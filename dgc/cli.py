@@ -388,6 +388,9 @@ class UI:
             # The agent a message went to, by what it was asked to do, else its id.
             value = terminal_safe_text(args.get("agent") or args.get("id") or "").replace("\n", " ")
             return value[:120] + ("…" if len(value) > 120 else "")
+        from .ui import _PIP_SAID_TOOLS, arg_summary
+        if name in _PIP_SAID_TOOLS and isinstance(args, dict):        # in words, as the editor's card: never a Pip's id
+            return terminal_safe_text(arg_summary(name, args))
         for key in ("path", "file_path", "command", "cmd", "pattern", "query", "url", "name",
                     "memory", "symbol", "operation", "description"):
             if key in args and args[key] not in (None, ""):

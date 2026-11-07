@@ -224,7 +224,46 @@ def _pip_change_words(key, value) -> str:
     return f"{key.replace('_', ' ')} → {value}"
 
 
+# The Pip tools whose step and Allow card say what they do; the rest of a Pip's tools only read.
+_PIP_SAID_TOOLS = ("pips_setup", "pips_workflow", "pips_propose", "pips_settings", "pips_adapt", "run_pip_now", "handoff_to_pip",
+                   "pause_pip", "resume_pip", "attach_pip_to_session",
+                   "draft_pip_email", "draft_pip_calendar_event", "draft_pip_connector_action")
+
+
+def _pip_called(args: dict, key: str = "pip_id") -> str:
+    """Which Pip a card is about, by name: Agent._with_task_agent reads it from DGC's records, and a reader with only the
+    model's arguments reads it here. Never the id, which names nothing a person knows."""
+    named = args.get("pip_name")
+    if not isinstance(named, str) or not named.strip():
+        from .pip_proposal_tool import display_name
+        named = display_name(args.get(key))
+    return f"Pip “{named}”" if named else "a Pip"
+
+
 def _pip_call_summary(name: str, args: dict) -> str:
+    if name == "pause_pip":
+        return f"Pause {_pip_called(args)}"
+    if name == "resume_pip":
+        return f"Resume {_pip_called(args)}"
+    if name == "attach_pip_to_session":
+        return f"Attach {_pip_called(args)} to this chat"
+    if name == "run_pip_now":
+        return f"Run {_pip_called(args)} now"
+    if name == "handoff_to_pip":
+        return f"Hand work to {_pip_called(args, 'target_pip_id')}"
+    if name == "pips_adapt":
+        changes = args.get("changes") if isinstance(args.get("changes"), dict) else {}
+        return f"Change {_pip_called(args)}: " + "; ".join(_pip_change_words(key, value) for key, value in changes.items())
+    if name == "draft_pip_email":
+        message = args.get("message") if isinstance(args.get("message"), dict) else {}
+        return f"Save an email draft to {message.get('recipient_email') or 'someone'}"
+    if name == "draft_pip_calendar_event":
+        event = args.get("event") if isinstance(args.get("event"), dict) else {}
+        return f"Save a calendar draft: {event.get('summary') or 'an event'}"
+    if name == "draft_pip_connector_action":
+        action = args.get("action") if isinstance(args.get("action"), dict) else {}
+        call = action.get("call") if isinstance(action.get("call"), dict) else {}
+        return f"Save an action draft: {call.get('tool') or 'an action'} in {action.get('server') or 'an app'}"
     if name == "pips_workflow":
         count = len(args.get("pip_ids", [])) if isinstance(args.get("pip_ids"), list) else 0
         return (f"Create {args.get('scope', '')} Pip workflow “{args.get('name', '')}” · "
@@ -274,7 +313,7 @@ def arg_summary(name: str, args: dict, root=None) -> str:
     if name == "task" and isinstance(args, dict) and "tasks" in args:
         value = task_batch_summary(args).replace("\n", " ")
         return value[:120] + ("…" if len(value) > 120 else "")
-    if name in ("pips_setup", "pips_workflow", "pips_propose", "pips_settings") and isinstance(args, dict):
+    if name in _PIP_SAID_TOOLS and isinstance(args, dict):
         # What allowing it does, in the user's words: the permission is the approval.
         value = _pip_call_summary(name, args).replace("\n", " ")
         return value[:160] + ("…" if len(value) > 160 else "")

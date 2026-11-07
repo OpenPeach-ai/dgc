@@ -2,6 +2,15 @@
 
 ## 0.35.0 — 2026-11-06
 
+- An answered form, site or plugin card in a Pip's chat stays as one quiet line where it was, "Allowed · Send a form to site.example". A reply that said "the card is below" while it waited no longer points at nothing. An open card keeps its look.
+- The notice, the Pips home and the Pips page say one number for what's waiting. The notice used to take the larger of two counts, and could say 2 beside a home that said 1. A workflow's handoff waiting for review now has its row in Needs attention; reviews in a project are named apart in the notice.
+- With no provider there is no context meter in Work, ChatDGC or a Pip: it read 38%, 11% and 0% of a model nobody chose.
+- A main chat's Allow card for a Pip's own tools reads in plain words with the Pip's name, never "Run resume_pip" and its JSON.
+- Details in a Pip's chat and in ChatDGC show all of a failure and wrap. They stopped at 300 characters, mid-word.
+- A failure in Work no longer stands under a "Gave up after 3 retries" row naming a host and port. The attempts are under its Details.
+- A new Pip whose first message failed says so in its chat, with Settings → Models and Try again. It opened as an empty chat. A follow-up DGC sends for itself that fails says so too.
+- The context ring keeps its value after a reload mid-reply.
+- Details name Settings → Models in place of the terminal's flags and commands (`dgc --model`, `/connect`, `dgc doctor`). The terminal keeps its own words.
 - A Pip's model menu opens over the Latest button. ChatDGC's model name no longer stays cut short after a window reload. "All quiet" on the home row takes its own line beside many faces.
 - Upgrading keeps your working model: adding your first saved provider no longer moves the default or hides the model you already ran on.
 - A Pip's effort slider shows its track in a light theme.

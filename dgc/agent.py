@@ -130,6 +130,11 @@ _PIPS_TOOL_NAMES = frozenset({
     "draft_pip_email", "draft_pip_calendar_event", "draft_pip_connector_action",
     "pause_pip", "resume_pip", "attach_pip_to_session"})
 _PIPS_MUTATION_TOOL_NAMES = _PIPS_TOOL_NAMES - {"pips_context"}
+# The argument that says which Pip a tool's Allow card is about (Agent._with_task_agent).
+PIP_NAMED_TOOLS = {"pips_propose": "pip_id", "pips_adapt": "pip_id", "run_pip_now": "pip_id", "pause_pip": "pip_id",
+                   "resume_pip": "pip_id", "attach_pip_to_session": "pip_id", "handoff_to_pip": "target_pip_id",
+                   "draft_pip_email": "source_run_id", "draft_pip_calendar_event": "source_run_id",
+                   "draft_pip_connector_action": "source_run_id"}
 _PIPS_REFERENCE_FRAME = '<pip-references-json trust="untrusted-reference-data">'
 
 
@@ -12501,6 +12506,13 @@ class Agent(GoalLifecycle):
         recognises. It carries what that agent was asked to do, live and again when the chat is
         reopened. Never the model's own arguments: a copy, for the screen only.
         """
+        if isinstance(args, dict) and name in PIP_NAMED_TOOLS:
+            # A Pip's tool asks about a Pip by its id: the card says its name, read from DGC's own records, so a model's
+            # own `pip_name` never stands in for it (dgc/pip_proposal_tool.py display_name; None when it can't be read).
+            from .pip_proposal_tool import display_name
+            named = display_name(args.get(PIP_NAMED_TOOLS[name]))       # a draft's: the Pip whose result it came from
+            shown = {key: value for key, value in args.items() if key != "pip_name"}
+            return {**shown, "pip_name": named} if named else shown
         if name not in ("message_task", "close_task", "continue_task") or not isinstance(args, dict):
             return args
         ident = str(args.get("id") or "")

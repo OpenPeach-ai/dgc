@@ -30,7 +30,7 @@ import {pluginsPage,pluginResult,shownPluginCards,pluginForServer,installedForSe
 import {attentionPage,attentionMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
 import {notesPage,notesMarkup,keptMarkup} from './pipNotes.js';
 import {workingNotesPage,dailyLogPage,workingNotesMarkup,dailyLogMarkup,learnCardMarkup,learnRequest} from './pipWorkingNotes.js';
-import {carefulPage,carefulMarkup,carefulWords,sendsWords,isPayment,asksWords,coversWords,coversDetail} from './pipCareful.js';
+import {carefulPage,carefulMarkup,carefulWords,settledWords,sendsWords,isPayment,asksWords,coversWords,coversDetail} from './pipCareful.js';
 import {loginsMarkup,loginFormMarkup,readLoginForm,loginFormProblem,clearLoginForm} from './pipLogins.js';
 import {pipLogins,pipLogin} from './pipsModel.js';
 import {mergeChatPage} from './pipsModel.js';
@@ -561,7 +561,8 @@ function chatControlsMarkup(canSend,busy){
  const list=chatModelListMarkup(selected,locked,reviewed,current,subs,usage);
  const modelMenu=S.composerPanel==='model'?`<div class="composer-model-menu composer-reasoning" role="dialog" aria-label="Model and thinking"><button type="button" id="chat-model-summary" class="composer-model-summary" aria-expanded="${S.modelListOpen}">${composerIcon('zap')}<span class="composer-summary-label">${esc(shownModel)}${o?` <span class="muted">${esc(effortLabel)}</span>`:''}</span>${composerIcon('next')}</button>${effort}${S.modelListOpen?list:''}</div>`:'';
  const sizes=o?[...new Set([2048,4096,8192,16384,32768,65536,131072,262144,524288,1048576,o.context_size])].filter(n=>n<=S.chatControls.context_max).sort((a,b)=>a-b):[];
- const ctx=o&&S.chatContext&&S.chatContext.pip_id===S.selected&&S.chatContext.context_size===o.context_size?S.chatContext:null,pct=ctx?Math.min(100,Math.round(ctx.used_tokens/ctx.context_size*100)):null;
+ // No provider: no model anyone chose, so no window to measure against, and no number.
+ const ctx=!S.noProvider&&o&&S.chatContext&&S.chatContext.pip_id===S.selected&&S.chatContext.context_size===o.context_size?S.chatContext:null,pct=ctx?Math.min(100,Math.round(ctx.used_tokens/ctx.context_size*100)):null;
  const meter=ctx?`<div class="ctx-head"><div><span class="ctx-kicker">Context window</span><strong>${ctx.used_tokens.toLocaleString('en-US')} / ${ctx.context_size.toLocaleString('en-US')}</strong></div><span class="ctx-pct">${pct}%</span></div>${ctx.breakdown?`<div class="pip-ctx-breakdown" data-sig="${esc(ctx.breakdown.used+':'+ctx.breakdown.categories.map(c=>c.id+'='+c.tokens).join(','))}"></div>`:`<div class="ctx-track" aria-hidden="true"><span style="width:${pct}%"></span></div><div class="ctx-split"><span>${Math.max(0,ctx.context_size-ctx.used_tokens).toLocaleString('en-US')} free</span><span>${ctx.recent_messages} recent message${ctx.recent_messages===1?'':'s'}${ctx.summarized_messages?` · ${ctx.summarized_messages} in its brief`:''}</span></div>`}`:`<div class="ctx-head"><div><span class="ctx-kicker">Context window</span></div></div>`;
  const contextMenu=S.composerPanel==='context'?`<section class="composer-model-menu composer-context-menu" role="dialog" aria-label="Context window">${meter}${o?`<div class="composer-context-size"><label for="chat-context">Window size</label><select id="chat-context" aria-label="Context window" title="${esc(choiceScope())}"${locked?' disabled':''}>${sizes.map(n=>`<option value="${n}"${o.context_size===n?' selected':''}>${n===1048576?'1M':n%1024===0?n/1024+'K':n.toLocaleString()}</option>`).join('')}</select></div>${composerNote(`${choiceScope()} Pips supports 2,048–${S.chatControls.context_max.toLocaleString()} tokens; main DGC requests ${S.chatControls.inherited_context_size.toLocaleString()}. ${S.chatControls.context_note}`)}${continuityMarkup()}`:unavailable}</section>`:'';
  // An empty box offers voice mode where Send is, as ChatGPT does; a word typed, and it's Send again.
@@ -570,7 +571,7 @@ function chatControlsMarkup(canSend,busy){
  const action=offerVoice?`<button type="button" id="chat-voicemode" class="chat-send ready" aria-label="Voice mode" title="Voice mode: talk with ${esc(S.pip?.name||'this Pip')}"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 6.5v3M6 4v8M10 3v10M13 6v4"/></svg></button>`:busy?`<button type="button" id="chat-stop" class="composer-chip" title="Stop generation" aria-label="Stop generation"${S.busy||!usable()?' disabled':''}>${composerIcon('stop')}</button>${S.apiVersion>=73?sendAction:''}`:sendAction;
  const routineCount=(S.routines||[]).filter(r=>r.status==='on').length;
  const routineChip=personalPip()&&S.apiVersion>=43?`<button type="button" id="chat-routines" class="composer-routines" aria-label="Routines: ${routineCount} on" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='routines'}" title="Manage ${esc(S.pip.name)}’s routines">${routineIcon()}<span>Routines</span>${routineCount?`<b>${routineCount}</b>`:''}</button>`:'';
- return `${modelMenu}${contextMenu}${providerRemoved()?'<p class="composer-unavailable" role="alert">The provider this Pip runs on was removed from Settings. Choose another model for it.</p>':''}<div class="composer-controls"><div class="composer-left">${canAttachImages()?`<button type="button" id="chat-attach" class="composer-chip" title="Add images and files" aria-label="Add images and files"${S.busy||archived()?' disabled':''}>${composerIcon('image')}</button><input type="file" id="chat-attach-input" accept="${[...PIP_IMAGE_TYPES,...(spoolsPhotos()?[...PIP_HEIC_TYPES,'.heic','.heif']:[]),...PIP_FILE_EXTENSIONS].join(',')}" multiple hidden>`:''}<button type="button" id="chat-context-toggle" class="composer-chip${pct===null?'':' with-text'}" title="Context window${o?' · '+o.context_size.toLocaleString()+' tokens':''}${pct===null?'':' · '+pct+'% used'}" aria-label="Context window${pct===null?'':': '+pct+' percent used'}" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='context'}">${composerIcon('context')}${pct===null?'':`<span class="composer-ctx-pct">${pct}%</span>`}</button>${routineChip}<button type="button" id="chat-permissions" class="composer-chip" title="What ${esc(S.pip.name)} can do" aria-label="What this Pip can do">${composerIcon('shield')}<span class="sr-only">What it can do</span></button></div><div class="composer-right"><button type="button" id="chat-model" class="model-control" aria-label="Change model and thinking" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='model'}" title="${esc(chip.title)}${o?' · '+esc(effortLabel):''} — change model and thinking"${locked?' disabled':''}><span class="model-copy"><span class="composer-model-name">${esc(shownModel)}</span>${o?`<span class="composer-effort-name">${esc(effortLabel)}</span>`:''}</span><span class="composer-chevron">${composerIcon('chevron')}</span></button>${voiceBar?`<button type="button" id="chat-mic" class="composer-chip" title="Dictate" aria-label="Dictate"${!usable()||archived()||busy?' disabled':''}>${composerIcon('mic')}</button>`:''}${action}</div></div>`;
+ return `${modelMenu}${contextMenu}${providerRemoved()?'<p class="composer-unavailable" role="alert">The provider this Pip runs on was removed from Settings. Choose another model for it.</p>':''}<div class="composer-controls"><div class="composer-left">${canAttachImages()?`<button type="button" id="chat-attach" class="composer-chip" title="Add images and files" aria-label="Add images and files"${S.busy||archived()?' disabled':''}>${composerIcon('image')}</button><input type="file" id="chat-attach-input" accept="${[...PIP_IMAGE_TYPES,...(spoolsPhotos()?[...PIP_HEIC_TYPES,'.heic','.heif']:[]),...PIP_FILE_EXTENSIONS].join(',')}" multiple hidden>`:''}${S.noProvider?'':`<button type="button" id="chat-context-toggle" class="composer-chip${pct===null?'':' with-text'}" title="Context window${o?' · '+o.context_size.toLocaleString()+' tokens':''}${pct===null?'':' · '+pct+'% used'}" aria-label="Context window${pct===null?'':': '+pct+' percent used'}" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='context'}">${composerIcon('context')}${pct===null?'':'<span class="composer-ctx-pct">'+pct+'%</span>'}</button>`}${routineChip}<button type="button" id="chat-permissions" class="composer-chip" title="What ${esc(S.pip.name)} can do" aria-label="What this Pip can do">${composerIcon('shield')}<span class="sr-only">What it can do</span></button></div><div class="composer-right"><button type="button" id="chat-model" class="model-control" aria-label="Change model and thinking" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='model'}" title="${esc(chip.title)}${o?' · '+esc(effortLabel):''} — change model and thinking"${locked?' disabled':''}><span class="model-copy"><span class="composer-model-name">${esc(shownModel)}</span>${o?`<span class="composer-effort-name">${esc(effortLabel)}</span>`:''}</span><span class="composer-chevron">${composerIcon('chevron')}</span></button>${voiceBar?`<button type="button" id="chat-mic" class="composer-chip" title="Dictate" aria-label="Dictate"${!usable()||archived()||busy?' disabled':''}>${composerIcon('mic')}</button>`:''}${action}</div></div>`;
 }
 function fitChatInput(){const input=$('chatText');if(!input)return;const sendButton=document.querySelector('.chat-send');sendButton?.classList.toggle('ready',!sendButton.disabled&&!!draft.chatText.trim()||!sendButton.disabled&&canAttachImages()&&(pendingImages().length>0||pendingFiles().length>0));if(!input.isConnected||input.clientWidth<40||document.hidden)return;input.style.height='auto';const content=input.scrollHeight,capped=content>=160;input.style.overflowY=capped?'auto':'hidden';input.style.height=(capped?160:content+1)+'px';}
 // What the prompt box's choices are for: since API 47 they are this Pip's own (its replies and the work it does on
@@ -631,6 +632,25 @@ function waitingMarkup(){
  return `<section class="waiting" aria-label="Changes waiting for you"><h3>${waiting.length===1?'A change is waiting for you':`${waiting.length} changes are waiting for you`}</h3>${waiting.map(p=>`<div class="waiting-row"><p>${esc(changeSummary(p))}</p><div class="actions"><button type="button" class="primary" data-proposal="${esc(p.id)}"${S.busy||!usable()?' disabled':''}>Review</button><button type="button" data-reject="${esc(p.id)}"${S.busy||!usable()?' disabled':''}>Reject</button></div></div>`).join('')}</section>`;
 }
 // Sending with no provider, or its model's name missing: the same words and link as Work's.
+// A turn DGC sent itself (a new Pip's hello, a follow-up) has no bubble, so when it fails nothing was said at all: a new Pip
+// whose key the provider refused opened as an empty chat (upgrade check, 2026-11-07). It says so where the turn fell, as a
+// failed message does; a hello that was the only thing in the chat offers Try again. A turn that ended with a post or a
+// reply says it there, and it says so only while nothing has been said since: a hello that worked on Try again has no
+// old failure above it.
+function failedHidden(m){return m.role==='user'&&m.intro===true&&m.status==='failed'&&typeof m.error==='string'&&!!m.error&&S.messages.at(-1)?.id===m.id&&!S.messages.some(r=>r.role==='assistant'&&r.run_id===m.run_id)&&!S.posts?.some?.(p=>p.run_id===m.run_id);}
+function failedHiddenMarkup(m){
+ const failed=window.DgcMarkdown?.modelFailure?.(m.error),raw=typeof m.error_detail==='string'&&m.error_detail?(window.DgcMarkdown?.editorAdvice?.(m.error_detail)??m.error_detail):failed?.detail;
+ const onlyHello=S.messages.every(x=>x.role==='user'&&x.intro===true&&x.status==='failed')&&!S.chatActiveRun;
+ const again=onlyHello&&S.apiVersion>=43&&!remoteHost?` <button type="button" class="message-send-again" data-hello-again${S.busy||!usable()||!S.runner?.online?' disabled':''}>Try again</button>`:'';
+ return `<div class="pip-failed-turn" data-failed-turn="${esc(m.id)}"><p class="message-status" role="alert" data-status="failed">Failed · ${esc(failed?`${failed.headline} ${failed.next}`:m.error)}${failed?.fix?` <button type="button" class="message-send-again" data-open-models>Settings → Models</button>`:''}${again}</p>${failed?`<details class="message-failure" data-details="failure-${esc(m.id)}"><summary>Details</summary><span>${esc(raw)}</span></details>`:''}</div>`;
+}
+async function helloAgain(){
+ const pip=S.selected;if(!pip||S.busy||!usable())return;
+ const token=scope();S.busy=true;render();
+ try{const said=await send('introduce_pip',{pip_id:pip});if(token!==scope())return;if(said?.no_provider===true)S.noProvider=true;}
+ catch(error){if(token===scope())setError(error);}
+ finally{if(token===scope()){S.busy=false;render();void loadMessages();}}
+}
 function noProviderMarkup(){if(!S.noProvider||!S.noProviderSaid)return '';const w=window.DgcMarkdown?.modelWords?.('no_provider');return w?`<p class="message-status" role="alert" data-status="failed">${esc(w.headline)} ${esc(w.next)} <button type="button" class="message-send-again" data-open-models>Settings → Models</button></p>`:'';}
 function renderPipMarkdown(text){return window.DgcMarkdown?.render?window.DgcMarkdown.render(text):`<div class="chat-text">${esc(text)}</div>`;}
 // The Pip's own reply in its chat: the one place on this page a ```dgc-ui card is live. Its routine posts, run
@@ -679,7 +699,7 @@ function chatMarkup(){
   const type=pipType(S.pip,S.types),busy=S.chatActiveRun,canSend=(S.apiVersion<24||!!S.chatControls)&&!archived()&&S.messagesLoaded&&usable()&&takesMessages()&&supportedSource()&&S.runner?.online&&!S.runner?.paused&&!S.busy&&(!busy||S.apiVersion>=73);
   const markdown=renderPipMarkdown;
   const sending=S.sending&&S.sending.pip===S.selected&&!S.chatWaiting.some(m=>m.text===S.sending.text)&&!S.messages.some(m=>m.role==='user'&&m.text===S.sending.text&&Date.parse(m.created_at)>=Date.parse(S.sending.at)-60000)?S.sending:null;
-  const shown=[...S.messages.filter(m=>!(m.role==='user'&&m.intro===true)),...(sending?[{id:'sending',pip_id:S.selected,workspace_id:S.workspace?.id,role:'user',text:sending.text,status:'sending',created_at:sending.at,...(sending.marks?.length?{display_mentions:sending.marks}:{})}]:[])];
+  const shown=[...S.messages.filter(m=>!(m.role==='user'&&m.intro===true)||failedHidden(m)),...(sending?[{id:'sending',pip_id:S.selected,workspace_id:S.workspace?.id,role:'user',text:sending.text,status:'sending',created_at:sending.at,...(sending.marks?.length?{display_mentions:sending.marks}:{})}]:[])];
   // While it answers, the Pip itself is in the chat, at work, with its name: the reply replaces it.
   // A routine's run is its live post (liveMarkup), not the working row: what it is doing, its clock, Stop, how it started.
   const routineLive=!!(S.live?.routine&&S.chatActiveRun&&S.live.runId===S.chatActiveRun.id);
@@ -691,6 +711,7 @@ function chatMarkup(){
   const timed=(m,mark=true)=>{const at=Date.parse(m.created_at),line=mark&&simple&&Number.isFinite(at)&&(last===null||at-last>30*60*1000)?`<p class="chat-time">${esc(chatTime(at))}</p>`:'';if(Number.isFinite(at))last=at;return line;};
   const latest=S.messages.at(-1),answerable=latest&&latest.role==='assistant'&&Array.isArray(latest.choices)?latest:null;
   const drawMessage=m=>{
+    if(failedHidden(m))return timed(m,false)+failedHiddenMarkup(m);
     const prompt=S.messages.find(p=>p.role==='user'&&p.run_id===m.run_id),routine=m.role==='assistant'&&prompt?.intro===true?postRoutineTitle(prompt.text):null;
     return timed(m,!routine)+messageMarkup(m,{imageSrc:messageImageSrc,pluginLogo:pluginLogoSrc,split:simple,name:S.pip?.name||type?.name||'Pip',formatDate:date,renderMarkdown:routine?markdown:renderPipReply,canSend,prompt,activity:chatActivities.get(m.run_id),choices:m===answerable?m.choices:null,stats:m.role==='assistant'?replyStats.get(m.run_id):null,...(routine?routineReply(m,routine,type):{})});
   };
@@ -698,6 +719,7 @@ function chatMarkup(){
   // 51, pipRunPosts.js).
   const items=postsShown()?timeline(shown,S.posts,{complete:!S.messageCursor}):shown.map(m=>({message:m}));
   const context=postsShown()?postContext():null;
+  const settled=settledLines(shown);
   const drawPost=i=>{const p=i.streak?i.streak.at(-1):i.post,first=i.streak?i.streak[0]:p;
     return timed({created_at:p.posted_at},false)+postMarkup(p,{...context,previous:i.previous,streak:i.streak||null,face:pipAvatar(S.pip,['failed','checks_failed'].includes(p.outcome)?'failure':'idle',`post-${first.run_id}`,context.type),...fixState(p.run_id),expanded:shownInFull.has(p.run_id),traced:replyStats.get(p.run_id)?.has_trace===true});};
   // Each prompt opens a box, the rest of its turn inside: the box's end is what pushes a pinned prompt off (pipsFollow.js).
@@ -705,15 +727,17 @@ function chatMarkup(){
   let turnOpen=false;
   const unasked=i=>!i.message||(i.message.role==='assistant'&&S.messages.find(p=>p.role==='user'&&p.run_id===i.message.run_id)?.intro===true&&!!postRoutineTitle(S.messages.find(p=>p.role==='user'&&p.run_id===i.message.run_id).text));
   const messages=items.map(i=>{
-   const piece=i.message?drawMessage(i.message):drawPost(i);
+   const piece=(i.message?drawMessage(i.message):drawPost(i))+(i.message?settled.byMessage.get(i.message.id)||'':settled.byRun.get((i.streak?i.streak.at(-1):i.post)?.run_id)||'');
+   if(i.message&&failedHidden(i.message)){const closes=turnOpen?'</div>':'';turnOpen=false;return closes+piece;}
    if(i.message?.role==='user'){const opens=`${turnOpen?'</div>':''}<div class="pip-turn" data-turn="${esc(i.message.id)}">`;turnOpen=true;return opens+piece;}
    if(turnOpen&&unasked(i)){turnOpen=false;return '</div>'+piece;}
    return piece;
   }).join('');
   // A run going now: its live post, at the end, where its own post will stand when it ends.
   const live=liveMarkup(markdown);
-  const quietChat=!S.messages.length&&!items.length&&!live;
-  return `<section class="pip-conversation${simple?' chat-style':''}" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${noProviderMarkup()}${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(postsShown()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${messages}${live}${simple?'':typing}${S.stream?.text&&!routineLive?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(replyParts(S.stream.text).join('\n\n'))}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${borrowCards()}${routineCards()}${computerWaitingCards()}${needsYouCard()}${cardRefusedCard()}${turnOpen?'</div>':''}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div><button type="button" id="pip-to-latest" class="pip-to-latest" data-dom-own="1" title="Jump to the newest message" aria-label="Jump to the newest message" hidden><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M4 9l4 4 4-4"/></svg><span data-latest-label>Latest</span></button>${simple?runnerOffMarkup():''}<div class="pip-composer-shell">${routinePopoverMarkup()}<section id="chat-queue-box" class="chat-queue-box" aria-label="Queued messages"${chatQueue().length||S.chatWaiting.length?'':' hidden'}><p class="chat-queue-head"></p><ol id="chat-queue" class="chat-queue-list" data-dom-own="1"></ol></section>${chatBox?'<div id="chat-paste-note" data-dom-own="1" hidden></div>':''}<form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}${chatBox?'<div id="chat-pop" class="pop pop-over" data-dom-own="1"></div>':''}<div class="composer-input">${chatBox?'<div id="chatText" class="mention-box" data-dom-own="1"></div>':`<label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea>`}</div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
+  // A hello that failed says so, above what a new chat says about itself: nothing else has been said.
+  const quietChat=S.messages.every(m=>m.role==='user'&&m.intro===true&&m.status==='failed')&&!items.some(i=>!(i.message&&failedHidden(i.message)))&&!live;
+  return `<section class="pip-conversation${simple?' chat-style':''}" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${noProviderMarkup()}${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(postsShown()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`${messages}<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${quietChat?'':messages}${live}${simple?'':typing}${S.stream?.text&&!routineLive?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(replyParts(S.stream.text).join('\n\n'))}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${borrowCards()}${routineCards()}${settled.tail}${computerWaitingCards()}${needsYouCard()}${cardRefusedCard()}${turnOpen?'</div>':''}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div><button type="button" id="pip-to-latest" class="pip-to-latest" data-dom-own="1" title="Jump to the newest message" aria-label="Jump to the newest message" hidden><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M4 9l4 4 4-4"/></svg><span data-latest-label>Latest</span></button>${simple?runnerOffMarkup():''}<div class="pip-composer-shell">${routinePopoverMarkup()}<section id="chat-queue-box" class="chat-queue-box" aria-label="Queued messages"${chatQueue().length||S.chatWaiting.length?'':' hidden'}><p class="chat-queue-head"></p><ol id="chat-queue" class="chat-queue-list" data-dom-own="1"></ol></section>${chatBox?'<div id="chat-paste-note" data-dom-own="1" hidden></div>':''}<form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}${chatBox?'<div id="chat-pop" class="pop pop-over" data-dom-own="1"></div>':''}<div class="composer-input">${chatBox?'<div id="chatText" class="mention-box" data-dom-own="1"></div>':`<label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea>`}</div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
 }
 // ---- Its runs in its chat (Pips API 51) ----
 // Each finished run is a post from the Pip, read with list_pip_run_posts and drawn among the messages; History
@@ -1491,7 +1515,7 @@ function settingUpComputer(){
 async function loadComputer(){
  const pip=S.selected;if(S.apiVersion<42||!usable()||!pip||computerState.loading&&computerState.pip===pip)return;
  const token=scope();computerState={pip,value:null,loading:true,error:''};
- try{const value=pipComputer((await send('get_pip_computer',{pip_id:pip})).computer,pip);if(token!==scope()||S.selected!==pip)return;computerState.value=value;}
+ try{const value=pipComputer((await send('get_pip_computer',{pip_id:pip})).computer,pip);if(token!==scope()||S.selected!==pip)return;computerState.value=value;if(S.apiVersion>=43&&!remoteHost)void loadComputerSettled(pip,token);}
  catch(error){if(token===scope()&&S.selected===pip)computerState.error=errorText(error);}
  finally{if(token===scope()&&S.selected===pip){computerState.loading=false;render();}}
 }
@@ -1505,8 +1529,53 @@ async function refreshComputer(){
  const needs=v=>JSON.stringify([v?.needs_you||null,(v?.actions||[]).filter(a=>a.status==='pending').map(a=>a.id)]);
  const token=scope(),before=needs(computerState.value);
  try{const value=pipComputer((await send('get_pip_computer',{pip_id:pip})).computer,pip);if(token!==scope()||S.selected!==pip||computerState.pip!==pip)return;
-  computerState.value=value;if(needs(value)!==before)render();}
+  computerState.value=value;if(needs(value)!==before)render();void loadComputerSettled(pip,token);}
  catch{/* the next look tries again */}
+}
+// A settled card stays as one quiet line where it was ("Allowed · Send a form to x"), under the reply that asked: a reply that
+// said "the card is below" still has something below it. get_pip_computer holds five actions, sent ones included, so a
+// busy computer would push lines out of the middle of a chat: they are read from the list, which holds fifty.
+let computerSettled={pip:'',actions:[]};
+async function loadComputerSettled(pip,token){
+ try{const page=await send('list_pip_computer_actions',{pip_id:pip,limit:50});if(token!==scope()||S.selected!==pip)return;
+  const actions=(Array.isArray(page?.actions)?page.actions:[]).map(a=>pipComputerAction(a,pip)).filter(a=>a.status!=='pending');
+  const said=list=>JSON.stringify(list.map(a=>[a.id,a.status]));
+  const before=computerSettled.pip===pip?said(computerSettled.actions):'[]';
+  computerSettled={pip,actions};if(said(actions)!==before)render();}
+ catch{/* the next look tries again */}
+}
+// Each one's place: under the last reply of the run that asked; while that reply is still being written, where the card
+// was, after it; a run with no reply of its own, by time. {byMessage, byRun: under a run's post, tail}
+function settledLines(shown){
+ const byMessage=new Map(),byRun=new Map();let tail='';
+ if(S.apiVersion<43||remoteHost||!personalPip())return {byMessage,byRun,tail};
+ const add=(map,key,line)=>map.set(key,(map.get(key)||'')+line);
+ const place=(run,created,line)=>{
+  const reply=shown.filter(m=>m.role==='assistant'&&m.run_id===run).at(-1);
+  if(reply){add(byMessage,reply.id,line);return;}
+  if(run&&postsShown()&&postFor(run)){add(byRun,run,line);return;}
+  if(run&&S.chatActiveRun?.id===run){tail+=line;return;}
+  const at=Date.parse(created),before=shown.filter(m=>Date.parse(m.created_at)<=at).at(-1);
+  if(before)add(byMessage,before.id,line);else if(!shown.length)tail+=line;
+ };
+ const c=computerState.pip===S.selected?computerState.value:null;
+ if(c){
+  const all=new Map();
+  for(const a of computerSettled.pip===S.selected?computerSettled.actions:[])all.set(a.id,a);
+  for(const a of Array.isArray(c.actions)?c.actions:[])if(a.status!=='pending')all.set(a.id,a);
+  for(const a of [...all.values()].sort((x,y)=>Date.parse(x.created_at)-Date.parse(y.created_at))){
+   const words=settledWords(a);if(!words)continue;
+   place(a.run_id,a.created_at,`<p class="card-settled" data-computer-settled="${esc(a.id)}" title="${esc(`${a.summary.host}${a.summary.path}`)}">${esc(words[0])} · ${esc(words[1])}</p>`);
+  }
+ }
+ // A plugin's Allow card is the same: allowed, it goes, and the reply that offered it still says it's below. (Don't says so
+ // in pluginNotRun; your own app says what it decided in ownAppDecidedCards.)
+ for(const d of S.connectorDrafts||[]){
+  if(d.status!=='prepared'||!d.source_run_id||isOwnApp(pluginDrafts.get(d.id+':'+d.digest)?.payload?.action?.server))continue;
+  const what=/^COMPOSIO_/.test(d.subject)?'Do this in Composio':`Run ${d.subject}`;
+  place(d.source_run_id,d.created_at,`<p class="card-settled" data-plugin-settled="${esc(d.id)}">Allowed · ${esc(what)}</p>`);
+ }
+ return {byMessage,byRun,tail};
 }
 // What its computer holds, under its reply: the decision the computer tab offers, so a user who never opens that tab
 // still sees it. A reply that said "Starting with the hospital bill on its pay page" sat above nothing while "Let Bill
@@ -2875,7 +2944,7 @@ function projectFirstMarkup(){
 }
 function simpleHomeList(all,live){
  const order=[...all.filter(p=>p.pip_type==='core'),...all.filter(p=>p.pip_type!=='core')];
- const row=p=>{const type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,[],usable(),S.runner),waiting=pendingReviews(p)+(S.attention?.byPip[p.id]||0),unread=p.status==='archived'||readingPips.has(p.id)?null:unreadByPip.get(p.id),readable=!!unread&&canMarkRead(unread);
+ const row=p=>{const type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,[],usable(),S.runner),waiting=S.attention?.listsReviews?Math.max(pendingReviews(p),S.attention.byPip[p.id]||0):pendingReviews(p)+(S.attention?.byPip[p.id]||0),unread=p.status==='archived'||readingPips.has(p.id)?null:unreadByPip.get(p.id),readable=!!unread&&canMarkRead(unread);
   const button=`<button type="button" class="pip-row${unread?' pip-row-unread':''}" data-job="${esc(p.id)}" data-state="${esc(pose.state)}" data-waiting="${waiting}">${pipAvatar(p,pose.state,`row-${p.id}`,type)}<span class="pip-row-copy"><strong>${esc(p.name)}${p.pip_type==='core'?'<span class="primary-badge" title="Your Primary Pip. It uses Core, the character of DGC’s main chat." aria-label="Primary Pip">★</span>':''}</strong><small>${S.pipSearch&&record(p.match)&&['chat','instructions'].includes(p.match.in)&&typeof p.match.text==='string'?`<span class="pip-match">${p.match.in==='chat'?'In its chat':'In its instructions'}: ${esc(p.match.text.slice(0,200))}</span>`:p.status==='archived'?'Archived':waiting?`${waiting} waiting for you${unread?' · '+esc(unread.latest):''}`:unread?esc(unread.latest):esc(pose.label)}</small></span>${readable?`<span class="pip-row-unread-count pip-row-read-room" aria-hidden="true"><span>${unread.count}</span><span>Read</span></span>`:unread?`<span class="pip-row-unread-count" aria-label="${unread.count} unread">${unread.count}</span>`:''}</button>`;
   // Its unread count is its own button over the row's end (never inside the row): "Read" on hover or focus, and a click
   // marks its whole chat read without opening it.
@@ -4254,6 +4323,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.pluginUseRemove){void pipsSettingsCall('decline_pip_plugin',{pip_id:target.dataset.pluginUsePip,grant_id:target.dataset.pluginUseRemove},'Removed. That Pip no longer uses the plugin.');return;}
   if(target.dataset.openPlugins!==undefined){vscode.postMessage({type:'openSettings',section:'plugins'});return;}
   if(target.dataset.openModels!==undefined){vscode.postMessage({type:'openSettings',section:'models'});return;}
+  if(target.dataset.helloAgain!==undefined){void helloAgain();return;}
   if(target.dataset.pipRead){markPipRead(target.dataset.pipRead);return;}
   if(target.dataset.job){if(event.detail>0&&!S.sidebarPinned)shell.classList.add('sidebar-dismissed');void select(target.dataset.job);return;}
   if(target.dataset.postOpen){openPostReport(target.dataset.postOpen);return;}

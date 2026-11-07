@@ -16,6 +16,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -247,6 +248,31 @@ class Backend(unittest.TestCase):
             time.sleep(0.02)
         self.assertEqual((self.frames("cache_clock")[-1]["state"], self.frames("cache_clock")[-1]["reason"]),
                          ("cold", "unloaded"))
+
+    def test_a_page_asking_for_its_history_hears_the_meter_first(self):
+        """A reload mid-reply reattaches and asks for a snapshot. No other `context` comes until the running turn ends, and a
+        fresh page's ring read 0% through the rest of the reply."""
+        self.server.script = lambda kind, body, index: say("hi", input_tokens=40)
+        host = self.host(model="deepseek-v4.1-flash:cloud", base_url=self.server.url, api_mode="ollama")
+        self.prompt(host)
+        self.wire.seek(0); self.wire.truncate(0)
+        host.dispatch({"type": "get_history", "request_id": "h1"})
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not self.frames("history"):
+            time.sleep(0.02)
+        kinds = [f["type"] for f in self.frames()]
+        self.assertIn("context", kinds)
+        self.assertLess(kinds.index("context"), kinds.index("history"), "the snapshot stays the last word")
+        self.assertGreater(self.frames("context")[0]["used"], 0)
+        self.assertGreater(self.frames("context")[0]["size"], 0)
+        # Counted while a running turn changes a message: nothing rather than a false 0%. An ordinary emit keeps its 0.
+        chat = host.default
+        self.wire.seek(0); self.wire.truncate(0)
+        with unittest.mock.patch.object(chat.agent, "estimate_tokens", side_effect=RuntimeError("changed during iteration")):
+            chat._emit_context(known_only=True)
+            self.assertEqual(self.frames("context"), [])
+            chat._emit_context()
+            self.assertEqual(self.frames("context")[0]["used"], 0)
 
     def test_an_ollama_cloud_model_is_never_timed(self):
         self.server.ps_models = []

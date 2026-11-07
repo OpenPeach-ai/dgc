@@ -2095,12 +2095,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     try {
       const bridge = this.ensurePipsBridge();
       const result = await bridge.hostRead("get_pip_digest");
-      let waiting: number | undefined;
+      let waiting: number | undefined, elsewhere = 0;
       if (Number(caps?.pips_api_version) >= 44) {
-        try { const list = await bridge.hostRead("list_pip_attention", { limit: 1 }); if (Number.isSafeInteger(list?.total)) waiting = list.total; }
-        catch { /* the digest alone still counts reviews and drafts */ }
+        try {
+          const list = await bridge.hostRead("list_pip_attention", { limit: 1 });
+          if (Number.isSafeInteger(list?.total)) waiting = list.total;
+          if (Number.isSafeInteger(list?.in_projects)) elsewhere = list.in_projects;
+        } catch { /* the digest alone still counts reviews and drafts */ }
       }
-      const notice = pipsAttention(result?.digest, this.context.globalState.get<PipsAttentionState>(PIPS_ATTENTION_KEY), waiting);
+      const notice = pipsAttention(result?.digest, this.context.globalState.get<PipsAttentionState>(PIPS_ATTENTION_KEY), waiting, elsewhere);
       if (!notice) return;
       await this.context.globalState.update(PIPS_ATTENTION_KEY, notice.state);
       if (!notice.text) return;

@@ -82,10 +82,24 @@ export function modelWords(kind: string, model = ""): ModelWords {
   if (kind === "stall" || kind === "loading") return say("The model stopped responding.", "Try again, or choose another one.", true);
   return say("The model didn't answer.", "Try again in a moment.");
 }
+// The terminal's advice in a failure's raw text (dgc/model_errors.py hint_for, dgc/llm.py): its flags and slash commands name
+// nothing an editor has, so an editor says where it is put right. The words change here, at the screen, so the terminal
+// keeps its own. Every phrase hint_for writes is in tests/test_small_051.py.
+const TERMINAL_ADVICE: ReadonlyArray<readonly [RegExp, string]> = [
+  [/, pick one with \/model or `dgc --model NAME`, or run `dgc setup`/g, ", or choose another in Settings → Models"],
+  [/set it with \/connect, `dgc --api-key-env NAME` or DGC_API_KEY/g, "check it in Settings → Models"],
+  [/ ?\(\/connect <url> to change it\)/g, " (change it in Settings → Models)"],
+  [/or fix the URL; `dgc doctor` checks both/g, "or fix the URL in Settings → Models"],
+  [/; `dgc doctor` checks it/g, ""],
+  [/ — check its logs; `dgc doctor` shows what it offers/g, " — check its logs"],
+];
+export function editorAdvice(text: string): string {
+  return TERMINAL_ADVICE.reduce((said, [phrase, words]) => said.replace(phrase, words), String(text ?? ""));
+}
 /** The same words for text a surface was handed, or null when the text isn't a model request's failure (it stays as it
  *  is). A model's own name is read from the provider's answer. */
 export function modelFailure(text: string): (ModelWords & { detail: string }) | null {
-  const detail = String(text || "");
+  const detail = editorAdvice(String(text || ""));
   // How a failure reaches a surface: ChatDGC's "The model didn't answer: ...", or a Pip's run ending on the request's own
   // "HTTP 404 from ...". Anything else is someone else's sentence (a plugin's, a page's), whatever it mentions.
   const body = detail.replace(/^the model didn't answer: /i, "");

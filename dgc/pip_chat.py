@@ -759,6 +759,14 @@ def introduce(store, pip_id, actor, config):
                              (pip_id,)).fetchone()
     if first and first["request_key"] != key:
         return {"already_started": True}
+    # A hello that failed, with nothing said since (a key the provider refused): the chat's Try again asks once more, under
+    # a key of its own, since the first key's retry only finds the failed turn again. Any other state keeps that key.
+    tries = store.db.execute("SELECT m.request_key,r.status FROM pip_chat_messages m JOIN pip_runs r ON r.id=m.run_id "
+                             "WHERE m.pip_id=? AND m.role='user' ORDER BY m.seq", (pip_id,)).fetchall()
+    if tries and all(row["status"] == "failed" for row in tries):
+        key = f"{key}_again{len(tries)}"
+    elif tries and tries[-1]["request_key"].startswith(key):
+        key = tries[-1]["request_key"]         # a try that hasn't failed: asking again finds it
     name = pip["name"][:120].replace('"', "'")
     if pip["source_policy"] == {"mode": "personal"}:
         text = (CORE_INTRO if pip.get("pip_type") == "core" else INTRO).format(name=name)
@@ -943,6 +951,28 @@ def failure_text(row) -> str:
     if error["message"].startswith("The audit worker stopped"):
         return "Its worker stopped unexpectedly. Send your message again."      # a chat reply isn't an audit
     return error["message"].strip()[:300]
+
+
+# What Details shows of a failure (the line itself stays within 300): the provider's own answer, with no key or
+# credentialed URL in it, kept to what a person reads.
+FAILURE_DETAIL_CHARS = 2000
+
+
+def failure_detail(row) -> str:
+    """All of why a chat turn failed, when the line under the message had to cut it; "" when the line has all of it. It
+    used to end mid-word ("Failed to e") while the same run's View error had the rest (final check, 2026-11-07)."""
+    try:
+        error = json.loads(row[0]) if row and row[0] else None
+    except (TypeError, ValueError, RecursionError):
+        return ""
+    if not isinstance(error, dict) or not isinstance(error.get("message"), str):
+        return ""
+    text = error["message"].strip()
+    if len(text) <= 300 or failure_text(row) != text[:300]:
+        return ""
+    from .model_errors import scrub_urls
+    from .redaction import redact_text, secret_values
+    return redact_text(scrub_urls(text), secret_values())[:FAILURE_DETAIL_CHARS]
 
 
 def _bounded_rows(db, pip_id, before=2**63 - 1, limit=50, *, successful=False):
@@ -1456,9 +1486,13 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
     for row in selected:
         message = _message(row)
         if row["role"] == "user" and row["status"] == "failed":
-            reason = failure_text(store.db.execute("SELECT error FROM pip_runs WHERE id=?", (row["run_id"],)).fetchone())
+            failed_run = store.db.execute("SELECT error FROM pip_runs WHERE id=?", (row["run_id"],)).fetchone()
+            reason = failure_text(failed_run)
             if reason:
                 message["error"] = reason
+                detail = failure_detail(failed_run)
+                if detail:
+                    message["error_detail"] = detail        # a newer key: a client that doesn't know it reads `error`
         if row["role"] == "user":
             pictures = message_images(store.db, row["id"])
             if pictures:

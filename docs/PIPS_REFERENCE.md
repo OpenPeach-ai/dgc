@@ -1027,14 +1027,21 @@ refuses a query that carries what the Pip read from apps and the user didn't say
 the Pip's computer.
 
 **Needs attention** (`pip_attention`, local only): `list_pip_attention {limit?}` (1–100, default 100) →
-`{as_of, total, counts, by_pip, items, truncated}` over every Personal Pip that is not archived. `items`
+`{as_of, total, counts, by_pip, items, reviews, truncated, in_projects}` over every Personal Pip that is not
+archived. `total` is the one number the Pips home, its rows and the editor's notice say. `items`
 are newest first: `{id: "<kind>:<card>", kind, card, pip_id, pip_name, pip_type, workspace_id,
 created_at, expires_at, title, detail}`, `kind` one of `email`, `event`, `action` (Pip-drafted, pending,
 not expired), `app_action` (a prepared action), `app_link` (requested or failed; newest per Pip and app),
 `plugin` (requested; newest per Pip and plugin), `setup` (`pip_id` null for a new Pip), `computer_action`
 (held, not expired), `computer_check` (`card` is the Pip id) and `routine` (suggested by the Pip).
-`counts` and `by_pip` count every item even when `items` is cut. The read runs in a savepoint that is
-rolled back, and decides "waiting" with `expires_at > now` in SQL: it never expires or resolves a row.
+`reviews` has the same shape, newest first, for what waits for a review: `handoff` (a workflow's or a
+shared result, `card` is the handoff and `pip_id` its target) and `approval` (a change waiting on a Pip's
+Changes page, `card` is the proposal and `review` its `job_update` or `schedule_update`). They are apart
+from `items` because a client from before refuses a kind it doesn't know. `in_projects` counts the reviews
+and setup cards waiting in project folders, which this list doesn't show; the editor's notice names them
+apart. `counts` and `by_pip` count every item and review even when `items` is cut. The read runs in a
+savepoint that is rolled back, and decides "waiting" with `expires_at > now` in SQL: it never expires or
+resolves a row.
 
 **What a Pip remembers** (`pip_notes`, schema 44, Personal Pips only): `pip_notes(id, pip_id,
 workspace_id, text ≤300, source chat|you, run_id, created_at)`. A Personal chat reply to the user's own
@@ -1668,8 +1675,15 @@ still marks Core unavailable, so project pickers never offer it.
 `introduce_pip {pip_id}` (local only) queues the Pip's first message once, as a conversation turn
 DGC writes under the reserved request key `intro_<id>`: it asks the Pip to say hello, guess from
 its name what the user wants, and offer the next step. Asking again returns the same run and
-message. In `list_pip_messages` that user message carries `intro: true`, and the editor does not
-show it as the user's. `send_pip_message` refuses keys that start with `intro_`.
+message, unless every try so far failed and nothing else has been said: then it is a new try, under
+`intro_<id>_again<n>`, which is what the chat's **Try again** asks for. In `list_pip_messages` that user
+message carries `intro: true`, and the editor does not show it as the user's: when it fails, the chat
+says so in plain words with **Settings → Models**, from its `error`. `send_pip_message` refuses keys
+that start with `intro_`.
+
+A failed turn's user message carries `error`, one line of at most 300 characters. When the provider's
+answer was longer it also carries `error_detail`, all of it up to 2,000 characters with credentials and
+credentialed URLs taken out, for the line's **Details**. An older client reads only `error`.
 
 **Images in a chat** (API 43). `send_pip_message` to a Personal Pip takes `images`: up to 4
 `data:image/png|jpeg|gif|webp;base64,…` URIs, 2 MB in all, checked like the main chat's (the bytes

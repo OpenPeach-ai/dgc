@@ -273,3 +273,11 @@ test('100 Pips: past the digest\'s 20 the count says it may be more, and a Pip p
  const beyond=harness(t,{list:list.slice(0,2),digest:digest([failed(150,'Past the first page')])});await beyond.connect();
  assert.deepEqual(beyond.rows(),[['Past the first page','1 run failed',true]],'named from the digest itself');
 });
+
+test('a review the list has already counted is one thing waiting, not two',async t=>{
+ const with_review=pip(1,'Approvals',{pending_review_count:1});
+ const listed=harness(t,{list:[with_review],digest:digest([]),attention:{total:1,items:[],reviews:[],truncated:false,counts:{},by_pip:{[id(1)]:1}}},{api:69});await listed.connect();
+ assert.deepEqual(listed.rows(),[['Approvals','1 waiting for you',false]]);
+ const before=harness(t,{list:[with_review],digest:digest([]),attention:{total:1,items:[],truncated:false,counts:{},by_pip:{[id(1)]:1}}},{api:69});await before.connect();
+ assert.deepEqual(before.rows(),[['Approvals','2 waiting for you',false]],'a DGC from before: its review and a card');
+});

@@ -275,9 +275,11 @@ test("a model error with a cause keeps its hint visible and opens to the full me
   assert.ok(doc.getElementById(toggle.getAttribute("aria-controls")).hidden);
   toggle.click();
   const pre = row.querySelector("pre.model-error-message");
-  assert.equal(pre.textContent, message);
+  assert.equal(pre.textContent, message.replace("(/connect <url> to change it)", "(change it in Settings → Models)")
+    .replace("or fix the URL; `dgc doctor` checks both", "or fix the URL in Settings → Models"), "all of it, in an editor's words: no terminal flag or command");
   assert.ok(pre.textContent.includes("\n  → "), "the break before the hint is kept");
-  assert.equal(lines()[0].dataset.state, "gave_up", "the matching retry line gave up");
+  assert.equal(lines().length, 0, "the failure says it all: no Gave up row, with its host and port, above it");
+  assert.match(row.querySelector(".model-error-detail").textContent, /Attempts/, "its attempts are under Details");
   assert.match(row.querySelector(".model-retry-facts").textContent, /the endpoint .* start your server/);
   assert.match(announcer(), /^DGC error: DGC can't reach the model provider/);
   assert.deepEqual(errors, []);

@@ -23,7 +23,7 @@ const link=(extra={})=>({id:LINK,pip_id:PIP,workspace_id:PW,toolkit:'gmail',app:
 async function flush(){for(let i=0;i<15;i++)await Promise.resolve();}
 
 const viewModule=load(viewCode,name=>name==='vscode'?{}:require(name));
-function setup({links=[link()],composio=true,messages=[],drafts=[],computer=null,events=[]}={}){
+function setup({links=[link()],composio=true,messages=[],drafts=[],computer=null,events=[],settledActions=null,activeRun=null}={}){
  const dom=new JSDOM(viewModule.pipsDocument(),{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);
  const sent=[],answered=new Set(),timers=[];
  w.HTMLCanvasElement.prototype.getContext=()=>null;w.TextEncoder=TextEncoder;
@@ -38,8 +38,9 @@ function setup({links=[link()],composio=true,messages=[],drafts=[],computer=null
  const defaults=r=>({list_workspaces:()=>({workspaces:[{id:PW,name:'Personal',kind:'personal'},{id:'ws_'+'1'.repeat(32),name:'demo',kind:'project'}],current_workspace_id:'ws_'+'1'.repeat(32)}),list_pip_types:()=>({types}),list_pip_setups:()=>({setups:[]}),
   list_pips:()=>({pips:r.workspace_id===PW?[pipRow]:[]}),get_pip:()=>({pip:pipRow}),list_pip_runs:()=>({runs:[]}),list_pip_starters:()=>({starters:[]}),get_pip_runner:()=>({runner}),
   get_workspace_context:()=>({context:{workspace_id:r.workspace_id||PW,revision:0,entries:[]}}),list_pip_models:()=>({default_model:'m',models:[],connection:'configured'}),
-  list_pip_messages:()=>({pip_id:PIP,workspace_id:PW,messages,next_before_id:null,active_run:null,history_context_omitted_count:0,chat_controls:controls}),
+  list_pip_messages:()=>({pip_id:PIP,workspace_id:PW,messages,next_before_id:null,active_run:activeRun,history_context_omitted_count:0,chat_controls:controls}),
   get_pip_computer:()=>({computer:computer||{pip_id:PIP,granted:false,available:true,reason:'',pending:0,actions:[]}}),
+  ...(settledActions?{list_pip_computer_actions:()=>({actions:settledActions})}:{}),
   list_pip_app_links:()=>({pip_id:PIP,links,composio}),list_pip_message_drafts:()=>({drafts:drafts.map(d=>({id:d.id,pip_id:d.pip_id,workspace_id:d.workspace_id,status:d.status,expired:d.expired,subject:d.payload.message.subject,digest:d.digest,source_run_id:d.source_run_id,expires_at:d.expires_at,action_id:d.action_id})),next_cursor:null}),get_pip_message_draft:()=>({draft:drafts.find(d=>d.id===r.draft_id)}),list_pip_calendar_drafts:()=>({drafts:events.map(d=>({id:d.id,pip_id:d.pip_id,workspace_id:d.workspace_id,status:d.status,expired:d.expired,subject:d.payload.event.summary,digest:d.digest,source_run_id:d.source_run_id,expires_at:d.expires_at,action_id:d.action_id})),next_cursor:null}),get_pip_calendar_draft:()=>({draft:events.find(d=>d.id===r.draft_id)}),list_pip_connector_drafts:()=>({drafts:[],next_cursor:null}),get_pip_digest:()=>undefined}[r.type]?.());
  async function drain(){for(let n=0;n<15;n++){await flush();for(const m of sent.filter(m=>m.type==='pipsRequest'&&!answered.has(m.id))){const result=defaults(m.request);if(result!==undefined)answer(m,result);}}}
  message({type:'pipsConnection',apiVersion:43,generation:1,connected:true,supported:true,enabled:true});
@@ -304,6 +305,54 @@ test('a held submit is the Soft card: Send once, Always allow and Reject on it, 
  x.computer.actions=[];x.answer(asked,{action:{...a,status:'approved',resolved_at:'2026-11-05T10:01:00Z',resolved_by:'editor-user'},grant:{id:'grant_'+'1'.repeat(32),kind:'computer_submit',server:'dash.example',connection_digest:'a'.repeat(64),account:'browser',schema_digest:'b'.repeat(64),tool:'POST /accounts/*/settings',label:'Submit in its browser to dash.example/accounts/*/settings, whatever the ID',created_at:'2026-11-05T10:01:00Z',created_by:'editor-user'}});await x.drain();
  assert.match(x.d.body.textContent,/Always allowed: Submit in its browser to dash\.example\/accounts\/\*\/settings, whatever the ID\./);
  assert.equal(x.d.querySelector(`[data-computer-card="${a.id}"]`),null,'the card is gone');
+});
+// A reply that said "the card is below" while the card waited: answered, the card stays as one quiet line where it was, so
+// the sentence stays true (final check, 2026-11-07: it pointed at nothing until the next reply).
+const settled=x=>[...x.d.querySelectorAll('.card-settled')].map(l=>l.textContent);
+test('a settled card leaves one quiet line where it was, and the open card keeps its look',async()=>{
+ const a=hold({route:'/accounts/*/settings'}),x=await chatWith([a]);
+ assert.deepEqual(settled(x),[],'nothing while it waits');
+ x.click(`[data-computer-decide="${a.id}"][data-approve="1"]`);
+ const asked=x.requests('decide_pip_computer_action')[0];
+ const done={...a,status:'approved',resolved_at:'2026-11-05T10:01:00Z',resolved_by:'editor-user'};
+ x.computer.actions=[done];x.answer(asked,{action:done});await x.drain();
+ assert.deepEqual(settled(x),['Allowed · Send a form to dash.example']);
+ assert.equal(x.d.querySelector(`[data-computer-card="${a.id}"]`),null);
+ assert.equal(x.d.querySelector('.card-settled button'),null,'one line: nothing to press');
+});
+test('Reject leaves its line too',async()=>{
+ const a=hold({route:'/x'}),x=await chatWith([a]);
+ x.click(`[data-computer-decide="${a.id}"][data-approve="0"]`);
+ const done={...a,status:'rejected',resolved_at:'2026-11-05T10:01:00Z',resolved_by:'editor-user'};
+ x.computer.actions=[done];x.answer(x.requests('decide_pip_computer_action')[0],{action:done});await x.drain();
+ assert.deepEqual(settled(x),['Rejected · Send a form to dash.example']);
+});
+test('each line stays under the reply of the run that asked, read from the list once five newer actions have moved on',async()=>{
+ const R1='run_'+'b'.repeat(32),R2='run_'+'e'.repeat(32),msg=(id,role,run,at,extra={})=>({id,pip_id:PIP,workspace_id:PW,role,text:id,run_id:run,status:'succeeded',model:'m',created_at:at,...extra});
+ const a=hold({route:'/x'},'compact_'+'1'.repeat(32));
+ const sent={...a,status:'sent',resolved_at:'2026-11-05T10:01:00Z',resolved_by:'editor-user',continuation_run_id:R2};
+ // The next reply came from the turn DGC sent after it, and its words came after the card did.
+ const messages=[msg('asked','user',R1,'2026-11-05T09:59:00Z'),msg('reply-one','assistant',R1,'2026-11-05T10:02:00Z'),msg('carry-on','user',R2,'2026-11-05T10:02:10Z',{intro:true}),msg('reply-two','assistant',R2,'2026-11-05T10:02:20Z')];
+ const x=setup({links:[],messages,settledActions:[sent],computer:{pip_id:PIP,granted:true,available:true,reason:'',pending:0,actions:[]}});await openChat(x);
+ const line=x.d.querySelector('.card-settled');assert.equal(line?.textContent,'Allowed · Send a form to dash.example','it comes from the list: get_pip_computer no longer has it');
+ const log=[...x.d.querySelector('.conversation-log').querySelectorAll('[data-message],.card-settled')].map(e=>e.dataset.message||'line');
+ assert.deepEqual(log,['asked','reply-one','line','reply-two'],'under the reply that asked, above the next');
+});
+test('while the reply that asked is still being written its line stands where the card was, after that reply',async()=>{
+ const R1='run_'+'b'.repeat(32),a=hold({route:'/x'},'compact_'+'1'.repeat(32));
+ const messages=[{id:'asked',pip_id:PIP,workspace_id:PW,role:'user',text:'asked',run_id:R1,status:'running',model:'m',created_at:'2026-11-05T09:59:00Z'}];
+ const x=setup({links:[],messages,activeRun:{id:R1,status:'running',created_at:'2026-11-05T09:59:00Z',started_at:null,run_kind:'conversation'},computer:{pip_id:PIP,granted:true,available:true,reason:'',pending:0,actions:[{...a,status:'approved',resolved_at:'2026-11-05T10:01:00Z',resolved_by:'editor-user'}]}});await openChat(x);
+ const log=x.d.querySelector('.conversation-log');
+ const line=log.querySelector('.card-settled');assert.ok(line,'it is drawn while the reply runs');
+ assert.equal(line.closest('.pip-message'),null);
+ const asked=log.querySelector('[data-message="asked"]');assert.ok(asked.compareDocumentPosition(line)&x.w.Node.DOCUMENT_POSITION_FOLLOWING);
+});
+test('what never showed a card leaves no line: its level, an Always allow sent at once, the user’s own action',async()=>{
+ const R1='run_'+'b'.repeat(32),base=hold({route:'/x'},'compact_'+'2'.repeat(32));
+ const at={resolved_at:base.created_at,status:'sent'};
+ const messages=[{id:'reply',pip_id:PIP,workspace_id:PW,role:'assistant',text:'x',run_id:R1,status:'succeeded',model:'m',created_at:'2026-11-05T10:02:00Z'}];
+ const x=setup({links:[],messages,settledActions:[{...base,...at,resolved_by:'pip-level:full'},{...base,...at,id:'compact_'+'3'.repeat(32),resolved_by:'pip-grant:grant_x'},{...base,...at,id:'compact_'+'4'.repeat(32),resolved_by:'editor-user',summary:{...base.summary,kind:'yours'}}],computer:{pip_id:PIP,granted:true,available:true,reason:'',pending:0,actions:[]}});await openChat(x);
+ assert.deepEqual(settled(x),[]);
 });
 test('Send once on the Soft card sends this one, and says so',async()=>{
  const a=hold({route:'/accounts/*/settings'}),x=await chatWith([a]);

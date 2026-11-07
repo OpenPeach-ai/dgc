@@ -43,6 +43,22 @@ export function carefulWords(summary, pipName = 'The Pip') {
   return null;
 }
 
+/** What a card leaves where it was, once it is settled: its one quiet line, [outcome, what]. Null while it waits, and for
+ *  what never showed a card: the user's own action on its screen, what its level let through, and a submit an Always
+ *  allow sent at once. A reply that said "the card is below" stays true after the card is answered (final check,
+ *  2026-11-07: it pointed at nothing until the next reply). */
+export function settledWords(action) {
+  const s = action?.summary || {}, status = action?.status, by = String(action?.resolved_by || '');
+  if (!action || status === 'pending' || s.kind === 'yours' || by.startsWith('pip-level:')) return null;
+  if (by.startsWith('pip-grant:') && !(Date.parse(action.resolved_at) - Date.parse(action.created_at) > 2000)) return null;
+  const host = s.host || 'a site', careful = ['site', 'login', 'text', 'floor'].includes(s.kind);
+  const what = s.kind === 'site' ? `Visit ${s.site || host}` : s.kind === 'login' ? `Save a login for ${s.site || host}`
+    : s.kind === 'text' ? `Put what it read from your apps on ${host}` : s.kind === 'floor' ? 'Run a command in its Terminal'
+    : isPayment(s) ? `Pay on ${host}` : `Send a form to ${host}`;
+  const outcome = {approved: 'Allowed', sent: 'Allowed', rejected: careful ? 'Not now' : 'Rejected', expired: 'Not answered', lost: 'Not sent'}[status];
+  return outcome ? [outcome, what] : null;
+}
+
 /** A payment asks every time and never gets Always allow: a card number in it, or real signs of paying (pip_levels.classify). */
 export function isPayment(summary) {
   return summary?.payment === true || summary?.asks_because === 'payment';

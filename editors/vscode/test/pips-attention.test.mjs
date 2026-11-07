@@ -43,7 +43,25 @@ test("an action a Pip drafted for your approval counts as waiting for you", () =
 test("with Needs attention (API 44) the notice counts every card the Pips home lists, never fewer than the digest", () => {
   const five = pipsAttention(digest({ reason: null, pips: [], pending_actions: 2 }), undefined, 5);
   assert.equal(five.text, "DGC Pips: 5 things are waiting for you.", "Connect, plugin and routine cards count too");
-  assert.equal(pipsAttention(digest({ reason: null, pips: [], pending_reviews: 3 }), undefined, 1).text,
-    "DGC Pips: 3 things are waiting for you.", "a project Pip's reviews still count");
   assert.equal(pipsAttention(digest({ reason: null, pips: [], pending_actions: 2 }), five.state, 5), null, "said once");
+});
+
+test("the notice says the number the Pips home says, whatever the digest counted (08-i8-07)", () => {
+  // The digest counted the held form and a workflow's handoff; Needs attention said 1, the notice 2.
+  const seen = pipsAttention(digest({ reason: null, pips: [], pending_reviews: 2 }), undefined, 1);
+  assert.equal(seen.text, "DGC Pips: 1 thing is waiting for you.");
+  assert.equal(seen.state.reviews, 1);
+  assert.equal(pipsAttention(digest({ reason: null, pips: [], pending_reviews: 2 }), seen.state, 1), null, "the digest's larger count is no news");
+  const none = pipsAttention(digest({ reason: null, pips: [], pending_reviews: 2 }), undefined, 0);
+  assert.equal(none?.text ?? null, null, "nothing on the list: nothing to say");
+});
+
+test("reviews in a project are named apart, never added into that number", () => {
+  const both = pipsAttention(digest({ reason: null, pips: [], pending_reviews: 3 }), undefined, 2, 1);
+  assert.equal(both.text, "DGC Pips: 2 things are waiting for you, and 1 review in a project.");
+  assert.equal(pipsAttention(digest({ reason: null, pips: [], pending_reviews: 3 }), both.state, 2, 1), null, "said once");
+  const more = pipsAttention(digest({ reason: null, pips: [] }), both.state, 2, 2);
+  assert.equal(more.text, "DGC Pips: 2 things are waiting for you, and 2 reviews in a project.", "a new one is news");
+  assert.equal(pipsAttention(digest({ reason: null, pips: [] }), undefined, 0, 1).text, "DGC Pips: 1 review waiting for you in a project.");
+  assert.equal(pipsAttention(digest({ reason: null, pips: [] }), undefined, 0, 3).text, "DGC Pips: 3 reviews waiting for you in a project.");
 });

@@ -93,6 +93,8 @@ test("no provider: the chip says so, a send stays in the box and says where to f
   const { p, errors, context } = await openChat();
   try {
     assert.equal((await p.innerText("body")).includes("qwen3:8b)"), false, "no model is claimed");
+    assert.equal(await p.locator("#chat-context-toggle").count(), 0, "no meter: 0% of a model nobody chose (10-w1-02g)");
+    assert.equal(await p.locator(".composer-ctx-pct").count(), 0);
     await p.fill("#chatText", "hello again");
     await p.press("#chatText", "Enter");
     await p.waitForSelector('.message-status[role="alert"]');

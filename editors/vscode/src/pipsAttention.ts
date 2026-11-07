@@ -7,8 +7,11 @@ export interface PipsAttention { text: string | null; state: PipsAttentionState 
 
 const MAX_REMEMBERED = 200;
 
-/** `waiting`: Needs attention's total (list_pip_attention, API 44), so the notice and the Pips home agree. */
-export function pipsAttention(digest: any, previous: PipsAttentionState | undefined, waiting?: number): PipsAttention | null {
+/** `waiting`: Needs attention's total (list_pip_attention, API 44), the one number the Pips home and its rows say, so the
+ *  notice says it too. `elsewhere`: the reviews waiting in project folders, which that list doesn't show: named apart, in
+ *  their own words, never added in. The digest's counts differ (it counts all folders' reviews and only some cards), so
+ *  they're only for a DGC without the list: taking the larger said "2 things" beside a home that said 1. */
+export function pipsAttention(digest: any, previous: PipsAttentionState | undefined, waiting?: number, elsewhere = 0): PipsAttention | null {
   if (!digest || typeof digest !== 'object' || !Array.isArray(digest.pips)) return null;
   const before: PipsAttentionState = {
     alerts: Array.isArray(previous?.alerts) ? previous!.alerts.filter((id) => typeof id === 'string') : [],
@@ -26,16 +29,20 @@ export function pipsAttention(digest: any, previous: PipsAttentionState | undefi
   const counted = (Number.isSafeInteger(digest.pending_reviews) ? digest.pending_reviews : 0)
     + (Number.isSafeInteger(digest.pending_setups) ? digest.pending_setups : 0)
     + (Number.isSafeInteger(digest.pending_actions) ? digest.pending_actions : 0);
-  // The list counts every card (Connect, plugin, routine…), the digest only reviews and drafts; neither double counts.
-  const reviews = Number.isSafeInteger(waiting) && waiting! >= 0 ? Math.max(waiting!, counted) : counted;
+  const listed = Number.isSafeInteger(waiting) && waiting! >= 0;
+  const inProjects = listed && Number.isSafeInteger(elsewhere) && elsewhere > 0 ? elsewhere : 0;
+  const reviews = listed ? waiting! + inProjects : counted;
   const fresh = alerts.filter((id) => !before.alerts.includes(id));
   const state: PipsAttentionState = { alerts: [...before.alerts, ...fresh].slice(-MAX_REMEMBERED), reviews };
   const headline = typeof digest.headline === 'string' ? digest.headline.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
   let text: string | null = null;
   if (fresh.length && headline) text = `DGC Pips: ${headline}`;
-  else if (reviews > before.reviews) text = waiting !== undefined
-    ? `DGC Pips: ${reviews} ${reviews === 1 ? 'thing is' : 'things are'} waiting for you.`
-    : `DGC Pips: ${reviews} review${reviews === 1 ? '' : 's'} waiting for you.`;
+  else if (reviews > before.reviews) {
+    const inProject = `${inProjects} review${inProjects === 1 ? '' : 's'}`;
+    text = !listed ? `DGC Pips: ${reviews} review${reviews === 1 ? '' : 's'} waiting for you.`
+      : !waiting ? `DGC Pips: ${inProject} waiting for you in a project.`
+      : `DGC Pips: ${waiting} ${waiting === 1 ? 'thing is' : 'things are'} waiting for you${inProjects ? `, and ${inProject} in a project` : ''}.`;
+  }
   if (!text && state.reviews === before.reviews && !fresh.length) return null;
   return { text, state };
 }

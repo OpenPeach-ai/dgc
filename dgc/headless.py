@@ -5730,10 +5730,13 @@ class Backend:
             return False
         return True
 
-    def _emit_context(self, request_id: str | None = None) -> None:
+    def _emit_context(self, request_id: str | None = None, *, known_only: bool = False) -> None:
         try:
             used = self.agent.estimate_tokens()
         except Exception:
+            # Counted while a running turn changes a message: `known_only` says nothing rather than a false 0%.
+            if known_only:
+                return
             used = 0
         totals = getattr(self.agent, "usage_totals", {})
         size = self._context_window_size()
@@ -8859,8 +8862,11 @@ class Backend:
                 self.em.emit("error", message="no session to resume",
                              **_request_fields(request_id))
         elif t == "get_history":
-            # The clock first: the correlated snapshot stays the last word of this reply.
+            # The clock and the meter first: the correlated snapshot stays the last word of this reply. A page asking
+            # for a snapshot knows nothing yet, and a reload mid-reply hears no other `context` until that turn ends:
+            # its meter read 0% through the rest of the reply (the first one after a reattach comes from here).
             self._publish_cache_clock(current=True)
+            self._emit_context(known_only=True)
             self._emit_history(cmd["request_id"])
         elif t == "get_outline":
             self._emit_outline(cmd["request_id"])

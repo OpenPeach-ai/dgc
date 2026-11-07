@@ -112,7 +112,8 @@ The reply is a `pips_result` event that carries the nested request ID:
   is drawn. In the chat the fix ran in, the Pips page closes and shows the card itself.
 - `introduce_pip {pip_id}` (API 43, local only) queues a new Personal Pip's first message once and
   returns `{run, message}` like `send_pip_message`. That message has `intro: true` in
-  `list_pip_messages`; the editor hides it and shows the Pip typing until its reply arrives.
+  `list_pip_messages`; the editor hides it and shows the Pip typing until its reply arrives. When every try
+  so far failed and nothing else has been said, asking again queues a new try.
 - `send_pip_message` may carry `images` (API 43, Personal Pips): up to 4 image data URIs, 2 MB in
   all, and then `text` may be empty. A listed user message carries `images: [{index, mime, bytes}]`;
   `get_pip_message_image {pip_id, message_id, index}` (API 43) returns one as `{image}`. The host

@@ -229,8 +229,11 @@ test("no provider: the pill says so and goes to Settings, and a send stays in th
   const s = await openScreen({ width: 900 });
   try {
     await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
+    await s.send({ type: "context", window: 32768, limit: 262144, used: 3600, preset: "32k", source: "reported", parts: { conversation: 3600 }, compactable: true });
+    assert.equal(await s.page.locator("#cd-context").isVisible(), true);
     await s.send({ type: "models", ids: [], current: "", noProvider: true, profiles: [] });
     await s.page.waitForFunction(() => document.getElementById("cd-model-name")?.textContent === "No provider");
+    assert.equal(await s.page.locator("#cd-context").isVisible(), false, "no meter: 11% of a model nobody chose (10-w1-02e)");
     assert.equal(await s.page.locator("#cd-model-pill").isVisible(), true, "it's there, and it claims no model");
     await s.page.locator("#cd-model-pill").click();
     assert.equal((await s.posted("openModels")).length, 1, "to Settings, not a menu of models");

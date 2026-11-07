@@ -14,6 +14,10 @@ import json
 
 KINDS = ("email", "event", "action", "app_action", "app_link", "plugin", "setup", "computer_action",
          "computer_check", "routine")
+# Reviews of a Personal Pip's work: a workflow's handoff waiting for its review, a change waiting on its Changes page. They wait
+# on you like any card, so the total counts them, but they come in `reviews`, not `items`: a client from before (its list knows
+# KINDS only) would refuse the whole list over a row it doesn't know.
+REVIEW_KINDS = ("handoff", "approval")
 MAX_ITEMS = 100
 MAX_SCAN = 2000                     # rows read per kind; the counts stay exact past it
 TITLE, DETAIL = 160, 200
@@ -79,7 +83,9 @@ def _when(event) -> str:
 
 
 def collect(registry, now, *, limit=MAX_ITEMS) -> dict:
-    """{as_of, total, counts, by_pip, items, truncated} over every Personal Pip that isn't archived."""
+    """{as_of, total, counts, by_pip, items, reviews, truncated, in_projects} over every Personal Pip that isn't archived.
+    `total` is the one number the Pips home, its rows and the editor's notice all say; `in_projects` is what waits in
+    project folders, which this list doesn't show (each project's own Pips do)."""
     limit = max(1, min(int(limit or MAX_ITEMS), MAX_ITEMS))
     db = registry.db
     db.execute("SAVEPOINT pip_attention")
@@ -147,6 +153,15 @@ def collect(registry, now, *, limit=MAX_ITEMS) -> dict:
         for row in rows(f"SELECT id,pip_id,title,prompt,created_at FROM pip_routines WHERE status='suggested' AND created_by='pip' "
                         f"AND {mine} ORDER BY created_at DESC", ids):
             add("routine", row["id"], row["pip_id"], row["created_at"], None, f"Add the routine “{row['title']}”?", row["prompt"])
+        for row in rows(f"SELECT id,target_pip_id,payload,created_at,expires_at FROM pip_handoffs WHERE status='pending' AND expires_at>? "
+                        f"AND target_pip_id IN (SELECT value FROM json_each(?)) ORDER BY created_at DESC", now, ids):
+            add("handoff", row["id"], row["target_pip_id"], row["created_at"], row["expires_at"],
+                f"Hand this to {pips[row['target_pip_id']]['name']}?", _json(row["payload"]).get("task", ""))
+        for row in rows(f"SELECT proposal_id,pip_id,action_type,action_summary,created_at,expires_at FROM pip_approvals "
+                        f"WHERE status='pending' AND expires_at>? AND {mine} ORDER BY created_at DESC", now, ids):
+            add("approval", row["proposal_id"], row["pip_id"], row["created_at"], row["expires_at"],
+                f"Change {pips[row['pip_id']]['name']}?", row["action_summary"])
+            found[-1]["review"] = row["action_type"]
         for workspace_id in personal:
             for row in rows("SELECT id,body,created_at,expires_at FROM pip_setup_proposals WHERE workspace_id=? AND status='pending' "
                             "AND expires_at>? ORDER BY created_at DESC", workspace_id, now):
@@ -161,7 +176,7 @@ def collect(registry, now, *, limit=MAX_ITEMS) -> dict:
         db.execute("ROLLBACK TO pip_attention")
         db.execute("RELEASE pip_attention")
     found.sort(key=lambda item: (item["created_at"] or "", item["id"]), reverse=True)
-    counts, by_pip = {kind: 0 for kind in KINDS}, {}
+    counts, by_pip = {kind: 0 for kind in (*KINDS, *REVIEW_KINDS)}, {}
     for item in found:
         counts[item["kind"]] += 1
         if item["pip_id"]:
@@ -170,6 +185,26 @@ def collect(registry, now, *, limit=MAX_ITEMS) -> dict:
             item.update(pip_name=pip["name"], pip_type=pip["pip_type"], workspace_id=pip["workspace_id"])
         else:
             item.update(pip_name="", pip_type="", workspace_id=personal[0] if personal else "")
-    items = found[:limit]
+    cards = [item for item in found if item["kind"] in KINDS]
+    reviews = [item for item in found if item["kind"] in REVIEW_KINDS][:limit]
+    items = cards[:limit]
     return {"as_of": now, "total": len(found), "counts": counts,
-            "by_pip": dict(sorted(by_pip.items(), key=lambda kv: -kv[1])[:500]), "items": items, "truncated": len(found) > len(items)}
+            "by_pip": dict(sorted(by_pip.items(), key=lambda kv: -kv[1])[:500]), "items": items, "reviews": reviews,
+            "truncated": len(found) > len(items) + len(reviews), "in_projects": _in_projects(registry, now, personal)}
+
+
+def _in_projects(registry, now, personal) -> int:
+    """Reviews and setup cards waiting in project folders on this computer. 0 when they can't be read: this only adds a
+    sentence to the editor's notice."""
+    from .pip_overview import pending_reviews
+    try:
+        total = pending_reviews(registry, limit=1)["total_pending"]
+        marks = ",".join("?" for _ in personal)
+        for table, column in (("pip_approvals", "workspace_id"), ("pip_handoffs", "workspace_id")):
+            total -= registry.db.execute(f"SELECT count(*) FROM {table} WHERE status='pending' AND expires_at>? "
+                                         f"AND {column} IN ({marks})", (now, *personal)).fetchone()[0]
+        total += registry.db.execute(f"SELECT count(*) FROM pip_setup_proposals WHERE status='pending' AND expires_at>? "
+                                     f"AND workspace_id NOT IN ({marks})", (now, *personal)).fetchone()[0]
+    except Exception:          # noqa: BLE001 - a count for one sentence
+        return 0
+    return max(0, total)

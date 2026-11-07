@@ -561,7 +561,7 @@ class ChatService:
             self._error(str(exc), request_id, conversation_id)
 
     def _error(self, message: str, request_id, conversation_id) -> None:
-        fields = {"message": str(message)[:1000]}
+        fields = {"message": str(message)[:2200]}                # room for a model's whole failure (engine._failure_text)
         if request_id:
             fields["request_id"] = request_id
         if isinstance(conversation_id, str) and conversation_id:
