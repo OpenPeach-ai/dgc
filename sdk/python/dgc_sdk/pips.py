@@ -945,9 +945,12 @@ class Pips:
             # API 55: a Personal Pip on the user's own Claude Code or Codex, with DGC's Pip tools only.
             if version < 55:
                 raise DGCUnsupportedError("A Pip on your own Claude Code or Codex requires a runtime advertising Pips API 55 or newer")
+            if any(isinstance(choice, dict) and choice.get('mode') == 'subscription' and 'model' in choice for choice in choices) and version < 74:
+                raise DGCUnsupportedError("Naming a model of Claude Code or Codex for a Pip requires a runtime advertising Pips API 74 or newer")
             if any(isinstance(choice, dict) and choice.get('mode') == 'subscription'
-                   and (set(choice) != {'mode', 'engine'} or choice.get('engine') not in SUBSCRIPTION_ENGINES) for choice in choices):
-                raise DGCConfigError('A subscription model_choice is {"mode": "subscription", "engine": "claude" | "codex"}')
+                   and (set(choice) - {'model'} != {'mode', 'engine'} or choice.get('engine') not in SUBSCRIPTION_ENGINES
+                        or ('model' in choice and (not isinstance(choice['model'], str) or not choice['model'].strip()))) for choice in choices):
+                raise DGCConfigError('A subscription model_choice is {"mode": "subscription", "engine": "claude" | "codex"}, with an optional "model" of that CLI')
         if any(isinstance(choice, dict) and choice.get('mode') == 'router' for choice in choices):
             # API 70: a Pip on DGC Router, any of the user's systems with the Pips job, or one system and model.
             if version < 70:

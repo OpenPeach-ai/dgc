@@ -2,6 +2,7 @@
 
 ## 0.9.0 — 2026-11-06
 
+- A Personal Pip on Claude Code or Codex can name one of that CLI's models: `model_choice` `{"mode": "subscription", "engine": "claude" | "codex", "model": id}`, from Pips API 74. Both SDKs refuse a `model` there on an older runtime and check its shape.
 - Pips API 72 adds local Personal and Project Pip workflow list, detail, create and status controls in both SDKs. A workflow routes exact Personal results or a Project finding through two to four Pips in reviewed or unattended mode without granting the receiving Pip any new external action permission.
 - Pips API 73 accepts a text message during one running Personal Pip conversation as a mid-turn update. It stays in that run's history; no second reply starts.
 - A message to the Primary Core Pip can propose up to three Personal Pip setup cards. Apps use the existing Pips API 23 `list_pip_setups`, `get_pip_setup`, `accept_pip_setup` and `reject_pip_setup` operations to present and decide them; no new SDK mutation or implicit approval is added.

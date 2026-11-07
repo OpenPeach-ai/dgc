@@ -24,15 +24,25 @@ class PipBrainSDKTests(unittest.TestCase):
                 call(old, CODEX)
         self.assertFalse(wire.calls)
         wire = Wire(); current = session(wire, caps={**CAPS, 'pips_api_version': 55})
-        for bad in ({'mode': 'subscription', 'engine': 'kimi'}, {'mode': 'subscription', 'engine': 'codex', 'model': 'x'}):
+        for bad in ({'mode': 'subscription', 'engine': 'kimi'}, {'mode': 'subscription', 'engine': 'codex', 'effort': 'high'}):
             for call in self.calls():
                 with self.assertRaises(DGCConfigError):
                     call(current, bad)
+        for call in self.calls():
+            with self.assertRaisesRegex(DGCUnsupportedError, 'API 74'):
+                call(current, {'mode': 'subscription', 'engine': 'claude', 'model': 'opus'})
         self.assertFalse(wire.calls)
         sent = [call(current, CODEX)['request'] for call in self.calls()]
         self.assertEqual(sent[0]['model_choice'], CODEX)
         self.assertEqual(sent[1]['changes']['model_choice'], CODEX)
         self.assertEqual(sent[2]['model_choice'], CODEX)
+        # From API 74 a Pip can name one of that CLI's models, as the editor's menu offers.
+        wire = Wire(); newest = session(wire, caps={**CAPS, 'pips_api_version': 74})
+        opus = {'mode': 'subscription', 'engine': 'claude', 'model': 'opus'}
+        self.assertEqual(self.calls()[0](newest, opus)['request']['model_choice'], opus)
+        for bad in ({'mode': 'subscription', 'engine': 'claude', 'model': ''}, {'mode': 'subscription', 'engine': 'claude', 'model': 3}):
+            with self.assertRaises(DGCConfigError):
+                self.calls()[0](newest, bad)
         # A native choice is as before, on any version.
         wire = Wire(); old = session(wire, caps={**CAPS, 'pips_api_version': 54})
         self.calls()[0](old, {'mode': 'model', 'model': 'gpt-oss:20b'})

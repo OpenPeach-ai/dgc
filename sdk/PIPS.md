@@ -277,9 +277,9 @@ request only (the SDKs keep no request log). DGC keeps them sealed on this compu
 page itself (docs/PIPS.md, Saved logins).
 
 `model_choice` is `{"mode": "default"}` or `{"mode": "model", "model": "<id from list_pip_models>"}`, or, for a
-Personal Pip from Pips API 55, `{"mode": "subscription", "engine": "claude" | "codex"}`: the user's own Claude Code
-or Codex, held to DGC's Pip tools (docs/PIPS.md). Both SDKs refuse a subscription choice before API 55 and check its
-shape; `list_pip_models` then also returns `subscriptions` `[{engine, name}]` and, when DGC's default is a
+Personal Pip from Pips API 55, `{"mode": "subscription", "engine": "claude" | "codex"}`, from API 74 with an optional `model` of that CLI: the user's
+own Claude Code or Codex, held to DGC's Pip tools (docs/PIPS.md). Both SDKs refuse a subscription choice before API 55,
+a `model` on it before API 74, and check its shape; `list_pip_models` then also returns `subscriptions` `[{engine, name}]` and, when DGC's default is a
 subscription, `default_engine` `{engine, name, available, reason?}`. A project Pip refuses it. From Pips API 66 each
 listed model may carry `context_window` (tokens) and the list says the Pips default as set, `pips_model`.
 Archiving keeps all history and refuses while a run or review is unfinished;

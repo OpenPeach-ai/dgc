@@ -28,14 +28,19 @@ test('a subscription for a Pip: refused before API 55, checked, then sent', asyn
   for (const call of calls) await assert.rejects(call(old.session, CODEX), (e) => e instanceof DGCUnsupportedError && /API 55/.test(e.message));
   assert.equal(old.calls.length, 0);
   const current = fixture(55);
-  for (const bad of [{ mode: 'subscription', engine: 'kimi' }, { mode: 'subscription', engine: 'codex', model: 'x' }])
+  for (const bad of [{ mode: 'subscription', engine: 'kimi' }, { mode: 'subscription', engine: 'codex', effort: 'high' }])
     for (const call of calls) await assert.rejects(call(current.session, bad), DGCConfigError);
+  for (const call of calls) await assert.rejects(call(current.session, { mode: 'subscription', engine: 'claude', model: 'opus' }), (e) => e instanceof DGCUnsupportedError && /API 74/.test(e.message));
   assert.equal(current.calls.length, 0);
   const sent = [];
   for (const call of calls) sent.push((await call(current.session, CODEX)).request);
   assert.deepEqual(sent[0].model_choice, CODEX);
   assert.deepEqual(sent[1].changes.model_choice, CODEX);
   assert.deepEqual(sent[2].model_choice, CODEX);
+  const newest = fixture(74);
+  const opus = { mode: 'subscription', engine: 'claude', model: 'opus' };
+  assert.deepEqual((await calls[0](newest.session, opus)).request.model_choice, opus, 'from API 74 a Pip can name one of its models');
+  for (const bad of [{ ...opus, model: '' }, { ...opus, model: 3 }]) await assert.rejects(calls[0](newest.session, bad), DGCConfigError);
   const native = fixture(54);
   await calls[0](native.session, { mode: 'model', model: 'gpt-oss:20b' });
   assert.equal(native.calls.length, 1, 'a native choice is as before');
