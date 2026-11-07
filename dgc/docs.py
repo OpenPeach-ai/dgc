@@ -3917,7 +3917,7 @@ self-hosted model, never your Claude Code or Codex plan.
   Changes, Memory, Context and Notifications in its **…** menu.
 - **Reports reach your chat.** A project reviewer's finished run appears as a card in the chat it
   reports to: what it found and the worst of it, with **Open report**. A card never starts a turn.
-  One card per Pip: a newer run's card takes the older one's place ("failed twice", "fixed · nothing
+  One card per Pip: a newer run's card takes the older one's place ("failed again", "fixed · nothing
   found"), unless you acted on the older one. A refused key or sign-in offers **Check sign-in**.
   **Ask DGC to fix** starts a helper in the chat's session without starting a turn, so you keep
   chatting. It works in one copy of the project DGC keeps for fixes, with the project's own install,

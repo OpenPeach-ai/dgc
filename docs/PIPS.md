@@ -614,8 +614,10 @@ When the model provider turned down the Pip's key, or its subscription isn't sig
 can fix that: the card says so and offers **Check sign-in**, which opens Settings → Models, in place of Ask DGC to fix.
 
 **One card per Pip.** A Pip's newer card takes the place of its older one in the chat, so a routine that runs every
-morning and evening leaves one card, not one per run. The older runs stay in Pips, under Runs, and count as read. The
-card says what changed: "failed twice" when the same failure came again, "fixed · nothing found" when a clean run
+morning and evening leaves one card, not one per run. The same failure again is said again once the last card
+about it is six hours old, so the evening's run replaces the morning's card; a check failing every half hour says so at
+most every six hours. The older runs stay in Pips, under Runs, and count as read. The
+card says what changed: "failed again" when it failed again, "fixed · nothing found" when a clean run
 follows a problem, and, opened, "Earlier: failed · 8:00 AM". A card you acted on stays where it is: one whose fix
 started, or whose prompt you sent. Dismiss removes the card and the ones it replaced.
 

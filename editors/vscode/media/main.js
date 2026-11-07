@@ -10626,14 +10626,14 @@ function permissionChoices(ev) {
     const card = el("div", `pip-report${quiet ? " quiet" : ""}`);
     card.dataset.run = r.run_id; card.dataset.outcome = r.outcome; card.dataset.pip = r.pip_id;
     card._report = r; card._replaced = replaced;
-    // A clean run after a card that needed you: the problem is gone ("fixed · nothing found"). The same failure again:
-    // "failed twice". A sign-in failure can't be fixed in the project: its card offers Check sign-in instead of Fix.
+    // A clean run after a card that needed you: the problem is gone ("fixed · nothing found"). A failure after a failure:
+    // "failed again" (never a count: the backend says a repeat at most every six hours, so the quiet ones aren't here). A sign-in failure can't be fixed in the project: its card offers Check sign-in instead of Fix.
     const fixed = quiet && replaced.some((x) => PIP_REPORT_BAD.includes(x.outcome));
     const again = r.outcome === "failed" && replaced.length > 0 && replaced.every((x) => x.outcome === "failed");
     const signIn = r.outcome === "failed" && r.sign_in === true;
     if (fixed) card.dataset.fixed = "";
     const state = fixed ? `fixed · ${pipReportState(r).replace(/^finished · /, "")}`
-      : again ? pipReportState(r).replace(/^failed/, `failed ${pipReportTimes(replaced.length + 1)}`) : pipReportState(r);
+      : again ? pipReportState(r).replace(/^failed/, "failed again") : pipReportState(r);
     card.setAttribute("role", "group");
     card.setAttribute("aria-label", `Pip report from ${r.name}: ${state}`);
     const face = el("span", "pip-report-face");
@@ -10725,7 +10725,7 @@ function permissionChoices(ev) {
     card.dataset.total = String(Number.isSafeInteger(r.total) ? r.total : 0);
     const short = pipReportShort(r);
     if (fixed) { short.text = `fixed · ${short.text}`; short.good = true; }
-    if (again) short.text = `failed ${pipReportTimes(replaced.length + 1)}`;
+    if (again) short.text = "failed again";
     const line1 = el("div", "pip-report-line1");
     line1.tabIndex = 0; line1.setAttribute("role", "button"); line1.setAttribute("aria-expanded", "false");
     line1.setAttribute("aria-label", `${r.name}: ${state}. Show details`);
@@ -10780,9 +10780,8 @@ function permissionChoices(ev) {
     return [...new Set([log, appendTarget])].some((root) => [...root.querySelectorAll(`.pip-report[data-pip="${r.pip_id}"]`)]
       .some((c) => c.dataset.run !== r.run_id && Date.parse(String(c._report?.finished_at || "")) > at));
   }
-  const pipReportTimes = (n) => (n === 2 ? "twice" : `${n} times`);
   // The opened card's line for what it replaced: "Earlier: failed · 8:00 AM", "Earlier: 4 findings · Yesterday 8:04 PM,
-  // and 2 older cards". Line one says the part that matters closed ("failed twice", "fixed · nothing found").
+  // and 2 older cards". Line one says the part that matters closed ("failed again", "fixed · nothing found").
   function pipReportEarlier(replaced) {
     const last = replaced.at(-1), r = last.report || {};
     const what = r.outcome === "failed" ? "failed" : r.outcome === "live_attention" ? "needed you"
