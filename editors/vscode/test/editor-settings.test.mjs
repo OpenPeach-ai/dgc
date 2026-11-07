@@ -1133,6 +1133,22 @@ const answer=(x,ask,fields)=>x.message({type:'modelsAt',token:ask.token,role:ask
 const openList=(x,id)=>x.d.querySelector(`[data-model-open=${id}]`).dispatchEvent(new x.w.MouseEvent('mousedown',{bubbles:true,cancelable:true}));
 const optionsOf=(x,id)=>[...x.d.querySelectorAll(`#${id}-list [role=option]`)].map(li=>li.textContent);
 
+test('an upgrade on a host with a key: its model shows as the default, and a saved provider beside it does not claim to be',()=>{
+  const x=setup();
+  x.click('[data-nav=models]');
+  const claude={id:'subscription_claude',kind:'subscription',engine:'claude',name:'Claude Code',model:''};
+  x.message({type:'providerProfiles',profiles:[claude],defaultId:'',direct:{name:'Groq',model:'some-model',base_url:'https://api.groq.com/openai/v1'}});
+  const row=x.d.querySelector('.provider-direct');
+  assert.ok(row,'the working model is listed');
+  assert.match(row.textContent,/Groq/);assert.match(row.textContent,/some-model/);assert.match(row.textContent,/Default/);
+  const box=x.d.querySelector('[data-provider-default=subscription_claude]');
+  assert.ok(box,'one saved provider gets a choice, not the word Default');
+  assert.equal(box.checked,false);
+  x.message({type:'providerProfiles',profiles:[claude],defaultId:'subscription_claude'});
+  assert.equal(x.d.querySelector('.provider-direct'),null,'once a saved provider is the default the old row goes');
+  assert.match(x.d.querySelector('.provider-default-only').textContent,/Default/);
+});
+
 test('provider setup keeps the form open and uses a saved route, not the old direct model field',()=>{
   const x=setup();
   x.message({type:'providers',providers:[{id:'ollama',label:'Ollama',url:'http://127.0.0.1:11434/v1'}]});

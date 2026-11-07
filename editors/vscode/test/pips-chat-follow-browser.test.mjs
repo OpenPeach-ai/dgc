@@ -181,6 +181,28 @@ test("a reader who scrolled away is left there: the pill says New when more arri
   } finally { await close(); }
 });
 
+test("the model menu opens over the Latest pill, so its last rows can be read and clicked", async (t) => {
+  if (skipOrFail(t)) return;
+  const { p, errors, close } = await open({ start: CHAT });
+  try {
+    await send(p, "And after that?");
+    await wheelUp(p);
+    assert.notEqual((await view(p)).pill, "", "the pill is showing");
+    const box = await p.locator("#pip-to-latest").boundingBox();
+    await p.click("#chat-model");
+    await p.waitForFunction(() => { const m = document.querySelector(".composer-menu, .composer-model-menu, [data-composer-panel]"); return m && m.getBoundingClientRect().height > 0; });
+    const onTop = await p.evaluate(({ x, y }) => {
+      const hit = document.elementFromPoint(x, y);
+      const menu = document.querySelector(".composer-menu, .composer-model-menu, [data-composer-panel]");
+      return { pill: !!hit?.closest("#pip-to-latest"), menuBottom: menu.getBoundingClientRect().bottom, menuTop: menu.getBoundingClientRect().top };
+    }, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
+    if (onTop.menuTop <= box.y && box.y <= onTop.menuBottom) assert.equal(onTop.pill, false, `the pill paints over the menu: ${JSON.stringify(onTop)}`);
+    const stacks = await p.evaluate(() => [getComputedStyle(document.querySelector("#pip-to-latest")).zIndex, getComputedStyle(document.querySelector(".pip-composer")).zIndex].map(Number));
+    assert.ok(stacks[0] < stacks[1], `the box and its menus stack above the pill: ${stacks}`);
+    assert.deepEqual(errors, []);
+  } finally { await close(); }
+});
+
 test("a Pip that opens with a long first message opens at its start, and your answer lands in view", async (t) => {
   if (skipOrFail(t)) return;
   const { p, errors, close } = await open({ start: [["assistant", "LONG"]] });

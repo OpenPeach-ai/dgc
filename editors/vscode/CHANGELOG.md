@@ -2,6 +2,8 @@
 
 ## 0.35.0 — 2026-11-06
 
+- A Pip's model menu opens over the Latest button. ChatDGC's model name no longer stays cut short after a window reload. "All quiet" on the home row takes its own line beside many faces.
+- Upgrading keeps your working model: adding your first saved provider no longer moves the default or hides the model you already ran on.
 - A Pip's effort slider shows its track in a light theme.
 - A Pip's chat follows as Work's does. Sending brings your message into view from wherever you were, the reply is followed unless you scrolled away, the same Latest pill appears (New once more has arrived), and your message pins at the top by Work's rule while you read its answer. A Pip that opens with a long first message opens at its start, where you can read it.
 - Every word on a Pip's approval card shows at any width: the two-line limit cut "Nothing has been sent." to "Nothing..." in the side bar.

@@ -793,7 +793,7 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .conversation-log{isolation:isolate}
 /* A plain block, so the messages' margins meet as they did before there were boxes. */
 .pip-turn{display:block;min-width:0}
-.pip-to-latest{position:relative;z-index:3;flex:none;align-self:center;display:inline-flex;align-items:center;gap:4px;height:28px;min-height:28px;margin:-36px 0 8px;padding:0 12px;cursor:pointer;border:1px solid var(--vscode-input-border,var(--vscode-widget-border,var(--line)));border-radius:9999px;background:var(--vscode-input-background,var(--vscode-dropdown-background,var(--vscode-editor-background)));color:var(--vscode-foreground);box-shadow:0 4px 16px rgba(0,0,0,.18);font:500 11px/1 var(--vscode-font-family,system-ui)}
+.pip-to-latest{position:relative;z-index:1;flex:none;align-self:center;display:inline-flex;align-items:center;gap:4px;height:28px;min-height:28px;margin:-36px 0 8px;padding:0 12px;cursor:pointer;border:1px solid var(--vscode-input-border,var(--vscode-widget-border,var(--line)));border-radius:9999px;background:var(--vscode-input-background,var(--vscode-dropdown-background,var(--vscode-editor-background)));color:var(--vscode-foreground);box-shadow:0 4px 16px rgba(0,0,0,.18);font:500 11px/1 var(--vscode-font-family,system-ui)}
 .pip-to-latest[hidden]{display:none}
 .pip-to-latest:hover{border-color:#7C5CFF;color:var(--vscode-editor-foreground,var(--vscode-foreground))}
 .pip-to-latest.unread{background:#7654F6;border-color:#7654F6;color:#fff}

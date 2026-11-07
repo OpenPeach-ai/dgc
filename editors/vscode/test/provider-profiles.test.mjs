@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {addProfile,defaultProfileId,listProfiles,markDefaultProfile,profileCredential,removeProfile,validRoute} from '../src/providerProfiles.js';
+import {addProfile,adoptWorkingRoute,defaultProfileId,firstTakesDefault,listProfiles,markDefaultProfile,profileCredential,removeProfile,validRoute} from '../src/providerProfiles.js';
 
 function store(){
  const state=new Map(),secrets=new Map();
@@ -68,4 +68,58 @@ test('saved provider metadata is projected to reviewed fields before reaching th
  s.state.get('dgc.modelProviders.v1')[0].api_key='unexpected-secret';
  assert.deepEqual(listProfiles(ctx),[expected]);
  assert.doesNotMatch(JSON.stringify(listProfiles(ctx)),/unexpected-secret/);
+});
+
+const PRESETS={ollama:{url:'http://localhost:11434/v1',needsKey:false,label:'Ollama (local)'},openai:{url:'https://api.openai.com/v1',needsKey:true,label:'OpenAI'}};
+const fresh=()=>{const s=store();return {globalState:s.globalState,secrets:s.secretsApi};};
+const ready=(saved={},caps={})=>({capabilities:{model_chosen:true,saved_route:{model:'deepseek-v4.1-flash:cloud',base_url:'http://localhost:11434/v1',api_mode:'auto',subscription_engine:'',...saved},...caps}});
+
+test('an upgrade keeps its working model: it becomes a saved provider and stays the default',async()=>{
+ const ctx=fresh();
+ const adopted=await adoptWorkingRoute(ctx,ready(),PRESETS);
+ assert.equal(adopted.name,'Ollama (local)');
+ assert.deepEqual(listProfiles(ctx).map(row=>[row.name,row.base_url,row.model]),[['Ollama (local)','http://localhost:11434/v1','deepseek-v4.1-flash:cloud']]);
+ assert.equal(defaultProfileId(ctx),adopted.id);
+ assert.equal(firstTakesDefault(ctx,ready()),false,'the next provider added does not take over');
+ assert.equal(await adoptWorkingRoute(ctx,ready(),PRESETS),null,'only once');
+ assert.equal(listProfiles(ctx).length,1);
+ assert.equal((await profileCredential(ctx,adopted.id)).api_key,'');
+});
+
+test('a route with a key is not adopted, because the editor cannot read it, and still stays the default',async()=>{
+ const ctx=fresh();
+ const keyed=ready({base_url:'https://api.openai.com/v1',model:'some-model'});
+ assert.equal(await adoptWorkingRoute(ctx,keyed,PRESETS),null);
+ assert.deepEqual(listProfiles(ctx),[]);
+ assert.equal(firstTakesDefault(ctx,keyed),false,'the first provider added does not move it');
+ const unknown=ready({base_url:'http://192.168.1.9:8000/v1'});
+ assert.equal(await adoptWorkingRoute(ctx,unknown,PRESETS),null,'an unknown host may need a key');
+ assert.equal(firstTakesDefault(ctx,unknown),false);
+});
+
+test('nothing chose a model: nothing is adopted, and the first provider becomes the default',async()=>{
+ for(const r of [ready({},{model_chosen:false}),{capabilities:{}},undefined]){
+  const ctx=fresh();
+  assert.equal(await adoptWorkingRoute(ctx,r,PRESETS),null);
+  assert.deepEqual(listProfiles(ctx),[]);
+  assert.equal(firstTakesDefault(ctx,r),true);
+ }
+});
+
+test('DGC\'s built-in model written down by an older save is no choice: the first provider still becomes the default',async()=>{
+ const ctx=fresh(),r=ready({model:'qwen3:8b',builtin:true});
+ assert.equal(await adoptWorkingRoute(ctx,r,PRESETS),null);
+ assert.deepEqual(listProfiles(ctx),[]);
+ assert.equal(firstTakesDefault(ctx,r),true);
+});
+
+test('a subscription default or a saved provider is left as it is',async()=>{
+ const sub=fresh();
+ assert.equal(await adoptWorkingRoute(sub,ready({subscription_engine:'claude'}),PRESETS),null);
+ const saved=fresh();
+ const row=await addProfile(saved,{name:'Mine',base_url:'https://host.test/v1',model:'one'});
+ await markDefaultProfile(saved,row.id);
+ assert.equal(await adoptWorkingRoute(saved,ready(),PRESETS),null);
+ assert.equal(listProfiles(saved).length,1);
+ assert.equal(firstTakesDefault(saved,ready({},{model_chosen:false})),false,'a default is already there');
 });
