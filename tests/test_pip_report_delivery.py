@@ -250,6 +250,29 @@ class WhatIsSaidTests(Scene):
         [card] = self.shown(self.session)
         self.assertEqual(card["reason"], "It stopped: the model endpoint returned 502")
 
+    def test_a_model_request_failure_says_what_it_means_and_a_refused_key_asks_for_sign_in(self):
+        # Reported 7 Nov: a 401 read "It stopped: HTTP 401 from Responses API: {..." and offered Fix, which asks DGC to
+        # change the project. A refused key or sign-in says so, and the card offers Check sign-in (``sign_in``).
+        self.finished(error={"code": "model_failed", "message": 'HTTP 401 from Responses API: {"error": {"message": "Incorrect API key"}}'})
+        [card] = self.shown(self.session)
+        self.assertEqual(card["reason"], "Its model provider turned down the API key.")
+        self.assertIn("HTTP 401", card["detail"], "the raw answer stays as the detail")
+        self.assertIs(card["sign_in"], True)
+        cases = [
+            ({"code": "model_failed", "message": "Claude Code isn't signed in on this computer. Run `claude login` once."}, True,
+             "It stopped: Claude Code isn't signed in on this computer. Run `claude login` once."),
+            ({"code": "model_failed", "message": "HTTP 429 Too Many Requests"}, False, "It stopped: the model provider is limiting requests."),
+            ({"code": "model_failed", "message": "HTTP 503 from the provider"}, False, "It stopped: the model provider is too busy."),
+            ({"code": "snapshot_limit", "message": "HTTP 401 inside a snapshot message"}, False, "The project is too big for it to copy for review."),
+            ({"code": "mystery", "message": "the model endpoint returned 502"}, False, "It stopped: the model endpoint returned 502"),
+            ({"code": "mystery"}, False, "It stopped with an error."),
+            ("invalid saved error", False, "It stopped with an error."),
+        ]
+        for error, sign_in, reason in cases:
+            with self.subTest(error=error):
+                self.assertEqual(delivery._reason(error)[0], reason)
+                self.assertIs(delivery._sign_in(error), sign_in)
+
     def test_a_clean_run_is_a_quiet_line_the_first_time_and_silent_while_nothing_changes(self):
         first = self.finished(findings=[])
         [card] = self.deliver(self.session)
