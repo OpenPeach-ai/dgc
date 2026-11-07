@@ -6,8 +6,8 @@
 // the 3 most urgent rows, then one line to the Pips view's Needs attention. A row that is news (failed
 // runs, new findings) has a dismiss: its news is marked seen for good (mark_pip_news_seen, Pips API 48)
 // and the Pip comes back only when it does something new. A row waiting for you needs an answer: none.
-// Unread messages (reported 2026-11-03, "Pips · 116 unread"): Dismiss all clears them from here only. Nothing is marked
-// read, and the Pips page still shows every one until its chat is opened. The home keeps, per Pip, what was unread then
+// Unread messages (reported 2026-11-03, "Pips · 116 unread"): Dismiss all marks them read, so the Pips page clears too. If
+// a read is refused they stay hidden here all the same: the home keeps, per Pip, what was unread then
 // (each feed's count and newest id; the host keeps it over a reload, src/pipHomeDismiss.ts) and counts only what came
 // after. A Pip's count pill reads "Read" on hover or focus, and clears its unread chat and finished-run
 // news together (mark_pip_read, then mark_pip_news_seen). Pending approvals still need an answer.
@@ -131,14 +131,24 @@ export function mountHomePips(options) {
    .map(item => { const snapshot = snapshots.get(item.pip_id); return {...item, count: snapshot ? since(snapshot, item).count : item.count}; })
    .filter(item => item.count > 0);
  }
- // Dismiss all: the news rows as before (kept by DGC), and every unread message here only: none is marked read.
+ // Dismiss all: the news rows as before (kept by DGC), and every unread message marked read, up to the newest reply and
+ // run post the home was told of, as each Pip's Read pill does. The number on the Pips page is the same unread
+ // (list_pip_unread), so it clears too. The snapshot hides them at once, and keeps them hidden here if a read is refused.
  function dismissAll(news) {
-  const set = {};
+  const set = {}, reading = [];
   for (const item of unread) {
    const snapshot = PIP_ID.test(item.pip_id) ? checkedSnapshot({w: item.workspace_id, ...feeds(item)}) : null;
    if (snapshot) { snapshots.set(item.pip_id, snapshot); set[item.pip_id] = snapshot; }
+   const message = typeof item.latest_message_id === 'string' ? item.latest_message_id : null;
+   const post = typeof item.latest_post_id === 'string' ? item.latest_post_id : null;
+   if (message || post) reading.push({pip: item.pip_id, request: {pip_id: item.pip_id, ...(message ? {message_id: message} : {}), ...(post ? {post_id: post} : {})}});
   }
   keep(set, []);
+  const token = epoch;
+  void Promise.all(reading.map(({pip, request: read}) => { reads.set(pip, Infinity); return request('mark_pip_read', read)
+   .then(() => { if (token !== epoch) { reads.delete(pip); return; } reads.set(pip, sequence); if (snapshots.delete(pip)) keep({}, [pip]); })
+   .catch(() => { reads.delete(pip); }); }))
+   .then(() => { if (reading.length && token === epoch) void load(); });
   if (news.length) { void dismiss(news, 0); return; }
   failure = ''; refocus = root.contains(doc.activeElement) ? 0 : null; paint();
  }
@@ -196,10 +206,10 @@ export function mountHomePips(options) {
   head.append(node('h2', '', 'Pips'));
   if (dismissible.length >= 2 || unreadCount) {
    const clear = node('button', 'home-pips-dismiss-all', 'Dismiss all'); clear.type = 'button';
-   const unreadNote = 'Every message stays unread in Pips until you open its chat.';
+   const unreadNote = 'Every message is marked read, here and in Pips.';
    clear.title = !unreadCount ? 'Dismiss every failed run and new finding here. What is waiting for you stays.'
     : dismissible.length ? `Dismiss every failed run and new finding here, and the unread count. What is waiting for you stays. ${unreadNote}`
-    : `Clear the unread count here. ${unreadNote}`;
+    : `Clear the unread count. ${unreadNote}`;
    if (unreadCount) clear.setAttribute('aria-label', dismissible.length ? 'Dismiss all failed runs, new findings and unread Pip messages from the home page'
     : 'Dismiss all unread Pip messages from the home page');
    clear.onclick = () => { if (unreadCount) dismissAll(dismissible); else void dismiss(dismissible, 0); };

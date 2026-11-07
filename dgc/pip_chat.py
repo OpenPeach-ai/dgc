@@ -1168,6 +1168,9 @@ def prepare(store, pip, req, *, context_size=32768, secrets=()):
         cards = []
     if cards:
         context["card_context"] = cards
+    waiting = _cards_waiting(store, pip["id"])
+    if waiting:
+        context["cards_waiting"] = waiting
     named = _named_pips(store, pip, req)
     if named:
         context["named_pips"] = named
@@ -1266,6 +1269,18 @@ def reply_plugins(db, run_id):
         return used_plugins(json.loads(row[0])) or [] if row and row[0] else []
     except (TypeError, ValueError, RecursionError):
         return []
+
+
+def _cards_waiting(store, pip_id) -> int:
+    """How many of this Pip's cards still wait for the user (pip_attention, the list the home shows). A card from an
+    earlier reply is still there, so a reply that mentions it isn't told it made none. A count that can't be read: 0."""
+    try:
+        from . import pip_attention
+        from .pip_schedules import timestamp
+        count = pip_attention.collect(store.registry, timestamp(store.registry.clock()), limit=1)["by_pip"].get(pip_id, 0)
+        return count if type(count) is int and 0 <= count <= 2000 else 0
+    except Exception:                       # noqa: BLE001 -- a count never costs the reply
+        return 0
 
 
 def card_context(store, pip_id) -> list:
@@ -1682,7 +1697,7 @@ def _left_waiting(store, run, result) -> bool:
 
 
 def validate_context(value):
-    if (not isinstance(value, dict) or set(value) - {"images", "files", "run_posts", "card_context", "named_pips"} not in (
+    if (not isinstance(value, dict) or set(value) - {"images", "files", "run_posts", "card_context", "cards_waiting", "named_pips"} not in (
             {"text", "history", "history_omitted_count", "last_report"},
             {"text", "history", "history_omitted_count", "last_report", "continuity"})):
         raise RegistryError("invalid_history", "Conversation context has an unsupported shape.")
@@ -1695,6 +1710,8 @@ def validate_context(value):
         validate_recent(value["run_posts"])
     if "card_context" in value:
         _valid_card_context(value["card_context"])
+    if "cards_waiting" in value and (type(value["cards_waiting"]) is not int or not 0 < value["cards_waiting"] <= 2000):
+        raise RegistryError("invalid_history", "The waiting card count is outside its bounded context contract.")
     if "named_pips" in value and (not isinstance(value["named_pips"], list) or len(value["named_pips"]) > 8
                                   or len(_json(value["named_pips"]).encode()) > 8192):
         raise RegistryError("invalid_history", "The named Pips exceed their bounded context contract.")

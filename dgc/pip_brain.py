@@ -94,17 +94,24 @@ def available(key: str) -> str:
 
 
 def offered() -> list[dict]:
-    """The subscriptions a Pip can use here, for its model picker: installed, signed in, locked down."""
-    return [{"engine": key, "name": name(key)} for key in ENGINES if not available(key)]
+    """The subscriptions a Pip can use here, for its model picker: installed, signed in, locked down. ``models``: that
+    CLI's model names, the same list Work and ChatDGC offer (subscriptions.status), from which a Pip may choose one."""
+    hints = {}
+    try:
+        from .subscriptions import status
+        hints = {row["key"]: [m for m in row.get("model_hints") or [] if isinstance(m, str)][:32] for row in status()}
+    except Exception:                                   # noqa: BLE001 -- the list never fails for its model names
+        pass
+    return [{"engine": key, "name": name(key), "models": hints.get(key, [])} for key in ENGINES if not available(key)]
 
 
 def route(config, choice) -> dict | None:
     """The CLI a Pip's run uses, or None for a native model. ``choice`` is a validated model choice.
 
     "Same as DGC" follows DGC's own subscription default, with its model and effort; a subscription chosen for the
-    Pip uses that CLI's own default model."""
+    Pip uses the model chosen with it, else that CLI's own default model."""
     if choice.get("mode") == "subscription":
-        key, model, effort = choice["engine"], "", ""
+        key, model, effort = choice["engine"], str(choice.get("model") or ""), ""
     elif choice.get("mode") == "default" and str(config.get("subscription_engine", "") or "").strip():
         key = str(config.get("subscription_engine", "")).strip().lower()
         model = str(config.get("subscription_model", "") or "").strip()

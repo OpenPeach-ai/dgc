@@ -254,16 +254,19 @@ export function modelChoice(value,models,subscriptions=[],router=null,providers=
     return{mode:'router',system:rest.slice(0,cut),model:rest.slice(cut+1)};
   }
   if(typeof value==='string'&&value.startsWith('subscription:')){
-    const engine=value.slice(13);
+    const rest=value.slice(13),cut=rest.indexOf(':'),engine=cut<0?rest:rest.slice(0,cut),model=cut<0?'':rest.slice(cut+1);
     if(!subscriptions.some(s=>s.engine===engine))throw new Error('Choose Default or a model from the list.');
-    return{mode:'subscription',engine};
+    if(cut<0)return{mode:'subscription',engine};
+    // A model of that CLI: one it lists, or any other by name, as in Work; the CLI says if it has no such model.
+    if(!/^[A-Za-z0-9_][A-Za-z0-9._:/@+\-]{0,255}$/.test(model)||model.includes('://'))throw new Error('Enter the model’s name or alias, such as opus.');
+    return{mode:'subscription',engine,model};
   }
   const id=typeof value==='string'&&value.startsWith('model:')?value.slice(6):'';
   if(!id||!models.some(m=>m.id===id))throw new Error('Choose Default or a model from the list.');
   return{mode:'model',model:id};
 }
-export const modelValue=choice=>providerModelChoice(choice)?`provider:${choice.provider}:${choice.model}`:record(choice)&&choice.mode==='model'?'model:'+choice.model:record(choice)&&choice.mode==='subscription'?'subscription:'+choice.engine:routerModelChoice(choice)?(choice.system?`router:${choice.system}/${choice.model}`:'router'):'default';
-export const modelLabel=value=>record(value)&&['model','provider'].includes(value.mode)&&typeof value.model==='string'?value.model:record(value)&&value.mode==='subscription'&&Object.hasOwn(SUBSCRIPTION_NAMES,value.engine)?SUBSCRIPTION_NAMES[value.engine]:routerModelChoice(value)?(value.system?`${value.model} on ${value.system} (DGC Router)`:'DGC Router (any Pip system)'):'Default';
+export const modelValue=choice=>providerModelChoice(choice)?`provider:${choice.provider}:${choice.model}`:record(choice)&&choice.mode==='model'?'model:'+choice.model:record(choice)&&choice.mode==='subscription'?'subscription:'+choice.engine+(choice.model?':'+choice.model:''):routerModelChoice(choice)?(choice.system?`router:${choice.system}/${choice.model}`:'router'):'default';
+export const modelLabel=value=>record(value)&&['model','provider'].includes(value.mode)&&typeof value.model==='string'?value.model:record(value)&&value.mode==='subscription'&&Object.hasOwn(SUBSCRIPTION_NAMES,value.engine)?SUBSCRIPTION_NAMES[value.engine]+(typeof value.model==='string'&&value.model?` · ${value.model}`:''):routerModelChoice(value)?(value.system?`${value.model} on ${value.system} (DGC Router)`:'DGC Router (any Pip system)'):'Default';
 // Said once, where a subscription is chosen for a Pip: its scheduled runs use the user's own plan.
 export const subscriptionUsage=name=>`Its replies and routines use your ${name} plan’s usage.`;
 export function presentation(pip, runs, connected, runnerState) {
@@ -1122,7 +1125,7 @@ export function pipSetup(value,workspace,id=null) {
  if(Object.hasOwn(value,'computer')&&(value.computer!==true||value.source_policy!=='personal'))fail();
  // A setup card's only trigger (Pips API 41): a review after each new commit, instead of a schedule.
  if(Object.hasOwn(value,'event_trigger')){const t=value.event_trigger;if(value.source_policy==='personal'||value.schedule!==null||value.pip_id!==null||!record(t)||Object.keys(t).sort().join()!=='events,minimum_minutes,missed_policy'||JSON.stringify(t.events)!=='["commit_changed"]'||!Number.isSafeInteger(t.minimum_minutes)||t.minimum_minutes<5||t.minimum_minutes>1440||t.missed_policy!=='coalesce_latest'||!['scout','lens','rook','lock','quill'].includes(value.pip_type))fail();}
- if(value.model_choice!==undefined){const m=value.model_choice;if(!record(m)||!(m.mode==='default'&&Object.keys(m).join()==='mode'||m.mode==='model'&&Object.keys(m).sort().join()==='mode,model'&&typeof m.model==='string'&&/^[A-Za-z0-9_][A-Za-z0-9._:/@+\-]{0,255}$/.test(m.model)&&!m.model.includes('://')||m.mode==='subscription'&&Object.keys(m).sort().join()==='engine,mode'&&Object.hasOwn(SUBSCRIPTION_NAMES,m.engine)||routerModelChoice(m)))fail();}
+ if(value.model_choice!==undefined){const m=value.model_choice;if(!record(m)||!(m.mode==='default'&&Object.keys(m).join()==='mode'||m.mode==='model'&&Object.keys(m).sort().join()==='mode,model'&&typeof m.model==='string'&&/^[A-Za-z0-9_][A-Za-z0-9._:/@+\-]{0,255}$/.test(m.model)&&!m.model.includes('://')||m.mode==='subscription'&&['engine,mode','engine,mode,model'].includes(Object.keys(m).sort().join())&&Object.hasOwn(SUBSCRIPTION_NAMES,m.engine)&&(m.model===undefined||typeof m.model==='string'&&/^[A-Za-z0-9_][A-Za-z0-9._:/@+\-]{0,255}$/.test(m.model)&&!m.model.includes('://'))||routerModelChoice(m)))fail();}
  const existing=value.pip_id!==null;
  if(existing?!/^pip_[a-f0-9]{32}$/.test(value.pip_id)||!Number.isSafeInteger(value.expected_version)||value.expected_version<1||!Number.isSafeInteger(value.expected_lifecycle_revision)||value.expected_lifecycle_revision<0:value.expected_version!==null||value.expected_lifecycle_revision!==null)fail();
  const schedule=value.schedule;

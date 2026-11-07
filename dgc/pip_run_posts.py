@@ -107,7 +107,7 @@ def line(post: dict) -> str:
     if outcome == "draft":
         return f"Pip '{name}' finished: a draft, {delivery._text(post.get('title'), 200)}"
     if outcome == "result":
-        return f"Pip '{name}' finished: " + delivery._text(post.get("preview"), 200)
+        return f"Pip '{name}' finished: " + delivery._text(delivery.plain_words(post.get("preview")), 200)
     return delivery.summary_line(post)
 
 

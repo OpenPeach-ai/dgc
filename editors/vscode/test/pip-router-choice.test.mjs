@@ -37,7 +37,7 @@ function setup({api=55,job=pip(),kind='personal',catalog={default_model:'local-d
  const click=selector=>{const e=w.document.querySelector(selector);assert.ok(e,selector);e.click();};
  return{w,d:w.document,requests,drain,click,select:async()=>{await drain();click(`[data-job="${PIP}"]`);await drain();}};
 }
-const openList=async x=>{x.click('#chat-model');await x.drain();x.click('#chat-model-summary');};
+const openList=async x=>{x.click('#chat-model');await x.drain();};
 const chooseProvider=(x,key)=>{x.click('#chat-model-providers');x.click(`[data-chat-provider="${key}"]`);};
 
 const ROUTER={enabled:true,systems:[{id:'nas',name:'NAS',online:true,models:[{name:'qwen3.5:9b',context_window:16384}]},

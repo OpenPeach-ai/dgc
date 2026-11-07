@@ -1,7 +1,7 @@
 // Unread Pip messages, read and dismissed (reported 2026-11-03), in real Chromium with the real panel page, the real
-// Pips bundle and its CSS. The home's "Pips · 116 unread" row has Dismiss all: it clears the count there only, nothing
-// is marked read, and the Pips page still shows every message unread until its chat is opened; something new brings the
-// row back with only the new count, and a reload keeps the dismiss (the host's store, src/pipHomeDismiss.ts). A Pip's
+// Pips bundle and its CSS. The home's "Pips · 116 unread" row has Dismiss all: it marks every message read, so the Pips
+// page's numbers (the same unread) clear too; something new brings the row back with only the new count, and if a read is
+// refused the row stays dismissed over a reload (the host's store, src/pipHomeDismiss.ts). A Pip's
 // purple count, on the home and the Pips page (Personal and Project), reads "Read" on hover or focus and marks its whole
 // chat read. A project Pip's card in a Work chat, acted on (Dismiss, its ✕, Fix), reads its run.
 import { after, before, test } from "node:test";
@@ -129,6 +129,7 @@ async function openHome({ state = STATE(), dismissed = "", width = 380, height =
       window.__posted.push(JSON.parse(JSON.stringify(m)));
       if (m?.type === "pipsReady") { setTimeout(connect, 1); return; }          // the host's bridge answers a page that mounts
       const make = m?.type === "pipsRequest" && answers[m.request.type];
+      if (m?.type === "pipsRequest" && m.request.type === "mark_pip_read" && S().refuseRead) { setTimeout(() => window.dispatchEvent(new MessageEvent("message", { data: { type: "pipsReply", id: m.id, ok: false, error: { code: "busy", message: "Not now." } } })), 2); return; }
       if (make) setTimeout(() => window.dispatchEvent(new MessageEvent("message", { data: { type: "pipsReply", id: m.id, ok: true, result: make(m.request) } })), 2);
     } });
     eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
@@ -193,7 +194,7 @@ test("opening an unread Pip from home keeps its composer at the bottom of the ed
   } finally { await x.close(); }
 });
 
-test("Dismiss all clears the home's unread count and rows, marks nothing read, and the Pips page still shows every message unread", async (t) => {
+test("Dismiss all clears the home's unread count and rows and marks them read, so the Pips page's numbers clear too", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openHome();
   try {
@@ -202,7 +203,7 @@ test("Dismiss all clears the home's unread count and rows, marks nothing read, a
     const button = x.page.locator(".home-pips-dismiss-all");
     assert.equal(await button.textContent(), "Dismiss all", "the same control as the news rows' Dismiss all");
     assert.equal(await button.getAttribute("aria-label"), "Dismiss all unread Pip messages from the home page");
-    assert.match(await button.getAttribute("title"), /Every message stays unread in Pips until you open its chat/);
+    assert.match(await button.getAttribute("title"), /Every message is marked read, here and in Pips/);
     await button.focus();
     await x.page.keyboard.press("Enter");
     await x.page.waitForFunction(() => !document.querySelector("#sessions-pips .home-pip-read"));
@@ -210,55 +211,72 @@ test("Dismiss all clears the home's unread count and rows, marks nothing read, a
     assert.equal(await x.page.locator(".home-pips-dismiss-all").count(), 0, "nothing left to dismiss");
     assert.equal(await x.active(), "Open Pips", "the keyboard lands on Open Pips beside it, never on the page's top");
     assert.equal(await x.page.evaluate(() => document.querySelector(".home-pips-quiet-text")?.textContent), "All quiet. Nothing is waiting for you.");
-    assert.deepEqual(await x.requests("mark_pip_read"), [], "nothing is marked read");
+    // The number on the Pips page counts what list_pip_unread counts, the same as the home's: each Pip is read up to what was named.
+    const read = (await x.requests("mark_pip_read")).map(({ request_id, ...r }) => r).sort((a, b) => a.pip_id.localeCompare(b.pip_id));
+    assert.deepEqual(read, [{ type: "mark_pip_read", pip_id: MAIL, message_id: M2 }, { type: "mark_pip_read", pip_id: AUDIT, post_id: RUN }].sort((a, b) => a.pip_id.localeCompare(b.pip_id)));
     assert.deepEqual(await x.requests("mark_pip_news_seen"), []);
-    const [saved] = await kept(x);
-    assert.deepEqual(Object.keys(saved.set).sort(), [MAIL, AUDIT].sort(), "what was dismissed goes to the host, for a reload");
-    assert.deepEqual(saved.set[MAIL], { w: P, m: 2, mid: M2, p: 0, pid: null });
-    assert.deepEqual(saved.set[AUDIT], { w: Q, m: 0, mid: null, p: 1, pid: RUN });
     await x.refresh(); await x.page.waitForTimeout(150);
     assert.equal(await x.head(), "Pips", "the next look at DGC doesn't bring the old count back");
     await openPipsPage(x, "personal");
-    assert.deepEqual(await pill(x, MAIL), { text: "2", label: "Mark Mail watch's 2 unread messages as read" }, "still unread on the Pips page");
-    assert.equal(await x.page.locator(".pips-tab[data-pips-tab=personal] .pip-tab-unread").textContent(), "2");
-    await x.page.click(".pips-tab[data-pips-tab=project]"); await x.page.waitForSelector(`[data-pip-read="${AUDIT}"]`);
-    assert.deepEqual(await pill(x, AUDIT), { text: "1", label: "Mark Billing audit's 1 unread message as read" });
-    assert.deepEqual(await x.requests("mark_pip_read"), []);
+    await x.page.waitForFunction(() => !document.getElementById("pips-host").shadowRoot.querySelector("[data-pip-read]"));
+    assert.equal(await pill(x, MAIL), null, "read on the Pips page too");
+    assert.equal(await x.page.locator(".pips-tab[data-pips-tab=personal] .pip-tab-unread").count(), 0);
+    assert.equal(await x.page.locator(".pips-tab[data-pips-tab=project] .pip-tab-unread").count(), 0, "and on the project tab");
+    await x.page.click(".pips-tab[data-pips-tab=project]"); await x.page.waitForSelector(`[data-job="${AUDIT}"]`);
+    assert.equal(await pill(x, AUDIT), null);
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
 });
 
-test("something new brings the row back with only the new count, and a reload keeps the dismiss", async (t) => {
+test("something new brings the row back with only the new count", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openHome();
+  try {
+    await x.page.waitForSelector("#sessions-pips .home-pip-read");
+    await x.page.click(".home-pips-dismiss-all");
+    await x.page.waitForFunction(() => !document.querySelector("#sessions-pips .home-pip-read"));
+    await x.page.evaluate(([unread]) => { window.__state.unread["ws_" + "1".repeat(32)] = [unread]; }, [mailUnread(1, "A third mail, from your bank.", M3)]);
+    await x.refresh();
+    await x.page.waitForSelector("#sessions-pips .home-pip-read");
+    assert.equal(await x.head(), "Pips · 1 unread", "only the one that came after the dismiss");
+    assert.deepEqual(await x.unreadRows(), [["Mail watch", "A third mail, from your bank.", "1"]]);
+    assert.deepEqual(x.errors, []);
+  } finally { await x.close(); }
+});
+
+test("a read DGC refuses leaves the row dismissed, also after a reload, and it comes back with only what came after", async (t) => {
+  if (skipOrFail(t)) return;
+  const state = STATE(); state.refuseRead = true;
+  const x = await openHome({ state });
   let attr = "";
   try {
     await x.page.waitForSelector("#sessions-pips .home-pip-read");
     await x.page.click(".home-pips-dismiss-all");
     await x.page.waitForFunction(() => !document.querySelector("#sessions-pips .home-pip-read"));
+    await x.page.waitForFunction(() => window.__posted.filter((m) => m.type === "pipsRequest" && m.request.type === "mark_pip_read").length === 2);
+    await x.page.waitForTimeout(60);
+    assert.equal(await x.head(), "Pips", "still dismissed here");
+    const [saved] = await kept(x);
+    assert.deepEqual(Object.keys(saved.set).sort(), [MAIL, AUDIT].sort(), "what was dismissed goes to the host, for a reload");
+    assert.deepEqual(saved.set[MAIL], { w: P, m: 2, mid: M2, p: 0, pid: null });
+    assert.deepEqual(saved.set[AUDIT], { w: Q, m: 0, mid: null, p: 1, pid: RUN });
+    assert.equal((await kept(x)).flatMap((m) => m.drop || []).length, 0, "kept, as nothing was read");
     await x.page.evaluate(([m3]) => { const u = window.__state.unread["ws_" + "1".repeat(32)][0];
       Object.assign(u, { count: 3, messages: 3, latest: "A third mail, from your bank.", latest_message_id: m3 }); }, [M3]);
     await x.refresh();
     await x.page.waitForSelector("#sessions-pips .home-pip-read");
     assert.equal(await x.head(), "Pips · 1 unread", "only the one that came after the dismiss");
-    assert.deepEqual(await x.unreadRows(), [["Mail watch", "A third mail, from your bank.", "1"]]);
-    // The host keeps what the page sent, and writes it into the next page it builds.
     const context = { globalState: { value: {}, get(key) { return this.value[key]; }, update(key, v) { this.value[key] = v; return Promise.resolve(); } } };
     for (const message of await kept(x)) assert.equal(store.rememberPipHomeDismissed(context, message), true);
     attr = store.pipHomeDismissedAttr(context);
     assert.match(attr, /^ data-pip-home-dismissed="\{&quot;pip_/);
   } finally { await x.close(); }
-  const reloaded = await openHome({ dismissed: attr });
+  const again = STATE(); again.refuseRead = true;
+  const reloaded = await openHome({ dismissed: attr, state: again });
   try {
     await reloaded.page.waitForSelector("#sessions-pips .home-pips-head");
     await reloaded.page.waitForTimeout(200);
     assert.equal(await reloaded.head(), "Pips", "after a reload the old count stays away");
-    assert.deepEqual(await reloaded.unreadRows(), []);
-    await reloaded.page.evaluate(([m3]) => { const u = window.__state.unread["ws_" + "1".repeat(32)][0];
-      Object.assign(u, { count: 3, messages: 3, latest: "A third mail, from your bank.", latest_message_id: m3 }); }, [M3]);
-    await reloaded.refresh();
-    await reloaded.page.waitForSelector("#sessions-pips .home-pip-read");
-    assert.equal(await reloaded.head(), "Pips · 1 unread");
     assert.deepEqual(reloaded.errors, []);
   } finally { await reloaded.close(); }
 });
@@ -278,13 +296,17 @@ test("the host keeps only well-formed entries for Pips, 500 at most, and drops w
   assert.equal(store.pipHomeDismissedAttr(context), "", "nothing kept: no attribute");
 });
 
-test("opening a Pip's chat reads it as before, and clears its dismiss: its next reply counts in full", async (t) => {
+test("opening a Pip's chat reads it as before, and clears a dismiss a refused read left: its next reply counts in full", async (t) => {
   if (skipOrFail(t)) return;
-  const x = await openHome();
+  const state = STATE(); state.refuseRead = true;
+  const x = await openHome({ state });
   try {
     await x.page.waitForSelector("#sessions-pips .home-pip-read");
     await x.page.click(".home-pips-dismiss-all");
     await x.page.waitForFunction(() => !document.querySelector("#sessions-pips .home-pip-read"));
+    await x.page.waitForFunction(() => window.__posted.filter((m) => m.type === "pipsRequest" && m.request.type === "mark_pip_read").length === 2);
+    await x.page.waitForTimeout(40);
+    await x.page.evaluate(() => { window.__state.refuseRead = false; window.__posted.length = 0; });
     await openPipsPage(x, "personal");
     await x.page.click(`[data-job="${MAIL}"]`);
     await x.page.waitForFunction(() => window.__posted.some((m) => m.type === "pipsRequest" && m.request.type === "mark_pip_read"));

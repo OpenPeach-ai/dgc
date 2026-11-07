@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from dgc import pip_chat, pip_computer, pips
+from dgc import pip_brain, pip_chat, pip_computer, pip_models, pips
 from dgc.workspace_registry import RegistryError
 from tests import test_pips_local as fixtures
 from tests.test_pip_eyes import JPEG, catalog_setup
@@ -63,12 +63,39 @@ class Choices(unittest.TestCase):
             validate_model_choice({"mode": "subscription", "engine": "kimi"})
         self.assertEqual(str(kimi.exception), "Kimi Code always starts your own MCP servers, so it can't be held to DGC's "
                                               "tools alone. Pips don't use it.")
-        for bad in ({"mode": "subscription"}, {"mode": "subscription", "engine": "codex", "model": "x"}):
+        for bad in ({"mode": "subscription"}, {"mode": "subscription", "engine": "codex", "effort": "high"}):
             with self.assertRaises(RegistryError):
                 validate_model_choice(bad)
         pip = self.store.create(self.registry.personal()["id"], "Tees", None, "editor-user", pip_type="lens",
                                 model_choice={"mode": "subscription", "engine": "codex"})
         self.assertEqual(pip["model_choice"], {"mode": "subscription", "engine": "codex"})
+
+    def test_a_personal_pip_can_choose_a_model_of_its_cli_and_the_run_uses_it(self):
+        # Work and ChatDGC offer opus, sonnet, haiku; a Pip offered one row, "Claude Code". The choice reaches the CLI's --model.
+        choice = pip_models.validate_model_choice({"mode": "subscription", "engine": "claude", "model": "opus"})
+        self.assertEqual(choice, {"mode": "subscription", "engine": "claude", "model": "opus"})
+        for bad in ("", "a b", "https://evil.example/x", "x" * 300, 5):
+            with self.subTest(bad=bad), self.assertRaises(RegistryError):
+                pip_models.validate_model_choice({"mode": "subscription", "engine": "claude", "model": bad})
+        with self.assertRaises(RegistryError):
+            pip_models.validate_model_choice({"mode": "subscription", "engine": "claude", "model": "opus", "effort": "max"})
+        settings = pips._model_settings(self.cfg, choice, personal=True)
+        self.assertEqual(settings["brain"], {"engine": "claude", "model": "opus", "effort": ""})
+        self.assertEqual(settings["model"], "claude:opus")
+        self.assertEqual(pip_brain.validate_route(settings["brain"]), settings["brain"])
+        argv = pip_brain.claude_argv("claude", mcp_config=Path("m.json"), system_file=Path("s.md"), model=settings["brain"]["model"])
+        self.assertEqual(argv[argv.index("--model") + 1], "opus")
+        # With none, as before: the CLI's own default.
+        self.assertEqual(pips._model_settings(self.cfg, {"mode": "subscription", "engine": "codex"}, personal=True)["brain"],
+                         {"engine": "codex", "model": "", "effort": ""})
+
+    def test_the_picker_offers_each_clis_models_as_work_does(self):
+        with patch("dgc.subscriptions.status", return_value=[{"key": "claude", "model_hints": ["opus", "sonnet", "haiku"]},
+                                                             {"key": "codex", "model_hints": ["gpt-5.5"]}]):
+            offered = {row["engine"]: row["models"] for row in pip_brain.offered()}
+        self.assertEqual(offered, {"claude": ["opus", "sonnet", "haiku"], "codex": ["gpt-5.5"]})
+        with patch("dgc.subscriptions.status", side_effect=OSError("no")):
+            self.assertEqual([row["models"] for row in pip_brain.offered()], [[], []], "the list never fails for its model names")
 
     def test_project_pip_uses_subscription_with_the_same_pinned_policy(self):
         pip = self.store.create(self.workspace["id"], "Auditor", "Inspect correctness.", "device_1",
@@ -97,7 +124,7 @@ class Choices(unittest.TestCase):
         self.assertEqual(str(signed_out.exception), "Codex isn't signed in on this computer. Run `codex login` once.")
         from dgc.pip_models import list_pip_models
         listed = list_pip_models(cfg)
-        self.assertEqual(listed["subscriptions"], [{"engine": "claude", "name": "Claude Code"}])
+        self.assertEqual(listed["subscriptions"], [{"engine": "claude", "name": "Claude Code", "models": ["opus", "sonnet", "haiku"]}])
         self.assertEqual(listed["default_engine"], {"engine": "codex", "name": "Codex", "available": False,
                                                     "reason": "Codex isn't signed in on this computer. Run `codex login` once."})
         self.assertEqual(listed["default_model"], "", "Same as DGC is the subscription, not the native model")
@@ -116,7 +143,8 @@ class Choices(unittest.TestCase):
     def test_the_picker_lists_the_signed_in_subscriptions(self):
         from dgc.pip_models import list_pip_models
         listed = list_pip_models(self.cfg)
-        self.assertEqual(listed["subscriptions"], [{"engine": "claude", "name": "Claude Code"}, {"engine": "codex", "name": "Codex"}])
+        self.assertEqual(listed["subscriptions"], [{"engine": "claude", "name": "Claude Code", "models": ["opus", "sonnet", "haiku"]},
+                                                   {"engine": "codex", "name": "Codex", "models": []}])
         self.assertNotIn("default_engine", listed)
         self.assertEqual(listed["default_model"], "fixture")
 

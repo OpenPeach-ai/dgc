@@ -68,6 +68,9 @@ ANSWER_MINUTES = 30                # how long the answer of an action the user a
 CALL_FIRST = ("Make the call first, then say what came back: never describe a card, or what a call will do, before "
               "you call it. A card exists only when call_plugin's answer says an Allow card is below your reply. ")
 RAN_AT_ONCE = "(Ran at once: there is no Allow card.)\n"
+# A plugin's own card (MCP Apps) sits above the words of the reply that showed it (pipsTranscript.js), unlike an Allow card,
+# which is below the reply. Told "under your reply", a Pip wrote that the card "is below my reply" with the card above it.
+APP_CARD_SHOWN = "[DGC shows "
 
 
 def _text(value, limit):
@@ -456,8 +459,9 @@ def remember(server, call, raw, config, declined=False, card=None) -> None:
         text = note + ("\n\n" + text if text else "")
     line = ""
     if card is not None and card[0] is not None:
-        line = (f"[DGC keeps {card[0].get('plugin') or server}'s card for {call.get('tool')} under your reply that "
-                "offered this action, in this chat; the user sees and can use it there. Its page is not part of this result.]")
+        line = (f"{APP_CARD_SHOWN}{card[0].get('plugin') or server}'s card for {call.get('tool')} above the words of your "
+                "reply that offered this action, in this chat; the user sees and can use it there. Its page is not part of "
+                "this result.]")
     elif card is not None and card[1]:
         from .mcp_apps import failed_line
         found = owner(server)
@@ -958,8 +962,8 @@ class Session:
                 record = app.card(arguments, "pip", info, {"pip_id": self.pip_id, "run_id": self.run_id})
                 if record is not None:
                     self.app_cards.append(record)
-                    text += (f"\n[DGC keeps {record.get('plugin') or server}'s card for {tool} under your reply in this "
-                             "chat; the user sees and can use it there. Its page is not part of this result.]")
+                    text += (f"\n{APP_CARD_SHOWN}{record.get('plugin') or server}'s card for {tool} above the words of your "
+                             "reply in this chat; the user sees and can use it there. Its page is not part of this result.]")
                 elif app.failed:
                     from .mcp_apps import failed_line
                     text += "\n" + failed_line(info["display_name"], tool, app.failed)

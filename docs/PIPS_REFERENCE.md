@@ -97,9 +97,9 @@ with `model_changed`. Rotating the key for the same endpoint is fine.
 
 A Personal Pip may instead run on the user's own Claude Code or Codex (Pips API 55,
 `dgc/pip_brain.py`): `model_choice` `{"mode": "subscription", "engine": "claude" |
-"codex"}`, or `{"mode": "default"}` when DGC's `subscription_engine` is one of them (then
-with DGC's `subscription_model` and `subscription_effort`; an explicit pick uses the CLI's
-own default model). The run pins `model_settings.brain` `{engine, model, effort}` and
+"codex"}`, with an optional `model` (one of that CLI's), or `{"mode": "default"}` when DGC's
+`subscription_engine` is one of them (then with DGC's `subscription_model` and
+`subscription_effort`; an explicit pick with no `model` uses the CLI's own default model). The run pins `model_settings.brain` `{engine, model, effort}` and
 `model` (the engine, then `:model` when DGC chose one), and no endpoint. At its start the
 CLI must still be installed and signed in (the CLI's own login marker, by existence only,
 under `CLAUDE_CONFIG_DIR` or `CODEX_HOME` when set), or the run fails with `model_changed`
@@ -122,8 +122,9 @@ refuse a subscription (`unsupported_model`: "Project Pips need a local or API mo
 source checks run only in DGC's own loop. Personal Pips can use your subscription."), at
 creation for an explicit pick and at queue time when "Same as DGC" follows one.
 
-`list_pip_models` (API 55) adds `subscriptions` `[{engine, name}]`, the CLIs a Personal Pip
-can run on here, and, when DGC's default is a subscription, `default_engine` `{engine,
+`list_pip_models` (API 55) adds `subscriptions` `[{engine, name, models}]`, the CLIs a Personal Pip
+can run on here (`models`: that CLI's model names, the list Work and ChatDGC offer, may be empty;
+`model_choice` takes one as an optional `model`, and any other valid name), and, when DGC's default is a subscription, `default_engine` `{engine,
 name, available, reason?}`; `default_model` is then `""`.
 
 ### Source

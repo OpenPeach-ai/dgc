@@ -13,6 +13,24 @@ EMAIL = {"kind": "email", "query": "from:alerts@bank.example", "every_minutes": 
 CALENDAR = {"kind": "calendar", "lead_minutes": 15, "every_minutes": 10}
 
 
+class ReminderWordsTests(unittest.TestCase):
+    def test_the_tool_itself_says_a_one_time_reminder_is_one_of_its_jobs(self):
+        # Every Pip gets this tool; its words spoke only of schedules and regular work, so a model asked "remind me at 5:39"
+        # sometimes told the user to set a phone alarm (17 of 24 chose it on the morning check's Pip, 23 of 24 with these words).
+        said = pip_routines.schema()["function"]["description"]
+        self.assertIn("once at a set time", said)
+        self.assertIn("reminding the user", said)
+        self.assertIn("however soon", said)
+        self.assertIn("asks for a reminder", said)
+        self.assertIn("instead of saying you cannot or sending them to another app", said)
+        self.assertIn("{type:'once', at:ISO time with offset}", said)
+        from dgc.pip_chat_setup import NOTICE
+        self.assertIn("For a reminder,", NOTICE)
+        candidate, told = pip_routines.tool_result({"title": "Call the supplier", "prompt": "Remind the user to call the supplier.",
+                                                    "when": {"kind": "schedule", "schedule": {"type": "once", "at": "2099-01-01T05:39:00+05:30"}}}, set())
+        self.assertIsNotNone(candidate, told)
+
+
 class RoutineTests(unittest.TestCase):
     setUp_base = fixtures.LocalPipsTests.setUp
 

@@ -37,9 +37,38 @@ function setup({api=55,job=pip(),kind='personal',catalog={default_model:'local-d
  const click=selector=>{const e=w.document.querySelector(selector);assert.ok(e,selector);e.click();};
  return{w,d:w.document,requests,drain,click,select:async()=>{await drain();click(`[data-job="${PIP}"]`);await drain();}};
 }
-const openList=async x=>{x.click('#chat-model');await x.drain();x.click('#chat-model-summary');};
+const openList=async x=>{x.click('#chat-model');await x.drain();};
 const chooseProvider=(x,key)=>{x.click('#chat-model-providers');x.click(`[data-chat-provider="${key}"]`);};
 
+test('the menu opens on the models: CLI default, each model of the CLI, and any other by name, as in Work; the choice is saved with its model',async()=>{
+ const x=setup({catalog:{default_model:'local-default',models:[{id:'model-a',name:'Local A'}],connection:'configured',subscriptions:[{engine:'claude',name:'Claude Code',models:['opus','sonnet','haiku']},{engine:'codex',name:'Codex',models:[]}]}});await x.select();
+ x.click('#chat-model');await x.drain();
+ assert.equal(x.d.querySelector('#chat-model-summary').getAttribute('aria-expanded'),'true','open at once: no extra click');
+ assert.ok(x.d.querySelector('[data-chat-model="model:model-a"]'),'the current provider\'s models show');
+ chooseProvider(x,'subscription:claude');
+ assert.match(x.d.querySelector('.composer-list-title').textContent,/^Claude Code model$/);
+ const rows=()=>[...x.d.querySelectorAll('.composer-model-options [data-chat-model]')].map(b=>b.textContent.trim());
+ assert.deepEqual(rows(),['CLI default','opus','sonnet','haiku']);
+ assert.ok(x.d.querySelector('[data-chat-model-custom]').textContent.includes('Enter another model…'));
+ x.click('[data-chat-model="subscription:claude:sonnet"]');await x.drain();
+ assert.deepEqual(JSON.parse(JSON.stringify(x.requests('propose_pip_update')[0].request.changes)),{model_choice:{mode:'subscription',engine:'claude',model:'sonnet'}});
+ assert.match(x.d.body.textContent,/Its replies and routines use your Claude Code plan’s usage\./,'the plan is the CLI\'s, with no model in its name');
+ assert.match(x.d.querySelector('#chat-model').textContent,/Claude Code · sonnet/,'the chip names both');
+ await openList(x);
+ assert.equal(x.d.querySelector('[data-chat-model="subscription:claude:sonnet"]').getAttribute('aria-selected'),'true','the list opens on it');
+ assert.equal(x.d.querySelector('[data-chat-model="subscription:claude"]').getAttribute('aria-selected'),'false');
+});
+test('Enter another model takes a name, and a name outside the list stays offered once chosen',async()=>{
+ const x=setup({catalog:{default_model:'local-default',models:[{id:'model-a',name:'Local A'}],connection:'configured',subscriptions:[{engine:'codex',name:'Codex',models:[]}]}});await x.select();await openList(x);
+ chooseProvider(x,'subscription:codex');
+ assert.deepEqual([...x.d.querySelectorAll('.composer-model-options [data-chat-model]')].map(b=>b.textContent.trim()),['CLI default'],'a CLI that lists no models still offers its default');
+ x.click('[data-chat-model-custom]');
+ const box=x.d.querySelector('#chat-model-custom');assert.ok(box,'a box for the name');
+ box.value='gpt-5.5-codex';box.dispatchEvent(new x.w.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));await x.drain();
+ assert.deepEqual(JSON.parse(JSON.stringify(x.requests('propose_pip_update')[0].request.changes)),{model_choice:{mode:'subscription',engine:'codex',model:'gpt-5.5-codex'}});
+ await openList(x);
+ assert.equal(x.d.querySelector('[data-chat-model="subscription:codex:gpt-5.5-codex"]').getAttribute('aria-selected'),'true');
+});
 test('a Personal Pip picks its own Codex, and is told once that its runs use that plan',async()=>{
  const x=setup();await x.select();await openList(x);
  chooseProvider(x,'subscription:codex');

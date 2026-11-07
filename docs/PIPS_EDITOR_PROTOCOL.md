@@ -273,7 +273,8 @@ extension sends neither request.
 "subscription", engine: "claude" | "codex"}` in `create_pip`, `propose_pip_update` and
 `revise_pip_setup`, and Default follows DGC's subscription default (when no Pips default model is
 set: then `default_model` is that model, and no `default_engine` is sent). `list_pip_models`
-adds `subscriptions` `[{engine, name}]` (installed and signed in here) and, when DGC's
+adds `subscriptions` `[{engine, name, models}]` (installed and signed in here; `models` is that
+CLI's model names, and a subscription `model_choice` takes an optional `model`) and, when DGC's
 default is a subscription, `default_engine` `{engine, name, available, reason?}`. The Pip's
 chat box model list shows them under **Your subscriptions** for a Personal Pip only, names
 the subscription as **Default (Codex)**, and says once, where one is chosen, "Its replies and

@@ -71,7 +71,7 @@ function setup({personal=false,messages=[],state:initial={}}={}){
 async function openChat(x){await x.drain();x.click(`[data-job="${PIP}"]`);await x.drain();}
 const text=el=>el?.textContent.replace(/\s+/g,' ').trim();
 const live=d=>d.querySelector('article.run-post-live');
-const items=d=>[...d.querySelector('.conversation-log').children].filter(e=>e.matches('[data-run-post],[data-message]'));
+const items=d=>[...d.querySelectorAll('.conversation-log [data-run-post],.conversation-log [data-message]')];
 // A run that started 42 seconds ago, as get_pip and list_pip_runs show it.
 function running(x,{trigger='manual',status='running',kind='audit'}={}){
   x.state.active={id:RUN,status,created_at:iso(NOW-42000),started_at:status==='queued'?null:iso(NOW-42000),run_kind:kind};

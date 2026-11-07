@@ -903,6 +903,9 @@ class Host:
         scrubber = getattr(self, "secrets", None)
         if scrubber is not None and isinstance(reply.get("text"), str):
             reply = {**reply, "text": scrubber.scrub(reply["text"])}
+        if self.waiting:
+            # This run has a card showing, whatever the step's words: the worker must not tell the model it made none.
+            reply = {**reply, "card": True}
         return reply
 
     def _act(self, op: str, args: dict) -> dict:
@@ -1590,6 +1593,8 @@ def worker_reply(pin: dict, op: str, args: dict, *, timeout: float = 120) -> dic
         out = {"text": str(reply.get("text", "error: no reply"))[:MAX_TEXT + 1000]}
         if reply.get("visual") is True:
             out["visual"] = True          # the page draws on a canvas its text can't show (pip_eyes)
+        if reply.get("card") is True:
+            out["card"] = True            # this run holds something for the user: a card shows below its reply
         image, width, height = reply.get("image"), reply.get("width"), reply.get("height")
         if (isinstance(image, str) and 0 < len(image) <= MAX_SHOT_CHARS and type(width) is int and type(height) is int
                 and 0 < width <= 4096 and 0 < height <= 4096):

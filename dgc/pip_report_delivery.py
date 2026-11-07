@@ -82,6 +82,29 @@ def _iso(value: datetime) -> str:
     return value.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+_MD_IMAGE = re.compile(r"!\[([^\]]*)\]\([^)\n]*\)")
+_MD_LINK = re.compile(r"\[([^\]\n]+)\]\([^)\n]*\)")
+_MD_FENCE = re.compile(r"^[ \t]*(?:`{3,}|~{3,})[^\n]*$", re.MULTILINE)
+_MD_LINE_START = re.compile(r"^[ \t]*(?:#{1,6}[ \t]+|>[ \t]?|[-*+][ \t]+)", re.MULTILINE)
+_MD_RULE = re.compile(r"^[ \t]*(?:-{3,}|\*{3,}|_{3,})[ \t]*$", re.MULTILINE)
+_MD_TABLE_RULE = re.compile(r"^[ \t]*\|?[ \t]*:?-{2,}:?[ \t]*(?:\|[ \t]*:?-{2,}:?[ \t]*)*\|?[ \t]*$", re.MULTILINE)
+_MD_MARK = re.compile(r"\*\*|~~|`|(?<![\w*])\*(?=\S)|(?<=\S)\*(?![\w*])|(?<![\w_])__?(?=\S)|(?<=\S)__?(?![\w_])")
+
+
+def plain_words(text) -> str:
+    """Words for one line of a list, with the marks a reply's Markdown is written in taken out: a row showed
+    "Pip 'Site traffic' finished: **vib...". A mark cut in half by a limit goes too. snake_case and 5 * 3 stay."""
+    words = _MD_IMAGE.sub(r"\1", str(text or ""))
+    words = _MD_LINK.sub(r"\1", words)
+    words = _MD_FENCE.sub("", words)
+    words = _MD_RULE.sub("", words)
+    words = _MD_TABLE_RULE.sub("", words)
+    words = _MD_LINE_START.sub("", words)
+    words = re.sub(r"^[ \t]*\|", "", words, flags=re.MULTILINE)
+    words = re.sub(r"[ \t]*\|[ \t]*$", "", words, flags=re.MULTILINE).replace(" | ", " · ")
+    return " ".join(_MD_MARK.sub("", words).split())
+
+
 def _text(value, limit: int) -> str:
     text = " ".join(str(value or "").split())
     return text if len(text) <= limit else text[:limit - 1] + "…"
