@@ -812,7 +812,9 @@
   function failedSendNode(message) {
     const box = el("div", "cd-send-failed");
     box.setAttribute("role", "alert");
-    box.append(el("span", "", `Didn't send: ${message.failedSend.reason || "ChatDGC couldn't start the reply."}`));
+    const words = window.DgcMarkdown?.modelFailure?.(message.failedSend.reason || "");
+    if (words) box.append(...modelWordsNodes(words));
+    else box.append(el("span", "", `Didn't send: ${message.failedSend.reason || "ChatDGC couldn't start the reply."}`));
     const retry = changes(el("button", "cd-retry", "Retry"));
     retry.type = "button";
     retry.addEventListener("click", () => {
@@ -946,7 +948,12 @@
   function endNote(message) {
     const finish = message.finish;
     const last = state.messages[state.messages.length - 1] === message;
-    if (finish === "error" && message.error) return el("p", "cd-end cd-end-error", message.error);
+    if (finish === "error" && message.error) {
+      const words = window.DgcMarkdown?.modelFailure?.(message.error);
+      const line = el("p", "cd-end cd-end-error", words ? "" : message.error);
+      if (words) line.replaceChildren(...modelWordsNodes(words));
+      return line;
+    }
     if ((finish === "length" || finish === "cancelled") && last && !state.busy) {
       const note = el("p", "cd-end");
       note.append(el("span", "", finish === "length" ? "The model reached its length limit here." : "Stopped."));
@@ -1364,7 +1371,10 @@
     } else {
       const failed = status === "failed";
       head(interrupted ? "Research was interrupted" : failed ? "Research didn't finish" : "Research stopped", researchStats(r));
-      if (failed && r.error) card.append(el("p", "cd-research-note cd-end-error", r.error));
+      if (failed && r.error) {
+        const words = window.DgcMarkdown?.modelFailure?.(r.error);
+        card.append(el("p", "cd-research-note cd-end-error", words ? `${words.headline} ${words.next}` : r.error));
+      }
       if (last && !state.busy) {
         const row = el("div", "cd-research-actions");
         if ((r.notes || []).length) {
@@ -3153,7 +3163,11 @@
     input.disabled = !!state.unavailable || locked;
     const fresh = !state.conversation || (!state.messages.length && !state.earlier);
     // A chat carried over isn't thrown away, and a project's chat is kept: neither can be temporary.
-    $("cd-temp-toggle").hidden = !fresh || !!state.conversation?.carried || !!state.conversation?.project;
+    const noTemporary = !fresh || !!state.conversation?.carried || !!state.conversation?.project;
+    if ($("cd-temp-toggle").hidden !== noTemporary) {
+      $("cd-temp-toggle").hidden = noTemporary;
+      queueMicrotask(fitModelName);                  // its word had a place in the row, and now it hasn't, or the other way
+    }
     placeholder();
     $("cd-temporary").checked = !!state.conversation?.temporary;
     $("cd-temp-badge").hidden = !state.conversation?.temporary;
@@ -3272,7 +3286,8 @@
     },
     // The name is the words: the model reads "ask Scout", and what a Pip is comes beside them (chatdgc_send's named Pips).
     pipPart: (p) => { const name = p.name.replace(/\s+/g, " ").trim(); return { kind: "pip", label: name, wire: name, identity: p.id, pipType: p.pip_type }; },
-    filePart: (file) => (file.path ? { kind: "file", label: file.label, wire: "", identity: file.path } : null),
+    // Its name stays in the sentence the model reads, as a Pip's does; the file itself rides along as an attachment.
+    filePart: (file) => (file.path ? { kind: "file", label: file.label, wire: file.label, identity: file.path } : null),
     allow: (part) => {
       if (part.kind !== "file" || state.pending.length < MAX_PENDING) return true;
       showNotice(`Attach up to ${MAX_PENDING} things to one message.`, "info");
@@ -3367,6 +3382,12 @@
       return;
     }
     if ((!text.trim() && !state.pending.length) || !state.conversation || state.unavailable || readOnly()) return;
+    // With no provider nothing is sent: it says so, and what you wrote stays in the box.
+    if (state.noProvider) {
+      modelNotice(window.DgcMarkdown?.modelWords?.("no_provider") || { headline: "No model provider yet.", next: "Add one to start.", fix: true });
+      notice.dataset.noProvider = "1";
+      return;
+    }
     if (state.research && state.pending.length) { showNotice("Deep research reads the web: send files without it, or turn it off.", "info"); return; }
     if (state.research && !text.trim()) return;
     const item = { text, research: !!state.research, model: modelPick.value || "", thinking: thinkingPick.value || "",
@@ -3728,13 +3749,38 @@
   };
   function updatePill() {
     const level = levelOf(thinkingPick.value), name = modelName(modelPick.value);
-    pill.hidden = modelPick.hidden;
-    $("cd-model-name").textContent = name || "Choose a model";
+    pill.hidden = modelPick.hidden && !state.noProvider;
+    $("cd-model-name").textContent = state.noProvider ? "No provider" : name || "Choose a model";
+    pill.querySelector(".cd-pill-arc")?.toggleAttribute("hidden", state.noProvider);
+    pill.querySelector(".cd-model-chevron")?.toggleAttribute("hidden", state.noProvider);
+    pill.toggleAttribute("data-no-provider", state.noProvider);
+    if (state.noProvider) {
+      pill.title = "No model provider yet. Click to add one in Settings → Models.";
+      pill.setAttribute("aria-label", "No model provider yet. Add one in Settings, Models.");
+      fitModelName();
+      return;
+    }
     $("cd-pill-arc-fill").setAttribute("d", level ? arc(angleOf(level), 6, 8, 9) : "");
     pill.dataset.level = LEVELS[level][0];
     pill.title = `${name || "No model"} · thinking: ${LEVELS[level][1]}. Click to change`;
     pill.setAttribute("aria-label", `Model ${name || "not chosen"}, thinking ${LEVELS[level][1]}. Change model and thinking`);
+    fitModelName();
   }
+  // The model's name stays readable: when the row is too full for it, the chips give up their words first, a step at a
+  // time and no further than it takes (Temporary's, Folder's, all of them, then the meter's figure), never the name down to
+  // "dee...". The steps are the box's classes.
+  const FIT_STEPS = ["cd-fit-1", "cd-fit-2", "cd-fit-3", "cd-fit-4"];
+  function fitModelName() {
+    const box = $("cd-box"), name = $("cd-model-name");
+    if (!box || !name) return;
+    box.classList.remove(...FIT_STEPS);
+    if (pill.hidden || getComputedStyle(name).display === "none") return;
+    for (const step of FIT_STEPS) {
+      if (name.clientWidth >= Math.min(name.scrollWidth, 110)) return;
+      box.classList.add(step);
+    }
+  }
+  if (typeof ResizeObserver === "function" && $("cd-box")) new ResizeObserver(() => fitModelName()).observe($("cd-box"));
   function modelName(value) {
     if (value.startsWith("subscription:")) {
       const body = value.slice("subscription:".length), cut = body.indexOf(":");
@@ -3873,6 +3919,7 @@
     if (focusPill) pill.focus();
   }
   pill.addEventListener("click", () => {
+    if (state.noProvider) { vscode.postMessage({ type: "openModels" }); return; }
     if (!modelMenu.hidden) { closeModelMenu(false); return; }
     state.menuProviders = false;
     state.menuProvider = providerOf(modelPick.value);
@@ -3891,12 +3938,47 @@
     const copy = e.target.closest?.(".copy[data-c]");
     if (copy) { vscode.postMessage({ type: "copy", text: decodeURIComponent(copy.dataset.c || "") }); return; }
     const link = e.target.closest?.(".md-link[data-target]");
-    if (link) { e.preventDefault(); vscode.postMessage({ type: "openLink", target: link.dataset.target || "" }); }
+    if (link) {
+      e.preventDefault();
+      const target = window.DgcMarkdown?.linkOf?.(link.dataset);
+      if (target?.kind === "file") vscode.postMessage({ type: "openLink", kind: "file", target: target.target, line: target.line, endLine: target.endLine });
+      else vscode.postMessage({ type: "openLink", target: link.dataset.target || "" });
+    }
   });
 
   // ---- notices
-  function showNotice(text, kind = "error") { notice.textContent = text; notice.dataset.kind = kind; notice.hidden = false; }
-  function hideNotice() { notice.hidden = true; notice.textContent = ""; }
+  function showNotice(text, kind = "error") {
+    // A failed model request reads plainly, with what fixes it; the provider's own answer is one click away.
+    const failure = kind === "error" ? window.DgcMarkdown?.modelFailure?.(text) : null;
+    if (failure) { modelNotice(failure); return; }
+    notice.textContent = text; notice.dataset.kind = kind; notice.hidden = false;
+    delete notice.dataset.noProvider;
+  }
+  function modelNotice(words) {
+    notice.replaceChildren(...modelWordsNodes(words));
+    notice.dataset.kind = "error"; notice.hidden = false;
+    delete notice.dataset.noProvider;
+  }
+  /** "The model x isn't available. Choose another one, or add a provider. Settings → Models · Details", as nodes. */
+  function modelWordsNodes(words) {
+    const nodes = [document.createTextNode(`${words.headline} ${words.next} `)];
+    if (words.fix) {
+      const fix = el("button", "cd-notice-link", "Settings → Models");
+      fix.type = "button";
+      fix.addEventListener("click", () => vscode.postMessage({ type: "openModels" }));
+      nodes.push(fix);
+    }
+    if (words.detail) {
+      const open = el("button", "cd-notice-link", "Details");
+      open.type = "button"; open.setAttribute("aria-expanded", "false");
+      const raw = el("span", "cd-notice-detail", words.detail);
+      raw.hidden = true;
+      open.addEventListener("click", () => { raw.hidden = !raw.hidden; open.setAttribute("aria-expanded", String(!raw.hidden)); });
+      nodes.push(document.createTextNode(words.fix ? " · " : " "), open, raw);
+    }
+    return nodes;
+  }
+  function hideNotice() { notice.hidden = true; notice.textContent = ""; delete notice.dataset.noProvider; }
   const announce = (text) => { $("cd-announce").textContent = text; };
 
   // ---- what the host says
@@ -4429,6 +4511,8 @@
       case "models":
         state.models = Array.isArray(msg.ids) ? msg.ids.filter((id) => typeof id === "string").slice(0, 500) : [];
         state.defaultModel = typeof msg.current === "string" ? msg.current : "";
+        state.noProvider = msg.noProvider === true;
+        if (!state.noProvider && notice.dataset.noProvider) hideNotice();
         if (Array.isArray(msg.profiles)) state.modelProfiles = msg.profiles.filter((row) => row && typeof row.id === "string" && typeof row.name === "string").slice(0, 12);
         if (typeof msg.providerId === "string" && msg.providerId) state.providerModels[msg.providerId] = state.models;
         fillModels();

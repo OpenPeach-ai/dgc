@@ -264,10 +264,13 @@ test("a model error with a cause keeps its hint visible and opens to the full me
   const row = doc.querySelector(".sys.err.model-error");
   assert.ok(row);
   assert.equal(row.getAttribute("role"), "alert");
-  assert.equal(row.querySelector(".model-error-headline").textContent, `Could not reach the model · connection refused by ${HOST}`);
+  // Plain words, with what fixes it; the host, the status and the terminal's hint only behind the toggle.
+  assert.equal(row.querySelector(".model-error-headline").textContent, "DGC can't reach the model provider.");
   const hint = row.querySelector(".model-error-hint");
   assert.equal(hint.hidden, false);
-  assert.match(hint.textContent, /^→ the endpoint .* start your server/);
+  assert.match(hint.textContent, /^Check that it's running, or change it\. Settings → Models$/);
+  assert.equal(row.querySelector(".model-error-toggle").textContent.includes(HOST), false);
+  assert.equal(hint.textContent.includes(HOST), false);
   const toggle = row.querySelector(".model-error-toggle");
   assert.ok(doc.getElementById(toggle.getAttribute("aria-controls")).hidden);
   toggle.click();
@@ -275,7 +278,8 @@ test("a model error with a cause keeps its hint visible and opens to the full me
   assert.equal(pre.textContent, message);
   assert.ok(pre.textContent.includes("\n  → "), "the break before the hint is kept");
   assert.equal(lines()[0].dataset.state, "gave_up", "the matching retry line gave up");
-  assert.match(announcer(), /^DGC error: Could not reach the model/);
+  assert.match(row.querySelector(".model-retry-facts").textContent, /the endpoint .* start your server/);
+  assert.match(announcer(), /^DGC error: DGC can't reach the model provider/);
   assert.deepEqual(errors, []);
 });
 
@@ -289,8 +293,7 @@ test("an error without a cause, or with a malformed one, is today's plain line",
   assert.deepEqual(plain, ["plain failure\n  → hint", "bad cause", "bad field"]);
   // A 404 names the model.
   event({ type: "error", message: "HTTP 404", cause: { kind: "model_not_found", summary: `HTTP 404 from ${HOST}`, model: "qwen3-coder:30b" } });
-  assert.equal(doc.querySelector(".model-error-headline").textContent,
-    `The server has no model named qwen3-coder:30b · HTTP 404 from ${HOST}`);
+  assert.equal(doc.querySelector(".model-error-headline").textContent, "The model qwen3-coder:30b isn't available.");
 });
 
 test("replayed stream recoveries render inside their turn, silently, and coerce bad types", () => {

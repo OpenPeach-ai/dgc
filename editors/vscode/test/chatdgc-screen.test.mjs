@@ -203,6 +203,107 @@ test("Escape closes ChatDGC's model menu after choosing a provider redraws it", 
   } finally { await s.page.close(); }
 });
 
+test("no provider: the pill says so and goes to Settings, and a send stays in the box", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen({ width: 900 });
+  try {
+    await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
+    await s.send({ type: "models", ids: [], current: "", noProvider: true, profiles: [] });
+    await s.page.waitForFunction(() => document.getElementById("cd-model-name")?.textContent === "No provider");
+    assert.equal(await s.page.locator("#cd-model-pill").isVisible(), true, "it's there, and it claims no model");
+    await s.page.locator("#cd-model-pill").click();
+    assert.equal((await s.posted("openModels")).length, 1, "to Settings, not a menu of models");
+    assert.equal(await s.page.locator("#cd-model-menu").isVisible(), false);
+    await s.page.locator("#cd-input").click();
+    await s.page.keyboard.type("hello");
+    await s.page.keyboard.press("Enter");
+    assert.equal((await s.posted("send")).length, 0, "nothing is sent");
+    assert.equal(await s.page.locator("#cd-input").inputValue().catch(() => s.page.locator("#cd-input").innerText()), "hello", "what you wrote stays");
+    assert.match(await s.page.locator("#cd-notice").innerText(), /^No model provider yet\. Add one to start\. Settings → Models/);
+    // The first provider saved: the notice goes, and the same words can go out.
+    const native = `provider:provider_${"a".repeat(32)}:deepseek-v4.1-flash:cloud`;
+    await s.send({ type: "models", ids: [], current: native, noProvider: false,
+                   profiles: [{ id: `provider_${"a".repeat(32)}`, name: "Ollama (local)", kind: "native", model: "deepseek-v4.1-flash:cloud" }] });
+    await s.page.waitForFunction(() => document.getElementById("cd-model-name")?.textContent === "deepseek-v4.1-flash:cloud");
+    assert.equal(await s.page.locator("#cd-notice").isVisible(), false);
+    await s.page.locator("#cd-input").click();
+    await s.page.keyboard.press("Enter");
+    assert.equal((await s.posted("send")).at(-1).text, "hello");
+  } finally { await s.page.close(); }
+});
+
+test("with no provider the pill says so at every width, where a real model would give way to its arc", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen({ width: 900 });
+  try {
+    await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
+    await s.send({ type: "models", ids: [], current: "", noProvider: true, profiles: [] });
+    await s.page.waitForFunction(() => document.getElementById("cd-model-name")?.textContent === "No provider");
+    // Every chip a real backend offers, and words in the box so Send shows.
+    await s.send({ type: "context", window: 32768, limit: 262144, used: 5200, preset: "32k", source: "reported", parts: { conversation: 5200 }, compactable: true });
+    await s.page.evaluate(() => { for (const id of ["cd-folder-wrap", "cd-output-wrap"]) { const n = document.getElementById(id); if (n) n.hidden = false; }
+      for (const n of document.querySelectorAll(".cd-output[hidden]")) n.hidden = false; });
+    await s.page.locator("#cd-input").fill("hello");
+    for (const width of [900, 480, 460, 440, 420, 400, 380, 340, 300, 260]) {
+      await s.page.setViewportSize({ width, height: 700 });
+      await s.page.waitForTimeout(120);
+      const facts = await s.page.evaluate(() => {
+        const boxNode = document.getElementById("cd-box"), box = boxNode.getBoundingClientRect();
+        const name = document.getElementById("cd-model-name"), named = name.getBoundingClientRect();
+        const send = document.getElementById("cd-send").getBoundingClientRect();
+        return { box: Math.round(box.width), words: name.innerText, shown: name.clientWidth, full: name.scrollWidth, over: boxNode.scrollWidth - boxNode.clientWidth,
+                 sendShown: send.width > 0, inBox: named.right <= box.right && send.right <= box.right + 0.5 && named.left >= box.left };
+      });
+      assert.equal(facts.words, "No provider", `at ${width}px`);
+      assert.ok(facts.shown > 0 && facts.shown >= facts.full, `at ${width}px the words aren't cut: ${JSON.stringify(facts)}`);
+      assert.equal(facts.sendShown, true, `at ${width}px: ${JSON.stringify(facts)}`);
+      assert.equal(facts.inBox, true, `at ${width}px it stays in the box: ${JSON.stringify(facts)}`);
+      assert.ok(facts.over <= 0, `at ${width}px Send doesn't leave the box: ${JSON.stringify(facts)}`);
+    }
+  } finally { await s.page.close(); }
+});
+
+test("the model's name stays readable in a full row: the chips give up their words first", async (t) => {
+  if (skipOrFail(t)) return;
+  const LONG = "qwen3.6-35b-a3b-instruct-long-name:cloud";
+  for (const width of [1300, 1000, 780, 700]) {
+    const s = await openScreen({ width, height: 700 });
+    try {
+      await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
+      await s.send({ type: "context", window: 32768, limit: 262144, used: 5200, preset: "32k", source: "reported", parts: { conversation: 5200 }, compactable: true });
+      // Every chip a real backend offers: Artifact and Folder come with its capabilities.
+      await s.page.evaluate(() => { for (const id of ["cd-folder-wrap", "cd-output-wrap"]) { const n = document.getElementById(id); if (n) n.hidden = false; }
+        for (const n of document.querySelectorAll(".cd-output[hidden]")) n.hidden = false; });
+      await s.send({ type: "models", ids: [LONG], current: LONG });
+      await s.frame(); await s.frame();
+      const f = await s.page.evaluate(() => { const n = document.getElementById("cd-model-name"), b = document.getElementById("cd-box"); return { shown: n.clientWidth, full: n.scrollWidth, box: b.getBoundingClientRect().width, over: b.scrollWidth - b.clientWidth }; });
+      if (f.box > 420) assert.ok(f.shown >= Math.min(f.full, 110), `${width}: "dee..." again: ${JSON.stringify(f)}`);
+      assert.ok(f.over <= 0, `${width}: the box keeps one row: ${JSON.stringify(f)}`);
+      assert.deepEqual(s.errors, []);
+    } finally { await s.page.close(); }
+  }
+});
+
+test("a failed model request in the notice: plain words, the way to fix it, the raw answer behind Details", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen({ width: 900 });
+  const RAW = "The model didn't answer: HTTP 404 from http://localhost:11434/v1/chat/completions: {\"error\":{\"message\":\"model 'qwen3:8b' not found\"}}";
+  try {
+    await s.send({ type: "error", message: RAW });
+    const notice = s.page.locator("#cd-notice");
+    await notice.waitFor({ state: "visible" });
+    const seen = await notice.innerText();
+    assert.match(seen, /^The model qwen3:8b isn't available\. Choose another one, or add a provider\./);
+    assert.doesNotMatch(seen, /http|\{|404/, "no URL, JSON or status in the words");
+    await notice.locator(".cd-notice-link", { hasText: "Settings" }).click();
+    assert.equal((await s.posted("openModels")).length, 1);
+    await notice.locator(".cd-notice-link", { hasText: "Details" }).click();
+    assert.match(await notice.innerText(), /HTTP 404 from http:/, "one click away");
+    await s.send({ type: "error", message: "That chat is open in another window." });
+    assert.equal(await notice.innerText(), "That chat is open in another window.", "anything else as it was");
+  } finally { await s.page.close(); }
+});
+
 test("ChatDGC Shift+Enter continues numbered prompts without sending", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
@@ -887,7 +988,7 @@ test("errors, a CLI without ChatDGC, and older messages", async (t) => {
     await s.page.locator("#cd-input").fill("hello");
     await s.page.keyboard.press("Enter");
     await s.send({ type: "error", message: "The model didn't answer: connection refused" });
-    assert.equal(await s.page.locator("#cd-notice").textContent(), "The model didn't answer: connection refused");
+    assert.match(await s.page.locator("#cd-notice").textContent(), /^DGC can't reach the model provider\./, "a person's words, with the raw answer behind Details");
     assert.equal(await shown(s.page, "#cd-send"), true, "a send that never started isn't running");
     await s.send({ type: "error", opening: true, message: "That chat doesn't exist." });
     assert.deepEqual((await s.posted("reopenNew")).length, 1, "a chat that is gone opens as a new one");

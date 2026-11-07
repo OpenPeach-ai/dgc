@@ -803,12 +803,14 @@ most applications use:
 | `error` | `message` |
 | `turn_end` | `turn_id`, `reason` (`completed`, `cancelled`, `error`) |
 | `trace_usage` | `tokens` — one finished model request's measured tokens, for a live Trace (CLI 0.51+) |
+| `reply_trace` | `turn_id`, `trace` — a finished turn's Trace, just before its `turn_end`: `{v, ms, steps, id, model}`, the record its history replays (CLI 0.51+) |
 | `queued` | `count`, `text` — how many prompts are waiting |
 | `queue_changed` | `order` (the request ids still waiting, in the order they will run), `removed`, `count` (CLI 0.51+) |
 
 Events are plain dictionaries, not typed classes; check `event.type` before reading `event.data`.
 A saved turn's Trace is in `history()`: beside an event, a marker `{"role": "time", "of": "trace", "at": when, "tokens"?: n}`
-says when it happened, and a `turn_start` carries `display_mentions` when an editor sent marks.
+says when it happened, a `{"role": "time", "of": "reply_trace", "at": when, "trace": ...}` before its `turn_end` is the whole
+record `reply_trace` sent, and a `turn_start` carries `display_mentions` when an editor sent marks.
 The startup handshake is not a run event, and event types newer than this SDK's copy of the protocol
 are skipped rather than ending the session.
 

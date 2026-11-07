@@ -25,7 +25,7 @@ for (const [name, grammar] of Object.entries({ javascript, typescript, python, j
 const parser = new MarkdownIt({ html: false, linkify: true, typographer: false, breaks: false });
 const escape = parser.utils.escapeHtml;
 
-export type LinkTarget = { kind: "external" | "file"; target: string; line?: number };
+export type LinkTarget = { kind: "external" | "file"; target: string; line?: number; endLine?: number };
 
 export function linkTarget(value: string): LinkTarget | undefined {
   if (!value || value.length > 8192 || /[\u0000-\u001f\u007f]/.test(value)) return;
@@ -41,15 +41,69 @@ export function linkTarget(value: string): LinkTarget | undefined {
   // A scheme that runs or reads something is refused whatever follows it, digits too ("javascript:1").
   if (/^(?:javascript|vbscript|data|file|command|vscode[\w.+-]*|about|blob):/i.test(path)) return;
   if (!path || path.startsWith("#") || path.includes("?")) return;
-  // A file and its line, as models write them (README.md:12, a.ts:3:7, a.py#L40). The line comes off first, so a
-  // bare name like "README.md:" isn't read as a scheme and left as raw text.
-  const location = /(?::(\d+)(?::\d+)?|#L(\d+)(?:C\d+)?)$/.exec(path);
-  const line = location ? Number(location[1] || location[2]) : undefined;
+  // A file and its line or lines, as models write them (README.md:12, a.ts:3:7, a.py#L40, billing.py:9-12, a.py#L9-L12).
+  // The lines come off first, so a bare name like "README.md:" or "billing.py:9-12" isn't read as a scheme and left as
+  // raw text.
+  const location = /(?::(\d+)(?:-(\d+)|:\d+)?|#L(\d+)(?:C\d+)?(?:-L?(\d+)(?:C\d+)?)?)$/.exec(path);
+  const line = location ? Number(location[1] || location[3]) : undefined;
+  const last = location ? Number(location[2] || location[4]) : undefined;
   if (location) path = path.slice(0, location.index);
   if (/[\u0000-\u001f\u007f]/.test(path) || /^(?:[a-z][a-z\d+.-]*:|\/\/|\\\\)/i.test(path)
       && !/^[A-Za-z]:[\\/]/.test(path)) return;
   return path ? { kind: "file", target: path,
-    ...(line && Number.isSafeInteger(line) ? { line } : {}) } : undefined;
+    ...(line && Number.isSafeInteger(line) ? { line } : {}),
+    ...(line && last && Number.isSafeInteger(last) && last > line ? { endLine: last } : {}) } : undefined;
+}
+
+/** What a rendered link (`.md-link`) points at, as linkTarget read it when it was drawn: its one way back. */
+export function linkOf(dataset: { target?: string; line?: string; endLine?: string }): LinkTarget | undefined {
+  const lines = dataset.line ? `:${dataset.line}${dataset.endLine ? `-${dataset.endLine}` : ""}` : "";
+  return linkTarget(String(dataset.target || "") + lines);
+}
+
+// What a failed model request means, for a person: the words Work, ChatDGC and a Pip's chat all use, with the provider's
+// own answer (a status, a URL, its JSON) one click away and never in the sentence. `fix`: Settings -> Models is where it
+// is put right. Reads either the kind the backend named (error.cause.kind), or the text a surface was handed.
+export type ModelWords = { kind: string; headline: string; next: string; fix: boolean };
+const REACH_KINDS = new Set(["connect", "dns", "tls", "proxy", "reset", "connect_timeout"]);
+export function modelWords(kind: string, model = ""): ModelWords {
+  const say = (headline: string, next: string, fix = false): ModelWords => ({ kind, headline, next, fix });
+  if (kind === "no_provider") return say("No model provider yet.", "Add one to start.", true);
+  if (kind === "model_not_found") {
+    return say(model ? `The model ${model} isn't available.` : "That model isn't available.",
+      "Choose another one, or add a provider.", true);
+  }
+  if (kind === "auth") return say("The model provider turned down the API key.", "Check the key.", true);
+  if (REACH_KINDS.has(kind)) return say("DGC can't reach the model provider.", "Check that it's running, or change it.", true);
+  if (kind === "rate_limited") return say("The model provider is limiting requests right now.", "Wait a moment and try again.");
+  if (kind === "overloaded") return say("The model provider is too busy right now.", "Try again in a moment.");
+  if (kind === "http") return say("The model provider had a problem on its side.", "Try again in a moment.");
+  if (kind === "stream_cut") return say("The connection to the model kept breaking.", "Try again in a moment.");
+  if (kind === "stall" || kind === "loading") return say("The model stopped responding.", "Try again, or choose another one.", true);
+  return say("The model didn't answer.", "Try again in a moment.");
+}
+/** The same words for text a surface was handed, or null when the text isn't a model request's failure (it stays as it
+ *  is). A model's own name is read from the provider's answer. */
+export function modelFailure(text: string): (ModelWords & { detail: string }) | null {
+  const detail = String(text || "");
+  // How a failure reaches a surface: ChatDGC's "The model didn't answer: ...", or a Pip's run ending on the request's own
+  // "HTTP 404 from ...". Anything else is someone else's sentence (a plugin's, a page's), whatever it mentions.
+  const body = detail.replace(/^the model didn't answer: /i, "");
+  const prefixed = body !== detail, said = body.toLowerCase();
+  const status = Number(/^HTTP (\d{3})\b/.exec(body)?.[1] || 0);
+  const unreachable = /cannot connect|connection refused|max retries|failed to establish|name or service not known|getaddrinfo|certificate verify failed|connection reset|could not connect|is not answering/.test(said);
+  let kind = "";
+  if (status === 401 || status === 403) kind = "auth";
+  else if (status === 429) kind = "rate_limited";
+  else if (status === 503 || status === 529) kind = "overloaded";
+  else if (status === 404 || (status && /no such model|unknown model|model\b.*\bnot found/.test(said))) kind = "model_not_found";
+  else if (status >= 500) kind = "http";
+  else if (status) kind = "other";
+  else if (unreachable && (prefixed || /^(?:cannot connect|could not connect|the endpoint|connection|httpconnectionpool|httpsconnectionpool)/.test(said))) kind = "connect";
+  else if (prefixed) kind = "other";
+  if (!kind) return null;
+  const named = /model ['"\u2018]([^'"\u2019]{1,200})['"\u2019]/i.exec(detail)?.[1] || "";
+  return { ...modelWords(kind, named), detail };
 }
 
 // Which source a link points at. These bundled codicons cost no network and are what a link
@@ -144,7 +198,7 @@ parser.validateLink = (value: string) => !!linkTarget(value);
 parser.renderer.rules.link_open = (tokens, index) => {
   const target = linkTarget(String(tokens[index].attrGet("href") || ""));
   if (!target) return "<span>";
-  const location = target.line ? ` data-line="${target.line}"` : "";
+  const location = target.line ? ` data-line="${target.line}"${target.endLine ? ` data-end-line="${target.endLine}"` : ""}` : "";
   if (target.kind !== "external") {
     return `<button type="button" class="md-link" data-link-kind="${target.kind}" data-target="${escape(target.target)}"${location}`
          + ` data-file-kind="${fileKind(target.target)}" title="${escape(target.target)}">`;
@@ -161,6 +215,24 @@ parser.renderer.rules.link_open = (tokens, index) => {
   return `<button type="button" class="md-link" data-link-kind="external" data-target="${escape(target.target)}"${location}${attr} title="${escape(target.target)}">${img}`;
 };
 parser.renderer.rules.link_close = () => "</button>";
+// A link to a file whose name has a space: models write [notes](my notes.md:9-12), which Markdown doesn't read as a link
+// (a destination can't hold one), so it stayed raw text. Only a destination that names a file: a word, a title, a URL or
+// a scheme goes on to the ordinary rule, which keeps it as the text it is.
+parser.inline.ruler.before("link", "spaced_file_link", (state, silent) => {
+  if (state.src.charCodeAt(state.pos) !== 0x5B) return false;
+  const found = /^\[([^\[\]\n]+)\]\(([^()\n]+)\)/.exec(state.src.slice(state.pos));
+  const destination = found?.[2].trim() || "";
+  if (!found || !/\s/.test(destination) || /^[<"']|["']$/.test(destination)
+      || !/[\\/]|\.[A-Za-z0-9]{1,8}(?:$|[:#])/.test(destination)) return false;
+  if (linkTarget(destination)?.kind !== "file") return false;
+  if (!silent) {
+    state.push("link_open", "a", 1).attrSet("href", destination);
+    state.push("text", "", 0).content = found[1];
+    state.push("link_close", "a", -1);
+  }
+  state.pos += found[0].length;
+  return true;
+});
 parser.renderer.rules.image = (tokens, index) => {
   // Model-provided image URLs must never trigger an invisible network request. A labelled link
   // lets the user decide whether to view it in the browser or open a local artifact.
@@ -257,6 +329,8 @@ function tableSource(tokens: any[], index: number): string {
 // GitHub-style task lists. "- [ ] step" rendered as the literal characters, which made every
 // checklist answer look broken.
 parser.renderer.rules.list_item_open = (tokens, index, options, _env, self) => {
+  // A numbered item keeps the number it was written with: 1, 2, 4 stays that, as the model wrote it.
+  if (/^\d{1,9}$/.test(tokens[index].info || "")) tokens[index].attrSet("value", String(Number(tokens[index].info)));
   const inline = tokens[index + 2];
   const text = inline && inline.type === "inline" ? String(inline.content || "") : "";
   const task = /^\[([ xX])\]\s+/.exec(text);
@@ -269,6 +343,26 @@ parser.renderer.rules.list_item_open = (tokens, index, options, _env, self) => {
   return `<li class="task-item"><input type="checkbox" disabled${checked ? " checked" : ""} `
     + `aria-label="${checked ? "done" : "not done"}">`;
 };
+
+// A run of numbered lines right under a line of text, not starting at 1: "**Second heading**\n5. e\n6. f". Markdown lets only
+// a 1 interrupt a paragraph, so it all ran together as one paragraph. Two numbered lines in a row, ascending, end the
+// paragraph; the list rule then reads them as a list, from where they start. One such line stays the sentence it may be
+// ("2026. was a good year"), and code is never looked at: this is asked only about a paragraph's next line.
+const NUMBERED_LINE = /^(\d{1,9})[.)][ \t]+\S/;
+parser.block.ruler.after("list", "numbered_run", (state, startLine, endLine, silent) => {
+  if (!silent || state.parentType !== "paragraph") return false;
+  const numberAt = (line: number) => {
+    if (line >= endLine || state.sCount[line] < state.blkIndent || state.sCount[line] - state.blkIndent >= 4) return 0;
+    const found = NUMBERED_LINE.exec(state.src.slice(state.bMarks[line] + state.tShift[line], state.eMarks[line]));
+    return found ? Number(found[1]) : 0;
+  };
+  const first = numberAt(startLine);
+  if (!first) return false;
+  // The first item may run on: a blank line, or lines indented under it, before the next number.
+  let next = startLine + 1;
+  while (next < endLine && (state.isEmpty(next) || state.sCount[next] - state.blkIndent >= 2)) next++;
+  return numberAt(next) > first;
+}, { alt: ["paragraph"] });
 
 // Maths, for a page that asks for it (ChatDGC's replies; main DGC's chat doesn't): the rules are markdownMath.ts's,
 // kept as TeX in a placeholder the page renders with KaTeX.

@@ -439,3 +439,73 @@ test("a folder outside the window's is asked about first, and a reload brings it
     void tabs;
   } finally { rmSync(outside, { recursive: true, force: true }); }
 });
+
+// ---- the status bar with no tab open follows the saved default; with nothing saved it says so --------------------------------
+const PROVIDER = { id: `provider_${"a".repeat(32)}`, name: "Ollama (local)", base_url: "http://localhost:11434/v1", model: "deepseek-v4.1-flash:cloud", api_mode: "auto" };
+function statusScene(values = {}) {
+  const saved = new Map(Object.entries(values));
+  const sidebar = new DgcViewProvider({ ...context(), globalState: { get: (key, fallback) => (saved.has(key) ? saved.get(key) : fallback), async update(key, value) { saved.set(key, value); } } });
+  return { sidebar, saved };
+}
+test("with no tab open, the status bar is the saved default, not the side bar's old chat", () => {
+  const { sidebar, saved } = statusScene({ "dgc.modelProviders.v1": [PROVIDER], "dgc.defaultModelProvider.v1": PROVIDER.id });
+  sidebar.lastReadyEvent = { model: "qwen3:8b", capabilities: { model_chosen: false } };
+  sidebar.state = { ...sidebar.state, model: "qwen3:8b", think: "off", mode: "default" };
+  sidebar.paintStatusBar();
+  assert.match(world.statusBar.text, /deepseek-v4\.1-flash:cloud · off · default/);
+  saved.set("dgc.modelProviders.v1", [PROVIDER, { id: "subscription_claude", kind: "subscription", engine: "claude", name: "Claude Code", model: "" }]);
+  saved.set("dgc.defaultModelProvider.v1", "subscription_claude");
+  sidebar.paintStatusBar();
+  assert.match(world.statusBar.text, /Claude Code · off · default/, "another default moves it with no reload");
+});
+test("with nothing saved and nothing chosen it says No provider; an older CLI, or a config's model, keeps its name", () => {
+  const { sidebar } = statusScene();
+  sidebar.state = { ...sidebar.state, model: "qwen3:8b", think: "off", mode: "default" };
+  sidebar.lastReadyEvent = { model: "qwen3:8b", capabilities: { model_chosen: false } };
+  sidebar.paintStatusBar();
+  assert.match(world.statusBar.text, /No provider · default/);
+  assert.doesNotMatch(world.statusBar.text, /qwen3/);
+  sidebar.lastReadyEvent = { model: "qwen3:8b", capabilities: { model_chosen: true } };
+  sidebar.paintStatusBar();
+  assert.match(world.statusBar.text, /qwen3:8b · off · default/, "a terminal's dgc setup chose it");
+  sidebar.lastReadyEvent = { model: "qwen3:8b", capabilities: {} };
+  sidebar.paintStatusBar();
+  assert.match(world.statusBar.text, /qwen3:8b · off · default/, "an older CLI doesn't say");
+  sidebar.lastReadyEvent = { model: "qwen3:8b", capabilities: { model_chosen: false } };
+  sidebar.state = { ...sidebar.state, model: "picked-with-slash-model" };
+  sidebar.paintStatusBar();
+  assert.match(world.statusBar.text, /picked-with-slash-model/, "this chat was moved to one");
+});
+
+// ---- a reload in the middle of a reply: nothing about the folder grant reaches the chat ----------------------------------------
+function chatInTab() {
+  const { sidebar, tabs, made } = windowWith();
+  tabs.open("a1");
+  const [provider] = made;
+  provider.posted = [];
+  provider.post = (message) => { provider.posted.push(message); };
+  return provider;
+}
+test("an older CLI's refusal of the folder grant mid-queue isn't shown, and the grant is asked again", () => {
+  const provider = chatInTab();
+  provider.workspaceRootsInFlight = { revision: 1, requestId: "roots-1" };
+  provider.workspaceRootsRevision = 1;
+  provider.onEvent({ type: "command_rejected", command: "set_workspace_roots", reason: "turn_in_progress",
+    request_id: "roots-1", message: "'set_workspace_roots' is unavailable while a turn is running; cancel or wait" });
+  assert.equal(provider.posted.some((m) => m.type === "event" && m.event?.type === "command_rejected"), false, "nothing in the chat");
+  assert.equal(provider.workspaceRootsInFlight, undefined);
+  assert.equal(provider.workspaceRootsDirty, true, "it goes again when this turn ends");
+  assert.equal(provider.turnActive, true);
+});
+test("while the grant waits, the changes row is left alone instead of saying partial scan", async () => {
+  const provider = chatInTab();
+  provider.backend = recordingBackend();
+  provider.workspaceRootsDirty = true;
+  provider.posted = [];
+  await provider.refreshWorkspaceChanges();
+  assert.deepEqual(provider.posted.filter((m) => /changes$/.test(String(m.type))), [], "not 'no files, and a reason'");
+  provider.workspaceRootsDirty = false;
+  provider.workspaceRootsInFlight = { revision: 1 };
+  await provider.refreshWorkspaceChanges();
+  assert.deepEqual(provider.posted.filter((m) => /changes$/.test(String(m.type))), []);
+});

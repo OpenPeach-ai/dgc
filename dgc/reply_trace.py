@@ -90,6 +90,7 @@ class ReplyTrace:
         self._rows: list[dict] = []
         self._open: dict[str, dict] = {}
         self._model = None                # (start, label) of the model request running now
+        self._tokens = None               # what the running request reported, before it closed
         self._broken = False              # it outgrew its bound: a part of a trace is not its trace
 
     def _at(self, at) -> float:
@@ -121,10 +122,21 @@ class ReplyTrace:
         row = self._add({"kind": "model", "label": words(label, MAX_LABEL), "start": start, "end": max(start, when)})
         if row is None:
             return
+        tokens = self._tokens if tokens is None else tokens
+        self._tokens = None
         if type(tokens) is int and 0 < tokens < MAX_TOKENS:
             row["tokens"] = tokens
         if error:
             row["error"] = True
+
+    def model_tokens(self, tokens) -> None:
+        """A model request's measured tokens, which can come just before or just after it closes."""
+        if self._model is not None:
+            self._tokens = tokens
+            return
+        row = next((row for row in reversed(self._rows) if row["kind"] == "model"), None)
+        if row is not None and type(tokens) is int and 0 < tokens < MAX_TOKENS:
+            row["tokens"] = tokens
 
     def tool_start(self, call_id, name, detail="", *, at=None, kind: str = "tool") -> str:
         """A tool (a search, a plugin, a card) begins, and with it the model's round has ended."""
@@ -140,6 +152,10 @@ class ReplyTrace:
                 row["detail"] = summary
             self._open[key] = row
         return key
+
+    def open_row(self, call_id) -> dict | None:
+        """The tool still running under this id, for a caller that says what its row reads as it ends."""
+        return self._open.get(str(call_id or ""))
 
     def tool_end(self, call_id, *, at=None, error: bool = False, denied: bool = False, detail=None, hits=None,
                  tokens=None) -> None:

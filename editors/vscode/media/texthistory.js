@@ -36,13 +36,18 @@
     if (doc.__dgcTextHistory || typeof doc.execCommand !== "function") return;
     doc.__dgcTextHistory = true;
     const previous = doc.execCommand;
+    let running = false;
     doc.execCommand = function (command, ...rest) {
       const name = String(command || "").toLowerCase();
       if (name === "undo" || name === "redo") {
         const el = focused(doc);
         for (const history of boxes) if (history.owns(el)) return name === "undo" ? history.undo() : history.redo();
       }
-      return previous.call(this, command, ...rest);
+      // Inside VS Code's own execCommand("paste") Chromium refuses another with a console warning: the same answer, unlogged.
+      if (running) return false;
+      running = true;
+      try { return previous.call(this, command, ...rest); }
+      finally { running = false; }
     };
   }
 

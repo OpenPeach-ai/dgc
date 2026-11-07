@@ -401,12 +401,18 @@
   // execCommand on this document, which would otherwise run the browser's stack.
   if (typeof document.execCommand === "function") {
     const nativeExecCommand = document.execCommand;
+    let runningCommand = false;
     document.execCommand = function (command, ...rest) {
       const name = String(command || "").toLowerCase();
       if ((name === "undo" || name === "redo") && input.contains(document.activeElement)) {
         return name === "undo" ? undoComposer() : redoComposer();
       }
-      return nativeExecCommand.call(this, command, ...rest);
+      // Inside VS Code's own execCommand("paste") Chromium refuses any other: it returns false and logs a warning, each
+      // time, for every paste. The answer is the same without the log, and the caller does the edit by hand.
+      if (runningCommand) return false;
+      runningCommand = true;
+      try { return nativeExecCommand.call(this, command, ...rest); }
+      finally { runningCommand = false; }
     };
   }
   input.addEventListener("beforeinput", (event) => {
@@ -1156,7 +1162,7 @@
       : "Native reasoning support depends on the model and provider.";
     return detail + " Ultra adds guidance for deeper work and bounded parallel agents; it cannot guarantee better answers.";
   }
-  let curMode = "default", curThink = "off", curModel = "", curSubscription = "", curUltra = false;
+  let curMode = "default", curThink = "off", curModel = "", curSubscription = "", curUltra = false, noProvider = false;
   let curBaseUrl = "";              // the chat's endpoint, as the host's state says it: whose prompt cache it is
   let curWorkers = 4;
   let lastConfig = null;
@@ -1523,6 +1529,7 @@
     if (win.kind !== "cold") return "";
     if (win.reason === "compacted") return "The conversation was compacted, so your next message will re-cache it.";
     const what = win.tokens === undefined ? "the conversation" : `about ${cacheTokens(win.tokens)} tokens`;
+    if (win.reason === "unloaded") return `Ollama unloaded the model (idle ${cacheIdle(win.idleMs)}), so your next message will re-cache ${what}.`;
     return `Idle ${cacheIdle(win.idleMs)}. The prompt cache has likely expired, so your next message will re-cache ${what}.`;
   }
   function renderCacheClock() {
@@ -1557,8 +1564,11 @@
   function renderCacheMenu() {
     const win = cacheWindow();
     $("cache-state").textContent = cacheHeadline(win);
-    $("cache-said").textContent = win.kind === "unknown" ? cacheUnknownTip() : cacheTooltip(win);
     const next = $("cache-next"), note = cacheReopenNote(win);
+    // Cold says it once: the sentence about what the next message costs already says why. The hover label keeps its short form.
+    const said = $("cache-said");
+    said.textContent = note ? "" : win.kind === "unknown" ? cacheUnknownTip() : cacheTooltip(win);
+    said.hidden = !!note;
     next.textContent = note;
     next.hidden = !note;
     // Each figure stays with its word, as in the context details: a narrow box wraps between them, never inside one.
@@ -1699,7 +1709,7 @@
         const selected = row.key === currentRouteKey;
         const note = row.installed === false ? " · install CLI first"
           : row.auth_state === "signed_out" ? " · sign in first" : "";
-        return `<button type="button" role="menuitemradio" aria-checked="${selected}" class="mrow${selected ? " sel" : ""}" data-provider-i="${i}"><span class="mi ${selected ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(String(row.label || row.key).split(" (")[0] + note)}</span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`;
+        return `<button type="button" role="menuitemradio" aria-checked="${selected}" class="mrow${selected ? " sel" : ""}" data-provider-i="${i}"><span class="mi ${selected ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(String(row.label || row.key) + note)}</span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`;
       }).join("")
       + `<button type="button" role="menuitem" class="mrow" data-manage-providers="1"><span class="mi codicon codicon-add" aria-hidden="true"></span><span>Add provider in Settings…</span></button></div>`;
     options.hidden = false;
@@ -1765,6 +1775,15 @@
                          xhigh: "Extra High", max: "Max", default: "Default" };
 
   function updateModelControl() {
+    // Nothing saved: it says so, and a click goes where that's put right, rather than naming a model that may not exist.
+    $("btn-model").classList.toggle("no-provider", noProvider);
+    if (noProvider) {
+      $("modelname").textContent = "No provider";
+      $("effortname").textContent = "";
+      $("btn-model").title = "No model provider yet. Click to add one in Settings → Models.";
+      $("btn-model").setAttribute("aria-label", "No model provider yet. Add one in Settings, Models.");
+      return;
+    }
     const model = curModel || "dgc";
     const raw = curUltra ? "Ultra" : (curSubscription && curThink === "off" ? "default" : curThink);
     const effort = EFFORT_LABEL[raw] || raw;
@@ -4450,7 +4469,9 @@
       // ...and finds it by its recovery point when the card was drawn from history (a reloaded window's turn ids are
       // the history's, not the backend's live ones).
       box._checkpoint = turn.files?.checkpoint || null;
-      const trace = complete ? window.DgcTrace?.finish(turn.trace, turn.traceEnd || (replaying ? null : Date.now())) : null;
+      const savedTrace = complete && turn.savedTrace
+        ? window.DgcTrace?.fromSaved(turn.savedTrace, turn.savedTrace.id, turn.savedTrace.model) : null;
+      const trace = savedTrace || (complete ? window.DgcTrace?.finish(turn.trace, turn.traceEnd || (replaying ? null : Date.now())) : null);
       const actions = responseActions(answer, turn.prompt, !complete, trace);
       // When the reply was written, first in its row: now, live; a saved turn's from its history.
       const writtenAt = window.DgcTime?.node(turn.replyAt ?? (replaying ? NaN : Date.now()));
@@ -7968,6 +7989,10 @@ function permissionChoices(ev) {
       case "trace_usage":
         if (turn?.trace) window.DgcTrace?.modelUsage(turn.trace, ev.tokens);
         break;
+      // The record the CLI saved with the turn: what a reload replays too, so Trace reads the same on both sides of one.
+      case "reply_trace":
+        if (turn) turn.savedTrace = ev.trace;
+        break;
       case "tool_call": {
         pipFixStepFrom(ev);
         const childId = agentIdFromCall(ev.call_id);
@@ -8686,7 +8711,9 @@ function permissionChoices(ev) {
         }
         // A custom slash command that was refused (busy, queue full) never started a turn.
         if (ev.command === "slash_command") settleCustomCommand();
-        sysLine(ev.message || "Command unavailable while a turn is running", true); break;
+        // An older CLI's refusal names the command: never a method's name in the chat.
+        sysLine(ev.reason === "turn_in_progress" || !ev.message
+          ? "That can't be done while a reply is running. Stop it or wait for it to finish." : ev.message, true); break;
       case "request_expired":
         document.querySelectorAll(".card[data-request-id]").forEach((card) => {
           if (card.dataset.requestId === String(ev.id)) resolveCard(card, "Closed without a decision");
@@ -8942,6 +8969,12 @@ function permissionChoices(ev) {
     // around it go, and its first line's indentation stays, or a pasted block arrives with its first
     // line out of step with the rest.
     const typed = composerText().trim();
+    // Sending with no provider: nothing goes to a model that may not exist. What you wrote stays in the box.
+    if (noProvider && (typed || attachments.length) && !isSlashCommandText(typed)) {
+      document.querySelector(".no-provider-line")?.remove();
+      modelFixRow(window.DgcMarkdown?.modelWords?.("no_provider"), "no-provider-line");
+      scroll(); persistDraft(); return;
+    }
     const kept = typed.startsWith("/") ? typed : messageText(composerText());
     const displayMentions = pastes.length ? [] : promptDisplayMentions(kept);
     const text = pastes.length
@@ -9260,7 +9293,8 @@ function permissionChoices(ev) {
         relative_path: it.relative_path, workspace: it.workspace,
       } });
       renderAtts();
-      insertComposerPill(popStart, popEnd, "file", it.label);
+      // Its name stays in the sentence the model reads, as a Pip's does; the file itself rides along as a reference.
+      insertComposerPill(popStart, popEnd, "file", it.label, displayMentionsVersion >= 3 ? it.label : "");
     } else if (popMode === "/") {
       if (it.modCommand || it.action === "mods") {
         // A mod's command runs at once with no model turn, mid-turn too; the rest of the draft stays as it was.
@@ -9933,6 +9967,7 @@ function permissionChoices(ev) {
   $("btn-cmd").onclick = openCommandMenu;
   $("btn-model").onclick = (e) => {
     e.stopPropagation();
+    if (noProvider) { vscode.postMessage({ type: "openSettings", section: "models" }); return; }
     const mm = $("modelmenu");
     if (!mm.hidden) { hideModelMenu(); return; }
     mm.innerHTML = `<div class="mhead"><span>Loading…</span></div>`;
@@ -11126,6 +11161,7 @@ function permissionChoices(ev) {
   function legacyItem(it) {
     if (!it || typeof it !== "object") return;
     if (it.role === "time") {
+      if (it.of === "reply_trace") { if (turn) turn.savedTrace = it.trace; return; }
       // When a saved turn's prompt was sent and its reply written (seconds since 1970, from the session file).
       const at = Number(it.at) * 1000;
       if (!turn || !Number.isFinite(at) || at <= 0) return;
@@ -11289,9 +11325,9 @@ function permissionChoices(ev) {
     const link = event.target.closest?.(".md-link");
     if (link) {
       event.preventDefault();
-      const target = DgcMarkdown.linkTarget(link.dataset.target + (link.dataset.line ? `:${link.dataset.line}` : ""));
+      const target = DgcMarkdown.linkOf(link.dataset);
       if (target?.kind === "external") vscode.postMessage({ type: "openExternal", url: target.target });
-      else if (target?.kind === "file") vscode.postMessage({ type: "openFile", path: target.target, line: target.line });
+      else if (target?.kind === "file") vscode.postMessage({ type: "openFile", path: target.target, line: target.line, endLine: target.endLine });
       return;
     }
     const copy = event.target.closest?.(".copy");
@@ -11430,14 +11466,15 @@ function permissionChoices(ev) {
       renderUnconfirmedDrafts();
     }
     else if (msg.type === "state") {
-      curModel = msg.state.model || ""; curThink = msg.state.think || "off";
+      curModel = msg.state.model || ""; curThink = msg.state.think || "off"; noProvider = msg.state.noProvider === true;
+      if (!noProvider) document.querySelector(".no-provider-line")?.remove();
       curSubscription = msg.state.subscriptionEngine || "";
       curBaseUrl = String(msg.state.baseUrl || "");
       renderCacheClock();                        // a model change can change whose cache it is
       curUltra = msg.state.ultra === true;
       updateModelControl();
       agentMapChanged();                         // the map's root names the model
-      if (pmodel) { pmodel.textContent = curModel || "dgc"; pmodel.title = "Model: " + (curModel || "dgc") + " — click to change"; pmodel.setAttribute("aria-label", "Change model. Current model: " + (curModel || "dgc")); }
+      if (pmodel) { pmodel.textContent = noProvider ? "No provider" : curModel || "dgc"; pmodel.title = noProvider ? "No model provider yet. Click to add one in Settings → Models." : "Model: " + (curModel || "dgc") + " — click to change"; pmodel.setAttribute("aria-label", "Change model. Current model: " + (curModel || "dgc")); }
       applyMode(msg.state.mode || "default");
       setGoalState(msg.state.goal || { text: "", status: "none", elapsed_seconds: 0 });
     }
@@ -15779,6 +15816,25 @@ function permissionChoices(ev) {
     stream_cut: "The model stream kept breaking", stall: "The model stopped responding", loading: "The model stopped responding",
     auth: "The model endpoint rejected the key", engine: "The engine failed", other: "Model request failed",
   };
+  // What fixes it: the next step in words, and the link to Settings → Models when that's where it is.
+  function fillModelFix(line, words) {
+    line.textContent = words?.next ? `${words.next} ` : "";
+    line.hidden = !words?.next;
+    if (!words?.fix) return;
+    const link = el("button", "model-error-fix", "Settings → Models");
+    link.type = "button";
+    link.addEventListener("click", () => vscode.postMessage({ type: "openSettings", section: "models" }));
+    line.appendChild(link);
+  }
+  function modelFixRow(words, extraClass = "") {
+    const row = el("div", `sys err model-error ${extraClass}`.trim());
+    row.setAttribute("role", "alert");
+    row.innerHTML = `<div class="model-error-plain"><span class="model-error-icon" aria-hidden="true">${icon("circle-alert")}</span>`
+      + '<span class="model-error-headline"></span></div><p class="model-error-hint" hidden></p>';
+    row.querySelector(".model-error-headline").textContent = words?.headline || "";
+    fillModelFix(row.querySelector(".model-error-hint"), words);
+    appendConversationContent(row);
+  }
   // The final model error, when the backend said why. False when there is no usable cause, so the
   // caller keeps today's plain line: a cause that fails coercion never becomes an empty row.
   function modelErrorRow(ev) {
@@ -15794,11 +15850,12 @@ function permissionChoices(ev) {
     const kind = RETRY_KINDS.has(cause.kind) ? cause.kind : "other";
     const summary = cause.summary.slice(0, 200), model = retryText(cause.model, 200);
     const message = String(ev.message || "");
-    const lead = kind === "model_not_found" ? (model ? `The server has no model named ${model}` : "The server has no such model")
-      : MODEL_ERROR_HEADLINES[kind];
-    const headline = `${lead} · ${summary}`;
+    // A person's words, and the way to what fixes it. The provider's own answer (its status, its address, its JSON) and
+    // the terminal's hint are one click away, under the row.
+    const words = window.DgcMarkdown.modelWords(kind, model);
+    const headline = words.headline;
     const split = message.indexOf("\n  → ");
-    const hint = split >= 0 ? message.slice(split + 5).trim() : retryText(cause.hint, 300);
+    const rawHint = split >= 0 ? message.slice(split + 5).trim() : retryText(cause.hint, 300);
     const n = ++retrySeq;
     const row = el("div", "sys err model-error");
     row.setAttribute("role", "alert");
@@ -15812,9 +15869,8 @@ function permissionChoices(ev) {
       + '<dl class="model-retry-facts"></dl><div class="model-error-label">Message</div><pre class="model-error-message"></pre>'
       + '<button type="button" class="link model-retry-copy"><span class="codicon codicon-copy" aria-hidden="true"></span> Copy details</button></div>';
     row.querySelector(".model-error-headline").textContent = headline;
-    const hintEl = row.querySelector(".model-error-hint");
-    hintEl.textContent = hint ? `→ ${hint}` : ""; hintEl.hidden = !hint;
-    const facts = [["Cause", summary], ["Model", [model, retryText(cause.api_mode, 40)].filter(Boolean).join(" · ")],
+    fillModelFix(row.querySelector(".model-error-hint"), words);
+    const facts = [["Cause", summary], ["Hint", rawHint], ["Model", [model, retryText(cause.api_mode, 40)].filter(Boolean).join(" · ")],
       ["Endpoint", retryText(cause.endpoint, 300)],
       ["HTTP status", retryInt(cause.http_status, 100, 599) ? String(cause.http_status) : ""],
       ["Attempts", retryInt(cause.attempts, 1, 1000000) ? String(cause.attempts) : ""],

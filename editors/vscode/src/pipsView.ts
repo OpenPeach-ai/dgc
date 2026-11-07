@@ -72,12 +72,15 @@ export class PipsEditor implements vscode.Disposable {
   private readonly mic: DictationOwner = { post: (message) => this.post({ ...message, from: 'pips' }) };
   useDictation(dictation: () => Dictation, readAloud?: () => ReadAloud): void { this.dictation = dictation; this.readAloud = readAloud; }
   /** A plugin's logo by its id (a data: URI), for a reply's "Used Aave" line; "" when it has none. */
-  private savedProviders?: { list: () => Promise<unknown[]>; save: (id: string) => Promise<void> };
+  private savedProviders?: { list: () => Promise<unknown[]>; save: (id: string) => Promise<void>; none: () => boolean };
   private pluginLogo?: (plugin: string) => string;
   usePluginLogos(lookup: (plugin: string) => string): void { this.pluginLogo = lookup; }
   /** Providers saved in Settings: the host lists them for a Pip's model menus, and saves one (with its key, which never
    *  comes here) before a Pip is set to it. */
-  useSavedProviders(list: () => Promise<unknown[]>, save: (id: string) => Promise<void>): void { this.savedProviders = { list, save }; }
+  useSavedProviders(list: () => Promise<unknown[]>, save: (id: string) => Promise<void>, none: () => boolean = () => false): void { this.savedProviders = { list, save, none }; }
+  /** A reply's links and Settings → Models, on the page in its own tab. The side bar's page shares the panel's own. */
+  private pageActions?: (message: any) => void;
+  usePageActions(act: (message: any) => void): void { this.pageActions = act; }
   /** The artifacts (Pips API 67): a Pip's page lists the person's dashboards to refresh, and opens its report's
    *  document or sheet and its dashboards in the artifact panel. */
   private artifacts?: () => PipArtifactsHub | undefined;
@@ -280,7 +283,7 @@ export class PipsEditor implements vscode.Disposable {
     }
     if (owner.command === 'list_pip_models' && event.type === 'pips_result' && event.ok === true && this.savedProviders) {
       void this.savedProviders.list().catch(() => [] as unknown[]).then(providers =>
-        this.post({ type: 'pipsReply', id: owner.client, ok: true, result: { ...event.result, providers } }, owner.surface));
+        this.post({ type: 'pipsReply', id: owner.client, ok: true, result: { ...event.result, providers, ...(this.savedProviders?.none() ? { no_provider: true } : {}) } }, owner.surface));
       return true;
     }
     if (event.type === 'pips_status') this.state.enabled = event.enabled === true;
@@ -515,6 +518,7 @@ export class PipsEditor implements vscode.Disposable {
                                               command => this.send(command, this.backendIdentity));
       return;
     }
+    if (!computer && ['openFile', 'openExternal', 'openSettings'].includes(String(message?.type))) { this.pageActions?.(message); return; }
     if (message?.type === 'pipsOpenComputer' && !computer) {
       const pip = message.pip;
       if (this.apiVersion >= 43 && pip && typeof pip.id === 'string' && /^pip_[A-Za-z0-9]{1,64}$/.test(pip.id) && typeof pip.name === 'string'

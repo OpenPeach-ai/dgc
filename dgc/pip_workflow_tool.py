@@ -10,11 +10,8 @@ import json
 from .workspace_registry import RegistryError, WorkspaceRegistry, canonical_directory
 
 
-def create(args, ctx):
-    if ctx.config.get('pips_enabled', False) is not True:
-        raise RegistryError('disabled', 'Pips are disabled in this session.')
-    from .pip_access import require_unrestricted
-    require_unrestricted(ctx.config)
+def check_request(args) -> None:
+    """The call's shape: what can be refused before the review card, with no store or session (dgc/tool_precheck.py)."""
     if (type(args) is not dict or set(args) !=
             {'scope', 'name', 'pip_ids', 'pip_names', 'tasks', 'mode', 'expected_pins'}):
         raise RegistryError('invalid_request', 'Choose scope, name, ordered Pips and their names, handoff tasks, mode and inspected pins.')
@@ -35,6 +32,15 @@ def create(args, ctx):
                    or pin['lifecycle_revision'] < 0 for pin in pins)
             or [pin['pip_id'] for pin in pins] != args['pip_ids']):
         raise RegistryError('invalid_request', 'Use the exact Pip IDs and versions from pips_context definition.')
+
+
+def create(args, ctx):
+    if ctx.config.get('pips_enabled', False) is not True:
+        raise RegistryError('disabled', 'Pips are disabled in this session.')
+    from .pip_access import require_unrestricted
+    require_unrestricted(ctx.config)
+    check_request(args)
+    pins = args['expected_pins']
     callback = getattr(ctx, 'pip_proposal_origin', None)
     if not callable(callback):
         raise RegistryError('session_required', 'A Pip workflow needs an owning Work session.')

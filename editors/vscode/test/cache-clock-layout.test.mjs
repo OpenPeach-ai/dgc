@@ -86,7 +86,7 @@ async function iconContrast(page) {
 const finishTransitions = (page) => page.evaluate(() => document.getAnimations().filter((a) => a instanceof CSSTransition).forEach((a) => a.finish()));
 
 for (const theme of ["dark-modern", "light-modern", "hc"]) {
-  test(`${theme}: the dimmed clock can be found, is dimmer than a warm one, comes up when pointed at; warm and cold are 0.48.0's`, async (t) => {
+  test(`${theme}: the dimmed clock can be found, is dimmer than a warm one, comes up when pointed at; warm is 0.48.0's and cold is a mild notice`, async (t) => {
     if (skipOrFail(t)) return;
     const s = await openPanel({ theme });
     try {
@@ -103,9 +103,9 @@ for (const theme of ["dark-modern", "light-modern", "hc"]) {
       await s.go("anthropic-cold");
       const cold = await look();
       assert.equal(cold.opacity, 1, "cold: full strength");
-      const error = await s.page.evaluate(() => { const probe = document.createElement("span"); probe.style.color = "var(--vscode-errorForeground, var(--err-text))"; document.body.append(probe);
+      const mild = await s.page.evaluate(() => { const probe = document.createElement("span"); probe.style.color = "var(--need-text)"; document.body.append(probe);
         const c = getComputedStyle(probe).color; probe.remove(); return c; });
-      assert.equal(cold.color, error, "in the error colour, as in 0.48.0");
+      assert.equal(cold.color, mild, "the product's mild notice: expired is normal, never the error colour");
       for (const name of ["ollama-cloud", "openai", "deepseek", "local-ollama"]) {
         await s.go(name);
         const unknown = await look();

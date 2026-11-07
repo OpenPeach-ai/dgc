@@ -91,7 +91,7 @@ test("the error row keeps its hint visible and its message pre-wrapped, without 
           scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth,
           preScroll: pre.scrollWidth, preClient: pre.clientWidth };
       });
-      assert.ok(facts.hintVisible && facts.hint.startsWith("→ the endpoint"), JSON.stringify(facts));
+      assert.ok(facts.hintVisible && facts.hint.startsWith("Check that it's running"), JSON.stringify(facts));
       assert.equal(facts.whiteSpace, "pre-wrap");
       assert.ok(facts.scrollWidth <= facts.clientWidth, JSON.stringify(facts));
       assert.ok(facts.preScroll <= facts.preClient + 1, JSON.stringify(facts));
@@ -111,7 +111,7 @@ for (const theme of ["dark", "light", "light-modern", "hc"]) {
       await panel.settle();
       const facts = await panel.page.evaluate(measureInPage);
       const rows = facts.texts.filter((entry) => entry.row === "error");
-      assert.ok(rows.some((entry) => entry.text.startsWith("Could not reach the model")), JSON.stringify(rows));
+      assert.ok(rows.some((entry) => entry.text.startsWith("DGC can't reach the model provider")), JSON.stringify(rows));
       assert.ok(rows.length > 8, "the open row has text to measure");
       for (const entry of rows) {
         assert.ok(entry.ratio >= 4.5, `${theme}: "${entry.text}" is ${entry.ratio.toFixed(2)}:1`);

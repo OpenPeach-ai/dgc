@@ -159,6 +159,55 @@ const PROVIDERS: Record<string, { url: string; needsKey: boolean; label: string;
   together: { url: "https://api.together.xyz/v1", needsKey: true, label: "Together AI" },
   mistral: { url: "https://api.mistral.ai/v1", needsKey: true, label: "Mistral" },
 };
+// Slash commands of the terminal's that this editor has no command for: where the same thing is here, or that it's the
+// terminal's own. /pips, /usage and /todo work here and aren't in this list; dgc/commands.py is the terminal's list.
+const IN_TERMINAL = (name: string, what: string) => ({ say: `/${name} is for the terminal: ${what}. Run it with dgc in a terminal.` });
+const TERMINAL_COMMANDS: Record<string, { say: string; section?: string }> = {
+  keys: { say: "Keyboard shortcuts are VS Code's here: open them with Preferences: Open Keyboard Shortcuts." },
+  shortcuts: { say: "Keyboard shortcuts are VS Code's here: open them with Preferences: Open Keyboard Shortcuts." },
+  cheatsheet: { say: "Keyboard shortcuts are VS Code's here: open them with Preferences: Open Keyboard Shortcuts." },
+  history: IN_TERMINAL("history", "it searches past prompts in the terminal's own box"),
+  hist: IN_TERMINAL("hist", "it searches past prompts in the terminal's own box"),
+  jump: { say: "Past turns are on the prompt rail at the right of this chat." },
+  expand: { say: "Click a tool's row to open it." },
+  expandall: { say: "Click a tool's row to open it." },
+  recall: { say: "Earlier messages are at the top of this chat: Show earlier messages." },
+  earlier: { say: "Earlier messages are at the top of this chat: Show earlier messages." },
+  files: { say: "Files are in VS Code's Explorer here. To give one to DGC, type @ and its name." },
+  diff: { say: "This chat's changes are in the row above the box: Review." },
+  eta: { say: "The running turn's time is on its status line here." },
+  notify: { say: "This editor tells you itself when a turn ends." },
+  troupes: { say: "A troupe shows in the row above the box while it runs." },
+  cards: { say: "A plugin's card shows in the reply here." },
+  copy: { say: "Each reply has a Copy icon under it." },
+  select: IN_TERMINAL("select", "it frees the mouse in a terminal"),
+  selection: IN_TERMINAL("selection", "it frees the mouse in a terminal"),
+  mouse: IN_TERMINAL("mouse", "it frees the mouse in a terminal"),
+  export: IN_TERMINAL("export", "it saves the conversation as Markdown"),
+  worktree: IN_TERMINAL("worktree", "it switches the terminal's folder"),
+  bg: { say: "This editor follows VS Code's color theme." },
+  background: { say: "This editor follows VS Code's color theme." },
+  theme: { say: "This editor follows VS Code's color theme." },
+  make: { say: "Pick what to make from Artifact in the box here." },
+  dashboard: { say: "Your sessions are in DGC's side bar here." },
+  dash: { say: "Your sessions are in DGC's side bar here." },
+  home: { say: "Your sessions are in DGC's side bar here." },
+  set: { say: "Opened Settings.", section: "general" },
+  "export-training": IN_TERMINAL("export-training", "it exports this project's sessions"),
+  "export-jsonl": IN_TERMINAL("export-jsonl", "it exports this project's sessions"),
+  "autonomous-gate": IN_TERMINAL("autonomous-gate", "it sets the check a turn must pass before it stops"),
+  "auto-gate": IN_TERMINAL("auto-gate", "it sets the check a turn must pass before it stops"),
+  router: { say: "The DGC Router is in Settings → Models here.", section: "models" },
+  images: { say: "Image generators are in Settings → Models here.", section: "models" },
+  videos: { say: "Video generators are in Settings → Models here.", section: "models" },
+  notes: IN_TERMINAL("notes", "it searches what this project learned"),
+  trust: IN_TERMINAL("trust", "it lists and revokes the folders you trusted"),
+  search: { say: "Web search is in Settings here.", section: "web" },
+  models: { say: "Click the model name in the box to see the models." },
+  quit: { say: "Close this tab to end the chat here." },
+  q: { say: "Close this tab to end the chat here." },
+  exit: { say: "Close this tab to end the chat here." },
+};
 // The web search providers this editor can offer in Settings; a CLI says which of them it takes.
 const SEARCH_PROVIDERS = ["duckduckgo", "brave", "tavily", "searxng", "ollama"];
 // The ones that take a key. A CLI with ready.capabilities.search_keys keeps one per provider (set_config
@@ -466,7 +515,7 @@ const PER_CHAT_FIELDS = [
   // A chat reattached to a backend that kept running with no window (dgc/serve_detach.py): its handshake
   // repaints from that backend, and its folder grant waits for the running turn to end. A chat shown in
   // another window is read-only here until "Open here".
-  "attachedLive", "rootsAfterLiveTurn", "sessionElsewhere",
+  "attachedLive", "rootsAfterLiveTurn", "startedWithoutProvider", "sessionElsewhere",
 ] as const;
 
 /** Where the window's chats are (#3 Sessions home): the side bar's Sessions list, and a session per
@@ -706,6 +755,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private attachedLive = false;
   /** The reattached turn was running, so the folder grant waits for it to end, then is sent. */
   private rootsAfterLiveTurn = false;
+  private startedWithoutProvider = false;
   /** This chat's session is shown in another window: "moved" (it was taken from here) or "elsewhere"
    *  (it was already there). Read-only here until the user presses "Open here". */
   private sessionElsewhere: { state: "moved" | "elsewhere"; pid?: number; reason?: string; holder?: HolderFacts;
@@ -860,6 +910,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // Settings -> General -> Pictures in replies: this page's pictures nobody folded or opened follow it at once.
     this.context.subscriptions.push(onPicturesSetting((message) => this.post(message)));
     if (tab) { return; }
+    // The saved default is the whole profile's: another window may have changed it while this one was in the background.
+    if (typeof vscode.window.onDidChangeWindowState === "function") {
+      this.context.subscriptions.push(vscode.window.onDidChangeWindowState(() => {
+        for (const owner of [this, ...this.tabProviders]) owner.paintStatusBar();
+      }));
+    }
     if (typeof vscode.workspace.registerTextDocumentContentProvider === "function") {
       this.context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider("dgc-review", {
         provideTextDocumentContent: (uri) => {
@@ -945,6 +1001,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       videosLibrary: (cmd) => this.videosLibrary(cmd),
       mcpAppsOffered: () => this.mcpAppsSupported,
       chatdgcModels: (providerId) => this.chatdgcModels(providerId),
+      chatdgcOpenFile: (path, line, endLine, folder) => this.openFile(path, line, endLine, folder ? [folder] : []),
       chatdgcProviderRoute: (model) => this.chatdgcProviderRoute(model),
       postHome: (message) => { if (this.home && this.webviewReady) this.post(message); },
       openSettings: (section) => this.openSettings(section),
@@ -1098,7 +1155,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async chatdgcModels(providerId = ""): Promise<{ ids: string[]; current: string;
-      profiles: any[]; defaultId: string; providerId: string }> {
+      profiles: any[]; defaultId: string; providerId: string; noProvider?: boolean }> {
     const saved = listProfiles(this.context);
     const defaultId = defaultProfileId(this.context);
     const profiles = saved.map(row => ({ id: row.id, name: row.name,
@@ -1111,6 +1168,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         : `provider:${defaultProfile.id}:${defaultProfile.model}`
       : String(this.state.model || "");
     const selected = saved.find(row => row.id === providerId) || defaultProfile;
+    // No provider: nothing to list and no model to claim. ChatDGC says so and points to Settings.
+    if (!selected && this.noProvider()) return { ids: [], current: "", profiles, defaultId, providerId: "", noProvider: true };
     if (!selected) {
       try { return { ids: await this.fetchModels(), current, profiles, defaultId, providerId: "" }; }
       catch { return { ids: [current].filter(Boolean), current, profiles, defaultId, providerId: "" }; }
@@ -1183,10 +1242,41 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   paintStatusBar(): void {
     if (!this.ownsStatusBar()) { return; }
+    if (this.noProvider()) {
+      this.sb.text = `$(circuit-board) No provider · ${this.state.mode}`;
+      this.sb.tooltip = "DGC has no model provider yet. Click to add one in Settings → Models.";
+      this.sb.show();
+      return;
+    }
     const profile = this.state.ultra ? "Ultra" : this.state.think;
-    this.sb.text = `$(circuit-board) ${this.state.model || "dgc"} · ${profile} · ${this.state.mode}`;
-    this.sb.tooltip = `DGC — ${this.state.model || "no model"} · ${profile} reasoning · ${this.state.mode} mode · click to change model`;
+    // With no tab on screen it describes what a new chat would use: the side bar's own chat started on whatever was the
+    // default when the window opened, and the saved default moves on without it.
+    const saved = this.tab ? undefined : listProfiles(this.context).find((row) => row.id === defaultProfileId(this.context));
+    const model = saved ? saved.model || saved.name : this.state.model;
+    this.sb.text = `$(circuit-board) ${model || "dgc"} · ${profile} · ${this.state.mode}`;
+    this.sb.tooltip = `DGC — ${model || "no model"} · ${profile} reasoning · ${this.state.mode} mode · click to change model`;
     this.sb.show();
+  }
+
+  /** Nothing chose a model: no provider saved here, none in DGC's own config (a terminal's `dgc setup`, DGC_MODEL), none
+   *  in this editor's settings, and this chat wasn't moved to one. DGC's built-in default is only a name then: it may not
+   *  exist. An older CLI doesn't say, and keeps what it showed. */
+  private noProvider(): boolean {
+    if ((this.lastReadyEvent?.capabilities as any)?.model_chosen !== false) return false;
+    if (listProfiles(this.context).length || this.routeState.subscriptionEngine) return false;
+    if (String(this.state.model || "") !== String(this.lastReadyEvent?.model || "")
+        || String(this.state.baseUrl || "") !== String(this.lastReadyEvent?.base_url || "")) return false;
+    const settings = vscode.workspace.getConfiguration("dgc");
+    return !settings.get<string>("model", "") && !userScopedString("baseUrl").value;
+  }
+
+  /** The first provider was saved. A chat that had none moves to it, so what it says and what it sends agree. */
+  private async firstProviderSaved(id: string): Promise<void> {
+    for (const owner of [this, ...this.tabProviders]) {
+      if (owner.home || !owner.backend?.ready || owner.turnActive || !owner.startedWithoutProvider) continue;
+      owner.startedWithoutProvider = false;
+      await owner.selectSubscription(id);
+    }
   }
 
   /** A tab's name follows its session's name, else its first prompt. */
@@ -3123,6 +3213,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async refreshWorkspaceChanges(): Promise<void> {
+    // Nothing can be asked yet: the backend is reconnecting, or the folder grant is waiting for a running turn. Their
+    // acknowledgement refreshes this. Answered with "no files, and a reason" meanwhile, the row flashed "Changes not
+    // recorded · partial scan" through every reload of a running chat.
+    if (this.workspaceRootsInFlight || this.workspaceRootsDirty || !this.backend?.ready) return;
     if (this.changesRefreshInFlight) { this.changesRefreshDirty = true; return; }
     this.changesRefreshInFlight = true;
     const revision = ++this.changesRefreshRevision;
@@ -3973,6 +4067,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           this.sessionRestoreSaved = saved?.saved !== false;
         }
         this.lastReadyEvent = ev;
+        this.startedWithoutProvider = (ev.capabilities as any)?.model_chosen === false && !listProfiles(this.context).length;
         // A finished background agent's report, drawn as its own line in the chat (agent_report). Asked with the
         // handshake, ahead of the session this chat restores, so the history it replays has those lines too. A
         // backend that doesn't offer it is never asked, and its wake turns keep the plain "Woke on agent" note.
@@ -4348,9 +4443,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           this.workspaceRootsInFlight = undefined;
           this.workspaceRootsDirty = true;
           // A custom slash command can start a worker just before its turn_start event
-          // reaches the extension. Preserve the update and retry when that turn ends.
+          // reaches the extension, and a queue's next turn starts as the last one ends. Preserve
+          // the update and retry when that turn ends: nothing went wrong, so the chat isn't told.
           if (ev.reason === "turn_in_progress") {
             this.turnActive = true;
+            return;
           }
         }
         break;
@@ -4928,7 +5025,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return this.testPostedMessages.map((item) => ({ ...item }));
   }
   private postState(): void {
-    this.post({ type: "state", state: this.state });
+    this.post({ type: "state", state: { ...this.state, noProvider: this.noProvider() } });
     this.paintStatusBar();
   }
 
@@ -5600,7 +5697,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.sendFiles();
         break;
       case "openFile":
-        await this.openFile(msg.path, msg.line);
+        await this.openFile(msg.path, msg.line, msg.endLine);
         break;
       case "fileThumb": {
         // The picture for a shown image's tile. Checked as Open checks it; "" tells the page to keep the plain chip.
@@ -6071,9 +6168,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async openFile(path: string, line?: number): Promise<void> {
+  private async openFile(path: string, line?: number, endLine?: number, folders: string[] = []): Promise<void> {
     // A path DGC (or its model) wrote in its own Linux names, under hidden WSL: the file as Windows names it.
-    const target = await workspaceFile(typeof path === "string" ? editorPath(path) : path, this.workspaceRoots());
+    const target = await workspaceFile(typeof path === "string" ? editorPath(path) : path, [...folders, ...this.workspaceRoots()]);
     if (!target) {
       void vscode.window.showInformationMessage("That file is unavailable in the current workspace.");
       return;
@@ -6084,8 +6181,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const ed = await vscode.window.showTextDocument(doc, { preview: true });
       if (typeof line === "number" && Number.isSafeInteger(line) && line > 0) {
         const pos = new vscode.Position(Math.min(doc.lineCount - 1, line - 1), 0);
-        ed.selection = new vscode.Selection(pos, pos);
-        ed.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+        // A range (billing.py:9-12) is selected whole, its last line to its end; a single line is the caret at its start.
+        const lastLine = typeof endLine === "number" && Number.isSafeInteger(endLine) && endLine > line
+          ? Math.min(doc.lineCount - 1, endLine - 1) : undefined;
+        const end = lastLine === undefined ? pos : new vscode.Position(lastLine, doc.lineAt(lastLine).text.length);
+        ed.selection = new vscode.Selection(pos, end);
+        ed.revealRange(new vscode.Range(pos, end), vscode.TextEditorRevealType.InCenter);
       }
     } catch {
       // openTextDocument REFUSES a binary file, and this catch used to swallow that as "may not
@@ -6666,6 +6767,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "workflow:init":
         this.post({ type: "workflow_draft", name: action.slice("workflow:".length) }); break;
       case "pickModel": this.selectModel(); break;
+      case "pips": { const home = this.tab?.host ?? this; home.ensurePipsBridge(); home.inVisiblePanel(() => home.post({ type: "pipsOpen" })); break; }
       case "connect": this.connect(); break;
       case "pickMode": this.setMode(); break;
       case "pickThink": this.setThinking(); break;
@@ -6682,7 +6784,6 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "subagent": this.openSettings("agents"); break;
       case "usage": this.openSettings("usage"); break;
       case "settings": this.openSettings(); break;
-      case "pips": this.openPips(); break;
       case "securitySettings": this.openSettings("security"); break;
       case "bug": void this.openSafeExternal("https://github.com/OpenPeach-ai/dgc/issues"); break;
       case "viewPlan": this.ensureBackend().send(
@@ -6927,6 +7028,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // rejects it as an unknown command (built-in names are reserved, so a custom command cannot
     // fill the gap either). The palette entry worked the whole time.
     if (name === "branch" || name === "fork") { void this.branchChat(rest); return; }
+    // The terminal's /pips prints; here the Pips page is what it opens, in the side bar, wherever it was typed.
+    if (name === "pips") {
+      this.slash("pips");
+      if (rest) { this.post({ type: "event", event: { type: "info", message: "/pips opens the Pips page here. Its other actions are on that page, or in a terminal with dgc pips." } }); }
+      return;
+    }
     if (name === "learn") { this.learn(rest); return; }
     // /artifact with an argument (`stop <id>`, `list`) is the backend's to interpret. The map
     // below keys on the command name alone, so every form of it opened the artifacts list.
@@ -6944,6 +7051,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       agents: "subagent", update: "update", skill: "skill", name: "nameSession",
     };
     if (direct[name]) { this.slash(direct[name]); return; }
+    // One the terminal has and this editor doesn't: said plainly, not "unknown command". A project's own command of
+    // that name can't exist (built-in names are reserved), so nothing is lost by not asking the backend.
+    const elsewhere = TERMINAL_COMMANDS[name];
+    if (elsewhere) {
+      if (elsewhere.section) { this.openSettings(elsewhere.section); }
+      this.post({ type: "event", event: { type: "info", message: elsewhere.say } });
+      return;
+    }
     be.send({ type: "slash_command", text }); // custom command, or a typed unknown-command error
   }
 
@@ -7698,7 +7813,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.pipsEditor.attach(message => this.post(message));
       this.pipsEditor.useDictation(() => this.dictationService(), () => this.readAloudService());
       this.pipsEditor.usePluginLogos((plugin) => this.replyPluginLogo(plugin));
-      this.pipsEditor.useSavedProviders(() => this.pipSavedProviders(), id => this.savePipProvider(id));
+      this.pipsEditor.useSavedProviders(() => this.pipSavedProviders(), id => this.savePipProvider(id), () => this.noProvider());
       // A Pip's page lists the person's dashboards and opens its report and its dashboards (Pips API 67).
       this.pipsEditor.useArtifacts(() => this.artifacts);
       this.pipsEditor.videoStop = (job) => this.videosStop(job);
@@ -7716,6 +7831,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   /** The API providers saved in Settings, for a Pip's model menus, with their models as Work lists them. Names and
    *  model ids only: no address and no key reaches a Pip's page. */
   private async pipSavedProviders(): Promise<{ id: string; name: string; default: boolean; models: string[] }[]> {
+    if (this.noProvider()) return [];
     if ((this.lastReadyEvent?.capabilities as any)?.saved_model_providers !== 1) return [];
     const defaultId = defaultProfileId(this.context);
     const saved = listProfiles(this.context).filter(row => row.kind !== "subscription");
@@ -7737,6 +7853,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const home = this.tab?.host || this;
     home.pipsEditor?.modelsChanged();
     home.pipsTab?.modelsChanged();
+    home.chatdgc?.modelsChanged();
+    // The status bar, the model buttons and whatever says "No provider": each chat paints its own.
+    for (const owner of [home, ...home.tabProviders]) owner.postState();
   }
   /** A Pip's messages were marked read (its chat opened, its count pill, its card in a Work chat acted on): the home's
    *  Pips row and every open Pips page count them again. */
@@ -7771,7 +7890,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         }, true);
       this.pipsTab.useDictation(() => this.dictationService(), () => this.readAloudService());
       this.pipsTab.usePluginLogos(plugin => this.replyPluginLogo(plugin));
-      this.pipsTab.useSavedProviders(() => this.pipSavedProviders(), id => this.savePipProvider(id));
+      this.pipsTab.useSavedProviders(() => this.pipSavedProviders(), id => this.savePipProvider(id), () => this.noProvider());
+      // A Pip's reply in this tab: its links and "Settings → Models" go where the side bar's do.
+      this.pipsTab.usePageActions((message) => { void this.onMessage(message); });
       this.pipsTab.useArtifacts(() => this.artifacts);
       this.pipsTab.videoStop = (job) => this.videosStop(job);
       this.pipsTab.videoFollow = (job) => this.videosJobs(job);
@@ -8236,6 +8357,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (first) {
           try { await this.setDefaultProvider(added.id); }
           catch (error) { await removeProfile(this.context, added.id); throw error; }
+          await this.firstProviderSaved(added.id);
         }
         this.settingsEditor?.webview.postMessage({ type: "providerProfiles", profiles: listProfiles(this.context), defaultId: defaultProfileId(this.context), saved: true });
         this.savedProvidersChanged();
@@ -8928,6 +9050,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   async selectModel(): Promise<void> {
+    if (this.noProvider()) { this.openSettings("models"); return; }
     const be = this.ensureBackend();
     const subscription = this.activeSubscription();
     if (this.routeState.subscriptionEngine) {

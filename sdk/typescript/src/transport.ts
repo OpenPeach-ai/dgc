@@ -41,7 +41,7 @@ export const KNOWN_EVENTS: ReadonlySet<string> = new Set([
   "request_expired", "retained_tasks", "rewind_preview", "rewound", "router_changed", "router_status", "router_suggestion", "rule_added", "saved_plan", "server_window", "session",
   "session_held", "session_holder", "session_live", "session_moved", "session_named", "sessions", "skill_catalog", "skill_detail", "skill_draft", "skill_package", "skill_saved", "status",
   "steering_update", "stream_end", "subagent_settings", "text_delta", "think_changed", "thinking_delta",
-  "thinking_end", "todos", "tool_call", "tool_denied", "tool_images", "tool_progress", "trace_usage",
+  "thinking_end", "todos", "tool_call", "tool_denied", "tool_images", "tool_progress", "trace_usage", "reply_trace",
   "tool_result", "troupe_finished", "troupe_progress", "troupe_started", "troupes",
   "turn_activity", "turn_end", "turn_eta", "turn_files", "turn_interrupted", "turn_start", "undo_result", "usage_report",
   "video_job", "video_jobs", "videos_library",

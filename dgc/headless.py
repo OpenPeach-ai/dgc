@@ -698,6 +698,17 @@ def _undo_question(agent, index) -> dict:
     return {"merged": plan["merged"][:500], "held": plan["held"][:500], "commands": plan["commands"][:500]}
 
 
+def _model_chosen(config) -> bool:
+    """Config.model_chosen, true for a config that can't say (a fixture, a hand-made stand-in)."""
+    chosen = getattr(config, "model_chosen", None)
+    if not callable(chosen):
+        return True
+    try:
+        return chosen() is not False
+    except Exception:                         # noqa: BLE001 -- a capability never costs a session its handshake
+        return True
+
+
 def _request_fields(request_id: str | None) -> dict[str, str]:
     """Attach a correlation ID only when the optional command field was present and valid."""
     return {"request_id": request_id} if request_id else {}
@@ -954,6 +965,15 @@ def _history_written_at(message) -> float | None:
     if isinstance(at, bool) or not isinstance(at, (int, float)) or not math.isfinite(at):
         return None
     return float(at) if 946_684_800 <= at <= time.time() + 172_800 else None   # 2000 .. two days ahead
+
+
+def _history_turn_trace(value) -> dict | None:
+    """A saved turn's Trace, checked before it reaches the wire: a hand-edited session must not become a bad event."""
+    from .reply_trace import validated
+    trace = validated({key: item for key, item in value.items() if key not in ("id", "model")}) if isinstance(value, dict) else None
+    if trace is None:
+        return None
+    return {**trace, "id": str(value.get("id") or "")[:40], "model": str(value.get("model") or "")[:80]}
 
 
 _TURN_FILE_STATUSES = ("new", "modified", "deleted")
@@ -1669,12 +1689,43 @@ class HeadlessUI:
         if phase in ("commentary", "answer"):
             fields["phase"] = phase
         self._stream_open = False
+        recording = self.__dict__.get("_turn_trace")
+        if recording is not None:
+            recording.model_end()
         self.em.emit("stream_end", **fields)
 
     def trace_usage(self, tokens: int) -> None:
         """Report one completed model request's measured tokens to the live editor trace."""
         if type(tokens) is int and 0 < tokens < 100_000_000:
             self.em.emit("trace_usage", tokens=tokens)
+            recording = self.__dict__.get("_turn_trace")
+            if recording is not None:
+                recording.model_tokens(tokens)
+
+    # What the turn did, as it happens, for its Trace (media/trace.js): one record, saved with the turn and sent as it
+    # ends. Only the chat's own steps: a helper's are on its own page.
+    def begin_turn_trace(self) -> None:
+        from .reply_trace import ReplyTrace
+        self._turn_trace = ReplyTrace()
+        self._turn_trace.model_start()
+
+    def trace_model_start(self) -> None:
+        recording = self.__dict__.get("_turn_trace")
+        if recording is not None:
+            recording.model_start()
+
+    def take_turn_trace(self, model: str) -> dict | None:
+        """The finished turn's record, once. None when it isn't whole: a Trace never fills in what wasn't measured."""
+        recording = self.__dict__.get("_turn_trace")
+        saved = recording.saved() if recording is not None else None
+        if saved is not None:
+            saved = {**saved, "id": str(getattr(self, "turn_id", "") or "")[:40], "model": str(model or "")[:80]}
+        self._finished_turn_trace = saved
+        return saved
+
+    @staticmethod
+    def _traced_call(call_id) -> bool:
+        return not str(call_id or "").startswith("sub-")
 
     def turn_activity(self, state: str, label: str, detail: str = "") -> None:
         """State what the turn is doing, once per change.
@@ -1869,6 +1920,11 @@ class HeadlessUI:
         summary = arg_summary(name, args, getattr(self, "preview_root", None))
         self.turn_activity("tool", activity_verb(name), summary)
         self._note_shown_call(call_id)
+        recording = self.__dict__.get("_turn_trace")
+        if recording is not None and self._traced_call(call_id):
+            # A search is a grep, whichever tool ran it: its row counts hits (media/trace.js).
+            searched = name == "grep" or re.search(r"(?:^|\s)(?:rg|grep)(?:\s|$)", str(summary or "")) is not None
+            recording.tool_start(call_id, "grep" if searched else name, summary)
         self.em.emit("tool_call", call_id=call_id, name=name, args=args,
                      summary=summary)
 
@@ -1907,6 +1963,15 @@ class HeadlessUI:
         failed = tool_output_is_error(out)
         out = shown_output(name, out)              # the person's row: no sentence written for the model alone
         is_diff, diff = split_diff(out)
+        recording = self.__dict__.get("_turn_trace")
+        row = recording.open_row(call_id) if recording is not None and self._traced_call(call_id) else None
+        if row is not None:
+            from .reply_trace import hits_in
+            lines = len([line for line in str(out or "").strip().split("\n") if line])
+            # What its row says, as the live Trace always said it: a search's hits, a change, else what it was given.
+            recording.tool_end(call_id, error=failed, hits=hits_in("grep", out) if row["label"] == "grep" else None,
+                               detail="Changed files" if is_diff else None if row.get("detail")
+                               else f"{lines} lines" if lines else "Done")
         self.em.emit("tool_result", call_id=call_id, name=name, output=out,
                      is_error=failed, is_diff=is_diff, diff=diff)
         hook = getattr(self, "_pips_settings_hook", None)
@@ -1985,6 +2050,10 @@ class HeadlessUI:
                     call_id: str | None = None) -> None:
         self.turn_activity("waiting", "Waiting for the model")
         self._note_shown_call(call_id)
+        recording = self.__dict__.get("_turn_trace")
+        if recording is not None and self._traced_call(call_id):
+            recording.tool_start(call_id, name, "")         # (a call refused before it started has no row of its own)
+            recording.tool_end(call_id, denied=True)
         self.em.emit("tool_denied", call_id=call_id, name=name, args=args, reason=reason)
 
     def on_todo(self, todos: list) -> None:
@@ -2589,6 +2658,9 @@ class Backend:
                           "session_model_route": True,
                           "model_defaults": True,
                           "subscription_defaults": True,
+                          # False: nothing chose a model (no saved route, no DGC_MODEL, no subscription), so the model
+                          # named here is only DGC's built-in default and may not exist. An editor says "No provider".
+                          "model_chosen": _model_chosen(self.config),
                           # The client answers with set_workspace_roots.ask_options when it can
                           # draw the options too; ready.capabilities is a free-form object, so
                           # advertising one costs an older client nothing.
@@ -4168,6 +4240,9 @@ class Backend:
                     # What a window that attaches mid-turn is told this turn is (session_live).
                     live_turn.update(prompt=str(turn_prompt or "")[:4000], kind=turn_kind,
                                      started_at=time.time())
+                begin_trace = getattr(self.ui, "begin_turn_trace", None)
+                if callable(begin_trace):
+                    begin_trace()
                 self.em.emit("turn_start", turn_id=tid,
                              prompt=turn_prompt,
                              kind=turn_kind,
@@ -4311,9 +4386,13 @@ class Backend:
                     # What this turn's Edited card lists, counted by the CLI: before turn_end, which
                     # is when the panel draws the card.
                     self._emit_turn_files(tid)
+                    finished_trace = self.ui.__dict__.pop("_finished_turn_trace", None) if hasattr(self.ui, "__dict__") else None
+                    if finished_trace and reason == "completed":
+                        self.em.emit("reply_trace", turn_id=tid, trace=finished_trace)
                     self.em.emit("turn_end", turn_id=tid, reason=reason,
                                  token_estimate=est, final_message_id=final_message_id)
                     self.ui.turn_id = ""        # nothing after this belongs to the finished turn
+                    self._flush_held_workspace_roots()
                     self._emit_context()
                 self._announce_peer("idle" if idle else "working")    # and "idle" once it is
                 if idle:
@@ -4334,6 +4413,7 @@ class Backend:
                 if self._worker is current:
                     self._worker = None
                     self._flush_unsaved_todo_clear()
+                    self._flush_held_workspace_roots()
 
     # ---- background monitors ---------------------------------------------------------------------
     # Lock order: the turn-state lock may be held while calling into the hub (take_pending,
@@ -4838,6 +4918,71 @@ class Backend:
         in_force = getattr(getattr(self, "agent", None), "todo_clear_in_force", None)
         return bool(callable(in_force) and in_force() is True)
 
+    def _hold_workspace_roots(self, cmd: dict, request_id: str | None) -> bool:
+        """Keep a folder grant for the end of the running turn (the newest wins); False when nothing runs now."""
+        with self._turn_state_lock():
+            if not self._busy():
+                return False                  # it ended while this was on its way: it applies at once
+            self._held_workspace_roots = (cmd, request_id)
+            return True
+
+    def _flush_held_workspace_roots(self) -> None:
+        """The folder grant a turn held back applies now. With the turn-state lock held, as the turn ends,
+        so nothing queued can start on the old grant."""
+        held = getattr(self, "_held_workspace_roots", None)
+        if held is None:
+            return
+        self._held_workspace_roots = None
+        self._set_workspace_roots(*held)
+
+    def _set_workspace_roots(self, cmd: dict, request_id: str | None) -> None:
+        from .workspace import is_within
+        # A client that can draw a question the turn did not stop for says so here. Without it
+        # the backend emits no ask_* events and the model is not offered the tool at all, so an
+        # older editor never sees a question nobody could answer.
+        # On the UI, not on self: the readers are HeadlessUI.ask_open_question and
+        # .ask_resolved, and Backend does not subclass HeadlessUI. Setting it here left the
+        # flag somewhere nobody looks, so every question was refused with "nobody can answer
+        # questions here" while `ready` advertised the capability as present.
+        self.ui._open_asks_enabled = bool(cmd.get("open_asks"))
+        self.ui._ask_options_enabled = bool(cmd.get("ask_options"))
+        # On the chat's UI, beside the two above: each chat on a shared `dgc serve` opts in for
+        # itself. Read by _on_subagent and _emit_agents.
+        self.ui._agent_faces_enabled = bool(cmd.get("agent_faces"))
+        # v14: ``question_forms`` is still declared and ignored; every v14 client takes one
+        # structured request per question batch.
+        roots, visible = [], []
+        for raw in cmd.get("roots", []) if isinstance(cmd.get("roots"), list) else []:
+            try:
+                path = Path(str(raw)).resolve(strict=True)
+            except (OSError, RuntimeError):
+                continue
+            if path.is_dir():
+                if path not in visible:
+                    visible.append(path)
+                if not is_within(path, self.config.project_root) and path not in roots:
+                    roots.append(path)
+        own = Path(self.config.project_root).resolve()
+        # The editor's folders are this chat's workspace only when its project is among them.
+        # A chat opened in another folder that was sent the window's folders got each one as
+        # an ExternalDirectory allow: writes into the window's project with no approval card,
+        # while its own files still asked.
+        if not any(is_within(own, path) or is_within(path, own) for path in visible):
+            roots, visible = [], []
+        self.config.session_permissions = {
+            "allow": [f"ExternalDirectory({path})" for path in roots[:32]], "ask": [], "deny": []}
+        # Its own folder is always one it inspects: that is where its changes are recorded.
+        # Replaced by the editor's folders, a chat whose project was not one of them listed
+        # none of its own changes and refused to open one.
+        self._editor_inspection_roots = [own, *(path for path in visible if path != own)][:16]
+        # What Workspace changes lists is still the editor's own folders, as before; only a
+        # chat with none of them (one in another folder) lists its own.
+        self._editor_scan_roots = visible[:16] or [own]
+        if getattr(self, "_editor_inspection", None) is not None:
+            self._editor_inspection.set_roots(self._editor_inspection_roots, scan=self._editor_scan_roots)
+        self.em.emit("workspace_roots", roots=[str(self.config.project_root), *map(str, roots[:32])],
+                     **_request_fields(request_id))
+
     def _flush_unsaved_todo_clear(self) -> None:
         """Save a checklist clear that landed while a worker owned the session.
 
@@ -4930,6 +5075,7 @@ class Backend:
                         if self._foreground_worker is current:
                             self._foreground_worker = None
                         self._flush_unsaved_todo_clear()
+                        self._flush_held_workspace_roots()
                 # A terminal event means the next foreground command is admissible. Emit it only
                 # after releasing the slot, otherwise a fast controller can receive completion and
                 # have its immediately following prompt rejected against a worker that is unwinding.
@@ -6081,6 +6227,9 @@ class Backend:
                 # When its last reply was written: the panel shows it on the answer, and with the prompt's
                 # time, how long the turn worked. A marker, not an event, as a turn_start field would be.
                 items.append({"role": "time", "of": "reply", "at": turn["written_at"]})
+            saved_trace = turn.pop("saved_trace", None)
+            if saved_trace is not None and finished:
+                items.append({"role": "time", "of": "reply_trace", "at": turn["written_at"] or 0, "trace": saved_trace})
             items.append({"type": "turn_end", "turn_id": turn["id"],
                           "reason": "paused" if pause else "completed" if finished else "cancelled",
                           "token_estimate": 0,
@@ -6188,6 +6337,10 @@ class Backend:
             # get the history they always did, like agent_report's lines.
             turn_files_mark = (_history_turn_files(m.get("_dgc_turn_files"))
                                if getattr(self, "_turn_files_on", False) else None)
+            # The turn's Trace as it was when it ended (Agent._settle_turn_trace): read the same after a reload.
+            saved_trace = _history_turn_trace(m.get("_dgc_turn_trace"))
+            if saved_trace is not None and turn is not None:
+                turn["saved_trace"] = saved_trace
             place_reports()
             arrived.extend(fixed(pip_report_items(m)))
             # Before any `continue`: images anchored at or before this message join the open turn.
@@ -7377,10 +7530,18 @@ class Backend:
                 return
 
         if self._busy() and t in _BUSY_MUTATIONS and not self._yield_wake_turn():
-            self.em.emit("command_rejected", command=t, reason="turn_in_progress",
-                         message=f"'{t}' is unavailable while a turn is running; cancel or wait",
-                         **_request_fields(request_id))
-            return
+            # A running turn keeps the folders it started with, and the next one gets these: the grant
+            # waits for the end of this turn, before anything queued behind it starts. Refused instead,
+            # an editor that sent it as one turn ended (its queue's next turn already running) drew the
+            # refusal in the chat, naming the command, and a queue kept running on the old grant.
+            if t == "set_workspace_roots":
+                if self._hold_workspace_roots(cmd, request_id):
+                    return
+            else:
+                self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                             message="That can't be done while a reply is running. Stop it or wait for it to finish.",
+                             **_request_fields(request_id))
+                return
 
         if t in ("pips_control", "pips_enable", "pips_runtime"):
             self._queue_pips_command(cmd)
@@ -8026,52 +8187,7 @@ class Backend:
                              message="a prompt or foreground operation is already running; cancel or wait")
 
         elif t == "set_workspace_roots":
-            from .workspace import is_within
-            # A client that can draw a question the turn did not stop for says so here. Without it
-            # the backend emits no ask_* events and the model is not offered the tool at all, so an
-            # older editor never sees a question nobody could answer.
-            # On the UI, not on self: the readers are HeadlessUI.ask_open_question and
-            # .ask_resolved, and Backend does not subclass HeadlessUI. Setting it here left the
-            # flag somewhere nobody looks, so every question was refused with "nobody can answer
-            # questions here" while `ready` advertised the capability as present.
-            self.ui._open_asks_enabled = bool(cmd.get("open_asks"))
-            self.ui._ask_options_enabled = bool(cmd.get("ask_options"))
-            # On the chat's UI, beside the two above: each chat on a shared `dgc serve` opts in for
-            # itself. Read by _on_subagent and _emit_agents.
-            self.ui._agent_faces_enabled = bool(cmd.get("agent_faces"))
-            # v14: ``question_forms`` is still declared and ignored; every v14 client takes one
-            # structured request per question batch.
-            roots, visible = [], []
-            for raw in cmd.get("roots", []) if isinstance(cmd.get("roots"), list) else []:
-                try:
-                    path = Path(str(raw)).resolve(strict=True)
-                except (OSError, RuntimeError):
-                    continue
-                if path.is_dir():
-                    if path not in visible:
-                        visible.append(path)
-                    if not is_within(path, self.config.project_root) and path not in roots:
-                        roots.append(path)
-            own = Path(self.config.project_root).resolve()
-            # The editor's folders are this chat's workspace only when its project is among them.
-            # A chat opened in another folder that was sent the window's folders got each one as
-            # an ExternalDirectory allow: writes into the window's project with no approval card,
-            # while its own files still asked.
-            if not any(is_within(own, path) or is_within(path, own) for path in visible):
-                roots, visible = [], []
-            self.config.session_permissions = {
-                "allow": [f"ExternalDirectory({path})" for path in roots[:32]], "ask": [], "deny": []}
-            # Its own folder is always one it inspects: that is where its changes are recorded.
-            # Replaced by the editor's folders, a chat whose project was not one of them listed
-            # none of its own changes and refused to open one.
-            self._editor_inspection_roots = [own, *(path for path in visible if path != own)][:16]
-            # What Workspace changes lists is still the editor's own folders, as before; only a
-            # chat with none of them (one in another folder) lists its own.
-            self._editor_scan_roots = visible[:16] or [own]
-            if getattr(self, "_editor_inspection", None) is not None:
-                self._editor_inspection.set_roots(self._editor_inspection_roots, scan=self._editor_scan_roots)
-            self.em.emit("workspace_roots", roots=[str(self.config.project_root), *map(str, roots[:32])],
-                         **_request_fields(request_id))
+            self._set_workspace_roots(cmd, request_id)
 
         elif t == "permission_response":
             self.pending.resolve(cmd.get("id"), {"decision": cmd.get("decision"), "rule": cmd.get("rule"),
@@ -8205,6 +8321,14 @@ class Backend:
                 for name in ("base_url", "api_mode", "model"):
                     defaults.set(name, cleaned[name], persist=False)
                 defaults.set("api_key", key, persist=False)
+                # The window goes with the model: the one chosen for it before; else a stored default is no choice
+                # (an older first save wrote every default), and the model's recommended window applies.
+                from .config import DEFAULTS, remembered_context_size
+                chosen_window = remembered_context_size(defaults, cleaned["model"])
+                if chosen_window:
+                    defaults.set_model_window(chosen_window, persist=False)
+                elif defaults.data.get("context_size") == DEFAULTS["context_size"]:
+                    defaults.data.pop("context_size", None)
                 for name in ("subscription_engine", "subscription_model", "subscription_effort"):
                     defaults.set(name, "", persist=False)
                 defaults._persist = True

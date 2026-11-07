@@ -199,6 +199,9 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # One completed model request's measured tokens, for the live Trace of the reply. A saved turn
     # carries the same numbers as {"role": "time", "of": "trace"} markers in history.items.
     "trace_usage": {"tokens": _I()},
+    # A finished turn's Trace, just before its turn_end: the same record its history replays as a
+    # {"role": "time", "of": "reply_trace", "trace": ...} marker, so it reads the same after a reload.
+    "reply_trace": {"turn_id": _S(), "trace": _O()},
     "todos": {"todos": _A()},
     "artifact_ready": {"id": _S(), "name": _S(), "url": _S(), "rel": _S()},
     # v14: files the model produced and asked to show, as chips under the step that made them.

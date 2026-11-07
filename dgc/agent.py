@@ -6211,6 +6211,23 @@ class Agent(GoalLifecycle):
         except Exception:                    # noqa: BLE001
             pass
 
+    def _settle_turn_trace(self) -> None:
+        """At a top-level turn's end, before its save: what it did, step by step, kept on its last message. The Trace
+        shown as the turn ends and the one a reload draws are then this one record, so they read the same. Never
+        raises: it runs in the finalizer that saves the turn."""
+        try:
+            take = getattr(self.ui, "take_turn_trace", None)
+            if self.depth != 0 or not callable(take):
+                return
+            shown = (str(self.config.get("subscription_model", "") or "") if self.config.get("subscription_engine", "")
+                     else str(self.config.model or ""))
+            trace = take(shown)
+            message = next((m for m in reversed(self.messages) if m.get("role") != "system"), None)
+            if trace and isinstance(message, dict) and message.get("role") == "assistant":
+                message["_dgc_turn_trace"] = trace
+        except Exception:                    # noqa: BLE001
+            pass
+
     def _settle_turn_files(self, began) -> None:
         """At a top-level turn's end, before its save: what its Edited card lists.
 
@@ -6445,6 +6462,7 @@ class Agent(GoalLifecycle):
                 self._run_handed_over()         # a child that finished during this turn integrates now
                 if began_files is not None:     # after that integration, so its files are listed
                     self._settle_turn_files(began_files)
+                self._settle_turn_trace()
                 revision_before_save = self._session_revision
                 saved = self._persist()
                 if not saved and self.depth == 0:
@@ -10409,6 +10427,15 @@ class Agent(GoalLifecycle):
         if decision == DENY:
             self.ui.tool_denied(name, display_args, redact_text(reason, secrets), call_id)
             return f"PERMISSION DENIED: {reason}. Do not retry this exact action."
+        if decision == ASK:
+            # Validate before asking: bad arguments go straight back to the model, in the tool's own words, with no card.
+            from .tool_precheck import refusal as arguments_refusal
+            refused = arguments_refusal(name, args, getattr(self, "mcp", None))
+            if refused:
+                out = f"error: {redact_text(refused, secrets)}"
+                self.ui.tool_call(name, display_args, call_id)
+                self.ui.tool_result(name, out, call_id)
+                return out
         if decision == ASK and getattr(self, "_monitor_turn", False) and self.mode != "auto":
             # Nobody asked for this turn: DGC started it on a monitor event. An approval card with
             # no deadline would hold the backend busy until someone noticed it, so in default and

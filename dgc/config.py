@@ -1448,6 +1448,10 @@ def _merge_mapping(on_disk, baseline, now) -> dict:
     return merged
 
 
+# What picks the model a chat runs on, and the keys a first save leaves out while they only state their defaults.
+_ROUTE_CHOICES = ("model", "base_url")
+_UNCHOSEN_UNTIL_SET = frozenset({"model", "base_url", "api_mode", "context_size"})
+
 # The windows a model switch can restore: the most recently chosen ones win a place.
 _MAX_REMEMBERED_WINDOWS = 64
 
@@ -2178,7 +2182,12 @@ class Config:
                 ephemeral = getattr(self, "_ephemeral_keys", None) or set()
                 payload = {k: (DEFAULTS[k] if k in ephemeral and k in DEFAULTS else v)
                            for k, v in self.data.items()
-                           if k not in SECRET_KEYS and not (k in ephemeral and k not in DEFAULTS)}
+                           if k not in SECRET_KEYS and not (k in ephemeral and k not in DEFAULTS)
+                           # A default written down isn't a choice. The route and the window stay out until someone
+                           # chooses them: a first save of anything else made qwen3:8b "chosen" and pinned the window
+                           # at 32K, under a recommended one (a cloud model's 128K) that only an unset window takes.
+                           and not (k in _UNCHOSEN_UNTIL_SET and k not in ephemeral and v == DEFAULTS.get(k)
+                                    and k not in getattr(self, "_explicit_keys", ()))}
                 # NOT self.permissions: on every new install the first save wrote a trusted project's
                 # rules into the global file, and every other project -- untrusted ones included --
                 # then inherited them. A project's `allow` became a global allow.
@@ -2500,6 +2509,15 @@ class Config:
     def is_explicit(self, key: str) -> bool:
         """True when `key` was present in the user's config.json rather than inherited."""
         return key in getattr(self, "_explicit_keys", set())
+
+    def model_chosen(self) -> bool:
+        """Whether anything chose the model this config runs: saved, set in the environment or on the command line, or a
+        subscription. DEFAULTS' model alone is only a name: it may not exist anywhere, and an editor says so."""
+        if str(self.data.get("subscription_engine") or "").strip():
+            return True
+        if any(self.is_explicit(key) for key in _ROUTE_CHOICES):
+            return True
+        return any(self.data.get(key) != DEFAULTS[key] for key in _ROUTE_CHOICES)
 
     def set(self, key: str, value, *, persist: bool = True) -> None:
         if key == LEGACY_SEARCH_KEY:
