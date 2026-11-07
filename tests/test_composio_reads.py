@@ -112,6 +112,21 @@ class Classification(unittest.TestCase):
                     manager, "route", {"plugin": "composio", "composio": True}, EXECUTE_LIVE,
                     source, raw, cancel=object()), raw)
 
+    def test_a_bigger_mail_read_is_still_a_read_and_a_wild_limit_still_asks(self):
+        """"How many unread emails have I got?" asked for 100 and raised a card (seen on a real account)."""
+        info = pip_plugins._info(record(), CATALOG)
+        def read(limit):
+            return {"tools": [{"tool_slug": "GMAIL_FETCH_EMAILS", "arguments": {"max_results": limit, "query": "is:unread"}}]}
+        self.assertTrue(pip_plugins.composio_reads(EXECUTE, info, read(100)))
+        self.assertTrue(pip_plugins.composio_reads(EXECUTE, info, read(500)))
+        for wild in (501, 0, -1, True, "100"):
+            with self.subTest(limit=wild):
+                self.assertFalse(pip_plugins.composio_reads(EXECUTE, info, read(wild)))
+        # A routine's reviewed read keeps its own limit.
+        from dgc import pip_app_access as apps
+        with self.assertRaises(apps.RegistryError):
+            apps.validate_arguments("GMAIL_FETCH_EMAILS", {"max_results": 100})
+
     def test_only_dgcs_own_composio_and_only_when_every_call_is_a_reviewed_read(self):
         info = pip_plugins._info(record(), CATALOG)
         self.assertTrue(info["composio"])
