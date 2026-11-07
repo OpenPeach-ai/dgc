@@ -1675,6 +1675,9 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
   background: linear-gradient(to right, var(--accent) var(--effort), var(--surface2) var(--effort)); cursor: pointer; }
 .effort-slider::-webkit-slider-thumb { appearance: none; width: 28px; height: 28px; border-radius: var(--r-full);
   background: var(--text-strong); border: 1px solid var(--border); box-shadow: 0 1px 4px rgba(0,0,0,.18); }
+/* Dragging it must never box it: the focus ring is for the keyboard, and it goes on the thumb. */
+.effort-slider, .effort-slider:focus, .effort-slider:focus-visible { outline: none; }
+.effort-slider:focus-visible:not(.by-pointer)::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--accent), 0 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent); }
 /* The fill glides to the new stop rather than jumping, and the thumb acknowledges the change.
    --effort is registered so a gradient stop can be transitioned at all. */
 @property --effort { syntax: "<percentage>"; inherits: true; initial-value: 0%; }
