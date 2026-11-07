@@ -317,7 +317,7 @@ def plain_failure(text) -> str:
     """A run's failure for a line a person reads (a Pip's report, the terminal's note of it): a model request's raw answer
     in words, anything else as it was. The raw answer stays on the run."""
     body = str(text or "")
-    if re.match(r"(?:cannot connect|could not connect|httpconnectionpool|httpsconnectionpool)", body, re.I):
+    if re.match(r"(?:the model didn't answer: )?(?:cannot connect|could not connect|httpconnectionpool|httpsconnectionpool)", body, re.I):
         return "DGC can't reach the model provider"
     found = re.match(r"(?:the model didn't answer: )?HTTP (\d{3})\b", body, re.I)
     if found is None:
