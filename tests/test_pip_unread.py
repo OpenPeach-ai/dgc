@@ -31,7 +31,7 @@ class PipUnreadTests(PostScene):
         page = pip_unread.list_unread(self.store, self.pip['workspace_id'])
         self.assertEqual((page['total'], page['pips'][0]['posts']), (1, 1))
         self.assertEqual(page['pips'][0]['latest_post_id'], run)
-        self.assertIn('finished', page['pips'][0]['latest'])
+        self.assertNotIn("Pip '", page['pips'][0]['latest'], 'the row has its name already')
         self.assertEqual(pip_unread.mark_read(self.store, self.pip['id'], post_id=run)['count'], 0)
         self.assertEqual(pip_unread.list_unread(self.store, self.pip['workspace_id'])['total'], 0)
 
@@ -165,6 +165,30 @@ class ChatItemTests(unittest.TestCase):
         item = self.unread()
         self.assertEqual((item['count'], item['latest']), (1, 'Nothing new in your inbox.'))
         self.assertEqual(pip_unread.mark_read(self.store, self.pip['id'], message_id=item['latest_message_id'])['count'], 0)
+
+    def test_a_rows_preview_is_plain_words_with_no_repeat_of_the_pips_name(self):
+        # Seen on the home row: "Pip 'Site traffic' finished: **vib...". Under the Pip's own name, in plain words.
+        for said, shown in (("Pip 'Site traffic' finished: **vibedgc.com**: 1,237 visits", 'Vibedgc.com: 1,237 visits'),
+                            ("Pip 'GitHub stats' finished: **T", 'T'),
+                            ("Pip 'It''s' finished: nothing found", 'Nothing found'),
+                            ("Pip 'Billing audit' finished: 5 findings (2 high, 3 medium)", '5 findings (2 high, 3 medium)'),
+                            ("Pip 'Percent checker' failed: It ran out of memory.", 'Failed: It ran out of memory.'),
+                            ("Pip 'Traffic' needs you: 3 changes", 'Needs you: 3 changes'),
+                            ('No prefix here', 'No prefix here')):
+            with self.subTest(said=said):
+                self.assertEqual(pip_unread._post_preview(said), shown)
+
+    def test_a_reply_preview_has_no_markdown_marks(self):
+        for said, shown in (("Today's visits: **1,237** (step 3).", "Today's visits: 1,237 (step 3)."),
+                            ('# Morning brief\n\n- **BTC** up 2%\n- *ETH* flat', 'Morning brief BTC up 2% ETH flat'),
+                            ('See [the report](https://example.test/r) and `run.py`.', 'See the report and run.py.'),
+                            ('![chart](a.png) ~~old~~ new', 'chart old new'),
+                            ('| a | b |\n|---|---|\n| 1 | 2 |', 'a · b 1 · 2'),
+                            ('> quoted\n```py\nx = 1\n```', 'quoted x = 1'),
+                            ('snake_case_name and 5 * 3 stay, __bold__ goes', 'snake_case_name and 5 * 3 stay, bold goes'),
+                            ('Cut in half by a limit: **vib', 'Cut in half by a limit: vib')):
+            with self.subTest(said=said):
+                self.assertEqual(pip_unread._preview(said), shown)
 
     def test_the_preview_leaves_out_the_line_between_short_messages(self):
         self.ask('Hi', 'chat-1', 'Hi there!\n---\nYour inbox has 3 new emails.')

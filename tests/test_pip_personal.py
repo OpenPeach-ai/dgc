@@ -254,6 +254,118 @@ class GuessedAddressTests(unittest.TestCase):
 class CardClaimTests(unittest.TestCase):
     """A reply that sends the user to a card it never made gets one more try (battle test 2026-10-09)."""
 
+    def _conversation(self):
+        from dgc import pip_computer
+        fixture = PersonalTests()
+        fixture.setUp = fixtures.LocalPipsTests.setUp.__get__(fixture)
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        job = fixture.make()
+        run = pip_chat.send(fixture.store, job["id"], "Press Refresh report on my site", "c1", "user", fixture.cfg)["run"]
+        raw = json.loads(fixture.registry.db.execute("SELECT manifest FROM pip_runs WHERE id=?", (run["id"],)).fetchone()[0])
+        return fixture, job, raw, pip_computer
+
+    def _run(self, fixture, raw, replies, **patches):
+        from dgc.llm import ChatResult, LLMClient
+        replies = iter(replies)
+        asked = []
+
+        def chat(client, messages, tools=None, **kwargs):
+            asked.append(json.dumps(messages))
+            return next(replies)
+        with patch.dict(os.environ, {"DGC_SESSION_POLICY": pips._json(pips.native_policy(personal=True))}), \
+             patch.object(LLMClient, "chat", chat), patch("dgc.agent.discover_skills", return_value={}), \
+             patch("dgc.agent.load_memories", side_effect=AssertionError("No ambient memory")), \
+             patch("requests.sessions.Session.request", side_effect=AssertionError("No network")):
+            result = pips.execute_native(fixture.cfg, fixture.root, raw, lambda e: None)
+        return asked, result
+
+    def test_a_hold_on_its_computer_is_a_card_so_the_reply_that_says_so_is_not_told_it_made_none(self):
+        # Seen on the 0.51.0 morning check: "It's waiting for your okay as a card below", then, asked again by this repair,
+        # "it looks like DGC didn't show you an approval for it", with the card right there, and already approved.
+        from dgc.llm import ChatResult, ToolCall
+        fixture, job, raw, pip_computer = self._conversation()
+        raw["computer_socket"] = {"socket": "/nonexistent", "token": "t"}
+        said = {"text": "Held: this would change something on the website, so DGC paused it unsent.", "card": True}
+        with patch.object(pip_computer, "worker_reply", return_value=said):
+            asked, result = self._run(fixture, raw, [
+                ChatResult(content="", tool_calls=[ToolCall(id="c1", name=pip_computer.TOOL, arguments={"op": "click", "ref": "e2"})]),
+                ChatResult(content="I pressed it. It's waiting for your okay as a card below."),
+                ChatResult(content="It looks like DGC didn't show you an approval."),
+            ])
+        self.assertEqual(len(asked), 2, "no repair: the card is there")
+        self.assertNotIn("you made none in this turn", asked[-1])
+        self.assertEqual(result["text"], "I pressed it. It's waiting for your okay as a card below.")
+
+    def test_the_computer_tells_the_worker_once_this_run_holds_something(self):
+        import socket
+        import tempfile
+        import threading
+        from dgc import pip_computer
+
+        class Stub:
+            waiting = []
+        with patch.object(pip_computer.Host, "_act", return_value={"text": "Opened the page."}), \
+             patch.object(pip_computer, "_secret_hold_refusal", return_value=None):
+            self.assertNotIn("card", pip_computer.Host.act(Stub(), "status", {}), "nothing held: no card")
+            held = Stub()
+            held.waiting = ["compact_held"]
+            self.assertIs(pip_computer.Host.act(held, "status", {})["card"], True, "whatever the step's words")
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "s")
+            server = socket.socket(socket.AF_UNIX)
+            self.addCleanup(server.close)
+            server.bind(path)
+            server.listen(1)
+
+            def answer():
+                client, _ = server.accept()
+                with client:
+                    client.recv(65536)
+                    client.sendall(json.dumps({"text": "ok", "card": True}).encode() + b"\n")
+            threading.Thread(target=answer, daemon=True).start()
+            self.assertEqual(pip_computer.worker_reply({"socket": path, "token": "t"}, "status", {}), {"text": "ok", "card": True})
+
+    def test_a_plugins_own_card_is_a_card_so_a_reply_that_mentions_it_is_not_told_it_made_none(self):
+        from dgc import pip_app_links, pip_plugins
+        from dgc.llm import ChatResult, ToolCall
+        fixture, job, raw, _ = self._conversation()
+        raw["app_socket"] = {"socket": "/nonexistent", "token": "t", "apps": [], "plugins": [{"plugin": "board", "name": "Board", "tools": 1}], "composio": False, "microsoft": False}
+        said = {"text": pip_plugins.RAN_AT_ONCE + "A board.\n" + pip_plugins.APP_CARD_SHOWN + "Board's card for show above the words of your reply in this chat; "
+                        "the user sees and can use it there. Its page is not part of this result.]"}
+        with patch.object(pip_app_links, "worker_reply", return_value=said):
+            asked, result = self._run(fixture, raw, [
+                ChatResult(content="", tool_calls=[ToolCall(id="c1", name="call_plugin", arguments={"plugin": "board", "tool": "show", "arguments": {}})]),
+                ChatResult(content="There it is, the card under the board's name."),
+                ChatResult(content="There is no card."),
+            ])
+        self.assertEqual(len(asked), 2, "no repair: the card is there")
+        self.assertEqual(result["text"], "There it is, the card under the board's name.")
+
+    def test_a_card_from_an_earlier_reply_still_waiting_is_never_called_missing(self):
+        from dgc.llm import ChatResult
+        fixture, job, raw, _ = self._conversation()
+        raw["conversation"]["cards_waiting"] = 1
+        asked, result = self._run(fixture, raw, [ChatResult(content="It's still waiting on the card below."),
+                                                 ChatResult(content="There is no card.")])
+        self.assertEqual(len(asked), 1)
+        self.assertEqual(result["text"], "It's still waiting on the card below.")
+        self.assertIn("cards_waiting_for_the_user", asked[0], "and the model is told, so it never has to guess")
+        self.assertIn("A plugin's own card, when a tool's answer says DGC shows it, is the one exception: it sits above the words of your reply",
+                      asked[0], "where each card is, as the chat really draws it")
+
+    def test_the_next_message_counts_what_still_waits_for_the_user(self):
+        fixture, job, raw, _ = self._conversation()
+        self.assertNotIn("cards_waiting", raw["conversation"], "nothing waits yet")
+        with patch("dgc.pip_attention.collect", return_value={"by_pip": {job["id"]: 2}}):
+            fixture.registry.db.execute("UPDATE pip_runs SET status='succeeded',finished_at=created_at WHERE id=?", (raw.get("run_id") or "",))
+            self.assertEqual(pip_chat._cards_waiting(fixture.store, job["id"]), 2)
+        self.assertEqual(pip_chat._cards_waiting(fixture.store, "pip_other"), 0)
+        for bad in (0, -1, 2001, True, "2"):
+            with self.subTest(bad=bad), self.assertRaises(RegistryError):
+                pip_chat.validate_context({"text": "t", "history": [], "history_omitted_count": 0, "last_report": None, "cards_waiting": bad})
+        pip_chat.validate_context({"text": "t", "history": [], "history_omitted_count": 0, "last_report": None, "cards_waiting": 2})
+
     def test_a_claimed_card_is_found_and_plain_words_are_not(self):
         for said in ("Tap Connect on the Google Calendar card below.", "The card below is how you add that.",
                      "There's an Allow card just below.", "Choose Allow and I'll read it.",

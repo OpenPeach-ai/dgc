@@ -222,7 +222,8 @@ would make. A free generator, or one you allowed (Always allow), makes the image
 
 A Personal Pip can think with the Claude Code or Codex you are already signed in to, on
 your own plan. Open its chat, choose the model under the chat box, and pick **Claude
-Code** or **Codex** under **Your subscriptions**. Only the ones installed and signed in on
+Code** or **Codex** under **Your subscriptions**, then **CLI default**, one of that CLI's models, or
+**Enter another model** for any other name. Only the ones installed and signed in on
 this computer are listed. **Default** follows DGC: when DGC's own default is Claude Code
 or Codex, the Pip uses it too, with DGC's model and effort for it (unless a model for Pips
 is set in Settings, below). The Pip's thinking setting in its chat box becomes the CLI's effort.
@@ -1050,8 +1051,8 @@ A routine is something a Personal Pip does on its own. It has a name, what to do
 | Your app's event | When the shop app sends order.created | Choose one of your own apps (see [Your own app](#your-own-app)) and the event: type it, or pick one it sent lately. Once for each event |
 
 Add one with **+ Add routine** on its page, or ask the Pip ("every morning, tell me what my day
-looks like"): it suggests a routine as a card under its reply, and nothing runs until you choose
-**Add routine** (**Not now** puts it away). Each routine has an on/off switch; tap one to edit or
+looks like", or "remind me at 5:30 to call the supplier", which runs once): it suggests a routine as a
+card under its reply, and nothing runs until you choose **Add routine** (**Not now** puts it away). Each routine has an on/off switch; tap one to edit or
 delete it.
 
 When a routine is due, DGC writes a turn in the Pip's chat (you see only its reply) and the Pip does

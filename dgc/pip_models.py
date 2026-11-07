@@ -5,7 +5,8 @@ uses DGC's provider layer; these helpers bound accepted catalog data and public 
 The provider layer owns HTTP timeouts/body parsing (its compatible/Ollama catalog paths
 do not currently impose a response-byte ceiling), so this is not an allocation limit.
 
-A subscription choice names only the engine (``{"mode": "subscription", "engine": "codex"}``). Default follows the
+A subscription choice names the engine (``{"mode": "subscription", "engine": "codex"}``) and, optionally, one of that
+CLI's models (``"model": "opus"``); with none it uses the CLI's own default. Default follows the
 Pips default model (config ``pips_model``) when one is set: a model on DGC's own connection, for every Pip on Default.
 With none it is "Same as DGC": DGC's own model, or its subscription default when it has one. A subscription runs a
 Personal or Project Pip turns on that CLI with DGC's tools alone (pip_brain).
@@ -53,11 +54,12 @@ def validate_model_choice(value) -> dict:
         return {"mode": "default"}
     if value.get("mode") == "model" and set(value) == {"mode", "model"}:
         return {"mode": "model", "model": _model_id(value["model"])}
-    if value.get("mode") == "subscription" and set(value) == {"mode", "engine"}:
+    if value.get("mode") == "subscription" and set(value) in ({"mode", "engine"}, {"mode", "engine", "model"}):
         from .pip_brain import ENGINES, NOT_FOR_PIPS
         if value["engine"] not in ENGINES:
             raise RegistryError("invalid_model_choice", NOT_FOR_PIPS.get(value["engine"], "Choose Claude Code or Codex."))
-        return {"mode": "subscription", "engine": value["engine"]}
+        # A model of that CLI (as Work and ChatDGC offer: opus, sonnet, haiku); with none, the CLI's own default.
+        return {"mode": "subscription", "engine": value["engine"], **({"model": _model_id(value["model"])} if "model" in value else {})}
     # API 70: DGC Router. {"mode": "router"} runs on any system with the Pips job; with system and model, on that one
     # (a pinned Pip waits for its own system).
     if value.get("mode") == "router" and set(value) == {"mode"}:
@@ -275,6 +277,7 @@ def list_pip_models(config) -> dict:
     API 55: ``subscriptions`` lists the CLIs a Pip can run on here (installed, signed in, held to DGC's
     tools), and ``default_engine`` says which one Default follows when DGC's default is a subscription.
     ``default_model`` is what Default runs: the Pips default model (``pips_model``) when one is set, else DGC's own.
+    Each subscription also lists ``models``, that CLI's model names as Work and ChatDGC offer them (may be empty).
     API 66: ``pips_model`` is the Pips default as set ("" when Pips follow DGC), and each model carries
     ``context_window`` when DGC knows one for it (model_window)."""
     from . import pip_brain

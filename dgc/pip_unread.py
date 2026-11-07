@@ -15,6 +15,7 @@ in the chat (pipRunPosts.js ``timeline``), and count once too.
 from __future__ import annotations
 
 import json
+import re
 from bisect import bisect_right
 
 from .workspace_registry import RegistryError
@@ -41,8 +42,23 @@ def migrate(db) -> None:
 
 
 def _preview(text: str) -> str:
+    """One plain line of a reply for a row: no Markdown marks, whatever the reply was written in."""
     from .pip_chat import without_breaks
-    return " ".join(without_breaks(text).split())[:180]
+    from .pip_report_delivery import plain_words
+    return plain_words(without_breaks(text))[:180]
+
+
+_RUN_LINE = re.compile(r"Pip '.*?' (finished|failed|needs you): ", re.DOTALL)
+
+
+def _post_preview(text: str) -> str:
+    """A run's post in a row that already has its Pip's name: "Pip 'X' finished: 5 findings" under X reads "5 findings"."""
+    said = _RUN_LINE.match(text)
+    if said:
+        rest = text[said.end():]
+        text = rest if said.group(1) == "finished" else f"{said.group(1)}: {rest}"
+    words = _preview(text)
+    return words[:1].upper() + words[1:]
 
 
 def _unread_items(db, pip_id: str, seq: int) -> int:
@@ -125,7 +141,7 @@ def _summary(db, pip_id: str) -> dict:
     elif latest_post:
         try:
             value = json.loads(latest_post[1])
-            newest = _preview(value.get('text', '')) if isinstance(value, dict) and isinstance(value.get('text'), str) else ''
+            newest = _post_preview(value.get('text', '')) if isinstance(value, dict) and isinstance(value.get('text'), str) else ''
             newest_at = latest_post[2]
         except (ValueError, TypeError):
             pass

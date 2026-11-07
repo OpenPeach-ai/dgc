@@ -949,7 +949,7 @@ class PipCardAfterAllow(_Fixture):
         self.assertEqual([a["card_id"] for a in offered["apps"]], [shown["card_id"]])
         [kept] = [r[0] for r in self.registry.db.execute("SELECT text FROM pip_plugin_answers")]
         self.assertIn("board move", kept)
-        self.assertIn("DGC keeps Board's card for move under your reply that offered this action", kept)
+        self.assertIn("DGC shows Board's card for move above the words of your reply that offered this action", kept)
         self.assertEqual(apps.digest(self.store.run(run["id"])["result"]), pinned, "the reply's result is unchanged")
         self.assertEqual(self.allow(run, key="two")["status"], "succeeded", "another review from that reply still runs")
         self.assertEqual(len(self.pip_chat.reply_apps(self.store.db, run["id"])), 2)
