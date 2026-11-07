@@ -15,6 +15,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import urllib.error
@@ -419,6 +420,48 @@ class Asks(_Card):
         self.assertIn("result", self.call(_Link(self.server, mode="auto"), "move"))
         rule = {"allow": ["McpCall(mcp__board__move)"], "ask": [], "deny": []}
         self.assertIn("result", self.call(_Link(self.server, rules=rule), "move"))
+
+    def _connecting(self, delay):
+        """A manager whose hosted server is still connecting at startup, as in a chat just reopened after a reload."""
+        manager = MCPManager(str(self.root))
+        self.addCleanup(manager.stop_all)
+        server = type("Connected", (), {"stop": lambda self: None})()
+
+        def connects():
+            time.sleep(delay)
+            manager.servers["board"] = server
+            manager._background.discard("board")
+
+        manager._background.add("board")
+        manager._background_thread = threading.Thread(target=connects, daemon=True)
+        manager._background_thread.start()
+        return manager, server
+
+    def test_a_card_in_a_reopened_work_chat_waits_for_its_plugin_to_connect(self):
+        manager, server = self._connecting(0.3)
+
+        class Agent:
+            mcp = manager
+
+        self.assertIs(mcp_apps.WorkLink(Agent()).server({"server": "board", "plugin": "Board"}), server)
+
+    def test_a_plugin_that_is_not_connecting_is_said_at_once(self):
+        manager, _server = self._connecting(0.0)
+        manager._background_thread.join()
+
+        class Agent:
+            mcp = manager
+
+        began = time.monotonic()
+        with self.assertRaisesRegex(mcp_apps.CardError, "Other isn't connected in this chat now"):
+            mcp_apps.WorkLink(Agent()).server({"server": "other", "plugin": "Other"})
+        self.assertLess(time.monotonic() - began, 1.0)
+
+    def test_a_plugin_that_never_finishes_connecting_gives_up_and_says_so(self):
+        manager, _server = self._connecting(5.0)
+        began = time.monotonic()
+        self.assertIsNone(manager.server_when_ready("board", timeout=0.2))
+        self.assertLess(time.monotonic() - began, 2.0)
 
     def test_plan_mode_refuses_a_cards_call(self):
         out = self.call(_Link(self.server, mode="plan"), "show_board")
