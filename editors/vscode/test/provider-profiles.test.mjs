@@ -97,6 +97,13 @@ test('choosing another default keeps the working route in the list: it is saved,
  assert.equal(await keepWorkingRoute(ctx,ready(),PRESETS),null,'once');
  await markDefaultProfile(ctx,other.id,'beta-2');
  assert.equal(await keepWorkingRoute(ctx,ready({model:'other'}),PRESETS),null,'a saved provider is the default: nothing to keep');
+ const loopback=fresh();
+ const kept127=await keepWorkingRoute(loopback,ready({base_url:'http://127.0.0.1:11434/v1'}),PRESETS);
+ assert.equal(kept127?.name,'Ollama (local)','127.0.0.1 is the same Ollama as localhost');
+ const own=fresh();
+ const keptOwn=await keepWorkingRoute(own,ready({base_url:'http://127.0.0.1:18911/v1',model:'my-model'}),PRESETS);
+ assert.equal(keptOwn?.name,'This computer','a server of your own on this computer is kept too');
+ assert.equal(await keepWorkingRoute(fresh(),ready({base_url:'http://192.168.1.9:8000/v1'}),PRESETS),null,'a host elsewhere may need a key');
  const keyedCtx=fresh();
  assert.equal(await keepWorkingRoute(keyedCtx,ready({base_url:'https://api.openai.com/v1',model:'some-model'}),PRESETS),null,'a key only DGC holds');
  const source=(await import('node:fs')).readFileSync(new URL('../src/panel.ts',import.meta.url),'utf8');
