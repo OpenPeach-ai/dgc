@@ -1,5 +1,6 @@
 """Deterministic offline main-chat dispatch, permissions and durable retry checks."""
 import copy
+from pathlib import Path
 import json
 import os
 import unittest
@@ -204,6 +205,13 @@ class PipRunToolTests(unittest.TestCase):
                 tool_precheck._pip_run(args)
         with patch.object(pip_run_tool, '_pip_type', return_value='quill'):
             tool_precheck._pip_run(args)
+        # The look read from the real registry, not a stand-in: it is in the version's definition (a lookup of a column
+        # that doesn't exist found nothing and let Core through to its Allow card, live on 2026-11-07).
+        writer = self.store.create(self.workspace['id'], 'Writer', 'Document source', 'user', pip_type='quill')
+        self.registry.db.commit()
+        with patch('dgc.workspace_registry.state_directory', return_value=Path(self.registry.directory)):
+            self.assertEqual(pip_run_tool._pip_type(writer['id']), 'quill')
+            self.assertEqual(pip_run_tool._pip_type('pip_' + '9' * 32), '')
         pin = {'scope': 'personal', 'workspace_id': 'ws_' + '1' * 32, 'pip_id': args['pip_id'], 'expected_version': 1}
         with patch.object(pip_run_tool, 'validate_pin'), patch.object(pip_run_tool, 'validate_origin'), \
                 patch.object(pip_run_tool, 'identities', return_value=('main-chat:x', 'k')):
