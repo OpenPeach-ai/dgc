@@ -6,6 +6,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## 0.51.0 — 2026-11-06
 
+- The thinking slider in Work and a Pip's chat no longer draws a box around itself when dragged. The keyboard keeps a ring, on the slider's handle or the Pip's face.
 - A main chat's Allow card for a Pip's own tools says what it does, to which Pip by name, and why. Pausing, resuming or attaching a Pip, running one now, changing its name, handing it work and saving a draft from its result each read "Run resume_pip" and the call's JSON. The terminal's approval says the same words.
 - Needs attention counts everything your Personal Pips wait on you for, a workflow's handoff and a change waiting for review included, so the Pips home and the editor's notice say one number. `list_pip_attention` adds `reviews` and `in_projects`.
 - A Pip's failed first message can be asked again: `introduce_pip` queues a new try when every try so far failed and nothing else has been said. `list_pip_messages` adds `error_detail`, all of a failure (up to 2,000 characters, no secrets) when `error` had to stop at 300. ChatDGC keeps a failure's whole text too.

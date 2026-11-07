@@ -1693,6 +1693,8 @@
       toggle.setAttribute("aria-expanded", String(!options.hidden));
       if (!options.hidden) (options.querySelector(".sel") || options.querySelector("button"))?.focus();
     };
+    slider.onpointerdown = () => slider.classList.add("by-pointer");
+    slider.onkeydown = () => slider.classList.remove("by-pointer");
     slider.oninput = () => {
       const profiles = slider.dataset.profiles.split(","), value = profiles[Number(slider.value)];
       slider.parentElement.style.setProperty("--effort", `${Number(slider.value) / (profiles.length - 1) * 100}%`);
