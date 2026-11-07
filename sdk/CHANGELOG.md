@@ -2,6 +2,7 @@
 
 ## 0.9.0 — 2026-11-06
 
+- `start_pip_app_link` no longer links the first Composio account it finds. With accounts there, it answers `{link, accounts, wanted}` and links nothing; its optional `account` links the one chosen, and `another: true` opens a sign-in for one more.
 - A Personal Pip on Claude Code or Codex can name one of that CLI's models: `model_choice` `{"mode": "subscription", "engine": "claude" | "codex", "model": id}`, from Pips API 74. Both SDKs refuse a `model` there on an older runtime and check its shape.
 - A finished turn's Trace is a run event, `reply_trace` (`turn_id`, `trace`), just before its `turn_end`, and its `history()` holds the same record as a `reply_trace` marker. The wire copy of the protocol carries it.
 - Pips API 72 adds local Personal and Project Pip workflow list, detail, create and status controls in both SDKs. A workflow routes exact Personal results or a Project finding through two to four Pips in reviewed or unattended mode without granting the receiving Pip any new external action permission.

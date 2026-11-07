@@ -1208,6 +1208,68 @@ test('with several providers each has a checkbox for the default, and a gone or 
   assert.equal(boxes()[0].checked,false);
 });
 
+test('Add provider: All models is what the Model field holds until another is chosen, and it saves no model',()=>{
+  const x=setup();x.message({type:'providers',providers:[{id:'openai',label:'OpenAI',url:'https://api.openai.com/v1',needsKey:true},{id:'ollama',label:'Ollama',url:'http://127.0.0.1:11434/v1',needsKey:false}]});
+  x.click('[data-nav=models]');x.click('details[data-more=saved-providers] summary');
+  const preset=x.d.querySelector('#saved_provider_preset');
+  preset.value='openai';preset.dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  assert.equal(x.d.querySelector('#saved_provider_model').value,'All models');
+  x.click('#saved-provider-add');
+  const added=x.sent.filter(m=>m.type==='addProviderProfile').at(-1);
+  assert.equal(added.profile.model,'','All models is no model');
+  // A name typed is that name.
+  x.input('#saved_provider_model','gpt-a');x.click('#saved-provider-add');
+  assert.equal(x.sent.filter(m=>m.type==='addProviderProfile').at(-1).profile.model,'gpt-a');
+});
+
+test('a provider saved with All models says so; ticking Default asks for its model on its row, and nothing moves until one is chosen',()=>{
+  const x=setup();const all='provider_'+'a'.repeat(32),named='provider_'+'b'.repeat(32);
+  const profiles=[{id:all,kind:'native',name:'OpenAI',base_url:'https://api.example.test/v1',model:'',api_mode:'auto'},
+    {id:named,kind:'native',name:'Ollama',base_url:'http://127.0.0.1:11434/v1',model:'qwen',api_mode:'auto'},
+    {id:'subscription_claude',kind:'subscription',engine:'claude',name:'Claude Code',model:''}];
+  x.message({type:'providerProfiles',defaultId:named,profiles});x.click('[data-nav=models]');
+  const row=name=>[...x.d.querySelectorAll('.provider-row')].find(r=>r.textContent.includes(name));
+  assert.match(row('OpenAI').querySelector('.hint').textContent,/^All models · https:\/\/api\.example\.test\/v1/);
+  assert.match(row('Claude Code').querySelector('.hint').textContent,/^CLI default · /);
+  assert.equal(row('OpenAI').querySelector('select.provider-default-model'),null,'no dropdown until it is ticked');
+  assert.ok(row('Ollama').querySelector('select.provider-default-model'),'the default has its own');
+  const before=x.sent.filter(m=>m.type==='setProviderDefault').length;
+  const box=row('OpenAI').querySelector('input[data-provider-default]');box.checked=true;box.dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  assert.equal(x.sent.filter(m=>m.type==='setProviderDefault').length,before,'not yet');
+  assert.ok(x.sent.some(m=>m.type==='providerModels'&&m.id===all),'it asks for that provider\u2019s models');
+  x.message({type:'providerModels',id:all,ids:['gpt-a','gpt-b']});
+  const pick=row('OpenAI').querySelector('select.provider-default-model');
+  assert.deepEqual([...pick.options].map(o=>o.textContent),['Choose a model','gpt-a','gpt-b','Enter another model…']);
+  assert.equal(row('OpenAI').querySelector('input[data-provider-default]').checked,true);
+  pick.value='gpt-b';pick.dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  assert.deepEqual(JSON.parse(JSON.stringify(x.sent.filter(m=>m.type==='setProviderDefault').at(-1))),{type:'setProviderDefault',id:all,model:'gpt-b'});
+  x.message({type:'providerProfiles',defaultId:all,defaultModel:'gpt-b',profiles});
+  assert.equal(row('OpenAI').querySelector('select.provider-default-model').value,'gpt-b');
+  assert.match(row('OpenAI').querySelector('.hint').textContent,/^All models/,'it still says All models');
+  // A subscription's default row: its CLI's default and its models.
+  const claude=row('Claude Code').querySelector('input[data-provider-default]');claude.checked=true;claude.dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  assert.equal(x.sent.filter(m=>m.type==='setProviderDefault').at(-1).id,'subscription_claude','a subscription has a real default at once');
+  x.message({type:'providerProfiles',defaultId:'subscription_claude',defaultModel:'',profiles});
+  x.message({type:'providerModels',id:'subscription_claude',ids:['','opus','sonnet']});
+  assert.deepEqual([...row('Claude Code').querySelector('select.provider-default-model').options].map(o=>o.textContent),['CLI default','opus','sonnet','Enter another model…']);
+});
+
+test('the only provider, saved with All models: its row asks for the default model',()=>{
+  const x=setup();const all='provider_'+'a'.repeat(32);
+  x.message({type:'providerProfiles',defaultId:'',chooseDefault:all,profiles:[{id:all,kind:'native',name:'OpenAI',base_url:'https://api.example.test/v1',model:'',api_mode:'auto'}]});
+  x.click('[data-nav=models]');
+  x.message({type:'providerModels',id:all,ids:['gpt-a']});
+  assert.equal(x.d.querySelector('.provider-row .provider-default-only').textContent,'Default');
+  assert.deepEqual([...x.d.querySelector('.provider-row select.provider-default-model').options].map(o=>o.textContent),['Choose a model','gpt-a','Enter another model…']);
+});
+
+test('Settings opens at the plugin directory, searching for what a Connect card asked for',()=>{
+  const x=setup();
+  x.message({type:'show',section:'plugins',range:'7d',browse:'Gmail'});
+  assert.equal(x.d.querySelector('#directory-search').value,'Gmail');
+  assert.match(x.d.querySelector('.crumbs').textContent,/Directory/);
+});
+
 test('saved subscription shows its own model field while fallback and agent controls remain reachable',()=>{
   const x=setup();x.click('[data-nav=models]');
   x.click('details[data-more=saved-providers] summary');

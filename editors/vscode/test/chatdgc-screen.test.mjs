@@ -228,11 +228,10 @@ test("on a subscription the meter has no percentage and its details no setter: o
   if (skipOrFail(t)) return;
   const s = await openScreen();
   const profiles = [{ id: "subscription_claude", name: "Claude Code", kind: "subscription", engine: "claude", model: "" }];
-  const context = { window: 32768, used: 12000, parts: {}, preset: "32k", source: "estimated", compactable: true };
   try {
-    await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false, context });
+    await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
     await s.send({ type: "windows", presets: ["8k", "32k"] });
-    await s.send({ type: "context", conversation: conversation().id, context });
+    await s.send({ type: "context", conversation: conversation().id, window: 32768, used: 12000, parts: {}, preset: "32k", source: "estimated", compactable: true });
     await s.send({ type: "models", profiles, defaultId: "subscription_claude", providerId: "subscription_claude", current: "subscription:claude", ids: ["", "opus"] });
     await s.page.locator("#cd-context").waitFor({ state: "visible" });
     assert.equal(await s.page.locator("#cd-context-pct").textContent(), "");

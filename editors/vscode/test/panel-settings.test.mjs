@@ -3347,3 +3347,108 @@ test("the window a vLLM or llama.cpp server set reaches Settings with the config
   provider.onEvent({ type: "config", model: "qwen3.8:27b", base_url: "http://localhost:11434/v1", context_size: 65536 });
   assert.equal(settings.at(-1).event.server_window.window, 0);
 });
+
+// ---- a saved provider with no model (All models): every place that assumed one.
+function allModelsWorld({ listed = ["gpt-a", "gpt-b"], chosen = false } = {}) {
+  const { provider, commands } = harness();
+  const state = new Map(), secrets = new Map();
+  provider.context.globalState = { get: (key, fallback) => (state.has(key) ? state.get(key) : fallback), update: async (key, value) => { state.set(key, value); } };
+  provider.context.secrets = { get: async (key) => secrets.get(key), store: async (key, value) => { secrets.set(key, value); }, delete: async (key) => { secrets.delete(key); } };
+  const seen = [];
+  const backend = { ready: true, send: () => true, request: async (command) => {
+    seen.push(JSON.parse(JSON.stringify(command)));
+    if (command.type === "list_models_at") {
+      if (world.replace > 0) { world.replace--; return { type: "models_at", ids: [], error: "a newer request replaced this one" }; }
+      return world.fail ? { type: "models_at", ids: [], error: world.fail } : { type: "models_at", ids: world.listed };
+    }
+    return { type: "ok" };
+  } };
+  const world = { provider, seen, listed, replace: 0, fail: "", state };
+  provider.ensureBackend = () => backend;
+  provider.lastReadyEvent = { capabilities: { session_model_route: true, model_defaults: true, subscription_defaults: true, saved_model_providers: 1, model_chosen: chosen, list_models_at: 1 } };
+  return world;
+}
+const addAll = (world, name = "OpenAI") => addProviderProfile(world, { name, base_url: "https://api.example.test/v1", model: "", api_mode: "auto", api_key: "key" });
+async function addProviderProfile(world, profile) {
+  const { addProfile } = await providerProfiles();
+  return addProfile(world.provider.context, profile);
+}
+let profilesModule;
+async function providerProfiles() {
+  profilesModule ??= await import("../src/providerProfiles.js");
+  return profilesModule;
+}
+
+test("All models: choosing it never sends an empty model, and choosing a model of it moves the session", async () => {
+  const world = allModelsWorld();
+  const row = await addAll(world);
+  await world.provider.selectSubscription(row.id);
+  assert.equal(world.seen.filter((c) => c.type === "set_model").length, 0);
+  assert.match(notices.errors.at(-1), /Choose a model for this provider/);
+  await world.provider.selectSubscription(row.id, "gpt-b");
+  const moved = world.seen.filter((c) => c.type === "set_model");
+  assert.equal(moved.length, 1);
+  assert.equal(moved[0].model, "gpt-b");
+  assert.equal(moved[0].base_url, "https://api.example.test/v1");
+  assert.equal(moved[0].api_key, "key");
+});
+
+test("All models: its models are what the API lists, with no empty row; a failed list says so; a list another took the turn of asks again", async () => {
+  const world = allModelsWorld();
+  const row = await addAll(world);
+  const first = await world.provider.chatdgcModels(row.id);
+  assert.deepEqual(first.ids, ["gpt-a", "gpt-b"]);
+  world.replace = 2;
+  assert.deepEqual((await world.provider.chatdgcModels(row.id)).ids, ["gpt-a", "gpt-b"], "replaced twice, then answered");
+  world.fail = "the host refused the key";
+  const failed = await world.provider.chatdgcModels(row.id);
+  assert.deepEqual(failed.ids, []);
+  assert.equal(failed.listError, "the host refused the key");
+  const asked = await world.provider.providerModels(row.id);
+  assert.deepEqual([asked.type, asked.id, asked.ids, asked.error], ["providerModels", row.id, [], "the host refused the key"]);
+  assert.ok(!JSON.stringify(asked).includes("key\":"), "no key goes to a page");
+});
+
+test("All models: a Pip's provider is saved with the model it was set to, never none", async () => {
+  const world = allModelsWorld({ chosen: true });
+  const row = await addAll(world);
+  await assert.rejects(world.provider.savePipProvider(row.id), /Choose a model/);
+  assert.equal(world.seen.filter((c) => c.type === "save_model_provider").length, 0);
+  await world.provider.savePipProvider(row.id, "gpt-b");
+  assert.equal(world.seen.find((c) => c.type === "save_model_provider").model, "gpt-b");
+  assert.deepEqual((await world.provider.pipSavedProviders()).map((p) => [p.name, p.models]), [["OpenAI", ["gpt-a", "gpt-b"]]]);
+});
+
+test("All models: the default names its model, and the status bar and a new chat follow it", async () => {
+  const world = allModelsWorld({ chosen: true });
+  const row = await addAll(world);
+  await assert.rejects(world.provider.setDefaultProvider(row.id), /Choose a model/);
+  assert.equal(world.seen.filter((c) => c.type === "set_model_defaults").length, 0, "no default with no model");
+  await world.provider.setDefaultProvider(row.id, "gpt-a");
+  assert.equal(world.seen.find((c) => c.type === "set_model_defaults").model, "gpt-a");
+  const { defaultProfileId } = await providerProfiles();
+  assert.equal(defaultProfileId(world.provider.context), row.id);
+  const shown = await world.provider.chatdgcModels();
+  assert.equal(shown.current, `provider:${row.id}:gpt-a`);
+  assert.equal(shown.profiles[0].model, "gpt-a");
+  world.provider.paintStatusBar();
+  assert.match(statusBar.text, /gpt-a/);
+});
+
+test("the first provider saved with All models isn't the default until its row has a model, and chats still say No provider", async () => {
+  const world = allModelsWorld();
+  const posted = [];
+  world.provider.settingsEditor = { webview: { postMessage: (m) => posted.push(m) } };
+  world.provider.state.model = world.provider.lastReadyEvent.model = "builtin";
+  world.provider.state.baseUrl = world.provider.lastReadyEvent.base_url = "http://localhost:11434/v1";
+  await world.provider.onSettingsMessage({ type: "addProviderProfile", profile: { name: "OpenAI", base_url: "https://api.example.test/v1", model: "", api_mode: "auto", api_key: "key" } });
+  const said = posted.filter((m) => m.type === "providerProfiles").at(-1);
+  assert.equal(said.defaultId, "");
+  assert.equal(said.chooseDefault, said.profiles[0].id, "its row asks");
+  assert.equal(world.seen.filter((c) => c.type === "set_model_defaults").length, 0);
+  assert.equal(world.provider.noProvider(), true);
+  await world.provider.onSettingsMessage({ type: "setProviderDefault", id: said.profiles[0].id, model: "gpt-a" });
+  const after = posted.filter((m) => m.type === "providerProfiles").at(-1);
+  assert.deepEqual([after.defaultId, after.defaultModel], [said.profiles[0].id, "gpt-a"]);
+  assert.equal(world.provider.noProvider(), false);
+});

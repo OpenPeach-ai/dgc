@@ -517,3 +517,14 @@ test('no connector or no Composio: the button goes to the plugin directory, sear
  y.click(`[data-app-link-settings="${LINK}"]`);await y.drain();
  assert.deepEqual(JSON.parse(JSON.stringify(y.sent.filter(m=>m.type==='openSettings').at(-1))),{type:'openSettings',section:'plugins',browse:'Gmail'});
 });
+test('a linked app says which account on the Pip\u2019s page, and Disconnect is there',async()=>{
+ const linked=link({status:'connected',label:'pitch@example.com',server:'composio',account:'ca_pitch'});
+ const x=setup({links:[linked]});await openChat(x);
+ x.d.querySelector('[data-pip-page="info"]')?.click();
+ await x.drain();
+ const open=[...x.d.querySelectorAll('button')].find(b=>b.textContent.trim()==='Settings');assert.ok(open,'its menu has Settings');open.click();await x.drain();
+ const row=x.d.querySelector(`[data-linked-app="${LINK}"]`);assert.ok(row,'its page has the row');
+ assert.match(row.textContent,/Gmail.*pitch@example\.com/);
+ x.d.querySelector(`[data-app-link-disconnect="${LINK}"]`).click();
+ assert.equal(x.requests('disconnect_pip_app_link')[0].request.link_id,LINK);
+});

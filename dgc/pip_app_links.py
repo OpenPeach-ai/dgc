@@ -657,7 +657,7 @@ class RunSocket:
                         return (f"A {card_name} card is below your reply, but Composio is not set up in DGC yet. "
                                 "Tell the user in one sentence to add Composio in Settings → Plugins, then choose the card.")
                     return (f"A {card_name} card is now below your reply. Tell the user in one sentence to choose "
-                            f"{card_name} there; an existing Composio sign-in can be reused. You will be told when it is linked. Do not paste links.")
+                            f"{card_name} there; they choose which account. You will be told when it is linked. Do not paste links.")
                 if op == "read_app":
                     toolkit = _toolkit(args.get("app"))
                     app = next((a for a in connected(registry, self.pip_id) if a["toolkit"] == toolkit), None)

@@ -44,6 +44,16 @@ function setup({apiVersion=43,jobs=[],flows=[],suggestions=[],messages={},active
   input:(s,value)=>{const e=w.document.querySelector(s);assert.ok(e,'Missing '+s);e.value=value;e.dispatchEvent(new w.Event('input',{bubbles:true}));}};
 }
 
+test('Meet Core only once the list has come back empty: while it is read a person who has a Core sees the slash logo, not a large face',async()=>{
+ const x=setup();
+ await x.drain({list_pips:()=>undefined});
+ assert.equal(x.d.querySelector('[aria-label="Meet Core"]'),null,'no face, and no Create Core to press');
+ assert.ok(x.d.querySelector('.pips-loading'),'the logo meanwhile');
+ await x.drain();
+ assert.ok(x.d.querySelector('[aria-label="Meet Core"]'),'a list that truly came back empty meets Core');
+ assert.equal(x.d.querySelector('.pips-loading'),null);
+});
+
 test('on API 43 the view opens on your Pips, and with none it introduces Core',async()=>{
  const x=setup();await x.drain();
  assert.ok(x.requests('list_pips').some(r=>r.request.workspace_id===PW),'your Personal Pips, not the project');

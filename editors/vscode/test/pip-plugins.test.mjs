@@ -73,6 +73,17 @@ test('the Pip asks: "Let Ava use Airtable?" with what for, and Allow goes to DGC
  assert.ok(x.requests('list_pip_messages').length>=2,'the chat reloads: the Pip carries on');
 });
 
+test('an Allow card names the account it runs on: the one linked to this Pip, by address',async()=>{
+ const {pluginActionMarkup}=await import('../src/pipPlugins.js');
+ const esc=value=>String(value);
+ const draft={id:'draft',payload:{action:{call:{tool:'COMPOSIO_MULTI_EXECUTE_TOOL',arguments:{tools:[{tool_slug:'GMAIL_SEND_EMAIL',account:'ca_dev',arguments:{to:'a@example.com'}}]}}}}};
+ const plugin={name:'Composio',plugin:'composio',money:false,asks:false};
+ const html=pluginActionMarkup(draft,plugin,{esc,accountLabel:id=>id==='ca_dev'?'dev@example.com':''});
+ assert.match(html,/plugin-account">Uses <strong>dev@example\.com<\/strong>/);
+ assert.match(pluginActionMarkup(draft,plugin,{esc}),/Uses <strong>ca_dev<\/strong>/,'no label to hand: its id, never nothing');
+ assert.doesNotMatch(pluginActionMarkup({...draft,payload:{action:{call:{tool:'x',arguments:{a:1}}}}},plugin,{esc}),/plugin-account/);
+});
+
 test('Not now declines; a plugin not added in DGC opens Settings; a card for another Pip is refused',async()=>{
  const x=setup();await openChat(x);
  x.click(`[data-plugin-decline="${CARD}"]`);

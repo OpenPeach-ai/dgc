@@ -137,7 +137,8 @@ body:is(.vscode-light, .vscode-high-contrast-light) {
 .pop .pi.sel { background: var(--sel); }
 /* A row that can't be chosen says why in full: never cut to one line, and its mark and name are quiet. */
 .pop .pi[aria-disabled="true"] { cursor: default; }
-.pop .pi[aria-disabled="true"] .pd { white-space: normal; }
+.pop .pi[aria-disabled="true"].sel { background: color-mix(in srgb, var(--text) 6%, transparent); color: inherit; }
+.pop .pi[aria-disabled="true"] .pd { white-space: normal; color: var(--muted); }
 .pop .pi[aria-disabled="true"] .pi-label { color: var(--muted); }
 .pop .pi[aria-disabled="true"] .pi-plugin-mark img { opacity: .55; }
 .pop .pd { grid-column: 1 / -1; color: var(--faint); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
