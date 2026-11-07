@@ -1,6 +1,6 @@
 # DGC SDK changelog
 
-## 0.9.0 — 2026-11-06
+## 0.9.0 — 2026-11-07
 
 - `start_pip_app_link` no longer links the first Composio account it finds. With accounts there, it answers `{link, accounts, wanted}` and links nothing; its optional `account` links the one chosen, and `another: true` opens a sign-in for one more.
 - A Personal Pip on Claude Code or Codex can name one of that CLI's models: `model_choice` `{"mode": "subscription", "engine": "claude" | "codex", "model": id}`, from Pips API 74. Both SDKs refuse a `model` there on an older runtime and check its shape.

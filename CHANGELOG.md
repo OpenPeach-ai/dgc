@@ -4,7 +4,7 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
-## 0.51.0 — 2026-11-06
+## 0.51.0 — 2026-11-07
 
 - One card per Pip in a chat: a Pip's newer report card takes the place of its older one, so a routine that runs morning and evening leaves one card, not two with the same Fix. It says "failed again" when it failed again (the same failure is said again once its card is six hours old), "fixed · nothing found" when a clean run follows a problem, and what it replaced. A card you acted on stays. A failure because the model provider turned down the key says so in words, on the card and in `dgc pips runs` and `dgc pips report`, not as "HTTP 401 from Responses API: {…}", and the card offers Check sign-in instead of Fix.
 - Work never queues a run of Core, which works in its own chat: it says so before asking, instead of a run that failed at once. In a short editor the model menus scroll inside themselves instead of running past the top of the chat.
