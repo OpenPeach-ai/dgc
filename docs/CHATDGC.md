@@ -19,7 +19,7 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
   it.
 - **Queue.** A message you send while a reply is being written waits above the box and goes when the reply
   finishes. Drag it or use the arrow keys to reorder it, remove it, copy it or move it to the top.
-- **Choose a model.** The model button in the box lists the providers saved in **Settings → Models**, a host with
+- **Choose a model.** With no provider saved the button says **No provider** and opens **Settings → Models**, and nothing is sent until there is one. Otherwise the model button in the box lists the providers saved in **Settings → Models**, a host with
   its key or a signed-in Claude Code or Codex, then that provider's models. The thinking slider stays in view while
   the list scrolls. The chat keeps its choice after a reload, and a new chat starts from the default in Settings.
 - **Trace.** Under a finished reply, **Trace** beside its icons replays what the reply did, as in Work: each

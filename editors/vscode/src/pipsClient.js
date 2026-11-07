@@ -310,7 +310,13 @@ function observeAvatars() {
   }
 }
 const field = (key,label,textarea=false) => `<label>${esc(label)}${textarea?`<textarea data-draft="${key}" id="${key}">${esc(draft[key])}</textarea>`:`<input data-draft="${key}" id="${key}" value="${esc(draft[key])}" autocomplete="off">`}</label>`;
-const errorMarkup = value => value ? `<p class="notice error" role="alert">${esc(value)}</p>` : '';
+// A failed model request in a person's words, with what fixes it; its own answer one click away. Anything else as it was.
+const errorMarkup = value => {
+ if(!value)return '';
+ const failed=window.DgcMarkdown?.modelFailure?.(String(value));
+ if(!failed)return `<p class="notice error" role="alert">${esc(value)}</p>`;
+ return `<p class="notice error" role="alert">${esc(failed.headline)} ${esc(failed.next)}${failed.fix?` <button type="button" class="message-send-again" data-open-models>Settings → Models</button>`:''}</p><details class="message-failure"><summary>Details</summary><span>${esc(failed.detail)}</span></details>`;
+};
 function setError(error) { S.error=errorText(error); render(); }
 // DGC's queue of Pip controls was full for a moment: nothing ran, and DGC said to wait. The line goes as soon as a
 // later control gets through, which shows there is room again (release check, 2026-11-03: it stayed on the Pips
@@ -425,7 +431,7 @@ function providerRemoved(){const c=S.pip?.model_choice;return c?.mode==='provide
 function routerLabel(choice){const value=modelValue(choice);const found=routerChoices(S.router).find(([v])=>v===value);return found?found[1]:modelLabel(choice);}
 function defaultModelName(){return defaultRunsOn({router:S.router,default_engine:S.defaultEngine,default_model:S.defaultModel});}
 // Default: the Pips default model set in Settings, else DGC's own (list_pip_models' default_model says which runs).
-function defaultLabel(){return defaultModelName()?`Default (${defaultModelName()})`:'Default';}
+function defaultLabel(){return S.noProvider?'No provider':defaultModelName()?`Default (${defaultModelName()})`:'Default';}
 // The composer's model chip: its words and its hover. On Default it says so, as the menu row does ("Default (NAS ·
 // qwen3.5:9b)"): it read "NAS · qwen3.5:9b", the same as choosing that model. On the Router's any-system choice it
 // fits a side bar ("DGC Router (any Pip sy…" was cut) and names the computer the last reply came from, which the
@@ -454,7 +460,7 @@ function modelPicker(id,label,value,personal=false) {
 }
 async function loadModels(){
   if(!usable()||S.modelsLoading)return;const epoch=S.epoch;S.modelsLoading=true;S.modelsError='';render();
-  try{const result=pipModels(await send('list_pip_models'));if(epoch!==S.epoch)return;S.models=result.models;S.defaultModel=result.default_model;S.subscriptions=result.subscriptions;S.defaultEngine=result.default_engine;S.router=pipRouter(result.router);S.providers=result.providers;S.modelsError=result.error?errorText(result.error):'';}
+  try{const result=pipModels(await send('list_pip_models'));if(epoch!==S.epoch)return;S.models=result.models;S.defaultModel=result.default_model;S.subscriptions=result.subscriptions;S.defaultEngine=result.default_engine;S.router=pipRouter(result.router);S.providers=result.providers;S.noProvider=result.no_provider===true;S.modelsError=S.noProvider?'':result.error?errorText(result.error):'';}
   catch(error){if(epoch===S.epoch)S.modelsError=errorText(error);}
   finally{if(epoch===S.epoch){S.modelsLoading=false;render();}}
 }
@@ -503,6 +509,8 @@ function currentChatProvider(value){
  return 'connection';
 }
 function chatModelListMarkup(selected,locked,reviewed,current,subs,usage){
+ // No provider: nothing to choose from yet, only the way to add one.
+ if(S.noProvider)return `<div class="composer-model-list"><p class="composer-list-title">No provider yet</p><div class="composer-model-options" role="listbox" aria-label="Providers"><button type="button" class="composer-model-action" data-open-models><span class="composer-model-check">${composerIcon('add')}</span><span class="composer-model-row">Add provider in Settings…</span></button></div></div>`;
  const routed=routerChoices(routerOffer());
  // Every provider saved in Settings, in its order, by its name, as Work lists them; a default on a host that isn't saved
  // stays "Current host", first. With only a subscription there is no host to choose: it isn't offered as an empty step.
@@ -614,6 +622,8 @@ function waitingMarkup(){
  const waiting=waitingProposals();if(!waiting.length||archived())return '';
  return `<section class="waiting" aria-label="Changes waiting for you"><h3>${waiting.length===1?'A change is waiting for you':`${waiting.length} changes are waiting for you`}</h3>${waiting.map(p=>`<div class="waiting-row"><p>${esc(changeSummary(p))}</p><div class="actions"><button type="button" class="primary" data-proposal="${esc(p.id)}"${S.busy||!usable()?' disabled':''}>Review</button><button type="button" data-reject="${esc(p.id)}"${S.busy||!usable()?' disabled':''}>Reject</button></div></div>`).join('')}</section>`;
 }
+// Sending with no provider, or its model's name missing: the same words and link as Work's.
+function noProviderMarkup(){if(!S.noProvider||!S.noProviderSaid)return '';const w=window.DgcMarkdown?.modelWords?.('no_provider');return w?`<p class="message-status" role="alert" data-status="failed">${esc(w.headline)} ${esc(w.next)} <button type="button" class="message-send-again" data-open-models>Settings → Models</button></p>`:'';}
 function renderPipMarkdown(text){return window.DgcMarkdown?.render?window.DgcMarkdown.render(text):`<div class="chat-text">${esc(text)}</div>`;}
 // The Pip's own reply in its chat: the one place on this page a ```dgc-ui card is live. Its routine posts, run
 // reports and fixes keep it as code (renderPipMarkdown).
@@ -679,7 +689,7 @@ function chatMarkup(){
   // A run going now: its live post, at the end, where its own post will stand when it ends.
   const live=liveMarkup(markdown);
   const quietChat=!S.messages.length&&!items.length&&!live;
-  return `<section class="pip-conversation${simple?' chat-style':''}" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(postsShown()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${messages}${live}${simple?'':typing}${S.stream?.text&&!routineLive?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(replyParts(S.stream.text).join('\n\n'))}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${borrowCards()}${routineCards()}${computerWaitingCards()}${needsYouCard()}${cardRefusedCard()}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div>${simple?runnerOffMarkup():''}<div class="pip-composer-shell">${routinePopoverMarkup()}<section id="chat-queue-box" class="chat-queue-box" aria-label="Queued messages"${chatQueue().length||S.chatWaiting.length?'':' hidden'}><p class="chat-queue-head"></p><ol id="chat-queue" class="chat-queue-list" data-dom-own="1"></ol></section>${chatBox?'<div id="chat-paste-note" data-dom-own="1" hidden></div>':''}<form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}${chatBox?'<div id="chat-pop" class="pop pop-over" data-dom-own="1"></div>':''}<div class="composer-input">${chatBox?'<div id="chatText" class="mention-box" data-dom-own="1"></div>':`<label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea>`}</div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
+  return `<section class="pip-conversation${simple?' chat-style':''}" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${noProviderMarkup()}${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(postsShown()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${messages}${live}${simple?'':typing}${S.stream?.text&&!routineLive?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(replyParts(S.stream.text).join('\n\n'))}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${borrowCards()}${routineCards()}${computerWaitingCards()}${needsYouCard()}${cardRefusedCard()}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div>${simple?runnerOffMarkup():''}<div class="pip-composer-shell">${routinePopoverMarkup()}<section id="chat-queue-box" class="chat-queue-box" aria-label="Queued messages"${chatQueue().length||S.chatWaiting.length?'':' hidden'}><p class="chat-queue-head"></p><ol id="chat-queue" class="chat-queue-list" data-dom-own="1"></ol></section>${chatBox?'<div id="chat-paste-note" data-dom-own="1" hidden></div>':''}<form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}${chatBox?'<div id="chat-pop" class="pop pop-over" data-dom-own="1"></div>':''}<div class="composer-input">${chatBox?'<div id="chatText" class="mention-box" data-dom-own="1"></div>':`<label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea>`}</div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
 }
 // ---- Its runs in its chat (Pips API 51) ----
 // Each finished run is a post from the Pip, read with list_pip_run_posts and drawn among the messages; History
@@ -885,6 +895,9 @@ async function toggleChatActivity(runId){
 const firstOpenRequested=new Set();
 async function introduceOnFirstOpen(id){
  if(firstOpenRequested.has(id)||remoteHost||S.apiVersion<43||!S.runner?.online||S.runner.paused)return;
+ // With no provider there's nothing to greet with yet: it greets on the next look after one is saved.
+ if(S.providers===undefined)await loadModels();
+ if(S.noProvider||firstOpenRequested.has(id))return;
  firstOpenRequested.add(id);
  try{
   await send('introduce_pip',{pip_id:id});
@@ -1175,6 +1188,8 @@ async function sendChat(sent={}){
   if(S.apiVersion>=24&&!S.chatControls||archived()||!supportedSource()||!usable()||!S.messagesLoaded||S.busy||!S.pip||!takesMessages()||!S.runner?.online||S.runner?.paused)return;
   if(S.chatActiveRun&&S.apiVersion<73){setError('Update DGC before sending a mid-turn update to this Pip.');return;}
   const text=messageWords(draft.chatText),images=canAttachImages()?pendingImages().map(i=>i.data):[],files=canAttachImages()?pendingFiles().map(f=>({name:f.name,data:f.data})):[];if(!text&&!images.length&&!files.length){setError('Enter a message.');return;}
+  // With no provider nothing is sent: it says so, with the way to fix it, and what you wrote stays in the box.
+  if(S.noProvider&&!text.startsWith('/')){S.noProviderSaid=true;render();return;}
   if(S.chatActiveRun&&(images.length||files.length)){setError('Send attached photos or files after this reply. Mid-turn updates are text only.');return;}
   // /learn [what]: a skill drafted from this chat, shown here with Save, Edit and Cancel. It isn't a message to the Pip.
   const learning=personalPip()&&!images.length&&!files.length?learnRequest(text):null;if(learning){void startLearn(learning);return;}
@@ -2941,7 +2956,7 @@ async function createSimplePip(type,name,review=null){
   // Its hello is a first turn DGC sends; the chat opens while it is being written.
   await ensureRunner();
   let introError='';
-  try{await send('introduce_pip',{pip_id:pip.id});}catch(error){introError=`${pip.name} was created, but its first message could not start: ${errorText(error)}`;}
+  try{if(S.providers===undefined)await loadModels();if(!S.noProvider)await send('introduce_pip',{pip_id:pip.id});}catch(error){introError=`${pip.name} was created, but its first message could not start: ${errorText(error)}`;}
   if(token!==scope())return;if(review)closeReview();S.busy=false;
   await refresh(true);if(token!==scope())return;await select(pip.id);
   if(introError){S.error=introError;render();}
@@ -4112,7 +4127,7 @@ document.addEventListener('click',event=>{
   if(voiceAction==='cancel'){micCancel();return;}
   if((voiceAction==='stop'||voiceAction==='send')&&S.mic==='recording'){micShow('writing',voiceAction);render();vscode.postMessage({type:'micStop',mode:voiceAction==='send'?'send':'insert',from:'pips'});return;}
   const link=event.target.closest?.('.md-link');
-  if(link){event.preventDefault();const target=window.DgcMarkdown?.linkTarget?.(link.dataset.target+(link.dataset.line?`:${link.dataset.line}`:''));if(target?.kind==='external')vscode.postMessage({type:'openExternal',url:target.target});else if(target?.kind==='file')vscode.postMessage({type:'openFile',path:target.target,line:target.line});return;}
+  if(link){event.preventDefault();const target=window.DgcMarkdown?.linkOf?.(link.dataset);if(target?.kind==='external')vscode.postMessage({type:'openExternal',url:target.target});else if(target?.kind==='file')vscode.postMessage({type:'openFile',path:target.target,line:target.line,endLine:target.endLine});return;}
   const copy=event.target.closest?.('button.copy[data-c]');if(copy){event.preventDefault();try{vscode.postMessage({type:'copy',text:decodeURIComponent(copy.dataset.c)});copy.classList.add('done');copy.title='Copied';copy.setAttribute('aria-label','Copied');copy.innerHTML=transcriptIcon('check');}catch{/* malformed generated data is not copied */}return;}
   const photo=event.target.closest?.('img[data-message-image]');
   if(photo&&S.apiVersion>=43&&!remoteHost){openMessageImage(photo.dataset.messageImage);return;}

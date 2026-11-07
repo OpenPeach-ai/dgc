@@ -268,6 +268,10 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .cd-user .cd-bubble:
 .cd-notice { margin: 0 0 var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--err); border-radius: var(--r-md);
   background: var(--err-soft); color: var(--text); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
 .cd-notice[data-kind="info"] { border-color: var(--border-strong); background: var(--surface2); }
+.cd-notice-link { padding: 0; border: 0; background: none; color: var(--link, var(--accent-text)); font: inherit; cursor: pointer; }
+.cd-notice-link:hover { text-decoration: underline; }
+.cd-notice-detail { display: block; margin-top: var(--sp-1); color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--mono, monospace); overflow-wrap: anywhere; white-space: pre-wrap; }
+.cd-notice-detail[hidden] { display: none; }
 /* As main DGC's box: no accent ring around what you look at all day; the send button carries the accent. */
 .cd-box { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-3) var(--sp-2);
   border: 1px solid var(--border-strong); border-radius: var(--r-2xl); background: var(--surface2); box-shadow: 0 7px 24px rgba(0,0,0,.18); }
@@ -344,6 +348,16 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
   .cd-toggle:has(input:checked) { color: var(--accent); background: var(--surface2); }
   .cd-toggle:has(input:focus-visible) { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
 }
+/* Too full for the model's name at this width (a long name, Temporary on a new chat): the chips give up their words first,
+   no further than it takes. fitModelName() in chatdgc.js sets these: Temporary's word, Folder's, all of them as under 640px
+   above, then the meter's figure. */
+.cd-box.cd-fit-1 .cd-toggle .cd-tool-label, .cd-box.cd-fit-2 #cd-folder .cd-tool-label, .cd-box.cd-fit-3 .cd-tool .cd-tool-label,
+.cd-box.cd-fit-4 #cd-context-pct { display: none; }
+.cd-box.cd-fit-1 .cd-toggle > .codicon.cd-toggle-icon { display: inline-block; }
+.cd-box.cd-fit-1 .cd-toggle { position: relative; width: var(--control); height: var(--control); justify-content: center; border-radius: var(--r-sm); }
+.cd-box.cd-fit-1 .cd-toggle input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.cd-box.cd-fit-1 .cd-toggle:has(input:checked) { color: var(--accent); background: var(--surface2); }
+.cd-box.cd-fit-2 #cd-folder, .cd-box.cd-fit-3 .cd-tool { width: var(--control); padding: 0; justify-content: center; }
 /* Narrower still: the model keeps its arc and chevron (its name is the pill's tooltip and heads its menu)... */
 @container cd-box (max-width: 420px) {
   .cd-tools, .cd-tools-end { gap: var(--sp-1); }
@@ -379,6 +393,17 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 .cd-model-pill:hover, .cd-model-pill[aria-expanded="true"] { background: var(--surface); }
 .cd-model-pill:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
 .cd-model-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* No provider has no arc or chevron to fall back on: the words stay at every width, whole, and the chips give way. */
+.cd-model-pill[data-no-provider] { flex-shrink: 0; max-width: none; }
+.cd-model-pill[data-no-provider] .cd-model-name { display: inline; overflow: visible; }
+@container cd-box (max-width: 420px) {
+  .cd-box:has(.cd-model-pill[data-no-provider]) #cd-context-pct { display: none; }
+}
+/* Too narrow for the words on one row: the tools take the first row and the group the second, as under 270px above. */
+@container cd-box (max-width: 395px) {
+  .cd-box:has(.cd-model-pill[data-no-provider]) .cd-tools { flex-wrap: wrap; row-gap: var(--sp-1); }
+  .cd-box:has(.cd-model-pill[data-no-provider]) .cd-tools > .cd-spacer { display: none; }
+}
 .cd-pill-arc { flex: none; width: 16px; height: 10px; }
 .cd-arc-track, .cd-arc-fill { fill: none; stroke-width: 2; stroke-linecap: round; }
 .cd-arc-track { stroke: var(--border-strong); }

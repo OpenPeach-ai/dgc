@@ -76,7 +76,11 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   const offered=!user&&Array.isArray(choices)&&choices.length?`<div class="msg-choices" role="group" aria-label="Answer ${esc(name)}">${choices.slice(0,4).map((c,i)=>`<button type="button" class="msg-choice" data-pip-choice="${esc(c)}"${canSend?'':' disabled'}><span class="msg-choice-key" aria-hidden="true">${'ABCD'[i]}</span><span>${esc(c)}</span></button>`).join('')}</div>`:'';
   // A mid-turn message the reply never read wasn't sent, and says so; one the reply read and then failed has no answer either.
   const unsent=user&&m.steer_status==='missed',again=user&&m.steered&&m.status==='failed'?` <button type="button" class="message-send-again" data-chat-action="resend" data-message-id="${esc(m.id)}"${canSend?'':' disabled'}>Send again</button>`:'';
-  const status=user&&phase(m.status)?`<p class="message-status" role="status" data-status="${unsent?'unsent':esc(m.status)}">${unsent?'Not sent':phase(m.status)}${m.status==='failed'&&m.error?` · ${esc(m.error)}`:m.status==='failed'||m.status==='cancelled'?' · No reply':''}${again}</p>`:'';
+  // A failed model request in a person's words, with what fixes it and the provider's own answer one click away.
+  const failed=m.status==='failed'&&m.error?globalThis.DgcMarkdown?.modelFailure?.(m.error):null;
+  const failure=failed?` · ${esc(failed.headline)} ${esc(failed.next)}${failed.fix?` <button type="button" class="message-send-again" data-open-models>Settings → Models</button>`:''}`:'';
+  const failureDetail=failed?`<details class="message-failure" data-details="failure-${esc(m.id)}"><summary>Details</summary><span>${esc(failed.detail)}</span></details>`:'';
+  const status=user&&phase(m.status)?`<p class="message-status" role="status" data-status="${unsent?'unsent':esc(m.status)}">${unsent?'Not sent':phase(m.status)}${failure||(m.status==='failed'&&m.error?` · ${esc(m.error)}`:m.status==='failed'||m.status==='cancelled'?' · No reply':'')}${again}</p>${failureDetail}`:'';
   const options=!user&&prompt?`${action('retry','Ask again',m.id,!canSend)}${action('edit','Edit message',m.id,false)}`:'';
   // The word Trace after the icons, as in Work: only for a reply that recorded its steps (dgc/reply_trace.py).
   const trace=!user&&stats?.has_trace===true?`<button type="button" class="ract ract-trace" data-chat-action="trace" data-message-id="${esc(m.id)}" aria-label="Replay response trace" title="Replay response trace">Trace</button>`:'';

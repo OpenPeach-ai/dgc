@@ -313,6 +313,28 @@ def short_cause(cause: FailureCause) -> str:
             "auth": "key rejected", "model_not_found": "no such model"}.get(cause.kind, "request failed")
 
 
+def plain_failure(text) -> str:
+    """A run's failure for a line a person reads (a Pip's report, the terminal's note of it): a model request's raw answer
+    in words, anything else as it was. The raw answer stays on the run."""
+    body = str(text or "")
+    if re.match(r"(?:cannot connect|could not connect|httpconnectionpool|httpsconnectionpool)", body, re.I):
+        return "DGC can't reach the model provider"
+    found = re.match(r"(?:the model didn't answer: )?HTTP (\d{3})\b", body, re.I)
+    if found is None:
+        return body
+    code = int(found.group(1))
+    if code in (401, 403):
+        return "the model provider turned down the API key"
+    if code == 429:
+        return "the model provider is limiting requests"
+    if code in (503, 529):
+        return "the model provider is too busy"
+    if code == 404:
+        named = re.search(r"model ['\"\u2018]([^'\"\u2019]{1,200})['\"\u2019]", body)
+        return f"the model {named.group(1)} isn't available" if named else "that model isn't available"
+    return "the model provider had a problem on its side" if code >= 500 else "the model didn't answer"
+
+
 def hint_for(kind: str, *, model: str = "", base_url: str = "", streaming: bool = False) -> str:
     """The hint for a failure kind; ``llm.explain_llm_error`` prints these same strings.
 

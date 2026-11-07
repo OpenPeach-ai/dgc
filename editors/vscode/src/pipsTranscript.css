@@ -158,3 +158,8 @@ details[open]>summary .run-post-chev{transform:rotate(90deg)}
 .hist-row-out{font-weight:600}
 .hist-row-out[data-tone=bad]{color:var(--vscode-errorForeground,#f48771)}
 .hist-row-out[data-tone=clear]{font-weight:400;color:var(--vscode-descriptionForeground)}
+/* A failed model request's own words, one click away. */
+.pip-message.user .message-failure{align-self:flex-start}
+.message-failure{margin:2px 0 0;color:var(--vscode-descriptionForeground);font-size:11px;line-height:1.45}
+.message-failure summary{width:max-content;cursor:pointer;color:var(--vscode-textLink-foreground)}
+.message-failure span{display:block;margin-top:4px;overflow-wrap:anywhere;font-family:var(--vscode-editor-font-family,monospace)}

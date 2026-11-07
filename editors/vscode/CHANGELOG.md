@@ -2,6 +2,19 @@
 
 ## 0.35.0 — 2026-11-06
 
+- A reload in the middle of a reply no longer puts "'set_workspace_roots' is unavailable while a turn is running" in the chat, or flashes "Changes not recorded · partial scan". Nothing is said while the folder grant waits for the running turn. A command refused mid-turn says so in plain words, whichever CLI refused it.
+- With no provider saved, Work, ChatDGC, a Pip's chat and the status bar say "No provider" instead of naming a model that may not exist, and the button opens Settings → Models. Sending says so with a link to Settings → Models, and what you wrote stays in the box. After you save the first provider, a chat that had none moves to it.
+- A failed model request reads plainly on every surface: "The model nope:1 isn't available. Choose another one, or add a provider." with a link where Settings can fix it, and the provider's own answer (its status, address and JSON) one click away under Details.
+- With no tab open, the status bar follows the saved default, after saving a provider and after Close All Editors, with no window reload.
+- Replies' file links with a line range (`[billing.py](billing.py:9-12)`, also `a.py#L9-L12`, and names with a space) are links, and open with that range selected, in Work, ChatDGC and a Pip's chat. A Pip's tab now opens its reply's links and Settings → Models as the side bar does. A scheme or a URL never reads as a file.
+- A run of numbered lines right under a line of text is a list, as a run starting at 1 always was ("**Second heading**\n5. e\n6. f"). Lists keep their written numbers: one starting at 7 keeps 7, and 1, 2, 4 stays that. One numbered line in a paragraph stays a sentence, and code is left alone.
+- `/pips` in a Work tab opens the Pips page in the side bar, and is in the slash menu. The terminal's other commands say where the same thing is here, or that it's the terminal's, instead of "unknown command".
+- A file you @ in Work and ChatDGC stays in the sentence the model reads, as it does in a Pip's chat; the file still attaches.
+- Trace reads the same after a reload: same title and model, same times.
+- ChatDGC's model name stays readable when the row is full: the chips give up their words first, Temporary's and then the rest.
+- The cache clock's popup says "expired" once, and its cold clock is the product's mild amber, not the error red. Expired is normal.
+- The provider menu in Work uses the name saved in Settings ("Ollama (local)"), as ChatDGC's and a Pip's do.
+- No more "called recursively" warnings for every paste.
 - The agent map's link and a Pip's settings card name Settings → Models, where sub-agent and Pip models now live. The marketplace description says what the extension is now: Work, ChatDGC and Pips, on your own models or a signed-in Claude Code or Codex.
 - In Work, ChatDGC and a Pip's chat, invisible characters in a paste are now removed as it lands, and a quiet row above the prompt box says "Removed 5 invisible characters from the pasted text". It has a close control, and goes when you send or clear the draft. One undo brings the paste back as it was copied. Work's old Remove and Keep bar never appeared after a real paste in VS Code, and a paste folded into a chip skipped the check; both are fixed. Text you type stays as you typed it.
 - A paste keeps the shape it was copied with. List numbers, bullets and nesting that a browser's plain text drops come back from the same copy's HTML, as plain text, and the first line's indentation now reaches the model and the sent message.

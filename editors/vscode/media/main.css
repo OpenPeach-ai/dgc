@@ -1568,7 +1568,9 @@ body.vscode-light .rail-pop { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
 .cache-clock:hover, .cache-clock:active { background: transparent; }
 .cache-clock svg { display: block; width: 16px; height: 16px; flex: none; }
 .cache-clock .cache-clock-left { display: inline-block; font-variant-numeric: tabular-nums; }
-.cache-clock.cold { color: var(--vscode-errorForeground, var(--err-text)); }
+/* Expired is normal, and it costs one slower message: the product's mild notice (--need-text, as a row that wants a look),
+   never the error colour. */
+.cache-clock.cold { color: var(--need-text); }
 /* Unknown: the provider doesn't say how long its cache lasts, so no minutes. The clock stays, dimmed as the
    a user's mockup (the same box as a cold one, so the footer never moves), its tooltip saying why; pointed at,
    it comes up to full strength. On white, a little less dimmed: about 1.5:1, as findable as on a dark theme. */
@@ -1718,6 +1720,7 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
   #btn-output .output-label, #btn-output .output-prefix { display: none; }
   .model-control #modelname, .model-control #effortname { display: none; }
   .model-control .model-copy::before { content: "Model"; color: var(--text); }
+  .model-control.no-provider .model-copy::before { content: "No provider"; }
   .agents-text, .agents-need { display: none; }
   .agents-pill .agents-short { display: inline; }
   #workspace-changes .workspace-changes-label { display: none; }
@@ -2750,6 +2753,14 @@ button.link.model-retry-copy { display: inline-flex; align-items: center; gap: v
 .model-error-icon { color: var(--err-text); }
 .model-error-headline { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .model-error-hint { margin: 2px 0 0 22px; color: var(--text); overflow-wrap: anywhere; }
+/* The way to what fixes it: link-like, in the row's own line and size, as Steer now is. */
+.model-error .model-error-fix { min-height: 0; height: auto; padding: 0 2px; border: 0; border-radius: var(--r-sm); background: transparent;
+  color: var(--link, var(--accent-text)); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.model-error .model-error-fix:hover { background: transparent; color: var(--link, var(--accent-text)); }
+.model-error .model-error-fix:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+/* No provider: the button says so and goes to Settings, so nothing here suggests a menu of models. */
+#btn-model.no-provider .model-chevron, #btn-model.no-provider #effortname { display: none; }
+.model-error-plain { display: flex; min-height: 22px; align-items: center; gap: var(--sp-2); color: var(--text); }
 .model-error-label { margin-top: var(--sp-1); color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .model-retry-chev { transition: none; } }
 @media (max-width: 360px) {

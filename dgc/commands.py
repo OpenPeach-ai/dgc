@@ -181,7 +181,7 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("videos", "video generation: generators, jobs, stop and open one",
                 _TC, accepts_args=True, usage="videos [jobs|stop JOB|open JOB]",
                 available_while_running=True),
-    CommandSpec("pips", "your Pips: today's digest, starters, runs and reports", _TC,
+    CommandSpec("pips", "your Pips: today's digest, starters, runs and reports", _TCE, "pips",
                 accepts_args=True, usage="pips [digest|starters|ACTION…]"),
     CommandSpec("skill", "invoke an installed skill", frozenset({"classic", "editor"}),
                 "skill", True, usage="skill NAME [ARGS]"),

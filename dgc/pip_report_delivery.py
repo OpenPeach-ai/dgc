@@ -640,7 +640,8 @@ def summary_line(report: dict) -> str:
     name = _text(report.get("name"), 120)
     outcome = report.get("outcome")
     if outcome == "failed":
-        return f"Pip '{name}' failed: {_text(report.get('reason'), 200)}"
+        from .model_errors import plain_failure
+        return f"Pip '{name}' failed: {_text(plain_failure(report.get('reason')), 200)}"
     if outcome == "clear":
         return f"Pip '{name}' finished: nothing found"
     checks = report.get("checks") if isinstance(report.get("checks"), dict) else {}

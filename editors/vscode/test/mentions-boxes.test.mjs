@@ -210,7 +210,7 @@ test("ChatDGC: a file mark attaches the file and shows once; removing the mark t
     await s.page.keyboard.press("Enter");
     const sent = (await s.posted("send")).at(-1);
     assert.deepEqual(sent.attachments, [{ kind: "file", name: "calc.py", path: "/ws/src/calc.py" }], "one: the mark Backspace took went with what it stood for");
-    assert.equal(sent.text, "Read", "the file adds no words, and a message ends where its words do");
+    assert.equal(sent.text, "Read src/calc.py", "the file's name stays in the sentence the model reads");
     assert.equal(await s.page.locator(".cd-user .sent-mention.pill-file").last().textContent(), "src/calc.py");
     assert.equal(await s.page.locator(".cd-user .cd-chip").count(), 0, "in its sentence, not a chip above it");
   } finally { await s.page.close(); }

@@ -1,7 +1,7 @@
 // The prompt cache's clock in the Work composer (0.48), copied from Claude Code.
 //
 // warm -> a clock and the whole minutes left ("4m", tabular figures), changed at most once a minute,
-// never seconds, no animation; cold -> the clock alone in the error colour, with the reason in its
+// never seconds, no animation; cold -> the clock alone in the mild notice's colour, with the reason in its
 // tooltip. Reopening a chat whose cache went cold adds one note to the transcript. unknown (0.48.3) ->
 // the clock still there, dimmed, no minutes, its tooltip naming the provider that doesn't say how long
 // it caches (it was hidden, and a user, on Ollama Cloud, took the missing clock for a broken one).
@@ -119,12 +119,12 @@ test("reopening a chat whose cache went cold adds one note, once", () => {
   assert.deepEqual(x.errors, []);
 });
 
-test("it sits right after the context meter, in the error colour when cold, and only in Work", () => {
+test("it sits right after the context meter, in the mild notice's colour when cold, and only in Work", () => {
   const footer = panelSrc.slice(panelSrc.indexOf('<div id="cfooter">'), panelSrc.indexOf('<div class="cf-right">'));
   const meter = footer.indexOf('class="picker context-picker"'), clock = footer.indexOf('id="cache-clock"');
   assert.ok(meter > 0 && clock > meter, "after the context meter");
   assert.ok(clock < footer.indexOf('id="btn-settings"'), "and before the next control");
-  assert.match(mainCss, /\.cache-clock\.cold\s*\{[^}]*color:\s*var\(--vscode-errorForeground/);
+  assert.match(mainCss, /\.cache-clock\.cold\s*\{[^}]*color:\s*var\(--need-text\)/);
   assert.match(mainCss, /\.cache-clock \.cache-clock-left\s*\{[^}]*font-variant-numeric:\s*tabular-nums/);
   assert.doesNotMatch(mainCss, /\.cache-clock[^{]*\{[^}]*animation/, "no animation");
   for (const file of ["media/chatdgc.js", "src/pipsClient.js", "src/chatdgc.ts", "src/pipsView.ts"]) {
@@ -247,7 +247,7 @@ test("a click on the clock opens its own popup, never the context details, and s
   assert.deepEqual(x.errors, []);
 });
 
-test("dimmed is the unknown state's alone: warm and cold keep 0.48.0's look", () => {
+test("dimmed is the unknown state's alone: warm keeps 0.48.0's look and cold is a mild notice", () => {
   // Innermost rules of the comment-free sheet (a rule inside @media reads its own selector), one selector at a time.
   const css = mainCss.replace(/\/\*[\s\S]*?\*\//g, "");
   const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].flatMap(([, selectors, body]) =>
@@ -259,6 +259,23 @@ test("dimmed is the unknown state's alone: warm and cold keep 0.48.0's look", ()
   }
   const rest = dim.find((r) => !/:hover/.test(r.selector));
   assert.match(rest.body, /opacity:\s*\.5/, "half strength, as the agreed mockup");
-  assert.match(mainCss, /\.cache-clock\.cold\s*\{[^}]*color:\s*var\(--vscode-errorForeground/, "cold: the error colour, as before");
+  assert.match(mainCss, /\.cache-clock\.cold\s*\{[^}]*color:\s*var\(--need-text\)/, "cold: expired is normal, so never the error colour");
   assert.doesNotMatch(panelSrc.match(/<button type="button" id="cache-clock"[^>]*>/)[0], /\shidden/, "no longer hidden in the markup");
+});
+
+test("the popup says expired once: the headline, then what the next message costs", () => {
+  const x = clockDom();
+  x.event({ type: "cache_clock", state: "cold", reason: "expired", source: "anthropic", tokens: 41000, anchor_ms: T0 - 12 * 60000 });
+  x.node.click();
+  const said = x.doc.getElementById("cache-said"), next = x.doc.getElementById("cache-next");
+  assert.equal(x.doc.getElementById("cache-state").textContent, "Expired");
+  assert.equal(said.hidden, true, "no second sentence saying the same");
+  assert.equal(said.textContent, "");
+  assert.match(next.textContent, /^Idle 12m\. The prompt cache has likely expired, so your next message will re-cache about 41k tokens\.$/);
+  assert.match(x.node.title || x.node.getAttribute("aria-label"), /^Prompt cache likely expired \(idle 12m\)\.$/, "the hover label keeps its short form");
+  x.event({ type: "cache_clock", state: "cold", reason: "unloaded", source: "ollama", tokens: 41000, anchor_ms: T0 - 12 * 60000 });
+  assert.match(next.textContent, /^Ollama unloaded the model \(idle 12m\), so your next message will re-cache about 41k tokens\.$/);
+  x.event({ type: "cache_clock", state: "warm", source: "anthropic", anchor_ms: T0, expires_ms: T0 + 4 * 60000, ttl_s: 300 });
+  assert.equal(said.hidden, false, "warm still says its one line");
+  assert.notEqual(said.textContent, "");
 });

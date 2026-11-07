@@ -60,7 +60,9 @@ export interface ChatDGCHost {
   /** "sent"; "starting" while its process comes up (sent again once it's ready); "old_cli" when it
    *  has no ChatDGC. */
   chatdgcSend(cmd: Record<string, unknown>): "sent" | "starting" | "old_cli";
-  chatdgcModels(providerId?: string): Promise<{ ids: string[]; current: string; providerId?: string; defaultId?: string; profiles?: any[] }>;
+  chatdgcModels(providerId?: string): Promise<{ ids: string[]; current: string; providerId?: string; defaultId?: string; profiles?: any[]; noProvider?: boolean }>;
+  /** A file link in a reply: in the chat's own folder, else the window's. */
+  chatdgcOpenFile?(path: string, line?: number, endLine?: number, folder?: string): Promise<void>;
   /** Resolve a saved native provider just before a model turn; its key never enters chat storage. */
   chatdgcProviderRoute?(model: string): Promise<Record<string, string>>;
   postHome(message: Record<string, unknown>): void;
@@ -2310,11 +2312,17 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           this.post(tab, { type: "copied" });
         }
         return;
+      case "openModels":
+        this.host?.openSettings?.("models");
+        return;
       case "openLink": {
         const target = typeof message.target === "string" ? message.target : "";
-        // Only the web: a chat has no project, so a file link names nothing this tab can open.
         if (/^https?:\/\/[^\s]+$/i.test(target) && target.length <= 8192) {
           await vscode.env.openExternal(vscode.Uri.parse(target, true));
+        } else if (message.kind === "file" && target && target.length <= 8192) {
+          // A file the reply named: in the folder this chat reads, else the window's. Checked there as Work's are; one
+          // that isn't in either says so.
+          await this.host?.chatdgcOpenFile?.(target, message.line, message.endLine, tab.folder);
         }
         return;
       }
@@ -2383,11 +2391,14 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     this.post(tab, { type: "attached", items });
   }
 
+  /** The saved providers changed: every open chat lists its models again. */
+  modelsChanged(): void { for (const tab of this.tabs) void this.models(tab); }
+
   private async models(tab: Tab, providerId = ""): Promise<void> {
     if (!this.host) return;
     try {
-      const { ids, current, profiles, defaultId, providerId: selected } = await this.host.chatdgcModels(providerId);
-      this.post(tab, { type: "models", ids, current,
+      const { ids, current, profiles, defaultId, providerId: selected, noProvider } = await this.host.chatdgcModels(providerId);
+      this.post(tab, { type: "models", ids, current, ...(noProvider === true ? { noProvider: true } : {}),
                        ...(profiles ? { profiles } : {}), ...(defaultId ? { defaultId } : {}),
                        ...(selected ? { providerId: selected } : {}) });
     } catch (err: any) {
