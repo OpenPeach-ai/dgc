@@ -3881,7 +3881,8 @@
     pill.setAttribute("aria-expanded", "true");
     (modelMenu.querySelector(".cd-menu-row.sel") || modelMenu.querySelector(".cd-dial-face"))?.focus();
   });
-  modelMenu.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeModelMenu(true); } });
+  // On the document: choosing a provider or a model draws the menu again, and the focus goes with the row it was on.
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !modelMenu.hidden) { e.preventDefault(); e.stopPropagation(); closeModelMenu(true); } }, true);
   // Where the click was, as it happened: choosing a model draws the menu again, so its row is gone by now.
   document.addEventListener("click", (e) => { if (!e.composedPath().some((n) => n === modelMenu || n === pill)) closeModelMenu(false); });
 

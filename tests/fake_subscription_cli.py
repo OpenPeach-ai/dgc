@@ -31,6 +31,15 @@ if ENGINE == "codex" and argv[:2] == ["debug", "models"]:
                      "shell_type": "unified_exec", "supports_search_tool": True, "tool_mode": "code_mode_only"}]})
     sys.exit(0)
 
+# A real older Claude Code doesn't list --restricted and refuses the whole command for it.
+if ENGINE == "claude" and (HERE / "old-claude").exists() and "--restricted" in argv:
+    sys.stderr.write("error: unknown option '--restricted'\n")
+    sys.exit(1)
+if "--help" in argv:
+    sys.stdout.write("Usage: " + ENGINE + " [options]\n  --tools <tools...>\n" + (
+        "" if (HERE / "old-claude").exists() else "  --restricted  Restricted mode\n"))
+    sys.exit(0)
+
 script = json.loads((HERE / "script.json").read_text())
 seen = {"engine": ENGINE, "argv": argv, "cwd": os.getcwd(), "env": sorted(os.environ), "home": os.environ.get("HOME"),
         "answers": []}

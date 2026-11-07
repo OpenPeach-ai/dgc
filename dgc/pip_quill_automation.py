@@ -84,11 +84,19 @@ def _job(value):
     return _digest(value, MAX_DEFINITION_BYTES)
 
 
+def _personal_task(manifest):
+    """Quill is a Personal Pip's look as well as a project's draft writer. A Personal Pip's routine is its own task and
+    no draft: asking it for a draft's grant refused every scheduled run of a Personal Pip made as a Quill."""
+    policy = manifest.get('source_policy')
+    return (manifest.get('run_kind') == 'personal_task' and 'draft_automation' not in manifest
+            and isinstance(policy, dict) and policy.get('mode') == 'personal')
+
+
 def validate_manifest(manifest):
     """Pure worker boundary. Legacy/manual manifests remain byte-compatible."""
     if not isinstance(manifest, dict): _fail()
     grant = manifest.get('draft_automation')
-    automatic = (manifest.get('pip_type') == 'quill'
+    automatic = (manifest.get('pip_type') == 'quill' and not _personal_task(manifest)
                  and (manifest.get('trigger') in ('schedule','event') or
                       any(key in manifest for key in ('schedule','scheduled_at','event_trigger'))))
     if 'draft_automation' not in manifest:
@@ -210,7 +218,8 @@ def validate_retry(prior, schedule_occurrence, event_occurrence):
     manifest = _json_object(raw, 131072)
     grant = validate_manifest(manifest)
     if grant is None:
-        if manifest.get('pip_type') == 'quill' and (schedule_occurrence is not None or event_occurrence is not None):
+        if (manifest.get('pip_type') == 'quill' and not _personal_task(manifest)
+                and (schedule_occurrence is not None or event_occurrence is not None)):
             _fail('This request key belongs to another Quill request.', 'conflict')
         return
     expected = grant['occurrence']

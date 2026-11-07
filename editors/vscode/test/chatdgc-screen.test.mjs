@@ -180,6 +180,29 @@ test("a new ChatDGC chat uses the saved provider default and changes providers w
   } finally { await s.page.close(); }
 });
 
+test("Escape closes ChatDGC's model menu after choosing a provider redraws it", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  const nativeId = `provider_${"a".repeat(32)}`;
+  const profiles = [{ id: "subscription_codex", name: "Codex", kind: "subscription", engine: "codex", model: "" },
+                    { id: nativeId, name: "Ollama", kind: "native", model: "deepseek-v4.1-flash:cloud" }];
+  try {
+    await s.send({ type: "opened", conversation: conversation({ model: "old-direct-model" }), messages: [], earlier: 0, busy: false });
+    await s.send({ type: "models", profiles, defaultId: "subscription_codex", providerId: "subscription_codex",
+                   current: "subscription:codex", ids: ["", "gpt-5.6-sol"] });
+    await s.page.locator("#cd-model-pill").click();
+    const menu = s.page.locator("#cd-model-menu");
+    await menu.locator(".cd-menu-back").click();
+    await menu.locator(".cd-menu-row", { hasText: "Ollama" }).click();
+    await s.send({ type: "models", profiles, defaultId: "subscription_codex", providerId: nativeId,
+                   current: "subscription:codex", ids: ["deepseek-v4.1-flash:cloud"] });
+    assert.equal(await menu.isVisible(), true, "the provider's models show");
+    await s.page.keyboard.press("Escape");
+    assert.equal(await menu.isVisible(), false, "Escape closes it, wherever the redraw left the focus");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("ChatDGC Shift+Enter continues numbered prompts without sending", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();

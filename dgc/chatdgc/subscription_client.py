@@ -209,6 +209,7 @@ class SubscriptionChatClient:
         said: list[str] = []
         errors: list[str] = []
         usage: dict = {}
+        refused = False
         try:
             while True:
                 if cancel is not None and cancel.is_set():
@@ -233,7 +234,11 @@ class SubscriptionChatClient:
                         # events. Preserve that short reason without exposing raw stderr or the
                         # model's prompt to the editor.
                         reason = "Check its sign-in and model in Settings."
+                        if refused:
+                            raise RuntimeError(pip_brain.too_old(self.engine))
                         if errors:
+                            if "usage limit" in errors[-1].lower():
+                                raise RuntimeError(errors[-1])       # the vendor's own words say when it's back
                             if "429" in errors[-1] or "rate limit" in errors[-1].lower():
                                 reason = "The subscription is rate limited. Try again later."
                             elif "disabled" in errors[-1].lower() and "subscription" in errors[-1].lower():
@@ -244,8 +249,10 @@ class SubscriptionChatClient:
                     return ChatResult(content="".join(said), usage=usage)
                 if len(raw) > pip_brain.MAX_LINE:
                     continue
-                for event in parse_stream_events(pip_brain._engine(self.engine).stream,
-                                                 raw.decode("utf-8", errors="replace")):
+                line = raw.decode("utf-8", errors="replace")
+                if not line.lstrip().startswith(("{", "[")) and pip_brain.refused_option(line):
+                    refused = True
+                for event in parse_stream_events(pip_brain._engine(self.engine).stream, line):
                     kind, value = event.get("kind"), event.get("text")
                     if kind == "text" and value:
                         said.append(str(value))
