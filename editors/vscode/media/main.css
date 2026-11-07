@@ -3238,13 +3238,25 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 .pip-report-line1, .pip-report-line2 { display: flex; align-items: baseline; gap: 6px; min-width: 0; white-space: nowrap; }
 .pip-report-line1 { font: var(--w-reg) var(--t-sm)/1.45 var(--sans); border-radius: var(--r-sm); outline: none; }
 .pip-report-line1:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
-.pip-report-line-name { flex: 0 1 auto; min-width: 4em; overflow: hidden; text-overflow: ellipsis; color: var(--text-strong); font-weight: var(--w-semi); }
-.pip-report-line-state { flex: 0 0 auto; color: var(--muted); }
+/* The name gives way first: what happened ("failed again") only shortens once the name is down to 4em. A plain weight
+   like 100 still took a fraction of a pixel from it, enough for an ellipsis. */
+.pip-report-line-name { flex: 0 9999 auto; min-width: 4em; overflow: hidden; text-overflow: ellipsis; color: var(--text-strong); font-weight: var(--w-semi); }
+.pip-report-line-state { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }   /* shortens before a button leaves the card */
 .pip-report-line-state[data-bad] { color: var(--del-text); font-weight: var(--w-semi); }
 .pip-report-line-state[data-good] { color: var(--good); font-weight: var(--w-semi); }   /* "fixed · nothing found" */
 body.vscode-light .pip-report-line-state[data-good] { color: #1D7A44; }   /* --good is 2.1:1 on light; this is 5.4:1 */
+/* "failed", "failed again" and the "why" label: --del-text is 2.8:1 on a light side bar; this red is 6.5:1. */
+body.vscode-light .pip-report-line-state[data-bad], body.vscode-light .pip-report-sev[data-severity="failed"],
+body.vscode-light .pip-report-sev[data-severity="critical"], body.vscode-light .pip-report-sev[data-severity="high"] { color: #B42318; }
 .pip-report-fill { flex: 1 1 0; min-width: 0; }
 .pip-report-line-when { flex: none; color: var(--muted); font-size: var(--t-xs); font-variant-numeric: tabular-nums; }
+/* A clean run is one line: its name, what it says, the time, Open, ✕ and the chevron. In a narrow side bar (300 px) that
+   ran off the chat (live check, 7 Nov), so there the time moves into the opened card and Open and ✕ stay in reach. */
+.pip-report.slim.quiet { container: pip-report / inline-size; }
+@container pip-report (max-width: 330px) {
+  .pip-report-line1 .pip-report-line-when { display: none; }
+  .pip-report.slim[data-shown="open"] .pip-report-head .pip-report-when { display: inline; }
+}
 .pip-report-chevron { flex: none; align-self: center; color: var(--muted); font-size: 14px; transition: transform .12s; }
 .pip-report.slim[data-shown="open"] > .pip-report-main > .pip-report-line1 .pip-report-chevron,
 .pip-report-group[data-shown="open"] > .pip-report-group-head .pip-report-chevron { transform: rotate(90deg); }

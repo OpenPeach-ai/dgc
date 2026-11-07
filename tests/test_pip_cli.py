@@ -566,3 +566,29 @@ class PersonalRunFormatTests(unittest.TestCase):
                                         "manifest": manifest}})
         self.assertIn("Personal · no project access", text)
         self.assertNotIn("None", text)
+
+
+class RunErrorWordsTests(unittest.TestCase):
+    """A failed run reads in words in the terminal, as the chat's card says it (live check, 7 Nov: `dgc pips runs`
+    printed "model_failed: HTTP 401 from Responses API: {...}")."""
+    KEY = {"code": "model_failed", "message": 'HTTP 401 from Responses API: {"error": {"message": "Incorrect API key"}}'}
+
+    def test_the_runs_list_says_why_in_words_with_the_code(self):
+        from dgc import pip_cli
+        text = pip_cli._format({"runs": [
+            {"id": "run_x", "status": "failed", "created_at": "2026-11-07T16:18:00Z", "error": self.KEY},
+            {"id": "run_y", "status": "failed", "created_at": "2026-11-07T16:19:00Z",
+             "error": {"code": "worker_failed", "message": "worker exited with status 1"}},
+            {"id": "run_z", "status": "succeeded", "created_at": "2026-11-07T16:20:00Z", "error": None}]})
+        self.assertEqual(text.splitlines(), [
+            "run_x  failed  2026-11-07T16:18:00Z  Its model provider turned down the API key. (model_failed)",
+            "run_y  failed  2026-11-07T16:19:00Z  Its worker stopped unexpectedly. (worker_failed)",
+            "run_z  succeeded  2026-11-07T16:20:00Z"])
+
+    def test_a_report_says_why_in_words_then_what_the_provider_said(self):
+        from dgc import pip_cli
+        manifest = {"job_version": 1, "model": "deepseek-v4.1-flash:cloud", "source_revision": None,
+                    "source_policy": {"mode": "personal"}}
+        text = pip_cli._format({"run": {"id": "run_" + "a" * 32, "status": "failed", "pip_id": "pip_" + "b" * 32,
+                                        "manifest": manifest, "error": self.KEY}})
+        self.assertIn("Error: Its model provider turned down the API key.\nDetail: HTTP 401 from Responses API:", text)
