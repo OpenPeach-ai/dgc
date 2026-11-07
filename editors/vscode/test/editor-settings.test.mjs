@@ -1254,6 +1254,21 @@ test('a provider saved with All models says so; ticking Default asks for its mod
   assert.deepEqual([...row('Claude Code').querySelector('select.provider-default-model').options].map(o=>o.textContent),['CLI default','opus','sonnet','Enter another model…']);
 });
 
+test('a default row takes a model by name, for a host that lists none',()=>{
+  const x=setup();const all='provider_'+'a'.repeat(32);
+  x.message({type:'providerProfiles',defaultId:'',chooseDefault:all,profiles:[{id:all,kind:'native',name:'OpenAI',base_url:'https://api.example.test/v1',model:'',api_mode:'auto'}]});
+  x.click('[data-nav=models]');
+  x.message({type:'providerModels',id:all,ids:[],error:'it answered 404'});
+  const pick=x.d.querySelector('select.provider-default-model');
+  assert.deepEqual([...pick.options].map(o=>o.textContent),['Couldn\'t list its models','Enter another model…']);
+  pick.value=pick.options[1].value;assert.equal(pick.value,pick.options[1].value,'the option can be chosen');
+  pick.dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  assert.equal(x.sent.filter(m=>m.type==='setProviderDefault').length,0,'choosing to type sends nothing');
+  const typed=x.d.querySelector('input.provider-default-model');assert.ok(typed,'a box to type it in');
+  typed.value='my-model';typed.dispatchEvent(new x.w.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
+  assert.deepEqual(JSON.parse(JSON.stringify(x.sent.filter(m=>m.type==='setProviderDefault').at(-1))),{type:'setProviderDefault',id:all,model:'my-model'});
+});
+
 test('the only provider, saved with All models: its row asks for the default model',()=>{
   const x=setup();const all='provider_'+'a'.repeat(32);
   x.message({type:'providerProfiles',defaultId:'',chooseDefault:all,profiles:[{id:all,kind:'native',name:'OpenAI',base_url:'https://api.example.test/v1',model:'',api_mode:'auto'}]});

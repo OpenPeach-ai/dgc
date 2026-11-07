@@ -419,7 +419,7 @@ function render() {
             const id=pick.dataset.providerDefaultModel;
             if(!providerModelLists[id]){providerModelLists[id]={loading:true,ids:[]};send({type:'providerModels',id});pick.options[0]&&!pick.value&&(pick.options[0].textContent=savedProfiles.find(row=>row.id===id)?.kind==='subscription'?'CLI default':'Listing its models…');}
             pick.addEventListener('change',()=>{
-                if(pick.value==='\u0000other'){typingDefaultModel=id;snapshot();render();const typed=main.querySelector(`[data-provider-default-typed="${id}"]`);typed?.focus();typed?.select?.();return;}
+                if(pick.value==='--other--'){typingDefaultModel=id;snapshot();render();const typed=main.querySelector(`[data-provider-default-typed="${id}"]`);typed?.focus();typed?.select?.();return;}
                 const row=savedProfiles.find(item=>item.id===id);
                 if(!pick.value&&row?.kind!=='subscription')return;
                 pick.disabled=true;

@@ -182,7 +182,7 @@ export function renderFields(section, main, config, providers, ui) {
             if (ui.typingDefaultModel === row.id) return `<input class="provider-default-model" type="text" data-provider-default-typed="${escapeHtml(row.id)}" value="${escapeHtml(current)}" placeholder="Model name" aria-label="${label}" autocomplete="off" spellcheck="false">`;
             const named = [...new Set([...(current ? [current] : []), ...(Array.isArray(list.ids) ? list.ids.filter(Boolean) : [])])];
             const first = subscribed ? [["", "CLI default"]] : current ? [] : [["", list.loading ? "Listing its models…" : list.error ? "Couldn't list its models" : named.length ? "Choose a model" : "It lists no models"]];
-            const options = [...first, ...named.map(id => [id, id]), ["\u0000other", "Enter another model…"]];
+            const options = [...first, ...named.map(id => [id, id]), ["--other--", "Enter another model…"]];
             return `<select class="provider-default-model" data-provider-default-model="${escapeHtml(row.id)}" aria-label="${label}" title="The model new chats and Pips on Default start on">${options.map(([value, words]) => `<option value="${escapeHtml(value)}"${value === current ? " selected" : ""}>${escapeHtml(words)}</option>`).join("")}</select>`;
         };
         const savedRows = savedProviders.map(row => {
