@@ -47,6 +47,12 @@ OUTCOMES = ("findings", "clear", "failed", "checks_failed", "checks_passed", "li
 SEVERITIES = ("critical", "high", "medium", "low")
 MAX_AGE = timedelta(days=7)         # an older run is history, not news
 MAX_CANDIDATES = 200
+# The same failure again is said again once the last card about that Pip is this old (reported 7 Nov: a routine that
+# fails the same way at 8 AM and 8 PM kept showing the morning's card as if the evening run never happened). The chat
+# draws one card per Pip, so the evening's takes the morning's place ("failed again"); a check failing every half hour
+# says so at most every six hours. The same findings again stay quiet: nothing new to say.
+REMIND_AFTER = timedelta(hours=6)
+STILL_BROKEN = ("failed", "checks_failed")
 MAX_SHOWN = 16                      # cards per look; one per Pip, and a chat has at most 16 attached
 TOP_FINDINGS = 3
 MAX_LEDGER = 20000
@@ -76,6 +82,14 @@ _REASONS = {
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _since(earlier: str, later: str) -> timedelta:
+    """How long between two saved times; nothing (0) when either doesn't read."""
+    try:
+        return datetime.fromisoformat(str(later).replace("Z", "+00:00")) - datetime.fromisoformat(str(earlier).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return timedelta(0)
 
 
 def _iso(value: datetime) -> str:
@@ -372,10 +386,14 @@ def pending(registry, session_id: str, *, exclude=(), now: datetime | None = Non
         previous = registry.db.execute("""SELECT signature FROM pip_report_deliveries WHERE session_id=? AND pip_id=?
             AND signature!='none' ORDER BY finished_at DESC,run_id DESC LIMIT 1""", (session_id, pip_id)).fetchone() if ledger else None
         newest = reports[-1] if reports else None
+        told = registry.db.execute("""SELECT finished_at FROM pip_report_deliveries WHERE session_id=? AND pip_id=?
+            AND shown=1 ORDER BY finished_at DESC,run_id DESC LIMIT 1""", (session_id, pip_id)).fetchone() if ledger else None
         if newest is not None:
-            # Say it when it changes (any run since the last one told differs), or when this chat asked.
+            # Say it when it changes (any run since the last one told differs), when this chat asked, or when it is
+            # still broken and the last card about it is REMIND_AFTER old.
             if (newest["asked"] or previous is None
-                    or any(entry["signature"] != previous[0] for entry in reports)):
+                    or any(entry["signature"] != previous[0] for entry in reports)
+                    or (newest["outcome"] in STILL_BROKEN and told is not None and _since(told[0], newest["finished_at"]) >= REMIND_AFTER)):
                 newest["shown"] = True
                 newest["report"]["earlier"] = len(reports) - 1
             for entry in reports[:-1]:

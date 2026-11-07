@@ -2,7 +2,7 @@
 
 ## 0.35.0 — 2026-11-06
 
-- One card per Pip in a chat: a Pip's newer report card takes the place of its older one, so a routine that runs morning and evening leaves one card, not two with the same Fix. It says "failed twice" for the same failure again, "fixed · nothing found" when a clean run follows a problem, and, opened, what it replaced. A card you acted on (its fix started, its prompt sent) stays. A refused key or sign-in offers Check sign-in, which opens Settings → Models, instead of Fix.
+- One card per Pip in a chat: a Pip's newer report card takes the place of its older one, so a routine that runs morning and evening leaves one card, not two with the same Fix. It says "failed again" when it failed again, "fixed · nothing found" when a clean run follows a problem, and, opened, what it replaced. A card you acted on (its fix started, its prompt sent) stays. A refused key or sign-in offers Check sign-in, which opens Settings → Models, instead of Fix.
 - Work never queues a run of Core, which works in its own chat: it says so before asking, instead of a run that failed at once. In a short editor the model menus scroll inside themselves instead of running past the top of the chat.
 - A Pip's thinking slider follows the pointer while you drag it, and Work's slider takes arrow keys without closing its menu. A Connect card's line stays under the reply that asked.
 - Choosing another default in Settings keeps the model you were running on in the list: it's saved as a provider first, instead of vanishing from Settings.

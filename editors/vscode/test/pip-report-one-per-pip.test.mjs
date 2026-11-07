@@ -1,6 +1,6 @@
 // One card per Pip (reported 7 Nov): a Project Pip that runs at 8 AM and 8 PM left two "requires Fix" cards in the chat
 // for one problem, and kept the morning failure's Fix after the evening run had worked. Now a Pip's newer card takes the
-// place of its older ones: the same failure again says "failed twice", a clean run after a problem says "fixed", and the
+// place of its older ones: a failure after a failure says "failed again", a clean run after a problem says "fixed", and the
 // opened card says what it replaced. A card someone acted on (a fix started, its prompt sent) stays. A failure that
 // nothing in the project can fix, a refused key or sign-in, offers Check sign-in instead of Fix.
 import { test } from "node:test";
@@ -42,18 +42,18 @@ test("a Pip's newer card takes the place of its older one; the older run counts 
   assert.deepEqual(s.errors, []);
 });
 
-test("the same failure again is one card that says so: failed twice, then 3 times", () => {
+test("a failure after a failure is one card that says so: failed again", () => {
   const s = panel();
   s.event({ type: "pip_report", report: failedAt("a", MORNING) });
   s.event({ type: "pip_report", report: failedAt("c", EVENING) });
   let [card] = cards(s);
   assert.equal(cards(s).length, 1);
-  assert.equal(lineState(card), "failed twice");
-  assert.equal(card.querySelector(".pip-report-state").textContent, "failed twice: its model provider turned down the API key.");
+  assert.equal(lineState(card), "failed again");
+  assert.equal(card.querySelector(".pip-report-state").textContent, "failed again: its model provider turned down the API key.");
   s.event({ type: "pip_report", report: failedAt("d", LATER) });
   [card] = cards(s);
   assert.equal(cards(s).length, 1);
-  assert.equal(lineState(card), "failed 3 times");
+  assert.equal(lineState(card), "failed again", "never a count");
   assert.match(card.querySelector(".pip-report-more").textContent, /^Earlier: failed · .+, and 1 older card$/);
 });
 

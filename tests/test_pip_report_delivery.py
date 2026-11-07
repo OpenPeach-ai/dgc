@@ -303,6 +303,25 @@ class WhatIsSaidTests(Scene):
         self.finished(error={"code": "invalid_report", "message": "bad JSON again"})
         self.assertEqual(self.deliver(self.session), [])
 
+    def test_a_pip_still_failing_the_same_way_is_said_again_once_its_card_is_six_hours_old(self):
+        # Reported 7 Nov: the same failure at 8 AM and 8 PM left the morning's card as if the evening run never happened.
+        # The chat draws one card per Pip, so the evening's takes its place; a half-hourly check says it at most every 6 h.
+        error = {"code": "model_failed", "message": "HTTP 401 from Responses API: {}"}
+        self.finished(error=error)
+        self.assertEqual(len(self.deliver(self.session)), 1)
+        # 10:00 told; 10:30 and 15:30 quiet; 16:30 (6 h 30 on) told; 17:00 and 22:00 quiet; 22:30 (6 h on) told.
+        for minutes, said in ((30, 0), (300, 0), (60, 1), (30, 0), (300, 0), (30, 1)):
+            self.later(minutes)
+            self.finished(error=error)
+            self.assertEqual(len(self.deliver(self.session)), said, f"at {self.now}")
+
+    def test_the_same_findings_stay_quiet_however_long(self):
+        self.finished(findings=[finding("Same issue")])
+        self.assertEqual(len(self.deliver(self.session)), 1)
+        self.later(600)
+        self.finished(findings=[finding("Same issue")])
+        self.assertEqual(self.deliver(self.session), [], "nothing new to say")
+
     def test_runs_that_waited_together_fold_into_the_newest(self):
         self.finished(findings=[finding("One")])
         self.later(30)
