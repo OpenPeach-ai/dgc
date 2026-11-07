@@ -918,13 +918,12 @@ async function toggleChatActivity(runId){
 // guard prevents the four-second refresh from repeatedly asking while that turn queues.
 const firstOpenRequested=new Set();
 async function introduceOnFirstOpen(id){
- if(firstOpenRequested.has(id)||remoteHost||S.apiVersion<43||!S.runner?.online||S.runner.paused)return;
- // With no provider there's nothing to greet with yet: it greets on the next look after one is saved.
- if(S.providers===undefined)await loadModels();
- if(S.noProvider||firstOpenRequested.has(id))return;
+ if(firstOpenRequested.has(id)||S.noProvider||remoteHost||S.apiVersion<43||!S.runner?.online||S.runner.paused)return;
  firstOpenRequested.add(id);
  try{
-  await send('introduce_pip',{pip_id:id});
+  const said=await send('introduce_pip',{pip_id:id});
+  // With no provider there's nothing to greet with yet (the host answers this itself): it greets on the next look after one is saved.
+  if(said?.no_provider===true){firstOpenRequested.delete(id);S.noProvider=true;render();return;}
   if(S.selected===id&&S.tab==='chat')void loadMessages();
  }catch(error){
   if(S.selected===id){S.messagesError=`${S.pip?.name||'This Pip'} could not start its first message: ${errorText(error)}`;render();}
@@ -2982,7 +2981,7 @@ async function createSimplePip(type,name,review=null){
   // Its hello is a first turn DGC sends; the chat opens while it is being written.
   await ensureRunner();
   let introError='';
-  try{if(S.providers===undefined)await loadModels();if(!S.noProvider)await send('introduce_pip',{pip_id:pip.id});}catch(error){introError=`${pip.name} was created, but its first message could not start: ${errorText(error)}`;}
+  try{const said=await send('introduce_pip',{pip_id:pip.id});if(said?.no_provider===true)S.noProvider=true;}catch(error){introError=`${pip.name} was created, but its first message could not start: ${errorText(error)}`;}
   if(token!==scope())return;if(review)closeReview();S.busy=false;
   await refresh(true);if(token!==scope())return;await select(pip.id);
   if(introError){S.error=introError;render();}

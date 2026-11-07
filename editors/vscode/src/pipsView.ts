@@ -578,6 +578,11 @@ export class PipsEditor implements vscode.Disposable {
     if (this.pending.size >= 64) { fail('DGC is busy. Reconnect and try again.'); return; }
     const request = message.request;
     if (!request || typeof request !== 'object' || Array.isArray(request) || typeof request.type !== 'string') return;
+    // No provider yet: a Pip's hello has nothing to run on. Nothing is queued; the Pip says hello once one is saved.
+    if (request.type === 'introduce_pip' && this.savedProviders?.none()) {
+      this.post({ type: 'pipsReply', id: message.id, ok: true, result: { no_provider: true } }, surface);
+      return;
+    }
     // A Pip set to a saved provider: the host saves that provider first, so the choice's check and its runs find it.
     const chosen = request.model_choice ?? request.changes?.model_choice;
     if (chosen?.mode === 'provider' && message.providerSaved !== true) {

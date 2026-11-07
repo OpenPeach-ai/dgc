@@ -390,6 +390,9 @@ class PlainFailureTests(unittest.TestCase):
         self.assertEqual(line, "Pip 'Core' failed: the model qwen3:8b isn't available")
         self.assertEqual(plain_failure("HTTP 401 from x: no"), "the model provider turned down the API key")
         self.assertEqual(plain_failure("HTTP 500 from x: boom"), "the model provider had a problem on its side")
+        for said in ("cannot connect to http://127.0.0.1:1/v1 (HTTPConnectionPool(host='127.0.0.1', port=1))",
+                     "The model didn't answer: cannot connect to http://127.0.0.1:1/v1"):
+            self.assertEqual(plain_failure(said), "DGC can't reach the model provider")
         self.assertEqual(plain_failure("cannot connect to http://h:1/v1 — is your local LLM server running?"), "DGC can't reach the model provider")
         self.assertEqual(plain_failure("Not run: this Pip's plan"), "Not run: this Pip's plan", "someone else's sentence stays")
 
