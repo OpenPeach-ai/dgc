@@ -17,6 +17,7 @@ import html
 import io
 import os
 import re
+import shutil
 import tempfile
 import time
 import zipfile
@@ -1060,12 +1061,19 @@ def _why_plain(exc: Exception) -> str:
     return "the browser couldn't print it (" + (text.split("\n")[0][:120] or type(exc).__name__) + ")."
 
 
-def _print(page: str, config, browser) -> bytes:
+def _opened(page: str, config, browser, files, entry):
+    """A browser session on the page, in a folder of its own, with its other files beside it: (session, folder)."""
     from .. import browser as cdp
     folder = tempfile.mkdtemp(prefix="dgc-made-")
-    path = os.path.join(folder, "page.html")
+    path = os.path.join(folder, *str(entry).split("/"))
     session = None
     try:
+        for name, data in (files or {}).items():
+            where = os.path.join(folder, *str(name).split("/"))
+            os.makedirs(os.path.dirname(where), exist_ok=True)
+            with open(where, "wb") as handle:
+                handle.write(data)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(page)
         get = getattr(config, "get", None) or (lambda key, default=None: default)
@@ -1074,6 +1082,29 @@ def _print(page: str, config, browser) -> bytes:
                                                 allow_unsandboxed=bool(get("browser_allow_unsandboxed", False)),
                                                 readable=(folder,))
         session.navigate("file://" + path if os.sep == "/" else "file:///" + path.replace("\\", "/"))
+        return session, folder
+    except BaseException:
+        if session is not None and browser is None:
+            session.close()
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
+
+
+def page_after_scripts(page: str, config, browser, *, files=None, entry="page.html") -> str:
+    """The page's HTML once its scripts have run, for a page that writes itself."""
+    session, folder = _opened(page, config, browser, files, entry)
+    try:
+        html = session.evaluate_json("document.documentElement.outerHTML")
+        return html if isinstance(html, str) else ""
+    finally:
+        if browser is None:
+            session.close()
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def _print(page: str, config, browser, *, files=None, entry="page.html") -> bytes:
+    session, folder = _opened(page, config, browser, files, entry)
+    try:
         width, height = (8.5, 11.0) if _letter() else (8.27, 11.69)
         footer = ('<div style="font: 8px -apple-system, \'Segoe UI\', Arial, sans-serif; color: #9ca3af; width: 100%; '
                   'text-align: center;"><span class="pageNumber"></span> / <span class="totalPages"></span></div>')
@@ -1087,13 +1118,9 @@ def _print(page: str, config, browser) -> bytes:
             raise MadeError("the browser returned no PDF")
         return raw
     finally:
-        if session is not None and browser is None:
+        if browser is None:
             session.close()
-        try:
-            os.remove(path)
-            os.rmdir(folder)
-        except OSError:
-            pass
+        shutil.rmtree(folder, ignore_errors=True)
 
 
 # The built-in writer: PDF's standard Helvetica (no font to embed), WinAnsi text, laid out by its metrics.

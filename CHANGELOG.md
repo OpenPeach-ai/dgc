@@ -6,6 +6,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## 0.51.0 — 2026-11-06
 
+- A page downloads as Word and PDF, and as Excel when it holds a table, not only as a web page or a zip. Word holds what it says, PDF how it looks, Excel its tables. A dashboard's Download lists PDF first.
 - The thinking slider in Work and a Pip's chat no longer draws a box around itself when dragged. The keyboard keeps a ring, on the slider's handle or the Pip's face.
 - A main chat's Allow card for a Pip's own tools says what it does, to which Pip by name, and why. Pausing, resuming or attaching a Pip, running one now, changing its name, handing it work and saving a draft from its result each read "Run resume_pip" and the call's JSON. The terminal's approval says the same words.
 - Needs attention counts everything your Personal Pips wait on you for, a workflow's handoff and a change waiting for review included, so the Pips home and the editor's notice say one number. `list_pip_attention` adds `reviews` and `in_projects`.
@@ -14,6 +15,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 - The digest headline and the desktop notice say the number Needs attention says, with a project's reviews named apart: "2 things are waiting for you, and 1 review in a project." They used to count every folder's reviews and only some cards. The digest's `pending_*` fields are unchanged.
 - A provider's whole answer reaches a failure's Details, up to 2,000 characters. `llm.py` kept only its first 400, so Details could stop mid-word. The sentence the terminal, the logs and a Pip's report read is the same short one as before; the long form travels beside it, in `cause.full`, `full_message` and `error_detail`.
 - A main chat's email or calendar draft no longer asks twice when the model wrote Windows line endings or a trailing line: they are tidied before the draft is checked, where they used to be refused after Allow and the same card came again.
+- A number on the Pips means something needs you, and it's Needs attention's: `list_pip_attention` adds `projects`, `{workspace_id: {total, by_pip}}`, so a project's tab and its Pips' rows can say theirs. `in_projects` is their sum.
 - The context meter is right after a reload mid-reply: `get_history` now sends `context` first, so a page that knows nothing doesn't read 0% until the turn ends.
 - Trace's popup is tighter: smaller type, shorter rows and a narrower window. Dragging its timeline no longer draws a box around it, and Play and Pause are drawn icons in a small purple circle.
 - A plugin's card in a reopened Work chat waits for its plugin. After a window reload the card asked for its data while the plugin was still connecting, and every part of it said "isn't connected in this chat now" until you pressed its Retry.

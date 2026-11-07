@@ -84,7 +84,7 @@ test("the Pips that need you sit above your sessions, each with its face, what i
     const m = await page.evaluate(() => {
       const root = document.getElementById("sessions-pips"), head = document.getElementById("sessions-title").closest(".sessions-head");
       return { rows: [...root.querySelectorAll(".home-pip-row")].map((r) => [r.querySelector("strong").textContent, r.querySelector("small").textContent,
-        r.querySelector(".home-pip-badge")?.textContent || "", r.querySelector(".dgc-plush")?.dataset.character || "", r.querySelector(".dgc-plush")?.dataset.state || ""]),
+        r.closest(".home-pip-item").querySelector(".home-pip-badge")?.textContent || "", r.querySelector(".dgc-plush")?.dataset.character || "", r.querySelector(".dgc-plush")?.dataset.state || ""]),
         above: root.getBoundingClientRect().bottom <= head.getBoundingClientRect().top + 1,
         faceLoaded: [...root.querySelectorAll(".dgc-plush-rig > image:first-child")].every((i) => new URL(i.getAttribute("href"), document.baseURI).pathname === "/ext/media/pips/plush-bodies.webp") };
     });
@@ -201,7 +201,7 @@ test("a failed run's ✕ shows on hover and on focus, sits beside the name at 30
   } finally { await page.context().close(); }
 });
 
-test("100 Pips, 37 need you: 3 rows and one line, and Chat and Work stay in view at 460×700", async (t) => {
+test("100 Pips, 17 waiting and 20 with news: 3 rows and one line, and Chat and Work stay in view at 460×700", async (t) => {
   if (skipOrFail(t)) return;
   const { page, errors } = await openHome({ ...HUNDRED, width: 460, height: 700, api: 48, chats: true });
   try {
@@ -212,7 +212,7 @@ test("100 Pips, 37 need you: 3 rows and one line, and Chat and Work stay in view
         strip: Math.round(strip.height), tabsBottom: Math.round(tabs.getBoundingClientRect().bottom), tabsShown: !tabs.hidden };
     });
     assert.deepEqual(m.rows, ["1 waiting for you", "1 waiting for you", "1 waiting for you"], "what waits for you first");
-    assert.equal(m.more, "34 more need you · Show all");
+    assert.equal(m.more, "14 more need you · Show all", "what waits, so it adds up with the head's number; the 20 with news are on the Pips page");
     // Today's strip listed all 37 rows: 1,600px, with Chat and Work at 1,659px, two screens down.
     assert.ok(m.strip <= 240, `the strip stays small: ${m.strip}px`);
     assert.equal(m.tabsShown, true);

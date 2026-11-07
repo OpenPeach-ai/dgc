@@ -682,6 +682,19 @@ artifact; removal moves its versions to DGC's trash. A Page or Dashboard has a *
 in its editor panel, so its readable text can be copied even when the embedded preview does not
 offer a working copy command.
 
+**Download** on a card or in the panel saves a copy to your own computer, also from a remote window:
+
+| What it is | Downloads as |
+| --- | --- |
+| Document | Word, PDF or Markdown |
+| Slides | PowerPoint, PDF or one HTML file |
+| Sheet | Excel or CSV |
+| Dashboard | PDF or a web page |
+| Page | Word, PDF, a web page or a zip of its files, and Excel when it holds a table of data |
+
+A page's PDF keeps how it looks. Its Word file holds what it says (headings, text, lists, tables and links), and its
+Excel file holds its tables, one sheet each. A page that only draws itself has no words for Word to hold, and DGC says so.
+
 - **You and DGC both edit it, and every change is a version**, marked with who made it (you, DGC
   or a Pip's name) and when. Restoring an old version makes a new one, so nothing is lost.
 - **The model writes data, never layout.** A deck is slides with a layout and notes, a sheet is

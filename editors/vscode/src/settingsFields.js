@@ -218,7 +218,7 @@ export function renderFields(section, main, config, providers, ui) {
             + (addingSubscription ? field("Model", "Blank uses the signed-in CLI's default.", inp("saved_provider_model", providerDraft.model || ""))
                 : field("Name", "Shown in the model menu.", inp("saved_provider_name", providerDraft.name || ""))
                 + field("Host", "Reachable from this computer.", inp("saved_provider_url", providerDraft.base_url || ""))
-                + model("saved_provider_model", "Model", "All models lets each chat choose. Or name one to start on.", providerDraft.model || "All models")
+                + model("saved_provider_model", "Model", "Each chat can choose, or name one.", providerDraft.model || "All models")
                 + field("Transport", "Auto works for most hosts.", sel("saved_provider_mode", TRANSPORTS, providerDraft.api_mode || "auto"))
                 + field("API key", "Saved in VS Code, never shown again.", inp("saved_provider_key", providerDraft.api_key || "", "password")))
             + `<div class="field"><span class="words"><span class="hint" id="saved-provider-status" role="status"></span></span><span class="host-control"><button type="button" class="secondary" id="saved-provider-add">Save provider</button></span></div></div></details>`;

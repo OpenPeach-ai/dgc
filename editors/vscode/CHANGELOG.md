@@ -2,11 +2,13 @@
 
 ## 0.35.0 — 2026-11-06
 
+- A page downloads as Word and PDF, and as Excel when it holds a table, not only as a web page or a zip. Word holds what it says, PDF how it looks, Excel its tables. A dashboard's Download lists PDF first.
 - The thinking slider in Work and a Pip's chat no longer draws a box around itself when dragged. The keyboard keeps a ring, on the slider's handle or the Pip's face.
 - An answered form, site or plugin card in a Pip's chat stays as one quiet line where it was, "Allowed · Send a form to site.example". A reply that said "the card is below" while it waited no longer points at nothing. An open card keeps its look.
 - The notice, the Pips home and the Pips page say one number for what's waiting. The notice used to take the larger of two counts, and could say 2 beside a home that said 1. A workflow's handoff waiting for review now has its row in Needs attention; reviews in a project are named apart in the notice.
 - A Work chat that failed reads as failed when you open it again after a reload, with its Details, instead of "Stopped". Details also shows all of a provider's answer up to 2,000 characters, where it could stop mid-word.
 - The digest panel says the number Needs attention says, with a project's reviews in their own words, as the notice does.
+- A number means something needs you; a dot means there's something new to read. The Personal tab said the unread count, 5, beside Needs attention's 2; now both tabs say what waits there, and a tab with only something new has a dot. A Pip's row has its number for what waits on it and a dot, **Read** on hover, for what's new. The home says "Pips · 2 need you · 3 new", and Dismiss all still leaves what waits.
 - With no provider there is no context meter in Work, ChatDGC or a Pip: it read 38%, 11% and 0% of a model nobody chose.
 - A main chat's Allow card for a Pip's own tools reads in plain words with the Pip's name, never "Run resume_pip" and its JSON.
 - Details in a Pip's chat and in ChatDGC show all of a failure and wrap. They stopped at 300 characters, mid-word.

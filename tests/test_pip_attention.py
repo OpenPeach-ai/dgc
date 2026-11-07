@@ -100,6 +100,9 @@ class AttentionTests(unittest.TestCase):
         self.assertEqual(apart["total"], 2)
         self.assertEqual(apart["in_projects"], 1)
         self.assertNotIn(project["id"], apart["by_pip"])
+        # What a project's tab and its row say: its number, and the Pip it waits on. A Personal folder is never in it.
+        self.assertEqual(apart["projects"], {self.workspace["id"]: {"total": 1, "by_pip": {project["id"]: 1}}})
+        self.assertEqual(sum(place["total"] for place in apart["projects"].values()), apart["in_projects"])
         self.assertEqual(self.now, now)
 
     def test_settled_expired_and_archived_ones_are_gone_and_the_limit_keeps_the_count(self):
