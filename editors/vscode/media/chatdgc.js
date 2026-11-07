@@ -3783,6 +3783,11 @@
     }
   }
   if (typeof ResizeObserver === "function" && $("cd-box")) new ResizeObserver(() => fitModelName()).observe($("cd-box"));
+  // The row can fill in after the first measure, with the box as wide as it was (a window reload: fonts, chips arriving).
+  let refit = 0;
+  const fitSoon = () => { if (!refit) refit = requestAnimationFrame(() => { refit = 0; fitModelName(); }); };
+  if (typeof ResizeObserver === "function" && $("cd-model-name")) new ResizeObserver(fitSoon).observe($("cd-model-name"));
+  document.fonts?.ready?.then(fitSoon);
   function modelName(value) {
     if (value.startsWith("subscription:")) {
       const body = value.slice("subscription:".length), cut = body.indexOf(":");

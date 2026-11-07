@@ -311,11 +311,11 @@ body.vscode-light .project-icon[data-color="green"] { color:#16A34A; } body.vsco
 #sessions-host .home-pip-read-word { display:none; }
 #sessions-host .home-pip-read:is(:hover, :focus-visible) .home-pip-read-count { display:none; }
 #sessions-host .home-pip-read:is(:hover, :focus-visible) .home-pip-read-word { display:inline; }
-#sessions-host .home-pips-quiet { display:flex; align-items:center; gap:var(--sp-2); padding:0 var(--sp-1); min-width:0; }
+#sessions-host .home-pips-quiet { display:flex; flex-wrap:wrap; align-items:center; gap:var(--sp-1) var(--sp-2); padding:0 var(--sp-1); min-width:0; }
 #sessions-host .home-pips-faces { display:inline-flex; flex:none; gap:var(--sp-1); }
 #sessions-host .home-pip-face-button { display:inline-flex; padding:1px; border:0; border-radius:50%; background:transparent; cursor:pointer; }
 #sessions-host .home-pip-face-button:hover { transform:translateY(-1px); }
-#sessions-host .home-pips-quiet-text { min-width:0; color:var(--muted); font:var(--w-reg) var(--t-xs)/1.3 var(--sans); }
+#sessions-host .home-pips-quiet-text { flex:1 1 140px; min-width:0; color:var(--muted); font:var(--w-reg) var(--t-xs)/1.3 var(--sans); }
 @media (prefers-reduced-motion: reduce) { #sessions-host .home-pip-face-button:hover { transform:none; } }
 /* A narrow side bar keeps the button and its name for screen readers; the word goes first. */
 @media (max-width: 300px) { #sessions-host .session-open .session-open-label { display:none; } }

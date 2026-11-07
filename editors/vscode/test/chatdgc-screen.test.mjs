@@ -305,6 +305,28 @@ test("the model's name stays readable in a full row: the chips give up their wor
   }
 });
 
+test("the model's name is measured again when the row changes around it, with no change to the box's width", async (t) => {
+  if (skipOrFail(t)) return;
+  const LONG = "deepseek-v4.1-flash:cloud";
+  const s = await openScreen({ width: 760 });
+  try {
+    await s.send({ type: "opened", conversation: conversation({ model: "" }), messages: [], earlier: 0, busy: false });
+    await s.send({ type: "models", ids: [LONG], current: LONG });
+    await s.frame(); await s.frame();
+    const width = await s.page.evaluate(() => document.getElementById("cd-box").getBoundingClientRect().width);
+    // What a window reload does: the row fills in after the first measure, and the box stays as wide as it was.
+    await s.page.evaluate(() => { for (const id of ["cd-folder-wrap", "cd-output-wrap"]) { const n = document.getElementById(id); if (n) n.hidden = false; }
+      for (const n of document.querySelectorAll(".cd-output[hidden]")) n.hidden = false; });
+    await s.page.evaluate(() => { const c = document.getElementById("cd-box").querySelector(".cd-tools, .cd-box-tools") || document.getElementById("cd-attach")?.parentElement;
+      const extra = document.createElement("span"); extra.id = "__wide"; extra.style.cssText = "display:inline-block;flex:none;width:260px;height:1px"; c?.prepend(extra); });
+    await s.frame(); await s.frame(); await s.frame();
+    const f = await s.page.evaluate(() => { const n = document.getElementById("cd-model-name"), b = document.getElementById("cd-box"); return { shown: n.clientWidth, full: n.scrollWidth, box: b.getBoundingClientRect().width, steps: b.className }; });
+    assert.equal(f.box, width, "the box didn't change, so only the row can set this off");
+    assert.ok(f.shown >= Math.min(f.full, 110) || /fit-|cd-fit/.test(f.steps), `"deepseek-v..." stays: ${JSON.stringify(f)}`);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("a failed model request in the notice: plain words, the way to fix it, the raw answer behind Details", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen({ width: 900 });
