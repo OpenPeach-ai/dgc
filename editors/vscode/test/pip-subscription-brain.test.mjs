@@ -189,6 +189,20 @@ test('below API 74 a list from a newer host is not offered',async()=>{
  assert.deepEqual(providerRows(x),['Current host','Claude Code','Codex']);
 });
 
+test('with no provider the host answers a Pip\'s hello itself, and queues it once one is saved',async()=>{
+ const sent=[],posted=[];let none=true;
+ const editor=new view.PipsEditor({},m=>{sent.push(m);return true;},()=>{});editor.attach(m=>posted.push(m));
+ editor.ready({pips_supported:true,pips_enabled:true,pips_api_version:74},{});
+ editor.useSavedProviders(async()=>[],async()=>{},()=>none);
+ const before=sent.length;
+ editor.receive({type:'pipsRequest',id:'hello',request:{type:'introduce_pip',pip_id:PIP}});
+ assert.equal(sent.length,before,'nothing goes to the Pips control');
+ assert.deepEqual(JSON.parse(JSON.stringify(posted.find(m=>m.id==='hello'))),{type:'pipsReply',id:'hello',ok:true,result:{no_provider:true}});
+ none=false;
+ editor.receive({type:'pipsRequest',id:'hello2',request:{type:'introduce_pip',pip_id:PIP}});
+ assert.equal(sent.at(-1).request.type,'introduce_pip');
+});
+
 test('the host adds the saved providers to the list and saves one before a Pip is set to it, with no key in the view',async()=>{
  const sent=[],posted=[];const calls=[];
  const editor=new view.PipsEditor({},m=>{sent.push(m);return true;},()=>{});editor.attach(m=>posted.push(m));

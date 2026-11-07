@@ -126,6 +126,18 @@ test('Create Core makes Core with just its name, asks it to say hello, and opens
  assert.ok(x.requests('list_pip_messages').some(r=>r.request.pip_id===core.id));
 });
 
+test('with no provider a new Pip is made and opens, and its hello waits for one',async()=>{
+ const none={default_model:'m',models:[],connection:'configured',no_provider:true,providers:[]};
+ const x=setup();await x.drain();
+ x.click('#create-core');
+ const core=pip('pip_'+'c'.repeat(32),'Core','core');x.addPip(core);x.answer(x.requests('create_pip')[0],{pip:core});await flush();
+ const hello=x.requests('introduce_pip')[0];assert.ok(hello,'the host decides, not a model listing first');
+ x.answer(hello,{no_provider:true});await x.drain({list_pip_models:()=>none});
+ assert.ok(x.d.querySelector('.pip-topbar'),'its chat is open');
+ for(let i=0;i<3;i++)await x.drain({list_pip_models:()=>none});
+ assert.equal(x.requests('introduce_pip').length,1,'no hello is asked for again while there is no provider');
+ assert.match(x.d.querySelector('#chat-model').textContent,/No provider/);
+});
 test('a rejected first message leaves the new Pip open and names the runner problem',async()=>{
  const x=setup();await x.drain();x.click('#create-core');
  const core=pip('pip_'+'e'.repeat(32),'Core','core');x.addPip(core);
