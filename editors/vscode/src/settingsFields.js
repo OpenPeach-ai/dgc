@@ -173,17 +173,35 @@ export function renderFields(section, main, config, providers, ui) {
             if (info?.auth_state === "signed_out") return { problem: true, text: `Not signed in on this computer. Run ${info.login_cmd || `${row.engine} login`} first.` };
             return { problem: false, text: "Signed-in CLI" };
         };
+        // The default's model, chosen on its row: an All models provider needs one to be the default at all; a subscription's
+        // first choice is its CLI's own. The row keeps saying what the provider is; the dropdown says what new chats start on.
+        const defaultModelPicker = (row, current) => {
+            const list = (ui.providerModels || {})[row.id] || {};
+            const subscribed = row.kind === "subscription";
+            const label = `Default model for ${escapeHtml(row.name)}`;
+            if (ui.typingDefaultModel === row.id) return `<input class="provider-default-model" type="text" data-provider-default-typed="${escapeHtml(row.id)}" value="${escapeHtml(current)}" placeholder="Model name" aria-label="${label}" autocomplete="off" spellcheck="false">`;
+            const named = [...new Set([...(current ? [current] : []), ...(Array.isArray(list.ids) ? list.ids.filter(Boolean) : [])])];
+            const first = subscribed ? [["", "CLI default"]] : current ? [] : [["", list.loading ? "Listing its models…" : list.error ? "Couldn't list its models" : named.length ? "Choose a model" : "It lists no models"]];
+            const options = [...first, ...named.map(id => [id, id]), ["\u0000other", "Enter another model…"]];
+            return `<select class="provider-default-model" data-provider-default-model="${escapeHtml(row.id)}" aria-label="${label}" title="The model new chats and Pips on Default start on">${options.map(([value, words]) => `<option value="${escapeHtml(value)}"${value === current ? " selected" : ""}>${escapeHtml(words)}</option>`).join("")}</select>`;
+        };
         const savedRows = savedProviders.map(row => {
             const state = row.kind === "subscription" ? subscriptionState(row) : null;
-            const hint = `${escapeHtml(row.model || "CLI default")}${state
-                ? ` · <span class="${state.problem ? "provider-problem" : ""}">${escapeHtml(state.text)}</span>` : " · " + escapeHtml(row.base_url)}`;
+            const allModels = row.kind !== "subscription" && !row.model;
             // One provider is the default. With several, a checkbox on each says which.
             const only = savedProviders.length === 1 && !ui.directProvider;
-            const isDefault = ui.defaultProviderId === row.id || only;
+            const choosing = ui.choosingDefaultId === row.id || (only && allModels && ui.defaultProviderId !== row.id);
+            const isDefault = ui.choosingDefaultId ? ui.choosingDefaultId === row.id : ui.defaultProviderId === row.id || only;
+            const current = !isDefault ? "" : allModels ? (ui.defaultProviderId === row.id ? String(ui.defaultProviderModel || "") : "") : String(row.model || "");
+            // The default row's dropdown names its model, so its words don't say it twice. All models always says so.
+            const said = allModels ? "All models" : isDefault ? "" : row.model || "CLI default";
+            const detail = state ? `<span class="${state.problem ? "provider-problem" : ""}">${escapeHtml(state.text)}</span>` : escapeHtml(row.base_url);
+            const hint = `${said ? escapeHtml(said) + " · " : ""}${detail}`;
             const choice = only
                 ? `<span class="provider-default-only">Default</span>`
                 : `<label class="provider-default-check"><input type="checkbox" data-provider-default="${escapeHtml(row.id)}" aria-label="Make ${escapeHtml(row.name)} the default"${isDefault ? " checked" : ""}>Default</label>`;
-            return `<div class="field"><span class="words"><span class="name-line"><span class="name">${escapeHtml(row.name)}</span></span><span class="hint">${hint}</span></span><span class="host-control">${choice}<button type="button" class="secondary" data-provider-remove="${escapeHtml(row.id)}" aria-label="Remove ${escapeHtml(row.name)}">Remove</button></span></div>`;
+            const picker = isDefault || choosing ? defaultModelPicker(row, current) : "";
+            return `<div class="field provider-row${picker ? " with-default-model" : ""}"><span class="words"><span class="name-line"><span class="name">${escapeHtml(row.name)}</span></span><span class="hint">${hint}</span></span><span class="host-control">${choice}${picker}<button type="button" class="secondary" data-provider-remove="${escapeHtml(row.id)}" aria-label="Remove ${escapeHtml(row.name)}">Remove</button></span></div>`;
         }).join("");
         // The default from before saved providers: its key is only DGC's, so it isn't one of them, and it is still the default.
         const direct = ui.directProvider;
@@ -200,7 +218,7 @@ export function renderFields(section, main, config, providers, ui) {
             + (addingSubscription ? field("Model", "Blank uses the signed-in CLI's default.", inp("saved_provider_model", providerDraft.model || ""))
                 : field("Name", "Shown in the model menu.", inp("saved_provider_name", providerDraft.name || ""))
                 + field("Host", "Reachable from this computer.", inp("saved_provider_url", providerDraft.base_url || ""))
-                + field("Model", "The starting model for this provider.", inp("saved_provider_model", providerDraft.model || ""))
+                + model("saved_provider_model", "Model", "All models lets each chat choose. Or name one to start on.", providerDraft.model || "All models")
                 + field("Transport", "Auto works for most hosts.", sel("saved_provider_mode", TRANSPORTS, providerDraft.api_mode || "auto"))
                 + field("API key", "Saved in VS Code, never shown again.", inp("saved_provider_key", providerDraft.api_key || "", "password")))
             + `<div class="field"><span class="words"><span class="hint" id="saved-provider-status" role="status"></span></span><span class="host-control"><button type="button" class="secondary" id="saved-provider-add">Save provider</button></span></div></div></details>`;

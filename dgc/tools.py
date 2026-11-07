@@ -651,7 +651,10 @@ TOOL_SCHEMAS = [
         "path. Do NOT narrate that you built or served something and do NOT type a 127.0.0.1 URL yourself "
         "— nothing is served until this tool RETURNS the URL to you. Pass a directory (served as a site) "
         "or a single .html file. 127.0.0.1 only; '/artifact' opens or stops previews. Call it whenever a "
-        "result is meant to be looked at.",
+        "result is meant to be looked at. It serves files that belong to THIS project, and only from inside "
+        "it. A page about anything else (a summary of mail, a one-off report) needs no file here: use "
+        "make_artifact with type page and its HTML in content, when offered. Never copy a page into the "
+        "project just to show it.",
         {"path": {"type": "string", "description": "Directory or .html file to preview (relative to the project)"},
          "name": {"type": "string", "description": "A short label for the preview (e.g. 'weather dashboard')"}},
         ["path"]),

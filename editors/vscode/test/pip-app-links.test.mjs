@@ -52,7 +52,7 @@ test('the Pip asks; the card says what for, Connect goes to DGC by card, and Not
  const x=setup();await openChat(x);
  const card=x.d.querySelector(`[data-app-link="${LINK}"]`);assert.ok(card,'the Connect card is in the chat');
  assert.match(card.textContent,/Link Gmail to .*To read your new mail each morning\./);
- assert.match(card.textContent,/Linking Gmail to this Pip also lets its email-trigger routines run.*reuse an active Gmail account in Composio/);
+ assert.match(card.textContent,/Linking Gmail to this Pip also lets its email-trigger routines run.*If Composio already has Gmail accounts, you choose which one/);
  assert.deepEqual([...card.querySelectorAll('button')].map(b=>b.textContent),['Link Gmail','Not now']);
  x.click(`[data-app-link-start="${LINK}"]`);
  const start=x.requests('start_pip_app_link')[0];assert.deepEqual(JSON.parse(JSON.stringify(start.request)),{type:'start_pip_app_link',pip_id:PIP,link_id:LINK});
@@ -66,14 +66,14 @@ test('the Pip asks; the card says what for, Connect goes to DGC by card, and Not
 
 test('while the browser is open the card checks itself, then closes when connected; the Pip is asked to carry on',async()=>{
  const x=setup({links:[link({status:'authorizing'})]});await openChat(x);
- x.click(`[data-app-link-start="${LINK}"]`);x.answer(x.requests('start_pip_app_link')[0],{link:link({status:'authorizing'}),opened:true,sign_in_host:'connect.composio.dev'});await flush();
+ x.click(`[data-app-link-another="${LINK}"]`);assert.equal(x.requests('start_pip_app_link')[0].request.another,true,'Open sign-in again opens a sign-in, not the list');x.answer(x.requests('start_pip_app_link')[0],{link:link({status:'authorizing'}),opened:true,sign_in_host:'connect.composio.dev'});await flush();
  const look=x.timers.filter(t=>t.ms===4000).at(-1);assert.ok(look,'a look in four seconds');look.fn();await flush();
  const check=x.requests('check_pip_app_link').at(-1);assert.equal(check.request.link_id,LINK);
  x.answer(check,{link:link({status:'authorizing'}),connected:false});await flush();
  x.click(`[data-app-link-check="${LINK}"]`);
  const now=x.requests('check_pip_app_link').at(-1);x.setLinks([link({status:'connected',label:'me@example.com',server:'composio',account:'gmail_A1b2C3d4E5f6G7h8'})]);x.answer(now,{link:link({status:'connected',label:'me@example.com',server:'composio',account:'gmail_A1b2C3d4E5f6G7h8'}),connected:true});await x.drain();
  assert.equal(x.d.querySelector(`[data-app-link="${LINK}"]`),null,'the completed request no longer occupies the composer area');
- assert.match(x.d.body.textContent,/Gmail is connected to Gmail\./);
+ assert.match(x.d.querySelector('[data-app-link-settled]').textContent,/Gmail linked to Gmail · me@example\.com/,'one quiet line says which account');
  assert.ok(x.requests('list_pip_messages').length>=2,'the chat reloads: the Pip carries on');
 });
 
@@ -87,7 +87,7 @@ test('without Composio the card says how to add it, and Not now declines',async(
  const x=setup({composio:false});await openChat(x);
  const card=x.d.querySelector(`[data-app-link="${LINK}"]`);
  assert.match(card.textContent,/first turn on Composio in Settings → Plugins/);
- x.click(`[data-app-link-settings="${LINK}"]`);assert.deepEqual(JSON.parse(JSON.stringify(x.sent.at(-1))),{type:'openSettings',section:'plugins'});
+ x.click(`[data-app-link-settings="${LINK}"]`);assert.deepEqual(JSON.parse(JSON.stringify(x.sent.at(-1))),{type:'openSettings',section:'plugins',browse:'Gmail'});
  x.click(`[data-app-link-decline="${LINK}"]`);
  const no=x.requests('decline_pip_app_link')[0];assert.equal(no.request.link_id,LINK);
  x.answer(no,{link:link({status:'declined'})});await flush();
@@ -100,9 +100,9 @@ test('Outlook card uses the Microsoft plugin even when Composio is absent',async
  const card=x.d.querySelector(`[data-app-link="${LINK}"]`);
  assert.match(card.textContent,/Couldn’t connect Outlook.*Connect Microsoft Mail in Settings/);
  assert.doesNotMatch(card.textContent,/turn on Composio/);
- assert.deepEqual([...card.querySelectorAll('button')].map(b=>b.textContent),['Open Plugins','Try again','Not now']);
+ assert.deepEqual([...card.querySelectorAll('button')].map(b=>b.textContent),['Browse plugins','Try again','Not now']);
  x.click(`[data-app-link-settings="${LINK}"]`);
- assert.deepEqual(JSON.parse(JSON.stringify(x.sent.at(-1))),{type:'openSettings',section:'plugins'});
+ assert.deepEqual(JSON.parse(JSON.stringify(x.sent.at(-1))),{type:'openSettings',section:'plugins',browse:'Outlook'});
 });
 
 test('a card for another Pip, or a forged reply, is refused',async()=>{
@@ -132,9 +132,10 @@ test('an account your other Pips use: the card asks to let this one use it, with
  const x=setup({links:[link({known_label:'me@example.com'})]});await openChat(x);
  const card=x.d.querySelector(`[data-app-link="${LINK}"]`);
  assert.match(card.textContent,/Let Gmail use your Gmail\?.*me@example\.com · already connected\. To read your new mail each morning\./);
- assert.deepEqual([...card.querySelectorAll('button')].map(b=>b.textContent),['Allow','Not now']);
+ assert.deepEqual([...card.querySelectorAll('button')].map(b=>b.textContent),['Choose an account','Not now']);
  x.click(`[data-app-link-start="${LINK}"]`);
- assert.equal(x.requests('start_pip_app_link').length,1,'Allow reuses the account (the backend finds it; no sign-in page)');
+ assert.equal(x.requests('start_pip_app_link').length,1,'it asks for the list; another Pip using an account links nothing here');
+ assert.equal(x.requests('start_pip_app_link')[0].request.account,undefined);
  const old=setup({links:[link({status:'connected',label:'me@example.com',server:'composio',account:'ca_done',updated_at:'2026-10-01T09:00:00.000Z'})]});await openChat(old);
  assert.equal(old.d.querySelector('[data-app-link]'),null,'an old connection is not a card in the chat');
 });
@@ -468,3 +469,51 @@ test('editing a repeating event says it stays a series, and Add says invite only
  assert.match(links.calendarCardMarkup(draft,{esc:s=>String(s),link:calendarLink(),edit}),/data-allow-create="[^"]+">Add event</,'no guests left, nobody is invited');
 });
 
+// A Pip asked for dev@vibedgc.com; Link Gmail bound Composio's first account, the wrong inbox, and opened nothing.
+const ACCOUNTS=[{id:'ca_pitch',label:'pitch@example.com'},{id:'ca_dev',label:'dev@example.com'}];
+const started=(x)=>x.requests('start_pip_app_link');
+test('with two accounts the card lists them by address and links only the one picked, with one quiet line after',async()=>{
+ const x=setup();await openChat(x);
+ x.click(`[data-app-link-start="${LINK}"]`);await x.drain();
+ assert.deepEqual(JSON.parse(JSON.stringify(started(x)[0].request)),{type:'start_pip_app_link',pip_id:PIP,link_id:LINK},'Link Gmail names no account');
+ x.answer(started(x)[0],{link:link(),accounts:ACCOUNTS,wanted:'',redirect_url:null});await x.drain();
+ const rows=[...x.d.querySelectorAll('[data-app-link-account]')];
+ assert.deepEqual(rows.map(r=>r.textContent),['pitch@example.com','dev@example.com']);
+ assert.match(x.d.querySelector('[data-app-link]').textContent,/Which Gmail should Gmail use\?/);
+ assert.ok(x.d.querySelector(`[data-app-link-another="${LINK}"]`),'Use another account is always offered');
+ assert.equal(x.d.querySelector(`[data-app-link-another="${LINK}"]`).textContent,'Use another account');
+ assert.equal(x.d.querySelector(`[data-app-link-another="${LINK}"]`).className,'quiet');
+ rows[1].click();await x.drain();
+ assert.deepEqual(JSON.parse(JSON.stringify(started(x)[1].request)),{type:'start_pip_app_link',pip_id:PIP,link_id:LINK,account:'ca_dev'});
+ const linked=link({status:'connected',label:'dev@example.com',server:'composio',account:'ca_dev'});x.setLinks([linked]);
+ x.answer(started(x)[1],{link:linked,connected:true,redirect_url:null});await x.drain();
+ assert.equal(x.d.querySelector('[data-app-link]'),null,'the card has gone');
+ assert.match(x.d.querySelector('[data-app-link-settled]').textContent,/Gmail linked to Gmail · dev@example\.com/);
+});
+test('an address the Pip named comes first, says so, and clicking nothing binds nothing',async()=>{
+ const x=setup();await openChat(x);
+ x.click(`[data-app-link-start="${LINK}"]`);await x.drain();
+ x.answer(started(x)[0],{link:link(),accounts:[{...ACCOUNTS[1],named:true},ACCOUNTS[0]],wanted:'',redirect_url:null});await x.drain();
+ const first=x.d.querySelector('[data-app-link-account]');
+ assert.equal(first.dataset.appLinkAccount,'ca_dev');
+ assert.match(first.textContent,/asked for this one/);
+ assert.equal(started(x).length,1,'no account was sent');
+});
+test('an address no account matches is said plainly, and Use another account is the main button',async()=>{
+ const x=setup();await openChat(x);
+ x.click(`[data-app-link-start="${LINK}"]`);await x.drain();
+ x.answer(started(x)[0],{link:link(),accounts:[ACCOUNTS[0]],wanted:'dev@example.com',redirect_url:null});await x.drain();
+ assert.match(x.d.querySelector('.app-link-wanted').textContent,/asked for dev@example\.com\. None of your Gmail accounts in Composio is that address/);
+ const another=x.d.querySelector(`[data-app-link-another="${LINK}"]`);
+ assert.equal(another.className,'primary');
+ another.click();await x.drain();
+ assert.deepEqual(JSON.parse(JSON.stringify(started(x)[1].request)),{type:'start_pip_app_link',pip_id:PIP,link_id:LINK,another:true});
+});
+test('no connector or no Composio: the button goes to the plugin directory, searching for the app',async()=>{
+ const x=setup({links:[link({status:'failed',error:'Composio did not return a sign-in link for Gmail.'})]});await openChat(x);
+ x.click(`[data-app-link-settings="${LINK}"]`);await x.drain();
+ assert.deepEqual(JSON.parse(JSON.stringify(x.sent.filter(m=>m.type==='openSettings').at(-1))),{type:'openSettings',section:'plugins',browse:'Gmail'});
+ const y=setup({composio:false});await openChat(y);
+ y.click(`[data-app-link-settings="${LINK}"]`);await y.drain();
+ assert.deepEqual(JSON.parse(JSON.stringify(y.sent.filter(m=>m.type==='openSettings').at(-1))),{type:'openSettings',section:'plugins',browse:'Gmail'});
+});

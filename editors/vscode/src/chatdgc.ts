@@ -60,7 +60,7 @@ export interface ChatDGCHost {
   /** "sent"; "starting" while its process comes up (sent again once it's ready); "old_cli" when it
    *  has no ChatDGC. */
   chatdgcSend(cmd: Record<string, unknown>): "sent" | "starting" | "old_cli";
-  chatdgcModels(providerId?: string): Promise<{ ids: string[]; current: string; providerId?: string; defaultId?: string; profiles?: any[]; noProvider?: boolean }>;
+  chatdgcModels(providerId?: string): Promise<{ ids: string[]; current: string; providerId?: string; defaultId?: string; profiles?: any[]; noProvider?: boolean; listError?: string }>;
   /** A file link in a reply: in the chat's own folder, else the window's. */
   chatdgcOpenFile?(path: string, line?: number, endLine?: number, folder?: string): Promise<void>;
   /** Resolve a saved native provider just before a model turn; its key never enters chat storage. */
@@ -2397,8 +2397,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   private async models(tab: Tab, providerId = ""): Promise<void> {
     if (!this.host) return;
     try {
-      const { ids, current, profiles, defaultId, providerId: selected, noProvider } = await this.host.chatdgcModels(providerId);
-      this.post(tab, { type: "models", ids, current, ...(noProvider === true ? { noProvider: true } : {}),
+      const { ids, current, profiles, defaultId, providerId: selected, noProvider, listError } = await this.host.chatdgcModels(providerId);
+      this.post(tab, { type: "models", ids, current, ...(noProvider === true ? { noProvider: true } : {}), ...(listError ? { listError: true } : {}),
                        ...(profiles ? { profiles } : {}), ...(defaultId ? { defaultId } : {}),
                        ...(selected ? { providerId: selected } : {}) });
     } catch (err: any) {

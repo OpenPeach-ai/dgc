@@ -64,6 +64,7 @@ export class PipsEditor implements vscode.Disposable {
   private backgroundSetup = false;
   private displayMentions = false;
   private state: { connected: boolean; supported: boolean; enabled: boolean } = { connected: false, supported: false, enabled: false };
+  private connectFailed = false;
   /** Reads the extension host makes for itself (the attention watcher), never a webview's. */
   private hostReads = new Map<string, (event: any) => void>();
   /** Dictation for the Pip chat's box (src/voice.ts), in this tab of its own; the side bar routes its own. */
@@ -72,12 +73,12 @@ export class PipsEditor implements vscode.Disposable {
   private readonly mic: DictationOwner = { post: (message) => this.post({ ...message, from: 'pips' }) };
   useDictation(dictation: () => Dictation, readAloud?: () => ReadAloud): void { this.dictation = dictation; this.readAloud = readAloud; }
   /** A plugin's logo by its id (a data: URI), for a reply's "Used Aave" line; "" when it has none. */
-  private savedProviders?: { list: () => Promise<unknown[]>; save: (id: string) => Promise<void>; none: () => boolean };
+  private savedProviders?: { list: () => Promise<unknown[]>; save: (id: string, model: string) => Promise<void>; none: () => boolean };
   private pluginLogo?: (plugin: string) => string;
   usePluginLogos(lookup: (plugin: string) => string): void { this.pluginLogo = lookup; }
   /** Providers saved in Settings: the host lists them for a Pip's model menus, and saves one (with its key, which never
    *  comes here) before a Pip is set to it. */
-  useSavedProviders(list: () => Promise<unknown[]>, save: (id: string) => Promise<void>, none: () => boolean = () => false): void { this.savedProviders = { list, save, none }; }
+  useSavedProviders(list: () => Promise<unknown[]>, save: (id: string, model: string) => Promise<void>, none: () => boolean = () => false): void { this.savedProviders = { list, save, none }; }
   /** A reply's links and Settings → Models, on the page in its own tab. The side bar's page shares the panel's own. */
   private pageActions?: (message: any) => void;
   usePageActions(act: (message: any) => void): void { this.pageActions = act; }
@@ -197,15 +198,21 @@ export class PipsEditor implements vscode.Disposable {
     this.spoolDir = capabilities?.image_spool === true && typeof capabilities?.image_spool_dir === 'string' ? capabilities.image_spool_dir : '';
     this.generation++;
     this.pending.clear();
+    this.connectFailed = false;
     this.state = { connected: true, supported: capabilities?.pips_supported === true && capabilities?.pips_api_version >= 9, enabled: capabilities?.pips_enabled === true };
     this.publish();
   }
-  offline(): void { if (!this.state.connected) return; this.generation++; this.pending.clear(); this.state.connected = false; this.publish(); }
+  /** `failed`: the backend stopped and isn't coming back by itself, so the page says so. Any other time with no connection
+   *  (starting, a chat switching, a restart under way) the page only waits. */
+  offline(failed = false): void {
+    if (!this.state.connected && failed === this.connectFailed) return;
+    this.generation++; this.pending.clear(); this.state.connected = false; this.connectFailed = failed; this.publish();
+  }
   private publish(): void {
     // Whether a folder is open in this window: with none, the Pips view's Project tab says to open one rather than show
     // the Pips of wherever DGC happened to start. Left out where the editor doesn't say.
     const folder = vscode.workspace ? (vscode.workspace.workspaceFolders?.length ?? 0) > 0 : undefined;
-    const connection = { type: 'pipsConnection', generation: this.generation, apiVersion: this.apiVersion, backgroundSetup:this.backgroundSetup, displayMentions:this.displayMentions, ...(folder === undefined ? {} : { folder }), ...this.state };
+    const connection = { type: 'pipsConnection', generation: this.generation, apiVersion: this.apiVersion, backgroundSetup:this.backgroundSetup, displayMentions:this.displayMentions, ...(folder === undefined ? {} : { folder }), ...(this.connectFailed ? { failed: true } : {}), ...this.state };
     this.post(connection);
     for (const id of this.computers.keys()) this.post(connection, 'computer:' + id);
   }
@@ -567,7 +574,7 @@ export class PipsEditor implements vscode.Disposable {
       }
       return;
     }
-    if (message?.type === 'pipsReconnect') { this.pending.clear(); this.generation++; this.connect(); this.publish(); return; }
+    if (message?.type === 'pipsReconnect') { this.pending.clear(); this.generation++; this.connectFailed = false; this.connect(); this.publish(); return; }
     if (message?.type !== 'pipsRequest' || typeof message.id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(message.id)) return;
     const fail = (text: string) => this.post({ type: 'pipsReply', id: message.id, ok: false, error: { message: text } }, surface);
     // A computer tab is pinned to its own Pip and to the computer's commands.
@@ -587,7 +594,7 @@ export class PipsEditor implements vscode.Disposable {
     const chosen = request.model_choice ?? request.changes?.model_choice;
     if (chosen?.mode === 'provider' && message.providerSaved !== true) {
       if (!this.savedProviders) { fail('Update DGC to run a Pip on a saved provider.'); return; }
-      void this.savedProviders.save(String(chosen.provider)).then(
+      void this.savedProviders.save(String(chosen.provider), String(chosen.model || '')).then(
         () => this.receive({ ...message, providerSaved: true }, surface),
         (error: unknown) => fail(error instanceof Error && error.message ? error.message : 'DGC could not save this provider for your Pips.'));
       return;

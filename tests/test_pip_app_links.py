@@ -88,13 +88,113 @@ class AppLinkTests(unittest.TestCase):
         self.assertEqual(self.world["calls"], [{"name": "gmail", "action": "list"}, {"name": "gmail", "action": "add"}])
         self.assertTrue(all(m.closed for m in self.managers), "every Composio session is closed")
 
-    def test_an_account_composio_already_has_is_used_without_a_second_sign_in(self):
-        self.world["accounts"] = [{"id": "gmail_A1b2C3d4E5f6G7h8", "status": "ACTIVE", "user_info": {"email": "me@example.com"}}]
-        started = links.start(self.registry, self.cfg, self.ask()["id"], "editor-user", manager_factory=self.factory)
-        self.assertEqual((started["link"]["status"], started["link"]["label"], started["redirect_url"]),
-                         ("connected", "me@example.com", None))
-        self.assertEqual(started["link"]["account"], "gmail_A1b2C3d4E5f6G7h8")
+    def test_an_account_composio_already_has_is_listed_and_only_the_one_chosen_is_linked(self):
+        self.world["accounts"] = [{"id": "gmail_A1b2C3d4E5f6G7h8", "status": "ACTIVE", "user_info": {"email": "pitch@example.com"}},
+                                  {"id": "gmail_Z9y8X7w6V5u4T3s2", "status": "ACTIVE", "user_info": {"email": "dev@example.com"}},
+                                  {"id": "gmail_N0tActiveYet00000", "status": "INITIATED", "user_info": {"email": "new@example.com"}}]
+        card = self.ask()
+        started = links.start(self.registry, self.cfg, card["id"], "editor-user", manager_factory=self.factory)
+        # Two accounts, and the first one was bound without a word: the wrong inbox.
+        self.assertEqual((started["link"]["status"], started["link"]["label"], started["redirect_url"]), ("requested", None, None))
+        self.assertEqual([a["label"] for a in started["accounts"]], ["pitch@example.com", "dev@example.com"], "by address, active only")
+        self.assertEqual(started["wanted"], "")
+        self.assertEqual(links.connected(self.registry, self.pip["id"]), [], "nothing is linked until the person chooses")
         self.assertEqual(self.world["calls"], [{"name": "gmail", "action": "list"}], "no new auth link")
+        linked = links.start(self.registry, self.cfg, card["id"], "editor-user", account="gmail_Z9y8X7w6V5u4T3s2", manager_factory=self.factory)
+        self.assertEqual((linked["link"]["status"], linked["link"]["label"], linked["connected"]), ("connected", "dev@example.com", True))
+        self.assertEqual(links.connected(self.registry, self.pip["id"])[0]["account"], "gmail_Z9y8X7w6V5u4T3s2", "the one chosen, not the first")
+
+    def test_one_account_is_still_the_persons_to_choose(self):
+        self.world["accounts"] = [{"id": "ca_only", "status": "ACTIVE", "user_info": {"email": "me@example.com"}}]
+        card = self.ask()
+        started = links.start(self.registry, self.cfg, card["id"], "editor-user", manager_factory=self.factory)
+        self.assertEqual(started["link"]["status"], "requested")
+        self.assertEqual([a["id"] for a in started["accounts"]], ["ca_only"])
+        self.assertEqual(links.connected(self.registry, self.pip["id"]), [])
+
+    def test_an_address_the_pip_names_comes_first_and_never_binds_anything(self):
+        pitch = {"id": "ca_pitch", "status": "ACTIVE", "user_info": {"email": "pitch@example.com"}}
+        dev = {"id": "ca_dev", "status": "ACTIVE", "user_info": {"email": "dev@example.com"}}
+        self.world["accounts"] = [pitch, dev]
+        card = self.ask(why="To read the company inbox, Dev@Example.com, each morning.")
+        started = links.start(self.registry, self.cfg, card["id"], "editor-user", manager_factory=self.factory)
+        self.assertEqual([(a["label"], a.get("named", False)) for a in started["accounts"]],
+                         [("dev@example.com", True), ("pitch@example.com", False)])
+        self.assertEqual(started["wanted"], "")
+        self.assertEqual(started["link"]["status"], "requested", "a match is first on the list, and still not linked")
+        self.assertEqual(links.connected(self.registry, self.pip["id"]), [])
+
+    def test_an_address_no_account_matches_is_said_and_nothing_is_guessed(self):
+        self.world["accounts"] = [{"id": "ca_pitch", "status": "ACTIVE", "user_info": {"email": "pitch@example.com"}}]
+        card = self.ask(why="To read dev@example.com for the company.")
+        started = links.start(self.registry, self.cfg, card["id"], "editor-user", manager_factory=self.factory)
+        self.assertEqual(started["wanted"], "dev@example.com")
+        self.assertEqual([a["label"] for a in started["accounts"]], ["pitch@example.com"])
+        self.assertEqual(started["link"]["status"], "requested")
+        self.assertEqual(links.connected(self.registry, self.pip["id"]), [])
+
+    def test_a_chosen_account_composio_no_longer_has_links_nothing(self):
+        self.world["accounts"] = [{"id": "ca_pitch", "status": "ACTIVE", "user_info": {"email": "pitch@example.com"}}]
+        card = self.ask()
+        said = links.start(self.registry, self.cfg, card["id"], "editor-user", account="ca_gone", manager_factory=self.factory)
+        self.assertEqual(said["link"]["status"], "requested")
+        self.assertIn("isn't in Composio now", said["error"])
+        self.assertEqual([a["id"] for a in said["accounts"]], ["ca_pitch"], "the list again, to choose from")
+        self.assertEqual(links.connected(self.registry, self.pip["id"]), [])
+
+    def test_use_another_account_opens_a_sign_in_and_links_only_the_one_it_added(self):
+        pitch = {"id": "ca_pitch", "status": "ACTIVE", "user_info": {"email": "pitch@example.com"}}
+        self.world["accounts"] = [pitch]
+        card = self.ask()
+        opened = links.start(self.registry, self.cfg, card["id"], "editor-user", another=True, manager_factory=self.factory)
+        self.assertEqual(opened["link"]["status"], "authorizing")
+        self.assertEqual(opened["redirect_url"], "https://connect.composio.dev/link/ln_abc")
+        self.assertEqual([c["action"] for c in self.world["calls"]], ["list", "add"])
+        # The sign-in isn't done: the account that was already there is not taken for it.
+        waiting = links.check(self.registry, self.cfg, card["id"], "editor-user", manager_factory=self.factory)
+        self.assertEqual((waiting["connected"], waiting["link"]["status"]), (False, "authorizing"))
+        self.world["accounts"] = [pitch, {"id": "ca_dev", "status": "ACTIVE", "user_info": {"email": "dev@example.com"}}]
+        done = links.check(self.registry, self.cfg, card["id"], "editor-user", manager_factory=self.factory)
+        self.assertEqual((done["connected"], done["link"]["label"]), (True, "dev@example.com"))
+        self.assertEqual(links.connected(self.registry, self.pip["id"])[0]["account"], "ca_dev", "not the first one listed")
+
+    def test_two_new_accounts_or_a_sign_in_this_process_did_not_open_go_back_to_the_list(self):
+        pitch = {"id": "ca_pitch", "status": "ACTIVE", "user_info": {"email": "pitch@example.com"}}
+        self.world["accounts"] = [pitch]
+        card = self.ask()
+        links.start(self.registry, self.cfg, card["id"], "editor-user", another=True, manager_factory=self.factory)
+        self.world["accounts"] = [pitch, {"id": "ca_a", "status": "ACTIVE", "alias": "a"}, {"id": "ca_b", "status": "ACTIVE", "alias": "b"}]
+        back = links.check(self.registry, self.cfg, card["id"], "editor-user", manager_factory=self.factory)
+        self.assertEqual((back["connected"], back["link"]["status"], len(back["accounts"])), (False, "requested", 3))
+        links.start(self.registry, self.cfg, card["id"], "editor-user", another=True, manager_factory=self.factory)
+        links._SIGN_INS.clear()                                  # the window was reloaded while the browser was open
+        back = links.check(self.registry, self.cfg, card["id"], "editor-user", manager_factory=self.factory)
+        self.assertEqual((back["connected"], back["link"]["status"]), (False, "requested"))
+        self.assertEqual(links.connected(self.registry, self.pip["id"]), [])
+
+    def test_an_add_that_opens_no_sign_in_never_binds_what_it_answers_with(self):
+        # Whether Composio's "add" makes a second account when one exists can't be told from a stand-in. If it answers
+        # with the existing one and no link, the card says so and links nothing.
+        self.world["accounts"] = [{"id": "ca_pitch", "status": "ACTIVE", "user_info": {"email": "pitch@example.com"}}]
+        self.world["redirect"] = None
+        card = self.ask()
+        said = links.start(self.registry, self.cfg, card["id"], "editor-user", another=True, manager_factory=self.factory)
+        self.assertEqual((said["link"]["status"], said["redirect_url"]), ("requested", None))
+        self.assertIn("didn't offer a sign-in for another Gmail account", said["error"])
+        self.assertEqual(links.connected(self.registry, self.pip["id"]), [])
+
+    def test_an_unattended_run_asks_and_never_links(self):
+        self.world["accounts"] = [{"id": "ca_pitch", "status": "ACTIVE", "user_info": {"email": "pitch@example.com"}}]
+        server = links.RunSocket(self.registry.directory, self.cfg, self.pip["id"], self.pip["workspace_id"], "run_" + "d" * 32,
+                                 manager_factory=self.factory)
+        self.addCleanup(server.close)
+        server.call("connect_app", {"app": "gmail", "why": "A routine wants my mail."})
+        self.assertEqual(links.connected(self.registry, self.pip["id"]), [])
+        self.assertEqual(links.listing(self.registry, self.pip["id"])[0]["status"], "requested")
+        self.assertEqual(self.world["calls"], [], "Composio isn't even asked until the person acts")
+        card = links.listing(self.registry, self.pip["id"])[0]
+        with self.assertRaises(RegistryError):
+            links.start(self.registry, self.cfg, card["id"], "run-worker", account="ca_pitch", manager_factory=self.factory)
 
     def test_check_waits_for_the_browser_then_connects_and_notices_a_changed_connection(self):
         card = self.ask()
@@ -169,7 +269,7 @@ class AppLinkTests(unittest.TestCase):
         self.assertEqual(links.listing(self.registry, self.pip["id"]), [])
         self.assertEqual(self.world["calls"], [])
         self.world["accounts"] = [{"id": "ca_existing", "status": "ACTIVE"}]
-        links.start(self.registry, self.cfg, self.ask("notion", "Read my notes.")["id"], "editor-user",
+        links.start(self.registry, self.cfg, self.ask("notion", "Read my notes.")["id"], "editor-user", account="ca_existing",
                     manager_factory=self.factory)
         with patch.object(pip_plugins, "installed", return_value={"notion": {"servers": {"notion--api": {}}}}):
             said = server.call("connect_app", {"app": "notion", "why": "Read my notes."})
@@ -199,7 +299,7 @@ class AppLinkTests(unittest.TestCase):
         self.world["accounts"] = [{"id": "ca_x", "status": "ACTIVE"}]
         card = self.ask()
         self.assertNotEqual(card["status"], "declined", "asking again after Not now is a fresh card")
-        links.start(self.registry, self.cfg, card["id"], "editor-user", manager_factory=self.factory)
+        links.start(self.registry, self.cfg, card["id"], "editor-user", account="ca_x", manager_factory=self.factory)
         with self.assertRaises(RegistryError):
             links.decline(self.registry, card["id"], "editor-user")
         gone = links.disconnect(self.registry, card["id"], "editor-user")["link"]
@@ -208,7 +308,7 @@ class AppLinkTests(unittest.TestCase):
 
     def test_reads_are_this_pips_account_and_only_that_apps_reads(self):
         self.world["accounts"] = [{"id": "ca_mine", "status": "ACTIVE"}]
-        links.start(self.registry, self.cfg, self.ask()["id"], "editor-user", manager_factory=self.factory)
+        links.start(self.registry, self.cfg, self.ask()["id"], "editor-user", account="ca_mine", manager_factory=self.factory)
         app = links.connected(self.registry, self.pip["id"])[0]
         text = links.read(self.cfg, app, "GMAIL_FETCH_EMAILS", {"query": "is:unread"}, manager_factory=self.factory)
         self.assertIn("messages", text)
@@ -282,6 +382,19 @@ class AppLinkTests(unittest.TestCase):
                                         (self.pip["id"],)).fetchone()
         self.assertIsNotNone(turn, "the Pip is asked to carry on")
         self.assertIn("connected Gmail to you (me@example.com)", turn["text"])
+        # With two accounts: the same command lists them, and its account links the one chosen, which is what the Pip hears.
+        self.world["accounts"] = [{"id": "ca_one", "status": "ACTIVE", "user_info": {"email": "one@example.com"}},
+                                  {"id": "ca_two", "status": "ACTIVE", "user_info": {"email": "two@example.com"}}]
+        other = self.ask("slack", "To read the team channel.")
+        with patch.object(apps, "_manager", self.factory):
+            listed = control("start_pip_app_link", link_id=other["id"])
+            self.assertEqual((listed["link"]["status"], [a["id"] for a in listed["accounts"]]), ("requested", ["ca_one", "ca_two"]))
+            with self.assertRaises(RegistryError):
+                control("start_pip_app_link", link_id=other["id"], account=7)
+            with patch("dgc.pip_chat.continue_after_app") as carried_on:
+                chosen = control("start_pip_app_link", link_id=other["id"], account="ca_two")
+        self.assertEqual(chosen["link"]["label"], "two@example.com")
+        self.assertEqual(carried_on.call_args.args[2]["label"], "two@example.com", "what the Pip is told names the one chosen")
 
 
 if __name__ == "__main__":

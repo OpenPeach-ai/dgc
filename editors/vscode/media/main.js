@@ -1356,7 +1356,18 @@
     serverWindow = tokens > 0 ? { window: tokens, server: String(ev.server || ""), trained: Math.floor(Number(ev.trained) || 0) } : null;
     renderContext();
   }
+  /** The CLI a subscription route runs on, by name: it keeps its own context window, whose size DGC neither sets nor knows. */
+  function subscriptionName() {
+    const row = (Array.isArray(lastConfig?.subscription_engines) ? lastConfig.subscription_engines : []).find((item) => item?.key === curSubscription);
+    return String(row?.label || "").split(" (")[0] || (curSubscription === "claude" ? "Claude Code" : curSubscription === "codex" ? "Codex" : "This CLI");
+  }
   function renderContextMenu() {
+    // On a subscription the size would be DGC's own setting, nothing the CLI uses: no setter, no percentage of it, and
+    // what the CLI reported stays (ctx-usage). Nothing else is shown, so nothing here is made up.
+    const cli = curSubscription ? subscriptionName() : "";
+    $("ctxmenu").classList.toggle("cli-window", !!cli);
+    $("ctx-cli").hidden = !cli;
+    $("ctx-cli").textContent = cli ? `${cli} manages its own context window, so there is no size to set here.` : "";
     const used = Math.max(0, Number(contextState.used || 0));
     const size = Math.max(0, Number(contextState.size || 0));
     const pct = size ? Math.min(100, Math.round((used / size) * 100)) : 0;
@@ -1436,6 +1447,15 @@
     const size = Math.max(0, Number(contextState.size || 0));
     const pct = size ? Math.min(100, Math.round((used / size) * 100)) : 0;
     const threshold = Math.max(.01, Math.min(1, Number(contextState.compact_threshold || .85)));
+    if (curSubscription) {
+      const cli = subscriptionName();
+      $("ctx").textContent = "";
+      $("btn-ctx").classList.remove("warn", "busy");
+      $("btn-ctx").title = `${cli} manages its own context window · click for details`;
+      $("btn-ctx").setAttribute("aria-label", `Context window: ${cli} manages its own. Open context details`);
+      renderContextMenu();
+      return;
+    }
     $("ctx").textContent = pct + "%";
     $("btn-ctx").classList.toggle("warn", pct >= Math.round(threshold * 100));
     $("btn-ctx").classList.toggle("busy", compacting);
@@ -1719,6 +1739,9 @@
       const row = choices[Number(button.dataset.providerI)];
       if (row.key === currentRouteKey) {
         renderProviderModels(lastModelMenu);
+      } else if (row.allModels) {
+        // All models: what its API offers, from here. The session moves only when one of them is chosen.
+        showAllModels(row);
       } else {
         vscode.postMessage({ type: "setSubscription", engine: row.key === "native" ? "" : row.key });
         hideModelMenu();
@@ -1729,6 +1752,32 @@
     };
     mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true");
     (options.querySelector(".sel") || options.querySelector("button"))?.focus();
+  }
+  // The step an All models provider opens: its host's models in the same menu, listed by the host with its saved key.
+  let allModelsStep = null;
+  function showAllModels(row, listed = null) {
+    const mm = $("modelmenu"), options = mm.querySelector(".model-options");
+    if (!options) return;
+    allModelsStep = row;
+    if (!listed) vscode.postMessage({ type: "providerModels", id: row.key });
+    const ids = listed?.ids || [];
+    const wait = !listed ? `<div class="mhead"><span>Listing its models…</span></div>`
+      : !ids.length ? `<div class="mhead"><span>${listed.error ? "Couldn’t list its models" : "It lists no models"}</span></div>` : "";
+    options.innerHTML = `<button type="button" role="menuitem" class="mrow" data-provider-back="1"><span class="mi codicon codicon-arrow-left" aria-hidden="true"></span><span>Providers</span></button>`
+      + `<div class="mhead"><span>${esc(row.label)} model</span></div><div class="model-list-scroll">${wait}`
+      + ids.map((id, i) => `<button type="button" role="menuitemradio" aria-checked="false" class="mrow" data-provider-model="${i}"><span class="mi" aria-hidden="true"></span><span>${esc(id)}</span></button>`).join("")
+      + (listed ? `<button type="button" role="menuitem" class="mrow" data-provider-typed="1"><span class="mi codicon codicon-edit" aria-hidden="true"></span><span>Enter another model…</span></button>` : "")
+      + `</div>`;
+    options.hidden = false;
+    options.querySelector("[data-provider-back]").onclick = (event) => { event.stopPropagation(); allModelsStep = null; showProviderStep(); };
+    options.querySelectorAll("[data-provider-model]").forEach((button) => button.onclick = () => {
+      allModelsStep = null;
+      vscode.postMessage({ type: "setSubscription", engine: row.key, model: ids[Number(button.dataset.providerModel)] });
+      hideModelMenu();
+    });
+    const typed = options.querySelector("[data-provider-typed]");
+    if (typed) typed.onclick = () => { allModelsStep = null; vscode.postMessage({ type: "providerModelTyped", id: row.key }); hideModelMenu(); };
+    (options.querySelector("[data-provider-model]") || options.querySelector("button"))?.focus();
   }
   function renderProviderModels({ ids, current, err, subscription, label, supportsEffort,
                                   cliDefaultModel, cliDefaultListed }) {
@@ -9587,8 +9636,11 @@ function permissionChoices(ev) {
       const candidates = [];
       for (const row of pluginRows) {
         const label = String(row.display_name || row.name).trim().slice(0, 80);
+        // A CLI on a subscription runs with its own tools: Work passes it no plugins (ChatDGC and Pips do, through their relay).
         if (label && `${label} ${row.name}`.toLowerCase().includes(query))
-          candidates.push({ label, kind: "Plugin", detail: "Connected", pluginId: row.name });
+          candidates.push(curSubscription
+            ? { label, kind: "Plugin", detail: `Not available with ${subscriptionName()} in Work. Switch provider, or use ChatDGC or a Pip.`, pluginId: row.name, disabled: true }
+            : { label, kind: "Plugin", detail: "Connected", pluginId: row.name });
       }
       if (outputOffered) for (const [value, label, , glyph] of offeredOutputs()) {
         if (value !== "auto" && `${label} ${value}`.toLowerCase().includes(query))
@@ -11473,11 +11525,13 @@ function permissionChoices(ev) {
       renderCacheClock();                        // a model change can change whose cache it is
       curUltra = msg.state.ultra === true;
       updateModelControl();
+      renderContext();                           // on a subscription the CLI keeps the window: no percentage of DGC's
       agentMapChanged();                         // the map's root names the model
       if (pmodel) { pmodel.textContent = noProvider ? "No provider" : curModel || "dgc"; pmodel.title = noProvider ? "No model provider yet. Click to add one in Settings → Models." : "Model: " + (curModel || "dgc") + " — click to change"; pmodel.setAttribute("aria-label", "Change model. Current model: " + (curModel || "dgc")); }
       applyMode(msg.state.mode || "default");
       setGoalState(msg.state.goal || { text: "", status: "none", elapsed_seconds: 0 });
     }
+    else if (msg.type === "providerModels") { if (allModelsStep && allModelsStep.key === msg.id && !$("modelmenu").hidden) showAllModels(allModelsStep, { ids: Array.isArray(msg.ids) ? msg.ids.filter((id) => typeof id === "string" && id) : [], error: msg.error }); }
     else if (msg.type === "models" && !$("modelmenu").hidden) { renderModelMenu(msg.ids || [], msg.current, msg.err, msg.subscription, msg.label, msg.supportsEffort, msg.routes, msg.cliDefaultModel, msg.cliDefaultListed, msg.currentRouteKey); }
     else if (msg.type === "chat_changes") {
       if (!msg.sessionId || msg.sessionId === draftSession) setChatChanges(msg);

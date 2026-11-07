@@ -23,7 +23,9 @@ MAKE_ARTIFACT = {"type": "function", "function": {
         "Make an artifact the user keeps and opens beside the conversation, with every version kept: a doc "
         "(a document in Markdown), slides (a deck), a sheet (a spreadsheet), a dashboard (charts over data the user "
         "allows) or a page (one HTML page). Use it when they ask for one of these, or when what they want is plainly "
-        "one (a report to keep editing, a deck to present, a budget, a small tool). It shows as a card under your "
+        "one (a report to keep editing, a deck to present, a budget, a small tool). DGC keeps it in its own store: it "
+        "needs no file, and nothing is written to the project, so it is the way to make a page that isn't part of the "
+        "project (a summary of mail, a one-off report). It shows as a card under your "
         "reply: say in a sentence or two what's in it; don't paste it into your reply. To change it later, use "
         "edit_artifact, not a new one."),
     "parameters": {"type": "object", "properties": {

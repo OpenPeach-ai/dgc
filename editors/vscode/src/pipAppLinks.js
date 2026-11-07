@@ -29,7 +29,11 @@ export function appLinkResult(value, pip, id) {
   const link = appLink(value?.link, pip);
   if (link.id !== id) throw new Error('DGC answered about another app card. Refresh the Pip.');
   return { link, opened: value.opened === true, host: typeof value.sign_in_host === 'string' ? value.sign_in_host.slice(0, 200) : '',
-    connected: value.connected === true, error: typeof value.error === 'string' ? value.error.slice(0, 600) : '' };
+    connected: value.connected === true, error: typeof value.error === 'string' ? value.error.slice(0, 600) : '',
+    // The accounts Composio has, for the person to choose from; wanted: the address the Pip named, when none of them is it.
+    accounts: Array.isArray(value.accounts) ? value.accounts.slice(0, 64).filter(a => a && validAccountId(a.id, link.toolkit) && text(a.label, 160) && a.label)
+      .map(a => ({ id: a.id, label: a.label, named: a.named === true })) : null,
+    wanted: typeof value.wanted === 'string' ? value.wanted.slice(0, 200) : '' };
 }
 
 /** Connection requests live by the composer only while they need the user's attention. */
@@ -37,34 +41,47 @@ export function shownAppLinks(links) {
   return (links || []).filter(l => l.status === 'requested' || l.status === 'authorizing' || l.status === 'failed');
 }
 
-export function appLinkMarkup(link, { esc, busy = false, composio = true, host = '', pipName = 'This Pip' }) {
+/** Once linked, the card is one quiet line: which account this Pip now reads. */
+export function appLinkSettledMarkup(link, { esc, pipName = 'This Pip' }) {
+  return `<p class="app-link-settled" role="status" data-app-link-settled="${esc(link.id)}">${esc(link.app)} linked to ${esc(pipName)}${link.label ? ` · <strong>${esc(link.label)}</strong>` : ''}</p>`;
+}
+
+export function appLinkMarkup(link, { esc, busy = false, composio = true, host = '', pipName = 'This Pip', choice = null }) {
   const id = esc(link.id), app = esc(link.app), off = busy ? ' disabled' : '';
   const mark = `<span class="app-link-mark" aria-hidden="true">${esc(link.app.slice(0, 1).toUpperCase())}</span>`;
   const head = (title, sub) => `<div class="app-link-head">${mark}<div class="app-link-words"><strong>${title}</strong>${sub ? `<small>${sub}</small>` : ''}</div></div>`;
   const no = `<button type="button" class="quiet" data-app-link-decline="${id}"${off}>Not now</button>`;
   let body;
+  const another = (main, words = 'Use another account') => `<button type="button" class="${main ? 'primary' : 'quiet'}" data-app-link-another="${id}"${off}>${words}</button>`;
   if (link.status === 'connected') {
     body = head(`${app} connected`, link.label ? esc(link.label) : '');
   } else if (link.status === 'authorizing') {
     body = head(`Finish signing in to ${app}`, `Your browser opened ${esc(host || 'Composio')}. Come back here once it says you are connected.`)
       + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-check="${id}"${off}>${busy ? 'Checking…' : 'I’ve signed in'}</button>`
-      + `<button type="button" class="quiet" data-app-link-start="${id}"${off}>Open sign-in again</button>${no}</div>`;
+      + another(false, 'Open sign-in again') + (choice?.accounts?.length ? `<button type="button" class="quiet" data-app-link-start="${id}"${off}>Choose from your accounts</button>` : '') + `${no}</div>`;
+  } else if (link.status === 'requested' && choice?.accounts?.length) {
+    // Composio has accounts: the person chooses. Nothing is linked until they do, whatever the Pip's reason named.
+    const missing = choice.wanted && !choice.accounts.some(a => a.named);
+    body = head(`Which ${app} should ${esc(pipName)} use?`, esc(link.reason))
+      + (missing ? `<p class="app-link-note app-link-wanted">${esc(pipName)} asked for <strong>${esc(choice.wanted)}</strong>. None of your ${app} accounts in Composio is that address.</p>` : '')
+      + `<div class="app-link-accounts" role="group" aria-label="Your ${app} accounts">${choice.accounts.map(a => `<button type="button" class="app-link-account${a.named ? ' named' : ''}" data-app-link-account="${esc(a.id)}" data-app-link-for="${id}"${off}><span>${esc(a.label)}</span>${a.named ? `<small>${esc(pipName)} asked for this one</small>` : ''}</button>`).join('')}</div>`
+      + `<div class="app-link-actions">${another(!!missing)}${no}</div>`;
   } else if (!composio && link.toolkit !== 'outlook') {
     body = head(link.toolkit === 'gmail' ? `Link Gmail to ${esc(pipName)}` : `Connect ${app}`, esc(link.reason))
       + `<p class="app-link-note">To connect apps, first turn on Composio in Settings → Plugins (once). Then choose Connect here.</p>`
-      + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-settings="${id}">Open Settings</button>`
+      + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-settings="${id}" data-app-link-app="${app}">Browse plugins</button>`
       + `<button type="button" class="quiet" data-app-link-start="${id}"${off}>Connect ${app}</button>${no}</div>`;
   } else if (link.status === 'requested' && link.known_label !== undefined) {
     // An account your other Pips already use: no sign-in, only your yes (Grok asks before a bot uses a connector).
     body = head(`Let ${esc(pipName)} use your ${app}?`, `${link.known_label ? `${esc(link.known_label)} · ` : ''}already connected. ${esc(link.reason)}`)
-      + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-start="${id}"${off}>${busy ? 'Allowing…' : 'Allow'}</button>${no}</div>`;
+      + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-start="${id}"${off}>${busy ? 'Listing…' : 'Choose an account'}</button>${no}</div>`;
   } else if (link.status === 'failed') {
     body = head(`Couldn’t connect ${app}`, esc(link.error || 'Try again.'))
-      + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-settings="${id}">Open Plugins</button>`
+      + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-settings="${id}" data-app-link-app="${app}">Browse plugins</button>`
       + `<button type="button" class="quiet" data-app-link-start="${id}"${off}>Try again</button>${no}</div>`;
   } else {
     body = head(link.toolkit === 'gmail' ? `Link Gmail to ${esc(pipName)}` : `Connect ${app}`, esc(link.reason))
-      + (link.toolkit === 'gmail' ? '<p class="app-link-note">Linking Gmail to this Pip also lets its email-trigger routines run. DGC can reuse an active Gmail account in Composio; this does not require the Google Workspace plugin.</p>' : '')
+      + (link.toolkit === 'gmail' ? '<p class="app-link-note">Linking Gmail to this Pip also lets its email-trigger routines run. If Composio already has Gmail accounts, you choose which one; this does not require the Google Workspace plugin.</p>' : '')
       + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-start="${id}"${off}>${busy ? 'Opening…' : link.toolkit === 'gmail' ? 'Link Gmail' : `Connect ${app}`}</button>${no}</div>`;
   }
   return `<div class="app-link" data-app-link="${id}" data-state="${esc(link.status)}" role="group" aria-label="${link.status === 'connected' ? `${app} connected` : link.known_label !== undefined && link.status === 'requested' ? `Use ${app}` : `Connect ${app}`}">${body}</div>`;

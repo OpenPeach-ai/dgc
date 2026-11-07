@@ -3,6 +3,7 @@
 import json
 import os
 import tempfile
+import time
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -36,6 +37,27 @@ class CodexCatalogueTests(unittest.TestCase):
             self.assertEqual(row["cli_default_model"], "gpt-5.6-sol")
             self.assertEqual(row["model_hints"], ["gpt-5.6-terra", "gpt-5.6-luna"])
             self.assertFalse(row["cli_default_listed"])
+
+    def test_a_cli_that_does_not_answer_in_time_still_lists_what_its_cache_holds(self):
+        # It left every menu on "CLI default" alone, for five minutes.
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / ".codex").mkdir()
+            (home / ".codex" / "auth.json").write_text("{}")
+            (home / ".codex" / "models_cache.json").write_text(json.dumps({"models": [
+                {"slug": "gpt-5.6-sol", "visibility": "list"}, {"slug": "gpt-reserve", "visibility": "hide"},
+                {"slug": "gpt-5.6-luna", "visibility": "list"}, {"slug": "not a model", "visibility": "list"}]}))
+            binary = home / "codex"
+            binary.write_text("#!/bin/sh\nexit 0\n")
+            binary.chmod(0o755)
+            engine = replace(subs.ENGINES["codex"], binary=str(binary))
+            with patch.dict(os.environ, {"HOME": str(home)}), patch.object(subs, "ENGINES", {"codex": engine}):
+                subs._codex_catalog_cache = None
+                self.assertEqual(subs.status()[0]["model_hints"], ["gpt-5.6-sol", "gpt-5.6-luna"])
+                (home / ".codex" / "models_cache.json").unlink()
+                subs._codex_catalog_cache = None
+                self.assertEqual(subs.status()[0]["model_hints"], [])
+                self.assertLess(subs._codex_catalog_cache[0] - time.monotonic(), 30, "nothing listed is asked again soon")
 
     def test_a_service_tier_the_account_refuses_points_at_the_setting(self):
         event = {"type": "turn.failed", "error": {"message": "400 Unsupported service_tier: flex"}}

@@ -12,7 +12,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const scratch = mkdtempSync(join(tmpdir(), "dgc-vscode-panel-settings-"));
 const bundle = join(scratch, "panel.cjs");
 
-const notices = { warnings: [], errors: [], info: [], warningResponses: [] };
+const notices = { warnings: [], errors: [], info: [], warningResponses: [], log: [] };
 let configurationInspections = {};
 const statusBar = { text: "", tooltip: "", command: "", show() {}, dispose() {} };
 globalThis.__DGC_TEST_VSCODE = {
@@ -31,7 +31,7 @@ globalThis.__DGC_TEST_VSCODE = {
     activeTextEditor: undefined,
     tabGroups: { all: [] },
     createStatusBarItem: () => statusBar,
-    createOutputChannel: () => ({ appendLine() {}, append() {}, show() {}, dispose() {} }),
+    createOutputChannel: () => ({ appendLine(line) { notices.log.push(String(line)); }, append() {}, show() {}, dispose() {} }),
     showWarningMessage: async (message) => {
       notices.warnings.push(String(message));
       return notices.warningResponses.shift();
@@ -86,6 +86,7 @@ beforeEach(() => {
   notices.errors.length = 0;
   notices.info.length = 0;
   notices.warningResponses.length = 0;
+  notices.log.length = 0;
   configurationInspections = {};
 });
 
@@ -1393,6 +1394,35 @@ test("a provider endpoint mismatch fails closed without erasing the prior bound 
   assert.equal(secretValues.get("dgc.apiKey.endpoint"), "https://old.invalid/v1");
   assert.deepEqual(secretMutations(timeline), []);
   assert.equal(await provider.storedSecret("apiKey", "https://old.invalid/v1"), "old-secret");
+});
+
+test("a key bound elsewhere stays home with no toast at any start: a line in the output channel, once, for each key", async () => {
+  const { provider, secretValues } = harness({ initialSecrets: {
+    "dgc.apiKey": "main-secret", "dgc.apiKey.endpoint": "https://api.openai.com/v1",
+    "dgc.subagentApiKey": "sub-secret", "dgc.subagentApiKey.endpoint": "https://helpers.invalid/v1",
+    "dgc.fallbackApiKey": "fall-secret", "dgc.fallbackApiKey.endpoint": "https://fallback.invalid/v1",
+  } });
+  for (let start = 0; start < 2; start++) {
+    assert.equal(await provider.storedSecret("apiKey", "http://localhost:11434/v1"), "");
+    assert.equal(await provider.storedSecret("subagentApiKey", "http://localhost:11434/v1"), "");
+    assert.equal(await provider.storedSecret("fallbackApiKey", "http://localhost:11434/v1"), "");
+  }
+  assert.deepEqual(notices.warnings, []);
+  assert.equal(notices.log.length, 3);
+  assert.match(notices.log[0], /did not send the key saved for the main provider: it is bound to api\.openai\.com, and this route uses localhost:11434/);
+  assert.match(notices.log[1], /sub-agents/);
+  assert.match(notices.log[2], /the fallback/);
+  assert.ok(!notices.log.join(" ").includes("secret"), "no key in the output channel");
+  assert.equal(secretValues.get("dgc.apiKey"), "main-secret");
+});
+
+test("a workspace that names another address is the case a person can act on: one warning, and the key still stays home", async () => {
+  configurationInspections = { baseUrl: { workspaceValue: "https://repository.invalid/v1" } };
+  const { provider } = harness({ initialSecrets: { "dgc.apiKey": "main-secret", "dgc.apiKey.endpoint": "https://api.openai.com/v1" } });
+  for (let start = 0; start < 2; start++) assert.equal(await provider.storedSecret("apiKey", "http://localhost:11434/v1"), "");
+  assert.equal(notices.warnings.length, 1);
+  assert.match(notices.warnings[0], /This workspace's settings set dgc\.baseUrl/);
+  assert.match(notices.warnings[0], /Settings → Models/);
 });
 
 test("legacy user credentials bind to the user endpoint, never a workspace override", async () => {

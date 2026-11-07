@@ -1135,7 +1135,7 @@ test("sent plugin, output and Pip keep their artwork inline while only names tur
       outputIcon: artifact.querySelector(".composer-artifact-mark")?.className,
       pipFace: !!pip.querySelector(".composer-pip-face"),
       colors: [plugin.querySelector(".composer-plugin-name"), artifact.querySelector(".composer-artifact-name"),
-        pip.querySelector(".composer-pip-name")].map(node => getComputedStyle(node).color),
+        pip.querySelector(".composer-pip-name"), artifact.querySelector(".composer-artifact-mark")].map(node => getComputedStyle(node).color),
       alignment};
   });
   assert.equal(result.text, "Use Composio to make a Page and ask Core to act.");

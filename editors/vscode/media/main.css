@@ -1589,6 +1589,9 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
 .context-size-custom { width: 10ch; cursor: text; }
 .context-size-select:hover, .context-size-custom:hover, .context-size-custom:focus { border-color: var(--accent); }
 .context-size-note { margin: var(--sp-1) 0 0; color: var(--faint); text-align: right; font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+/* A subscription's CLI keeps its own window: one plain line and what it reported, and none of DGC's window controls. */
+#ctx-cli { margin: var(--sp-1) 0 var(--sp-2); color: var(--muted); text-align: left; }
+.context-menu.cli-window :is(#ctx-used, #ctx-max, #ctx-pct, .context-track, .context-split, #ctx-breakdown, .context-size, #ctx-size-note, .context-last, #ctx-detail, #ctx-compact) { display: none; }
 /* "Set by the server: 32K": a vLLM or llama.cpp server sized the window when it started; nothing to choose here. */
 .context-size-server { color: var(--text-strong); font: var(--w-semi) var(--t-xs)/24px var(--sans); font-variant-numeric: tabular-nums; }
 .context-usage { margin-top: var(--sp-3); padding: var(--sp-2) var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--muted); background: var(--code); font: var(--w-med) var(--t-xs)/1.2 var(--mono); font-variant-numeric: tabular-nums; }
