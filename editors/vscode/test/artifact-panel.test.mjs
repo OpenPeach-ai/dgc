@@ -96,7 +96,7 @@ test("restoring or reloading a sheet and a deck replaces their visible content w
 test("the header names it, its kind and version, and Export offers exactly its own formats", async (t) => {
   if (skipOrFail(t)) return;
   for (const [kind, labels] of [["slides", ["PowerPoint (.pptx)", "PDF", "Web page (.html)"]], ["sheet", ["Excel workbook (.xlsx)", "CSV (first sheet)"]],
-                                ["dashboard", ["Web page (.html)", "PDF"]]]) {
+                                ["dashboard", ["PDF", "Web page (.html)"]]]) {
     const s = await openPanel(browser, { kind });
     try {
       assert.equal(await text(s.page, "#art-title"), s.data.view.title);

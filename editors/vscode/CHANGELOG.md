@@ -2,6 +2,7 @@
 
 ## 0.35.0 — 2026-11-06
 
+- A page downloads as Word and PDF, and as Excel when it holds a table, not only as a web page or a zip. Word holds what it says, PDF how it looks, Excel its tables. A dashboard's Download lists PDF first.
 - The thinking slider in Work and a Pip's chat no longer draws a box around itself when dragged. The keyboard keeps a ring, on the slider's handle or the Pip's face.
 - An answered form, site or plugin card in a Pip's chat stays as one quiet line where it was, "Allowed · Send a form to site.example". A reply that said "the card is below" while it waited no longer points at nothing. An open card keeps its look.
 - The notice, the Pips home and the Pips page say one number for what's waiting. The notice used to take the larger of two counts, and could say 2 beside a home that said 1. A workflow's handoff waiting for review now has its row in Needs attention; reviews in a project are named apart in the notice.
