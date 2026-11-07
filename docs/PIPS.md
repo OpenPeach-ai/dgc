@@ -446,13 +446,13 @@ and the run reviews the ref's commit at the moment it is queued.
 
 ## The daily digest
 
-Pips don't message you after every run. Once a day, when there is something to
-say, the **Pips bar** above the main chat's composer shows a one-line digest: new
-findings, failed runs, reviews waiting, and earlier findings that went away after
-their file changed. Expand it for each Pip's details; select a finding to open its
-report. **Dismiss** marks the digest seen until the next day.
+Pips don't message you after every run. In the editor, **Pips** on the DGC home lists
+the Pips with news, one line each, and **Dismiss all** marks them read. A notification
+says when something is waiting for you. Once a day, when there is something to say, the
+digest gathers new findings, failed runs, reviews waiting, and earlier findings that
+went away after their file changed.
 
-A new finding at a Pip's alert level brings the bar back straight away. Each
+A new finding at a Pip's alert level brings a notification straight away. Each
 project reviewer (Scout, Lens, Rook, Lock) has two settings in its **Job** tab
 under **Notifications**:
 
@@ -1265,7 +1265,7 @@ without.
   since whatever you send there goes to the model.
 - **Sends caused by the Pip wait for you** (at Ask; see [How much it asks](#how-much-it-asks)). When its click,
   typing or choice makes a page submit a form or send data, DGC holds that exact request, unsent, and the run ends with it waiting. It appears under
-  **Waiting for you** in the Pip's **Job** tab, and the Pips bar above the chat says so at once. It also waits
+  **Waiting for you** in the Pip's **Job** tab, and **Pips** on the DGC home says so at once. It also waits
   as a card under the Pip's reply in its chat: a new site with **Allow this site** and **Not now**; a form with
   **Send once**, **Always allow** and **Reject**, and what **Always allow** would cover, with the rest under **Details**;
   a payment with what it sends (a bill number and amount, never a card field), **Review…** and **Reject**.
