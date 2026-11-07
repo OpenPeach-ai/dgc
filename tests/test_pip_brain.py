@@ -243,6 +243,10 @@ class ToolServerTests(unittest.TestCase):
         self.assertEqual(calls, [("computer", {"op": "look"})], "a tool DGC didn't offer is never run")
 
 
+def manifest_key(run_id, registry):
+    return registry.db.execute("SELECT idempotency_key FROM pip_runs WHERE id=?", (run_id,)).fetchone()[0]
+
+
 class Turns(unittest.TestCase):
     """Whole Pip turns on the stand-in CLI, through execute_native: the Pip's own handlers answer every call."""
 
@@ -283,6 +287,51 @@ class Turns(unittest.TestCase):
             result = pips.execute_native(self.cfg, self.root, manifest, events.append)
         seen = json.loads((self.bin / "seen.json").read_text())
         return result, seen, launch
+
+    def test_a_personal_quill_runs_on_its_schedule(self):
+        """It failed every time, "An automatic Quill draft requires its reviewed immutable grant": a Personal Pip made
+        as a Quill with a routine is no draft (seen on a real Instagram Pip, four runs in a row)."""
+        from dgc import pip_schedules as schedules
+        (self.bin / "script.json").write_text(json.dumps([{"say": "Three new comments, nothing urgent."}]))
+        now = ["2026-10-01T10:00:00.000Z"]
+        self.registry.clock = lambda: now[0]
+        pip = self.store.create(self.registry.personal()["id"], "Instagram", "Check my account.", "editor-user",
+                                pip_type="quill", model_choice={"mode": "subscription", "engine": "claude"})
+        proposal = self.store.propose(pip["id"], pip["current_version"], {"schedule": {"type": "interval", "minutes": 5}}, "human", "A routine")
+        pip = self.store.accept(pip["id"], proposal["id"], pip["current_version"], "human")
+        now[0] = "2026-10-01T10:05:00.000Z"
+        state = self.registry.db.execute("SELECT * FROM pip_schedule_state WHERE pip_id=?", (pip["id"],)).fetchone()
+        plan = schedules.plan_due(pip["schedule"], state["next_due_at"], now[0], state["anchor_at"])
+        occurrence = {"job_version": pip["current_version"],
+                      **{key: plan[key] for key in ("expected_next_due", "scheduled_at", "next_due_at", "checked_at")}}
+        self.assertEqual(schedules.tick(self.registry, self.cfg)["enqueued"], 1)
+        run = self.store.runs(pip["id"])[0]
+        manifest = json.loads(self.registry.db.execute("SELECT manifest FROM pip_runs WHERE id=?", (run["id"],)).fetchone()[0])
+        self.assertEqual((manifest["pip_type"], manifest["run_kind"], manifest["trigger"]), ("quill", "personal_task", "schedule"))
+        self.assertNotIn("draft_automation", manifest)
+        again = self.store.enqueue(pip["id"], manifest_key(run["id"], self.registry), "local-scheduler", self.cfg,
+                                   schedule_occurrence=occurrence)
+        self.assertEqual(again["id"], run["id"], "the same occurrence again is the same run, not a conflict")
+        from dgc import pip_brain
+        from dgc.llm import LLMClient
+        launch = pip_brain.launch_pin(manifest["model_settings"]["brain"], self.base / ("brain-" + os.urandom(3).hex()))
+        with patch.dict(os.environ, {"DGC_SESSION_POLICY": pips._json(pips.native_policy(personal=True)),
+                                     "DGC_PIP_BRAIN": json.dumps(launch)}), \
+                patch.object(LLMClient, "chat", side_effect=AssertionError("a subscription run sends DGC no request")), \
+                patch("dgc.vision.has_vision", side_effect=AssertionError("its CLI sees; nothing is probed")), \
+                patch("dgc.agent.discover_skills", return_value={}), \
+                patch("dgc.agent.load_memories", side_effect=AssertionError("No ambient memory")):
+            result = pips.execute_native(self.cfg, self.root, manifest, [].append)
+        self.assertIn("Three new comments", result["text"])
+
+    def test_a_project_quill_still_needs_its_grant_on_a_schedule(self):
+        from dgc import pip_quill_automation as automation
+        for manifest in ({"pip_type": "quill", "trigger": "schedule", "run_kind": "draft", "source_policy": {"mode": "committed_only"}},
+                         {"pip_type": "quill", "trigger": "schedule", "source_policy": {"mode": "committed_only"}},
+                         {"pip_type": "quill", "trigger": "schedule", "run_kind": "personal_task", "source_policy": {"mode": "committed_only"}},
+                         {"pip_type": "quill", "trigger": "event", "run_kind": "draft", "source_policy": {"mode": "personal"}}):
+            with self.subTest(manifest=manifest), self.assertRaisesRegex(pips.RegistryError, "reviewed immutable grant"):
+                automation.validate_manifest(manifest)
 
     def test_a_pip_runs_on_an_older_claude_code(self):
         """It doesn't have --restricted and refuses the whole command for it (seen with 2.1.220)."""
