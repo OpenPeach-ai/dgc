@@ -125,6 +125,11 @@ class MainEmailToolTests(unittest.TestCase):
         args={'scope':'personal','source_run_id':self.run['id'],'message':{'recipient_email':'review@example.invalid','subject':'Plan','body':'Walk for 30 minutes.'},'request_key':'once',**changes}
         with patch.object(tool,'WorkspaceRegistry',lambda:WorkspaceRegistry(self.registry.directory,clock=self.registry.clock)):
             return json.loads(tool.propose(args,self.context()))
+    def test_a_models_line_endings_do_not_ask_twice(self):
+        """A body with CRLF was refused after Allow, so the same card came a second time with the same words."""
+        result=self.propose(message={'recipient_email':'review@example.invalid','subject':' Plan ','body':'Hi Sam,\r\n\r\nWalk for 30 minutes.\r\n'})
+        saved=json.loads(self.store.db.execute('SELECT payload FROM pip_message_drafts WHERE id=?',(result['draft_id'],)).fetchone()[0])['message']
+        self.assertEqual((saved['subject'],saved['body']),('Plan','Hi Sam,\n\nWalk for 30 minutes.'))
     def test_main_tool_saves_draft_only_and_replays_exact_request(self):
         result=self.propose();self.assertFalse(result['send_authorized']);self.assertFalse(result['account_selected']);self.assertEqual(self.propose(),result)
         self.assertEqual(self.store.db.execute('SELECT count(*) FROM pip_app_actions').fetchone()[0],0)

@@ -811,6 +811,8 @@ Events are plain dictionaries, not typed classes; check `event.type` before read
 A saved turn's Trace is in `history()`: beside an event, a marker `{"role": "time", "of": "trace", "at": when, "tokens"?: n}`
 says when it happened, a `{"role": "time", "of": "reply_trace", "at": when, "trace": ...}` before its `turn_end` is the whole
 record `reply_trace` sent, and a `turn_start` carries `display_mentions` when an editor sent marks.
+A saved turn that failed has a marker `{"role": "turn_failure", "message": said, "cause"?: ...}` before its `turn_end`, whose
+reason is `error`; `cause` has the fields of a live `error`'s, with `full` when the provider's answer was longer than the sentence.
 The startup handshake is not a run event, and event types newer than this SDK's copy of the protocol
 are skipped rather than ending the session.
 

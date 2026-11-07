@@ -5,11 +5,12 @@
 
 export const KINDS = ['email', 'event', 'action', 'app_action', 'app_link', 'plugin', 'setup', 'computer_action', 'computer_check', 'routine'];
 const LABELS = {email: 'Email', event: 'Calendar', action: 'Action', app_action: 'Ready to send', app_link: 'App', plugin: 'Plugin',
-  setup: 'New Pip', computer_action: 'Its computer', computer_check: 'Its computer', routine: 'Routine'};
+  setup: 'New Pip', computer_action: 'Its computer', computer_check: 'Its computer', routine: 'Routine', handoff: 'Handoff', approval: 'Change'};
 const ID = {email: /^maildraft_[a-f0-9]{32}$/, event: /^caldraft_[a-f0-9]{32}$/, action: /^conndraft_[a-f0-9]{32}$/,
   app_action: /^appaction_[a-f0-9]{32}$/, app_link: /^applink_[a-f0-9]{32}$/, plugin: /^pipplugin_[a-f0-9]{32}$/,
   setup: /^setup_[a-f0-9]{32}$/, computer_action: /^compact_[a-f0-9]{32}$/, computer_check: /^pip_[a-f0-9]{32}$/,
-  routine: /^routine_[a-f0-9]{32}$/};
+  routine: /^routine_[a-f0-9]{32}$/, handoff: /^handoff_[a-f0-9]{32}$/, approval: /^[A-Za-z0-9_-]{1,128}$/};
+const REVIEW_KINDS = ['job_update', 'schedule_update'];
 const SHOWN = 6;
 // Lengths in characters, as the CLI cuts them: an emoji is one, not two UTF-16 units.
 const text = (v, max) => typeof v === 'string' && (v.length <= max || [...v].length <= max);
@@ -20,17 +21,22 @@ export function attentionPage(value) {
   if (!value || typeof value !== 'object' || !Number.isSafeInteger(value.total) || value.total < 0 || !Array.isArray(value.items)
     || value.items.length > 100 || value.items.length > value.total || typeof value.truncated !== 'boolean'
     || !value.counts || typeof value.counts !== 'object' || !value.by_pip || typeof value.by_pip !== 'object') fail();
-  const items = value.items.map(i => {
-    if (!i || !KINDS.includes(i.kind) || !ID[i.kind].test(i.card) || i.id !== `${i.kind}:${i.card}`
+  const check = i => {
+    if (!i || !ID[i.kind]?.test(i.card) || i.id !== `${i.kind}:${i.card}`
       || !(i.pip_id === null && i.kind === 'setup' || PIP.test(i.pip_id)) || !text(i.title, 160) || !i.title || !text(i.detail, 200)
       || !text(i.pip_name, 120) || !WORKSPACE.test(i.workspace_id) || !text(i.created_at, 40)
       || !(i.expires_at === null || text(i.expires_at, 40))) fail();
     return {id: i.id, kind: i.kind, card: i.card, pip_id: i.pip_id, pip_name: i.pip_name, pip_type: i.pip_type || '',
-      workspace_id: i.workspace_id, title: i.title, detail: i.detail, created_at: i.created_at};
-  });
+      workspace_id: i.workspace_id, title: i.title, detail: i.detail, created_at: i.created_at,
+      ...(REVIEW_KINDS.includes(i.review) ? {review: i.review} : {})};
+  };
+  for (const i of value.items) if (!i || !KINDS.includes(i.kind)) fail();
+  // Reviews come beside the cards (a DGC from before has none): a row of each, newest first, among the rest.
+  const reviews = Array.isArray(value.reviews) ? value.reviews.map(check) : [];
+  const items = [...value.items.map(check), ...reviews].sort((a, b) => (b.created_at > a.created_at) - (b.created_at < a.created_at));
   const byPip = {};
   for (const [pip, n] of Object.entries(value.by_pip)) { if (!PIP.test(pip) || !Number.isSafeInteger(n) || n < 1) fail(); byPip[pip] = n; }
-  return {total: value.total, items, byPip, truncated: value.truncated};
+  return {total: value.total, items, byPip, truncated: value.truncated, listsReviews: Array.isArray(value.reviews)};
 }
 
 /** Where a row goes: the Pip's chat at its card, its computer, or the Pips home's setup reviews. */
@@ -38,6 +44,8 @@ export function attentionNavigation(item) {
   if (item.kind === 'setup' && !item.pip_id) return {setup: item.card, workspace: item.workspace_id};
   const base = {pip: item.pip_id, workspace: item.workspace_id, attention: true};
   if (item.kind === 'computer_action') return {...base, computer: true};
+  if (item.kind === 'handoff') return {...base, section: 'handoffs', reviewKind: 'handoff', review: item.card};
+  if (item.kind === 'approval') return {...base, section: 'revisions', reviewKind: item.review || 'job_update', review: item.card};
   if (item.kind === 'app_action') return {...base, section: 'chat', reviewKind: 'app_action', review: item.card};
   return {...base, section: 'chat', card: item.card, cardKind: item.kind};
 }

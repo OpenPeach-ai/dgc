@@ -403,6 +403,8 @@ button.pill{border-radius:999px;padding:6px 16px}
 .app-link-words strong{font-weight:600;overflow-wrap:anywhere}
 .app-link-words small{color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.45;overflow-wrap:anywhere}
 .app-link-note{margin:0;color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.45}
+.card-settled{margin:-14px 0 20px 4px;color:var(--vscode-descriptionForeground);font-size:11px;line-height:1.45;overflow-wrap:anywhere}
+.pip-failed-turn{display:flex;flex-direction:column;align-items:flex-start;margin:0 0 12px}
 .app-link-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .app-link-actions button{min-height:28px;border-radius:999px;padding:4px 12px}
 /* Borrowing your own Chrome (API 59): the card, the line while lent, and the line it leaves when it gives it back. */

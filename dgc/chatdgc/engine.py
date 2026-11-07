@@ -3422,8 +3422,15 @@ def _merged_plugins(before, used) -> list:
     return merged
 
 
+# What Details shows of a failure. It was 300 characters, so it ended mid-word ("Failed to e") while the Pip's View error had
+# it all: what the provider said, with no key or credentialed URL in it, kept to what a person reads.
+_FAILURE_CHARS = 2000
+
+
 def _failure_text(exc) -> str:
-    text = " ".join(str(exc).split())[:300]
+    from ..model_errors import scrub_urls
+    from ..redaction import redact_text, secret_values
+    text = redact_text(scrub_urls(" ".join(str(getattr(exc, "full_text", "") or exc).split())), secret_values())[:_FAILURE_CHARS]
     return f"The model didn't answer: {text}" if text else "The model didn't answer. Try again."
 
 

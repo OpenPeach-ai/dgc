@@ -29,7 +29,7 @@ from .model_watch import (CHECK_EVERY_S, LOCAL_SOCKET_CEILING_S, RECHECK_S, Requ
                           resolve_first_token_timeout, resolve_load_timeout, safe_endpoint)
 from .model_watch import is_local_endpoint
 from .server_check import ServerCheck, kind_for as _server_kind
-from .model_errors import classify_exception, classify_status, eof_cause, hint_for, scrub_urls
+from .model_errors import FailureCause, classify_exception, classify_status, eof_cause, hint_for, scrub_urls
 
 
 _DATA_IMAGE_RE = re.compile(
@@ -292,6 +292,10 @@ def _is_transport_interruption(exc: BaseException) -> bool:
     ))
 
 
+# How much of a provider's error answer is read: what an editor's Details can show. The sentence an error carries stays short.
+ERROR_DETAIL_CHARS = 2000
+
+
 def _error_body(response, limit: int = 600) -> str:
     """Read a bounded error body and always release its streamed response."""
     try:
@@ -507,10 +511,18 @@ def _interruption_of(watch, finish_reason: str, transport: str) -> dict | None:
             "endpoint": cause.endpoint, "transport": transport}
 
 
-def _with_cause(error: Exception, cause, attempts: int) -> Exception:
-    """Attach the structured cause and the number of requests made to a raised model error."""
+def _with_cause(error: Exception, cause, attempts: int, *, shown: str = "", whole: str = "") -> Exception:
+    """Attach the structured cause and the number of requests made to a raised model error. ``shown``: the provider's words
+    as the error's sentence ends with them; ``whole``: all of them. The sentence is what the terminal, logs and a Pip's
+    report read, so it keeps its short form, and the long one goes beside it (``full_text``, ``cause.full``) for Details."""
     error.cause = cause
     error.attempts = max(0, int(attempts))
+    said, whole = str(error), scrub_urls(whole)
+    if shown and len(whole) > len(shown) and said.endswith(shown):
+        error.full_text = said[:-len(shown)] + whole
+        if isinstance(cause, FailureCause):
+            from dataclasses import replace as _replace
+            error.cause = _replace(cause, full=error.full_text)
     return error
 
 
@@ -2703,10 +2715,12 @@ class LLMClient:
             message = f"cannot connect to {where} — {cause.summary}{local}\n{scrub_urls(exc)}"
         return _with_cause(LLMError(message), cause, attempts)
 
-    def _answer_error(self, message: str, status: int, body: str, url: str, attempts: int) -> LLMError:
+    def _answer_error(self, message: str, status: int, body: str, url: str, attempts: int, whole: str = "",
+                      shown: str | None = None) -> LLMError:
         """A final non-retried HTTP answer, carrying its cause (auth, model not found, 4xx)."""
         cause = self._status_cause(status, body, None, url, 0.0)
-        return _with_cause(LLMError(message), cause, attempts)
+        return _with_cause(LLMError(message), cause, attempts,
+                           shown=scrub_urls(body) if shown is None else shown, whole=whole)
 
     @staticmethod
     def _pre_progress_stall(result: ChatResult) -> StallInfo | None:
@@ -3563,7 +3577,8 @@ class LLMClient:
             if response.status_code in (408, 429) or response.status_code >= 500:
                 status = response.status_code
                 headers = response.headers
-                body = scrub_urls(_error_body(response, 400))
+                whole = scrub_urls(_error_body(response, ERROR_DETAIL_CHARS))
+                body = whole[:400]
                 if status >= 500 and _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
                     messages = self._without_images(messages, refused=True)   # images: a refusal
                     continue
@@ -3577,10 +3592,11 @@ class LLMClient:
                     continue
                 raise _with_cause(LLMError(
                     f"HTTP {status} from Anthropic Messages after {transient} tries: {body}"),
-                    last_cause, transient)
+                    last_cause, transient, shown=body, whole=whole)
             if response.status_code in (400, 413):
                 status = response.status_code
-                body = _error_body(response)
+                whole = _error_body(response, ERROR_DETAIL_CHARS)
+                body = whole[:600]
                 low = body.lower()
                 last_err = body
                 if status == 413 or _OVERFLOW_RE.search(low):
@@ -3621,15 +3637,16 @@ class LLMClient:
                     self._mark_rejected("tools")
                     raise ToolsUnsupportedError("Anthropic Messages rejected native tool calling")
                 raise self._answer_error(f"{status} from Anthropic Messages: {scrub_urls(body)}",
-                                         status, body, f"{self.base_url}/messages", transient + 1)
+                                         status, body, f"{self.base_url}/messages", transient + 1, whole)
             if response.status_code != 200:
                 status = response.status_code
-                body = scrub_urls(_error_body(response, 400))
+                whole = scrub_urls(_error_body(response, ERROR_DETAIL_CHARS))
+                body = whole[:400]
                 if status == 422 and _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
                     messages = self._without_images(messages, refused=True)   # images: a refusal
                     continue
                 raise self._answer_error(f"HTTP {status} from Anthropic Messages: {body}",
-                                         status, body, f"{self.base_url}/messages", transient + 1)
+                                         status, body, f"{self.base_url}/messages", transient + 1, whole)
             budget = self._think_budget(level)
             self._usage_opened()
             self._next_reasoning_attempt(
@@ -4171,7 +4188,8 @@ class LLMClient:
             if r.status_code == 429:
                 transient += 1
                 headers = r.headers
-                body = scrub_urls(_error_body(r))
+                whole = scrub_urls(_error_body(r, ERROR_DETAIL_CHARS))
+                body = whole[:600]
                 last_err = f"429 rate limited: {body[:200]}"
                 delay = _retry_delay(headers, 0.5 * transient)
                 last_cause = self._status_cause(429, body, headers, self._ollama_url, delay)
@@ -4180,9 +4198,10 @@ class LLMClient:
                         return ChatResult(finish_reason="cancelled")
                     continue
                 raise _with_cause(LLMError(f"rate limited (429) after {transient} tries: {last_err}"),
-                                  last_cause, transient)
+                                  last_cause, transient, shown=body[:200], whole=whole)
             if r.status_code in (400, 413):
-                body = _error_body(r)
+                whole = _error_body(r, ERROR_DETAIL_CHARS)
+                body = whole[:600]
                 low = body.lower()
                 last_err = body
                 if _OVERFLOW_RE.search(low):
@@ -4242,10 +4261,11 @@ class LLMClient:
                         native_options.pop(key, None)
                     continue
                 raise self._answer_error(f"{r.status_code} from Ollama: {scrub_urls(body)}",
-                                         r.status_code, body, self._ollama_url, transient + 1)
+                                         r.status_code, body, self._ollama_url, transient + 1, whole)
             if r.status_code >= 500:
                 status = r.status_code
-                body = scrub_urls(_error_body(r))
+                whole = scrub_urls(_error_body(r, ERROR_DETAIL_CHARS))
+                body = whole[:600]
                 if _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
                     messages = self._without_images(messages, refused=True)   # images: a refusal
                     payload["messages"] = self._ollama_messages(
@@ -4264,12 +4284,13 @@ class LLMClient:
                     continue
                 raise _with_cause(LLMError(
                     f"HTTP {status} from {safe_endpoint(self._ollama_url)} after {transient} tries: "
-                    f"{body[:400]}"), last_cause, transient)
+                    f"{body[:400]}"), last_cause, transient, shown=body[:400], whole=whole)
             if r.status_code != 200:
                 status = r.status_code
-                body = scrub_urls(_error_body(r, 400))
+                whole = scrub_urls(_error_body(r, ERROR_DETAIL_CHARS))
+                body = whole[:400]
                 raise self._answer_error(f"HTTP {status} from {safe_endpoint(self._ollama_url)}: {body}",
-                                         status, body, self._ollama_url, transient + 1)
+                                         status, body, self._ollama_url, transient + 1, whole)
             budget = self._think_budget(level)
             self._usage_opened()
             self._next_reasoning_attempt()
@@ -4430,7 +4451,8 @@ class LLMClient:
             if r.status_code == 429:
                 # rate limited — back off (honour Retry-After) and retry within the budget
                 headers = r.headers
-                body = scrub_urls(_error_body(r))
+                whole = scrub_urls(_error_body(r, ERROR_DETAIL_CHARS))
+                body = whole[:600]
                 last_err = f"429 rate limited: {body[:200]}"
                 transient += 1
                 delay = _retry_delay(headers, 0.5 * transient)
@@ -4440,9 +4462,10 @@ class LLMClient:
                         return ChatResult(finish_reason="cancelled")
                     continue
                 raise _with_cause(LLMError(f"rate limited (429) after {transient} tries: {last_err}"),
-                                  last_cause, transient)
+                                  last_cause, transient, shown=body[:200], whole=whole)
             if r.status_code in (400, 413, 422):
-                body = _error_body(r)
+                whole = _error_body(r, ERROR_DETAIL_CHARS)
+                body = whole[:600]
                 last_err = body
                 low = body.lower()
                 # Classify OVERFLOW first — some overflow bodies contain words like "invalid" that would
@@ -4475,7 +4498,7 @@ class LLMClient:
                 if r.status_code == 422:
                     raise self._answer_error(
                         f"HTTP 422 from {safe_endpoint(self._url)}: {scrub_urls(body)[:400]}",
-                        422, body, self._url, transient + 1)
+                        422, body, self._url, transient + 1, whole, shown=scrub_urls(body)[:400])
                 # only disable a capability when the server actually blames THAT capability —
                 # a 400 about something else must not permanently strip tools/reasoning.
                 if (r.status_code == 400 and "parallel_tool_calls" in payload
@@ -4523,13 +4546,14 @@ class LLMClient:
                     self._mark_rejected("tools")
                     raise ToolsUnsupportedError("endpoint rejected native tool calling")
                 raise self._answer_error(f"{r.status_code} from server: {scrub_urls(body)}",
-                                         r.status_code, body, self._url, transient + 1)
+                                         r.status_code, body, self._url, transient + 1, whole)
             if r.status_code >= 500:
                 # Transient upstream error — retry instead of killing the turn (robust
                 # clients do the same). Ollama, for one, intermittently 500s
                 # "no user query found in messages" on long tool-loops.
                 status = r.status_code
-                body = scrub_urls(_error_body(r))
+                whole = scrub_urls(_error_body(r, ERROR_DETAIL_CHARS))
+                body = whole[:600]
                 if _image_parts_in(payload["messages"]) and _IMAGE_REFUSAL_RE.search(body):
                     # images: a server without an image encoder (llama.cpp without mmproj) says so
                     # with a 500. That is a refusal, not a transient failure: retry without it.
@@ -4555,12 +4579,13 @@ class LLMClient:
                     continue
                 raise _with_cause(LLMError(
                     f"HTTP {status} from {safe_endpoint(self._url)} after {transient} tries: {body[:400]}"),
-                    last_cause, transient)
+                    last_cause, transient, shown=body[:400], whole=whole)
             if r.status_code != 200:
                 status = r.status_code
-                body = scrub_urls(_error_body(r, 400))
+                whole = scrub_urls(_error_body(r, ERROR_DETAIL_CHARS))
+                body = whole[:400]
                 raise self._answer_error(f"HTTP {status} from {safe_endpoint(self._url)}: {body}",
-                                         status, body, self._url, transient + 1)
+                                         status, body, self._url, transient + 1, whole)
             budget = self._think_budget(level)
             self._usage_opened()
             self._next_reasoning_attempt()
@@ -4945,7 +4970,8 @@ class LLMClient:
             if response.status_code == 429 or response.status_code >= 500:
                 status = response.status_code
                 headers = response.headers
-                body = scrub_urls(_error_body(response, 400))
+                whole = scrub_urls(_error_body(response, ERROR_DETAIL_CHARS))
+                body = whole[:400]
                 if status >= 500 and _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
                     messages = self._without_images(messages, refused=True)   # images: a refusal
                     continue
@@ -4959,9 +4985,10 @@ class LLMClient:
                     continue
                 raise _with_cause(LLMError(
                     f"HTTP {status} from Responses API after {transient} tries: {body}"),
-                    last_cause, transient)
+                    last_cause, transient, shown=body, whole=whole)
             if response.status_code in (400, 413):
-                body = _error_body(response)
+                whole = _error_body(response, ERROR_DETAIL_CHARS)
+                body = whole[:600]
                 low = body.lower()
                 if _OVERFLOW_RE.search(low):
                     raise self._overflow(body)
@@ -5006,15 +5033,16 @@ class LLMClient:
                     continue
                 raise self._answer_error(f"{response.status_code} from Responses API: {scrub_urls(body)}",
                                          response.status_code, body, f"{self.base_url}/responses",
-                                         transient + 1)
+                                         transient + 1, whole)
             if response.status_code != 200:
                 status = response.status_code
-                body = scrub_urls(_error_body(response, 400))
+                whole = scrub_urls(_error_body(response, ERROR_DETAIL_CHARS))
+                body = whole[:400]
                 if status == 422 and _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
                     messages = self._without_images(messages, refused=True)   # images: a refusal
                     continue
                 raise self._answer_error(f"HTTP {status} from Responses API: {body}",
-                                         status, body, f"{self.base_url}/responses", transient + 1)
+                                         status, body, f"{self.base_url}/responses", transient + 1, whole)
             self._usage_opened()
             self._next_reasoning_attempt()
             try:

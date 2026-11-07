@@ -6,6 +6,14 @@ from .workspace_registry import WorkspaceRegistry,RegistryError,canonical_direct
 from . import pip_message_drafts as drafts
 
 
+def _tidied(value,kind):
+    """A model's line endings and the space around its words. The card reads the same either way; refusing them after
+    Allow only sent the model round to ask for the same draft again."""
+    fields={'email':('subject','body'),'calendar':('summary','description')}.get(kind,())
+    if not isinstance(value,dict):return value
+    return {k:v.replace('\r\n','\n').replace('\r','\n').strip() if k in fields and isinstance(v,str) else v for k,v in value.items()}
+
+
 def propose(args,ctx,*,kind='email'):
     _,_,content,_=drafts._spec(kind)
     from .pip_access import require_unrestricted
@@ -17,7 +25,7 @@ def propose(args,ctx,*,kind='email'):
     _id(args['source_run_id'],'run')
     if not isinstance(args['request_key'],str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}',args['request_key']):raise RegistryError('invalid_request','Use a 1–64 character retry key.')
     from .redaction import secret_values
-    message=drafts.validate_message(args[content],secret_values(ctx.config),kind=kind)
+    message=drafts.validate_message(_tidied(args[content],kind),secret_values(ctx.config),kind=kind)
     callback=getattr(ctx,'pip_proposal_origin',None)
     if not callable(callback):raise RegistryError('session_required','Drafts require an owning local main chat.')
     origin=callback()

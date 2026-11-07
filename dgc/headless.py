@@ -1874,31 +1874,40 @@ class HeadlessUI:
 
     def _error_cause(self, cause) -> dict | None:
         """``error.cause`` with every bound clamped (the nested object is not schema-checked)."""
+        out = self._clamped_cause(cause)
+        if out is None:
+            return None
+        if cause.get("run_n") is not None and self._bounded_int(cause.get("run_n"), 1, 10**9):
+            out["retry_id"] = self._retry_id(cause["run_n"], str(cause.get("agent") or ""))
+        elif isinstance(cause.get("retry_id"), str) and cause["retry_id"]:
+            out["retry_id"] = cause["retry_id"][:128]
+        return out
+
+    @classmethod
+    def _clamped_cause(cls, cause) -> dict | None:
+        """A cause's fields with every bound clamped: what a saved failure replays, which belongs to no live retry."""
         from .editor_protocol import MAX_SAFE_INTEGER, MODEL_FAILURE_KINDS
         from .model_watch import safe_endpoint
         if not isinstance(cause, dict):
             return None
         out: dict = {"kind": cause.get("kind") if cause.get("kind") in MODEL_FAILURE_KINDS else "other",
-                     "summary": self._bounded_text(cause.get("summary"), 200) or "the model request failed"}
+                     "summary": cls._bounded_text(cause.get("summary"), 200) or "the model request failed"}
         where = str(cause.get("endpoint") or "")
         if "://" in where:
             where = safe_endpoint(where)
         for key, value, bound in (("endpoint", where, 300), ("model", cause.get("model"), 200),
                                   ("api_mode", cause.get("api_mode"), 40),
-                                  ("detail", cause.get("detail"), 4000), ("hint", cause.get("hint"), 300)):
-            text = self._bounded_text(value, bound)
+                                  ("detail", cause.get("detail"), 4000), ("hint", cause.get("hint"), 300),
+                                  ("full", cause.get("full"), 2400)):
+            text = cls._bounded_text(value, bound)
             if text:
                 out[key] = text
-        status = self._bounded_int(cause.get("http_status"), 0, 10**6)
+        status = cls._bounded_int(cause.get("http_status"), 0, 10**6)
         if status is not None and 100 <= status <= 599:
             out["http_status"] = status
-        attempts = self._bounded_int(cause.get("attempts"), 0, MAX_SAFE_INTEGER)
+        attempts = cls._bounded_int(cause.get("attempts"), 0, MAX_SAFE_INTEGER)
         if attempts:
             out["attempts"] = attempts
-        if cause.get("run_n") is not None and self._bounded_int(cause.get("run_n"), 1, 10**9):
-            out["retry_id"] = self._retry_id(cause["run_n"], str(cause.get("agent") or ""))
-        elif isinstance(cause.get("retry_id"), str) and cause["retry_id"]:
-            out["retry_id"] = cause["retry_id"][:128]
         return out
     # ---- end reconnecting: model_retry ------------------------------------------------------------
 
@@ -5730,6 +5739,15 @@ class Backend:
             return False
         return True
 
+    def _emit_known_context(self) -> None:
+        """The meter for a page that knows nothing yet, or nothing at all: counted while a running turn changes a
+        message, a false 0% would be worse than saying nothing."""
+        try:
+            self.agent.estimate_tokens()
+        except Exception:
+            return
+        self._emit_context()
+
     def _emit_context(self, request_id: str | None = None) -> None:
         try:
             used = self.agent.estimate_tokens()
@@ -6229,6 +6247,14 @@ class Backend:
             # same class of lie as calling a shutdown the user's own stop.
             finished = bool(turn["final"]) and not turn["interrupted"]
             finished = self._history_turn_finished(turn, finished)
+            # Unless the turn said how it ended (Agent._note_turn_failure): an answer written after that note means it
+            # went on. A marker, so an older client ignores it; `error` isn't replayed, its side effects aren't for a reload.
+            failure = turn.pop("failure", None)
+            if failure and failure[1] != turn["final"]:
+                failure = None
+            if failure:
+                finished = False
+                items.append(self._history_failure_item(failure[0]))
             pause = turn.get("goal_pause")
             if pause:
                 finished = False
@@ -6247,7 +6273,7 @@ class Backend:
             if saved_trace is not None and finished:
                 items.append({"role": "time", "of": "reply_trace", "at": turn["written_at"] or 0, "trace": saved_trace})
             items.append({"type": "turn_end", "turn_id": turn["id"],
-                          "reason": "paused" if pause else "completed" if finished else "cancelled",
+                          "reason": "paused" if pause else "completed" if finished else "error" if failure else "cancelled",
                           "token_estimate": 0,
                           "final_message_id": turn["final"] if finished else None})
             items.extend(turn.pop("pip_reports", ()))
@@ -6346,8 +6372,19 @@ class Backend:
                 items.extend(arrived)
             arrived.clear()
 
+        failed_note = None
+        def note_failure() -> None:
+            # The note is on the turn's last message, so that message has been read when this runs: its turn is the open one.
+            nonlocal failed_note
+            if failed_note is not None and turn is not None:
+                turn["failure"] = (failed_note, turn["final"])
+            failed_note = None
+
         for index, m in enumerate(self.agent.messages):
             position = index
+            note_failure()
+            if isinstance(m.get("_dgc_turn_failed"), dict):
+                failed_note = m["_dgc_turn_failed"]
             mark_turn_files()
             # Only to a client that draws the CLI's card (watch_turn_files): the SDK, ACP and an older editor
             # get the history they always did, like agent_report's lines.
@@ -6656,6 +6693,7 @@ class Backend:
         place_reports()
         live_start = None
         live_reports: list = []
+        note_failure()
         if isinstance(live_turn, dict) and turn is not None and turn["at"] > live_after:
             live_start, live_id = items[turn["item"]], str(live_turn.get("id") or "") or turn["id"]
             live_reports = turn.pop("pip_reports", [])
@@ -8859,8 +8897,11 @@ class Backend:
                 self.em.emit("error", message="no session to resume",
                              **_request_fields(request_id))
         elif t == "get_history":
-            # The clock first: the correlated snapshot stays the last word of this reply.
+            # The clock and the meter first: the correlated snapshot stays the last word of this reply. A page asking
+            # for a snapshot knows nothing yet, and a reload mid-reply hears no other `context` until that turn ends:
+            # its meter read 0% through the rest of the reply (the first one after a reattach comes from here).
             self._publish_cache_clock(current=True)
+            self._emit_known_context()
             self._emit_history(cmd["request_id"])
         elif t == "get_outline":
             self._emit_outline(cmd["request_id"])
@@ -10096,6 +10137,14 @@ class Backend:
                                                   notice.get("attempt"), notice.get("max"),
                                                   notice.get("summary"), notice.get("endpoint")))
         return items
+
+    def _history_failure_item(self, note: dict) -> dict:
+        """A saved failure as a {role: "turn_failure"} marker: its words and its cause, clamped as a live error's are."""
+        item = {"role": "turn_failure", "message": HeadlessUI._bounded_text(note.get("message"), 4000) or "The turn failed."}
+        cause = HeadlessUI._clamped_cause(note.get("cause"))
+        if cause:
+            item["cause"] = cause
+        return item
 
     def _history_turn_closing_items(self, turn: dict) -> list:
         """Items a replayed turn draws last, before its ``turn_end``: the reconnect it gave up on."""

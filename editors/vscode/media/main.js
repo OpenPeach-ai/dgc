@@ -1437,6 +1437,9 @@
     const pct = size ? Math.min(100, Math.round((used / size) * 100)) : 0;
     const threshold = Math.max(.01, Math.min(1, Number(contextState.compact_threshold || .85)));
     $("ctx").textContent = pct + "%";
+    // No provider: no model anyone chose, so no window to measure against, and no number.
+    $("btn-ctx").hidden = noProvider;
+    if (noProvider && !$("ctxmenu").hidden) hideContextMenu();
     $("btn-ctx").classList.toggle("warn", pct >= Math.round(threshold * 100));
     $("btn-ctx").classList.toggle("busy", compacting);
     const capped = modelMaxLabel();
@@ -6268,6 +6271,8 @@ function permissionChoices(ev) {
         labels: {}, edit: null };
     }
     if (canonicalTool(name) === "task") return helpersPermission(a);
+    const pip = pipToolPermission(name, a);
+    if (pip) return pip;
     const mcp = /^mcp__([a-z0-9_-]+)__(.+)$/.exec(String(name || ""));
     if (mcp && !pluginCalls(name, a)) return pluginToolPermission(mcp[1], mcp[2], a);
     return null;
@@ -6295,6 +6300,47 @@ function permissionChoices(ev) {
       detail: `<ul class="perm-helpers">${items}</ul>`
         + (a.background === true ? `<p class="muted perm-facts">In the background: the reply goes on without waiting for ${n === 1 ? "it" : "them"}.</p>` : ""),
       labels: { once: n === 1 ? "Start it" : "Start them" }, edit: null, note: true };
+  }
+  // A Pip's own tools on the main chat's Allow card: what it does, to which Pip by its name (the backend reads it from DGC's
+  // records: args.pip_name), and why. It read "Run resume_pip {"pip_id":"pip_96…","expected_version":3,…}" (final check,
+  // 2026-11-07). `rule: false`: the answer's receipt reads "Always allowed", never the rule's Pip id.
+  function pipToolPermission(name, a) {
+    const pip = plainWords(a.pip_name, 120) || "this Pip";
+    const row = (label, value) => (value ? `<dt>${esc(label)}</dt><dd>${esc(String(value).slice(0, 2000))}</dd>` : "");
+    const card = (shown, title, rows, note) => ({ name: shown, title, labels: {}, edit: null, note: true, rule: false,
+      detail: `${rows ? `<dl class="pip-permission">${rows}</dl>` : ""}<div class="muted pip-permission-note">${esc(note)}</div>` });
+    const why = row("Why", a.reason);
+    const named = `<b>${esc(pip)}</b>`;
+    if (name === "pause_pip") return card(`Pause ${pip}`, `Pause ${named}?`, why, "Its queued and scheduled work waits until you resume it. Its chat stays open, and a reply already running may finish.");
+    if (name === "resume_pip") return card(`Resume ${pip}`, `Resume ${named}?`, why, "Work it already has, queued or on its schedule, can run again. Nothing new is approved.");
+    if (name === "attach_pip_to_session") return card(`Attach ${pip}`, `Attach ${named} to this chat?`, why, "Its finished reports show here. It gets no access to this chat, no new tools and no new permissions.");
+    if (name === "run_pip_now") return card(`Run ${pip}`, `Run ${named} now?`, why, "It runs in the background under its own job and model. Its report comes back to this chat.");
+    if (name === "pips_adapt") {
+      const changes = a.changes && typeof a.changes === "object" ? a.changes : {};
+      return card(`Change ${pip}`, `Change ${named}?`, row("New name", changes.name) + row("Branch", changes.source_ref) + why, "Allow applies this to the Pip. It starts no work, and what the Pip may do stays the same.");
+    }
+    if (name === "handoff_to_pip") {
+      return card(`Hand work to ${pip}`, `Hand this to ${named}?`, row("Task", a.task) + row("Shared", a.shared_text), "This saves it for your review. Nothing runs until you accept it in Pips.");
+    }
+    const from = row("From", a.pip_name ? pip : "");
+    if (name === "draft_pip_email") {
+      const m = a.message && typeof a.message === "object" ? a.message : {};
+      return card("Save an email draft", "Save this email as a draft?", from + row("To", m.recipient_email) + row("Subject", m.subject) + row("Message", m.body), "Nothing is sent. You review it in the Pip's chat and choose Send once.");
+    }
+    if (name === "draft_pip_calendar_event") {
+      const e = a.event && typeof a.event === "object" ? a.event : {};
+      const when = [e.start_datetime, e.end_datetime].filter(Boolean).join(" to ");
+      return card("Save a calendar draft", "Save this event as a draft?", from + row("Event", e.summary) + row("When", when && `${when}${e.timezone ? ` (${e.timezone})` : ""}`)
+        + row("Guests", Array.isArray(e.attendees) ? e.attendees.join(", ") : ""), "Nothing is added and no invitation goes out. You review it in the Pip's chat first.");
+    }
+    if (name === "draft_pip_connector_action") {
+      const act = a.action && typeof a.action === "object" ? a.action : {}, call = act.call && typeof act.call === "object" ? act.call : {};
+      const inputs = call.arguments && typeof call.arguments === "object" ? JSON.stringify(call.arguments, null, 2) : "";
+      const shown = card("Save an action draft", `Save this action in <b>${esc(plainWords(act.server, 60) || "an app")}</b> as a draft?`, from + row("Action", call.tool), "Nothing runs. You review it in the Pip's chat and choose Run once.");
+      if (inputs && inputs !== "{}") shown.detail += `<details class="perm-brief"><summary>Inputs as sent</summary><pre>${esc(inputs.slice(0, 12000))}</pre></details>`;
+      return shown;
+    }
+    return null;
   }
   // A plugin's tool that isn't Composio's multi-execute: the tool and the plugin by name. One that sends or changes
   // something shows every input it sends, in full and with no click; a read keeps its inputs one click away, in Inputs
@@ -8231,7 +8277,7 @@ function permissionChoices(ev) {
           // Read by the model and shown in the step's row: plain words for both.
           const note = edited ? `Changed the prompt to: ${edited} — make it with this prompt instead (same generator, ${plain?.video ? "length and resolution" : "size and count"}).`
             : (c.querySelector(".feedback")?.value || "").trim().slice(0, 2000);
-          if (!resolveCard(c, edited ? "Asked again with your prompt" : permissionDecision(b.dataset.d, ev.suggested_rule, note))) return;
+          if (!resolveCard(c, edited ? "Asked again with your prompt" : permissionDecision(b.dataset.d, plain?.rule === false ? "" : ev.suggested_rule, note))) return;
           compactPermissionCard(c, plain ? plain.name : ev.name);
           vscode.postMessage({ type: "permission_response", id: ev.id, decision: b.dataset.d,
             rule: b.dataset.d === "always" ? ev.suggested_rule : undefined,
@@ -8734,7 +8780,7 @@ function permissionChoices(ev) {
         break;
       }
       case "error":
-        if (!modelErrorRow(ev)) { speak(`DGC error: ${ev.message}`); sysLine(ev.message, true); }
+        if (!modelErrorRow(ev)) { speak(`DGC error: ${ev.message}`); sysLine(window.DgcMarkdown?.editorAdvice?.(ev.message) ?? ev.message, true); }
         if (ev.fatal) { endTurn("error"); setSending(false); }
         // "unknown command: /foo" / "custom command /foo is empty": no turn is coming for it.
         else if (answersCustomCommand(ev.message)) settleCustomCommand();
@@ -11174,6 +11220,11 @@ function permissionChoices(ev) {
       return;
     }
     if (it.role === "goal_edit") { sysLine(String(it.text || "")); return; }
+    // A turn that failed, reopened: the row it drew (Agent._note_turn_failure). `error` itself isn't replayed: its side effects aren't a reload's.
+    if (it.role === "turn_failure") {
+      if (!modelErrorRow({ message: it.message, cause: it.cause })) sysLine(window.DgcMarkdown?.editorAdvice?.(String(it.message || "")) ?? String(it.message || ""), true);
+      return;
+    }
     if (it.role === "pip_report") { renderPipReport(it.report); return; }
     if (it.role === "steering") {
       ensureTurn();
@@ -11468,6 +11519,7 @@ function permissionChoices(ev) {
     else if (msg.type === "state") {
       curModel = msg.state.model || ""; curThink = msg.state.think || "off"; noProvider = msg.state.noProvider === true;
       if (!noProvider) document.querySelector(".no-provider-line")?.remove();
+      renderContext();
       curSubscription = msg.state.subscriptionEngine || "";
       curBaseUrl = String(msg.state.baseUrl || "");
       renderCacheClock();                        // a model change can change whose cache it is
@@ -15735,6 +15787,21 @@ function permissionChoices(ev) {
           : state === "cancelled" || state === "unfinished" ? "circle-slash" : "refresh-cw");
     retryFacts(node.querySelector(".model-retry-facts"), retryFactRows(line));
     const list = node.querySelector(".model-retry-attempts");
+    retryAttemptList(list, line);
+    list.hidden = !line.attempts.length && !line.dropped;
+    list.previousElementSibling.hidden = list.hidden;
+    const raw = node.querySelector(".model-retry-raw"), hint = node.querySelector(".model-retry-hint");
+    const advice = (text) => window.DgcMarkdown?.editorAdvice?.(text) ?? text;
+    raw.textContent = advice(line.detail); raw.hidden = !line.detail;
+    hint.textContent = advice(line.hint); hint.hidden = !line.hint;
+    node.querySelector(".model-retry-raw-label").hidden = raw.hidden;
+    node.querySelector(".model-retry-hint-label").hidden = hint.hidden;
+  }
+  function retryAttemptLines(line) {
+    return [...(line.dropped ? [`… ${line.dropped} earlier attempts`] : []), ...line.attempts.map((a) =>
+      `Attempt ${a.n}: ${a.summary}${a.delayMs != null ? ` · retried after ${retrySeconds(a.delayMs)}` : ""}`)];
+  }
+  function retryAttemptList(list, line) {
     list.textContent = "";
     if (line.dropped) list.appendChild(el("li", "model-retry-earlier")).textContent = `… ${line.dropped} earlier attempts`;
     for (const attempt of line.attempts) {
@@ -15744,24 +15811,24 @@ function permissionChoices(ev) {
         + (attempt.delayMs != null ? ` · retried after ${retrySeconds(attempt.delayMs)}` : "")));
       list.appendChild(li);
     }
-    list.hidden = !line.attempts.length && !line.dropped;
-    list.previousElementSibling.hidden = list.hidden;
-    const raw = node.querySelector(".model-retry-raw"), hint = node.querySelector(".model-retry-hint");
-    raw.textContent = line.detail; raw.hidden = !line.detail;
-    hint.textContent = line.hint; hint.hidden = !line.hint;
-    node.querySelector(".model-retry-raw-label").hidden = raw.hidden;
-    node.querySelector(".model-retry-hint-label").hidden = hint.hidden;
+  }
+  // The retries a failure ended, under that failure's Details.
+  function foldRetryInto(row, line) {
+    if (!line.attempts.length && !line.dropped) return;
+    const label = el("div", "model-retry-section", "Attempts"), list = el("ol", "model-retry-attempts");
+    label.id = `model-retry-attempts-${++retrySeq}`;
+    list.setAttribute("aria-labelledby", label.id);
+    retryAttemptList(list, line);
+    row.querySelector(".model-error-label").before(label, list);
   }
   function retryCopyText(line) {
     const [words, count] = retryWords(line, line.state);
     const out = [`${words}${count ? " " + count : ""}${line.summary ? " · " + line.summary : ""}`];
     for (const [name, value] of retryFactRows(line)) if (value) out.push(`${name}: ${value}`);
-    if (line.dropped) out.push(`… ${line.dropped} earlier attempts`);
-    for (const a of line.attempts) {
-      out.push(`Attempt ${a.n}: ${a.summary}${a.delayMs != null ? ` · retried after ${retrySeconds(a.delayMs)}` : ""}`);
-    }
-    if (line.detail) out.push("Details:", line.detail);
-    if (line.hint) out.push(`Hint: ${line.hint}`);
+    out.push(...retryAttemptLines(line));
+    const advice = (text) => window.DgcMarkdown?.editorAdvice?.(text) ?? text;
+    if (line.detail) out.push("Details:", advice(line.detail));
+    if (line.hint) out.push(`Hint: ${advice(line.hint)}`);
     return out.join("\n");
   }
   function onModelRetry(ev) {
@@ -15841,7 +15908,7 @@ function permissionChoices(ev) {
     const cause = ev.cause;
     if (!cause || typeof cause !== "object" || Array.isArray(cause)) return false;
     if (typeof cause.kind !== "string" || typeof cause.summary !== "string" || !cause.summary.trim()) return false;
-    for (const key of ["endpoint", "model", "api_mode", "retry_id", "detail", "hint"]) {
+    for (const key of ["endpoint", "model", "api_mode", "retry_id", "detail", "hint", "full"]) {
       if (cause[key] != null && typeof cause[key] !== "string") return false;
     }
     for (const key of ["http_status", "attempts"]) {
@@ -15849,13 +15916,17 @@ function permissionChoices(ev) {
     }
     const kind = RETRY_KINDS.has(cause.kind) ? cause.kind : "other";
     const summary = cause.summary.slice(0, 200), model = retryText(cause.model, 200);
-    const message = String(ev.message || "");
+    // Its own advice in an editor's words: Settings → Models, never a terminal flag (markdown.ts editorAdvice).
+    const advice = (text) => window.DgcMarkdown.editorAdvice?.(text) ?? text;
+    // All of the provider's answer when its sentence stopped short (cause.full), with the hint the sentence carries.
+    const said = String(ev.message || ""), whole = retryText(cause.full, 2400), hintAt = said.indexOf("\n  → ");
+    const message = advice(whole ? whole + (hintAt >= 0 ? said.slice(hintAt) : "") : said);
     // A person's words, and the way to what fixes it. The provider's own answer (its status, its address, its JSON) and
-    // the terminal's hint are one click away, under the row.
+    // the hint are one click away, under the row.
     const words = window.DgcMarkdown.modelWords(kind, model);
     const headline = words.headline;
     const split = message.indexOf("\n  → ");
-    const rawHint = split >= 0 ? message.slice(split + 5).trim() : retryText(cause.hint, 300);
+    const rawHint = split >= 0 ? message.slice(split + 5).trim() : advice(retryText(cause.hint, 300));
     const n = ++retrySeq;
     const row = el("div", "sys err model-error");
     row.setAttribute("role", "alert");
@@ -15875,7 +15946,7 @@ function permissionChoices(ev) {
       ["HTTP status", retryInt(cause.http_status, 100, 599) ? String(cause.http_status) : ""],
       ["Attempts", retryInt(cause.attempts, 1, 1000000) ? String(cause.attempts) : ""],
       // The message below already prints the transport's words: never show them twice.
-      ["Details", message.includes(retryText(cause.detail, 4000).replace(/^\w+: /, "")) ? "" : retryText(cause.detail, 4000)]];
+      ["Details", whole || message.includes(advice(retryText(cause.detail, 4000)).replace(/^\w+: /, "")) ? "" : advice(retryText(cause.detail, 4000))]];
     retryFacts(row.querySelector(".model-retry-facts"), facts);
     row.querySelector(".model-error-message").textContent = message;
     const toggle = row.querySelector(".model-error-toggle"), detail = row.querySelector(".model-error-detail");
@@ -15883,17 +15954,26 @@ function permissionChoices(ev) {
       const open = toggle.getAttribute("aria-expanded") !== "true";
       toggle.setAttribute("aria-expanded", String(open)); detail.hidden = !open;
     });
+    const copied = { attempts: null };
     row.querySelector(".model-retry-copy").addEventListener("click", (event) => {
-      const text = [headline, ...facts.filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`), "Message:", message].join("\n");
+      const attempts = copied.attempts ? retryAttemptLines(copied.attempts) : [];
+      const text = [headline, ...facts.filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`), ...attempts, "Message:", message].join("\n");
       vscode.postMessage({ type: "copy", text });
       flashAction(event.currentTarget, "check");
     });
     speak(`DGC error: ${headline}`);
     appendConversationContent(row);
     endToolGroup();
+    // This failure ends those retries and says it all: the "Gave up after 3 retries" row above it (it named a host and
+    // a port) goes, its attempts one click away under this row's Details. Each attempt is what the row's own unfolded
+    // detail listed.
     const retryId = retryText(cause.retry_id, 128);
     const line = retryId ? (turn?.retryLines?.get(retryId) || retryTurnless.get(retryId)) : null;
-    if (line && line.state !== "gave_up") paintRetryLine(line, "gave_up");
+    if (line) {
+      foldRetryInto(row, line);
+      line.node.remove();
+      copied.attempts = line;
+    }
     return true;
   }
   // ---- end 0.40 reconnecting ----------------------------------------------------------------------

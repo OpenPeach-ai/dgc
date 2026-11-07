@@ -63,6 +63,45 @@ class AttentionTests(unittest.TestCase):
         self.assertEqual(item["computer_check"]["title"], "Prove you’re human on www.google.com")
         self.assertTrue(all(i["workspace_id"] == workspace for i in found["items"]))
 
+    def test_a_personal_pips_waiting_review_is_on_the_list_and_a_projects_is_named_apart(self):
+        """The one number: home, Pips page and the editor's notice all read `total`. A reviewed workflow's handoff waited
+        for you unlisted, so the notice said 2 beside a home that said 1 (final check, 2026-11-07)."""
+        from dgc import pip_handoffs, pip_flows
+        now = self.now
+        personal = self.registry.personal()
+        made = [self.store.create(personal["id"], name, goal, "local-console", pip_type="rook")
+                for name, goal in (("Research", "Research a topic"), ("Writer", "Write a draft"))]
+        flow = pip_flows.create(self.store, "Daily post", [p["id"] for p in made], ["Write using these notes."], "reviewed", "local-console", self.cfg)
+        queued = self.store.enqueue(made[0]["id"], "research", "local-console", self.cfg)
+        self.assertEqual(self.store.claim_next()["id"], queued["id"])
+        self.store.finish(queued["id"], result={"text": "Research result.", "external_actions": False, "tools_called": 0, "usage": {}})
+        pip_flows.after_run(self.store, self.cfg, queued["id"])
+        before = self.control("list_pip_attention")
+        handoff = pip_flows.get(self.store, flow["id"])["steps"][0]["handoff_id"]
+        self.assertEqual(before["counts"]["handoff"], 1)
+        self.assertEqual(before["total"], 1)
+        self.assertEqual(before["by_pip"], {made[1]["id"]: 1})
+        self.assertEqual(before["items"], [], "a client from before refuses a kind it doesn't know")
+        [row] = before["reviews"]
+        self.assertEqual((row["kind"], row["card"], row["pip_id"], row["pip_name"]), ("handoff", handoff, made[1]["id"], "Writer"))
+        self.assertEqual(row["title"], "Hand this to Writer?")
+        self.assertEqual(row["detail"], "Write using these notes.")
+        self.assertEqual(before["in_projects"], 0)
+        # A change waiting on a Personal Pip's Changes page.
+        proposal = self.store.propose(made[0]["id"], made[0]["current_version"], {"goal": "Research harder"}, "local-console")
+        listed = self.control("list_pip_attention")
+        self.assertEqual(listed["total"], 2)
+        change = next(r for r in listed["reviews"] if r["kind"] == "approval")
+        self.assertEqual((change["card"], change["review"]), (proposal["id"], "job_update"))
+        # A project Pip's review waits in that project: named apart, never in the number the Pips home says.
+        project = self.store.create(self.workspace["id"], "Project", "Review", "local-console")
+        self.store.propose(project["id"], project["current_version"], {"goal": "Review harder"}, "local-console")
+        apart = self.control("list_pip_attention")
+        self.assertEqual(apart["total"], 2)
+        self.assertEqual(apart["in_projects"], 1)
+        self.assertNotIn(project["id"], apart["by_pip"])
+        self.assertEqual(self.now, now)
+
     def test_settled_expired_and_archived_ones_are_gone_and_the_limit_keeps_the_count(self):
         pip, workspace = self.source["id"], self.source["workspace_id"]
         for n in range(5):

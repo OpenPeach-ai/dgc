@@ -207,6 +207,21 @@ class DigestTests(unittest.TestCase):
                  json.dumps({"method": "POST"}), "a" * 64, created, expires))
         return action_id
 
+    def test_the_headline_says_the_number_the_pips_home_says_with_a_projects_reviews_apart(self):
+        """It said "N reviews waiting" of every folder, over a home that said something else."""
+        self.store.propose(self.job["id"], self.job["current_version"], {"goal": "Review harder"}, "local-console")
+        value = self.build()
+        self.assertIn("1 review in a project", value["headline"])
+        self.assertNotIn("reviews waiting", value["headline"])
+        self.assertNotIn("1 review waiting", value["headline"])
+        self.assertEqual(value["pending_reviews"], 1, "the count an older reader has is as it was")
+        personal = self.registry.personal()
+        pip = self.store.create(personal["id"], "Planner", "Plan my week", "local-console", pip_type="rook")
+        self.store.propose(pip["id"], 1, {"goal": "Plan harder"}, "local-console")
+        value = self.build()
+        self.assertIn("1 thing waiting", value["headline"])
+        self.assertIn("1 review in a project", value["headline"])
+
     def test_a_held_submit_is_said_at_once_and_counts_until_decided_or_expired(self):
         digest.mark_seen(self.registry, self.build()["until"], "editor-user")
         self.at("2026-10-01T10:05:00.000Z")
@@ -385,7 +400,6 @@ class DigestControlTests(unittest.TestCase):
         self.assertEqual(refused["error"]["code"], "local_only")
         extra = self.control({"type": "mark_pip_news_seen", "pip_ids": [pip["id"]], "until": until, "pip_id": pip["id"]})
         self.assertEqual(extra["error"]["code"], "invalid_request")
-
 
 if __name__ == "__main__":
     unittest.main()

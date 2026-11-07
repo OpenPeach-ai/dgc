@@ -113,7 +113,7 @@ class ChatClient:
             if event["type"] == answer:
                 return event
             if event["type"] in ("chatdgc_error", "command_rejected", "error"):
-                raise ChatCliError(str(event.get("message") or "ChatDGC refused that"))
+                raise ChatCliError(_terminal_line(event.get("message") or "ChatDGC refused that"))
 
     def turn(self, conversation_id: str, command: dict, on_event: Callable[[dict], None],
              timeout: float = REPLY_TIMEOUT_S) -> dict:
@@ -139,7 +139,7 @@ class ChatClient:
             kind = event["type"]
             if kind == "chatdgc_error":
                 if event.get("request_id") == rid or started:
-                    raise ChatCliError(str(event.get("message") or "ChatDGC couldn't answer"))
+                    raise ChatCliError(_terminal_line(event.get("message") or "ChatDGC couldn't answer"))
                 continue
             if kind == "chatdgc_turn":
                 if event.get("state") == "started":
@@ -159,6 +159,14 @@ class ChatClient:
 
     def close(self) -> None:
         self.service.close()
+
+
+def _terminal_line(message) -> str:
+    """A model's failure as the terminal says it: ChatDGC's message carries all of it for an editor's Details, and the
+    terminal's line stays the length it was."""
+    text = str(message)
+    prefix = "The model didn't answer: "
+    return text[:len(prefix) + 300] if text.startswith(prefix) else text
 
 
 def _send_command(text: str, args) -> dict:

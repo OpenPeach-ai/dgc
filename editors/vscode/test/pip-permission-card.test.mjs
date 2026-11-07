@@ -152,6 +152,47 @@ test("a Pip's new model and context window read as words, never [object Object]"
   await setup.page.close();
 });
 
+test("a Pip's own tools say what they do and to which Pip, never the call's JSON or its id", async (t) => {
+  // Final check, 2026-11-07: a main DGC Allow card read "Run resume_pip {"pip_id":"pip_96…","expected_version":3,…}".
+  if (skipOrFail(t)) return;
+  const pip = "pip_" + "9".repeat(32), run = "run_" + "8".repeat(32);
+  const base = { pip_id: pip, expected_version: 3, reason: "The user asked for it.", request_key: "k", pip_name: "Order Keeper" };
+  const rows = [
+    ["pause_pip", { ...base, expected_lifecycle_revision: 0 }, /Pause Order Keeper\?/, /waits until you resume it/],
+    ["resume_pip", { ...base, expected_lifecycle_revision: 0 }, /Resume Order Keeper\?/, /can run again/],
+    ["attach_pip_to_session", { ...base, expected_lifecycle_revision: 0 }, /Attach Order Keeper to this chat\?/, /no new tools/],
+    ["run_pip_now", base, /Run Order Keeper now\?/, /comes back to this chat/],
+    ["pips_adapt", { ...base, changes: { name: "Seed Keeper" } }, /Change Order Keeper\?/, /New name\s*Seed Keeper/],
+    ["handoff_to_pip", { source_kind: "personal_result", scope: "personal", source_run_id: run, target_pip_id: pip, task: "Write it up", shared_text: "Peas are late", request_key: "k", pip_name: "Order Keeper" },
+      /Hand this to Order Keeper\?/, /Task\s*Write it up[\s\S]*Shared\s*Peas are late[\s\S]*Nothing runs until you accept/],
+    ["draft_pip_email", { scope: "personal", source_run_id: run, message: { recipient_email: "a@example.com", subject: "Peas", body: "They are late." }, request_key: "k", pip_name: "Order Keeper" },
+      /Save this email as a draft\?/, /From\s*Order Keeper[\s\S]*To\s*a@example\.com[\s\S]*Message\s*They are late\.[\s\S]*Nothing is sent/],
+    ["draft_pip_calendar_event", { scope: "personal", source_run_id: run, event: { summary: "Sow peas", start_datetime: "2026-11-08T09:00:00Z", end_datetime: "2026-11-08T10:00:00Z", timezone: "UTC", description: "" }, request_key: "k" },
+      /Save this event as a draft\?/, /Event\s*Sow peas[\s\S]*When\s*2026-11-08T09:00:00Z to 2026-11-08T10:00:00Z \(UTC\)/],
+    ["draft_pip_connector_action", { scope: "personal", source_run_id: run, action: { server: "zapier", connection_digest: "a", schema_digest: "b", call: { tool: "add_row", arguments: { sheet: "orders" } } }, request_key: "k" },
+      /Save this action in zapier as a draft\?/, /Action\s*add_row[\s\S]*Nothing runs/],
+  ];
+  for (const [name, args, title, detail] of rows) {
+    const { page, errors, card } = await scene({ type: "permission_request", id: "p1", name, args, summary: "Words", suggested_rule: `Pips(${pip})`, choices: ["once", "always", "deny"] });
+    const text = await card.innerText();
+    assert.match(text, title, name);
+    assert.match(text, detail, name);
+    assert.doesNotMatch(text, new RegExp(`${name}|expected_version|request_key|${pip}|${run}|\\{"`), `${name}: no call, no id, no JSON`);
+    assert.deepEqual(errors, [], name);
+    await card.locator('button[data-d="always"]').click();
+    const receipt = await card.locator(".permission-receipt > summary").innerText();
+    assert.match(receipt, /· Always allowed$/, `${name}: the receipt names no rule's Pip id`);
+    const [answer] = await page.evaluate(() => window.__posted.filter((m) => m.type === "permission_response"));
+    assert.equal(answer.rule, `Pips(${pip})`, `${name}: the rule still goes back as the card offered it`);
+    await page.close();
+  }
+  const unnamed = await scene({ type: "permission_request", id: "p1", name: "resume_pip", args: { pip_id: pip, reason: "x" }, summary: "Resume a Pip", suggested_rule: "PipsResume", choices: ["once", "deny"] });
+  const text = await unnamed.card.innerText();
+  assert.match(text, /Resume this Pip\?/, "a name that can't be read never becomes its id");
+  assert.doesNotMatch(text, new RegExp(pip));
+  await unnamed.page.close();
+});
+
 test("other tools keep their raw arguments", async (t) => {
   if (skipOrFail(t)) return;
   const { page, card } = await scene({ type: "permission_request", id: "p1", name: "web_fetch", args: { url: "https://example.com" },

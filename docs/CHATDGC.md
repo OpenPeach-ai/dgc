@@ -151,7 +151,7 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
   for the time of day ("Up late? I'm here.", "Good morning. Where should we start?"), chosen once a chat.
 - **Temporary chats.** Tick **Temporary** before your first message. A temporary chat is never saved or
   listed, and it disappears when DGC stops.
-- **The context window.** The meter in the box shows how much of the model's context window the chat fills.
+- **The context window.** The meter in the box shows how much of the model's context window the chat fills. With no provider saved there is no meter.
   It uses the model's own count where it reports one, and turns amber at 70% and red at 85%. Click it for
   what fills the window, as Claude's Usage sheet shows it: a bar in one colour a part, then each part with its
   tokens and its share (the conversation, files, ChatDGC's own instructions, yours, memory, the project, the canvas

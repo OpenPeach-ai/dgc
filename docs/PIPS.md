@@ -481,7 +481,8 @@ dgc pips outcomes PIP_ID                             # what became of its findin
 reaches you once:
 
 - **In the editor.** While VS Code (or Cursor) is open, DGC checks every minute and shows
-  one notification, with **Open Pips**, whether or not the DGC panel is on screen. This is
+  one notification, with **Open Pips**, whether or not the DGC panel is on screen. Its count of
+  what's waiting is the number beside **Needs attention**; reviews in a project are named apart. This is
   the one to rely on when you work on a remote machine. `dgc.notifyPips` turns it off.
 - **On the desktop.** The runner shows a desktop notification (Notification Center on
   macOS, `notify-send` on Linux) even with the editor closed. Each alert and review is
@@ -1268,6 +1269,7 @@ without.
   as a card under the Pip's reply in its chat: a new site with **Allow this site** and **Not now**; a form with
   **Send once**, **Always allow** and **Reject**, and what **Always allow** would cover, with the rest under **Details**;
   a payment with what it sends (a bill number and amount, never a card field), **Review…** and **Reject**.
+  Once answered, the card stays where it was as one quiet line, such as "Allowed · Send a form to site.example".
   **Review…** (and **See the page…** under a form's **Details**) shows a screenshot of the page, where the request
   would go and its form fields.
   Fields named like passwords, codes or card details are hidden in the review but are sent as

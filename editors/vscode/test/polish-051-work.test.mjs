@@ -150,6 +150,19 @@ test("no provider: the button says so, goes to Settings, and a send stays in the
   assert.ok(x.doc.getElementById("modelmenu").hidden, "no menu of models that may not exist");
 });
 
+test("no provider: no meter, since nobody chose a model to measure it against", () => {
+  const x = work();
+  x.send({ type: "event", event: { type: "context", used: 12000, size: 32768, compact_threshold: 0.85 } });
+  assert.equal(x.doc.getElementById("ctx").textContent, "37%");
+  assert.equal(x.doc.getElementById("btn-ctx").hidden, false);
+  x.send(stateOf({ noProvider: true }));
+  assert.equal(x.doc.getElementById("btn-ctx").hidden, true, "38% of a model nobody chose (10-w1-02c)");
+  x.send({ type: "event", event: { type: "context", used: 12000, size: 32768, compact_threshold: 0.85 } });
+  assert.equal(x.doc.getElementById("btn-ctx").hidden, true, "and it stays gone when the backend counts again");
+  x.send(stateOf({ noProvider: false, model: "deepseek-v4.1-flash:cloud" }));
+  assert.equal(x.doc.getElementById("btn-ctx").hidden, false, "the first provider saved brings it back");
+});
+
 test("a saved provider sees what it saw", () => {
   const x = work();
   x.send(stateOf({ noProvider: false, model: "deepseek-v4.1-flash:cloud" }));

@@ -2652,7 +2652,8 @@
   /** The meter: what the chat takes of its window, amber from 70%, red from 85%. */
   function meter() {
     const c = state.context, button = $("cd-context");
-    button.hidden = !c || !c.window || !state.conversation;
+    // No provider: no model anyone chose, so no window to measure against, and no number.
+    button.hidden = !c || !c.window || !state.conversation || state.noProvider;
     if (button.hidden) { $("cd-context-pop").hidden = true; return; }
     const share = Math.min(1, c.used / c.window);
     const percent = Math.round(share * 100);
@@ -4486,7 +4487,7 @@
           if (waiting) {
             // The reply drawn at Enter: a short error with Retry. Your text is back in the box (above); your bubble goes.
             state.messages = state.messages.filter((m) => !(m.local === true && m.role === "user"));
-            waiting.failedSend = { reason: String(msg.message || "").slice(0, 300), item: waiting.item };
+            waiting.failedSend = { reason: String(msg.message || "").slice(0, 2200), item: waiting.item };
             delete waiting.waiting;
             render();
           } }
@@ -4520,6 +4521,7 @@
         state.defaultModel = typeof msg.current === "string" ? msg.current : "";
         state.noProvider = msg.noProvider === true;
         if (!state.noProvider && notice.dataset.noProvider) hideNotice();
+        meter();
         if (Array.isArray(msg.profiles)) state.modelProfiles = msg.profiles.filter((row) => row && typeof row.id === "string" && typeof row.name === "string").slice(0, 12);
         if (typeof msg.providerId === "string" && msg.providerId) state.providerModels[msg.providerId] = state.models;
         else state.hostModels = state.models;

@@ -79,7 +79,9 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   // A failed model request in a person's words, with what fixes it and the provider's own answer one click away.
   const failed=m.status==='failed'&&m.error?globalThis.DgcMarkdown?.modelFailure?.(m.error):null;
   const failure=failed?` · ${esc(failed.headline)} ${esc(failed.next)}${failed.fix?` <button type="button" class="message-send-again" data-open-models>Settings → Models</button>`:''}`:'';
-  const failureDetail=failed?`<details class="message-failure" data-details="failure-${esc(m.id)}"><summary>Details</summary><span>${esc(failed.detail)}</span></details>`:'';
+  // All of it (API's error_detail), when the short line had to cut it; a DGC from before has only the line.
+  const rawFailure=typeof m.error_detail==='string'&&m.error_detail?(globalThis.DgcMarkdown?.editorAdvice?.(m.error_detail)??m.error_detail):failed?.detail;
+  const failureDetail=failed?`<details class="message-failure" data-details="failure-${esc(m.id)}"><summary>Details</summary><span>${esc(rawFailure)}</span></details>`:'';
   const status=user&&phase(m.status)?`<p class="message-status" role="status" data-status="${unsent?'unsent':esc(m.status)}">${unsent?'Not sent':phase(m.status)}${failure||(m.status==='failed'&&m.error?` · ${esc(m.error)}`:m.status==='failed'||m.status==='cancelled'?' · No reply':'')}${again}</p>${failureDetail}`:'';
   const options=!user&&prompt?`${action('retry','Ask again',m.id,!canSend)}${action('edit','Edit message',m.id,false)}`:'';
   // The word Trace after the icons, as in Work: only for a reply that recorded its steps (dgc/reply_trace.py).

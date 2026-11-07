@@ -40,11 +40,23 @@ class NotifierTests(unittest.TestCase):
     def test_a_new_review_is_announced_once(self):
         self.assertIsNone(self.tick(), "nothing waiting, nothing said")
         self.propose("Review more")
-        self.assertEqual(self.tick(), "1 review waiting for you. Open the Pips view to decide.")
-        self.assertEqual(self.shown, [("DGC Pips", "1 review waiting for you. Open the Pips view to decide.")])
+        self.assertEqual(self.tick(), "1 review waiting for you in a project. Open the Pips view to decide.")
+        self.assertEqual(self.shown, [("DGC Pips", "1 review waiting for you in a project. Open the Pips view to decide.")])
         self.assertIsNone(self.tick(), "never twice")
         restarted = desktop.Notifier(self.cfg, clock=self.clock, send=lambda t, b: self.shown.append((t, b)) or True)
         self.assertIsNone(restarted.tick(self.registry), "a restarted runner remembers what it said")
+
+    def test_it_says_the_number_the_pips_home_says_with_a_projects_reviews_apart(self):
+        """It said "N reviews" of every folder, beside a Needs attention that said something else."""
+        from dgc import pip_attention
+        personal = self.registry.personal()
+        pip = self.store.create(personal["id"], "Planner", "Plan my week", "local-console", pip_type="rook")
+        self.store.propose(pip["id"], 1, {"goal": "Plan harder"}, "local-console")
+        said = self.tick()
+        self.assertEqual(said, "1 thing is waiting for you. Open the Pips view to decide.")
+        self.assertEqual(pip_attention.collect(self.registry, self.registry.clock(), limit=1)["total"], 1)
+        self.propose("Review more")
+        self.assertEqual(self.tick(), "1 thing is waiting for you, and 1 review in a project. Open the Pips view to decide.")
 
     def test_damaged_seen_metadata_does_not_stop_notifications(self):
         for damaged in ('null', '["review"]', '{"reviews": "not a list"}', '{"reviews": 4}', 'not json'):
@@ -53,7 +65,7 @@ class NotifierTests(unittest.TestCase):
                     self.registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (desktop.SEEN_KEY, damaged))
                 self.assertEqual(self.notifier._seen(self.registry)["reviews"], [])
         self.propose("Review after recovery")
-        self.assertEqual(self.tick(), "1 review waiting for you. Open the Pips view to decide.")
+        self.assertEqual(self.tick(), "1 review waiting for you in a project. Open the Pips view to decide.")
 
     def test_at_most_once_a_minute(self):
         self.propose("One")
@@ -62,7 +74,7 @@ class NotifierTests(unittest.TestCase):
         self.propose_second = self.store.create(self.workspace["id"], "Other", "Other", "local-console")
         self.store.propose(self.propose_second["id"], 1, {"goal": "Two"}, "local-console")
         self.assertIsNone(self.notifier.tick(self.registry), "five seconds later: not yet")
-        self.assertEqual(self.tick(), "2 reviews waiting for you. Open the Pips view to decide.")
+        self.assertEqual(self.tick(), "2 reviews waiting for you in a project. Open the Pips view to decide.")
 
     def test_off_says_nothing_and_turning_it_on_brings_no_backlog(self):
         desktop.set_enabled(self.registry, False, "editor-user")

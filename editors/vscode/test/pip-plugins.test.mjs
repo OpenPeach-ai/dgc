@@ -120,6 +120,17 @@ test('Always allow runs it and saves the grant; Don’t dismisses it',async()=>{
  const no=y.requests('dismiss_pip_connector_draft').at(-1);assert.deepEqual(clean(no.request),{type:'dismiss_pip_connector_draft',draft_id:DRAFT,expected_digest:'c'.repeat(64)});
 });
 
+test('an allowed action leaves one quiet line under the reply that offered it, and it stays there',async()=>{
+ const reply={id:'message_'+'9'.repeat(32),pip_id:PIP,workspace_id:PW,run_id:RUN,role:'assistant',text:'The Allow card for create_record is below.',status:'succeeded',model:'m',created_at:'2026-10-07T09:00:00.000Z'};
+ const later={...reply,id:'message_'+'8'.repeat(32),run_id:'run_'+'6'.repeat(32),text:'Done.',created_at:'2026-10-07T09:05:00.000Z'};
+ const x=setup({plugins:[card({status:'allowed'})],drafts:[draft('airtable',{status:'prepared'})],messages:[reply,later]});await openChat(x);
+ const line=x.d.querySelector(`[data-plugin-settled="${DRAFT}"]`);
+ assert.equal(line?.textContent,'Allowed · Run create_record');
+ assert.deepEqual([...x.d.querySelectorAll('.conversation-log [data-message],.conversation-log .card-settled')].map(e=>e.dataset.message||'line'),[reply.id,'line',later.id]);
+ const pending=setup({plugins:[card({status:'allowed'})],drafts:[draft()],messages:[reply]});await openChat(pending);
+ assert.equal(pending.d.querySelector('.card-settled'),null,'it waits: the card');
+});
+
 test('Don’t says it did not run, where the card was, also after a reload, until a newer reply',async()=>{
  // Release check, 2026-11-03: Don't left only "Not run." above the chat, out of sight, under a reply that still said its
  // Allow card was below.

@@ -92,7 +92,9 @@ export function mountHomePips(options) {
  function needing() {
   const rows = [];
   for (const pip of pips) {
-   pip.waiting = pip.reviews + (attention?.byPip[pip.id] || 0);
+   // A DGC that lists a Personal Pip's reviews has them in byPip already; a project Pip's are only in its own count.
+   const listed = attention?.byPip[pip.id] || 0;
+   pip.waiting = attention?.listsReviews ? Math.max(pip.reviews, listed) : pip.reviews + listed;
    const fresh = pip.waiting ? null : news(pip.id);
    if (pip.waiting) rows.push({pip, rank: 0, line: `${pip.waiting} waiting for you`, dismissible: false});
    else if (fresh) rows.push({pip, rank: fresh.rank, line: fresh.line, dismissible: apiVersion >= 48});

@@ -83,3 +83,20 @@ test('a digest may count actions waiting for you, and the bar adds them to its r
  assert.equal(Model.pipDigest(digest()).pending_actions,undefined,'a digest from before the count is still valid');
  for(const bad of [-1,1.5,'2',null])assert.throws(()=>Model.pipDigest(digest({pending_actions:bad})),/invalid/);
 });
+
+test('the panel says the number the Pips home says, with a project\'s reviews named apart',async t=>{
+ const x=harness(t);x.connect(44);
+ x.answer(x.requests('get_pip_digest')[0],{digest:digest({pending_reviews:5})});await flush();
+ x.d.getElementById('pips-digest-main').click();
+ assert.match(x.d.getElementById('pips-digest-panel').textContent,/5 reviews waiting for you in Pips/,'until the list has answered');
+ x.answer(x.requests('list_pip_attention')[0],{total:2,in_projects:1,items:[],counts:{},by_pip:{},truncated:false});await flush();
+ const panel=x.d.getElementById('pips-digest-panel').textContent;
+ assert.match(panel,/2 things are waiting for you in Pips, and 1 review in a project\./);
+ assert.doesNotMatch(panel,/5 reviews/);
+ x.timers[0]();x.answer(x.requests('get_pip_digest')[1],{digest:digest({pending_reviews:5})});await flush();
+ x.answer(x.requests('list_pip_attention')[1],{total:0,in_projects:3,items:[],counts:{},by_pip:{},truncated:false});await flush();
+ assert.match(x.d.getElementById('pips-digest-panel').textContent,/3 reviews waiting for you in a project\./);
+ x.timers[0]();x.answer(x.requests('get_pip_digest')[2],{digest:digest({pending_reviews:5})});await flush();
+ x.answer(x.requests('list_pip_attention')[2],{total:0,in_projects:0,items:[],counts:{},by_pip:{},truncated:false});await flush();
+ assert.doesNotMatch(x.d.getElementById('pips-digest-panel').textContent,/waiting/,'nothing waits');
+});

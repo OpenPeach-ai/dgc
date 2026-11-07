@@ -153,3 +153,16 @@ test('a malformed list is refused whole, never half-shown',()=>{
  assert.deepEqual(attention.attentionNavigation(attention.attentionPage(page([item('app_action',ACTION,PIP,'Send?')])).items[0]),
   {pip:PIP,workspace:PW,attention:true,section:'chat',reviewKind:'app_action',review:ACTION});
 });
+
+test('a Personal Pip’s waiting reviews come beside the cards: newest first, each with where it opens',()=>{
+ const HANDOFF='handoff_'+'a'.repeat(32),PROPOSAL='proposal_1',newer='2026-11-07T10:00:00Z',older='2026-11-07T09:00:00Z';
+ const value=page([item('email',DRAFT,PIP,'Send?',{created_at:older})]);
+ const listed=attention.attentionPage({...value,total:3,reviews:[item('handoff',HANDOFF,PIP,'Hand this to Max?',{created_at:newer}),item('approval',PROPOSAL,PIP,'Change Max?',{created_at:older,review:'schedule_update'})]});
+ assert.equal(listed.total,3);assert.equal(listed.listsReviews,true);
+ assert.deepEqual(listed.items.map(i=>i.kind),['handoff','email','approval']);
+ assert.deepEqual(attention.attentionNavigation(listed.items[0]),{pip:PIP,workspace:PW,attention:true,section:'handoffs',reviewKind:'handoff',review:HANDOFF});
+ assert.deepEqual(attention.attentionNavigation(listed.items[2]),{pip:PIP,workspace:PW,attention:true,section:'revisions',reviewKind:'schedule_update',review:PROPOSAL});
+ assert.equal(attention.attentionPage(value).listsReviews,false,'a DGC from before lists none');
+ assert.throws(()=>attention.attentionPage(page([item('handoff',HANDOFF,PIP,'Hand this?')])),'a card kind stays one of the kinds');
+ assert.throws(()=>attention.attentionPage({...value,total:2,reviews:[item('handoff','nope',PIP,'x')]}));
+});

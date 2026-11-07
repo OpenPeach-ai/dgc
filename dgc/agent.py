@@ -130,6 +130,11 @@ _PIPS_TOOL_NAMES = frozenset({
     "draft_pip_email", "draft_pip_calendar_event", "draft_pip_connector_action",
     "pause_pip", "resume_pip", "attach_pip_to_session"})
 _PIPS_MUTATION_TOOL_NAMES = _PIPS_TOOL_NAMES - {"pips_context"}
+# The argument that says which Pip a tool's Allow card is about (Agent._with_task_agent).
+PIP_NAMED_TOOLS = {"pips_propose": "pip_id", "pips_adapt": "pip_id", "run_pip_now": "pip_id", "pause_pip": "pip_id",
+                   "resume_pip": "pip_id", "attach_pip_to_session": "pip_id", "handoff_to_pip": "target_pip_id",
+                   "draft_pip_email": "source_run_id", "draft_pip_calendar_event": "source_run_id",
+                   "draft_pip_connector_action": "source_run_id"}
 _PIPS_REFERENCE_FRAME = '<pip-references-json trust="untrusted-reference-data">'
 
 
@@ -7749,6 +7754,7 @@ class Agent(GoalLifecycle):
         """
         self._last_turn_error = self._safe_text(message or "the turn failed")
         payload = self._settle_failed_runs(cause)
+        self._note_turn_failure(self._last_turn_error, payload)
         if payload is not None and self._ui_error_takes_cause():
             try:
                 self.ui.error(self._last_turn_error, cause=payload)
@@ -7757,6 +7763,30 @@ class Agent(GoalLifecycle):
                 pass
         self.ui.error(self._last_turn_error)
         return False
+
+    def _note_turn_failure(self, message: str, cause=None) -> None:
+        """Says on the session's last message that this turn failed, and why (``_dgc_turn_failed``, a private key no
+        transport sends and an older DGC doesn't read). A reopened chat replays it (Backend._history). With nothing
+        saved, a turn with no answer could only read "Stopped", however it ended."""
+        messages = getattr(self, "messages", None)
+        last = messages[-1] if messages else None
+        self._last_turn_full = ""
+        whole = str((cause or {}).get("full") or "") if isinstance(cause, dict) else ""
+        if whole:
+            # The long form of the same sentence, with its hint: what a Pip's Details shows.
+            split = str(message).find("\n  → ")
+            self._last_turn_full = self._safe_text(whole + (str(message)[split:] if split >= 0 else ""))
+        if not isinstance(last, dict) or last.get("role") == "system":
+            return
+        note: dict = {"message": str(message)[:4000]}
+        if isinstance(cause, dict) and cause.get("kind") and cause.get("summary"):
+            note["cause"] = {key: cause[key] for key in ("kind", "summary", "endpoint", "model", "api_mode", "detail", "hint",
+                                                         "http_status", "attempts", "full") if cause.get(key) not in (None, "")}
+        last["_dgc_turn_failed"] = self._safe_value(note)
+        try:
+            self._persist()
+        except Exception:                # noqa: BLE001 -- a note about a failure never makes a second one
+            pass
 
     # ---- reconnecting: retry runs ---------------------------------------------------------------
     # A run is one sequence of consecutive failed attempts at one layer ("request": retries inside
@@ -12501,6 +12531,13 @@ class Agent(GoalLifecycle):
         recognises. It carries what that agent was asked to do, live and again when the chat is
         reopened. Never the model's own arguments: a copy, for the screen only.
         """
+        if isinstance(args, dict) and name in PIP_NAMED_TOOLS:
+            # A Pip's tool asks about a Pip by its id: the card says its name, read from DGC's own records, so a model's
+            # own `pip_name` never stands in for it (dgc/pip_proposal_tool.py display_name; None when it can't be read).
+            from .pip_proposal_tool import display_name
+            named = display_name(args.get(PIP_NAMED_TOOLS[name]))       # a draft's: the Pip whose result it came from
+            shown = {key: value for key, value in args.items() if key != "pip_name"}
+            return {**shown, "pip_name": named} if named else shown
         if name not in ("message_task", "close_task", "continue_task") or not isinstance(args, dict):
             return args
         ident = str(args.get("id") or "")
@@ -13625,7 +13662,7 @@ class Agent(GoalLifecycle):
             return self.client.estimate_input_tokens(messages, tools)
         chars = sum(len(json.dumps({k: v for k, v in m.items()
                                     if k not in ("_dgc_reasoning", "_dgc_think_splice",
-                                                 "_dgc_stream_recoveries")}
+                                                 "_dgc_stream_recoveries", "_dgc_turn_failed")}
                                    if isinstance(m, dict) else m, default=str))
                     for m in messages)
         if tools:

@@ -91,3 +91,22 @@ test('turning Careful mode off is yours alone, says what changes, and an older C
  const old=setup({row:computerPip(),apiVersion:43});await openPage(old);
  assert.equal(old.requests('list_pip_sites').length,0);
 });
+
+test('a settled card says what it was and how it ended, in one line',async()=>{
+ const {settledWords}=load(await bundle('pipCareful.js'));
+ const a=(summary,extra={})=>({status:'sent',resolved_by:'editor-user',created_at:'2026-11-07T10:00:00Z',resolved_at:'2026-11-07T10:00:09Z',summary:{host:'dash.example',...summary},...extra});
+ assert.deepEqual(settledWords(a({})),['Allowed','Send a form to dash.example']);
+ assert.deepEqual(settledWords(a({},{status:'approved'})),['Allowed','Send a form to dash.example']);
+ assert.deepEqual(settledWords(a({},{status:'rejected'})),['Rejected','Send a form to dash.example']);
+ assert.deepEqual(settledWords(a({},{status:'expired',resolved_by:null})),['Not answered','Send a form to dash.example']);
+ assert.deepEqual(settledWords(a({},{status:'lost',resolved_by:null})),['Not sent','Send a form to dash.example']);
+ assert.deepEqual(settledWords(a({payment:true})),['Allowed','Pay on dash.example']);
+ assert.deepEqual(settledWords(a({kind:'site',site:'dash.example'},{status:'rejected'})),['Not now','Visit dash.example']);
+ assert.deepEqual(settledWords(a({kind:'login',site:'dash.example'})),['Allowed','Save a login for dash.example']);
+ assert.deepEqual(settledWords(a({kind:'floor'})),['Allowed','Run a command in its Terminal']);
+ assert.deepEqual(settledWords(a({},{resolved_by:'pip-grant:grant_x'})),['Allowed','Send a form to dash.example'],'its card was open when Always allow covered it');
+ assert.equal(settledWords(a({},{status:'pending'})),null,'it still waits: the Soft card');
+ assert.equal(settledWords(a({},{resolved_by:'pip-grant:grant_x',resolved_at:'2026-11-07T10:00:00Z'})),null,'an Always allow sent it at once: no card');
+ assert.equal(settledWords(a({},{resolved_by:'pip-level:full'})),null,'its level let it through: no card');
+ assert.equal(settledWords(a({kind:'yours'})),null,'the user did it on its screen: no card');
+});

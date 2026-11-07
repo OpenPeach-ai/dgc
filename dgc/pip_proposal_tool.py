@@ -110,9 +110,10 @@ def _save_window(registry, store, pip_id, window, config):
 
 
 def display_name(pip_id):
-    """The Pip's name, for the approval card's one line; None when it cannot be read (never fails a card).
+    """The Pip's name, for the approval card's one line; None when it cannot be read (never fails a card). Takes a Pip's
+    id, or one of its runs' ids (a draft's card names the Pip whose result it came from).
     Read-only: opens no registry, migrates nothing and creates no file."""
-    if not isinstance(pip_id, str) or not re.fullmatch(r"pip_[0-9a-f]{32}", pip_id):
+    if not isinstance(pip_id, str) or not re.fullmatch(r"(?:pip|run)_[0-9a-f]{32}", pip_id):
         return None
     from .workspace_registry import state_directory
     try:
@@ -121,6 +122,9 @@ def display_name(pip_id):
             return None
         db = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=0.5)
         try:
+            if pip_id.startswith("run_"):
+                owner = db.execute("SELECT pip_id FROM pip_runs WHERE id=?", (pip_id,)).fetchone()
+                pip_id = owner[0] if owner else ""
             row = db.execute("SELECT v.definition FROM pips p JOIN pip_versions v ON v.pip_id=p.id "
                              "AND v.version=p.current_version WHERE p.id=? AND length(CAST(v.definition AS BLOB))<=16384",
                              (pip_id,)).fetchone()

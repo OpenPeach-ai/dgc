@@ -3831,7 +3831,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     and (bool(routine_candidates or core_setup_candidates) or any(c is not None for c in (setup_candidate, email_candidate,
                                                                                 calendar_candidate, connector_candidate))))
         if (ok is False and not wordless) or agent.cancelled.is_set():
-            raise RegistryError("model_failed", getattr(agent, "_last_turn_error", "") or "The audit model did not finish its bounded turn.")
+            failed = RegistryError("model_failed", getattr(agent, "_last_turn_error", "") or "The audit model did not finish its bounded turn.")
+            failed.full_message = str(getattr(agent, "_last_turn_full", "") or "")
+            raise failed
         final_message = next((m for m in reversed(agent.messages)
                               if m.get("role") == "assistant" and not m.get("tool_calls")), {})
         final = final_message.get("content", "")
@@ -4032,7 +4034,8 @@ def _worker_main():
         return 0
     except Exception as exc:
         emit({"kind": "failure", "error": {"code": getattr(exc, "code", "worker_failed"),
-                                               "message": str(exc)[:1500]}})
+                                               "message": str(exc)[:1500],
+                                               **({"full_message": exc.full_message[:2400]} if getattr(exc, "full_message", "") else {})}})
         return 1
     finally:
         finished.set()
@@ -4583,7 +4586,9 @@ def _execute_run(registry, row, config):
             raise RegistryError("timeout", "The run exceeded its reviewed five-minute wall-clock budget.")
         if not confirmed or rc or not isinstance(result, dict) or failure:
             if isinstance(failure, dict):
-                raise RegistryError(str(failure.get("code", "worker_failed")), str(failure.get("message", "Audit failed.")))
+                failed = RegistryError(str(failure.get("code", "worker_failed")), str(failure.get("message", "Audit failed.")))
+                failed.full_message = str(failure.get("full_message") or "")
+                raise failed
             raise RegistryError("worker_failed", "The audit worker stopped without a verified structured result.")
         result["snapshot"] = snapshot_info
         if live_commands is not None:
@@ -4926,8 +4931,10 @@ def _run_claimed(registry, store, row, config, directory):
         pip_memory_review.after_run(registry, config, row["id"])
     except Exception as exc:
         from .redaction import redact_text, secret_values
+        secrets = secret_values(config)
         store.finish(row["id"], error={"code": getattr(exc, "code", "run_failed"),
-            "message": redact_text(str(exc), secret_values(config))[:1500]})
+            "message": redact_text(str(exc), secrets)[:1500],
+            **({"full_message": redact_text(exc.full_message, secrets)[:2400]} if getattr(exc, "full_message", "") else {})})
     finally:
         _router_release(row["id"])            # its DGC Router worker, whatever happened
         with _THREAD_LOCK:

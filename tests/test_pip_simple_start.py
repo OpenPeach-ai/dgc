@@ -46,6 +46,29 @@ class SimpleStartTests(unittest.TestCase):
         catalog = {t["id"]: t for t in __import__("dgc.pip_types", fromlist=["catalog"]).catalog()}
         self.assertFalse(catalog["core"]["available"], "project pickers still never offer Core")
 
+    def test_a_hello_that_failed_can_be_asked_again_and_only_then(self):
+        pip = self.store.create(self.personal_id(), "Gmail", None, "editor-user", pip_type="lens")
+        first = pip_chat.introduce(self.store, pip["id"], "editor-user", self.cfg)
+        self.store.claim_next()
+        self.store.finish(first["run"]["id"], error={"code": "worker_failed", "message": "HTTP 401 from the provider " + "x" * 400})
+        page = pip_chat.list_messages(self.store, pip["id"])
+        [hello] = page["messages"]
+        self.assertTrue(hello["intro"])
+        self.assertEqual(hello["status"], "failed")
+        self.assertTrue(hello["error"].startswith("HTTP 401"), "what the chat says instead of nothing")
+        self.assertEqual(len(hello["error"]), 300)
+        self.assertEqual(len(hello["error_detail"]), len("HTTP 401 from the provider ") + 400, "Details has it all")
+        again = pip_chat.introduce(self.store, pip["id"], "editor-user", self.cfg)
+        self.assertNotEqual(again["run"]["id"], first["run"]["id"], "Try again is a new turn: the same key only finds the failed one")
+        same = pip_chat.introduce(self.store, pip["id"], "editor-user", self.cfg)
+        self.assertEqual(same["run"]["id"], again["run"]["id"], "once per try: it is waiting")
+        self.store.claim_next()
+        self.store.finish(again["run"]["id"], result={"text": "Hi, I'm Gmail."})
+        replied = pip_chat.introduce(self.store, pip["id"], "editor-user", self.cfg)
+        self.assertEqual(replied["run"]["id"], again["run"]["id"], "it has said hello: nothing more")
+        shown = pip_chat.list_messages(self.store, pip["id"])["messages"]
+        self.assertTrue(all(m["intro"] for m in shown if m["role"] == "user"), "neither try shows a bubble")
+
     def test_a_new_pip_says_hello_first_from_one_hidden_turn(self):
         pip = self.store.create(self.personal_id(), "Gmail", None, "editor-user", pip_type="lens")
         first = self.control({"type": "introduce_pip", "pip_id": pip["id"]})
