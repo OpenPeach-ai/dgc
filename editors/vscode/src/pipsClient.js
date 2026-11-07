@@ -28,7 +28,7 @@ let effortByKeys=false;      // the thinking slider's focus ring: see markEffort
 import {mountHomePips} from './pipHomeStrip.js';
 import {appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup,appLinkSettledMarkup,allowCardMarkup,calendarCardMarkup} from './pipAppLinks.js';
 import {pluginsPage,pluginResult,shownPluginCards,pluginForServer,installedForServer,pluginCardMarkup,pluginActionMarkup,pluginsPageMarkup,pluginUsesPage,pluginUsesMarkup,argumentValues,editedArguments,PLUGIN_LEVELS} from './pipPlugins.js';
-import {attentionPage,attentionMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
+import {attentionPage,waitingOn,needWords,attentionMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
 import {notesPage,notesMarkup,keptMarkup} from './pipNotes.js';
 import {workingNotesPage,dailyLogPage,workingNotesMarkup,dailyLogMarkup,learnCardMarkup,learnRequest} from './pipWorkingNotes.js';
 import {carefulPage,carefulMarkup,carefulWords,settledWords,sendsWords,isPayment,asksWords,coversWords,coversDetail} from './pipCareful.js';
@@ -2547,11 +2547,17 @@ function scopeTabs(){return !remoteHost&&!!personalSpace();}
 function scopeTab(){return S.projectEmpty||S.workspace?.kind!=='personal'?'project':'personal';}
 // The workspaces this view may open: with tabs, Personal and this folder's project; without, every one, as before.
 function openableSpaces(){return scopeTabs()?[personalSpace(),projectSpace()].filter(Boolean):S.workspaces;}
+// A number means something needs you, and it's the number Needs attention says; a dot means there's something new to read.
+// With neither, nothing. An older DGC has no such number, so it never gets one here. Nothing shows until that list has been
+// read, so a dot never stands in for a number that is on its way.
 function scopeTabsMarkup(){
  if(!scopeTabs())return '';
  const chosen=scopeTab(),project=projectSpace();
- const tab=(key,label,title,workspace)=>`<button type="button" role="tab" id="pips-tab-${key}" class="pips-tab" data-pips-tab="${key}" aria-controls="pips-tabpanel" aria-selected="${chosen===key}"${chosen===key?'':' tabindex="-1"'} title="${esc(title)}">${label}${workspace&&unreadTotals.get(workspace.id)?` <span class="pip-tab-unread" aria-label="${unreadTotals.get(workspace.id)} unread">${unreadTotals.get(workspace.id)}</span>`:''}</button>`;
- return `<div class="pips-tabs" role="tablist" aria-label="Your Pips, or this project’s Pips">${tab('personal','Personal','Your Pips: the same in every folder',personalSpace())}${tab('project','Project',project?`${project.name}: this project’s Pips`:'Open a project folder to see its Pips',project)}</div>`;
+ const tab=(key,label,title,workspace,need)=>{
+  const fresh=attentionRead&&workspace?unreadTotals.get(workspace.id)||0:0,count=attentionRead?need:0,said=needWords(count,fresh);
+  const mark=count?`<span class="pip-tab-count" aria-hidden="true">${count.toLocaleString('en-US')}</span>`:fresh?'<span class="pip-tab-new" aria-hidden="true"></span>':'';
+  return `<button type="button" role="tab" id="pips-tab-${key}" class="pips-tab" data-pips-tab="${key}" aria-controls="pips-tabpanel" aria-selected="${chosen===key}"${chosen===key?'':' tabindex="-1"'} title="${esc(said?`${said}\n${title}`:title)}"${said?` aria-label="${esc(`${label}, ${said}`)}"`:''}>${label}${mark}</button>`;};
+ return `<div class="pips-tabs" role="tablist" aria-label="Your Pips, or this project’s Pips">${tab('personal','Personal','Your Pips: the same in every folder',personalSpace(),S.attention?.total||0)}${tab('project','Project',project?`${project.name}: this project’s Pips`:'Open a project folder to see its Pips',project,project&&S.attention?.projects?.[project.id]?.total||0)}</div>`;
 }
 // What the chosen tab shows is its panel (the list, or a Pip open in it).
 function scopePanelAttrs(){return scopeTabs()?` id="pips-tabpanel" role="tabpanel" aria-labelledby="pips-tab-${scopeTab()}"${S.switching?' aria-busy="true"':''}`:'';}
@@ -2593,14 +2599,14 @@ function mergePage(first,value){
  const seen=new Set(first.map(p=>p.id));return [...first,...jobsExtra.filter(p=>!seen.has(p.id))];
 }
 // Needs attention (#8): every card your Personal Pips wait on you for, across all of them, on the home.
-S.attention=null;let attentionSeq=0,attentionExpanded=false;
+S.attention=null;let attentionSeq=0,attentionExpanded=false,attentionRead=false;
 async function loadAttention(){
- // Personal Pips' cards only: a project's home has its setup cards, and each row says what waits for you.
- if(remoteHost||S.apiVersion<44||!simpleMode()||projectHome()||!usable())return;
- const token=scope(),sequence=++attentionSeq;
+ // Its list is Personal Pips' cards, and a project's home shows none of it, but both tabs say their number from this page.
+ if(remoteHost||S.apiVersion<44||!simpleMode()||!usable()){attentionRead=true;return;}
+ const token=scope(),sequence=++attentionSeq,first=!attentionRead;
  try{const page=attentionPage(await send('list_pip_attention',{limit:100}));if(token!==scope()||sequence!==attentionSeq)return;
-  const before=JSON.stringify(S.attention);S.attention=page;if(JSON.stringify(page)!==before)render();}
- catch{/* the home still lists every Pip; the next refresh tries again */}
+  const before=JSON.stringify(S.attention);S.attention=page;attentionRead=true;if(first||JSON.stringify(page)!==before)render();}
+ catch{/* the home still lists every Pip; the next refresh tries again */if(token===scope()&&!attentionRead){attentionRead=true;render();}}
 }
 function attentionHomeMarkup(){
  const face=i=>{if(!i.pip_id)return '<span class="attention-mark" aria-hidden="true">+</span>';
@@ -2963,13 +2969,20 @@ function projectFirstMarkup(){
 }
 function simpleHomeList(all,live){
  const order=[...all.filter(p=>p.pip_type==='core'),...all.filter(p=>p.pip_type!=='core')];
- const row=p=>{const type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,[],usable(),S.runner),waiting=S.attention?.listsReviews?Math.max(pendingReviews(p),S.attention.byPip[p.id]||0):pendingReviews(p)+(S.attention?.byPip[p.id]||0),unread=p.status==='archived'||readingPips.has(p.id)?null:unreadByPip.get(p.id),readable=!!unread&&canMarkRead(unread);
-  const button=`<button type="button" class="pip-row${unread?' pip-row-unread':''}" data-job="${esc(p.id)}" data-state="${esc(pose.state)}" data-waiting="${waiting}">${pipAvatar(p,pose.state,`row-${p.id}`,type)}<span class="pip-row-copy"><strong>${esc(p.name)}${p.pip_type==='core'?'<span class="primary-badge" title="Your Primary Pip. It uses Core, the character of DGC’s main chat." aria-label="Primary Pip">★</span>':''}</strong><small>${S.pipSearch&&record(p.match)&&['chat','instructions'].includes(p.match.in)&&typeof p.match.text==='string'?`<span class="pip-match">${p.match.in==='chat'?'In its chat':'In its instructions'}: ${esc(p.match.text.slice(0,200))}</span>`:p.status==='archived'?'Archived':waiting?`${waiting} waiting for you${unread?' · '+esc(unread.latest):''}`:unread?esc(unread.latest):esc(pose.label)}</small></span>${readable?`<span class="pip-row-unread-count pip-row-read-room" aria-hidden="true"><span>${unread.count}</span><span>Read</span></span>`:unread?`<span class="pip-row-unread-count" aria-label="${unread.count} unread">${unread.count}</span>`:''}</button>`;
-  // Its unread count is its own button over the row's end (never inside the row): "Read" on hover or focus, and a click
+ const row=p=>{const type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,[],usable(),S.runner),waiting=waitingOn(S.attention,p.id,pendingReviews(p)),unread=p.status==='archived'||readingPips.has(p.id)?null:unreadByPip.get(p.id),readable=!!unread&&canMarkRead(unread);
+  // A number is what waits on it, and it's the row's own (a click on it opens the row). A dot is something new to read, and
+  // over the row's end when it can be read from here, so the row keeps its room for it.
+  const count=waiting?`<span class="pip-row-count" aria-hidden="true">${waiting}</span>`:'',latest=unread?`<span class="pip-row-latest">${esc(unread.latest)}</span>`:'';
+  const both=count&&unread?' pip-row-both':'';
+  const marks=readable?`<span class="pip-row-marks pip-row-room${both}" aria-hidden="true"><span class="pip-row-read-slot"></span>${count}</span>`
+   :unread?`<span class="pip-row-marks${both}"><span class="pip-row-read-slot" role="img" aria-label="${unread.count} new"><span class="pip-new-dot"></span></span>${count}</span>`
+   :count?`<span class="pip-row-marks">${count}</span>`:'';
+  const button=`<button type="button" class="pip-row${marks?' pip-row-marked':''}" data-job="${esc(p.id)}" data-state="${esc(pose.state)}" data-waiting="${waiting}">${pipAvatar(p,pose.state,`row-${p.id}`,type)}<span class="pip-row-copy"><strong>${esc(p.name)}${p.pip_type==='core'?'<span class="primary-badge" title="Your Primary Pip. It uses Core, the character of DGC’s main chat." aria-label="Primary Pip">★</span>':''}</strong><small>${S.pipSearch&&record(p.match)&&['chat','instructions'].includes(p.match.in)&&typeof p.match.text==='string'?`<span class="pip-match">${p.match.in==='chat'?'In its chat':'In its instructions'}: ${esc(p.match.text.slice(0,200))}</span>`:p.status==='archived'?'Archived':waiting?`${waiting} waiting for you${unread?' · '+latest:''}`:unread?latest:esc(pose.label)}</small></span>${marks}</button>`;
+  // Its dot is its own button over the row's end (never inside the row): "Read" on hover or focus, and a click
   // marks its whole chat read without opening it.
   if(!readable)return button;
-  const label=`Mark ${p.name}'s ${unread.count} unread message${unread.count===1?'':'s'} as read`,dot=['working','waiting_approval'].includes(pose.state);
-  return `<div class="pip-row-item${dot?' pip-row-dot':''}">${button}<button type="button" class="pip-row-unread-count pip-row-read" id="pip-read-${esc(p.id)}" data-pip-read="${esc(p.id)}" aria-label="${esc(label)}" title="Mark as read, without opening its chat"><span class="pip-read-count">${unread.count}</span><span class="pip-read-word">Read</span></button></div>`;};
+  const label=`Mark ${p.name}'s ${unread.count} new message${unread.count===1?'':'s'} as read`,dot=pose.state==='working'||pose.state==='waiting_approval'&&!waiting;
+  return `<div class="pip-row-item${dot?' pip-row-dot':''}">${button}<span class="pip-row-marks pip-row-marks-live${count?' pip-row-both':''}"><button type="button" class="pip-row-read" id="pip-read-${esc(p.id)}" data-pip-read="${esc(p.id)}" aria-label="${esc(label)}" title="Mark as read, without opening its chat"><span class="pip-new-dot" aria-hidden="true"></span><span class="pip-read-word">Read</span></button>${count}</span></div>`;};
  const project=projectHome();
  return `<section class="simple-home" aria-label="Your Pips"><div class="simple-home-head"><h2>Your Pips</h2><span class="simple-home-actions">${project?projectHomeMenu():S.apiVersion>=43&&!remoteHost?`<button type="button" id="pips-settings-open" class="topbar-icon" aria-label="Pips settings" title="Pips settings: computers, apps and plugins"${!usable()?' disabled':''}>${simpleIcon('gear')}</button>`:''}${button('simple-new','New Pip',S.busy||!usable(),'primary pill')}</span></div>${pipsPaged()?`<div class="pip-search"><label class="sr-only" for="pip-search">Search your Pips</label><input id="pip-search" type="search" placeholder="Search your Pips" autocomplete="off" value="${esc(draft.pipSearch||'')}" maxlength="120">${S.jobsTotal!==null&&(S.jobsTotal>S.jobs.length||S.pipSearch)?`<small class="pip-search-count">${S.pipSearch?`${S.jobsTotal.toLocaleString('en-US')} found`:`Showing ${S.jobs.length.toLocaleString('en-US')} of ${S.jobsTotal.toLocaleString('en-US')}`}</small>`:''}</div>`:''}${project?(S.jobs.length||S.pipSearch?'':projectFirstMarkup()):live.some(p=>p.pip_type==='core')||S.pipSearch?'':`<div class="core-offer">${avatar('idle',characterType('core'),'core-offer')}<p><strong>Meet Core</strong><span>Your Primary Pip, for everyday tasks.</span></p>${button('create-core','Create',S.busy||!usable(),'primary pill')}</div>`}<div class="pip-rows">${order.map(row).join('')}</div>${S.pipSearch&&!S.jobs.length?`<p class="muted">No Pip matches “${esc(S.pipSearch)}” in its name, instructions or chat.</p>`:''}${pipsPaged()&&S.jobsNext!==null?button('pips-more',jobsMoreBusy?'Loading…':'Load more',jobsMoreBusy||!usable(),'link'):''}${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived':'Show archived',false,'link'):''}</section>`;
 }

@@ -5,7 +5,7 @@ import {JSDOM} from 'jsdom';
 
 // The Sessions home's Pips strip (pipHomeStrip.js): reported 2026-10-18, "my 3 Pips ran and failed ...
 // there should be a dismiss option there too", and "what if there were 100 Pips". The 3 most urgent rows,
-// then "N more need you · Show all"; news rows (failed runs, new findings) dismiss for good (Pips API 48).
+// then "N more need you · Show all" (what waits, the head's number) or "N more Pips with news"; news rows (failed runs, new findings) dismiss for good (Pips API 48).
 const bundle=buildSync({entryPoints:[new URL('../src/pipHomeStrip.js',import.meta.url).pathname],bundle:true,write:false,format:'iife',globalName:'Strip',loader:{'.css':'empty'}}).outputFiles[0].text;
 const P='ws_'+'1'.repeat(32), Q='ws_'+'2'.repeat(32);
 const id=n=>'pip_'+n.toString(16).padStart(32,'0');
@@ -61,7 +61,7 @@ test('latest unread routine results appear with the existing row geometry, even 
   {pip_id:id(2),workspace_id:P,name:'Mail watch',pip_type:'scout',count:2,latest:'No new mail since the last check.',latest_at:'2026-11-01T10:00:00Z'},
   {pip_id:id(1),workspace_id:P,name:'Daily check',pip_type:'scout',count:1,latest:'Everything passed.',latest_at:'2026-11-01T09:00:00Z'}]};
  const x=harness(t,state,{api:69});await x.connect();
- assert.equal(x.d.querySelector('.home-pips-head h2').textContent,'Pips · 3 unread');
+ assert.equal(x.d.querySelector('.home-pips-head h2').textContent,'Pips · 3 new','something to read is new, not a number that needs you');
  x.d.querySelector('.home-pips-open').click();
  assert.deepEqual(JSON.parse(JSON.stringify(x.opened.at(-1))),{overview:true},'Open Pips leads to the list, not the last selected chat');
  assert.deepEqual(x.rows().map(r=>r.slice(0,2)),[['Mail watch','No new mail since the last check.'],['Daily check','Everything passed.']]);
@@ -77,13 +77,14 @@ test('a Pip with attention and unread appears once; its count grows in the same 
  assert.equal(x.d.querySelectorAll('.home-pip-item').length,1);
  assert.deepEqual(x.rows(),[['Site traffic','2 waiting for you',false]]);
  assert.equal(x.d.querySelector('.home-pip-latest').textContent,'Traffic report finished.');
- assert.equal(x.d.querySelector('.home-pip-read-count').textContent,'8');
+ assert.equal(x.d.querySelector('.home-pip-badge').textContent,'2','its number is what waits on it');
+ assert.equal(x.d.querySelector('.home-pip-read').getAttribute('aria-label'),"Mark Site traffic's 8 new messages as read",'its dot says how many are new');
  assert.equal(x.d.querySelector('.home-pip-face').dataset.tint,undefined,'old saved colours no longer tint accessories');
  state.unread[0]={...state.unread[0],count:9,latest:'Another report.',latest_message_id:'m2'};
  state.list[0]={...state.list[0],profile:{body:'quill',color:'quill'}};
  await x.poll();
  assert.equal(x.d.querySelectorAll('.home-pip-item').length,1);
- assert.equal(x.d.querySelector('.home-pip-read-count').textContent,'9');
+ assert.equal(x.d.querySelector('.home-pip-read').getAttribute('aria-label'),"Mark Site traffic's 9 new messages as read");
  assert.equal(x.d.querySelector('.home-pip-face').dataset.tint,undefined);
 });
 test('Read removes the unread Pip and its old digest news while leaving a pending approval alone',async t=>{
@@ -141,7 +142,8 @@ test('a merged unread row still opens its pending computer approval',async t=>{
  assert.equal(x.d.querySelectorAll('.home-pip-item').length,1);
  x.d.querySelector('.home-pip-row').click();
  assert.deepEqual(JSON.parse(JSON.stringify(x.opened.at(-1))),{pip:id(1),workspace:P,attention:true,computer:true});
- assert.equal(x.d.querySelector('.home-pip-read-count').textContent,'2');
+ assert.equal(x.d.querySelector('.home-pip-read').getAttribute('aria-label'),"Mark Site traffic's 2 new messages as read");
+ assert.equal(x.d.querySelector('.home-pip-badge').textContent,'1');
 });
 test('an unread request failure never claims all quiet, and Retry recovers the count',async t=>{
  const state={list:[pip(1,'Mail watch')],digest:digest([]),unreadFail:true,unread:[
@@ -150,7 +152,7 @@ test('an unread request failure never claims all quiet, and Retry recovers the c
  assert.equal(x.d.querySelector('.home-pips-quiet-text'),null);
  assert.match(x.d.querySelector('.home-pips-error').textContent,/Couldn’t check for new Pip messages/);
  state.unreadFail=false;x.d.querySelector('.home-pips-error button').click();await flush();
- assert.equal(x.d.querySelector('.home-pips-head h2').textContent,'Pips · 1 unread');
+ assert.equal(x.d.querySelector('.home-pips-head h2').textContent,'Pips · 1 new');
  assert.equal(x.d.querySelector('.home-pips-error'),null);
 });
 
@@ -201,7 +203,7 @@ test('Dismiss all dismisses every news row, also past the top 3, and leaves what
  const state={list,digest:digest([2,3,4,5,6].map(n=>failed(n,`Audit ${n}`)))};
  const x=harness(t,state);await x.connect();
  assert.equal(x.rows().length,3);
- assert.equal(x.more(),'3 more need you · Show all');
+ assert.equal(x.more(),'3 more Pips with news · Show all','failed runs are news: they don\'t need you');
  const all=x.d.querySelector('.home-pips-dismiss-all');
  assert.equal(all.textContent,'Dismiss all');
  all.click();await flush();
@@ -244,14 +246,14 @@ test('the 3 most urgent: waiting for you, then alerts, then failed runs, then ne
   news(6,'Quiet',{runs:{succeeded:3,failed:0,cancelled:0}})])};
  const x=harness(t,state);await x.connect();
  assert.deepEqual(x.rows(),[['Waits','3 waiting for you',false],['Alerts','1 new, worth a look now',true],['Fails','1 run failed',true]]);
- assert.equal(x.more(),'3 more need you · Show all','Fails too, Core and Finds; Quiet only ran, so it does not need you');
+ assert.equal(x.more(),'3 more Pips with news · Show all','Fails too, Core and Finds; Quiet only ran, so it is not listed');
  const more=x.d.querySelector('.home-pips-more');
  assert.equal(more.tagName,'BUTTON');assert.equal(more.title,'Open Needs attention in the Pips view');
  more.click();
  assert.deepEqual(JSON.parse(JSON.stringify(x.opened.at(-1))),{attention:true,all:true,workspace:P},'Show all opens the Pips view at Needs attention, in your Personal Pips');
  x.d.querySelectorAll('.home-pip-dismiss')[1].click();await flush();
  assert.deepEqual(x.rows().map(r=>r[0]),['Waits','Alerts','Fails too'],'dismissing one of the top 3 pulls the next one up');
- assert.equal(x.more(),'2 more need you · Show all','and the count follows');
+ assert.equal(x.more(),'2 more Pips with news · Show all','and the count follows');
  for(const label of ['Fails too','Core'])[...x.d.querySelectorAll('.home-pip-item')].find(li=>li.querySelector('strong').textContent===label).querySelector('.home-pip-dismiss').click();
  await flush();
  assert.deepEqual(x.rows().map(r=>r[0]),['Waits','Alerts','Finds']);
@@ -269,7 +271,7 @@ test('100 Pips: past the digest\'s 20 the count says it may be more, and a Pip p
  const twenty=Array.from({length:20},(_,n)=>failed(n+1,`Pip ${n+1}`));
  const x=harness(t,{list,digest:digest(twenty,{omitted_pips:17})});await x.connect();
  assert.equal(x.rows().length,3);
- assert.equal(x.more(),'17+ more need you · Show all','the digest left out 17 Pips after 20 with news: more may need you');
+ assert.equal(x.more(),'17+ more Pips with news · Show all','the digest left out 17 Pips after 20 with news: there may be more');
  const beyond=harness(t,{list:list.slice(0,2),digest:digest([failed(150,'Past the first page')])});await beyond.connect();
  assert.deepEqual(beyond.rows(),[['Past the first page','1 run failed',true]],'named from the digest itself');
 });

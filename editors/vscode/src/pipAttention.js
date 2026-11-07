@@ -36,7 +36,27 @@ export function attentionPage(value) {
   const items = [...value.items.map(check), ...reviews].sort((a, b) => (b.created_at > a.created_at) - (b.created_at < a.created_at));
   const byPip = {};
   for (const [pip, n] of Object.entries(value.by_pip)) { if (!PIP.test(pip) || !Number.isSafeInteger(n) || n < 1) fail(); byPip[pip] = n; }
-  return {total: value.total, items, byPip, truncated: value.truncated, listsReviews: Array.isArray(value.reviews)};
+  // What waits in each project folder (a DGC from before has none: its Project tab then has no number). A row that doesn't
+  // read is left out, never a number made up.
+  const projects = {}, everyPip = {...byPip};
+  for (const [space, place] of Object.entries(value.projects && typeof value.projects === 'object' ? value.projects : {})) {
+    if (!WORKSPACE.test(space) || !Number.isSafeInteger(place?.total) || place.total < 1) continue;
+    const pips = {};
+    for (const [pip, n] of Object.entries(place.by_pip && typeof place.by_pip === 'object' ? place.by_pip : {})) if (PIP.test(pip) && Number.isSafeInteger(n) && n > 0) { pips[pip] = n; everyPip[pip] = n; }
+    projects[space] = {total: place.total, byPip: pips};
+  }
+  return {total: value.total, items, byPip, projects, everyPip, truncated: value.truncated, listsReviews: Array.isArray(value.reviews)};
+}
+
+/** What waits on one Pip, the number on its row. `reviews` is its own count from list_pips, a project Pip's or an older DGC's. */
+export function waitingOn(page, pip, reviews = 0) {
+  const listed = page?.everyPip?.[pip] || 0;
+  return page?.listsReviews ? Math.max(reviews, listed) : reviews + listed;
+}
+
+/** A number means something needs you; "new" is something to read: "2 need you · 3 new", either part alone. */
+export function needWords(need, fresh) {
+  return [need ? `${need.toLocaleString('en-US')} ${need === 1 ? 'needs' : 'need'} you` : '', fresh ? `${fresh.toLocaleString('en-US')} new` : ''].filter(Boolean).join(' · ');
 }
 
 /** Where a row goes: the Pip's chat at its card, its computer, or the Pips home's setup reviews. */

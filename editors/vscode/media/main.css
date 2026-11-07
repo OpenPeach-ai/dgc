@@ -267,12 +267,12 @@ body.vscode-light .project-icon[data-color="green"] { color:#16A34A; } body.vsco
 #sessions-host .home-pips { display:flex; flex-direction:column; gap:var(--sp-1); padding:var(--sp-2);
   border-radius:var(--r-md); background:color-mix(in srgb, var(--accent) 9%, var(--surface)); }
 #sessions-host .home-pips[hidden] { display:none; }
-#sessions-host .home-pips-head { display:flex; align-items:center; justify-content:space-between; gap:var(--sp-2); padding:0 var(--sp-1) 0 var(--sp-1); }
+#sessions-host .home-pips-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:0 var(--sp-2); padding:0 var(--sp-1) 0 var(--sp-1); }
 #sessions-host .home-pips-head h2 { margin:0; font:var(--w-semi) var(--t-sm)/1.3 var(--sans); color:var(--text-strong); }
 #sessions-host .home-pips-open { border:0; background:transparent; color:var(--link, var(--accent-text)); font:var(--w-med) var(--t-xs)/1 var(--sans);
   cursor:pointer; padding:var(--sp-1); border-radius:var(--r-sm); }
 #sessions-host .home-pips-open:hover { text-decoration:underline; }
-#sessions-host .home-pips-actions { display:inline-flex; align-items:center; gap:var(--sp-1); flex:none; }
+#sessions-host .home-pips-actions { display:inline-flex; align-items:center; gap:var(--sp-1); flex:none; margin-left:auto; }
 #sessions-host .home-pips-dismiss-all { border:0; background:transparent; color:var(--muted); font:var(--w-med) var(--t-xs)/1 var(--sans);
   cursor:pointer; padding:var(--sp-1); border-radius:var(--r-sm); }
 #sessions-host .home-pips-dismiss-all:hover { color:var(--text); text-decoration:underline; }
@@ -282,7 +282,7 @@ body.vscode-light .project-icon[data-color="green"] { color:#16A34A; } body.vsco
 #sessions-host .home-pips-unread .home-pip-copy small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 /* A row and, for news, its dismiss beside it (never over the name): the ✕ keeps its room and shows on
    hover or focus; it is always in the tab order. */
-#sessions-host .home-pip-item { display:flex; align-items:center; gap:2px; min-width:0; border-radius:var(--r-sm); }
+#sessions-host .home-pip-item { position:relative; display:flex; align-items:center; gap:2px; min-width:0; border-radius:var(--r-sm); }
 #sessions-host .home-pip-item:hover { background:color-mix(in srgb, var(--accent) 14%, var(--surface)); }
 #sessions-host .home-pip-row { flex:1 1 auto; min-width:0; display:flex; align-items:center; gap:var(--sp-2); padding:var(--sp-1); border:0; border-radius:var(--r-sm);
   background:transparent; color:inherit; text-align:left; cursor:pointer; }
@@ -302,15 +302,25 @@ body.vscode-light .project-icon[data-color="green"] { color:#16A34A; } body.vsco
 #sessions-host .home-pip-copy { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:1px; }
 #sessions-host .home-pip-copy strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:var(--w-med) var(--t-sm)/1.3 var(--sans); color:var(--text); }
 #sessions-host .home-pip-copy small { color:var(--muted); font:var(--w-reg) var(--t-xs)/1.3 var(--sans); }
-#sessions-host .home-pip-copy :is(.home-pip-latest, .home-pip-unread-only small) { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-#sessions-host .home-pip-badge { flex:none; width:32px; min-width:32px; height:20px; padding:0; border-radius:10px; display:inline-flex; align-items:center;
-  justify-content:center; background:var(--accent-fill); color:#fff; font:var(--w-semi) var(--t-xs)/1 var(--sans); font-variant-numeric:tabular-nums; }
-/* An unread row's count is its own button beside the row: it reads "Read" on hover or focus, and marks that Pip read. */
-#sessions-host .home-pip-read { order:3; width:46px; min-width:46px; margin-right:var(--sp-1); border:0; cursor:pointer; }
+#sessions-host .home-pip-copy :is(.home-pip-latest, .home-pip-unread-only small) { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); }
+/* A number means something needs you: the only thing here filled purple with a digit, at the row's end. A click on it opens the row. */
+#sessions-host .home-pip-badge { order:4; flex:none; box-sizing:border-box; min-width:20px; height:20px; margin-right:var(--sp-1); padding:0 6px; border-radius:10px; display:inline-flex; align-items:center;
+  justify-content:center; background:var(--accent-fill); color:#fff; font:var(--w-semi) var(--t-xs)/1 var(--sans); font-variant-numeric:tabular-nums; cursor:pointer; }
+/* A dot means there's something new to read. Its 24px target stands 2px past a number's edge, so the dot sits at a number's
+   centre; it reads "Read" on hover or focus, over the row's end, and marks that Pip read. */
+#sessions-host .home-pip-read { order:3; position:static; flex:none; display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; margin:0 calc(var(--sp-1) - 2px) 0 6px; padding:0; border:0; border-radius:50%; background:transparent; cursor:pointer; }
+#sessions-host .home-pip-both .home-pip-read { margin-right:-4px; }
+/* "Read" ends where a number ends and starts where the row's words stop, so it never covers them; beside a number it
+   covers the dot and the number together. */
+#sessions-host .home-pip-new-dot { display:block; width:8px; height:8px; border-radius:50%; background:var(--link, var(--accent-text)); }
 #sessions-host .home-pip-item .home-pip-dismiss { order:2; }
-#sessions-host .home-pip-read-word { display:none; }
-#sessions-host .home-pip-read:is(:hover, :focus-visible) .home-pip-read-count { display:none; }
-#sessions-host .home-pip-read:is(:hover, :focus-visible) .home-pip-read-word { display:inline; }
+#sessions-host .home-pip-read-word { display:none; position:absolute; z-index:1; top:50%; right:var(--sp-1); transform:translateY(-50%); box-sizing:border-box; width:34px; height:20px; padding:0; align-items:center; justify-content:center; border-radius:10px;
+  background:var(--accent-fill); color:#fff; font:var(--w-semi) var(--t-xs)/1 var(--sans); white-space:nowrap; }
+#sessions-host .home-pip-read:is(:hover, :focus-visible) .home-pip-new-dot { visibility:hidden; }
+#sessions-host .home-pip-read:is(:hover, :focus-visible) .home-pip-read-word { display:inline-flex; }
+#sessions-host .home-pip-read:focus-visible { outline:none; }
+#sessions-host .home-pip-read:focus-visible .home-pip-read-word { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:1px; }
+@media (forced-colors: active) { #sessions-host .home-pip-new-dot { forced-color-adjust:none; background:Highlight; } }
 #sessions-host .home-pips-quiet { display:flex; flex-wrap:wrap; align-items:center; gap:var(--sp-1) var(--sp-2); padding:0 var(--sp-1); min-width:0; }
 #sessions-host .home-pips-faces { display:inline-flex; flex:none; gap:var(--sp-1); }
 #sessions-host .home-pip-face-button { display:inline-flex; padding:1px; border:0; border-radius:50%; background:transparent; cursor:pointer; }

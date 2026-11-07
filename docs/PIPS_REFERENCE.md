@@ -1031,8 +1031,8 @@ refuses a query that carries what the Pip read from apps and the user didn't say
 the Pip's computer.
 
 **Needs attention** (`pip_attention`, local only): `list_pip_attention {limit?}` (1–100, default 100) →
-`{as_of, total, counts, by_pip, items, reviews, truncated, in_projects}` over every Personal Pip that is not
-archived. `total` is the one number the Pips home, its rows and the editor's notice say. `items`
+`{as_of, total, counts, by_pip, items, reviews, truncated, in_projects, projects}` over every Personal Pip that is not
+archived. `total` is the one number the Personal tab, Needs attention, the Pips home, its rows and the editor's notice say. `items`
 are newest first: `{id: "<kind>:<card>", kind, card, pip_id, pip_name, pip_type, workspace_id,
 created_at, expires_at, title, detail}`, `kind` one of `email`, `event`, `action` (Pip-drafted, pending,
 not expired), `app_action` (a prepared action), `app_link` (requested or failed; newest per Pip and app),
@@ -1043,7 +1043,9 @@ shared result, `card` is the handoff and `pip_id` its target) and `approval` (a 
 Changes page, `card` is the proposal and `review` its `job_update` or `schedule_update`). They are apart
 from `items` because a client from before refuses a kind it doesn't know. `in_projects` counts the reviews
 and setup cards waiting in project folders, which this list doesn't show; the editor's notice names them
-apart. `counts` and `by_pip` count every item and review even when `items` is cut. The read runs in a
+apart. `projects` is the same per folder, `{workspace_id: {total, by_pip}}` (the 100 busiest, 500 Pips each): a
+project's tab says its `total` and a project Pip's row its `by_pip` count. An editor with no `projects` shows no
+number on that tab. `counts` and `by_pip` count every item and review even when `items` is cut. The read runs in a
 savepoint that is rolled back, and decides "waiting" with `expires_at > now` in SQL: it never expires or
 resolves a row.
 

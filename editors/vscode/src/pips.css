@@ -255,20 +255,33 @@ button.pill{border-radius:999px;padding:6px 16px}
 .pip-row-copy{display:grid;gap:2px;min-width:0}
 .pip-row-copy strong{font-size:14px;font-weight:600;display:flex;align-items:center;gap:6px}
 .pip-row-copy small{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.pip-row-unread{grid-template-columns:44px minmax(0,1fr) auto}
-.pip-row-unread-count,.pip-tab-unread{flex:none;display:inline-flex;align-items:center;justify-content:center;min-width:19px;height:19px;padding:0 5px;border-radius:10px;background:var(--pip-accent);color:#fff;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums}
-.pip-row-unread-count{justify-self:end}
-/* An unread Pip's count is a button over its row's end, where the count always sat (the row keeps that room, sized for
-   the count or "Read"): it reads "Read" on hover or keyboard focus, and marks the chat read. */
+.pip-row-marked{grid-template-columns:44px minmax(0,1fr) auto}
+/* A number means something needs you: the only thing filled purple with a digit. A dot means there's something new to read,
+   and it sits where a number's centre sits: its 24px target stands 2px past the number's edge. */
+.pip-row-count,.pip-tab-count{flex:none;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--pip-accent);color:#fff;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums}
+.pip-tab-count{min-width:16px;height:16px;padding:0 4px;font-size:10px}
+.pip-new-dot,.pip-tab-new{flex:none;display:block;width:8px;height:8px;border-radius:50%;background:var(--pip-ink)}
+.pip-tab-new{width:7px;height:7px}
+.pip-row-latest{color:var(--vscode-foreground)}
+.pip-row-marks{display:inline-flex;align-items:center;justify-content:flex-end;gap:4px;justify-self:end}
+.pip-row-read,.pip-row-read-slot{position:relative;flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;max-width:none;height:24px;margin-right:-2px;padding:0}
+/* Its dot is a button over the row's end; the row keeps that room with a hidden copy of what's there. */
 .pip-row-item{position:relative;min-width:0}.pip-row-item:hover>.pip-row{background:var(--pip-wash)}
-.pip-row-read-room{display:inline-grid;visibility:hidden}.pip-row-read-room>span{grid-area:1/1;text-align:right}
-.pip-row-read{position:absolute;top:50%;right:10px;transform:translateY(-50%);min-height:0;border:0;cursor:pointer}
-.pip-row-dot>.pip-row-read{right:25px}
-.pip-row-read:hover{background:var(--pip-accent-hover)}
-.pip-row-read .pip-read-word{display:none}
-.pip-row-read:is(:hover,:focus-visible) .pip-read-count{display:none}
-.pip-row-read:is(:hover,:focus-visible) .pip-read-word{display:inline}
-.pip-tab-unread{min-width:16px;height:16px;padding:0 4px;font-size:10px}
+.pip-row-room{visibility:hidden}
+.pip-row-marks-live{position:absolute;top:50%;right:10px;transform:translateY(-50%);pointer-events:none}
+.pip-row-dot>.pip-row-marks-live{right:25px}
+.pip-row-read{position:static;min-height:0;border:0;border-radius:50%;background:transparent;cursor:pointer;pointer-events:auto}
+/* Beside a number the dot's target reaches into the gap before it, so the row keeps the room it always had; "Read" then
+   covers the dot and the number together, never the row's words. */
+.pip-row-both>:is(.pip-row-read,.pip-row-read-slot){margin:0 -6px 0 -8px}
+.pip-row-read:hover{background:transparent}
+/* "Read" ends where a number ends (the marks' own edge) and starts where the row's words stop (their 12px gap). */
+.pip-read-word{display:none;position:absolute;z-index:1;top:50%;right:0;transform:translateY(-50%);box-sizing:border-box;width:34px;height:20px;padding:0;align-items:center;justify-content:center;border-radius:10px;background:var(--pip-accent);color:#fff;font-size:11px;font-weight:700;white-space:nowrap}
+.pip-row-read:hover .pip-read-word{background:var(--pip-accent-hover)}
+.pip-row-read:is(:hover,:focus-visible) .pip-new-dot{visibility:hidden}
+.pip-row-read:is(:hover,:focus-visible) .pip-read-word{display:inline-flex}
+.pip-row-read:focus-visible{outline:none}.pip-row-read:focus-visible .pip-read-word{outline:1px solid var(--vscode-focusBorder,#7C5CFF);outline-offset:1px}
+@media(forced-colors:active){.pip-new-dot,.pip-tab-new{forced-color-adjust:none;background:Highlight}}
 .primary-badge{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#F5A524;color:#1b1b1b;font-size:10px;line-height:1}
 .pip-topbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;padding:10px 12px;flex:none}
 .topbar-icon{width:34px;height:34px;min-height:34px;padding:0;border-radius:50%;border:1px solid var(--pip-edge);background:transparent;display:inline-flex;align-items:center;justify-content:center;color:var(--vscode-foreground);cursor:pointer;list-style:none}
@@ -632,10 +645,13 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
    row elements, so pipsClient adds these classes only when the preceding state differs. */
 .pip-row{position:relative}
 .pip-row:is([data-state="working"],[data-state="waiting_approval"]){padding-right:25px}
+/* A number says it waits on you: no amber dot beside it, and the number stays in its column. */
+.pip-row[data-state="waiting_approval"]:not([data-waiting="0"]){padding-right:10px}
 .pip-row[data-state="working"]::after,.pip-row[data-state="waiting_approval"]::after{
   content:"";position:absolute;right:13px;top:50%;width:6px;height:6px;border-radius:50%;
   background:var(--vscode-textLink-foreground,#a78bfa);transform:translateY(-50%);pointer-events:none}
 .pip-row[data-state="waiting_approval"]::after{background:var(--vscode-editorWarning-foreground,#c9a054)}
+.pip-row[data-state="waiting_approval"]:not([data-waiting="0"])::after{display:none}
 @media(prefers-reduced-motion:no-preference) and (forced-colors:none){
   @keyframes pip-motion-enter{from{opacity:.55;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
   @keyframes pip-motion-state{from{background:color-mix(in srgb,var(--vscode-textLink-foreground,#a78bfa) 14%,transparent)}to{background:transparent}}
@@ -654,7 +670,7 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .allow-fields{display:grid;gap:8px;font-size:12px}.allow-fields label{margin:0;gap:3px;color:var(--vscode-descriptionForeground)}.allow-fields input,.allow-fields textarea{font-size:12px;color:var(--vscode-input-foreground)}.allow-fields textarea{min-height:0;resize:vertical;line-height:1.5}
 .allow-card[data-editing]{border-color:var(--vscode-focusBorder)}.allow-error{margin:0;font-size:12px;color:var(--vscode-errorForeground)}
 /* Needs attention (#8): every card your Pips wait on you for, above Your Pips on the home. */
-.attention{margin:0 0 18px}.attention-toggle{display:flex;align-items:center;gap:8px;width:100%;padding:5px 0;margin:0 0 8px;background:transparent;text-align:left;font-size:13px;font-weight:600}.attention-toggle:hover{background:transparent;color:#b9a1ff}.attention-toggle .codicon{margin-left:auto;font-size:12px;color:var(--muted)}.attention-count{font-size:11px;font-weight:600;min-width:18px;padding:1px 6px;border-radius:9px;background:#7952f6;color:#fff;text-align:center}
+.attention{margin:0 0 18px}.attention-toggle{display:flex;align-items:center;gap:8px;width:100%;padding:5px 0;margin:0 0 8px;background:transparent;text-align:left;font-size:13px;font-weight:600}.attention-toggle:hover{background:transparent;color:#b9a1ff}.attention-toggle .codicon{margin-left:auto;font-size:12px;color:var(--muted)}.attention-count{font-size:11px;font-weight:600;min-width:18px;padding:1px 6px;border-radius:9px;background:var(--pip-accent);color:#fff;text-align:center}
 .attention-list{list-style:none;margin:0;padding:0;display:grid;gap:2px}.attention-row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:transparent;border:1px solid transparent;border-radius:10px;padding:7px 8px;color:inherit}
 .attention-row:hover{background:var(--vscode-list-hoverBackground)}.attention-row .avatar,.attention-row .pip-avatar{width:34px;height:34px;flex:none}.attention-copy{display:grid;gap:1px;min-width:0}.attention-copy strong{font-size:12px;font-weight:600;overflow-wrap:anywhere}
 .attention-item{display:flex;align-items:center;gap:8px}.attention-item .attention-row{min-width:0;flex:1}.attention-dismiss{background:transparent;color:#b9a1ff;flex:none;font-size:12px;padding:2px 6px}.attention-dismiss:hover{background:color-mix(in srgb,#7952f6 14%,transparent)}

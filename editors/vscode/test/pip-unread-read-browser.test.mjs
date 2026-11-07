@@ -129,6 +129,8 @@ async function openHome({ state = STATE(), dismissed = "", width = 380, height =
       window.__posted.push(JSON.parse(JSON.stringify(m)));
       if (m?.type === "pipsReady") { setTimeout(connect, 1); return; }          // the host's bridge answers a page that mounts
       const make = m?.type === "pipsRequest" && answers[m.request.type];
+      // A DGC from before Needs attention: it has no such command.
+      if (m?.type === "pipsRequest" && m.request.type === "list_pip_attention" && S().noAttention) { setTimeout(() => window.dispatchEvent(new MessageEvent("message", { data: { type: "pipsReply", id: m.id, ok: false, error: { code: "unknown_command", message: "Unknown command." } } })), 2); return; }
       if (m?.type === "pipsRequest" && m.request.type === "mark_pip_read" && S().refuseRead) { setTimeout(() => window.dispatchEvent(new MessageEvent("message", { data: { type: "pipsReply", id: m.id, ok: false, error: { code: "busy", message: "Not now." } } })), 2); return; }
       if (make) setTimeout(() => window.dispatchEvent(new MessageEvent("message", { data: { type: "pipsReply", id: m.id, ok: true, result: make(m.request) } })), 2);
     } });
@@ -199,10 +201,10 @@ test("Dismiss all clears the home's unread count and rows and marks them read, s
   const x = await openHome();
   try {
     await x.page.waitForSelector("#sessions-pips .home-pip-read");
-    assert.equal(await x.head(), "Pips · 3 unread");
+    assert.equal(await x.head(), "Pips · 3 new");
     const button = x.page.locator(".home-pips-dismiss-all");
     assert.equal(await button.textContent(), "Dismiss all", "the same control as the news rows' Dismiss all");
-    assert.equal(await button.getAttribute("aria-label"), "Dismiss all unread Pip messages from the home page");
+    assert.equal(await button.getAttribute("aria-label"), "Dismiss all new Pip messages from the home page");
     assert.match(await button.getAttribute("title"), /Every message is marked read, here and in Pips/);
     await button.focus();
     await x.page.keyboard.press("Enter");
@@ -220,8 +222,8 @@ test("Dismiss all clears the home's unread count and rows and marks them read, s
     await openPipsPage(x, "personal");
     await x.page.waitForFunction(() => !document.getElementById("pips-host").shadowRoot.querySelector("[data-pip-read]"));
     assert.equal(await pill(x, MAIL), null, "read on the Pips page too");
-    assert.equal(await x.page.locator(".pips-tab[data-pips-tab=personal] .pip-tab-unread").count(), 0);
-    assert.equal(await x.page.locator(".pips-tab[data-pips-tab=project] .pip-tab-unread").count(), 0, "and on the project tab");
+    assert.equal(await x.page.locator(".pips-tab[data-pips-tab=personal] :is(.pip-tab-new, .pip-tab-count)").count(), 0);
+    assert.equal(await x.page.locator(".pips-tab[data-pips-tab=project] :is(.pip-tab-new, .pip-tab-count)").count(), 0, "and on the project tab");
     await x.page.click(".pips-tab[data-pips-tab=project]"); await x.page.waitForSelector(`[data-job="${AUDIT}"]`);
     assert.equal(await pill(x, AUDIT), null);
     assert.deepEqual(x.errors, []);
@@ -238,8 +240,9 @@ test("something new brings the row back with only the new count", async (t) => {
     await x.page.evaluate(([unread]) => { window.__state.unread["ws_" + "1".repeat(32)] = [unread]; }, [mailUnread(1, "A third mail, from your bank.", M3)]);
     await x.refresh();
     await x.page.waitForSelector("#sessions-pips .home-pip-read");
-    assert.equal(await x.head(), "Pips · 1 unread", "only the one that came after the dismiss");
-    assert.deepEqual(await x.unreadRows(), [["Mail watch", "A third mail, from your bank.", "1"]]);
+    assert.equal(await x.head(), "Pips · 1 new", "only the one that came after the dismiss");
+    assert.deepEqual(await x.unreadRows(), [["Mail watch", "A third mail, from your bank.", ""]]);
+    assert.equal(await x.page.getAttribute(".home-pip-read", "aria-label"), "Mark Mail watch's 1 new message as read");
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
 });
@@ -265,7 +268,7 @@ test("a read DGC refuses leaves the row dismissed, also after a reload, and it c
       Object.assign(u, { count: 3, messages: 3, latest: "A third mail, from your bank.", latest_message_id: m3 }); }, [M3]);
     await x.refresh();
     await x.page.waitForSelector("#sessions-pips .home-pip-read");
-    assert.equal(await x.head(), "Pips · 1 unread", "only the one that came after the dismiss");
+    assert.equal(await x.head(), "Pips · 1 new", "only the one that came after the dismiss");
     const context = { globalState: { value: {}, get(key) { return this.value[key]; }, update(key, v) { this.value[key] = v; return Promise.resolve(); } } };
     for (const message of await kept(x)) assert.equal(store.rememberPipHomeDismissed(context, message), true);
     attr = store.pipHomeDismissedAttr(context);
@@ -318,33 +321,34 @@ test("opening a Pip's chat reads it as before, and clears a dismiss a refused re
     await x.page.evaluate(([unread]) => { window.__state.unread["ws_" + "1".repeat(32)] = [unread]; }, [mailUnread(1, "One more mail.", M3, "2026-11-03T11:00:00Z")]);
     await x.refresh();
     await x.page.waitForSelector("#sessions-pips .home-pip-read");
-    assert.equal(await x.head(), "Pips · 1 unread", "all of it is new since the read; Billing audit stays dismissed");
-    assert.deepEqual(await x.unreadRows(), [["Mail watch", "One more mail.", "1"]]);
+    assert.equal(await x.head(), "Pips · 1 new", "all of it is new since the read; Billing audit stays dismissed");
+    assert.deepEqual(await x.unreadRows(), [["Mail watch", "One more mail.", ""]]);
+    assert.equal(await x.page.getAttribute(".home-pip-read", "aria-label"), "Mark Mail watch's 1 new message as read");
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
 });
 
-test("a Pip's count on the home reads Read on hover and focus, and marks its whole chat read", async (t) => {
+test("a Pip's dot on the home reads Read on hover and focus, and marks its whole chat read", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openHome();
   try {
     await x.page.waitForSelector("#sessions-pips .home-pip-read");
-    assert.deepEqual(await x.unreadRows(), [["Mail watch", "Two new mails from OKX.", "2"], ["Billing audit", "2 findings in billing.py", "1"]]);
+    assert.deepEqual(await x.unreadRows(), [["Mail watch", "Two new mails from OKX.", ""], ["Billing audit", "2 findings in billing.py", ""]], "a dot, no number: nothing waits on them");
     const labels = await x.page.evaluate(() => [...document.querySelectorAll(".home-pip-read")].map((b) => [b.tagName, b.type, b.getAttribute("aria-label"), !!b.closest(".home-pip-row")]));
-    assert.deepEqual(labels, [["BUTTON", "button", "Mark Mail watch's 2 unread messages as read", false], ["BUTTON", "button", "Mark Billing audit's 1 unread message as read", false]],
+    assert.deepEqual(labels, [["BUTTON", "button", "Mark Mail watch's 2 new messages as read", false], ["BUTTON", "button", "Mark Billing audit's 1 new message as read", false]],
       "its own button, never inside the row");
     await x.page.hover(".home-pip-read >> nth=0");
     assert.equal((await x.unreadRows())[0][2], "Read", "hover");
     await x.page.mouse.move(5, 700);
-    assert.equal((await x.unreadRows())[0][2], "2");
+    assert.equal((await x.unreadRows())[0][2], "", "the dot again");
     await x.page.focus(".home-pip-item:has(.home-pip-read) .home-pip-row >> nth=0");
     await x.page.keyboard.press("Tab");
-    assert.equal(await x.active(), "Mark Mail watch's 2 unread messages as read", "Tab reaches it");
+    assert.equal(await x.active(), "Mark Mail watch's 2 new messages as read", "Tab reaches it");
     assert.equal((await x.unreadRows())[0][2], "Read", "keyboard focus");
     await x.page.keyboard.press("Enter");
     await x.page.waitForFunction(() => document.querySelectorAll("#sessions-pips .home-pip-item:has(.home-pip-read)").length === 1);
-    assert.equal(await x.head(), "Pips · 1 unread");
-    assert.equal(await x.active(), "Mark Billing audit's 1 unread message as read", "the keyboard stays in the list, on the next one");
+    assert.equal(await x.head(), "Pips · 1 new");
+    assert.equal(await x.active(), "Mark Billing audit's 1 new message as read", "the keyboard stays in the list, on the next one");
     await x.page.keyboard.press("Space");
     await x.page.waitForFunction(() => !document.querySelector("#sessions-pips .home-pip-read"));
     assert.deepEqual((await x.requests("mark_pip_read")).map(({ request_id, ...r }) => r),
@@ -356,7 +360,7 @@ test("a Pip's count on the home reads Read on hover and focus, and marks its who
   } finally { await x.close(); }
 });
 
-test("the Pips page's purple count reads Read on hover and focus, Personal and Project, and marks the chat read without opening it", async (t) => {
+test("the Pips page's dot reads Read on hover and focus, Personal and Project, and marks the chat read without opening it", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openHome({ width: 300 });
   try {
@@ -369,18 +373,18 @@ test("the Pips page's purple count reads Read on hover and focus, Personal and P
         clear: r(copy).right <= r(b).left, nested: !!b.closest("[data-job]"), bg: getComputedStyle(b).backgroundColor, h: Math.round(r(b).height) };
     }, MAIL);
     const { bg, ...where } = geometry;
-    assert.deepEqual(where, { inside: true, clear: true, nested: false, h: 19 }, `where the count always sat, clear of the name: ${JSON.stringify(geometry)}`);
-    assert.equal(bg, "rgb(109, 73, 232)", "the purple pill");
+    assert.deepEqual(where, { inside: true, clear: true, nested: false, h: 24 }, `at the row's end, clear of the name: ${JSON.stringify(geometry)}`);
+    assert.equal(bg, "rgba(0, 0, 0, 0)", "a dot, not a filled pill: nothing waits on it");
     await x.page.hover(`[data-pip-read="${MAIL}"]`);
     assert.equal((await pill(x, MAIL)).text, "Read", "hover");
     const clearHover = await x.page.evaluate((id) => { const root = document.getElementById("pips-host").shadowRoot, b = root.querySelector(`[data-pip-read="${id}"]`);
-      return root.querySelector(`[data-job="${id}"] .pip-row-copy`).getBoundingClientRect().right <= b.getBoundingClientRect().left; }, MAIL);
+      return root.querySelector(`[data-job="${id}"] .pip-row-copy`).getBoundingClientRect().right <= b.querySelector(".pip-read-word").getBoundingClientRect().left + 0.5; }, MAIL);
     assert.equal(clearHover, true, "Read never covers the name");
     await x.page.mouse.move(5, 5);
-    assert.equal((await pill(x, MAIL)).text, "2");
+    assert.equal((await pill(x, MAIL)).text, "", "the dot again");
     await x.page.focus(`[data-job="${MAIL}"]`);
     await x.page.keyboard.press("Tab");
-    assert.equal(await x.active(), "Mark Mail watch's 2 unread messages as read");
+    assert.equal(await x.active(), "Mark Mail watch's 2 new messages as read");
     assert.equal((await pill(x, MAIL)).text, "Read", "keyboard focus");
     const before = (await x.requests("list_pip_unread")).length;
     await x.page.keyboard.press("Enter");
@@ -388,7 +392,7 @@ test("the Pips page's purple count reads Read on hover and focus, Personal and P
     assert.deepEqual((await x.requests("mark_pip_read")).map(({ request_id, ...r }) => r), [{ type: "mark_pip_read", pip_id: MAIL, message_id: M2 }]);
     assert.equal(await x.page.evaluate(() => window.__posted.some((m) => m.type === "pipsRequest" && m.request.type === "list_pip_messages")), false, "its chat stays closed");
     await x.page.waitForFunction((n) => window.__posted.filter((m) => m.type === "pipsRequest" && m.request.type === "list_pip_unread").length > n, before);
-    await x.page.waitForFunction(() => !document.getElementById("pips-host").shadowRoot.querySelector(".pips-tab[data-pips-tab=personal] .pip-tab-unread"));
+    await x.page.waitForFunction(() => !document.getElementById("pips-host").shadowRoot.querySelector(".pips-tab[data-pips-tab=personal] :is(.pip-tab-new, .pip-tab-count)"));
     assert.equal(await x.page.evaluate(() => document.getElementById("pips-host").shadowRoot.activeElement?.dataset.job), MAIL, "the keyboard stays on its row");
     await x.page.click(".pips-tab[data-pips-tab=project]");
     await x.page.waitForSelector(`[data-pip-read="${AUDIT}"]`);
@@ -607,5 +611,121 @@ test("ChatDGC already leaves its scrollbar room: your bubble and its time stay c
       assert.equal(m.scrolls, true, JSON.stringify(m));
       assert.ok(m.bubble <= m.client - SCROLLBAR && (m.time === null || m.time <= m.client - SCROLLBAR), `ChatDGC at ${width}px: ${JSON.stringify(m)}`);
     } finally { await page.close(); }
+  }
+});
+
+// A number means something needs you, and it is Needs attention's; a dot means there's something new to read (approved
+// 2026-11-07: "Personal 5" sat beside "Needs attention 2"). One data set: a Personal Pip with a handoff waiting and two new
+// messages, one with only a new message, a setup card with no Pip, and a project Pip with a review waiting and a new run post.
+const NOTES = "pip_" + "e".repeat(32), HANDOFF = "handoff_" + "f".repeat(32), SETUP = "setup_" + "9".repeat(32);
+const notes = { ...base, id: NOTES, workspace_id: P, pip_type: "quill", name: "Garden notes", goal: "Keep my garden notes.", source_policy: { mode: "personal" } };
+const notesUnread = { pip_id: NOTES, workspace_id: P, name: "Garden notes", pip_type: "quill", count: 1, messages: 1, posts: 0,
+  latest: "Water the tomatoes at dawn.", latest_at: "2026-11-03T08:00:00Z", latest_message_id: M4, latest_post_id: null };
+const waits = (state) => {
+  state.list[P] = [mail, notes];
+  state.unread[P] = [mailUnread(2, "Two new mails from OKX.", M2), notesUnread];
+  state.attention = { as_of: "2026-11-03T12:00:00.000Z", total: 2, truncated: false, counts: { setup: 1, handoff: 1 }, by_pip: { [MAIL]: 1 }, in_projects: 1,
+    items: [{ id: `setup:${SETUP}`, kind: "setup", card: SETUP, pip_id: null, pip_name: "", pip_type: "", workspace_id: P, title: "Create the Pip “Bills”?",
+      detail: "Watch my bills.", created_at: "2026-11-03T07:00:00.000Z", expires_at: null }],
+    reviews: [{ id: `handoff:${HANDOFF}`, kind: "handoff", card: HANDOFF, pip_id: MAIL, pip_name: "Mail watch", pip_type: "scout", workspace_id: P,
+      title: "Hand this to Mail watch?", detail: "Sort the bills.", created_at: "2026-11-03T06:00:00.000Z", expires_at: null }],
+    projects: { [Q]: { total: 1, by_pip: { [AUDIT]: 1 } } } };
+  return state;
+};
+const tabs = (x) => x.page.evaluate(() => { const root = document.getElementById("pips-host").shadowRoot;
+  return ["personal", "project"].map((key) => { const t = root.querySelector(`.pips-tab[data-pips-tab=${key}]`);
+    return { count: t.querySelector(".pip-tab-count")?.textContent ?? null, dot: !!t.querySelector(".pip-tab-new"), label: t.getAttribute("aria-label"), title: t.title }; }); });
+const attentionCount = (x) => x.page.evaluate(() => document.getElementById("pips-host").shadowRoot.querySelector(".attention-count")?.textContent ?? null);
+const homeMarks = (x) => x.page.evaluate(() => [...document.querySelectorAll("#sessions-pips .home-pip-item")].map((li) => {
+  const r = (e) => e && e.getBoundingClientRect(), badge = li.querySelector(".home-pip-badge"), dot = li.querySelector(".home-pip-new-dot");
+  return { name: li.querySelector("strong").textContent, number: badge?.textContent ?? null, dot: !!dot,
+    numberRight: badge ? r(badge).right : null, numberMid: badge ? (r(badge).left + r(badge).right) / 2 : null, dotMid: dot ? (r(dot).left + r(dot).right) / 2 : null,
+    dotRight: dot ? r(dot).right : null, numberLeft: badge ? r(badge).left : null, filled: badge ? getComputedStyle(badge).backgroundColor : null, dotFill: dot ? getComputedStyle(dot).backgroundColor : null };
+}));
+
+test("a tab's number is Needs attention's on one data set, and a Pip's number is what waits on it; new is a dot", async (t) => {
+  if (skipOrFail(t)) return;
+  const x = await openHome({ state: waits(STATE()) });
+  try {
+    await x.page.waitForSelector("#sessions-pips .home-pip-badge");
+    assert.equal(await x.head(), "Pips · 3 need you · 4 new", "Needs attention's 2 and the project's 1; 2, 1 and 1 new messages");
+    const home = await homeMarks(x);
+    assert.deepEqual(home.map(({ name, number, dot }) => [name, number, dot]),
+      [["Mail watch", "1", true], ["Billing audit", "1", true], ["Garden notes", null, true]], "a number where something waits, a dot where something is new");
+    assert.equal(await x.page.evaluate(() => document.querySelector("#sessions-pips .home-pips-more")?.textContent), "1 more needs you · Show all",
+      "the setup card: the rows' 1 and 1 and this 1 are the head's 3");
+    await openPipsPage(x, "personal");
+    await x.page.waitForFunction(() => document.getElementById("pips-host").shadowRoot.querySelector(".pip-tab-count"));
+    const [personal, project] = await tabs(x);
+    assert.equal(personal.count, await attentionCount(x), "the tab says Needs attention's number");
+    assert.deepEqual(personal, { count: "2", dot: false, label: "Personal, 2 need you · 3 new", title: "2 need you · 3 new\nYour Pips: the same in every folder" });
+    assert.deepEqual(project, { count: "1", dot: false, label: "Project, 1 needs you · 1 new", title: "1 needs you · 1 new\nshop: this project’s Pips" });
+    const rows = await x.page.evaluate(() => { const root = document.getElementById("pips-host").shadowRoot;
+      return [...root.querySelectorAll("[data-job]")].map((row) => { const item = row.closest(".pip-row-item") || row;
+        return [row.querySelector("strong").textContent, item.querySelector(".pip-row-marks-live .pip-row-count, .pip-row-marks:not(.pip-row-room) .pip-row-count")?.textContent ?? null,
+          !!item.querySelector("[data-pip-read] .pip-new-dot")]; }); });
+    assert.deepEqual(rows, [["Mail watch", "1", true], ["Garden notes", null, true]]);
+    assert.deepEqual(x.errors, []);
+  } finally { await x.close(); }
+});
+
+test("with something new and nothing waiting a tab has only a dot, with its count in words; an older DGC never gets a number", async (t) => {
+  if (skipOrFail(t)) return;
+  const fresh = STATE(); fresh.list[P] = [mail, notes]; fresh.unread[P] = [mailUnread(2, "Two new mails from OKX.", M2), notesUnread];
+  for (const [state, why] of [[fresh, "nothing waits"], [{ ...fresh, noAttention: true }, "a DGC with no Needs attention"]]) {
+    const x = await openHome({ state });
+    try {
+      await x.page.waitForSelector("#sessions-pips .home-pip-read");
+      assert.equal(await x.head(), "Pips · 4 new", why);
+      assert.equal(await x.page.locator("#sessions-pips .home-pip-badge").count(), 0, why);
+      await openPipsPage(x, "personal");
+      await x.page.waitForFunction(() => document.getElementById("pips-host").shadowRoot.querySelector(".pip-tab-new"));
+      const [personal, project] = await tabs(x);
+      assert.deepEqual(personal, { count: null, dot: true, label: "Personal, 3 new", title: "3 new\nYour Pips: the same in every folder" }, why);
+      assert.deepEqual(project, { count: null, dot: true, label: "Project, 1 new", title: "1 new\nshop: this project’s Pips" }, why);
+      assert.equal(await attentionCount(x), null, `${why}: no Needs attention number either`);
+      assert.deepEqual(x.errors, []);
+    } finally { await x.close(); }
+  }
+});
+
+test("a dot sits where a number's centre sits, numbers share one edge, and both read in dark and light at 300px; Dismiss all leaves the numbers", async (t) => {
+  if (skipOrFail(t)) return;
+  for (const theme of ["dark-modern", "light-modern"]) {
+    const x = await openHome({ state: waits(STATE()), width: 300, theme });
+    try {
+      await x.page.waitForSelector("#sessions-pips .home-pip-badge");
+      const [mail_, audit_, notes_] = await homeMarks(x);
+      assert.ok(Math.abs(mail_.numberRight - audit_.numberRight) < 0.5, `numbers share their edge (${theme}): ${JSON.stringify([mail_, audit_])}`);
+      assert.ok(Math.abs(notes_.dotMid - mail_.numberMid) < 0.5, `a dot alone sits at a number's centre (${theme}): ${JSON.stringify([notes_, mail_])}`);
+      assert.ok(Math.abs(mail_.numberLeft - mail_.dotRight - 6) < 0.5, `beside a number, the dot keeps 6px clear of it (${theme}): ${JSON.stringify(mail_)}`);
+      const contrast = await x.page.evaluate(() => {
+        const rgb = (c) => { const m = c.match(/[\d.]+/g).map(Number); return c.startsWith("color(srgb") ? m.slice(0, 3).map((v) => v * 255) : m.slice(0, 3); };
+        const lum = (c) => { const [r, g, b] = rgb(c).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+        const ground = (e) => { for (; e; e = e.parentElement) { const c = getComputedStyle(e).backgroundColor; if (!/rgba\(0, 0, 0, 0\)|transparent/.test(c)) return c; } return "rgb(255, 255, 255)"; };
+        const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+        const dot = document.querySelector("#sessions-pips .home-pip-item:last-child .home-pip-new-dot");
+        const root = document.getElementById("pips-host").shadowRoot;
+        return { home: ratio(getComputedStyle(dot).backgroundColor, ground(dot.closest(".home-pip-item"))) };
+      });
+      assert.ok(contrast.home >= 3, `the dot reads on its ground (${theme}): ${JSON.stringify(contrast)}`);
+      assert.notEqual(notes_.dotFill, mail_.filled, "a dot is not the number's purple fill");
+      // The Pips page: the same column, though its dot is a button over the row's end and its number the row's own.
+      await openPipsPage(x, "personal");
+      await x.page.waitForSelector("#pips-host >> [data-pip-read]");
+      const page_ = await x.page.evaluate(() => { const root = document.getElementById("pips-host").shadowRoot, b = (e) => e.getBoundingClientRect();
+        const item = (name) => [...root.querySelectorAll("[data-job]")].find((r) => r.querySelector("strong").textContent === name).closest(".pip-row-item");
+        const n = item("Mail watch").querySelector(".pip-row-marks-live .pip-row-count"), d = item("Garden notes").querySelector(".pip-new-dot"), md = item("Mail watch").querySelector(".pip-new-dot");
+        return { numberMid: (b(n).left + b(n).right) / 2, dotMid: (b(d).left + b(d).right) / 2, bothDotRight: b(md).right, numberLeft: b(n).left, target: b(d.parentElement).width }; });
+      assert.ok(Math.abs(page_.dotMid - page_.numberMid) < 0.5, `on the Pips page too (${theme}): ${JSON.stringify(page_)}`);
+      assert.equal(page_.target, 24, "a dot's target is 24px wide");
+      assert.ok(Math.abs(page_.numberLeft - page_.bothDotRight - 6) < 0.5, `beside a number, the dot keeps 6px clear of it on the Pips page too (${theme}): ${JSON.stringify(page_)}`);
+      await x.page.click("#btn-pips-back"); await x.page.waitForSelector("#sessions-pips .home-pips-dismiss-all", { state: "visible" });
+      await x.page.click(".home-pips-dismiss-all");
+      await x.page.waitForFunction(() => !document.querySelector("#sessions-pips .home-pip-read"));
+      assert.equal(await x.head(), "Pips · 3 need you", `what waits stays; what's new clears (${theme})`);
+      assert.deepEqual((await homeMarks(x)).map(({ name, number }) => [name, number]), [["Mail watch", "1"], ["Billing audit", "1"]]);
+      assert.deepEqual(x.errors, []);
+    } finally { await x.close(); }
   }
 });

@@ -6,13 +6,15 @@
 // the 3 most urgent rows, then one line to the Pips view's Needs attention. A row that is news (failed
 // runs, new findings) has a dismiss: its news is marked seen for good (mark_pip_news_seen, Pips API 48)
 // and the Pip comes back only when it does something new. A row waiting for you needs an answer: none.
-// Unread messages (reported 2026-11-03, "Pips · 116 unread"): Dismiss all marks them read, so the Pips page clears too. If
+// A number means something needs you; a dot means there's something new to read (approved 2026-11-07: "Personal 5" sat
+// beside "Needs attention 2"). The head says both, "Pips · 2 need you · 3 new", and a row's number is what waits on that Pip.
+// New messages (reported 2026-11-03, "Pips · 116 unread"): Dismiss all marks them read, so the Pips page clears too. If
 // a read is refused they stay hidden here all the same: the home keeps, per Pip, what was unread then
 // (each feed's count and newest id; the host keeps it over a reload, src/pipHomeDismiss.ts) and counts only what came
-// after. A Pip's count pill reads "Read" on hover or focus, and clears its unread chat and finished-run
-// news together (mark_pip_read, then mark_pip_news_seen). Pending approvals still need an answer.
+// after. A Pip's dot reads "Read" on hover or focus, and clears its new messages and finished-run
+// news together (mark_pip_read, then mark_pip_news_seen). What waits for you still needs an answer.
 import {pipDigest, pendingReviews} from './pipsModel.js';
-import {attentionPage, attentionNavigation} from './pipAttention.js';
+import {attentionPage, attentionNavigation, waitingOn, needWords} from './pipAttention.js';
 import {profile} from './pipProfile.js';
 
 const POLL_MS = 60000;
@@ -52,7 +54,7 @@ export function mountHomePips(options) {
  if (!root) return quiet;
  const pending = new Map(), setTimer = options.setInterval || setInterval, clearTimer = options.clearInterval || clearInterval;
  let generation = 0, epoch = 0, sequence = 0, ready = false, loading = false, timer = null, disposed = false;
- let pips = null, digest = null, attention = null, unread = [], unreadFailure = false, apiVersion = 0, cleanup = null, personal = null, partial = false, failure = '', refocus = null;
+ let pips = null, digest = null, attention = null, unread = [], unreadFailure = false, apiVersion = 0, cleanup = null, personal = null, current = null, partial = false, failure = '', refocus = null;
  // Dismissed here: pip id → the request number after which a digest already leaves its news out.
  const hidden = new Map();
  // Unread dismissed here (Dismiss all): pip id → its snapshot. Read with its pill: pip id → the request number after which
@@ -92,9 +94,7 @@ export function mountHomePips(options) {
  function needing() {
   const rows = [];
   for (const pip of pips) {
-   // A DGC that lists a Personal Pip's reviews has them in byPip already; a project Pip's are only in its own count.
-   const listed = attention?.byPip[pip.id] || 0;
-   pip.waiting = attention?.listsReviews ? Math.max(pip.reviews, listed) : pip.reviews + listed;
+   pip.waiting = waitingOn(attention, pip.id, pip.reviews);
    const fresh = pip.waiting ? null : news(pip.id);
    if (pip.waiting) rows.push({pip, rank: 0, line: `${pip.waiting} waiting for you`, dismissible: false});
    else if (fresh) rows.push({pip, rank: fresh.rank, line: fresh.line, dismissible: apiVersion >= 48});
@@ -204,28 +204,30 @@ export function mountHomePips(options) {
    if (extra && !visible.some(row => row.pip.id === item.pip_id)) visible.push(extra);
   }
   const unreadCount = fresh.reduce((n, item) => n + item.count, 0);
+  // Needs attention's number and this project's, as its two tabs say them. A DGC with no such list has no number here.
+  const need = attention ? attention.total + (attention.projects[current]?.total || 0) : 0;
   const head = node('div', 'home-pips-head'), actions = node('span', 'home-pips-actions');
   head.append(node('h2', '', 'Pips'));
   if (dismissible.length >= 2 || unreadCount) {
    const clear = node('button', 'home-pips-dismiss-all', 'Dismiss all'); clear.type = 'button';
    const unreadNote = 'Every message is marked read, here and in Pips.';
    clear.title = !unreadCount ? 'Dismiss every failed run and new finding here. What is waiting for you stays.'
-    : dismissible.length ? `Dismiss every failed run and new finding here, and the unread count. What is waiting for you stays. ${unreadNote}`
-    : `Clear the unread count. ${unreadNote}`;
-   if (unreadCount) clear.setAttribute('aria-label', dismissible.length ? 'Dismiss all failed runs, new findings and unread Pip messages from the home page'
-    : 'Dismiss all unread Pip messages from the home page');
+    : dismissible.length ? `Dismiss every failed run and new finding here, and what’s new. What is waiting for you stays. ${unreadNote}`
+    : `Clear what’s new. What is waiting for you stays. ${unreadNote}`;
+   if (unreadCount) clear.setAttribute('aria-label', dismissible.length ? 'Dismiss all failed runs, new findings and new Pip messages from the home page'
+    : 'Dismiss all new Pip messages from the home page');
    clear.onclick = () => { if (unreadCount) dismissAll(dismissible); else void dismiss(dismissible, 0); };
    actions.append(clear);
   }
   const all = node('button', 'home-pips-open', 'Open Pips'); all.type = 'button'; all.title = 'Open the Pips view';
   all.onclick = () => options.onOpen?.({overview: true});
   actions.append(all); head.append(actions);
-  if (unreadCount) head.querySelector('h2').textContent = `Pips · ${unreadCount} unread`;
+  if (need || unreadCount) head.querySelector('h2').textContent = `Pips · ${needWords(need, unreadCount)}`;
   root.append(head);
   if (displayed.length) {
    const list = node('ul', 'home-pips-list'); list.setAttribute('aria-label', 'Pips that need you');
    for (const [index, {pip, line, dismissible: canDismiss, unread: itemUnread}] of visible.entries()) {
-    const item = node('li', 'home-pip-item'), row = node('button', 'home-pip-row'); row.type = 'button';
+    const item = node('li', `home-pip-item${pip.waiting && itemUnread ? ' home-pip-both' : ''}`), row = node('button', 'home-pip-row'); row.type = 'button';
     const needsAttention = rows.some(r => r.pip.id === pip.id);
     item.dataset.pipId = pip.id;
     item.dataset.news = line;
@@ -235,20 +237,26 @@ export function mountHomePips(options) {
     copy.append(node('strong', '', pip.name), node('small', '', line));
     if (itemUnread && needsAttention) copy.append(node('small', 'home-pip-latest', itemUnread.latest));
     row.append(face(pip, pip.waiting ? 'waiting_approval' : 'success', 'row'), copy);
-    if (pip.waiting && !itemUnread) { const badge = node('span', 'home-pip-badge', String(pip.waiting)); badge.setAttribute('aria-hidden', 'true'); row.append(badge); }
     row.onclick = () => itemUnread && !needsAttention ? options.onOpen?.({pip: pip.id}) : open(pip);
     item.append(row);
     if (itemUnread) {
-     const read = node('button', 'home-pip-badge home-pip-read'); read.type = 'button';
-     read.setAttribute('aria-label', `Mark ${pip.name}'s ${plural(itemUnread.count, 'unread message')} as read`);
+     const read = node('button', 'home-pip-read'); read.type = 'button';
+     read.setAttribute('aria-label', `Mark ${pip.name}'s ${plural(itemUnread.count, 'new message')} as read`);
      read.title = 'Mark as read, without opening its chat';
-     read.append(node('span', 'home-pip-read-count', String(itemUnread.count)), node('span', 'home-pip-read-word', 'Read'));
+     const dot = node('span', 'home-pip-new-dot'); dot.setAttribute('aria-hidden', 'true');
+     read.append(dot, node('span', 'home-pip-read-word', 'Read'));
      read.onclick = () => { void markRead(itemUnread, index); };
      item.append(read);
     }
-    // An unread Pip already has a Read control in this row. It clears the old
-    // run news too, so a second × beside its count is redundant and shifts
-    // that count away from the common right edge.
+    // The number has its own place at the row's end, so a dot beside it never moves it. The row says it in words.
+    if (pip.waiting) {
+     const badge = node('span', 'home-pip-badge', String(pip.waiting)); badge.setAttribute('aria-hidden', 'true');
+     badge.onclick = () => row.click();
+     item.append(badge);
+    }
+    // A Pip with something new already has a Read control in this row. It clears the old
+    // run news too, so a second × beside its dot is redundant and shifts
+    // that dot away from the common right edge.
     if (canDismiss && !itemUnread) {
      const x = node('button', 'home-pip-dismiss'); x.type = 'button';
      x.setAttribute('aria-label', `Dismiss: ${pip.name} — ${line}`); x.title = `Dismiss: ${line}. It comes back if ${pip.name} has something new.`;
@@ -259,16 +267,22 @@ export function mountHomePips(options) {
     list.append(item);
    }
    root.append(list);
-   const more = rows.filter(row => !visible.some(item => item.pip.id === row.pip.id)).length;
-   if (more > 0) {
-    const rest = node('button', 'home-pips-more', `${more}${partial ? '+' : ''} more need you · Show all`); rest.type = 'button';
-    rest.title = 'Open Needs attention in the Pips view';
-    rest.onclick = openAll;
-    root.append(rest);
-   }
+  }
+  // What the rows above don't show. "Need you" is the head's number, so the two add up; a failed run or a finding is news.
+  const hidden = rows.filter(row => !visible.some(item => item.pip.id === row.pip.id));
+  const shownWaiting = visible.reduce((n, row) => n + row.pip.waiting, 0);
+  const moreNeed = attention ? Math.max(0, need - shownWaiting) : hidden.reduce((n, row) => n + row.pip.waiting, 0);
+  const moreNews = hidden.filter(row => !row.pip.waiting).length;
+  if (moreNeed || moreNews) {
+   const said = moreNeed ? `${moreNeed}${visible.length ? ' more' : ''} ${moreNeed === 1 ? 'needs' : 'need'} you`
+    : `${moreNews}${partial ? '+' : ''} more ${moreNews === 1 ? 'Pip' : 'Pips'} with news`;
+   const rest = node('button', 'home-pips-more', `${said} · Show all`); rest.type = 'button';
+   rest.title = 'Open Needs attention in the Pips view';
+   rest.onclick = openAll;
+   root.append(rest);
   }
   if (fresh.some(item => !visible.some(row => row.pip.id === item.pip_id))) {
-   const more = node('button', 'home-pips-more', `See all ${unreadCount} unread updates`); more.type = 'button';
+   const more = node('button', 'home-pips-more', `See all ${unreadCount} new ${unreadCount === 1 ? 'update' : 'updates'}`); more.type = 'button';
    more.onclick = () => options.onOpen?.({overview: true}); root.append(more);
   }
   if (unreadFailure) {
@@ -276,7 +290,7 @@ export function mountHomePips(options) {
    const warning = node('p', 'home-pips-error', 'Couldn’t check for new Pip messages.');
    warning.setAttribute('role', 'status'); warning.append(' ', retry); root.append(warning);
   }
-  if (!displayed.length && !unreadFailure) {
+  if (!displayed.length && !unreadFailure && !need) {
    const row = node('div', 'home-pips-quiet');
    const faces = node('span', 'home-pips-faces');
    for (const pip of pips.slice(0, 6)) {
@@ -331,7 +345,7 @@ export function mountHomePips(options) {
    }
    // Core first, then the rest as the Pips view orders them.
    pips = [...found.filter(p => p.type === 'core'), ...found.filter(p => p.type !== 'core')];
-   digest = value; attention = waiting;
+   digest = value; attention = waiting; current = spaces.current_workspace_id;
    personal = workspaces.find(w => w?.kind === 'personal' && typeof w.id === 'string')?.id || null;
    // A digest asked for after a dismiss was kept already leaves that news out, or it is new news.
    if (value) for (const [id, after] of hidden) if (asked > after) hidden.delete(id);

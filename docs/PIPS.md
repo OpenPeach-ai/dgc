@@ -447,7 +447,11 @@ and the run reviews the ref's commit at the moment it is queued.
 ## The daily digest
 
 Pips don't message you after every run. In the editor, **Pips** on the DGC home lists
-the Pips with news, one line each, and **Dismiss all** marks them read. A notification
+the Pips with news, one line each. A number means something needs you: it's what Needs
+attention counts, and the Personal and Project tabs, each Pip's row and the home say the
+same one. A dot means there's something new to read, and becomes **Read** when you hover or
+focus it. The home's heading says both, "Pips · 2 need you · 3 new", and **Dismiss all**
+marks what's new as read and leaves what's waiting. A notification
 says when something is waiting for you. Once a day, when there is something to say, the
 digest gathers new findings, failed runs, reviews waiting, and earlier findings that
 went away after their file changed.

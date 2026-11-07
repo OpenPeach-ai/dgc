@@ -19,6 +19,7 @@ KINDS = ("email", "event", "action", "app_action", "app_link", "plugin", "setup"
 # KINDS only) would refuse the whole list over a row it doesn't know.
 REVIEW_KINDS = ("handoff", "approval")
 MAX_ITEMS = 100
+MAX_PROJECTS = 100
 MAX_SCAN = 2000                     # rows read per kind; the counts stay exact past it
 TITLE, DETAIL = 160, 200
 APP_KINDS = {"gmail_send": "email", "calendar_create": "event", "connector_call": "action"}
@@ -190,7 +191,7 @@ def collect(registry, now, *, limit=MAX_ITEMS) -> dict:
     items = cards[:limit]
     return {"as_of": now, "total": len(found), "counts": counts,
             "by_pip": dict(sorted(by_pip.items(), key=lambda kv: -kv[1])[:500]), "items": items, "reviews": reviews,
-            "truncated": len(found) > len(items) + len(reviews), "in_projects": _in_projects(registry, now, personal)}
+            "truncated": len(found) > len(items) + len(reviews), **_in_projects(registry, now, personal)}
 
 
 def waiting_words(total, in_projects, place="") -> str:
@@ -204,18 +205,34 @@ def waiting_words(total, in_projects, place="") -> str:
     return f"{things}, and {reviews} in a project." if in_projects else f"{things}."
 
 
-def _in_projects(registry, now, personal) -> int:
-    """Reviews and setup cards waiting in project folders on this computer. 0 when they can't be read: this only adds a
-    sentence to the editor's notice."""
-    from .pip_overview import pending_reviews
+def _in_projects(registry, now, personal) -> dict:
+    """Reviews and setup cards waiting in project folders on this computer: `in_projects`, all of them, for the editor's
+    notice, and `projects`, {workspace: {total, by_pip}}, what a project's tab and rows say. Nothing when they can't be read:
+    Needs attention's own number stands either way."""
+    from .pip_overview import _REVIEW_UNION, _statement_reviews
+    found: dict = {}
+    def add(workspace, pip, count=1):
+        place = found.setdefault(workspace, {"total": 0, "by_pip": {}})
+        place["total"] += count
+        if pip:
+            place["by_pip"][pip] = place["by_pip"].get(pip, 0) + count
     try:
-        total = pending_reviews(registry, limit=1)["total_pending"]
         marks = ",".join("?" for _ in personal)
-        for table, column in (("pip_approvals", "workspace_id"), ("pip_handoffs", "workspace_id")):
-            total -= registry.db.execute(f"SELECT count(*) FROM {table} WHERE status='pending' AND expires_at>? "
-                                         f"AND {column} IN ({marks})", (now, *personal)).fetchone()[0]
-        total += registry.db.execute(f"SELECT count(*) FROM pip_setup_proposals WHERE status='pending' AND expires_at>? "
-                                     f"AND workspace_id NOT IN ({marks})", (now, *personal)).fetchone()[0]
-    except Exception:          # noqa: BLE001 - a count for one sentence
-        return 0
-    return max(0, total)
+        for row in registry.db.execute(
+                f"SELECT workspace_id,pip_id,count(*) FROM ({_REVIEW_UNION}) WHERE workspace_id NOT IN ({marks}) "
+                "AND workspace_id IN (SELECT workspace_id FROM bindings WHERE runner_id=?) GROUP BY workspace_id,pip_id",
+                (now, now, *personal, registry.runner_id)):
+            add(row[0], row[1], row[2])
+        for item in _statement_reviews(registry):
+            if item["workspace_id"] not in personal:
+                add(item["workspace_id"], None)
+        for row in registry.db.execute(
+                f"SELECT workspace_id,count(*) FROM pip_setup_proposals WHERE status='pending' AND expires_at>? "
+                f"AND workspace_id NOT IN ({marks}) GROUP BY workspace_id", (now, *personal)):
+            add(row[0], None, row[1])
+    except Exception:          # noqa: BLE001 - counts for a tab and one sentence
+        return {"in_projects": 0, "projects": {}}
+    busiest = sorted(found.items(), key=lambda kv: (-kv[1]["total"], kv[0]))[:MAX_PROJECTS]
+    return {"in_projects": sum(place["total"] for place in found.values()),
+            "projects": {workspace: {"total": place["total"], "by_pip": dict(sorted(place["by_pip"].items(), key=lambda kv: -kv[1])[:500])}
+                         for workspace, place in busiest}}
