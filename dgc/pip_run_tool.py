@@ -16,9 +16,35 @@ from .redaction import contains_secret, redact_value, secret_values
 from .workspace_registry import RegistryError, WorkspaceRegistry, canonical_directory
 
 READ_ONLY_ROLES = frozenset({"scout", "lens", "rook", "lock", "quill"})
-# A Personal Pip's run has no project tools or source (validate_manifest), whatever it looks like: Core is one too. Leaving
-# it out queued Core's run from the main chat and then failed it (final check, 2026-11-07).
-PERSONAL_ROLES = READ_ONLY_ROLES | {"patch", "pulse", "core"}
+PERSONAL_ROLES = READ_ONLY_ROLES | {"patch", "pulse"}
+# Core is never started from another chat (validate_manifest keeps refusing it). It used to be queued and then fail with
+# "does not match this read-only run", and the model blamed Core's setup (final check, 2026-11-07): it's refused up front,
+# before the Allow card, in words that say where to go.
+CORE_WORDS = "Core works in its own chat, so it can't be started from here. Open Core and ask it there."
+
+
+def _pip_type(pip_id) -> str:
+    """The Pip's look, read-only, or "" when it can't be read (the queue's own checks still decide)."""
+    if not isinstance(pip_id, str) or not re.fullmatch(r"pip_[0-9a-f]{32}", pip_id):
+        return ""
+    from .workspace_registry import state_directory
+    try:
+        path = state_directory() / "registry.sqlite3"
+        if not path.is_file():
+            return ""
+        db = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=0.5)
+        try:
+            row = db.execute("SELECT pip_type FROM pips WHERE id=?", (pip_id,)).fetchone()
+        finally:
+            db.close()
+    except (OSError, sqlite3.Error):
+        return ""
+    return str(row[0]) if row and row[0] else ""
+
+
+def refuse_core(pip_id) -> None:
+    if _pip_type(pip_id) == "core":
+        raise RegistryError("core_own_chat", CORE_WORDS)
 _REQUEST_KEYS = {"pip_id", "expected_version", "reason", "request_key"}
 _PIN_KEYS = _REQUEST_KEYS | {"schema_version", "session_id", "workspace_id"}
 _PERSONAL_PIN_KEYS = _PIN_KEYS | {"scope", "origin_workspace_id"}
@@ -120,6 +146,8 @@ def validate_enqueue(registry, pin, pip, actor, key):
         raise RegistryError("invalid_run", "The queue request does not match its owning chat and Pip.")
     if pip["current_version"] != pin["expected_version"]:
         raise RegistryError("conflict", "The Pip's job changed. Inspect its current definition before requesting another run.")
+    if pip["pip_type"] == "core":
+        raise RegistryError("core_own_chat", CORE_WORDS)
     live = pip["pip_type"] == "pulse" and pip.get("live_plan") is not None       # its approved read-only commands
     if pin.get("scope") != "personal" and pip["pip_type"] not in READ_ONLY_ROLES and not live:
         raise RegistryError("review_required", "This tool starts only read-only auditors, Quill drafts and live-data Pulses. "

@@ -27,8 +27,9 @@ def _pip_settings(args) -> None:
 
 
 def _pip_run(args) -> None:
-    from .pip_run_tool import request
+    from .pip_run_tool import refuse_core, request
     request(args)
+    refuse_core(args.get("pip_id"))
 
 
 def _pip_handoff(args) -> None:

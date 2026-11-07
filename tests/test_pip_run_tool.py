@@ -194,20 +194,22 @@ class PipRunToolTests(unittest.TestCase):
             with patch('dgc.agent.Agent', side_effect=AssertionError('No Agent')), self.assertRaises(RegistryError):
                 pips.execute_native(self.cfg, self.root, manifest, lambda event: None)
 
-    def test_a_personal_core_run_from_the_main_chat_is_a_valid_run(self):
-        """Work's "Run Core now?" was queued and then failed: Core's look wasn't on the personal list (final check,
-        2026-11-07). A personal run has no project tools or source whatever it looks like; a project run stays narrow."""
-        pin = {'scope': 'personal', 'workspace_id': 'ws_' + '1' * 32, 'pip_id': 'pip_' + '2' * 32, 'expected_version': 1}
-        manifest = {'main_chat_request': pin, 'trigger': 'main_chat', 'requested_by': 'main-chat:x', 'workspace_id': pin['workspace_id'],
-                    'pip_id': pin['pip_id'], 'job_version': 1, 'policy': 'read_only', 'job': {'pip_type': 'core'},
-                    'run_kind': 'personal_task', 'source_policy': {'mode': 'personal'}, 'tools': [], 'source_revision': None}
-        with patch.object(pip_run_tool, 'validate_pin'), patch.object(pip_run_tool, 'identities', return_value=('main-chat:x', 'k')):
-            pip_run_tool.validate_manifest(manifest)
-            with self.assertRaises(RegistryError, msg='a personal run still has no project tools'):
-                pip_run_tool.validate_manifest({**manifest, 'tools': ['read_file']})
-            with self.assertRaises(RegistryError, msg="a project run doesn't start Core"):
-                pip_run_tool.validate_manifest({**manifest, 'main_chat_request': {**pin, 'scope': 'project'}, 'run_kind': 'audit',
-                                                'source_policy': 'committed_only'})
+    def test_core_is_refused_up_front_in_plain_words_never_queued_then_failed(self):
+        """Work's "Run Core now?" was queued and then failed with "does not match this read-only run", and the model
+        blamed Core's setup (final check, 2026-11-07). Core stays out of main-chat runs, said before the Allow card."""
+        from dgc import tool_precheck
+        args = {'pip_id': 'pip_' + '2' * 32, 'expected_version': 1, 'reason': 'Say ready', 'request_key': 'k1', 'scope': 'personal'}
+        with patch.object(pip_run_tool, '_pip_type', return_value='core'):
+            with self.assertRaisesRegex(RegistryError, 'Core works in its own chat'):
+                tool_precheck._pip_run(args)
+        with patch.object(pip_run_tool, '_pip_type', return_value='quill'):
+            tool_precheck._pip_run(args)
+        pin = {'scope': 'personal', 'workspace_id': 'ws_' + '1' * 32, 'pip_id': args['pip_id'], 'expected_version': 1}
+        with patch.object(pip_run_tool, 'validate_pin'), patch.object(pip_run_tool, 'validate_origin'), \
+                patch.object(pip_run_tool, 'identities', return_value=('main-chat:x', 'k')):
+            with self.assertRaisesRegex(RegistryError, 'Core works in its own chat'):
+                pip_run_tool.validate_enqueue(None, pin, {'id': pin['pip_id'], 'workspace_id': pin['workspace_id'], 'current_version': 1,
+                                                         'pip_type': 'core'}, 'main-chat:x', 'k')
 
     def test_no_supervisor_refuses_before_queue_without_starting_a_runner(self):
         args = self.request()
