@@ -6,6 +6,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## 0.51.0 — 2026-11-06
 
+- ChatDGC and a Pip's chat tell the model which plugin calls each earlier reply made, so a follow-up on Claude Code no longer decides it made up a real read of your mail and tells you to disregard it.
 - A page downloads as Word and PDF, and as Excel when it holds a table, not only as a web page or a zip. Word holds what it says, PDF how it looks, Excel its tables. A dashboard's Download lists PDF first.
 - The thinking slider in Work and a Pip's chat no longer draws a box around itself when dragged. The keyboard keeps a ring, on the slider's handle or the Pip's face.
 - A main chat's Allow card for a Pip's own tools says what it does, to which Pip by name, and why. Pausing, resuming or attaching a Pip, running one now, changing its name, handing it work and saving a draft from its result each read "Run resume_pip" and the call's JSON. The terminal's approval says the same words.

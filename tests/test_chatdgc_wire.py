@@ -189,6 +189,31 @@ class ServiceTests(unittest.TestCase):
         self.service.dispatch({"type": "chatdgc_context_breakdown", "request_id": "b2", "conversation_id": "chat_" + "0" * 32})
         self.assertEqual(self.wire.wait(lambda f: f.get("request_id") == "b2")["type"], "chatdgc_error")
 
+    def test_an_earlier_reply_says_which_plugin_calls_it_made_so_a_model_never_disowns_a_real_read(self):
+        """A live run on Claude Code (2026-11-07): the next turn read only the reply's words, decided it had never called
+        Composio, and told the user to disregard a real list of their mail."""
+        chat = self.engine.open(self.new())
+        trace = {"v": 1, "ms": 9000, "steps": [
+            {"kind": "model", "label": "model.response", "start": 0, "end": 10},
+            {"kind": "tool", "label": "plugin_tools", "detail": "Composio", "start": 10, "end": 20},
+            {"kind": "tool", "label": "COMPOSIO_MULTI_EXECUTE_TOOL", "detail": "Composio", "start": 20, "end": 30},
+            {"kind": "tool", "label": "COMPOSIO_MULTI_EXECUTE_TOOL", "detail": "Composio", "start": 30, "end": 40},
+            {"kind": "tool", "label": "GMAIL_SEND_EMAIL", "detail": "Composio · Card", "start": 40, "end": 41},
+            {"kind": "tool", "label": "web_search", "detail": "weather in Pune", "start": 41, "end": 42}]}
+        chat["messages"] = [
+            {"id": "u1", "role": "user", "text": "List my last ten emails."},
+            {"id": "a1", "role": "assistant", "text": "1. Priya: Invoice", "plugins": [{"plugin": "composio", "name": "Composio"}], "trace": trace},
+            {"id": "u2", "role": "user", "text": "How many are unread?"},
+            {"id": "a2", "role": "assistant", "text": "Hello.", "trace": {"v": 1, "ms": 5, "steps": []}}]
+        history = self.engine._history(chat)
+        read = next(m["content"] for m in history if m["role"] == "assistant" and "Priya" in m["content"])
+        self.assertIn("[You called Composio (COMPOSIO_MULTI_EXECUTE_TOOL) here", read)
+        self.assertEqual(read.count("COMPOSIO_MULTI_EXECUTE_TOOL"), 1, "once, however many times")
+        for not_a_call in ("plugin_tools", "GMAIL_SEND_EMAIL", "weather in Pune"):
+            self.assertNotIn(not_a_call, read)
+        plain = next(m["content"] for m in history if m["role"] == "assistant" and "Hello." in m["content"])
+        self.assertNotIn("You called", plain)
+
     def test_a_draft_edited_in_place_is_the_replys_from_then_on_but_never_mid_turn(self):
         chat = self.new()
         email = "Subject: Moving out\n\nDear Mr Rao,\n\nI'm leaving flat 4B on 30 November."

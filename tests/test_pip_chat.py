@@ -205,6 +205,26 @@ class PipChatTests(unittest.TestCase):
         self.assertEqual(omitted, 0)
         self.assertIn('The invoice is number 272', history[0]['content'])
 
+    def test_an_earlier_reply_that_read_a_plugin_says_so_to_the_next_turn(self):
+        """ChatDGC on Claude Code took its own earlier read for something it had made up (2026-11-07). A Pip's chat goes
+        back to its model as words too, so the reply says what it called."""
+        self.setup_job()
+        sent = self.send(key='first')
+        self.store.claim_next()
+        self.store.finish(sent['run']['id'], result={'text': 'Your last email is from Priya.'})
+        pip_chat.keep_trace(self.registry.db, {'id': sent['run']['id'], 'pip_id': self.job['id']}, {"v": 1, "ms": 900, "steps": [
+            {"kind": "tool", "label": "plugin_tools", "start": 0, "end": 10},
+            {"kind": "tool", "label": "call_plugin", "start": 10, "end": 800},
+            {"kind": "model", "label": "model.response", "start": 800, "end": 900}]})
+        history, _ = pip_chat.snapshot(self.store, self.job['id'])
+        self.assertIn("Your last email is from Priya.", history[-1]['content'])
+        self.assertIn("[In this reply you called a plugin's tool", history[-1]['content'])
+        second = self.send(text='And the one before?', key='second')
+        self.store.claim_next()
+        self.store.finish(second['run']['id'], result={'text': 'I can look.'})
+        history, _ = pip_chat.snapshot(self.store, self.job['id'])
+        self.assertNotIn("you called", history[-1]['content'], "a reply that called nothing says nothing")
+
     def test_a_mid_turn_update_that_cannot_have_a_turn_is_reported_as_not_sent(self):
         # What a finished reply never read becomes the next turn (test_pip_missed_steer); this is when it can't.
         self.setup_job()
