@@ -915,6 +915,21 @@ def source_check_text(check) -> str:
     return "\n".join(lines)
 
 
+def _run_failure(error: dict) -> str:
+    """Why a run failed, for `dgc pips runs`: in the card's words first, then what it said, so a reader (or a model
+    reading the terminal) has the specifics without opening the registry: "Its model provider turned down the API key.
+    (model_failed: HTTP 401 from Responses API: ...)". The raw part stops at 120 characters; `dgc pips report` has it
+    whole."""
+    from .pip_report_delivery import _reason
+    words, detail = _reason(error)
+    code = str(error.get("code") or "")
+    raw = " ".join(str(detail or "").split())
+    raw = raw if len(raw) <= 120 else raw[:119] + "…"
+    if raw and raw not in words:
+        return f"{words} ({code}: {raw})" if code else f"{words} ({raw})"
+    return f"{words} ({code})" if code else words
+
+
 def _format(value):
     if "check" in value and isinstance(value["check"], dict) and "fits" in value["check"]:
         return source_check_text(value["check"])
@@ -1430,10 +1445,8 @@ def _format(value):
             lines.append("Queued for the foreground supervisor. Read progress with dgc pips report " + run["id"])
         return "\n".join(lines)
     if "runs" in value:
-        from .pip_report_delivery import _reason
         return "\n".join(f'{row["id"]}  {row["status"]}  {row["created_at"]}'
-                         + (f'  {_reason(row["error"])[0]} ({row["error"].get("code")})'
-                            if isinstance(row.get("error"), dict) else '')
+                         + (f'  {_run_failure(row["error"])}' if isinstance(row.get("error"), dict) else '')
                          for row in value["runs"]) or "No runs yet. Use dgc pips run PIP_ID while the supervisor is running."
     if "context" in value:
         context = value["context"]
