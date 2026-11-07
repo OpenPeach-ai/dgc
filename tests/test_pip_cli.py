@@ -581,9 +581,18 @@ class RunErrorWordsTests(unittest.TestCase):
              "error": {"code": "worker_failed", "message": "worker exited with status 1"}},
             {"id": "run_z", "status": "succeeded", "created_at": "2026-11-07T16:20:00Z", "error": None}]})
         self.assertEqual(text.splitlines(), [
-            "run_x  failed  2026-11-07T16:18:00Z  Its model provider turned down the API key. (model_failed)",
-            "run_y  failed  2026-11-07T16:19:00Z  Its worker stopped unexpectedly. (worker_failed)",
+            'run_x  failed  2026-11-07T16:18:00Z  Its model provider turned down the API key. (model_failed: HTTP 401 from '
+            'Responses API: {"error": {"message": "Incorrect API key"}})',
+            "run_y  failed  2026-11-07T16:19:00Z  Its worker stopped unexpectedly. (worker_failed: worker exited with status 1)",
             "run_z  succeeded  2026-11-07T16:20:00Z"])
+
+    def test_a_long_raw_answer_stops_at_120_characters_in_the_list(self):
+        from dgc import pip_cli
+        error = {"code": "model_failed", "message": "HTTP 401 from Responses API: " + "x" * 400}
+        line = pip_cli._format({"runs": [{"id": "run_x", "status": "failed", "created_at": "t", "error": error}]})
+        self.assertIn("Its model provider turned down the API key. (model_failed: HTTP 401 from Responses API: xxx", line)
+        self.assertTrue(line.endswith("…)"))
+        self.assertLess(len(line), 260)
 
     def test_a_report_says_why_in_words_then_what_the_provider_said(self):
         from dgc import pip_cli
