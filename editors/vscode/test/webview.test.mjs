@@ -4779,6 +4779,28 @@ test("the Work model picker lists only configured routes supplied by the backend
   assert.deepEqual(errors, []);
 });
 
+test("Work's thinking slider: an arrow key steps it and the menu stays open; a drag's release closes it", () => {
+  const { doc, send, posted, errors } = makeDom();
+  doc.getElementById("btn-model").click();
+  send({ type: "models", ids: ["deepseek-v4.1-flash:cloud"], current: "deepseek-v4.1-flash:cloud",
+    routes: [{ key: "native", label: "Ollama" }] });
+  const menu = doc.getElementById("modelmenu"), slider = menu.querySelector(".effort-slider"), W = doc.defaultView;
+  const open = () => !menu.hidden;
+  const was = open();
+  assert.equal(was, true, "the menu is open");
+  slider.dispatchEvent(new W.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+  slider.value = String(Number(slider.value) + 1);
+  slider.dispatchEvent(new W.Event("input", { bubbles: true }));
+  slider.dispatchEvent(new W.Event("change", { bubbles: true }));
+  assert.ok(posted.some((m) => m.type === "setReasoningProfile"), "the step is chosen");
+  assert.equal(open(), was, "and the menu stays open for the next one");
+  slider.dispatchEvent(new W.Event("pointerdown", { bubbles: true }));
+  slider.value = "0";
+  slider.dispatchEvent(new W.Event("change", { bubbles: true }));
+  assert.equal(open(), false, "a release after a drag closes it");
+  assert.deepEqual(errors, []);
+});
+
 test("a Codex CLI default missing from its model list is labelled and cannot be reselected", () => {
   const { doc, send, posted, errors } = makeDom();
   doc.getElementById("btn-model").click();

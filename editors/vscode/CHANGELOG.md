@@ -2,6 +2,7 @@
 
 ## 0.35.0 — 2026-11-06
 
+- A Pip's thinking slider follows the pointer while you drag it, and Work's slider takes arrow keys without closing its menu. A Connect card's line stays under the reply that asked.
 - Choosing another default in Settings keeps the model you were running on in the list: it's saved as a provider first, instead of vanishing from Settings.
 - A page downloads as Word and PDF, and as Excel when it holds a table, not only as a web page or a zip. Word holds what it says, PDF how it looks, Excel its tables. A dashboard's Download lists PDF first.
 - The thinking slider in Work and a Pip's chat no longer draws a box around itself when dragged. The keyboard keeps a ring, on the slider's handle or the Pip's face.

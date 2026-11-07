@@ -6,6 +6,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## 0.51.0 — 2026-11-06
 
+- Work's file tool says a page about something outside the project, such as a summary of your mail, is made as a page, not a file, and the Connect card's line now stays under the reply that asked. In a Pip, the thinking slider follows the pointer while you drag it, and in Work an arrow key steps it without closing the menu.
 - Choosing another default in Settings keeps the model you were running on in the list: it's saved as a provider first, instead of vanishing from Settings.
 - ChatDGC and a Pip's chat tell the model which plugin calls each earlier reply made, so a follow-up on Claude Code no longer decides it made up a real read of your mail and tells you to disregard it.
 - A page downloads as Word and PDF, and as Excel when it holds a table, not only as a web page or a zip. Word holds what it says, PDF how it looks, Excel its tables. A dashboard's Download lists PDF first.
