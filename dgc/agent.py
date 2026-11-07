@@ -7754,6 +7754,7 @@ class Agent(GoalLifecycle):
         """
         self._last_turn_error = self._safe_text(message or "the turn failed")
         payload = self._settle_failed_runs(cause)
+        self._note_turn_failure(self._last_turn_error, payload)
         if payload is not None and self._ui_error_takes_cause():
             try:
                 self.ui.error(self._last_turn_error, cause=payload)
@@ -7762,6 +7763,30 @@ class Agent(GoalLifecycle):
                 pass
         self.ui.error(self._last_turn_error)
         return False
+
+    def _note_turn_failure(self, message: str, cause=None) -> None:
+        """Says on the session's last message that this turn failed, and why (``_dgc_turn_failed``, a private key no
+        transport sends and an older DGC doesn't read). A reopened chat replays it (Backend._history). With nothing
+        saved, a turn with no answer could only read "Stopped", however it ended."""
+        messages = getattr(self, "messages", None)
+        last = messages[-1] if messages else None
+        self._last_turn_full = ""
+        whole = str((cause or {}).get("full") or "") if isinstance(cause, dict) else ""
+        if whole:
+            # The long form of the same sentence, with its hint: what a Pip's Details shows.
+            split = str(message).find("\n  → ")
+            self._last_turn_full = self._safe_text(whole + (str(message)[split:] if split >= 0 else ""))
+        if not isinstance(last, dict) or last.get("role") == "system":
+            return
+        note: dict = {"message": str(message)[:4000]}
+        if isinstance(cause, dict) and cause.get("kind") and cause.get("summary"):
+            note["cause"] = {key: cause[key] for key in ("kind", "summary", "endpoint", "model", "api_mode", "detail", "hint",
+                                                         "http_status", "attempts", "full") if cause.get(key) not in (None, "")}
+        last["_dgc_turn_failed"] = self._safe_value(note)
+        try:
+            self._persist()
+        except Exception:                # noqa: BLE001 -- a note about a failure never makes a second one
+            pass
 
     # ---- reconnecting: retry runs ---------------------------------------------------------------
     # A run is one sequence of consecutive failed attempts at one layer ("request": retries inside
@@ -13637,7 +13662,7 @@ class Agent(GoalLifecycle):
             return self.client.estimate_input_tokens(messages, tools)
         chars = sum(len(json.dumps({k: v for k, v in m.items()
                                     if k not in ("_dgc_reasoning", "_dgc_think_splice",
-                                                 "_dgc_stream_recoveries")}
+                                                 "_dgc_stream_recoveries", "_dgc_turn_failed")}
                                    if isinstance(m, dict) else m, default=str))
                     for m in messages)
         if tools:

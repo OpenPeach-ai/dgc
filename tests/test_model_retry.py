@@ -1422,9 +1422,14 @@ class AgentRunReviewTests(RetryTestCase):
         last_text = max(n for n, t in enumerate(types_) if t == "text_delta")
         self.assertGreater(types_.index("model_retry", last_text), last_text, "the give-up follows the partial")
         end = [i for i in items if i.get("type") == "turn_end"]
-        self.assertEqual((end[-1]["reason"], end[-1]["final_message_id"]), ("cancelled", None))
+        # It failed, so it replays as a failure (a reopened chat read "Stopped"): the give-up's row, then the failure's.
+        self.assertEqual((end[-1]["reason"], end[-1]["final_message_id"]), ("error", None))
         self.assertEqual(types_[-1], "turn_end")
         self.assertEqual(types_[-2], "model_retry")
+        failure = [i for i in items if i.get("role") == "turn_failure"]
+        self.assertEqual(len(failure), 1)
+        self.assertEqual(failure[0]["message"], message)
+        self.assertGreater(items.index(failure[0]), items.index(retries[-1]), "the give-up comes first, as it did live")
 
         tui = object.__new__(TUI)
         tui._width = 100

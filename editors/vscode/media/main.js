@@ -11220,6 +11220,11 @@ function permissionChoices(ev) {
       return;
     }
     if (it.role === "goal_edit") { sysLine(String(it.text || "")); return; }
+    // A turn that failed, reopened: the row it drew (Agent._note_turn_failure). `error` itself isn't replayed: its side effects aren't a reload's.
+    if (it.role === "turn_failure") {
+      if (!modelErrorRow({ message: it.message, cause: it.cause })) sysLine(window.DgcMarkdown?.editorAdvice?.(String(it.message || "")) ?? String(it.message || ""), true);
+      return;
+    }
     if (it.role === "pip_report") { renderPipReport(it.report); return; }
     if (it.role === "steering") {
       ensureTurn();
@@ -15903,7 +15908,7 @@ function permissionChoices(ev) {
     const cause = ev.cause;
     if (!cause || typeof cause !== "object" || Array.isArray(cause)) return false;
     if (typeof cause.kind !== "string" || typeof cause.summary !== "string" || !cause.summary.trim()) return false;
-    for (const key of ["endpoint", "model", "api_mode", "retry_id", "detail", "hint"]) {
+    for (const key of ["endpoint", "model", "api_mode", "retry_id", "detail", "hint", "full"]) {
       if (cause[key] != null && typeof cause[key] !== "string") return false;
     }
     for (const key of ["http_status", "attempts"]) {
@@ -15913,7 +15918,9 @@ function permissionChoices(ev) {
     const summary = cause.summary.slice(0, 200), model = retryText(cause.model, 200);
     // Its own advice in an editor's words: Settings → Models, never a terminal flag (markdown.ts editorAdvice).
     const advice = (text) => window.DgcMarkdown.editorAdvice?.(text) ?? text;
-    const message = advice(String(ev.message || ""));
+    // All of the provider's answer when its sentence stopped short (cause.full), with the hint the sentence carries.
+    const said = String(ev.message || ""), whole = retryText(cause.full, 2400), hintAt = said.indexOf("\n  → ");
+    const message = advice(whole ? whole + (hintAt >= 0 ? said.slice(hintAt) : "") : said);
     // A person's words, and the way to what fixes it. The provider's own answer (its status, its address, its JSON) and
     // the hint are one click away, under the row.
     const words = window.DgcMarkdown.modelWords(kind, model);
@@ -15939,7 +15946,7 @@ function permissionChoices(ev) {
       ["HTTP status", retryInt(cause.http_status, 100, 599) ? String(cause.http_status) : ""],
       ["Attempts", retryInt(cause.attempts, 1, 1000000) ? String(cause.attempts) : ""],
       // The message below already prints the transport's words: never show them twice.
-      ["Details", message.includes(advice(retryText(cause.detail, 4000)).replace(/^\w+: /, "")) ? "" : advice(retryText(cause.detail, 4000))]];
+      ["Details", whole || message.includes(advice(retryText(cause.detail, 4000)).replace(/^\w+: /, "")) ? "" : advice(retryText(cause.detail, 4000))]];
     retryFacts(row.querySelector(".model-retry-facts"), facts);
     row.querySelector(".model-error-message").textContent = message;
     const toggle = row.querySelector(".model-error-toggle"), detail = row.querySelector(".model-error-detail");

@@ -440,3 +440,49 @@ test("the error row shows the transport's words once: in the message, or as Deta
     assert.ok(facts.includes("Details"), JSON.stringify(facts));
   }
 });
+
+test("a failed chat reopened reads as the failure it was, not Stopped", () => {
+  const { event, doc, announcer } = setup();
+  const message = `HTTP 401 from http://${HOST}/v1/chat/completions: no such key\n  → the endpoint rejected the key — set it with /connect, \`dgc --api-key-env NAME\` or DGC_API_KEY`;
+  event({ type: "history", items: [
+    { type: "turn_start", turn_id: "h1", prompt: "hello", kind: "prompt" },
+    { role: "turn_failure", message, cause: { kind: "auth", summary: `HTTP 401 from ${HOST}`, model: "m:1", http_status: 401, attempts: 1 } },
+    { type: "turn_end", turn_id: "h1", reason: "error", final_message_id: null },
+  ] });
+  const row = doc.querySelector(".model-error");
+  assert.ok(row, "the row it drew when it failed");
+  assert.equal(row.querySelector(".model-error-headline").textContent, "The model provider turned down the API key.");
+  assert.match(row.querySelector("pre.model-error-message").textContent, /check it in Settings → Models/);
+  assert.doesNotMatch(doc.body.textContent, /Stopped/);
+  assert.match(doc.body.textContent, /Failed/);
+  assert.equal(announcer(), "", "replay speaks nothing");
+});
+
+test("a saved failure with no cause is a plain line, in an editor's words; an old session has none", () => {
+  const first = setup();
+  first.event({ type: "history", items: [
+    { type: "turn_start", turn_id: "h1", prompt: "hello", kind: "prompt" },
+    { role: "turn_failure", message: "cannot connect (/connect <url> to change it)" },
+    { type: "turn_end", turn_id: "h1", reason: "error", final_message_id: null },
+  ] });
+  assert.match(first.doc.querySelector(".sys.err").textContent, /^cannot connect \(change it in Settings → Models\)$/);
+  const old = setup();
+  old.event({ type: "history", items: [
+    { type: "turn_start", turn_id: "h1", prompt: "hello", kind: "prompt" },
+    { type: "turn_end", turn_id: "h1", reason: "cancelled", final_message_id: null },
+  ] });
+  assert.equal(old.doc.querySelector(".model-error"), null);
+  assert.match(old.doc.body.textContent, /Stopped/, "the file says no more than that");
+});
+
+test("Details has all of a provider's answer when its sentence stopped short, and a plain error row speaks an editor's words", () => {
+  const { event, doc } = setup();
+  const short = "HTTP 401 from x: " + "a".repeat(400), whole = short + "b".repeat(1500) + " End of the refusal.";
+  event({ type: "turn_start", turn_id: "t1", prompt: "Go" });
+  event({ type: "error", message: `${short}\n  → the hint`, cause: { kind: "auth", summary: "HTTP 401 from x", detail: `HTTP 401 Unauthorized · ${"a".repeat(400)}`, full: whole } });
+  const pre = doc.querySelector("pre.model-error-message");
+  assert.equal(pre.textContent, `${whole}\n  → the hint`, "all of it, with its hint");
+  assert.doesNotMatch(doc.querySelector(".model-retry-facts").textContent, /Unauthorized/, "not twice");
+  event({ type: "error", message: "cannot connect (/connect <url> to change it)" });
+  assert.equal([...doc.querySelectorAll(".sys.err")].at(-1).textContent, "cannot connect (change it in Settings → Models)");
+});

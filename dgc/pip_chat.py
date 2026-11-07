@@ -968,11 +968,12 @@ def failure_detail(row) -> str:
     if not isinstance(error, dict) or not isinstance(error.get("message"), str):
         return ""
     text = error["message"].strip()
-    if len(text) <= 300 or failure_text(row) != text[:300]:
+    whole = error.get("full_message").strip() if isinstance(error.get("full_message"), str) else ""
+    if (len(text) <= 300 and not whole) or failure_text(row) != text[:300]:
         return ""
     from .model_errors import scrub_urls
     from .redaction import redact_text, secret_values
-    return redact_text(scrub_urls(text), secret_values())[:FAILURE_DETAIL_CHARS]
+    return redact_text(scrub_urls(whole or text), secret_values())[:FAILURE_DETAIL_CHARS]
 
 
 def _bounded_rows(db, pip_id, before=2**63 - 1, limit=50, *, successful=False):

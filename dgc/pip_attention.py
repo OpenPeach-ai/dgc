@@ -193,6 +193,17 @@ def collect(registry, now, *, limit=MAX_ITEMS) -> dict:
             "truncated": len(found) > len(items) + len(reviews), "in_projects": _in_projects(registry, now, personal)}
 
 
+def waiting_words(total, in_projects, place="") -> str:
+    """The number in the words the editor's notice uses: what Needs attention lists, and a project's reviews named apart.
+    "" when nothing waits. `place`: where it waits, " in Pips"."""
+    total, in_projects = max(0, int(total or 0)), max(0, int(in_projects or 0))
+    reviews = f"{in_projects} review{'' if in_projects == 1 else 's'}"
+    if not total:
+        return f"{reviews} waiting for you in a project." if in_projects else ""
+    things = f"{total} {'thing is' if total == 1 else 'things are'} waiting for you{place}"
+    return f"{things}, and {reviews} in a project." if in_projects else f"{things}."
+
+
 def _in_projects(registry, now, personal) -> int:
     """Reviews and setup cards waiting in project folders on this computer. 0 when they can't be read: this only adds a
     sentence to the editor's notice."""

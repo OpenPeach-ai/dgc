@@ -7,6 +7,15 @@ export interface PipsAttention { text: string | null; state: PipsAttentionState 
 
 const MAX_REMEMBERED = 200;
 
+/** The number in words: what Needs attention lists, and a project's reviews named apart. "" when nothing waits. dgc/pip_attention.py
+ *  waiting_words says the same for the desktop notice. */
+export function waitingWords(total: number, inProjects: number, place = ''): string {
+  const reviews = `${inProjects} review${inProjects === 1 ? '' : 's'}`;
+  if (!total) return inProjects ? `${reviews} waiting for you in a project.` : '';
+  const things = `${total} ${total === 1 ? 'thing is' : 'things are'} waiting for you${place}`;
+  return inProjects ? `${things}, and ${reviews} in a project.` : `${things}.`;
+}
+
 /** `waiting`: Needs attention's total (list_pip_attention, API 44), the one number the Pips home and its rows say, so the
  *  notice says it too. `elsewhere`: the reviews waiting in project folders, which that list doesn't show: named apart, in
  *  their own words, never added in. The digest's counts differ (it counts all folders' reviews and only some cards), so
@@ -38,10 +47,7 @@ export function pipsAttention(digest: any, previous: PipsAttentionState | undefi
   let text: string | null = null;
   if (fresh.length && headline) text = `DGC Pips: ${headline}`;
   else if (reviews > before.reviews) {
-    const inProject = `${inProjects} review${inProjects === 1 ? '' : 's'}`;
-    text = !listed ? `DGC Pips: ${reviews} review${reviews === 1 ? '' : 's'} waiting for you.`
-      : !waiting ? `DGC Pips: ${inProject} waiting for you in a project.`
-      : `DGC Pips: ${waiting} ${waiting === 1 ? 'thing is' : 'things are'} waiting for you${inProjects ? `, and ${inProject} in a project` : ''}.`;
+    text = !listed ? `DGC Pips: ${reviews} review${reviews === 1 ? '' : 's'} waiting for you.` : `DGC Pips: ${waitingWords(waiting!, inProjects)}`;
   }
   if (!text && state.reviews === before.reviews && !fresh.length) return null;
   return { text, state };

@@ -62,6 +62,9 @@ class FailureCause:
     endpoint: str = ""
     model: str = ""
     api_mode: str = ""
+    # All of the provider's answer in the failure's sentence, when the sentence itself stops short (llm._with_cause). Only
+    # for what an editor's Details draws: the sentence, the summary and `detail` stay as every other reader has them.
+    full: str = ""
 
     def with_context(self, *, endpoint: str = "", model: str = "", api_mode: str = "",
                      hint: str | None = None) -> "FailureCause":
@@ -73,7 +76,7 @@ class FailureCause:
         """The ``error.cause`` shape (optional keys left out when empty)."""
         out: dict = {"kind": self.kind if self.kind in MODEL_FAILURE_KINDS else "other",
                      "summary": self.summary}
-        for key in ("endpoint", "model", "api_mode", "detail", "hint"):
+        for key in ("endpoint", "model", "api_mode", "detail", "hint", "full"):
             value = getattr(self, key)
             if value:
                 out[key] = value

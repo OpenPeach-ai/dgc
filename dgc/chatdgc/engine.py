@@ -3430,7 +3430,7 @@ _FAILURE_CHARS = 2000
 def _failure_text(exc) -> str:
     from ..model_errors import scrub_urls
     from ..redaction import redact_text, secret_values
-    text = redact_text(scrub_urls(" ".join(str(exc).split())), secret_values())[:_FAILURE_CHARS]
+    text = redact_text(scrub_urls(" ".join(str(getattr(exc, "full_text", "") or exc).split())), secret_values())[:_FAILURE_CHARS]
     return f"The model didn't answer: {text}" if text else "The model didn't answer. Try again."
 
 

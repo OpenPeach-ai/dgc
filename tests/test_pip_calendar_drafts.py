@@ -127,6 +127,10 @@ class MainCalendarDraftTests(unittest.TestCase):
         args={'scope':'personal','source_run_id':self.run['id'],'event':EVENT,'request_key':'once',**changes}
         with patch.object(tool,'WorkspaceRegistry',lambda:WorkspaceRegistry(self.registry.directory,clock=self.registry.clock)):
             return json.loads(tool.propose(args,ctx or self.context(),kind='calendar'))
+    def test_a_models_line_endings_do_not_ask_twice(self):
+        value=self.propose(event={**EVENT,'description':'Line one\r\nLine two\r\n'})
+        saved=json.loads(self.store.db.execute('SELECT payload FROM pip_calendar_drafts WHERE id=?',(value['draft_id'],)).fetchone()[0])['event']
+        self.assertEqual(saved['description'],'Line one\nLine two')
     def test_main_saves_inert_draft_and_replays_same_identity(self):
         value=self.propose();self.assertFalse(value['create_authorized']);self.assertFalse(value['account_selected']);self.assertEqual(value,self.propose())
         self.assertEqual(self.store.db.execute('SELECT count(*) FROM pip_app_actions').fetchone()[0],0)

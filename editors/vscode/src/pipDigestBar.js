@@ -4,6 +4,7 @@
 // and marks the digest seen only when the user dismisses it. Finding titles are model text: they
 // are set as text, never as markup, and never reach the chat's model.
 import {pipDigest} from './pipsModel.js';
+import {waitingWords} from './pipsAttention';
 
 const POLL_MS = 60000;
 
@@ -16,7 +17,7 @@ export function mountDigestBar(options) {
   dismissButton=doc.getElementById('pips-digest-dismiss');
  if(!main||!text||!panel||!openButton||!dismissButton)return quiet;
  const pending=new Map(), setTimer=options.setInterval||setInterval, clearTimer=options.clearInterval||clearInterval;
- let generation=0,epoch=0,sequence=0,connected=false,ready=false,digest=null,expanded=false,busy=false,loading=false,timer=null,disposed=false;
+ let generation=0,epoch=0,sequence=0,connected=false,ready=false,digest=null,expanded=false,busy=false,loading=false,timer=null,disposed=false,attention=null,apiVersion=0;
  const node=(tag,cls,value)=>{const e=doc.createElement(tag);if(cls)e.className=cls;if(value!==undefined)e.textContent=value;return e;};
  const request=(type,fields={})=>new Promise((resolve,reject)=>{
   const id=`pip-digest-${epoch}-${++sequence}`;
@@ -52,8 +53,10 @@ export function mountDigestBar(options) {
     panel.append(list);
    }
   }
+  // The number the Pips home says, with a project's reviews named apart; a DGC from before has only its own count of reviews.
   const waiting=digest.pending_reviews+digest.pending_setups+(digest.pending_actions||0);
-  if(waiting)panel.append(node('p','pips-digest-note',`${waiting} review${waiting===1?'':'s'} waiting for you in Pips.`));
+  const said=attention?waitingWords(attention.total,attention.inProjects,' in Pips'):waiting?`${waiting} review${waiting===1?'':'s'} waiting for you in Pips.`:'';
+  if(said)panel.append(node('p','pips-digest-note',said));
   if(digest.omitted_pips)panel.append(node('p','pips-digest-note',`And ${digest.omitted_pips} more Pips. Open Pips to see them all.`));
  }
  function paint(){
@@ -77,6 +80,10 @@ export function mountDigestBar(options) {
   try{const value=pipDigest((await request('get_pip_digest')).digest);if(token===epoch)digest=value;}
   catch{if(token===epoch)digest=null;}            // an invalid or failed digest is hidden, never half-shown
   finally{if(token===epoch){loading=false;paint();}}
+  if(token!==epoch||!digest?.due||apiVersion<44)return;
+  try{const page=await request('list_pip_attention',{limit:1});
+   if(token===epoch&&Number.isSafeInteger(page?.total)){attention={total:page.total,inProjects:Number.isSafeInteger(page.in_projects)?page.in_projects:0};paint();}}
+  catch{/* its own count says it until the next look */}
  }
  async function dismiss(){
   if(!digest||busy||!connected)return;
@@ -93,7 +100,7 @@ export function mountDigestBar(options) {
   if(message.type==='pipsConnection'){
    if(generation!==message.generation){epoch++;loading=false;busy=false;for(const p of pending.values()){clearTimeout(p.timer);p.reject(Error('The chat connection changed.'));}pending.clear();}
    generation=message.generation;connected=message.connected===true;
-   ready=connected&&message.supported!==false&&message.enabled===true&&(message.apiVersion||0)>=41;
+   ready=connected&&message.supported!==false&&message.enabled===true&&(message.apiVersion||0)>=41;apiVersion=message.apiVersion||0;
    if(ready){if(timer===null)timer=setTimer(()=>{if(!doc.hidden)void load();},POLL_MS);void load();}
    else{digest=null;paint();}
    return;

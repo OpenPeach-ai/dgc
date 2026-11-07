@@ -152,8 +152,13 @@ class Notifier:
             elif new_asking:
                 body = new_asking[0][1] + (f" And {len(new_asking) - 1} more." if len(new_asking) > 1 else "")
             else:
+                # The number the Pips home says, with a project's reviews named apart (pip_attention), not this list's length.
+                from . import pip_attention
+                from .pip_schedules import timestamp as _timestamp
+                waiting = pip_attention.collect(registry, _timestamp(registry.clock()), limit=1)
+                said = pip_attention.waiting_words(waiting["total"], waiting["in_projects"])
                 count = len(reviews)
-                body = f"{count} review{'' if count == 1 else 's'} waiting for you. Open the Pips view to decide."
+                body = (said or f"{count} review{'' if count == 1 else 's'} waiting for you.") + " Open the Pips view to decide."
             shown = self.send(TITLE, body)
         # Remembered even when the system could not show it: it is not retried every minute.
         seen["alerts"] = (seen["alerts"] + new_alerts)[-MAX_SEEN:]

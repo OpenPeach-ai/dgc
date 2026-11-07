@@ -374,12 +374,16 @@ def _build(registry, config=None) -> dict:
                                                    -sum(p["runs"].values()), p["name"]))
     failed = sum(p["runs"]["failed"] for p in ordered)
     alert = any(p["alert"] for p in ordered) or bool(new_held) or bool(new_blocked)
-    anything = bool(ordered) or reviews or setups or actions or bool(blocked)
+    # The number it says is the one Needs attention says, with a project's reviews named apart. The counts below are for what
+    # reads them as reviews, drafts and setups; they mean something else, and a home that said 1 sat under "2 reviews waiting".
+    from .pip_attention import collect
+    waiting = collect(registry, until_s, limit=1)
+    anything = bool(ordered) or reviews or setups or actions or waiting["total"] or waiting["in_projects"] or bool(blocked)
     today = local_day(now)
     daily = anything and (state is None or state["seen_day"] != today)
     return {"schema_version": 1, "since": since_s, "until": until_s, "first": state is None,
             "due": bool(alert or daily), "reason": "alert" if alert else "daily" if daily else None,
-            "headline": _headline(ordered, failed, reviews + setups + actions, new_held, blocked),
+            "headline": _headline(ordered, failed, waiting["total"], waiting["in_projects"], new_held, blocked),
             "pips": ordered[:MAX_PIPS], "omitted_pips": max(0, len(ordered) - MAX_PIPS),
             "failed_runs": failed, "pending_reviews": reviews, "pending_setups": setups, "pending_actions": actions,
             "truncated": truncated}
@@ -389,7 +393,7 @@ def _plural(count, word):
     return f"{count} {word}{'' if count == 1 else 's'}"
 
 
-def _headline(pips, failed, reviews, held=(), blocked=()) -> str:
+def _headline(pips, failed, waiting, in_projects=0, held=(), blocked=()) -> str:
     """One line for a status bar or a terminal tip: what most needs attention first."""
     parts = []
     if blocked:
@@ -406,8 +410,10 @@ def _headline(pips, failed, reviews, held=(), blocked=()) -> str:
         parts.append(f"{_plural(total, 'new finding')} from {where} (worst: {worst})")
     if failed:
         parts.append(_plural(failed, "failed run"))
-    if reviews:
-        parts.append(f"{_plural(reviews, 'review')} waiting")
+    if waiting:
+        parts.append(f"{_plural(waiting, 'thing')} waiting")
+    if in_projects:
+        parts.append(f"{_plural(in_projects, 'review')} in a project")
     gone = sum(p["gone_after_change"] for p in pips)
     if gone:
         parts.append(f"{gone} earlier finding{'' if gone == 1 else 's'} gone after a change")

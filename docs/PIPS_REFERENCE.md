@@ -1209,7 +1209,8 @@ even with Pips off and creates none for a profile that never used them.
 
 **Desktop notifications** (API 41). The runner checks once a minute (`pip_desktop.Notifier`)
 for alert findings in the digest and for pending reviews and setup cards, and shows one
-notification for what is new: the digest headline, or "N reviews waiting". What it has
+notification for what is new: the digest headline, or the number Needs attention says, with a
+project's reviews named apart ("2 things are waiting for you, and 1 review in a project"). What it has
 announced is kept in registry metadata (`desktop_notifications_seen`, 400 ids per kind), so a
 restart does not repeat it; while the setting is off it still marks what arrives as seen.
 Delivery is `notify-send` (with the session bus at `/run/user/UID/bus` when the service has
@@ -1683,7 +1684,9 @@ that start with `intro_`.
 
 A failed turn's user message carries `error`, one line of at most 300 characters. When the provider's
 answer was longer it also carries `error_detail`, all of it up to 2,000 characters with credentials and
-credentialed URLs taken out, for the line's **Details**. An older client reads only `error`.
+credentialed URLs taken out, for the line's **Details**. It comes from `full_message` beside `message` in
+the run's saved error; `message`, which a report and the logs read, stays the short sentence. An older
+client reads only `error`.
 
 **Images in a chat** (API 43). `send_pip_message` to a Personal Pip takes `images`: up to 4
 `data:image/png|jpeg|gif|webp;base64,…` URIs, 2 MB in all, checked like the main chat's (the bytes
