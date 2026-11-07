@@ -194,6 +194,21 @@ class PipRunToolTests(unittest.TestCase):
             with patch('dgc.agent.Agent', side_effect=AssertionError('No Agent')), self.assertRaises(RegistryError):
                 pips.execute_native(self.cfg, self.root, manifest, lambda event: None)
 
+    def test_a_personal_core_run_from_the_main_chat_is_a_valid_run(self):
+        """Work's "Run Core now?" was queued and then failed: Core's look wasn't on the personal list (final check,
+        2026-11-07). A personal run has no project tools or source whatever it looks like; a project run stays narrow."""
+        pin = {'scope': 'personal', 'workspace_id': 'ws_' + '1' * 32, 'pip_id': 'pip_' + '2' * 32, 'expected_version': 1}
+        manifest = {'main_chat_request': pin, 'trigger': 'main_chat', 'requested_by': 'main-chat:x', 'workspace_id': pin['workspace_id'],
+                    'pip_id': pin['pip_id'], 'job_version': 1, 'policy': 'read_only', 'job': {'pip_type': 'core'},
+                    'run_kind': 'personal_task', 'source_policy': {'mode': 'personal'}, 'tools': [], 'source_revision': None}
+        with patch.object(pip_run_tool, 'validate_pin'), patch.object(pip_run_tool, 'identities', return_value=('main-chat:x', 'k')):
+            pip_run_tool.validate_manifest(manifest)
+            with self.assertRaises(RegistryError, msg='a personal run still has no project tools'):
+                pip_run_tool.validate_manifest({**manifest, 'tools': ['read_file']})
+            with self.assertRaises(RegistryError, msg="a project run doesn't start Core"):
+                pip_run_tool.validate_manifest({**manifest, 'main_chat_request': {**pin, 'scope': 'project'}, 'run_kind': 'audit',
+                                                'source_policy': 'committed_only'})
+
     def test_no_supervisor_refuses_before_queue_without_starting_a_runner(self):
         args = self.request()
         self.supervisor.side_effect = RegistryError('runner_required', 'Start the Pips runner')
