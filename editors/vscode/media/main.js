@@ -1708,7 +1708,9 @@
     };
     slider.onchange = () => {
       vscode.postMessage({ type: "setReasoningProfile", level: slider.dataset.profiles.split(",")[Number(slider.value)] });
-      hideModelMenu();
+      // A drag's release closes the menu; an arrow key keeps it open for the next step (it closed after one: final check,
+      // 2026-11-07). Escape or a click outside closes it.
+      if (slider.classList.contains("by-pointer")) hideModelMenu();
     };
   }
   let lastModelMenu = null;

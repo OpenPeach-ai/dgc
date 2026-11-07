@@ -34,7 +34,7 @@ import { pipsAttention, PipsAttentionState } from "./pipsAttention";
 import { settingsDocument } from "./settingsView";
 import { onPicturesSetting, pictureFoldsMessage, rememberPictureFold, setPicturesInReplies, picturesFolded } from "./pictureFolds";
 import { pipHomeDismissedAttr, rememberPipHomeDismissed } from "./pipHomeDismiss";
-import { addProfile, adoptWorkingRoute, defaultProfileId, firstTakesDefault, hasRunnableProfile, listProfiles, markDefaultProfile, profileCredential, removeProfile, startingModel } from "./providerProfiles.js";
+import { addProfile, adoptWorkingRoute, defaultProfileId, firstTakesDefault, keepWorkingRoute, hasRunnableProfile, listProfiles, markDefaultProfile, profileCredential, removeProfile, startingModel } from "./providerProfiles.js";
 
 function isSlashCommandText(text: string): boolean {
   if (!text.startsWith("/")) { return false; }
@@ -8363,6 +8363,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  (a subscription's blank is its CLI's default, which is a model). */
   private async setDefaultProvider(id: string, chosen?: string): Promise<void> {
     const be = this.ensureBackend();
+    // The route DGC runs on now stays in the list as a saved provider, so another default never makes it vanish.
+    await keepWorkingRoute(this.context, this.lastReadyEvent, PROVIDERS).catch(() => null);
     const { route, api_key } = await profileCredential(this.context, id);
     const model = chosen === undefined ? route.model : chosen.trim();
     if (route.kind === "subscription") {

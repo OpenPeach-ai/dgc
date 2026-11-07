@@ -92,7 +92,9 @@ def projection(row) -> dict:
             "label": row["label"], "error": row["error"], "created_at": row["created_at"], "updated_at": row["updated_at"],
             # A connected card names its account and connection, as the account picker already does,
             # so the editor can prepare a send from it; never a credential.
-            **({"server": row["server"], "account": row["account"]} if row["status"] == "connected" else {})}
+            **({"server": row["server"], "account": row["account"]} if row["status"] == "connected" else {}),
+            # The run that asked: its settled line sits under that reply, which says the card is below.
+            **({"run_id": row["run_id"]} if row["run_id"] else {})}
 
 
 def _row(registry, link_id):

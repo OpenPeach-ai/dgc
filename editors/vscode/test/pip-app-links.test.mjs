@@ -78,6 +78,24 @@ test('while the browser is open the card checks itself, then closes when connect
  assert.ok(x.requests('list_pip_messages').length>=2,'the chat reloads: the Pip carries on');
 });
 
+test('a linked or put-away Connect card leaves its line under the reply that asked, and keeps it after more messages (final check, 2026-11-07)',async()=>{
+ const asked=message('a1','assistant','Choose Link Gmail on the card below.'),later=message('a2','assistant','Gmail is connected now.');
+ asked.run_id='run_'+'a'.repeat(32);later.run_id='run_'+'b'.repeat(32);
+ const x=setup({links:[link({status:'connected',label:'dev@example.com',server:'composio',account:'gmail_A1b2C3d4E5f6G7h8',run_id:asked.run_id})],
+  messages:[message('u1','user','Connect my Gmail'),asked,message('u2','user','Thanks'),later]});
+ await openChat(x);
+ const line=x.d.querySelector('[data-app-link-settled]');
+ assert.ok(line,'the line is there with no Connect in this session: it is part of the chat');
+ assert.match(line.textContent,/Gmail linked to .* · dev@example\.com/);
+ const reply=x.d.querySelector('[data-message="a1"]');
+ assert.ok(reply&&(reply.compareDocumentPosition(line)&4),'after the reply that asked');
+ const next=x.d.querySelector('[data-message="u2"]');
+ assert.ok(next&&(line.compareDocumentPosition(next)&4),'and before the next message');
+ const x2=setup({links:[link({status:'declined',run_id:asked.run_id})],messages:[message('u1','user','Connect my Gmail'),asked]});
+ await openChat(x2);
+ assert.match(x2.d.querySelector('[data-app-link-declined]').textContent,/Not now · Link Gmail/);
+});
+
 test('a connected Outlook account never recreates its request card after opening the Pip again',async()=>{
  const x=setup({links:[link({toolkit:'outlook',app:'Outlook',status:'connected',label:'me@example.com',server:'microsoft_mail',account:'ca_done'})]});
  await openChat(x);

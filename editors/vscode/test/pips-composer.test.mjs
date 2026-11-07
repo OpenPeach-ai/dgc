@@ -190,6 +190,27 @@ test('the thinking control uses this Pip’s face at every effort stop',async(t)
  }finally{await browser.close();}
 });
 
+test('dragging the thinking slider moves its face and word with the pointer, and a refresh waits for the release (final check, 2026-11-07)',async()=>{
+ const personal=job('a',{name:'Microsoft',source_policy:{mode:'personal'},profile:{body:'core',color:'purple'}});
+ const x=setup({api:47,jobs:[personal]});await x.select('a');
+ x.click('#chat-model');await x.drain();
+ const slider=x.d.querySelector('#chat-thinking'),W=x.w,saves=()=>x.requests('set_pip_chat_options').length,before=saves();
+ slider.dispatchEvent(new W.Event('pointerdown',{bubbles:true,composed:true}));
+ slider.value='3';slider.dispatchEvent(new W.Event('input',{bubbles:true}));
+ const control=x.d.querySelector('.composer-effort-control');
+ assert.equal(control.dataset.step,'3','the face and the fill follow while it is held');
+ assert.equal(control.style.getPropertyValue('--effort-t'),'0.75');
+ assert.equal(control.querySelector('output').textContent,'High','and the word');
+ assert.equal(slider.getAttribute('aria-valuetext'),'High');
+ x.receive({type:'pipsConnection',apiVersion:47,generation:1,connected:true,supported:true,enabled:true});await x.drain();
+ assert.equal(x.d.querySelector('#chat-thinking'),slider,'a refresh while it is held leaves the slider under the pointer');
+ assert.equal(saves(),before,'nothing is saved mid-drag');
+ x.d.dispatchEvent(new W.Event('pointerup',{bubbles:true}));
+ slider.dispatchEvent(new W.Event('change',{bubbles:true}));await x.drain();
+ assert.equal(saves(),before+1,'saved once, on release');
+ assert.equal(x.requests('set_pip_chat_options').at(-1).request.chat_options.thinking,'high');
+});
+
 test('on a subscription a Pip has no window setter and no percentage: one plain line says the CLI keeps its own',async()=>{
  const pip=job('a',{model_choice:{mode:'subscription',engine:'claude'}}),x=setup({api:66,jobs:[pip],chatControls:{...controls(),context_max:1048576}});await x.select('a');await x.drain();
  assert.equal(x.d.querySelector('.composer-ctx-pct'),null,'no percentage');

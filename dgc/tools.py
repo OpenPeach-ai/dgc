@@ -424,7 +424,8 @@ TOOL_SCHEMAS = [
         {"path": {"type": "string"},
          "caption": {"type": "string", "description": "Short label, e.g. 'the recording'"}},
         ["path"]),
-    _fn("write_file", "Create or completely overwrite a file. Parent dirs are created.",
+    _fn("write_file", "Create or completely overwrite a file. Parent dirs are created. A page or report about something "
+        "outside this project (a summary of mail, notes) isn't a project file: make it with make_artifact when that is offered.",
         {"path": {"type": "string"}, "content": {"type": "string", "description": "Full file content"}},
         ["path", "content"]),
     _fn("edit_file", "Replace an exact string in a file. old_string must match exactly once unless replace_all is true.",

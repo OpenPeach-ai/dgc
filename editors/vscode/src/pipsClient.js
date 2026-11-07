@@ -25,6 +25,7 @@ import {latestActivity,activityEnded,startedWords,routineStartedWords,elapsed} f
 import {mountSetupCards} from './pipSetupCards.js';
 import {mountDigestBar} from './pipDigestBar.js';
 let effortByKeys=false;      // the thinking slider's focus ring: see markEffortInput
+let effortHeld=false,effortRedraw=false;   // the thinking slider is being dragged, and a redraw waits for its release
 import {mountHomePips} from './pipHomeStrip.js';
 import {appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup,appLinkSettledMarkup,allowCardMarkup,calendarCardMarkup} from './pipAppLinks.js';
 import {pluginsPage,pluginResult,shownPluginCards,pluginForServer,installedForServer,pluginCardMarkup,pluginActionMarkup,pluginsPageMarkup,pluginUsesPage,pluginUsesMarkup,argumentValues,editedArguments,PLUGIN_LEVELS} from './pipPlugins.js';
@@ -1585,6 +1586,12 @@ function settledLines(shown){
    const words=settledWords(a);if(!words)continue;
    place(a.run_id,a.created_at,`<p class="card-settled" data-computer-settled="${esc(a.id)}" title="${esc(`${a.summary.host}${a.summary.path}`)}">${esc(words[0])} · ${esc(words[1])}</p>`);
   }
+ }
+ // A Connect card too: linked or put away, it leaves its line under the reply that asked, for good. It used to show only
+ // until the next message, and that reply's "choose Link Gmail on the card below" pointed at nothing (final check, 2026-11-07).
+ for(const link of S.appLinks||[]){
+  if(link.status==='connected')place(link.run_id,link.created_at,appLinkSettledMarkup(link,{esc,pipName:S.pip?.name||'This Pip'}));
+  else if(link.status==='declined')place(link.run_id,link.created_at,`<p class="card-settled" data-app-link-declined="${esc(link.id)}">Not now · Link ${esc(link.app)}</p>`);
  }
  // A plugin's Allow card is the same: allowed, it goes, and the reply that offered it still says it's below. (Don't says so
  // in pluginNotRun; your own app says what it decided in ownAppDecidedCards.)
@@ -3172,6 +3179,9 @@ function simpleMarkup(){
 }
 function render() {
   if(disposed)return;
+  // A redraw replaces the slider under a pointer that is dragging it, and the drag ends where it was (final check,
+  // 2026-11-07): the page's own refreshes wait until the slider is let go.
+  if(effortHeld){effortRedraw=true;return;}
   noticeFades();syncNewPipModel();
   const focus=document.activeElement; const focusId=focus?.id; const focusActivity=focus?.dataset?.chatActivity; const focusData=focus?.getAttribute?.('data-run')||focus?.getAttribute?.('data-job')||focus?.getAttribute?.('data-pip-type'); const inBox=!!chatBox&&focus===chatBox.el;const selection=focus&&typeof focus.selectionStart==='number'&&!inBox?[focus.selectionStart,focus.selectionEnd]:null;const boxAt=inBox?Mentions.selectedOffsets(chatBox.el):null;
   const oldLog=document.querySelector('.conversation-log'),oldScroll=oldLog?.scrollTop||0,oldHeight=oldLog?.scrollHeight||0,oldFirst=oldLog?.querySelector('[data-message]')?.dataset.message;
@@ -3283,8 +3293,7 @@ function appLinkCards(){
  if(remoteHost||S.apiVersion<43||!personalPip())return '';
  const pipName=S.pip?.name||'This Pip';
  const cards=shownAppLinks(S.appLinks).map(link=>appLinkMarkup(link,{esc,busy:appLinkBusy===link.id||S.busy||archived(),composio:S.composio!==false,host:appLinkHosts.get(link.id)||'',pipName,choice:appLinkChoices.get(link.id)||null}));
- const settled=(S.appLinks||[]).filter(link=>link.status==='connected'&&appLinkSettled.has(link.id)).map(link=>appLinkSettledMarkup(link,{esc,pipName}));
- return settled.join('')+cards.join('')+(S.appLinksError?`<p class="app-link-note" role="alert">${esc(S.appLinksError)}</p>`:'');
+ return cards.join('')+(S.appLinksError?`<p class="app-link-note" role="alert">${esc(S.appLinksError)}</p>`:'');
 }
 function putAppLink(link){S.appLinks=[link,...(S.appLinks||[]).filter(l=>l.id!==link.id&&l.toolkit!==link.toolkit)];}
 // A Personal Pip's plugins (pip_plugins): it asks with use_plugin and you Allow it on its card. What it
@@ -4750,6 +4759,16 @@ document.addEventListener('mousemove',event=>picker.hover(event));
 // The thinking slider's focus ring is for the keyboard, on the Pip's face. Dragging it draws nothing (reported 2026-11-07). A
 // redraw keeps which it was, since a choice redraws the composer under the slider.
 const markEffortInput=byKeys=>{effortByKeys=byKeys;for(const node of [document,...[document.querySelector('#pips-host')?.shadowRoot].filter(Boolean)])node.getElementById?.('chat-thinking')?.classList.toggle('by-keys',byKeys);};
+// The slider follows the pointer while it's held: its face, fill and word move with it, and the choice is saved on release.
+const pathTarget=event=>event.composedPath?.()[0]||event.target;
+const followEffort=input=>{const step=Math.max(0,Math.min(4,Number(input.value)||0)),control=input.closest?.('.composer-effort-control');
+ if(!control)return;control.dataset.step=String(step);control.style.setProperty('--effort-t',String(step/4));
+ const word=EFFORT_NAME[chatThinkingLevels[step]]||chatThinkingLevels[step];input.setAttribute('aria-valuetext',word);
+ const out=control.querySelector('output');if(out)out.textContent=word;};
+const releaseEffort=()=>{if(!effortHeld)return;effortHeld=false;if(effortRedraw){effortRedraw=false;render();}};
+if(typeof document!=='undefined'){document.addEventListener('pointerdown',event=>{if(pathTarget(event)?.id==='chat-thinking')effortHeld=true;},true);
+ document.addEventListener('pointerup',releaseEffort,true);document.addEventListener('pointercancel',releaseEffort,true);
+ document.addEventListener('input',event=>{const t=pathTarget(event);if(t?.id==='chat-thinking')followEffort(t);},true);}
 if(typeof document!=='undefined'){document.addEventListener('pointerdown',()=>markEffortInput(false),true);document.addEventListener('keydown',event=>{if(event.key==='Tab'||event.composedPath?.()[0]?.id==='chat-thinking')markEffortInput(true);},true);}
 document.addEventListener('keydown',event=>{
   if(picker.keydown(event))return;
