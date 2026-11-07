@@ -2915,6 +2915,7 @@ test("combined model/reasoning control offers Ultra while permissions stay separ
   assert.ok(high.dataset.profiles.split(",").includes("ultra"));
   assert.equal(high.dataset.profiles.split(",").includes("max"), false,
     "Codex uses xhigh; its selector must not offer an unsupported max value");
+  high.dispatchEvent(new dom.window.Event("pointerdown", { bubbles: true }));      // a drag: its release closes the menu
   high.value = String(high.dataset.profiles.split(",").indexOf("high"));
   high.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
   assert.equal(posted.at(-1).type, "setReasoningProfile");
