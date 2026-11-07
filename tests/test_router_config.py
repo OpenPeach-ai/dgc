@@ -71,7 +71,8 @@ class RouterOffIsTheOldConfig(unittest.TestCase):
             config.save()
             written = home.disk()
             self.assertNotIn("router", written)
-            self.assertEqual(set(written) - {"permissions"}, set(C.DEFAULTS) - C.SECRET_KEYS)
+            # A first save leaves out what only states its default until someone chooses it (the model's route, its window).
+            self.assertEqual(set(written) - {"permissions"}, set(C.DEFAULTS) - C.SECRET_KEYS - C._UNCHOSEN_UNTIL_SET)
             secrets = home.disk("secrets.json")
             self.assertFalse(any(key.startswith("router") for key in secrets), secrets)
             self.assertEqual(config.router_block(), {"enabled": False, "when_busy": "wait", "systems": []})
