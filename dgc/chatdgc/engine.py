@@ -1840,6 +1840,10 @@ class ChatEngine:
                 content += (f"\n\n[You showed an interactive widget here, {w.get('title', '')}. Its page"
                             + (f" (the first {MAX_WIDGET_HISTORY_CHARS:,} characters)" if len(code) > MAX_WIDGET_HISTORY_CHARS else "")
                             + f":\n<<<\n{code[:MAX_WIDGET_HISTORY_CHARS]}\n>>>]")
+            if m["role"] == "assistant":
+                called = _plugin_calls_note(m)
+                if called:
+                    content += "\n\n" + called
             if m["role"] == "assistant" and m.get("queries"):
                 ran = [q["sql"] for q in m["queries"] if not q.get("error")][:6]
                 if ran:
@@ -3344,6 +3348,29 @@ def _heard(chat: dict, messages: list) -> str:
     said += [str(m.get("content") or "") for m in messages if isinstance(m, dict) and m.get("role") == "tool"]
     said += [str(a.get("answer") or "") for m in chat["messages"] for a in m.get("actions") or []]
     return "\n".join(said)
+
+
+def _plugin_calls_note(message: dict) -> str:
+    """What an earlier reply called in the user's plugins, from its saved Trace: the words a reply wrote from a plugin's
+    answer stay in the chat, the answer itself doesn't. Without this, a model reading the chat back took its own earlier
+    read for something it had made up, and told the user to disregard a real list of their mail (a live run on Claude
+    Code, 2026-11-07). A call that only raised a card is the card's note, not this."""
+    names = {str(p.get("name") or "") for p in message.get("plugins") or [] if isinstance(p, dict)} - {""}
+    steps = (message.get("trace") or {}).get("steps") if isinstance(message.get("trace"), dict) else None
+    called: list[str] = []
+    for step in steps if isinstance(steps, list) else []:
+        if not isinstance(step, dict) or step.get("kind") != "tool":
+            continue
+        label, where = str(step.get("label") or ""), str(step.get("detail") or "")
+        if where not in names or label in ("plugin_tools", "") or "·" in where:
+            continue
+        item = f"{where} ({label})"
+        if item not in called:
+            called.append(item)
+    if not called:
+        return ""
+    return ("[You called " + ", ".join(called[:6]) + " here, and what this reply says came from those answers. The answers "
+            "themselves aren't kept in the chat, so their absence here doesn't mean you didn't call them.]")
 
 
 def _card_note(card: dict) -> str:
