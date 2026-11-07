@@ -195,11 +195,36 @@ def _pip(db, pip_id: str) -> dict | None:
     return {"name": _text(name, 120), "pip_type": kind}
 
 
+_KEY_REFUSED = "the model provider turned down the API key"        # model_errors.plain_failure's words for a 401/403
+_SIGNED_OUT = re.compile(r"\b(?:isn't|is not) signed in\b", re.I)    # a subscription CLI's (pip_brain, subscriptions)
+
+
 def _reason(error) -> tuple[str, str]:
+    """Why a run failed, in words (the raw message stays as the detail): a model request's raw answer ("HTTP 401
+    from Responses API: {...}") reads as what it means."""
     error = error if isinstance(error, dict) else {}
     code = str(error.get("code") or "")
     detail = _text(error.get("message"), 600)
-    return _REASONS.get(code, "It stopped with an error." if not detail else "It stopped: " + _text(detail, 200)), detail
+    if code in _REASONS:
+        return _REASONS[code], detail
+    if not detail:
+        return "It stopped with an error.", detail
+    from .model_errors import plain_failure
+    plain = plain_failure(detail)
+    if plain == _KEY_REFUSED:
+        return "Its model provider turned down the API key.", detail
+    return "It stopped: " + (plain + "." if plain != detail else _text(detail, 200)), detail
+
+
+def _sign_in(error) -> bool:
+    """A failure that Fix can't mend, because nothing in the project is wrong: the model provider refused the key, or the
+    subscription isn't signed in. Its card offers Check sign-in (Settings > Models) instead of Fix."""
+    error = error if isinstance(error, dict) else {}
+    if str(error.get("code") or "") in _REASONS:
+        return False
+    detail = _text(error.get("message"), 600)
+    from .model_errors import plain_failure
+    return bool(detail) and (plain_failure(detail) == _KEY_REFUSED or bool(_SIGNED_OUT.search(detail)))
 
 
 def _check_label(test) -> str:
@@ -266,7 +291,7 @@ def _candidate(registry, row, pip) -> dict | None:
         except (ValueError, RecursionError):
             error = None
         reason, detail = _reason(error)
-        report.update(outcome="failed", reason=reason, detail=detail)
+        report.update(outcome="failed", reason=reason, detail=detail, **({"sign_in": True} if _sign_in(error) else {}))
         signature = "failed:" + str((error if isinstance(error, dict) else {}).get("code") or "")[:64]
         return {"report": report, "outcome": "failed", "signature": signature}
     if kind == "test":

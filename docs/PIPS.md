@@ -610,6 +610,15 @@ saved error below it), with the worst findings, file and line. It has three butt
 | **Open report** | Opens the Pips view at that run. |
 | **Dismiss** | Removes the card. The report stays in Pips. Saved with the chat. |
 
+When the model provider turned down the Pip's key, or its subscription isn't signed in, nothing in the project
+can fix that: the card says so and offers **Check sign-in**, which opens Settings → Models, in place of Ask DGC to fix.
+
+**One card per Pip.** A Pip's newer card takes the place of its older one in the chat, so a routine that runs every
+morning and evening leaves one card, not one per run. The older runs stay in Pips, under Runs, and count as read. The
+card says what changed: "failed twice" when the same failure came again, "fixed · nothing found" when a clean run
+follows a problem, and, opened, "Earlier: failed · 8:00 AM". A card you acted on stays where it is: one whose fix
+started, or whose prompt you sent. Dismiss removes the card and the ones it replaced.
+
 ### Ask DGC to fix
 
 **Ask DGC to fix** (**Fix** on the card's second line) starts a helper that works in the background

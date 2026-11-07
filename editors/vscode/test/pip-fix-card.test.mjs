@@ -332,7 +332,7 @@ test("the Pip fixes pill shows only fixes since its last dismissal", () => {
 
 test("a card with a fix leaves a folded group of reports: a running fix is never out of sight", () => {
   const s = panel();
-  const other = (c) => ({ ...REPORT, run_id: "run_" + c.repeat(32), pip_id: PIP, name: `Pip ${c}` });
+  const other = (c) => ({ ...REPORT, run_id: "run_" + c.repeat(32), pip_id: "pip_" + c.repeat(32), name: `Pip ${c}` });
   for (const c of ["d", "e"]) s.event({ type: "pip_report", report: other(c) });
   s.event({ type: "pip_report", report: REPORT });
   assert.ok(s.doc.querySelector("#log .pip-report-group"), "three are one line");
@@ -347,7 +347,7 @@ test("a card with a fix leaves a folded group of reports: a running fix is never
 
 test("a fix on one of two folded reports leaves the other as a card of its own", () => {
   const s = panel();
-  s.event({ type: "pip_report", report: { ...REPORT, run_id: "run_" + "d".repeat(32), pip_id: PIP, name: "Pip d" } });
+  s.event({ type: "pip_report", report: { ...REPORT, run_id: "run_" + "d".repeat(32), pip_id: "pip_" + "d".repeat(32), name: "Pip d" } });
   s.event({ type: "pip_report", report: REPORT });
   assert.ok(s.doc.querySelector("#log .pip-report-group"), "two are one line");
   s.event({ type: "pip_fix", fix: fix({ state: "running" }) });

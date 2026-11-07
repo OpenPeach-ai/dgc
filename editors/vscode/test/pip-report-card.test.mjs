@@ -20,12 +20,12 @@ const REPORT = {
   ],
 };
 const FAILED = {
-  run_id: "run_" + "c".repeat(32), pip_id: PIP, name: "GST watchdog", pip_type: "scout", kind: "audit",
+  run_id: "run_" + "c".repeat(32), pip_id: "pip_" + "1".repeat(32), name: "GST watchdog", pip_type: "scout", kind: "audit",
   outcome: "failed", finished_at: "2026-10-18T13:05:00.000Z", earlier: 0,
   reason: "The project is too big for it to copy for review.",
   detail: "Snapshot exceeds 10,000 entries, 4 MiB per file or 64 MiB total.",
 };
-const CLEAR = { run_id: "run_" + "d".repeat(32), pip_id: PIP, name: "Lock review", pip_type: "lock", kind: "audit",
+const CLEAR = { run_id: "run_" + "d".repeat(32), pip_id: "pip_" + "2".repeat(32), name: "Lock review", pip_type: "lock", kind: "audit",
   outcome: "clear", finished_at: "2026-10-18T13:10:00.000Z", earlier: 0, total: 0, counts: {}, findings: [] };
 
 function panel() {

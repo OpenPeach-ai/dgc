@@ -433,12 +433,13 @@ test("a project Pip's card in a Work chat, dismissed, closed or fixed, reads its
   if (skipOrFail(t)) return;
   const x = await openChat();
   try {
-    for (const n of [1, 2, 3]) await x.send({ type: "pip_report", report: report(n) });
-    await x.page.click(".pip-report-group-head");                   // three in a row fold into "3 Pip reports"
-    await x.page.waitForSelector(".pip-report[data-run] .pip-report-dismiss-slim");
+    // Three runs of one Pip, each acted on as it comes (one card per Pip: an untouched card gives way to the next).
     const reads = () => x.page.evaluate(() => window.__posted.filter((m) => m.type === "pipReportRead"));
+    await x.send({ type: "pip_report", report: report(1) });
     await x.page.click(`.pip-report[data-run="run_${"1".repeat(32)}"] .pip-report-fix-slim`);
+    await x.send({ type: "pip_report", report: report(2) });
     await x.page.click(`.pip-report[data-run="run_${"2".repeat(32)}"] .pip-report-dismiss-slim`);
+    await x.send({ type: "pip_report", report: report(3) });
     await x.page.click(`.pip-report[data-run="run_${"3".repeat(32)}"] .pip-report-line1`);
     await x.page.click(`.pip-report[data-run="run_${"3".repeat(32)}"] .pip-report-dismiss`);
     assert.deepEqual(await reads(), [1, 2, 3].map((n) => ({ type: "pipReportRead", pip_id: AUDIT, run_id: "run_" + String(n).repeat(32) })));

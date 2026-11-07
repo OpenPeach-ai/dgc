@@ -3241,6 +3241,8 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 .pip-report-line-name { flex: 0 1 auto; min-width: 4em; overflow: hidden; text-overflow: ellipsis; color: var(--text-strong); font-weight: var(--w-semi); }
 .pip-report-line-state { flex: 0 0 auto; color: var(--muted); }
 .pip-report-line-state[data-bad] { color: var(--del-text); font-weight: var(--w-semi); }
+.pip-report-line-state[data-good] { color: var(--good); font-weight: var(--w-semi); }   /* "fixed · nothing found" */
+body.vscode-light .pip-report-line-state[data-good] { color: #1D7A44; }   /* --good is 2.1:1 on light; this is 5.4:1 */
 .pip-report-fill { flex: 1 1 0; min-width: 0; }
 .pip-report-line-when { flex: none; color: var(--muted); font-size: var(--t-xs); font-variant-numeric: tabular-nums; }
 .pip-report-chevron { flex: none; align-self: center; color: var(--muted); font-size: 14px; transition: transform .12s; }

@@ -10620,12 +10620,20 @@ function permissionChoices(ev) {
       if (pipFixLive ? !pipFixActive(pipFixes.get(r.run_id)) : !pipReportAsked(r.run_id)) askDgcToFix(r, null);
     }
   }
-  function pipReportCard(r) {
+  // `replaced`: the Pip's older cards this one took the place of, oldest first (pipReportOlder).
+  function pipReportCard(r, replaced = []) {
     const quiet = r.outcome === "clear" || r.outcome === "checks_passed" || r.outcome === "live_clear";
     const card = el("div", `pip-report${quiet ? " quiet" : ""}`);
-    card.dataset.run = r.run_id; card.dataset.outcome = r.outcome;
-    card._report = r;
-    const state = pipReportState(r);
+    card.dataset.run = r.run_id; card.dataset.outcome = r.outcome; card.dataset.pip = r.pip_id;
+    card._report = r; card._replaced = replaced;
+    // A clean run after a card that needed you: the problem is gone ("fixed · nothing found"). The same failure again:
+    // "failed twice". A sign-in failure can't be fixed in the project: its card offers Check sign-in instead of Fix.
+    const fixed = quiet && replaced.some((x) => PIP_REPORT_BAD.includes(x.outcome));
+    const again = r.outcome === "failed" && replaced.length > 0 && replaced.every((x) => x.outcome === "failed");
+    const signIn = r.outcome === "failed" && r.sign_in === true;
+    if (fixed) card.dataset.fixed = "";
+    const state = fixed ? `fixed · ${pipReportState(r).replace(/^finished · /, "")}`
+      : again ? pipReportState(r).replace(/^failed/, `failed ${pipReportTimes(replaced.length + 1)}`) : pipReportState(r);
     card.setAttribute("role", "group");
     card.setAttribute("aria-label", `Pip report from ${r.name}: ${state}`);
     const face = el("span", "pip-report-face");
@@ -10675,6 +10683,7 @@ function permissionChoices(ev) {
     const more = [];
     const total = Number.isSafeInteger(r.total) ? r.total : 0;
     if (r.outcome === "findings" && total > rows.length) more.push(`${total - rows.length} more in the report`);
+    if (replaced.length) more.push(pipReportEarlier(replaced));
     if (Number.isSafeInteger(r.earlier) && r.earlier > 0) more.push(`${pipReportPlural(r.earlier, "earlier run")} not shown`);
     if (more.length) { const p = el("p", "pip-report-more"); p.textContent = more.join(" · "); main.append(p); }
     const actions = el("div", "pip-report-actions");
@@ -10689,17 +10698,23 @@ function permissionChoices(ev) {
     // Acting on the card (Dismiss, its ✕ or Fix) reads its run: the Pip's unread count drops on the Pips page and the home.
     // The host marks that run's post read (mark_pip_read, Pips API 69); an older DGC has no unread to drop.
     const read = () => vscode.postMessage({ type: "pipReportRead", pip_id: r.pip_id, run_id: r.run_id });
-    const fix = () => { read(); askDgcToFix(r, card); };
+    const fix = () => { card.dataset.acted = ""; read(); askDgcToFix(r, card); };   // acted on: a newer card won't replace it
+    const checkSignIn = () => { read(); vscode.postMessage({ type: "openSettings", section: "models" }); };
+    const signInTitle = "Its model provider turned down the key or sign-in, so there is nothing to fix in the project. Check it in Settings > Models.";
     const dismiss = () => {
       const group = card.parentElement?.closest(".pip-report-group");
       const next = card.nextElementSibling || group?.nextElementSibling;
       card.remove();
       if (group) paintPipReportGroup(group);
-      if (pipReportsLive) vscode.postMessage({ type: "pipReportDismiss", run_id: r.run_id });
+      if (pipReportsLive) {
+        for (const x of card._replaced || []) vscode.postMessage({ type: "pipReportDismiss", run_id: x.run_id });
+        vscode.postMessage({ type: "pipReportDismiss", run_id: r.run_id });
+      }
       read();
       (next?.querySelector?.("button, [tabindex='0']") || input).focus({ preventScroll: true });
     };
-    if (!quiet) button("Ask DGC to fix", "act primary pip-report-fix", fixTitle, fix);
+    if (signIn) button("Check sign-in", "act primary pip-report-signin", signInTitle, checkSignIn);
+    else if (!quiet) button("Ask DGC to fix", "act primary pip-report-fix", fixTitle, fix);
     button("Open report", "act pip-report-open", `Open this run of ${r.name} in Pips`, openReport);
     button("Dismiss", "act pip-report-dismiss", "Remove this card from the chat. The report stays in Pips.", dismiss);
     main.append(actions);
@@ -10709,17 +10724,21 @@ function permissionChoices(ev) {
     card.classList.add("slim"); card.dataset.shown = "closed";
     card.dataset.total = String(Number.isSafeInteger(r.total) ? r.total : 0);
     const short = pipReportShort(r);
+    if (fixed) { short.text = `fixed · ${short.text}`; short.good = true; }
+    if (again) short.text = `failed ${pipReportTimes(replaced.length + 1)}`;
     const line1 = el("div", "pip-report-line1");
     line1.tabIndex = 0; line1.setAttribute("role", "button"); line1.setAttribute("aria-expanded", "false");
     line1.setAttribute("aria-label", `${r.name}: ${state}. Show details`);
     const name1 = el("span", "pip-report-line-name"); name1.textContent = r.name.slice(0, 120);
     const state1 = el("span", "pip-report-line-state"); state1.textContent = short.text;
     if (short.bad) state1.dataset.bad = "";
+    if (short.good) state1.dataset.good = "";
     line1.append(name1, state1, el("span", "pip-report-fill"));
     const time1 = window.DgcTime?.node(Date.parse(String(r.finished_at || "")), "pip-report-line-when");
     if (time1) line1.append(time1);
     const slimActs = el("span", "pip-report-slim-actions");
-    if (!quiet) button("Fix", "pip-report-fix-slim", fixTitle, fix, slimActs);
+    if (signIn) button("Check sign-in", "pip-report-signin-slim", signInTitle, checkSignIn, slimActs);
+    else if (!quiet) button("Fix", "pip-report-fix-slim", fixTitle, fix, slimActs);
     button("Open", "pip-report-open-slim", `Open this run of ${r.name} in Pips`, openReport, slimActs);
     const x = button("", "pip-report-dismiss-slim", "Dismiss: remove this card from the chat. The report stays in Pips.", dismiss, slimActs);
     x.setAttribute("aria-label", "Dismiss"); x.innerHTML = '<span class="codicon codicon-close" aria-hidden="true"></span>';
@@ -10744,6 +10763,33 @@ function permissionChoices(ev) {
     card.append(face, main);
     if (!quiet && !pipFixLive && pipReportAsked(r.run_id)) markPipReportAsked(card);
     return card;
+  }
+  // One card per Pip (reported 7 Nov: a routine that runs at 8 AM and 8 PM left two "Fix" cards for one problem). A
+  // Pip's newer card takes the place of its older ones in this chat; the older runs stay in Pips, under Runs. A card
+  // someone acted on stays: a fix started from it (its card is the fix's status) or its prompt sent in the chat.
+  const PIP_REPORT_BAD = ["failed", "findings", "checks_failed", "live_attention"];
+  function pipReportOlder(r) {
+    const at = Date.parse(String(r.finished_at || ""));
+    const cards = new Set([...new Set([log, appendTarget])].flatMap((root) => [...root.querySelectorAll(".pip-report")]));
+    return [...cards].filter((c) => c.dataset.pip === r.pip_id && c.dataset.run !== r.run_id && !("fix" in c.dataset) && !("acted" in c.dataset)
+      && !pipFixes.has(c.dataset.run) && !c.querySelector(".asked")
+      && !(Date.parse(String(c._report?.finished_at || "")) > at));       // never an older run over a newer one
+  }
+  function pipReportNewer(r) {
+    const at = Date.parse(String(r.finished_at || ""));
+    return [...new Set([log, appendTarget])].some((root) => [...root.querySelectorAll(`.pip-report[data-pip="${r.pip_id}"]`)]
+      .some((c) => c.dataset.run !== r.run_id && Date.parse(String(c._report?.finished_at || "")) > at));
+  }
+  const pipReportTimes = (n) => (n === 2 ? "twice" : `${n} times`);
+  // The opened card's line for what it replaced: "Earlier: failed · 8:00 AM", "Earlier: 4 findings · Yesterday 8:04 PM,
+  // and 2 older cards". Line one says the part that matters closed ("failed twice", "fixed · nothing found").
+  function pipReportEarlier(replaced) {
+    const last = replaced.at(-1), r = last.report || {};
+    const what = r.outcome === "failed" ? "failed" : r.outcome === "live_attention" ? "needed you"
+      : pipReportState(r).replace(/^finished · /, "").replace(/ \(.*\)$/, "");
+    const when = window.DgcTime?.label(Date.parse(String(r.finished_at || ""))) || "";
+    const older = replaced.length - 1;
+    return `Earlier: ${what}${when ? ` · ${when}` : ""}${older ? `, and ${pipReportPlural(older, "older card")}` : ""}`;
   }
   // The card's first two lines, from the report: "5 findings · 2 high" and the worst finding; "failed" and why.
   function pipReportShort(r) {
@@ -10822,7 +10868,19 @@ function permissionChoices(ev) {
       old.remove();
       if (group) paintPipReportGroup(group);
     }
-    const card = pipReportCard(r);
+    // An older history page drawn after newer ones ("Show earlier messages"): the Pip's newer card took this one's place.
+    if (!r.fix && !pipFixes.has(r.run_id) && pipReportNewer(r)) return;
+    const older = pipReportOlder(r);
+    const replaced = older.flatMap((c) => [...(c._replaced || []),
+      { run_id: c.dataset.run, outcome: c.dataset.outcome, report: c._report }]).slice(-20);
+    for (const old of older) {
+      const group = old.parentElement?.closest(".pip-report-group");
+      old.remove();
+      if (group) paintPipReportGroup(group);
+      // Arriving now, the newer card carries the older runs' news: they count as read (a replay already did this).
+      if (!replaying) vscode.postMessage({ type: "pipReportRead", pip_id: r.pip_id, run_id: old.dataset.run });
+    }
+    const card = pipReportCard(r, replaced);
     if (r.fix) applyPipFix(r.fix, { quiet: true });          // a replayed card carries its latest fix
     const fix = pipFixes.get(r.run_id);
     if (replaying) {

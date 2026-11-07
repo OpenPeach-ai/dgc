@@ -26,7 +26,7 @@ after(async () => { await browser?.close(); });
 
 const PIP = "pip_" + "b".repeat(32);
 const report = (n, name, outcome, extra = {}) => ({
-  run_id: "run_" + String(n).repeat(32), pip_id: PIP, name, pip_type: "scout", kind: "audit", outcome,
+  run_id: "run_" + String(n).repeat(32), pip_id: "pip_" + String(n).repeat(32), name, pip_type: "scout", kind: "audit", outcome,
   finished_at: `2026-10-25T14:3${n}:00.000Z`, earlier: 0, total: 0, counts: {}, findings: [], ...extra });
 const CLEAR_A = report(1, "ERP daily audit — data & Tally integrity", "clear");
 const CLEAR_B = report(2, "GST watchdog — e-invoice & e-way", "clear");
