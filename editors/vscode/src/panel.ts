@@ -1162,6 +1162,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       kind: row.kind === "subscription" ? "subscription" : "native",
       model: row.model, ...(row.kind === "subscription" ? { engine: row.engine } : {}) }));
     const defaultProfile = saved.find(row => row.id === defaultId);
+    // The default isn't a saved provider (an upgrade on a host with a key): it stays in the list, as in Work's menu.
+    if (!defaultProfile && saved.length && !this.noProvider() && !this.routeState.subscriptionEngine) {
+      const label = Object.values(PROVIDERS).find(p => p.url === this.state.baseUrl)?.label || "Custom host";
+      profiles.unshift({ id: "", name: `Current host · ${label}`, kind: "native", model: String(this.state.model || "") });
+    }
     const current = defaultProfile
       ? defaultProfile.kind === "subscription"
         ? `subscription:${defaultProfile.engine}${defaultProfile.model ? `:${defaultProfile.model}` : ""}`
@@ -8240,7 +8245,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.settingsEditor?.webview.postMessage({ type: "providers", providers });
     // An upgrade's working model shows here as a saved provider from the first look (adoptWorkingRoute).
     void adoptWorkingRoute(this.context, this.lastReadyEvent, PROVIDERS).catch(() => null).then((adopted) => {
-      this.settingsEditor?.webview.postMessage({ type: "providerProfiles", profiles: listProfiles(this.context), defaultId: defaultProfileId(this.context) });
+      this.settingsEditor?.webview.postMessage(this.providerProfilesMessage());
       if (adopted) this.savedProvidersChanged();
     });
     const be = this.ensureBackend();
@@ -8254,6 +8259,19 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.sendPluginCommand({ type: "list_plugins", request_id: this.nextRequestId("plugins") });
     this.sendPluginCommand({ type: "list_plugin_marketplaces", request_id: this.nextRequestId("marketplaces") });
     be.send({ type: "list_mcp_servers", request_id: this.nextRequestId("settings-mcp") });
+  }
+
+  /** Settings' provider list. `direct`: the default is a model set before saved providers, on a host whose key only DGC
+   *  holds (adoptWorkingRoute can't save those): the list shows it, so it doesn't look as if a saved provider is the default. */
+  private providerProfilesMessage(extra: Record<string, unknown> = {}): Record<string, unknown> {
+    const defaultId = defaultProfileId(this.context);
+    const caps = (this.lastReadyEvent?.capabilities as any) || {};
+    const saved = caps.saved_route;
+    const direct = !defaultId && caps.model_chosen === true && saved && !saved.builtin && !saved.subscription_engine && saved.model
+      ? { name: Object.values(PROVIDERS).find(p => p.url === saved.base_url)?.label || "Current host",
+          model: String(saved.model), base_url: String(saved.base_url || "") }
+      : undefined;
+    return { type: "providerProfiles", profiles: listProfiles(this.context), defaultId, ...(direct ? { direct } : {}), ...extra };
   }
 
   private async setDefaultProvider(id: string): Promise<void> {
@@ -8364,7 +8382,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           catch (error) { await removeProfile(this.context, added.id); throw error; }
           await this.firstProviderSaved(added.id);
         }
-        this.settingsEditor?.webview.postMessage({ type: "providerProfiles", profiles: listProfiles(this.context), defaultId: defaultProfileId(this.context), saved: true });
+        this.settingsEditor?.webview.postMessage(this.providerProfilesMessage({ saved: true }));
         this.savedProvidersChanged();
       } catch (error: any) {
         this.settingsEditor?.webview.postMessage({ type: "providerProfileError", message: String(error?.message || "Could not save provider.") });
@@ -8379,7 +8397,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
             "model_provider_saved", 10000);
         }
         await removeProfile(this.context, removing);
-        this.settingsEditor?.webview.postMessage({ type: "providerProfiles", profiles: listProfiles(this.context), defaultId: defaultProfileId(this.context) });
+        this.settingsEditor?.webview.postMessage(this.providerProfilesMessage());
         this.savedProvidersChanged();
       } catch (error: any) {
         this.settingsEditor?.webview.postMessage({ type: "providerProfileError", message: String(error?.message || "Could not remove provider.") });
@@ -8388,8 +8406,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       try {
         const id = String(msg.id || "");
         await this.setDefaultProvider(id);
-        this.settingsEditor?.webview.postMessage({ type: "providerProfiles",
-          profiles: listProfiles(this.context), defaultId: id });
+        this.settingsEditor?.webview.postMessage(this.providerProfilesMessage());
         this.savedProvidersChanged();
       } catch (error: any) {
         this.settingsEditor?.webview.postMessage({ type: "providerProfileError",

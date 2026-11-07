@@ -180,6 +180,27 @@ test("a new ChatDGC chat uses the saved provider default and changes providers w
   } finally { await s.page.close(); }
 });
 
+test("a default that isn't a saved provider stays in ChatDGC's list as the current host, and can be gone back to", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  const profiles = [{ id: "", name: "Current host · Groq", kind: "native", model: "some-model" },
+                    { id: "subscription_claude", name: "Claude Code", kind: "subscription", engine: "claude", model: "" }];
+  try {
+    await s.send({ type: "opened", conversation: conversation({ model: "" }), messages: [], earlier: 0, busy: false });
+    await s.send({ type: "models", profiles, current: "some-model", ids: ["some-model", "another-model"] });
+    assert.equal(await s.page.locator("#cd-model-name").textContent(), "some-model");
+    await s.page.locator("#cd-model-pill").click();
+    const menu = s.page.locator("#cd-model-menu");
+    assert.deepEqual(await menu.locator(".cd-menu-models .cd-menu-row").allInnerTexts(), ["some-model", "another-model"], "it opens on what's running");
+    await menu.locator(".cd-menu-back").click();
+    assert.deepEqual(await menu.locator(".cd-menu-models .cd-menu-row").allInnerTexts(), ["Current host · Groq", "Claude Code"]);
+    assert.equal(await menu.locator(".cd-menu-row.sel .cd-menu-name").textContent(), "Current host · Groq");
+    await menu.locator(".cd-menu-row", { hasText: "Current host" }).click();
+    assert.deepEqual((await s.posted("models")).at(-1), { type: "models", provider: "" });
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("Escape closes ChatDGC's model menu after choosing a provider redraws it", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();

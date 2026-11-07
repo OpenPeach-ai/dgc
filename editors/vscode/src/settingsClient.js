@@ -48,7 +48,7 @@ const icon = name => `<svg viewBox="0 0 21 21" aria-hidden="true"><path d="${pat
 // Agents was its own page until 0.51: its Sub-agents, Fallback and Pips are blocks of Models now (an old link to
 // "agents" opens Models at Sub-agents).
 const sections = [['general', 'General'], ['models', 'Models'], ['web', 'Web search'], ['chatdgc', 'ChatDGC'], ['memory', 'Memory'], ['voice', 'Voice'], ['running', 'Running sessions'], ['usage', 'Token usage'], ['security', 'Security'], ['plugins', 'Plugins'], ['mcp', 'MCP servers']];
-let section = 'general', lane = 'plugins', detail = '', query = '', items = [], servers = [], providers = [], savedProfiles = [], signin = null, config = null, draft = {}, dirty = new Set(), usage = null, range = '7d', saving = false, saveStatus = '', mcpEditing = null, mcpSubmitted = '';
+let section = 'general', lane = 'plugins', detail = '', query = '', items = [], servers = [], providers = [], savedProfiles = [], directProvider = null, signin = null, config = null, draft = {}, dirty = new Set(), usage = null, range = '7d', saving = false, saveStatus = '', mcpEditing = null, mcpSubmitted = '';
 let providerForm = {preset:'',name:'',base_url:'',model:'',api_mode:'auto',api_key:''}, defaultProviderId = '';
 let mcpError = "";
 let mcpConfirm = '';     // a pending confirm in the MCP form's danger zone: '', 'forget' or 'remove'
@@ -350,7 +350,7 @@ function render() {
         main.innerHTML = '<h2>' + sections.find(([id]) => id === section)[1] + '</h2><p class="sub" role="status">Reading settings from DGC…</p>';
         return;
     }
-    ui.providerProfiles=savedProfiles;ui.providerDraft=providerForm;ui.defaultProviderId=defaultProviderId;
+    ui.providerProfiles=savedProfiles;ui.providerDraft=providerForm;ui.defaultProviderId=defaultProviderId;ui.directProvider=directProvider;
     const savedFormOpen=section==='models' && main.querySelector('details[data-more="saved-providers"]')?.open;
     renderFields(section, main, draft, providers, ui);
     if(section==='models'){
@@ -1340,7 +1340,7 @@ window.addEventListener('message', event => {
     }
     else if(msg.type==='providerProfiles'){
         savedProfiles=Array.isArray(msg.profiles)?msg.profiles:[];
-        defaultProviderId=String(msg.defaultId||'');
+        defaultProviderId=String(msg.defaultId||'');directProvider=msg.direct&&typeof msg.direct==='object'?msg.direct:null;
         if(msg.saved){providerForm={preset:'',kind:'native',engine:'',name:'',base_url:'',model:'',api_mode:'auto',api_key:''};}
         if(config&&section==='models'){snapshot();render();}
     }

@@ -3676,6 +3676,8 @@
       : (state.defaultModel || state.conversation?.model || ""));
     const ids = state.modelProfiles.length ? [current] : [current, ...state.models];
     for (const profile of state.modelProfiles) {
+      // The current host when it isn't a saved provider: its models are plain names.
+      if (!profile.id) { ids.push(...(state.hostModels || [])); continue; }
       const models = state.providerModels[profile.id] || [profile.model || ""];
       for (const id of models) ids.push(profile.kind === "subscription"
         ? `subscription:${profile.engine}${id ? `:${id}` : ""}`
@@ -4515,6 +4517,7 @@
         if (!state.noProvider && notice.dataset.noProvider) hideNotice();
         if (Array.isArray(msg.profiles)) state.modelProfiles = msg.profiles.filter((row) => row && typeof row.id === "string" && typeof row.name === "string").slice(0, 12);
         if (typeof msg.providerId === "string" && msg.providerId) state.providerModels[msg.providerId] = state.models;
+        else state.hostModels = state.models;
         fillModels();
         return;
       case "breakdown":
