@@ -1517,7 +1517,7 @@ function computerSubmitCard(a,name,off){
  const s=a.summary,id=esc(a.id),pay=isPayment(s),title=pay?`Pay on ${s.host}?`:`Send a form to ${s.host}?`;
  const line=[pay?sendsWords(s):'',s.payment===true?'It sends payment card details.':'',asksWords(s),'Nothing has been sent.'].filter(Boolean).join(' ');
  const rows=(Array.isArray(s.fields)?s.fields:[]).filter(f=>f.value!=='•••').map(f=>`<dt>${esc(f.name)}</dt><dd>${esc(f.value)}</dd>`).join('');
- const details=`<details class="allow-details"><summary><span class="allow-preview">${esc(pay?`${s.method} ${s.host}${s.path}`:coversWords(s))}</span><span>Details</span></summary>`
+ const details=`<details class="allow-details"><summary><span class="allow-preview" title="${esc(pay?`${s.method} ${s.host}${s.path}`:coversWords(s))}">${esc(pay?`${s.method} ${s.host}${s.path}`:coversWords(s))}</span><span>Details</span></summary>`
   +`<dl class="allow-meta"><dt>Sends to</dt><dd>${esc(s.host)}${esc(s.path)}</dd>${s.page?`<dt>From page</dt><dd>${esc(s.page)}</dd>`:''}${rows}</dl>`
   +(s.more_fields?`<p class="app-link-note">And ${esc(String(s.more_fields))} more fields.</p>`:'')
   +(pay?'':`<p class="app-link-note">${esc(coversDetail(s,name))}</p><button type="button" class="link allow-see" data-computer-action="${id}"${off}>See the page…</button>`)

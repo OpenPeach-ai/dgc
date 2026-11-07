@@ -93,6 +93,10 @@ for (const [width, name, theme] of [[300, "dark", dark], [300, "light", light], 
       assert.equal(shown.cut, false, JSON.stringify(shown));
       assert.equal(shown.clamp, "none", "no clamp");
       assert.ok(shown.words <= 1, "the last word is inside the card's own box");
+      // The one line that may end in dots: Details holds it all, and pointing at it says it all.
+      const preview = await p.evaluate(() => { const e = document.querySelector("[data-computer-card] .allow-preview"); return { text: e.textContent, title: e.title }; });
+      assert.equal(preview.title, preview.text);
+      assert.match(preview.text, /^Always allow covers POST \/accounts\/\*\/billing\/profile/);
     } finally { await close(); }
   });
 }
