@@ -108,6 +108,20 @@ export async function adoptWorkingRoute(context,ready,presets){
  return added;
 }
 
+/** Before another provider becomes the default: the route DGC runs on now, when no saved provider is it, is saved as one
+ *  (not the default), so choosing another default never makes it vanish from the list with no word (final check, 2026-11-07:
+ *  ticking a saved provider dropped the working Ollama row). A host whose key only DGC holds can't be saved here, as with
+ *  adoptWorkingRoute. The saved provider, or null. */
+export async function keepWorkingRoute(context,ready,presets){
+ const saved=ready?.capabilities?.saved_route;
+ if(defaultProfileId(context)||ready?.capabilities?.model_chosen!==true||!saved||saved.builtin===true||String(saved.subscription_engine||''))return null;
+ const base=String(saved.base_url||'').replace(/\/$/,''),model=String(saved.model||'');
+ const preset=Object.values(presets||{}).find(row=>row?.url===base);
+ if(!model||!preset||preset.needsKey)return null;
+ if(listProfiles(context).some(row=>String(row.base_url||'').replace(/\/$/,'')===base&&(!row.model||row.model===model)))return null;
+ return addProfile(context,{name:preset.label,base_url:base,model,api_mode:String(saved.api_mode||'auto')});
+}
+
 /** Whether anything saved can run as it is: a subscription, a provider with a model, or an All models provider that was
  *  given its default model. One saved with no model and no default yet is not a provider to run on. */
 export function hasRunnableProfile(context){

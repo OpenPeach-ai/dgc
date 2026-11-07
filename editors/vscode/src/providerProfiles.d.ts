@@ -32,4 +32,5 @@ export function profileCredential(context: vscode.ExtensionContext, id: string):
   api_key: string;
 }>;
 export function adoptWorkingRoute(context: vscode.ExtensionContext, ready: unknown, presets: unknown): Promise<ProviderProfile | null>;
+export function keepWorkingRoute(context: vscode.ExtensionContext, ready: unknown, presets: unknown): Promise<ProviderProfile | null>;
 export function firstTakesDefault(context: vscode.ExtensionContext, ready: unknown): boolean;

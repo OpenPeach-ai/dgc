@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {addProfile,adoptWorkingRoute,defaultProfileId,firstTakesDefault,hasRunnableProfile,listProfiles,markDefaultProfile,profileCredential,removeProfile,startingModel,validRoute} from '../src/providerProfiles.js';
+import {addProfile,adoptWorkingRoute,defaultProfileId,firstTakesDefault,keepWorkingRoute,hasRunnableProfile,listProfiles,markDefaultProfile,profileCredential,removeProfile,startingModel,validRoute} from '../src/providerProfiles.js';
 
 function store(){
  const state=new Map(),secrets=new Map();
@@ -84,6 +84,24 @@ test('an upgrade keeps its working model: it becomes a saved provider and stays 
  assert.equal(await adoptWorkingRoute(ctx,ready(),PRESETS),null,'only once');
  assert.equal(listProfiles(ctx).length,1);
  assert.equal((await profileCredential(ctx,adopted.id)).api_key,'');
+});
+
+test('choosing another default keeps the working route in the list: it is saved, not lost (final check, 2026-11-07)',async()=>{
+ const ctx=fresh();
+ const other=await addProfile(ctx,{name:'Stand-in host',base_url:'http://127.0.0.1:18910/v1',model:'',api_mode:'auto'});
+ assert.equal(await adoptWorkingRoute(ctx,ready(),PRESETS),null,'not at first look: a provider was already saved');
+ const kept=await keepWorkingRoute(ctx,ready(),PRESETS);
+ assert.equal(kept.name,'Ollama (local)');
+ assert.deepEqual(listProfiles(ctx).map(row=>[row.name,row.model]),[['Stand-in host',''],['Ollama (local)','deepseek-v4.1-flash:cloud']]);
+ assert.ok(!defaultProfileId(ctx),"it is kept; which is the default is still the user's choice");
+ assert.equal(await keepWorkingRoute(ctx,ready(),PRESETS),null,'once');
+ await markDefaultProfile(ctx,other.id,'beta-2');
+ assert.equal(await keepWorkingRoute(ctx,ready({model:'other'}),PRESETS),null,'a saved provider is the default: nothing to keep');
+ const keyedCtx=fresh();
+ assert.equal(await keepWorkingRoute(keyedCtx,ready({base_url:'https://api.openai.com/v1',model:'some-model'}),PRESETS),null,'a key only DGC holds');
+ const source=(await import('node:fs')).readFileSync(new URL('../src/panel.ts',import.meta.url),'utf8');
+ const body=source.slice(source.indexOf('private async setDefaultProvider('));
+ assert.ok(body.indexOf('keepWorkingRoute(')>0&&body.indexOf('keepWorkingRoute(')<body.indexOf('set_model_defaults'),'kept before the default moves');
 });
 
 test('a route with a key is not adopted, because the editor cannot read it, and still stays the default',async()=>{
