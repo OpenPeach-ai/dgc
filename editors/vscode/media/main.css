@@ -3250,13 +3250,6 @@ body.vscode-light .pip-report-line-state[data-bad], body.vscode-light .pip-repor
 body.vscode-light .pip-report-sev[data-severity="critical"], body.vscode-light .pip-report-sev[data-severity="high"] { color: #B42318; }
 .pip-report-fill { flex: 1 1 0; min-width: 0; }
 .pip-report-line-when { flex: none; color: var(--muted); font-size: var(--t-xs); font-variant-numeric: tabular-nums; }
-/* A clean run is one line: its name, what it says, the time, Open, ✕ and the chevron. In a narrow side bar (300 px) that
-   ran off the chat (live check, 7 Nov), so there the time moves into the opened card and Open and ✕ stay in reach. */
-.pip-report.slim.quiet { container: pip-report / inline-size; }
-@container pip-report (max-width: 330px) {
-  .pip-report-line1 .pip-report-line-when { display: none; }
-  .pip-report.slim[data-shown="open"] .pip-report-head .pip-report-when { display: inline; }
-}
 .pip-report-chevron { flex: none; align-self: center; color: var(--muted); font-size: 14px; transition: transform .12s; }
 .pip-report.slim[data-shown="open"] > .pip-report-main > .pip-report-line1 .pip-report-chevron,
 .pip-report-group[data-shown="open"] > .pip-report-group-head .pip-report-chevron { transform: rotate(90deg); }
@@ -3283,6 +3276,15 @@ body.vscode-light .pip-report-sev[data-severity="critical"], body.vscode-light .
 .pip-report.slim[data-shown="open"] .pip-report-head .pip-report-name, .pip-report.slim[data-shown="open"] .pip-report-head .pip-report-when { display: none; }
 .pip-report.slim.quiet[data-shown="open"] > .pip-report-main > .pip-report-actions { display: none; }
 .pip-report.slim.quiet[data-shown="open"] { border-color: var(--border); background: var(--surface); }
+/* In a narrow side bar (300 px; live check, 7 Nov) a card's first line ran out of room: a clean run's line (name, what it
+   says, time, Open, ✕, chevron) ran off the chat, and the time cut "failed again" to "failed a…". In a narrow card the
+   time moves into the opened card, and a clean run's Open moves there too (its Open report and Dismiss show opened). */
+.pip-report.slim { container: pip-report / inline-size; }
+@container pip-report (max-width: 330px) {
+  .pip-report-line1 .pip-report-line-when, .pip-report.slim.quiet .pip-report-open-slim { display: none; }
+  .pip-report.slim[data-shown="open"] .pip-report-main .pip-report-head .pip-report-when { display: inline; }
+  .pip-report.slim.quiet[data-shown="open"] > .pip-report-main > .pip-report-actions { display: flex; }
+}
 /* Three or more together: one line until opened. */
 .pip-report-group { display: flex; flex-direction: column; min-width: 0; margin: 0; border: 1px solid var(--border);
   border-radius: var(--r-md); background: var(--surface); }

@@ -1,6 +1,20 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { openThinkingPage } from "./render-thinking.mjs";
+
+// The real clock (msgtime.js), as the panel loads it: every card's first line then carries its time, as in VS Code. The
+// first version of this test had no clock, so it missed the time crowding "failed again" at 300 px (recheck, 7 Nov).
+const MSGTIME = readFileSync(new URL("../media/msgtime.js", import.meta.url), "utf8");
+async function openCards(browser, options) {
+  const page = await openThinkingPage(browser, { ...options, events: [events[0]] });
+  await page.evaluate(([clock, list]) => {
+    eval(clock);
+    for (const event of list) window.dispatchEvent(new MessageEvent("message", { data: { type: "event", event } }));
+  }, [MSGTIME, events.slice(1)]);
+  await page.waitForTimeout(120);
+  return page;
+}
 
 // A Pip report card fits a 300 px side bar (live check, 7 Nov): "Check sign-in" is wider than Fix and pushed the ✕ past
 // the card's edge, and a clean run's one line ("fixed · nothing found", its time, Open, ✕ and the chevron) ran off the
@@ -57,22 +71,33 @@ const OUTSIDE = `(() => [...document.querySelectorAll("#log .pip-report")].flatM
 for (const width of [300, 360, 900]) {
   test(`at ${width} px every card's buttons, time and chevron sit inside it, closed and opened`, async (t) => {
     if (skipOrFail(t)) return;
-    const page = await openThinkingPage(browser, { width, height: 1400, events });
+    const page = await openCards(browser, { width, height: 1400 });
     try {
       const ids = await page.evaluate(() => [...document.querySelectorAll("#log .pip-report")].map((c) => c.dataset.run.slice(4, 8)));
       assert.deepEqual(ids, ["1111", "3333", "5555", "6666"], "one card per Pip, none folded");
       assert.deepEqual(await page.evaluate(OUTSIDE), [], "closed");
+      assert.ok(await page.evaluate(() => document.querySelectorAll("#log .pip-report time").length >= 4), "the cards carry their times");
+      // What happened reads whole on a card with a second line ("failed again", "failed"): the name gives way first.
+      const cut = await page.evaluate(() => [...document.querySelectorAll("#log .pip-report:not(.quiet) .pip-report-line-state")]
+        .filter((n) => n.scrollWidth > n.clientWidth + 0.5).map((n) => n.textContent));
+      assert.deepEqual(cut, [], "what happened is never cut on a card with a second line");
       // A refused key still offers Check sign-in somewhere a click reaches, and a clean card keeps Open and Dismiss.
       const reach = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll("#log .pip-report")].map((c) =>
         [c.dataset.run.slice(4, 8), [...c.querySelectorAll("button")].filter((b) => b.checkVisibility())
           .map((b) => (b.textContent || b.getAttribute("aria-label")).trim())])));
       assert.ok(reach["1111"].includes("Check sign-in"), JSON.stringify(reach));
-      assert.ok(reach["3333"].includes("Open") && reach["3333"].includes("Dismiss"), JSON.stringify(reach));
+      // Closed, a clean run keeps ✕; in a narrow card its Open moves into the opened card (checked below).
+      assert.ok(reach["3333"].includes("Dismiss") && (width < 400 || reach["3333"].includes("Open")), JSON.stringify(reach));
       for (const id of ["1111", "3333", "5555", "6666"]) await page.click(`#log .pip-report[data-run="run_${id.repeat(8)}"] .pip-report-line1`);
       assert.deepEqual(await page.evaluate(OUTSIDE), [], "opened");
       const opened = await page.evaluate(() => [...document.querySelectorAll("#log .pip-report")].map((c) =>
         [c.dataset.shown, [...c.querySelectorAll("button")].filter((b) => b.checkVisibility())
           .map((b) => (b.textContent || b.getAttribute("aria-label")).trim())]));
+      // Opened, a card says when its run finished.
+      const timeless = await page.evaluate(() => [...document.querySelectorAll("#log .pip-report")]
+        .filter((c) => ![...c.querySelectorAll("time")].some((t) => t.checkVisibility() && t.getBoundingClientRect().width > 0))
+        .map((c) => c.dataset.run.slice(4, 8)));
+      assert.deepEqual(timeless, [], "opened, every card shows its time");
       for (const [shown, buttons] of opened) {
         assert.equal(shown, "open");
         assert.ok(buttons.some((b) => /^Open/.test(b)) && buttons.includes("Dismiss"), `opened, Open and Dismiss are reachable: ${buttons}`);
