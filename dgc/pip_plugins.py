@@ -661,12 +661,16 @@ def _composio_reads(row, info, arguments) -> bool:
 
 def _reviewed_inputs(slug, arguments) -> bool:
     """Whether one reviewed read's inputs are ones DGC's review of that read allows (pip_app_access.validate_arguments):
-    only its own fields, each of its type and size, Gmail's own account (user_id "me"), a limit of 1 to 20, and for
+    only its own fields, each of its type and size, Gmail's own account (user_id "me"), a limit of 1 to 500, and for
     Drive, Notion and Contacts their fixed fields exactly. A limit or a calendar the model leaves out is the app's own
-    default, which a reviewed read may name explicitly: they are filled in for the check, and nothing is sent changed."""
+    default, which a reviewed read may name explicitly: they are filled in for the check, and nothing is sent changed.
+    A bigger read is still a read: "how many unread emails have I got?" asks for 100, and got a card the user had to
+    allow. validate_arguments' 1 to 20 stays for what a routine is reviewed to read each time it runs."""
     checked = dict(arguments)
     if slug in ("GMAIL_FETCH_EMAILS", "GOOGLECALENDAR_FIND_EVENT"):
         checked.setdefault("max_results", 1)
+        if type(checked["max_results"]) is int and 20 < checked["max_results"] <= 500:
+            checked["max_results"] = 20
         if slug == "GOOGLECALENDAR_FIND_EVENT":
             checked.setdefault("calendar_id", "primary")
     try:
