@@ -1055,6 +1055,7 @@ def snapshot(store, pip_id, *, context_size=32768):
             original = store.db.execute("SELECT text FROM pip_chat_messages WHERE seq=? AND pip_id=?",
                                         ((user if index == 0 else assistant)["seq"], pip_id)).fetchone()[0]
             validate_text(original, reply=index == 1)
+        pair[1]["content"] += _calls_note(store.db, pip_id, assistant["run_id"])
         amount = len(_json(pair).encode()) - 2 + (1 if history else 0)
         if size + amount > budget:
             break
@@ -1836,6 +1837,25 @@ def keep_trace(db, run, value) -> None:
                    (run["id"], run["pip_id"], _json(steps)))
     except sqlite3.Error:
         pass
+
+
+# A reply's tools that read the user's own things: a plugin's tool, a connected app's read.
+_READ_CALLS = {"call_plugin": "a plugin's tool", "read_app": "a connected app"}
+
+
+def _calls_note(db, pip_id, run_id) -> str:
+    """What an earlier reply called, from its saved Trace. The words it wrote from a plugin's answer stay in the chat, the
+    answer doesn't: without this, a model reading the chat back took its own earlier read for something it had made up
+    (ChatDGC on Claude Code, 2026-11-07). "" when it called nothing of the kind, or has no trace."""
+    try:
+        steps = (_traces(db, pip_id, [run_id], full=True).get(run_id) or {}).get("steps") or []
+    except Exception:      # noqa: BLE001 - a note, never a failed reply
+        return ""
+    called = [words for label, words in _READ_CALLS.items() if any(step.get("label") == label for step in steps)]
+    if not called:
+        return ""
+    return ("\n\n[In this reply you called " + " and ".join(called) + ", and what it says came from those answers. The "
+            "answers themselves aren't kept in this chat, so their absence doesn't mean you didn't call them.]")
 
 
 def _traces(db, pip_id, run_ids, *, full=False) -> dict:
