@@ -178,7 +178,7 @@ TOOL_SCHEMAS = [
     _fn("run_pip_now", "Start one existing read-only Pip audit or Quill draft in this chat's project, or a personal task with explicit scope=personal. "
         "Read pips_context definition first and pass that exact job version. This uses the Pip's pinned model and "
         "existing source policy, independently of this chat. It cannot create/edit jobs, resume paused jobs, "
-        "change permissions, or execute project Patch/Pulse work. Personal roles never gain project tools. Use the same retry key for an identical request. "
+        "change permissions, or execute project Patch/Pulse work, and it never starts Core, which works in its own chat. Personal roles never gain project tools. Use the same retry key for an identical request. "
         "A queued run is not a completed result. When it finishes, its report appears in this chat by itself as a card "
         "for the user (finished, or failed and why); never poll for it or build a monitor, loop or script to watch Pips.",
         {"pip_id": {"type": "string"}, "scope": {"type": "string", "enum": ["project", "personal"]},
