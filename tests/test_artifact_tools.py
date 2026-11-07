@@ -94,6 +94,37 @@ class WorkArtifactTools(unittest.TestCase):
         from dgc_sdk import policy as sdk_policy                       # the SDK can name them in a policy
         self.assertEqual(sdk_policy._DISPLAY["make_artifact"], "MakeArtifact")
 
+    def test_a_page_outside_the_project_is_refused_with_the_way_that_needs_no_file(self):
+        # A page of someone's mail summary was refused as outside the project, so the model copied it into their repo.
+        from dgc.agent import Agent
+        from dgc.llm import ToolCall
+        page = self.tmp / "dgc-pages" / "inbox.html"
+        page.parent.mkdir()
+        page.write_text("<h1>Inbox</h1>", encoding="utf-8")
+        cfg = Config(self.root)
+        cfg.data.update({"model": "fixture", "base_url": "http://fixture", "mode": "default"})
+
+        class Quiet:
+            def __getattr__(self, name):
+                return lambda *a, **k: None
+        agent = Agent(cfg, Quiet())
+        self.addCleanup(agent.mcp.stop_all)
+        said = agent._handle_call(ToolCall("c1", "artifact", {"path": str(page), "name": "Inbox"}))
+        self.assertIn("outside the project", said)
+        self.assertIn('make_artifact with type "page"', said)
+        self.assertIn("Do not copy the file into the project", said)
+        self.assertEqual(sorted(p.name for p in self.root.iterdir()), [".secret", "img"], "nothing landed in the project")
+        # And the way it names works: a page with no file in the project.
+        made = tools.execute("make_artifact", {"type": "page", "title": "Inbox", "content": "<h1>Inbox</h1>"}, self.ctx)
+        self.assertTrue(made.startswith("Made Page “Inbox” (ar_"), made)
+        self.assertEqual(sorted(p.name for p in self.root.iterdir()), [".secret", "img"])
+
+    def test_the_words_say_a_page_needs_no_file_in_the_project(self):
+        schema = next(row["function"]["description"] for row in tools.TOOL_SCHEMAS if row["function"]["name"] == "artifact")
+        self.assertIn("make_artifact with type page", schema)
+        self.assertIn("Never copy a page into the project", schema)
+        self.assertIn("needs no file", artifact_tools.MAKE_ARTIFACT["function"]["description"])
+
     def test_the_output_chip_line_and_the_note_when_it_wasnt_made(self):
         self.assertIn("make_artifact (type slides)", artifact_tools.output_line("slides"))
         self.assertEqual(artifact_tools.output_line("auto"), "")

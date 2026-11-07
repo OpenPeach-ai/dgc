@@ -79,7 +79,7 @@
   // has no switch for it (reported 2026-10-18: "it anyway uses web, so let's not confuse users"). Settings -> Web
   // search -> Search in ChatDGC turns it off for every chat.
   const searchMode = () => "auto";
-  const state = { conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "", modelProfiles: [], providerModels: {}, menuProvider: "", menuProviders: false, windows: [], breakdown: null,
+  const state = { conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "", modelProfiles: [], providerModels: {}, providerErrors: {}, menuProvider: "", menuProviders: false, windows: [], breakdown: null,
                   model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "",
                   context: null, compacting: false, editingSummary: false, picks: {},
                   research: false, planAsked: false, countdowns: {}, lastSent: null, forgotten: new Set(), planEditing: "", steerDraft: "", open: new Set(),
@@ -2001,9 +2001,9 @@
         const button = el("button", "cd-edit-cancel cd-artifact-export-button");
         button.type = "button";
         button.setAttribute("aria-haspopup", "menu"); button.setAttribute("aria-expanded", "false");
-        button.append(el("span", "", "Export"), icon("chevron-down"));
+        button.append(el("span", "", "Download"), icon("chevron-down"));
         const menu = el("span", "cd-artifact-menu");
-        menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", "Export as"); menu.hidden = true;
+        menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", "Download as"); menu.hidden = true;
         for (const format of formats) {
           const item = el("button", "cd-artifact-menu-item", ARTIFACT_FORMAT[format] || format.toUpperCase());
           item.type = "button"; item.setAttribute("role", "menuitem"); item.dataset.format = format;
@@ -2649,12 +2649,29 @@
                summaryText(carried.text));
     return box;
   }
-  /** The meter: what the chat takes of its window, amber from 70%, red from 85%. */
+  /** The CLI this chat's model runs on, by name, when it is a subscription: it keeps its own context window. */
+  function subscriptionCli() {
+    const value = modelPick.value || state.model || state.defaultModel || "";
+    if (!value.startsWith("subscription:")) return "";
+    const engine = value.split(":", 3)[1] || "";
+    return state.modelProfiles.find((p) => p.kind === "subscription" && p.engine === engine)?.name || (engine === "claude" ? "Claude Code" : "Codex");
+  }
+  /** The meter: what the chat takes of its window, amber from 70%, red from 85%. On a subscription the CLI's window is its
+   *  own and DGC doesn't know its size: no percentage, which would be of a number the CLI never uses. */
   function meter() {
     const c = state.context, button = $("cd-context");
     // No provider: no model anyone chose, so no window to measure against, and no number.
     button.hidden = !c || !c.window || !state.conversation || state.noProvider;
     if (button.hidden) { $("cd-context-pop").hidden = true; return; }
+    const cli = subscriptionCli();
+    if (cli) {
+      $("cd-context-pct").textContent = "";
+      button.dataset.level = "low";
+      button.title = `${cli} manages its own context window`;
+      button.setAttribute("aria-label", `Context window: ${cli} manages its own. Show details`);
+      if (!$("cd-context-pop").hidden) popover();
+      return;
+    }
     const share = Math.min(1, c.used / c.window);
     const percent = Math.round(share * 100);
     $("cd-context-pct").textContent = `${percent}%`;
@@ -2724,6 +2741,17 @@
       const controls = el("div", "context-size-controls");
       controls.append(pick);
       size.append(label, controls);
+    }
+    const cli = subscriptionCli();
+    if (cli) {
+      const heading = el("div", "context-head"), title = el("div");
+      title.append(el("span", "context-kicker", "Context window"));
+      heading.append(title);
+      pop.replaceChildren(heading, el("p", "cd-pop-note cd-pop-cli", `${cli} manages its own context window, so there is no size to set here.`),
+                          ...(why ? [why] : []), compact, carry);
+      compact.className = "context-action"; carry.className = "context-action cd-pop-second";
+      if (readOnly()) holdChanges(pop, true);
+      return;
     }
     const note = el("div", "context-last");
     note.append(icon("history"), el("span", "", (state.windows.length ? "For every chat" : `Window: ${presets[c.preset] || c.preset} (Settings → ChatDGC)`)
@@ -3577,7 +3605,7 @@
   });
   researchToggle.addEventListener("click", () => { researchMode(!state.research); input.focus(); });
   studyToggle.addEventListener("click", () => { studyMode(!state.study); input.focus(); });
-  modelPick.addEventListener("change", () => { state.model = modelPick.value; });
+  modelPick.addEventListener("change", () => { state.model = modelPick.value; meter(); });
   thinkingPick.addEventListener("change", () => { state.thinking = thinkingPick.value; });
   $("cd-temporary").addEventListener("change", (e) => vscode.postMessage({ type: "newChat", temporary: e.target.checked }));
   $("cd-new").addEventListener("click", () => vscode.postMessage({ type: "newChat" }));
@@ -3680,9 +3708,11 @@
       // The current host when it isn't a saved provider: its models are plain names.
       if (!profile.id) { ids.push(...(state.hostModels || [])); continue; }
       const models = state.providerModels[profile.id] || [profile.model || ""];
-      for (const id of models) ids.push(profile.kind === "subscription"
-        ? `subscription:${profile.engine}${id ? `:${id}` : ""}`
-        : `provider:${profile.id}:${id}`);
+      for (const id of models) {
+        // An All models provider has no name to offer until its host has listed them: never an empty one.
+        if (!id && profile.kind !== "subscription") continue;
+        ids.push(profile.kind === "subscription" ? `subscription:${profile.engine}${id ? `:${id}` : ""}` : `provider:${profile.id}:${id}`);
+      }
     }
     const offered = [...new Set(ids.filter(Boolean))];
     modelPick.replaceChildren(...offered.map((id) => { const option = el("option", "", id); option.value = id; return option; }));
@@ -3690,6 +3720,7 @@
     modelPick.hidden = !offered.length;
     thinkingPick.value = state.thinking || state.conversation?.thinking || "off";
     updatePill();
+    meter();
     if (!modelMenu.hidden) renderModelMenu();
   }
 
@@ -3911,6 +3942,18 @@
           });
           return row;
         });
+    // A provider with nothing to choose from yet says why, rather than showing an empty list.
+    if (profilesOn && !state.menuProviders && !options.length) {
+      const listed = state.providerModels[state.menuProvider];
+      if (!listed) options.push(el("div", "cd-menu-kicker", "Listing its models…"));
+      else {
+        options.push(el("div", "cd-menu-kicker", state.providerErrors[state.menuProvider] ? "Couldn’t list its models" : "It lists no models"));
+        const settings = el("button", "cd-menu-row", "Settings → Models");
+        settings.type = "button";
+        settings.addEventListener("click", () => vscode.postMessage({ type: "openModels" }));
+        options.push(settings);
+      }
+    }
     // The models scroll in a list of their own (a provider can list dozens), so the dial is always in view, by the pill.
     const list = el("div", "cd-menu-models");
     list.setAttribute("role", "menu"); list.setAttribute("aria-label", "Model");
@@ -4523,7 +4566,7 @@
         if (!state.noProvider && notice.dataset.noProvider) hideNotice();
         meter();
         if (Array.isArray(msg.profiles)) state.modelProfiles = msg.profiles.filter((row) => row && typeof row.id === "string" && typeof row.name === "string").slice(0, 12);
-        if (typeof msg.providerId === "string" && msg.providerId) state.providerModels[msg.providerId] = state.models;
+        if (typeof msg.providerId === "string" && msg.providerId) { state.providerModels[msg.providerId] = state.models; state.providerErrors[msg.providerId] = msg.listError === true; }
         else state.hostModels = state.models;
         fillModels();
         return;

@@ -2,7 +2,7 @@
 // credentials stay in VS Code SecretStorage and are bound to an immutable URL.
 import {randomBytes} from 'node:crypto';
 
-const STATE_KEY='dgc.modelProviders.v1', DEFAULT_KEY='dgc.defaultModelProvider.v1', MAX=12;
+const STATE_KEY='dgc.modelProviders.v1', DEFAULT_KEY='dgc.defaultModelProvider.v1', DEFAULT_MODEL_KEY='dgc.defaultModelProvider.model.v1', MAX=12;
 const ID=/^provider_[a-f0-9]{32}$/;
 const SUBSCRIPTION_ID=/^subscription_(claude|codex)$/;
 const MODES=new Set(['auto','ollama','anthropic','chat_completions','responses']);
@@ -19,7 +19,8 @@ export function validRoute(raw){
  }
  const name=String(raw.name||'').trim(),model=String(raw.model||'').trim();
  if(!name||name.length>64||/[\x00-\x1f\x7f]/.test(name))throw Error('Use a provider name of up to 64 characters.');
- if(!model||model.length>256||/[\x00-\x1f\x7f]/.test(model))throw Error('Choose one model for this provider.');
+ // No model: "All models". Each chat, or a Pip, chooses from what the host lists; the default names its own (defaultModel).
+ if(model.length>256||/[\x00-\x1f\x7f]/.test(model))throw Error('Use a model name of up to 256 characters.');
  let url;
  try{url=new URL(String(raw.base_url||''));}catch{throw Error('Enter a valid model host URL.');}
  if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash
@@ -40,18 +41,39 @@ export function listProfiles(context){
  return valid.slice(0,MAX);
 }
 
+const needsModel=row=>row.kind!=='subscription'&&!row.model;
+
 export function defaultProfileId(context){
  const id=context.globalState.get(DEFAULT_KEY,'');
- return listProfiles(context).some(row=>row.id===id)?id:'';
+ const row=listProfiles(context).find(row=>row.id===id);
+ // An All models provider is the default only with its model: nothing ever runs on no model.
+ return row&&(!needsModel(row)||context.globalState.get(DEFAULT_MODEL_KEY,''))?id:'';
 }
 
-export async function markDefaultProfile(context,id){
- if(!listProfiles(context).some(row=>row.id===id))throw Error('Provider not found.');
+/** The model a chat starts on when it follows this provider: its own, or for an All models default the one chosen for it. */
+export function startingModel(context,row){
+ if(!row||row.model||row.kind==='subscription')return row?.model||'';
+ return defaultProfileId(context)===row.id?String(context.globalState.get(DEFAULT_MODEL_KEY,'')):'';
+}
+
+/** The default, and its model. An All models provider keeps saying All models, with the default's model beside it. A
+ *  provider with a model of its own, or a subscription (blank: the CLI's default), takes this as that model. */
+export async function markDefaultProfile(context,id,model){
+ const rows=listProfiles(context),row=rows.find(row=>row.id===id);
+ if(!row)throw Error('Provider not found.');
+ const chosen=model===undefined?row.model:String(model).trim();
+ if(needsModel(row)&&!chosen)throw Error('Choose a model for this provider.');
+ if(!needsModel(row)&&chosen!==row.model){
+  const changed={...row,model:chosen};validRoute(changed);
+  await context.globalState.update(STATE_KEY,rows.map(other=>other.id===id?changed:other));
+ }
+ await context.globalState.update(DEFAULT_MODEL_KEY,needsModel(row)?chosen:'');
  await context.globalState.update(DEFAULT_KEY,id);
 }
 
 export async function clearDefaultProfile(context){
  await context.globalState.update(DEFAULT_KEY,'');
+ await context.globalState.update(DEFAULT_MODEL_KEY,'');
 }
 
 export async function addProfile(context,raw){
@@ -84,6 +106,12 @@ export async function adoptWorkingRoute(context,ready,presets){
  const added=await addProfile(context,{name:preset.label,base_url:base,model,api_mode:String(saved.api_mode||'auto')});
  await markDefaultProfile(context,added.id);
  return added;
+}
+
+/** Whether anything saved can run as it is: a subscription, a provider with a model, or an All models provider that was
+ *  given its default model. One saved with no model and no default yet is not a provider to run on. */
+export function hasRunnableProfile(context){
+ return !!defaultProfileId(context)||listProfiles(context).some(row=>!needsModel(row));
 }
 
 /** Whether the provider being added becomes the default: only when nothing chose a model yet. An older CLI doesn't say. */

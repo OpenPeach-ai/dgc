@@ -238,11 +238,29 @@ def _codex_cli_default_model() -> str:
     return ""
 
 
+def _codex_cached_models() -> tuple[str, ...]:
+    """The models in Codex's own cache file, which it writes as it lists them: what a menu shows when the CLI didn't
+    answer in time. Only the names it marks for listing; never its authentication file."""
+    path = Path.home() / ".codex" / "models_cache.json"
+    try:
+        if path.stat().st_size > 8 * 1024 * 1024:
+            return ()
+        rows = json.loads(path.read_text(encoding="utf-8")).get("models")
+    except (OSError, UnicodeError, ValueError, AttributeError):
+        return ()
+    if not isinstance(rows, list):
+        return ()
+    names = [str(row.get("slug") or "") for row in rows if isinstance(row, dict) and row.get("visibility", "list") == "list"]
+    return tuple(dict.fromkeys(name for name in names if re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", name)))[:128]
+
+
 def _codex_models(binary: str) -> tuple[str, ...]:
     """Ask the installed Codex CLI for its account's model catalogue, with a short bound.
 
     The catalogue can be cached by Codex and is a picker hint, not proof that a turn can run.
-    DGC never reads the CLI's authentication file or sends its credentials itself.
+    DGC never reads the CLI's authentication file or sends its credentials itself. A CLI that doesn't answer in time
+    (it can fetch the list first) left every menu on "CLI default" alone for five minutes: Codex's own cache answers
+    then, and an empty answer is kept only briefly.
     """
     global _codex_catalog_cache
     now = time.monotonic()
@@ -314,7 +332,9 @@ def _codex_models(binary: str) -> tuple[str, ...]:
                         stream.close()
                     except OSError:
                         pass
-    _codex_catalog_cache = (time.monotonic() + 300, binary, models)
+    if not models:
+        models = _codex_cached_models()
+    _codex_catalog_cache = (time.monotonic() + (300 if models else 20), binary, models)
     return models
 
 

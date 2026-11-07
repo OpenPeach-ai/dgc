@@ -5390,7 +5390,10 @@ class Agent(GoalLifecycle):
             return [
                 "# Saved Artifacts: pages, dashboards, documents, slides and sheets",
                 "Use make_artifact to make a new Artifact that the user can reopen from Library. Its card opens "
-                "in the editor and DGC keeps its versions. Use edit_artifact with the existing ar_… id when "
+                "in the editor and DGC keeps its versions. It lives in DGC's own store and needs no file, so a page "
+                "about something other than this project (a summary of mail, a one-off report) is a make_artifact "
+                "with type page and its HTML in content: never write it into the project or copy it there to show "
+                "it. The artifact tool is for a page that belongs to this project's files. Use edit_artifact with the existing ar_… id when "
                 "the user asks to fix or change an Artifact made earlier, even if the Artifact chip is Auto or "
                 "not selected this turn. Read it first with edit_artifact(id=…) if its current content is "
                 "uncertain. If several Artifacts could match and you cannot identify the right id from the "
@@ -10335,7 +10338,13 @@ class Agent(GoalLifecycle):
                     hostname=str(self.config.get("artifact_hostname", "") or ""),
                     session=getattr(getattr(self, "session_file", None), "stem", "") or "")
             except Exception as e:
-                return artifact_refused(f"error: could not start the artifact preview: {type(e).__name__}: {e}")
+                # A page outside the project isn't this tool's: say what is, or the next try copies it into the project.
+                from .workspace import WorkspaceBoundaryError
+                elsewhere = (" To show a page that isn't part of this project, call make_artifact with type \"page\" and "
+                             "its HTML in content: DGC keeps it in its own store and it needs no file. Do not copy the "
+                             "file into the project."
+                             if isinstance(e, WorkspaceBoundaryError) and self._artifacts_exposed() else "")
+                return artifact_refused(f"error: could not start the artifact preview: {type(e).__name__}: {e}{elsewhere}")
             notify = getattr(self.ui, "artifact_ready", None)
             if notify:
                 notify(art)                          # the TUI proposes opening it in the terminal

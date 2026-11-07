@@ -9,7 +9,7 @@ import { keepRunningAfterClose } from "./closingTab";
 import { holderFacts, holderLine, type HolderLine } from "./holderWords";
 import type { Dictation, DictationOwner, ReadAloud } from "./voice";
 import { mcpAppsHost } from "./mcpApps";
-import { ARTIFACT_ID, outputChoice, type Artifacts } from "./artifacts";
+import { ARTIFACT_ID, forwardedArtifactPage, outputChoice, type Artifacts } from "./artifacts";
 import { allowFromJobs, handleVideoMessage, VIDEO_MESSAGES } from "./videoHost";
 import { onPicturesSetting, pictureFoldsMessage, picturesFolded, rememberPictureFold } from "./pictureFolds";
 import { promises as fs } from "fs";
@@ -60,7 +60,7 @@ export interface ChatDGCHost {
   /** "sent"; "starting" while its process comes up (sent again once it's ready); "old_cli" when it
    *  has no ChatDGC. */
   chatdgcSend(cmd: Record<string, unknown>): "sent" | "starting" | "old_cli";
-  chatdgcModels(providerId?: string): Promise<{ ids: string[]; current: string; providerId?: string; defaultId?: string; profiles?: any[]; noProvider?: boolean }>;
+  chatdgcModels(providerId?: string): Promise<{ ids: string[]; current: string; providerId?: string; defaultId?: string; profiles?: any[]; noProvider?: boolean; listError?: string }>;
   /** A file link in a reply: in the chat's own folder, else the window's. */
   chatdgcOpenFile?(path: string, line?: number, endLine?: number, folder?: string): Promise<void>;
   /** Resolve a saved native provider just before a model turn; its key never enters chat storage. */
@@ -2318,7 +2318,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "openLink": {
         const target = typeof message.target === "string" ? message.target : "";
         if (/^https?:\/\/[^\s]+$/i.test(target) && target.length <= 8192) {
-          await vscode.env.openExternal(vscode.Uri.parse(target, true));
+          // A link to DGC's artifact page, in a remote window: the artifact's own forwarded address (src/artifacts.ts).
+          await vscode.env.openExternal(await forwardedArtifactPage(target) ?? vscode.Uri.parse(target, true));
         } else if (message.kind === "file" && target && target.length <= 8192) {
           // A file the reply named: in the folder this chat reads, else the window's. Checked there as Work's are; one
           // that isn't in either says so.
@@ -2397,8 +2398,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   private async models(tab: Tab, providerId = ""): Promise<void> {
     if (!this.host) return;
     try {
-      const { ids, current, profiles, defaultId, providerId: selected, noProvider } = await this.host.chatdgcModels(providerId);
-      this.post(tab, { type: "models", ids, current, ...(noProvider === true ? { noProvider: true } : {}),
+      const { ids, current, profiles, defaultId, providerId: selected, noProvider, listError } = await this.host.chatdgcModels(providerId);
+      this.post(tab, { type: "models", ids, current, ...(noProvider === true ? { noProvider: true } : {}), ...(listError ? { listError: true } : {}),
                        ...(profiles ? { profiles } : {}), ...(defaultId ? { defaultId } : {}),
                        ...(selected ? { providerId: selected } : {}) });
     } catch (err: any) {

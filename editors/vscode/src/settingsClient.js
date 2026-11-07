@@ -48,7 +48,7 @@ const icon = name => `<svg viewBox="0 0 21 21" aria-hidden="true"><path d="${pat
 // Agents was its own page until 0.51: its Sub-agents, Fallback and Pips are blocks of Models now (an old link to
 // "agents" opens Models at Sub-agents).
 const sections = [['general', 'General'], ['models', 'Models'], ['web', 'Web search'], ['chatdgc', 'ChatDGC'], ['memory', 'Memory'], ['voice', 'Voice'], ['running', 'Running sessions'], ['usage', 'Token usage'], ['security', 'Security'], ['plugins', 'Plugins'], ['mcp', 'MCP servers']];
-let section = 'general', lane = 'plugins', detail = '', query = '', items = [], servers = [], providers = [], savedProfiles = [], directProvider = null, signin = null, config = null, draft = {}, dirty = new Set(), usage = null, range = '7d', saving = false, saveStatus = '', mcpEditing = null, mcpSubmitted = '';
+let section = 'general', lane = 'plugins', detail = '', query = '', items = [], servers = [], providers = [], savedProfiles = [], defaultProviderModel = '', choosingDefaultId = '', typingDefaultModel = '', providerModelLists = {}, directProvider = null, signin = null, config = null, draft = {}, dirty = new Set(), usage = null, range = '7d', saving = false, saveStatus = '', mcpEditing = null, mcpSubmitted = '';
 let providerForm = {preset:'',name:'',base_url:'',model:'',api_mode:'auto',api_key:''}, defaultProviderId = '';
 let mcpError = "";
 let mcpConfirm = '';     // a pending confirm in the MCP form's danger zone: '', 'forget' or 'remove'
@@ -100,7 +100,8 @@ const ui = {
 const MODEL_ROUTES = { model: ['main', 'base_url', 'api_mode', 'api_key'],
     subagent_model: ['subagent', 'subagent_base_url', 'subagent_api_mode', 'subagent_api_key'],
     fallback_model: ['fallback', 'fallback_base_url', 'fallback_api_mode', 'fallback_api_key'],
-    pips_model: ['main', 'base_url', 'api_mode', 'api_key'] };
+    pips_model: ['main', 'base_url', 'api_mode', 'api_key'],
+    saved_provider_model: ['main', 'saved_provider_url', 'saved_provider_mode', 'saved_provider_key'] };
 /** A field's value as typed: from the page when it is on it, else from what was typed on another page. */
 const typedValue = id => String($(id) ? $(id).value : (draft[id] ?? '')).trim();
 const sameHost = (a, b) => a.replace(/\/+$/, '').toLowerCase() === b.replace(/\/+$/, '').toLowerCase();
@@ -108,6 +109,13 @@ const sameHost = (a, b) => a.replace(/\/+$/, '').toLowerCase() === b.replace(/\/
 function modelRoute(id) {
     const [role, urlId, modeId, keyId] = MODEL_ROUTES[id] || [];
     if (!role) return null;
+    // Add provider: a host that needs a key lists nothing without one, and a refusal before it's typed would only be noise.
+    if (id === 'saved_provider_model') {
+        const url = typedValue(urlId), key = typedValue(keyId);
+        if (!url) return null;
+        if (!key && providers.find(row => row.id === providerForm.preset)?.needsKey) return null;
+        return { role, base_url: url, api_mode: typedValue(modeId) || 'auto', ...(key ? { api_key: key } : {}) };
+    }
     const mainUrl = typedValue('base_url');
     const url = typedValue(urlId) || (role === 'main' ? '' : mainUrl);
     if (!url) return null;
@@ -117,7 +125,10 @@ function modelRoute(id) {
     return { role, base_url: url, api_mode: mode, ...(key ? { api_key: key } : {}) };
 }
 const modelBoxes = createModelBoxes({ send: m => vscode.postMessage(m), route: modelRoute,
-    fields: id => (MODEL_ROUTES[id] || []).slice(1) });
+    fields: id => (MODEL_ROUTES[id] || []).slice(1),
+    // Add provider: All models comes first, and is what's chosen until another is.
+    first: id => (id === 'saved_provider_model' ? 'All models' : ''),
+    idleNote: id => (id === 'saved_provider_model' ? 'Enter the host and its key to list its models.' : '') });
 // Settings -> Models -> DGC Router (settingsRouter.js): its switch and Systems list save at once, apart from Save all.
 // When the Router goes on or off the page is drawn again (Sub-agents and Pips read differently); otherwise only the
 // Router's own block and the Sub-agents line follow its status.
@@ -350,7 +361,8 @@ function render() {
         main.innerHTML = '<h2>' + sections.find(([id]) => id === section)[1] + '</h2><p class="sub" role="status">Reading settings from DGC…</p>';
         return;
     }
-    ui.providerProfiles=savedProfiles;ui.providerDraft=providerForm;ui.defaultProviderId=defaultProviderId;ui.directProvider=directProvider;
+    ui.providerProfiles=savedProfiles;ui.providerDraft=providerForm;ui.defaultProviderId=defaultProviderId;ui.defaultProviderModel=defaultProviderModel;ui.directProvider=directProvider;
+    ui.choosingDefaultId=choosingDefaultId;ui.providerModels=providerModelLists;ui.typingDefaultModel=typingDefaultModel;
     const savedFormOpen=section==='models' && main.querySelector('details[data-more="saved-providers"]')?.open;
     renderFields(section, main, draft, providers, ui);
     if(section==='models'){
@@ -385,15 +397,47 @@ function render() {
         main.querySelector('#saved-provider-add')?.addEventListener('click',()=>{
             const status=main.querySelector('#saved-provider-status');if(status)status.textContent='Saving provider…';
             if(!providerForm.preset){if(status)status.textContent='Choose a provider first.';return;}
-            send({type:'addProviderProfile',profile:{...providerForm}});
+            // "All models" is the blank model: each chat chooses from what the host lists.
+            const named=String(providerForm.model||'').trim();
+            send({type:'addProviderProfile',profile:{...providerForm,model:/^all models$/i.test(named)?'':named}});
         });
         main.querySelectorAll('[data-provider-remove]').forEach(button=>button.addEventListener('click',()=>send({type:'removeProviderProfile',id:button.dataset.providerRemove})));
         main.querySelectorAll('[data-provider-default]').forEach(box=>box.addEventListener('change',()=>{
+            const id=box.dataset.providerDefault,row=savedProfiles.find(item=>item.id===id);
+            // Ticked but still waiting for its model: cleared, the default stays where it was.
+            if(!box.checked&&choosingDefaultId===id){choosingDefaultId='';typingDefaultModel='';snapshot();render();return;}
             // One is always the default: its own box can't be cleared, only another one chosen.
             if(!box.checked){box.checked=true;return;}
+            // An All models provider needs its model first: the default moves when one is chosen on its row.
+            if(row&&row.kind!=='subscription'&&!row.model){choosingDefaultId=id;typingDefaultModel='';snapshot();render();main.querySelector(`[data-provider-default-model="${id}"]`)?.focus();return;}
+            choosingDefaultId='';typingDefaultModel='';
             main.querySelectorAll('[data-provider-default]').forEach(other=>{if(other!==box)other.checked=false;other.disabled=true;});
-            send({type:'setProviderDefault',id:box.dataset.providerDefault});
+            send({type:'setProviderDefault',id});
         }));
+        // Each default row's dropdown lists its own provider's models, once.
+        main.querySelectorAll('[data-provider-default-model]').forEach(pick=>{
+            const id=pick.dataset.providerDefaultModel;
+            if(!providerModelLists[id]){providerModelLists[id]={loading:true,ids:[]};send({type:'providerModels',id});pick.options[0]&&!pick.value&&(pick.options[0].textContent=savedProfiles.find(row=>row.id===id)?.kind==='subscription'?'CLI default':'Listing its models…');}
+            pick.addEventListener('change',()=>{
+                if(pick.value==='--other--'){typingDefaultModel=id;snapshot();render();const typed=main.querySelector(`[data-provider-default-typed="${id}"]`);typed?.focus();typed?.select?.();return;}
+                const row=savedProfiles.find(item=>item.id===id);
+                if(!pick.value&&row?.kind!=='subscription')return;
+                pick.disabled=true;
+                send({type:'setProviderDefault',id,model:pick.value});
+            });
+        });
+        main.querySelectorAll('[data-provider-default-typed]').forEach(typed=>{
+            const id=typed.dataset.providerDefaultTyped;
+            const finish=commit=>{
+                if(typingDefaultModel!==id)return;
+                typingDefaultModel='';
+                const name=typed.value.trim();
+                if(commit&&name){typed.disabled=true;send({type:'setProviderDefault',id,model:name});return;}
+                snapshot();render();
+            };
+            typed.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();finish(true);}else if(event.key==='Escape'){event.preventDefault();event.stopPropagation();finish(false);}});
+            typed.addEventListener('blur',()=>finish(true));
+        });
     }
     // Sub-agents' Context window: a size typed or picked (src/contextCombo.js), as DGC Router's Context each.
     const subWindow = main.querySelector('#subagent_context_size')?.closest('[data-ctx-combo]');
@@ -1323,6 +1367,8 @@ window.addEventListener('message', event => {
     if (images.receive(msg)) return;
     if (msg.type === 'show') {
         navTo(msg.section, msg.range);
+        // Asked for by name (a Pip's Connect card): the plugin directory, searching for it.
+        if (typeof msg.browse === 'string' && section === 'plugins') { lane = 'plugins'; detail = ''; directory = true; query = msg.browse; render(); }
     }
     else if (msg.type === 'picturesInReplies') {
         draft.pictures_in_replies = msg.value === 'folded' ? 'folded' : 'shown';
@@ -1338,13 +1384,22 @@ window.addEventListener('message', event => {
             render();
         }
     }
+    else if(msg.type==='providerModels'){
+        const id=String(msg.id||'');
+        if(id){providerModelLists[id]={ids:Array.isArray(msg.ids)?msg.ids.filter(model=>typeof model==='string'):[],error:typeof msg.error==='string'?msg.error:''};if(config&&section==='models'){snapshot();render();}}
+    }
     else if(msg.type==='providerProfiles'){
         savedProfiles=Array.isArray(msg.profiles)?msg.profiles:[];
-        defaultProviderId=String(msg.defaultId||'');directProvider=msg.direct&&typeof msg.direct==='object'?msg.direct:null;
+        defaultProviderId=String(msg.defaultId||'');defaultProviderModel=String(msg.defaultModel||'');directProvider=msg.direct&&typeof msg.direct==='object'?msg.direct:null;
+        // The first provider saved with no model: its row asks. Otherwise, whatever was being chosen has happened, or has gone.
+        choosingDefaultId=typeof msg.chooseDefault==='string'?msg.chooseDefault:savedProfiles.some(row=>row.id===choosingDefaultId)&&defaultProviderId!==choosingDefaultId?choosingDefaultId:'';
+        typingDefaultModel='';
+        for(const id of Object.keys(providerModelLists))if(!savedProfiles.some(row=>row.id===id))delete providerModelLists[id];
         if(msg.saved){providerForm={preset:'',kind:'native',engine:'',name:'',base_url:'',model:'',api_mode:'auto',api_key:''};}
         if(config&&section==='models'){snapshot();render();}
     }
     else if(msg.type==='providerProfileError'){
+        if(config&&section==='models'){snapshot();render();}      // a tick or a dropdown that was waiting goes back to what is so
         const form=$('page').querySelector('details[data-more="saved-providers"]');if(form)form.open=true;
         const status=$('saved-provider-status');if(status)status.textContent=String(msg.message||'Could not save provider.');
     }

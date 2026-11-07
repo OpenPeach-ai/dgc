@@ -132,6 +132,8 @@ test("ChatDGC: a sent prompt carries clean words and its marks; the bubble keeps
       const bubble = document.querySelector(".cd-user .cd-bubble"), plugin = bubble.querySelector(".sent-mention.pill-plugin"), output = bubble.querySelector(".sent-mention.pill-artifact");
       return { text: bubble.textContent, logo: !!plugin.querySelector("img"), icon: output.querySelector(".composer-artifact-mark").className,
         plugin: getComputedStyle(plugin).color, words: getComputedStyle(output.querySelector(".composer-artifact-name")).color,
+        glyph: getComputedStyle(output.querySelector(".composer-artifact-mark")).color,
+        glyphFill: getComputedStyle(output.querySelector(".composer-artifact-mark")).webkitTextFillColor,
         moving: getComputedStyle(output.querySelector(".composer-artifact-name")).animationName };
     });
     assert.equal(look.text, "Make Slides with Composio");
@@ -139,6 +141,8 @@ test("ChatDGC: a sent prompt carries clean words and its marks; the bubble keeps
     assert.match(look.icon, /codicon-preview/, "the Output's icon, the one its menu has");
     assert.equal(look.plugin, "rgb(216, 214, 223)", "the plugin's name is light grey");
     assert.equal(look.words, "rgb(216, 214, 223)", "the Output's name is light grey");
+    assert.equal(look.glyph, "rgb(216, 214, 223)", "an Output's icon isn't a logo: it takes the grey of its name");
+    assert.equal(look.glyphFill, "rgb(216, 214, 223)", "and what paints it does too");
     assert.equal(look.moving, "composerArtifactWords", "and it still moves");
     // The backend's copy of the message draws the same, so a reload does.
     await s.send({ type: "opened", conversation: CONVERSATION, models: ["m"], messages: [{ id: `msg_${"1".repeat(32)}`, role: "user", text: sent.text, created_at: "2026-11-06T10:00:00Z", display_mentions: sent.display_mentions }] });
@@ -159,7 +163,12 @@ test("ChatDGC on a light theme: the marks can be read, in the box and in the bub
     await s.page.keyboard.type("Make @slid");
     await s.page.keyboard.press("Tab");
     assert.ok(dark(await s.page.locator("#cd-input .composer-artifact-name").evaluate((n) => getComputedStyle(n).color)) < 0.45, "a word in the box is no pale lilac on white");
+    const boxGlyph = await s.page.locator("#cd-input .composer-artifact-mark").evaluate((n) => getComputedStyle(n).color);
     await s.page.keyboard.press("Enter");
+    const [sentGlyph, sentName] = await s.page.locator(".cd-user .sent-mention.pill-artifact").evaluate((n) => [
+      getComputedStyle(n.querySelector(".composer-artifact-mark")).color, getComputedStyle(n.querySelector(".composer-artifact-name")).color]);
+    assert.equal(sentGlyph, sentName, "the icon in the bubble is the grey of its name");
+    assert.notEqual(sentGlyph, boxGlyph, "and the box's stays purple");
     assert.ok(dark(await s.page.locator(".cd-user .sent-mention .composer-artifact-name").evaluate((n) => getComputedStyle(n).color)) < 0.5, "nor the bubble's grey on its lilac");
   } finally { await s.page.close(); }
 });

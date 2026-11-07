@@ -474,4 +474,6 @@ input[type=checkbox],input[type=radio]{height:auto;padding:0;accent-color:var(--
 .ctx-combo-said,.ctx-combo-note,.ctx-combo-cost{font-size:11px;line-height:1.35;color:var(--muted);overflow-wrap:anywhere}
 .ctx-combo-note,.ctx-combo-cost.over{color:var(--vscode-editorWarning-foreground,var(--text))}
 .ctx-combo-note[hidden],.ctx-combo-cost[hidden]{display:none}
+/* A default row's dropdown sits between its tick and Remove, and takes what room they leave. */
+.provider-row>.host-control{flex-wrap:wrap;row-gap:6px}.provider-row.with-default-model>.host-control{align-items:center}.provider-row.with-default-model .provider-default-check,.provider-row.with-default-model .provider-default-only{margin-right:0}.host-control .provider-default-model{flex:1 1 130px;width:auto;min-width:0}
 .provider-default-check,.provider-default-only{display:inline-flex;align-items:center;gap:6px;flex:none;margin-right:auto;font-size:12px;color:var(--vscode-descriptionForeground)}.provider-default-check{cursor:pointer}.provider-problem{color:var(--err-text,var(--vscode-errorForeground))}

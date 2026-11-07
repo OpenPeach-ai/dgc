@@ -30,7 +30,7 @@ function fingerprint(text) {
  * typed: {role, base_url, api_mode, api_key} (api_key only when one is typed in the form), or null for nothing to
  * list yet. `fields(id)` names the inputs whose changes make it list again.
  */
-export function createModelBoxes({ send, route, fields }) {
+export function createModelBoxes({ send, route, fields, first = () => '', idleNote = () => '' }) {
     const boxes = new Map();          // id -> {sig, token, state: 'idle'|'loading'|'ready'|'error', ids, error}
     const timers = new Map();
     let seq = 0;
@@ -69,7 +69,7 @@ export function createModelBoxes({ send, route, fields }) {
     function options(id) {
         const input = main.querySelector('#' + id), b = box(id);
         const typed = String(input?.value || '').trim().toLowerCase();
-        const all = b.ids;
+        const all = first(id) ? [first(id), ...b.ids] : b.ids;
         // Opened on a name that is in the list (or empty): everything, so you can pick another. Typing filters.
         const filtering = input?.dataset.filter === '1' && typed && !all.some((m) => m.toLowerCase() === typed);
         return (filtering ? all.filter((m) => m.toLowerCase().includes(typed)) : all).slice(0, SHOWN_MAX);
@@ -81,10 +81,12 @@ export function createModelBoxes({ send, route, fields }) {
         const shown = options(id), current = String(input.value || '').trim();
         const note = (text) => `<li class="model-box-note" role="presentation">${escape(text)}</li>`;
         let html = shown.map((m, i) => `<li role="option" id="${id}-opt-${i}" data-model="${escape(m)}" aria-selected="${m === current}">${escape(m)}</li>`).join('');
-        if (b.state === 'loading' && !shown.length) html = note('Listing the models at this host…');
-        else if (b.state === 'error' && !shown.length) html = note("Couldn't list the models at this host. Type the model's name.");
-        else if (b.state === 'idle' && !shown.length) html = note('Enter the host URL to list its models.');
-        else if (!shown.length) html = note(b.ids.length ? 'No model here matches. Keep typing to use that name.' : 'This host lists no models. Type the model\'s name.');
+        // What the list has to say: under a first row that is always there (All models), or in place of an empty list.
+        const listed = shown.filter((m) => m !== first(id)).length;
+        if (b.state === 'loading' && !listed) html += note('Listing the models at this host…');
+        else if (b.state === 'error' && !listed) html += note("Couldn't list the models at this host. Type the model's name.");
+        else if (b.state === 'idle' && !listed) html += note(idleNote(id) || 'Enter the host URL to list its models.');
+        else if (!listed) html += note(b.ids.length ? 'No model here matches. Keep typing to use that name.' : 'This host lists no models. Type the model\'s name.');
         listbox.innerHTML = html;
         input.removeAttribute('aria-activedescendant');
         listbox.querySelectorAll('[role=option]').forEach((li) => {
@@ -164,6 +166,8 @@ export function createModelBoxes({ send, route, fields }) {
         for (const [id, b] of boxes) {
             if (b.token !== msg.token) continue;
             if (msg.unsupported) Object.assign(b, { state: 'error', ids: [], error: 'update the DGC CLI to list them here' });
+            // Another box's list took its turn at the CLI (one at a time, for each role): this one asks again.
+            else if (msg.error === 'a newer request replaced this one') { b.sig = ''; later(id); continue; }
             else if (msg.error) Object.assign(b, { state: 'error', ids: [], error: String(msg.error).replace(/\.$/, '') });
             else Object.assign(b, { state: 'ready', ids: Array.isArray(msg.ids) ? msg.ids.filter((m) => typeof m === 'string') : [], error: '' });
             paint(id);

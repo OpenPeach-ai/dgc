@@ -1100,6 +1100,34 @@ test("sent slash, file and command names stay muted on the prompt baseline", asy
     JSON.stringify(marks));
 });
 
+test("on a subscription Work's @ list says a plugin isn't available there, and what to do; it can't be chosen", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  await freshComposer([]);
+  const rows = (text) => page.evaluate(async (typed) => {
+    const input = document.getElementById("input");
+    input.replaceChildren(); input.focus();
+    document.execCommand("insertText", false, typed);
+    await new Promise((r) => setTimeout(r, 250));
+    return [...document.querySelectorAll("#pop .pi")].map((row) => ({ words: row.textContent.replace(/\\s+/g, " ").trim(), off: row.getAttribute("aria-disabled") }));
+  }, text);
+  await page.evaluate(() => {
+    window.postMessage({type: "event", event: {type: "plugin_catalog", items: [{name: "composio", display_name: "Composio", connected: true}]}}, "*");
+    window.postMessage({type: "state", state: {model: "m", think: "off", mode: "default", subscriptionEngine: ""}}, "*");
+  });
+  await page.waitForTimeout(100);
+  const native = (await rows("@compos")).find((row) => row.words.includes("Composio"));
+  assert.equal(native.off, "false", "on a native route it can be chosen, as ever");
+  assert.match(native.words, /Connected/);
+  await page.evaluate(() => window.postMessage({type: "state", state: {model: "opus", think: "off", mode: "default", subscriptionEngine: "claude"}}, "*"));
+  await page.waitForTimeout(100);
+  const cli = (await rows("@compos")).find((row) => row.words.includes("Composio"));
+  assert.equal(cli.off, "true");
+  assert.match(cli.words, /Not available with Claude Code in Work\. Switch provider, or use ChatDGC or a Pip\./);
+  await page.keyboard.press("Enter");
+  assert.equal(await page.locator("#input .pill-plugin").count(), 0, "Enter takes nothing");
+  await page.evaluate(() => { document.getElementById("input").replaceChildren(); window.postMessage({type: "state", state: {model: "m", think: "off", mode: "default", subscriptionEngine: ""}}, "*"); });
+});
+
 test("sent plugin, output and Pip keep their artwork inline while only names turn grey", async (t) => {
   if (skipReason()) return t.skip(skipReason());
   await freshComposer([]);
@@ -1135,7 +1163,7 @@ test("sent plugin, output and Pip keep their artwork inline while only names tur
       outputIcon: artifact.querySelector(".composer-artifact-mark")?.className,
       pipFace: !!pip.querySelector(".composer-pip-face"),
       colors: [plugin.querySelector(".composer-plugin-name"), artifact.querySelector(".composer-artifact-name"),
-        pip.querySelector(".composer-pip-name")].map(node => getComputedStyle(node).color),
+        pip.querySelector(".composer-pip-name"), artifact.querySelector(".composer-artifact-mark")].map(node => getComputedStyle(node).color),
       alignment};
   });
   assert.equal(result.text, "Use Composio to make a Page and ask Core to act.");

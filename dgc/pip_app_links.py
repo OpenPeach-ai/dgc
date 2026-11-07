@@ -2,10 +2,11 @@
 
 The Pip asks (``connect_app``): the controller records the request, and the editor shows a Connect
 card in the Pip's chat. The user's Connect makes the controller call Composio's
-``COMPOSIO_MANAGE_CONNECTIONS`` over the user's own Composio connection in Settings ("list" first,
-so an account already connected is used rather than a second sign-in; then "add"), and the editor
-opens the sign-in link from that reply. Once Composio lists an ACTIVE account for the app, it is this
-Pip's: the Pip reads it (``read_app``) through the controller, with the same closed read vocabulary
+``COMPOSIO_MANAGE_CONNECTIONS`` over the user's own Composio connection in Settings ("list" first: the
+accounts it already has go back to the card, and the user picks one; "add" when there are none, or for
+Use another account), and the editor opens the sign-in link from that reply. An account is linked only
+when the user names it or has just signed in to it, never because it is the first one listed. Then it is
+this Pip's: the Pip reads it (``read_app``) through the controller, with the same closed read vocabulary
 and checks as reviewed app reads, and anything it would send still waits for the user's Allow.
 
 The model never touches MCP, credentials or the sign-in link: both tools reach the controller over a
@@ -155,6 +156,13 @@ def apps_overview(registry) -> dict:
     return {"apps": [groups[k] for k in order][:40]}
 
 
+def composio_links(registry, pip_id) -> dict:
+    """This Pip's accounts in Composio, by toolkit: what its plugin calls are held to. Outlook through the Microsoft plugin
+    is an account of that plugin's, not one Composio knows."""
+    return {link["toolkit"]: link for link in connected(registry, pip_id)
+            if link.get("account") and link.get("server") != microsoft_mail.SERVER}
+
+
 def connected(registry, pip_id) -> list[dict]:
     """The apps this Pip may read: its connected cards, one per app, with what the controller needs."""
     out = []
@@ -240,6 +248,11 @@ def _manage(config, server, toolkit, action, *, manager_factory=None):
                            input_handler=lambda *a, **kw: {"action": "cancel"})
     finally:
         manager.stop_all()
+    return _manage_reply(raw, toolkit, action)
+
+
+def _manage_reply(raw, toolkit, action):
+    """One toolkit's answer in a COMPOSIO_MANAGE_CONNECTIONS reply."""
     try:
         if not isinstance(raw, str) or len(raw) > 262144:
             raise ValueError()
@@ -254,22 +267,44 @@ def _manage(config, server, toolkit, action, *, manager_factory=None):
         raise RegistryError("connect_failed", f"Composio could not {'list' if action == 'list' else 'start'} the {app_name(toolkit)} connection. Try again, or use Connect Apps in Composio.") from exc
 
 
-def _active(result, toolkit):
-    """The first ACTIVE account in a COMPOSIO_MANAGE_CONNECTIONS reply: (id, label), or None."""
+def _accounts(result, toolkit) -> list[dict]:
+    """Every ACTIVE account in a COMPOSIO_MANAGE_CONNECTIONS reply, as {id, label}, in Composio's order. There can be
+    several, and which one a Pip reads is the person's to say: nothing here picks one."""
     accounts = result.get("accounts")
     if not isinstance(accounts, list):
-        return None
+        return []
+    found, seen = [], set()
     for account in accounts[:64]:
         if not isinstance(account, dict) or str(account.get("status", "")).upper() != "ACTIVE":
             continue
         identity = account.get("id") or account.get("account_id") or account.get("connected_account_id")
-        if not valid_account_id(identity, toolkit):
+        if not valid_account_id(identity, toolkit) or identity in seen:
             continue
+        seen.add(identity)
         info = account.get("user_info") if isinstance(account.get("user_info"), dict) else {}
         label = next((v for v in (info.get("email"), account.get("email"), account.get("alias"), info.get("name"))
                       if isinstance(v, str) and 1 <= len(v) <= 160 and v.isprintable()), None)
-        return identity, (label or identity)[:160]
-    return None
+        found.append({"id": identity, "label": (label or identity)[:160]})
+    return found
+
+
+ADDRESS = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
+
+
+def _choices(row, accounts) -> dict:
+    """What a card lists: the accounts, an address the Pip's reason names first when one matches. ``wanted`` is that
+    address when none does, so the card can say so. The reason is the model's words: they only order a list that the
+    person chooses from, and never bind anything."""
+    named = [word.lower() for word in ADDRESS.findall(str(row["reason"] or ""))]
+    matches = [a for a in accounts if a["label"].lower() in named]
+    rest = [a for a in accounts if a not in matches]
+    return {"accounts": [{**a, **({"named": True} if a in matches else {})} for a in [*matches, *rest]],
+            "wanted": named[0] if named and not matches else ""}
+
+
+# The accounts Composio had when a sign-in was opened, by card: what `check` compares with, to tell the one that sign-in
+# added. Only as long as this process lives; a card it no longer knows goes back to the list, and nothing is assumed.
+_SIGN_INS: dict[str, frozenset] = {}
 
 
 def _owned(registry, link_id, actor):
@@ -278,8 +313,10 @@ def _owned(registry, link_id, actor):
     return _row(registry, link_id)
 
 
-def start(registry, config, link_id, actor, *, manager_factory=None) -> dict:
-    """The user's Connect: bind Outlook to Microsoft Mail, or use Composio for other apps."""
+def start(registry, config, link_id, actor, *, account=None, another=False, manager_factory=None) -> dict:
+    """The user's Connect: bind Outlook to Microsoft Mail, or use Composio for other apps. With Composio, an account is
+    linked only when it is named here (``account``, one the person chose from the list this answers with). ``another``
+    opens Composio's sign-in for one more, and nothing is linked until it shows up."""
     row = _owned(registry, link_id, actor)
     if row["status"] not in ("requested", "authorizing", "failed"):
         raise RegistryError("invalid_state", "This card is already settled.")
@@ -304,28 +341,43 @@ def start(registry, config, link_id, actor, *, manager_factory=None) -> dict:
                              error="Add Composio in Settings → Plugins first, then choose Connect again."), "redirect_url": None}
     server, fingerprint = found
     try:
-        listed = _manage(config, server, row["toolkit"], "list", manager_factory=manager_factory)
-        active = _active(listed, row["toolkit"])
-        if active:
+        accounts = _accounts(_manage(config, server, row["toolkit"], "list", manager_factory=manager_factory), row["toolkit"])
+        if account is not None:
+            # The one the person chose, if Composio still has it. Never another in its place.
+            chosen = next((a for a in accounts if a["id"] == account), None)
+            if chosen is None:
+                return {"link": _set(registry, link_id, status="requested", error=None), "redirect_url": None,
+                        "error": f"That {app_name(row['toolkit'])} account isn't in Composio now. Choose another.",
+                        **_choices(row, accounts)}
+            _SIGN_INS.pop(link_id, None)
             return {"link": _set(registry, link_id, status="connected", server=server, connection_digest=fingerprint,
-                                 account=active[0], label=active[1], error=None), "redirect_url": None, "connected": True}
+                                 account=chosen["id"], label=chosen["label"], error=None), "redirect_url": None, "connected": True}
+        if accounts and not another:
+            return {"link": _set(registry, link_id, status="requested", error=None), "redirect_url": None, **_choices(row, accounts)}
         added = _manage(config, server, row["toolkit"], "add", manager_factory=manager_factory)
         url = added.get("redirect_url") or added.get("redirectUrl")
         parts = urlsplit(url) if isinstance(url, str) and len(url) <= 4096 else None
         if not parts or parts.scheme != "https" or not parts.hostname or parts.username or parts.password:
-            active = _active(added, row["toolkit"])
-            if active:
-                return {"link": _set(registry, link_id, status="connected", server=server, connection_digest=fingerprint,
-                                     account=active[0], label=active[1], error=None), "redirect_url": None, "connected": True}
+            # No sign-in to open. An account in the answer may be one the person meant to leave out: it goes on the list.
+            listed = {a["id"]: a for a in [*accounts, *_accounts(added, row["toolkit"])]}
+            if listed:
+                return {"link": _set(registry, link_id, status="requested", error=None), "redirect_url": None,
+                        **({"error": f"Composio didn't offer a sign-in for another {app_name(row['toolkit'])} account. Add it "
+                                     "in Composio's own Connect Apps, then choose Link again."} if another else {}),
+                        **_choices(row, list(listed.values()))}
             raise RegistryError("connect_failed", f"Composio did not return a sign-in link for {app_name(row['toolkit'])}.")
     except RegistryError as exc:
         return {"link": _set(registry, link_id, status="failed", error=str(exc)[:500]), "redirect_url": None}
+    while len(_SIGN_INS) >= 64:
+        _SIGN_INS.pop(next(iter(_SIGN_INS)))
+    _SIGN_INS[link_id] = frozenset(a["id"] for a in accounts)
     link = _set(registry, link_id, status="authorizing", server=server, connection_digest=fingerprint, error=None)
-    return {"link": link, "redirect_url": url, "sign_in_host": parts.hostname}
+    return {"link": link, "redirect_url": url, "sign_in_host": parts.hostname, **({"accounts": accounts} if accounts else {})}
 
 
 def check(registry, config, link_id, actor, *, manager_factory=None) -> dict:
-    """After the browser: is there an ACTIVE account now? Connected if so; still waiting if not."""
+    """After the browser: the account that sign-in added is this card's. One new account connects, as the person just
+    signed in to it; none is still waiting; more than one, or a sign-in this process didn't open, goes back to the list."""
     row = _owned(registry, link_id, actor)
     if row["status"] == "connected":
         return {"link": projection(row), "connected": True}
@@ -335,12 +387,19 @@ def check(registry, config, link_id, actor, *, manager_factory=None) -> dict:
         return {"link": _set(registry, link_id, status="failed", error="Your Composio connection changed in Settings. Choose Connect again."),
                 "connected": False}
     try:
-        active = _active(_manage(config, row["server"], row["toolkit"], "list", manager_factory=manager_factory), row["toolkit"])
+        accounts = _accounts(_manage(config, row["server"], row["toolkit"], "list", manager_factory=manager_factory), row["toolkit"])
     except RegistryError as exc:
         return {"link": projection(row), "connected": False, "error": str(exc)}
-    if not active:
-        return {"link": projection(row), "connected": False}
-    return {"link": _set(registry, link_id, status="connected", account=active[0], label=active[1], error=None), "connected": True}
+    before = _SIGN_INS.get(link_id)
+    fresh = [a for a in accounts if before is not None and a["id"] not in before]
+    if len(fresh) == 1:
+        _SIGN_INS.pop(link_id, None)
+        return {"link": _set(registry, link_id, status="connected", account=fresh[0]["id"], label=fresh[0]["label"], error=None),
+                "connected": True}
+    if fresh or (before is None and accounts):
+        _SIGN_INS.pop(link_id, None)
+        return {"link": _set(registry, link_id, status="requested", error=None), "connected": False, **_choices(row, accounts)}
+    return {"link": projection(row), "connected": False, **({"accounts": accounts} if accounts else {})}
 
 
 def decline(registry, link_id, actor) -> dict:
@@ -598,7 +657,7 @@ class RunSocket:
                         return (f"A {card_name} card is below your reply, but Composio is not set up in DGC yet. "
                                 "Tell the user in one sentence to add Composio in Settings → Plugins, then choose the card.")
                     return (f"A {card_name} card is now below your reply. Tell the user in one sentence to choose "
-                            f"{card_name} there; an existing Composio sign-in can be reused. You will be told when it is linked. Do not paste links.")
+                            f"{card_name} there; they choose which account. You will be told when it is linked. Do not paste links.")
                 if op == "read_app":
                     toolkit = _toolkit(args.get("app"))
                     app = next((a for a in connected(registry, self.pip_id) if a["toolkit"] == toolkit), None)

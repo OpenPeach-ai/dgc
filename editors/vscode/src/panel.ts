@@ -11,7 +11,7 @@ import { basename, isAbsolute, join, resolve, sep } from "path";
 import { AttachMode, AttachedChatState, ChildExitInfo, DgcBackend, DgcEvent, MOVED_CAUSE, STOP_CAUSE } from "./backend";
 import { ChatBackend, OpenedChat } from "./chatChannel";
 import { CHATDGC_WINDOWS, isChatdgcEvent, isChatdgcModsEvent, type ChatDGC, type ChatDGCHost } from "./chatdgc";
-import { artifactsOffer, outputChoice, type Artifacts } from "./artifacts";
+import { artifactsOffer, forwardedArtifactPage, outputChoice, type Artifacts } from "./artifacts";
 import { keepRunningAfterClose } from "./closingTab";
 import { editorName, holderFacts, holderLine, type HolderFacts, type HolderLine } from "./holderWords";
 import { Dictation, MIC_MESSAGES, ReadAloud, SPEAK_MESSAGES, VoiceClient, type DictationOwner } from "./voice";
@@ -34,7 +34,7 @@ import { pipsAttention, PipsAttentionState } from "./pipsAttention";
 import { settingsDocument } from "./settingsView";
 import { onPicturesSetting, pictureFoldsMessage, rememberPictureFold, setPicturesInReplies, picturesFolded } from "./pictureFolds";
 import { pipHomeDismissedAttr, rememberPipHomeDismissed } from "./pipHomeDismiss";
-import { addProfile, adoptWorkingRoute, defaultProfileId, firstTakesDefault, listProfiles, markDefaultProfile, profileCredential, removeProfile } from "./providerProfiles.js";
+import { addProfile, adoptWorkingRoute, defaultProfileId, firstTakesDefault, hasRunnableProfile, listProfiles, markDefaultProfile, profileCredential, removeProfile, startingModel } from "./providerProfiles.js";
 
 function isSlashCommandText(text: string): boolean {
   if (!text.startsWith("/")) { return false; }
@@ -224,6 +224,8 @@ const MAX_PARALLEL_TASKS = 32;
 const PIPS_MODEL_RE = /^[A-Za-z0-9_][A-Za-z0-9._:/@+\-]{0,255}$/;
 
 const endpointId = (value: unknown): string => String(value || "").trim().replace(/\/$/, "").toLowerCase();
+/** A saved route's host, for a line in the output channel: never its path, and never anything that could hold a secret. */
+const hostOfEndpoint = (value: unknown): string => { try { return new URL(String(value)).host || "another address"; } catch { return "another address"; } };
 
 // The sub-agents' context window as the CLI keeps it (dgc/config.py subagent_window_arg): 0 is the main model's,
 // otherwise 2,048 to 16,777,216 tokens. Blank, 0 or anything unreadable saves 0; a number outside is brought inside.
@@ -721,6 +723,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  both once the request is answered, to cancel that sign-in rather than the chat's turn. */
   private openedSignIn?: { id: string; be: ChatBackend };
   private settingsSelection = { section: "general", range: "7d" };
+  private settingsBrowse?: string;
   private settingsCatalog: any[] = [];
   private settingsInstalls = new Map<string, string>();
   private settingsPreviews = new Map<string, any>();
@@ -910,6 +913,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // Settings -> General -> Pictures in replies: this page's pictures nobody folded or opened follow it at once.
     this.context.subscriptions.push(onPicturesSetting((message) => this.post(message)));
     if (tab) { return; }
+    mcpAppsHost(this.context.extensionUri).logoOf = (plugin) => this.replyPluginLogo(plugin);
     // The saved default is the whole profile's: another window may have changed it while this one was in the background.
     if (typeof vscode.window.onDidChangeWindowState === "function") {
       this.context.subscriptions.push(vscode.window.onDidChangeWindowState(() => {
@@ -1155,12 +1159,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async chatdgcModels(providerId = ""): Promise<{ ids: string[]; current: string;
-      profiles: any[]; defaultId: string; providerId: string; noProvider?: boolean }> {
+      profiles: any[]; defaultId: string; providerId: string; noProvider?: boolean; listError?: string }> {
     const saved = listProfiles(this.context);
     const defaultId = defaultProfileId(this.context);
     const profiles = saved.map(row => ({ id: row.id, name: row.name,
       kind: row.kind === "subscription" ? "subscription" : "native",
-      model: row.model, ...(row.kind === "subscription" ? { engine: row.engine } : {}) }));
+      model: startingModel(this.context, row), ...(row.kind === "subscription" ? { engine: row.engine } : {}) }));
     const defaultProfile = saved.find(row => row.id === defaultId);
     // The default isn't a saved provider (an upgrade on a host with a key): it stays in the list, as in Work's menu.
     if (!defaultProfile && saved.length && !this.noProvider() && !this.routeState.subscriptionEngine) {
@@ -1170,7 +1174,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const current = defaultProfile
       ? defaultProfile.kind === "subscription"
         ? `subscription:${defaultProfile.engine}${defaultProfile.model ? `:${defaultProfile.model}` : ""}`
-        : `provider:${defaultProfile.id}:${defaultProfile.model}`
+        : `provider:${defaultProfile.id}:${startingModel(this.context, defaultProfile)}`
       : String(this.state.model || "");
     const selected = saved.find(row => row.id === providerId) || defaultProfile;
     // No provider: nothing to list and no model to claim. ChatDGC says so and points to Settings.
@@ -1196,16 +1200,36 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     try {
       const { route, api_key } = await profileCredential(this.context, selected.id);
       if (route.kind === "subscription") throw new Error("Choose a model host.");
-      const ev: any = await this.requestState(this.ensureBackend(), "chat-models-at", {
-        type: "list_models_at", role: "main", base_url: route.base_url, api_key,
-        api_mode: route.api_mode,
-      }, "models_at", 10000);
+      const ev = await this.modelsAtProvider(route.base_url, api_key, route.api_mode);
       const ids = Array.isArray(ev.ids) ? ev.ids.filter((id: unknown): id is string => typeof id === "string") : [];
-      if (!ids.includes(route.model)) ids.unshift(route.model);
-      return { ids, current, profiles, defaultId, providerId: selected.id };
+      // An All models provider has nothing of its own to add, and never lists an empty name: what the host offers is the list.
+      const starting = startingModel(this.context, route);
+      if (starting && !ids.includes(starting)) ids.unshift(starting);
+      return { ids, current, profiles, defaultId, providerId: selected.id, ...(typeof ev.error === "string" && ev.error ? { listError: ev.error } : {}) };
     } catch {
-      return { ids: [selected.model], current, profiles, defaultId, providerId: selected.id };
+      const starting = startingModel(this.context, selected);
+      return { ids: starting ? [starting] : [], current, profiles, defaultId, providerId: selected.id, listError: "DGC didn't answer" };
     }
+  }
+
+  /** The models at one saved provider's host. The CLI runs one list at a time and a newer one replaces one still waiting
+   *  (dgc/headless.py _list_models_at), which is right for a Settings box being typed in. A provider isn't being typed in,
+   *  and with no model of its own this list is all it has: it asks again. */
+  private async modelsAtProvider(base_url: string, api_key: string, api_mode: string): Promise<any> {
+    for (let attempt = 0; ; attempt++) {
+      const ev: any = await this.requestState(this.ensureBackend(), "chat-models-at", {
+        type: "list_models_at", role: "main", base_url, api_key, api_mode,
+      }, "models_at", 10000);
+      if (ev.error !== "a newer request replaced this one" || attempt >= 8) return ev;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  }
+
+  /** One saved provider's models, as Work's menu and Settings' row list them. No address and no key reaches the page. */
+  private async providerModels(id: string): Promise<{ type: "providerModels"; id: string; ids: string[]; error?: string }> {
+    const { ids, listError } = await this.chatdgcModels(id);
+    const listed = ids.filter((model) => typeof model === "string");
+    return { type: "providerModels", id, ids: listed, ...(listError ? { error: String(listError).slice(0, 200) } : {}) };
   }
 
   /** The side bar becomes the Sessions home: its own chat starts empty rather than on the window's
@@ -1257,7 +1281,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // With no tab on screen it describes what a new chat would use: the side bar's own chat started on whatever was the
     // default when the window opened, and the saved default moves on without it.
     const saved = this.tab ? undefined : listProfiles(this.context).find((row) => row.id === defaultProfileId(this.context));
-    const model = saved ? saved.model || saved.name : this.state.model;
+    const model = saved ? startingModel(this.context, saved) || saved.name : this.state.model;
     this.sb.text = `$(circuit-board) ${model || "dgc"} · ${profile} · ${this.state.mode}`;
     this.sb.tooltip = `DGC — ${model || "no model"} · ${profile} reasoning · ${this.state.mode} mode · click to change model`;
     this.sb.show();
@@ -1268,7 +1292,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  exist. An older CLI doesn't say, and keeps what it showed. */
   private noProvider(): boolean {
     if ((this.lastReadyEvent?.capabilities as any)?.model_chosen !== false) return false;
-    if (listProfiles(this.context).length || this.routeState.subscriptionEngine) return false;
+    if (hasRunnableProfile(this.context) || this.routeState.subscriptionEngine) return false;
     if (String(this.state.model || "") !== String(this.lastReadyEvent?.model || "")
         || String(this.state.baseUrl || "") !== String(this.lastReadyEvent?.base_url || "")) return false;
     const settings = vscode.workspace.getConfiguration("dgc");
@@ -4075,7 +4099,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           this.sessionRestoreSaved = saved?.saved !== false;
         }
         this.lastReadyEvent = ev;
-        this.startedWithoutProvider = (ev.capabilities as any)?.model_chosen === false && !listProfiles(this.context).length;
+        this.startedWithoutProvider = (ev.capabilities as any)?.model_chosen === false && !hasRunnableProfile(this.context);
         // A finished background agent's report, drawn as its own line in the chat (agent_report). Asked with the
         // handshake, ahead of the session this chat restores, so the history it replays has those lines too. A
         // backend that doesn't offer it is never asked, and its wake turns keep the plain "Woke on agent" note.
@@ -4957,7 +4981,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (["backend_exit", "cleared"].includes(msg?.type)) {
       this.settleGoalEdit("The backend stopped before confirming the goal edit. Check the saved goal before trying again.");
     }
-    if (["backend_exit", "cleared"].includes(msg?.type)) { this.pipsEditor?.offline(); this.pipsTab?.offline(); }
+    if (["backend_exit", "cleared"].includes(msg?.type)) {
+      const failed = msg.type === "backend_exit" && msg.recovering !== true;
+      this.pipsEditor?.offline(failed); this.pipsTab?.offline(failed);
+    }
     // A settings-side MCP write reports its progress to the settings tab, not into the chat. The
     // counter alone could not say WHICH webview started the command, and it is held across a
     // request that may take three minutes -- so a /mcp the user typed in chat during that window
@@ -5627,7 +5654,21 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.listModels();
         break;
       case "setSubscription":
-        await this.selectSubscription(String(msg.engine || ""));
+        await this.selectSubscription(String(msg.engine || ""), typeof msg.model === "string" ? msg.model.trim().slice(0, 256) : "");
+        break;
+      case "providerModelTyped":
+        // A host that lists none: its model by name.
+        if (typeof msg.id === "string" && msg.id.startsWith("provider_")) {
+          const typed = await vscode.window.showInputBox({ prompt: "Model name for this provider", placeHolder: "The name the host knows it by",
+            validateInput: (value) => (value.trim().length > 256 ? "Use up to 256 characters." : undefined) });
+          if (typed?.trim()) await this.selectSubscription(msg.id, typed.trim());
+        }
+        break;
+      case "providerModels":
+        // Work's menu, an All models provider: what its host offers, before anything moves.
+        if (typeof msg.id === "string" && msg.id.startsWith("provider_")) {
+          this.post(await this.providerModels(msg.id).catch(() => ({ type: "providerModels" as const, id: String(msg.id), ids: [], error: "DGC didn't answer" })));
+        }
         break;
       case "setModel":
         {
@@ -5673,7 +5714,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
       case "openSettings":
         // The header gear. It opens the standalone Settings tab beside the chat.
-        this.openSettings(typeof msg.section === "string" ? msg.section : "general");
+        this.openSettings(typeof msg.section === "string" ? msg.section : "general", undefined,
+                          typeof msg.browse === "string" ? msg.browse.slice(0, 80) : undefined);
         break;
       case "pickMode":
         this.setMode();
@@ -6239,7 +6281,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (parsed.username || parsed.password || !["http:", "https:"].includes(parsed.protocol)) {
         throw new Error("unsupported external URL");
       }
-      await vscode.env.openExternal(vscode.Uri.parse(parsed.toString(), true));
+      // A link to DGC's artifact page, in a remote window: the artifact's own forwarded address (src/artifacts.ts).
+      await vscode.env.openExternal(await forwardedArtifactPage(parsed.toString()) ?? vscode.Uri.parse(parsed.toString(), true));
     } catch {
       void vscode.window.showErrorMessage("DGC refused an invalid or unsafe external URL.");
     }
@@ -7504,6 +7547,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   // ---- model listing --------------------------------------------------------
+  /** Each saved key's "not sent" line, said once per address in this window (src/panel.ts keyNotSent). */
+  private readonly keysNotSent = new Set<string>();
   private async deleteSecret(id: "apiKey" | "subagentApiKey" | "fallbackApiKey"): Promise<void> {
     const key = `dgc.${id}`;
     await this.context.secrets.delete(key);
@@ -7585,13 +7630,29 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       return "";
     }
     if (boundEndpoint !== endpointId(endpoint)) {
-      // A workspace can override provider URLs. Fail closed for the active endpoint without letting
-      // that workspace erase a user-owned credential that remains valid for its original host.
-      void vscode.window.showWarningMessage(
-        "DGC did not send a provider key because it is bound to a different endpoint.");
+      // Fail closed for the active endpoint without erasing a user-owned credential that remains valid for its own host.
+      this.keyNotSent(id, boundEndpoint, endpoint);
       return "";
     }
     return secret;
+  }
+
+  /** A saved key stayed home because this route's address isn't the one it is bound to. That is usually just the default
+   *  having moved to another provider (a key for OpenAI, a default on Ollama): nothing to do, so a line in the output
+   *  channel, once. A toast only when a person can act: this workspace's settings name another address, and DGC reads a
+   *  provider's address from the user's settings alone. */
+  private keyNotSent(id: ProviderSecretId, bound: string, endpoint: string): void {
+    const said = (this.tab?.host ?? this).keysNotSent;
+    const what = id === "apiKey" ? "the main provider" : id === "subagentApiKey" ? "sub-agents" : "the fallback";
+    const setting = id === "apiKey" ? "baseUrl" : id === "subagentApiKey" ? "subagentBaseUrl" : "fallbackBaseUrl";
+    const key = `${id} ${bound} ${endpointId(endpoint)}`;
+    if (said.has(key)) return;
+    said.add(key);
+    this.backendLog?.appendLine(`DGC did not send the key saved for ${what}: it is bound to ${hostOfEndpoint(bound)}, and this route uses ${hostOfEndpoint(endpoint)}.`);
+    if (userScopedString(setting).ignoredWorkspaceOverride) {
+      void vscode.window.showWarningMessage(
+        `This workspace's settings set dgc.${setting}. DGC takes a provider's address only from your user settings, so it did not send your saved key to that workspace's address. Choose the provider in Settings → Models, or remove that workspace setting.`);
+    }
   }
 
   /** Commit provider credentials only after every corresponding backend state command has
@@ -7675,12 +7736,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // The engine catalogue describes what the backend could support. The Work picker is a list
     // of configured routes, so an uninstalled or never-added CLI does not appear here.
     const saved = listProfiles(this.context);
+    // A session may run on any model of a provider's host, and an All models provider names none: its host says which it is.
     const currentProfile = !this.routeState.subscriptionEngine
       ? saved.find(row => row.base_url === this.state.baseUrl && row.model === this.routeState.nativeModel)
+        ?? saved.find(row => row.base_url === this.state.baseUrl && !row.model)
       : undefined;
     const currentSubscription = saved.find(row => row.kind === "subscription"
       && row.engine === this.routeState.subscriptionEngine);
-    const routes = saved.map(row => ({ key: row.id, label: row.name }));
+    // allModels: choosing it lists what its host offers, and the session moves only once a model is chosen from them.
+    const routes: { key: string; label: string; allModels?: boolean }[] = saved.map(row => ({ key: row.id, label: row.name,
+      ...(row.kind !== "subscription" && !startingModel(this.context, row) ? { allModels: true } : {}) }));
     if (!this.routeState.subscriptionEngine && !currentProfile) {
       routes.unshift({ key: "native", label: `Current host · ${nativeLabel}` });
     } else if (this.routeState.subscriptionEngine && !currentSubscription) {
@@ -7715,13 +7780,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async selectSubscription(engine: string): Promise<void> {
+  private async selectSubscription(engine: string, chosenModel = ""): Promise<void> {
     try {
       if ((this.lastReadyEvent?.capabilities as any)?.session_model_route !== true) {
         throw new Error("Update DGC CLI to choose a provider for this Work session.");
       }
       if (engine.startsWith("provider_")) {
         const { route, api_key } = await profileCredential(this.context, engine);
+        // A session always runs on a named model: an All models provider is chosen together with one of its models.
+        const model = chosenModel || startingModel(this.context, route);
+        if (!model) throw new Error("Choose a model for this provider.");
         const be = this.ensureBackend();
         const previous = { engine: this.routeState.subscriptionEngine,
                            model: this.routeState.subscriptionModel,
@@ -7733,7 +7801,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         try {
           await this.requestState(be, "provider-route", { type: "set_model", route: "native",
             scope: "session", base_url: route.base_url, api_mode: route.api_mode,
-            model: route.model, api_key }, "model_changed", 10000);
+            model, api_key }, "model_changed", 10000);
         } catch (error) {
           if (previous.engine) {
             await this.requestState(be, "subscription-restore", { type: "set_config", scope: "session",
@@ -7821,7 +7889,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.pipsEditor.attach(message => this.post(message));
       this.pipsEditor.useDictation(() => this.dictationService(), () => this.readAloudService());
       this.pipsEditor.usePluginLogos((plugin) => this.replyPluginLogo(plugin));
-      this.pipsEditor.useSavedProviders(() => this.pipSavedProviders(), id => this.savePipProvider(id), () => this.noProvider());
+      this.pipsEditor.useSavedProviders(() => this.pipSavedProviders(), (id, model) => this.savePipProvider(id, model), () => this.noProvider());
       // A Pip's page lists the person's dashboards and opens its report and its dashboards (Pips API 67).
       this.pipsEditor.useArtifacts(() => this.artifacts);
       this.pipsEditor.videoStop = (job) => this.videosStop(job);
@@ -7843,18 +7911,25 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if ((this.lastReadyEvent?.capabilities as any)?.saved_model_providers !== 1) return [];
     const defaultId = defaultProfileId(this.context);
     const saved = listProfiles(this.context).filter(row => row.kind !== "subscription");
-    return Promise.all(saved.map(async row => ({ id: row.id, name: row.name, default: row.id === defaultId,
-      models: (await this.chatdgcModels(row.id)).ids.filter(Boolean) })));
+    // One after another: the CLI lists one host at a time (modelsAtProvider).
+    const rows: { id: string; name: string; default: boolean; models: string[] }[] = [];
+    for (const row of saved) {
+      rows.push({ id: row.id, name: row.name, default: row.id === defaultId, models: (await this.chatdgcModels(row.id)).ids.filter(Boolean) });
+    }
+    return rows;
   }
   /** A Pip was set to this provider. Its runs happen with no window, so its route and key go where DGC keeps keys. */
-  private async savePipProvider(id: string): Promise<void> {
+  private async savePipProvider(id: string, chosenModel = ""): Promise<void> {
     if ((this.lastReadyEvent?.capabilities as any)?.saved_model_providers !== 1) {
       throw new Error("Update DGC CLI to run a Pip on a saved provider.");
     }
     const { route, api_key } = await profileCredential(this.context, id);
     if (route.kind === "subscription") throw new Error("That provider uses a subscription CLI.");
+    // What DGC keeps needs a model: the provider's own, or for an All models provider the one this Pip was just set to.
+    const model = route.model || chosenModel;
+    if (!model) throw new Error("Choose a model for this provider.");
     await this.requestState(this.ensureBackend(), "pip-provider", { type: "save_model_provider", id: route.id, name: route.name,
-      base_url: route.base_url, model: route.model, api_mode: route.api_mode, api_key }, "model_provider_saved", 10000);
+      base_url: route.base_url, model, api_mode: route.api_mode, api_key }, "model_provider_saved", 10000);
   }
   /** The provider list changed: every open Pips page lists it again. */
   private savedProvidersChanged(): void {
@@ -7898,7 +7973,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         }, true);
       this.pipsTab.useDictation(() => this.dictationService(), () => this.readAloudService());
       this.pipsTab.usePluginLogos(plugin => this.replyPluginLogo(plugin));
-      this.pipsTab.useSavedProviders(() => this.pipSavedProviders(), id => this.savePipProvider(id), () => this.noProvider());
+      this.pipsTab.useSavedProviders(() => this.pipSavedProviders(), (id, model) => this.savePipProvider(id, model), () => this.noProvider());
       // A Pip's reply in this tab: its links and "Settings → Models" go where the side bar's do.
       this.pipsTab.usePageActions((message) => { void this.onMessage(message); });
       this.pipsTab.useArtifacts(() => this.artifacts);
@@ -8124,15 +8199,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  openSettings(section = "general", usageRange?: string): void {
-    if (this.tab) { this.tab.host.openSettings(section, usageRange); return; }   // one Settings tab for the window
+  /** `browse`: Plugins' directory, searching for this (a Pip's Connect card with no connector for its app). */
+  openSettings(section = "general", usageRange?: string, browse?: string): void {
+    if (this.tab) { this.tab.host.openSettings(section, usageRange, browse); return; }   // one Settings tab for the window
     const name = section === "extensions" ? "plugins" : section;
-    this.openEditorSettings(name, usageRange);
+    this.openEditorSettings(name, usageRange, browse);
   }
 
   /** Codex-style settings: a real editor tab beside the chat, not a page inside it. */
-  openEditorSettings(section = "general", usageRange?: string): void {
+  openEditorSettings(section = "general", usageRange?: string, browse?: string): void {
     this.settingsSelection = { section, range: usageRange || "7d" };
+    this.settingsBrowse = typeof browse === "string" ? browse : undefined;
     if (this.settingsEditor) {
       this.settingsEditor.reveal(vscode.ViewColumn.Beside);
       this.showEditorSettings();
@@ -8162,7 +8239,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   /** Open the tab AT a section. Only a user action reaches this: the gear, a palette entry, or a
    *  webview that has just loaded and has nowhere else to start. */
   private showEditorSettings(): void {
-    this.settingsEditor?.webview.postMessage({ type: "show", ...this.settingsSelection });
+    // A search asked for once: a later show (a new backend's handshake, the gear) doesn't go back to it.
+    this.settingsEditor?.webview.postMessage({ type: "show", ...this.settingsSelection, ...(this.settingsBrowse !== undefined ? { browse: this.settingsBrowse } : {}) });
+    this.settingsBrowse = undefined;
     // Settings -> General -> Pictures in replies: the editor's own setting, shown as it is now.
     this.settingsEditor?.webview.postMessage({ type: "picturesInReplies", value: picturesFolded() ? "folded" : "shown" });
     this.refreshEditorSettings();
@@ -8274,31 +8353,38 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       ? { name: Object.values(PROVIDERS).find(p => p.url === saved.base_url)?.label || "Current host",
           model: String(saved.model), base_url: String(saved.base_url || "") }
       : undefined;
-    return { type: "providerProfiles", profiles: listProfiles(this.context), defaultId, ...(direct ? { direct } : {}), ...extra };
+    // defaultModel: what the default row's dropdown shows, the All models default's own model included.
+    const current = listProfiles(this.context).find((row) => row.id === defaultId);
+    return { type: "providerProfiles", profiles: listProfiles(this.context), defaultId, defaultModel: startingModel(this.context, current),
+             ...(direct ? { direct } : {}), ...extra };
   }
 
-  private async setDefaultProvider(id: string): Promise<void> {
+  /** `chosen`: the default's model, from its row in Settings. Left out, the provider's own; a default never runs on no model
+   *  (a subscription's blank is its CLI's default, which is a model). */
+  private async setDefaultProvider(id: string, chosen?: string): Promise<void> {
     const be = this.ensureBackend();
     const { route, api_key } = await profileCredential(this.context, id);
+    const model = chosen === undefined ? route.model : chosen.trim();
     if (route.kind === "subscription") {
       if ((this.lastReadyEvent?.capabilities as any)?.subscription_defaults !== true) {
         throw new Error("Update DGC CLI to use a subscription as the default.");
       }
       await this.verifySubscription(route.engine, be);
       await this.requestState(be, "subscription-default", {
-        type: "set_subscription_default", engine: route.engine, model: route.model || "", effort: "",
+        type: "set_subscription_default", engine: route.engine, model: model || "", effort: "",
       }, "subscription_default_changed", 10000);
       await this.rememberSubscription(route.engine);
     } else {
       if ((this.lastReadyEvent?.capabilities as any)?.model_defaults !== true) {
         throw new Error("Update DGC CLI to set a default for new chats.");
       }
+      if (!model) throw new Error("Choose a model for this provider.");
       await this.requestState(be, "model-defaults", {
-        type: "set_model_defaults", base_url: route.base_url, model: route.model,
+        type: "set_model_defaults", base_url: route.base_url, model,
         api_mode: route.api_mode, api_key,
       }, "model_defaults_changed", 10000);
     }
-    await markDefaultProfile(this.context, id);
+    await markDefaultProfile(this.context, id, model);
   }
 
   private pluginLogo(item: PluginLogoItem, webview?: vscode.Webview, inline = false): string {
@@ -8380,12 +8466,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         await adoptWorkingRoute(this.context, this.lastReadyEvent, PROVIDERS);
         const first = firstTakesDefault(this.context, this.lastReadyEvent);
         const added = await addProfile(this.context, msg.profile);
-        if (first) {
+        // The first provider is the default, and a default needs a model: saved with none, its row asks which.
+        const choose = first && added.kind !== "subscription" && !added.model;
+        if (first && !choose) {
           try { await this.setDefaultProvider(added.id); }
           catch (error) { await removeProfile(this.context, added.id); throw error; }
           await this.firstProviderSaved(added.id);
         }
-        this.settingsEditor?.webview.postMessage(this.providerProfilesMessage({ saved: true }));
+        this.settingsEditor?.webview.postMessage(this.providerProfilesMessage({ saved: true, ...(choose ? { chooseDefault: added.id } : {}) }));
         this.savedProvidersChanged();
       } catch (error: any) {
         this.settingsEditor?.webview.postMessage({ type: "providerProfileError", message: String(error?.message || "Could not save provider.") });
@@ -8408,13 +8496,19 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     } else if (msg?.type === "setProviderDefault") {
       try {
         const id = String(msg.id || "");
-        await this.setDefaultProvider(id);
+        const without = this.noProvider();
+        await this.setDefaultProvider(id, typeof msg.model === "string" ? msg.model.slice(0, 256) : undefined);
+        if (without) await this.firstProviderSaved(id);
         this.settingsEditor?.webview.postMessage(this.providerProfilesMessage());
         this.savedProvidersChanged();
       } catch (error: any) {
         this.settingsEditor?.webview.postMessage({ type: "providerProfileError",
           message: String(error?.message || "Could not set the default model.") });
       }
+    } else if (msg?.type === "providerModels") {
+      // A default row's dropdown: that provider's models, listed here with its saved key, which stays here.
+      const id = String(msg.id || "");
+      this.settingsEditor?.webview.postMessage(await this.providerModels(id).catch(() => ({ type: "providerModels", id, ids: [], error: "DGC didn't answer" })));
     } else if (msg?.type === "listModelsAt") {
       await this.listModelsAt(msg);
     } else if (msg?.type === "removeSearchKey") {
@@ -9816,6 +9910,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         <button type="button" id="btn-ctx" class="fbtn" title="Context used — click for details" aria-label="Context used: 0 percent; open context details" aria-haspopup="dialog" aria-expanded="false"><span class="codicon codicon-pie-chart" aria-hidden="true"></span> <span id="ctx">0%</span></button>
         <section id="ctxmenu" class="cmenu context-menu" role="dialog" aria-label="Context window" hidden>
           <div class="context-head"><div><span class="context-kicker">Context window</span><strong id="ctx-used">0 / 0</strong><span id="ctx-max" class="context-max" hidden></span></div><span id="ctx-pct">0%</span></div>
+          <p id="ctx-cli" class="context-size-note" hidden></p>
           <div class="context-track" aria-hidden="true"><span id="ctx-fill"></span></div>
           <div class="context-split"><span id="ctx-free">0 free</span><span id="ctx-auto">auto at 85%</span></div>
           <div id="ctx-breakdown" hidden></div>

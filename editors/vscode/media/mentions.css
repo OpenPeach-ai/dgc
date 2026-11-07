@@ -86,6 +86,9 @@ body:is(.vscode-light, .vscode-high-contrast-light) {
 .prompt-text .sent-mention.pill-plugin { color: var(--mark-sent);
   background: var(--mark-sent-glow);
   background-size: 260% 100%; }
+/* An Output's glyph takes the grey of its name once sent (its name still shimmers); a plugin's logo and a Pip's face are
+   their own colours, and the box above stays purple. */
+.prompt-text .sent-mention .composer-artifact-mark { color: var(--mark-sent); -webkit-text-fill-color: var(--mark-sent); }
 .prompt-text .sent-mention .composer-artifact-name,
 .prompt-text .sent-mention .composer-pip-name { color: var(--mark-sent);
   background: var(--mark-sent-shimmer);
@@ -132,9 +135,15 @@ body:is(.vscode-light, .vscode-high-contrast-light) {
 .pop .pi.sel .pi-icon { color: inherit; }
 .pop .pi-kind { color: var(--faint); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 .pop .pi.sel { background: var(--sel); }
+/* A row that can't be chosen says why in full: never cut to one line, and its mark and name are quiet. */
+.pop .pi[aria-disabled="true"] { cursor: default; }
+.pop .pi[aria-disabled="true"].sel { background: color-mix(in srgb, var(--text) 6%, transparent); color: inherit; }
+.pop .pi[aria-disabled="true"] .pd { white-space: normal; color: var(--muted); }
+.pop .pi[aria-disabled="true"] .pi-label { color: var(--muted); }
+.pop .pi[aria-disabled="true"] .pi-plugin-mark img { opacity: .7; }
 .pop .pd { grid-column: 1 / -1; color: var(--faint); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pop .pi-pip-face, .pop .pi-pip-face .dgc-plush { display: inline-block; flex: none; width: 20px; height: 20px; }
-.pop .pi-plugin-mark img { display: block; width: 16px; height: 16px; object-fit: contain; }
+.pop .pi-plugin-mark img { display: block; width: 16px; height: 16px; object-fit: contain; filter: var(--mark-logo-filter, none); }
 
 /* A box that was a <textarea>: ChatDGC's and a Pip's. Its font and line height stay its page's; these are what a
    textarea gave it for free. The placeholder is out of flow, as #input's is: as an in-flow inline box it is the first

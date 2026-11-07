@@ -8,6 +8,7 @@
 import * as vscode from "vscode";
 import * as http from "http";
 import * as https from "https";
+import { createReadStream, statSync } from "fs";
 import { randomBytes } from "crypto";
 import { homedir } from "os";
 import { CANVAS_DOC_VIEW } from "./canvasDoc";
@@ -102,6 +103,55 @@ type Listener = (message: Record<string, unknown>) => void;
 
 const attr = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
+/** A link to DGC's artifact page (`http://127.0.0.1:45000/?a=<id>`, the list with a frame) in a remote window. That page
+ *  frames each artifact from its own port, its own origin, so a script in one can't read the list, its stop token or another
+ *  artifact; forwarding the list alone leaves the frame on a port the person's browser can't reach. So a remote window
+ *  forwards the artifact's own address and opens that, as a card's Open in browser does. Separate origins stay. Undefined
+ *  for a local window, or a link that isn't one to that page. */
+export async function forwardedArtifactPage(raw: string): Promise<vscode.Uri | undefined> {
+  if (!vscode.env?.remoteName) return undefined;
+  let link: URL;
+  try { link = new URL(raw); } catch { return undefined; }
+  if (link.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(link.hostname) || !["/", "/index.html"].includes(link.pathname)) return undefined;
+  const wanted = link.searchParams.get("a");
+  if (!wanted) return undefined;
+  try {
+    const listed = JSON.parse(await fetchPage(`http://127.0.0.1:${link.port}/_list`, 1024 * 1024, 5000));
+    const row = (Array.isArray(listed?.artifacts) ? listed.artifacts : []).find((item: any) => item?.id === wanted);
+    if (!row || !Number.isSafeInteger(row.port) || typeof row.path !== "string" || !row.path.startsWith("/")) return undefined;
+    return await vscode.env.asExternalUri(vscode.Uri.parse(`http://127.0.0.1:${row.port}${row.path}`, true));
+  } catch { return undefined; }
+}
+
+/** One file, to the browser on the person's own computer: a remote window's save dialog can only save on the remote
+ *  machine. A one-time address on the machine that made it, forwarded like any other, answers with an attachment and
+ *  then closes. It holds only this file, behind a token nobody else has, and it goes away after a few minutes unused. */
+export async function downloadThroughBrowser(path: string, name: string): Promise<boolean> {
+  const token = randomBytes(24).toString("hex");
+  const encoded = encodeURIComponent(name);
+  const size = statSync(path).size;
+  const server = http.createServer((req, res) => {
+    if (req.method !== "GET" || req.url !== `/${token}/${encoded}`) { res.writeHead(404); res.end(); return; }
+    res.writeHead(200, {
+      "Content-Type": "application/octet-stream", "Content-Length": String(size), "Cache-Control": "no-store",
+      "Content-Disposition": `attachment; filename*=UTF-8''${encoded}`, "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
+    });
+    const stream = createReadStream(path);
+    stream.on("error", () => res.destroy());
+    res.on("close", () => { clearTimeout(unused); server.close(); });
+    stream.pipe(res);
+  });
+  const unused = setTimeout(() => server.close(), 5 * 60_000);
+  unused.unref?.();
+  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  server.unref();
+  const { port } = server.address() as { port: number };
+  const external = await vscode.env.asExternalUri(vscode.Uri.parse(`http://127.0.0.1:${port}/${token}/${encoded}`, true));
+  const opened = await vscode.env.openExternal(external);
+  if (!opened) { clearTimeout(unused); server.close(); }
+  return opened;
+}
+
 /** The artifact panel's page. Its frames: a page artifact at its own address (frame-src), and DGC's own layout of a
  *  deck, a sheet or a dashboard as text the host fetched (srcdoc, sandboxed with no script). A page is served on this
  *  computer (127.0.0.1), or over https when asExternalUri forwards it for a remote window; nothing else is framed. */
@@ -116,8 +166,8 @@ export function artifactDocument(asset: (name: string) => string, cspSource: str
 <div class="art-titles"><h1 class="art-title" id="art-title">Loading…</h1><p class="art-meta" id="art-meta"></p></div>
 <div class="art-actions" id="art-actions" role="toolbar" aria-label="Artifact">
 <button type="button" class="art-btn" id="art-versions" aria-haspopup="dialog" aria-expanded="false" title="Every version: who made it, when, and what changed" disabled><span class="codicon codicon-history" aria-hidden="true"></span><span class="art-btn-label">Versions</span></button>
-<div class="art-menu-wrap"><button type="button" class="art-btn" id="art-export" aria-haspopup="menu" aria-expanded="false" title="Export a copy" disabled><span class="codicon codicon-desktop-download" aria-hidden="true"></span><span class="art-btn-label">Export</span><span class="codicon codicon-chevron-down art-caret" aria-hidden="true"></span></button>
-<div class="art-menu" id="art-export-menu" role="menu" aria-label="Export as" hidden></div></div>
+<div class="art-menu-wrap"><button type="button" class="art-btn" id="art-export" aria-haspopup="menu" aria-expanded="false" title="Download a copy" disabled><span class="codicon codicon-desktop-download" aria-hidden="true"></span><span class="art-btn-label">Download</span><span class="codicon codicon-chevron-down art-caret" aria-hidden="true"></span></button>
+<div class="art-menu" id="art-export-menu" role="menu" aria-label="Download as" hidden></div></div>
 <button type="button" class="art-btn" id="art-browser" title="Open it in your browser, at an address of its own" disabled><span class="codicon codicon-link-external" aria-hidden="true"></span><span class="art-btn-label">Open in browser</span></button>
 </div></header>
 <section class="art-versions" id="art-versions-panel" role="dialog" aria-label="Versions" hidden><div class="art-versions-head"><h2>Versions</h2><button type="button" class="art-icon" id="art-versions-close" title="Close" aria-label="Close versions"><span class="codicon codicon-close" aria-hidden="true"></span></button></div><ol class="art-version-list" id="art-version-list"></ol></section>
@@ -553,17 +603,22 @@ export class Artifacts implements vscode.Disposable {
     }
   }
 
-  /** Export a copy: where to keep it first, then the process makes it and it is copied there. */
+  /** Download a copy. Here, a save dialog: where to keep it first, then the process makes it and it is copied there. In a
+   *  remote window that dialog could only save on the remote machine, so the person's own browser downloads it. */
   async exportArtifact(view: Pick<ArtifactView, "id" | "title" | "exports" | "type">, format: string, version?: number): Promise<void> {
     const formats = view.exports?.length ? view.exports : this.offers()?.exports[view.type] ?? [];
     if (!formats.includes(format)) return;
-    const folder = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir());
     const name = fileName(view.title, format);
-    const target = await vscode.window.showSaveDialog({
-      defaultUri: vscode.Uri.joinPath(folder, name), saveLabel: "Export",
-      title: `Export “${view.title}”${version ? ` (version ${version})` : ""} as ${FORMAT_LABELS[format] || format}`,
-    });
-    if (!target) return;
+    const remote = !!vscode.env?.remoteName;
+    let target: vscode.Uri | undefined;
+    if (!remote) {
+      const folder = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir());
+      target = await vscode.window.showSaveDialog({
+        defaultUri: vscode.Uri.joinPath(folder, name), saveLabel: "Download",
+        title: `Download “${view.title}”${version ? ` (version ${version})` : ""} as ${FORMAT_LABELS[format] || format}`,
+      });
+      if (!target) return;
+    }
     const made = new Promise<string>((resolve, reject) => {
       this.ask({ type: "artifact_export", id: view.id, format, ...(version ? { version } : {}) }, {
         ok: (ev) => resolve(String(ev.path || "")),
@@ -571,15 +626,20 @@ export class Artifacts implements vscode.Disposable {
       });
     });
     try {
-      const path = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Exporting “${view.title}”…` }, () => made);
+      const path = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Preparing “${view.title}”…` }, () => made);
       if (!path) throw new Error("DGC said nothing about where it made the file.");
+      if (!target) {
+        if (!await downloadThroughBrowser(path, name)) throw new Error("the browser wasn't opened");
+        void vscode.window.showInformationMessage(`Downloading “${name}” in your browser.`);
+        return;
+      }
       await vscode.workspace.fs.copy(vscode.Uri.file(path), target, { overwrite: true });
       const shown = target.path.split("/").pop() || name;
-      const choice = await vscode.window.showInformationMessage(`Exported “${shown}”.`, "Open", "Show in Folder");
+      const choice = await vscode.window.showInformationMessage(`Saved “${shown}”.`, "Open", "Show in Folder");
       if (choice === "Open") await this.openFile(target);
       else if (choice === "Show in Folder") await vscode.commands.executeCommand("revealFileInOS", target);
     } catch (err: any) {
-      void vscode.window.showWarningMessage(`“${view.title}” wasn't exported: ${String(err?.message || err)}`);
+      void vscode.window.showWarningMessage(`“${view.title}” wasn't downloaded: ${String(err?.message || err)}`);
     }
   }
 
@@ -679,11 +739,11 @@ export class Artifacts implements vscode.Disposable {
     const when = (at: string) => { const t = Date.parse(at); return Number.isFinite(t) ? new Date(t).toLocaleString() : ""; };
     const pick = await vscode.window.showQuickPick([...view.versions].reverse().map((v) => ({
       label: `Version ${v.n}${v.n === view.version ? " (now)" : ""}`, description: [v.author, v.summary].filter(Boolean).join(" · "), detail: when(v.at), n: v.n,
-    })), { placeHolder: `${view.title}: restore a version, or export it` });
+    })), { placeHolder: `${view.title}: restore a version, or download it` });
     if (!pick) return;
     const n = (pick as any).n as number;
     const actions = [...(n !== view.version ? ["Restore this version", ...(this.offers()?.compare ? ["Compare with current"] : [])] : []),
-                     ...view.exports.map((f) => `Export as ${FORMAT_LABELS[f] || f}`)];
+                     ...view.exports.map((f) => `Download as ${FORMAT_LABELS[f] || f}`)];
     const action = await vscode.window.showQuickPick(actions, { placeHolder: `Version ${n}` });
     if (!action) return;
     if (action === "Compare with current") {
@@ -704,7 +764,7 @@ export class Artifacts implements vscode.Disposable {
       this.ask({ type: "artifact_restore", id, version: n }, { ok: () => undefined, fail: (_r, m) => { void vscode.window.showWarningMessage(`Version ${n} wasn't restored: ${m}`); } });
       return;
     }
-    const format = view.exports.find((f) => action === `Export as ${FORMAT_LABELS[f] || f}`);
+    const format = view.exports.find((f) => action === `Download as ${FORMAT_LABELS[f] || f}`);
     if (format) await this.exportArtifact(view, format, n === view.version ? undefined : n);
   }
 
@@ -714,7 +774,7 @@ export class Artifacts implements vscode.Disposable {
       this.ask({ type: "artifact_get", id }, { ok: (ev) => resolve(artifactView(ev.artifact)), fail: (_r, m) => { void vscode.window.showWarningMessage(m); resolve(undefined); } });
     });
     if (!view) return;
-    const pick = await vscode.window.showQuickPick(view.exports.map((f) => ({ label: FORMAT_LABELS[f] || f, format: f })), { placeHolder: `Export “${view.title}” as` });
+    const pick = await vscode.window.showQuickPick(view.exports.map((f) => ({ label: FORMAT_LABELS[f] || f, format: f })), { placeHolder: `Download “${view.title}” as` });
     if (pick) await this.exportArtifact(view, (pick as any).format);
   }
 

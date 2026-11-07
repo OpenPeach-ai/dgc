@@ -15,6 +15,14 @@
 - Details name Settings → Models in place of the terminal's flags and commands (`dgc --model`, `/connect`, `dgc doctor`). The terminal keeps its own words.
 - Trace's popup is tighter: smaller type, shorter rows and a narrower window. Dragging its timeline no longer draws a box around it, and Play and Pause are drawn icons in a small purple circle.
 - A plugin's card in a reopened Work chat waits for its plugin to connect, so a window reload no longer leaves it saying "isn't connected in this chat now" with a Retry.
+- A Pip's Connect card lists your accounts by address and links only the one you choose, with Use another account always offered. With no connector for the app, its button opens Settings → Plugins at the directory, searching for that app. An Allow card names the account it runs on.
+- Settings → Models: a provider can be saved with All models, and the Model field lists what the host offers. The default provider's row has a dropdown for its default model, Claude Code and Codex too. Work, ChatDGC and a Pip list everything that API offers.
+- Pages open at their own forwarded address in a remote window, and Download on a card reaches your own computer there.
+- No toast at every start about a provider key bound to another address; a line in the DGC Backend output.
+- On Claude Code or Codex: no context window setter or percentage, and the @ list in Work says plugins aren't available there.
+- Pips open behind DGC's slash logo. A Pip's thinking slider has no ring around the face, on a slimmer track. An Output's icon greys in a sent message.
+- A plugin's card shows its own logo. Several cards from one tool in a reply say what differs, and the earlier ones start folded.
+
 - A Pip's model menu opens over the Latest button. ChatDGC's model name no longer stays cut short after a window reload. "All quiet" on the home row takes its own line beside many faces.
 - Upgrading keeps your working model: adding your first saved provider no longer moves the default or hides the model you already ran on.
 - A Pip's effort slider shows its track in a light theme.

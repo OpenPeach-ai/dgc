@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {addProfile,adoptWorkingRoute,defaultProfileId,firstTakesDefault,listProfiles,markDefaultProfile,profileCredential,removeProfile,validRoute} from '../src/providerProfiles.js';
+import {addProfile,adoptWorkingRoute,defaultProfileId,firstTakesDefault,hasRunnableProfile,listProfiles,markDefaultProfile,profileCredential,removeProfile,startingModel,validRoute} from '../src/providerProfiles.js';
 
 function store(){
  const state=new Map(),secrets=new Map();
@@ -122,4 +122,31 @@ test('a subscription default or a saved provider is left as it is',async()=>{
  assert.equal(await adoptWorkingRoute(saved,ready(),PRESETS),null);
  assert.equal(listProfiles(saved).length,1);
  assert.equal(firstTakesDefault(saved,ready({},{model_chosen:false})),false,'a default is already there');
+});
+
+test('a provider can be saved with All models; as the default it names one, and it never runs on none',async()=>{
+ const s=store(),ctx={globalState:s.globalState,secrets:s.secretsApi};
+ const all=await addProfile(ctx,{name:'OpenAI',base_url:'https://api.example.test/v1',model:'',api_key:'k'});
+ assert.equal(listProfiles(ctx)[0].model,'','it lists with no model');
+ assert.equal(hasRunnableProfile(ctx),false,'and is nothing to run on yet');
+ await assert.rejects(markDefaultProfile(ctx,all.id),/Choose a model/);
+ await assert.rejects(markDefaultProfile(ctx,all.id,'  '),/Choose a model/);
+ assert.equal(defaultProfileId(ctx),'');
+ await markDefaultProfile(ctx,all.id,'gpt-a');
+ assert.equal(defaultProfileId(ctx),all.id);
+ assert.equal(listProfiles(ctx)[0].model,'','it keeps saying All models');
+ assert.equal(startingModel(ctx,listProfiles(ctx)[0]),'gpt-a');
+ assert.equal(hasRunnableProfile(ctx),true);
+ const other=await addProfile(ctx,{name:'Named',base_url:'https://two.example.test/v1',model:'one'});
+ await markDefaultProfile(ctx,other.id);
+ assert.equal(startingModel(ctx,listProfiles(ctx)[0]),'','not the default now: it asks again');
+ // A default with a model of its own takes the one chosen on its row. So does a subscription, whose blank is its CLI's own.
+ await markDefaultProfile(ctx,other.id,'two');
+ assert.equal(listProfiles(ctx)[1].model,'two');
+ const claude=await addProfile(ctx,{kind:'subscription',engine:'claude'});
+ await markDefaultProfile(ctx,claude.id,'opus');
+ assert.equal(listProfiles(ctx)[2].model,'opus');
+ await markDefaultProfile(ctx,claude.id,'');
+ assert.equal(listProfiles(ctx)[2].model,'');
+ assert.equal(defaultProfileId(ctx),claude.id,'a blank there is the CLI default, a real choice');
 });

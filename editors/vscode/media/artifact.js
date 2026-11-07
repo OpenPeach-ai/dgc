@@ -1,4 +1,4 @@
-// An artifact's panel (src/artifacts.ts hosts it): its header (title, type, version, Versions, Export, Open in browser)
+// An artifact's panel (src/artifacts.ts hosts it): its header (title, type, version, Versions, Download, Open in browser)
 // and, by type, what edits or shows it. A deck and a sheet have editors of their own (artifactSlides.js,
 // artifactSheet.js); a dashboard shows DGC's page of it with its sources to allow; a page is framed at its own address.
 // Everything a model or a person wrote is put in as text, never as markup. DGC's own page of an artifact is shown in a
@@ -184,8 +184,8 @@
         const wrap = el("div", "art-menu-wrap");
         const button = el("button", "art-btn art-btn-quiet");
         button.type = "button"; button.setAttribute("aria-haspopup", "menu"); button.setAttribute("aria-expanded", "false");
-        button.append(el("span", "", "Export"), icon("chevron-down", "art-caret"));
-        button.setAttribute("aria-label", `Export version ${v.n}`);
+        button.append(el("span", "", "Download"), icon("chevron-down", "art-caret"));
+        button.setAttribute("aria-label", `Download version ${v.n}`);
         const menu = el("div", "art-menu"); menu.setAttribute("role", "menu"); menu.hidden = true;
         button.addEventListener("click", (e) => { e.stopPropagation(); showMenu(button, menu, exportItems(v.n === view.version ? 0 : v.n)); });
         wrap.append(button, menu);

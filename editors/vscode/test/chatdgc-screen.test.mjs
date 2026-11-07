@@ -224,6 +224,50 @@ test("Escape closes ChatDGC's model menu after choosing a provider redraws it", 
   } finally { await s.page.close(); }
 });
 
+test("on a subscription the meter has no percentage and its details no setter: one plain line", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  const profiles = [{ id: "subscription_claude", name: "Claude Code", kind: "subscription", engine: "claude", model: "" }];
+  try {
+    await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
+    await s.send({ type: "windows", presets: ["8k", "32k"] });
+    await s.send({ type: "context", conversation: conversation().id, window: 32768, used: 12000, parts: {}, preset: "32k", source: "estimated", compactable: true });
+    await s.send({ type: "models", profiles, defaultId: "subscription_claude", providerId: "subscription_claude", current: "subscription:claude", ids: ["", "opus"] });
+    await s.page.locator("#cd-context").waitFor({ state: "visible" });
+    assert.equal(await s.page.locator("#cd-context-pct").textContent(), "");
+    assert.match(await s.page.locator("#cd-context").getAttribute("title"), /Claude Code manages its own context window/);
+    await s.page.locator("#cd-context").click();
+    assert.equal(await s.page.locator("#cd-window-size").count(), 0, "no setter");
+    assert.match(await s.page.locator("#cd-context-pop").textContent(), /Claude Code manages its own context window, so there is no size to set here/);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("an All models provider offers no empty model: its menu lists what the host offers, once it has", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  const id = `provider_${"b".repeat(32)}`;
+  const profiles = [{ id: "subscription_codex", name: "Codex", kind: "subscription", engine: "codex", model: "" },
+                    { id, name: "OpenAI", kind: "native", model: "" }];
+  try {
+    await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
+    await s.send({ type: "models", profiles, defaultId: "subscription_codex", providerId: "subscription_codex", current: "subscription:codex", ids: [""] });
+    const options = () => s.page.locator("#cd-model option").evaluateAll((all) => all.map((o) => o.value));
+    assert.ok(!(await options()).some((v) => /^provider:provider_b+:$/.test(v)), "never provider:<id>: with no model");
+    await s.page.locator("#cd-model-pill").click();
+    const menu = s.page.locator("#cd-model-menu");
+    await menu.locator(".cd-menu-back").click();
+    await menu.locator(".cd-menu-row", { hasText: "OpenAI" }).click();
+    assert.match(await menu.textContent(), /Listing its models/);
+    assert.deepEqual((await s.posted("models")).at(-1).provider, id);
+    await s.send({ type: "models", profiles, defaultId: "subscription_codex", providerId: id, current: "subscription:codex", ids: ["gpt-a", "gpt-b"] });
+    await menu.locator(".cd-menu-row", { hasText: "gpt-b" }).click();
+    assert.equal(await s.page.locator("#cd-model").inputValue(), `provider:${id}:gpt-b`);
+    await s.send({ type: "models", profiles, defaultId: "subscription_codex", providerId: id, current: "subscription:codex", ids: [], listError: true });
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("no provider: the pill says so and goes to Settings, and a send stays in the box", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen({ width: 900 });

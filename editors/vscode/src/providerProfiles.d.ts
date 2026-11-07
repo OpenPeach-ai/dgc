@@ -21,7 +21,9 @@ export type ProviderProfile = {
 export function validRoute(raw: any): Omit<ProviderProfile, 'id'>;
 export function listProfiles(context: vscode.ExtensionContext): ProviderProfile[];
 export function defaultProfileId(context: vscode.ExtensionContext): string;
-export function markDefaultProfile(context: vscode.ExtensionContext, id: string): Promise<void>;
+export function markDefaultProfile(context: vscode.ExtensionContext, id: string, model?: string): Promise<void>;
+export function startingModel(context: vscode.ExtensionContext, row: ProviderProfile | undefined): string;
+export function hasRunnableProfile(context: vscode.ExtensionContext): boolean;
 export function clearDefaultProfile(context: vscode.ExtensionContext): Promise<void>;
 export function addProfile(context: vscode.ExtensionContext, raw: any): Promise<ProviderProfile>;
 export function removeProfile(context: vscode.ExtensionContext, id: string): Promise<void>;

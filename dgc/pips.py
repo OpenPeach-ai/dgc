@@ -115,7 +115,7 @@ _COMMAND_ARGS = {
     "accept_pip_app_action": {"action_id", "expected_digest"},
     "always_allow_pip_app_action": {"action_id", "expected_digest"},
     "list_pip_action_grants": {"pip_id"}, "revoke_pip_action_grant": {"pip_id", "grant_id"},
-    "list_pip_app_links": {"pip_id"}, "start_pip_app_link": {"pip_id", "link_id"}, "check_pip_app_link": {"pip_id", "link_id"},
+    "list_pip_app_links": {"pip_id"}, "start_pip_app_link": {"pip_id", "link_id", "account", "another"}, "check_pip_app_link": {"pip_id", "link_id"},
     "decline_pip_app_link": {"pip_id", "link_id"}, "disconnect_pip_app_link": {"pip_id", "link_id"},
     "finish_pip_computer_check": {"pip_id"},
     # app_events (API 63): list routines on your own app's events too (an older editor refuses a "when" it doesn't know).
@@ -5311,7 +5311,11 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     if link['pip_id'] != pip_id:
                         raise RegistryError('not_found', 'That app connection card belongs to another Pip.')
                     was = link['status']
-                    result = (pip_app_links.start(registry, config, link['id'], actor) if command == 'start_pip_app_link'
+                    if command == 'start_pip_app_link' and not (('account' not in request or isinstance(request['account'], str))
+                                                                and ('another' not in request or isinstance(request['another'], bool))):
+                        raise RegistryError('invalid_request', 'Choose one account, or Use another account.')
+                    result = (pip_app_links.start(registry, config, link['id'], actor, account=request.get('account'), another=request.get('another') is True)
+                              if command == 'start_pip_app_link'
                               else pip_app_links.check(registry, config, link['id'], actor) if command == 'check_pip_app_link'
                               else pip_app_links.decline(registry, link['id'], actor) if command == 'decline_pip_app_link'
                               else pip_app_links.disconnect(registry, link['id'], actor))

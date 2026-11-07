@@ -455,7 +455,7 @@ COMMAND_FIELDS = {
     'delete_pip_routine': frozenset({'pip_id', 'routine_id'}),
     'decide_pip_routine': frozenset({'pip_id', 'routine_id', 'add'}),
     'list_pip_app_links': frozenset({'pip_id'}),
-    'start_pip_app_link': frozenset({'pip_id', 'link_id'}),
+    'start_pip_app_link': frozenset({'pip_id', 'link_id', 'account', 'another'}),
     'check_pip_app_link': frozenset({'pip_id', 'link_id'}),
     'decline_pip_app_link': frozenset({'pip_id', 'link_id'}),
     'disconnect_pip_app_link': frozenset({'pip_id', 'link_id'}),

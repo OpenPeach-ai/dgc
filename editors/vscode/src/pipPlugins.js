@@ -112,7 +112,7 @@ function sentInputs(esc, tool, args) {
 }
 
 /** What the Pip would do in a plugin, as Grok's Allow card. Edit changes its inputs right here. */
-export function pluginActionMarkup(draft, plugin, { esc, busy = false, pipName = 'Your Pip', edit = null, logo = null }) {
+export function pluginActionMarkup(draft, plugin, { esc, busy = false, pipName = 'Your Pip', edit = null, logo = null, accountLabel = null }) {
   const a = draft.payload.action, id = esc(draft.id), off = busy ? ' disabled' : '';
   // A plugin the user set to Always ask offers Allow once and Don't only, as an ask rule of their own does: an Always
   // allow there would save a grant their Always ask overrides.
@@ -131,9 +131,12 @@ export function pluginActionMarkup(draft, plugin, { esc, busy = false, pipName =
     + (calls ? `<ul class="allow-calls">${calls.map(c => `<li>${esc(c.line)}${c.fields.length ? inputs(esc, c.fields) : ''}</li>`).join('')}</ul>` : inputs(esc, args))
     + sentInputs(esc, a.call.tool, args) + '</details>';
   const accessibleTitle = esc(calls ? `Do this in ${plugin.name}?` : `Run ${a.call.tool} in ${plugin.name}?`);
+  // Which account it runs on, in sight: the one linked to this Pip, which is what the call sends.
+  const accounts = [...new Set((Array.isArray(args.tools) ? args.tools : []).map(c => c && c.account).filter(v => typeof v === 'string' && v))];
+  const uses = accounts.length ? `<p class="app-link-note plugin-account">Uses ${accounts.map(v => `<strong>${esc(accountLabel?.(v) || v)}</strong>`).join(', ')}</p>` : '';
   return `<div class="allow-card plugin-action" data-plugin-action="${id}"${edit ? ' data-editing' : ''} role="group" aria-label="${accessibleTitle}">`
     + head(esc, plugin.name, title, sub, plugin.plugin, logo)
-    + askedAgainLine(esc, draft)
+    + askedAgainLine(esc, draft) + uses
     + (edit ? `<div class="allow-fields">${argumentFields(args).map(f => field(esc, draft.id, f.name, f.label, edit.values[f.name] ?? '', { ...f, disabled: busy })).join('') || '<p class="app-link-note">No inputs.</p>'}</div>` : shown)
     + editError(esc, edit)
     + `<div class="app-link-actions"><button type="button" class="primary" data-plugin-run="${id}"${off}>${busy ? 'Running…' : plugin.asks ? 'Allow once' : 'Allow'}</button>${always}`

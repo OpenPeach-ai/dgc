@@ -156,6 +156,49 @@
     return { variables };
   }
 
+  // ---- several cards from one tool in a reply: each says what differs, and the newest is the one open --------------
+  // Two "Show Uploaded Media" in a reply read as a duplicate; the model had asked once for images and once for videos.
+  // Only short plain values say so: nothing long, nothing named or shaped like a secret. No card is ever hidden.
+  const SECRET_NAME = /key|token|secret|pass|auth|cookie|session|credential|bearer|signature/i;
+  function plainValue(name, value) {
+    if (SECRET_NAME.test(name)) return "";
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    if (typeof value !== "string") return "";
+    const text = value.trim();
+    if (!text || text.length > 32 || /[\r\n\t]/.test(text) || text.includes("://") || /[A-Za-z0-9+/=_-]{20,}/.test(text)) return "";
+    return text;
+  }
+  function differences(group) {
+    const inputs = group.map((view) => plain(view.data?.tool_input ?? view.card.tool_input));
+    const names = [...new Set(inputs.flatMap((input) => Object.keys(input)))].slice(0, 32);
+    const varying = names.filter((name) => new Set(inputs.map((input) => JSON.stringify(input[name]))).size > 1);
+    return inputs.map((input) => varying.map((name) => plainValue(name, input[name])).filter(Boolean).slice(0, 2).join(" · "));
+  }
+  const REPLY = ".turn, .cd-msg, .pip-message";
+  function arrange() {
+    const groups = new Map();
+    for (const view of views) {
+      if (view.display !== "inline" || !view.node.isConnected || view.node.parentNode === holder) continue;
+      const reply = view.node.closest(REPLY);
+      if (!reply) continue;
+      const tools = groups.get(reply) || new Map();
+      groups.set(reply, tools);
+      const key = `${view.card.server}\u0000${view.card.tool}`;
+      tools.set(key, [...(tools.get(key) || []), view]);
+    }
+    for (const tools of groups.values()) for (const group of tools.values()) {
+      group.sort((a, b) => (a.node.compareDocumentPosition(b.node) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+      const said = group.length > 1 ? differences(group) : group.map(() => "");
+      group.forEach((view, at) => {
+        view.differs.textContent = said[at];
+        view.differs.hidden = !said[at];
+        const kept = window.DgcPictureFold?.chose?.(`card:${view.card.card_id}`);
+        if (typeof kept === "boolean") view.setCollapsed(kept);
+        else if (!view.chosen && group.length > 1) view.setCollapsed(at < group.length - 1);
+      });
+    }
+  }
+
   // ---- one card, one frame ---------------------------------------------------------------------------------------
   class View {
     constructor(card, options) {
@@ -172,16 +215,34 @@
       this.node.setAttribute("aria-label", `${card.plugin || card.server}'s card`);
       const head = el("div", "mcp-app-head");
       const name = el("span", "mcp-app-name");
-      name.append(glyph("window"), el("strong", "", card.plugin || card.server),
-                  el("span", "mcp-app-tool", words(card.tool_info?.title || card.tool_info?.annotations?.title || card.tool, 80)));
+      // The plugin's own logo, once the host has it; none, and the window stays.
+      const mark = glyph("window");
+      // What sets this card apart from others of the same tool in a reply, when there are others (arrange).
+      this.differs = el("span", "mcp-app-differs");
+      this.differs.hidden = true;
+      name.append(mark, el("strong", "", card.plugin || card.server),
+                  el("span", "mcp-app-tool", words(card.tool_info?.title || card.tool_info?.annotations?.title || card.tool, 80)), this.differs);
       head.append(name);
+      const plugin = String(card.plugin_id || card.server || "").split("--")[0].toLowerCase();
+      if (/^[a-z0-9][a-z0-9-]{0,63}$/.test(plugin)) hostRound("logo", { card_id: card.card_id, plugin }).then((answer) => {
+        if (typeof answer?.logo !== "string" || !/^data:image\/(?:png|svg\+xml|x-icon);base64,[A-Za-z0-9+/=]+$/.test(answer.logo)) return;
+        const img = el("img", "mcp-app-logo");
+        img.alt = ""; img.src = answer.logo;
+        img.addEventListener("load", () => { if (mark.isConnected) mark.replaceWith(img); }, { once: true });
+      });
       if (this.display === "inline") {
         this.collapse = el("button", "mcp-app-btn mcp-app-collapse");
         this.collapse.type = "button";
         this.collapse.textContent = "Collapse";
         this.collapse.setAttribute("aria-label", `Collapse ${card.plugin || card.server}'s card`);
         this.collapse.setAttribute("aria-expanded", "true");
-        this.collapse.addEventListener("click", () => this.setCollapsed(this.collapse.getAttribute("aria-expanded") === "true"));
+        this.collapse.addEventListener("click", () => {
+          const shut = this.collapse.getAttribute("aria-expanded") === "true";
+          this.setCollapsed(shut);
+          // The person's own choice: it holds, here and after a reload, whatever arrange would do.
+          window.DgcPictureFold?.remember?.(`card:${card.card_id}`, shut);
+          this.chosen = true;
+        });
         head.append(this.collapse);
       }
       if (this.display === "inline") {
@@ -216,6 +277,7 @@
       this.node._mcpAppView = this;
       views.add(this);
       this.load();
+      queueMicrotask(arrange);              // once the page has put it where it goes
     }
 
     setCollapsed(collapsed) {
@@ -520,7 +582,7 @@
       });
     }
   }
-  function adopt(root, options) { fill(root, options); }
+  function adopt(root, options) { fill(root, options); queueMicrotask(arrange); }
 
   window.DgcMcpApps = {
     setup(options) {
@@ -540,7 +602,8 @@
     has(cardId) { return [...views].some((v) => v.card.card_id === cardId); },
     /** A card this page heard of live (mcp_app_card), kept for the slot a redraw puts it in. */
     remember(event) { if (event && CARD_ID.test(String(event.card_id || ""))) { seen.set(event.card_id, event); if (seen.size > 256) seen.delete(seen.keys().next().value); } },
-    park, adopt, fill,
+    park, adopt, fill(root, options) { fill(root, options); queueMicrotask(arrange); },
+    arrange,
     event(ev) {
       if (!ev || typeof ev !== "object") return false;
       if (ev.type === "mcp_app_reply") {

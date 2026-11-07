@@ -149,7 +149,7 @@ export type PipMutationParams = {
   update_pip_routine: { pip_id: string; routine_id: string; changes: Record<string, PipJson> };
   delete_pip_routine: { pip_id: string; routine_id: string };
   decide_pip_routine: { pip_id: string; routine_id: string; add: boolean };
-  start_pip_app_link: { pip_id: string; link_id: string };
+  start_pip_app_link: { pip_id: string; link_id: string; account?: string; another?: boolean };
   check_pip_app_link: { pip_id: string; link_id: string };
   decline_pip_app_link: { pip_id: string; link_id: string };
   disconnect_pip_app_link: { pip_id: string; link_id: string };
@@ -307,7 +307,7 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   delete_pip_routine: ["pip_id", "routine_id"],
   decide_pip_routine: ["pip_id", "routine_id", "add"],
   list_pip_app_links: ["pip_id"],
-  start_pip_app_link: ["pip_id", "link_id"],
+  start_pip_app_link: ["pip_id", "link_id", "account", "another"],
   check_pip_app_link: ["pip_id", "link_id"],
   decline_pip_app_link: ["pip_id", "link_id"],
   disconnect_pip_app_link: ["pip_id", "link_id"],

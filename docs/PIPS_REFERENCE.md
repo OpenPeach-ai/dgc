@@ -970,10 +970,14 @@ and `read_app {app, tool, arguments}`, which reach the controller over a per-run
 vocabulary that belongs to that app, through `pip_app_access.execute` on the card's account.
 Local-only commands, each `{pip_id, link_id}` except the list: `list_pip_app_links {pip_id}` →
 `{pip_id, links, composio}`; `start_pip_app_link` calls `COMPOSIO_MANAGE_CONNECTIONS` with
-`action: "list"` (an ACTIVE account connects at once) and otherwise `"add"`, and returns
+`action: "list"`. When Composio has ACTIVE accounts it links none and returns `{link, accounts, wanted}`
+(`accounts` is `[{id, label, named?}]`, an address the card's reason names first; `wanted` is that address
+when none matches); the optional `account` links the one chosen from them, and `another: true` is Use
+another account. With no accounts, or with `another`, it calls `"add"` and returns
 `{link, redirect_url, sign_in_host}` with the card `authorizing` (the editor host opens the link
-and never passes it to the webview); `check_pip_app_link` lists again and connects the first
-ACTIVE account; `decline_pip_app_link` and `disconnect_pip_app_link` set `declined`. A card that
+and never passes it to the webview); `check_pip_app_link` lists again and connects the one account that
+sign-in added, and with more than one, or a sign-in this process didn't open, returns the list again;
+`decline_pip_app_link` and `disconnect_pip_app_link` set `declined`. A card that
 turns `connected` queues the Pip's next chat turn under the reserved key `apps_<link id>`.
 Statuses: `requested`, `authorizing`, `connected`, `declined`, `failed` (with `error`).
 

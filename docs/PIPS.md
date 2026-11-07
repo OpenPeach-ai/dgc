@@ -203,7 +203,7 @@ when they end. While every such worker is busy, the run waits in the queue; `pip
 how many Pip runs go at once. From the CLI: `dgc pips models` lists the systems, and
 `dgc pips create NAME --goal ... --router` (or `--router nas/qwen3.5:9b`) chooses one.
 
-A Pip's model menu offers every provider saved in **Settings → Models**, with its models, as a Work session's does.
+A Pip's model menu offers every provider saved in **Settings → Models**, with its models, as a Work session's does. A provider saved with **All models** lists everything its API offers.
 The choice belongs to that Pip and stays after a reload or a runner restart. The Pip keeps only the provider's id and
 the model. The provider's address and key go to `~/.dgc/secrets.json` (owner-only) when a Pip is first set to it,
 because a routine runs with no window open, and only that provider's key does. Each run uses that provider alone,
@@ -1138,13 +1138,23 @@ yourself.
 Ask a Personal Pip to do something with an app it doesn't have yet, for example "set up
 my Gmail so you can check my inbox every morning". The Pip puts a **Connect Gmail**
 card in its chat, with one line on what it will do with it. Choose **Connect Gmail**:
-DGC asks Composio (your connection in **Settings → Plugins**) for the account. If
-Composio already has a Gmail account, that one is used. Otherwise your browser opens
-Composio's sign-in page; sign in there, and the card turns into **Gmail connected**
-by itself (or choose **I've signed in**). The Pip is told and carries on. **Not now**
-puts the card away; the Pip can ask again later. When another of your Pips already uses
-a Gmail account, the card asks **Let Ava use your Gmail?** with that account, and
-**Allow** gives this Pip the same account with no sign-in.
+DGC asks Composio (your connection in **Settings → Plugins**) which accounts it has. If
+it has any, the card lists them by address and you choose; nothing is linked until you do.
+**Use another account** is always there, and opens Composio's sign-in page. An address the
+Pip named comes first on the list, and if none of your accounts is that address the card says
+so. With no account yet your browser opens the sign-in page straight away; sign in there, and
+the card turns into one line naming the account by itself (or choose **I've signed in**). The
+Pip is told which account and carries on. **Not now** puts the card away; the Pip can ask again
+later. With no connector for the app, or no Composio yet, the card's **Browse plugins** opens
+**Settings → Plugins** at the directory, searching for that app.
+
+Once linked, the Pip's Composio calls for that app run on that account, whatever else you
+connect later: Composio's own default is your newest account. A call naming another account is
+refused, and an Allow card names the account it uses. Without a link, an app with two or more
+accounts raises the card instead of running. Composio's tools that can't name an account (its
+proxy, workbench and bash tools) are refused for a Pip with a linked app that has two or more
+accounts. The Pip's page shows which account each app is on; **Disconnect**, and asking again,
+gives the same choice.
 
 A connected app is that Pip's: it reads it when you ask, like Grok's connectors
 (Gmail messages, Calendar events, Drive and Notion search results, Contacts), and the
