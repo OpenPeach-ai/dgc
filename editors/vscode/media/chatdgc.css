@@ -411,6 +411,8 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 .cd-model-chevron { flex: none; color: var(--faint); font-size: var(--t-sm); }
 .cd-model-menu { position: absolute; right: 0; bottom: 100%; z-index: 20; margin-bottom: var(--sp-2);
   width: min(300px, calc(100vw - 20px)); padding: var(--sp-1);
+  /* In a short editor (the bottom panel open) it scrolls inside itself instead of running past the top of the chat. */
+  max-height: calc(100vh - 170px); overflow-y: auto; overscroll-behavior: contain;
   border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 14px 40px -10px rgba(0,0,0,.75); }
 .cd-menu-kicker { padding: var(--sp-2) var(--sp-2) var(--sp-1); color: var(--faint); font: var(--w-semi) var(--t-xs)/1 var(--sans);
   letter-spacing: .1em; text-transform: uppercase; }

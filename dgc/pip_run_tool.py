@@ -16,6 +16,9 @@ from .redaction import contains_secret, redact_value, secret_values
 from .workspace_registry import RegistryError, WorkspaceRegistry, canonical_directory
 
 READ_ONLY_ROLES = frozenset({"scout", "lens", "rook", "lock", "quill"})
+# A Personal Pip's run has no project tools or source (validate_manifest), whatever it looks like: Core is one too. Leaving
+# it out queued Core's run from the main chat and then failed it (final check, 2026-11-07).
+PERSONAL_ROLES = READ_ONLY_ROLES | {"patch", "pulse", "core"}
 _REQUEST_KEYS = {"pip_id", "expected_version", "reason", "request_key"}
 _PIN_KEYS = _REQUEST_KEYS | {"schema_version", "session_id", "workspace_id"}
 _PERSONAL_PIN_KEYS = _PIN_KEYS | {"scope", "origin_workspace_id"}
@@ -161,7 +164,7 @@ def validate_manifest(manifest):
             or manifest.get("workspace_id") != pin["workspace_id"] or manifest.get("pip_id") != pin["pip_id"]
             or manifest.get("job_version") != pin["expected_version"] or manifest.get("policy") != "read_only"
             or not isinstance(job, dict) or not isinstance(job.get("pip_type"), str)
-            or job["pip_type"] not in (READ_ONLY_ROLES | {"patch", "pulse"} if personal else READ_ONLY_ROLES | {"pulse"})
+            or job["pip_type"] not in (PERSONAL_ROLES if personal else READ_ONLY_ROLES | {"pulse"})
             or manifest.get("run_kind") not in (("personal_task",) if personal else
                                                 ("live",) if job["pip_type"] == "pulse" else ("audit", "draft"))
             or any(key in manifest for key in ("handoff", "conversation", "schedule", "event_trigger"))):
