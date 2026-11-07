@@ -138,7 +138,12 @@
     const cursor = document.createElement("div"); cursor.className = "dgc-trace-cursor"; body.appendChild(cursor);
     const transport = document.createElement("div"); transport.className = "dgc-trace-transport";
     const play = document.createElement("button"); play.type = "button"; play.className = "dgc-trace-play";
-    play.setAttribute("aria-label", "Play trace"); play.textContent = "▶";
+    // Drawn, not typed: "▶" and "Ⅱ" come from whichever font has them, with their own size and place in the circle.
+    const icon = (shape) => { const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svg.setAttribute("viewBox", "0 0 10 10"); svg.setAttribute("aria-hidden", "true");
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", shape === "pause" ? "M2.2 1h1.9v8H2.2zM5.9 1h1.9v8H5.9z" : "M2.6 1.1 8.8 4.6a.46.46 0 0 1 0 .8L2.6 8.9a.46.46 0 0 1-.7-.4V1.5a.46.46 0 0 1 .7-.4z");
+      svg.appendChild(path); play.replaceChildren(svg); };
+    play.setAttribute("aria-label", "Play trace"); icon("play");
     const scrub = document.createElement("input"); scrub.type = "range"; scrub.className = "dgc-trace-scrub";
     scrub.min = "0"; scrub.max = String(duration); scrub.value = String(duration); scrub.step = "1";
     scrub.setAttribute("aria-label", "Trace playback position");
@@ -147,24 +152,26 @@
     let frame = 0, last = 0, position = duration;
     const paint = () => { const fraction = position / duration;
       cursor.style.left = `calc(var(--trace-name-width) + (100% - var(--trace-name-width) - var(--trace-meta-width)) * ${fraction})`;
-      scrub.value = String(Math.round(position)); elapsed.textContent = `${clock(position)} / ${clock(duration)}`;
+      scrub.value = String(Math.round(position)); scrub.style.setProperty("--pos", `${fraction * 100}%`); elapsed.textContent = `${clock(position)} / ${clock(duration)}`;
       body.querySelectorAll(".dgc-trace-row").forEach((item, index) =>
         item.classList.toggle("future", trace.rows[index].start - trace.start > position));
     };
-    const stop = () => { cancelAnimationFrame(frame); frame = 0; play.textContent = "▶"; play.setAttribute("aria-label", "Play trace"); };
+    const stop = () => { cancelAnimationFrame(frame); frame = 0; icon("play"); play.setAttribute("aria-label", "Play trace"); };
     // A long work turn remains scrubbed in real elapsed time; playback finishes in about 12 seconds.
     const speed = Math.max(1, duration / 12000);
     const tick = (now) => { if (!last) last = now; position = Math.min(duration, position + (now - last) * speed); last = now; paint();
       if (position >= duration) stop(); else frame = requestAnimationFrame(tick); };
     play.onclick = () => { if (frame) { stop(); return; } if (position >= duration) position = 0;
-      last = 0; play.textContent = "Ⅱ"; play.setAttribute("aria-label", "Pause trace"); frame = requestAnimationFrame(tick); };
+      last = 0; icon("pause"); play.setAttribute("aria-label", "Pause trace"); frame = requestAnimationFrame(tick); };
     scrub.oninput = () => { position = Number(scrub.value); paint(); };
+    scrub.onpointerdown = () => scrub.classList.add("by-pointer");
     // A Pip's chat is inside a shadow root: what had the keyboard is the element in there, not its host.
     let previous = document.activeElement;
     while (previous?.shadowRoot?.activeElement) previous = previous.shadowRoot.activeElement;
     const dismiss = () => { stop(); backdrop.remove(); document.removeEventListener("keydown", keydown, true); previous?.focus?.(); };
     // First, so Esc closes this and nothing behind it hears it (a Pip's chat, a running reply's Stop).
-    const keydown = (event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); dismiss(); return; }
+    const keydown = (event) => { scrub.classList.remove("by-pointer");
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); dismiss(); return; }
       if (event.key === "Tab") { const controls = [close, play, scrub];
         const index = controls.indexOf(document.activeElement); if (event.shiftKey && index === 0) { event.preventDefault(); scrub.focus(); }
         else if (!event.shiftKey && index === controls.length - 1) { event.preventDefault(); close.focus(); } } };

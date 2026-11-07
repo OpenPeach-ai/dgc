@@ -13,6 +13,8 @@
 - A new Pip whose first message failed says so in its chat, with Settings → Models and Try again. It opened as an empty chat. A follow-up DGC sends for itself that fails says so too.
 - The context ring keeps its value after a reload mid-reply.
 - Details name Settings → Models in place of the terminal's flags and commands (`dgc --model`, `/connect`, `dgc doctor`). The terminal keeps its own words.
+- Trace's popup is tighter: smaller type, shorter rows and a narrower window. Dragging its timeline no longer draws a box around it, and Play and Pause are drawn icons in a small purple circle.
+- A plugin's card in a reopened Work chat waits for its plugin to connect, so a window reload no longer leaves it saying "isn't connected in this chat now" with a Retry.
 - A Pip's model menu opens over the Latest button. ChatDGC's model name no longer stays cut short after a window reload. "All quiet" on the home row takes its own line beside many faces.
 - Upgrading keeps your working model: adding your first saved provider no longer moves the default or hides the model you already ran on.
 - A Pip's effort slider shows its track in a light theme.

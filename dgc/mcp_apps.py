@@ -887,8 +887,9 @@ class WorkLink(Link):
         self.agent, self._add_rule = agent, add_rule
 
     def server(self, record: dict):
-        servers = getattr(getattr(self.agent, "mcp", None), "servers", None) or {}
-        server = servers.get(record.get("server"))
+        # A reopened chat's hosted plugins connect in the background, and its cards ask for their data as soon as they
+        # draw: asked at once, every card of a reloaded chat said "isn't connected" until its Retry (reported 2026-11-07).
+        server = self.agent.mcp.server_when_ready(record.get("server")) if getattr(self.agent, "mcp", None) else None
         if server is None:
             raise CardError(f"{record.get('plugin') or record.get('server')} isn't connected in this chat now")
         return server

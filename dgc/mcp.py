@@ -1960,6 +1960,15 @@ class MCPManager:
             thread.join(timeout)
         return not self._background
 
+    def server_when_ready(self, name: str, timeout: float = 20.0):
+        """The connected server of this name. One still connecting at startup (_connect_in_background) gets the same
+        moment a turn gives it; any other that isn't connected answers None at once, with no wait."""
+        server = self.servers.get(name)
+        if server is None and name in self._background:
+            self.wait_background(timeout)
+            server = self.servers.get(name)
+        return server
+
     def note_persisted(self, name: str, spec: dict | None) -> None:
         """Record the saved form of a server just connected with a different, runtime one."""
         if isinstance(spec, dict) and name in self.servers:
