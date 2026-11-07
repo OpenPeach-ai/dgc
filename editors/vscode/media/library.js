@@ -342,7 +342,7 @@
     if (menuOpen?.button === button) { closeMenu(true); return; }
     closeMenu(false);
     const menu = el("div", "lib-menu");
-    menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", `Export ${a.title || "it"} as`);
+    menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", `Download ${a.title || "it"} as`);
     for (const format of Array.isArray(a.exports) ? a.exports : []) {
       const item = el("button", "lib-menu-item", FORMATS[format] || format.toUpperCase());
       item.type = "button"; item.setAttribute("role", "menuitem"); item.dataset.format = format;
@@ -409,7 +409,7 @@
     actions.append(action("go-to-file", a.type === "doc" ? "Open it in the editor" : "Open it", () => vscode.postMessage({ type: "artifactOpen", artifact: a })));
     if (Array.isArray(a.exports) && a.exports.length) {
       const wrap = el("span", "lib-menu-wrap");
-      const exp = action("desktop-download", "Export…", () => exportMenu(exp, a));
+      const exp = action("desktop-download", "Download…", () => exportMenu(exp, a));
       exp.setAttribute("aria-haspopup", "menu"); exp.setAttribute("aria-expanded", "false");
       wrap.append(exp);
       actions.append(wrap);

@@ -5163,7 +5163,7 @@
   }
 
   // ---- artifacts (dgc/artifact_service): a card for each one a Work turn made or changed. Open shows it in its panel
-  // (a document in the editor over its file); Export makes a copy in one of its own formats. Every card of the same
+  // (a document in the editor over its file); Download makes a copy in one of its own formats, to the person's own computer. Every card of the same
   // artifact shows it as it is now: a later change names the same id (artifact_changed, or artifactNews from another
   // chat, a Pip or the editor).
   const ARTIFACT_MARK = { doc: "file-text", slides: "presentation", sheet: "sheet", dashboard: "layout-dashboard", page: "app-window" };
@@ -5208,10 +5208,10 @@
     if (formats.length) {
       const wrap = el("div", "amenu-wrap");
       const button = el("button", "abtn amenu-button"); button.type = "button";
-      button.innerHTML = `<span>Export</span>${icon("chevron-down", "xs")}`;
+      button.innerHTML = `<span>Download</span>${icon("chevron-down", "xs")}`;
       button.setAttribute("aria-haspopup", "menu"); button.setAttribute("aria-expanded", "false");
       button.disabled = removed;
-      const menu = el("div", "amenu"); menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", "Export as"); menu.hidden = true;
+      const menu = el("div", "amenu"); menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", "Download as"); menu.hidden = true;
       for (const format of formats) {
         const item = el("button", "amenu-item"); item.type = "button"; item.setAttribute("role", "menuitem");
         item.textContent = ARTIFACT_FORMAT[format] || format.toUpperCase();

@@ -167,6 +167,68 @@ test("a live card collapses without losing its frame or approval controls", asyn
   await page.close();
 });
 
+const LOGO = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiI+PHJlY3Qgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2IiBmaWxsPSJyZWQiLz48L3N2Zz4=";
+test("a card's header shows its plugin's own logo, at the Used line's size; with none, the window stays", async (t) => {
+  if (skipOrFail(t)) return;
+  const page = await browser.newPage();
+  await page.goto(`http://127.0.0.1:${pagePort}/`);
+  await page.evaluate((logo) => {
+    const before = window.__posted.length;
+    window.__answerLogos = setInterval(() => {
+      for (const m of window.__posted) if (m.op === "logo" && !m.done) { m.done = true; DgcMcpApps.host({ type: "mcpAppDone", id: m.id, logo: m.plugin === "board" ? logo : "" }); }
+    }, 10);
+    return before;
+  }, LOGO);
+  await page.evaluate((c) => window.show(c), { ...card(), server: "board--main" });
+  await page.waitForSelector(".mcp-app-logo");
+  const look = await page.evaluate(() => {
+    const img = document.querySelector(".mcp-app-logo"), box = img.getBoundingClientRect(), name = document.querySelector(".mcp-app-name strong").getBoundingClientRect();
+    return { width: box.width, height: box.height, centred: Math.abs((box.y + box.height / 2) - (name.y + name.height / 2)), asked: window.__posted.find((m) => m.op === "logo").plugin,
+             glyph: document.querySelectorAll(".mcp-app-name .mcp-app-icon-window").length };
+  });
+  assert.deepEqual([look.width, look.height, look.glyph, look.asked], [14, 14, 0, "board"], "the logo in place of the window, asked for by the plugin's id");
+  assert.ok(look.centred < 1.5, "level with the name");
+  await page.evaluate((c) => window.show(c), { ...card(), card_id: QUIET_ID, url: card().url.replace(CARD_ID, QUIET_ID), server: "nologo", plugin: "No logo" });
+  await page.waitForFunction(() => document.querySelectorAll(".mcp-app").length === 2);
+  await page.waitForTimeout(100);
+  assert.equal(await page.locator(".mcp-app").nth(1).locator(".mcp-app-icon-window").count(), 1, "none: the generic icon stays");
+  await page.close();
+});
+
+test("two cards from one tool in a reply: each says what differs, the earlier folds, and a person's own choice holds", async (t) => {
+  if (skipOrFail(t)) return;
+  const page = await browser.newPage();
+  await page.goto(`http://127.0.0.1:${pagePort}/`);
+  await page.evaluate(() => {
+    window.__chose = new Map();
+    window.DgcPictureFold = { chose: (k) => window.__chose.get(k), remember: (k, v) => window.__chose.set(k, v) };
+    const turn = document.createElement("div"); turn.className = "turn"; turn.id = "t1"; document.getElementById("log").append(turn);
+    window.showIn = (c, id = "t1") => document.getElementById(id).append(DgcMcpApps.card(c, {}));
+  });
+  const id = (n) => `app_${String(n).repeat(24)}`;
+  const mediaCard = (n, input) => ({ ...card(), card_id: id(n), url: card().url.replace(CARD_ID, id(n)), server: "media", plugin: "Media", tool: "show_medias",
+                                     tool_info: { name: "show_medias", title: "Show Uploaded Media" }, tool_input: input });
+  const state = () => page.evaluate(() => [...document.querySelectorAll(".mcp-app")].map((n) => [n.querySelector(".mcp-app-differs").hidden ? "" : n.querySelector(".mcp-app-differs").textContent, n.dataset.collapsed === "true"]));
+  await page.evaluate((c) => window.showIn(c), mediaCard(1, { type: "image", api_key: "short-one", query: "x".repeat(200) }));
+  await page.waitForTimeout(30);
+  assert.deepEqual(await state(), [["", false]], "one card: as it was");
+  await page.evaluate((c) => window.showIn(c), mediaCard(2, { type: "video", api_key: "short-two", query: "y".repeat(200) }));
+  await page.waitForTimeout(30);
+  assert.deepEqual(await state(), [["image", true], ["video", false]], "only short plain values, nothing long, nothing named as a secret; the newest is open");
+  assert.equal(await page.locator(".mcp-app").count(), 2, "never hidden");
+  // Opened by hand, it stays open as a third arrives; folded by hand, the newest stays folded.
+  await page.getByRole("button", { name: "Expand Media's card" }).first().click();
+  await page.evaluate((c) => window.showIn(c), mediaCard(3, { type: "audio" }));
+  await page.waitForTimeout(30);
+  assert.deepEqual(await state(), [["image", false], ["video", true], ["audio", false]]);
+  // Another tool, or another reply, is left alone.
+  await page.evaluate(() => { const other = document.createElement("div"); other.className = "turn"; other.id = "t2"; document.getElementById("log").append(other); });
+  await page.evaluate((c) => window.showIn(c, "t2"), mediaCard(4, { type: "image" }));
+  await page.waitForTimeout(30);
+  assert.deepEqual((await state())[3], ["", false]);
+  await page.close();
+});
+
 test("an old failed card shows a concise error instead of opening its gallery", async (t) => {
   if (skipOrFail(t)) return;
   const page = await browser.newPage();

@@ -3260,7 +3260,7 @@ function pluginCards(){
  if(remoteHost||S.apiVersion<44||!personalPip())return '';
  const pipName=S.pip?.name||'This Pip',off=archived()||S.busy;
  const actions=(S.connectorDrafts||[]).filter(d=>d.status==='pending'&&!d.expired).map(pluginDraft).filter(Boolean)
-  .map(({draft,plugin})=>pluginActionMarkup(draft,plugin,{esc,busy:pluginBusy===draft.id||off,pipName,edit:cardEdit(draft),logo:pluginLogoSrc}));
+  .map(({draft,plugin})=>pluginActionMarkup(draft,plugin,{esc,busy:pluginBusy===draft.id||off,pipName,edit:cardEdit(draft),logo:pluginLogoSrc,accountLabel:id=>(S.appLinks||[]).find(l=>l.account===id)?.label||''}));
  actions.push(ownAppDecidedCards(),pluginNotRun());
  const cards=shownPluginCards(S.plugins).map(c=>pluginCardMarkup(c,{esc,busy:pluginBusy===c.id||off,pipName}));
  return actions.join('')+cards.join('')+(S.pluginsError?`<p class="app-link-note" role="alert">${esc(S.pluginsError)}</p>`:'');

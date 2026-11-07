@@ -203,18 +203,18 @@ test("Remove asks first, says it goes to DGC's trash and can be recovered, and o
   assert.equal(await removing, true);
 });
 
-test("Export: where to keep it first, then the process makes it and it is copied there", async () => {
+test("Download, in a local window: where to keep it first, then the process makes it and it is copied there", async () => {
   world.saveTo = uri("/work/Q3 plan.pptx");
   const done = hub.exportArtifact(VIEW, "pptx");
   await tick();
-  assert.match(world.saveAsked.title, /Export “Q3 plan” as PowerPoint/);
+  assert.match(world.saveAsked.title, /Download “Q3 plan” as PowerPoint/);
   assert.equal(world.saveAsked.defaultUri.fsPath, "/work/Q3 plan.pptx");
   const cmd = last("artifact_export");
   assert.deepEqual({ ...cmd, request_id: "" }, { type: "artifact_export", id: ID, format: "pptx", request_id: "" });
   hub.onEvent({ type: "artifact_exported", id: ID, format: "pptx", path: "/home/u/.dgc/artifacts/ar_x/exports/Q3 plan.pptx", request_id: cmd.request_id });
   await done;
   assert.deepEqual(world.copies, [["/home/u/.dgc/artifacts/ar_x/exports/Q3 plan.pptx", "/work/Q3 plan.pptx"]]);
-  assert.match(world.infos[0], /Exported “Q3 plan.pptx”/);
+  assert.match(world.infos[0], /Saved “Q3 plan.pptx”/);
   await hub.exportArtifact(VIEW, "xlsx");
   assert.equal(last("artifact_export").format, "pptx", "a format it doesn't have is never asked for");
   world.saveTo = undefined;
@@ -246,6 +246,60 @@ test("a document opens in the canvas editor over its working file, and its saves
   assert.equal(hub.docAt("/home/u/.dgc/artifacts/ar_cccccccccccccccc/work/Other.md").id, "ar_cccccccccccccccc", "the store's own layout, after a reload");
   assert.equal(hub.docAt("/home/u/project/notes.md"), undefined);
   assert.equal(hub.docAt("/home/u/.dgc/artifacts/ar_cccccccccccccccc/work/../../x.md"), undefined, "never a path that climbs out");
+});
+
+test("Download, in a remote window: no save dialog on the remote machine; the person's own browser gets the file, once, as an attachment", async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const folder = mkdtempSync(join(tmpdir(), "dgc-download-"));
+  const file = join(folder, "made.pptx");
+  writeFileSync(file, "the deck");
+  const env = globalThis.__DGC_ART_VSCODE.env, opened = env.openExternal, external = env.asExternalUri;
+  env.remoteName = "ssh-remote";
+  let address = "";
+  env.asExternalUri = async (u) => u;
+  env.openExternal = async (u) => { address = u.toString(); return true; };
+  try {
+    world.saveTo = undefined; world.saveAsked = undefined;
+    const done = hub.exportArtifact(VIEW, "pptx");
+    await tick();
+    assert.equal(world.saveAsked, undefined, "the remote machine's dialog isn't asked");
+    hub.onEvent({ type: "artifact_exported", id: ID, format: "pptx", path: file, request_id: last("artifact_export").request_id });
+    await done;
+    assert.match(address, /^http:\/\/127\.0\.0\.1:\d+\/[a-f0-9]{48}\/Q3%20plan\.pptx$/);
+    assert.match(world.infos.at(-1), /Downloading “Q3 plan.pptx” in your browser/);
+    assert.equal((await fetch(address.replace(/\/[a-f0-9]{48}\//, `/${"0".repeat(48)}/`))).status, 404, "only with its token");
+    const got = await fetch(address);
+    assert.equal(got.status, 200);
+    assert.equal(got.headers.get("content-disposition"), "attachment; filename*=UTF-8''Q3%20plan.pptx");
+    assert.equal(await got.text(), "the deck");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await assert.rejects(fetch(address), "and then it has gone");
+  } finally {
+    delete env.remoteName; env.openExternal = opened; env.asExternalUri = external;
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test("a link to DGC's artifact page, in a remote window: the artifact's own address, forwarded; locally, and for any other link, nothing changes", async () => {
+  const { createServer } = await import("node:http");
+  const server = createServer((req, res) => {
+    if (req.url !== "/_list") { res.writeHead(404); res.end(); return; }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ artifacts: [{ id: "a1", name: "Other", path: "/index.html", port: 45011 }, { id: "a2", name: "Inbox", path: "/inbox.html", port: 45012 }] }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const shell = `http://127.0.0.1:${server.address().port}`;
+  const env = globalThis.__DGC_ART_VSCODE.env;
+  try {
+    assert.equal(await art.forwardedArtifactPage(`${shell}/?a=a2`), undefined, "a local window keeps the page with its list");
+    env.remoteName = "ssh-remote";
+    assert.equal((await art.forwardedArtifactPage(`${shell}/?a=a2`)).toString(), "http://forwarded.example:45012/inbox.html");
+    assert.equal(await art.forwardedArtifactPage(`${shell}/?a=gone`), undefined);
+    assert.equal(await art.forwardedArtifactPage("https://example.com/?a=a2"), undefined, "never another site");
+    assert.equal(await art.forwardedArtifactPage(`${shell}/other?a=a2`), undefined);
+  } finally { delete env.remoteName; server.close(); }
 });
 
 test("Open in browser goes through asExternalUri; Present shows the deck's one-file page in a tab of its own", async () => {

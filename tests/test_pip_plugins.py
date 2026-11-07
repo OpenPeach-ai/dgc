@@ -178,6 +178,122 @@ class PluginAccessTests(PluginWorld, unittest.TestCase):
             with self.subTest(marks=marks):
                 self.composio_batches({"name": "COMPOSIO_MULTI_EXECUTE_TOOL", "annotations": marks})
 
+    # ---- a Pip's Composio calls run on its linked account (Composio's own default is the newest active one).
+    def two_accounts(self):
+        """A stand-in with Composio's real shapes: list's lowercase status and user_info; every call is seen."""
+        from types import SimpleNamespace
+        self.composio_seen, self.composio_accounts = [], [
+            {"id": "ca_first", "status": "active", "is_default": True, "user_info": {"email": "pitch@example.com"}},
+            {"id": "ca_second", "status": "active", "is_default": False, "user_info": {"email": "dev@example.com"}}]
+        def call(route, args, **kw):
+            if route == "manage":
+                self.composio_seen.append(("manage", copy.deepcopy(args)))
+                name = args["toolkits"][0]["name"]
+                return json.dumps({"successful": True, "error": None, "data": {"results": {name: {"toolkit": name, "accounts": self.composio_accounts}}}})
+            self.composio_seen.append(("run", copy.deepcopy(args)))
+            return '{"successful": true, "data": {"results": []}}'
+        manager = SimpleNamespace(call=call)
+        spec = {"transport": "remote", "url": "https://mcp.composio.dev/mcp"}
+        info = {"plugin": "composio", "composio": True, "display_name": "Composio", "money": False, "reads": (), "servers": {"composio": spec}}
+        row = {"name": pip_plugins.COMPOSIO_EXECUTE}
+        entry = {"_route": "execute", "schema_digest": "a" * 64}
+        tools = {pip_plugins.COMPOSIO_EXECUTE: ("composio", row, entry, manager),
+                 pip_plugins.COMPOSIO_MANAGE: ("composio", {"name": pip_plugins.COMPOSIO_MANAGE}, {"_route": "manage", "schema_digest": "b" * 64}, manager)}
+        for name in pip_plugins.COMPOSIO_UNPINNABLE:
+            tools[name] = ("composio", {"name": name}, {"_route": "unpinnable", "schema_digest": "c" * 64}, manager)
+        return info, tools
+
+    def link_second(self):
+        from dgc import pip_app_links as links
+        card = links.request(self.registry, self.pip["id"], self.pip["workspace_id"], "gmail", "To read the company inbox.", None)
+        with self.registry.transaction():
+            self.registry.db.execute("UPDATE pip_app_links SET status='connected',server='composio',connection_digest=?,account='ca_second',label='dev@example.com' WHERE id=?",
+                                     ("d" * 64, card["id"]))
+
+    FETCH = {"tool_slug": "GMAIL_FETCH_EMAILS", "arguments": {"max_results": 5}}
+    SEND = {"tool_slug": "GMAIL_SEND_EMAIL", "arguments": {"recipient_email": "a@example.com", "subject": "Hi", "body": "Hello"}}
+
+    def test_a_batch_naming_no_account_reaches_composio_with_the_linked_one(self):
+        info, tools = self.two_accounts()
+        self.link_second()
+        said = self.session._call(self.registry, info, tools, {"tool": pip_plugins.COMPOSIO_EXECUTE, "arguments": {"tools": [self.FETCH]}})
+        self.assertIn("Untrusted data", said)
+        ran = [args for kind, args in self.composio_seen if kind == "run"]
+        self.assertEqual(ran[0]["tools"][0]["account"], "ca_second", "the second account, not Composio's default")
+        self.assertFalse([1 for kind, _ in self.composio_seen if kind == "manage"], "a linked Pip needs no list")
+
+    def test_a_batch_naming_another_account_is_refused_in_one_plain_line(self):
+        info, tools = self.two_accounts()
+        self.link_second()
+        said = self.session._call(self.registry, info, tools, {"tool": pip_plugins.COMPOSIO_EXECUTE, "arguments": {"tools": [{**self.FETCH, "account": "ca_first"}]}})
+        self.assertIn("linked to dev@example.com", said)
+        self.assertIn("nothing ran", said)
+        self.assertEqual(self.composio_seen, [], "it never reached Composio")
+        # Its own address is the same account, said another way.
+        self.session._call(self.registry, info, tools, {"tool": pip_plugins.COMPOSIO_EXECUTE, "arguments": {"tools": [{**self.FETCH, "account": "DEV@example.com"}]}})
+        self.assertEqual(self.composio_seen[-1][1]["tools"][0]["account"], "ca_second")
+
+    def test_an_allow_card_shows_and_sends_the_linked_account(self):
+        info, tools = self.two_accounts()
+        self.link_second()
+        pending = self.session._call(self.registry, info, tools, {"tool": pip_plugins.COMPOSIO_EXECUTE, "arguments": {"tools": [self.SEND]}})
+        self.assertIsInstance(pending, dict)
+        self.assertEqual(pending["draft"]["call"]["arguments"]["tools"][0]["account"], "ca_second")
+        self.assertEqual(self.composio_seen, [], "a send waits for the Allow")
+        # Before it runs, and however the card was edited, what it sends is held to the link.
+        pip_plugins.require_pinned(self.registry, self.pip["id"], info, pending["draft"]["call"])
+        for edited in ({"tools": [self.SEND]}, {"tools": [{**self.SEND, "account": "ca_first"}]}):
+            with self.subTest(edited=edited), self.assertRaises(pip_plugins.RegistryError):
+                pip_plugins.require_pinned(self.registry, self.pip["id"], info, {"tool": pip_plugins.COMPOSIO_EXECUTE, "arguments": edited})
+
+    def test_the_follow_up_inside_a_truncated_gmail_read_stays_on_the_linked_account(self):
+        info, tools = self.two_accounts()
+        self.link_second()
+        preview = json.dumps({"successful": True, "data": {"remote_file_info": {"file_path": "/x"}, "results": [
+            {"tool_slug": "GMAIL_FETCH_EMAILS", "response": {"data_preview": {"messages": []}}}]}})
+        full = json.dumps({"successful": True, "data": {"results": [{"tool_slug": "GMAIL_FETCH_EMAILS", "response": {"data": {"messages": ["whole"]}}}]}})
+        answers = [preview, full]
+        seen = []
+        tools[pip_plugins.COMPOSIO_EXECUTE][3].call = lambda route, args, **kw: seen.append(copy.deepcopy(args)) or answers.pop(0)
+        said = self.session._call(self.registry, info, tools, {"tool": pip_plugins.COMPOSIO_EXECUTE, "arguments": {"tools": [self.FETCH]}})
+        self.assertIn("whole", said)
+        self.assertEqual([a["tools"][0]["account"] for a in seen], ["ca_second", "ca_second"])
+
+    def test_an_unlinked_pip_with_two_accounts_gets_the_card_and_nothing_runs(self):
+        from dgc import pip_app_links as links
+        info, tools = self.two_accounts()
+        said = self.session._call(self.registry, info, tools, {"tool": pip_plugins.COMPOSIO_EXECUTE, "arguments": {"tools": [self.FETCH]}})
+        self.assertIn("Connect card", said)
+        self.assertEqual([kind for kind, _ in self.composio_seen], ["manage"], "it only looked")
+        card = links.listing(self.registry, self.pip["id"])[0]
+        self.assertEqual((card["toolkit"], card["status"]), ("gmail", "requested"))
+        self.assertEqual(links.connected(self.registry, self.pip["id"]), [], "and nothing is linked for it")
+        # Naming one doesn't get round the person's choice.
+        said = self.session._call(self.registry, info, tools, {"tool": pip_plugins.COMPOSIO_EXECUTE, "arguments": {"tools": [{**self.FETCH, "account": "ca_first"}]}})
+        self.assertIn("Connect card", said)
+        self.assertEqual([kind for kind, _ in self.composio_seen], ["manage"], "read once a run")
+
+    def test_an_unlinked_pip_with_one_account_runs_as_ever(self):
+        info, tools = self.two_accounts()
+        self.composio_accounts.pop()
+        said = self.session._call(self.registry, info, tools, {"tool": pip_plugins.COMPOSIO_EXECUTE, "arguments": {"tools": [self.FETCH]}})
+        self.assertIn("Untrusted data", said)
+        self.assertNotIn("account", [args for kind, args in self.composio_seen if kind == "run"][0]["tools"][0], "nothing added")
+
+    def test_composio_tools_that_cant_name_an_account_are_refused_only_when_it_could_be_the_wrong_one(self):
+        info, tools = self.two_accounts()
+        self.link_second()
+        for name in sorted(pip_plugins.COMPOSIO_UNPINNABLE):
+            with self.subTest(tool=name):
+                said = self.session._call(self.registry, info, tools, {"tool": name, "arguments": {"code_to_execute": "1"}})
+                self.assertIn("can't be held to one account", said)
+        self.assertFalse([1 for kind, _ in self.composio_seen if kind == "run"])
+        # One account, or no link: as it was (they ask with a card, as a change does).
+        self.composio_accounts.pop()
+        self.session._account_lists.clear()
+        pending = self.session._call(self.registry, info, tools, {"tool": "COMPOSIO_REMOTE_WORKBENCH", "arguments": {"code_to_execute": "1"}})
+        self.assertIsInstance(pending, dict)
+
     def composio_batches(self, row):
         from types import SimpleNamespace
         spec = {"transport": "remote", "url": "https://mcp.composio.dev/mcp"}

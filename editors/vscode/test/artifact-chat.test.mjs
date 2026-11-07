@@ -148,7 +148,7 @@ test("the Library's Artifacts tab: only when offered, newest first, by kind and 
     const row = s.page.locator('.lib-artifact[data-type="dashboard"]');
     await row.locator('[aria-label="Open it"]').click();
     assert.equal((await s.posted("artifactOpen"))[0].artifact.id, ITEMS[2].id);
-    await row.locator('[aria-label="Export…"]').click();
+    await row.locator('[aria-label="Download…"]').click();
     assert.deepEqual(await row.locator(".lib-menu-item").allTextContents(), ["Web page (.html)"], "a dashboard's one format");
     await row.locator(".lib-menu-item").click();
     assert.deepEqual((await s.posted("artifactExport")).map((m) => [m.artifact.id, m.format]), [[ITEMS[2].id, "html"]]);

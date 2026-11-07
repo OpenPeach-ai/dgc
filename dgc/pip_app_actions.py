@@ -145,8 +145,10 @@ def _plugin_allowed(store,payload,config):
         return
     # A plugin's server is a Pip's while the plugin is installed and turned on in Settings → Plugins (pip_plugins).
     if payload['kind']=='connector_call' and payload['server'] not in connector.PROVIDERS:
-        from .pip_plugins import require_server
-        require_server(store.registry,payload['source']['pip_id'],payload['server'],config)
+        from .pip_plugins import require_pinned,require_server
+        info=require_server(store.registry,payload['source']['pip_id'],payload['server'],config)
+        # Composio: what runs names the account linked to this Pip, whatever a card was edited to or written before.
+        require_pinned(store.registry,payload['source']['pip_id'],info,payload['call'])
 
 
 def _current(store,payload,config):

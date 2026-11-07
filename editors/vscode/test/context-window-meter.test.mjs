@@ -42,3 +42,26 @@ test("the meter names the model's own maximum when it is below the chosen window
   assert.equal(max.textContent, "1M · this model's max");
   assert.deepEqual(errors, []);
 });
+
+test("on a subscription the CLI keeps its own window: no setter, no percentage, one plain line, and what it reported stays", () => {
+  const { errors, send, doc } = makeDom();
+  const event = (ev) => send({ type: "event", event: ev });
+  event({ type: "ready", capabilities: {} });
+  event({ type: "config", model: "sonnet", mode: "default", base_url: "http://x.example/v1", context_size: 32768,
+          subscription_engines: [{ key: "claude", label: "Claude Code (Pro / Max subscription)" }] });
+  event({ ...context(32768, 12000), input_tokens: 12, output_tokens: 9, requests: 1 });
+  send({ type: "state", state: { model: "sonnet", think: "off", mode: "default", subscriptionEngine: "claude" } });
+  const button = doc.getElementById("btn-ctx"), menu = doc.getElementById("ctxmenu");
+  assert.equal(doc.getElementById("ctx").textContent, "", "no percentage of a size the CLI never uses");
+  assert.match(button.title, /Claude Code manages its own context window/);
+  assert.equal(menu.classList.contains("cli-window"), true, "main.css hides DGC's window controls with this");
+  assert.equal(doc.getElementById("ctx-cli").hidden, false);
+  assert.match(doc.getElementById("ctx-cli").textContent, /^Claude Code manages its own context window/);
+  assert.match(doc.getElementById("ctx-usage").textContent, /12 in · 9 out/, "what it reported stays");
+  // Another provider, and it's all as it was.
+  send({ type: "state", state: { model: "m", think: "off", mode: "default", subscriptionEngine: "" } });
+  assert.equal(doc.getElementById("ctx").textContent, "37%");
+  assert.equal(menu.classList.contains("cli-window"), false);
+  assert.equal(doc.getElementById("ctx-cli").hidden, true);
+  assert.deepEqual(errors, []);
+});

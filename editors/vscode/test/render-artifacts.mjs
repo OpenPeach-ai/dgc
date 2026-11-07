@@ -170,7 +170,7 @@ for (const [tone, theme] of THEMES_SHOT) {
     await s.page.waitForTimeout(100);
     await shoot(s.page, `library-artifacts-${label}-${tone}`);
     await s.page.locator('#lib-made .lib-kind[data-value="work"]').click();
-    await s.page.locator('.lib-artifact[data-type="sheet"] [aria-label="Export…"]').click();
+    await s.page.locator('.lib-artifact[data-type="sheet"] [aria-label="Download…"]').click();
     await shoot(s.page, `library-artifacts-filtered-export-${label}-${tone}`);
     await s.page.close();
   }

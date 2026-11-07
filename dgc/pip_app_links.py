@@ -156,6 +156,13 @@ def apps_overview(registry) -> dict:
     return {"apps": [groups[k] for k in order][:40]}
 
 
+def composio_links(registry, pip_id) -> dict:
+    """This Pip's accounts in Composio, by toolkit: what its plugin calls are held to. Outlook through the Microsoft plugin
+    is an account of that plugin's, not one Composio knows."""
+    return {link["toolkit"]: link for link in connected(registry, pip_id)
+            if link.get("account") and link.get("server") != microsoft_mail.SERVER}
+
+
 def connected(registry, pip_id) -> list[dict]:
     """The apps this Pip may read: its connected cards, one per app, with what the controller needs."""
     out = []
@@ -241,6 +248,11 @@ def _manage(config, server, toolkit, action, *, manager_factory=None):
                            input_handler=lambda *a, **kw: {"action": "cancel"})
     finally:
         manager.stop_all()
+    return _manage_reply(raw, toolkit, action)
+
+
+def _manage_reply(raw, toolkit, action):
+    """One toolkit's answer in a COMPOSIO_MANAGE_CONNECTIONS reply."""
     try:
         if not isinstance(raw, str) or len(raw) > 262144:
             raise ValueError()

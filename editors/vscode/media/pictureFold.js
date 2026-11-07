@@ -155,6 +155,9 @@
     return true;
   }
   root.DgcPictureFold = { markup, element, summary, message, isFolded,
+    /** What a person chose for this key, kept by the host (a plugin's card folds through the same store), or undefined. */
+    chose(key) { return chosen.get(key); },
+    remember(key, shut) { chosen.set(key, shut === true); post?.({ type: "pictureFold", key, folded: shut === true }); },
     host(fn) { post = typeof fn === "function" ? fn : null; },
     /** A shadow root this page draws replies in, so a fold there is painted too. */
     root(node) { if (node && typeof node.querySelectorAll === "function") roots.add(node); },

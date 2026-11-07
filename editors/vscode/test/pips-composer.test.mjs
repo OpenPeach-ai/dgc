@@ -177,12 +177,25 @@ test('the thinking control uses this Pip’s face at every effort stop',async(t)
   await page.setContent(`<style>${plush}\n${css}</style><main class="pip-app-root" style="width:330px;padding:12px"><div class="composer-model-menu" style="position:relative;bottom:auto">${control}</div></main>`);
   await page.locator('.composer-effort-face .dgc-plush-rig > image:first-child').evaluate(async(el)=>{const img=new Image();img.src=el.getAttribute('href');await img.decode();});
   for(const step of [0,2,4]){
-   await page.locator('#chat-thinking').evaluate((el,value)=>{el.value=String(value);const control=el.closest('.composer-effort-control');control.style.setProperty('--effort',`${value*25}%`);control.style.setProperty('--face-offset',`${18-value*9}px`);},step);
-   const bounds=await page.evaluate(()=>{const a=document.querySelector('.composer-effort-face').getBoundingClientRect(),s=document.querySelector('#chat-thinking').getBoundingClientRect();return{face:a.x+a.width/2,trackLeft:s.x,trackRight:s.right};});
-   assert.ok(bounds.face>=bounds.trackLeft&&bounds.face<=bounds.trackRight,`Pip face remains on the slider at ${step}`);
+   await page.locator('#chat-thinking').evaluate((el,value)=>{el.value=String(value);const control=el.closest('.composer-effort-control');control.dataset.step=String(value);control.style.setProperty('--effort-t',String(value/4));},step);
+   const bounds=await page.evaluate(()=>{const f=document.querySelector('.composer-effort-face'),a=f.getBoundingClientRect(),s=document.querySelector('#chat-thinking').getBoundingClientRect(),style=getComputedStyle(f);return{left:a.x,right:a.right,mid:a.x+a.width/2,midY:a.y+a.height/2,trackLeft:s.x,trackRight:s.right,trackMidY:s.y+s.height/2,ring:style.boxShadow,fill:style.backgroundColor};});
+   assert.ok(bounds.left>=bounds.trackLeft-.5&&bounds.right<=bounds.trackRight+.5,`Pip face stays inside the track's ends at ${step}`);
+   assert.ok(Math.abs(bounds.midY-bounds.trackMidY)<.6,`and centred on it at ${step}`);
+   assert.equal(bounds.ring,'none','no ring around the face');
+   assert.equal(bounds.fill,'rgba(0, 0, 0, 0)','and nothing painted behind it');
+   // Between the ends, the filled part ends under the middle of the face.
+   if(step===2)assert.ok(Math.abs(bounds.mid-(bounds.trackLeft+bounds.trackRight)/2)<.6,'on the boundary of what is filled');
    if(process.env.DGC_VISUAL_CAPTURE&&step===4)await page.screenshot({path:process.env.DGC_VISUAL_CAPTURE});
   }
  }finally{await browser.close();}
+});
+
+test('on a subscription a Pip has no window setter and no percentage: one plain line says the CLI keeps its own',async()=>{
+ const pip=job('a',{model_choice:{mode:'subscription',engine:'claude'}}),x=setup({api:66,jobs:[pip],chatControls:{...controls(),context_max:1048576}});await x.select('a');await x.drain();
+ assert.equal(x.d.querySelector('.composer-ctx-pct'),null,'no percentage');
+ x.click('#chat-context-toggle');await x.drain();
+ assert.equal(x.d.querySelector('#chat-context'),null,'no setter');
+ assert.match(x.d.querySelector('.composer-cli-window').textContent,/manages its own context window, so there is no size to set here/);
 });
 
 test('a window the main chat set shows in the prompt box at its next read, and the next message keeps it',async()=>{

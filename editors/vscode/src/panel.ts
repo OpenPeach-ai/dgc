@@ -11,7 +11,7 @@ import { basename, isAbsolute, join, resolve, sep } from "path";
 import { AttachMode, AttachedChatState, ChildExitInfo, DgcBackend, DgcEvent, MOVED_CAUSE, STOP_CAUSE } from "./backend";
 import { ChatBackend, OpenedChat } from "./chatChannel";
 import { CHATDGC_WINDOWS, isChatdgcEvent, isChatdgcModsEvent, type ChatDGC, type ChatDGCHost } from "./chatdgc";
-import { artifactsOffer, outputChoice, type Artifacts } from "./artifacts";
+import { artifactsOffer, forwardedArtifactPage, outputChoice, type Artifacts } from "./artifacts";
 import { keepRunningAfterClose } from "./closingTab";
 import { editorName, holderFacts, holderLine, type HolderFacts, type HolderLine } from "./holderWords";
 import { Dictation, MIC_MESSAGES, ReadAloud, SPEAK_MESSAGES, VoiceClient, type DictationOwner } from "./voice";
@@ -913,6 +913,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // Settings -> General -> Pictures in replies: this page's pictures nobody folded or opened follow it at once.
     this.context.subscriptions.push(onPicturesSetting((message) => this.post(message)));
     if (tab) { return; }
+    mcpAppsHost(this.context.extensionUri).logoOf = (plugin) => this.replyPluginLogo(plugin);
     // The saved default is the whole profile's: another window may have changed it while this one was in the background.
     if (typeof vscode.window.onDidChangeWindowState === "function") {
       this.context.subscriptions.push(vscode.window.onDidChangeWindowState(() => {
@@ -6277,7 +6278,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (parsed.username || parsed.password || !["http:", "https:"].includes(parsed.protocol)) {
         throw new Error("unsupported external URL");
       }
-      await vscode.env.openExternal(vscode.Uri.parse(parsed.toString(), true));
+      // A link to DGC's artifact page, in a remote window: the artifact's own forwarded address (src/artifacts.ts).
+      await vscode.env.openExternal(await forwardedArtifactPage(parsed.toString()) ?? vscode.Uri.parse(parsed.toString(), true));
     } catch {
       void vscode.window.showErrorMessage("DGC refused an invalid or unsafe external URL.");
     }

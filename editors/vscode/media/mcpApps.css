@@ -9,6 +9,12 @@
 .mcp-app-tool { overflow: hidden; text-overflow: ellipsis; }
 .mcp-app-icon { width: 14px; height: 14px; flex: none; }
 .mcp-app-name .mcp-app-icon { opacity: .8; }
+/* The plugin's own logo: the size of the "Used" line's, with the light-theme edge a pale logo keeps there. */
+.mcp-app-logo { display: block; width: 14px; height: 14px; flex: none; border-radius: 3px; object-fit: contain; filter: var(--mark-logo-filter, none); }
+/* What sets it apart from another card of the same tool in this reply: kept in view as the tool's name gives way. */
+.mcp-app-differs { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; color: var(--vscode-foreground); }
+.mcp-app-differs::before { content: "· "; color: var(--vscode-descriptionForeground); }
+.mcp-app-differs[hidden] { display: none; }
 .mcp-app-btn { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 22px;
   height: 22px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
 .mcp-app-btn:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }

@@ -132,3 +132,14 @@ test("declared sites: *.x is x and its subdomains, nothing else", () => {
   assert.equal(apps.declaredHost("https://cdn.test/", ["cdn.test"]), true);
   assert.equal(apps.declaredHost("not a url", ["*"]), false);
 });
+
+test("a card asks for its plugin's logo: from the side bar's list when it has one, and only by a plugin's id", () => {
+  const posted = [], post = (m) => posted.push(m);
+  const host = new apps.McpAppsHost(uri("/ext"));
+  const CARD = `app_${"c".repeat(24)}`;
+  host.logoOf = (plugin) => (plugin === "composio" ? "data:image/png;base64,AAAA" : "");
+  host.fromPage({ type: "mcpApp", op: "logo", id: "l1", card_id: CARD, plugin: "composio" }, post, () => true);
+  host.fromPage({ type: "mcpApp", op: "logo", id: "l2", card_id: CARD, plugin: "none" }, post, () => true);
+  host.fromPage({ type: "mcpApp", op: "logo", id: "l3", card_id: CARD, plugin: "../../etc" }, post, () => true);
+  assert.deepEqual(posted, [{ type: "mcpAppDone", id: "l1", logo: "data:image/png;base64,AAAA" }, { type: "mcpAppDone", id: "l2", logo: "" }, { type: "mcpAppDone", id: "l3", logo: "" }]);
+});

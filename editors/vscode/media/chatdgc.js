@@ -2001,9 +2001,9 @@
         const button = el("button", "cd-edit-cancel cd-artifact-export-button");
         button.type = "button";
         button.setAttribute("aria-haspopup", "menu"); button.setAttribute("aria-expanded", "false");
-        button.append(el("span", "", "Export"), icon("chevron-down"));
+        button.append(el("span", "", "Download"), icon("chevron-down"));
         const menu = el("span", "cd-artifact-menu");
-        menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", "Export as"); menu.hidden = true;
+        menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", "Download as"); menu.hidden = true;
         for (const format of formats) {
           const item = el("button", "cd-artifact-menu-item", ARTIFACT_FORMAT[format] || format.toUpperCase());
           item.type = "button"; item.setAttribute("role", "menuitem"); item.dataset.format = format;

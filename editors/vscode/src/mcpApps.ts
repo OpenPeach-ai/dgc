@@ -1,3 +1,4 @@
+import { PLUGIN_ID, pluginLogoData } from "./pluginLogos";
 import * as vscode from "vscode";
 import { randomBytes } from "crypto";
 
@@ -71,6 +72,9 @@ export class McpAppsHost implements vscode.Disposable {
   private tabs = new Map<string, vscode.WebviewPanel>();
   private origins = new Map<string, string>();
 
+  /** A plugin's logo as the side bar knows it (its catalog row, when Settings has listed plugins). */
+  logoOf?: (plugin: string) => string;
+
   constructor(private readonly extensionUri: vscode.Uri) {}
 
   /** One of the page's {type: "mcpApp"} messages. `send` reaches the backend that showed this page's cards. */
@@ -80,6 +84,12 @@ export class McpAppsHost implements vscode.Disposable {
     if (!CARD_ID.test(cardId)) return;
     this.see(cardId, post);
     switch (op) {
+      case "logo": {
+        // The plugin's own logo for a card's header, as an Allow card and "Used Composio" draw it. None: the page keeps its icon.
+        const plugin = String(msg.plugin || "");
+        post({ type: "mcpAppDone", id: msg.id, logo: PLUGIN_ID.test(plugin) ? (this.logoOf?.(plugin) ?? pluginLogoData(this.extensionUri, { name: plugin })) : "" });
+        return;
+      }
       case "call": {
         const requestId = String(msg.request_id || "");
         if (!REQUEST_ID.test(requestId) || !["tools/call", "resources/read"].includes(msg.method)) return;
