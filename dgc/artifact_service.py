@@ -14,7 +14,7 @@ The types and what each is made from:
   ``refresh``, which runs the queries on this computer with no model; they are kept beside the artifact, not as
   versions, so a dashboard refreshed every hour doesn't fill its history.
 - ``page``: an HTML page or small site. Work's ``artifact`` tool makes one linked to the project's files; the model
-  can make one from HTML it writes.
+  can make one from HTML it writes. Exported as Word or PDF, as Excel when it holds a table, as HTML or a zip of its files.
 
 The model hands over data, never a file's bytes; DGC lays every artifact out the same way every time.
 """
@@ -36,7 +36,7 @@ from .artifact_store import ArtifactError, Store
 OUTPUTS = {"auto": None, "document": "doc", "slides": "slides", "spreadsheet": "sheet", "page": "page",
            "dashboard": "dashboard"}
 EXPORTS = {"doc": ("docx", "pdf", "md"), "slides": ("pptx", "pdf", "html"), "sheet": ("xlsx", "csv"),
-           "dashboard": ("html", "pdf"), "page": ("html", "zip")}
+           "dashboard": ("pdf", "html"), "page": ("docx", "pdf", "html", "zip")}
 LABELS = {"doc": "Document", "slides": "Slides", "sheet": "Spreadsheet", "dashboard": "Dashboard", "page": "Page"}
 MAX_DOC_CHARS = 200_000
 MAX_PAGE_BYTES = 2 * 1024 * 1024
@@ -285,13 +285,39 @@ def compare(aid: str, before: int, after: int | None = None, *, store: Store | N
         raise ArtifactUseError(str(exc)) from None
 
 
+# Which versions of a page hold a table of data, so listing pages reads each one once.
+_PAGE_TABLES: dict[tuple[str, int], bool] = {}
+
+
+def _page_has_table(art, st) -> bool:
+    key = (art.id, art.version)
+    if key not in _PAGE_TABLES:
+        from . import artifact_page_export as page_export
+        if len(_PAGE_TABLES) > 512:
+            _PAGE_TABLES.clear()
+        try:
+            files, entry = render(art.id, art.version, store=st)
+            _PAGE_TABLES[key] = page_export.has_table(files[entry].decode("utf-8", "replace"))
+        except Exception:          # noqa: BLE001 - a menu entry fewer, never a failed listing
+            return False
+    return _PAGE_TABLES[key]
+
+
+def _exports(art, st) -> list[str]:
+    """What this artifact downloads as, its most useful first. A page with a table of data is a workbook too."""
+    out = list(EXPORTS[art.type])
+    if art.type == "page" and _page_has_table(art, st):
+        out.insert(2, "xlsx")
+    return out
+
+
 def view(aid: str, *, store: Store | None = None, versions: bool = True) -> dict:
     """An artifact as the screens, the CLI and the SDK show it."""
     st = _store(store)
     art = st.get(aid)
     out = {"id": art.id, "type": art.type, "label": LABELS[art.type], "title": art.title, "version": art.version,
            "created": art.created, "updated": art.updated, "origin": dict(art.origin),
-           "exports": list(EXPORTS[art.type])}
+           "exports": _exports(art, st)}
     if art.link:
         out["link"] = dict(art.link)
     if art.legacy.get("canvas"):
@@ -436,7 +462,7 @@ def export(aid: str, fmt: str, *, n: int | None = None, config=None, browser=Non
     art = st.get(aid)
     fmt = str(fmt or "").lower().lstrip(".")
     fmt = {"word": "docx", "powerpoint": "pptx", "excel": "xlsx", "markdown": "md"}.get(fmt, fmt)
-    if fmt not in EXPORTS[art.type]:
+    if fmt not in EXPORTS[art.type] and not (art.type == "page" and fmt == "xlsx"):
         raise ArtifactUseError(f"A {LABELS[art.type].lower()} exports as {', '.join(EXPORTS[art.type])}.")
     n = art.version if n is None else n
     # Each request owns its bytes until its caller copies them, even if another window exports
@@ -479,6 +505,8 @@ def export(aid: str, fmt: str, *, n: int | None = None, config=None, browser=Non
             files, entry = render(aid, n, store=store)
             if fmt == "html":
                 target.write_bytes(files[entry])
+            elif fmt in ("docx", "pdf", "xlsx"):
+                target.write_bytes(_page_file(art.title, fmt, files, entry, config, browser))
             else:
                 buffer = io.BytesIO()
                 with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -490,6 +518,37 @@ def export(aid: str, fmt: str, *, n: int | None = None, config=None, browser=Non
     except BaseException:
         shutil.rmtree(folder, ignore_errors=True)
         raise
+
+
+def _page_file(title: str, fmt: str, files: dict, entry: str, config, browser) -> bytes:
+    """A page as Word, PDF or Excel. A PDF is the page as the browser prints it, with its look and pictures; Word and Excel
+    hold what it says. A page that writes itself with script is read after it has run."""
+    from . import artifact_page_export as page_export
+    from .chatdgc import made
+    html = files[entry].decode("utf-8", "replace")
+    if fmt == "pdf":
+        try:
+            return made._print(html, config, browser, files=files, entry=entry)
+        except Exception:      # noqa: BLE001 - no browser, or it wouldn't print: its words, with the built-in writer
+            pass
+    page = page_export.read(html)
+    if not page_export.has_words(page) and "<script" in html.lower():
+        try:
+            page = page_export.read(made.page_after_scripts(html, config, browser, files=files, entry=entry))
+        except Exception:      # noqa: BLE001 - said just below
+            pass
+    if not page_export.has_words(page):
+        raise ArtifactUseError("This page has no text DGC can read: it draws itself. "
+                               + ("Set up Chrome or Edge with `dgc doctor`, then download it as PDF."
+                                  if fmt == "pdf" else "Download it as PDF instead."))
+    if fmt == "pdf":
+        return made.plain_pdf(title, page.blocks)[0]
+    if fmt == "docx":
+        return made.docx(title, page.blocks)
+    tables = page_export.sheets(page)
+    if not tables:
+        raise ArtifactUseError("This page has no table to put in a workbook. Download it as Word or PDF instead.")
+    return made.xlsx(made._sheets({"sheets": tables}))
 
 
 def refresh(aid: str, *, project_root=None, call=None, is_read_only=None, store: Store | None = None) -> dict:
