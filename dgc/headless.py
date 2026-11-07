@@ -5730,13 +5730,19 @@ class Backend:
             return False
         return True
 
-    def _emit_context(self, request_id: str | None = None, *, known_only: bool = False) -> None:
+    def _emit_known_context(self) -> None:
+        """The meter for a page that knows nothing yet, or nothing at all: counted while a running turn changes a
+        message, a false 0% would be worse than saying nothing."""
+        try:
+            self.agent.estimate_tokens()
+        except Exception:
+            return
+        self._emit_context()
+
+    def _emit_context(self, request_id: str | None = None) -> None:
         try:
             used = self.agent.estimate_tokens()
         except Exception:
-            # Counted while a running turn changes a message: `known_only` says nothing rather than a false 0%.
-            if known_only:
-                return
             used = 0
         totals = getattr(self.agent, "usage_totals", {})
         size = self._context_window_size()
@@ -8866,7 +8872,7 @@ class Backend:
             # for a snapshot knows nothing yet, and a reload mid-reply hears no other `context` until that turn ends:
             # its meter read 0% through the rest of the reply (the first one after a reattach comes from here).
             self._publish_cache_clock(current=True)
-            self._emit_context(known_only=True)
+            self._emit_known_context()
             self._emit_history(cmd["request_id"])
         elif t == "get_outline":
             self._emit_outline(cmd["request_id"])

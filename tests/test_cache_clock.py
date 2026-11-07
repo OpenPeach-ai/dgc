@@ -269,7 +269,7 @@ class Backend(unittest.TestCase):
         chat = host.default
         self.wire.seek(0); self.wire.truncate(0)
         with unittest.mock.patch.object(chat.agent, "estimate_tokens", side_effect=RuntimeError("changed during iteration")):
-            chat._emit_context(known_only=True)
+            chat._emit_known_context()
             self.assertEqual(self.frames("context"), [])
             chat._emit_context()
             self.assertEqual(self.frames("context")[0]["used"], 0)
