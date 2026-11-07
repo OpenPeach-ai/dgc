@@ -34,12 +34,15 @@ def _pip_type(pip_id) -> str:
             return ""
         db = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=0.5)
         try:
-            row = db.execute("SELECT pip_type FROM pips WHERE id=?", (pip_id,)).fetchone()
+            # Its look is in its current version's definition, not a column of its own.
+            row = db.execute("SELECT v.definition FROM pips p JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version "
+                             "WHERE p.id=? AND length(CAST(v.definition AS BLOB))<=16384", (pip_id,)).fetchone()
         finally:
             db.close()
-    except (OSError, sqlite3.Error):
+        kind = json.loads(row[0]).get("pip_type") if row else ""
+    except (OSError, sqlite3.Error, ValueError, TypeError, AttributeError):
         return ""
-    return str(row[0]) if row and row[0] else ""
+    return kind if isinstance(kind, str) else ""
 
 
 def refuse_core(pip_id) -> None:
