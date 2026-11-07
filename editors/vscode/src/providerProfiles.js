@@ -68,6 +68,29 @@ export async function addProfile(context,raw){
  return row;
 }
 
+/**
+ * An upgrade: this computer already runs on a model set before saved providers existed (`dgc setup`, or an older
+ * editor). The first provider added must not take that over: it moved the default and hid the working model from every
+ * menu, and a Pip on that model then had no connection. A host that needs no key becomes a saved provider, as it is,
+ * and stays the default. A key lives in DGC's own store, which the editor can't read, so that route isn't adopted; it
+ * stays the default all the same (firstTakesDefault). `ready`: the backend's ready event. `presets`: the host presets.
+ */
+export async function adoptWorkingRoute(context,ready,presets){
+ const saved=ready?.capabilities?.saved_route;
+ if(ready?.capabilities?.model_chosen!==true||!saved||saved.builtin===true||listProfiles(context).length||String(saved.subscription_engine||''))return null;
+ const base=String(saved.base_url||'').replace(/\/$/,''),model=String(saved.model||'');
+ const preset=Object.values(presets||{}).find(row=>row?.url===base);
+ if(!model||!preset||preset.needsKey)return null;
+ const added=await addProfile(context,{name:preset.label,base_url:base,model,api_mode:String(saved.api_mode||'auto')});
+ await markDefaultProfile(context,added.id);
+ return added;
+}
+
+/** Whether the provider being added becomes the default: only when nothing chose a model yet. An older CLI doesn't say. */
+export function firstTakesDefault(context,ready){
+ return !defaultProfileId(context)&&(ready?.capabilities?.model_chosen!==true||ready?.capabilities?.saved_route?.builtin===true);
+}
+
 export async function removeProfile(context,id){
  if(!(ID.test(String(id||''))||SUBSCRIPTION_ID.test(String(id||''))))throw Error('Unknown provider.');
  if(defaultProfileId(context)===id)throw Error('Choose another default before removing this provider.');

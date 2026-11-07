@@ -34,7 +34,7 @@ import { pipsAttention, PipsAttentionState } from "./pipsAttention";
 import { settingsDocument } from "./settingsView";
 import { onPicturesSetting, pictureFoldsMessage, rememberPictureFold, setPicturesInReplies, picturesFolded } from "./pictureFolds";
 import { pipHomeDismissedAttr, rememberPipHomeDismissed } from "./pipHomeDismiss";
-import { addProfile, defaultProfileId, listProfiles, markDefaultProfile, profileCredential, removeProfile } from "./providerProfiles.js";
+import { addProfile, adoptWorkingRoute, defaultProfileId, firstTakesDefault, listProfiles, markDefaultProfile, profileCredential, removeProfile } from "./providerProfiles.js";
 
 function isSlashCommandText(text: string): boolean {
   if (!text.startsWith("/")) { return false; }
@@ -8238,7 +8238,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private refreshEditorSettings(): void {
     const providers = Object.entries(PROVIDERS).map(([id, p]) => ({ id, label: p.label, url: p.url, needsKey: p.needsKey }));
     this.settingsEditor?.webview.postMessage({ type: "providers", providers });
-    this.settingsEditor?.webview.postMessage({ type: "providerProfiles", profiles: listProfiles(this.context), defaultId: defaultProfileId(this.context) });
+    // An upgrade's working model shows here as a saved provider from the first look (adoptWorkingRoute).
+    void adoptWorkingRoute(this.context, this.lastReadyEvent, PROVIDERS).catch(() => null).then((adopted) => {
+      this.settingsEditor?.webview.postMessage({ type: "providerProfiles", profiles: listProfiles(this.context), defaultId: defaultProfileId(this.context) });
+      if (adopted) this.savedProvidersChanged();
+    });
     const be = this.ensureBackend();
     // The web search's address and whether its key is saved are opt-in fields (an older editor never
     // sees them); every supported CLI takes `fields` and ignores names it doesn't know.
@@ -8352,7 +8356,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     } else if (msg?.type === "addProviderProfile") {
       try {
         if (msg.profile?.kind === "subscription") await this.verifySubscription(String(msg.profile.engine || ""), be);
-        const first = !defaultProfileId(this.context);
+        await adoptWorkingRoute(this.context, this.lastReadyEvent, PROVIDERS);
+        const first = firstTakesDefault(this.context, this.lastReadyEvent);
         const added = await addProfile(this.context, msg.profile);
         if (first) {
           try { await this.setDefaultProvider(added.id); }

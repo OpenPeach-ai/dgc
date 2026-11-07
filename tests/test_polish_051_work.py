@@ -44,6 +44,39 @@ class _Home(unittest.TestCase):
         return Config(project_root=self.work)
 
 
+class SavedRouteTests(_Home):
+    """What ready.capabilities.saved_route tells an editor, so an upgrade's first saved provider doesn't take over."""
+
+    def route(self, config=None):
+        from dgc.headless import _saved_route
+        return _saved_route(config or self.config())
+
+    def test_it_is_what_settings_saved_with_no_key(self):
+        (self.root / "config.json").write_text(json.dumps({"model": "deepseek-v4.1-flash:cloud", "base_url": "http://localhost:11434/v1"}))
+        (self.root / "secrets.json").write_text(json.dumps({"api_key": "private-token"}))
+        route = self.route()
+        self.assertEqual((route["model"], route["base_url"], route["builtin"]),
+                         ("deepseek-v4.1-flash:cloud", "http://localhost:11434/v1", False))
+        self.assertNotIn("private-token", json.dumps(route))
+        self.assertNotIn("api_key", route)
+
+    def test_a_chat_that_moved_elsewhere_does_not_change_it(self):
+        (self.root / "config.json").write_text(json.dumps({"model": "deepseek-v4.1-flash:cloud", "base_url": "http://localhost:11434/v1"}))
+        config = self.config()
+        config.set("model", "some-other-model", persist=False)
+        config.set("base_url", "https://host.test/v1", persist=False)
+        self.assertEqual(self.route(config)["model"], "deepseek-v4.1-flash:cloud")
+
+    def test_the_built_in_model_written_down_is_marked_as_no_choice(self):
+        (self.root / "config.json").write_text(json.dumps({"model": DEFAULTS["model"], "base_url": DEFAULTS["base_url"]}))
+        self.assertTrue(self.config().model_chosen(), "an older first save looks chosen")
+        self.assertTrue(self.route()["builtin"])
+
+    def test_a_subscription_default_is_named(self):
+        (self.root / "config.json").write_text(json.dumps({"subscription_engine": "claude"}))
+        self.assertEqual(self.route()["subscription_engine"], "claude")
+
+
 class NothingChosenTests(_Home):
     """A default written down isn't a choice: the first provider's window, and 'No provider'."""
 

@@ -217,7 +217,7 @@ export function renderFields(section, main, config, providers, ui) {
             c.cache_settable ? "Anthropic only. 5 minutes suits replies that follow each other; 1 hour keeps the cache between replies further apart, and each write costs more." : "");
         main.innerHTML = head("Models", "Choose the providers DGC can use in Work, ChatDGC and Pips.")
             + group("Providers", savedRows + addSaved,
-                "The first provider becomes the default. With several, choose the default for new chats and Pips here; each chat can switch providers in its model menu.")
+                "With no model yet, the first provider becomes the default. With several, choose the default for new chats and Pips here; each chat can switch providers in its model menu.")
             + group("Cache", field("Prompt cache", "Reuses what the model already read.", bool("prompt_cache", c.prompt_cache !== false))
                 + (anthropic ? cacheLife : "")
                 + (localOllama(c) ? field("Keep the model loaded", c.cache_settable ? "After the last reply, so the next is quick." : old,

@@ -698,6 +698,21 @@ def _undo_question(agent, index) -> dict:
     return {"merged": plan["merged"][:500], "held": plan["held"][:500], "commands": plan["commands"][:500]}
 
 
+def _saved_route(config) -> dict:
+    """What Settings has saved as the default, whatever this chat moved to, for an editor to keep on an upgrade (its first
+    saved provider must not take over a working model). Addresses and names only, never a key."""
+    from .config import Config, DEFAULTS
+    try:
+        root = getattr(config, "project_root", None)
+        saved = Config(project_root=root) if root is not None else config
+        route = {key: str(saved.get(key, "") or "") for key in ("base_url", "model", "api_mode", "subscription_engine")}
+    except Exception:                         # noqa: BLE001 -- a capability never costs a session its handshake
+        return {}
+    # An older first save wrote every default down: DGC's built-in model there is no choice anyone made.
+    route["builtin"] = route["model"] == DEFAULTS["model"] and route["base_url"] == DEFAULTS["base_url"]
+    return route
+
+
 def _model_chosen(config) -> bool:
     """Config.model_chosen, true for a config that can't say (a fixture, a hand-made stand-in)."""
     chosen = getattr(config, "model_chosen", None)
@@ -2661,6 +2676,7 @@ class Backend:
                           # False: nothing chose a model (no saved route, no DGC_MODEL, no subscription), so the model
                           # named here is only DGC's built-in default and may not exist. An editor says "No provider".
                           "model_chosen": _model_chosen(self.config),
+                          "saved_route": _saved_route(self.config),
                           # The client answers with set_workspace_roots.ask_options when it can
                           # draw the options too; ready.capabilities is a free-form object, so
                           # advertising one costs an older client nothing.
