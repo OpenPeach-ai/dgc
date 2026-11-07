@@ -10698,7 +10698,7 @@ function permissionChoices(ev) {
     // Acting on the card (Dismiss, its ✕ or Fix) reads its run: the Pip's unread count drops on the Pips page and the home.
     // The host marks that run's post read (mark_pip_read, Pips API 69); an older DGC has no unread to drop.
     const read = () => vscode.postMessage({ type: "pipReportRead", pip_id: r.pip_id, run_id: r.run_id });
-    const fix = () => { card.dataset.acted = ""; read(); askDgcToFix(r, card); };   // acted on: a newer card won't replace it
+    const fix = () => { card._acted = true; read(); askDgcToFix(r, card); };   // acted on: a newer card won't replace it
     const checkSignIn = () => { read(); vscode.postMessage({ type: "openSettings", section: "models" }); };
     const signInTitle = "Its model provider turned down the key or sign-in, so there is nothing to fix in the project. Check it in Settings > Models.";
     const dismiss = () => {
@@ -10771,7 +10771,7 @@ function permissionChoices(ev) {
   function pipReportOlder(r) {
     const at = Date.parse(String(r.finished_at || ""));
     const cards = new Set([...new Set([log, appendTarget])].flatMap((root) => [...root.querySelectorAll(".pip-report")]));
-    return [...cards].filter((c) => c.dataset.pip === r.pip_id && c.dataset.run !== r.run_id && !("fix" in c.dataset) && !("acted" in c.dataset)
+    return [...cards].filter((c) => c.dataset.pip === r.pip_id && c.dataset.run !== r.run_id && !("fix" in c.dataset) && !c._acted
       && !pipFixes.has(c.dataset.run) && !c.querySelector(".asked")
       && !(Date.parse(String(c._report?.finished_at || "")) > at));       // never an older run over a newer one
   }
