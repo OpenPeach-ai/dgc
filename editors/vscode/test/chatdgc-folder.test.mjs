@@ -84,7 +84,7 @@ test("a new chat can have a folder too; Continue in Work waits for a message", a
     await s.send({ type: "models", ids: ["glm-5.3:cloud"], current: "glm-5.3:cloud" });
     const cut = (id) => s.page.locator(id).evaluate((n) => n.scrollWidth > n.clientWidth + 0.5);
     assert.equal(await cut("#cd-output-label"), false, "a tool not chosen keeps its word: the folder's name gives way first");
-    assert.equal(await s.page.locator("#cd-temp-toggle").isVisible(), true, "(a new chat's row, Temporary in it)");
+    assert.equal(await s.page.locator("#cd-temp-toggle").isVisible(), true, "(a new chat's row, Incognito in it)");
     await s.page.click("#cd-folder");
     const item = s.page.locator('#cd-folder-menu [data-folder-action="work"]');
     assert.equal(await item.getAttribute("aria-disabled"), "true");

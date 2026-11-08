@@ -494,7 +494,7 @@ class ChatEngine:
         engine = str(self.config.get("subscription_engine", "") or "")
         model = str(self.config.get("subscription_model", "") or "")
         default = f"subscription:{engine}" + (f":{model}" if model else "") if engine else None
-        chat = {"id": new_chat_id(), "title": "Temporary chat" if temporary else "New chat", "created_at": stamp,
+        chat = {"id": new_chat_id(), "title": "Incognito chat" if temporary else "New chat", "created_at": stamp,
                 "updated_at": stamp, "model": default, "thinking": None, "pinned": False, "archived": False,
                 "messages": []}
         chat["temporary" if temporary else "draft"] = True
@@ -786,7 +786,7 @@ class ChatEngine:
             if relay is None:
                 raise ChatEngineError(f"{chat_model} can't see images, and no model that can is set up. Choose a model "
                                       "that can see (or install one, such as qwen3-vl), or send this without the image.")
-        if not chat["messages"] and chat["title"] in ("New chat", "Temporary chat") and not chat.get("temporary"):
+        if not chat["messages"] and chat["title"] in ("New chat", "Incognito chat", "Temporary chat") and not chat.get("temporary"):
             chat["title"] = title_from(text or prepared[0]["meta"]["name"])
         for item in prepared:
             self._keep_file(chat, item)
@@ -924,7 +924,7 @@ class ChatEngine:
         self._choose(chat, model, thinking, "off")
         client = self.client(chat.get("model") or None)
         room = self._research_room(client)
-        if not chat["messages"] and chat["title"] in ("New chat", "Temporary chat") and not chat.get("temporary"):
+        if not chat["messages"] and chat["title"] in ("New chat", "Incognito chat", "Temporary chat") and not chat.get("temporary"):
             chat["title"] = title_from(text)
         context = "\n\n".join(self._plain(m) for m in chat["messages"][-6:])[-6000:]
         mine = {"id": new_message_id(), "role": "user", "text": text, "created_at": now(), "research": True}

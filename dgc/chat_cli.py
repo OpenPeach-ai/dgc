@@ -28,7 +28,7 @@ SEARCH = ("off", "auto", "on")
 MAX_FILES = 10
 REPLY_TIMEOUT_S = 1800.0
 USAGE = ("dgc chat [QUESTION] [--resume ID] [--list [QUERY]] [--export ID [-o FILE]] [--model M] "
-         "[--think LEVEL] [--search off|auto|on] [--temporary] [--file PATH]... [--json]")
+         "[--think LEVEL] [--search off|auto|on] [--incognito] [--file PATH]... [--json]")
 HELP = """Commands, inside a chat:
   /new              a new chat
   /list [QUERY]     your chats, newest first
@@ -60,7 +60,9 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--think", choices=THINKING, help="how much the model thinks first")
     p.add_argument("--search", choices=SEARCH,
                    help="auto (default): it searches when an answer depends on facts; on: search first; off: never")
-    p.add_argument("--temporary", action="store_true", help="a chat that's never saved or listed")
+    # Incognito, as ChatDGC names it; --temporary, its first name, still works.
+    p.add_argument("--incognito", "--temporary", dest="temporary", action="store_true",
+                   help="an incognito chat: never saved, listed or remembered")
     p.add_argument("--file", action="append", default=[], metavar="PATH", help="attach a file (up to 10)")
     p.add_argument("--json", action="store_true", help="print the reply, list or export as JSON")
     p.add_argument("--make", choices=("document", "slides", "spreadsheet", "page", "dashboard"),

@@ -2632,7 +2632,7 @@ share: short facts you told ChatDGC, a Work session or a Pip (each keeps what yo
 yourself, or ask it to remember, and says so) or added yourself, plus your projects, from your
 Work sessions. A Work session reads those facts under **# Memory**. See, change or delete
 everything in **Settings → Memory**, where one switch turns it off everywhere. A fact is kept
-only when you said it yourself, never a password, key or account number, and temporary chats are
+only when you said it yourself, never a password, key or account number, and incognito chats are
 never remembered.
 
 It also learns by itself: once a chat or a session has been quiet a couple of minutes, or a turn
@@ -3835,9 +3835,9 @@ still streaming if it is being written.
 
 ## Where chats live
 
-One file per chat in `~/.dgc/chat`, readable only by you. Tick **Temporary** before your first
-message and the chat is never written down or listed. From your own program, the SDK's `dgc.chat()`
-reaches the same chats; see **SDK**.
+One file per chat in `~/.dgc/chat`, readable only by you. Turn on **Incognito** (the ghost) before
+your first message, or run `dgc chat --incognito`, and the chat is never written down, listed or
+remembered. From your own program, the SDK's `dgc.chat()` reaches the same chats; see **SDK**.
 """.strip()),
     ("Pips", "standing agents with one job each, beside your main chat", """
 # Pips

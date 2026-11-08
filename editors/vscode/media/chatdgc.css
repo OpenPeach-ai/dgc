@@ -330,8 +330,6 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 .cd-tools-end { display: flex; align-items: center; gap: var(--sp-2); flex: 0 1 auto; min-width: 0; margin-left: auto; }
 .cd-tools-end > * { flex: none; }
 .cd-tools-end > .cd-picker { flex: 0 1 auto; min-width: 0; }
-/* (.codicon[class*='codicon-'] sets display itself: these say which, at its weight.) */
-.cd-toggle > .codicon.cd-toggle-icon { display: none; }
 @container cd-box (max-width: 640px) {
   .cd-tool { width: var(--control); padding: 0; justify-content: center; }
   .cd-tool .cd-tool-label, .cd-toggle .cd-tool-label { display: none; }
@@ -339,24 +337,15 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
   .cd-output .cd-tool[aria-pressed="true"] { width: auto; padding: 0 var(--sp-2); }
   .cd-output .cd-tool[aria-pressed="true"] .cd-tool-label { display: inline; }
   .cd-output .cd-tool[aria-pressed="true"] .cd-output-prefix { display: none; }
-  .cd-toggle > .codicon.cd-toggle-icon { display: inline-block; }
-  /* Without its word, Temporary is an icon button like its neighbours: the checkbox stays (focus, Space, the screen
-     reader's "checkbox, checked") but is drawn by the icon, lit when on. A bare native box read as a stray white square. */
-  .cd-toggle { position: relative; width: var(--control); height: var(--control); justify-content: center; border-radius: var(--r-sm); }
-  .cd-toggle input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
-  .cd-toggle:hover { background: var(--surface2); color: var(--text); }
-  .cd-toggle:has(input:checked) { color: var(--accent); background: var(--surface2); }
-  .cd-toggle:has(input:focus-visible) { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+  /* Without its word, Incognito is its ghost alone, square like its neighbours (.cd-tools: outweighs the base rule below). */
+  .cd-tools .cd-toggle { width: var(--control); padding: 0; justify-content: center; }
 }
-/* Too full for the model's name at this width (a long name, Temporary on a new chat): the chips give up their words first,
-   no further than it takes. fitModelName() in chatdgc.js sets these: Temporary's word, Folder's, all of them as under 640px
+/* Too full for the model's name at this width (a long name, Incognito on a new chat): the chips give up their words first,
+   no further than it takes. fitModelName() in chatdgc.js sets these: Incognito's word, Folder's, all of them as under 640px
    above, then the meter's figure. */
 .cd-box.cd-fit-1 .cd-toggle .cd-tool-label, .cd-box.cd-fit-2 #cd-folder .cd-tool-label, .cd-box.cd-fit-3 .cd-tool .cd-tool-label,
 .cd-box.cd-fit-4 #cd-context-pct { display: none; }
-.cd-box.cd-fit-1 .cd-toggle > .codicon.cd-toggle-icon { display: inline-block; }
-.cd-box.cd-fit-1 .cd-toggle { position: relative; width: var(--control); height: var(--control); justify-content: center; border-radius: var(--r-sm); }
-.cd-box.cd-fit-1 .cd-toggle input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
-.cd-box.cd-fit-1 .cd-toggle:has(input:checked) { color: var(--accent); background: var(--surface2); }
+.cd-box.cd-fit-1 .cd-toggle { width: var(--control); padding: 0; justify-content: center; }
 .cd-box.cd-fit-2 #cd-folder, .cd-box.cd-fit-3 .cd-tool { width: var(--control); padding: 0; justify-content: center; }
 /* Narrower still: the model keeps its arc and chevron (its name is the pill's tooltip and heads its menu)... */
 @container cd-box (max-width: 420px) {
@@ -438,8 +427,19 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 .cd-dial-desc { min-height: 2.8em; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
 .cd-dial-hint { margin-top: 2px; color: var(--faint); font: var(--w-reg) var(--t-xs)/1.3 var(--sans); }
 @media (prefers-reduced-motion: reduce) { .cd-dial-needle { transition: none; } }
-.cd-toggle { display: inline-flex; align-items: center; gap: var(--sp-1); color: var(--muted); font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; }
-.cd-toggle input { margin: 0; accent-color: var(--accent); }
+/* Incognito (his pick, 9 Nov): a ghost and its word, like the tools beside it. The checkbox stays (focus, Space, the
+   screen reader's "checkbox, checked") but is drawn by the ghost, lit when on: a bare native box read as a white square. */
+.cd-toggle { position: relative; display: inline-flex; align-items: center; gap: 6px; height: var(--control); padding: 0 var(--sp-2);
+  border-radius: var(--r-row); color: var(--muted); font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer;
+  transition: background-color var(--dur-hover) ease, color var(--dur-hover) ease; }
+.cd-toggle input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.cd-toggle .cd-ghost { flex: none; width: 16px; height: 16px; }
+.cd-toggle:hover { background: var(--wash); color: var(--text); }
+.cd-toggle:has(input:checked) { color: var(--accent-text); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.cd-toggle:has(input:focus-visible) { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.cd-badge.cd-incognito { display: inline-flex; align-items: center; gap: 4px; }
+.cd-badge.cd-incognito[hidden] { display: none; }
+.cd-badge.cd-incognito .cd-ghost { width: 12px; height: 12px; flex: none; }
 .cd-spacer { flex: 1 1 auto; }
 /* margin-left:auto, not only the spacer: when a narrow box wraps the tools, Send still ends the row on the right. */
 .cd-send { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: var(--control); height: var(--control);

@@ -33,8 +33,8 @@
   const A_MADE = { chat: "made in Chat", work: "made in Work", pip: "made by a Pip", sdk: "made by an app", cli: "made in the terminal" };
   const FORMATS = { docx: "Word document (.docx)", pdf: "PDF", md: "Markdown (.md)", pptx: "PowerPoint (.pptx)", html: "Web page (.html)",
                     xlsx: "Excel workbook (.xlsx)", csv: "CSV (first sheet)", zip: "Zip of its files (.zip)" };
-  const ABOUT = { files: "Every file you attached in ChatDGC or it made for you, in every chat and project. Temporary chats keep none.",
-                  filesAndWork: "Every file you attached in ChatDGC or it made for you, in every chat and project, and every image DGC made in Work. Temporary chats keep none.",
+  const ABOUT = { files: "Every file you attached in ChatDGC or it made for you, in every chat and project. Incognito chats keep none.",
+                  filesAndWork: "Every file you attached in ChatDGC or it made for you, in every chat and project, and every image DGC made in Work. Incognito chats keep none.",
                   widgets: "Every calculator, timer or quiz ChatDGC made for you, in every chat. Open one beside you, or delete it.",
                   artifacts: "Every document, deck, sheet, page and dashboard DGC made for you, in Chat, Work and your Pips, with every version. Open one, export it, or remove it.",
                   videos: "Every video DGC made for you, in Work, ChatDGC and your Pips, newest first. Play one here, open it in your player, or save a copy into the project." };

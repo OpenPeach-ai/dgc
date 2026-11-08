@@ -85,6 +85,12 @@ class ChatCliTests(unittest.TestCase):
         secret = self.dgc("Just between us.", "--temporary", "--search", "off")
         self.assertIn(ANSWER, secret.stdout)
         self.assertEqual(len(json.loads(self.dgc("--list", "--json").stdout)), 1, "a temporary chat is never listed")
+        # Incognito is its name now (9 Nov), as ChatDGC says it; --temporary keeps working for anything that uses it.
+        hidden = self.dgc("Just between us, again.", "--incognito", "--search", "off")
+        self.assertEqual(hidden.returncode, 0, hidden.stderr)
+        self.assertIn(ANSWER, hidden.stdout)
+        self.assertEqual(len(json.loads(self.dgc("--list", "--json").stdout)), 1, "an incognito chat is never listed either")
+        self.assertIn("--incognito", self.dgc("--help").stdout)
 
     def test_make_asks_for_slides_and_a_reply_that_didnt_make_them_says_so(self):
         run = self.dgc("Our Q3 in a few slides", "--make", "slides", "--search", "off", "--json")

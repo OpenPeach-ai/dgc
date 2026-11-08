@@ -678,7 +678,7 @@ function renderMemory(main) {
     const facts = st?.facts || [], projects = st?.projects || [];
     let html = '<h2>Memory</h2>' + ui.intro('memory', 'What DGC remembers about you, everywhere.',
         'One memory of what you tell DGC, shared by ChatDGC, your Work sessions and your Pips: '
-        + 'facts, never files or secrets, and only what you said yourself. Temporary chats are never remembered.');
+        + 'facts, never files or secrets, and only what you said yourself. Incognito chats are never remembered.');
     if (memory.note) html += `<div class="banner error" role="alert"><p>${esc(memory.note)}</p></div>`;
     if (!st) {
         main.innerHTML = html + (memory.note ? '' : '<p class="note" role="status">Reading what DGC remembers…</p>');

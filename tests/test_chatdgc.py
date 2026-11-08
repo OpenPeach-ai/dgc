@@ -195,6 +195,7 @@ class ChatDGCTests(unittest.TestCase):
         self.assertEqual(self.store.listing()["total"], 0)
         self.assertFalse((self.root / "chats" / f"{chat['id']}.json").exists())
         self.assertEqual(len(self.engine.open(chat["id"])["messages"]), 2, "it lives while DGC runs")
+        self.assertEqual(chat["title"], "Incognito chat", "ChatDGC calls it Incognito (9 Nov); it was Temporary chat")
 
     def test_a_new_chat_is_listed_only_once_it_has_a_message(self):
         chat = self.engine.open()

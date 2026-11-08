@@ -669,16 +669,16 @@ test("for a reader who asked for less motion, the wave is still: all three slash
   } finally { await s.page.close(); }
 });
 
-// A narrow box drew Temporary as a bare native checkbox beside its icon: a stray white square in a dark theme
-// (seen in real VS Code, 2026-10-18). Without its word it is an icon button like its neighbours, lit when on.
-test("narrow, Temporary is an icon button: no bare checkbox, Space and a click still toggle it, and it lights when on", async (t) => {
+// A narrow box drew Temporary (now Incognito) as a bare native checkbox beside its icon: a stray white square in a dark
+// theme (seen in real VS Code, 2026-10-18). Without its word it is an icon button like its neighbours, lit when on.
+test("narrow, Incognito is an icon button: no bare checkbox, Space and a click still toggle it, and it lights when on", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen({ width: 460, height: 700 });
   try {
     await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
     const look = () => s.page.evaluate(() => {
       const label = document.getElementById("cd-temp-toggle"), box = document.getElementById("cd-temporary");
-      const r = label.getBoundingClientRect(), icon = label.querySelector(".cd-toggle-icon"), cs = getComputedStyle;
+      const r = label.getBoundingClientRect(), icon = label.querySelector(".cd-ghost"), cs = getComputedStyle;
       return { boxShown: cs(box).opacity !== "0", checked: box.checked, size: [Math.round(r.width), Math.round(r.height)],
                icon: cs(icon).display !== "none", colour: cs(label).color,
                accent: cs(document.body).getPropertyValue("--accent").trim(), attach: Math.round(document.getElementById("cd-attach").getBoundingClientRect().height) };
@@ -689,6 +689,7 @@ test("narrow, Temporary is an icon button: no bare checkbox, Space and a click s
     assert.equal(before.size[1], before.attach, "as tall as its neighbours");
     assert.equal(before.checked, false);
     await s.page.locator("#cd-temp-toggle").click();
+    await s.page.locator("#cd-temp-toggle").evaluate((n) => Promise.all(n.getAnimations().map((a) => a.finished)));   // its 120 ms colour change
     const on = await look();
     assert.equal(on.checked, true, "a click turns it on");
     assert.notEqual(on.colour, before.colour, "and it lights");
