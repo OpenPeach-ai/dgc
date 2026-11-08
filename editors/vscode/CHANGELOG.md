@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Finding severity in Apple's system colours: red for high and yellow for medium on dark themes, Apple's own higher-contrast red and yellow on light ones, where the old amber was hard to read.
 - A Pip report card's face sits in the middle of the card, not at its top; an opened card keeps it beside the Pip's name.
 - A Pip report card says "1 new · 3 still there" and names the new finding when its review said which findings are new.
 - A held request that was lost, unsent, says why on its line: "Not sent, DGC restarted" (the Pip then does that step again) or "Not sent, its computer was stopped".

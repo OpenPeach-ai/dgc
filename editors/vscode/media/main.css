@@ -2324,8 +2324,8 @@ body.vscode-light .prompt-rail-card { box-shadow: 0 10px 30px -10px rgba(0, 0, 0
   border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text); cursor: pointer; text-align: left; font: inherit; }
 .pips-digest-finding:hover { background: var(--surface2); }
 .pips-digest-severity { flex: none; min-width: 4.2em; color: var(--muted); font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .04em; }
-.pips-digest-severity.sev-high, .pips-digest-severity.sev-critical { color: var(--err-text); }
-.pips-digest-severity.sev-medium { color: var(--warn); }
+.pips-digest-severity.sev-high, .pips-digest-severity.sev-critical { color: var(--sev-high); }
+.pips-digest-severity.sev-medium { color: var(--sev-medium); }
 .pips-digest-title { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .pips-digest-path { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--faint); font: var(--w-reg) var(--t-xs)/1.5 var(--mono); }
@@ -3195,6 +3195,12 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 .pip-report.quiet { align-items: center; margin: var(--sp-2) 0; padding: var(--sp-1) var(--sp-3);
   border-color: transparent; background: transparent; box-shadow: none; }
 .pip-report, .pip-report-group { --pip-report-face: 20px; }
+/* A finding's severity in Apple's system colours (asked 8 Nov): systemRed and systemYellow on a dark theme; on a light
+   one Apple's own Increase Contrast values, since its standard red (3.2:1) and yellow (1.4:1) don't read as small text on
+   white. #D70015 is 4.9:1 and #B25000 4.7:1 on the lightest grounds; the old amber was 2.4:1 there. */
+.pip-report, .pip-report-group, .pips-digest-severity { --sev-high: #FF453A; --sev-medium: #FFD60A; }
+body.vscode-light :is(.pip-report, .pip-report-group, .pips-digest-severity),
+body.vscode-high-contrast-light :is(.pip-report, .pip-report-group, .pips-digest-severity) { --sev-high: #D70015; --sev-medium: #B25000; }
 /* One size for a Pip's face wherever a report shows it, the size of the faces stacked on a group's line (reported 8 Nov:
    a clean run's face was smaller than the rest, a full card's larger). */
 .pip-report-face, .pip-report-face .dgc-plush { display: block; flex: none; width: var(--pip-report-face); height: var(--pip-report-face); }
@@ -3216,8 +3222,8 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
   font: var(--w-reg) var(--t-xs)/1.5 var(--sans); color: var(--text); }
 .pip-report-sev { flex: none; min-width: 4.5em; color: var(--muted); font-weight: var(--w-semi); text-transform: lowercase; }
 .pip-report-sev[data-severity="critical"], .pip-report-sev[data-severity="high"],
-.pip-report-sev[data-severity="failed"] { color: var(--del-text); }
-.pip-report-sev[data-severity="medium"] { color: var(--warn); }
+.pip-report-sev[data-severity="failed"] { color: var(--sev-high); }
+.pip-report-sev[data-severity="medium"] { color: var(--sev-medium); }
 .pip-report-title { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; }
 .pip-report-where { flex: 0 1 auto; min-width: 0; color: var(--muted); font-family: var(--mono); overflow-wrap: anywhere; }
 .pip-report-more { margin: var(--sp-1) 0 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
@@ -3247,12 +3253,11 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
    like 100 still took a fraction of a pixel from it, enough for an ellipsis. */
 .pip-report-line-name { flex: 0 9999 auto; min-width: 4em; overflow: hidden; text-overflow: ellipsis; color: var(--text-strong); font-weight: var(--w-semi); }
 .pip-report-line-state { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }   /* shortens before a button leaves the card */
-.pip-report-line-state[data-bad] { color: var(--del-text); font-weight: var(--w-semi); }
+.pip-report-line-state[data-bad] { color: var(--sev-high); font-weight: var(--w-semi); }
 .pip-report-line-state[data-good] { color: var(--good); font-weight: var(--w-semi); }   /* "fixed · nothing found" */
 body.vscode-light .pip-report-line-state[data-good] { color: #1D7A44; }   /* --good is 2.1:1 on light; this is 5.4:1 */
 /* "failed", "failed again" and the "why" label: --del-text is 2.8:1 on a light side bar; this red is 6.5:1. */
-body.vscode-light .pip-report-line-state[data-bad], body.vscode-light .pip-report-sev[data-severity="failed"],
-body.vscode-light .pip-report-sev[data-severity="critical"], body.vscode-light .pip-report-sev[data-severity="high"] { color: #B42318; }
+
 .pip-report-fill { flex: 1 1 0; min-width: 0; }
 .pip-report-line-when { flex: none; color: var(--muted); font-size: var(--t-xs); font-variant-numeric: tabular-nums; }
 .pip-report-chevron { flex: none; align-self: center; color: var(--muted); font-size: 14px; transition: transform .12s; }
