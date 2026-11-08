@@ -91,6 +91,11 @@ MAX_FRAME_BYTES = 90 * 1024          # base64 still fits a 128 KiB Pips reply
 MAX_VIEW_FRAME_BYTES = 700 * 1024    # the live screen: one reply, well inside the 4 MiB frame
 MAX_TEXT = 12000
 ACTOR = "local-computer"
+# Why a held request was lost, unsent (Pips package 3), in its resolved_by: the runner restarted (an update, a restart, a
+# crash) and its browser went with it; or the user stopped or reset its computer. The first is redone once (_continue_lost),
+# the second is the user's own stop and isn't. Either way the chat's line says which.
+LOST_BY_RESTART = "pip-restart"
+LOST_BY_STOP = "pip-computer-stop"
 
 SCHEMA = """
 CREATE TABLE pip_computer_actions (
@@ -1723,6 +1728,17 @@ def tick(registry, config) -> dict:
             with registry.transaction():
                 registry.db.execute("UPDATE pip_computer_actions SET continuation_run_id=? WHERE id=? AND continuation_run_id IS NULL",
                                     (follow, row["id"]))
+    for row in registry.db.execute("SELECT * FROM pip_computer_actions WHERE status='lost' AND resolved_by=? "
+                                   "AND continuation_run_id IS NULL AND resolved_at>?", (LOST_BY_RESTART, recent)).fetchall():
+        # Lost to a restart: nothing was sent, so the Pip does that step again, once (its chat busy: the next tick).
+        try:
+            follow = _continue_lost(registry, row, config)
+        except RegistryError:
+            follow = None
+        if follow:
+            with registry.transaction():
+                registry.db.execute("UPDATE pip_computer_actions SET continuation_run_id=? WHERE id=? AND continuation_run_id IS NULL",
+                                    (follow, row["id"]))
     for row in rows:
         host = HOSTS.get(row["pip_id"])
         live = host is not None and host.id == row["host_id"]
@@ -1730,8 +1746,8 @@ def tick(registry, config) -> dict:
         if row["status"] == "pending":
             if not live and not careful:
                 with registry.transaction():
-                    registry.db.execute("UPDATE pip_computer_actions SET status='lost',resolved_at=? WHERE id=? AND status='pending'",
-                                        (_now(), row["id"]))
+                    registry.db.execute("UPDATE pip_computer_actions SET status='lost',resolved_at=?,resolved_by=? "
+                                        "WHERE id=? AND status='pending'", (_now(), LOST_BY_RESTART, row["id"]))
                 done["lost"] += 1
             elif _now() >= row["expires_at"]:
                 if live:
@@ -1758,6 +1774,7 @@ def tick(registry, config) -> dict:
                                             "AND status='rejected' AND continuation_run_id IS NULL", (follow, row["id"]))
             continue
         outcome = host.apply(row) if live else "sent" if careful else "lost"
+        restarted = outcome == "lost" and not live          # approved, but its browser went with a restart
         continuation = None
         summary = json.loads(row["summary"])
         if careful and summary.get("kind") == "text" and row["status"] == "approved" and summary.get("text_digest"):
@@ -1779,8 +1796,9 @@ def tick(registry, config) -> dict:
             except RegistryError:
                 continuation = None        # its chat is busy: pip_chat kept the turn, and a later tick sends it
         with registry.transaction():
-            registry.db.execute("UPDATE pip_computer_actions SET status=?,continuation_run_id=? WHERE id=? AND status='approved'",
-                                (outcome, continuation, row["id"]))
+            registry.db.execute("UPDATE pip_computer_actions SET status=?,continuation_run_id=?,resolved_by=? WHERE id=? "
+                                "AND status='approved'", (outcome, continuation,
+                                                          LOST_BY_RESTART if restarted else row["resolved_by"], row["id"]))
         done[outcome] += 1
     for pip_id, host in list(HOSTS.items()):
         if host.run_id is None and not host.browser.held and time.monotonic() - host.last_used > IDLE_SECONDS:
@@ -1817,6 +1835,29 @@ def _continue_rejected(registry, row, config, *, paid=False) -> str | None:
     from .pip_chat import continue_after_rejection, continue_after_user_paid
     follow = continue_after_user_paid if paid else continue_after_rejection
     return follow(PipStore(registry), row["pip_id"], row["id"], json.loads(row["summary"]), config)["run"]["id"]
+
+
+def _continue_lost(registry, row, config) -> str | None:
+    """After a restart lost a held request, unsent: the chat that held it gets the Pip's next turn, told nothing was sent
+    and to do that step again (it is held for the user's Allow again). Only once (continuation_run_id), only for a chat's
+    hold the user hasn't moved on from (their chat still ends at the reply that held it), only before the hold would have
+    lapsed anyway, and never when the run itself is going again (a restart puts a running run back in line, and it redoes
+    the step there: pip_run_watchdog)."""
+    if not row["run_id"] or _now() >= row["expires_at"]:
+        return None
+    origin = registry.db.execute("SELECT json_extract(manifest,'$.run_kind'),status FROM pip_runs WHERE id=?",
+                                 (row["run_id"],)).fetchone()
+    if origin is None or origin[0] != "conversation":
+        return None
+    if origin[1] in ("queued", "running", "cancelling"):
+        return row["run_id"]               # it is going again by itself: that is its redo, and nothing more is started
+    last = registry.db.execute("SELECT run_id FROM pip_chat_messages WHERE pip_id=? ORDER BY seq DESC LIMIT 1",
+                               (row["pip_id"],)).fetchone()
+    if last is None or last[0] != row["run_id"]:
+        return None
+    from .pips import PipStore
+    from .pip_chat import continue_after_lost
+    return continue_after_lost(PipStore(registry), row["pip_id"], row["id"], json.loads(row["summary"]), config)["run"]["id"]
 
 
 def _continue(registry, row, config) -> str | None:
@@ -1941,8 +1982,8 @@ def handle_stops(registry) -> int:
         if kind == "computer_reset":
             _wipe(registry.directory, pip_id)
         with registry.transaction():
-            registry.db.execute("UPDATE pip_computer_actions SET status='lost',resolved_at=? WHERE pip_id=? AND status IN ('pending','approved')",
-                                (_now(), pip_id))
+            registry.db.execute("UPDATE pip_computer_actions SET status='lost',resolved_at=?,resolved_by=? WHERE pip_id=? "
+                                "AND status IN ('pending','approved')", (_now(), LOST_BY_STOP, pip_id))
             registry.db.execute("DELETE FROM metadata WHERE key=?", (key,))
     return len(rows)
 

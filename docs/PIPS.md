@@ -1341,7 +1341,9 @@ without.
   carries on from the result, as soon as its chat is free. **Reject** drops it, and the Pip is told: it says what wasn't done and goes on with
   the rest of what you asked (the next bill). A held request expires after 24 hours. It is
   also lost, unsent, if the computer stops or the runner restarts, because the browser is what
-  holds it.
+  holds it. Its line says why ("Not sent, DGC restarted"). After a restart or an update the Pip
+  is told that nothing was sent and does that step again, once, so it asks you again; it isn't
+  redone after you stop its computer yourself, once you've written since, or past the 24 hours.
 - **What you submit is yours, right away.** With no Pip run using the computer, a submit within
   three seconds of your own click or key is sent, because you made it. Anything a page sends on
   its own may go through: background XHR, fetch, hidden-frame posts and browser telemetry outside

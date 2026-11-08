@@ -100,6 +100,9 @@ test('a settled card says what it was and how it ended, in one line',async()=>{
  assert.deepEqual(settledWords(a({},{status:'rejected'})),['Rejected','Send a form to dash.example']);
  assert.deepEqual(settledWords(a({},{status:'expired',resolved_by:null})),['Not answered','Send a form to dash.example']);
  assert.deepEqual(settledWords(a({},{status:'lost',resolved_by:null})),['Not sent','Send a form to dash.example']);
+ // Why, when DGC knows (Pips package 3): a restart (the Pip does it again), or the user's own Stop computer.
+ assert.deepEqual(settledWords(a({},{status:'lost',resolved_by:'pip-restart'})),['Not sent, DGC restarted','Send a form to dash.example']);
+ assert.deepEqual(settledWords(a({},{status:'lost',resolved_by:'pip-computer-stop'})),['Not sent, its computer was stopped','Send a form to dash.example']);
  assert.deepEqual(settledWords(a({payment:true})),['Allowed','Pay on dash.example']);
  assert.deepEqual(settledWords(a({kind:'site',site:'dash.example'},{status:'rejected'})),['Not now','Visit dash.example']);
  assert.deepEqual(settledWords(a({kind:'login',site:'dash.example'})),['Allowed','Save a login for dash.example']);

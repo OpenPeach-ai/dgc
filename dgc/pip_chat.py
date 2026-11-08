@@ -682,6 +682,11 @@ COMPUTER_REJECTED = ("This message is from DGC, not the user. The user chose Rej
                      "holding, unsent: {what}. Don't do it again or look for another way to do it. A Reject is about that one "
                      "thing only: if they asked you for more than that (the next bill, another order), go on with the next one "
                      "now, without asking whether to; otherwise stop. Tell them in a short message what was not done.")
+# A restart lost what its computer was holding (Pips package 3): nothing was sent, so the step is safe to redo.
+COMPUTER_LOST = ("This message is from DGC, not the user. DGC restarted before {what} could be sent, so nothing was sent "
+                 "and the page your computer had open is closed. Do that step once more now: open the page with your computer "
+                 "and redo it; DGC holds it for the user's Allow again. Say in one short sentence that DGC restarted before it "
+                 "went and you're doing it again, then carry on with what they asked.")
 COMPUTER_USER_PAID = ("This message is from DGC, not the user. The user typed their card on your screen and pressed Pay "
                       "themselves, and DGC sent it: {what}. That one is paid: never get it ready or pay it again. Read the "
                       "page to see what happened and tell them in a short message. If they asked you for more (the next "
@@ -878,6 +883,19 @@ def continue_after_rejection(store, pip_id, action_id, summary, config):
     what = (("a payment: " if is_payment(summary) else "")
             + f"{summary.get('method', '')} to {summary.get('host', '')}{summary.get('path', '')}")[:300]
     return send(store, pip_id, COMPUTER_REJECTED.format(what=what), key, "local-computer", config, _intro=True)
+
+
+def continue_after_lost(store, pip_id, action_id, summary, config):
+    """The chat's next turn once a restart lost what its computer held, unsent (pip_computer._continue_lost decides
+    whether it is due): the Pip does that step again."""
+    key = COMPUTER_KEY + "lost_" + re.sub(r"[^A-Za-z0-9_-]", "", str(action_id))[:100]
+    from .pip_computer import is_payment
+    if summary.get("kind") == "login":
+        what = f"saving a login for {summary.get('site') or summary.get('host') or 'that site'}"
+    else:
+        what = (("a payment: " if is_payment(summary) else "")
+                + f"{summary.get('method', '')} to {summary.get('host', '')}{summary.get('path', '')}")
+    return send(store, pip_id, COMPUTER_LOST.format(what=what[:300]), key, "local-computer", config, _intro=True)
 
 
 def continue_after_user_paid(store, pip_id, action_id, summary, config):

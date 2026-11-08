@@ -55,7 +55,9 @@ export function settledWords(action) {
   const what = s.kind === 'site' ? `Visit ${s.site || host}` : s.kind === 'login' ? `Save a login for ${s.site || host}`
     : s.kind === 'text' ? `Put what it read from your apps on ${host}` : s.kind === 'floor' ? 'Run a command in its Terminal'
     : isPayment(s) ? `Pay on ${host}` : `Send a form to ${host}`;
-  const outcome = {approved: 'Allowed', sent: 'Allowed', rejected: careful ? 'Not now' : 'Rejected', expired: 'Not answered', lost: 'Not sent'}[status];
+  // Lost, unsent (Pips package 3): why, when DGC knows. After a restart the Pip does that step again, and its reply says so.
+  const lost = by === 'pip-restart' ? 'Not sent, DGC restarted' : by === 'pip-computer-stop' ? 'Not sent, its computer was stopped' : 'Not sent';
+  const outcome = {approved: 'Allowed', sent: 'Allowed', rejected: careful ? 'Not now' : 'Rejected', expired: 'Not answered', lost}[status];
   return outcome ? [outcome, what] : null;
 }
 
