@@ -660,6 +660,11 @@ card says what changed: "failed again" when it failed again, "fixed · nothing f
 follows a problem, and, opened, "Earlier: failed · 8:00 AM". A card you acted on stays where it is: one whose fix
 started, or whose prompt you sent. Dismiss removes the card and the ones it replaced.
 
+**New or still there.** Each review sees its last report and says, for every finding, which earlier one it is
+the same problem as, however it words it this time or wherever it moved. The card says "1 new · 3 still there"
+and names the new one first. A run with nothing new is not news: no new card, even when the model words the same
+problems differently. A model that doesn't say is counted as before, by its findings' words.
+
 ### Ask DGC to fix
 
 **Ask DGC to fix** (**Fix** on the card's second line) starts a helper that works in the background

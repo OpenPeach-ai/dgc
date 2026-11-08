@@ -284,3 +284,16 @@ test("names and findings are text, never markup", () => {
   assert.equal(card.querySelector("img, b, i"), null);
   assert.equal(card.querySelector(".pip-report-title").textContent, "<b>bold</b>");
 });
+
+// New or still there (0.52): its model said which findings repeat its last report; the card says so and names a new one.
+test("a report whose model said which findings are new says \"1 new · 2 still there\" and names the new one", () => {
+  const s = panel();
+  s.event({ type: "pip_report", report: { ...REPORT, total: 3, new: 1, still: 2, counts: { high: 1, medium: 2 },
+    findings: [{ title: "E-way valid-upto dropped on re-pull", severity: "medium", path: "app/eway.py", line: 9, new: true },
+               { title: "GST total skips cess", severity: "high", path: "app/gst.py", line: 88, new: false }] } });
+  const [card] = cards(s);
+  const line1 = card.querySelector(".pip-report-line1"), line2 = card.querySelector(".pip-report-line2");
+  assert.equal(line1.querySelector(".pip-report-line-state").textContent, "1 new · 2 still there");
+  assert.equal(line2.querySelector(".pip-report-line-what").textContent, "E-way valid-upto dropped on re-pull");
+  assert.equal(line2.querySelector(".pip-report-where").textContent, "app/eway.py:9");
+});

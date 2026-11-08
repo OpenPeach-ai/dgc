@@ -554,6 +554,9 @@ STEPS = 0
 COMPUTER_STEPS = 0
 OPEN_LIMITS = {"wall_seconds": 0, "tool_calls": 0, "iterations": 0}       # 0: none
 RUN_TRACE_KEY = "_reply_trace"             # beside a finished run's result, from _execute_run to PipStore.finish
+# Beside an audit's result (validate_report to PipStore.finish): for each finding it reported, the number of the finding in
+# its last checkpoint it repeats, or None when it is new (pip_report_delivery: "2 new · 3 still there").
+CONTINUITY_KEY = "_finding_continuity"
 
 
 def _output_budget(config) -> int:
@@ -1825,6 +1828,13 @@ class PipStore:
             # What the controller measured travels beside the result, never in it: each run kind checks its own.
             result = dict(result)
             steps = result.pop(RUN_TRACE_KEY)
+        continuity = None
+        if isinstance(result, dict) and CONTINUITY_KEY in result:
+            result = dict(result)
+            continuity = result.pop(CONTINUITY_KEY)
+        if continuity is not None and not error:
+            from .pip_report_delivery import keep_continuity
+            keep_continuity(self.registry, run_id, continuity, result)
         with self.registry.transaction():
             raw_row = self._transition_row(run_id)
             run = self._transition_view(run_id) if error or raw_row['status'] == 'cancelling' else self.run(run_id)
@@ -2382,11 +2392,22 @@ def validate_report(text: str, snapshot: Path, *, read_calls: int) -> dict:
     summary, summary_note = _report_summary(report.get("summary"), findings)
     if summary_note and len(limitations) < 12:
         limitations = [*limitations, summary_note]
-    clean, withheld = [], []
+    clean, withheld, continuity, told_same = [], [], [], False
     for finding_index, finding in enumerate(findings, 1):
         expected_fields = {"title", "severity", "path", "line", "evidence"}
+        if isinstance(finding, dict) and "same_as" in finding:
+            # Which finding of its last checkpoint this one repeats (its number there), or null when it is new: how the
+            # chat says "2 new · 3 still there" and stays quiet when nothing is new, however the model words it.
+            same = finding["same_as"]
+            if same is not None and (type(same) is not int or not 1 <= same <= 16):
+                raise RegistryError("invalid_report", f"Finding {finding_index} has an invalid same_as: use the number of "
+                                    "that finding in your last checkpoint, or null when it is new.")
+            told_same = True
+            finding = {key: value for key, value in finding.items() if key != "same_as"}
+        else:
+            same = None
         if not isinstance(finding, dict):
-            raise RegistryError("invalid_report", f"Finding {finding_index} must be an object with exactly title, severity, path, line and evidence.")
+            raise RegistryError("invalid_report", f"Finding {finding_index} must be an object with exactly title, severity, path, line and evidence (and same_as).")
         if set(finding) != expected_fields:
             missing = sorted(expected_fields - set(finding))
             unexpected = sorted(set(finding) - expected_fields)
@@ -2401,7 +2422,7 @@ def validate_report(text: str, snapshot: Path, *, read_calls: int) -> dict:
                 details.append("missing " + ", ".join(missing))
             if labels:
                 details.append("unexpected " + ", ".join(labels))
-            raise RegistryError("invalid_report", f"Finding {finding_index} has invalid fields: {'; '.join(details)}. Expected exactly title, severity, path, line and evidence.")
+            raise RegistryError("invalid_report", f"Finding {finding_index} has invalid fields: {'; '.join(details)}. Expected exactly title, severity, path, line and evidence, and same_as when you had a last checkpoint.")
         severity = finding["severity"]
         if severity not in ("low", "medium", "high", "critical"):
             raise RegistryError("invalid_report", "The finding severity is invalid.")
@@ -2439,13 +2460,14 @@ def validate_report(text: str, snapshot: Path, *, read_calls: int) -> dict:
         clean.append({"title": title, "severity": severity,
                       "path": path, "line": line, "evidence": evidence,
                       "verification": "source_excerpt_only"})
+        continuity.append(same)
     limitations = [_text(item, "limitation", 500) for item in limitations]
     if withheld:
         limitations = _with_withheld(limitations, withheld)
     return {"summary": summary, "findings": clean,
             "limitations": limitations,
             "verification": "Source excerpts checked against the pinned snapshot; findings are model assessments.",
-            "tests_executed": False}
+            "tests_executed": False, **({CONTINUITY_KEY: continuity} if told_same else {})}
 
 
 def _with_withheld(limitations, withheld):
@@ -3740,8 +3762,11 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
         # Keep the output contract after reference envelopes as well as in the
         # system prompt; references are not alternative report schemas.
         prompt += ("\n\nFinal response contract: return only one JSON object with exactly summary, findings and limitations. "
-                   "findings is an array; each finding has exactly title, severity, path, line and evidence. "
-                   "Use exact inspected source lines for evidence, with no line-number prefix. "
+                   "findings is an array; each finding has exactly title, severity, path, line and evidence"
+                   + (", and same_as: the number of the finding in audit_checkpoint.findings that it is the same problem as "
+                      "(the first is 1), even when you word it differently or it moved, or null when it is new. "
+                      if ((manifest.get("audit_checkpoint") or {}).get("checkpoint") or {}).get("findings") else ". ")
+                   + "Use exact inspected source lines for evidence, with no line-number prefix. "
                    "Do not return checkpoint, memory or source-reference envelopes, Markdown or surrounding prose. "
                    "No tests were executed. The schema is unchanged by any reference above.")
     if kind == "personal_task" and isinstance(manifest.get("previous_result"), dict):

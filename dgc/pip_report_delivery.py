@@ -255,25 +255,70 @@ def _check_label(test) -> str:
     return _text(" ".join(str(part) for part in argv), 200)
 
 
-def _audit(row, result) -> tuple[str, str, dict]:
+CONTINUITY = "pip_report_continuity:"      # metadata, per audit run: the same_as of each finding it reported
+
+
+def keep_continuity(registry, run_id, continuity, result) -> None:
+    """An audit's word on which of its findings repeat its last checkpoint's (pips.CONTINUITY_KEY), kept for its card.
+    Only one that names each reported finding, in order; anything else is dropped, and the card counts as before."""
+    findings = result.get("findings") if isinstance(result, dict) else None
+    if (not isinstance(continuity, list) or not isinstance(findings, list) or len(continuity) != len(findings)
+            or any(item is not None and (type(item) is not int or not 1 <= item <= 16) for item in continuity)):
+        return
+    with registry.transaction():
+        registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (CONTINUITY + str(run_id), json.dumps(continuity)))
+
+
+def continuity_of(db, run_id, count) -> list | None:
+    """[same_as or None] for each of a run's findings, or None when its model didn't say."""
+    try:
+        row = db.execute("SELECT value FROM metadata WHERE key=?", (CONTINUITY + str(run_id),)).fetchone()
+        value = json.loads(row[0]) if row else None
+    except (sqlite3.Error, TypeError, ValueError):
+        return None
+    return value if isinstance(value, list) and len(value) == count else None
+
+
+def _nothing_new(entry) -> bool:
+    """A run whose model said every finding is still there from last time: not a change to tell the chat about."""
+    report = entry.get("report") or {}
+    return entry.get("outcome") == "findings" and report.get("new") == 0 and isinstance(report.get("still"), int)
+
+
+def _audit(row, result, db=None) -> tuple[str, str, dict]:
     findings = [f for f in (result.get("findings") or []) if isinstance(f, dict)][:16] if isinstance(result, dict) else []
     counts = {level: 0 for level in SEVERITIES}
     for finding in findings:
         if finding.get("severity") in counts:
             counts[finding["severity"]] += 1
-    ranked = sorted(findings, key=lambda f: SEVERITIES.index(f["severity"]) if f.get("severity") in SEVERITIES else 9)
+    # New or still there (its model said, by same_as): the new ones first, worst first, so the card names a new one.
+    raw = result.get("findings") if isinstance(result, dict) else []
+    said = continuity_of(db, row["id"], len(raw)) if db is not None and isinstance(raw, list) and findings else None
+    fresh = {id(f): (said[i] is None) for i, f in enumerate(raw[:16]) if isinstance(f, dict)} if said is not None else {}
+    ranked = sorted(findings, key=lambda f: (0 if fresh.get(id(f), True) else 1,
+                                             SEVERITIES.index(f["severity"]) if f.get("severity") in SEVERITIES else 9))
     top = []
     for finding in ranked[:TOP_FINDINGS]:
         item = {"title": _text(finding.get("title"), 200), "severity": finding.get("severity") if finding.get("severity") in SEVERITIES else "low"}
+        if said is not None:
+            item["new"] = fresh.get(id(finding), True)
         path = finding.get("path")
         if isinstance(path, str) and path.strip():
             item["path"] = _text(path, 300)
             if type(finding.get("line")) is int and finding["line"] > 0:
                 item["line"] = finding["line"]
         top.append(item)
+    fields = {"total": len(findings), "counts": counts, "findings": top}
+    if said is not None:
+        new = [f for f in findings if fresh.get(id(f), True)]
+        fields.update(new=len(new), still=len(findings) - len(new))
+        # The new ones are what changed: none new is no change, however the rest are worded (pending: nothing_new).
+        key = sorted((str(f.get("severity")), str(f.get("title")), str(f.get("path")), str(f.get("line"))) for f in new)
+        signature = "findings:new:" + hashlib.sha256(json.dumps(key).encode()).hexdigest()[:24]
+        return "findings", signature, fields
     key = sorted((str(f.get("severity")), str(f.get("title")), str(f.get("path")), str(f.get("line"))) for f in findings)
     signature = "findings:" + hashlib.sha256(json.dumps(key).encode()).hexdigest()[:24] if findings else "clear"
-    return ("findings" if findings else "clear"), signature, {"total": len(findings), "counts": counts, "findings": top}
+    return ("findings" if findings else "clear"), signature, fields
 
 
 def _pulse(registry, row) -> tuple[str, str, dict] | None:
@@ -334,7 +379,7 @@ def _candidate(registry, row, pip) -> dict | None:
             result = json.loads(row["result"]) if row["result"] else {}
         except (ValueError, RecursionError):
             result = {}
-        outcome, signature, fields = _audit(row, result)
+        outcome, signature, fields = _audit(row, result, registry.db)
     report.update(outcome=outcome, **fields)
     return {"report": report, "outcome": outcome, "signature": signature}
 
@@ -397,7 +442,7 @@ def pending(registry, session_id: str, *, exclude=(), now: datetime | None = Non
             # Say it when it changes (any run since the last one told differs), when this chat asked, or when it is
             # still broken and the last card about it is REMIND_AFTER old.
             if (newest["asked"] or previous is None
-                    or any(entry["signature"] != previous[0] for entry in reports)
+                    or any(entry["signature"] != previous[0] and not _nothing_new(entry) for entry in reports)
                     or (newest["outcome"] in STILL_BROKEN and told is not None and _since(told[0], newest["finished_at"]) >= REMIND_AFTER)):
                 newest["shown"] = True
                 newest["report"]["earlier"] = len(reports) - 1

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A Pip report card says "1 new · 3 still there" and names the new finding when its review said which findings are new.
 - A held request that was lost, unsent, says why on its line: "Not sent, DGC restarted" (the Pip then does that step again) or "Not sent, its computer was stopped".
 - Pip report cards in the chat draw every Pip's face at one size, the size of the faces stacked on a group's line: a clean run's face was smaller than the rest, and a card on its own drew it larger.
 - A routine's failed run keeps its line in the Pip's chat after you chat again, and the same failure again is one line with a count. A routine with nothing to say is one faint line. A routine that was missed, or couldn't start, has a line where it fell. Each Pip's row and page say "Last ran 8:00 AM · worked · next 8:00 AM tomorrow", or "Can't run: Claude Code signed out" with Fix, which opens a terminal to sign it in.

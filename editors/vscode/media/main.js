@@ -10466,6 +10466,9 @@ function permissionChoices(ev) {
       && PIP_REPORT_OUTCOMES.includes(r.outcome) && typeof r.name === "string" && !!r.name.trim();
   }
   // "finished · 5 findings (2 high, 3 medium)", "failed: the project is too big…", in the user's words.
+  function pipReportNewStill(r) {
+    return r.outcome === "findings" && Number.isSafeInteger(r.new) && r.new >= 0 && Number.isSafeInteger(r.still) && r.still >= 0;
+  }
   function pipReportState(r) {
     const n = (v) => (Number.isSafeInteger(v) && v >= 0 ? v : 0);
     if (r.outcome === "failed") {
@@ -10484,6 +10487,8 @@ function permissionChoices(ev) {
       return failed ? `needs you · ${failed} of ${pipReportPlural(n(r.commands?.total), "command")} didn’t run` : "needs you";
     }
     const counts = PIP_REPORT_SEVERITIES.filter((s) => n(r.counts?.[s])).map((s) => `${n(r.counts[s])} ${s}`);
+    // Its model said which are new (Pips: "new or still there"): that is the news, the rest are named as still there.
+    if (pipReportNewStill(r)) return `finished · ${n(r.new)} new · ${n(r.still)} still there`;
     return `finished · ${pipReportPlural(n(r.total), "finding")}${counts.length ? ` (${counts.join(", ")})` : ""}`;
   }
   // What "Ask DGC to fix" sends. It names the run so the model reads the whole report
@@ -10808,6 +10813,12 @@ function permissionChoices(ev) {
                what: String((Array.isArray(r.failed_checks) && r.failed_checks[0]) || "A check failed.").slice(0, 300) };
     }
     const high = n(r.counts?.critical) + n(r.counts?.high);
+    if (pipReportNewStill(r)) {
+      // "1 new · 3 still there", and the new one named (the report lists new ones first).
+      return { text: `${n(r.new)} new · ${n(r.still)} still there`, bad: high > 0,
+               sev: PIP_REPORT_SEVERITIES.includes(top?.severity) ? top.severity : "", what: String(top?.title || "").slice(0, 200),
+               where: typeof top?.path === "string" && top.path ? top.path.slice(0, 300) + (Number.isSafeInteger(top.line) && top.line > 0 ? `:${top.line}` : "") : "" };
+    }
     return { text: `${pipReportPlural(n(r.total), "finding")}${high ? ` · ${high} high` : ""}`, bad: high > 0,
              sev: PIP_REPORT_SEVERITIES.includes(top?.severity) ? top.severity : "", what: String(top?.title || "").slice(0, 200),
              where: typeof top?.path === "string" && top.path ? top.path.slice(0, 300) + (Number.isSafeInteger(top.line) && top.line > 0 ? `:${top.line}` : "") : "" };
