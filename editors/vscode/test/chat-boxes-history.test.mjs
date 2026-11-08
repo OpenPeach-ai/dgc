@@ -35,7 +35,7 @@ const markdownJs = buildSync({ entryPoints: [join(root, "src/markdown.ts")], bun
 function chatdgcPage() {
   const source = readFileSync(join(root, "src/chatdgc.ts"), "utf8");
   const doc = source.match(/return `(<!doctype html>[\s\S]*?<\/html>)`;/)[1];
-  const scripts = [...doc.matchAll(/asset\("media\/([\w-]+\.js)"\)/g)].map((m) => m[1]);
+  const scripts = [...doc.matchAll(/asset\("media\/((?:shared\/)?[\w-]+\.js)"\)/g)].map((m) => m[1]);
   const html = doc.replace(/<link [^>]*>/g, "").replace(/<script [^>]*><\/script>/g, "").replace(/\$\{[^}]*\}/g, "");
   const css = readStylesheet(join(root, "media/main.css")).replace(/@import[^;]*;/, "") + readFileSync(join(root, "media/chatdgc.css"), "utf8");
   return { html: html.replace("</head>", `<style>${css}</style></head>`), js: scripts.map((f) => readFileSync(join(root, "media", f), "utf8")).join("\n") };
@@ -62,7 +62,7 @@ const boxValue = (page, id) => page.evaluate((i) => document.getElementById(i).v
 
 test("ChatDGC's page loads the box's history before its own script", () => {
   const source = readFileSync(join(root, "src/chatdgc.ts"), "utf8");
-  const scripts = [...source.matchAll(/asset\("media\/([\w-]+\.js)"\)/g)].map((m) => m[1]);
+  const scripts = [...source.matchAll(/asset\("media\/((?:shared\/)?[\w-]+\.js)"\)/g)].map((m) => m[1]);
   assert.ok(scripts.includes("texthistory.js") && scripts.indexOf("texthistory.js") < scripts.indexOf("chatdgc.js"));
 });
 

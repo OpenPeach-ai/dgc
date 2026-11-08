@@ -43,7 +43,7 @@ function screenHtml() {
   const css = readStylesheet(join(root, "media/main.css")).replace(/@import[^;]*;/, "");
   const own = readFileSync(join(root, "media/mentions.css"), "utf8") + readFileSync(join(root, "media/trace.css"), "utf8") + readFileSync(join(root, "media/chatdgc.css"), "utf8") + readFileSync(join(root, "media/voicebar.css"), "utf8");
   // The page's own scripts, in the order chatdgc.ts loads them: a list kept here by hand misses the next one added.
-  const scripts = [...source.match(/return `(<!doctype html>[\s\S]*?<\/html>)`;/)[1].matchAll(/asset\("media\/([\w-]+\.js)"\)/g)].map((m) => m[1]);
+  const scripts = [...source.match(/return `(<!doctype html>[\s\S]*?<\/html>)`;/)[1].matchAll(/asset\("media\/((?:shared\/)?[\w-]+\.js)"\)/g)].map((m) => m[1]);
   assert.equal(scripts.at(-1), "chatdgc.js");
   const js = scripts.map((f) => readFileSync(join(root, "media", f), "utf8")).join("\n");
   const markdownJs = buildSync({ entryPoints: [join(root, "src/markdown.ts")], bundle: true, format: "iife",
@@ -2251,6 +2251,8 @@ test("the thinking menu keeps its height at every level, though some levels' wor
       await s.frame();
       await s.page.locator("#cd-model-pill").click();
       const menu = s.page.locator("#cd-model-menu");
+      // Measured at rest: the menu opens over 150 ms from 98% (the shared menu's motion), which a box measures mid-way.
+      await menu.evaluate((n) => Promise.all(n.getAnimations().map((a) => a.finished)));
       await menu.locator(".cd-dial-face").focus();
       await s.page.keyboard.press("Home");
       const seen = [];

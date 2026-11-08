@@ -36,8 +36,8 @@ function screenHtml() {
   const doc = chatdgcFixtureHtml(source.match(/return `(<!doctype html>[\s\S]*?<\/html>)`;/)[1]);
   const css = readStylesheet(join(root, "media/main.css")).replace(/@import[^;]*;/, "");
   const own = readFileSync(join(root, "media/chatdgc.css"), "utf8");
-  const scripts = [...doc.matchAll(/asset\("media\/([\w-]+\.js)"\)/g)].map((m) => m[1]);
-  const js = [...source.match(/return `(<!doctype html>[\s\S]*?<\/html>)`;/)[1].matchAll(/asset\("media\/([\w-]+\.js)"\)/g)]
+  const scripts = [...doc.matchAll(/asset\("media\/((?:shared\/)?[\w-]+\.js)"\)/g)].map((m) => m[1]);
+  const js = [...source.match(/return `(<!doctype html>[\s\S]*?<\/html>)`;/)[1].matchAll(/asset\("media\/((?:shared\/)?[\w-]+\.js)"\)/g)]
     .map((m) => readFileSync(join(root, "media", m[1]), "utf8")).join("\n");
   const markdownJs = buildSync({ entryPoints: [join(root, "src/markdown.ts")], bundle: true, format: "iife",
     globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;

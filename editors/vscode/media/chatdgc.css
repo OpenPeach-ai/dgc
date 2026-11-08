@@ -409,23 +409,13 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 .cd-arc-track { stroke: var(--border-strong); }
 .cd-arc-fill { stroke: var(--accent-text, var(--accent)); }
 .cd-model-chevron { flex: none; color: var(--faint); font-size: var(--t-sm); }
+/* Where ChatDGC's menus open and how big they are; how they look (surface, lift, rows, headings, motion) is the shared
+   menu, media/shared/menu.css, the same as Work's and a Pip's. */
 .cd-model-menu { position: absolute; right: 0; bottom: 100%; z-index: 20; margin-bottom: var(--sp-2);
-  width: min(300px, calc(100vw - 20px)); padding: var(--sp-1);
+  width: min(300px, calc(100vw - 20px));
   /* In a short editor (the bottom panel open) it scrolls inside itself instead of running past the top of the chat. */
-  max-height: calc(100vh - 170px); overflow-y: auto; overscroll-behavior: contain;
-  border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 14px 40px -10px rgba(0,0,0,.75); }
-.cd-menu-kicker { padding: var(--sp-2) var(--sp-2) var(--sp-1); color: var(--faint); font: var(--w-semi) var(--t-xs)/1 var(--sans);
-  letter-spacing: .1em; text-transform: uppercase; }
-.cd-menu-row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: var(--sp-1) var(--sp-2); border: 0;
-  border-radius: var(--r-sm); background: transparent; color: var(--text); text-align: left; cursor: pointer; font: var(--w-reg) var(--t-sm)/1.3 var(--sans); }
-.cd-menu-row:hover { background: var(--surface2); }
-.cd-menu-row.sel { background: var(--sel); }
-.cd-menu-row:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
-.cd-menu-row > .codicon:first-child { color: var(--muted); }
-.cd-menu-row.sel > .codicon:first-child { color: var(--accent-text, var(--accent)); }
-.cd-menu-row > .codicon-check { margin-left: auto; color: var(--accent-text, var(--accent)); }
-.cd-menu-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cd-menu-sep { height: 1px; margin: var(--sp-1) var(--sp-1); background: var(--border); }
+  max-height: calc(100vh - 170px); overflow-y: auto; overscroll-behavior: contain; }
+.cd-menu-row > .codicon-check { margin-left: auto; color: var(--accent-text); }
 .cd-menu-models { max-height: min(196px, calc(100vh - 300px)); min-height: 30px; overflow-y: auto; overscroll-behavior: contain; }
 /* Thinking, as a dial: Off on the left, Extra high on the right; click a mark, drag, or step it with the arrow keys. */
 .cd-dial { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-1) var(--sp-2) var(--sp-2); }
@@ -542,20 +532,8 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 .cd-output { position: static; display: inline-flex; }
 .cd-output .cd-tool { max-width: 180px; }
 .cd-output .cd-tool-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cd-output-menu { position: absolute; left: var(--sp-2); bottom: 100%; z-index: 20; margin-bottom: var(--sp-2); width: min(320px, calc(100% - var(--sp-4)));
-  padding: var(--sp-1); border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--surface);
-  box-shadow: 0 14px 40px -10px rgba(0,0,0,.75); }
-body.vscode-light .cd-output-menu { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
-.cd-output-head { display: block; padding: var(--sp-2) var(--sp-2) var(--sp-1); color: var(--faint); font: var(--w-semi) var(--t-xs)/1 var(--sans);
-  letter-spacing: .1em; text-transform: uppercase; }
-.cd-output-item { display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: var(--sp-2); border: 0; border-radius: var(--r-sm);
-  background: transparent; color: var(--text); text-align: left; cursor: pointer; font: var(--w-reg) var(--t-sm)/1.3 var(--sans); }
-.cd-output-item:hover, .cd-output-item:focus-visible { background: var(--surface2); outline: none; }
-.cd-output-item[aria-checked="true"] { background: var(--sel); }
-.cd-output-item > .codicon { color: var(--muted); }
-.cd-output-item[aria-checked="true"] > .codicon { color: var(--accent-text); }
-.cd-output-name { flex: none; color: var(--text-strong); }
-.cd-output-desc { margin-left: auto; padding-left: var(--sp-3); color: var(--faint); font-size: var(--t-xs); text-align: right; }
+.cd-output-menu { position: absolute; left: var(--sp-2); bottom: 100%; z-index: 20; margin-bottom: var(--sp-2); width: min(320px, calc(100% - var(--sp-4))); }
+.cd-output-desc { padding-left: var(--sp-3); }
 /* The Folder chip: Output's look. With a folder it shows the folder's name, cut short, and is the first in the row to
    give way when the row is full (the spacer goes first); its menu opens above the box as Output's does. */
 /* Chosen, Output and Folder give way first when the row is full (their words cut short, never their icons), well
@@ -568,14 +546,15 @@ body.vscode-light .cd-output-menu { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25
 .cd-output .cd-tool-label { min-width: 0; }
 .cd-folder .cd-tool { max-width: 200px; }
 .cd-folder .cd-tool[aria-busy="true"] { cursor: progress; }
-.cd-folder-path { display: block; padding: 0 var(--sp-2) 2px; color: var(--text-strong); overflow-wrap: anywhere;
+/* The path and the note line up with the rows' words (10 px in, as the shared menu's rows). */
+.cd-folder-path { display: block; padding: 0 10px 2px; color: var(--text-strong); overflow-wrap: anywhere;
   font: var(--w-reg) var(--t-xs)/1.45 var(--mono); }
-.cd-folder-note { display: block; margin-bottom: var(--sp-1); padding: 0 var(--sp-2) var(--sp-2); border-bottom: 1px solid var(--border);
+.cd-folder-note { display: block; margin-bottom: var(--sp-1); padding: 0 10px var(--sp-2); border-bottom: 1px solid var(--hair);
   color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
-.cd-folder-item[aria-disabled="true"] { cursor: default; }
-.cd-folder-item[aria-disabled="true"] .cd-output-name, .cd-folder-item[aria-disabled="true"] > .codicon { color: var(--muted); }
-.cd-folder-item[aria-disabled="true"]:hover { background: transparent; }
-.cd-folder-item[aria-disabled="true"]:focus-visible { background: var(--surface2); }
+.dgc-menu .cd-folder-item[aria-disabled="true"] { cursor: default; }
+.dgc-menu .cd-folder-item[aria-disabled="true"] .cd-output-name, .dgc-menu .cd-folder-item[aria-disabled="true"] > .codicon { color: var(--muted); }
+.dgc-menu .cd-folder-item[aria-disabled="true"]:hover { background: transparent; }
+.dgc-menu .cd-folder-item[aria-disabled="true"]:focus-visible { background: var(--wash); }
 .cd-research-chip { display: inline-flex; align-items: center; gap: var(--sp-1); align-self: flex-end; color: var(--muted);
   font: var(--w-med) var(--t-xs)/1.4 var(--sans); }
 .cd-research { display: grid; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border: 1px solid var(--border-strong);

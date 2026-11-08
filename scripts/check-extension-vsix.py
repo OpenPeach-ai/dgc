@@ -36,6 +36,9 @@ STATIC_MEMBERS = {
     "extension/media/main.css": "media/main.css",
     # One set of tokens every page loads (main.css imports it; the bundles carry their own copy).
     "extension/media/shared/tokens.css": "media/shared/tokens.css",
+    # One menu for every "+" and picker: its look and its keys (Work and ChatDGC load them; the Pips bundle carries a copy).
+    "extension/media/shared/menu.css": "media/shared/menu.css",
+    "extension/media/shared/menu.js": "media/shared/menu.js",
     "extension/media/genui.css": "media/genui.css",
     "extension/media/tool-insights.js": "media/tool-insights.js",
     "extension/media/dgc.svg": "media/dgc.svg",

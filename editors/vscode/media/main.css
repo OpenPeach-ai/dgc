@@ -1,4 +1,5 @@
 @import url("./shared/tokens.css");
+@import url("./shared/menu.css");
 @import url("./pips/wordmark.css");
 /* DGC panel — Codex's quiet editor hierarchy with a restrained DGC accent. */
 * { box-sizing: border-box; }
@@ -1363,12 +1364,7 @@ body.vscode-light .rail-pop { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
 #attachments .chip-action:hover { color: var(--text); }
 #attachments .pasted-chip { gap: var(--sp-2); }
 /* The Add menu opens upward from the composer, like the model and mode pickers beside it. */
-#addmenu { min-width: 232px; }
-#addmenu .mrow { display: flex; align-items: center; gap: var(--sp-2); width: 100%; }
-#addmenu .mrow-label { flex: 1 1 auto; min-width: 0; text-align: left;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#addmenu .mrow-hint { flex: 0 0 auto; color: var(--faint);
-  font: var(--w-reg) var(--t-xs)/1 var(--mono); }
+#addmenu { min-width: 248px; }   /* its rows, groups and key caps: media/shared/menu.css */
 #attachments .chip { font: var(--w-reg) var(--t-xs)/1 var(--sans); background: var(--surface2); color: var(--muted); border: 1px solid var(--border); border-radius: var(--r-sm); padding: var(--sp-1) var(--sp-2); display: inline-flex; gap: var(--sp-1); align-items: center; min-width: 0; max-width: 100%; box-sizing: border-box; }
 #attachments .chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #attachments .chip .x { cursor: pointer; border: 0; padding: 0 0; background: transparent; color: var(--faint); line-height: 1; flex: 0 0 auto; }
@@ -1519,8 +1515,9 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
 .context-last { display: flex; align-items: flex-start; gap: var(--sp-2); margin-top: var(--sp-2); color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 .context-last .codicon { flex: none; margin-top: 0; color: var(--accent-text); }
 .context-detail { margin: var(--sp-1) 0 0 var(--sp-5); color: var(--faint); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
-.context-action { width: 100%; min-height: var(--control); margin-top: var(--sp-3); border: 1px solid var(--border-strong); border-radius: var(--r-sm); color: var(--text-strong); background: var(--surface2); cursor: pointer; font: var(--w-semi) var(--t-xs)/1 var(--sans); }
-.context-action:hover:not(:disabled) { border-color: var(--accent); background: var(--sel); }
+/* "Compact now": an outline button, never a filled one; the one filled button in view stays Send. */
+.context-action { width: 100%; min-height: var(--control); margin-top: var(--sp-3); border: 1px solid var(--hair-strong); border-radius: var(--r-row); color: var(--text); background: transparent; cursor: pointer; font: var(--w-med) var(--t-sm)/1 var(--sans); transition: background-color var(--dur-hover) ease; }
+.context-action:hover:not(:disabled) { background: var(--wash); }
 .context-action:disabled { cursor: wait; color: var(--faint); opacity: .75; }
 @keyframes context-pulse { 50% { opacity: .35; transform: scale(.88); } }
 .csend { height: var(--control); width: var(--control); margin-left: var(--sp-1); border: none; border-radius: var(--r-full); cursor: pointer; color: var(--faint); background: var(--surface2); display: inline-flex; align-items: center; justify-content: center; transition: background .12s, color .12s; }
@@ -1576,11 +1573,10 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
 .picker { position: static; }
 .cf-left .cmenu { left: 0; }
 .cf-right .cmenu { right: 0; }
+/* Where each menu opens and how big it is. How it looks (surface, lift, rows, motion) is the shared menu, media/shared/menu.css. */
 .cmenu { position: absolute; bottom: 100%; margin-bottom: var(--sp-2);
   width: min(310px, calc(100vw - 20px)); min-width: min(280px, calc(100vw - 20px));
-  max-height: min(440px, calc(100vh - 96px)); overflow-y: auto; padding: var(--sp-1);
-  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg);
-  box-shadow: 0 14px 40px -10px rgba(0,0,0,.75); z-index: 20; }
+  max-height: min(440px, calc(100vh - 96px)); overflow-y: auto; z-index: 20; }
 #modelmenu { width: min(260px, calc(100vw - 20px)); min-width: min(240px, calc(100vw - 20px));
   max-height: calc(100vh - 170px); }   /* in a short editor its model list scrolls inside it, below */
 #modelmenu:not([hidden]) { display: flex; flex-direction: column; overflow: hidden; }
@@ -1630,15 +1626,6 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
 .reasoning-card.is-ultra .effort-slider { background: linear-gradient(100deg, var(--accent), var(--lav), var(--accent)); background-size: 200% 100%; animation: effort-shimmer 3s linear infinite; }
 @keyframes effort-shimmer { to { background-position: 200% 0; } }
 @media (prefers-reduced-motion: reduce) { .reasoning-card.is-ultra .effort-slider { animation: none; } }
-.cmenu .mhead { padding: var(--sp-1) var(--sp-2) var(--sp-1); font: var(--w-reg) var(--t-xs)/1 var(--sans); color: var(--faint); display: flex; justify-content: space-between; align-items: center; }
-.cmenu .mhead kbd { background: var(--code); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 0 var(--sp-1); font: var(--w-reg) var(--t-xs)/1 var(--mono); color: var(--muted); }
-.cmenu .mrow { display: flex; align-items: center; gap: var(--sp-2); width: calc(100% - 4px); margin: 0 0; padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--r-sm); background: transparent; text-align: left; cursor: pointer; font: var(--w-reg) var(--t-sm)/1.2 var(--sans); color: var(--text); }
-.cmenu .mrow:hover { background: var(--surface2); }
-.cmenu .mrow.sel { background: var(--sel); }
-.cmenu .mrow .mi { width: 16px; text-align: center; color: var(--muted); }
-.cmenu .mrow.sel .mi { color: var(--accent-text); }
-.cmenu .mrow .md { color: var(--faint); font: var(--w-reg) var(--t-xs)/1.2 var(--mono); margin-left: auto; text-align: right; }
-.cmenu .mdiv { height: 1px; background: var(--border); margin: var(--sp-1) 0; }
 
 /* Combined model + reasoning selector. The continuous rail reads as one power scale while every
    stop remains a real keyboard-focusable radio item. Ultra gets motion only as status feedback. */
@@ -1860,7 +1847,6 @@ body.vscode-light .artifact-card .amenu { box-shadow: 0 10px 30px -10px rgba(0,0
 .fbtn.output-control:hover { color: var(--text); }
 .fbtn.output-control.on { background: color-mix(in srgb, var(--accent-fill) 18%, transparent); color: var(--accent-text); }
 body.vscode-light .fbtn.output-control.on, body.vscode-high-contrast-light .fbtn.output-control.on { color: var(--link); }
-.cmenu.output-menu .mrow .md { font-family: var(--sans); }
 
 /* Windows High Contrast / VS Code forced-colors mode. System colors preserve the user's chosen
    palette; shape, text, and border changes keep status from depending on hue alone. */

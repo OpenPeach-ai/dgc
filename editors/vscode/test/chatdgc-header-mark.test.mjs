@@ -27,7 +27,7 @@ const ID = `chat_${"a".repeat(32)}`, P = `proj_${"c".repeat(32)}`;
 
 /** ChatDGC's screen with its own scripts run, as the tab loads them. */
 function chatScreen() {
-  const scripts = [...chatPage.matchAll(/asset\("media\/([\w-]+\.js)"\)/g)].map((m) => m[1]);
+  const scripts = [...chatPage.matchAll(/asset\("media\/((?:shared\/)?[\w-]+\.js)"\)/g)].map((m) => m[1]);
   assert.equal(scripts.at(-1), "chatdgc.js");
   const dom = new JSDOM(bare(chatPage), { runScripts: "outside-only", pretendToBeVisual: true });
   const w = dom.window;

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- One menu for "+" and every picker, in Work, ChatDGC and a Pip's chat: a soft lift, taller rows, plain words in place of the monospace hints, and the same keys everywhere (arrows, Home, End, Escape back to its button). Work's "+" menu comes in three groups, Add to the message, This chat and Go to, with key caps for @, $ and /.
 - A link in a ChatDGC reply shows its site's favicon, as a link in Work does (and the bundled mark when the icon can't load). The dgc.linkFavicons setting now switches both.
 - One purple, from one place. Pips had a purple of its own beside the panel's; now Pips, Settings, a Pip's computer and the canvas take every colour from the panel's one set of tokens. On light themes, high contrast light included, accent words and marks take the deeper purple, where the pale one read 2.6:1 on white.
 - Finding severity in Apple's system colours: red for high and yellow for medium on dark themes, Apple's own higher-contrast red and yellow on light ones, where the old amber was hard to read.

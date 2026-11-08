@@ -9667,6 +9667,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const queueCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "messagequeue.css"));
     const mentionsCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "mentions.css"));
     const mentionsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "mentions.js"));
+    // One menu for every "+" and picker, the same in ChatDGC and a Pip's chat (media/shared/menu.js, window.DgcMenu).
+    const menuJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "menu.js"));
     const queueJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "messagequeue.js"));
     const genuiCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "genui.css"));
     const js = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.js"));
@@ -9909,12 +9911,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <div class="cf-left">
       <div class="picker add-picker">
         <button type="button" id="btn-add" class="fbtn" title="Add files and more" aria-label="Add files and more" aria-haspopup="menu" aria-expanded="false"><span class="codicon codicon-add" aria-hidden="true"></span></button>
-        <div id="addmenu" class="cmenu" role="menu" aria-label="Add" hidden></div>
+        <div id="addmenu" class="cmenu dgc-menu" role="menu" aria-label="Add" hidden></div>
       </div>
       <button type="button" id="btn-cmd" class="fbtn" title="Commands (/)" aria-label="Open commands"><span class="codicon codicon-terminal" aria-hidden="true"></span></button>
       <div class="picker context-picker">
         <button type="button" id="btn-ctx" class="fbtn" title="Context used — click for details" aria-label="Context used: 0 percent; open context details" aria-haspopup="dialog" aria-expanded="false"><span class="codicon codicon-pie-chart" aria-hidden="true"></span> <span id="ctx">0%</span></button>
-        <section id="ctxmenu" class="cmenu context-menu" role="dialog" aria-label="Context window" hidden>
+        <section id="ctxmenu" class="cmenu dgc-menu context-menu" role="dialog" aria-label="Context window" hidden>
           <div class="context-head"><div><span class="context-kicker">Context window</span><strong id="ctx-used">0 / 0</strong><span id="ctx-max" class="context-max" hidden></span></div><span id="ctx-pct">0%</span></div>
           <p id="ctx-cli" class="context-size-note" hidden></p>
           <div class="context-track" aria-hidden="true"><span id="ctx-fill"></span></div>
@@ -9942,7 +9944,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <!-- The prompt cache's clock (0.48, Work only): always here; dimmed, with no minutes, where the provider doesn't say how long its cache lasts. -->
       <div class="picker cache-picker">
         <button type="button" id="cache-clock" class="fbtn cache-clock" title="Prompt cache" aria-haspopup="dialog" aria-expanded="false" data-cache-window="unknown"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.5C14.1421 2.5 17.5 5.85786 17.5 10C17.5 14.1421 14.1421 17.5 10 17.5C5.85786 17.5 2.5 14.1421 2.5 10C2.5 5.85786 5.85786 2.5 10 2.5ZM10 3.5C6.41015 3.5 3.5 6.41015 3.5 10C3.5 13.5899 6.41015 16.5 10 16.5C13.5899 16.5 16.5 13.5899 16.5 10C16.5 6.41015 13.5899 3.5 10 3.5ZM10 5C10.2761 5 10.5 5.22386 10.5 5.5V9.66895L13.6973 11.04L13.7852 11.0898C13.9763 11.2224 14.0552 11.4751 13.96 11.6973C13.8647 11.9193 13.6272 12.0372 13.3994 11.9902L13.3027 11.96L9.80273 10.46C9.61896 10.3811 9.5 10.2 9.5 10V5.5C9.5 5.22386 9.72386 5 10 5Z" fill="currentColor"/></svg><span id="cache-clock-left" class="cache-clock-left"></span></button>
-        <section id="cachemenu" class="cmenu context-menu cache-menu" role="dialog" aria-label="Prompt cache" tabindex="-1" hidden>
+        <section id="cachemenu" class="cmenu dgc-menu context-menu cache-menu" role="dialog" aria-label="Prompt cache" tabindex="-1" hidden>
           <div class="context-head"><div><span class="context-kicker">Prompt cache</span><strong id="cache-state">No timer</strong></div></div>
           <p id="cache-said" class="cache-said"></p>
           <p id="cache-next" class="cache-said" hidden></p>
@@ -9952,11 +9954,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <button type="button" id="btn-settings" class="fbtn" title="Settings" aria-label="Open settings"><span class="codicon codicon-settings-gear" aria-hidden="true"></span></button>
       <div class="picker">
         <button type="button" id="btn-mode" class="fbtn mode" title="Permission mode — Shift+Tab to cycle" aria-label="Permission mode: default" aria-haspopup="menu" aria-expanded="false"><span id="modeicon" class="codicon codicon-shield" aria-hidden="true"></span> <span id="modelabel">default</span></button>
-        <div id="modemenu" class="cmenu" role="menu" aria-label="Permission mode" hidden></div>
+        <div id="modemenu" class="cmenu dgc-menu" role="menu" aria-label="Permission mode" hidden></div>
       </div>
       <div class="picker output-picker" id="output-picker" hidden>
         <button type="button" id="btn-output" class="fbtn output-control" title="Artifact: what the next message should make. Auto lets the model pick" aria-label="Artifact: Auto. The model picks" aria-haspopup="menu" aria-expanded="false" aria-pressed="false"><span id="output-icon" class="codicon codicon-output" aria-hidden="true"></span><span id="output-label" class="output-label">Artifact</span></button>
-        <div id="outputmenu" class="cmenu output-menu" role="menu" aria-label="Artifact" hidden></div>
+        <div id="outputmenu" class="cmenu dgc-menu output-menu" role="menu" aria-label="Artifact" hidden></div>
       </div>
       <button type="button" id="btn-goal" class="fbtn goal-control" data-state="none" hidden><span class="codicon codicon-target" aria-hidden="true"></span> <span id="goal-control-label">Goal</span></button>
       </div>
@@ -9966,7 +9968,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       </div>
       <div class="picker">
         <button type="button" id="btn-model" class="fbtn mode model-control" title="Model and reasoning — click to change" aria-label="Change model and reasoning" aria-haspopup="menu" aria-expanded="false"><span class="codicon codicon-zap model-icon" aria-hidden="true"></span><span class="model-copy"><span id="modelname">dgc</span><span id="effortname">off</span></span><span class="codicon codicon-chevron-up model-chevron" aria-hidden="true"></span></button>
-        <div id="modelmenu" class="cmenu" role="menu" aria-label="Model" hidden></div>
+        <div id="modelmenu" class="cmenu dgc-menu" role="menu" aria-label="Model" hidden></div>
       </div>
       <button type="button" id="queue-send" class="fbtn" title="Queue for the next turn — Alt+Enter" aria-label="Queue for next turn" hidden>Queue</button>
       <button type="button" id="stop-run" class="fbtn" title="Stop generation" aria-label="Stop generation" hidden><span class="codicon codicon-debug-stop" aria-hidden="true"></span></button>
@@ -9978,6 +9980,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   </div>
   <div id="followup-hint" hidden></div>
 </footer>
+<script nonce="${nonce}" src="${menuJs}"></script>
 <script nonce="${nonce}" src="${mcpAppsJs}"></script>
 <script nonce="${nonce}" src="${markdown}"></script>
 <script nonce="${nonce}" src="${breakdownScript}"></script>

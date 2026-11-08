@@ -584,7 +584,7 @@ function chatdgcHtml() {
   const page = source.match(/return `(<!doctype html>[\s\S]*?<\/html>)`;/)[1];
   const doc = chatdgcFixtureHtml(page);
   const css = readStylesheet(join(root, "media/main.css")).replace(/@import[^;]*;/, "") + readFileSync(join(root, "media/chatdgc.css"), "utf8");
-  const js = [...page.matchAll(/asset\("media\/([\w-]+\.js)"\)/g)].map((m) => readFileSync(join(root, "media", m[1]), "utf8")).join("\n");
+  const js = [...page.matchAll(/asset\("media\/((?:shared\/)?[\w-]+\.js)"\)/g)].map((m) => readFileSync(join(root, "media", m[1]), "utf8")).join("\n");
   const markdownJs = buildSync({ entryPoints: [join(root, "src/markdown.ts")], bundle: true, format: "iife", globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
   return { html: doc.replace("</head>", `<style>${css}</style></head>`), js, markdownJs };
 }

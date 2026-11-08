@@ -1138,10 +1138,10 @@
 
   // permission modes — codicon glyph, one-liner (matches the CLI's mode ladder)
   const MODES = {
-    default:     { icon: "shield",    desc: "ask before edits & commands" },
-    acceptEdits: { icon: "edit",      desc: "auto-approve file edits" },
-    plan:        { icon: "checklist", desc: "read-only — plan first" },
-    auto:        { icon: "zap",       desc: "approve everything" },
+    default:     { icon: "shield",    desc: "Ask before edits and commands" },
+    acceptEdits: { icon: "edit",      desc: "Approve file edits for me" },
+    plan:        { icon: "checklist", desc: "Read only, plan first" },
+    auto:        { icon: "zap",       desc: "Approve everything" },
   };
   const MODE_ORDER = ["default", "acceptEdits", "plan", "auto"];
   const THINK = ["off", "low", "medium", "high", "xhigh"];
@@ -1257,8 +1257,8 @@
     if (!mm.hidden) { hideModeMenu(); return; }
     hideModelMenu(); hideContextMenu(); hideAgentsMenu(); hideOutputMenu();
     mm.innerHTML =
-      `<div role="group" aria-label="Permission mode"><div class="mhead" role="presentation"><span>Permission mode</span><kbd>⇧Tab</kbd></div>` +
-      MODE_ORDER.map((m) => `<button type="button" role="menuitemradio" aria-checked="${m === curMode}" class="mrow${m === curMode ? " sel" : ""}" data-mode="${m}"><span class="mi codicon codicon-${MODES[m].icon}" aria-hidden="true"></span><span>${m}</span><span class="md">${MODES[m].desc}</span></button>`).join("") +
+      `<div role="group" aria-label="Permission mode"><div class="mhead dgc-menu-head" role="presentation"><span>Permission mode</span><kbd>⇧Tab</kbd></div>` +
+      MODE_ORDER.map((m) => `<button type="button" role="menuitemradio" aria-checked="${m === curMode}" class="mrow dgc-menu-row${m === curMode ? " sel" : ""}" data-mode="${m}"><span class="mi dgc-menu-icon codicon codicon-${MODES[m].icon}" aria-hidden="true"></span><span>${m}</span><span class="md dgc-menu-hint">${MODES[m].desc}</span></button>`).join("") +
       `</div>`;
     mm.querySelectorAll("[data-mode]").forEach((r) => r.onclick = () => setMode(r.dataset.mode));
     mm.hidden = false; $("btn-mode").setAttribute("aria-expanded", "true");
@@ -1306,8 +1306,8 @@
     const menu = $("outputmenu");
     if (!menu.hidden) { hideOutputMenu(); return; }
     hideModeMenu(); hideModelMenu(); hideContextMenu(); hideAgentsMenu();
-    menu.innerHTML = `<div role="group" aria-label="Artifact"><div class="mhead" role="presentation"><span>Make, with the next message</span></div>`
-      + offeredOutputs().map(([value, label, desc, glyph]) => `<button type="button" role="menuitemradio" aria-checked="${value === outputPick}" class="mrow${value === outputPick ? " sel" : ""}" data-output="${value}"><span class="mi codicon codicon-${glyph}" aria-hidden="true"></span><span>${label}</span><span class="md">${desc}</span></button>`).join("")
+    menu.innerHTML = `<div role="group" aria-label="Artifact"><div class="mhead dgc-menu-head" role="presentation"><span>Make, with the next message</span></div>`
+      + offeredOutputs().map(([value, label, desc, glyph]) => `<button type="button" role="menuitemradio" aria-checked="${value === outputPick}" class="mrow dgc-menu-row${value === outputPick ? " sel" : ""}" data-output="${value}"><span class="mi dgc-menu-icon codicon codicon-${glyph}" aria-hidden="true"></span><span>${label}</span><span class="md dgc-menu-hint">${desc}</span></button>`).join("")
       + `</div>`;
     menu.querySelectorAll("[data-output]").forEach((row) => { row.onclick = () => { setOutput(row.dataset.output); hideOutputMenu(); $("btn-output").focus(); }; });
     menu.hidden = false; $("btn-output").setAttribute("aria-expanded", "true");
@@ -1652,7 +1652,7 @@
     const profiles = [...levels, "ultra"];
     const selected = curUltra ? "ultra" : profiles.includes(curThink) ? curThink : profiles[0];
     const index = Math.max(0, profiles.indexOf(selected));
-    return `<section class="reasoning-card${curUltra ? " is-ultra" : ""}" aria-label="Model and reasoning"><button type="button" class="mrow model-summary" aria-expanded="false"><span class="codicon codicon-zap" aria-hidden="true"></span><span class="model-summary-label">${esc(curModel || "Select model")} <span class="muted">${effortLabel(selected, subscription)}</span></span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button><div class="effort-control" style="--effort:${index / (profiles.length - 1) * 100}%"><input class="effort-slider" type="range" min="0" max="${profiles.length - 1}" step="1" value="${index}" data-profiles="${profiles.join(",")}" aria-label="Thinking effort" aria-valuetext="${effortLabel(selected, subscription)}"/><div class="effort-labels"><span>${effortLabel(profiles[0], subscription)}</span><output>${effortLabel(selected, subscription)}</output><span>Ultra</span></div></div><p class="reasoning-note clamped">${esc(subscription ? "Uses the selected CLI’s supported effort. Ultra adds DGC orchestration guidance." : reasoningNote())}</p><button type="button" class="reasoning-more" aria-expanded="false" hidden>Show more</button></section>`;
+    return `<section class="reasoning-card${curUltra ? " is-ultra" : ""}" aria-label="Model and reasoning"><button type="button" class="mrow dgc-menu-row model-summary" aria-expanded="false"><span class="codicon codicon-zap" aria-hidden="true"></span><span class="model-summary-label">${esc(curModel || "Select model")} <span class="muted">${effortLabel(selected, subscription)}</span></span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button><div class="effort-control" style="--effort:${index / (profiles.length - 1) * 100}%"><input class="effort-slider" type="range" min="0" max="${profiles.length - 1}" step="1" value="${index}" data-profiles="${profiles.join(",")}" aria-label="Thinking effort" aria-valuetext="${effortLabel(selected, subscription)}"/><div class="effort-labels"><span>${effortLabel(profiles[0], subscription)}</span><output>${effortLabel(selected, subscription)}</output><span>Ultra</span></div></div><p class="reasoning-note clamped">${esc(subscription ? "Uses the selected CLI’s supported effort. Ultra adds DGC orchestration guidance." : reasoningNote())}</p><button type="button" class="reasoning-more" aria-expanded="false" hidden>Show more</button></section>`;
   }
   // The note under the slider is three lines at most, with Show more when there is more to read: a
   // long one (Ollama's levels) took over the menu. Measured once the menu is on screen.
@@ -1731,14 +1731,14 @@
     const choices = (Array.isArray(routes) ? routes : [{ key: "native", label: "Current host" }])
       .filter(row => row && row.key);
     // Keep the same model/effort control mounted while only the lower list changes.
-    options.innerHTML = `<div class="mhead"><span>Provider</span></div><div class="model-list-scroll">`
+    options.innerHTML = `<div class="mhead dgc-menu-head"><span>Provider</span></div><div class="model-list-scroll">`
       + choices.map((row, i) => {
         const selected = row.key === currentRouteKey;
         const note = row.installed === false ? " · install CLI first"
           : row.auth_state === "signed_out" ? " · sign in first" : "";
-        return `<button type="button" role="menuitemradio" aria-checked="${selected}" class="mrow${selected ? " sel" : ""}" data-provider-i="${i}"><span class="mi ${selected ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(String(row.label || row.key) + note)}</span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`;
+        return `<button type="button" role="menuitemradio" aria-checked="${selected}" class="mrow dgc-menu-row${selected ? " sel" : ""}" data-provider-i="${i}"><span class="mi dgc-menu-icon ${selected ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(String(row.label || row.key) + note)}</span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`;
       }).join("")
-      + `<button type="button" role="menuitem" class="mrow" data-manage-providers="1"><span class="mi codicon codicon-add" aria-hidden="true"></span><span>Add provider in Settings…</span></button></div>`;
+      + `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-manage-providers="1"><span class="mi dgc-menu-icon codicon codicon-add" aria-hidden="true"></span><span>Add provider in Settings…</span></button></div>`;
     options.hidden = false;
     mm.querySelector(".model-summary")?.setAttribute("aria-expanded", "true");
     options.querySelectorAll("[data-provider-i]").forEach(button => button.onclick = (event) => {
@@ -1768,12 +1768,12 @@
     allModelsStep = row;
     if (!listed) vscode.postMessage({ type: "providerModels", id: row.key });
     const ids = listed?.ids || [];
-    const wait = !listed ? `<div class="mhead"><span>Listing its models…</span></div>`
-      : !ids.length ? `<div class="mhead"><span>${listed.error ? "Couldn’t list its models" : "It lists no models"}</span></div>` : "";
-    options.innerHTML = `<button type="button" role="menuitem" class="mrow" data-provider-back="1"><span class="mi codicon codicon-arrow-left" aria-hidden="true"></span><span>Providers</span></button>`
-      + `<div class="mhead"><span>${esc(row.label)} model</span></div><div class="model-list-scroll">${wait}`
-      + ids.map((id, i) => `<button type="button" role="menuitemradio" aria-checked="false" class="mrow" data-provider-model="${i}"><span class="mi" aria-hidden="true"></span><span>${esc(id)}</span></button>`).join("")
-      + (listed ? `<button type="button" role="menuitem" class="mrow" data-provider-typed="1"><span class="mi codicon codicon-edit" aria-hidden="true"></span><span>Enter another model…</span></button>` : "")
+    const wait = !listed ? `<div class="mhead dgc-menu-head"><span>Listing its models…</span></div>`
+      : !ids.length ? `<div class="mhead dgc-menu-head"><span>${listed.error ? "Couldn’t list its models" : "It lists no models"}</span></div>` : "";
+    options.innerHTML = `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-provider-back="1"><span class="mi dgc-menu-icon codicon codicon-arrow-left" aria-hidden="true"></span><span>Providers</span></button>`
+      + `<div class="mhead dgc-menu-head"><span>${esc(row.label)} model</span></div><div class="model-list-scroll">${wait}`
+      + ids.map((id, i) => `<button type="button" role="menuitemradio" aria-checked="false" class="mrow dgc-menu-row" data-provider-model="${i}"><span class="mi dgc-menu-icon" aria-hidden="true"></span><span>${esc(id)}</span></button>`).join("")
+      + (listed ? `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-provider-typed="1"><span class="mi dgc-menu-icon codicon codicon-edit" aria-hidden="true"></span><span>Enter another model…</span></button>` : "")
       + `</div>`;
     options.hidden = false;
     options.querySelector("[data-provider-back]").onclick = (event) => { event.stopPropagation(); allModelsStep = null; showProviderStep(); };
@@ -1790,12 +1790,12 @@
                                   cliDefaultModel, cliDefaultListed }) {
     const mm = $("modelmenu");
     const profile = profileMenu(subscription, supportsEffort);
-    const back = `<button type="button" role="menuitem" class="mrow" data-provider-back="1"><span class="mi codicon codicon-arrow-left" aria-hidden="true"></span><span>Providers</span></button>`;
+    const back = `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-provider-back="1"><span class="mi dgc-menu-icon codicon codicon-arrow-left" aria-hidden="true"></span><span>Providers</span></button>`;
     if (subscription) {
-      mm.innerHTML = profile + `<div class="mhead"><span>${esc(label || "Subscription")} model</span></div>`
-        + `<button type="button" role="menuitemradio" aria-checked="${!current}" class="mrow${!current ? " sel" : ""}" data-default="1"${cliDefaultListed === false ? " disabled" : ""}><span class="mi ${!current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(cliDefaultModel ? `CLI default · ${cliDefaultModel}${cliDefaultListed === false ? " (not listed)" : ""}` : "CLI default")}</span></button>`
-        + ids.map((id, i) => `<button type="button" role="menuitemradio" aria-checked="${id === current}" class="mrow${id === current ? " sel" : ""}" data-i="${i}"><span class="mi ${id === current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(id)}</span></button>`).join("")
-        + `<button type="button" role="menuitem" class="mrow" data-custom="1"><span class="mi codicon codicon-edit" aria-hidden="true"></span><span>Enter another model…</span></button>`;
+      mm.innerHTML = profile + `<div class="mhead dgc-menu-head"><span>${esc(label || "Subscription")} model</span></div>`
+        + `<button type="button" role="menuitemradio" aria-checked="${!current}" class="mrow dgc-menu-row${!current ? " sel" : ""}" data-default="1"${cliDefaultListed === false ? " disabled" : ""}><span class="mi dgc-menu-icon ${!current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(cliDefaultModel ? `CLI default · ${cliDefaultModel}${cliDefaultListed === false ? " (not listed)" : ""}` : "CLI default")}</span></button>`
+        + ids.map((id, i) => `<button type="button" role="menuitemradio" aria-checked="${id === current}" class="mrow dgc-menu-row${id === current ? " sel" : ""}" data-i="${i}"><span class="mi dgc-menu-icon ${id === current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(id)}</span></button>`).join("")
+        + `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-custom="1"><span class="mi dgc-menu-icon codicon codicon-edit" aria-hidden="true"></span><span>Enter another model…</span></button>`;
       bindProfiles(mm);
       mm.querySelector(".model-options").insertAdjacentHTML("afterbegin", back);
       mm.querySelector(".model-summary")?.click();
@@ -1807,7 +1807,7 @@
       mm.querySelector(".model-summary")?.focus(); return;
     }
     if (err || !ids.length) {
-      mm.innerHTML = profile + `<button type="button" role="menuitem" class="mrow" data-connect="1"><span class="mi codicon codicon-plug" aria-hidden="true"></span><span>${err ? "Can’t reach endpoint — connect…" : "No models — connect…"}</span></button>`;
+      mm.innerHTML = profile + `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-connect="1"><span class="mi dgc-menu-icon codicon codicon-plug" aria-hidden="true"></span><span>${err ? "Can’t reach endpoint — connect…" : "No models — connect…"}</span></button>`;
       bindProfiles(mm);
       mm.querySelector(".model-options").insertAdjacentHTML("afterbegin", back);
       mm.querySelector(".model-summary")?.click();
@@ -1815,8 +1815,8 @@
       mm.querySelector("[data-provider-back]").onclick = (event) => { event.stopPropagation(); showProviderStep(); };
       mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true"); mm.querySelector("button")?.focus(); return;
     }
-    mm.innerHTML = profile + `<div class="mhead"><span>Model</span></div>` +
-      ids.map((id, i) => `<button type="button" role="menuitemradio" aria-checked="${id === current}" class="mrow${id === current ? " sel" : ""}" data-i="${i}"><span class="mi ${id === current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(id)}</span></button>`).join("");
+    mm.innerHTML = profile + `<div class="mhead dgc-menu-head"><span>Model</span></div>` +
+      ids.map((id, i) => `<button type="button" role="menuitemradio" aria-checked="${id === current}" class="mrow dgc-menu-row${id === current ? " sel" : ""}" data-i="${i}"><span class="mi dgc-menu-icon ${id === current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(id)}</span></button>`).join("");
     bindProfiles(mm);
     mm.querySelector(".model-options").insertAdjacentHTML("afterbegin", back);
     mm.querySelector(".model-summary")?.click();
@@ -1850,22 +1850,13 @@
     $("btn-model").setAttribute("aria-label", `Change model and reasoning. Current model: ${model}. Profile: ${effort}.`);
   }
 
-  function menuKeys(menu, close, trigger, e) {
-    if (e.key === "Escape") { e.preventDefault(); close(); trigger.focus(); return; }
-    if (e.target.matches?.("input[type=range]")) return;
-    const items = [...menu.querySelectorAll("button[role^='menuitem']")].filter(item => !item.closest("[hidden]"));
-    if (!items.length) return;
-    const current = Math.max(0, items.indexOf(document.activeElement));
-    let next = null;
-    if (e.key === "ArrowDown") next = (current + 1) % items.length;
-    else if (e.key === "ArrowUp") next = (current - 1 + items.length) % items.length;
-    else if (e.key === "Home") next = 0;
-    else if (e.key === "End") next = items.length - 1;
-    if (next !== null) { e.preventDefault(); items[next].focus(); }
-  }
-  $("modemenu").addEventListener("keydown", (e) => menuKeys($("modemenu"), hideModeMenu, $("btn-mode"), e));
-  $("outputmenu").addEventListener("keydown", (e) => menuKeys($("outputmenu"), hideOutputMenu, $("btn-output"), e));
-  $("modelmenu").addEventListener("keydown", (e) => menuKeys($("modelmenu"), hideModelMenu, $("btn-model"), e));
+  // The keys every menu answers, the same in ChatDGC and a Pip's chat (media/shared/menu.js): arrows, Home and End move,
+  // Escape closes and returns to the button, Tab closes.
+  const ROWS = "button[role^='menuitem']";
+  DgcMenu.keys($("addmenu"), { close: hideAddMenu, trigger: $("btn-add"), rows: ROWS });
+  DgcMenu.keys($("modemenu"), { close: hideModeMenu, trigger: $("btn-mode"), rows: ROWS });
+  DgcMenu.keys($("outputmenu"), { close: hideOutputMenu, trigger: $("btn-output"), rows: ROWS });
+  DgcMenu.keys($("modelmenu"), { close: hideModelMenu, trigger: $("btn-model"), rows: ROWS });
 
   // animated DGC mark — the three stripes light up one-by-one, hold all three,
   // then repeat (CSS-driven, ~1.2s loop, single purple). Replaces the old braille
@@ -10021,18 +10012,18 @@ function permissionChoices(ev) {
     ];
     if (mcpContextSupported) {
       items.push({ id: "mcp", icon: "plug", label: "MCP context",
-                   hint: "resources, prompts",
+                   hint: "Resources and prompts",
                    run: () => vscode.postMessage({ type: "slash", action: "mcp" }) });
     }
     items.push({ id: "goal", icon: "target", label: "Goal",
-                 hint: "keep pursuing", run: () => vscode.postMessage({ type: "slash", action: "goal" }) });
+                 hint: "Keep pursuing one thing", run: () => vscode.postMessage({ type: "slash", action: "goal" }) });
     items.push({ id: "plan", icon: "checklist", label: "Plan mode",
-                 hint: curMode === "plan" ? "turn off" : "turn on",
+                 hint: curMode === "plan" ? "On" : "Off",
                  run: () => setMode(curMode === "plan" ? "default" : "plan") });
     items.push({ id: "pips", icon: "beaker", label: "Pips",
-                 hint: "your Pips and conversations", run: () => vscode.postMessage({ type: "openPips" }) });
+                 hint: "Your Pips", run: () => vscode.postMessage({ type: "openPips" }) });
     items.push({ id: "memory", icon: "bookmark", label: "Memory",
-                 hint: "what DGC remembers",
+                 hint: "What DGC remembers",
                  run: () => vscode.postMessage({ type: "slash", action: "memory" }) });
     return items;
   }
@@ -10041,12 +10032,11 @@ function permissionChoices(ev) {
     if (!am.hidden) { hideAddMenu(); return; }
     hideModeMenu(); hideModelMenu(); hideContextMenu(); hideAgentsMenu();
     const items = addMenuItems();
+    // Three groups with small headings, plain words, and key caps for the keys you can type instead (U2, 7 Nov).
+    const group = (name, ids) => ({ name, rows: items.filter((it) => ids.includes(it.id)) });
     am.innerHTML = '<div role="group" aria-label="Add">'
-      + '<div class="mhead" role="presentation"><span>Add</span></div>'
-      + items.map((it) => `<button type="button" role="menuitem" class="mrow" data-add="${it.id}">`
-          + `<span class="codicon codicon-${it.icon}" aria-hidden="true"></span>`
-          + `<span class="mrow-label">${esc(it.label)}</span>`
-          + `<span class="mrow-hint">${esc(it.hint)}</span></button>`).join("")
+      + DgcMenu.html([group("Add to the message", ["files", "skill", "command", "mcp"]), group("This chat", ["goal", "plan"]),
+                      group("Go to", ["pips", "memory"])], { data: "add", rowClass: "mrow" })
       + "</div>";
     am.querySelectorAll("[data-add]").forEach((row) => row.onclick = () => {
       hideAddMenu();
@@ -10072,7 +10062,7 @@ function permissionChoices(ev) {
     if (noProvider) { vscode.postMessage({ type: "openSettings", section: "models" }); return; }
     const mm = $("modelmenu");
     if (!mm.hidden) { hideModelMenu(); return; }
-    mm.innerHTML = `<div class="mhead"><span>Loading…</span></div>`;
+    mm.innerHTML = `<div class="mhead dgc-menu-head"><span>Loading…</span></div>`;
     mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true"); hideModeMenu(); hideContextMenu(); hideAgentsMenu();
     vscode.postMessage({ type: "listModels" });
   };

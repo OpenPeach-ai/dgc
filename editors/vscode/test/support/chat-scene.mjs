@@ -19,7 +19,7 @@ function documents() {
   const docs = [...source.matchAll(/return `(<!doctype html>[\s\S]*?<\/html>)`;/g)].map((m) => m[1]);
   const prepare = (doc) => doc.replace(/<link [^>]*>/g, "").replace(/<script [^>]*><\/script>/g, "").replace(/\$\{[^}]*\}/g, "")
     .replace("font-src ;", "font-src data:;");
-  const scripts = (doc) => [...doc.matchAll(/asset\("media\/([\w-]+\.js)"\)/g)].map((m) => m[1]).map((f) => read(`media/${f}`)).join("\n");
+  const scripts = (doc) => [...doc.matchAll(/asset\("media\/((?:shared\/)?[\w-]+\.js)"\)/g)].map((m) => m[1]).map((f) => read(`media/${f}`)).join("\n");
   const css = readStylesheet(join(root, "media/main.css")) + read("media/mentions.css");
   const own = read("media/chatdgc.css") + read("media/voicebar.css");
   const styled = (doc) => prepare(doc).replace("</head>", `<style>${codicon()}</style><style>${css}</style><style>${own}</style></head>`);

@@ -1172,6 +1172,8 @@
   }
   // ---- deep research: a plan to edit or start, the reading as it happens, then the report
   const icon = (name) => { const glyph = el("span", `codicon codicon-${name}`); glyph.setAttribute("aria-hidden", "true"); return glyph; };
+  // A menu row's leading icon, in the shared menu's icon box (media/shared/menu.css).
+  const menuIcon = (name) => { const glyph = icon(name); glyph.classList.add("dgc-menu-icon"); return glyph; };
   const RESEARCHING = ["planning", "running", "writing", "checking"];
   const COUNTDOWN = 15;                // seconds a new plan waits for Edit before it starts, as ChatGPT's does
   /** A <details> that stays as you left it across redraws (research redraws often). */
@@ -2093,13 +2095,13 @@
   }
   function openOutputMenu() {
     const listed = Array.isArray(artifactsOffer?.outputs) ? artifactsOffer.outputs : [];
-    outputMenu.replaceChildren(el("span", "cd-output-head", "Make, with the next reply"), ...OUTPUT_CHOICES
+    outputMenu.replaceChildren(el("span", "cd-output-head dgc-menu-head", "Make, with the next reply"), ...OUTPUT_CHOICES
       .filter(([value]) => value === "auto" || !listed.length || listed.includes(value))
       .map(([value, label, desc, glyph]) => {
-        const row = el("button", "cd-output-item");
+        const row = el("button", "cd-output-item dgc-menu-row");
         row.type = "button"; row.setAttribute("role", "menuitemradio"); row.setAttribute("aria-checked", String(value === state.output));
         row.dataset.output = value;
-        row.append(icon(glyph), el("span", "cd-output-name", label), el("span", "cd-output-desc", desc));
+        row.append(menuIcon(glyph), el("span", "cd-output-name dgc-menu-label", label), el("span", "cd-output-desc dgc-menu-hint", desc));
         row.addEventListener("click", () => { outputChoice(value); closeOutputMenu(true); });
         return row;
       }));
@@ -2107,16 +2109,8 @@
     (outputMenu.querySelector('[aria-checked="true"]') || outputMenu.querySelector("button"))?.focus();
   }
   outputButton.addEventListener("click", (e) => { e.stopPropagation(); if (outputMenu.hidden) openOutputMenu(); else closeOutputMenu(true); });
-  outputMenu.addEventListener("keydown", (e) => {
-    const items = [...outputMenu.querySelectorAll("button")];
-    const at = items.indexOf(document.activeElement);
-    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeOutputMenu(true); }
-    else if (e.key === "ArrowDown") { e.preventDefault(); items[(at + 1) % items.length].focus(); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); items[(at - 1 + items.length) % items.length].focus(); }
-    else if (e.key === "Home") { e.preventDefault(); items[0].focus(); }
-    else if (e.key === "End") { e.preventDefault(); items.at(-1).focus(); }
-    else if (e.key === "Tab") closeOutputMenu(false);
-  });
+  // The keys every menu answers, as in Work and a Pip's chat (media/shared/menu.js).
+  window.DgcMenu?.keys(outputMenu, { close: closeOutputMenu, trigger: outputButton });
   document.addEventListener("click", (e) => { if (!outputMenu.hidden && !outputMenu.contains(e.target) && !outputButton.contains(e.target)) closeOutputMenu(false); });
 
   // ---- a folder this chat reads (ready.capabilities.chatdgc.folder): the Folder chip beside Output. The chat reads the
@@ -2190,10 +2184,10 @@
     if (focus) $("cd-folder").focus();
   }
   function folderItem(glyph, name, desc, action, blocked = "") {
-    const row = el("button", "cd-output-item cd-folder-item");
+    const row = el("button", "cd-output-item cd-folder-item dgc-menu-row");
     row.type = "button"; row.setAttribute("role", "menuitem"); row.dataset.folderAction = action;
     if (blocked) row.setAttribute("aria-disabled", "true");      // focusable, said as unavailable, does nothing
-    row.append(icon(glyph), el("span", "cd-output-name", name), el("span", "cd-output-desc", blocked || desc));
+    row.append(menuIcon(glyph), el("span", "cd-output-name dgc-menu-label", name), el("span", "cd-output-desc dgc-menu-hint", blocked || desc));
     row.addEventListener("click", () => {
       if (row.getAttribute("aria-disabled") === "true") return;
       closeFolderMenu(action !== "work");
@@ -2207,7 +2201,7 @@
     const menu = $("cd-folder-menu");
     const where = el("span", "cd-folder-path", state.folder);
     where.title = state.folder;
-    menu.replaceChildren(el("span", "cd-output-head", "This chat reads"), where,
+    menu.replaceChildren(el("span", "cd-output-head dgc-menu-head", "This chat reads"), where,
       el("span", "cd-folder-note", "Its files, to answer from. It never changes them."),
       folderItem("arrow-right", "Continue in Work", "Code in that folder", "work", workBlocked()),
       folderItem("folder-opened", "Choose another folder…", "", "pick"),
@@ -2239,16 +2233,7 @@
     if (!state.folder) { pickFolder(); return; }
     if ($("cd-folder-menu").hidden) openFolderMenu(); else closeFolderMenu(true);
   });
-  $("cd-folder-menu").addEventListener("keydown", (e) => {
-    const items = [...$("cd-folder-menu").querySelectorAll("button")];
-    const at = items.indexOf(document.activeElement);
-    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeFolderMenu(true); }
-    else if (e.key === "ArrowDown") { e.preventDefault(); items[(at + 1) % items.length].focus(); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); items[(at - 1 + items.length) % items.length].focus(); }
-    else if (e.key === "Home") { e.preventDefault(); items[0].focus(); }
-    else if (e.key === "End") { e.preventDefault(); items.at(-1).focus(); }
-    else if (e.key === "Tab") closeFolderMenu(false);
-  });
+  window.DgcMenu?.keys($("cd-folder-menu"), { close: closeFolderMenu, trigger: () => $("cd-folder") });
   document.addEventListener("click", (e) => {
     const menu = $("cd-folder-menu");
     if (!menu.hidden && !menu.contains(e.target) && !$("cd-folder").contains(e.target)) closeFolderMenu(false);
@@ -3915,21 +3900,21 @@
     const profilesOn = state.modelProfiles.length > 0;
     const header = profilesOn && !state.menuProviders
       ? (() => {
-          const back = el("button", "cd-menu-row cd-menu-back", "←  Providers");
+          const back = el("button", "cd-menu-row cd-menu-back dgc-menu-row", "←  Providers");
           back.type = "button";
           back.addEventListener("click", () => { state.menuProviders = true; renderModelMenu();
             modelMenu.querySelector(".cd-menu-row.sel")?.focus(); });
           return back;
         })()
-      : el("div", "cd-menu-kicker", profilesOn ? "Provider" : "Model");
+      : el("div", "cd-menu-kicker dgc-menu-head", profilesOn ? "Provider" : "Model");
     const options = profilesOn && state.menuProviders
       ? state.modelProfiles.map((profile) => {
           const on = profile.id === currentProvider;
-          const row = el("button", `cd-menu-row${on ? " sel" : ""}`);
+          const row = el("button", `cd-menu-row dgc-menu-row${on ? " sel is-selected" : ""}`);
           row.type = "button";
           row.setAttribute("role", "menuitemradio"); row.setAttribute("aria-checked", String(on));
-          row.append(icon(profile.kind === "subscription" ? "terminal" : "server"),
-                     el("span", "cd-menu-name", profile.name), ...(on ? [icon("check")] : []));
+          row.append(menuIcon(profile.kind === "subscription" ? "terminal" : "server"),
+                     el("span", "cd-menu-name dgc-menu-label", profile.name), ...(on ? [icon("check")] : []));
           row.addEventListener("click", () => {
             state.menuProvider = profile.id;
             state.menuProviders = false;
@@ -3941,10 +3926,10 @@
       : [...modelPick.options].filter((option) => !profilesOn || providerOf(option.value) === state.menuProvider)
         .map((option) => {
           const on = option.value === modelPick.value;
-          const row = el("button", `cd-menu-row${on ? " sel" : ""}`);
+          const row = el("button", `cd-menu-row dgc-menu-row${on ? " sel is-selected" : ""}`);
           row.type = "button";
           row.setAttribute("role", "menuitemradio"); row.setAttribute("aria-checked", String(on));
-          row.append(icon("zap"), el("span", "cd-menu-name", modelName(option.value)), ...(on ? [icon("check")] : []));
+          row.append(menuIcon("zap"), el("span", "cd-menu-name dgc-menu-label", modelName(option.value)), ...(on ? [icon("check")] : []));
           row.addEventListener("click", () => {
             modelPick.value = option.value;
             modelPick.dispatchEvent(new Event("change"));
@@ -3956,10 +3941,10 @@
     // A provider with nothing to choose from yet says why, rather than showing an empty list.
     if (profilesOn && !state.menuProviders && !options.length) {
       const listed = state.providerModels[state.menuProvider];
-      if (!listed) options.push(el("div", "cd-menu-kicker", "Listing its models…"));
+      if (!listed) options.push(el("div", "cd-menu-kicker dgc-menu-head", "Listing its models…"));
       else {
-        options.push(el("div", "cd-menu-kicker", state.providerErrors[state.menuProvider] ? "Couldn’t list its models" : "It lists no models"));
-        const settings = el("button", "cd-menu-row", "Settings → Models");
+        options.push(el("div", "cd-menu-kicker dgc-menu-head", state.providerErrors[state.menuProvider] ? "Couldn’t list its models" : "It lists no models"));
+        const settings = el("button", "cd-menu-row dgc-menu-row", "Settings → Models");
         settings.type = "button";
         settings.addEventListener("click", () => vscode.postMessage({ type: "openModels" }));
         options.push(settings);
@@ -3969,7 +3954,7 @@
     const list = el("div", "cd-menu-models");
     list.setAttribute("role", "menu"); list.setAttribute("aria-label", "Model");
     list.append(...options);
-    modelMenu.replaceChildren(header, list, el("div", "cd-menu-sep"), el("div", "cd-menu-kicker", "Thinking"), dialNode());
+    modelMenu.replaceChildren(header, list, el("div", "cd-menu-sep dgc-menu-div"), el("div", "cd-menu-kicker dgc-menu-head", "Thinking"), dialNode());
     showDial();
     const selected = list.querySelector(".cd-menu-row.sel");
     if (selected) list.scrollTop = Math.max(0, selected.offsetTop - list.offsetTop - list.clientHeight / 2);
@@ -3990,6 +3975,8 @@
     pill.setAttribute("aria-expanded", "true");
     (modelMenu.querySelector(".cd-menu-row.sel") || modelMenu.querySelector(".cd-dial-face"))?.focus();
   });
+  // Arrows, Home and End between its rows, as every menu (media/shared/menu.js); the thinking dial keeps its own keys.
+  window.DgcMenu?.keys(modelMenu, { close: closeModelMenu, trigger: pill });
   // On the document: choosing a provider or a model draws the menu again, and the focus goes with the row it was on.
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !modelMenu.hidden) { e.preventDefault(); e.stopPropagation(); closeModelMenu(true); } }, true);
   // Where the click was, as it happened: choosing a model draws the menu again, so its row is gone by now.

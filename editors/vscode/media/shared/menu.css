@@ -1,0 +1,63 @@
+/* One menu for every "+" and picker: Work's "+", mode, output, model, context and cache menus, ChatDGC's model, output
+   and folder menus, and a Pip's model, context, routines and page menus. Each keeps its own place and size; this is how
+   all of them look. A soft lift (not a hole of shadow), a 12 px corner, 30 px rows on an 8 px corner, small group
+   headings, quiet hints in the UI font and small key caps for real keys, and a 150 ms open from just below.
+   The selected row is a light wash with only its icon in the accent. media/shared/menu.js answers the same keys in all
+   of them. Tokens from media/shared/tokens.css. */
+.dgc-menu {
+  padding: 6px; border: 1px solid var(--hair-strong); border-radius: var(--r-menu);
+  background: var(--vscode-editorWidget-background, var(--surface)); color: var(--text);
+  box-shadow: var(--lift-1);
+}
+.dgc-menu .dgc-menu-head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  padding: 8px 10px 4px; font: var(--w-semi) var(--t-xs)/1.2 var(--sans); color: var(--faint);
+}
+/* A row: a .dgc-menu-row, or any button straight inside a menu marked .dgc-menu-rows (a Pip's page menus, whose buttons
+   come from general helpers). Selected: checked (a picker), selected (a list) or pressed (the section shown now). */
+/* (The class twice outweighs a page's general button rule, such as the Pips' plain-button look, without !important.) */
+.dgc-menu .dgc-menu-row, .dgc-menu.dgc-menu-rows.dgc-menu-rows > button {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 30px; margin: 0; padding: 0 10px;
+  border: 0; border-radius: var(--r-row); background: transparent; color: var(--text);
+  font: var(--w-reg) var(--t-base)/1.2 var(--sans); text-align: left; cursor: pointer;
+  transition: background-color var(--dur-hover) ease, color var(--dur-hover) ease;
+}
+.dgc-menu :is(.dgc-menu-row, .dgc-menu-rows > button):hover:not(:disabled),
+.dgc-menu :is(.dgc-menu-row, .dgc-menu-rows > button):focus-visible { background: var(--wash); }
+.dgc-menu :is(.dgc-menu-row, .dgc-menu-rows > button):focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+.dgc-menu :is(.dgc-menu-row, .dgc-menu-rows > button):disabled { cursor: default; opacity: .55; }
+.dgc-menu :is(.dgc-menu-row, .dgc-menu-rows > button):is(.is-selected, [aria-checked="true"], [aria-selected="true"], [aria-pressed="true"]) {
+  background: var(--wash); color: var(--text-strong);
+}
+.dgc-menu.dgc-menu-rows > hr { height: 1px; margin: 4px 6px; border: 0; background: var(--hair); }
+.dgc-menu .dgc-menu-icon {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px;
+  color: var(--muted); font-size: 15px; transition: color var(--dur-hover) ease;
+}
+.dgc-menu .dgc-menu-row:hover:not(:disabled) .dgc-menu-icon { color: var(--text); }
+.dgc-menu .dgc-menu-row:is(.is-selected, [aria-checked="true"], [aria-selected="true"]) .dgc-menu-icon { color: var(--accent-text); }
+/* The name keeps its width (it shrinks only when it alone is too long); the hint takes the room that is left, and is the
+   one cut short. A shrink shared between them, however weighted, cut "Auto" to "A…" by half a pixel. */
+.dgc-menu .dgc-menu-label { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dgc-menu .dgc-menu-hint {
+  flex: 1 1 0%; min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: var(--w-reg) var(--t-sm)/1.2 var(--sans); color: var(--faint); text-align: right;
+}
+.dgc-menu kbd, .dgc-menu .dgc-key {
+  display: inline-block; min-width: 18px; padding: 1px 5px; border: 1px solid var(--hair-strong); border-radius: var(--r-chip);
+  background: var(--wash); font: var(--w-med) var(--t-xs)/1.3 var(--sans); color: var(--muted); text-align: center;
+}
+.dgc-menu .dgc-menu-div { height: 1px; margin: 4px 6px; background: var(--hair); }
+@media (prefers-reduced-motion: no-preference) {
+  .dgc-menu:not([hidden]) { animation: dgc-menu-in var(--dur-menu) var(--ease-out); transform-origin: bottom left; }
+  .dgc-menu.from-right:not([hidden]), .cf-right .dgc-menu:not([hidden]) { transform-origin: bottom right; }
+}
+@keyframes dgc-menu-in { from { opacity: 0; transform: translateY(4px) scale(.98); } }
+@media (forced-colors: active) {
+  .dgc-menu { border-color: CanvasText; box-shadow: none; }
+  .dgc-menu :is(.dgc-menu-row, .dgc-menu-rows > button):is(.is-selected, [aria-checked="true"], [aria-selected="true"], [aria-pressed="true"]) {
+    forced-color-adjust: none; background: Highlight; color: HighlightText;
+  }
+  .dgc-menu :is(.dgc-menu-row, .dgc-menu-rows > button):is(.is-selected, [aria-checked="true"], [aria-selected="true"], [aria-pressed="true"]) * { color: inherit; }
+  .dgc-menu kbd, .dgc-menu .dgc-key { border-color: CanvasText; }
+}

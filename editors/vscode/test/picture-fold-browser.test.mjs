@@ -152,7 +152,7 @@ test("Work: a fold holds after a reload (the host's kept choice), and Folded in 
 function chatHtml() {
   const source = readFileSync(join(root, "src/chatdgc.ts"), "utf8");
   const doc = source.match(/return `(<!doctype html>[\s\S]*?<\/html>)`;/)[1];
-  const js = [...doc.matchAll(/asset\("media\/([\w-]+\.js)"\)/g)].map((m) => readFileSync(join(root, "media", m[1]), "utf8")).join("\n");
+  const js = [...doc.matchAll(/asset\("media\/((?:shared\/)?[\w-]+\.js)"\)/g)].map((m) => readFileSync(join(root, "media", m[1]), "utf8")).join("\n");
   assert.match(doc, /media\/pictureFold\.js/, "the ChatDGC page loads the fold");
   const clean = chatdgcFixtureHtml(doc);
   const css = readStylesheet(join(root, "media/main.css")).replace(/@import[^;]*;/, "") + readFileSync(join(root, "media/chatdgc.css"), "utf8");
