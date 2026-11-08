@@ -68,3 +68,40 @@ for (const [what, reports] of [["two clear reports", [CLEAR_A, CLEAR_B]], ["thre
     }
   });
 }
+
+// One size for a Pip's face (reported 8 Nov, with a screenshot): opened, a clean run's row ("fixed · nothing found") drew
+// its face smaller than the rows with findings, and a card alone drew it larger. Every face is the size of the faces
+// stacked on the group's line.
+const FACES = `(() => {
+  const size = (n) => { const b = n.getBoundingClientRect(); return [Math.round(b.width * 10) / 10, Math.round(b.height * 10) / 10]; };
+  return { stacked: [...document.querySelectorAll("#log .pip-report-group-faces > span")].map(size),
+           rows: [...document.querySelectorAll("#log .pip-report .pip-report-face")].filter((n) => n.checkVisibility()).map(size) };
+})()`;
+test("every Pip face in reports is one size: the size stacked on the group's line", async (t) => {
+  if (skipOrFail(t)) return;
+  const second = report(4, "Morning business review — all units", "findings", { total: 1, counts: { medium: 1 },
+    findings: [{ title: "Snapshot JSON carries extra fields", severity: "medium", path: "app/snap.py", line: 3 }] });
+  const page = await openThinkingPage(browser, { width: 900, height: 900, events: [
+    { type: "ready", capabilities: { pip_reports: 1 }, model: "m", mode: "default", think: "off" },
+    ...[FINDINGS, second, CLEAR_A].map((r) => ({ type: "pip_report", report: r }))] });
+  try {
+    await page.click("#log .pip-report-group-head");
+    const { stacked, rows } = await page.evaluate(FACES);
+    assert.equal(stacked.length, 3);
+    assert.equal(rows.length, 3, "a face on each row, the clean one too");
+    const one = stacked[0];
+    assert.ok(stacked.every((s) => s[0] === one[0] && s[1] === one[1]), JSON.stringify(stacked));
+    assert.deepEqual(rows, [one, one, one], `rows ${JSON.stringify(rows)} against the line's ${JSON.stringify(one)}`);
+  } finally {
+    await page.close();
+  }
+  const alone = await openThinkingPage(browser, { width: 900, height: 900, events: [
+    { type: "ready", capabilities: { pip_reports: 1 }, model: "m", mode: "default", think: "off" },
+    { type: "pip_report", report: FINDINGS }] });
+  try {
+    const { rows } = await alone.evaluate(FACES);
+    assert.deepEqual(rows, [[20, 20]], "a card on its own: the same size");
+  } finally {
+    await alone.close();
+  }
+});

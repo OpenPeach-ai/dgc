@@ -3194,8 +3194,10 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 /* No thick accent bar down a card's left edge (reported 24 Oct): the card's border and its own words say what it is. */
 .pip-report.quiet { align-items: center; margin: var(--sp-2) 0; padding: var(--sp-1) var(--sp-3);
   border-color: transparent; background: transparent; box-shadow: none; }
-.pip-report-face, .pip-report-face .dgc-plush { display: block; flex: none; width: 28px; height: 28px; }
-.pip-report.quiet .pip-report-face, .pip-report.quiet .pip-report-face .dgc-plush { width: 18px; height: 18px; }
+.pip-report, .pip-report-group { --pip-report-face: 20px; }
+/* One size for a Pip's face wherever a report shows it, the size of the faces stacked on a group's line (reported 8 Nov:
+   a clean run's face was smaller than the rest, a full card's larger). */
+.pip-report-face, .pip-report-face .dgc-plush { display: block; flex: none; width: var(--pip-report-face); height: var(--pip-report-face); }
 .pip-report-main { flex: 1 1 auto; min-width: 0; }
 .pip-report.quiet .pip-report-main { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); }
 .pip-report-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); min-width: 0;
@@ -3232,8 +3234,8 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 .pip-report.slim { margin: 0; padding: 6px var(--sp-3) 6px 12px; gap: 10px; cursor: pointer; }
 .pip-report.slim.quiet { margin: 0; padding: 2px var(--sp-3) 2px 12px; }
 .pip-report.slim + .pip-report.slim { margin-top: calc(4px - var(--sp-4)); }
-.pip-report.slim .pip-report-face, .pip-report.slim .pip-report-face .dgc-plush { width: 22px; height: 22px; margin-top: 2px; }
-.pip-report.slim.quiet .pip-report-face, .pip-report.slim.quiet .pip-report-face .dgc-plush { width: 18px; height: 18px; margin-top: 0; }
+.pip-report.slim .pip-report-face { margin-top: 2px; }
+.pip-report.slim.quiet .pip-report-face { margin-top: 0; }
 .pip-report.slim .pip-report-main { display: block; }
 .pip-report-line1, .pip-report-line2 { display: flex; align-items: baseline; gap: 6px; min-width: 0; white-space: nowrap; }
 .pip-report-line1 { font: var(--w-reg) var(--t-sm)/1.45 var(--sans); border-radius: var(--r-sm); outline: none; }
@@ -3294,9 +3296,9 @@ body.vscode-light .pip-report-sev[data-severity="critical"], body.vscode-light .
 .pip-report-group-head:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
 .pip-report-group-head:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
 .pip-report-group-faces { flex: none; display: inline-flex; }
-.pip-report-group-faces > span { display: block; width: 20px; height: 20px; margin-left: -6px; border-radius: 50%; }
+.pip-report-group-faces > span { display: block; width: var(--pip-report-face); height: var(--pip-report-face); margin-left: -6px; border-radius: 50%; }
 .pip-report-group-faces > span:first-child { margin-left: 0; }
-.pip-report-group-faces .dgc-plush { display: block; width: 20px; height: 20px; }
+.pip-report-group-faces .dgc-plush { display: block; width: var(--pip-report-face); height: var(--pip-report-face); }
 .pip-report-group-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 .pip-report-group-title b { color: var(--text-strong); font-weight: var(--w-semi); }
 .pip-report-group-head .pip-report-line-when { margin-left: auto; }

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Pip report cards in the chat draw every Pip's face at one size, the size of the faces stacked on a group's line: a clean run's face was smaller than the rest, and a card on its own drew it larger.
 - A Pip's chat says "Got stuck, started again" when a stuck run starts again by itself, and the reply keeps that line beside its time. What the stuck try had written so far goes from the screen as the new try begins.
 
 ## 0.35.0 — 2026-11-07
