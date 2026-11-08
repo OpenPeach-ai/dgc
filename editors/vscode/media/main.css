@@ -3234,8 +3234,11 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 .pip-report.slim { margin: 0; padding: 6px var(--sp-3) 6px 12px; gap: 10px; cursor: pointer; }
 .pip-report.slim.quiet { margin: 0; padding: 2px var(--sp-3) 2px 12px; }
 .pip-report.slim + .pip-report.slim { margin-top: calc(4px - var(--sp-4)); }
+/* Closed, the face sits in the middle of the card's lines (reported 8 Nov: it sat at the top); opened, the card is the
+   whole report, so the face stays beside its name. */
+.pip-report.slim[data-shown="closed"] { align-items: center; }
 .pip-report.slim .pip-report-face { margin-top: 2px; }
-.pip-report.slim.quiet .pip-report-face { margin-top: 0; }
+.pip-report.slim[data-shown="closed"] .pip-report-face, .pip-report.slim.quiet .pip-report-face { margin-top: 0; }
 .pip-report.slim .pip-report-main { display: block; }
 .pip-report-line1, .pip-report-line2 { display: flex; align-items: baseline; gap: 6px; min-width: 0; white-space: nowrap; }
 .pip-report-line1 { font: var(--w-reg) var(--t-sm)/1.45 var(--sans); border-radius: var(--r-sm); outline: none; }

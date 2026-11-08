@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A Pip report card's face sits in the middle of the card, not at its top; an opened card keeps it beside the Pip's name.
 - A Pip report card says "1 new · 3 still there" and names the new finding when its review said which findings are new.
 - A held request that was lost, unsent, says why on its line: "Not sent, DGC restarted" (the Pip then does that step again) or "Not sent, its computer was stopped".
 - Pip report cards in the chat draw every Pip's face at one size, the size of the faces stacked on a group's line: a clean run's face was smaller than the rest, and a card on its own drew it larger.

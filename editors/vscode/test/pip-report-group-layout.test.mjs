@@ -105,3 +105,30 @@ test("every Pip face in reports is one size: the size stacked on the group's lin
     await alone.close();
   }
 });
+
+// The face in the middle of the card (reported 8 Nov: it sat at the top of a two-line card). Closed cards, alone and
+// as the rows of an opened group, clean ones too; an opened card keeps it beside its name.
+const CENTRES = `(() => [...document.querySelectorAll("#log .pip-report")].filter((n) => n.checkVisibility()).map((card) => {
+  const face = card.querySelector(".pip-report-face").getBoundingClientRect(), box = card.getBoundingClientRect();
+  const style = getComputedStyle(card);
+  const top = box.top + parseFloat(style.paddingTop) + parseFloat(style.borderTopWidth);
+  const bottom = box.bottom - parseFloat(style.paddingBottom) - parseFloat(style.borderBottomWidth);
+  return { shown: card.dataset.shown, off: Math.abs((face.top + face.bottom) / 2 - (top + bottom) / 2) };
+}))()`;
+test("a closed card's face is in the middle of its lines, alone and as a group's rows", async (t) => {
+  if (skipOrFail(t)) return;
+  for (const reports of [[FINDINGS], [FINDINGS, report(4, "Morning business review", "findings", { total: 1, counts: { medium: 1 },
+    findings: [{ title: "Snapshot JSON carries extra fields", severity: "medium", path: "app/snap.py", line: 3 }] }), CLEAR_A]]) {
+    const page = await openThinkingPage(browser, { width: 900, height: 900, events: [
+      { type: "ready", capabilities: { pip_reports: 1 }, model: "m", mode: "default", think: "off" },
+      ...reports.map((r) => ({ type: "pip_report", report: r }))] });
+    try {
+      if (reports.length > 1) await page.click("#log .pip-report-group-head");
+      const cards = await page.evaluate(CENTRES);
+      assert.equal(cards.length, reports.length);
+      for (const card of cards) assert.ok(card.off <= 1, `a face ${card.off.toFixed(1)}px off the middle of its card`);
+    } finally {
+      await page.close();
+    }
+  }
+});
