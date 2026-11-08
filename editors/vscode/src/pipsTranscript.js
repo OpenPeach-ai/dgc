@@ -90,8 +90,11 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   // When it was sent or written, at the message's own edge: after a prompt's buttons, before a reply's.
   const at=Date.parse(m.created_at),time=globalThis.DgcTime?.markup(at)||'';
   const sentTime=user&&m.steer_status==='applied'?time.replace(/(<time[^>]*>)/,'$1Steered · '):time;
+  // A reply whose run got stuck, or was cut off by a restart, and started again says so in one line (dgc/pip_run_watchdog.py).
+  const startedAgain=!user&&typeof m.started_again==='string'&&m.started_again?esc(m.started_again.slice(0,80)):'';
+  const replyTime=startedAgain&&time?time.replace(/(<time[^>]*>)/,`$1${startedAgain} · `):startedAgain?`<span class="msg-time">${startedAgain}</span>`:time;
   const activityRow=!user?`<button type="button" class="chat-activity-toggle" data-chat-activity="${esc(m.run_id)}" aria-expanded="${activity?.open===true}">${transcriptIcon('tool')}<span>${activity?.loading?'Loading…':'What it did'}</span><span class="activity-chevron">${transcriptIcon('chevron')}</span></button>${activity?.open?activityMarkup(activity,m.run_id):''}`:'';
-  return `<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}" data-message="${esc(m.id)}">${user?'':head}<span class="sr-only role">${esc(label)}</span>${activityRow}${shownCards}${body}${used}${offered}${status}<div class="response-actions">${user||head?'':time}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${options}${details}${trace}${!user&&stats?replyStats(stats):''}${user?sentTime:''}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
+  return `<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}" data-message="${esc(m.id)}">${user?'':head}<span class="sr-only role">${esc(label)}</span>${activityRow}${shownCards}${body}${used}${offered}${status}<div class="response-actions">${user?'':head?(startedAgain?`<span class="msg-time">${startedAgain}</span>`:''):replyTime}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${options}${details}${trace}${!user&&stats?replyStats(stats):''}${user?sentTime:''}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
 }
 
 // What a reply took, beside its actions: its time and its tokens (in and out, all its model requests).

@@ -1756,13 +1756,26 @@ class PipStore:
         return self._transition_view(run_id)
 
     def recover(self):
-        """Call only while holding the exclusive runner lease. Never replay in-flight work."""
+        """Call only while holding the exclusive runner lease. A run the runner was still running when it stopped (a
+        restart, an update) goes back in line once, told to check what it already did (pip_run_watchdog); never one
+        that already sent something, and never twice: those fail, saying which."""
+        from . import pip_run_watchdog as run_watchdog
         with self.registry.transaction():
             rows = self.db.execute("SELECT id FROM pip_runs WHERE status IN ('running','cancelling')").fetchall()
             for identity in rows:
                 row = self._transition_row(identity['id'])
+                sent = row["status"] == "running" and run_watchdog.sent_something(self.db, row["id"])
+                if (row["status"] == "running" and not sent and run_watchdog.may_run_again(json.loads(row["manifest"]))
+                        and not run_watchdog.attempts(self.db, row["id"])["restarted"]):
+                    run_watchdog.record(self.db, row["id"], "restart")
+                    self.db.execute("UPDATE pip_runs SET status='queued',started_at=NULL WHERE id=?", (row["id"],))
+                    self.registry.event(row["workspace_id"], "pip_run_requeued", pip_id=row["pip_id"], run_id=row["id"],
+                                        payload={"reason": "restart"})
+                    continue
                 status = "cancelled" if row["status"] == "cancelling" else "failed"
                 error = {"code": "interrupted", "message": "The runner stopped. Review this run and start a new one; work was not replayed."}
+                if sent:
+                    error = dict(zip(("code", "message"), run_watchdog.RESTART_AFTER_SEND))
                 pulse = self._pulse_terminal(row, status, error)
                 self.db.execute("UPDATE pip_runs SET status=?,finished_at=?,error=? WHERE id=?",
                                 (status, self.registry.clock(), _json(error), row["id"]))
@@ -2457,12 +2470,22 @@ class _WorkerUI:
         self.read_calls = 0
         self.calls = 0
         self.agent = None
+        self._alive_at = None
+
+    def _alive(self):
+        """The controller's silence clock (pip_run_watchdog): called only when the model writes or thinks or a tool
+        reports progress, at most once per PULSE_SECONDS. Never from a timer, so a hung model goes quiet."""
+        from .pip_run_watchdog import PULSE_SECONDS
+        now = time.monotonic()
+        if self._alive_at is None or now - self._alive_at >= PULSE_SECONDS:
+            self._alive_at = now
+            self.emit({"kind": "alive"})
 
     def on_text(self, chunk):
-        pass
+        self._alive()
 
     def on_thinking(self, chunk, block=None):
-        pass
+        self._alive()
 
     def end_stream(self, phase=""):
         pass
@@ -2506,7 +2529,7 @@ class _WorkerUI:
                    "trace": worker_mark(call_id=str(call_id or "")[:120])})
 
     def tool_progress(self, name, message, **kwargs):
-        pass
+        self._alive()
 
     def on_todo(self, todos):
         pass
@@ -2551,6 +2574,7 @@ class _ConversationUI(_WorkerUI):
             super().turn_activity(state, label, detail)
 
     def on_thinking(self, chunk, block=None):
+        self._alive()
         if chunk:
             self.turn_activity("thinking", "Thinking")
 
@@ -2583,6 +2607,7 @@ class _ConversationUI(_WorkerUI):
             self.emit({"kind": "text_delta", "text": chunk})
 
     def on_text(self, chunk):
+        self._alive()
         text = self.redactor.feed(chunk)
         if self.between and text.strip():
             # Each message before a tool call is a paragraph of its own, as in the saved reply ("\n\n".join):
@@ -3801,6 +3826,10 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 changing=[reference.get("conversation_continuation"), conversation["text"], files_note])
         except Exception:                      # noqa: BLE001
             context_measure = None
+    # A try after this run got stuck or DGC restarted (pip_run_watchdog): told to check what it already did first.
+    from .pip_run_watchdog import NOTES as attempt_notes
+    if manifest.get("attempt_note") in attempt_notes.values():
+        prompt += "\n\n" + manifest["attempt_note"]
     # Guard mods (ones that hear tool.call) watch a Pip's run too: they may stop a step, never allow one, and one
     # that would ask stops it instead, since nobody is there to answer (dgc/mods/host.py, surface "pip").
     from .mods import bridge as mod_bridge
@@ -4496,6 +4525,10 @@ def _execute_run(registry, row, config):
         api_key = route.key
         registry.event(row["workspace_id"], "pip_run_routed", pip_id=row["pip_id"], run_id=row["id"],
                        payload={"system": route.system_name, "model": route.model, "context": int(route.context)})
+    from . import pip_run_watchdog as run_watchdog
+    attempt_note = run_watchdog.note_for(registry.db, row["id"])
+    if attempt_note:
+        manifest = {**manifest, "attempt_note": attempt_note}     # this worker's copy only; the stored run is unchanged
     payload = {"snapshot": str(snapshot), "manifest": manifest, "api_key": api_key}
     payload_bytes = _worker_payload(payload)
     if time.monotonic() >= deadline:
@@ -4512,6 +4545,9 @@ def _execute_run(registry, row, config):
         app_socket.images.cancel = execution_cancel
     bounded = int((manifest.get("limits") or {}).get("wall_seconds") or 0) > 0
     model_deadline = deadline if bounded else float("inf")
+    # Pips package 1 (pip_run_watchdog, D8): a run with no budget still stops when its worker goes quiet.
+    activity = run_watchdog.Activity()
+    stalled = threading.Event()
 
     def watch():
         try:
@@ -4527,6 +4563,11 @@ def _execute_run(registry, row, config):
                         execution_cancel.set()
                         if time.monotonic() >= model_deadline:
                             timed_out.set()
+                        _terminate(proc)
+                        return
+                    if activity.stuck(waiting=run_watchdog.is_waiting(row["id"])):
+                        stalled.set()
+                        execution_cancel.set()
                         _terminate(proc)
                         return
         except Exception:
@@ -4551,6 +4592,7 @@ def _execute_run(registry, row, config):
             line = proc.stdout.readline(65537)
             if not line:
                 break
+            activity.heard()
             total += len(line)
             # One line is bounded; a run that keeps going says as much as it needs over its life.
             if len(line) > 65536 or (bounded and total > 512 * 1024):
@@ -4563,7 +4605,9 @@ def _execute_run(registry, row, config):
                 continue
             event = redact_value(event, secrets)
             kind = event.get("kind")
-            measured.feed(kind, event, event.pop("trace", None))
+            mark = event.pop("trace", None)
+            activity.heard(kind, event, mark)
+            measured.feed(kind, event, mark)
             if kind == "policy_ready":
                 confirmed = event.get("digest") == manifest["policy_digest"]
                 if not confirmed:
@@ -4580,6 +4624,8 @@ def _execute_run(registry, row, config):
                     raise RegistryError("output_limit", "The worker emitted an oversized progress event.")
                 registry.event(row["workspace_id"], "pip_run_progress", pip_id=row["pip_id"], run_id=row["id"], payload=event)
         rc = proc.wait(timeout=5)
+        if stalled.is_set():
+            raise run_watchdog.Stalled()
         if state_unavailable.is_set():
             raise RegistryError("runner_state_unavailable", "The worker stopped because its local runner state could not be checked.")
         if timed_out.is_set():
@@ -4924,7 +4970,7 @@ def _run_claimed(registry, store, row, config, directory):
     try:
         from . import pip_memory_review
         pip_memory_review.run_started(registry.directory, row["pip_id"])    # its chat isn't quiet any more
-        result = _execute_run(registry, row, config)
+        result = _execute_with_one_retry(registry, row, config)
         store.finish(row["id"], result=result)
         _run_granted_actions(registry, config, row["id"])
         # The user's one memory: their words to this Pip, looked back over now or once its chat is quiet.
@@ -4968,6 +5014,70 @@ def _run_claimed(registry, store, row, config, directory):
             prune_run(registry.directory, row["id"])
     except Exception:
         pass
+
+
+def _execute_with_one_retry(registry, row, config):
+    """Pips package 1 (pip_run_watchdog, D8): a run the controller stopped for going quiet starts again once, as the
+    same run, told to check what it already did. Not when it already sent something (nothing happens twice), and not
+    a second time: then it fails with one line saying which."""
+    from . import pip_run_watchdog as run_watchdog
+    if run_watchdog.attempts(registry.db, row["id"])["last"]:
+        _reset_run_directory(registry, row)           # a try after a restart: what the cut-off try left goes first
+    _say_started_again(registry, row)                 # a run a restart put back in line says so as it starts
+    try:
+        return _execute_run(registry, row, config)
+    except run_watchdog.Stalled:
+        if not run_watchdog.may_run_again(json.loads(row["manifest"])):
+            raise RegistryError(*run_watchdog.STUCK_NOT_RERUN) from None
+        with registry.transaction():
+            if run_watchdog.sent_something(registry.db, row["id"]):
+                raise RegistryError(*run_watchdog.STUCK_AFTER_SEND) from None
+            if run_watchdog.attempts(registry.db, row["id"])["stalled"]:
+                raise RegistryError(*run_watchdog.STUCK_AGAIN) from None
+            run_watchdog.withdraw_unsent(registry.db, row["id"], registry.clock())
+            run_watchdog.record(registry.db, row["id"], "stalled")
+    _reset_run_directory(registry, row)
+    _say_started_again(registry, row)
+    try:
+        return _execute_run(registry, row, config)
+    except run_watchdog.Stalled:
+        raise RegistryError(*run_watchdog.STUCK_AGAIN) from None
+
+
+def _say_started_again(registry, row):
+    """Its chat's one line, "Got stuck, started again" (or after a restart, "DGC restarted, so it started again"),
+    once per try: the live row shows it and the reply keeps it (pip_run_watchdog.line_for)."""
+    from . import pip_run_watchdog as run_watchdog
+    with registry.transaction():
+        line = run_watchdog.line_for(registry.db, row["id"])
+        if not line or run_watchdog.attempts(registry.db, row["id"])["told"]:
+            return
+        run_watchdog.told(registry.db, row["id"])
+        registry.event(row["workspace_id"], "pip_run_progress", pip_id=row["pip_id"], run_id=row["id"],
+                       payload={"kind": "progress", "state": "restarted", "message": line})
+
+
+def _reset_run_directory(registry, row):
+    """What a try left in its run's folder, before the next try of the same run (pip_run_watchdog): the copies it
+    made and its worker's home go (the next try makes them again; its token usage is recorded first), and what it
+    made for the user (artifacts/, generated pictures) stays. A copy of the project taken when the run was queued
+    (current tree) belongs to the run and stays too; a draft's folder is all its own and goes whole."""
+    from .pip_run_cleanup import COPIES, WORKER_HOME, _remove_tree, _usage_recorded
+    from .pip_sources import validate_manifest as validate_source_manifest
+    manifest = json.loads(row["manifest"])
+    current_tree = validate_source_manifest(manifest)['source_policy']['mode'] == 'current_tree'
+    run_dir = registry.directory / "runs" / row["id"]
+    if not run_dir.exists():
+        return
+    if (run_dir / WORKER_HOME).exists():
+        _usage_recorded(row["id"], registry.directory.parent)
+    if manifest.get("run_kind") == "draft" and not current_tree:
+        _remove_tree(run_dir)
+        return
+    for name in (*COPIES, WORKER_HOME, "brain"):
+        if name == "source" and current_tree:
+            continue
+        _remove_tree(run_dir / name)
 
 
 def start_queued(config):

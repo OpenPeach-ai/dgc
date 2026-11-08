@@ -107,3 +107,25 @@ test('a Personal Pip’s model chip names the model as soon as its chat opens',a
  assert.equal(x.requests('list_pip_models').length,1,'read once, when the chat opens');
  assert.equal(x.d.querySelector('#chat-model .composer-model-name').textContent,'Default (m)','the model, not "Same as DGC"; on Default, as the menu says it');
 });
+
+// Pips package 1 (dgc/pip_run_watchdog.py): a run that went quiet is started again once, as the same run.
+test('started again: the stuck try’s words go, and the working row says so',async()=>{
+ const started=new Date(Date.now()-12000).toISOString();
+ const x=setup({activeRun:{id:RUN,status:'running',created_at:started,started_at:started},
+  activity:[ev(1,{kind:'text_delta',text:'Half of an answer that never'}),ev(2,{kind:'progress',state:'restarted',message:'Got stuck, started again'}),
+   ev(3,{kind:'text_delta',text:'A fresh answer.'})]});
+ await openChat(x);
+ const live=x.d.querySelector('.pip-message.provisional');assert.ok(live,'the live reply');
+ assert.equal(live.querySelector('.message-body').textContent.trim(),'A fresh answer.','only the new try’s words');
+ const quiet=setup({activeRun:{id:RUN,status:'running',created_at:started,started_at:started},
+  activity:[ev(1,{kind:'text_delta',text:'Half of an answer'}),ev(2,{kind:'progress',state:'restarted',message:'Got stuck, started again'})]});
+ await openChat(quiet);
+ assert.equal(quiet.d.querySelector('.pip-message.provisional'),null,'nothing of the stuck try is left on screen');
+ assert.match(quiet.d.querySelector('.pip-working').textContent,/Got stuck, started again/);
+});
+test('the reply of a run that started again keeps the one line beside its time',async()=>{
+ const reply={id:'a1',pip_id:PIP,workspace_id:PW,role:'assistant',text:'Done.',run_id:RUN,status:'succeeded',model:'m',created_at:'2026-10-08T10:00:00.000Z',started_again:'Got stuck, started again'};
+ const x=setup({messages:[reply,{...reply,id:'a2',started_again:undefined}]});await openChat(x);
+ assert.match(x.d.querySelector('[data-message="a1"] .response-actions').textContent,/Got stuck, started again · /);
+ assert.doesNotMatch(x.d.querySelector('[data-message="a2"] .response-actions').textContent,/started again/,'a run that never got stuck says nothing');
+});

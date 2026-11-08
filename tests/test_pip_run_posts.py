@@ -89,6 +89,9 @@ class PostedOnceTests(PostScene):
             VALUES(?,?,?,?,?,?,?,?,?,?)""", (run, self.pip["id"], self.workspace["id"], binding["id"], run,
                                               "pip-schedule", json.dumps(manifest), "running", self.now, self.now))
         self.assertEqual(self.store.recover(), 1)
+        self.assertEqual(self.page()["posts"], [], "back in line once (pip_run_watchdog): nothing to post yet")
+        self.registry.db.execute("UPDATE pip_runs SET status='running',started_at=? WHERE id=?", (self.now, run))
+        self.assertEqual(self.store.recover(), 1)
         [post] = self.page()["posts"]
         self.assertEqual((post["run_id"], post["outcome"], post["reason"]),
                          (run, "failed", "Pips stopped before the run finished."))

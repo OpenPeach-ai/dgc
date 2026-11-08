@@ -1038,7 +1038,11 @@ async function loadChatStream(){
     for(const event of page.events){changed=true;
       if(event.event_type==='pip_run_progress'&&event.payload.kind==='text_delta'&&typeof event.payload.text==='string'){
         const available=16384-S.stream.text.length;S.stream.text+=event.payload.text.slice(0,available);if(event.payload.text.length>available)S.stream.limited=true;
-      }else if(event.event_type==='pip_run_progress'&&event.payload.kind==='progress'&&typeof event.payload.state==='string'&&typeof event.payload.message==='string'&&event.payload.message)S.stream.activity={state:event.payload.state.slice(0,40),label:event.payload.message.slice(0,120)};
+      }else if(event.event_type==='pip_run_progress'&&event.payload.kind==='progress'&&typeof event.payload.state==='string'&&typeof event.payload.message==='string'&&event.payload.message){
+        // Started again (dgc/pip_run_watchdog.py): what the stuck try had written goes; the new try writes its own.
+        if(event.payload.state==='restarted'){S.stream.text='';S.stream.limited=false;}
+        S.stream.activity={state:event.payload.state.slice(0,40),label:event.payload.message.slice(0,120)};
+      }
       else if(/^pip_run_(succeeded|failed|cancelled)$/.test(event.event_type))ended=true;
     }
     S.stream.error='';if(!page.has_more||S.stream.limited)break;

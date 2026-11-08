@@ -77,6 +77,11 @@ _REASONS = {
     "execution_unavailable": "This computer cannot run its checks.",
     "unsupported_model": "Its model is not available.",
     "worker_failed": "Its worker stopped unexpectedly.",
+    # Pips package 1 (pip_run_watchdog): a stuck run is started again once; these are the times it isn't.
+    "stalled": "Got stuck again, so it stopped.",
+    "stalled_stopped": "Got stuck, so it stopped.",
+    "stalled_after_send": "Got stuck after it had sent something, so it wasn't started again.",
+    "interrupted_after_send": "DGC restarted after it had sent something, so it wasn't run again.",
 }
 
 

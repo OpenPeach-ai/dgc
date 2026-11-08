@@ -277,7 +277,12 @@ class StoppedOrFailed(Base):
         first = self.send("Write the summary", "first")
         self.send("One more thing", "late")
         self.store.claim_next()
-        self.assertEqual(self.store.recover(), 1)
+        self.assertEqual(self.store.recover(), 1)          # back in line once (pip_run_watchdog): nothing lost yet
+        pip_steering.recover(self.store, self.cfg)
+        self.assertEqual(self.store.run(first["run"]["id"])["status"], "queued")
+        self.assertEqual(self.registry.db.execute("SELECT status FROM pip_chat_steers").fetchone()[0], "pending")
+        self.store.claim_next()
+        self.assertEqual(self.store.recover(), 1)          # cut off again: now the reply is lost
         pip_steering.recover(self.store, self.cfg)
         self.assertEqual(self.store.run(first["run"]["id"])["status"], "failed")
         self.assertIn("before the Pip read this", self.unsent("One more thing")["error"])
@@ -289,6 +294,8 @@ class StoppedOrFailed(Base):
     def test_the_message_of_a_reply_that_was_lost_says_so_in_plain_words(self):
         self.job_ready()
         first = self.send("Write the summary", "first")
+        self.store.claim_next()
+        self.store.recover()                               # its one rerun (pip_run_watchdog)
         self.store.claim_next()
         self.store.recover()
         said = self.page()["messages"][0]

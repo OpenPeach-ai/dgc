@@ -213,10 +213,15 @@ class LocalPipsTests(unittest.TestCase):
         self.assertIsNone(self.store.run(second["id"])["result"])
         self.assertEqual(self.store.finish(first["id"], result={"summary": "late"})["status"], "cancelled")
 
-    def test_recovery_marks_interrupted_without_replay(self):
+    def test_recovery_reruns_once_then_marks_interrupted_without_replay(self):
+        """0.52 (pip_run_watchdog): a run the runner was running when it stopped goes back in line once; cut off a
+        second time it fails, and is never replayed again."""
         self.commit()
         first = self.enqueue()
         self.store.claim_next()
+        self.assertEqual(self.store.recover(), 1)
+        self.assertEqual(self.store.run(first["id"])["status"], "queued")
+        self.assertEqual(self.store.claim_next()["id"], first["id"])
         self.assertEqual(self.store.recover(), 1)
         self.assertEqual(self.store.run(first["id"])["status"], "failed")
         self.assertEqual(self.store.run(first["id"])["error"]["code"], "interrupted")

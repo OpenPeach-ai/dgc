@@ -980,7 +980,10 @@ class Session:
     def _connect(self) -> None:
         try:
             try:
-                ws = self.tab.connect()
+                # Chrome asks the user now ("Allow remote debugging?"): waiting on them is never a stuck run.
+                from .pip_run_watchdog import waiting_on_you
+                with waiting_on_you(self.run_id):
+                    ws = self.tab.connect()
             except BrowserError as error:
                 kind = getattr(error, "kind", "")
                 how = {SAID_NO: CHROME_NO, UNANSWERED: NO_ANSWER, NOT_RUNNING: UNREACHABLE}.get(kind, UNREACHABLE if kind == "" else FAILED)

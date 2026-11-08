@@ -1522,6 +1522,10 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             clips = message_videos(pip_id, row["id"])
             if clips:
                 message["videos"] = clips       # API 71: the videos it started, each as its job is now
+            from .pip_run_watchdog import line_for
+            again = line_for(store.db, row["run_id"])
+            if again:
+                message["started_again"] = again    # "Got stuck, started again" (Pips package 1)
         # A running reply can have several mid-turn user messages. They are
         # projected beside its original prompt below, so count them against
         # the same page budget before accepting the row.

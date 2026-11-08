@@ -4,6 +4,10 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## Unreleased
+
+- A Pip run that gets stuck starts again by itself, once. No word from its model for 20 minutes (2 hours while a tool runs) stops it, and the same run starts again, told to check what it already did; its chat says "Got stuck, started again". A restart or update in the middle of a run puts it back in line once instead of failing it. A run that already sent something is never run again, so nothing happens twice: it says so in one line.
+
 ## 0.51.0 — 2026-11-07
 
 - One card per Pip in a chat: a Pip's newer report card takes the place of its older one, so a routine that runs morning and evening leaves one card, not two with the same Fix. It says "failed again" when it failed again (the same failure is said again once its card is six hours old), "fixed · nothing found" when a clean run follows a problem, and what it replaced. A card you acted on stays. A failure because the model provider turned down the key says so in words, on the card and in `dgc pips runs` and `dgc pips report`, not as "HTTP 401 from Responses API: {…}", and the card offers Check sign-in instead of Fix.

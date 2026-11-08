@@ -3925,6 +3925,10 @@ self-hosted model, never your Claude Code or Codex plan.
   question it needs asked right on the card); then what it changed and whether the tests ran in the
   copy, with **Review** and **Undo**. A file you changed on the same lines meanwhile is held back. A
   **Pip fixes** chip on the chip line above the message box lists the fixes while they work.
+- **A stuck run starts again, once.** No word from its model for 20 minutes (2 hours while a tool
+  runs) stops a run, and the same run starts again, told to check what it already did: "Got stuck,
+  started again". A restart in the middle of a run puts it back in line once. A run that already sent
+  something is never run again, so nothing happens twice; it says so in one line.
 - **Routines.** A Personal Pip does things on its own at a time, on a new email that matches a
   search, before a calendar event, or when your own app sends an event ("when the shop app sends
   order.created"): once for each event, with what the app sent as data, never as instructions. It

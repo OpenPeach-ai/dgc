@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- A Pip's chat says "Got stuck, started again" when a stuck run starts again by itself, and the reply keeps that line beside its time. What the stuck try had written so far goes from the screen as the new try begins.
+
 ## 0.35.0 — 2026-11-07
 
 - One card per Pip in a chat: a Pip's newer report card takes the place of its older one, so a routine that runs morning and evening leaves one card, not two with the same Fix. It says "failed again" when it failed again, "fixed · nothing found" when a clean run follows a problem, and, opened, what it replaced. A card you acted on (its fix started, its prompt sent) stays. A refused key or sign-in offers Check sign-in, which opens Settings → Models, instead of Fix.

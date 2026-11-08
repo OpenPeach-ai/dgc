@@ -327,6 +327,19 @@ Otherwise:
 `dgc pips status` shows whether the runner is online and how much work is queued.
 The runner does one run at a time.
 
+**A run that gets stuck, or is cut off.** A run that goes quiet, with no word from its model
+for 20 minutes (2 hours while a tool runs), is stopped and started again once, as the same run.
+It is told to check what it already did, and its chat says "Got stuck, started again", beside the
+reply's time once it's done. A run that keeps working is never stopped, however long it takes, and
+waiting for you (Chrome's "Allow remote debugging?") is not quiet. Stuck a second time, it stops
+and says "Got stuck again, so it stopped."
+
+When the runner stops in the middle of a run (an update, a restart, a crash), that run goes back in
+the queue once when the runner starts again: "DGC restarted, so it started again". A run that had
+already sent something (a form it submitted, an email or message an app sent for it) is never run
+again either way, so nothing happens twice; it says so in one line instead. What a stuck try only
+drafted, and you hadn't decided yet, is withdrawn, and the new try drafts it again.
+
 **On a server**, with no VS Code and no desktop, beside your own app: `dgc pips serve
 --server`, or the same as a systemd unit (`dgc pips service install --server`), or the
 Docker image in [deploy/docker](../deploy/docker/README.md). It shows no desktop
