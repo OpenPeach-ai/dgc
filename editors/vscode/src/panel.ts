@@ -27,7 +27,7 @@ import { McpBrowserRequest, editorIsRemote, handSignInBack, openMcpBrowser } fro
 import { routerCommand } from "./routerCommands";
 import { imagesCommand, MAX_WORKFLOW_CHARS } from "./imagesCommands";
 import { allowFromJobs, handleVideoMessage, VIDEO_MESSAGES } from "./videoHost";
-import { PipsEditor } from "./pipsView";
+import { PipsEditor, openEngineSignIn } from "./pipsView";
 import { mcpAppsHost } from "./mcpApps";
 import { PLUGIN_ID, pluginLogoData, pluginLogoSource, type PluginLogoItem } from "./pluginLogos";
 import { pipsAttention, PipsAttentionState } from "./pipsAttention";
@@ -5712,6 +5712,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         else this.openPips();
         return;
       }
+      case "pipsSignIn":
+        // Fix on a Pip whose Claude Code or Codex is signed out, from the Pips inside this panel (Pips package 2).
+        openEngineSignIn(String(msg.engine || ""));
+        return;
       case "openSettings":
         // The header gear. It opens the standalone Settings tab beside the chat.
         this.openSettings(typeof msg.section === "string" ? msg.section : "general", undefined,

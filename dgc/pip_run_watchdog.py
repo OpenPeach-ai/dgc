@@ -52,6 +52,12 @@ NOTES = {
                 "(your notes, your files, drafts waiting for the user) before you do any of it a second time."),
     "restart": ("Note from DGC: DGC restarted while you were working on this, so it started again. Check what you "
                 "already did (your notes, your files, drafts waiting for the user) before you do any of it a second time."),
+    # A routine's run that failed and is tried once more (pip_routine_care): the same check, and nothing said of it. Told
+    # only that it was started again, a Pip doing its morning brief on deepseek added "(This run restarted after the first
+    # attempt, so if you saw the earlier one, that was the same job going twice)" about a different, earlier run (8 Nov).
+    "failed": ("Note from DGC: your first try at this failed on the model's side before it finished, and DGC started it "
+               "again. Check what you already did (your notes, your files, drafts waiting for the user) before you do any "
+               "of it a second time. Don't mention the retry to the user: just do the routine and reply as usual."),
 }
 
 # The run's error when it stops instead (pip_report_delivery._REASONS has the same words).
@@ -165,8 +171,9 @@ def is_waiting(run_id) -> bool:
 # -- What a run has been through -----------------------------------------------------------------------------------
 
 def attempts(db, run_id) -> dict:
-    """{"stalled": n, "restarted": n, "last": ""|"stalled"|"restart", "told": bool}: nothing yet is all zero."""
-    blank = {"stalled": 0, "restarted": 0, "last": "", "told": False}
+    """{"stalled": n, "restarted": n, "failed": n, "last": ""|"stalled"|"restart"|"failed", "told": bool}: nothing yet
+    is all zero. ``failed``: a routine's run tried once more after it failed (pip_routine_care)."""
+    blank = {"stalled": 0, "restarted": 0, "failed": 0, "last": "", "told": False}
     try:
         row = db.execute("SELECT value FROM metadata WHERE key=?", (KEY + str(run_id),)).fetchone()
         value = json.loads(row[0]) if row is not None and len(row[0]) <= 512 else {}
@@ -176,6 +183,7 @@ def attempts(db, run_id) -> dict:
         return blank
     return {"stalled": value.get("stalled") if type(value.get("stalled")) is int else 0,
             "restarted": value.get("restarted") if type(value.get("restarted")) is int else 0,
+            "failed": value.get("failed") if type(value.get("failed")) is int else 0,
             "last": value.get("last") if value.get("last") in NOTES else "",
             "told": value.get("told") is True}
 
@@ -185,10 +193,11 @@ def _save(db, run_id, value) -> None:
 
 
 def record(db, run_id, why) -> dict:
-    """Count one more stall or restart for a run, in the caller's transaction."""
+    """Count one more stall, restart or failed routine try for a run, in the caller's transaction."""
     value = attempts(db, run_id)
-    value["stalled" if why == "stalled" else "restarted"] += 1
-    value["last"], value["told"] = ("stalled" if why == "stalled" else "restart"), False
+    why = why if why in ("stalled", "failed") else "restart"
+    value[{"stalled": "stalled", "failed": "failed"}.get(why, "restarted")] += 1
+    value["last"], value["told"] = why, False
     _save(db, run_id, value)
     return value
 
@@ -209,6 +218,9 @@ def note_for(db, run_id) -> str | None:
 def line_for(db, run_id) -> str:
     """The one line a run that started again shows: "" for a run that never did."""
     value = attempts(db, run_id)
+    if value["last"] == "failed":
+        # A routine's quiet retry says nothing of itself; a stall or restart before it still does.
+        return STUCK_LINE if value["stalled"] else RESUMED_LINE if value["restarted"] else ""
     return {"stalled": STUCK_LINE, "restart": RESUMED_LINE}.get(value["last"], "")
 
 

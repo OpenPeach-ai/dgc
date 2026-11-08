@@ -283,3 +283,17 @@ test('a review the list has already counted is one thing waiting, not two',async
  const before=harness(t,{list:[with_review],digest:digest([]),attention:{total:1,items:[],truncated:false,counts:{},by_pip:{[id(1)]:1}}},{api:69});await before.connect();
  assert.deepEqual(before.rows(),[['Approvals','2 waiting for you',false]],'a DGC from before: its review and a card');
 });
+
+// Routines recover and tell you (Pips package 2): a Pip whose routines can't run has its row here too, in the words its
+// row in the Pips view says, and it isn't news to dismiss: it goes when the Pip can run again.
+test('a Pip whose routines can\'t run gets its row, in the words its Pips row says',async t=>{
+ const blocked={last:null,next_at:'2026-11-09T02:30:00.000Z',blocked:{cause:'signed_out',text:'Claude Code signed out',fix:{kind:'sign_in',engine:'claude'}}};
+ const state={list:[pip(1,'Daily check'),pip(2,'Morning',{routine_health:blocked})],digest:digest([])};
+ const x=harness(t,state,{api:69});await x.connect();
+ assert.deepEqual(x.rows(),[['Morning',"Can't run: Claude Code signed out",false]]);
+ state.attention={total:1,items:[{id:`computer_action:compact_${'b'.repeat(32)}`,kind:'computer_action',card:`compact_${'b'.repeat(32)}`,pip_id:id(2),pip_name:'Morning',pip_type:'scout',workspace_id:P,title:'Send a form',detail:'',created_at:'2026-11-07T09:00:00Z',expires_at:null}],truncated:false,counts:{},by_pip:{[id(2)]:1}};await x.poll();
+ assert.deepEqual(x.rows(),[['Morning',"Can't run: Claude Code signed out · 1 waiting for you",false]],'it can\'t run: said first, with what waits');
+ state.attention=undefined;
+ state.list=[pip(1,'Daily check'),pip(2,'Morning',{routine_health:{...blocked,blocked:null}})];await x.poll();
+ assert.deepEqual(x.rows(),[],'signed in again: the row goes');
+});

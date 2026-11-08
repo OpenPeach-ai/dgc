@@ -3929,6 +3929,10 @@ self-hosted model, never your Claude Code or Codex plan.
   runs) stops a run, and the same run starts again, told to check what it already did: "Got stuck,
   started again". A restart in the middle of a run puts it back in line once. A run that already sent
   something is never run again, so nothing happens twice; it says so in one line.
+- **Routines recover and tell you.** A failed routine tries once more by itself; if it still
+  fails, its chat has a line and you get one desktop notice per Pip and cause. A routine more than
+  12 hours late says it was missed. One that has nothing to say can stay quiet. Each Pip's row
+  and page say when its routines last ran, how it went, and when they run next.
 - **Routines.** A Personal Pip does things on its own at a time, on a new email that matches a
   search, before a calendar event, or when your own app sends an event ("when the shop app sends
   order.created"): once for each event, with what the app sent as data, never as instructions. It

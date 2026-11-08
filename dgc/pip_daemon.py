@@ -170,8 +170,31 @@ def _heartbeat(registry, record, status):
         current = _read(registry, SUPERVISOR_KEY)
         if current is not None and current.get("instance_id") != record["instance_id"]:
             raise RegistryError("supervisor_changed", "The Pips supervisor identity changed unexpectedly.")
-        record.update(status=status, heartbeat_at=registry.clock())
+        now = registry.clock()
+        # Since when it has run without a gap: a missed routine says the computer was off only when it was (asleep,
+        # or DGC not running), and why it didn't run otherwise (pip_routine_care.missed_words).
+        if _gap(record.get("heartbeat_at"), now) or not record.get("awake_since"):
+            record["awake_since"] = now
+        record.update(status=status, heartbeat_at=now)
         _write(registry, SUPERVISOR_KEY, record)
+
+
+def _keep_awake(awake, registry):
+    """The hour before a routine, plugged in: sleep held off (pip_keep_awake). Never stops the runner."""
+    try:
+        awake.tick(registry)
+    except Exception:                    # noqa: BLE001 - a hold that couldn't start is a computer that may sleep
+        pass
+
+
+def _gap(before, now) -> bool:
+    """Whether two heartbeats are further apart than a running runner leaves them (the computer slept between)."""
+    try:
+        earlier = datetime.fromisoformat(str(before).replace("Z", "+00:00"))
+        later = datetime.fromisoformat(str(now).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return True
+    return (later - earlier).total_seconds() > max(60.0, HEARTBEAT_SECONDS * 15)
 
 
 def _controller(directory):
@@ -300,7 +323,7 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now, server=False)
             _follow_pips_default(runtime_config, followed)
             from . import __version__
             record = {"schema_version": 1, "instance_id": identifier("supervisor"), "version": __version__,
-                      "pid": os.getpid(), "started_at": clock(), "heartbeat_at": clock(), "status": "running",
+                      "pid": os.getpid(), "started_at": clock(), "heartbeat_at": clock(), "awake_since": clock(), "status": "running",
                       **({"mode": pip_server.MODE} if server else {})}
             log = pip_server.EventLog(registry) if server else None
             with registry.transaction():
@@ -311,10 +334,12 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now, server=False)
                 for sig in (signal.SIGINT, signal.SIGTERM):
                     handlers[sig] = signal.getsignal(sig)
                     signal.signal(sig, lambda *_: event.set())
-            notifier = None
-            if not server:                   # a server has no desktop to notify
+            notifier = awake = None
+            if not server:                   # a server has no desktop to notify, and no sleep to hold off
                 from .pip_desktop import Notifier
+                from .pip_keep_awake import KeepAwake
                 notifier = Notifier(runtime_config)
+                awake = KeepAwake()
             try:
                 while not event.is_set() and not is_runtime_paused(registry):
                     _check_controller(directory)
@@ -341,6 +366,8 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now, server=False)
                     pips.start_queued(runtime_config)
                     if notifier is not None:
                         _notify(notifier, registry)
+                    if awake is not None:
+                        _keep_awake(awake, registry)
                     _log_events(log, registry)
                     _check_controller(directory)
                     stopping = event.wait(HEARTBEAT_SECONDS)
@@ -349,6 +376,8 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now, server=False)
                         break
             finally:
                 schedule_failure = None
+                if awake is not None:
+                    awake.stop()
                 if routine_tick is not None:
                     routine_tick.stop()
                     routine_tick.join()

@@ -58,6 +58,11 @@ class TroupeRoutineTests(unittest.TestCase):
         later = pip_routines._instant(self.registry.clock()) + timedelta(minutes=minutes)
         self.registry.clock = lambda: pip_routines.stamp(later)
 
+    def just_due(self, routine):
+        """The clock a minute past its next time: a routine much later than that is missed (Pips package 2)."""
+        due = pip_routines._instant(self.row(routine["id"])["next_due_at"])
+        self.registry.clock = lambda: pip_routines.stamp(due + timedelta(minutes=1))
+
     def job(self, routine, runner):
         """The background job, run here, with the registry's clock and the Pip's chat send recorded."""
         def send(store, pip_id, text, key, actor, config, **kwargs):
@@ -168,7 +173,7 @@ class TroupeRoutineTests(unittest.TestCase):
         started = []
         with patch.object(troupe_routines, "start", lambda *a, **k: started.append(a)):
             self.assertEqual(pip_routines.tick(self.registry, self.cfg), {}, "not due yet")
-            self.at(7 * 24 * 60)
+            self.just_due(routine)
             with patch.object(troupe_routines, "busy", return_value=True):
                 self.assertEqual(pip_routines.tick(self.registry, self.cfg), {routine["id"]: "busy"})
             self.assertEqual(started, [], "one troupe routine at a time")
@@ -183,7 +188,7 @@ class TroupeRoutineTests(unittest.TestCase):
 
     def test_a_raced_busy_troupe_keeps_the_due_occurrence(self):
         routine = self.add()
-        self.at(7 * 24 * 60)
+        self.just_due(routine)
         def raced(*_args, **_kwargs):
             raise RegistryError("troupe_busy", "Another troupe started.")
         with patch.object(troupe_routines, "busy", return_value=False), patch.object(troupe_routines, "start", raced):

@@ -46,6 +46,18 @@ const PIP_TYPES = ['core','scout','lens','patch','rook','pulse','lock','quill'];
 type ComputerPip = { id: string; name: string; pip_type: string };
 
 /** Local Pips control bridge. Request correlation is owned by the extension host. */
+/** Fix on a Pip whose routines can't run because its Claude Code or Codex is signed out (Pips package 2): that CLI's own
+ * sign-in, in a terminal on the computer running DGC (over Remote-SSH, the remote one). DGC never touches the login. The
+ * Pips tab and the Pips inside the DGC panel both ask for it. */
+export function openEngineSignIn(engine: string): void {
+  const login = ({ claude: { name: 'Claude Code', command: 'claude' }, codex: { name: 'Codex', command: 'codex login' } } as
+    Record<string, { name: string; command: string }>)[engine];
+  if (!login) { return; }
+  const terminal = vscode.window.createTerminal({ name: `Sign in to ${login.name}` });
+  terminal.show();
+  terminal.sendText(login.command, true);
+}
+
 export class PipsEditor implements vscode.Disposable {
   private panel?: vscode.WebviewPanel;
   private panelNavigation?: { pip: string; section?: 'chat' | 'runs'; run?: string } | { overview: true };
@@ -526,6 +538,7 @@ export class PipsEditor implements vscode.Disposable {
       return;
     }
     if (!computer && ['openFile', 'openExternal', 'openSettings'].includes(String(message?.type))) { this.pageActions?.(message); return; }
+    if (message?.type === 'pipsSignIn' && !computer) { openEngineSignIn(String(message.engine || '')); return; }
     if (message?.type === 'pipsOpenComputer' && !computer) {
       const pip = message.pip;
       if (this.apiVersion >= 43 && pip && typeof pip.id === 'string' && /^pip_[A-Za-z0-9]{1,64}$/.test(pip.id) && typeof pip.name === 'string'

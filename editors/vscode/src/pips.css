@@ -828,3 +828,22 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .pips-loading{display:flex;align-items:center;justify-content:center;min-height:min(62vh,420px);color:var(--accent,#7c5cff)}.pips-loading svg{display:block;width:44px;height:44px}.pips-loading path{animation:pips-slash-pulse 2.1s ease-in-out infinite;animation-delay:var(--pulse,0ms)}.pips-loading path:nth-child(2){animation-delay:calc(var(--pulse,0ms) + .22s)}.pips-loading path:nth-child(3){animation-delay:calc(var(--pulse,0ms) + .44s)}@keyframes pips-slash-pulse{0%{opacity:.28}22%,80%{opacity:1}100%{opacity:.28}}@media(prefers-reduced-motion:reduce){.pips-loading path{animation:none}}
 /* A Connect card's accounts, by address: the person picks; and the one quiet line it settles to. */
 .app-link-accounts{display:flex;flex-direction:column;gap:4px;margin:8px 0 2px}.app-link-account{display:flex;flex-direction:column;align-items:flex-start;gap:1px;width:100%;min-height:30px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--vscode-foreground);text-align:left;font:inherit;cursor:pointer;overflow-wrap:anywhere}.app-link-account:hover:not(:disabled){background:color-mix(in srgb,var(--vscode-foreground) 7%,transparent)}.app-link-account:disabled{opacity:.6;cursor:default}.app-link-account small{color:var(--muted);font-size:11px}.app-link-account.named{border-color:color-mix(in srgb,#7c5cff 60%,var(--line))}.app-link-wanted{margin:6px 0 0}.app-link-settled{margin:0 0 6px;padding:0 2px;font-size:12px;color:var(--muted);overflow-wrap:anywhere}.app-link-settled strong{font-weight:500;color:var(--vscode-foreground)}.plugin-account{margin:6px 0 -6px}.plugin-account strong{font-weight:500;color:var(--vscode-foreground)}
+/* Routines recover and tell you (Pips package 2, pipRoutineHealth.js). A Pip's health line, on its row (words only: the
+   row is a button) and under its name on its page, with Fix there. */
+.job-health{display:block;min-width:0;font-size:10px;line-height:1.4;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.layout.overview .job-health{grid-column:1/-1}
+.job-health[data-health=failing]{color:var(--vscode-editorWarning-foreground,var(--muted))}
+.job-health[data-health=blocked]{color:var(--vscode-errorForeground)}
+.pip-health{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin:2px 0 14px;font-size:12px;line-height:1.5;color:var(--muted)}
+.pip-health-dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--vscode-testing-iconPassed,#3fb950)}
+.pip-health[data-health=failing] .pip-health-dot{background:var(--vscode-editorWarning-foreground,#d29922)}
+.pip-health[data-health=blocked] .pip-health-dot{background:var(--vscode-errorForeground)}
+.pip-health[data-health=blocked] .pip-health-text{color:var(--vscode-errorForeground)}
+.pip-health-text{min-width:0;overflow-wrap:anywhere}
+.pip-health-fix{padding:1px 9px;font-size:11px;line-height:1.6;border-radius:4px}
+.pip-health-hint{flex-basis:100%;font-size:11px;color:var(--muted)}
+/* In its chat: a routine's failed run, a routine with nothing new, and one that never ran, each one quiet line. */
+.pip-routine-line{margin:0 0 12px;font-size:12px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
+.pip-routine-line .pip-routine-name{font-weight:550;color:var(--vscode-foreground)}
+.pip-quiet-line{opacity:.8}
+.pip-routine-note[data-routine-line=blocked]{color:var(--vscode-errorForeground)}

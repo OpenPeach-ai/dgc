@@ -746,6 +746,16 @@ BUBBLES = ("Write the way you'd text: when separate short messages read better, 
 MESSAGE_BREAK = re.compile(r"^[ \t]*---[ \t]*$", re.M)      # the line between two messages (BUBBLES)
 
 
+def quiet_reply(db, run_id, text) -> bool:
+    """A routine's reply that is only NOTHING_NEW (pip_routine_care.QUIET): kept, shown as one faint line, never unread,
+    never notified. Only a routine's: a person's own chat is answered in words."""
+    from .pip_routine_care import is_quiet
+    if not is_quiet(text):
+        return False
+    turn = db.execute("SELECT request_key FROM pip_chat_messages WHERE run_id=? AND role='user'", (run_id,)).fetchone()
+    return bool(turn) and str(turn[0] or "").startswith(ROUTINE_KEY)
+
+
 def without_breaks(text: str) -> str:
     """A reply for a place that shows it as one piece (a preview, a notification): its message breaks gone."""
     return MESSAGE_BREAK.sub("", str(text or ""))
@@ -1206,6 +1216,13 @@ def prepare(store, pip, req, *, context_size=32768, secrets=()):
     named = _named_pips(store, pip, req)
     if named:
         context["named_pips"] = named
+    if pip.get("pip_type") == "core" and not str(req.get("request_key") or "").startswith(DGC_KEYS):
+        # A question another Pip has waited on for a day: Core says it once, in its next reply to the user.
+        from datetime import datetime, timezone
+        from .pip_routine_care import long_waits
+        waits = long_waits(store.registry, datetime.now(timezone.utc))
+        if waits:
+            context["long_waits"] = waits
     if req.get("images"):
         context["images"] = req["images"]
     elif str(req.get("request_key") or "").startswith(FOLLOW_UP_KEYS):
@@ -1439,6 +1456,10 @@ def insert_reply(store, run, result, now):
     if "eyes" in result:
         from .pip_eyes import record_card
         record_card(store, run, result["eyes"], reply_id)
+    waits = (run["manifest"].get("conversation") or {}).get("long_waits") if isinstance(run["manifest"], dict) else None
+    if waits:
+        from .pip_routine_care import mark_told             # Core has said them: never again (Pips package 2)
+        mark_told(store.db, [item.get("id") for item in waits if isinstance(item, dict)])
     from .pip_chat_continuity import commit
     commit(store, run, result, now)
 
@@ -1526,6 +1547,8 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             again = line_for(store.db, row["run_id"])
             if again:
                 message["started_again"] = again    # "Got stuck, started again" (Pips package 1)
+            if quiet_reply(store.db, row["run_id"], row["text"]):
+                message["quiet"] = True             # a routine with nothing to say: one faint line (Pips package 2)
         # A running reply can have several mid-turn user messages. They are
         # projected beside its original prompt below, so count them against
         # the same page budget before accepting the row.
@@ -1557,7 +1580,11 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
                 if marks:
                     said['display_mentions'] = marks
                 expanded.append(said)
+    from .pip_routine_care import notes as routine_notes
+    noted = routine_notes(store.db, pip_id)
     return {"pip_id": pip_id, "workspace_id": pip["workspace_id"], "messages": expanded,
+            # Routines that didn't run (missed, or couldn't start): lines the chat places by time (Pips package 2).
+            **({"routine_notes": noted} if noted else {}),
             "waiting": [{key: row[key] for key in ("id", "text", "created_at")} for row in waiting(store.db, pip_id)[:8]],
             "next_before_id": next_id, "active_run": {**dict(active), "run_kind": "conversation"} if active else None,
             "history_context_omitted_count": omitted, "continuity": continuity}
@@ -1737,7 +1764,8 @@ def _left_waiting(store, run, result) -> bool:
 
 
 def validate_context(value):
-    if (not isinstance(value, dict) or set(value) - {"images", "files", "run_posts", "card_context", "cards_waiting", "named_pips"} not in (
+    if (not isinstance(value, dict) or set(value) - {"images", "files", "run_posts", "card_context", "cards_waiting", "named_pips",
+                                                    "long_waits"} not in (
             {"text", "history", "history_omitted_count", "last_report"},
             {"text", "history", "history_omitted_count", "last_report", "continuity"})):
         raise RegistryError("invalid_history", "Conversation context has an unsupported shape.")
@@ -1755,6 +1783,10 @@ def validate_context(value):
     if "named_pips" in value and (not isinstance(value["named_pips"], list) or len(value["named_pips"]) > 8
                                   or len(_json(value["named_pips"]).encode()) > 8192):
         raise RegistryError("invalid_history", "The named Pips exceed their bounded context contract.")
+    if "long_waits" in value and (not isinstance(value["long_waits"], list) or not 0 < len(value["long_waits"]) <= 3 or any(
+            not isinstance(item, dict) or set(item) != {"id", "pip", "what", "waited"}
+            or not all(isinstance(item[key], str) and len(item[key]) <= 200 for key in item) for item in value["long_waits"])):
+        raise RegistryError("invalid_history", "The long waits exceed their bounded context contract.")
     if 'continuity' in value:
         from .pip_chat_continuity import _validate_envelope
         _validate_envelope(value['continuity'])

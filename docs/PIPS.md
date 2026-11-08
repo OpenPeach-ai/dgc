@@ -340,6 +340,32 @@ already sent something (a form it submitted, an email or message an app sent for
 again either way, so nothing happens twice; it says so in one line instead. What a stuck try only
 drafted, and you hadn't decided yet, is withdrawn, and the new try drafts it again.
 
+**A routine that fails, is missed, or has nothing to say.** A routine's run that fails for a reason
+a second go can fix (the provider's error, a rate limit, a crash) starts again by itself, once, as
+the same run: after 15 seconds, or a minute after a rate limit. Nothing says so when the second go
+works. If it still fails, its chat keeps a line where its turn was, and you get one desktop notice
+for that Pip and that cause, not one per run, until a run of that Pip works again. The same failure
+again is the same line with a count ("2 times since 8:00 AM"). What only you can fix (its Claude
+Code or Codex signed out, no credit left, a usage limit, a model that isn't there) gets no second
+go: a routine that couldn't even start says so once in its chat ("Couldn't start: …") and tries
+again every few minutes, not on every heartbeat.
+
+A routine that comes due while the computer is off runs once if it's under 12 hours late. Later
+than that, its chat says "Missed 8:00 AM; the computer was off" (or that Pips were turned off, or
+the Pip was paused, when that was why) and it waits for its next time. For the hour before a
+routine, while the computer is on mains power, the runner holds off sleep (`systemd-inhibit` on
+Linux, `caffeinate -s` on macOS). Where Linux lets only your desktop session hold sleep (a runner
+started at login as a service, or over SSH), it holds off idle instead, so an idle computer doesn't
+suspend itself.
+
+A routine told to stay quiet unless there is something to say may reply with only `NOTHING_NEW`.
+That is one faint line in its chat, never counted unread and never a desktop notice.
+
+Each Pip with routines has one line of health on its row and its page: "Last ran 8:00 AM · worked
+· next 8:00 AM tomorrow", or "Can't run: Claude Code signed out", with Fix on its page (a terminal
+to sign that CLI in, or Settings → Models). Core mentions a question one of your Pips has waited on
+for a day, once, in a line of its next reply.
+
 **On a server**, with no VS Code and no desktop, beside your own app: `dgc pips serve
 --server`, or the same as a systemd unit (`dgc pips service install --server`), or the
 Docker image in [deploy/docker](../deploy/docker/README.md). It shows no desktop

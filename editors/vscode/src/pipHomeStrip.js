@@ -77,7 +77,10 @@ export function mountHomePips(options) {
   if (!p || typeof p !== 'object' || typeof p.id !== 'string' || !/^pip_[a-f0-9]{32}$/.test(p.id)) return null;
   if (typeof p.name !== 'string' || !p.name.trim() || p.name.length > 200 || !TYPES.includes(p.pip_type)) return null;
   if (p.status === 'archived') return null;
-  return {id: p.id, name: p.name.trim(), type: p.pip_type, profile: profile(p.profile), reviews: pendingReviews(p), waiting: 0};
+  // Routines it can't run (Pips package 2): the words its row in the Pips view says, so the home says it too.
+  const blocked = p.routine_health && typeof p.routine_health === 'object' && p.routine_health.blocked && typeof p.routine_health.blocked.text === 'string'
+   ? p.routine_health.blocked.text.slice(0, 120) : '';
+  return {id: p.id, name: p.name.trim(), type: p.pip_type, profile: profile(p.profile), reviews: pendingReviews(p), waiting: 0, blocked};
  }
  // What is new for a Pip since you last looked, from the digest: how urgent (1 an alert, 2 failed runs,
  // 3 new findings) and a few words.
@@ -96,7 +99,9 @@ export function mountHomePips(options) {
   for (const pip of pips) {
    pip.waiting = waitingOn(attention, pip.id, pip.reviews);
    const fresh = pip.waiting ? null : news(pip.id);
-   if (pip.waiting) rows.push({pip, rank: 0, line: `${pip.waiting} waiting for you`, dismissible: false});
+   // A Pip that can't run says so first, even with cards waiting: its routines stop until it's fixed (Pips package 2).
+   if (pip.blocked) rows.push({pip, rank: 0, line: `Can't run: ${pip.blocked}${pip.waiting ? ` · ${pip.waiting} waiting for you` : ''}`, dismissible: false});
+   else if (pip.waiting) rows.push({pip, rank: 0, line: `${pip.waiting} waiting for you`, dismissible: false});
    else if (fresh) rows.push({pip, rank: fresh.rank, line: fresh.line, dismissible: apiVersion >= 48});
   }
   return rows.sort((a, b) => a.rank - b.rank);     // stable: Core first, then as the Pips view orders them

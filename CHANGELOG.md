@@ -6,6 +6,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- Routines recover and tell you. A routine's run that fails for a reason a second go can fix tries once more by itself, after 15 seconds (a minute after a rate limit), and nothing says so if that works. If it still fails, its chat keeps a line and you get one desktop notice per Pip and cause, not one per run. A routine that couldn't start (its Claude Code or Codex signed out, say) says so once and tries again every few minutes instead of on every heartbeat. A routine up to 12 hours late runs once; later, its chat says "Missed 8:00 AM; the computer was off". For the hour before a routine, on mains power, the computer stays awake. A routine may reply only `NOTHING_NEW` to stay quiet. Each Pip's row and page say how its routines are going, with Fix when it can't run. Core mentions a question that has waited a day, once.
 - A Pip run that gets stuck starts again by itself, once. No word from its model for 20 minutes (2 hours while a tool runs) stops it, and the same run starts again, told to check what it already did; its chat says "Got stuck, started again". A restart or update in the middle of a run puts it back in line once instead of failing it. A run that already sent something is never run again, so nothing happens twice: it says so in one line.
 
 ## 0.51.0 — 2026-11-07

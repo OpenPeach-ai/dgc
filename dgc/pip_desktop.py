@@ -124,7 +124,7 @@ class Notifier:
         from .pip_action_grants import ran_on_their_own
         ran = ran_on_their_own(registry)
         finished, asking = self._personal(registry, quiet)
-        blocked = self._blocked(registry, quiet)
+        blocked = self._blocked(registry, quiet) + self._troubled(registry, quiet)
         seen = self._seen(registry)
         new_alerts = [i for i in alerts if i not in seen["alerts"]]
         new_reviews = [i for i in reviews if i not in seen["reviews"]]
@@ -141,7 +141,7 @@ class Notifier:
             if new_alerts:
                 body = headline
             elif new_blocked:
-                # A scheduled Pip that can't run here: once per episode, never every retry.
+                # A scheduled Pip that can't run here, or a routine that keeps failing: once per episode, never every retry.
                 body = new_blocked[0][1] + (f" And {len(new_blocked) - 1} more." if len(new_blocked) > 1 else "")
             elif new_ran:
                 # Something a Pip did on its own: say what, so it is never a surprise.
@@ -194,6 +194,16 @@ class Notifier:
         except Exception:
             return []                     # a registry from before this record, or one being upgraded
 
+    def _troubled(self, registry, quiet=frozenset()):
+        """Pips whose routines can't run, or keep failing: [(id, sentence)], one per Pip and cause until a run of that
+        Pip works again (pip_routine_care), never one per run."""
+        from .pip_routine_care import all_troubles
+        try:
+            return [(item["id"], item["said"]) for item in all_troubles(registry.db)
+                    if item["pip_id"] not in quiet and item["said"]]
+        except Exception:
+            return []
+
     def _quiet(self, registry) -> set:
         """Pips whose page says not to notify you."""
         try:
@@ -216,7 +226,8 @@ class Notifier:
                     "JOIN pip_chat_messages u ON u.run_id=a.run_id AND u.role='user' "
                     "JOIN pips p ON p.id=a.pip_id JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version "
                     "WHERE a.role='assistant' AND u.request_key LIKE 'routine\\_%' ESCAPE '\\' ORDER BY a.seq DESC LIMIT 20"):
-                if pip_id not in quiet:
+                from .pip_routine_care import is_quiet
+                if pip_id not in quiet and not is_quiet(text):     # a routine with nothing to say says nothing
                     from .pip_chat import without_breaks          # its --- between short messages is not said
                     finished.append(("chat:" + message_id, f"{name(definition)}: {_plain(without_breaks(text), 160)}"))
             for routine_id, pip_id, title, definition in registry.db.execute(

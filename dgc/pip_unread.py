@@ -64,12 +64,15 @@ def _post_preview(text: str) -> str:
 def _unread_items(db, pip_id: str, seq: int) -> int:
     """How many of the chat's items have a reply after the cursor. An item is the turn the user sees with its
     replies: the reply to a follow-up turn DGC wrote belongs to the nearest turn before it that is not one."""
-    from .pip_chat import FOLLOW_UP_KEYS
-    replies = db.execute("""SELECT a.seq,u.seq,u.request_key FROM pip_chat_messages a
+    from .pip_chat import FOLLOW_UP_KEYS, ROUTINE_KEY
+    from .pip_routine_care import is_quiet
+    replies = db.execute("""SELECT a.seq,u.seq,u.request_key,a.text FROM pip_chat_messages a
         LEFT JOIN pip_chat_messages u ON u.run_id=a.run_id AND u.role='user'
         WHERE a.pip_id=? AND a.role='assistant' AND a.seq>?""", (pip_id, seq)).fetchall()
     items = set()
-    for reply, turn, key in replies:
+    for reply, turn, key, text in replies:
+        if isinstance(key, str) and key.startswith(ROUTINE_KEY) and is_quiet(text):
+            continue                           # a routine that had nothing to say stays quiet (Pips package 2)
         if turn is None:
             items.add(-reply)                  # a reply with no turn of its own is an item by itself
             continue
@@ -128,8 +131,10 @@ def _summary(db, pip_id: str) -> dict:
     messages = _unread_items(db, pip_id, seq)
     has_posts = _has_table(db)
     posts = _unread_posts(db, pip_id, post_rowid) if has_posts else 0
-    latest_message = db.execute("""SELECT id,text,created_at FROM pip_chat_messages
-        WHERE pip_id=? AND role='assistant' AND seq>? ORDER BY seq DESC LIMIT 1""", (pip_id, seq)).fetchone()
+    from .pip_chat import quiet_reply
+    latest_message = next((row for row in db.execute("""SELECT id,text,created_at,run_id FROM pip_chat_messages
+        WHERE pip_id=? AND role='assistant' AND seq>? ORDER BY seq DESC LIMIT 20""", (pip_id, seq))
+        if not quiet_reply(db, row[3], row[1])), None)
     latest_post = (db.execute("""SELECT run_id,post,posted_at FROM pip_run_posts
         WHERE pip_id=? AND rowid>? ORDER BY rowid DESC LIMIT 1""", (pip_id, post_rowid)).fetchone()
         if has_posts else None)
