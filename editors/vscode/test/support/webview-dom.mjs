@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { JSDOM, VirtualConsole } from "jsdom";
 import { buildSync } from "esbuild";
+import { readStylesheet } from "./stylesheet.mjs";
 
 const dir = fileURLToPath(new URL("../", import.meta.url));
 export const panelSrc = readFileSync(dir + "../src/panel.ts", "utf8");
@@ -21,7 +22,7 @@ export const traceJs = readFileSync(dir + "../media/trace.js", "utf8");
 export const messageQueueJs = readFileSync(dir + "../media/messagequeue.js", "utf8");
 export const markdownJs = buildSync({ entryPoints: [dir + "../src/markdown.ts"], bundle: true,
   format: "iife", globalName: "DgcMarkdown", platform: "browser", write: false }).outputFiles[0].text;
-export const mainCss = readFileSync(dir + "../media/main.css", "utf8");
+export const mainCss = readStylesheet(dir + "../media/main.css");
 
 export function relativeLuminance(hex) {
   const channels = hex.match(/[0-9a-f]{2}/gi).map((part) => parseInt(part, 16) / 255);

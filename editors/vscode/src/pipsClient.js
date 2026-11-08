@@ -1,5 +1,7 @@
 import {createConnectorInputs,mountConnectorInputs,readConnectorInputs,mountConnectorSummary} from './pipsConnectorForm.js';
 import {connectorDraft,connectorDraftsPage,connectorCall,connectorInspection,actionStatus,calendarAccounts,calendarDraft,calendarDetails,extendedCalendar,sendAccounts,messageDraft,messageReview,messageHistory,messageStates,emailDraft,emailDraftsPage} from './pipsMessageReviews.js';
+// One set of tokens for every page, first, so each page's own stylesheet can lean on it (media/shared/tokens.css).
+import '../media/shared/tokens.css';
 import './pips.css';
 import '../media/messagequeue.js';
 import '../media/messagequeue.css';

@@ -106,7 +106,7 @@ test("a Project Pip’s chat paints as a Personal Pip’s, in the same page", as
   const { shell: _a, ...personalChat } = personal, { shell: _b, ...projectChat } = project;
   assert.deepEqual(projectChat, personalChat, "the same chat");
   assert.equal(project.you.color, "rgb(255, 255, 255)", "your message: white on the accent");
-  assert.equal(project.you.backgroundColor, "rgb(109, 73, 232)");
+  assert.equal(project.you.backgroundColor, "rgb(118, 84, 246)", "the panel's purple (#7654F6); Pips' own #6D49E8 is gone (0.52)");
   assert.equal(project.reply.borderTopLeftRadius, "17px", "its reply: short rounded bubbles");
   assert.equal(project.parts, 2, "a bubble for each short message the Pip parted with ---");
   assert.equal(project.buttons, 0, "the buttons wait for the pointer");

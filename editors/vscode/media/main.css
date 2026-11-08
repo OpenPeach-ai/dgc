@@ -1,84 +1,6 @@
+@import url("./shared/tokens.css");
 @import url("./pips/wordmark.css");
 /* DGC panel — Codex's quiet editor hierarchy with a restrained DGC accent. */
-:root {
-  /* Host-native surfaces: Cursor/VS Code inject these tokens for the active color theme. The
-     literal values are deliberate fallbacks for tests and unusual hosts that omit a token. */
-  --fallback-bg:#181819; --fallback-surface:#202021; --fallback-surface2:#29292B;
-  --fallback-code:#151516; --fallback-border:#303032; --fallback-border-strong:#3A3A3D;
-  --fallback-text:#D7D7DA; --fallback-text-strong:#F5F5F6;
-  --fallback-muted:#B2B2B6; --fallback-faint:#96969B;
-  --bg:var(--vscode-sideBar-background, var(--vscode-editor-background, var(--fallback-bg)));
-  --surface:var(--vscode-editor-background, var(--fallback-surface));
-  --surface2:var(--vscode-input-background, var(--vscode-dropdown-background, var(--fallback-surface2)));
-  --code:var(--vscode-textCodeBlock-background, var(--vscode-editor-background, var(--fallback-code)));
-  --term:var(--vscode-editor-background, var(--fallback-code));
-  --border:var(--vscode-panel-border, var(--vscode-widget-border, var(--fallback-border)));
-  --border-strong:var(--vscode-input-border, var(--vscode-widget-border, var(--fallback-border-strong)));
-  --text:var(--vscode-foreground, var(--fallback-text));
-  --text-strong:var(--vscode-editor-foreground, var(--vscode-foreground, var(--fallback-text-strong)));
-  --muted:var(--vscode-descriptionForeground, var(--fallback-muted));
-  --faint:var(--vscode-disabledForeground, var(--vscode-descriptionForeground, var(--fallback-faint)));
-  --accent:#7C5CFF; --accent-text:#A78BFA; --accent-fill:#7654F6;
-  /* Links and their marks, which are body text and must clear 4.5:1 to be read comfortably.
-     --accent cannot do that job: at 4.08:1 on this panel's dark ground and 4.09:1 on its light
-     one it fails AA on BOTH, which is why a page of links read as harsh. No single purple fixes
-     it -- a tone light enough for the dark ground (6.5:1) collapses to 2.6:1 on the light one --
-     so the link tone follows the theme. */
-  --link:#A78BFA;                    /* on dark: 6.5:1 */
-  /* File-kind hues, from Seti's own palette. Icons are non-text content, so each must clear
-     WCAG 1.4.11 (3:1) on the ground it sits on. Seti's light variants for yellow, green and the
-     neutral do NOT -- 1.92, 2.36 and 1.62 on a light panel -- so those three are darkened here,
-     hue and saturation kept, until they clear it. Measured in link-contrast.test.mjs. */
-  --fk-blue:#519aba; --fk-yellow:#cbcb41; --fk-orange:#e37933; --fk-green:#8dc149;
-  --fk-violet:#a074c4; --fk-pink:#f55385; --fk-red:#cc3e44; --fk-neutral:#d4d7d6;
-  --accent-hover:#6A4BF0; --lav:#A78BFA;
-  --accent-soft:rgba(124,92,255,.12);
-  /* Selection and focus are structural, not chromatic. Codex marks a chosen row by lifting its
-     surface and a focused field by firming its border; purple is reserved for the primary action,
-     links and live status. A 2px accent rail down every selected row read as decoration. */
-  --sel:var(--vscode-list-activeSelectionBackground, rgba(255,255,255,.06));
-  --ring:rgba(124,92,255,.30);
-  --good:#5BCB8B; --good-soft:rgba(91,203,139,.1);
-  --warn:#D1902B;
-  /* Something on the chip line needs you. Amber, and lifted for words: --need is 6.1:1 on the dark editor ground and
-     4.8:1 on the input one, --need-text 7.4:1 and 5.9:1. The light themes take darker steps (below). */
-  --need:#D1902B; --need-text:#E0A24E;
-  /* Auto mode and error states share this olive. --err paints borders, fills and dots, where
-     the exact colour is what matters. Text uses --err-text: the same hue lifted until it clears
-     4.5:1 on every panel surface, because #768A00 reads 3.74:1 on --surface2 and the webview
-     contrast test rightly refuses it. */
-  --err:#768A00; --err-text:#839900; --err-soft:rgba(118,138,0,.16);
-  /* Diff polarity is not an error state. Removed lines rode on --err, so turning that
-     olive for auto mode made every −120 line count read as an addition. Red means removed
-     everywhere, so it gets its own token: --del paints the gutter rail and row fill where
-     the hue is the signal, --del-text clears 4.5:1 on all four panel surfaces. */
-  --del:#E5484D; --del-text:#F0747E; --del-soft:rgba(229,72,77,.14);
-  --sans: var(--vscode-font-family, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
-  --mono: var(--vscode-editor-font-family, ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace);
-
-  /* One geometry, one type scale. The panel had grown 17 radii, 61 paddings and 13 font sizes,
-     each chosen locally and reasonable on its own; together they read as noise. Every ratio below
-     is a 4px unit, which is what makes a dense editor panel look deliberate rather than busy. */
-  --sp: 4px;                     /* the unit: every gap and pad is a multiple of it */
-  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px;  --sp-4: 16px;  --sp-5: 20px;  --sp-6: 24px;
-  --r-sm: 6px;  --r-md: 8px;  --r-lg: 10px;  --r-xl: 12px;  --r-2xl: 16px;  --r-full: 9999px;
-  /* Five sizes and four weights, on Codex's steps (11 · 12 · 14 · 16 · 18). The panel had
-     grown 13 sizes including half-pixels and seven weights; the eye reads that as noise even
-     when no single choice is wrong. Line heights are 1 · 1.2 · 1.45 · 1.6, chosen by role. */
-  --t-xs: 11px; --t-sm: 12px; --t-base: var(--vscode-font-size,13px); --t-lg: 16px; --t-xl: 18px;
-  /* Transcript icons: one box for everything that describes work, matched to the 12px rows it sits
-     in — 14px of box against a 12px cap height is the same proportion the reference set uses.
-     12px where the slot is smaller (the image pill, the question ring), 20px in the 80px tile. */
-  --icon: 14px; --icon-xs: 12px; --icon-lg: 20px;
-  /* The conversation itself: your prompts, the answers, and what you're typing. */
-  --t-chat: 13px;
-  --w-reg: 400; --w-med: 500; --w-semi: 600; --w-bold: 700;
-  --control: 28px;               /* every button, chip and field lands on this height */
-  --control-sm: 20px;
-  /* Soft and low, so a raised surface reads as raised without a drop shadow shouting about it. */
-  --shadow-1: 0 1px 2px rgba(0,0,0,.14);
-  --shadow-2: 0 4px 16px rgba(0,0,0,.18);
-}
 * { box-sizing: border-box; }
 /* `hidden` must mean hidden. Every component that sets its own `display` outranks the user-agent
    rule for `[hidden]`, so the attribute silently did nothing on `.fbtn` and the composer carried a
@@ -425,18 +347,6 @@ body[data-agent-page] #to-latest { display: none; }
     drop-shadow(0 1px 2px rgba(0,0,0,.58))
     drop-shadow(0 0 4px color-mix(in srgb, var(--mark) 70%, transparent));
 }
-body.vscode-light { --link:#6D49E8; }   /* on light: 5.3:1, and still the brand's hue */
-/* #D1902B is 2.7:1 on white. These clear 3:1 (the border and dot: 4.4 on white, 3.6 on the hover grey) and 4.5:1
-   (the words: 6.0 on white, 4.9 on the hover grey). */
-body.vscode-light, body.vscode-high-contrast-light { --need:#A86A12; --need-text:#8F5600; }
-/* The olive as text on a light ground: #839900 is 3.2:1 on white, so blocked tasks and errors read faint in light
-   themes. The same hue, darker: 5.9:1 on white, 4.8:1 on the darkest light surface. */
-body.vscode-light { --err-text:#5C6B00; }
-/* Seti's own light pair, except the three it ships too pale to clear 3:1 on a light ground. */
-body.vscode-light {
-  --fk-blue:#498ba7; --fk-yellow:#8d8d2d; --fk-orange:#cc6d2e; --fk-green:#6c9438;
-  --fk-violet:#9068b0; --fk-pink:#dd4b78; --fk-red:#b8383d; --fk-neutral:#848a88;
-}
 body.vscode-light .agent-mark:not(:has(img)) {
   filter:
     drop-shadow(0 0 0.55px rgba(255,255,255,.95))
@@ -566,7 +476,7 @@ body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { ma
 /* Static, soft grain on sent prompts. The overlay cannot intercept selection or fold controls. */
 .user .bubble {
   position: relative;
-  background-image: radial-gradient(130% 110% at 14% 0%, rgba(174, 145, 255, .08), transparent 70%);
+  background-image: radial-gradient(130% 110% at 14% 0%, var(--bubble-grain), transparent 70%);
 }
 .user .bubble::before {
   content: "";
@@ -1479,7 +1389,7 @@ body.vscode-light .rail-pop { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
 }
 .cinput { position: relative; min-height: 50px; display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-3) var(--sp-3) var(--sp-1); }
 .cinput .pmark { display: none; }
-#cbox[data-mode="auto"] .cinput .pmark { color: #8B7CFF; }
+#cbox[data-mode="auto"] .cinput .pmark { color: var(--accent-text); }
 /* The composer is an editing host, not a form control, so three things it used to get free now
    have to be asked for: wrapping that keeps a typed newline (pre-wrap), a placeholder (a textarea
    has one; a div does not), and a height that follows its content instead of `rows`. */
@@ -1955,20 +1865,7 @@ body.vscode-light .fbtn.output-control.on, body.vscode-high-contrast-light .fbtn
 /* Windows High Contrast / VS Code forced-colors mode. System colors preserve the user's chosen
    palette; shape, text, and border changes keep status from depending on hue alone. */
 @media (forced-colors: active) {
-  :root {
-    --bg:Canvas; --surface:Canvas; --surface2:ButtonFace; --code:Canvas; --term:Canvas;
-    --border:CanvasText; --border-strong:CanvasText;
-    --text:CanvasText; --text-strong:CanvasText; --muted:CanvasText; --faint:GrayText;
-    --accent:Highlight; --accent-text:LinkText; --accent-fill:Highlight; --link:LinkText;
-    /* In forced colours the user's palette wins; a hue per file kind is exactly what they turned off. */
-    --fk-blue:CanvasText; --fk-yellow:CanvasText; --fk-orange:CanvasText; --fk-green:CanvasText;
-    --fk-violet:CanvasText; --fk-pink:CanvasText; --fk-red:CanvasText; --fk-neutral:CanvasText;
-    --accent-hover:Highlight; --lav:LinkText;
-    --accent-soft:transparent; --good:CanvasText; --good-soft:transparent; --warn:CanvasText;
-    --need:CanvasText; --need-text:CanvasText;
-    --err:CanvasText; --err-text:CanvasText; --err-soft:transparent;
-    --del:CanvasText; --del-text:CanvasText; --del-soft:transparent;
-  }
+  /* The tokens themselves turn to system colours in media/shared/tokens.css. */
   *, *::before, *::after { box-shadow: none !important; text-shadow: none !important; }
   :where(button, input, select, textarea, [tabindex]):focus-visible {
     outline: 2px solid Highlight !important; outline-offset: 2px;
@@ -2282,7 +2179,7 @@ body.vscode-light .prompt-rail-card { box-shadow: 0 10px 30px -10px rgba(0, 0, 0
    ================================================================================================== */
 
 /* Pip mention chips are references, distinct from file attachments. */
-.pip-reference-chip { border-color: var(--vscode-textLink-foreground, #a799ec); }
+.pip-reference-chip { border-color: var(--vscode-textLink-foreground, var(--link)); }
 .pip-reference-chip .chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .prompt-att.pip-reference-chip { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent;
   color: var(--text); font-weight: var(--w-med); padding: 0 2px; }

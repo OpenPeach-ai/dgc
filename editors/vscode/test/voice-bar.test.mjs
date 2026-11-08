@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build, buildSync } from "esbuild";
+import { TOKENS_CSS, readStylesheet } from "./support/stylesheet.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const voicebarJs = readFileSync(join(root, "media/voicebar.js"), "utf8");
@@ -115,7 +116,7 @@ test("the bar: the waveform rises with speech and lies flat in silence; quiet fo
 
 async function mainPage(width = 520) {
   const panelSrc = readFileSync(join(root, "src/panel.ts"), "utf8");
-  const css = readFileSync(join(root, "media/main.css"), "utf8"), codicon = readFileSync(join(root, "media/codicon.css"), "utf8");
+  const css = readStylesheet(join(root, "media/main.css")), codicon = readFileSync(join(root, "media/codicon.css"), "utf8");
   const mainJs = readFileSync(join(root, "media/mentions.js"), "utf8") + "\n" + readFileSync(join(root, "media/main.js"), "utf8");
   const markdownJs = buildSync({ entryPoints: [join(root, "src/markdown.ts")], bundle: true, format: "iife", globalName: "DgcMarkdown",
     write: false, platform: "browser" }).outputFiles[0].text;
@@ -212,7 +213,7 @@ test("main DGC's chat: the microphone beside Send; while it records the footer i
 /** A Pip's chat in the side bar's shadow root, answering its requests as the runner does; `messages` saved. */
 async function pipsPage(messages = []) {
   const client = (await build({ entryPoints: [join(root, "src/pipsClient.js")], bundle: true, write: false, format: "iife", loader: { ".css": "empty" } })).outputFiles[0].text;
-  const css = ["src/pips.css", "src/pipsTranscript.css", "media/voicebar.css"].map((f) => readFileSync(join(root, f), "utf8").replace(/^@import[^;]+;/gm, "")).join("\n");
+  const css = readStylesheet(TOKENS_CSS) + "\n" + ["src/pips.css", "src/pipsTranscript.css", "media/voicebar.css"].map((f) => readFileSync(join(root, f), "utf8").replace(/^@import[^;]+;/gm, "")).join("\n");
   const page = await browser.newPage({ viewport: { width: 520, height: 700 } });
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));

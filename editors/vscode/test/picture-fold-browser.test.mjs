@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
 import { THEMES, panelHtml } from "./support/options-scene.mjs";
 import { chatdgcFixtureHtml } from "./support/chatdgc-html.mjs";
+import { readStylesheet } from "./support/stylesheet.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let chromium, browser;
@@ -154,7 +155,7 @@ function chatHtml() {
   const js = [...doc.matchAll(/asset\("media\/([\w-]+\.js)"\)/g)].map((m) => readFileSync(join(root, "media", m[1]), "utf8")).join("\n");
   assert.match(doc, /media\/pictureFold\.js/, "the ChatDGC page loads the fold");
   const clean = chatdgcFixtureHtml(doc);
-  const css = readFileSync(join(root, "media/main.css"), "utf8").replace(/@import[^;]*;/, "") + readFileSync(join(root, "media/chatdgc.css"), "utf8");
+  const css = readStylesheet(join(root, "media/main.css")).replace(/@import[^;]*;/, "") + readFileSync(join(root, "media/chatdgc.css"), "utf8");
   const markdownJs = buildSync({ entryPoints: [join(root, "src/markdown.ts")], bundle: true, format: "iife", globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
   return { html: clean.replace("</head>", `<style>${css}</style></head>`), js, markdownJs };
 }

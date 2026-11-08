@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- One purple, from one place. Pips had a purple of its own beside the panel's; now Pips, Settings, a Pip's computer and the canvas take every colour from the panel's one set of tokens. On light themes, high contrast light included, accent words and marks take the deeper purple, where the pale one read 2.6:1 on white.
 - Finding severity in Apple's system colours: red for high and yellow for medium on dark themes, Apple's own higher-contrast red and yellow on light ones, where the old amber was hard to read.
 - A Pip report card's face sits in the middle of the card, not at its top; an opened card keeps it beside the Pip's name.
 - A Pip report card says "1 new · 3 still there" and names the new finding when its review said which findings are new.

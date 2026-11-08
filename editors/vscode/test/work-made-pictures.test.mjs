@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
+import { readStylesheet } from "./support/stylesheet.mjs";
 
 // A picture DGC made in Work (generate_image) shows under the reply, as ChatDGC and a Pip's reply show theirs, while
 // the turn's steps fold into "Worked for": before, it was three folds deep (Worked for → Used 1 tool · 1 image → the
@@ -37,7 +38,7 @@ before(async () => {
   if (!chromium) return;
   try { browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox", "--force-color-profile=srgb"] }); } catch { browser = null; return; }
   const panelSrc = readFileSync(here + "/../src/panel.ts", "utf8");
-  const css = readFileSync(here + "/../media/main.css", "utf8");
+  const css = readStylesheet(here + "/../media/main.css");
   const codicon = readFileSync(here + "/../media/codicon.css", "utf8")
     .replace(/url\([^)]*codicon\.ttf[^)]*\)/, `url("data:font/ttf;base64,${readFileSync(here + "/../media/codicon.ttf").toString("base64")}")`);
   mainJs = readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");

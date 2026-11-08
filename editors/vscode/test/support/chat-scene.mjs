@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { buildSync } from "esbuild";
 import { THEMES } from "./options-scene.mjs";
 import { extensionRoot as root } from "./artifact-scene.mjs";
+import { readStylesheet } from "./stylesheet.mjs";
 
 const read = (name) => readFileSync(join(root, name), "utf8");
 const codicon = () => read("media/codicon.css").replace(/url\([^)]*codicon\.ttf[^)]*\)/,
@@ -19,7 +20,7 @@ function documents() {
   const prepare = (doc) => doc.replace(/<link [^>]*>/g, "").replace(/<script [^>]*><\/script>/g, "").replace(/\$\{[^}]*\}/g, "")
     .replace("font-src ;", "font-src data:;");
   const scripts = (doc) => [...doc.matchAll(/asset\("media\/([\w-]+\.js)"\)/g)].map((m) => m[1]).map((f) => read(`media/${f}`)).join("\n");
-  const css = read("media/main.css").replace(/@import[^;]*;/, "") + read("media/mentions.css");
+  const css = readStylesheet(join(root, "media/main.css")) + read("media/mentions.css");
   const own = read("media/chatdgc.css") + read("media/voicebar.css");
   const styled = (doc) => prepare(doc).replace("</head>", `<style>${codicon()}</style><style>${css}</style><style>${own}</style></head>`);
   const chat = docs.find((d) => d.includes('id="cd-input"'));

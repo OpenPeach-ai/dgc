@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
 import { THEMES } from "./support/options-scene.mjs";
 import { chatdgcFixtureHtml } from "./support/chatdgc-html.mjs";
+import { readStylesheet } from "./support/stylesheet.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let chromium, browser;
@@ -33,7 +34,7 @@ const M = (n) => `msg_${String(n).repeat(32).slice(0, 32)}`;
 function screenHtml() {
   const source = readFileSync(join(root, "src/chatdgc.ts"), "utf8");
   const doc = chatdgcFixtureHtml(source.match(/return `(<!doctype html>[\s\S]*?<\/html>)`;/)[1]);
-  const css = readFileSync(join(root, "media/main.css"), "utf8").replace(/@import[^;]*;/, "");
+  const css = readStylesheet(join(root, "media/main.css")).replace(/@import[^;]*;/, "");
   const own = readFileSync(join(root, "media/chatdgc.css"), "utf8");
   const scripts = [...doc.matchAll(/asset\("media\/([\w-]+\.js)"\)/g)].map((m) => m[1]);
   const js = [...source.match(/return `(<!doctype html>[\s\S]*?<\/html>)`;/)[1].matchAll(/asset\("media\/([\w-]+\.js)"\)/g)]

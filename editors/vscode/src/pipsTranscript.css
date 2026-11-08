@@ -2,7 +2,7 @@
    the same 13px / 1.62 prose, and quiet 20px response controls. */
 .pip-message{display:flex;flex-direction:column;gap:4px;flex:none;margin:0 0 16px;font-size:13px;line-height:1.62;min-width:0;color:var(--vscode-foreground,#d7d7da)}
 .pip-message.user{align-items:flex-end;margin-top:8px;padding:0;border:0;background:transparent;border-radius:0}
-.pip-message.user .bubble{max-width:92%;background:var(--prompt-fill,color-mix(in srgb,#7c5cff 12%,var(--vscode-editor-background,#202021)));border:var(--prompt-border,0);box-shadow:var(--prompt-rail,none);border-radius:16px;padding:8px 12px;min-width:0}
+.pip-message.user .bubble{max-width:92%;background:var(--prompt-fill,color-mix(in srgb,var(--accent) 12%,var(--vscode-editor-background,#202021)));border:var(--prompt-border,0);box-shadow:var(--prompt-rail,none);border-radius:16px;padding:8px 12px;min-width:0}
 .prompt-text{white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.62}
 .pip-message .answer{margin:0;padding:0;border:0;background:transparent;min-width:0}
 .message-body{font-size:13px;line-height:1.62;color:var(--vscode-foreground,#d7d7da)}
@@ -13,11 +13,11 @@
 .message-body code{font-family:var(--vscode-editor-font-family,monospace);font-size:.88em;background:var(--vscode-input-background,#29292b);padding:.12em .4em;border-radius:6px}
 .message-body pre.code{position:relative;border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:8px 0;background:var(--vscode-textCodeBlock-background,var(--vscode-editor-background,#151516));overflow:auto;max-width:100%;white-space:pre;font-size:12px;line-height:1.6}
 .message-body pre.code>code{font-size:inherit;padding:0;border-radius:0;background:transparent;display:block}.message-body .code-language{margin-bottom:12px;font-size:11px;padding-right:24px}
-.message-body .md-link{font:inherit;color:var(--vscode-textLink-foreground,#a78bfa);background:transparent;min-height:0;text-decoration:none;padding:0}.message-body .md-link:hover,.message-body .md-link:focus-visible{text-decoration:underline;text-underline-offset:3px}
+.message-body .md-link{font:inherit;color:var(--vscode-textLink-foreground,var(--link));background:transparent;min-height:0;text-decoration:none;padding:0}.message-body .md-link:hover,.message-body .md-link:focus-visible{text-decoration:underline;text-underline-offset:3px}
 .message-body blockquote{position:relative;margin:12px 0;padding:12px 16px;background:var(--vscode-editor-background,#202021);border:1px solid var(--line);border-left:3px solid var(--vscode-input-border,var(--line));border-radius:8px;color:var(--muted)}
 .message-body blockquote>.copy+*{margin-top:0;padding-right:36px}.message-body blockquote>:last-child{margin-bottom:0}.message-body hr{border:0;border-top:1px solid var(--line);margin:16px 0}
 .message-body .md-table-wrap{position:relative;max-width:100%;overflow-x:auto;margin:8px 0}.message-body .md-table{display:table;width:100%;border-collapse:collapse;font-size:12px;line-height:1.45}.message-body .md-table :is(th,td){padding:4px 8px;border:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}.message-body .md-table th{background:var(--vscode-input-background,#29292b);font-weight:700}
-.message-body button.copy{position:absolute;top:6px;right:6px;float:none;display:grid;place-items:center;height:20px;min-height:20px;width:20px;padding:0;border:1px solid var(--vscode-input-border,var(--line));border-radius:6px;background:var(--vscode-input-background,#29292b);color:var(--muted);font-size:12px;opacity:0}.message-body :is(pre.code,.md-table-wrap,blockquote):hover>.copy,.message-body button.copy:focus-visible,.message-body button.copy.done{opacity:1}.message-body button.copy:hover{border-color:#7c5cff;color:var(--vscode-foreground)}
+.message-body button.copy{position:absolute;top:6px;right:6px;float:none;display:grid;place-items:center;height:20px;min-height:20px;width:20px;padding:0;border:1px solid var(--vscode-input-border,var(--line));border-radius:6px;background:var(--vscode-input-background,#29292b);color:var(--muted);font-size:12px;opacity:0}.message-body :is(pre.code,.md-table-wrap,blockquote):hover>.copy,.message-body button.copy:focus-visible,.message-body button.copy.done{opacity:1}.message-body button.copy:hover{border-color:var(--accent);color:var(--vscode-foreground)}
 /* Markdown's font icon cannot cross a ShadowRoot. A CSS mask supplies the same
    copy outline without depending on a font or fetching an asset. */
 .message-body button.copy .codicon{display:block;width:12px;height:12px;background:currentColor;mask:center/contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M5 5h8v9H5zM10 5V2H2v9h3' fill='none' stroke='black' stroke-width='1.2'/%3E%3C/svg%3E")}
@@ -34,7 +34,7 @@
 .message-provenance{margin-top:4px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--vscode-editor-background,#202021);font-size:11px;min-width:0}.message-provenance dl{display:grid;grid-template-columns:48px minmax(0,1fr);gap:4px 8px;margin:0 0 6px}.message-provenance dt{color:var(--muted)}.message-provenance dd{margin:0;overflow-wrap:anywhere}.message-provenance button{font-size:11px;min-height:24px;padding:2px 6px}
 .pip-message.user .message-status{align-self:flex-start;margin:2px 0 0}
 /* Not sent, and the way to send it again: words in a line, read before they are pressed. */
-.message-send-again{min-height:0;height:auto;margin:0 0 0 2px;padding:0;border:0;border-radius:3px;background:transparent;font:inherit;color:var(--vscode-textLink-foreground,#a78bfa);cursor:pointer}.message-send-again:hover:not(:disabled){background:transparent;text-decoration:underline;text-underline-offset:2px}.message-send-again:focus-visible{outline:2px solid var(--vscode-focusBorder,#7c5cff);outline-offset:1px}.message-send-again:disabled{opacity:.5;cursor:default}.pip-message.provisional .message-status{font-size:11px;margin:0;color:var(--muted)}
+.message-send-again{min-height:0;height:auto;margin:0 0 0 2px;padding:0;border:0;border-radius:3px;background:transparent;font:inherit;color:var(--vscode-textLink-foreground,var(--link));cursor:pointer}.message-send-again:hover:not(:disabled){background:transparent;text-decoration:underline;text-underline-offset:2px}.message-send-again:focus-visible{outline:2px solid var(--vscode-focusBorder,var(--accent));outline-offset:1px}.message-send-again:disabled{opacity:.5;cursor:default}.pip-message.provisional .message-status{font-size:11px;margin:0;color:var(--muted)}
 .chat-activity-toggle{align-self:flex-start;display:flex;align-items:center;gap:6px;min-height:24px;padding:2px 0;font-size:12px;border:0;background:transparent;color:var(--muted)}.chat-activity-toggle:hover{background:transparent;color:var(--vscode-foreground)}.chat-activity-toggle .activity-chevron{display:flex;margin-left:2px}.chat-activity-toggle .activity-chevron svg{width:10px;height:10px}.chat-activity-toggle[aria-expanded=true] .activity-chevron{transform:rotate(90deg)}
 .chat-activity{min-width:0;margin:0 0 8px;padding-left:4px;border-left:1px solid var(--line)}.chat-tool-row{display:flex;align-items:baseline;gap:8px;padding:4px 8px;font-size:12px;color:var(--muted);min-width:0}.chat-tool-row>span:last-child{min-width:0;overflow-wrap:anywhere}.tool-glyph{display:flex;align-self:center;flex:none}.chat-activity p,.chat-activity>button{font-size:11px;margin-left:8px}
 .chat-result-card{margin:12px 0 16px;border:1px solid var(--line);border-radius:10px;background:var(--vscode-editor-background,#202021);overflow:hidden;font-size:12px;min-width:0}.chat-result-head{display:flex;align-items:center;gap:12px;padding:12px;border-bottom:1px solid var(--line)}.chat-result-mark{display:grid;place-items:center;width:30px;height:30px;border:1px solid var(--line);border-radius:8px;flex:none}.chat-result-head>div{min-width:0;flex:1}.chat-result-head strong,.chat-result-head small{display:block}.chat-result-head strong{font-size:12px;line-height:1.4}.chat-result-head small{font-size:11px;margin-top:3px}.chat-result-head>button{flex:none;font-size:11px;min-height:28px}
@@ -68,7 +68,7 @@
 .chat-continuity{margin-top:10px;border-top:1px solid var(--line);padding-top:8px;font-size:11px}.chat-continuity>summary{cursor:pointer}.chat-continuity pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:190px;overflow:auto;font:inherit;line-height:1.5;background:var(--vscode-editor-background);padding:8px;border-radius:6px}.composer-context-menu{max-height:min(70vh,560px);overflow:auto}
 /* Task-list markers are content, not the full-width inputs used by setup forms. */
 .message-body li.task-item{position:relative;list-style:none}
-.message-body li.task-item>input[type=checkbox]{position:absolute;left:-20px;top:3px;width:13px;height:13px;min-height:0;margin:0;padding:0;accent-color:var(--vscode-button-background,#7c5cff)}
+.message-body li.task-item>input[type=checkbox]{position:absolute;left:-20px;top:3px;width:13px;height:13px;min-height:0;margin:0;padding:0;accent-color:var(--vscode-button-background,var(--accent))}
 /* "Used [logo] Aave": the plugins a reply took an answer from, quiet under it. */
 .msg-plugins{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;margin:6px 0 0;color:var(--vscode-descriptionForeground);font-size:11px;line-height:1.5}
 .msg-plugin{display:inline-flex;align-items:center;gap:4px;min-width:0}
@@ -78,10 +78,10 @@
 /* Grok's A/B card: the Pip's choices under its latest reply. */
 .msg-choices{display:flex;flex-direction:column;gap:6px;margin:8px 0 2px;max-width:420px}
 .msg-choice{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:8px 12px;border:1px solid var(--pip-edge,var(--vscode-widget-border));border-radius:10px;background:transparent;color:var(--vscode-foreground);font:inherit;cursor:pointer}
-.msg-choice:hover:not(:disabled){border-color:var(--pip-accent,#6D49E8);background:color-mix(in srgb,var(--pip-accent,#6D49E8) 8%,transparent)}
+.msg-choice:hover:not(:disabled){border-color:var(--pip-accent);background:color-mix(in srgb,var(--pip-accent) 8%,transparent)}
 .msg-choice:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:1px}
 .msg-choice:disabled{opacity:.55;cursor:default}
-.msg-choice-key{flex:none;width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-size:11px;font-weight:600;color:var(--pip-accent,#6D49E8);border:1px solid color-mix(in srgb,var(--pip-accent,#6D49E8) 45%,transparent)}
+.msg-choice-key{flex:none;width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-size:11px;font-weight:600;color:var(--pip-accent);border:1px solid color-mix(in srgb,var(--pip-accent) 45%,transparent)}
 
 /* A Pip's runs in its own chat (Pips API 51, pipRunPosts.js), as the Pip speaking: its face, name and the time over
    the words, which look like its replies (a bubble in a Personal Pip's chat, a reply's text in a project's), and a
@@ -152,7 +152,7 @@ details[open]>summary .run-post-chev{transform:rotate(90deg)}
 .run-post-started{align-self:center;color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.35}
 @media(prefers-reduced-motion:reduce){.run-post-spinner{animation:none}}
 .run-post-flash{animation:run-post-flash 1.6s ease-out}
-@keyframes run-post-flash{0%{background:color-mix(in srgb,var(--vscode-focusBorder,#7c5cff) 22%,transparent)}100%{background:transparent}}
+@keyframes run-post-flash{0%{background:color-mix(in srgb,var(--vscode-focusBorder,var(--accent)) 22%,transparent)}100%{background:transparent}}
 @media (prefers-reduced-motion:reduce){.run-post-flash{animation:none;outline:1px solid var(--vscode-focusBorder)}.run-post-chev{transition:none}}
 @media(forced-colors:active){.run-post-chip{border:1px solid ButtonText}}
 .hist-row-out{font-weight:600}

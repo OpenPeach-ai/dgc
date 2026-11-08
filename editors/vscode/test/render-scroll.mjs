@@ -13,9 +13,10 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 import { buildSync } from "esbuild";
+import { readStylesheet } from "./support/stylesheet.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const panelSrc = readFileSync(here + "/../src/panel.ts", "utf8");
-const css = readFileSync(here + "/../media/main.css", "utf8");
+const css = readStylesheet(here + "/../media/main.css");
 const mainJs = readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
 const markdownJs = buildSync({ entryPoints: [here + "/../src/markdown.ts"], bundle: true,
   format: "iife", globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;

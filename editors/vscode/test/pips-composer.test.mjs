@@ -5,6 +5,7 @@ import {JSDOM} from 'jsdom';
 import {chromium} from 'playwright';
 import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
+import { TOKENS_CSS, readStylesheet } from "./support/stylesheet.mjs";
 // Chromium the way the other layout tests start it: a machine without it skips (GitHub's release job installs
 // none, and a launch here failed the 0.48.2 release), and DGC_REQUIRE_CHROMIUM=1 makes that a failure.
 async function launchOrSkip(t){try{return await chromium.launch({args:['--headless=new','--no-sandbox']});}catch(error){if(process.env.DGC_REQUIRE_CHROMIUM==='1')throw error;t.skip('Chromium could not start: '+String(error?.message||error).split('\n')[0]);return null;}}
@@ -58,7 +59,7 @@ test('at narrow and wide sizes only the transcript scrolls while composer positi
   const page=await browser.newPage({viewport:{width:300,height:700}});
   await page.route('**/*',route=>route.request().isNavigationRequest()?route.fulfill({contentType:'text/html',body:'<style>html,body{margin:0;height:100%;overflow:hidden}#host{width:100%;height:100%}</style>'+(embedded?'<div id="host"></div>':'<main id="app"></main><div id="review-root"></div>')}):route.abort());
   await page.goto('https://pips-composer.invalid/');await page.addScriptTag({content:client});
-  const css=['pips.css','pipsTranscript.css'].map(file=>readFileSync(new URL('../src/'+file,import.meta.url),'utf8').replace(/^@import[^;]+;/gm,'')).join('\n');
+  const css=readStylesheet(TOKENS_CSS)+'\n'+['pips.css','pipsTranscript.css'].map(file=>readFileSync(new URL('../src/'+file,import.meta.url),'utf8').replace(/^@import[^;]+;/gm,'')).join('\n');
   await page.evaluate(({css,embedded,ws,types,pip,runner,chatControls,catalog,messages})=>{
    // Geometry is independent of the polling clock. A real four-second timer
    // can replace a node between locator resolution and its geometry read when
@@ -138,7 +139,7 @@ test('the Pip in a chat\'s header is never clipped when it hops: only its name i
  const browser=await launchOrSkip(t);if(!browser)return;
  try{
   const page=await browser.newPage({viewport:{width:320,height:200}});
-  const css=readFileSync(new URL('../src/pips.css',import.meta.url),'utf8').replace(/^@import[^;]+;/gm,'');
+  const css=readStylesheet(TOKENS_CSS)+readFileSync(new URL('../src/pips.css',import.meta.url),'utf8').replace(/^@import[^;]+;/gm,'');
   await page.setContent(`<style>${css}</style><div class="pip-topbar"><button>Back</button><div class="pip-pill"><span class="avatar"><span class="dgc-plush"><svg class="dgc-plush-rig"></svg></span></span><span>A Pip with a name far too long to fit in its header</span><small>Working</small></div><button>More</button></div>`);
   const got=await page.evaluate(()=>{const o=s=>getComputedStyle(document.querySelector(s)).overflow;return{avatar:o('.pip-pill .avatar'),body:o('.pip-pill .dgc-plush'),name:o('.pip-pill>span:not(.avatar)')};});
   assert.deepEqual(got,{avatar:'visible',body:'visible',name:'hidden'},'the name\'s ellipsis must not clip the Pip, whose drawing is spans too');
@@ -170,7 +171,7 @@ test('the thinking control uses this Pip’s face at every effort stop',async(t)
  const browser=await launchOrSkip(t);if(!browser)return;
  try{
   const page=await browser.newPage({viewport:{width:390,height:420}});
-  const css=readFileSync(new URL('../src/pips.css',import.meta.url),'utf8').replace(/^@import[^;]+;/gm,'');
+  const css=readStylesheet(TOKENS_CSS)+readFileSync(new URL('../src/pips.css',import.meta.url),'utf8').replace(/^@import[^;]+;/gm,'');
   const plush=x.d.querySelector('#pips-plush-styles')?.textContent||'';
   const sprite=`data:image/webp;base64,${readFileSync(new URL('../media/pips/plush-bodies.webp',import.meta.url)).toString('base64')}`;
   const control=x.d.querySelector('.composer-effort-control').outerHTML.replaceAll('../media/pips/plush-bodies.webp',sprite);

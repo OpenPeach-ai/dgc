@@ -3,6 +3,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { readStylesheet } from "./support/stylesheet.mjs";
 
 let chromium;
 try { ({ chromium } = await import("@playwright/test")); } catch { chromium = null; }
@@ -24,7 +25,7 @@ for (const [name, sheet, menu] of [["ChatDGC", "media/chatdgc.css", `<div class=
     if (skipOrFail(t)) return;
     const page = await browser.newPage({ viewport: { width: 500, height: 360 } });
     try {
-      const css = readFileSync(new URL(`../${sheet}`, import.meta.url), "utf8");
+      const css = readStylesheet(new URL(`../${sheet}`, import.meta.url));
       await page.setContent(`<style>${css}</style><div style="position:fixed;left:0;right:0;bottom:0;height:120px"><div style="position:relative;height:100%">${menu}</div></div>`);
       const box = await page.locator(".cd-model-menu, #modelmenu").first().boundingBox();
       assert.ok(box.y >= 0, `its top is inside the page (${box.y})`);

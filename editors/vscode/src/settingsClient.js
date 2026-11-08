@@ -1,4 +1,6 @@
 import { APP_CONNECTORS, ownAppRedirect } from './appConnectors';
+// One set of tokens for every page, first, so each page's own stylesheet can lean on it (media/shared/tokens.css).
+import '../media/shared/tokens.css';
 import './settings.css';
 import zapierLogo from '../media/plugin-logos/zapier.ico';
 import makeLogo from '../media/plugin-logos/make.ico';

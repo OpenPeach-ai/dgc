@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
+import { readStylesheet } from "./support/stylesheet.mjs";
 
 // Pills in a REAL browser, with real keystrokes.
 //
@@ -30,7 +31,7 @@ before(async () => {
     browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox"] });
   } catch { browser = null; return; }
   const panelSrc = readFileSync(here + "/../src/panel.ts", "utf8");
-  const css = readFileSync(here + "/../media/main.css", "utf8") + readFileSync(here + "/../media/mentions.css", "utf8");
+  const css = readStylesheet(here + "/../media/main.css") + readFileSync(here + "/../media/mentions.css", "utf8");
   // The faces are real here (a page without them draws a stand-in icon, on another baseline).
   const mainJs = readFileSync(here + "/../media/pips/plush.js", "utf8") + "\n" + readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
   const pasteCleanJs = readFileSync(here + "/../media/pasteclean.js", "utf8");

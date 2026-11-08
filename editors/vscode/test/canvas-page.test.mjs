@@ -49,6 +49,7 @@ async function open(file = FILE) {
     if (route.request().isNavigationRequest()) return route.fulfill({ contentType: "text/html", body: html });
     if (url.endsWith("/dist/canvas.js")) return route.fulfill({ contentType: "text/javascript", body: script });
     if (url.endsWith("/media/canvas.css")) return route.fulfill({ contentType: "text/css", body: readFileSync(media("canvas.css")) });
+    if (url.endsWith("/media/shared/tokens.css")) return route.fulfill({ contentType: "text/css", body: readFileSync(media("shared/tokens.css")) });
     if (url.endsWith("/media/codicon.css")) return route.fulfill({ contentType: "text/css", body: readFileSync(media("codicon.css")) });
     if (url.endsWith("/dist/katex/katex.js")) return route.fulfill({ contentType: "text/javascript", body: katexScript });
     if (url.endsWith("/dist/katex/katex.css")) return route.fulfill({ contentType: "text/css", body: readFileSync(require.resolve("katex/dist/katex.min.css")) });

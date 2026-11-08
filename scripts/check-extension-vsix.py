@@ -34,6 +34,8 @@ STATIC_MEMBERS = {
     "extension/media/mentions.js": "media/mentions.js",
     "extension/media/mentions.css": "media/mentions.css",
     "extension/media/main.css": "media/main.css",
+    # One set of tokens every page loads (main.css imports it; the bundles carry their own copy).
+    "extension/media/shared/tokens.css": "media/shared/tokens.css",
     "extension/media/genui.css": "media/genui.css",
     "extension/media/tool-insights.js": "media/tool-insights.js",
     "extension/media/dgc.svg": "media/dgc.svg",

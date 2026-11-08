@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
+import { readStylesheet } from "./stylesheet.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url)) + "/../..";
 
@@ -45,7 +46,7 @@ let cached;
 export function panelHtml() {
   if (cached) return cached;
   const panelSrc = readFileSync(here + "/src/panel.ts", "utf8");
-  const css = readFileSync(here + "/media/main.css", "utf8");
+  const css = readStylesheet(here + "/media/main.css");
   const codicon = readFileSync(here + "/media/codicon.css", "utf8").replace(/url\([^)]*codicon\.ttf[^)]*\)/,
     `url("data:font/ttf;base64,${readFileSync(here + "/media/codicon.ttf").toString("base64")}")`);
   // The prompt rail (DgcPromptRail) is loaded before main.js, as the panel loads it.

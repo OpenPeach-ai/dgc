@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
 import { THEMES as THINKING_THEMES } from "../render-thinking.mjs";
+import { readStylesheet } from "./stylesheet.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..", "..");
@@ -68,7 +69,7 @@ let assets;
 function loadAssets() {
   if (assets) return assets;
   const panelSrc = readFileSync(join(root, "src/panel.ts"), "utf8");
-  const css = readFileSync(join(root, "media/main.css"), "utf8");
+  const css = readStylesheet(join(root, "media/main.css"));
   const mainJs = readFileSync(join(root, "media/mentions.js"), "utf8") + "\n" + readFileSync(join(root, "media/main.js"), "utf8");
   const markdownJs = buildSync({ entryPoints: [join(root, "src/markdown.ts")], bundle: true,
     format: "iife", globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;

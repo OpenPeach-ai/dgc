@@ -51,22 +51,22 @@
    #cbox/.cinput/#cfooter. Pip-only limits live in the popup, not extra rows. */
 .pip-composer{position:relative;z-index:2;flex:none;display:flex;flex-direction:column;border:1px solid var(--vscode-input-border,var(--vscode-widget-border,#3a3a3d));border-radius:16px;padding:0;background:var(--vscode-input-background,var(--vscode-dropdown-background,#29292b));margin-top:8px;box-shadow:0 7px 24px rgba(0,0,0,.18);--composer-faint:var(--vscode-disabledForeground,var(--vscode-descriptionForeground,#96969b))}
 .pip-composer:focus-within{border-color:var(--vscode-input-border,var(--vscode-widget-border,#3a3a3d))}.composer-input{min-height:50px;display:flex;align-items:flex-start;gap:8px;padding:12px 12px 4px}.pip-composer textarea{display:block;flex:1;min-width:0;min-height:0;max-height:160px;border:0;outline:0;background:transparent;color:var(--vscode-foreground,#d7d7da);font:400 13px/1.6 var(--vscode-font-family,system-ui);padding:0;margin:0;resize:none;overflow-y:hidden}.pip-composer textarea::placeholder{color:var(--composer-faint)}.pip-composer textarea:focus-visible{outline:0}.pip-composer .mention-box{display:block;flex:1;min-width:0;min-height:0;max-height:160px;border:0;outline:0;background:transparent;color:var(--vscode-foreground,#d7d7da);font:400 13px/1.6 var(--vscode-font-family,system-ui);padding:0;margin:0}.pip-composer .mention-box.is-empty::before{color:var(--composer-faint)}
-/* What media/mentions.css reads. In the side bar a Pip's page inherits them from Work's page; its own tab has no main.css. */
-body.pip-app-root{--link:#A78BFA;--text:var(--vscode-foreground);--faint:var(--vscode-disabledForeground,var(--vscode-descriptionForeground,#96969b));--sel:var(--vscode-list-activeSelectionBackground,rgba(255,255,255,.06));--border-strong:var(--vscode-input-border,var(--vscode-widget-border,#3a3a3d));--sans:var(--vscode-font-family,system-ui);--mono:var(--vscode-editor-font-family,monospace);--sp-1:4px;--sp-2:8px;--sp-3:12px;--r-sm:6px;--r-lg:10px;--t-xs:11px;--t-sm:12px;--w-reg:400;--w-med:500}body.pip-app-root.vscode-light{--link:#6D49E8}
+/* What media/mentions.css and the rest read of Work's tokens (--link, --text, --sp-*, …) comes from
+   media/shared/tokens.css: the side bar's Pips inherit it from Work's page, a Pip's own tab has it in this bundle. */
 .pip-composer .composer-controls{display:flex;align-items:center;flex-wrap:wrap;gap:4px;row-gap:4px;padding:4px 8px 8px}.composer-left,.composer-right{display:flex;align-items:center;gap:4px;min-width:0}.composer-left{flex:0 1 auto}.composer-right{flex:1 1 200px;justify-content:flex-end}.composer-left>*,.composer-right>*{flex:0 0 auto}.pip-composer .composer-chip,.pip-composer .model-control{height:28px;min-height:28px;min-width:28px;border:0;border-radius:8px;background:transparent;color:var(--composer-faint);padding:0 8px;display:inline-flex;align-items:center;justify-content:center;gap:4px;font:500 12px/1 var(--vscode-font-family,system-ui)}.pip-composer .composer-chip{width:28px;padding:0}.pip-composer .model-control{flex:0 1 auto;max-width:100%;min-width:0;padding:0 4px 0 8px}.model-copy{min-width:0;display:flex;align-items:center;gap:4px}.composer-model-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--vscode-foreground,#d7d7da)}.composer-effort-name{flex:0 0 auto;font-size:11px;color:var(--composer-faint);white-space:nowrap}.composer-chevron{flex:none;display:flex}.composer-chevron svg{width:12px;height:12px}.pip-composer .composer-chip:hover,.pip-composer .model-control:hover{background:var(--vscode-toolbar-hoverBackground,#ffffff0a);color:var(--vscode-foreground)}
-.pip-composer .chat-send{height:28px;width:28px;min-height:28px;margin-left:4px;border:0;border-radius:9999px;padding:0;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;color:var(--composer-faint);background:transparent;transition:background .12s,color .12s}.pip-composer .chat-send.ready{background:#7654f6;color:#fff}.pip-composer .chat-send.ready:hover{background:#6a4bf0}.pip-composer .chat-send:not(.ready):hover{background:var(--vscode-panel-border,#303032);color:var(--vscode-foreground)}.pip-composer .chat-send:disabled{opacity:1;cursor:default}.pip-composer #chat-stop{flex:none}.composer-hint{font-size:11px;line-height:1.45;margin:4px 2px 0;color:var(--vscode-descriptionForeground,#96969b)}
+.pip-composer .chat-send{height:28px;width:28px;min-height:28px;margin-left:4px;border:0;border-radius:9999px;padding:0;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;color:var(--composer-faint);background:transparent;transition:background .12s,color .12s}.pip-composer .chat-send.ready{background:var(--accent-fill);color:#fff}.pip-composer .chat-send.ready:hover{background:var(--accent-hover)}.pip-composer .chat-send:not(.ready):hover{background:var(--vscode-panel-border,#303032);color:var(--vscode-foreground)}.pip-composer .chat-send:disabled{opacity:1;cursor:default}.pip-composer #chat-stop{flex:none}.composer-hint{font-size:11px;line-height:1.45;margin:4px 2px 0;color:var(--vscode-descriptionForeground,#96969b)}
 .composer-model-menu{position:absolute;bottom:calc(100% + 8px);right:0;z-index:20;display:flex;flex-direction:column;width:min(300px,100%);max-height:min(440px,62vh);overflow-y:auto;padding:8px;border:1px solid var(--vscode-input-border,var(--vscode-widget-border,#3a3a3d));border-radius:10px;background:var(--vscode-editor-background,#202021);box-shadow:0 14px 40px -10px rgba(0,0,0,.75)}.composer-model-menu>.section-head{flex:none;margin:0 0 4px}.composer-model-menu>.section-head strong{font-size:12px}.composer-model-menu>.section-head button{font-size:11px;min-height:24px;padding:0 4px;background:transparent}.composer-model-menu>p,.composer-model-heading p{font-size:11px;line-height:1.45;flex:none}.composer-model-heading{flex:none;border-top:1px solid var(--line);padding-top:8px;margin-top:8px}.composer-model-heading strong{font-size:12px}.composer-model-menu>input{font-size:12px;flex:none;margin:4px 0}.composer-model-options{overflow-y:auto;min-height:32px;flex:1 1 auto}.composer-model-options button{display:block;text-align:left;width:100%;padding:6px 8px;background:transparent;border-radius:6px;font-size:12px}.composer-model-options button[aria-selected=true]{background:var(--vscode-list-activeSelectionBackground);color:var(--vscode-list-activeSelectionForeground)}.composer-model-options button:hover{background:var(--vscode-list-hoverBackground)}.composer-model-options small{display:block;font-size:11px;color:inherit;opacity:.8}.composer-model-menu>#chat-refresh-models{flex:none;margin-top:4px;font-size:11px;align-self:flex-start;background:transparent}
 /* The face rides a slimmer track: at Work's thick one its purple sank into the filled part (the contact sheet, r2-e). The box stays the face's height, so the place to grab is as big as it was. */
-.composer-effort-control{--effort-track:14px;--effort-face:26px;--effort-fill:calc(var(--effort-face)/2 + (100% - var(--effort-face))*var(--effort-t,0));flex:none;padding:8px 4px 0}.composer-effort-control[data-step="0"]{--effort-fill:0%}.composer-effort-control[data-step="4"]{--effort-fill:100%}.composer-effort-slider{appearance:none;display:block;width:100%;height:var(--effort-face);min-height:0;padding:0;border:0;margin:0;background:transparent;cursor:pointer}.composer-effort-slider::-webkit-slider-runnable-track{height:var(--effort-track);border-radius:9999px;background:linear-gradient(to right,#7c5cff var(--effort-fill),color-mix(in srgb,var(--vscode-foreground) 14%,transparent) var(--effort-fill))}.composer-effort-slider::-webkit-slider-thumb{appearance:none;width:var(--effort-face);height:var(--effort-face);margin-top:calc((var(--effort-track) - var(--effort-face))/2);border-radius:9999px;background:var(--vscode-editor-foreground,var(--vscode-foreground,#f5f5f6));border:1px solid var(--line);box-shadow:0 1px 4px rgba(0,0,0,.18)}.composer-effort-labels{display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--muted)}.composer-effort-labels output{color:var(--vscode-foreground)}.composer-scope,.composer-unavailable{font-size:11px;line-height:1.45;color:var(--muted)}.composer-context-menu{left:0;right:auto;padding:12px}.composer-context-size{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px}.composer-context-size label{margin:0;font-size:11px}.composer-context-size select{width:auto;height:24px;padding:0 8px;font:600 11px/1 var(--vscode-editor-font-family,monospace);border:1px solid var(--line);border-radius:6px}.composer-context-menu p{margin:8px 0 0}
+.composer-effort-control{--effort-track:14px;--effort-face:26px;--effort-fill:calc(var(--effort-face)/2 + (100% - var(--effort-face))*var(--effort-t,0));flex:none;padding:8px 4px 0}.composer-effort-control[data-step="0"]{--effort-fill:0%}.composer-effort-control[data-step="4"]{--effort-fill:100%}.composer-effort-slider{appearance:none;display:block;width:100%;height:var(--effort-face);min-height:0;padding:0;border:0;margin:0;background:transparent;cursor:pointer}.composer-effort-slider::-webkit-slider-runnable-track{height:var(--effort-track);border-radius:9999px;background:linear-gradient(to right,var(--accent) var(--effort-fill),color-mix(in srgb,var(--vscode-foreground) 14%,transparent) var(--effort-fill))}.composer-effort-slider::-webkit-slider-thumb{appearance:none;width:var(--effort-face);height:var(--effort-face);margin-top:calc((var(--effort-track) - var(--effort-face))/2);border-radius:9999px;background:var(--vscode-editor-foreground,var(--vscode-foreground,#f5f5f6));border:1px solid var(--line);box-shadow:0 1px 4px rgba(0,0,0,.18)}.composer-effort-labels{display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--muted)}.composer-effort-labels output{color:var(--vscode-foreground)}.composer-scope,.composer-unavailable{font-size:11px;line-height:1.45;color:var(--muted)}.composer-context-menu{left:0;right:auto;padding:12px}.composer-context-size{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px}.composer-context-size label{margin:0;font-size:11px}.composer-context-size select{width:auto;height:24px;padding:0 8px;font:600 11px/1 var(--vscode-editor-font-family,monospace);border:1px solid var(--line);border-radius:6px}.composer-context-menu p{margin:8px 0 0}
 @media(prefers-reduced-motion:reduce){.pip-composer .chat-send{transition:none}}
 .pip-composer-shell{position:relative;flex:none;min-width:0}
 .pip-composer .composer-routines{display:inline-flex;align-items:center;gap:5px;min-height:28px;border:0;border-radius:8px;padding:0 7px;background:transparent;color:var(--composer-faint);font-size:11px;white-space:nowrap}
 .pip-composer .composer-routines:hover,.pip-composer .composer-routines[aria-expanded=true]{background:var(--vscode-toolbar-hoverBackground,#ffffff0a);color:var(--vscode-foreground)}
-.composer-routines b{display:grid;place-items:center;min-width:16px;height:16px;padding:0 3px;border-radius:999px;background:color-mix(in srgb,#7c5cff 20%,transparent);color:var(--vscode-foreground);font-size:10px}
+.composer-routines b{display:grid;place-items:center;min-width:16px;height:16px;padding:0 3px;border-radius:999px;background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--vscode-foreground);font-size:10px}
 .pip-routines-popover{position:absolute;z-index:25;right:0;bottom:calc(100% + 8px);width:min(390px,100%);max-height:min(520px,65vh);overflow:auto;padding:12px;border:1px solid var(--vscode-widget-border,var(--line));border-radius:12px;background:var(--vscode-editor-background,#202021);box-shadow:0 14px 40px -10px rgba(0,0,0,.75)}
 .pip-routines-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}.pip-routines-head strong{font-size:12px}.pip-routines-head small{margin-left:auto}.pip-routines-head button{min-width:26px;min-height:26px;padding:0;font-size:18px;line-height:1}
 .pip-routines-popover .routine-list{margin:0}.pip-routines-popover .routine-row{min-width:0}.pip-routines-popover .routine-form-row{min-width:0}.pip-routines-popover .routine-form{min-width:0}
-.composer-effort-slider,.composer-effort-slider:focus,.composer-effort-slider:focus-visible{outline:none}.composer-effort-control:has(.composer-effort-slider.by-keys:focus-visible) .composer-effort-face{border-radius:50%;box-shadow:0 0 0 2px #7c5cff,0 0 0 4px color-mix(in srgb,#7c5cff 30%,transparent)}
+.composer-effort-slider,.composer-effort-slider:focus,.composer-effort-slider:focus-visible{outline:none}.composer-effort-control:has(.composer-effort-slider.by-keys:focus-visible) .composer-effort-face{border-radius:50%;box-shadow:0 0 0 2px var(--accent),0 0 0 4px color-mix(in srgb,var(--accent) 30%,transparent)}
 .composer-effort-control{position:relative}.composer-effort-slider::-webkit-slider-thumb{background:transparent;border-color:transparent;box-shadow:none}.composer-effort-face{position:absolute;z-index:1;top:8px;left:calc(4px + var(--effort-face)/2 + (100% - 8px - var(--effort-face))*var(--effort-t,0));width:var(--effort-face);height:var(--effort-face);transform:translateX(-50%);pointer-events:none}.composer-effort-face .avatar{display:block;width:var(--effort-face);height:var(--effort-face);animation:pip-effort-breathe 3.4s ease-in-out infinite}
 @keyframes pip-effort-breathe{0%,100%{transform:translateY(0)}50%{transform:translateY(-1px)}}
 @container(max-width:430px){.composer-routines>span{display:none}.pip-composer .composer-routines{padding:0 5px}}
@@ -95,12 +95,12 @@ body.pip-app-root{--link:#A78BFA;--text:var(--vscode-foreground);--faint:var(--v
    every width. With Pips, the list keeps its reading order from the left. */
 .pips-overview-intro.welcome{margin:8px auto 22px;text-align:center}.pips-overview-intro.welcome p{margin-inline:auto}
 .pips-first-job{justify-self:center;width:100%;box-sizing:border-box}
-.pips-first-job{grid-column:1/-1;text-align:center;border:1px dashed var(--line);border-radius:14px;padding:28px 20px;max-width:640px;background:radial-gradient(ellipse at 50% 0%,#9475d609,transparent 70%)}
+.pips-first-job{grid-column:1/-1;text-align:center;border:1px dashed var(--line);border-radius:14px;padding:28px 20px;max-width:640px;background:radial-gradient(ellipse at 50% 0%,color-mix(in srgb,var(--accent) 3.5%,transparent),transparent 70%)}
 .pips-welcome-cast{display:flex;align-items:center;justify-content:center;gap:14px;margin-bottom:22px}.pips-welcome-cast .avatar{width:44px;height:44px}.pips-welcome-cast .avatar:nth-child(2){transform:translateY(-5px)}
 .pips-first-job h3{font-size:15px;letter-spacing:-.02em;font-weight:500}.pips-first-job p{color:var(--muted);font-size:12px;max-width:300px;margin:8px auto 16px}.pips-first-job small{display:block;font-size:10px;margin-top:14px}.pips-first-job button{border-radius:7px;padding:7px 13px}
-.setup-card{display:grid;grid-template-columns:24px minmax(0,1fr);gap:7px 10px;border-radius:7px;padding:9px 11px;background:linear-gradient(130deg,#9475d60a,transparent 80%)}.setup-card>.avatar{width:24px;height:24px}.setup-card-copy{min-width:0}.setup-card h3{font-size:13px;margin:5px 0}.setup-card>.actions{grid-column:2;margin:0;gap:6px}.setup-card .badge{border:0;padding:0;font-size:10px;color:var(--vscode-textLink-foreground)}
-.type-card{border-radius:12px;background:linear-gradient(135deg,#9475d608,transparent);transition:border-color .16s}.type-card:hover{border-color:var(--vscode-focusBorder)}
-.hero{border-bottom:1px solid var(--line);padding-bottom:10px}.hero .copy h2{font-weight:550;letter-spacing:-.02em}.tabs button{transition:color .16s}.tabs button[aria-pressed=true]{border-bottom-color:#997ee7}
+.setup-card{display:grid;grid-template-columns:24px minmax(0,1fr);gap:7px 10px;border-radius:7px;padding:9px 11px;background:linear-gradient(130deg,color-mix(in srgb,var(--accent) 4%,transparent),transparent 80%)}.setup-card>.avatar{width:24px;height:24px}.setup-card-copy{min-width:0}.setup-card h3{font-size:13px;margin:5px 0}.setup-card>.actions{grid-column:2;margin:0;gap:6px}.setup-card .badge{border:0;padding:0;font-size:10px;color:var(--vscode-textLink-foreground)}
+.type-card{border-radius:12px;background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 3%,transparent),transparent);transition:border-color .16s}.type-card:hover{border-color:var(--vscode-focusBorder)}
+.hero{border-bottom:1px solid var(--line);padding-bottom:10px}.hero .copy h2{font-weight:550;letter-spacing:-.02em}.tabs button{transition:color .16s}.tabs button[aria-pressed=true]{border-bottom-color:var(--accent)}
 @container(max-width:400px){.layout.overview>aside{padding:14px 12px}.pips-overview-intro h2{font-size:20px}.layout.overview .job{padding:9px;gap:8px}.layout.overview .job-copy{column-gap:6px}.layout.overview .job-schedule{max-width:135px}}
 @media(prefers-reduced-motion:reduce){.layout.overview .job,.type-card,.tabs button{transition:none}}
 .setup-inbox-toggle{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;list-style:none;padding:8px 0;font-size:12px;font-weight:500}.setup-inbox-toggle::-webkit-details-marker{display:none}.setup-inbox-toggle>span{font-size:11px;font-weight:400;color:var(--vscode-textLink-foreground)}.setup-inbox details[open]>.section-head{margin-top:10px}.setup-inbox details[open]>.setup-inbox-toggle>span{visibility:hidden}
@@ -112,7 +112,7 @@ body.pip-app-root{--link:#A78BFA;--text:var(--vscode-foreground);--faint:var(--v
 .pips-tabs>.pips-tab{flex:1 1 0;display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:0;min-height:20px;margin:0;padding:0 8px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--vscode-descriptionForeground,#B2B2B6);font:600 12px/1 var(--vscode-font-family,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif);white-space:nowrap;cursor:pointer}
 .pips-tabs>.pips-tab:hover{background:transparent;color:var(--vscode-foreground,#D7D7DA)}
 .pips-tabs>.pips-tab[aria-selected=true]{border-color:var(--vscode-input-border,var(--vscode-widget-border,#3A3A3D));background:var(--vscode-input-background,var(--vscode-dropdown-background,#29292B));color:var(--vscode-editor-foreground,var(--vscode-foreground,#F5F5F6))}
-.pips-tabs>.pips-tab:focus-visible{outline:1px solid var(--vscode-focusBorder,#7C5CFF);outline-offset:1px}
+.pips-tabs>.pips-tab:focus-visible{outline:1px solid var(--vscode-focusBorder,var(--accent));outline-offset:1px}
 @media(forced-colors:active){.pips-tabs{border-color:CanvasText;background:Canvas}.pips-tabs>.pips-tab{color:CanvasText}.pips-tabs>.pips-tab[aria-selected=true]{border-color:CanvasText;background:ButtonFace}}
 /* The project's bar is as tall as the Personal one above the tabs, so switching never moves them. */
 .extension-pips .embedded-header.scoped{padding:8px 12px 6px}
@@ -136,7 +136,7 @@ body.pip-app-root{--link:#A78BFA;--text:var(--vscode-foreground);--faint:var(--v
 .grant-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:6px 0;border-top:1px solid var(--line)}
 /* Polish pass (2026-10): one purple action per section, quiet outlines for the rest, room between things.
    Placed last on purpose: these equal-specificity rules replace the grey button look above. */
-:host,:root{--pip-accent:#6D49E8;--pip-accent-hover:#5B39D6;--pip-ink:color-mix(in srgb,var(--vscode-foreground) 35%,#7C5CFA);--pip-edge:color-mix(in srgb,var(--vscode-foreground) 20%,transparent);--pip-wash:color-mix(in srgb,var(--vscode-foreground) 7%,transparent);--pip-tint:color-mix(in srgb,#7C5CFA 12%,transparent)}
+:host,:root{--pip-accent:var(--accent-fill);--pip-accent-hover:var(--accent-hover);--pip-ink:color-mix(in srgb,var(--vscode-foreground) 35%,var(--accent));--pip-edge:color-mix(in srgb,var(--vscode-foreground) 20%,transparent);--pip-wash:color-mix(in srgb,var(--vscode-foreground) 7%,transparent);--pip-tint:color-mix(in srgb,var(--accent) 12%,transparent)}
 /* Plain buttons only (no class, or the helper's empty one): special buttons such as list rows, tabs and
    the rail keep their own look. :is() takes [class=""]'s weight, so these beat the base `button` rule. */
 button:is(:not([class]),[class=""]):not([data-tab]),button.primary,button.quiet,button.link,button.danger{min-height:30px;border-radius:6px;padding:5px 12px;font-weight:500;transition:background-color .12s,border-color .12s}
@@ -162,7 +162,7 @@ input,textarea,select{border-radius:6px;padding:7px 10px}
 .hero .muted{font-size:12px}
 .review-count{display:inline-block;margin-top:4px;padding:1px 8px;border-radius:999px;background:var(--pip-tint);color:var(--pip-ink);font-size:11px}
 /* What is waiting for the user: a card, with the two choices beside each change. */
-.waiting{margin:0 0 18px;padding:12px 14px;border:1px solid color-mix(in srgb,#7C5CFA 45%,transparent);border-radius:8px;background:var(--pip-tint)}
+.waiting{margin:0 0 18px;padding:12px 14px;border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);border-radius:8px;background:var(--pip-tint)}
 .waiting h3{margin:0 0 6px;font-size:13px}
 .waiting-row{display:flex;align-items:center;justify-content:space-between;gap:8px 14px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--pip-edge)}
 .waiting-row:first-of-type{border-top:0;padding-top:2px}
@@ -199,7 +199,7 @@ details.advanced>.section:first-of-type{padding-top:12px}
 .dialog .actions{gap:8px}
 .notice{border-radius:6px}
 .runner-menu{z-index:30}
-.tabs button[aria-pressed=true]{background:transparent;border-bottom-color:#7C5CFA}
+.tabs button[aria-pressed=true]{background:transparent;border-bottom-color:var(--accent)}
 label>span{display:block}
 #new-pip{background:var(--pip-accent);border-color:var(--pip-accent);color:#fff}
 #new-pip:hover{background:var(--pip-accent-hover)}
@@ -280,7 +280,7 @@ button.pill{border-radius:999px;padding:6px 16px}
 .pip-row-read:hover .pip-read-word{background:var(--pip-accent-hover)}
 .pip-row-read:is(:hover,:focus-visible) .pip-new-dot{visibility:hidden}
 .pip-row-read:is(:hover,:focus-visible) .pip-read-word{display:inline-flex}
-.pip-row-read:focus-visible{outline:none}.pip-row-read:focus-visible .pip-read-word{outline:1px solid var(--vscode-focusBorder,#7C5CFF);outline-offset:1px}
+.pip-row-read:focus-visible{outline:none}.pip-row-read:focus-visible .pip-read-word{outline:1px solid var(--vscode-focusBorder,var(--accent));outline-offset:1px}
 @media(forced-colors:active){.pip-new-dot,.pip-tab-new{forced-color-adjust:none;background:Highlight}}
 .primary-badge{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#F5A524;color:#1b1b1b;font-size:10px;line-height:1}
 .pip-topbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;padding:10px 12px;flex:none}
@@ -374,7 +374,7 @@ button.pill{border-radius:999px;padding:6px 16px}
 .msg-images{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin:0 0 6px}
 .msg-image{width:120px;height:90px;object-fit:cover;border-radius:12px;border:1px solid var(--pip-edge);background:var(--pip-wash);cursor:zoom-in}
 .chat-file-chip,.msg-file{display:inline-flex;align-items:center;gap:7px;max-width:240px;height:40px;padding:0 8px 0 6px;border-radius:10px;border:1px solid var(--pip-edge);background:var(--pip-wash);font-size:12px;flex:none}
-.chat-file-ext{display:grid;place-items:center;flex:none;white-space:nowrap;min-width:28px;height:28px;padding:0 3px;border-radius:7px;background:color-mix(in srgb,var(--pip-accent,#7c5cff) 22%,transparent);color:var(--vscode-foreground);font-size:9px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.chat-file-ext{display:grid;place-items:center;flex:none;white-space:nowrap;min-width:28px;height:28px;padding:0 3px;border-radius:7px;background:color-mix(in srgb,var(--pip-accent) 22%,transparent);color:var(--vscode-foreground);font-size:9px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
 .chat-file-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chat-file-size{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
 .chat-file-chip button{width:18px;height:18px;min-height:18px;padding:0;border-radius:50%;border:0;background:transparent;color:var(--muted);font-size:13px;line-height:1}
@@ -441,7 +441,7 @@ button.pill{border-radius:999px;padding:6px 16px}
 .allow-details>summary{display:flex;gap:8px;align-items:center;list-style:none;cursor:pointer;color:var(--vscode-descriptionForeground);min-width:0}
 .allow-details>summary::-webkit-details-marker{display:none}
 .allow-details>summary .allow-preview{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.allow-details>summary>span:last-child{flex:none;color:var(--vscode-textLink-foreground,#b9a1ff)}
+.allow-details>summary>span:last-child{flex:none;color:var(--vscode-textLink-foreground,var(--link))}
 .allow-details>summary>span:last-child::after{content:'⌄';margin-left:3px}
 .allow-details[open]>summary>span:last-child::after{content:'⌃'}
 .allow-details[open]{border-top:1px solid var(--pip-edge);padding-top:8px}
@@ -560,12 +560,12 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .composer-model-summary{display:flex;align-items:center;gap:8px;width:100%;min-height:32px;padding:6px 8px;border:0;border-radius:6px;background:transparent;color:var(--vscode-foreground);font-size:12px;text-align:left}
 .composer-model-summary:hover{background:var(--vscode-list-hoverBackground)}
 .composer-model-summary svg{flex:none}
-.composer-model-summary svg:first-child{color:#7c5cff}
+.composer-model-summary svg:first-child{color:var(--accent)}
 .composer-summary-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .composer-summary-label .muted{font-size:11px}
 .composer-note{margin:10px 4px 4px;color:var(--muted);font-size:11px;line-height:1.5}
 .composer-note.clamped{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-.composer-more{display:block;align-self:flex-start;margin:0 4px 6px;padding:0;min-height:0!important;border:0;background:none;color:var(--vscode-textLink-foreground,#a78bfa);font-size:11px;cursor:pointer}
+.composer-more{display:block;align-self:flex-start;margin:0 4px 6px;padding:0;min-height:0!important;border:0;background:none;color:var(--vscode-textLink-foreground,var(--link));font-size:11px;cursor:pointer}
 .composer-more:hover{text-decoration:underline;background:none}
 .composer-model-list{display:flex;flex-direction:column;min-height:0;flex:1 1 auto}
 .composer-reasoning .composer-note,.composer-reasoning .composer-more{margin-left:10px;margin-right:10px}
@@ -585,19 +585,19 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .ctx-head>div{min-width:0;display:grid;gap:4px}
 .ctx-kicker{color:var(--muted);font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase}
 .ctx-head strong{font:600 12px/1.2 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums}
-.ctx-pct{color:#a78bfa;font:700 18px/1 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums}
+.ctx-pct{color:var(--accent-text);font:700 18px/1 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums}
 .ctx-track{height:4px;margin-top:12px;overflow:hidden;border-radius:999px;background:var(--line)}
-.ctx-track span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#7c5cff,#a78bfa)}
+.ctx-track span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--accent),var(--lav))}
 .ctx-split{display:flex;justify-content:space-between;gap:8px;margin:4px 0 10px;color:var(--muted);font:500 10px/1.2 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums}
 .composer-chip.with-text{width:auto;padding:0 6px}
 /* The context window part by part (media/breakdown.js draws it; main.css styles it in DGC's own panel, where this
    menu also shows, so each rule here sets every property main.css does and wins by scope in both places). */
 .composer-context-menu .bd{margin:10px 0 0}
 .composer-context-menu .bd-bar{display:flex;height:8px;overflow:hidden;border-radius:999px;background:var(--line)}
-.composer-context-menu .bd-seg{flex:none;height:100%;min-width:1px;background:var(--bd-c,#7c5cff)}
+.composer-context-menu .bd-seg{flex:none;height:100%;min-width:1px;background:var(--bd-c,var(--accent))}
 .composer-context-menu .bd-list{display:grid;gap:1px;margin-top:8px}
 .composer-context-menu .bd-row{display:grid;grid-template-columns:10px minmax(0,1fr) auto 3.4em;align-items:center;gap:8px;padding:3px 0;font:400 11px/1.3 var(--vscode-font-family,system-ui);color:var(--vscode-foreground)}
-.composer-context-menu .bd-dot{width:8px;height:8px;border-radius:2px;background:var(--bd-c,#7c5cff)}
+.composer-context-menu .bd-dot{width:8px;height:8px;border-radius:2px;background:var(--bd-c,var(--accent))}
 .composer-context-menu .bd-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .composer-context-menu .bd-num{color:var(--vscode-foreground);font:600 11px/1 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums;text-align:right}
 .composer-context-menu .bd-share{color:var(--muted);font:400 11px/1 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums;text-align:right}
@@ -649,12 +649,12 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .pip-row[data-state="waiting_approval"]:not([data-waiting="0"]){padding-right:10px}
 .pip-row[data-state="working"]::after,.pip-row[data-state="waiting_approval"]::after{
   content:"";position:absolute;right:13px;top:50%;width:6px;height:6px;border-radius:50%;
-  background:var(--vscode-textLink-foreground,#a78bfa);transform:translateY(-50%);pointer-events:none}
+  background:var(--vscode-textLink-foreground,var(--link));transform:translateY(-50%);pointer-events:none}
 .pip-row[data-state="waiting_approval"]::after{background:var(--vscode-editorWarning-foreground,#c9a054)}
 .pip-row[data-state="waiting_approval"]:not([data-waiting="0"])::after{display:none}
 @media(prefers-reduced-motion:no-preference) and (forced-colors:none){
   @keyframes pip-motion-enter{from{opacity:.55;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
-  @keyframes pip-motion-state{from{background:color-mix(in srgb,var(--vscode-textLink-foreground,#a78bfa) 14%,transparent)}to{background:transparent}}
+  @keyframes pip-motion-state{from{background:color-mix(in srgb,var(--vscode-textLink-foreground,var(--link)) 14%,transparent)}to{background:transparent}}
   @keyframes pip-motion-news{from{box-shadow:inset 0 0 0 1px var(--vscode-editorWarning-foreground,#c9a054)}to{box-shadow:inset 0 0 0 1px transparent}}
   .pip-motion-arrive{animation:pip-motion-enter .18s ease-out both}
   :is(.pip-row,.job).pip-motion-state{animation:pip-motion-state .55s ease-out both}
@@ -670,10 +670,10 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .allow-fields{display:grid;gap:8px;font-size:12px}.allow-fields label{margin:0;gap:3px;color:var(--vscode-descriptionForeground)}.allow-fields input,.allow-fields textarea{font-size:12px;color:var(--vscode-input-foreground)}.allow-fields textarea{min-height:0;resize:vertical;line-height:1.5}
 .allow-card[data-editing]{border-color:var(--vscode-focusBorder)}.allow-error{margin:0;font-size:12px;color:var(--vscode-errorForeground)}
 /* Needs attention (#8): every card your Pips wait on you for, above Your Pips on the home. */
-.attention{margin:0 0 18px}.attention-toggle{display:flex;align-items:center;gap:8px;width:100%;padding:5px 0;margin:0 0 8px;background:transparent;text-align:left;font-size:13px;font-weight:600}.attention-toggle:hover{background:transparent;color:#b9a1ff}.attention-toggle .codicon{margin-left:auto;font-size:12px;color:var(--muted)}.attention-count{font-size:11px;font-weight:600;min-width:18px;padding:1px 6px;border-radius:9px;background:var(--pip-accent);color:#fff;text-align:center}
+.attention{margin:0 0 18px}.attention-toggle{display:flex;align-items:center;gap:8px;width:100%;padding:5px 0;margin:0 0 8px;background:transparent;text-align:left;font-size:13px;font-weight:600}.attention-toggle:hover{background:transparent;color:var(--accent-text)}.attention-toggle .codicon{margin-left:auto;font-size:12px;color:var(--muted)}.attention-count{font-size:11px;font-weight:600;min-width:18px;padding:1px 6px;border-radius:9px;background:var(--pip-accent);color:#fff;text-align:center}
 .attention-list{list-style:none;margin:0;padding:0;display:grid;gap:2px}.attention-row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:transparent;border:1px solid transparent;border-radius:10px;padding:7px 8px;color:inherit}
 .attention-row:hover{background:var(--vscode-list-hoverBackground)}.attention-row .avatar,.attention-row .pip-avatar{width:34px;height:34px;flex:none}.attention-copy{display:grid;gap:1px;min-width:0}.attention-copy strong{font-size:12px;font-weight:600;overflow-wrap:anywhere}
-.attention-item{display:flex;align-items:center;gap:8px}.attention-item .attention-row{min-width:0;flex:1}.attention-dismiss{background:transparent;color:#b9a1ff;flex:none;font-size:12px;padding:2px 6px}.attention-dismiss:hover{background:color-mix(in srgb,#7952f6 14%,transparent)}
+.attention-item{display:flex;align-items:center;gap:8px}.attention-item .attention-row{min-width:0;flex:1}.attention-dismiss{background:transparent;color:var(--accent-text);flex:none;font-size:12px;padding:2px 6px}.attention-dismiss:hover{background:color-mix(in srgb,var(--accent-fill) 14%,transparent)}
 .attention-detail{font-size:12px;color:var(--vscode-foreground);opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.attention-copy small{font-size:11px}.attention-mark{width:34px;height:34px;flex:none;display:grid;place-items:center;border-radius:50%;background:var(--surface);border:1px solid var(--line)}
 .attention-more{margin:4px 0 0 52px;font-size:12px}.attention-cut{font-size:11px;margin:4px 0 0 52px}
 .attention-flash{animation:attention-flash 2.4s ease-out 1}@keyframes attention-flash{0%,30%{box-shadow:0 0 0 2px var(--vscode-focusBorder)}100%{box-shadow:0 0 0 0 transparent}}@media(prefers-reduced-motion:reduce){.attention-flash{animation:none;outline:2px solid var(--vscode-focusBorder)}}
@@ -698,9 +698,9 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .computer-timeline-frame .computer-timeline-shot{margin:0}
 .computer-timeline-cursor{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
 .computer-timeline-cursor[hidden]{display:none}
-.computer-timeline-cursor .ct-ring{fill:none;stroke:#7c5cff;opacity:.85}
-.computer-timeline-cursor .ct-path{stroke:#7c5cff;opacity:.85}
-.computer-timeline-cursor .ct-from{fill:#7c5cff;opacity:.85}
+.computer-timeline-cursor .ct-ring{fill:none;stroke:var(--accent);opacity:.85}
+.computer-timeline-cursor .ct-path{stroke:var(--accent);opacity:.85}
+.computer-timeline-cursor .ct-from{fill:var(--accent);opacity:.85}
 .computer-timeline-cursor .ct-arrow{fill:#fff;stroke:#1d1d22;stroke-width:1.5;stroke-linejoin:round;vector-effect:non-scaling-stroke}
 /* Saved logins (Pips API 56): the dialog that saves one, and the rows on a Pip's page. */
 .login-dialog{max-width:480px}.login-form label{margin:12px 0 0}.login-form label.login-all-row{display:flex;align-items:center;gap:8px;margin:14px 0 2px}
@@ -795,7 +795,7 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message .ract:active,
 .simple-pips.chat-open .pip-conversation.chat-style .allow-card button:active{transform:scale(.97)}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-composer{border-radius:19px;border-color:color-mix(in srgb,var(--vscode-foreground) 16%,transparent);box-shadow:0 3px 14px rgba(0,0,0,.08)}
-.simple-pips.chat-open .pip-conversation.chat-style .pip-composer:focus-within{border-color:var(--vscode-focusBorder,#7c5cff);box-shadow:0 0 0 1px color-mix(in srgb,var(--vscode-focusBorder,#7c5cff) 30%,transparent)}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-composer:focus-within{border-color:var(--vscode-focusBorder,var(--accent));box-shadow:0 0 0 1px color-mix(in srgb,var(--vscode-focusBorder,var(--accent)) 30%,transparent)}
 .simple-pips.chat-open .pip-conversation.chat-style .allow-card,
 .simple-pips.chat-open .pip-conversation.chat-style .app-link[data-state=waiting],
 .simple-pips.chat-open .pip-conversation.chat-style .app-link[data-state=needs]{max-width:min(100%,540px);border:1px solid color-mix(in srgb,var(--pip-accent) 22%,var(--pip-edge));border-radius:14px;background:color-mix(in srgb,var(--pip-accent) 5%,var(--vscode-editor-background));box-shadow:0 2px 8px rgba(0,0,0,.05)}
@@ -804,7 +804,7 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .simple-pips.chat-open .pip-conversation.chat-style .allow-card .allow-details>summary:hover{color:var(--vscode-foreground)}
 .simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-actions{padding-top:2px}
 .simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-actions button{min-height:28px}
-.simple-pips.chat-open .pip-conversation.chat-style :is(.allow-details>summary,.app-link-actions button,.ract):focus-visible{outline:2px solid var(--vscode-focusBorder,#7c5cff);outline-offset:2px}
+.simple-pips.chat-open .pip-conversation.chat-style :is(.allow-details>summary,.app-link-actions button,.ract):focus-visible{outline:2px solid var(--vscode-focusBorder,var(--accent));outline-offset:2px}
 @container(max-width:390px){.simple-pips.chat-open .simple-content.chat{padding-inline:10px}.simple-pips.chat-open .simple-content.chat .conversation-log{margin-right:-10px;padding-right:10px}.simple-pips.chat-open .pip-conversation.chat-style .pip-message.user .bubble,.simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer.split .reply-part,.simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer:not(.split){max-width:93%}}
 @media(prefers-reduced-motion:reduce){.simple-pips.chat-open .pip-conversation.chat-style .pip-message .ract:active,.simple-pips.chat-open .pip-conversation.chat-style .allow-card button:active{transform:none}}
 @media(prefers-contrast:more){.simple-pips.chat-open .pip-conversation.chat-style :is(.allow-card,.app-link[data-state=waiting],.app-link[data-state=needs],.pip-message.assistant .answer){border-color:var(--vscode-foreground)}}
@@ -815,8 +815,8 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .pip-turn{display:block;min-width:0}
 .pip-to-latest{position:relative;z-index:1;flex:none;align-self:center;display:inline-flex;align-items:center;gap:4px;height:28px;min-height:28px;margin:-36px 0 8px;padding:0 12px;cursor:pointer;border:1px solid var(--vscode-input-border,var(--vscode-widget-border,var(--line)));border-radius:9999px;background:var(--vscode-input-background,var(--vscode-dropdown-background,var(--vscode-editor-background)));color:var(--vscode-foreground);box-shadow:0 4px 16px rgba(0,0,0,.18);font:500 11px/1 var(--vscode-font-family,system-ui)}
 .pip-to-latest[hidden]{display:none}
-.pip-to-latest:hover{border-color:#7C5CFF;color:var(--vscode-editor-foreground,var(--vscode-foreground))}
-.pip-to-latest.unread{background:#7654F6;border-color:#7654F6;color:#fff}
+.pip-to-latest:hover{border-color:var(--accent);color:var(--vscode-editor-foreground,var(--vscode-foreground))}
+.pip-to-latest.unread{background:var(--accent-fill);border-color:var(--accent-fill);color:#fff}
 .chat-style .pip-turn>.pip-message.user{position:sticky;top:0;z-index:2}
 .chat-style .pip-turn>.pip-message.user::before{content:"";position:absolute;z-index:-1;pointer-events:none;inset:-16px -16px -12px;background:var(--vscode-editor-background);-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 12px),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 12px),transparent)}
 .chat-style .pip-turn>.pip-message.user .bubble{cursor:pointer}
@@ -825,9 +825,9 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 @media(forced-colors:active){.chat-style .pip-turn>.pip-message.user::before{background:Canvas;bottom:-4px;-webkit-mask-image:none;mask-image:none}}
 .composer-model-custom{padding:2px 4px 4px 4px}.composer-model-custom input{width:100%;min-height:26px;padding:3px 8px;border:1px solid var(--vscode-input-border,var(--line));border-radius:6px;background:var(--vscode-input-background,transparent);color:var(--vscode-input-foreground,var(--vscode-foreground));font-size:12px}
 /* Only connecting or loading: DGC's slash logo in the accent, the three slashes breathing in turn, as the panel's header (main.css brand-slash-pulse). */
-.pips-loading{display:flex;align-items:center;justify-content:center;min-height:min(62vh,420px);color:var(--accent,#7c5cff)}.pips-loading svg{display:block;width:44px;height:44px}.pips-loading path{animation:pips-slash-pulse 2.1s ease-in-out infinite;animation-delay:var(--pulse,0ms)}.pips-loading path:nth-child(2){animation-delay:calc(var(--pulse,0ms) + .22s)}.pips-loading path:nth-child(3){animation-delay:calc(var(--pulse,0ms) + .44s)}@keyframes pips-slash-pulse{0%{opacity:.28}22%,80%{opacity:1}100%{opacity:.28}}@media(prefers-reduced-motion:reduce){.pips-loading path{animation:none}}
+.pips-loading{display:flex;align-items:center;justify-content:center;min-height:min(62vh,420px);color:var(--accent)}.pips-loading svg{display:block;width:44px;height:44px}.pips-loading path{animation:pips-slash-pulse 2.1s ease-in-out infinite;animation-delay:var(--pulse,0ms)}.pips-loading path:nth-child(2){animation-delay:calc(var(--pulse,0ms) + .22s)}.pips-loading path:nth-child(3){animation-delay:calc(var(--pulse,0ms) + .44s)}@keyframes pips-slash-pulse{0%{opacity:.28}22%,80%{opacity:1}100%{opacity:.28}}@media(prefers-reduced-motion:reduce){.pips-loading path{animation:none}}
 /* A Connect card's accounts, by address: the person picks; and the one quiet line it settles to. */
-.app-link-accounts{display:flex;flex-direction:column;gap:4px;margin:8px 0 2px}.app-link-account{display:flex;flex-direction:column;align-items:flex-start;gap:1px;width:100%;min-height:30px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--vscode-foreground);text-align:left;font:inherit;cursor:pointer;overflow-wrap:anywhere}.app-link-account:hover:not(:disabled){background:color-mix(in srgb,var(--vscode-foreground) 7%,transparent)}.app-link-account:disabled{opacity:.6;cursor:default}.app-link-account small{color:var(--muted);font-size:11px}.app-link-account.named{border-color:color-mix(in srgb,#7c5cff 60%,var(--line))}.app-link-wanted{margin:6px 0 0}.app-link-settled{margin:0 0 6px;padding:0 2px;font-size:12px;color:var(--muted);overflow-wrap:anywhere}.app-link-settled strong{font-weight:500;color:var(--vscode-foreground)}.plugin-account{margin:6px 0 -6px}.plugin-account strong{font-weight:500;color:var(--vscode-foreground)}
+.app-link-accounts{display:flex;flex-direction:column;gap:4px;margin:8px 0 2px}.app-link-account{display:flex;flex-direction:column;align-items:flex-start;gap:1px;width:100%;min-height:30px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--vscode-foreground);text-align:left;font:inherit;cursor:pointer;overflow-wrap:anywhere}.app-link-account:hover:not(:disabled){background:color-mix(in srgb,var(--vscode-foreground) 7%,transparent)}.app-link-account:disabled{opacity:.6;cursor:default}.app-link-account small{color:var(--muted);font-size:11px}.app-link-account.named{border-color:color-mix(in srgb,var(--accent) 60%,var(--line))}.app-link-wanted{margin:6px 0 0}.app-link-settled{margin:0 0 6px;padding:0 2px;font-size:12px;color:var(--muted);overflow-wrap:anywhere}.app-link-settled strong{font-weight:500;color:var(--vscode-foreground)}.plugin-account{margin:6px 0 -6px}.plugin-account strong{font-weight:500;color:var(--vscode-foreground)}
 /* Routines recover and tell you (Pips package 2, pipRoutineHealth.js). A Pip's health line, on its row (words only: the
    row is a button) and under its name on its page, with Fix there. */
 .job-health{display:block;min-width:0;font-size:10px;line-height:1.4;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

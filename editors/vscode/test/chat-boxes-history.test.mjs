@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build, buildSync } from "esbuild";
+import { readStylesheet } from "./support/stylesheet.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let chromium;
@@ -36,7 +37,7 @@ function chatdgcPage() {
   const doc = source.match(/return `(<!doctype html>[\s\S]*?<\/html>)`;/)[1];
   const scripts = [...doc.matchAll(/asset\("media\/([\w-]+\.js)"\)/g)].map((m) => m[1]);
   const html = doc.replace(/<link [^>]*>/g, "").replace(/<script [^>]*><\/script>/g, "").replace(/\$\{[^}]*\}/g, "");
-  const css = readFileSync(join(root, "media/main.css"), "utf8").replace(/@import[^;]*;/, "") + readFileSync(join(root, "media/chatdgc.css"), "utf8");
+  const css = readStylesheet(join(root, "media/main.css")).replace(/@import[^;]*;/, "") + readFileSync(join(root, "media/chatdgc.css"), "utf8");
   return { html: html.replace("</head>", `<style>${css}</style></head>`), js: scripts.map((f) => readFileSync(join(root, "media", f), "utf8")).join("\n") };
 }
 async function openChatdgc(platform) {

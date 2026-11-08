@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build, buildSync } from "esbuild";
 import { THEMES } from "./support/options-scene.mjs";
+import { readStylesheet } from "./support/stylesheet.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let chromium;
@@ -37,7 +38,7 @@ function chatHtml() {
     .replace("font-src ;", "font-src data:;");
   const codicon = read("media/codicon.css").replace(/url\([^)]*codicon\.ttf[^)]*\)/,
     `url("data:font/ttf;base64,${readFileSync(join(root, "media/codicon.ttf")).toString("base64")}")`);
-  const css = [read("media/main.css").replace(/@import[^;]*;/, ""), read("media/mentions.css"), read("media/chatdgc.css"), read("media/voicebar.css")];
+  const css = [readStylesheet(join(root, "media/main.css")), read("media/mentions.css"), read("media/chatdgc.css"), read("media/voicebar.css")];
   const scripts = [...doc.matchAll(/asset\("media\/([\w/-]+\.js)"\)/g)].map((m) => m[1]);
   const js = scripts.map((f) => read(`media/${f}`)).join("\n");
   const markdownJs = buildSync({ entryPoints: [join(root, "src/markdown.ts")], bundle: true, format: "iife", globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
@@ -348,7 +349,7 @@ async function openPip({ embedded = true, scope = "personal", width = 640 } = {}
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
   // The page's own tokens: in the side bar a Pip's page inherits main.css's.
-  const tokens = read("media/main.css").match(/:root\s*\{[\s\S]*?\n\}/)?.[0] || "";
+  const tokens = readStylesheet(join(root, "media/main.css")).match(/:root\s*\{[\s\S]*?\n\}/)?.[0] || "";
   // crypto.randomUUID needs a secure context, as a webview's is.
   await page.route("https://pips.invalid/", (route) => route.fulfill({ contentType: "text/html", body: `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${tokens}</style>${embedded ? "" : `<style>${pipCss}</style>`}</head><body>${embedded ? '<section id="host" style="display:block;height:780px"></section>' : '<main id="app"></main><div id="review-root"></div>'}</body></html>` }));
   await page.goto("https://pips.invalid/");

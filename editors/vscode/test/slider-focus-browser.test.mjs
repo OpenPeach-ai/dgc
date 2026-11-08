@@ -3,6 +3,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { readStylesheet, TOKENS_CSS } from "./support/stylesheet.mjs";
 
 let chromium;
 try { ({ chromium } = await import("@playwright/test")); } catch { chromium = null; }
@@ -22,7 +23,7 @@ after(async () => { await browser?.close(); });
 
 const read = (name) => readFileSync(new URL(`../${name}`, import.meta.url), "utf8");
 const UA = ":focus{outline:1px solid orange}";   // what a webview's own default sheet does
-const SHEETS = { work: read("media/main.css"), pip: read("src/pips.css"), trace: read("media/trace.css") };
+const SHEETS = { work: readStylesheet(new URL("../media/main.css", import.meta.url)), pip: readStylesheet(TOKENS_CSS) + read("src/pips.css"), trace: readStylesheet(TOKENS_CSS) + read("media/trace.css") };
 for (const [where, selector] of [["work", "effort-slider"], ["pip", "composer-effort-slider"], ["trace", "dgc-trace-scrub"]]) {
   test(`${where}: dragging ${selector} with the mouse draws no outline`, async (t) => {
     if (skipOrFail(t)) return;

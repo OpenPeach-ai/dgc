@@ -1,3 +1,4 @@
+@import url("./shared/tokens.css");
 /* ChatDGC's formatted canvas (src/canvasEditor.ts): ChatGPT's canvas, a page of writing in the editor's own colours,
    with a quiet row of formatting buttons above it. Only VS Code's theme variables, so it reads in every theme. */
 :root {
@@ -7,8 +8,8 @@
   --cv-line: var(--vscode-editorWidget-border, var(--vscode-panel-border, rgba(128, 128, 128, .28)));
   --cv-soft: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, .12));
   --cv-hover: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, .16));
-  --cv-accent: var(--vscode-textLink-foreground, #8b7cff);
-  --cv-flash: var(--vscode-editor-findMatchHighlightBackground, rgba(139, 124, 255, .22));
+  --cv-accent: var(--vscode-textLink-foreground, var(--link));
+  --cv-flash: var(--vscode-editor-findMatchHighlightBackground, color-mix(in srgb, var(--accent) 22%, transparent));
 }
 html, body { height: 100%; }
 body { margin: 0; background: var(--vscode-editor-background); color: var(--cv-text);
@@ -72,7 +73,7 @@ body { margin: 0; background: var(--vscode-editor-background); color: var(--cv-t
   text-align: left; vertical-align: top; }
 .cv-doc tr:first-child > th, .cv-doc tr:first-child > td { background: var(--cv-soft); font-weight: 600; }
 .cv-doc .selectedCell::after { content: ""; position: absolute; inset: 0; pointer-events: none;
-  background: var(--vscode-editor-selectionBackground, rgba(139, 124, 255, .3)); opacity: .45; }
+  background: var(--vscode-editor-selectionBackground, color-mix(in srgb, var(--accent) 30%, transparent)); opacity: .45; }
 
 /* Checklists: a box you tick; a ticked item is crossed through. */
 .cv-doc li.cv-task { display: flex; align-items: flex-start; gap: .55em; margin-left: -1.35em; list-style: none; }

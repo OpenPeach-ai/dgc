@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
+import { readStylesheet } from "./stylesheet.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = here + "/../..";
@@ -39,7 +40,7 @@ let assets;
 function load() {
   if (assets) return assets;
   const panelSrc = readFileSync(root + "/src/panel.ts", "utf8");
-  const css = readFileSync(root + "/media/main.css", "utf8");
+  const css = readStylesheet(root + "/media/main.css");
   const mainJs = readFileSync(root + "/media/mentions.js", "utf8") + "\n" + readFileSync(root + "/media/main.js", "utf8");
   const markdownJs = buildSync({ entryPoints: [root + "/src/markdown.ts"], bundle: true,
     format: "iife", globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;

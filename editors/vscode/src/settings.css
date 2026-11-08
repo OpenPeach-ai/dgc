@@ -2,7 +2,8 @@
 /* DGC Settings. The chat panel's own tokens (media/main.css: the same names, VS Code's theme variables, the same
    fallbacks), so every page follows the VS Code theme, light and high contrast included. One quiet hierarchy: a
    plain title, groups of rows in one border, one-line hints with detail behind "?", and one Save at the foot.
-   No new colours: the primary action and switches are the panel's --accent-fill; focus is VS Code's own. */
+   No new colours: the primary action and switches are the panel's --accent-fill (media/shared/tokens.css, the
+   bundle's first stylesheet); focus is VS Code's own. */
 :root{
   --fallback-bg:#1f1f1f;--fallback-side:#181818;--fallback-surface:#202021;--fallback-surface2:#29292B;
   --fallback-border:#303032;--fallback-border-strong:#3A3A3D;--fallback-text:#D7D7DA;--fallback-text-strong:#F5F5F6;
@@ -24,9 +25,8 @@
   --button2:var(--vscode-button-secondaryBackground,rgba(127,127,127,.18));
   --button2-text:var(--vscode-button-secondaryForeground,var(--text));
   --button2-hover:var(--vscode-button-secondaryHoverBackground,rgba(127,127,127,.28));
-  --accent-fill:#7654F6;--accent-hover:#6A4BF0;--link:#A78BFA;
-  --good:#5BCB8B;--need:#D1902B;--need-text:#E0A24E;
-  --focus:var(--vscode-focusBorder,#7C5CFF);
+    --good:#5BCB8B;--need:#D1902B;--need-text:#E0A24E;
+  --focus:var(--vscode-focusBorder,var(--accent));
   --error:var(--vscode-errorForeground,#f48771);
   --shadow:var(--vscode-widget-shadow,rgba(0,0,0,.36));
   --sans:var(--vscode-font-family,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif);--mono:var(--vscode-editor-font-family,monospace);
@@ -34,7 +34,7 @@
   --w-reg:400;--w-med:500;--w-semi:600;--control:28px;--usage-input:#14a89a;--usage-output:#8b6cff;
   color-scheme:dark;
 }
-body.vscode-light{color-scheme:light;--link:#6D49E8;--need:#A86A12;--need-text:#8F5600}
+body.vscode-light{color-scheme:light;--need:#A86A12;--need-text:#8F5600}
 body.vscode-high-contrast{--border:var(--vscode-contrastBorder,#6fc3df);--border-strong:var(--vscode-contrastBorder,#6fc3df)}
 *{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:12px/1.5 var(--sans)}
 [hidden]{display:none!important}button,input,select,textarea{font:inherit;color:inherit}

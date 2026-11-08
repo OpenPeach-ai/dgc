@@ -5,8 +5,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { readStylesheet } from "./support/stylesheet.mjs";
 
-const css = readFileSync(new URL("../media/main.css", import.meta.url), "utf8");
+const css = readStylesheet(new URL("../media/main.css", import.meta.url));
 const js = readFileSync(new URL("../media/main.js", import.meta.url), "utf8");
 
 test("main.css reads no custom property it never defines", () => {

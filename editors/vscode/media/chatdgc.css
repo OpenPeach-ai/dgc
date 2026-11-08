@@ -113,7 +113,7 @@ body.cd-blank .cd-fine { display: none; }
 /* Match the Work prompt finish without changing assistant messages. */
 .cd-user .cd-bubble {
   position: relative;
-  background-image: radial-gradient(130% 110% at 14% 0%, rgba(174, 145, 255, .08), transparent 70%);
+  background-image: radial-gradient(130% 110% at 14% 0%, var(--bubble-grain), transparent 70%);
 }
 .cd-user .cd-bubble::before {
   content: "";

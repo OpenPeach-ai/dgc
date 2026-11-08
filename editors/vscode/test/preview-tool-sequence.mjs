@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
+import { readStylesheet } from "./support/stylesheet.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
@@ -13,7 +14,7 @@ const panelSource = readFileSync(resolve(root, "src/panel.ts"), "utf8");
 const skeleton = [...panelSource.matchAll(/<!doctype html>[\s\S]*?<\/body><\/html>/gi)]
   .map((match) => match[0]).find((html) => html.includes('id="input"'))
   .replace(/\$\{[^}]*\}/g, "");
-const css = readFileSync(resolve(root, "media/main.css"), "utf8");
+const css = readStylesheet(resolve(root, "media/main.css"));
 mkdirSync(resolve(output, "pips"), { recursive: true });
 writeFileSync(resolve(output, "pips/wordmark.css"), readFileSync(resolve(root, "media/pips/wordmark.css")));
 writeFileSync(resolve(output, "dgc.svg"), readFileSync(resolve(root, "media/dgc.svg")));

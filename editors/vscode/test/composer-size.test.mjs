@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
+import { readStylesheet } from "./support/stylesheet.mjs";
 
 // The prompt box grows with its text, and that measurement needs a real layout. A turn that stopped
 // while a user was on another view restarted the backend, which restores the draft and resizes
@@ -20,7 +21,7 @@ before(async () => {
   if (!chromium) return;
   try { browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox"] }); } catch { browser = null; return; }
   const panelSrc = readFileSync(here + "/../src/panel.ts", "utf8");
-  const css = readFileSync(here + "/../media/main.css", "utf8");
+  const css = readStylesheet(here + "/../media/main.css");
   const mainJs = readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
   const markdownJs = buildSync({ entryPoints: [here + "/../src/markdown.ts"], bundle: true,
     format: "iife", globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
@@ -96,7 +97,7 @@ test("the one-line prompt box shows no scrollbar at device scale 2", async (t) =
   try {
     const hidpi = await hidpiBrowser.newPage({ viewport: { width: WIDTH, height: 800 } });
     const panelSrc = readFileSync(here + "/../src/panel.ts", "utf8");
-    const css = readFileSync(here + "/../media/main.css", "utf8");
+    const css = readStylesheet(here + "/../media/main.css");
     const mainJs = readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
     const skeleton = [...panelSrc.matchAll(/<!doctype html>[\s\S]*?<\/body><\/html>/gi)].map(m => m[0])
       .find(c => c.includes('id="input"')).replace(/\$\{[^}]*\}/g, "");

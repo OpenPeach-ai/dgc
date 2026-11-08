@@ -1,5 +1,6 @@
 /* Trace replays measured turn events, the same dialog in Work, ChatDGC and a Pip's chat. It always opens on the document's
-   body, and a Pip's own page has none of main.css, so what it uses of main.css's tokens it names here, the same way. The
+   body, and a Pip's own page has none of main.css, so what it uses of main.css's tokens it names here, the same way (the
+   accent comes from media/shared/tokens.css, which every page loads). The
    colour of failed spans is the error token of tool rows. */
 .dgc-trace-backdrop {
   --surface: var(--vscode-editor-background, #1e1e1e);
@@ -8,7 +9,7 @@
   --text: var(--vscode-foreground, #cccccc);
   --text-strong: var(--vscode-editor-foreground, var(--vscode-foreground, #e6e6e6));
   --muted: var(--vscode-descriptionForeground, #9d9d9d);
-  --trace-accent: #7C5CFF;
+  --trace-accent: var(--accent);
 }
 .dgc-trace-backdrop { position: fixed; z-index: 10000; inset: 0; background: #000a; display: grid; place-items: center; padding: 24px; }
 .dgc-trace-dialog { --trace-name-width: 168px; --trace-meta-width: 150px; width: min(820px, 100%); max-height: min(760px, calc(100vh - 48px)); display: flex; flex-direction: column; overflow: hidden; color: var(--text-strong); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 16px 48px #0008; font: 11.5px/1.35 var(--vscode-editor-font-family, ui-monospace, monospace); }

@@ -5,6 +5,7 @@ import {JSDOM} from 'jsdom';
 import {chromium} from 'playwright';
 import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
+import { TOKENS_CSS, readStylesheet } from "./support/stylesheet.mjs";
 // Chromium the way the other layout tests start it: a machine without it skips (GitHub's release job installs
 // none, and a launch here failed the 0.48.2 release), and DGC_REQUIRE_CHROMIUM=1 makes that a failure.
 async function launchOrSkip(t){try{return await chromium.launch({args:['--headless=new','--no-sandbox']});}catch(error){if(process.env.DGC_REQUIRE_CHROMIUM==='1')throw error;t.skip('Chromium could not start: '+String(error?.message||error).split('\n')[0]);return null;}}
@@ -99,7 +100,7 @@ test('setup inbox and New stay visible at 300px without showing the duplicate de
   await page.route('**/*',route=>route.request().isNavigationRequest()?route.fulfill({contentType:'text/html',body:'<div id="host" style="width:100%;height:900px"></div>'}):route.abort());
   await page.goto('https://pips-layout.invalid/'); // Entirely fulfilled above; no network or server.
   await page.addScriptTag({content:client});
-  const css=['pips.css','pipsTranscript.css'].map(file=>readFileSync(new URL('../src/'+file,import.meta.url),'utf8').replace(/^@import[^;]+;/gm,'')).join('\n');
+  const css=readStylesheet(TOKENS_CSS)+'\n'+['pips.css','pipsTranscript.css'].map(file=>readFileSync(new URL('../src/'+file,import.meta.url),'utf8').replace(/^@import[^;]+;/gm,'')).join('\n');
   await page.evaluate(({css,workspace,types,proposal,pip})=>{
    // This layout fixture drives data explicitly rather than racing a wall clock.
    window.setInterval=()=>1;

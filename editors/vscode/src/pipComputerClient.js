@@ -2,6 +2,8 @@
 // The tab talks to the extension host exactly as the Pips view does (pipsRequest/pipsReply), and
 // the host pins it to this one Pip and to the computer commands.
 import {carefulWords,sendsWords,isPayment,asksWords,coversWords} from './pipCareful.js';
+// One set of tokens for every page, first, so each page's own stylesheet can lean on it (media/shared/tokens.css).
+import '../media/shared/tokens.css';
 import './pipComputer.css';
 import '../media/pips/plush.js';
 import RFB from '@novnc/novnc';

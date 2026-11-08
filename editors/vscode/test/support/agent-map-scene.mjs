@@ -9,13 +9,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
 import { THEMES } from "./options-scene.mjs";
+import { readStylesheet } from "./stylesheet.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url)) + "/../..";
 const cache = new Map();
 export function mapPanelHtml(root = here) {
   if (cache.has(root)) return cache.get(root);
   const panelSrc = readFileSync(root + "/src/panel.ts", "utf8");
-  const css = readFileSync(root + "/media/main.css", "utf8");
+  const css = readStylesheet(root + "/media/main.css");
   const codicon = readFileSync(here + "/media/codicon.css", "utf8").replace(/url\([^)]*codicon\.ttf[^)]*\)/,
     `url("data:font/ttf;base64,${readFileSync(here + "/media/codicon.ttf").toString("base64")}")`);
   // A message's time (DgcTime), which the panel loads before main.js.

@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
+import { readStylesheet } from "./support/stylesheet.mjs";
 
 // The prompt box's own undo history, in a real browser, with the real keys on both platforms:
 // Cmd+Z / Cmd+Shift+Z / Cmd+Y on a Mac and Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y elsewhere -- the bindings
@@ -39,7 +40,7 @@ before(async () => {
   if (!chromium) return;
   try { browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox"] }); } catch { browser = null; return; }
   const panelSrc = readFileSync(here + "/../src/panel.ts", "utf8");
-  const css = readFileSync(here + "/../media/main.css", "utf8");
+  const css = readStylesheet(here + "/../media/main.css");
   const mainJs = readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
   const markdownJs = buildSync({ entryPoints: [here + "/../src/markdown.ts"], bundle: true,
     format: "iife", globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;

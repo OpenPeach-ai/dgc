@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readStylesheet } from "./support/stylesheet.mjs";
 
 // The Stop buttons in the /monitors and /artifact listing cards, in a real browser. Every .abtn rule
 // was scoped to `.artifact`, and these rows live in a plain `.card`, so their buttons fell back to
@@ -18,7 +19,7 @@ before(async () => {
   if (!chromium) return;
   try { browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox"] }); } catch { browser = null; return; }
   const panelSrc = readFileSync(here + "/../src/panel.ts", "utf8");
-  const css = readFileSync(here + "/../media/main.css", "utf8");
+  const css = readStylesheet(here + "/../media/main.css");
   const mainJs = readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
   const skeleton = [...panelSrc.matchAll(/<!doctype html>[\s\S]*?<\/body><\/html>/gi)].map(m => m[0])
     .find(c => c.includes('id="input"')).replace(/\$\{[^}]*\}/g, "");

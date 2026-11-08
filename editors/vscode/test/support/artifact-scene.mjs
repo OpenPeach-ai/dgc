@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
 import { pickPython } from "./panel-live.mjs";
 import { THEMES } from "./options-scene.mjs";
+import { readStylesheet } from "./stylesheet.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const extensionRoot = resolve(here, "..", "..");
@@ -67,7 +68,7 @@ export function panelPage() {
   const html = artifactDocument((name) => name, "data:", "TESTNONCE");
   const scripts = [...html.matchAll(/<script nonce="TESTNONCE" src="(media\/[\w.]+\.js)"><\/script>/g)].map((m) => m[1]);
   const styles = [...html.matchAll(/<link rel="stylesheet" href="(media\/[\w.]+\.css)">/g)].map((m) => m[1]);
-  const inline = (name) => (name === "media/codicon.css" ? codicon() : read(name).replace(/@import[^;]*;/, ""));
+  const inline = (name) => (name === "media/codicon.css" ? codicon() : readStylesheet(join(extensionRoot, name)));
   const page = html.replace(/<link rel="stylesheet" href="media\/[\w.]+\.css">/g, "")
     .replace("</head>", `${styles.map((s) => `<style>${inline(s)}</style>`).join("")}</head>`)
     .replace(/<script nonce="TESTNONCE" src="media\/[\w.]+\.js"><\/script>/g, "");

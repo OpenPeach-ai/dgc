@@ -10,6 +10,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
 import { JSDOM } from "jsdom";
+import { readStylesheet } from "./support/stylesheet.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (file) => readFileSync(join(root, file), "utf8");
@@ -77,7 +78,7 @@ test("ChatDGC's header opens on DGC's wordmark with its own mark: the tab icon's
 });
 
 test("the slashes and the cursor move by Work's own rules, the bubble holds still, and reduced motion stops them with Work's", () => {
-  const dom = new JSDOM(`<style>${read("media/main.css").replace(/@import[^;]*;/, "")}</style><style>${read("media/chatdgc.css")}</style>`);
+  const dom = new JSDOM(`<style>${readStylesheet(join(root, "media/main.css"))}</style><style>${read("media/chatdgc.css")}</style>`);
   windows.push(dom.window);
   const [main, own] = dom.window.document.styleSheets;
   const flat = (rules, media = "") => [...rules].flatMap((r) => (r.cssRules && r.media ? flat(r.cssRules, r.media.mediaText) : r.selectorText

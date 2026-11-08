@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
+import { readStylesheet } from "./support/stylesheet.mjs";
 
 // Undo in the prompt box, in a real browser. The box keeps its own history (main.js, "undo and redo"),
 // which is what Cmd+Z and Ctrl+Z act on; composer-history.test.mjs covers it key by key on both
@@ -23,7 +24,7 @@ before(async () => {
     browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox"] });
   } catch { browser = null; return; }
   const panelSrc = readFileSync(here + "/../src/panel.ts", "utf8");
-  const css = readFileSync(here + "/../media/main.css", "utf8");
+  const css = readStylesheet(here + "/../media/main.css");
   const mainJs = readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
   const markdownJs = buildSync({ entryPoints: [here + "/../src/markdown.ts"], bundle: true,
     format: "iife", globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;

@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
+import { readStylesheet } from "./support/stylesheet.mjs";
 
 // Card numbers stay out of the chats (three-asks test, 2026-10-20): a Pip's chat refuses one (pip-app-links has
 // that), and the Work chat warns once, since whatever is sent there goes to the model. src/pipCards.js and the copy
@@ -40,7 +41,7 @@ before(async () => {
   if (!chromium) return;
   try { browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox"] }); } catch { browser = null; return; }
   const panelSrc = readFileSync(here + "/../src/panel.ts", "utf8");
-  const css = readFileSync(here + "/../media/main.css", "utf8");
+  const css = readStylesheet(here + "/../media/main.css");
   const mainJs = readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
   const markdownJs = buildSync({ entryPoints: [here + "/../src/markdown.ts"], bundle: true, format: "iife", globalName: "DgcMarkdown",
     write: false, platform: "browser" }).outputFiles[0].text;

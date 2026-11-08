@@ -9,6 +9,7 @@ import { chromium } from "@playwright/test";
 import { artifactsModule, extensionRoot, fixtures, framesLoaded, openPanel, THEMES } from "./support/artifact-scene.mjs";
 import { ITEMS, M, OFFER, conversation, openChat, openLibrary } from "./support/chat-scene.mjs";
 import { panelHtml } from "./support/options-scene.mjs";
+import { readStylesheet } from "./support/stylesheet.mjs";
 
 const out = process.argv[2] || join(tmpdir(), "dgc-artifact-screens");
 mkdirSync(out, { recursive: true });
@@ -79,7 +80,7 @@ server.close();
   const codicon = readFileSync(join(extensionRoot, "media/codicon.css"), "utf8").replace(/url\([^)]*codicon\.ttf[^)]*\)/,
     `url("data:font/ttf;base64,${readFileSync(join(extensionRoot, "media/codicon.ttf")).toString("base64")}")`);
   const html = canvasDocDocument((n) => n, "data:", true).replace(/<link [^>]*>/g, "").replace(/<script [^>]*><\/script>/g, "")
-    .replace("</head>", `<style>${codicon}</style><style>${readFileSync(join(extensionRoot, "media/canvas.css"), "utf8")}</style></head>`);
+    .replace("</head>", `<style>${codicon}</style><style>${readStylesheet(join(extensionRoot, "media/canvas.css"))}</style></head>`);
   const canvasJs = readFileSync(join(extensionRoot, "dist/canvas.js"), "utf8");
   for (const [tone, theme] of THEMES_SHOT) {
     for (const [label, width] of [["narrow", 360], ["normal", 900]]) {

@@ -1,6 +1,6 @@
 /* A Pip's computer, in an editor tab: a header with the Pip, a rail of three apps, one pane. */
 :root{color-scheme:light dark;font-family:var(--vscode-font-family,system-ui);font-size:var(--vscode-font-size,13px);color:var(--vscode-foreground);background:var(--vscode-editor-background);
- --line:var(--vscode-panel-border,rgba(128,128,128,.28));--muted:var(--vscode-descriptionForeground,#8b8b8b);--accent:#7c5cff;--surface:var(--vscode-sideBar-background,rgba(127,127,127,.06));
+ --line:var(--vscode-panel-border,rgba(128,128,128,.28));--muted:var(--vscode-descriptionForeground,#8b8b8b);--surface:var(--vscode-sideBar-background,rgba(127,127,127,.06));
  --mono:var(--vscode-editor-font-family,ui-monospace,SFMono-Regular,Menlo,monospace)}
 *{box-sizing:border-box}
 body{margin:0;height:100vh;background:var(--vscode-editor-background)}
@@ -32,7 +32,7 @@ input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-
 .pc-split{display:grid;grid-template-columns:minmax(180px,280px) minmax(0,1fr);gap:12px;flex:1;min-height:0}
 .pc-list{list-style:none;margin:0;padding:0;overflow:auto;border:1px solid var(--line);border-radius:8px}
 .pc-file{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:6px;width:100%;text-align:left;color:var(--vscode-foreground);background:transparent;border-radius:0;padding:6px 8px}
-.pc-file:hover{background:var(--vscode-list-hoverBackground,rgba(127,127,127,.12))}.pc-file.active{background:var(--vscode-list-activeSelectionBackground,rgba(124,92,255,.22))}
+.pc-file:hover{background:var(--vscode-list-hoverBackground,rgba(127,127,127,.12))}.pc-file.active{background:var(--vscode-list-activeSelectionBackground,color-mix(in srgb,var(--accent) 22%,transparent))}
 .pc-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pc-size{color:var(--muted);font-variant-numeric:tabular-nums;font-size:12px}
 .pc-list .pc-muted{padding:10px}
 .pc-preview{min-width:0;overflow:auto;display:flex;flex-direction:column;gap:8px}
@@ -41,7 +41,7 @@ input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-
 .pc-terminal{gap:8px}
 .pc-log{flex:1;min-height:0;overflow:auto;display:grid;align-content:start;gap:10px;font-family:var(--mono);font-size:12px;padding:10px;border-radius:8px;background:#0b0b0d;color:#e6e6e6}
 .pc-log .pc-muted{font-family:var(--vscode-font-family,system-ui)}
-.pc-run{display:grid;gap:4px}.pc-prompt{margin:0}.pc-who{color:#b8a6ff}.pc-run pre{background:transparent;border:0;padding:0;color:inherit}.pc-exit{margin:0;color:#ff8a80}
+.pc-run{display:grid;gap:4px}.pc-prompt{margin:0}.pc-who{color:var(--lav)}.pc-run pre{background:transparent;border:0;padding:0;color:inherit}.pc-exit{margin:0;color:#ff8a80}
 #pc-run input{font-family:var(--mono)}
 /* The desktop: DGC's Graphite wallpaper (quiet dark surface and the DGC mark; the
    same picture the full desktop shows, dgc/desktop_assets/wallpaper.jpg), apps in windows, a dock. */
@@ -77,12 +77,12 @@ input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-
 .pc-overlay-note{color:#f3f3f5;background:rgba(20,20,24,.6);padding:8px 14px;border-radius:10px;margin:0}
 .pc-overlay-card{display:grid;gap:10px;justify-items:center;max-width:460px;text-align:center;color:#f3f3f5;background:rgba(20,20,24,.75);padding:16px 20px;border-radius:12px}
 .pc-overlay-card p{margin:0}
-.pc-overlay-badge{align-self:start;margin:12px 0 0;color:#fff;background:rgba(124,92,255,.85);padding:6px 12px;border-radius:999px;font-size:12px;pointer-events:none}
+.pc-overlay-badge{align-self:start;margin:12px 0 0;color:#fff;background:color-mix(in srgb,var(--accent) 85%,transparent);padding:6px 12px;border-radius:999px;font-size:12px;pointer-events:none}
 .pc-setup{display:flex;flex-direction:column;gap:4px}
 .pc-setup strong{font-weight:600}
 .pc-setup-step{font-variant-numeric:tabular-nums}
 .pc-setup-bar{display:block;height:6px;max-width:420px;border-radius:3px;background:color-mix(in srgb,var(--fg,currentColor) 14%,transparent);overflow:hidden}
-.pc-setup-bar>span{display:block;height:100%;border-radius:3px;background:#7654F6;transition:width .4s ease}
+.pc-setup-bar>span{display:block;height:100%;border-radius:3px;background:var(--accent-fill);transition:width .4s ease}
 .pc-setup small{opacity:.75}
 @media (prefers-reduced-motion:reduce){.pc-setup-bar>span{transition:none}}
 .pc-install code{font-family:var(--mono);font-size:12px;background:var(--surface);padding:2px 6px;border-radius:4px;user-select:all}
@@ -94,8 +94,8 @@ input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-
 .pc-cursor{position:absolute;z-index:3;left:0;top:0;width:22px;height:26px;pointer-events:none;filter:drop-shadow(0 1px 2px rgba(0,0,0,.55));transition:left .25s ease,top .25s ease}
 .pc-cursor[hidden]{display:none}
 .pc-cursor svg{display:block;margin:-2px 0 0 -2px}
-.pc-cursor-name{position:absolute;left:16px;top:20px;white-space:nowrap;font-size:11px;line-height:1;color:#fff;background:#7c5cff;padding:3px 7px;border-radius:999px}
-.pc-cursor::before{content:'';position:absolute;left:-13px;top:-13px;width:26px;height:26px;border-radius:50%;border:2px solid rgba(124,92,255,.95);opacity:0}
+.pc-cursor-name{position:absolute;left:16px;top:20px;white-space:nowrap;font-size:11px;line-height:1;color:#fff;background:var(--accent);padding:3px 7px;border-radius:999px}
+.pc-cursor::before{content:'';position:absolute;left:-13px;top:-13px;width:26px;height:26px;border-radius:50%;border:2px solid color-mix(in srgb,var(--accent) 95%,transparent);opacity:0}
 .pc-cursor.pulse::before{animation:pc-click .7s ease-out}
 @keyframes pc-click{from{opacity:1;transform:scale(.35)}to{opacity:0;transform:scale(1.7)}}
 @media (prefers-reduced-motion:reduce){.pc-cursor{transition:none}.pc-cursor.pulse::before{animation:none}}
