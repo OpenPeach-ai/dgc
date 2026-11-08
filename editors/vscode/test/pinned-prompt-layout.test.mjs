@@ -896,7 +896,7 @@ for (const kind of ["image", "file"]) {
       assert.equal(m.pinned, true, "mid-answer, the prompt with its attachment is pinned");
       if (kind === "image") {
         assert.equal(m.height, composer.height, `its chip is the composer's height (${m.height}px sent, ${composer.height}px in the composer)`);
-        assert.equal(m.tile, 28, "the image is a 28px tile, as in the composer");
+        assert.equal(m.tile, 24, "the image is a 24px tile, as in the composer's pill (0.52)");
         assert.equal(m.tile, composer.tile);
         assert.equal(m.caption, "shot.png", "beside its file's name, as in Claude Code");
         assert.equal(m.caption, composer.caption, "the same words as in the composer");

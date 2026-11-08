@@ -52,6 +52,7 @@
   }
 
   const log = $("cd-log"), scroller = $("cd-scroll"), input = $("cd-input"), send = $("cd-send"), stop = $("cd-stop");
+  if (window.DgcComposer) stop.innerHTML = window.DgcComposer.STOP;   // a square inside a spinning arc, as in Work and a Pip's chat
   // The box holds marks (@plugins, @Outputs, @Pips, @files) where they were typed, so it is the same kind of box as
   // Work's, answering this page as the <textarea> it was written against (media/mentions.js).
   const M = window.DgcMentions;
@@ -980,26 +981,22 @@
   }
   const sizeText = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
   /** One attachment as a chip: an icon for its kind, its name, and its size or length. */
+  // An attachment is the prompt box's shared pill (media/shared/composer.js), as in Work and a Pip's chat: a pasted or
+  // dropped picture shows itself, and a click opens it large just above the box.
   function chip(item, onRemove) {
-    const node = el("li", "cd-chip");
     const kind = item.kind === "library" ? item.fileKind
       : item.kind === "file" ? (/\.(png|jpe?g|gif|webp)$/i.test(item.name || "") ? "image" : "file") : item.kind;
-    const glyph = el("span", `codicon codicon-${KIND_ICON[kind] || "file"}`); glyph.setAttribute("aria-hidden", "true");
-    const name = el("span", "cd-chip-name", item.name || "Attachment");
     const about = item.removed ? "deleted from your Library"
       : item.kind === "text" && typeof item.text === "string" ? `${item.text.length.toLocaleString()} characters`
       : Number(item.chars) && item.kind !== "image" ? `${Number(item.chars).toLocaleString()} characters`
       : Number(item.size) ? sizeText(Number(item.size)) : "";
-    node.append(glyph, name);
-    if (about) node.append(el("span", "cd-chip-about", about));
-    node.title = item.name || "";
-    if (onRemove) {
-      const remove = el("button", "cd-chip-remove");
-      remove.type = "button"; remove.title = `Remove ${item.name || "attachment"}`; remove.setAttribute("aria-label", remove.title);
-      const x = el("span", "codicon codicon-close"); x.setAttribute("aria-hidden", "true");
-      remove.append(x); remove.addEventListener("click", onRemove);
-      node.append(remove);
-    }
+    const picture = item.kind === "image" && IMAGE_DATA.test(item.data || "") ? item.data : "";
+    const name = item.name || "Attachment";
+    const node = window.DgcComposer.pill({ tag: "li", classes: "cd-chip", nameClass: "cd-chip-name", removeClass: "cd-chip-remove",
+      name, src: picture, icon: KIND_ICON[kind] || "file", title: [item.name, about].filter(Boolean).join(" · "),
+      removeTitle: `Remove ${name}`, removeLabel: `Remove ${name}`, onRemove: onRemove || null,
+      onOpen: picture && onRemove ? (pill) => window.DgcComposer.preview(pill, { src: picture, name, box: $("cd-box") }) : null });
+    if (about) node.querySelector(".dgc-att-open").append(el("span", "cd-chip-about", about));
     return node;
   }
   function chips() {
@@ -3605,7 +3602,33 @@
   thinkingPick.addEventListener("change", () => { state.thinking = thinkingPick.value; });
   $("cd-temporary").addEventListener("change", (e) => vscode.postMessage({ type: "newChat", temporary: e.target.checked }));
   $("cd-new").addEventListener("click", () => vscode.postMessage({ type: "newChat" }));
-  $("cd-attach").addEventListener("click", () => vscode.postMessage({ type: "attach" }));
+  // ---- "+": the same menu as Work's, in place of the paperclip that went straight to a file window (U3, 7 Nov): your files
+  // through the @ list Work uses, your Library, or the computer's file window when you ask for it.
+  const addButton = $("cd-attach"), addMenu = $("cd-add-menu");
+  function closeAddMenu(focus) {
+    if (addMenu.hidden) return;
+    addMenu.hidden = true; addButton.setAttribute("aria-expanded", "false");
+    if (focus) addButton.focus();
+  }
+  function openAddMenu() {
+    addMenu.innerHTML = window.DgcMenu.html([{ name: "Add to the message", rows: [
+      { id: "files", icon: "file-directory", label: "Files and folders", hint: "@" },
+      { id: "library", icon: "library", label: "From your Library", hint: "Recent files" },
+      { id: "upload", icon: "cloud-upload", label: "Upload from this computer", hint: "File window" }] }], { data: "add" });
+    addMenu.querySelectorAll("[data-add]").forEach((row) => row.addEventListener("click", () => {
+      closeAddMenu(false);
+      if (row.dataset.add === "files") {
+        input.focus();
+        const at = input.selectionStart ?? input.value.length, before = input.value.slice(0, at);
+        document.execCommand("insertText", false, (before && !/\s$/.test(before) ? " " : "") + "@");
+      } else vscode.postMessage({ type: "attach", from: row.dataset.add });
+    }));
+    addMenu.hidden = false; addButton.setAttribute("aria-expanded", "true");
+    addMenu.querySelector(".dgc-menu-row")?.focus();
+  }
+  addButton.addEventListener("click", (e) => { e.stopPropagation(); if (addMenu.hidden) openAddMenu(); else closeAddMenu(true); });
+  window.DgcMenu?.keys(addMenu, { close: closeAddMenu, trigger: addButton });
+  document.addEventListener("click", (e) => { if (!addMenu.hidden && !addMenu.contains(e.target) && !addButton.contains(e.target)) closeAddMenu(false); });
   /** A pasted image, scaled so its longer side is at most IMAGE_SIDE; JPEG when that is smaller. */
   function pastedImage(file) {
     return new Promise((resolve) => {
@@ -3638,6 +3661,9 @@
     document.body.classList.add("cd-dropping");
   });
   document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) document.body.classList.remove("cd-dropping"); });
+  // "Drop to attach" over the box, the shared overlay (media/shared/composer.js), while files are anywhere over the tab.
+  window.DgcComposer?.dropZone($("cd-box"), { listen: document, accepts: (e) => carriesFiles(e) && !state.unavailable && !readOnly(),
+    isFull: () => state.pending.length >= 10, full: "Up to 10 attachments" });
   document.addEventListener("drop", async (e) => {
     if (!carriesFiles(e)) return;
     e.preventDefault();
@@ -3657,7 +3683,7 @@
         state.pending.push({ kind: "text", name: file.name, text: await file.text() });
       } else skipped++;
     }
-    if (skipped) showNotice("Use the paperclip to attach that kind of file.", "info");
+    if (skipped) showNotice("Use + to attach that kind of file: Upload from this computer.", "info");
     chips(); controls(); input.focus();
   });
   input.addEventListener("paste", async (e) => {

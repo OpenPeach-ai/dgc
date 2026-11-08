@@ -161,6 +161,7 @@ test("a new ChatDGC chat uses the saved provider default and changes providers w
     const menu = s.page.locator("#cd-model-menu");
     assert.deepEqual(await menu.locator(".cd-menu-models .cd-menu-row").allInnerTexts(), ["Codex default", "Codex gpt-5.6-sol"]);
     const dial = menu.locator(".cd-dial-face");
+    await menu.evaluate((n) => Promise.all(n.getAnimations().map((a) => a.finished)));   // at rest: the menu opens over 150 ms
     const dialBefore = await dial.boundingBox();
     await menu.locator(".cd-menu-back").click();
     assert.deepEqual(await menu.locator(".cd-menu-models .cd-menu-row").allInnerTexts(), ["Codex", "Ollama"]);
@@ -2076,8 +2077,10 @@ test("attachments: picked files and pastes become chips, go with the message, an
   const s = await openScreen();
   try {
     await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
+    // "+" (it was the paperclip) opens the menu; Upload from this computer asks for the file window (0.52).
     await s.page.locator("#cd-attach").click();
-    assert.deepEqual((await s.posted("attach")).length, 1);
+    await s.page.locator('#cd-add-menu [data-add="upload"]').click();
+    assert.deepEqual((await s.posted("attach")).map((m) => m.from), ["upload"]);
     await s.send({ type: "attached", items: [{ kind: "file", path: "/home/u/trip.csv", name: "trip.csv", size: 2400 },
                                              { kind: "file", path: "/home/u/old.pdf", name: "old.pdf", size: 3_400_000 }] });
     assert.deepEqual(await s.page.locator("#cd-chips .cd-chip").allInnerTexts(), ["trip.csv\n2 KB", "old.pdf\n3.2 MB"]);
@@ -2163,7 +2166,7 @@ test("images you sent show as thumbnails, what a vision model saw is one click a
     });
     await s.page.waitForFunction(() => document.querySelectorAll("#cd-chips .cd-chip").length === 1);
     assert.equal(await s.page.locator("#cd-chips .cd-chip-name").textContent(), "packing.md");
-    assert.match(await s.page.locator("#cd-notice").textContent(), /Use the paperclip/);
+    assert.match(await s.page.locator("#cd-notice").textContent(), /Use \+ to attach that kind of file/);
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });

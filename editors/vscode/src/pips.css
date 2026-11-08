@@ -368,16 +368,16 @@ button.pill{border-radius:999px;padding:6px 16px}
 .chat-time{text-align:center;color:var(--muted);font-size:11px;margin:14px 0 10px}
 .runner-off{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:8px 12px;margin:0 0 8px;border:1px solid var(--pip-edge);border-radius:12px;font-size:12px;color:var(--muted);flex:none}
 .chat-images{display:flex;gap:6px;flex-wrap:wrap;padding:8px 10px 0}
-.chat-image-chip{position:relative;width:56px;height:56px;border-radius:10px;overflow:hidden;border:1px solid var(--pip-edge);flex:none}
-.chat-image-chip img{width:100%;height:100%;object-fit:cover;display:block}
-.chat-image-chip button{position:absolute;top:2px;right:2px;width:18px;height:18px;min-height:18px;padding:0;border-radius:50%;border:0;background:#000a;color:#fff;font-size:12px;line-height:1}
+
+
+
 .msg-images{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin:0 0 6px}
 .msg-image{width:120px;height:90px;object-fit:cover;border-radius:12px;border:1px solid var(--pip-edge);background:var(--pip-wash);cursor:zoom-in}
-.chat-file-chip,.msg-file{display:inline-flex;align-items:center;gap:7px;max-width:240px;height:40px;padding:0 8px 0 6px;border-radius:10px;border:1px solid var(--pip-edge);background:var(--pip-wash);font-size:12px;flex:none}
+.msg-file{display:inline-flex;align-items:center;gap:7px;max-width:240px;height:40px;padding:0 8px 0 6px;border-radius:10px;border:1px solid var(--pip-edge);background:var(--pip-wash);font-size:12px;flex:none}
 .chat-file-ext{display:grid;place-items:center;flex:none;white-space:nowrap;min-width:28px;height:28px;padding:0 3px;border-radius:7px;background:color-mix(in srgb,var(--pip-accent) 22%,transparent);color:var(--vscode-foreground);font-size:9px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
 .chat-file-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chat-file-size{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
-.chat-file-chip button{width:18px;height:18px;min-height:18px;padding:0;border-radius:50%;border:0;background:transparent;color:var(--muted);font-size:13px;line-height:1}
+
 .msg-files{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin:0 0 6px}
 
 /* A Project Pip on the simple page: Run now beside its menu, its home menu, and its first-Pip offer. */
@@ -847,3 +847,7 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .pip-routine-line .pip-routine-name{font-weight:550;color:var(--vscode-foreground)}
 .pip-quiet-line{opacity:.8}
 .pip-routine-note[data-routine-line=blocked]{color:var(--vscode-errorForeground)}
+/* A Pip's "+" menu opens above the box at its left, as Work's and ChatDGC's do; how it looks is the shared menu. */
+.composer-add-menu{position:absolute;bottom:calc(100% + 8px);left:0;z-index:20;width:min(280px,100%)}
+/* A Pip's attachments are the shared pills (media/shared/composer.css). */
+.chat-images .dgc-att{flex:none}

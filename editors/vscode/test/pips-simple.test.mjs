@@ -2,6 +2,7 @@ import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 import {JSDOM} from 'jsdom';
+import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {createRequire} from 'node:module';
 
@@ -354,7 +355,7 @@ async function dropFiles(x,files){
 test('files go with a message too: text, code and documents, shown by name, sent with it or on their own',async()=>{
  const gmail=pip('pip_'+'g'.repeat(32),'Gmail','scout');
  const x=setup({jobs:[gmail]});await x.drain();x.click(`[data-job="${gmail.id}"]`);await x.drain();
- assert.match(x.d.querySelector('#chat-attach').getAttribute('title'),/images and files/);
+ assert.match(x.d.querySelector('#chat-attach').getAttribute('title'),/pictures, files and more/);
  assert.match(x.d.querySelector('#chat-attach-input').getAttribute('accept'),/\.pdf.*\.docx|\.docx.*\.pdf/);
  await dropFiles(x,[new x.w.File(['Sold 5 TCS\n'],'broker notes.txt',{type:'text/plain'})]);
  await dropFiles(x,[new x.w.File(['%PDF-1.4'],'statement.pdf',{type:'application/pdf'})]);
@@ -475,4 +476,39 @@ test('a Personal Pip has no Run now: you chat with it, or it works on its schedu
  assert.equal(chat.d.querySelector('#run'),null);assert.match(chat.d.body.textContent,/When Gmail works on its own, on a schedule/);
  const daily=await results(pip('pip_'+'s'.repeat(32),'Daily','scout',{schedule:{type:'daily',time:'08:00',timezone:'Asia/Kolkata'}}));
  assert.equal(daily.d.querySelector('#run'),null,'not even with a schedule');assert.match(daily.d.body.textContent,/What Daily made on its schedule/);
+});
+// One prompt box (0.52, UI step 3): a Pip's "+" in place of its picture chip opens the shared menu (pictures and files,
+// or @ for a Pip or an app); a dropped picture is the shared pill with its name and ✕, and a click opens it large above
+// the box; files over the box say Drop to attach; Stop is the square in a spinning arc.
+test('the prompt box: + menu, picture pills that open above the box, Drop to attach, and Stop in an arc',async()=>{
+ const gmail=pip('pip_'+'h'.repeat(32),'Gmail','scout');
+ const x=setup({jobs:[gmail]});await x.drain();x.click(`[data-job="${gmail.id}"]`);await x.drain();
+ const plus=x.d.querySelector('#chat-attach');
+ assert.equal(plus.getAttribute('aria-haspopup'),'menu','+ opens a menu');
+ let picked=0;const click=x.w.HTMLInputElement.prototype.click;x.w.HTMLInputElement.prototype.click=function(){if(this.id==='chat-attach-input')picked++;else click.call(this);};   // a redraw brings a new input
+ x.click('#chat-attach');
+ assert.deepEqual([...x.d.querySelectorAll('.composer-add-menu .dgc-menu-row')].map(r=>r.dataset.pipAdd),['upload','mention']);
+ assert.equal(x.d.querySelector('.composer-add-menu kbd')?.textContent,'@');
+ assert.equal(picked,0,'opening + opens no file window');
+ x.click('[data-pip-add="upload"]');
+ assert.equal(picked,1,'Pictures and files: the computer’s file window');
+ assert.equal(x.d.querySelector('.composer-add-menu'),null,'and the menu closes');
+ x.click('#chat-attach');x.click('[data-pip-add="mention"]');
+ assert.match(x.d.querySelector('#chatText').value,/@$/,'A Pip or an app types @');
+ await dropImage(x,'receipt.png');
+ const pill=x.d.querySelector('.chat-image-chip');
+ assert.ok(pill.matches('.dgc-att'),'the shared pill');
+ assert.equal(pill.querySelector('.dgc-att-name').textContent,'receipt.png');
+ assert.ok(pill.querySelector('.dgc-att-thumb img'));assert.ok(pill.querySelector('.dgc-att-x[data-remove-image="0"]'));
+ x.click('[data-open-image="0"]');
+ const island=x.d.querySelector('#chat-form .dgc-att-preview');
+ assert.ok(island,'a click shows it large, in the box');assert.equal(island.querySelector('img').getAttribute('src'),pill.querySelector('img').getAttribute('src'));
+ const overlay=x.d.querySelector('#chat-form > .dgc-drop');
+ assert.equal(overlay.hidden,true);
+ const enter=new x.w.Event('dragenter',{bubbles:true});Object.defineProperty(enter,'dataTransfer',{value:{types:['Files']}});
+ x.d.querySelector('#chatText').dispatchEvent(enter);
+ assert.equal(overlay.hidden,false,'Drop to attach while files are over the box');assert.equal(overlay.textContent,'Drop to attach');
+ const leave=new x.w.Event('dragleave',{bubbles:true});x.d.querySelector('#chatText').dispatchEvent(leave);
+ assert.equal(overlay.hidden,true);
+ assert.match(readFileSync(new URL('../src/pipsClient.js',import.meta.url),'utf8'),/id="chat-stop"[^`]*DgcComposer\?\.STOP/,'Stop is the shared square in an arc');
 });

@@ -9669,6 +9669,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const mentionsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "mentions.js"));
     // One menu for every "+" and picker, the same in ChatDGC and a Pip's chat (media/shared/menu.js, window.DgcMenu).
     const menuJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "menu.js"));
+    // The prompt box's shared pieces, the same in ChatDGC and a Pip's chat (media/shared/composer.js, window.DgcComposer).
+    const composerJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "composer.js"));
     const queueJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "messagequeue.js"));
     const genuiCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "genui.css"));
     const js = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.js"));
@@ -9981,6 +9983,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   <div id="followup-hint" hidden></div>
 </footer>
 <script nonce="${nonce}" src="${menuJs}"></script>
+<script nonce="${nonce}" src="${composerJs}"></script>
 <script nonce="${nonce}" src="${mcpAppsJs}"></script>
 <script nonce="${nonce}" src="${markdown}"></script>
 <script nonce="${nonce}" src="${breakdownScript}"></script>

@@ -8854,9 +8854,10 @@ function permissionChoices(ev) {
       : stop ? "Stop generation" : streaming ? (nativeSteering ? "Steer current run" : "Queue next turn") : "Send message";
     // This runs on every keystroke. Replacing a node's children while typing closes Chromium's open
     // typing step, which made each Ctrl+Z take back one character, so write only what changed.
-    const icon = stop ? "debug-stop" : "arrow-up";
+    const icon = stop ? "stop" : "arrow-up";
     if (send._icon !== icon) {
-      send.innerHTML = `<span class="codicon codicon-${icon}" aria-hidden="true"></span>`;
+      // Stop is a square inside a spinning arc, the same in ChatDGC and a Pip's chat (media/shared/composer.js).
+      send.innerHTML = stop ? DgcComposer.STOP : `<span class="codicon codicon-arrow-up" aria-hidden="true"></span>`;
       send._icon = icon;
     }
     if (send.getAttribute("aria-label") !== label) { send.title = label; send.setAttribute("aria-label", label); }
@@ -9177,31 +9178,27 @@ function permissionChoices(ev) {
   }
   // An attached image is shown, not named: the same tile the sent prompt carries, so you can see
   // what you are about to send (and that it is the right screenshot) before you send it.
-  function imageAttachmentChip(a, remove) {
-    const chip = el("span", "chip image-att-chip");
-    const tile = el("span", "image-tile");
-    const caption = el("span", "image-caption");
+  // The pill is the prompt box's shared one (media/shared/composer.js), as in ChatDGC and a Pip's chat: a click shows the
+  // picture large just above the box, without moving the prompt.
+  function imageAttachmentChip(a, onRemove) {
     const kind = (String(a.data || "").match(/^data:image\/([a-z]+)/i) || [])[1];
     const name = kind ? kind.toUpperCase() : "Image";
     const file = imageFileName(a.label);
     const size = imageSize(a.bytes);
-    caption.textContent = file || name;
-    chip.title = [file, a.heic ? "iPhone photo, sent as a JPEG" : name, size].filter(Boolean).join(" · ");
-    if (a.data && !a.heic) {
-      const img = el("img"); img.alt = ""; img.decoding = "async"; img.src = a.data;
-      img.addEventListener("load", () => {
-        // The caption is the file's name, cut to fit; type, size and dimensions are the hover label.
-        const dims = img.naturalWidth ? `${img.naturalWidth}×${img.naturalHeight}` : "";
-        caption.textContent = file || [name, dims].filter(Boolean).join(" · ");
-        chip.title = [file, name, dims, size].filter(Boolean).join(" · ");
-      });
-      tile.appendChild(img);
-    } else {
-      // A restored draft keeps the attachment but not its bytes: name it instead of showing it.
-      tile.appendChild(el("span", "codicon codicon-file-media"));
-      tile.lastChild.setAttribute("aria-hidden", "true");
-    }
-    chip.append(tile, caption, remove);
+    const shown = a.data && !a.heic;
+    const chip = DgcComposer.pill({ classes: "chip image-att-chip", thumbClass: "image-tile", nameClass: "image-caption", removeClass: "x",
+      name: file || name, src: shown ? a.data : "", icon: "file-media",
+      // A restored draft keeps the attachment but not its bytes: named, not shown.
+      title: [file, a.heic ? "iPhone photo, sent as a JPEG" : name, size].filter(Boolean).join(" · "),
+      removeTitle: "Remove this image", removeLabel: "Remove attached image", onRemove,
+      onOpen: shown ? (node) => DgcComposer.preview(node, { src: a.data, name: file || name, box: $("cbox") }) : null });
+    const img = chip.querySelector("img"), caption = chip.querySelector(".image-caption");
+    img?.addEventListener("load", () => {
+      // The caption is the file's name, cut to fit; type, size and dimensions are the hover label.
+      const dims = img.naturalWidth ? `${img.naturalWidth}×${img.naturalHeight}` : "";
+      caption.textContent = file || [name, dims].filter(Boolean).join(" · ");
+      chip.title = [file, name, dims, size].filter(Boolean).join(" · ");
+    });
     return chip;
   }
   // A selection that is ALREADY visible as a pill in the composer does not need a second chip
@@ -9223,11 +9220,7 @@ function permissionChoices(ev) {
     attachments.forEach((a, i) => {
       if (pillShowing(a)) return;
       if (a.img) {
-        const drop = el("button", "x", "\u00d7");
-        drop.type = "button"; drop.title = "Remove this image";
-        drop.setAttribute("aria-label", "Remove attached image");
-        drop.onclick = () => { dismissAttachment(attachments[i]); attachments.splice(i, 1); renderAtts(); };
-        atts.appendChild(imageAttachmentChip(a, drop));
+        atts.appendChild(imageAttachmentChip(a, () => { DgcComposer.closePreview(); dismissAttachment(attachments[i]); attachments.splice(i, 1); renderAtts(); }));
         return;
       }
       const chip = el("span", `chip${a.pipReference ? " pip-reference-chip" : ""}${a.skill || a.template ? " invocation-chip" : ""}${a.pasted ? " pasted-chip" : ""}`);
@@ -9775,8 +9768,9 @@ function permissionChoices(ev) {
     if (msg.mode === "send") submit();
   }
 
-  // Files dragged from the explorer (or a tab) attach as @-mentions, like the popup does.
-  for (const zone of [input, log]) {
+  // Files dragged from the explorer (or a tab) attach as @-mentions, like the popup does. The whole prompt box takes them
+  // (not only the text field): its "Drop to attach" overlay covers the footer too. (cbox: the box, from the voice bar's lines.)
+  for (const zone of [cbox, log]) {
     zone.addEventListener("dragover", (e) => {
       if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("text/uri-list")) {
         e.preventDefault(); e.dataTransfer.dropEffect = "copy";
@@ -9792,7 +9786,7 @@ function permissionChoices(ev) {
       const uris = list.split(/\r?\n/).map((s) => s.trim()).filter((s) => s && !s.startsWith("#")).slice(0, 16);
       if (!uris.length) {
         // Text dragged in is text from somewhere else, so it is what a paste is.
-        if (zone === input) {
+        if (zone === cbox) {
           const dropped = pasteFrom(e.dataTransfer);
           if (dropped.raw) {
             const at = composerSelection()[0];
@@ -9805,6 +9799,8 @@ function permissionChoices(ev) {
       vscode.postMessage({ type: "drop_uris", uris });
     });
   }
+  // "Drop to attach" over the box while files are dragged over it (the shared overlay, media/shared/composer.js).
+  DgcComposer.dropZone(cbox, { accepts: (e) => { const types = [...(e.dataTransfer?.types || [])]; return types.includes("text/uri-list") || types.includes("Files"); } });
   input.addEventListener("paste", (e) => {                 // paste an image → attach for vision models
     const items = (e.clipboardData && e.clipboardData.items) || [];
     let sawImage = false;

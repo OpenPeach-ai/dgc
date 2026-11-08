@@ -304,8 +304,8 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <form id="cd-box" class="cd-box"><div id="cd-queue" class="cd-queue" role="region" aria-label="Queued messages" hidden></div><ul id="cd-chips" class="cd-chips" aria-label="Attached" hidden></ul>
 <div id="cd-pop" class="pop pop-over" role="listbox" aria-label="Suggestions"></div>
 <div id="cd-input" class="cd-input mention-box" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Message ChatDGC" data-placeholder="Ask anything" data-maxlength="${MAX_TEXT}" aria-controls="cd-pop" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false"></div>
-<div class="cd-tools">
-<button type="button" id="cd-attach" class="cd-icon" data-changes="1" title="Attach files (or paste an image)" aria-label="Attach files"><span class="codicon codicon-attach" aria-hidden="true"></span></button>
+<div id="cd-add-menu" class="cd-output-menu cd-add-menu dgc-menu" role="menu" aria-label="Add" hidden></div><div class="cd-tools">
+<button type="button" id="cd-attach" class="cd-icon" data-changes="1" title="Add files and more (or paste, or drop)" aria-label="Add files and more" aria-haspopup="menu" aria-expanded="false"><span class="codicon codicon-add" aria-hidden="true"></span></button>
 <span class="cd-picks" hidden><select id="cd-model" tabindex="-1" aria-hidden="true"></select><select id="cd-thinking" tabindex="-1" aria-hidden="true">
 <option value="off">Off</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option></select></span>
 <button type="button" id="cd-research" class="cd-tool" data-changes="1" aria-pressed="false" aria-label="Deep research" title="Deep research: a plan to check, then many sources read, then a report with checked citations"><span class="codicon codicon-telescope" aria-hidden="true"></span><span class="cd-tool-label">Deep research</span></button>
@@ -327,7 +327,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <div id="cd-announce" class="sr-only" aria-live="polite"></div>
 <dialog id="cd-keys" class="cd-keys" aria-labelledby="cd-keys-title"><h2 id="cd-keys-title">Keyboard shortcuts</h2><dl id="cd-keys-list"></dl>
 <button type="button" id="cd-keys-close" class="cd-edit-cancel">Close</button></dialog>
-<script src="${attr(asset("media/shared/menu.js"))}"></script><script src="${attr(asset("media/pasteclean.js"))}"></script><script src="${attr(asset("media/mentions.js"))}"></script><script src="${attr(asset("media/pips/plush.js"))}"></script><script src="${attr(asset("media/messagequeue.js"))}"></script><script src="${attr(asset("media/trace.js"))}"></script><script src="${attr(asset("media/mcpApps.js"))}"></script><script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/msgtime.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/pictureFold.js"))}"></script><script src="${attr(asset("media/pluginCalls.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/texthistory.js"))}"></script><script src="${attr(asset("media/numbered-list.js"))}"></script><script src="${attr(asset("media/promptrail.js"))}"></script><script src="${attr(asset("media/mods.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
+<script src="${attr(asset("media/shared/menu.js"))}"></script><script src="${attr(asset("media/shared/composer.js"))}"></script><script src="${attr(asset("media/pasteclean.js"))}"></script><script src="${attr(asset("media/mentions.js"))}"></script><script src="${attr(asset("media/pips/plush.js"))}"></script><script src="${attr(asset("media/messagequeue.js"))}"></script><script src="${attr(asset("media/trace.js"))}"></script><script src="${attr(asset("media/mcpApps.js"))}"></script><script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/msgtime.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/pictureFold.js"))}"></script><script src="${attr(asset("media/pluginCalls.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/texthistory.js"))}"></script><script src="${attr(asset("media/numbered-list.js"))}"></script><script src="${attr(asset("media/promptrail.js"))}"></script><script src="${attr(asset("media/mods.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
 }
 
 /** The Library (ChatGPT's): every file attached in ChatDGC, in its own tab. */
@@ -1888,8 +1888,14 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         if (tab.elsewhere) this.openHere(tab);
         return;
       case "attach": {
-        // Your recent files from the Library first, as ChatGPT's paperclip lists them; with none, the picker.
-        const recent = await this.recentFiles();
+        // From the box's "+" menu: "upload" goes straight to the computer's file window; "library" lists your recent
+        // Library files (and says so when there are none). With neither (an older page), the Library first, then the window.
+        const from = message.from === "upload" || message.from === "library" ? message.from : "";
+        const recent = from === "upload" ? [] : await this.recentFiles();
+        if (from === "library" && !recent.length) {
+          void vscode.window.showInformationMessage("Your Library has nothing yet. Upload from this computer, or paste or drop a file into the box.");
+          return;
+        }
         if (recent.length) {
           type Pick = vscode.QuickPickItem & { file?: any };
           const UPLOAD: Pick = { label: "$(cloud-upload) Upload files…", description: "from this computer" };

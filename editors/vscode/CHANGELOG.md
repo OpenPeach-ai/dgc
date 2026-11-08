@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- One prompt box in Work, ChatDGC and a Pip's chat: an attached picture is a pill (a small picture, its name, a remove button) and a click shows it large just above the box without moving the prompt; files dragged over the box say "Drop to attach"; Stop is a square inside a spinning arc. ChatDGC's "+" replaces the paperclip (Files and folders through @, your Library, or Upload from this computer, which alone opens the file window), and a Pip's "+" replaces its picture button (pictures and files, or @ for a Pip or an app).
 - ChatDGC's Temporary is now Incognito, with a ghost in place of the checkbox (a white square in dark themes): the ghost and its word, lit when on, the ghost alone in a narrow box. The chat's header says Incognito too. As before, it's never saved, listed or remembered.
 - One menu for "+" and every picker, in Work, ChatDGC and a Pip's chat: a soft lift, taller rows, plain words in place of the monospace hints, and the same keys everywhere (arrows, Home, End, Escape back to its button). Work's "+" menu comes in three groups, Add to the message, This chat and Go to, with key caps for @, $ and /.
 - A link in a ChatDGC reply shows its site's favicon, as a link in Work does (and the bundled mark when the icon can't load). The dgc.linkFavicons setting now switches both.

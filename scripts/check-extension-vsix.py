@@ -39,6 +39,9 @@ STATIC_MEMBERS = {
     # One menu for every "+" and picker: its look and its keys (Work and ChatDGC load them; the Pips bundle carries a copy).
     "extension/media/shared/menu.css": "media/shared/menu.css",
     "extension/media/shared/menu.js": "media/shared/menu.js",
+    # The prompt box's shared pieces: pills, the picture island, the drop overlay, Stop.
+    "extension/media/shared/composer.css": "media/shared/composer.css",
+    "extension/media/shared/composer.js": "media/shared/composer.js",
     "extension/media/genui.css": "media/genui.css",
     "extension/media/tool-insights.js": "media/tool-insights.js",
     "extension/media/dgc.svg": "media/dgc.svg",

@@ -96,7 +96,7 @@ function shape(x,name){
     times:[...log.querySelectorAll('[data-message] time.msg-time')].length,
     placeholder:x.$('#chatText').getAttribute('placeholder').replace(name,'NAME'),
     // A Personal Pip's box also adds photos and files, and measures its context: a Project Pip's DGC does neither yet.
-    controls:[...x.$('.pip-composer .composer-controls').querySelectorAll('button')].map(b=>b.getAttribute('aria-label').replace(/^Context window:.*/,'Context window')).filter(l=>l!=='Add images and files')};
+    controls:[...x.$('.pip-composer .composer-controls').querySelectorAll('button')].map(b=>b.getAttribute('aria-label').replace(/^Context window:.*/,'Context window')).filter(l=>l!=='Add pictures, files and more')};
 }
 
 test('a Project Pip’s chat draws the Personal Pip’s pieces: the Pip at work, its reply in bubbles as it comes, time marks, the same box',async()=>{

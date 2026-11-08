@@ -1,0 +1,74 @@
+/* The prompt box's shared pieces, the same in Work, ChatDGC and a Pip's chat (media/shared/composer.js draws them):
+   an attachment pill (a small picture or a file's icon, its name, a remove button; an upload fills it from the left so
+   its width never changes; a failed one says so), the picture shown large in an island just above the box, the "Drop to
+   attach" overlay while files are dragged over the box, and Stop as a square inside a spinning arc. Tokens from
+   media/shared/tokens.css; motion off under reduced motion. */
+.dgc-att {
+  position: relative; isolation: isolate; display: inline-flex; align-items: center; gap: 2px; flex: none;
+  max-width: 100%; height: 32px; padding: 0 2px 0 4px; overflow: hidden;
+  border: 1px solid var(--hair-strong); border-radius: var(--r-row); background: var(--wash); color: var(--text);
+  font: var(--w-reg) var(--t-xs)/1 var(--sans);
+}
+.dgc-att::before {   /* the upload's progress, from the left */
+  content: ""; position: absolute; inset: 0; z-index: -1; transform-origin: left center; transform: scaleX(var(--dgc-progress, 0));
+  background: color-mix(in srgb, var(--accent) 16%, transparent); transition: transform var(--dur-menu) var(--ease-out);
+}
+.dgc-att:not([data-progress])::before { display: none; }
+.dgc-att:not(:has(.dgc-att-x)) { padding-right: var(--sp-2); }   /* a sent attachment: no ✕ */
+.dgc-att span.dgc-att-open { cursor: default; }
+.dgc-att .dgc-att-open {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 100%; margin: 0; padding: 0 4px 0 0;
+  border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; text-align: left;
+}
+.dgc-att .dgc-att-open:focus-visible, .dgc-att .dgc-att-x:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; border-radius: var(--r-chip); }
+.dgc-att .dgc-att-thumb {
+  flex: none; display: grid; place-items: center; width: 24px; height: 24px; overflow: hidden;
+  border-radius: var(--r-chip); background: var(--surface2, var(--wash)); color: var(--muted);
+}
+.dgc-att .dgc-att-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.dgc-att .dgc-att-thumb .codicon { font-size: 14px; }
+.dgc-att .dgc-att-ext { font: var(--w-semi) 9px/1 var(--sans); text-transform: uppercase; letter-spacing: .02em; color: var(--muted); }
+.dgc-att .dgc-att-name { min-width: 0; max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dgc-att .dgc-att-state { flex: none; color: var(--muted); }
+.dgc-att[data-failed] { border-color: color-mix(in srgb, var(--del) 55%, transparent); }
+.dgc-att[data-failed] .dgc-att-state { color: var(--del-text); }
+.dgc-att .dgc-att-x {
+  flex: none; display: grid; place-items: center; width: 22px; height: 22px; margin: 0; padding: 0;
+  border: 0; border-radius: var(--r-chip); background: transparent; color: var(--faint); cursor: pointer; font: inherit; line-height: 1;
+  transition: background-color var(--dur-hover) ease, color var(--dur-hover) ease;
+}
+.dgc-att .dgc-att-x:hover { background: var(--wash); color: var(--text); }
+
+/* The picture, large, in an island over the pill it came from; the prompt itself never moves. */
+.dgc-att-preview {
+  position: absolute; z-index: 40; bottom: calc(100% + 8px); left: 0; padding: 4px; margin: 0;
+  border: 1px solid var(--hair-strong); border-radius: var(--r-card); background: var(--vscode-editorWidget-background, var(--surface));
+  box-shadow: var(--lift-1);
+}
+.dgc-att-preview[hidden] { display: none; }
+.dgc-att-preview img { display: block; max-width: 100%; max-height: 300px; border-radius: calc(var(--r-card) - 4px); object-fit: contain; }
+.dgc-att-preview figcaption { padding: 6px 4px 2px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: var(--w-reg) var(--t-xs)/1.2 var(--sans); color: var(--muted); }
+
+/* Files dragged over the box. Pointer events pass through, so the box's own drop handler still takes them. */
+.dgc-drop {
+  position: absolute; inset: 0; z-index: 35; display: grid; place-items: center; pointer-events: none;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 70%, transparent); border-radius: inherit;
+  background: color-mix(in srgb, var(--accent) 10%, var(--vscode-editorWidget-background, var(--surface)));
+  color: var(--accent-text); font: var(--w-med) var(--t-sm)/1 var(--sans);
+}
+.dgc-drop[hidden] { display: none; }
+
+/* Stop while a reply runs: a square inside a spinning arc. */
+.dgc-stop { display: block; width: 18px; height: 18px; }
+.dgc-stop .dgc-stop-arc { transform-origin: 50% 50%; }
+@media (prefers-reduced-motion: no-preference) {
+  .dgc-att-preview:not([hidden]) { animation: dgc-island-in var(--dur-menu) var(--ease-out); transform-origin: bottom left; }
+  .dgc-stop .dgc-stop-arc { animation: dgc-stop-spin 1s linear infinite; }
+}
+@keyframes dgc-stop-spin { to { transform: rotate(360deg); } }
+@keyframes dgc-island-in { from { opacity: 0; transform: translateY(4px) scale(.98); } }
+@media (forced-colors: active) {
+  .dgc-att, .dgc-att-preview { border-color: CanvasText; box-shadow: none; }
+  .dgc-drop { border-color: Highlight; background: Canvas; color: CanvasText; }
+}
