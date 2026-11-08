@@ -11,7 +11,18 @@
   const IMAGE_DATA = /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+$/;
   // ``cards``: a ```dgc-ui card is live only in the chat's own reply; anywhere else it stays code.
   const md = (text, cards = false) => (window.DgcMarkdown?.render ? window.DgcMarkdown.render(String(text || ""), { cards }) : null);
-  window.DgcMarkdown?.setFavicons?.(false);      // no image ever loads from a link's site
+  // A link in a reply wears its site's favicon, as in Work, once dgc.linkFavicons says so (the `favicons` message); until
+  // then, and with it off, no image loads from a link's site.
+  window.DgcMarkdown?.setFavicons?.(false);
+  // An icon that cannot load (the icon service unreachable, or nothing for that host) gives the link its bundled glyph
+  // back, as Work's panel does: `error` does not bubble, but it captures, so one listener catches every reply's links.
+  document.addEventListener("error", (event) => {
+    const img = event.target;
+    if (!img || img.tagName !== "IMG" || !img.classList?.contains("link-favicon")) return;
+    const link = img.closest?.(".md-link");
+    img.remove();
+    if (link) { link.dataset.linkSource = link.dataset.linkFallback || "web"; delete link.dataset.linkFallback; }
+  }, true);
   // Maths, as ChatGPT draws it: the Markdown leaves each formula as TeX in a placeholder, and KaTeX (loaded the first
   // time one shows) draws it in the conversation. A copied reply is built afresh, so it carries the TeX as written.
   window.DgcMarkdown?.setMath?.(true);
@@ -4607,6 +4618,7 @@
         return;
       case "favicons":
         favicons = msg.on === true;
+        window.DgcMarkdown?.setFavicons?.(favicons);
         render();
         return;
       case "copied":
