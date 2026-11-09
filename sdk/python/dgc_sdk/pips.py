@@ -385,7 +385,7 @@ API75_READS = frozenset({'get_pips_payments'})
 API75_MUTATIONS = frozenset({'set_pips_payments'})
 READ_COMMANDS |= API75_READS
 MUTATION_COMMANDS |= API75_MUTATIONS
-# API 76: a backup model for Pips, one for all and each Pip's own (local only in DGC).
+# API 76: a Pip's fallback model (a provider and a model) and the one new Pips start with (local only in DGC).
 API76_READS = frozenset({'get_pips_backup', 'get_pip_backup'})
 API76_MUTATIONS = frozenset({'set_pips_backup', 'set_pip_backup'})
 READ_COMMANDS |= API76_READS
@@ -495,9 +495,9 @@ COMMAND_FIELDS = {
     'get_pip_usage': frozenset({'pip_id'}),
     'set_pip_daily_cap': frozenset({'pip_id', 'daily_tokens'}),
     'get_pips_backup': frozenset(),
-    'set_pips_backup': frozenset({'model'}),
+    'set_pips_backup': frozenset({'model', 'provider'}),
     'get_pip_backup': frozenset({'pip_id'}),
-    'set_pip_backup': frozenset({'pip_id', 'model'}),
+    'set_pip_backup': frozenset({'pip_id', 'model', 'provider'}),
     'get_pips_payments': frozenset(),
     'set_pips_payments': frozenset({'enabled'}),
     'get_pips_desktop_notifications': frozenset(),

@@ -46,7 +46,7 @@ const floorHold = { id: "compact_" + "f".repeat(32), pip_id: PIP, workspace_id: 
   summary: { kind: "floor", method: "RUN", host: "Terminal", path: "/", page: "", fields: [{ name: "command", value: "rm -rf ~/*" }],
     more_fields: 0, body_bytes: 0, floor: "could delete everything in its Files", text: "rm -rf ~/*", text_digest: "e".repeat(64) } };
 async function flush() { for (let i = 0; i < 15; i++) await Promise.resolve(); }
-function pipsPage({ apiVersion = 58, state = level("approve", DONE), actions = [], activeRun = null, pipPatch = {}, backupLine = "" } = {}) {
+function pipsPage({ apiVersion = 58, state = level("approve", DONE), actions = [], activeRun = null, pipPatch = {}, backupLine = "", models = [], fallback = { provider: "", model: "" }, fallbackOn = null } = {}) {
   const thePip = { ...pip, ...pipPatch };
   const dom = new JSDOM(viewModule.pipsDocument(), { runScripts: "outside-only", pretendToBeVisual: true }), w = dom.window; windows.push(w);
   const sent = [], answered = new Set();
@@ -61,12 +61,12 @@ function pipsPage({ apiVersion = 58, state = level("approve", DONE), actions = [
     list_pip_types: () => ({ types }), list_pip_setups: () => ({ setups: [] }), list_pips: () => ({ pips: [thePip] }), get_pip: () => ({ pip: thePip }),
     list_pip_runs: () => ({ runs: [] }), list_pip_starters: () => ({ starters: [] }), get_pip_runner: () => ({ runner }),
     get_workspace_context: () => ({ context: { workspace_id: PW, revision: 0, entries: [] } }),
-    list_pip_models: () => ({ default_model: "m", models: [], connection: "configured" }),
+    list_pip_models: () => ({ default_model: "m", models, connection: "configured" }),
     list_pip_messages: () => ({ pip_id: PIP, workspace_id: PW, messages: [
       { id: "message_" + "1".repeat(32), pip_id: PIP, workspace_id: PW, run_id: RUN, role: "user", text: "Tidy my files", model: "m", created_at: now, status: "succeeded" },
       { id: "message_" + "2".repeat(32), pip_id: PIP, workspace_id: PW, run_id: RUN, role: "assistant", text: "I want to clear the folder.", model: "m", created_at: now, status: "succeeded",
         ...(backupLine ? { backup: backupLine } : {}) }],
-      next_before_id: null, active_run: activeRun, history_context_omitted_count: 0, chat_controls: controls }),
+      next_before_id: null, active_run: activeRun, history_context_omitted_count: 0, chat_controls: controls, ...(fallbackOn ? { fallback_on: fallbackOn } : {}) }),
     get_pip_computer: () => ({ computer: { pip_id: PIP, granted: true, available: true, reason: "", pending: actions.length, actions } }),
     list_pip_app_links: () => ({ pip_id: PIP, links: [], composio: true }), list_pip_message_drafts: () => ({ drafts: [], next_cursor: null }),
     list_pip_calendar_drafts: () => ({ drafts: [], next_cursor: null }), list_pip_connector_drafts: () => ({ drafts: [], next_cursor: null }),
@@ -80,8 +80,8 @@ function pipsPage({ apiVersion = 58, state = level("approve", DONE), actions = [
     get_pip_working_notes: () => ({ pip_id: PIP, lines: [], text: "", max_lines: 60, max_bytes: 6000, bytes: 0, revision: "r0", updated_at: null }),
     list_pip_daily_log: () => ({ pip_id: PIP, days: [], next_before: null }),
     get_pip_level: () => (typeof state === "function" ? state() : state),
-    get_pip_backup: () => ({ backup: { pip_id: PIP, model: null, follows: "backup-model", backup: "backup-model" } }),
-    get_pips_backup: () => ({ backup: { model: "backup-model" } }), get_pip_computers: () => null }[r.type]?.());
+    get_pip_backup: () => ({ backup: { pip_id: PIP, ...fallback } }),
+    get_pips_backup: () => ({ backup: { provider: "", model: "" } }), get_pip_computers: () => null }[r.type]?.());
   async function drain() { for (let n = 0; n < 15; n++) { await flush(); for (const m of sent.filter((m) => m.type === "pipsRequest" && !answered.has(m.id))) { const result = defaults(m.request); if (result !== undefined) answer(m, result); } } }
   message({ type: "pipsConnection", apiVersion, generation: 1, connected: true, supported: true, enabled: true });
   const click = (s) => { const el = w.document.querySelector(s); assert.ok(el, "Missing " + s); el.click(); };
@@ -212,34 +212,77 @@ test("a Project Pip, an older DGC and a remote one keep the shield: no level chi
 });
 
 // ---- a backup model for Pips (API 76, Pips package 6)
-test("a backup model: one in Pips settings, each Pip's own on its page, and the reply that used it says so", async () => {
-  const x = pipsPage({ apiVersion: 76 }); await x.drain();
-  x.click("#pips-settings-open"); await x.drain();
-  x.click('[data-pips-settings="models"]'); await x.drain();
-  const wide = x.d.getElementById("pipsBackup");
-  assert.ok(wide, "Pips settings has a Models tab with the backup model");
-  assert.equal(wide.value, "backup-model");
-  assert.match(x.d.body.textContent, /it carries on with backup-model and says so once/);
-  wide.value = ""; wide.dispatchEvent(new x.w.Event("change", { bubbles: true })); await flush();
-  assert.deepEqual(JSON.parse(JSON.stringify(x.requests("set_pips_backup").at(-1).request)), { type: "set_pips_backup", model: "" });
-  // Its page: follow Pips settings, none, or a model of its own.
-  const y = pipsPage({ apiVersion: 76 }); await openInfo(y);
-  const own = y.d.getElementById("pipBackup");
-  assert.ok(own, "its page has its own backup model");
-  assert.deepEqual([...own.options].slice(0, 2).map((o) => [o.value, o.textContent]), [["__follow", "As in Pips settings (backup-model)"], ["", "None"]]);
-  assert.equal(own.value, "__follow");
-  own.value = ""; own.dispatchEvent(new y.w.Event("change", { bubbles: true })); await flush();
-  const set = y.requests("set_pip_backup").at(-1);
-  assert.deepEqual(JSON.parse(JSON.stringify(set.request)), { type: "set_pip_backup", pip_id: PIP, model: "" });
-  y.answer(set, { backup: { pip_id: PIP, model: "", follows: "backup-model", backup: "" } }); await y.drain();
-  assert.match(y.d.body.textContent, /Ava has no backup model: it stops when its model doesn’t answer\./);
-  own.value = "__follow"; y.d.getElementById("pipBackup").value = "__follow";
-  y.d.getElementById("pipBackup").dispatchEvent(new y.w.Event("change", { bubbles: true })); await flush();
-  assert.equal(y.requests("set_pip_backup").at(-1).request.model, null, "follow is null");
-  // An older DGC: no tab, no row, asked for nothing.
-  const z = pipsPage({ apiVersion: 75 }); await openInfo(z);
+test("a fallback model: the ⋯ beside a model in its picker, Main and Fallback pills, and the chip says so while it answers", async () => {
+  // D14 (9 Nov): chosen where the main model is, one provider and one model; the old rows in Pips settings and on its page went.
+  const MODELS = [{ id: "m", name: "m" }, { id: "spare", name: "spare" }];
+  const x = pipsPage({ apiVersion: 76, models: MODELS }); await x.drain();
+  x.click(`[data-job="${PIP}"]`); await x.drain();
+  x.click("#chat-model"); await x.drain();
+  assert.equal(x.requests("get_pip_backup").length >= 1, true, "opening the menu reads its fallback");
+  const dots = x.d.querySelector('[data-chat-model-more="model:spare"]');
+  assert.ok(dots, "a model DGC runs has a ⋯");
+  assert.equal(dots.getAttribute("aria-label"), "More for spare");
+  assert.equal(x.d.querySelector('[data-chat-model-more="default"]'), null, "Default has none: it follows, it isn't one model");
+  assert.equal(x.d.querySelector(".dgc-menu-pill"), null, "no fallback yet: the check alone marks the model");
+  // Right from the row reaches its ⋯, Left goes back.
+  const row = x.d.querySelector('[data-chat-model="model:spare"]');
+  row.focus(); row.dispatchEvent(new x.w.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+  assert.equal(x.d.activeElement, x.d.querySelector('[data-chat-model-more="model:spare"]'), "Right: its ⋯");
+  x.d.activeElement.dispatchEvent(new x.w.KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+  assert.equal(x.d.activeElement?.dataset.chatModel, "model:spare", "Left: the row again");
+  x.click('[data-chat-model-more="model:spare"]'); await x.drain();
+  const choices = [...x.d.querySelectorAll(".dgc-menu-choices button")].map((b) => b.textContent);
+  assert.deepEqual(choices, ["Use as main", "Use as fallback"]);
+  assert.equal(x.d.querySelector('[data-chat-model-more="model:spare"]').getAttribute("aria-expanded"), "true");
+  x.click('[data-chat-fallback="model:spare"]'); await flush();
+  const set = x.requests("set_pip_backup").at(-1);
+  assert.deepEqual(JSON.parse(JSON.stringify(set.request)), { type: "set_pip_backup", pip_id: PIP, model: "spare", provider: "" });
+  x.answer(set, { backup: { pip_id: PIP, provider: "", model: "spare" } }); await x.drain();
+  assert.match(x.d.body.textContent, /Ava carries on with spare when its own model doesn’t answer\./);
+  assert.equal(x.d.querySelector(".dgc-menu-choices"), null, "its choices close");
+  const pills = (value) => [...(x.d.querySelector(`[data-chat-model="${value}"]`)?.querySelectorAll(".dgc-menu-pill") || [])].map((p) => p.textContent);
+  assert.deepEqual(pills("model:spare"), ["Fallback"]);
+  assert.deepEqual(pills("default"), ["Main"], "the main model says Main once a fallback is set");
+  x.click('[data-chat-model-more="model:spare"]'); await x.drain();
+  assert.deepEqual([...x.d.querySelectorAll(".dgc-menu-choices button")].map((b) => b.textContent), ["Use as main", "Stop using as fallback"]);
+  x.click('.dgc-menu-choices [data-chat-fallback=""]'); await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(x.requests("set_pip_backup").at(-1).request)), { type: "set_pip_backup", pip_id: PIP, model: "", provider: "" });
+  // Its own model out and its fallback answering: the chip names the fallback, in olive, with the word.
+  const y = pipsPage({ apiVersion: 76, models: MODELS, fallback: { provider: "", model: "spare" }, fallbackOn: { model: "spare", since: now } });
+  await y.drain(); y.click(`[data-job="${PIP}"]`); await y.drain();
+  const chip = y.d.getElementById("chat-model");
+  assert.ok(chip.classList.contains("on-fallback"));
+  assert.equal(chip.querySelector(".composer-model-name").textContent, "spare");
+  assert.equal(chip.querySelector(".composer-fallback-word").textContent, "fallback");
+  assert.match(chip.title, /didn’t answer, so its fallback spare is answering\. It tries .+ again with your next message\./);
+  // The old places are gone: no Models tab in Pips settings, no row on its page.
+  const home = pipsPage({ apiVersion: 76, models: MODELS }); await home.drain();
+  home.click("#pips-settings-open"); await home.drain();
+  assert.ok(home.d.querySelector('[data-pips-settings="apps"]'), "Pips settings opened");
+  assert.equal(home.d.querySelector('[data-pips-settings="models"]'), null);
+  const z = pipsPage({ apiVersion: 76, models: MODELS }); await openInfo(z);
   assert.equal(z.d.getElementById("pipBackup"), null);
-  assert.equal(z.requests("get_pip_backup").length, 0);
+  // An older DGC: no ⋯, asked for nothing.
+  const old = pipsPage({ apiVersion: 75, models: MODELS }); await old.drain();
+  old.click(`[data-job="${PIP}"]`); await old.drain(); old.click("#chat-model"); await old.drain();
+  assert.equal(old.d.querySelector("[data-chat-model-more]"), null);
+  assert.equal(old.requests("get_pip_backup").length, 0);
+});
+
+test("a fallback on a saved provider: the host saves that provider first, as for a Pip's main model", async () => {
+  const sent = [], posted = [], saved = [];
+  const editor = new viewModule.PipsEditor({}, (m) => { sent.push(m); return true; }, () => {}); editor.attach((m) => posted.push(m));
+  editor.ready({ pips_supported: true, pips_enabled: true, pips_api_version: 76 }, {});
+  const SPARE = "provider_" + "c".repeat(32);
+  editor.useSavedProviders(async () => [], async (id, model) => { saved.push([id, model]); });
+  editor.receive({ type: "pipsRequest", id: "f", request: { type: "set_pip_backup", pip_id: PIP, model: "gpt-oss:120b", provider: SPARE } });
+  await flush(); await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(saved, [[SPARE, "gpt-oss:120b"]]);
+  assert.equal(sent.at(-1).request.type, "set_pip_backup", "then it goes");
+  const before = saved.length;
+  editor.receive({ type: "pipsRequest", id: "g", request: { type: "set_pip_backup", pip_id: PIP, model: "spare", provider: "" } });
+  await flush();
+  assert.equal(saved.length, before, "DGC's own connection needs nothing saved");
 });
 
 test("the reply its backup answered carries one line before its time", async () => {

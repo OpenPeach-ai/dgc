@@ -37,6 +37,16 @@
       }).join("")).join("");
   }
 
+  // A model row's ⋯ (D14): a quiet button at the row's right end, for what else that row can be (Use as fallback). It sits
+  // in a .dgc-menu-item with its row, never inside it (a button can't hold a button); Right reaches it from its row, Left
+  // goes back. `pill` is a small word at a row's right end: Main and Fallback in a model picker. The pill and the ⋯ share
+  // that end: the pill at rest, the ⋯ while the row is hovered or focused, so every row's pill lines up at the edge.
+  const DOTS = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="3.5" cy="8" r="1.25" fill="currentColor"/><circle cx="8" cy="8" r="1.25" fill="currentColor"/><circle cx="12.5" cy="8" r="1.25" fill="currentColor"/></svg>';
+  const more = (label, attrs = "", open = false) =>
+    `<button type="button" class="dgc-menu-more" aria-label="${esc(label)}" aria-haspopup="true" aria-expanded="${open ? "true" : "false"}"${attrs ? ` ${attrs}` : ""}>${DOTS}</button>`;
+  const pill = (text, kind = "") => `<span class="dgc-menu-pill${kind ? ` dgc-menu-pill-${esc(kind)}` : ""}">${esc(text)}</span>`;
+  const item = (rowHtml, moreHtml = "", after = "") => `<div class="dgc-menu-item" role="presentation">${rowHtml}${moreHtml}</div>${after}`;
+
   // A row inside anything hidden is not a stop, and neither is a disabled one (as Work's menus always skipped them).
   const shown = (el) => !el.disabled && !el.closest("[hidden]");
 
@@ -66,7 +76,16 @@
     if (!items.length) return false;
     // Inside a shadow root (a Pip in Work's side bar) the document's active element is the host: ask the menu's own root.
     const active = menu.getRootNode?.().activeElement || document.activeElement;
-    const at = items.indexOf(active);
+    // A row's ⋯: Right from the row, Left back; Up and Down from the ⋯ move on from its row.
+    const dots = active?.classList?.contains("dgc-menu-more") ? active : null;
+    const own = dots ? dots.parentElement?.querySelector(rows) : null;
+    if (key === "ArrowRight" && !dots) {
+      const beside = active?.parentElement?.classList?.contains("dgc-menu-item") ? active.parentElement.querySelector(".dgc-menu-more") : null;
+      if (beside && shown(beside)) { event.preventDefault(); beside.focus(); return true; }
+      return false;
+    }
+    if (key === "ArrowLeft" && dots && own) { event.preventDefault(); own.focus(); return true; }
+    const at = items.indexOf(own || active);
     let next = null;
     if (key === "ArrowDown") next = typing || at < 0 ? 0 : (at + 1) % items.length;
     else if (key === "ArrowUp") next = at < 0 ? items.length - 1 : (at - 1 + items.length) % items.length;
@@ -85,5 +104,5 @@
     return () => menu.removeEventListener("keydown", listener);
   }
 
-  root.DgcMenu = Object.freeze({ html, keys, handle, hintHtml, KEY, esc, CHECK });
+  root.DgcMenu = Object.freeze({ html, keys, handle, hintHtml, KEY, esc, CHECK, DOTS, more, pill, item });
 })();

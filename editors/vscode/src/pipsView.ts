@@ -604,7 +604,10 @@ export class PipsEditor implements vscode.Disposable {
       return;
     }
     // A Pip set to a saved provider: the host saves that provider first, so the choice's check and its runs find it.
-    const chosen = request.model_choice ?? request.changes?.model_choice;
+    // A Pip's fallback on a saved provider (D14) is saved the same way.
+    const chosen = request.model_choice ?? request.changes?.model_choice
+      ?? (request.type === 'set_pip_backup' && typeof request.provider === 'string' && request.provider && request.model
+        ? { mode: 'provider', provider: request.provider, model: request.model } : undefined);
     if (chosen?.mode === 'provider' && message.providerSaved !== true) {
       if (!this.savedProviders) { fail('Update DGC to run a Pip on a saved provider.'); return; }
       void this.savedProviders.save(String(chosen.provider), String(chosen.model || '')).then(

@@ -371,14 +371,18 @@ class Turns(unittest.TestCase):
             self.cfg.set(key, value, persist=False)
         asked = []
 
+        prompts = []
+
         def chat(client, messages, tools=None, on_text=None, **kwargs):
             asked.append(client.model)
+            prompts.append([m.get("content") for m in messages if m.get("role") == "user"])
             return ChatResult(content="Here are your shirt ideas, from the backup.")
         events = []
         result, _, _ = self.turn("claude", [{"fail": "You've hit your usage limit. It resets at 3pm."}], computer=False,
                                  events=events, chat=chat)
         self.assertEqual(result["text"], "Here are your shirt ideas, from the backup.")
         self.assertEqual(set(asked), {"backup-model"})
+        self.assertEqual(len(prompts[0]), 1, "a first message: the backup sees it once, not twice (9 Nov)")
         self.assertIn({"kind": "backup", "model": "backup-model"}, events)
 
     def test_a_subscription_that_already_spoke_or_acted_is_not_redone_on_the_backup(self):

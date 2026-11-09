@@ -1,5 +1,5 @@
-"""A backup model for Pips (Pips package 6, Pips API 76): one in Pips settings, each Pip's own choice, which runs get one,
-and the one line said once an outage. The worker's switch itself: test_pip_chat (a real worker) and test_pip_brain (a
+"""A fallback model for Pips (Pips package 6, Pips API 76; D14): each Pip's own provider and model, what new Pips start
+with, which runs get one, and the one line said once an outage. The worker's switch itself: test_pip_chat (a real worker) and test_pip_brain (a
 subscription at its limit)."""
 import unittest
 from unittest.mock import patch
@@ -22,54 +22,91 @@ class BackupTests(unittest.TestCase):
     def pip(self):
         return self.store.create(self.registry.personal()["id"], "Ava", "Pay my bills", "editor-user")
 
-    def test_nothing_to_set_up_one_backup_for_all_and_only_you_set_it(self):
+    PROVIDER = "provider_" + "c" * 32
+
+    def test_new_pips_start_with_the_last_fallback_you_chose_and_only_you_set_it(self):
         from dgc.headless import PIPS_API_VERSION
         self.assertGreaterEqual(PIPS_API_VERSION, 76)
-        self.assertEqual(self.control("get_pips_backup"), {"backup": {"model": ""}}, "none by default: nothing changes")
-        self.assertEqual(self.control("set_pips_backup", model="qwen3:8b"), {"backup": {"model": "qwen3:8b"}})
-        self.assertEqual(pip_backup.pips_wide(self.registry), "qwen3:8b", "kept in the registry: the editor, CLI and runner all see it")
-        for actor, model, code in (("device_1", "x", "local_only"), ("editor-user", "https://evil.example/v1", "invalid_request"),
-                                   ("editor-user", 7, "invalid_request")):
-            with self.subTest(actor=actor, model=model), self.assertRaises(RegistryError) as raised:
-                self.control("set_pips_backup", actor=actor, model=model)
+        none = {"provider": "", "model": ""}
+        self.assertEqual(self.control("get_pips_backup"), {"backup": none}, "none by default: nothing changes")
+        before = self.pip()
+        self.assertEqual(self.control("set_pips_backup", model="qwen3:8b", provider=self.PROVIDER),
+                         {"backup": {"provider": self.PROVIDER, "model": "qwen3:8b"}})
+        after = self.store.create(self.registry.personal()["id"], "Max", "Plans", "editor-user")
+        self.assertEqual(pip_backup.chosen(self.registry, after["id"]), {"provider": self.PROVIDER, "model": "qwen3:8b"},
+                         "a new Pip starts with it")
+        self.assertEqual(pip_backup.chosen(self.registry, before["id"]), none, "a Pip made before never follows it")
+        for actor, fields, code in (("device_1", {"model": "x"}, "local_only"),
+                                    ("editor-user", {"model": "https://evil.example/v1"}, "invalid_request"),
+                                    ("editor-user", {"model": 7}, "invalid_request"),
+                                    ("editor-user", {"model": "x", "provider": "provider_nope"}, "invalid_request")):
+            with self.subTest(actor=actor, fields=fields), self.assertRaises(RegistryError) as raised:
+                self.control("set_pips_backup", actor=actor, **fields)
             self.assertEqual(raised.exception.code, code)
-        self.assertEqual(self.control("set_pips_backup", model=""), {"backup": {"model": ""}}, "none again")
+        self.assertEqual(self.control("set_pips_backup", model=""), {"backup": none}, "none again")
 
-    def test_each_pip_follows_it_or_chooses_its_own_or_none(self):
-        pip = self.pip()
-        self.control("set_pips_backup", model="qwen3:8b")
-        self.assertEqual(self.control("get_pip_backup", pip_id=pip["id"])["backup"],
-                         {"pip_id": pip["id"], "model": None, "follows": "qwen3:8b", "backup": "qwen3:8b"})
-        own = self.control("set_pip_backup", pip_id=pip["id"], model="llama3.3:70b")["backup"]
-        self.assertEqual((own["model"], own["backup"]), ("llama3.3:70b", "llama3.3:70b"))
-        none = self.control("set_pip_backup", pip_id=pip["id"], model="")["backup"]
-        self.assertEqual((none["model"], none["backup"]), ("", ""), "none for this Pip")
-        back = self.control("set_pip_backup", pip_id=pip["id"], model=None)["backup"]
-        self.assertEqual((back["model"], back["backup"]), (None, "qwen3:8b"), "null follows Pips settings again")
+    def test_each_pip_has_its_own_provider_and_model_and_never_changes_anothers(self):
+        # D14: chosen with the ⋯ beside a model in the Pip's own picker: one provider and one model, so it is clear which
+        # of your providers it falls back to. Choosing it for one Pip never changes another's.
+        pip, other = self.pip(), self.store.create(self.registry.personal()["id"], "Max", "Plans", "editor-user")
+        self.control("set_pip_backup", pip_id=other["id"], model="llama3.3:70b")
+        own = self.control("set_pip_backup", pip_id=pip["id"], model="gpt-oss:120b", provider=self.PROVIDER)["backup"]
+        self.assertEqual(own, {"pip_id": pip["id"], "provider": self.PROVIDER, "model": "gpt-oss:120b"})
+        self.assertEqual(self.control("get_pip_backup", pip_id=other["id"])["backup"],
+                         {"pip_id": other["id"], "provider": "", "model": "llama3.3:70b"}, "the other Pip's is unchanged")
+        self.assertEqual(pip_backup.pips_wide(self.registry), {"provider": self.PROVIDER, "model": "gpt-oss:120b"},
+                         "and the next new Pip starts with it")
+        for value in ("", None):
+            with self.subTest(value=value):
+                gone = self.control("set_pip_backup", pip_id=pip["id"], model=value, provider=self.PROVIDER)["backup"]
+                self.assertEqual((gone["provider"], gone["model"]), ("", ""), "none for this Pip")
         with self.assertRaises(RegistryError) as raised:
             self.control("set_pip_backup", actor="device_1", pip_id=pip["id"], model="x")
         self.assertEqual(raised.exception.code, "local_only")
         with self.assertRaises(RegistryError):
             self.control("get_pip_backup", pip_id="pip_" + "f" * 32)
 
-    def test_which_runs_get_a_backup(self):
+    def test_which_runs_get_a_fallback(self):
         pip = self.pip()
         row = {"pip_id": pip["id"], "id": "run_" + "a" * 32, "workspace_id": pip["workspace_id"]}
-        own = {"model_settings": {"model": "fixture", "base_url": str(self.cfg.get("base_url")).rstrip("/")}}
+        base = str(self.cfg.get("base_url")).rstrip("/")
+        own = {"model_settings": {"model": "fixture", "base_url": base}}
         self.assertIsNone(pip_backup.for_run(self.registry, self.cfg, row, own), "none set: none")
-        pip_backup.set_pips_wide(self.registry, "backup-model", "editor-user")
+        pip_backup.set_own(self.registry, pip["id"], "backup-model", "editor-user")
         got = pip_backup.for_run(self.registry, self.cfg, row, own)
-        self.assertEqual((got["model"], got["base_url"]), ("backup-model", str(self.cfg.get("base_url")).rstrip("/")))
-        self.assertEqual(set(got), {"model", "base_url", "api_mode", "api_key"}, "DGC's own connection, read when the run starts")
-        pip_backup.set_pips_wide(self.registry, "fixture", "editor-user")
-        self.assertIsNone(pip_backup.for_run(self.registry, self.cfg, row, own), "its own model is no backup for itself")
-        brain = {"model_settings": {"model": "Claude Code", "brain": {"engine": "claude"}}}
-        self.assertEqual(pip_backup.for_run(self.registry, self.cfg, row, brain)["model"], "fixture",
-                         "a subscription's backup is a model DGC runs")
+        self.assertEqual((got["model"], got["provider"], got["base_url"]), ("backup-model", "", base), "DGC's own connection")
+        self.assertEqual(set(got), {"model", "provider", "base_url", "api_mode", "api_key"})
+        saved = {"name": "Spare", "base_url": "https://spare.example/v1", "api_mode": "chat", "model": "m", "api_key": "sk-spare"}
+        with patch.object(type(self.cfg), "saved_provider", lambda this, pid: dict(saved) if pid == self.PROVIDER else None):
+            pip_backup.set_own(self.registry, pip["id"], "gpt-oss:120b", "editor-user", self.PROVIDER)
+            got = pip_backup.for_run(self.registry, self.cfg, row, own)
+            self.assertEqual((got["model"], got["provider"], got["base_url"], got["api_mode"], got["api_key"]),
+                             ("gpt-oss:120b", self.PROVIDER, "https://spare.example/v1", "chat", "sk-spare"),
+                             "on the saved provider it names, with that provider's own key")
+            on_it = {"model_settings": {"model": "gpt-oss:120b", "provider": self.PROVIDER}}
+            self.assertIsNone(pip_backup.for_run(self.registry, self.cfg, row, on_it), "its own model is no fallback for itself")
+            brain = {"model_settings": {"model": "Claude Code", "brain": {"engine": "claude"}}}
+            self.assertEqual(pip_backup.for_run(self.registry, self.cfg, row, brain)["base_url"], "https://spare.example/v1",
+                             "a subscription's fallback is a model DGC runs")
+        self.assertIsNone(pip_backup.for_run(self.registry, self.cfg, row, own), "a removed provider: no fallback, never another")
+        pip_backup.set_own(self.registry, pip["id"], "fixture", "editor-user")
+        self.assertIsNone(pip_backup.for_run(self.registry, self.cfg, row, own), "its own model is no fallback for itself")
         self.assertIsNone(pip_backup.for_run(self.registry, self.cfg, row, {"model_settings": {"model": "router", "router": {}}}),
                           "DGC Router moves a run itself")
         self.control("set_pip_backup", pip_id=pip["id"], model="")
         self.assertIsNone(pip_backup.for_run(self.registry, self.cfg, row, brain), "this Pip chose none")
+
+    def test_its_chat_says_the_fallback_answers_until_its_own_model_is_back(self):
+        from dgc import pip_chat
+        pip = self.pip()
+        backup = {"model": "backup-model", "provider": "", "base_url": "http://x", "api_mode": "auto", "api_key": ""}
+        row = {"pip_id": pip["id"], "id": "run_" + "e" * 32, "workspace_id": pip["workspace_id"]}
+        self.assertNotIn("fallback_on", pip_chat.list_messages(self.store, pip["id"]))
+        pip_backup.used(self.registry, row, backup, "backup-model")
+        self.assertEqual(pip_chat.list_messages(self.store, pip["id"])["fallback_on"]["model"], "backup-model")
+        self.assertEqual(self.control("get_pip_backup", pip_id=pip["id"])["backup"]["on"]["model"], "backup-model")
+        pip_backup.answered_itself(self.registry, row)
+        self.assertNotIn("fallback_on", pip_chat.list_messages(self.store, pip["id"]))
 
     def test_said_once_an_outage_and_only_for_the_backup_it_was_given(self):
         pip = self.pip()
@@ -105,6 +142,10 @@ class BackupTests(unittest.TestCase):
         self.assertEqual((code, json.loads(text)["backup"]["model"]), (0, "qwen3:8b"), err)
         code, text, _ = cli("backup", "--json", shell=True)
         self.assertEqual((code, json.loads(text)["backup"]["model"]), (0, "qwen3:8b"), "a chat may read it")
+        pip = self.pip()
+        with patch.object(pips, "WorkspaceRegistry", lambda *a, **k: WorkspaceRegistry(self.registry.directory)):
+            code, text, err = cli("backup", "gpt-oss:120b", "--pip", pip["id"], "--provider", self.PROVIDER, "--json")
+        self.assertEqual((code, json.loads(text)["backup"]["provider"]), (0, self.PROVIDER), err)
         self.assertEqual(cli("backup", "none", shell=True)[0], 2, "but only you change it")
         code, text, err = cli("payments", "--json")
         self.assertEqual((code, json.loads(text)["payments"]["on"]), (0, False), err)
@@ -112,10 +153,13 @@ class BackupTests(unittest.TestCase):
 
     def test_the_cli_shows_and_sets_it(self):
         from dgc.pip_cli import _format, parser
-        args = parser().parse_args(["backup", "follow", "--pip", "pip_x"])
-        self.assertEqual((args.command, args.model, args.backup_pip), ("backup", "follow", "pip_x"))
-        self.assertIn("Backup model for Pips: qwen3:8b", _format({"backup": {"model": "qwen3:8b"}}))
-        self.assertIn("No backup model for Pips", _format({"backup": {"model": ""}}))
+        args = parser().parse_args(["backup", "none", "--pip", "pip_x", "--provider", self.PROVIDER])
+        self.assertEqual((args.command, args.model, args.backup_pip, args.backup_provider), ("backup", "none", "pip_x", self.PROVIDER))
+        self.assertIn("New Pips start with the fallback qwen3:8b", _format({"backup": {"provider": "", "model": "qwen3:8b"}}))
+        self.assertIn("New Pips start with no fallback", _format({"backup": {"provider": "", "model": ""}}))
+        self.assertIn("This Pip's fallback: qwen3:8b on a saved provider",
+                      _format({"backup": {"pip_id": "pip_x", "provider": self.PROVIDER, "model": "qwen3:8b"}}))
+        self.assertIn("This Pip has no fallback", _format({"backup": {"pip_id": "pip_x", "provider": "", "model": ""}}))
 
 
 if __name__ == "__main__":

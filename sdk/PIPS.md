@@ -220,7 +220,7 @@ job with `create_pip` and a reviewed update.
 | 73 | A new text message can join one running Personal Pip conversation as a mid-turn update; it stays in that run's history and does not start a competing reply. |
 | 74 | A provider saved in the editor's Settings → Models: `model_choice` `{"mode": "provider", "provider": "provider_<32 hex>", "model": id}`. The Pip keeps only those; the key stays with the CLI. |
 | 75 | `get_pips_payments`, `set_pips_payments {enabled}`: whether a Pip at Do it all may pay by itself, at most three times a day (off by default; local only in DGC) |
-| 76 | `get_pips_backup`, `set_pips_backup {model}`, `get_pip_backup {pip_id}`, `set_pip_backup {pip_id, model}`: a backup model for Pips, one for all and each Pip's own (`model` null follows, "" none; local only in DGC) |
+| 76 | `get_pip_backup {pip_id}`, `set_pip_backup {pip_id, model, provider?}`: a Pip's fallback model, one provider ("" DGC's own connection, or `provider_<32 hex>`) and one model ("" none); `get_pips_backup`, `set_pips_backup {model, provider?}`: the one new Pips start with (local only in DGC) |
 | 58 | How much a Personal Pip asks: `get_pip_level {pip_id}` (R: `level`, `default`, `levels` [{level, name, says}], `on_its_own` [{at, what, level, unattended, kind}]) and `set_pip_level {pip_id, level}` (M, local only; `ask`, `approve` or `full`). What a level let through is a computer action already `sent` by `pip-level:<level>` or an app action resolved by it; a payment asks at every level. |
 | 57 | A Personal Pip's own working notes: `get_pip_working_notes {pip_id}` (R: `lines`, `text`, `revision`, `max_lines`, `max_bytes`, `bytes`, `updated_at`) and `set_pip_working_notes {pip_id, text, expected_revision}` (M, local only, never a secret); `list_pip_daily_log {pip_id, before?, limit?}` (R): what it did each day, `{days: [{day, lines, more}], next_before}`. The Pip keeps its notes itself with a `working_notes` tool and starts every run with them; the log is never given to a run. |
 
@@ -495,9 +495,9 @@ approves, rejects or starts nothing. Open the referenced record before acting.
 | `get_pips_desktop_notifications` | R | none |
 | `set_pips_desktop_notifications` | M | `enabled` (bool) |
 | `get_pips_backup` | R | none; from API 76 |
-| `set_pips_backup` | M | `model` (string, "" none); from API 76 |
+| `set_pips_backup` | M | `model` (string, "" none), `provider?` ("" or a saved provider's id): the fallback new Pips start with; from API 76 |
 | `get_pip_backup` | R | `pip_id`; from API 76 |
-| `set_pip_backup` | M | `pip_id`, `model` (string, "" none, or null to follow Pips settings); from API 76 |
+| `set_pip_backup` | M | `pip_id`, `model` (string; "" or null none), `provider?` ("" DGC's own connection, or a saved provider's id); from API 76 |
 | `get_pips_payments` | R | none; from API 75 |
 | `set_pips_payments` | M | `enabled` (bool): whether a Pip at Do it all may pay by itself, at most 3 times a day; from API 75 |
 | `get_pip_usage` | R | `pip_id` |

@@ -1263,20 +1263,28 @@ export function pipsPayments(value) {
   return value;
 }
 
-// Pips API 76 (0.52, Pips package 6): the backup model for Pips ({model}, "" none) and one Pip's ({pip_id, model: its own
-// choice, null follows Pips settings, "" none; follows: Pips settings'; backup: what its runs use now}).
+// Pips API 76 (0.52, Pips package 6; D14): a Pip's fallback model, {pip_id, provider ("" DGC's own connection, or a saved
+// provider), model ("" none), on? (while its own model is out: {since, model})}, and the one new Pips start with
+// ({provider, model}).
 const BACKUP_MODEL = /^(?:|[A-Za-z0-9][A-Za-z0-9._:/@+\-]{0,255})$/;
+const BACKUP_PROVIDER = /^(?:|provider_[a-f0-9]{32})$/;
+const fallbackPair = value => typeof value.model === 'string' && BACKUP_MODEL.test(value.model)
+  && typeof value.provider === 'string' && BACKUP_PROVIDER.test(value.provider);
 export function pipsBackup(value) {
-  if (!record(value) || Object.keys(value).join() !== 'model' || typeof value.model !== 'string' || !BACKUP_MODEL.test(value.model))
-    throw Error('The backup model didn’t load. Refresh the Pips view.');
+  if (!record(value) || Object.keys(value).sort().join() !== 'model,provider' || !fallbackPair(value))
+    throw Error('The fallback model didn’t load. Refresh the Pips view.');
   return value;
 }
+export function fallbackOn(value) {
+  return record(value) && typeof value.model === 'string' && BACKUP_MODEL.test(value.model) && value.model
+    && typeof value.since === 'string' ? { model: value.model, since: value.since } : null;
+}
 export function pipBackup(value, pip) {
-  if (!record(value) || Object.keys(value).sort().join() !== 'backup,follows,model,pip_id' || value.pip_id !== pip
-    || !(value.model === null || (typeof value.model === 'string' && BACKUP_MODEL.test(value.model)))
-    || typeof value.follows !== 'string' || !BACKUP_MODEL.test(value.follows) || typeof value.backup !== 'string' || !BACKUP_MODEL.test(value.backup))
-    throw Error('This Pip’s backup model didn’t load. Refresh this Pip.');
-  return value;
+  const keys = Object.keys(value || {}).sort().join();
+  if (!record(value) || !['model,pip_id,provider', 'model,on,pip_id,provider'].includes(keys) || value.pip_id !== pip
+    || !fallbackPair(value) || ('on' in value && !fallbackOn(value.on)))
+    throw Error('This Pip’s fallback model didn’t load. Refresh this Pip.');
+  return { pip_id: value.pip_id, provider: value.provider, model: value.model, on: 'on' in value ? fallbackOn(value.on) : null };
 }
 
 export function pipOutcomes(value, pip) {

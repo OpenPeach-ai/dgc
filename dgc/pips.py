@@ -206,8 +206,8 @@ _COMMAND_ARGS = {
     "get_pips_keep_running": set(), "set_pips_keep_running": {"enabled"},
     "get_pips_desktop_notifications": set(), "set_pips_desktop_notifications": {"enabled"},
     "get_pips_payments": set(), "set_pips_payments": {"enabled"},
-    "get_pips_backup": set(), "set_pips_backup": {"model"},
-    "get_pip_backup": {"pip_id"}, "set_pip_backup": {"pip_id", "model"},
+    "get_pips_backup": set(), "set_pips_backup": {"model", "provider"},
+    "get_pip_backup": {"pip_id"}, "set_pip_backup": {"pip_id", "model", "provider"},
     "get_pip_usage": {"pip_id"}, "set_pip_daily_cap": {"pip_id", "daily_tokens"}, "export_pip": {"pip_id"},
     "set_pip_feedback": {"run_id", "rating", "note"}, "list_pip_feedback": {"pip_id"},
     "mark_pip_notification_read": {"workspace_id", "notification_id", "expected_revision"},
@@ -872,6 +872,8 @@ class PipStore:
             self.db.execute("INSERT INTO pips VALUES(?,?,?,?,?,?)", (pip_id, workspace_id, "active", 1, now, now))
             self.db.execute("INSERT INTO pip_versions VALUES(?,?,?,?,?,?)", (pip_id, 1, _json(definition), actor, "Created by user", now))
             self.registry.event(workspace_id, "pip_created", pip_id=pip_id, payload={"actor": actor, "version": 1})
+            from .pip_backup import start_new
+            start_new(self.db, pip_id)          # the last fallback you chose (D14)
         return self.get(pip_id)
 
     def _proposal(self, row):
@@ -2997,6 +2999,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 self._on_backup = True
                 self.client = self._fallback_client(backup_model)
                 self._pending_images, self._last_turn_error = pending, ''
+                if (self.messages and self.messages[-1].get("role") == "user"
+                        and self.messages[-1].get("content") == user_text):
+                    self.messages.pop()        # the brain's try kept the prompt; run_turn adds it again (once)
                 return super().run_turn(user_text, **kwargs)
             return ok
 
@@ -4690,7 +4695,12 @@ def _execute_run(registry, row, config):
             elif kind == "failure":
                 failure = event.get("error")
             elif kind == "backup":
-                backup_model = str(event.get("model") or "")[:256]     # believed only if it is the backup it was given
+                backup_model = str(event.get("model") or "")[:256]     # believed only if it is the fallback it was given
+                if backup is not None:
+                    try:
+                        pip_backup.used(registry, row, backup, backup_model)   # from now its chat says the fallback answers
+                    except Exception:            # noqa: BLE001 - the run goes on either way
+                        pass
             elif kind == 'steer_applied' and manifest.get('run_kind') == 'conversation':
                 from .pip_steering import applied
                 applied(PipStore(registry), row['id'], event.get('ids'))
@@ -4712,9 +4722,7 @@ def _execute_run(registry, row, config):
                 raise failed
             raise RegistryError("worker_failed", "The audit worker stopped without a verified structured result.")
         try:
-            if backup is not None and backup_model:
-                pip_backup.used(registry, row, backup, backup_model)       # said once, under the first reply of an outage
-            else:
+            if not (backup is not None and backup_model):
                 pip_backup.answered_itself(registry, row)                  # its own model answered: an outage is over
         except Exception:                        # noqa: BLE001 - the reply stands either way
             pass
@@ -5997,13 +6005,13 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 if actor not in ("editor-user", "local-console"):
                     raise RegistryError("local_only", "The backup model is set on this computer only.")
                 if command == "get_pips_backup":
-                    result = {"backup": {"model": pip_backup.pips_wide(registry)}}
+                    result = {"backup": pip_backup.pips_wide(registry)}
                 elif command == "set_pips_backup":
-                    result = {"backup": pip_backup.set_pips_wide(registry, request.get("model"), actor)}
+                    result = {"backup": pip_backup.set_pips_wide(registry, request.get("model"), actor, request.get("provider"))}
                 elif command == "get_pip_backup":
                     result = {"backup": pip_backup.listing(registry, pip_id)}
                 else:
-                    result = {"backup": pip_backup.set_own(registry, pip_id, request.get("model"), actor)}
+                    result = {"backup": pip_backup.set_own(registry, pip_id, request.get("model"), actor, request.get("provider"))}
             elif command in ("get_pips_payments", "set_pips_payments"):
                 # Pips API 75 (your P1): whether a Pip at Do it all may pay by itself, at most three a day. Off by default.
                 from . import pip_levels

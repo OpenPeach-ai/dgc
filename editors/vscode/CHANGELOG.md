@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- A backup model for Pips: Pips settings has a Models tab with Backup model for Pips, and each Pip's page has its own (follow Pips settings, none, or a model). A reply the backup answered says so before its time, the first of an outage only.
+- A fallback model for each Pip, chosen in its model picker: the ⋯ beside a model offers Use as main and Use as fallback, and once one is set the rows say Main and Fallback. While the fallback answers, the prompt box names it in olive with the word fallback. A reply the fallback answered says so before its time, the first of an outage only.
 - Let Pips at Do it all pay: a switch in the Pips view's Controls, off by default. On, a Pip at Do it all pays by itself, at most 3 times a day across your Pips, and the switch says how many it paid in the last day.
 - A Pip's card says when the fuse is why it asks: "It has done 25 things on its own in the last hour, so it asks before each one until 8:12 AM."
 - A Pip's level is in its prompt box. A chip at the left, where Work's mode picker is, says the level's name: Ask me first, Approve for me or Do it all (the names Ask and Full access are gone). Its menu gives each level with one line saying what it means, a check on the chosen one, and a last row, What this Pip can do, which the shield used to open. The chip takes the shield's place. A change works while a reply runs and applies from the next step. The Pip's page says the same level, and a change in either place shows in the other. A Project Pip keeps its shield: it always asks.

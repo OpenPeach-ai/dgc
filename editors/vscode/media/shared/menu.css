@@ -57,6 +57,41 @@
   background: var(--wash); font: var(--w-med) var(--t-xs)/1.3 var(--sans); color: var(--muted); text-align: center;
 }
 .dgc-menu .dgc-menu-div { height: 1px; margin: 4px 6px; background: var(--hair); }
+/* A model row and its ⋯ (D14). The row keeps the whole width; the ⋯ is a quiet square over its right end, seen while the
+   row is hovered or focused (always on a touch screen, and while its choices are open). The row's Main or Fallback word
+   sits at that same end and steps aside for the ⋯, so the words line up at the edge on every row. Its choices open as two
+   short rows under the model, indented. */
+.dgc-menu .dgc-menu-item { position: relative; display: flex; align-items: center; }
+.dgc-menu .dgc-menu-item > .dgc-menu-row { flex: 1 1 auto; min-width: 0; }
+.dgc-menu .dgc-menu-more {
+  position: absolute; top: 50%; right: 2px; transform: translateY(-50%);
+  display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; margin: 0;
+  padding: 0; border: 0; border-radius: var(--r-row); background: transparent; color: var(--muted); cursor: pointer;
+  opacity: 0; transition: opacity var(--dur-hover) ease, background-color var(--dur-hover) ease, color var(--dur-hover) ease;
+}
+.dgc-menu .dgc-menu-item:is(:hover, :focus-within) > .dgc-menu-more, .dgc-menu .dgc-menu-more[aria-expanded="true"] { opacity: 1; }
+.dgc-menu .dgc-menu-item:is(:hover, :focus-within) > .dgc-menu-row,
+.dgc-menu .dgc-menu-item:has(> .dgc-menu-more[aria-expanded="true"]) > .dgc-menu-row { padding-right: 34px; }
+.dgc-menu .dgc-menu-item:is(:hover, :focus-within) > .dgc-menu-row .dgc-menu-pill,
+.dgc-menu .dgc-menu-item:has(> .dgc-menu-more[aria-expanded="true"]) > .dgc-menu-row .dgc-menu-pill { display: none; }
+.dgc-menu .dgc-menu-more:is(:hover, :focus-visible, [aria-expanded="true"]) { background: var(--wash); color: var(--text); }
+.dgc-menu .dgc-menu-more:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+@media (hover: none) {
+  .dgc-menu .dgc-menu-more { opacity: 1; }
+  .dgc-menu .dgc-menu-item > .dgc-menu-row { padding-right: 34px; }
+  .dgc-menu .dgc-menu-item > .dgc-menu-row .dgc-menu-pill { margin-right: 0; }
+}
+.dgc-menu .dgc-menu-choices { display: flex; flex-direction: column; margin: 0 0 2px 30px; padding-left: 6px; border-left: 1px solid var(--hair); }
+.dgc-menu .dgc-menu-choices .dgc-menu-row { min-height: 26px; font-size: var(--t-sm); }
+/* Main and Fallback: small words at the row's end. Main in the accent, Fallback in the olive DGC uses when something
+   isn't answering, the colour the prompt box takes while the fallback answers. */
+.dgc-menu .dgc-menu-pill {
+  flex: none; margin-left: auto; padding: 0 6px; border: 1px solid var(--hair-strong); border-radius: 999px;
+  font: var(--w-med) var(--t-xs)/15px var(--sans); color: var(--muted); white-space: nowrap;
+}
+.dgc-menu .dgc-menu-pill + .dgc-menu-pill { margin-left: 4px; }
+.dgc-menu .dgc-menu-pill-main { color: var(--accent-text); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.dgc-menu .dgc-menu-pill-fallback { color: var(--err-text); border-color: color-mix(in srgb, var(--err) 60%, transparent); }
 @media (prefers-reduced-motion: no-preference) {
   .dgc-menu:not([hidden]) { animation: dgc-menu-in var(--dur-menu) var(--ease-out); transform-origin: bottom left; }
   .dgc-menu.from-right:not([hidden]), .cf-right .dgc-menu:not([hidden]) { transform-origin: bottom right; }

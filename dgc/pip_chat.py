@@ -1604,9 +1604,14 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
                 expanded.append(said)
     from .pip_routine_care import notes as routine_notes
     noted = routine_notes(store.db, pip_id)
+    from .pip_backup import out as fallback_out
+    fallback_on = fallback_out(store.registry, pip_id)
     return {"pip_id": pip_id, "workspace_id": pip["workspace_id"], "messages": expanded,
             # Routines that didn't run (missed, or couldn't start): lines the chat places by time (Pips package 2).
             **({"routine_notes": noted} if noted else {}),
+            # Its own model is out and its fallback answers (D14): the prompt box says so until its own model is back.
+            **({"fallback_on": {"model": str(fallback_on.get("model") or "")[:256], "since": str(fallback_on.get("since") or "")}}
+               if fallback_on else {}),
             "waiting": [{key: row[key] for key in ("id", "text", "created_at")} for row in waiting(store.db, pip_id)[:8]],
             "next_before_id": next_id, "active_run": {**dict(active), "run_kind": "conversation"} if active else None,
             "history_context_omitted_count": omitted, "continuity": continuity}

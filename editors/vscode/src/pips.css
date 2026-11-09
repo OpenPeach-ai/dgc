@@ -860,3 +860,11 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .composer-level-menu .composer-level-error{color:var(--del-text,var(--vscode-errorForeground))}
 /* A Pip's attachments are the shared pills (media/shared/composer.css). */
 .chat-images .dgc-att{flex:none}
+
+/* D14: its own model is out and its fallback answers. The chip names the fallback, with the word, in the olive DGC uses
+   when something isn't answering (tokens.css --err), on its soft wash, until its own model answers again. */
+.pip-composer .model-control.on-fallback{background:var(--err-soft);color:var(--err-text)}
+.pip-composer .model-control.on-fallback .composer-model-name,.pip-composer .model-control.on-fallback .composer-effort-name{color:var(--err-text)}
+.pip-composer .composer-fallback-word{flex:none;margin-left:5px;padding:0 5px;border:1px solid color-mix(in srgb,var(--err) 60%,transparent);border-radius:999px;font-size:10px;font-weight:600;line-height:14px;color:var(--err-text)}
+/* A row with Main or Fallback keeps its name on one line, cut short, so the word never pushes it onto two. */
+.composer-model-option:has(.dgc-menu-pill) .composer-model-row{flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;overflow-wrap:normal}

@@ -1,4 +1,4 @@
-"""Pips API 76 in the Python SDK: a backup model for Pips (get_/set_pips_backup, get_/set_pip_backup), known, refused
+"""Pips API 76 in the Python SDK: a Pip's fallback model (provider and model) (get_/set_pips_backup, get_/set_pip_backup), known, refused
 before API 76, then sent."""
 import unittest
 
@@ -27,6 +27,9 @@ class PipBackupSDKTests(unittest.TestCase):
         wire = Wire(); current = session(wire, caps={**CAPS, 'pips_api_version': 76})
         self.assertEqual(current.pips.read('get_pip_backup', {'pip_id': PIP})['request']['type'], 'get_pip_backup')
         self.assertEqual(current.pips.mutate('set_pips_backup', {'model': 'qwen3:8b'}, approved=True)['request']['model'], 'qwen3:8b')
+        provider = 'provider_' + 'c' * 32
+        self.assertEqual(current.pips.mutate('set_pip_backup', {'pip_id': PIP, 'model': 'gpt-oss:120b', 'provider': provider},
+                                             approved=True)['request']['provider'], provider)
 
 
 if __name__ == '__main__':

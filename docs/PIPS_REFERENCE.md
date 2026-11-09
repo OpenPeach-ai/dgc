@@ -1169,15 +1169,19 @@ and `dispatch_for_run` use it, the computer sends nothing by an Always allow mea
 carries `summary.asks_because: "fuse"` and `summary.fuse_until` (the instant it may act on its own again).
 `get_pip_level` still says the level the user chose.
 
-**A backup model** (`pip_backup`, Pips API 76). The controller reads the Pip's backup when a run starts (its own choice,
-metadata `pip_backup:<pip>`, else the Pips-wide one, metadata `pips_backup_model`, read by every process alike) and, unless
-it is none, the run's own model, or a DGC Router run, puts `{model, base_url, api_mode, api_key}` for DGC's own
-connection in the worker's start payload as `backup` (never in the manifest). The worker sets it as its
+**A fallback model** (`pip_backup`, Pips API 76; chosen in the Pip's model picker since D14). The controller reads the
+Pip's fallback when a run starts (metadata `pip_backup:<pip>` = `{provider, model}`, read by every process alike; a new
+Pip is given the last one chosen, metadata `pips_backup_model`, when it is made, and never follows it afterwards) and,
+unless it is none, the run's own model, a removed provider or a DGC Router run, puts `{model, provider, base_url,
+api_mode, api_key}` in the worker's start payload as `backup` (never in the manifest): DGC's own connection for
+`provider` "", else that saved provider's own address and key (`pip_models.provider_view`). The worker sets it as its
 `fallback_*`: a model turn that fails (after its own retries) carries on with it, and a subscription turn that failed
 before it said or called anything runs again on it (`_on_backup`). The worker emits `{"kind": "backup", "model"}`; the
 controller believes it only for the backup it gave. The first run of an outage keeps `pip_backup_run:<run>` with its
 line ("Its own model didn't answer; X did"), shown as the reply's `backup`; `pip_backup_on:<pip>` marks the outage, so
-later runs say nothing, and a run that finishes on its own model ends it (`pip_backup.answered_itself`). Each use is a
+later runs say nothing, and a run that finishes on its own model ends it (`pip_backup.answered_itself`). The outage is
+marked as soon as the worker reports the switch, so `list_pip_messages` carries `fallback_on {model, since}` (and
+`get_pip_backup` `on`) while the fallback answers, and the prompt box says so. Each use is a
 `pip_backup_used` workspace event.
 
 Words are matched whole on the lower-cased text, split at anything but letters and digits and at camelCase. "What was
@@ -2321,4 +2325,4 @@ Clients check it before using a newer control.
 | 73 | A text message can join one running Personal Pip conversation as a mid-turn update. It stays in that run's history and does not start a second reply. One that reply never read becomes the next turn, or says it wasn't sent if the reply was stopped or failed; `list_pip_messages` lists those waiting for a turn in `waiting` (see PIPS_EDITOR_PROTOCOL.md). |
 | 74 | A Pip on a provider saved in the editor's Settings → Models: `model_choice` `{"mode": "provider", "provider", "model"}`. |
 | 75 | Payments at Do it all: `get_pips_payments` / `set_pips_payments {enabled}` (local only) → `{payments: {on, limit, paid}}`. Off by default; on, a Pip at Do it all may pay by itself, at most `limit` (3) times in 24 hours across all Pips, never a request carrying a card number. |
-| 76 | A backup model for Pips: `get_pips_backup` / `set_pips_backup {model}` → `{backup: {model}}` (registry metadata `pips_backup_model`, "" none) and `get_pip_backup {pip_id}` / `set_pip_backup {pip_id, model}` → `{backup: {pip_id, model, follows, backup}}` (`model` null follows Pips settings, "" none), all local only. When a run's own model doesn't answer, it carries on with the backup on DGC's own connection; the first reply of an outage carries `backup`, its one line. |
+| 76 | A Pip's fallback model: `get_pip_backup {pip_id}` / `set_pip_backup {pip_id, model, provider?}` → `{backup: {pip_id, provider, model, on?}}` (`provider` "" DGC's own connection or `provider_<32 hex>`, `model` "" or null none; `on` `{since, model}` while it answers) and the one new Pips start with, `get_pips_backup` / `set_pips_backup {model, provider?}` → `{backup: {provider, model}}`, all local only. When a run's own model doesn't answer, it carries on with the fallback; the first reply of an outage carries `backup`, its one line, and `list_pip_messages` carries `fallback_on {model, since}` while the fallback answers. |

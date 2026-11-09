@@ -554,9 +554,10 @@ def parser():
     spend.add_argument("pip_id")
     desktop = command("desktop-notifications", "the runner's desktop notifications for new alerts and reviews: show, or turn on or off")
     desktop.add_argument("state", nargs="?", choices=("on", "off"))
-    backup = command("backup", "the model a Pip carries on with when its own doesn't answer: show, set (a model, or none), or with --pip one Pip's own (follow uses Pips settings)")
+    backup = command("backup", "the fallback model a Pip carries on with when its own doesn't answer: with --pip one Pip's (a model, or none); without, the one new Pips start with")
     backup.add_argument("model", nargs="?")
-    backup.add_argument("--pip", dest="backup_pip", help="one Pip's own backup")
+    backup.add_argument("--pip", dest="backup_pip", help="one Pip's fallback")
+    backup.add_argument("--provider", dest="backup_provider", default="", help="a saved provider's id (provider_...); none: DGC's own connection")
     paying = command("payments", "whether a Pip at Do it all may pay by itself, at most 3 times a day (off by default): show, or turn on or off")
     paying.add_argument("state", nargs="?", choices=("on", "off"))
     stop = command("stop", "emergency stop: pause all jobs and cancel their work")
@@ -984,14 +985,14 @@ def _format(value):
         return usage_text(value["usage"])
     if set(value) == {"backup"} and isinstance(value["backup"], dict):
         item = value["backup"]
+        where = " on a saved provider" if item.get("provider") else " on DGC's own connection"
         if "pip_id" in item:
-            own = item["model"]
-            return ((f"This Pip follows Pips settings: {item['follows'] or 'no backup'}." if own is None else
-                     f"This Pip's own backup: {own}." if own else "This Pip has no backup model.")
-                    + " Set it: dgc pips backup --pip PIP MODEL (none, or follow).")
-        return ((f"Backup model for Pips: {item['model']}. A Pip whose own model doesn't answer carries on with it and says so once."
-                 if item["model"] else "No backup model for Pips: a Pip whose model doesn't answer stops, as before.")
-                + " Set it: dgc pips backup MODEL (or none).")
+            return ((f"This Pip's fallback: {item['model']}{where}. When its own model doesn't answer, it carries on with it "
+                     "and says so once." if item.get("model") else "This Pip has no fallback: when its model doesn't answer, it stops.")
+                    + " Set it in its model picker, or: dgc pips backup --pip PIP MODEL [--provider ID] (or none).")
+        return ((f"New Pips start with the fallback {item['model']}{where}." if item.get("model")
+                 else "New Pips start with no fallback.")
+                + " Each Pip's own: dgc pips backup --pip PIP MODEL. This one: dgc pips backup MODEL (or none).")
     if set(value) == {"payments"} and isinstance(value["payments"], dict):
         item = value["payments"]
         return ((f"Pips at Do it all may pay by themselves: at most {item['limit']} payments a day across your Pips "
@@ -1579,11 +1580,12 @@ def _digest_command(config, args):
         if args.backup_pip:
             if not word:
                 return control({"type": "get_pip_backup", "pip_id": args.backup_pip})
-            return control({"type": "set_pip_backup", "pip_id": args.backup_pip,
-                            "model": None if word == "follow" else "" if word == "none" else word})
+            return control({"type": "set_pip_backup", "pip_id": args.backup_pip, "model": "" if word == "none" else word,
+                            "provider": "" if word == "none" else (args.backup_provider or "")})
         if not word:
             return control({"type": "get_pips_backup"})
-        return control({"type": "set_pips_backup", "model": "" if word == "none" else word})
+        return control({"type": "set_pips_backup", "model": "" if word == "none" else word,
+                        "provider": "" if word == "none" else (args.backup_provider or "")})
     if args.command == "payments":
         if args.state is None:
             return control({"type": "get_pips_payments"})

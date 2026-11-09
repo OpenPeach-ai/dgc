@@ -1,4 +1,4 @@
-/** Pips API 76 in the TypeScript SDK: a backup model for Pips (get_/set_pips_backup, get_/set_pip_backup): known,
+/** Pips API 76 in the TypeScript SDK: a Pip's fallback model (provider and model) (get_/set_pips_backup, get_/set_pip_backup): known,
  *  refused before API 76, then sent. Offline wire. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -20,8 +20,8 @@ function fixture(version) {
 }
 
 test('a backup model for Pips: refused before API 76, then sent', async () => {
-  assert.deepEqual([...COMMAND_FIELDS.set_pips_backup], ['model']);
-  assert.deepEqual([...COMMAND_FIELDS.set_pip_backup], ['pip_id', 'model']);
+  assert.deepEqual([...COMMAND_FIELDS.set_pips_backup], ['model', 'provider']);
+  assert.deepEqual([...COMMAND_FIELDS.set_pip_backup], ['pip_id', 'model', 'provider']);
   const old = fixture(75);
   await assert.rejects(old.session.pips.read('get_pips_backup', {}), (e) => e instanceof DGCUnsupportedError && /API 76/.test(e.message));
   await assert.rejects(old.session.pips.mutate('set_pip_backup', { pip_id: PIP, model: null }, { approved: true }), DGCUnsupportedError);
@@ -29,4 +29,6 @@ test('a backup model for Pips: refused before API 76, then sent', async () => {
   const current = fixture(76);
   assert.equal((await current.session.pips.read('get_pip_backup', { pip_id: PIP })).request.type, 'get_pip_backup');
   assert.equal((await current.session.pips.mutate('set_pips_backup', { model: 'qwen3:8b' }, { approved: true })).request.model, 'qwen3:8b');
+  const provider = 'provider_' + 'c'.repeat(32);
+  assert.equal((await current.session.pips.mutate('set_pip_backup', { pip_id: PIP, model: 'gpt-oss:120b', provider }, { approved: true })).request.provider, provider);
 });

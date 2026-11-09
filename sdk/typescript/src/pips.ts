@@ -182,8 +182,8 @@ export type PipMutationParams = {
   set_pip_daily_cap: { pip_id: string; daily_tokens: number | null };
   set_pips_desktop_notifications: { enabled: boolean };
   set_pips_payments: { enabled: boolean };
-  set_pips_backup: { model: string };
-  set_pip_backup: { pip_id: string; model: string | null };
+  set_pips_backup: { model: string; provider?: string };
+  set_pip_backup: { pip_id: string; model: string | null; provider?: string };
   set_pips_keep_running: { enabled: boolean };
   mark_pip_digest_seen: { until: string };
   mark_pip_news_seen: { pip_ids: string[]; until: string };
@@ -347,9 +347,9 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   get_pips_payments: [],
   set_pips_payments: ["enabled"],
   get_pips_backup: [],
-  set_pips_backup: ["model"],
+  set_pips_backup: ["model", "provider"],
   get_pip_backup: ["pip_id"],
-  set_pip_backup: ["pip_id", "model"],
+  set_pip_backup: ["pip_id", "model", "provider"],
   get_pips_keep_running: [],
   set_pips_keep_running: ["enabled"],
   get_pip_digest: [],
@@ -840,7 +840,7 @@ const API75_READS = new Set(["get_pips_payments"]);
 const API75_MUTATIONS = new Set(["set_pips_payments"]);
 for (const command of API75_READS) READS.add(command);
 for (const command of API75_MUTATIONS) MUTATIONS.add(command);
-// API 76: a backup model for Pips, one for all and each Pip's own (local only in DGC).
+// API 76: a Pip's fallback model (a provider and a model) and the one new Pips start with (local only in DGC).
 const API76_READS = new Set(["get_pips_backup", "get_pip_backup"]);
 const API76_MUTATIONS = new Set(["set_pips_backup", "set_pip_backup"]);
 for (const command of API76_READS) READS.add(command);

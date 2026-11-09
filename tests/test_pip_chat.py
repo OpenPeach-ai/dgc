@@ -518,7 +518,7 @@ with patch.object(LLMClient, "chat", chat), patch("requests.sessions.Session.req
         # nothing, and a reply from its own model again ends the outage.
         from dgc import pip_backup
         self.setup_job()
-        pip_backup.set_pips_wide(self.registry, "backup-model", "editor-user")
+        pip_backup.set_own(self.registry, self.job["id"], "backup-model", "editor-user")
         fixture = r'''from unittest.mock import patch
 from dgc.llm import ChatResult, LLMClient, LLMError
 from dgc.pips import _worker_main
@@ -565,7 +565,7 @@ with patch.object(LLMClient, "chat", chat), patch("requests.sessions.Session.req
         again = turn("out-3", False)
         self.assertEqual(again["backup"], "Its own model didn't answer; backup-model did", "a new outage says so again")
         # No backup set: a model that doesn't answer fails the turn, as before.
-        pip_backup.set_pips_wide(self.registry, "", "editor-user")
+        pip_backup.set_own(self.registry, self.job["id"], "", "editor-user")
         sent = self.send(key="none")
         row = self.store.claim_next()
         script = fixture.replace("OWN_WORKS_FLAG", "False")
