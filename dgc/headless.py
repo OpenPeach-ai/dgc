@@ -402,7 +402,10 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # never changes either Pip's authority to use apps, send, or operate its computer.
 # API 73 lets a new text message join one running Pip conversation. It keeps the
 # same run and session history instead of starting a competing reply.
-PIPS_API_VERSION = 74
+# API 74: a provider saved in the editor's Settings -> Models. API 75 (0.52): get_pips_payments / set_pips_payments
+# ({enabled}) -> {payments: {on, limit, paid}}, local only: whether a Pip at Do it all may pay by itself, at most
+# three times a day across all Pips (off by default).
+PIPS_API_VERSION = 75
 
 
 def _pips_platform_supported() -> bool:

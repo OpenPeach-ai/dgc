@@ -66,6 +66,7 @@ CONTROL_COMMANDS = frozenset({
     "run_pip_computer_command", "list_pip_computer_terminal", "get_pip_computer_desktop",
     "get_pips_keep_running", "set_pips_keep_running",
     "get_pips_desktop_notifications", "set_pips_desktop_notifications",
+    "get_pips_payments", "set_pips_payments",
     "get_pip_usage", "set_pip_daily_cap", "export_pip", "set_pip_feedback", "list_pip_feedback",
     "list_pip_app_links", "start_pip_app_link", "check_pip_app_link", "decline_pip_app_link", "disconnect_pip_app_link",
     "finish_pip_computer_check",
@@ -203,6 +204,7 @@ _COMMAND_ARGS = {
     "get_pip_computer_desktop": {"pip_id"},
     "get_pips_keep_running": set(), "set_pips_keep_running": {"enabled"},
     "get_pips_desktop_notifications": set(), "set_pips_desktop_notifications": {"enabled"},
+    "get_pips_payments": set(), "set_pips_payments": {"enabled"},
     "get_pip_usage": {"pip_id"}, "set_pip_daily_cap": {"pip_id", "daily_tokens"}, "export_pip": {"pip_id"},
     "set_pip_feedback": {"run_id", "rating", "note"}, "list_pip_feedback": {"pip_id"},
     "mark_pip_notification_read": {"workspace_id", "notification_id", "expected_revision"},
@@ -5944,6 +5946,13 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     raise RegistryError("local_only", "Desktop notifications are set on this computer only.")
                 result = {"desktop_notifications": pip_desktop.status(registry) if command == "get_pips_desktop_notifications"
                           else pip_desktop.set_enabled(registry, request.get("enabled"), actor)}
+            elif command in ("get_pips_payments", "set_pips_payments"):
+                # Pips API 75 (your P1): whether a Pip at Do it all may pay by itself, at most three a day. Off by default.
+                from . import pip_levels
+                if actor not in ("editor-user", "local-console"):
+                    raise RegistryError("local_only", "Only you let Pips pay, on this computer.")
+                result = {"payments": pip_levels.payments(registry) if command == "get_pips_payments"
+                          else pip_levels.set_payments(registry, request.get("enabled"), actor)}
             elif command in ("get_pips_keep_running", "set_pips_keep_running"):
                 from . import pip_keep_running
                 from .pip_daemon import runner_status

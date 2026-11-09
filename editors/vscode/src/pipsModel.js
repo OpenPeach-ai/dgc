@@ -1255,6 +1255,14 @@ export function pipsDesktopNotifications(value) {
   return value;
 }
 
+// Pips API 75 (0.52, P1): whether a Pip at Do it all may pay by itself, at most `limit` times a day; `paid` in the last day.
+export function pipsPayments(value) {
+  if (!record(value) || Object.keys(value).sort().join() !== 'limit,on,paid' || typeof value.on !== 'boolean'
+    || !Number.isSafeInteger(value.limit) || value.limit < 0 || value.limit > 100 || !Number.isSafeInteger(value.paid) || value.paid < 0)
+    throw Error('Whether Pips may pay didn’t load. Refresh the Pips view.');
+  return value;
+}
+
 export function pipOutcomes(value, pip) {
   const counts = ['reported','accepted','dismissed','still_reported','gone_after_change','gone_without_change','checkpoints_examined'];
   if (!digestKeys(value, ['pip_id','name','pip_type','history_truncated',...counts]) || value.pip_id !== pip || typeof value.name !== 'string'

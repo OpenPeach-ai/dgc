@@ -380,6 +380,11 @@ API72_READS = frozenset({'list_pip_flows', 'get_pip_flow'})
 API72_MUTATIONS = frozenset({'create_pip_flow', 'set_pip_flow'})
 READ_COMMANDS |= API72_READS
 MUTATION_COMMANDS |= API72_MUTATIONS
+# API 75: whether a Pip at Do it all may pay by itself, at most three a day (off by default; local only in DGC).
+API75_READS = frozenset({'get_pips_payments'})
+API75_MUTATIONS = frozenset({'set_pips_payments'})
+READ_COMMANDS |= API75_READS
+MUTATION_COMMANDS |= API75_MUTATIONS
 PIP_REPORT_AS = frozenset({'chat', 'doc', 'sheet'})
 TEMPLATE_CHANGE_ID = re.compile(r"tmplchange_[a-f0-9]{32}\Z")
 COMMAND_FIELDS = {
@@ -484,6 +489,8 @@ COMMAND_FIELDS = {
     'export_pip': frozenset({'pip_id'}),
     'get_pip_usage': frozenset({'pip_id'}),
     'set_pip_daily_cap': frozenset({'pip_id', 'daily_tokens'}),
+    'get_pips_payments': frozenset(),
+    'set_pips_payments': frozenset({'enabled'}),
     'get_pips_desktop_notifications': frozenset(),
     'set_pips_desktop_notifications': frozenset({'enabled'}),
     'get_pips_keep_running': frozenset(),
@@ -798,7 +805,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API72_READS | API72_MUTATIONS:
+        if command in API75_READS | API75_MUTATIONS:
+            minimum = 75
+        elif command in API72_READS | API72_MUTATIONS:
             minimum = 72
         elif command in API69_READS | API69_MUTATIONS:
             minimum = 69

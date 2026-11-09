@@ -182,6 +182,39 @@ class ClassifyTests(unittest.TestCase):
         for value in levels.LEVELS:
             self.assertIsNone(levels.decide_write(value, pay), f"{value}: a payment asks")
             self.assertIsNone(levels.decide_write(value, {**cart, "payment": True}), f"{value}: a card number asks")
+        # 0.52: at Do it all what only might be a payment goes; a payment goes only with your switch on (pay).
+        maybe = {"method": "POST", "host": "x.example", "path": "/zones/x/subscription", "fields": ["plan"], "target": ""}
+        self.assertEqual(levels.classify(maybe)["verdict"], "maybe_payment")
+        self.assertIsNone(levels.decide_write("approve", maybe), "Approve for me: a maybe still asks")
+        self.assertIsNotNone(levels.decide_write("full", maybe), "Do it all: a maybe goes")
+        self.assertEqual(levels.decide_write("full", pay, pay=True)["verdict"], "payment", "your switch on: Do it all pays")
+        self.assertIsNone(levels.decide_write("approve", pay, pay=True), "only at Do it all")
+        self.assertIsNone(levels.decide_write("full", {**cart, "payment": True}, pay=True), "a card number asks, switch or not")
+
+
+class PaymentsTests(Store):
+    """Your P1 (0.52): a switch, off by default, that only you turn on, lets a Pip at Do it all pay, three a day."""
+
+    def test_off_by_default_only_you_turn_it_on_and_only_do_it_all_may_pay(self):
+        self.assertEqual(self.control("get_pips_payments")["payments"], {"on": False, "limit": 3, "paid": 0})
+        for actor, fields, code in (("device_1", {"enabled": True}, "local_only"), ("editor-user", {"enabled": "yes"}, "invalid_request")):
+            with self.subTest(actor=actor), self.assertRaises(RegistryError) as raised:
+                self.control("set_pips_payments", actor=actor, **fields)
+            self.assertEqual(raised.exception.code, code)
+        pip = self.personal()
+        self.assertEqual(self.control("set_pips_payments", enabled=True)["payments"]["on"], True)
+        self.assertFalse(levels.may_pay(self.registry, pip["id"]), "Ask me first never pays")
+        levels.set_level(self.registry, pip["id"], "approve", "editor-user")
+        self.assertFalse(levels.may_pay(self.registry, pip["id"]), "nor does Approve for me")
+        levels.set_level(self.registry, pip["id"], "full", "editor-user")
+        self.assertTrue(levels.may_pay(self.registry, pip["id"]))
+        self.control("set_pips_payments", enabled=False)
+        self.assertFalse(levels.may_pay(self.registry, pip["id"]), "off again: every payment asks")
+        # A money action's send by its level follows the same switch.
+        self.assertIsNone(levels.decide_send(self.registry, pip["id"], "full", "connector",
+                                             {"server": "x", "call": {"tool": "STRIPE_CREATE_CHARGE", "arguments": {}}}, money=True))
+        self.assertIsNotNone(levels.decide_send(self.registry, pip["id"], "full", "connector",
+                                                {"server": "x", "call": {"tool": "STRIPE_CREATE_CHARGE", "arguments": {}}}, money=True, pay=True))
 
 
 class FloorTests(unittest.TestCase):
@@ -435,6 +468,30 @@ class SharedGateTests(Store):
         host._queued.append(host.browser.hold("r26"))
         self.assertEqual(host._record_held(), [])
         self.assertIn("r26", host.browser.released)
+
+    def test_with_your_switch_on_do_it_all_pays_three_times_a_day_and_never_a_card_number(self):
+        pip, host = self.host("full")
+        levels.set_level(self.registry, pip["id"], "full", "editor-user")
+        host._level_now = levels.follow(self.registry.directory, pip["id"])
+        host.target = "Pay 500"
+        pay = dict(url="https://shop.example/checkout/pay", fields=[("card_token", "tok_1")])
+        host._queued.append(host.browser.hold("p-off", **pay))
+        [made] = host._record_held()
+        self.assertEqual(next(a for a in pip_computer.list_actions(self.registry, pip["id"]) if a["id"] == made)["summary"]["asks_because"],
+                         "payment", "off by default: a payment asks at Do it all")
+        levels.set_payments(self.registry, True, "editor-user")
+        host._queued.append(host.browser.hold("p-card", payment=True, **pay))
+        self.assertEqual(len(host._record_held()), 1, "a card number in it asks, switch or not")
+        for n in range(levels.PAY_LIMIT):
+            host._queued.append(host.browser.hold(f"p{n}", **pay))
+            self.assertEqual(host._record_held(), [], f"payment {n} goes")
+        self.assertEqual(host.browser.released, ["p0", "p1", "p2"])
+        self.assertEqual(levels.payments(self.registry)["paid"], 3)
+        sent = [a for a in pip_computer.list_actions(self.registry, pip["id"]) if a["status"] == "sent"]
+        self.assertTrue(all(a["summary"].get("paid") is True and a["resolved_by"] == "pip-level:full" for a in sent))
+        host._queued.append(host.browser.hold("p3", **pay))
+        self.assertEqual(len(host._record_held()), 1, "three a day: the fourth asks")
+        self.assertNotIn("p3", host.browser.released)
 
     def test_at_ask_the_shared_gate_is_as_before(self):
         pip, host = self.host("ask")

@@ -1,5 +1,9 @@
 # DGC SDK changelog
 
+## Unreleased
+
+- Pips API 75: `get_pips_payments` and `set_pips_payments {enabled}` read and set whether a Pip at Do it all may pay by itself, at most three times a day across all Pips (off by default; DGC takes it only from this computer). Both SDKs refuse them before API 75.
+
 ## 0.9.0 — 2026-11-07
 
 - `start_pip_app_link` no longer links the first Composio account it finds. With accounts there, it answers `{link, accounts, wanted}` and links nothing; its optional `account` links the one chosen, and `another: true` opens a sign-in for one more.

@@ -706,6 +706,16 @@ class Host:
             self.waiting.append(action_id)
         return made
 
+    def _may_pay(self) -> bool:
+        """Whether its level may pay this one (pip_levels.may_pay), read now."""
+        from .pip_levels import may_pay
+        from .workspace_registry import WorkspaceRegistry
+        try:
+            with WorkspaceRegistry(self.state_directory) as registry:
+                return may_pay(registry, self.pip_id)
+        except Exception:                                  # noqa: BLE001 - unreadable: it asks
+            return False
+
     def _fused(self) -> str:
         """While the fuse holds for this Pip (pip_levels.fuse): when it may act on its own again; else ""."""
         from .pip_levels import fuse
@@ -798,7 +808,11 @@ class Host:
         if not cues["target"]:
             form_cues = getattr(self.browser, "form_cues", None)
             cues["buttons"] = (form_cues(held.url) or {}).get("buttons", []) if form_cues else []
-        found = pip_levels.decide_write(level, cues) if acting else None
+        # A payment goes only at Do it all, when the user let Pips pay and today's three aren't used (pip_levels.may_pay).
+        pay = acting and level == pip_levels.FULL and Host._may_pay(self)
+        found = pip_levels.decide_write(level, cues, pay=pay) if acting else None
+        if found is not None and found.get("verdict") == "payment":
+            found = {**found, "paid": True}
         if found is not None and upload_name:
             self.upload_from_chat = None
         if found is None:
@@ -826,6 +840,8 @@ class Host:
         summary = Host._held_summary(self, held)
         if approval.get("site"):
             summary.update(kind="site", site=approval["site"])
+        if approval.get("paid"):
+            summary["paid"] = True                          # counted against today's payments (pip_levels.paid)
         self.browser.release(held.request_id)
         self.browser.pump(1.5)
         Host._level_record(self, summary, approval["what"], held.request_id)

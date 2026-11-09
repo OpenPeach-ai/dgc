@@ -144,6 +144,38 @@ test('the desktop notifications switch says when this computer cannot show them'
  assert.throws(()=>model.pipsDesktopNotifications(off({last:{shown:'no',at:'x'}})),/invalid/);
 });
 
+test('payments at Do it all: off by default, one switch, its words from the reply, and none before API 75', async()=>{
+ const pay=(extra={})=>({on:false,limit:3,paid:0,...extra});
+ const x=setup({api:75});await x.drain({get_pips_payments:()=>({payments:pay()})});
+ assert.equal(x.requests('get_pips_payments').length,1);
+ const box=x.d.getElementById('pips-payments');assert.ok(box,'in the runner controls');assert.equal(box.checked,false);
+ assert.match(x.d.body.textContent,/Let Pips at Do it all pay/);
+ assert.match(x.d.body.textContent,/Off: every payment asks you, at every level\./);
+ box.checked=true;box.dispatchEvent(new x.w.Event('change',{bubbles:true}));await flush();
+ const sent=x.requests('set_pips_payments')[0];assert.deepEqual(JSON.parse(JSON.stringify(sent.request)),{type:'set_pips_payments',enabled:true});
+ x.answer(sent,{payments:pay({on:true,paid:1})});await x.drain();
+ assert.match(x.d.body.textContent,/A Pip at Do it all may now pay by itself, at most 3 times a day across your Pips\. It never types a card number\./);
+ assert.match(x.d.body.textContent,/at most 3 times a day across your Pips \(1 in the last day\)/);
+ // Opening Controls again reads it again: a payment made since shows in its count.
+ x.d.getElementById('runner-controls-toggle').click();await x.drain({get_pips_payments:()=>({payments:pay({on:true,paid:2})})});
+ assert.equal(x.requests('get_pips_payments').length,2);
+ assert.match(x.d.body.textContent,/\(2 in the last day\)/);
+ assert.throws(()=>model.pipsPayments({on:true,limit:3}),/didn’t load/);
+ assert.throws(()=>model.pipsPayments({on:'yes',limit:3,paid:0}),/didn’t load/);
+ const old=setup({api:74});await old.drain();
+ assert.equal(old.d.getElementById('pips-payments'),null,'an older DGC has no switch');
+ assert.equal(old.requests('get_pips_payments').length,0);
+ // The host refuses both below API 75.
+ const view=load(viewCode,(name)=>(name==='vscode'?{}:require(name)));
+ for(const api of [74,75]){
+  const posted=[],forwarded=[];const editor=new view.PipsEditor({},m=>{forwarded.push(m);return true;},()=>{});
+  editor.attach(m=>posted.push(m));editor.ready({pips_supported:true,pips_enabled:true,pips_api_version:api},{});
+  editor.receive({type:'pipsRequest',id:'s',request:{type:'set_pips_payments',enabled:true}});
+  if(api<75){assert.equal(forwarded.length,0);assert.match(posted.find(m=>m.id==='s').error.message,/Update DGC to let Pips pay/);}
+  else assert.equal(forwarded.length,1);
+ }
+});
+
 test('a current CLI that cannot run Pips here says why, not "update"', async()=>{
  const make=(api)=>{const dom=new JSDOM('<main id="app"></main><div id="review-root"></div>',{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);let listener;
   w.HTMLCanvasElement.prototype.getContext=()=>null;w.TextEncoder=TextEncoder;w.setInterval=()=>1;w.eval(client);

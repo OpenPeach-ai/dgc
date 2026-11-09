@@ -1414,6 +1414,11 @@ Existing Pips keep the level you chose for them. A Project Pip has no chip: it a
   its Files, or a real question with no sensible default. A plugin set to **Always ask**, or one that can move money,
   still asks. The line under the level says the risk plainly: a page or an email it reads could talk it into sending
   something.
+- **Payments at Do it all.** Off by default: every payment asks, at every level. **Let Pips at Do it all pay** (in the
+  Pips view's Controls, or `dgc pips payments on`) lets a Pip at Do it all pay by itself, at most 3 times a day across
+  your Pips. Only you turn it on, on this computer. It never types a card number: a request carrying one still asks,
+  and your own Pay on its screen is still yours. Something that only might be a payment (one money word, such as a
+  billing page, with nothing certain) goes at Do it all, and still asks at Approve for me.
 - **The fuse.** If a Pip does 25 things on its own in an hour (a submit, a send or a plugin change its level or an
   Always allow let through; a new site's first visit doesn't count), it asks before each one again until the hour has
   passed, whatever its level. Its card says so, with the time. The level you chose stays as it was.

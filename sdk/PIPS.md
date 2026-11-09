@@ -219,6 +219,7 @@ job with `create_pip` and a reviewed update.
 | 72 | Local Pip workflow controls: `list_pip_flows {workspace_id}` and `get_pip_flow {flow_id}` (R); `create_pip_flow {name, pip_ids, tasks, mode}` and `set_pip_flow {flow_id, expected_revision, status}` (M). `list_pip_flows` also returns `core_suggestions`: ordered Pips created from one Core reply, for prefilling a separate human review; suggestions never authorize routing. Mode is `reviewed` or `unattended`; status is `on`, `paused` or `retired`. Exactly two to four distinct Pips of one workspace and kind, one bounded task per handoff, at most three starts per day. Personal workflows share the exact prior result. Project workflows hand the first source checked finding to a read only Pip on committed source. Unattended only accepts the route; each Pip keeps its own action approvals. |
 | 73 | A new text message can join one running Personal Pip conversation as a mid-turn update; it stays in that run's history and does not start a competing reply. |
 | 74 | A provider saved in the editor's Settings → Models: `model_choice` `{"mode": "provider", "provider": "provider_<32 hex>", "model": id}`. The Pip keeps only those; the key stays with the CLI. |
+| 75 | `get_pips_payments`, `set_pips_payments {enabled}`: whether a Pip at Do it all may pay by itself, at most three times a day (off by default; local only in DGC) |
 | 58 | How much a Personal Pip asks: `get_pip_level {pip_id}` (R: `level`, `default`, `levels` [{level, name, says}], `on_its_own` [{at, what, level, unattended, kind}]) and `set_pip_level {pip_id, level}` (M, local only; `ask`, `approve` or `full`). What a level let through is a computer action already `sent` by `pip-level:<level>` or an app action resolved by it; a payment asks at every level. |
 | 57 | A Personal Pip's own working notes: `get_pip_working_notes {pip_id}` (R: `lines`, `text`, `revision`, `max_lines`, `max_bytes`, `bytes`, `updated_at`) and `set_pip_working_notes {pip_id, text, expected_revision}` (M, local only, never a secret); `list_pip_daily_log {pip_id, before?, limit?}` (R): what it did each day, `{days: [{day, lines, more}], next_before}`. The Pip keeps its notes itself with a `working_notes` tool and starts every run with them; the log is never given to a run. |
 
@@ -492,6 +493,8 @@ approves, rejects or starts nothing. Open the referenced record before acting.
 | `set_pips_keep_running` | M | `enabled` (bool) |
 | `get_pips_desktop_notifications` | R | none |
 | `set_pips_desktop_notifications` | M | `enabled` (bool) |
+| `get_pips_payments` | R | none; from API 75 |
+| `set_pips_payments` | M | `enabled` (bool): whether a Pip at Do it all may pay by itself, at most 3 times a day; from API 75 |
 | `get_pip_usage` | R | `pip_id` |
 | `export_pip` | R | `pip_id`; returns a shareable `dgc-pip` file (no accounts, IDs, memory or history) |
 | `set_pip_daily_cap` | M | `pip_id`, `daily_tokens`: only null since 2026-10-14 (Pips have no daily limit; a number is refused) |

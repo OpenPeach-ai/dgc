@@ -9,7 +9,7 @@ Pips API history. For a guided introduction, start with [PIPS.md](PIPS.md).
 | DGC CLI | 0.51.0 |
 | VS Code extension | 0.35.0 |
 | SDK (Python and TypeScript) | 0.9.0 |
-| Pips API | 73 |
+| Pips API | 75 |
 | Editor protocol | v14 |
 | Pips registry schema | 51 |
 
@@ -1236,7 +1236,10 @@ Delivery is `notify-send` (with the session bus at `/run/user/UID/bus` when the 
 none) or `osascript` with the text as script arguments; failure is never an error and is
 recorded as `last.shown: false`. `get_pips_desktop_notifications` /
 `set_pips_desktop_notifications {enabled}` (local only) return `{on, available, platform,
-last}`. The editor's own notice reads `get_pip_digest` from the extension host every minute
+last}`. `get_pips_payments` / `set_pips_payments {enabled}` (Pips API 75, local only) return `{on, limit, paid}`: whether a
+Pip at Do it all may pay by itself (metadata `pips_level_payments`, off by default), at most `limit` (`pip_levels.PAY_LIMIT`,
+3) payments in 24 hours across all Pips, counted from `sent` computer actions with `summary.paid` and `pip_level_approved`
+events with `payload.paid` (`pip_levels.paid`). The editor's own notice reads `get_pip_digest` from the extension host every minute
 (`pipsAttention.ts`, remembered in the host's global state) and is turned off by
 `dgc.notifyPips`.
 
@@ -2304,3 +2307,5 @@ Clients check it before using a newer control.
 | 71 | Videos in a Personal Pip's chat: a reply that started a video carries `videos`, each the video's job as DGC last saw it (state, length, resolution, price and, once made, the file). No command is added |
 | 72 | Reviewed local Personal and Project Pip workflow controls: list, get, create and set status. Two to four Pips of one workspace and kind can pass exact results or a committed-source finding through reviewed or unattended routing; each Pip keeps its own external-action permissions. |
 | 73 | A text message can join one running Personal Pip conversation as a mid-turn update. It stays in that run's history and does not start a second reply. One that reply never read becomes the next turn, or says it wasn't sent if the reply was stopped or failed; `list_pip_messages` lists those waiting for a turn in `waiting` (see PIPS_EDITOR_PROTOCOL.md). |
+| 74 | A Pip on a provider saved in the editor's Settings → Models: `model_choice` `{"mode": "provider", "provider", "model"}`. |
+| 75 | Payments at Do it all: `get_pips_payments` / `set_pips_payments {enabled}` (local only) → `{payments: {on, limit, paid}}`. Off by default; on, a Pip at Do it all may pay by itself, at most `limit` (3) times in 24 hours across all Pips, never a request carrying a card number. |

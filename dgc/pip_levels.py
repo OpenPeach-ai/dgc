@@ -167,6 +167,60 @@ def effective(registry, pip_id) -> str:
     return chosen
 
 
+# --------------------------------------------------------------------------- payments at Do it all (your P1)
+# Off by default: every payment asks, at every level. On (only you, on this computer), a Pip at Do it all pays by itself,
+# at most PAY_LIMIT times in a day across all your Pips (payments counted, not money). It never types a card number: a
+# request carrying one still asks, and your own Pay on its screen is still your own.
+PAYMENTS_KEY = "pips_level_payments"       # metadata: JSON {on, at, by}
+PAY_LIMIT = 3
+PAY_SECONDS = 24 * 3600
+
+
+def payments(registry) -> dict:
+    """get_pips_payments: {on, limit, paid}: whether a Pip at Do it all may pay, and how many it paid in the last day."""
+    try:
+        row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (PAYMENTS_KEY,)).fetchone()
+        on = bool(row) and json.loads(row["value"]).get("on") is True
+    except Exception:                       # noqa: BLE001 - unreadable is off
+        on = False
+    return {"on": on, "limit": PAY_LIMIT, "paid": len(paid(registry))}
+
+
+def set_payments(registry, value, actor) -> dict:
+    if actor not in LOCAL:
+        raise RegistryError("local_only", "Only you let Pips pay, on this computer.")
+    if not isinstance(value, bool):
+        raise RegistryError("invalid_request", "Say on or off.")
+    with registry.transaction():
+        registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
+                            (PAYMENTS_KEY, json.dumps({"on": value, "at": utc_now(), "by": actor})))
+    return payments(registry)
+
+
+def paid(registry, seconds=PAY_SECONDS) -> list[str]:
+    """When each payment a Pip made by itself in the last `seconds` went, across all Pips: a computer submit its level
+    paid, and a plugin change or app send it paid (pip_level_approved with paid)."""
+    since, times = _since(seconds, registry), []
+    for query in ("SELECT resolved_at FROM pip_computer_actions WHERE status='sent' AND resolved_at>=? "
+                  "AND resolved_by LIKE 'pip-level:%' AND json_extract(summary,'$.paid')=1",
+                  "SELECT created_at FROM workspace_events WHERE created_at>=? AND event_type='pip_level_approved' "
+                  "AND json_extract(payload,'$.paid')=1"):
+        try:
+            times += [str(r[0]) for r in registry.db.execute(query, (since,))]
+        except Exception:                   # noqa: BLE001 - a registry without that kind of action
+            pass
+    return sorted(times)
+
+
+def may_pay(registry, pip_id) -> bool:
+    """Whether this Pip may pay by itself now: at Do it all (the fuse not holding), you let Pips pay, and fewer than
+    PAY_LIMIT payments went in the last day."""
+    try:
+        return payments(registry)["on"] and effective(registry, pip_id) == FULL and len(paid(registry)) < PAY_LIMIT
+    except Exception:                       # noqa: BLE001 - unreadable means it asks
+        return False
+
+
 # New Personal Pips start with Ask. Existing Pips retain their saved level; creating a workflow
 # or accepting a setup card never changes the new Pip's authority to send or submit.
 NEW_PIP = ASK
@@ -507,14 +561,17 @@ def _said_what(target, host, method, path) -> str:
     return f"Sent a form to {host}{str(path or '/')[:80]}"
 
 
-def decide_write(value, cues) -> dict | None:
+def decide_write(value, cues, *, pay=False) -> dict | None:
     """Whether the level lets this held write through now. None: it waits for the user, as at Ask.
-    Else {"what", "verdict"}."""
-    if value not in (APPROVE, FULL):
-        return None
+    Else {"what", "verdict"}. At Do it all what only might be a payment goes (one money word, nothing certain), and a
+    payment goes only when the user let Pips at Do it all pay and today's three aren't used (`pay`, may_pay)."""
+    if value not in (APPROVE, FULL) or cues.get("payment"):
+        return None                          # a card number in it: it asks, whatever the level or the switch
     found = classify(cues)
-    if found["verdict"] in ("payment", MAYBE_PAYMENT):
-        return None                          # every level: a payment asks, and so does what might be one
+    if found["verdict"] == "payment":
+        return found if value == FULL and pay else None
+    if found["verdict"] == MAYBE_PAYMENT:
+        return found if value == FULL else None
     if value == FULL or found["verdict"] == "routine":
         return found
     return None
@@ -697,10 +754,12 @@ def _known_recipients(registry, pip_id) -> set[str]:
     return found
 
 
-def decide_send(registry, pip_id, value, kind, content, *, money=False) -> dict | None:
+def decide_send(registry, pip_id, value, kind, content, *, money=False, pay=False) -> dict | None:
     """Whether the level sends this draft without asking: {"what"} or None (it waits for the user).
-    kind: email | calendar | connector; content: the draft's message, event or action."""
-    if value not in (APPROVE, FULL) or money:
+    kind: email | calendar | connector; content: the draft's message, event or action. ``pay``: Pips at Do it all may
+    pay now (may_pay), which lets a payment go at Do it all."""
+    paying = value == FULL and pay
+    if value not in (APPROVE, FULL) or (money and not paying):
         return None
     if kind == "connector":
         from .pip_plugins import always_asks
@@ -709,8 +768,8 @@ def decide_send(registry, pip_id, value, kind, content, *, money=False) -> dict 
         call = content.get("call") or {}
         tool = str(call.get("tool") or "")
         said = words(tool, list((call.get("arguments") or {}).keys()))
-        if _find(PAYMENT, said) or _find(r"charge|refund|invoice|payout|withdraw|deposit|swap|trade|order|orders", said):
-            return None                      # a payment, by its own name, at every level
+        if (_find(PAYMENT, said) or _find(r"charge|refund|invoice|payout|withdraw|deposit|swap|trade|order|orders", said)) and not paying:
+            return None                      # a payment, by its own name, at every level (unless Pips may pay)
         from . import pip_sdk_apps
         server = str(content.get('server', ''))
         what = f"Ran {tool} with {pip_sdk_apps.display(pip_sdk_apps.name_of(server)) if pip_sdk_apps.is_app(server) else server}"
@@ -749,7 +808,9 @@ def check(store, actor, payload) -> None:
     kind = {"gmail_send": "email", "calendar_create": "calendar", "connector_call": "connector"}[payload["kind"]]
     content = payload["message"] if kind == "email" else payload["event"] if kind == "calendar" else {
         "server": payload["server"], "call": payload["call"]}
-    if decide_send(store.registry, pip_id, chosen, kind, content, money=bool(_asks_every_time(payload))) is None:
+    money = bool(_asks_every_time(payload))
+    if decide_send(store.registry, pip_id, chosen, kind, content, money=money,
+                   pay=money and may_pay(store.registry, pip_id)) is None:
         raise RegistryError("local_only", "This Pip's level doesn't let that run without asking.")
 
 
@@ -805,7 +866,8 @@ def dispatch_for_run(registry, config, run_id) -> list:
                 content = draft["payload"][field]
                 money = draft_kind == "connector" and bool(_asks_every_time({"kind": "connector_call", "server": content.get("server"),
                                                                              "call": content.get("call")}))
-                if decide_send(registry, row[0], chosen, draft_kind, content, money=money) is None:
+                pay = bool(money) and may_pay(registry, row[0])
+                if decide_send(registry, row[0], chosen, draft_kind, content, money=money, pay=pay) is None:
                     continue
                 if draft_kind == "connector":
                     from .pip_connector_drafts import prepare
@@ -818,7 +880,7 @@ def dispatch_for_run(registry, config, run_id) -> list:
                 done = actions.accept(store, prepared["id"], prepared["digest"], actor, config)
                 outcomes.append({"action_id": done["id"], "status": done["status"], "level": chosen})
                 registry.event(row[1], "pip_level_approved", pip_id=row[0], run_id=run_id,
-                               payload={"action_id": done["id"], "level": chosen, "kind": draft_kind})
+                               payload={"action_id": done["id"], "level": chosen, "kind": draft_kind, **({"paid": True} if pay else {})})
                 from .pip_plugins import after_action
                 after_action(store, config, done)     # a plugin action: the Pip reads its answer and carries on
             except Exception as exc:        # noqa: BLE001 - it stays a draft for the user

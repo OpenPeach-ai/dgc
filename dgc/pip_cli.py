@@ -554,6 +554,8 @@ def parser():
     spend.add_argument("pip_id")
     desktop = command("desktop-notifications", "the runner's desktop notifications for new alerts and reviews: show, or turn on or off")
     desktop.add_argument("state", nargs="?", choices=("on", "off"))
+    paying = command("payments", "whether a Pip at Do it all may pay by itself, at most 3 times a day (off by default): show, or turn on or off")
+    paying.add_argument("state", nargs="?", choices=("on", "off"))
     stop = command("stop", "emergency stop: pause all jobs and cancel their work")
     stop.add_argument("--yes", action="store_true", help="confirm the global emergency stop without a prompt")
     command("resume", "locally clear emergency stop; jobs stay paused")
@@ -977,6 +979,12 @@ def _format(value):
         return dumps(value["shared_pip"]).rstrip()
     if set(value) == {"usage"} and isinstance(value["usage"], dict) and "last_30_days" in value["usage"]:
         return usage_text(value["usage"])
+    if set(value) == {"payments"} and isinstance(value["payments"], dict):
+        item = value["payments"]
+        return ((f"Pips at Do it all may pay by themselves: at most {item['limit']} payments a day across your Pips "
+                 f"({item['paid']} in the last day). They never type a card number.") if item["on"] else
+                "Every payment asks you, at every level. Turn this on to let a Pip at Do it all pay by itself, "
+                f"at most {item['limit']} times a day: dgc pips payments on")
     if set(value) == {"desktop_notifications"}:
         item = value["desktop_notifications"]
         return (f"Desktop notifications: {'on' if item['on'] else 'off'}."
@@ -1553,6 +1561,10 @@ def _digest_command(config, args):
         return {"shared_pip": value["document"]}
     if args.command == "usage":
         return control({"type": "get_pip_usage", "pip_id": args.pip_id})
+    if args.command == "payments":
+        if args.state is None:
+            return control({"type": "get_pips_payments"})
+        return control({"type": "set_pips_payments", "enabled": args.state == "on"})
     if args.command == "desktop-notifications":
         if args.state is None:
             return control({"type": "get_pips_desktop_notifications"})

@@ -244,15 +244,20 @@ class PaymentTable(unittest.TestCase):
             with self.subTest(name):
                 self.assertEqual(self.verdict(**cues)["verdict"], expected, cues)
 
-    def test_a_payment_and_a_maybe_ask_at_every_level_and_a_false_alarm_goes_at_full_access(self):
+    def test_a_payment_asks_at_every_level_and_a_maybe_goes_only_at_do_it_all(self):
+        # 0.52 (Pips package 4): a maybe (one money word, nothing certain) goes at Do it all and still asks at Approve for
+        # me; a payment asks at both (your switch off), and every false alarm goes at Do it all.
         for name, cues in TABLE_PAY:
             for value in (levels.APPROVE, levels.FULL):
                 with self.subTest(name, level=value):
                     self.assertIsNone(levels.decide_write(value, {"method": "POST", "host": "shop.example", "path": "/", "fields": [], **cues}))
         for name, cues, expected in TABLE_NOT_PAY:
             with self.subTest(name):
-                went = levels.decide_write(levels.FULL, {"method": "POST", "host": "shop.example", "path": "/", "fields": [], **cues})
-                self.assertEqual(went is None, expected == "maybe_payment", cues)
+                full = levels.decide_write(levels.FULL, {"method": "POST", "host": "shop.example", "path": "/", "fields": [], **cues})
+                self.assertIsNotNone(full, cues)
+                if expected == "maybe_payment":
+                    self.assertIsNone(levels.decide_write(levels.APPROVE, {"method": "POST", "host": "shop.example", "path": "/",
+                                                                           "fields": [], **cues}), cues)
 
     def test_a_maybe_says_the_word_that_raised_it(self):
         self.assertEqual(self.verdict(path="/accounts/x/billing/profile")["why"], "billing")
@@ -454,7 +459,7 @@ class PaymentsAskEveryTime(Gate):
         self.assertEqual([a["summary"]["path"] for a in self.waiting(pip)], [f"/items/{HEX_B}"])
 
     def test_a_false_alarm_offers_always_allow_says_why_and_then_holds(self):
-        pip, host = self.host("full")
+        pip, host = self.host("approve")      # (at Do it all a maybe goes, 0.52)
         self.assertEqual(len(self.hold(host, f"https://dash.example/accounts/{HEX_A}/billing/profile", fields=[("company", "x")])), 1)
         [card] = self.waiting(pip)
         self.assertEqual((card["summary"]["asks_because"], card["summary"]["asks_word"]), ("maybe_payment", "billing"))
