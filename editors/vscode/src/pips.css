@@ -849,5 +849,11 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .pip-routine-note[data-routine-line=blocked]{color:var(--vscode-errorForeground)}
 /* A Pip's "+" menu opens above the box at its left, as Work's and ChatDGC's do; how it looks is the shared menu. */
 .composer-add-menu{position:absolute;bottom:calc(100% + 8px);left:0;z-index:20;width:min(280px,100%)}
+/* The level chip: the shield and the level's name, as Work's mode picker; its menu opens above the box, as "+" does. */
+.pip-composer .composer-chip.composer-level{gap:5px;padding:0 8px 0 6px}
+.composer-level-name{min-width:0;max-width:9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.composer-level-menu{position:absolute;bottom:calc(100% + 8px);left:0;z-index:20;width:min(320px,100%)}
+.composer-level-menu .composer-level-wait,.composer-level-menu .composer-level-error{margin:0;padding:4px 10px 6px;font-size:12px;color:var(--muted)}
+.composer-level-menu .composer-level-error{color:var(--del-text,var(--vscode-errorForeground))}
 /* A Pip's attachments are the shared pills (media/shared/composer.css). */
 .chat-images .dgc-att{flex:none}

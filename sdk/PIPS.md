@@ -774,7 +774,7 @@ DGC POSTs two kinds of event, signed exactly as tool calls are (the same headers
 
 `decision` is `accepted`, `rejected` or `expired`. `by` is `dgc` (DGC's own card, the CLI, or the 24-hour expiry),
 `app` (your app, through `decide`), `always_allow` (the Pip's Always allow) or `level` (the Pip's level, Approve for
-me or Full access). An Always allow-ed change was never waiting, so it has no `approval_requested`, only its
+me or Do it all). An Always allow-ed change was never waiting, so it has no `approval_requested`, only its
 `approval_resolved`: your audit sees it either way. An accepted change then arrives as its own `tool_call`, carrying
 the same `action_id`.
 

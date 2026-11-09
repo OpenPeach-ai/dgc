@@ -1,6 +1,7 @@
-// How much a Personal Pip asks (pip_levels, Pips API 58), on its page: Ask, Approve for me or Full access, one plain line
-// for the one chosen, and a short "What it did on its own" list right under it, so changing the level is one click away.
-// The line is DGC's own (get_pip_level's `says`), shown once more as the notice when a level is chosen.
+// How much a Personal Pip asks (pip_levels, Pips API 58): Ask me first, Approve for me or Do it all. In its prompt box, a
+// chip with the level's name and a menu of the three with a line each and "What it can do" last; on its page, the picker
+// with one plain line for the one chosen and a short "What it did on its own" list right under it. Both read one state,
+// so they always agree. The line is DGC's own (get_pip_level's `says`), shown once more as the notice when one is chosen.
 
 const LEVELS = ['ask', 'approve', 'full'];
 const KINDS = ['site', 'computer', 'app'];
@@ -37,6 +38,21 @@ export function levelMarkup(state, {esc, busy = false, error = '', pipName = 'It
       `<li class="pip-page-row static sub"><span class="row-words"><span>${esc(d.what)}</span><small>${esc(when(d.at))} · ${esc(name(d.level))}${d.unattended ? ' · nobody at the keyboard' : ''}</small></span></li>`).join('')}</ul>`
       + (state.level === 'ask' ? '' : `<button type="button" class="link" data-level-ask${off}>Ask me again from now on</button>`) : '')
     + (error ? `<p class="error" role="alert">${esc(error)}</p>` : '') + '</section>';
+}
+
+/**
+ * The level chip's menu in a Pip's prompt box (the shared menu, media/shared/menu.js): "Before <name> acts", one row a
+ * level with its line under its name and a check on the chosen one, then "What <name> can do", the dialog the shield
+ * opened. Rows wait while a change is saving. Before the level has loaded it says so, and an error is said in the menu.
+ */
+export function levelMenuMarkup(state, {esc, menu = globalThis.DgcMenu, pipName = 'this Pip', busy = false, error = ''}) {
+  const head = `<div class="dgc-menu-head" role="presentation"><span>Before ${esc(pipName)} acts</span></div>`;
+  const rows = state && menu ? menu.html([{rows: state.levels.map(l => ({id: l.level, label: l.name, sub: l.says, checked: l.level === state.level,
+    attrs: busy ? 'disabled' : ''}))}], {role: 'menuitemradio', data: 'pip-level-pick', check: true})
+    : `<p class="composer-level-wait" role="status">${error ? '' : 'Loading…'}</p>`;
+  return head + rows + (error ? `<p class="composer-level-error" role="alert">${esc(error)}</p>` : '')
+    + '<div class="dgc-menu-div" role="separator"></div>'
+    + `<button type="button" role="menuitem" class="dgc-menu-row" data-pip-level-what><span class="dgc-menu-label">What ${esc(pipName)} can do</span></button>`;
 }
 
 /** What a newly chosen level means, in its one line: the notice after the change. */

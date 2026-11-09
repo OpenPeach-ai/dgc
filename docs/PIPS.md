@@ -1374,17 +1374,21 @@ without.
 
 ### How much it asks
 
-Each Personal Pip has a level, on its page under **How much it asks** (Pips API 58), the way OpenMausBot's bots do.
-Only you change it, on this computer. A new Personal Pip starts at **Ask**. Existing Pips keep
-the level you chose for them.
+Each Personal Pip has a level, the way OpenMausBot's bots do (Pips API 58): **Ask me first**, **Approve for me** or
+**Do it all**. Its chip sits at the left of its prompt box, where Work's mode picker is, and says the level's name. Its
+menu gives each level with one line saying what it means, and a last row, **What PIP can do**. The same setting is on
+its page under **How much it asks**: change it in one place and the other follows. A change made while a reply runs
+applies from its next step. Only you change it, on this computer. A new Personal Pip starts at **Ask me first**.
+Existing Pips keep the level you chose for them. A Project Pip has no chip: it always asks.
 
 | Level | What goes by itself | What still asks |
 |---|---|---|
-| **Ask** | Reading and the page's own background requests | A new site (careful mode), each submit and send caused by the Pip |
+| **Ask me first** | Reading and the page's own background requests | A new site (careful mode), each submit and send caused by the Pip |
 | **Approve for me** | A new site's first visit, a search, a filter or sort, adding to a cart, saving a draft, an upload of a file you sent it in its chat, an email to someone you named in its chat or already wrote to from it, a calendar event with no guests | Placing an order or checking out, any payment, sending to someone new, posting, deleting, changing an account's settings or password, anything the page calls pay, purchase, subscribe, transfer or book, and anything DGC can't place |
-| **Full access** | Every new site, submit and send, connected-app sends included | Any payment |
+| **Do it all** | Every new site, submit and send, connected-app sends included | Any payment |
 
-- **One line says what each level means.** It shows under the picker, and once more when you choose a level.
+- **One line says what each level means.** It shows in the chip's menu and on its page, and once more when you choose
+  a level.
 - **How DGC tells routine from consequential.** From the request itself and the page's own words, never the model's
   say-so: the method and address it goes to, its field names (a card or bank field, an amount), and what the Pip
   pressed (the button's words and accessible name, or the form's submit buttons, read in DGC's own isolated world of
@@ -1402,7 +1406,7 @@ the level you chose for them.
 - **What it did on its own is one click away.** Each thing its level let through goes at once, in the same run, and
   is kept: the step's picture in **What it saw…** says "Approved by its level: Approve for me · Added to cart on
   shop.example", and its page lists the newest under **What it did on its own**, right under the picker, with **Ask
-  me again from now on**. A desktop notification says what it sent (an email, a submit at Full access). Its drafts
+  me again from now on**. A desktop notification says what it sent (an email, a submit at Do it all). Its drafts
   (an email, an event, a plugin's action) go after the reply, re-checked against the level when they run.
 - **Routines run at its level.** With nobody at the keyboard, what its level let through says so ("nobody at the
   keyboard"). Careful mode still keeps a routine that can read your apps off its computer.
@@ -1667,8 +1671,8 @@ one exception to "Pips keep their own computers", and only for the task you allo
   the Pip is told. A tab its page opens is closed straight away. WebSockets are off in its tab.
 - **Nothing is sent unless its level says so.** Reading and moving around are free. What a page would
   send (a form, a search that posts, a change in your account) goes only as the Pip's level allows (see
-  [How much it asks](#how-much-it-asks)): at **Ask** nothing is sent, at **Approve for me** only
-  routine steps such as a search or a filter, at **Full access** everything but a payment. A payment
+  [How much it asks](#how-much-it-asks)): at **Ask me first** nothing is sent, at **Approve for me**
+  only routine steps such as a search or a filter, at **Do it all** everything but a payment. A payment
   never goes from your Chrome, at any level, and nothing goes to a site that isn't on the card. When
   DGC doesn't send something, the Pip tells you what to do there yourself.
 - **It never sees a password or a card.** Password, card and code boxes read as hidden, a card number

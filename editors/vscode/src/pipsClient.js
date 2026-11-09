@@ -48,7 +48,7 @@ import {mergeChatPage} from './pipsModel.js';
 import {livePlan,livePlanFromText,livePip} from './pipsModel.js';
 import {cardNumber} from './pipCards.js';
 import {eyesMarkup,eyesNotice} from './pipEyes.js';
-import {levelPage,levelMarkup,levelNotice} from './pipLevels.js';
+import {levelPage,levelMarkup,levelNotice,levelMenuMarkup} from './pipLevels.js';
 import {pipArtifacts,dashboardList,artifactsPageMarkup,artifactsSectionsMarkup,reportNotice} from './pipArtifacts.js';
 import {templatePage,templateMarkup} from './pipTemplates.js';
 import {borrowsPage,borrowResult,shownBorrows,borrowActive,borrowMarkup} from './pipBorrow.js';
@@ -592,9 +592,16 @@ function chatControlsMarkup(canSend,busy){
  const action=offerVoice?`<button type="button" id="chat-voicemode" class="chat-send ready" aria-label="Voice mode" title="Voice mode: talk with ${esc(S.pip?.name||'this Pip')}"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 6.5v3M6 4v8M10 3v10M13 6v4"/></svg></button>`:busy?`<button type="button" id="chat-stop" class="composer-chip" title="Stop generation" aria-label="Stop generation"${S.busy||!usable()?' disabled':''}>${globalThis.DgcComposer?.STOP||composerIcon('stop')}</button>${S.apiVersion>=73?sendAction:''}`:sendAction;
  const routineCount=(S.routines||[]).filter(r=>r.status==='on').length;
  const routineChip=personalPip()&&S.apiVersion>=43?`<button type="button" id="chat-routines" class="composer-routines" aria-label="Routines: ${routineCount} on" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='routines'}" title="Manage ${esc(S.pip.name)}’s routines">${routineIcon()}<span>Routines</span>${routineCount?`<b>${routineCount}</b>`:''}</button>`:'';
+ // The level (Pips API 58): a chip with the level's name where Work's mode picker is. It replaces the shield, whose "What
+ // it can do" is its menu's last row (U6, 7 Nov). It works while a reply runs: a change applies from the next step. A
+ // Project Pip always asks, and an older or remote DGC has no levels: the shield stays.
+ const lv=levelShown()&&levelState.pip===S.pip.id?levelState.value:null,lvName=lv?(lv.levels.find(l=>l.level===lv.level)||{}).name||'':'';
+ const levelChip=levelShown()?`<button type="button" id="chat-level" class="composer-chip with-text composer-level" title="How much ${esc(S.pip.name)} asks before it acts${lvName?': '+esc(lvName):''}" aria-label="Before ${esc(S.pip.name)} acts${lvName?': '+esc(lvName):''}" aria-haspopup="menu" aria-expanded="${S.composerPanel==='level'}"${usable()?'':' disabled'}>${composerIcon('shield')}${lvName?`<span class="composer-level-name">${esc(lvName)}</span>`:''}</button>`
+  :`<button type="button" id="chat-permissions" class="composer-chip" title="What ${esc(S.pip.name)} can do" aria-label="What this Pip can do">${composerIcon('shield')}<span class="sr-only">What it can do</span></button>`;
+ const levelMenu=S.composerPanel==='level'&&levelShown()?`<div class="composer-level-menu dgc-menu" role="menu" aria-label="Before ${esc(S.pip.name)} acts">${levelMenuMarkup(lv,{esc,pipName:S.pip.name,busy:levelState.busy,error:levelState.error})}</div>`:'';
  // "+": the same menu as Work's and ChatDGC's (media/shared/menu.js), in place of the picture chip (U3, 7 Nov).
  const addMenu=S.composerPanel==='add'&&canAttachImages()?`<div class="composer-add-menu dgc-menu" role="menu" aria-label="Add">${globalThis.DgcMenu?.html([{name:'Add to the message',rows:[{id:'upload',label:'Pictures and files',hint:'From this computer'},{id:'mention',label:'A Pip or an app',hint:'@'}]}],{data:'pip-add'})||''}</div>`:'';
- return `${modelMenu}${contextMenu}${addMenu}${providerRemoved()?'<p class="composer-unavailable" role="alert">The provider this Pip runs on was removed from Settings. Choose another model for it.</p>':''}<div class="composer-controls"><div class="composer-left">${canAttachImages()?`<button type="button" id="chat-attach" class="composer-chip" title="Add pictures, files and more" aria-label="Add pictures, files and more" aria-haspopup="menu" aria-expanded="${S.composerPanel==='add'}"${S.busy||archived()?' disabled':''}>${composerIcon('add')}</button><input type="file" id="chat-attach-input" accept="${[...PIP_IMAGE_TYPES,...(spoolsPhotos()?[...PIP_HEIC_TYPES,'.heic','.heif']:[]),...PIP_FILE_EXTENSIONS].join(',')}" multiple hidden>`:''}${S.noProvider?'':`<button type="button" id="chat-context-toggle" class="composer-chip${pct===null?'':' with-text'}" title="${cliName?`${esc(cliName)} manages its own context window`:`Context window${o?' · '+o.context_size.toLocaleString()+' tokens':''}${pct===null?'':' · '+pct+'% used'}`}" aria-label="Context window${cliName?`: ${esc(cliName)} manages its own`:pct===null?'':': '+pct+' percent used'}" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='context'}">${composerIcon('context')}${pct===null?'':`<span class="composer-ctx-pct">${pct}%</span>`}</button>`}${routineChip}<button type="button" id="chat-permissions" class="composer-chip" title="What ${esc(S.pip.name)} can do" aria-label="What this Pip can do">${composerIcon('shield')}<span class="sr-only">What it can do</span></button></div><div class="composer-right"><button type="button" id="chat-model" class="model-control" aria-label="Change model and thinking" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='model'}" title="${esc(chip.title)}${o?' · '+esc(effortLabel):''} — change model and thinking"${locked?' disabled':''}><span class="model-copy"><span class="composer-model-name">${esc(shownModel)}</span>${o?`<span class="composer-effort-name">${esc(effortLabel)}</span>`:''}</span><span class="composer-chevron">${composerIcon('chevron')}</span></button>${voiceBar?`<button type="button" id="chat-mic" class="composer-chip" title="Dictate" aria-label="Dictate"${!usable()||archived()||busy?' disabled':''}>${composerIcon('mic')}</button>`:''}${action}</div></div>`;
+ return `${modelMenu}${contextMenu}${addMenu}${levelMenu}${providerRemoved()?'<p class="composer-unavailable" role="alert">The provider this Pip runs on was removed from Settings. Choose another model for it.</p>':''}<div class="composer-controls"><div class="composer-left">${canAttachImages()?`<button type="button" id="chat-attach" class="composer-chip" title="Add pictures, files and more" aria-label="Add pictures, files and more" aria-haspopup="menu" aria-expanded="${S.composerPanel==='add'}"${S.busy||archived()?' disabled':''}>${composerIcon('add')}</button><input type="file" id="chat-attach-input" accept="${[...PIP_IMAGE_TYPES,...(spoolsPhotos()?[...PIP_HEIC_TYPES,'.heic','.heif']:[]),...PIP_FILE_EXTENSIONS].join(',')}" multiple hidden>`:''}${S.noProvider?'':`<button type="button" id="chat-context-toggle" class="composer-chip${pct===null?'':' with-text'}" title="${cliName?`${esc(cliName)} manages its own context window`:`Context window${o?' · '+o.context_size.toLocaleString()+' tokens':''}${pct===null?'':' · '+pct+'% used'}`}" aria-label="Context window${cliName?`: ${esc(cliName)} manages its own`:pct===null?'':': '+pct+' percent used'}" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='context'}">${composerIcon('context')}${pct===null?'':`<span class="composer-ctx-pct">${pct}%</span>`}</button>`}${routineChip}${levelChip}</div><div class="composer-right"><button type="button" id="chat-model" class="model-control" aria-label="Change model and thinking" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='model'}" title="${esc(chip.title)}${o?' · '+esc(effortLabel):''} — change model and thinking"${locked?' disabled':''}><span class="model-copy"><span class="composer-model-name">${esc(shownModel)}</span>${o?`<span class="composer-effort-name">${esc(effortLabel)}</span>`:''}</span><span class="composer-chevron">${composerIcon('chevron')}</span></button>${voiceBar?`<button type="button" id="chat-mic" class="composer-chip" title="Dictate" aria-label="Dictate"${!usable()||archived()||busy?' disabled':''}>${composerIcon('mic')}</button>`:''}${action}</div></div>`;
 }
 function fitChatInput(){const input=$('chatText');if(!input)return;const sendButton=document.querySelector('.chat-send');sendButton?.classList.toggle('ready',!sendButton.disabled&&!!draft.chatText.trim()||!sendButton.disabled&&canAttachImages()&&(pendingImages().length>0||pendingFiles().length>0));if(!input.isConnected||input.clientWidth<40||document.hidden)return;input.style.height='auto';const content=input.scrollHeight,capped=content>=160;input.style.overflowY=capped?'auto':'hidden';input.style.height=(capped?160:content+1)+'px';}
 // What the prompt box's choices are for: since API 47 they are this Pip's own (its replies and the work it does on
@@ -983,7 +990,7 @@ async function introduceOnFirstOpen(id){
  }
 }
 async function loadMessages(more=false){
- if(!more){void loadEmailDrafts();void loadAppLinks();void loadPlugins();void loadBorrows();void loadRoutines();void loadNotes();void loadWorkingNotes();void loadDailyLog();void refreshComputer();if(personalPip()&&!S.models.length&&!S.defaultModel)void loadModels();}
+ if(!more){void loadEmailDrafts();void loadAppLinks();void loadPlugins();void loadBorrows();void loadRoutines();void loadLevel();void loadNotes();void loadWorkingNotes();void loadDailyLog();void refreshComputer();if(personalPip()&&!S.models.length&&!S.defaultModel)void loadModels();}
   if(!S.selected||!usable()||(more&&(!S.messageCursor||S.messagesLoading||S.messages.length>=200)))return;
   const token=scope(),id=S.selected,sequence=++messageSeq,before=more?S.messageCursor:null,optionsEpoch=chatOptionsEpoch;S.messagesLoading=true;
   if(!S.messagesLoaded)render();
@@ -2725,22 +2732,28 @@ function computerRowMarkup(p,off){
   ?`<strong>Its own computer</strong><small>A browser, a Terminal and files, separate from yours. It starts when ${esc(p.name)} needs it.</small></span>${button('remove-computer','Remove…',off,'quiet')}`
   :`<strong>Computer</strong><small>Give ${esc(p.name)} its own computer, so it can look things up and fill in forms for you.</small></span>${button('give-computer','Give it a computer…',off,'quiet')}`}</div></section>`;
 }
+// What this Pip can do: the shield's dialog, now also the level menu's last row.
+function openWhatItCanDo(){if(!S.pip)return;openReview({title:`What ${S.pip.name} can do`,description:personalPip()?(S.pip.computer_plan?`${S.pip.name} has its own computer: ${S.apiVersion>=54?'a desktop with a browser, apps and a Terminal that reach public websites, and files':'a browser, a Terminal that reaches public websites, and files'}. It can also read the apps you connected. ${levelState.pip===S.pip.id&&levelState.value&&levelState.value.level!=='ask'?levelNotice(levelState.value):'Anything it would send, submit or change waits for your Allow, unless you chose Always allow.'}${S.apiVersion>=44?(carefulState.pip===S.pip.id&&carefulState.value?.careful===false?' Careful mode is off.':' Careful mode: it asks before it opens a new site, and before anything it read from your apps goes onto a website.'):''}`:`${S.pip.name} reads what you share here and the apps you connected. It can’t send, buy or change anything without your OK.`):`It reads ${currentTree()?'your current files':'the committed code'} of this project, and only reads. In chat it can’t run commands, open the running app, change files or permissions. Anything it runs or changes, you approve separately, in a handoff or its setup.`,readOnly:true,request:{}});}
 // How much it asks (Pips API 58): its level, the chosen level's one line, and what its level did by itself.
 const levelState={pip:'',value:null,error:'',busy:false,seq:0};
 const levelShown=()=>S.apiVersion>=58&&!remoteHost&&personalPip();
 async function loadLevel(){
- if(!levelShown()||!usable())return;
+ if(!levelShown()||!usable()||levelState.busy)return;   // a change being saved answers for itself
  const token=scope(),pip=S.selected,sequence=++levelState.seq;
  try{const value=levelPage(await send('get_pip_level',{pip_id:pip}),pip);if(token!==scope()||sequence!==levelState.seq||S.selected!==pip)return;
   levelState.pip=pip;levelState.value=value;levelState.error='';render();}
  catch(error){if(token===scope()&&sequence===levelState.seq){levelState.error=errorText(error);render();}}
 }
-async function setLevel(level){
- if(levelState.busy||!usable()||!levelShown())return;const token=scope(),pip=S.selected;levelState.busy=true;levelState.error='';render();
+async function setLevel(level,{refocus=''}={}){
+ if(levelState.busy||!usable()||!levelShown())return;const token=scope(),pip=S.selected;levelState.busy=true;levelState.seq++;levelState.error='';render();
  try{const value=levelPage(await send('set_pip_level',{pip_id:pip,level}),pip);if(token!==scope()||S.selected!==pip)return;levelState.pip=pip;levelState.value=value;S.notice=levelNotice(value);}
  catch(error){if(token===scope())levelState.error=errorText(error);}
- finally{levelState.busy=false;if(token===scope())render();}
+ finally{levelState.busy=false;if(token===scope()){render();if(refocus)keepFocus(refocus);}}
 }
+// Focus back on a control a re-render may have drawn anew, unless the user has moved on (typing, another control).
+function keepFocus(id){const el=$(id);if(!el)return;const active=el.getRootNode?.().activeElement;if(!active||active===el||!active.isConnected||active===document.body||active.id==='pips-host')el.focus();}
+// The chip's menu opens on the chosen level; reading the level again may redraw it, so focus is put back if it was lost.
+function focusLevelMenu(){const menu=document.querySelector('.composer-level-menu');if(!menu)return;const active=menu.getRootNode?.().activeElement;if(active&&menu.contains(active))return;(menu.querySelector('[aria-checked="true"]')||menu.querySelector('.dgc-menu-row:not(:disabled)'))?.focus();}
 // Where its reports go and the dashboards it refreshes (Pips API 67, artifact_pips): on its page, set on this computer.
 // Reports is a reviewing Pip's (a review's findings are what a document or sheet keeps); dashboards are any Pip's. The
 // person's dashboards come from the editor's own artifacts list (list_artifact_dashboards), not from a Pip control.
@@ -4294,7 +4307,7 @@ document.addEventListener('pointerover',event=>{
 });
 document.addEventListener('click',event=>{
   if(picker.click(event))return;
-  if(S.composerPanel&&!event.target.closest?.('.composer-model-menu,.pip-routines-popover,.composer-add-menu,#chat-model,#chat-context-toggle,#chat-routines,#chat-attach')){S.composerPanel='';render();}
+  if(S.composerPanel&&!event.target.closest?.('.composer-model-menu,.pip-routines-popover,.composer-add-menu,.composer-level-menu,#chat-model,#chat-context-toggle,#chat-routines,#chat-attach,#chat-level')){S.composerPanel='';render();}
   if(event.target.closest?.('#chat-voicemode')){S.error='';voiceMode?.start();return;}
   const talkAction=event.target.closest?.('[data-voicebar="pips-talk"] [data-voice-action]')?.dataset.voiceAction;
   if(talkAction){voiceMode?.action(talkAction);return;}
@@ -4311,6 +4324,10 @@ document.addEventListener('click',event=>{
   if(target.dataset.pipsTab){chooseScopeTab(target.dataset.pipsTab);return;}
   if(target.dataset.workingNotes){if(target.dataset.workingNotes==='edit'&&S.workingNotes){workingNotesEditing=true;draft.workingNotesText=S.workingNotes.lines.join('\n');render();$('workingNotesText')?.focus();}else if(target.dataset.workingNotes==='cancel'){workingNotesEditing=false;draft.workingNotesText='';S.workingNotesError='';render();void loadWorkingNotes();}return;}
   if(target.dataset.pipLearn){const l=S.learn,a=target.dataset.pipLearn;if(a==='save')void saveLearn();else if(a==='edit'&&l?.status==='draft'){if(l.editing)l.text=draft.pipLearnText;else draft.pipLearnText=l.text;l.editing=!l.editing;render();if(l.editing)$('pipLearnText')?.focus();}else if(a==='cancel'&&l){S.learn={pip:l.pip,status:'cancelled',name:l.name};render();}else if(a==='dismiss'){S.learn=null;render();$('chatText')?.focus();}return;}
+  if(target.id==='chat-level'){S.composerPanel=S.composerPanel==='level'?'':'level';render();if(S.composerPanel==='level'){focusLevelMenu();void loadLevel().then(()=>{if(S.composerPanel==='level')focusLevelMenu();});}return;}
+  if(target.dataset.pipLevelPick!==undefined){const chosen=target.dataset.pipLevelPick;S.composerPanel='';render();$('chat-level')?.focus();
+   if(!(levelState.pip===S.selected&&levelState.value?.level===chosen))void setLevel(chosen,{refocus:'chat-level'});return;}
+  if(target.dataset.pipLevelWhat!==undefined){S.composerPanel='';render();openWhatItCanDo();return;}
   if(target.id==='chat-attach'){S.composerPanel=S.composerPanel==='add'?'':'add';render();if(S.composerPanel==='add')document.querySelector('.composer-add-menu .dgc-menu-row')?.focus();return;}
   if(target.dataset.pipAdd!==undefined){const which=target.dataset.pipAdd;S.composerPanel='';render();
    if(which==='upload'){$('chat-attach-input')?.click();return;}
@@ -4606,7 +4623,7 @@ document.addEventListener('click',event=>{
     case 'chat-routines':S.composerPanel=S.composerPanel==='routines'?'':'routines';render();if(S.composerPanel){if(!S.routines)void loadRoutines();$('chat-routines-close')?.focus();}break;
     case 'chat-routines-close':S.composerPanel='';render();$('chat-routines')?.focus();break;
     case 'chat-refresh-models':void loadModels();break;
-    case 'chat-permissions':S.composerPanel='';render();openReview({title:`What ${S.pip.name} can do`,description:personalPip()?(S.pip.computer_plan?`${S.pip.name} has its own computer: ${S.apiVersion>=54?'a desktop with a browser, apps and a Terminal that reach public websites, and files':'a browser, a Terminal that reaches public websites, and files'}. It can also read the apps you connected. ${levelState.pip===S.pip.id&&levelState.value&&levelState.value.level!=='ask'?levelNotice(levelState.value):'Anything it would send, submit or change waits for your Allow, unless you chose Always allow.'}${S.apiVersion>=44?(carefulState.pip===S.pip.id&&carefulState.value?.careful===false?' Careful mode is off.':' Careful mode: it asks before it opens a new site, and before anything it read from your apps goes onto a website.'):''}`:`${S.pip.name} reads what you share here and the apps you connected. It can’t send, buy or change anything without your OK.`):`It reads ${currentTree()?'your current files':'the committed code'} of this project, and only reads. In chat it can’t run commands, open the running app, change files or permissions. Anything it runs or changes, you approve separately, in a handoff or its setup.`,readOnly:true,request:{}});break;
+    case 'chat-permissions':S.composerPanel='';render();openWhatItCanDo();break;
     case 'older-messages':void loadMessages(true);void loadPosts(true);break;
     case 'refresh-models':void loadModels();break;
     case 'chat-stop':if(S.chatActiveRun?.id)void mutate({type:'cancel_pip_run',run_id:S.chatActiveRun.id},()=>loadMessages());break;
@@ -4825,7 +4842,7 @@ document.addEventListener('keydown',event=>{
    if(event.target===summary&&event.key==='ArrowDown'){const first=pageMenu.querySelector('button:not(:disabled)');if(first){event.preventDefault();first.focus();return;}}
    else if(pageMenu.contains(event.target)&&globalThis.DgcMenu.handle(pageMenu,event,{rows:':scope > button',close:()=>opened.removeAttribute('open'),trigger:summary}))return;
   }
-  if(!S.review&&S.composerPanel){if(event.key==='Escape'){event.preventDefault();const target=S.composerPanel==='context'?'chat-context-toggle':S.composerPanel==='routines'?'chat-routines':S.composerPanel==='add'?'chat-attach':'chat-model';S.composerPanel='';render();$(target)?.focus();return;}const menu=event.target.closest?.('.dgc-menu');if(menu&&globalThis.DgcMenu?.handle(menu,event,{rows:'.dgc-menu-row'}))return;}
+  if(!S.review&&S.composerPanel){if(event.key==='Escape'){event.preventDefault();const target=S.composerPanel==='context'?'chat-context-toggle':S.composerPanel==='routines'?'chat-routines':S.composerPanel==='add'?'chat-attach':S.composerPanel==='level'?'chat-level':'chat-model';S.composerPanel='';render();$(target)?.focus();return;}const menu=event.target.closest?.('.dgc-menu');if(menu&&globalThis.DgcMenu?.handle(menu,event,{rows:'.dgc-menu-row'}))return;}
   if(event.key==='Escape'&&voiceMode?.active){event.preventDefault();voiceMode.end();return;}
   if(event.key==='Escape'&&(S.mic==='recording'||S.mic==='starting')){event.preventDefault();micCancel();return;}
   if(!S.review&&event.target.id==='chatText'&&event.key==='Enter'&&!event.isComposing){

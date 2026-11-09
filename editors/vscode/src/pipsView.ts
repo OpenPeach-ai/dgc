@@ -741,7 +741,7 @@ export class PipsEditor implements vscode.Disposable {
     if(['list_pip_logins','save_pip_login','remove_pip_login','grant_pip_login'].includes(request.type) && this.apiVersion < 56) { fail('Update DGC to save logins for your Pips.'); return; }
     // API 57: a Pip's own working notes, and its daily log.
     if(['get_pip_working_notes','set_pip_working_notes','list_pip_daily_log'].includes(request.type) && this.apiVersion < 57) { fail('Update DGC to see a Pip\'s working notes and daily log.'); return; }
-    // API 58: how much a Personal Pip asks (Ask, Approve for me, Full access). An older DGC has no levels: every Pip asks.
+    // API 58: how much a Personal Pip asks (Ask me first, Approve for me, Do it all). An older DGC has no levels: every Pip asks.
     if(['get_pip_level','set_pip_level'].includes(request.type) && this.apiVersion < 58) { fail('Update DGC to choose how much a Pip asks.'); return; }
     // API 59: a Personal Pip may borrow your own signed-in Chrome, with your consent each time. An older DGC has no cards to answer.
     if(['list_pip_borrows','allow_pip_borrow','decline_pip_borrow','stop_pip_borrow'].includes(request.type) && this.apiVersion < 59) { fail('Update DGC to let a Pip borrow your Chrome.'); return; }

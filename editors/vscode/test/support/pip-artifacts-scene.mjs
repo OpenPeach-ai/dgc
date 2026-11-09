@@ -60,7 +60,7 @@ const host = (opts) => `(${function (PIP, opts) {
     get_pip_level: () => ({ pip_id: PIP, level: "ask", default: "ask", on_its_own: [], levels: [
       { level: "ask", name: "Ask me", says: "It asks before it sends, submits or changes anything." },
       { level: "approve", name: "Approve for me", says: "It does what you allowed before without asking." },
-      { level: "full", name: "Full access", says: "It acts without asking." }] }),
+      { level: "full", name: "Do it all", says: "It acts without asking." }] }),
     get_pip_working_notes: () => ({ pip_id: PIP, lines: [], revision: "0", max_lines: 60, max_bytes: 8000, bytes: 0 }),
     list_pip_daily_log: () => ({ pip_id: PIP, days: [] }),
     get_pip_artifacts: () => ({ artifacts: { ...window.__artifacts } }),

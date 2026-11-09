@@ -316,7 +316,7 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # API 58: how much a Personal Pip asks (pip_levels). get_pip_level {pip_id} reads it ({pip_id, level, default, levels:
 # [{level, name, says}], on_its_own: [{at, what, level, unattended, kind}]}) and set_pip_level {pip_id, level} sets it
 # (local only): "ask" (the default, as before), "approve" (Approve for me: DGC approves routine steps itself and asks for
-# consequential ones) or "full" (Full access: no asking for sites, submits or app sends, except payments). What a level
+# consequential ones) or "full" (Do it all: no asking for sites, submits or app sends, except payments). What a level
 # approved is a computer action already "sent" by "pip-level:<level>" (its summary has `what`, `level`, `unattended`)
 # or an app action resolved by it. A payment, the card rule, saved-login scoping and careful mode's check of what it read
 # from your apps hold at every level; so does the safety floor: a Terminal command that could wipe its Files is a

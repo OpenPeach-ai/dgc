@@ -12,22 +12,28 @@
   const hintHtml = (hint) => (hint === undefined || hint === null || hint === "" ? ""
     : `<span class="dgc-menu-hint">${KEY.test(String(hint)) ? `<kbd class="dgc-key">${esc(hint)}</kbd>` : esc(hint)}</span>`);
 
+  const CHECK = '<svg class="dgc-menu-check" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   /**
-   * Grouped rows as HTML. `groups`: [{ name?, rows: [{ id, icon?, label, hint?, checked?, classes?, attrs?, data? }] }].
+   * Grouped rows as HTML. `groups`: [{ name?, rows: [{ id, icon?, label, sub?, hint?, checked?, classes?, attrs? }] }].
    * A group with a name gets a small heading; groups are parted by a hairline. `role` is "menuitem" for actions and
-   * "menuitemradio" for a picker (then `checked` marks the chosen row). `data` names the data-* key each row carries.
+   * "menuitemradio" for a picker (then `checked` marks the chosen row, and `check` adds a check mark it shows). `sub` is
+   * one quiet line under the row's name, which may wrap (a Pip's level says what it means). `data` names the data-* key
+   * each row carries.
    */
-  function html(groups, { role = "menuitem", data = "id", rowClass = "" } = {}) {
+  function html(groups, { role = "menuitem", data = "id", rowClass = "", check = false } = {}) {
     const visible = (groups || []).filter((g) => g && Array.isArray(g.rows) && g.rows.length);
     return visible.map((group, i) => (i ? '<div class="dgc-menu-div mdiv" role="separator"></div>' : "")
       + (group.name ? `<div class="dgc-menu-head mhead" role="presentation"><span>${esc(group.name)}</span></div>` : "")
       + group.rows.map((row) => {
         const checked = role === "menuitemradio" ? ` aria-checked="${row.checked ? "true" : "false"}"` : "";
-        const classes = ["dgc-menu-row", rowClass, row.checked ? "is-selected" : "", row.classes || ""].filter(Boolean).join(" ");
+        const sub = row.sub !== undefined && row.sub !== null && row.sub !== "";
+        const classes = ["dgc-menu-row", sub ? "dgc-menu-row-sub" : "", rowClass, row.checked ? "is-selected" : "", row.classes || ""].filter(Boolean).join(" ");
         const attrs = row.attrs ? ` ${row.attrs}` : "";
+        const label = `<span class="dgc-menu-label">${esc(row.label)}</span>`;
         return `<button type="button" role="${role}" class="${classes}" data-${data}="${esc(row.id)}"${checked}${attrs}>`
           + (row.icon ? `<span class="dgc-menu-icon codicon codicon-${esc(row.icon)}" aria-hidden="true"></span>` : "")
-          + `<span class="dgc-menu-label">${esc(row.label)}</span>${hintHtml(row.hint)}</button>`;
+          + (sub ? `<span class="dgc-menu-words">${label}<span class="dgc-menu-sub">${esc(row.sub)}</span></span>` : label)
+          + hintHtml(row.hint) + (check && role === "menuitemradio" ? CHECK : "") + "</button>";
       }).join("")).join("");
   }
 
@@ -79,5 +85,5 @@
     return () => menu.removeEventListener("keydown", listener);
   }
 
-  root.DgcMenu = Object.freeze({ html, keys, handle, hintHtml, KEY, esc });
+  root.DgcMenu = Object.freeze({ html, keys, handle, hintHtml, KEY, esc, CHECK });
 })();

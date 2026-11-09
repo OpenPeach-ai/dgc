@@ -223,7 +223,7 @@ class WideningTests(TemplateWorld, unittest.TestCase):
         self.assertEqual([i["kind"] for i in change["items"]], ["tool", "computer", "always_allow", "level", "routine"])
         self.assertEqual([i["words"] for i in change["items"]], [
             "Use create_dispatch in Shop app, a change", "Have its own computer: a browser, a Terminal and files",
-            "Run create_dispatch in Shop app without asking", "Ask less: Approve for me (now Ask)",
+            "Run create_dispatch in Shop app without asking", "Ask less: Approve for me (now Ask me first)",
             "A routine, New orders: when the shop app sends order.created"])
         self.assertTrue(asked["notice"].startswith("A change waits for a person on Dunning's page in DGC: Use "
                                                    "create_dispatch in Shop app, a change;"), asked["notice"])
@@ -371,7 +371,7 @@ class ConflictTests(TemplateWorld, unittest.TestCase):
                          [("level", None), ("name", None), ("routines", "Unpaid orders")])
         level = next(c for c in kept["conflicts"] if c["field"] == "level")
         self.assertEqual((level["pip"], level["template"]), ("full", "approve"))
-        self.assertIn("You set How much it asks to Full access in DGC, so it stays", level["words"])
+        self.assertIn("You set How much it asks to Do it all in DGC, so it stays", level["words"])
         self.assertEqual((self.pip(made)["name"], self.level(made)), ("My chaser", "full"), "not stomped")
         self.assertEqual(self.routines(made)["Unpaid orders"]["prompt"], "Only list them.")
         self.assertEqual(len(self.ensure(dunning(level="approve"))["conflicts"]), 3, "said every time, still kept")

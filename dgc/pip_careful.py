@@ -6,7 +6,7 @@ On by default for every Pip with a computer; only you turn it off, on its page. 
 - **New sites ask.** The first time the Pip's browser goes to a site (its registrable domain, like
   ``amazon.in``), its chat shows "Let Ava visit amazon.in?". Sites you named in your own messages or wrote out in a
   document you attached to one (Pips API 58: its text read by DGC, never the model), the computer's home page, and
-  sites you opened on its screen yourself never ask. Allow adds the site for good. At Approve for me and Full access
+  sites you opened on its screen yourself never ask. Allow adds the site for good. At Approve for me and Do it all
   (pip_levels) a new site's first visit is routine: it opens, and is kept on record.
 - **What it read from your apps is yours to send.** Text the Pip types into a page, an option it picks, an
   address it opens and a Terminal command are checked against what it read from your apps (emails, events,

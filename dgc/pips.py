@@ -4480,6 +4480,7 @@ def _execute_run(registry, row, config):
             computer_host.begin(row['id'], run_dir / 'artifacts' / 'computer', careful=careful, said=said,
                                 sites=pip_careful.known(registry, row['pip_id']) if careful else (),
                                 level=pip_levels.level(registry, row['pip_id']),
+                                level_now=pip_levels.follow(registry.directory, row['pip_id']),
                                 unattended=row['requested_by'] in pip_careful.UNATTENDED)
             computer_socket = pip_computer.RunSocket(computer_host, row['id'])
             if careful and row['requested_by'] in pip_careful.UNATTENDED:
@@ -4523,6 +4524,7 @@ def _execute_run(registry, row, config):
                 registry.directory, config, row['pip_id'], row['workspace_id'], row['id'],
                 unattended=row['requested_by'] in UNATTENDED, grant=None if server else pip_borrow.claim(registry, row),
                 level=pip_levels.level(registry, row['pip_id']), careful=pip_careful.is_on(registry, row['pip_id']),
+                level_now=pip_levels.follow(registry.directory, row['pip_id']),
                 taint=taint, said=app_socket.said, refused=pip_server.NO_CHROME if server else "")
         manifest = {**manifest, 'app_socket': app_socket.pin()}
     if personal and manifest.get('run_kind') in ('personal_task', 'conversation'):
@@ -5668,7 +5670,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                         result = {"artifacts": artifact_pips.set_settings(
                             registry.db, pip_id, report_as=request.get('report_as'), dashboards=request.get('dashboards'))}
             elif command in ('get_pip_level', 'set_pip_level'):
-                # How much a Personal Pip asks (pip_levels): Ask, Approve for me or Full access, and what its level did.
+                # How much a Personal Pip asks (pip_levels): Ask me first, Approve for me or Do it all, and what its level did.
                 from . import pip_levels
                 if actor not in ('editor-user', 'local-console'):
                     raise RegistryError('local_only', "How much a Pip asks is set on this computer only.")

@@ -76,7 +76,7 @@ class Borrow(Store):
         self.registry.db.execute("UPDATE pip_runs SET status='running' WHERE id=?", (run["id"],))
         return card, run
 
-    def lent(self, fake=None, *, level="ask", taint=None, said="", careful=True, card=None):
+    def lent(self, fake=None, *, level="ask", taint=None, said="", careful=True, card=None, level_now=None):
         fake = fake or FakeChrome(shop_pages())
         self.addCleanup(fake.close)
         # A turn before this one has ended (a test may lend it more than once).
@@ -85,7 +85,8 @@ class Borrow(Store):
         card, run = self.allowed_run(card)
         grant = pip_borrow.claim(self.registry, run)
         session = pip_borrow.Session(self.registry.directory, self.cfg, self.pip["id"], self.pip["workspace_id"], run["id"],
-                                     grant=grant, folders=fake.folders(), level=level, taint=taint, said=said, careful=careful)
+                                     grant=grant, folders=fake.folders(), level=level, taint=taint, said=said, careful=careful,
+                                     **({"level_now": level_now} if level_now else {}))
         self.addCleanup(session.close)
         return fake, session, card, run
 
@@ -308,7 +309,7 @@ class LentChromeTests(Borrow):
         session.use({"op": "open", "url": SHOP + "/orders"})
         told = session.use({"op": "click", "ref": "e4"})
         self.assertEqual(sent(fake), [], "at Ask nothing is sent from the user's Chrome")
-        self.assertIn("Not sent: Searched on shop.example. At Ask, DGC doesn't send that", told)
+        self.assertIn("Not sent: Searched on shop.example. At Ask me first, DGC doesn't send that", told)
         session.close()
         for level, ref, goes in ((pip_levels.APPROVE, "e4", True), (pip_levels.APPROVE, "e7", False),
                                  (pip_levels.FULL, "e7", True), (pip_levels.FULL, "e5", False)):
@@ -328,6 +329,20 @@ class LentChromeTests(Borrow):
         told = session.use({"op": "click", "ref": "e11"})
         self.assertEqual(sent(fake), [])
         self.assertIn("Not sent: Sending to evil.example, which isn't on the card", told)
+
+    def test_a_level_changed_while_it_borrows_applies_from_its_next_send(self):
+        sent = lambda fake: [u for m, u, _ in fake.sent_requests if m == "POST"]
+        now = [pip_levels.ASK]
+        fake, session, _, _ = self.lent(level=pip_levels.ASK, level_now=lambda: now[0])
+        session.use({"op": "open", "url": SHOP + "/orders"})
+        told = session.use({"op": "click", "ref": "e4"})
+        self.assertEqual(sent(fake), [], "at Ask me first nothing is sent")
+        self.assertIn("At Ask me first, DGC doesn't send that", told)
+        now[0] = pip_levels.APPROVE              # chosen in its prompt box while the reply runs
+        session.use({"op": "open", "url": SHOP + "/orders"})
+        told = session.use({"op": "click", "ref": "e4"})
+        self.assertEqual(len(sent(fake)), 1, told)
+        self.assertIn("Sent at its level (Approve for me)", told)
 
     def test_passwords_codes_and_cards_are_never_typed_and_a_card_number_is_never_shown(self):
         fake, session, _, _ = self.lent()

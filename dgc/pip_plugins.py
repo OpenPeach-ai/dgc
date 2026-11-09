@@ -590,7 +590,7 @@ def _answer(registry, pip_id, server, call, run_id=None):
 
 def always_asks(server) -> bool:
     """Whether the user set this server's plugin to Always ask (Pips settings → Plugins). Then a Pip's own level
-    (Approve for me, Full access) never runs its calls by itself: each waits for the user's Allow."""
+    (Approve for me, Do it all) never runs its calls by itself: each waits for the user's Allow."""
     found = owner(server)
     return found is not None and level(found["name"], found) == "always_ask"
 

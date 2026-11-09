@@ -34,7 +34,7 @@ const now = new Date().toISOString();
 const SAYS = { ask: "Asks before every new site, every submit and every send.",
   approve: "Opens new sites, searches, adds to carts and saves drafts by itself. Asks before it orders, pays, sends to someone new, posts, deletes or changes an account.",
   full: "Does it all by itself, sends included. Still asks before any payment." };
-const NAMES = { ask: "Ask", approve: "Approve for me", full: "Full access" };
+const NAMES = { ask: "Ask me first", approve: "Approve for me", full: "Do it all" };
 const level = (value, done = []) => ({ pip_id: PIP, level: value, default: "ask",
   levels: ["ask", "approve", "full"].map((l) => ({ level: l, name: NAMES[l], says: SAYS[l] })), on_its_own: done });
 async function flush() { for (let i = 0; i < 15; i++) await Promise.resolve(); }

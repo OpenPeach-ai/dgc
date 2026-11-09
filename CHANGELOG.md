@@ -6,6 +6,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- A Pip's levels are now called Ask me first, Approve for me and Do it all (`ask`, `approve` and `full` are unchanged). A change made while a reply runs applies from its next step: its computer and a borrowed Chrome tab read the level again at each step they hold (`pip_levels.follow`), where the run used to keep the level it started with.
 - `dgc chat --incognito` starts a chat that's never saved, listed or remembered, as ChatDGC's Incognito does. `--temporary` still works.
 - Pip reports say new or still there. Each review sees its last report and marks every finding with the earlier one it repeats, so the chat's card says "1 new · 3 still there" and names the new one, and a run with nothing new makes no new card, however the model words the same problems.
 - A held submit lost to a restart says so, and the Pip redoes that step. A Pip's computer holds a form or a payment for your Allow in its own browser, so an update or a restart loses it, unsent. Its line now says "Not sent, DGC restarted", and the Pip is told, once, that nothing was sent and does that step again, so it asks you again. After your own Stop computer it says so and isn't redone.

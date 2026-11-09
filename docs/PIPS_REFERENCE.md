@@ -1133,9 +1133,10 @@ way of its own to read text in a picture (`photos` only converts and shrinks).
 
 **How much it asks** (`pip_levels`, Pips API 58, Personal Pips only): metadata `pip_level:<pip>` = `{level, at,
 by}`, `level` one of `ask` (the default, `pip_levels.DEFAULT`, for every Pip with none: as before), `approve` (Approve
-for me) or `full` (Full access). A Project Pip is always `ask`. At the start of a `conversation` or `personal_task` run
-the supervisor gives its `Host` the level and whether the run is unattended (`local-routine`, `local-scheduler`,
-`local-event-trigger`), and the worker gets `approval_level {level, unattended}` (when not `ask`) only to word its
+for me) or `full` (Do it all); `ask` is shown as Ask me first. A Project Pip is always `ask`. At the start of a
+`conversation` or `personal_task` run the supervisor gives its `Host` the level, a reader that fetches it again at each
+held step (`pip_levels.follow`, so a change mid-run applies from the next step; the borrowed Chrome tab reads it the same
+way), and whether the run is unattended (`local-routine`, `local-scheduler`, `local-event-trigger`), and the worker gets `approval_level {level, unattended}` (when not `ask`) only to word its
 instructions; the worker never decides. In the run, each request the browser holds (from a browser step, a step by
 position, a desktop step or a subscription brain's call: all end in `Host._record_held`) goes through
 `pip_levels.decide_write` before it becomes a pending action:

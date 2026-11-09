@@ -338,7 +338,7 @@ def pending_count(registry, now) -> int:
 
 def ran_on_their_own(registry, limit=20) -> list:
     """The newest actions Pips ran on an Always-allow grant, or sent as their level allows (pip_levels: an app send at
-    any level, a submit at Full access): [(action_id, sentence)], newest first."""
+    any level, a submit at Do it all): [(action_id, sentence)], newest first."""
     rows = registry.db.execute(
         "SELECT a.id,a.status,a.payload,v.definition,a.resolved_by FROM pip_app_actions a JOIN pips p ON p.id=a.pip_id "
         "JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version "
@@ -371,7 +371,8 @@ def ran_on_their_own(registry, limit=20) -> list:
             server = str(p.get('server', ''))
             what = f"ran {p.get('call', {}).get('tool', '')} with " + (
                 pip_sdk_apps.display(pip_sdk_apps.name_of(server)) if pip_sdk_apps.is_app(server) else server)
-        how = (", as its level allows (" + {"approve": "Approve for me", "full": "Full access"}.get(resolved_by.split(":", 1)[1], "") + ")."
+        from .pip_levels import name as level_name
+        how = (", as its level allows (" + level_name(resolved_by.split(":", 1)[1]) + ")."
                if str(resolved_by).startswith("pip-level:") else ", as you always allow.")
         said.append((action_id, f"{name} {what}" + (" (not confirmed)" if status == "unknown" else "") + how))
     return said

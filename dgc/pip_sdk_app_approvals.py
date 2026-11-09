@@ -13,7 +13,7 @@ whichever answers first wins, once, and the other side observes that answer.
 - ``{type: "approval_resolved", app, action_id, tool, decision, by, at}`` when it closes, wherever that happened:
   ``decision`` is ``accepted``, ``rejected`` or ``expired``; ``by`` is ``dgc`` (DGC's card, the CLI, or the expiry),
   ``app`` (your app, through ``decide``), ``always_allow`` (the Pip's Always allow) or ``level`` (the Pip's level,
-  Approve for me or Full access). A change that moves money never gets Always allow or a level: it always asks.
+  Approve for me or Do it all). A change that moves money never gets Always allow or a level: it always asks.
 
 **Delivery.** Kept in the Pips database in the same transaction that opens or closes the review, then sent by the Pips
 runner (it looks every couple of seconds): a first try, then up to three more 5 s, 30 s and 2 min after a failure. The

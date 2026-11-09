@@ -43,6 +43,15 @@
   flex: 1 1 0%; min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font: var(--w-reg) var(--t-sm)/1.2 var(--sans); color: var(--faint); text-align: right;
 }
+/* A row with one quiet line under its name, which may wrap (a Pip's level and what it means). Its name, line and check
+   start at the top. */
+.dgc-menu .dgc-menu-row.dgc-menu-row-sub { align-items: flex-start; padding-block: 7px; }
+.dgc-menu .dgc-menu-row-sub .dgc-menu-icon { height: 17px; }
+.dgc-menu .dgc-menu-words { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.dgc-menu .dgc-menu-sub { font: var(--w-reg) var(--t-sm)/1.35 var(--sans); color: var(--muted); white-space: normal; }
+/* A picker's check: drawn on every row, shown on the chosen one, so no row moves when the choice does. */
+.dgc-menu .dgc-menu-check { flex: none; width: 14px; height: 14px; margin: 2px 0 0 auto; color: var(--accent-text); visibility: hidden; }
+.dgc-menu .dgc-menu-row[aria-checked="true"] .dgc-menu-check { visibility: visible; }
 .dgc-menu kbd, .dgc-menu .dgc-key {
   display: inline-block; min-width: 18px; padding: 1px 5px; border: 1px solid var(--hair-strong); border-radius: var(--r-chip);
   background: var(--wash); font: var(--w-med) var(--t-xs)/1.3 var(--sans); color: var(--muted); text-align: center;

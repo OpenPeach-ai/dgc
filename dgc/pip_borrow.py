@@ -21,7 +21,7 @@ How it goes:
    going anywhere not on the card is stopped before it is sent (each redirect hop too), what a page of it loads (its
    styles, scripts, pictures, API reads and frames) comes from wherever the site keeps it, and anything that would send
    (a form, a POST from the Pip's step) goes only as the Pip's level allows (pip_levels): at Ask nothing is sent, at
-   Approve for me only routine steps, at Full access everything but a payment. A payment never leaves their Chrome.
+   Approve for me only routine steps, at Do it all everything but a payment. A payment never leaves their Chrome.
    Reads are judged by the page actually read (tools._browser_operation with a
    guard, Work's signed-in rules), passwords, card fields and codes are never read out, a card number in page text is
    hidden, and the Pip never types a password, a code or a card. What the gate can't see (WebSockets, WebTransport,
@@ -498,10 +498,12 @@ class BorrowedTab(UserChromeSession):
     """One tab of DGC's in the user's own Chrome, for one borrow: the card's origins only, every request gated inside
     Chrome (Fetch, on this tab and the frames and workers it has), the Pip's level deciding what may be sent."""
 
-    def __init__(self, origins, *, folders=None, level="ask", deny=None):
+    def __init__(self, origins, *, folders=None, level="ask", deny=None, level_now=None):
         super().__init__(folders)
         self.allowed_hosts = set(origins)        # the card's sites: nothing ever adds to them
         self.level = level
+        # The Pip's level read again at each send (pip_levels.follow): a change in its prompt box mid-reply applies next.
+        self.level_now = level_now if callable(level_now) else None
         self.deny = deny or (lambda url: "")
         self._io = threading.RLock()             # one reader of the connection at a time: a step, or the pump
         self._stop = ""                          # why it was given back: a step in flight unwinds at once
@@ -793,6 +795,12 @@ class BorrowedTab(UserChromeSession):
             self.refused.append(("payment", found["what"]))
             self._refuse(request_id, session, document)
             return
+        if self.level_now is not None:
+            try:
+                now = self.level_now()
+            except Exception:                    # noqa: BLE001 - unreadable means the safe default
+                now = pip_levels.ASK
+            self.level = now if now in pip_levels.LEVELS else pip_levels.ASK
         decided = pip_levels.decide_write(self.level, cues)
         if decided is None:
             self.refused.append(("asks", found["what"]))
@@ -937,7 +945,7 @@ class Session:
     reply; borrowed_chrome works only in the reply the user's Allow started, through a BorrowedTab."""
 
     def __init__(self, directory, config, pip_id, workspace_id, run_id, *, unattended=False, grant=None, level="ask",
-                 careful=True, taint=None, said="", folders=None, reach=None, refused=""):
+                 careful=True, taint=None, said="", folders=None, reach=None, refused="", level_now=None):
         self.directory, self.config, self.pip_id, self.workspace_id, self.run_id = directory, config, pip_id, workspace_id, run_id
         # Why borrowing can't happen here at all (a runner in server mode, pip_server.NO_CHROME): no card is saved and
         # no Chrome is looked for; both tools answer with it.
@@ -957,7 +965,7 @@ class Session:
         self.own = Taint()                    # what it read in their Chrome this run: typing it back there is fine
         if self.grant is not None:
             self.deadline = time.monotonic() + BORROW_SECONDS
-            self.tab = BorrowedTab(self.grant["sites"], folders=folders, level=level,
+            self.tab = BorrowedTab(self.grant["sites"], folders=folders, level=level, level_now=level_now,
                                    deny=lambda url: denied(self.config, url))
             threading.Thread(target=self._connect, name=f"pip-borrow-{run_id[-8:]}", daemon=True).start()
             threading.Thread(target=self._watch, name=f"pip-borrow-watch-{run_id[-8:]}", daemon=True).start()
@@ -1259,6 +1267,7 @@ class Session:
     def _notes(self, tab) -> str:
         lines = []
         from . import pip_levels
+        named = pip_levels.name(getattr(tab, "level", self.level))       # the level its last send was decided at
         for kind, what in tab.refused:
             if kind == "site":
                 lines.append(f"DGC stopped the tab going there: {what}. Nothing was sent or read there.")
@@ -1270,10 +1279,10 @@ class Session:
                 lines.append(f"Not sent: {what}. A payment never goes from the user's own Chrome: tell them what to pay "
                              "and where, and they pay it themselves.")
             else:
-                lines.append(f"Not sent: {what}. At {pip_levels.name(self.level)}, DGC doesn't send that from the user's "
+                lines.append(f"Not sent: {what}. At {named}, DGC doesn't send that from the user's "
                              "own Chrome. Tell them what you would send, so they can do it themselves in their Chrome.")
         for what in tab.sent:
-            lines.append(f"Sent at its level ({pip_levels.name(self.level)}): {what}.")
+            lines.append(f"Sent at its level ({named}): {what}.")
         for where in tab.opened:
             lines.append("The page opened a new tab" + (f" ({where})" if where else "")
                          + "; DGC closed it: you work in your one tab. Open the address here if it's on the card.")

@@ -1,8 +1,9 @@
 """How much a Personal Pip asks (Pips API 58): its approval level, set on its page by the user only.
 
-Three levels, OpenMausBot's (docs/approval-levels.md) cut to what a Pip does:
+Three levels, OpenMausBot's (docs/approval-levels.md) cut to what a Pip does, chosen with the level chip in its prompt
+box or on its page:
 
-- **Ask** (``ask``): today's behaviour. Careful mode asks before a new site, every submit its browser makes waits for
+- **Ask me first** (``ask``): today's behaviour. Careful mode asks before a new site, every submit its browser makes waits for
   Allow, and every app send is a draft waiting for Send.
 - **Approve for me** (``approve``): DGC approves routine steps by itself and asks for consequential ones. Routine: a new
   site's first visit, a search, filter or sort, adding to a cart, saving a draft, an upload of a file the user sent in
@@ -10,7 +11,7 @@ Three levels, OpenMausBot's (docs/approval-levels.md) cut to what a Pip does:
   a payment, sending to someone new, posting, deleting, account settings and passwords, anything the page calls pay,
   purchase or book. Decided from the request itself (method, address, field names) and the words the page gives what
   was pressed; anything DGC can't place asks.
-- **Full access** (``full``): no asking for sites, submits or app sends, except payments and what might be one.
+- **Do it all** (``full``): no asking for sites, submits or app sends, except payments and what might be one.
 
 At every level, unchanged: a payment asks and never gets Always allow (a card number or card fields in the request, a
 checkout's address, a button that says pay, a payment provider's site; ``classify``), what only might be one asks with
@@ -31,7 +32,7 @@ import re
 import shlex
 import time
 
-from .workspace_registry import RegistryError, utc_now
+from .workspace_registry import RegistryError, WorkspaceRegistry, utc_now
 
 ASK, APPROVE, FULL = "ask", "approve", "full"
 LEVELS = (ASK, APPROVE, FULL)
@@ -42,7 +43,7 @@ FLOOR_KEY = "pip_floor_allowed:"         # metadata: Terminal commands the user 
 FLOOR_ALLOW_SECONDS = 30 * 60
 LOCAL = ("editor-user", "local-console")
 ACTOR = re.compile(r"pip-level:(approve|full)\Z")
-NAMES = {ASK: "Ask", APPROVE: "Approve for me", FULL: "Full access"}
+NAMES = {ASK: "Ask me first", APPROVE: "Approve for me", FULL: "Do it all"}
 # One plain line a level: what will and won't ask. Shown with the picker and once when it is chosen.
 SAYS = {
     ASK: "Asks before every new site, every submit and every send.",
@@ -84,6 +85,19 @@ def level(registry, pip_id) -> str:
     return value
 
 
+def follow(directory, pip_id):
+    """The Pip's level as it is now, for a run's supervisor to ask at each held step (pip_computer.Host, pip_borrow): a
+    change in its prompt box or on its page while a reply runs applies from the next step, both ways. Read afresh each
+    time; a registry that can't be read is Ask, so nothing goes by itself on a guess."""
+    def now() -> str:
+        try:
+            with WorkspaceRegistry(directory) as registry:
+                return level(registry, pip_id)
+        except Exception:                   # noqa: BLE001 - unreadable means the safe default
+            return ASK
+    return now
+
+
 # New Personal Pips start with Ask. Existing Pips retain their saved level; creating a workflow
 # or accepting a setup card never changes the new Pip's authority to send or submit.
 NEW_PIP = ASK
@@ -100,7 +114,7 @@ def set_level(registry, pip_id, value, actor) -> dict:
     if actor not in LOCAL:
         raise RegistryError("local_only", "Only you change how much a Pip asks, on this computer.")
     if value not in LEVELS:
-        raise RegistryError("invalid_request", "Choose Ask, Approve for me or Full access.")
+        raise RegistryError("invalid_request", "Choose Ask me first, Approve for me or Do it all.")
     _personal(registry, pip_id)
     with registry.transaction():
         write_level(registry, pip_id, value, actor)
@@ -110,7 +124,7 @@ def set_level(registry, pip_id, value, actor) -> dict:
 def write_level(registry, pip_id, value, actor) -> None:
     """Save a Personal Pip's level, inside the caller's transaction (set_level, and a Pip template: pip_templates)."""
     if value not in LEVELS:
-        raise RegistryError("invalid_request", "Choose Ask, Approve for me or Full access.")
+        raise RegistryError("invalid_request", "Choose Ask me first, Approve for me or Do it all.")
     workspace = _personal(registry, pip_id)
     before = level(registry, pip_id)
     registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
@@ -564,7 +578,7 @@ def instructions(value, *, drafting=False, unattended=False) -> str:
             line += (" After your reply, DGC sends a draft to someone the user named or already wrote to; any other "
                      "draft waits for them.")
     elif value == FULL:
-        line = ("How much you ask: the user chose Full access. DGC lets your submits, new sites and sends through without "
+        line = ("How much you ask: the user chose Do it all. DGC lets your submits, new sites and sends through without "
                 "asking, and the tool says so: carry on without stopping. A payment still waits for the user. Do only "
                 "what they asked.")
         if drafting:

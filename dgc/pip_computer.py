@@ -22,7 +22,7 @@ Safety rules that hold for every computer:
   in every screenshot before it is sent to the model. Clicking by position holds a submit exactly as
   clicking a ref does.
 - How much it asks (pip_levels, Pips API 58): at Approve for me a routine submit (a search, adding to a cart, a draft)
-  and a new site's first visit go through at once; at Full access every submit but a payment does. Each is kept as a
+  and a new site's first visit go through at once; at Do it all every submit but a payment does. Each is kept as a
   computer action already sent by ``pip-level:<level>`` and named in the step's timeline row. A payment, careful
   mode's check of what it read from the user's apps, and the safety floor (a Terminal command that could wipe its
   Files) ask at every level.
@@ -417,7 +417,7 @@ class Host:
         # pressed (its words, for routine or not), a file from the user's chat it just put in a page, and what its level
         # approved in this step (timeline rows still to picture, lines for the Pip).
         self.level, self.unattended, self.target, self.upload_from_chat = "ask", False, "", None
-        self._level_pending = []
+        self._level_pending, self._level_now = [], None
         # Saved logins (pip_logins): every answer to the Pip is scrubbed of saved secrets and of what sign_in typed,
         # and a page a typed secret may still be on holds the steps that could copy it (secret_hold).
         from . import pip_logins
@@ -554,7 +554,9 @@ class Host:
     # -- a run's session ---------------------------------------------------------------------
 
     def begin(self, run_id: str, frames_dir: Path, *, careful: bool = False, said: str = "", sites=(),
-              level: str = "ask", unattended: bool = False) -> None:
+              level: str = "ask", unattended: bool = False, level_now=None) -> None:
+        """`level` is the Pip's level as the run starts; `level_now` (pip_levels.follow) reads it again at each held step,
+        so a change in its prompt box while the reply runs applies from the next step."""
         from .pip_levels import LEVELS
         with self.lock:
             self.run_id, self.frames_dir, self.frames, self.waiting = run_id, Path(frames_dir), 0, []
@@ -562,6 +564,7 @@ class Host:
             self.frames_dir.mkdir(parents=True, exist_ok=True)
             self.careful, self.said, self.sites = bool(careful), str(said or ""), set(sites)
             self.level = level if level in LEVELS else "ask"
+            self._level_now = level_now if callable(level_now) else None
             self.unattended, self.target, self.upload_from_chat, self._level_pending = bool(unattended), "", None, []
             self.browser.site_gate = self._site_ok if self.careful else None
             # The run's steps are numbered for its report and its timeline ("Recorded as step 3"); what changed is told
@@ -579,7 +582,7 @@ class Host:
             self.last_run_id = self.run_id          # the chat turn a payment the user then makes on its screen follows
             self.run_id = None
             self.careful, self.said = False, ""
-            self.level, self.unattended, self._level_pending = "ask", False, []
+            self.level, self.unattended, self._level_pending, self._level_now = "ask", False, [], None
             self.browser.site_gate = None
             # A question the page asked that the Pip left unanswered is cancelled, so the user's page isn't stuck.
             self.browser.hold_dialogs = False
@@ -753,7 +756,7 @@ class Host:
         only the Pip's own steps; a payment never. At every level this names what it holds if that is or may be a payment
         (held.asks_because), which is what keeps Always allow from a checkout."""
         from . import pip_levels
-        level = getattr(self, "level", "ask")
+        level = Host._level_current(self)
         acting = self.run_id is not None and level in (pip_levels.APPROVE, pip_levels.FULL)
         if held.request_id not in self.browser.held:
             return None
@@ -784,6 +787,19 @@ class Host:
             if acting or said["verdict"] in ("payment", pip_levels.MAYBE_PAYMENT):
                 held.asks_because, held.asks_word = said["verdict"], said["why"]     # why it still asks, for the card
         return found
+
+    def _level_current(self) -> str:
+        """The Pip's level for this step: read again when the run can (level_now), so a change mid-run applies from its
+        next step, and kept as the run's level for the record (_level_record)."""
+        from .pip_levels import LEVELS
+        now = getattr(self, "_level_now", None)
+        if callable(now):
+            try:
+                value = now()
+            except Exception:                  # noqa: BLE001 - unreadable means the safe default
+                value = "ask"
+            self.level = value if value in LEVELS else "ask"
+        return getattr(self, "level", "ask")
 
     def _release_by_level(self, held, approval) -> None:
         if approval.get("site"):

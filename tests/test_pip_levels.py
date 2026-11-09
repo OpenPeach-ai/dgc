@@ -1,5 +1,5 @@
 """How much a Personal Pip asks (pip_levels, Pips API 58): Ask (as before), Approve for me (routine steps go by
-themselves, consequential ones ask) and Full access (everything but payments), with the safety floor, sites from the
+themselves, consequential ones ask) and Do it all (everything but payments), with the safety floor, sites from the
 user's own documents, and a record of everything a level let through."""
 import base64
 import hashlib
@@ -65,7 +65,7 @@ class LevelSettingTests(Store):
         got = self.control("get_pip_level", pip_id=pip["id"])
         self.assertEqual((got["pip_id"], got["level"], got["default"], got["on_its_own"]), (pip["id"], "ask", "ask", []))
         self.assertEqual([(l["level"], l["name"]) for l in got["levels"]],
-                         [("ask", "Ask"), ("approve", "Approve for me"), ("full", "Full access")])
+                         [("ask", "Ask me first"), ("approve", "Approve for me"), ("full", "Do it all")])
         for line in (l["says"] for l in got["levels"]):
             self.assertLess(len(line), 160, "one plain line a level")
             self.assertNotRegex(line, r"\bAI\b")
@@ -263,7 +263,7 @@ class SendTests(unittest.TestCase):
                                              {"recipient_email": "stranger@example.invalid"}))
         self.assertIsNone(levels.decide_send(self.registry, self.source["id"], "full", "connector",
                                              {"server": "x", "call": {"tool": "STRIPE_CREATE_CHARGE", "arguments": {}}}),
-                          "a payment by its own name asks at Full access too")
+                          "a payment by its own name asks at Do it all too")
         self.assertIsNone(levels.decide_send(self.registry, self.source["id"], "full", "connector",
                                              {"server": "aave", "call": {"tool": "supply", "arguments": {}}}, money=True))
         self.assertIsNotNone(levels.decide_send(self.registry, self.source["id"], "approve", "calendar",
@@ -368,6 +368,37 @@ class SharedGateTests(Store):
         rows = {r["status"]: r for r in pip_computer.list_actions(self.registry, pip["id"])}
         self.assertEqual(rows["sent"]["resolved_by"], "pip-level:approve")
         self.assertTrue(rows["pending"]["summary"]["payment"])
+
+    def test_a_level_changed_mid_run_applies_from_its_next_step(self):
+        # The level chip in its prompt box changes the level while a reply runs: its next held step is decided by the
+        # new level, both ways, and a level it was given at the start no longer decides.
+        pip, host = self.host("ask")
+        host._level_now = levels.follow(self.registry.directory, pip["id"])
+        host._queued.append(host.browser.hold("r1"))
+        self.assertEqual(len(host._record_held()), 1, "at Ask me first the cart waits for you")
+        levels.set_level(self.registry, pip["id"], "approve", "editor-user")
+        host._queued.append(host.browser.hold("r2"))
+        self.assertEqual(host._record_held(), [])
+        self.assertEqual(host.browser.released, ["r2"], "the next step goes at Approve for me")
+        [(_, words, _)] = pip_computer.Host._level_take(host)
+        self.assertEqual(words, "Approved by its level: Approve for me · Added to cart on shop.example")
+        sent = [r for r in pip_computer.list_actions(self.registry, pip["id"]) if r["status"] == "sent"]
+        self.assertEqual([r["resolved_by"] for r in sent], ["pip-level:approve"])
+        levels.set_level(self.registry, pip["id"], "ask", "editor-user")
+        host._queued.append(host.browser.hold("r3"))
+        self.assertEqual(len(host._record_held()), 1, "back at Ask me first, the next step waits again")
+        self.assertEqual(host.browser.released, ["r2"])
+        # A level that can't be read is Ask: nothing goes by itself on a guess.
+        host._level_now = levels.follow(self.registry.directory / "missing", pip["id"])
+        host.level = "full"
+        host._queued.append(host.browser.hold("r4"))
+        self.assertEqual(len(host._record_held()), 1)
+        self.assertEqual(host.browser.released, ["r2"])
+
+    def test_a_run_hands_its_computer_and_its_borrowed_chrome_the_live_level(self):
+        import inspect
+        source = inspect.getsource(pips._execute_run)
+        self.assertEqual(source.count("level_now=pip_levels.follow(registry.directory, row['pip_id'])"), 2, source[:0])
 
     def test_at_ask_the_shared_gate_is_as_before(self):
         pip, host = self.host("ask")
@@ -485,21 +516,21 @@ class RealBrowserTests(Store):
     def test_full_access_asks_only_for_payments_and_notes_nobody_at_the_keyboard(self):
         pip, host, queued = self.host("full", unattended=True)
         host.call("open", {"url": self.url})
-        self.assertIn("Full access", self.press(host, "Post comment"))
+        self.assertIn("Do it all", self.press(host, "Post comment"))
         self.reset(host)
-        self.assertNotIn("Held", self.press(host, "Continue"), "not sure what it is: Full access lets it through")
+        self.assertNotIn("Held", self.press(host, "Continue"), "not sure what it is: Do it all lets it through")
         self.assertEqual([p for p, _ in self.received], ["/comments", "/step"])
         for name in ("Pay 500", "Use saved card", "Place order"):
             self.reset(host)
             with self.subTest(name=name):
-                self.assertTrue(self.press(host, name).startswith("Held:"), f"{name} is a payment: it asks at Full access")
+                self.assertTrue(self.press(host, name).startswith("Held:"), f"{name} is a payment: it asks at Do it all")
         self.assertEqual([p for p, _ in self.received], ["/comments", "/step"])
         held = {a["summary"]["path"]: a["summary"] for a in pip_computer.list_actions(self.registry, pip["id"]) if a["status"] == "pending"}
         self.assertTrue(held["/pay"]["payment"], "a card number: its card says it sends card details")
         self.assertEqual((held["/pay-saved"].get("payment"), held["/pay-saved"]["asks_because"]), (None, "payment"),
                          "a saved card sends a token: its card says it looks like a payment")
         labels = [f["label"] for f in pip_computer.frames(self.registry.directory, queued["id"])]
-        self.assertTrue(any("Approved by its level: Full access" in l and "nobody at the keyboard" in l for l in labels), labels)
+        self.assertTrue(any("Approved by its level: Do it all" in l and "nobody at the keyboard" in l for l in labels), labels)
 
     def test_the_floor_holds_a_wipe_at_every_level_and_allow_lets_that_command_run_once(self):
         from dgc import pip_computer_files as desk
