@@ -9,6 +9,9 @@ Built by Mohit Kalra.
 
 </div>
 
+<p align="center"><img src="docs/demo.gif" alt="DGC in VS Code: one prompt, two helpers build an invoicing app side by side, the tests pass and the app runs" width="860"></p>
+<p align="center"><sub>One prompt in VS Code: two helpers build a small invoicing app side by side, 29 tests pass, and it runs. Sped up from 19 minutes, on DeepSeek V4.1 Flash through Ollama.</sub></p>
+
 ---
 
 DGC is an interactive coding agent that lives in your terminal and points at **the model endpoint you choose**: local Ollama, llama.cpp, LM Studio, or vLLM; native Anthropic or OpenAI; and compatible clouds such as OpenRouter, Groq, DeepSeek, Together, and Mistral.
