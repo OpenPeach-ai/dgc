@@ -144,6 +144,13 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
   Each chat keeps the model and thinking level you choose, and gets them back when you reopen it; chats have no
   ultra mode. If
   the model thought before answering, **Thought** above the reply opens what it thought.
+- **A fallback model.** The **⋯** beside a model in that menu offers **Use as main** and **Use as fallback** (or **Stop
+  using as fallback**); once a fallback is set, the two rows say **Main** and **Fallback** at their right end. It is one
+  model on your own connection or a saved provider, never Claude Code or Codex. When the chat's model fails before the
+  reply wrote or did anything (a usage limit, unreachable, signed out), the fallback writes the whole reply, with the
+  whole chat; the button by Send names it in olive with the word **fallback**, and the first such reply says so once
+  ("X didn't answer; Y did"). The next reply tries the chat's own model first. Each chat keeps its fallback with its
+  next reply; a new chat starts with the last one you chose.
 - **Long replies.** ChatDGC doesn't limit reply length; the model's own limit is the only one. If a reply
   stops at that limit, or you press Stop, the reply keeps what was written and shows **Continue**.
   Continue picks up in the same reply.
@@ -479,6 +486,11 @@ ChatDGC says so in `ready.capabilities.chatdgc = {"version": 1}`.
 `chatdgc_mentions {request_id}` (`capabilities.chatdgc.mentions`) answers with what the box can name with `@`:
 `chatdgc_mentions {request_id, plugins: [{id, name}], pips: [{id, name, pip_type, goal}], error?}`, every plugin a reply
 can use and your Personal Pips. `error` says why the Pips aren't listed, with the plugins still there.
+Every command that runs a reply may carry `fallback` (`capabilities.chatdgc.fallback`): the chat's fallback model as
+a model string (`""` none), with `fallback_provider` (a saved provider's route, as `provider`, for that turn only).
+When the reply's model fails before it wrote or did anything, the reply runs once more on it: `chatdgc_waiting` comes
+again naming it, the saved reply carries `fallback {for, line?}` (`line` on the first of an outage), and the conversation
+carries `fallback` and, while the fallback answers, `fallback_on {model, since}`.
 `chatdgc_send` may carry `display_mentions`, where the box drew its marks, as on `prompt`, plus `wired: true` on a Pip
 whose name is the words of the text. They are display-only: they come back on the saved message, and marks that don't
 spell the text are left out. The model reads `text`, and a Pip so named comes with a line of what it is, for that reply.

@@ -2013,6 +2013,10 @@ for _chat_turn_command in (
     # A saved VS Code provider's route is supplied for this turn only; the API
     # key never enters the persisted conversation or a model-visible message.
     COMMAND_FIELDS[_chat_turn_command]["provider"] = _O(False)
+    # The chat's fallback model (D14, only with capabilities.chatdgc.fallback): a model string as `model` ("" none),
+    # and its saved provider's route for this turn only, as `provider`.
+    COMMAND_FIELDS[_chat_turn_command]["fallback"] = _S(False)
+    COMMAND_FIELDS[_chat_turn_command]["fallback_provider"] = _O(False)
 
 
 def command_error(value) -> str | None:

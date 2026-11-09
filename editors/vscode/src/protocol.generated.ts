@@ -10995,6 +10995,18 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "object"
       ],
       "required": false
+    },
+    "fallback": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "fallback_provider": {
+      "types": [
+        "object"
+      ],
+      "required": false
     }
   },
   "chatdgc_pips": {
@@ -11194,6 +11206,18 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "object"
       ],
       "required": false
+    },
+    "fallback": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "fallback_provider": {
+      "types": [
+        "object"
+      ],
+      "required": false
     }
   },
   "chatdgc_continue": {
@@ -11216,6 +11240,18 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
       "required": true
     },
     "provider": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    },
+    "fallback": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "fallback_provider": {
       "types": [
         "object"
       ],
@@ -11282,6 +11318,18 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "object"
       ],
       "required": false
+    },
+    "fallback": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "fallback_provider": {
+      "types": [
+        "object"
+      ],
+      "required": false
     }
   },
   "chatdgc_regenerate": {
@@ -11334,6 +11382,18 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
       ]
     },
     "provider": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    },
+    "fallback": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "fallback_provider": {
       "types": [
         "object"
       ],
@@ -11438,6 +11498,18 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "object"
       ],
       "required": false
+    },
+    "fallback": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "fallback_provider": {
+      "types": [
+        "object"
+      ],
+      "required": false
     }
   },
   "chatdgc_export": {
@@ -11520,6 +11592,18 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "object"
       ],
       "required": false
+    },
+    "fallback": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "fallback_provider": {
+      "types": [
+        "object"
+      ],
+      "required": false
     }
   },
   "chatdgc_research_start": {
@@ -11554,6 +11638,18 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
       "required": false
     },
     "provider": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    },
+    "fallback": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "fallback_provider": {
       "types": [
         "object"
       ],
@@ -11852,6 +11948,18 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "object"
       ],
       "required": false
+    },
+    "fallback": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "fallback_provider": {
+      "types": [
+        "object"
+      ],
+      "required": false
     }
   },
   "chatdgc_summary": {
@@ -11888,6 +11996,18 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
       "required": true
     },
     "provider": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    },
+    "fallback": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "fallback_provider": {
       "types": [
         "object"
       ],
@@ -12034,6 +12154,18 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
       "required": true
     },
     "provider": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    },
+    "fallback": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "fallback_provider": {
       "types": [
         "object"
       ],

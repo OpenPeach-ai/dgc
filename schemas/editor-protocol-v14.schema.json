@@ -14766,6 +14766,12 @@
             },
             "provider": {
               "type": "object"
+            },
+            "fallback": {
+              "type": "string"
+            },
+            "fallback_provider": {
+              "type": "object"
             }
           },
           "required": [
@@ -14989,6 +14995,12 @@
             },
             "provider": {
               "type": "object"
+            },
+            "fallback": {
+              "type": "string"
+            },
+            "fallback_provider": {
+              "type": "object"
             }
           },
           "required": [
@@ -15020,6 +15032,12 @@
               "type": "string"
             },
             "provider": {
+              "type": "object"
+            },
+            "fallback": {
+              "type": "string"
+            },
+            "fallback_provider": {
               "type": "object"
             }
           },
@@ -15077,6 +15095,12 @@
             },
             "provider": {
               "type": "object"
+            },
+            "fallback": {
+              "type": "string"
+            },
+            "fallback_provider": {
+              "type": "object"
             }
           },
           "required": [
@@ -15130,6 +15154,12 @@
               ]
             },
             "provider": {
+              "type": "object"
+            },
+            "fallback": {
+              "type": "string"
+            },
+            "fallback_provider": {
               "type": "object"
             }
           },
@@ -15230,6 +15260,12 @@
             },
             "provider": {
               "type": "object"
+            },
+            "fallback": {
+              "type": "string"
+            },
+            "fallback_provider": {
+              "type": "object"
             }
           },
           "required": [
@@ -15318,6 +15354,12 @@
             },
             "provider": {
               "type": "object"
+            },
+            "fallback": {
+              "type": "string"
+            },
+            "fallback_provider": {
+              "type": "object"
             }
           },
           "required": [
@@ -15355,6 +15397,12 @@
               "type": "boolean"
             },
             "provider": {
+              "type": "object"
+            },
+            "fallback": {
+              "type": "string"
+            },
+            "fallback_provider": {
               "type": "object"
             }
           },
@@ -15853,6 +15901,12 @@
             },
             "provider": {
               "type": "object"
+            },
+            "fallback": {
+              "type": "string"
+            },
+            "fallback_provider": {
+              "type": "object"
             }
           },
           "required": [
@@ -15909,6 +15963,12 @@
               "type": "string"
             },
             "provider": {
+              "type": "object"
+            },
+            "fallback": {
+              "type": "string"
+            },
+            "fallback_provider": {
               "type": "object"
             }
           },
@@ -16110,6 +16170,12 @@
               "type": "string"
             },
             "provider": {
+              "type": "object"
+            },
+            "fallback": {
+              "type": "string"
+            },
+            "fallback_provider": {
               "type": "object"
             }
           },

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A fallback model for each ChatDGC chat, chosen the same way in its model menu (the ⋯ beside a model; Main and Fallback at the row's end). While the fallback writes a reply, the model button names it in olive with the word fallback.
 - A fallback model for each Pip, chosen in its model picker: the ⋯ beside a model offers Use as main and Use as fallback, and once one is set the rows say Main and Fallback. While the fallback answers, the prompt box names it in olive with the word fallback. A reply the fallback answered says so before its time, the first of an outage only.
 - Let Pips at Do it all pay: a switch in the Pips view's Controls, off by default. On, a Pip at Do it all pays by itself, at most 3 times a day across your Pips, and the switch says how many it paid in the last day.
 - A Pip's card says when the fuse is why it asks: "It has done 25 things on its own in the last hour, so it asks before each one until 8:12 AM."

@@ -2013,3 +2013,28 @@ test("a read-only ChatDGC tab cannot run a mod in the other window's chat", asyn
     assert.equal(requests.length, 1, "a read-only tab can still inspect its mods");
   } finally { delete host.chatdgcModsSend; }
 });
+
+test("a chat's fallback model (D14) goes with every turn it sends, only to a process that offers it, a provider's route with it", async () => {
+  chat.open("");
+  const [panel] = world.panels;
+  panel.say({ type: "ready" });
+  opened(panel, { id: ID(7), title: "New chat", temporary: false, fallback: "glm-5.3:cloud" });
+  const sendIt = () => panel.say({ type: "send", text: "Hi.", model: "fixture", thinking: "", search: "auto" });
+  sendIt();
+  assert.equal("fallback" in last("chatdgc_send"), false, "an older process: never sent");
+  host.offers = { version: 1, fallback: 1 };
+  sendIt();
+  assert.equal(last("chatdgc_send").fallback, "glm-5.3:cloud", "the chat's own, as it opened");
+  panel.say({ type: "fallback", value: "" });
+  sendIt();
+  assert.equal(last("chatdgc_send").fallback, "", "none chosen: none");
+  const spare = `provider_${"c".repeat(32)}`;
+  host.chatdgcProviderRoute = async (model) => ({ id: spare, base_url: "https://spare.example/v1", api_key: "k", api_mode: "chat", asked: model });
+  panel.say({ type: "fallback", value: `provider:${spare}:gpt-oss:120b` });
+  sendIt();
+  await new Promise((r) => setImmediate(r));
+  const turn = last("chatdgc_send");
+  assert.equal(turn.fallback, `provider:${spare}:gpt-oss:120b`);
+  assert.equal(turn.fallback_provider.base_url, "https://spare.example/v1", "its saved provider's route, for this turn only");
+  assert.equal(panel.last("fallbackOffered")?.type, "fallbackOffered");
+});

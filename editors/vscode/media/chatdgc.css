@@ -1007,3 +1007,13 @@ path.cd-chart-mark, rect.cd-chart-mark { stroke: none; }
 .cd-option:has(input[data-held="1"]):hover { background: transparent; }
 /* ChatDGC's mods above the message box (media/mods.js; main.css draws them). */
 .cd-foot .mod-strip { margin: 0 0 var(--sp-2); }
+/* D14: a chat's fallback model. In the model menu the check and Main share the row's end; Fallback alone sits there. */
+.cd-menu-row > .codicon-check + .dgc-menu-pill { margin-left: 6px; }
+/* While the fallback answers: the pill names it, in the olive DGC uses when something isn't answering, with the word. */
+.cd-model-pill.on-fallback { background: var(--err-soft); color: var(--err-text); }
+.cd-model-pill.on-fallback .cd-model-name { color: var(--err-text); }
+.cd-fallback-word {
+  flex: none; padding: 0 5px; border: 1px solid color-mix(in srgb, var(--err) 60%, transparent); border-radius: 999px;
+  font: var(--w-semi) 10px/14px var(--sans); color: var(--err-text);
+}
+.cd-fallback-line { margin: var(--sp-1) 0 0; font: var(--w-reg) var(--t-sm)/1.35 var(--sans); color: var(--muted); overflow-wrap: anywhere; }

@@ -4526,3 +4526,72 @@ test("a card's place never cuts the reply's Markdown: inside a code fence or a l
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
+
+test("a chat's fallback (D14): the ⋯ beside a model, Main and Fallback lined up at the right end, the pill in olive while it answers", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen({ width: 700 });
+  const at = "2026-11-09T10:00:00.000Z";
+  try {
+    await s.send({ type: "fallbackOffered", on: true });
+    await s.send({ type: "opened", conversation: conversation({ model: "deepseek-v4.1-flash:cloud" }), messages: [], earlier: 0, busy: false });
+    await s.send({ type: "models", current: "deepseek-v4.1-flash:cloud", ids: ["deepseek-v4.1-flash:cloud", "glm-5.3:cloud"] });
+    await s.page.locator("#cd-model-pill").click();
+    const menu = s.page.locator("#cd-model-menu");
+    await menu.evaluate((n) => Promise.all(n.getAnimations().map((a) => a.finished)));
+    assert.equal(await menu.locator(".dgc-menu-pill").count(), 0, "no fallback yet: no words");
+    const glm = menu.locator(".dgc-menu-item", { hasText: "glm-5.3:cloud" });
+    await glm.hover();
+    await glm.locator(".dgc-menu-more").click();
+    assert.deepEqual(await menu.locator(".dgc-menu-choices button").allInnerTexts(), ["Use as main", "Use as fallback"]);
+    await menu.locator(".dgc-menu-choices button", { hasText: "Use as fallback" }).click();
+    assert.deepEqual((await s.posted("fallback")).at(-1), { type: "fallback", value: "glm-5.3:cloud" });
+    await s.page.mouse.move(1, 1);
+    const main = menu.locator(".cd-menu-row", { hasText: "deepseek-v4.1-flash:cloud" }).locator(".dgc-menu-pill");
+    const fallback = menu.locator(".cd-menu-row", { hasText: "glm-5.3:cloud" }).locator(".dgc-menu-pill");
+    assert.equal(await main.textContent(), "Main");
+    assert.equal(await fallback.textContent(), "Fallback");
+    const [a, b] = [await main.boundingBox(), await fallback.boundingBox()];
+    assert.ok(Math.abs((a.x + a.width) - (b.x + b.width)) < 1.5, `Main and Fallback end on one line (${a.x + a.width} vs ${b.x + b.width})`);
+    const rowBox = await menu.locator(".cd-menu-row", { hasText: "glm-5.3:cloud" }).boundingBox();
+    assert.ok(rowBox.x + rowBox.width - (b.x + b.width) <= 14, "at the row's right end");
+    await s.page.keyboard.press("Escape");
+    // Its model didn't answer: the waiting line names the fallback, and so does the pill, in olive, with the word.
+    await s.send({ type: "turn", state: "started", replyId: M(2) });
+    await s.send({ type: "waiting", messageId: M(2), model: "glm-5.3:cloud", usual_s: 0 });
+    const pill = s.page.locator("#cd-model-pill");
+    assert.ok(await pill.evaluate((n) => n.classList.contains("on-fallback")));
+    assert.equal(await s.page.locator("#cd-model-name").textContent(), "glm-5.3:cloud");
+    assert.equal(await pill.locator(".cd-fallback-word").textContent(), "fallback");
+    assert.match(await pill.getAttribute("title"), /deepseek-v4\.1-flash:cloud didn’t answer, so its fallback glm-5\.3:cloud is answering/);
+    await s.send({ type: "message", message: { id: M(2), role: "assistant", text: "Paris.", created_at: at, finish: "stop", model: "glm-5.3:cloud",
+      fallback: { for: "deepseek-v4.1-flash:cloud", line: "deepseek-v4.1-flash:cloud didn't answer; glm-5.3:cloud did" } } });
+    await s.send({ type: "turn", state: "ended", replyId: M(2) });
+    assert.equal(await s.page.locator(`.cd-assistant[data-id="${M(2)}"] .cd-fallback-line`).textContent(), "deepseek-v4.1-flash:cloud didn't answer; glm-5.3:cloud did");
+    assert.ok(await pill.evaluate((n) => n.classList.contains("on-fallback")), "still out: still olive");
+    await s.send({ type: "message", message: { id: M(4), role: "assistant", text: "Rome.", created_at: at, finish: "stop", model: "deepseek-v4.1-flash:cloud" } });
+    assert.ok(!(await pill.evaluate((n) => n.classList.contains("on-fallback"))), "its own model wrote again: back to normal");
+    assert.equal(await s.page.locator("#cd-model-name").textContent(), "deepseek-v4.1-flash:cloud");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("a chat's fallback: never a subscription, and nothing offered by an older process", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const nativeId = `provider_${"a".repeat(32)}`;
+    const profiles = [{ id: "subscription_codex", name: "Codex", kind: "subscription", engine: "codex", model: "" },
+                      { id: nativeId, name: "Ollama", kind: "native", model: "deepseek-v4.1-flash:cloud" }];
+    await s.send({ type: "fallbackOffered", on: true });
+    await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
+    await s.send({ type: "models", profiles, defaultId: "subscription_codex", providerId: "subscription_codex", current: "subscription:codex", ids: ["", "gpt-5.6-sol"] });
+    await s.page.locator("#cd-model-pill").click();
+    assert.equal(await s.page.locator("#cd-model-menu .dgc-menu-more").count(), 0, "Codex can't be a fallback");
+    await s.page.keyboard.press("Escape");
+    await s.send({ type: "fallbackOffered", on: false });
+    await s.send({ type: "models", profiles, defaultId: nativeId, providerId: nativeId, current: `provider:${nativeId}:deepseek-v4.1-flash:cloud`, ids: ["deepseek-v4.1-flash:cloud"] });
+    await s.page.locator("#cd-model-pill").click();
+    assert.equal(await s.page.locator("#cd-model-menu .dgc-menu-more").count(), 0, "an older process: no ⋯");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});

@@ -202,6 +202,11 @@ export function isChatdgcModsEvent(ev: { type?: unknown; surface?: unknown; requ
   return (type === "mod_result" || type === "command_rejected") && String(ev?.request_id || "").startsWith("chatdgc-mods-");
 }
 
+/** The commands that run a chat's reply: they carry its provider's route, and its fallback (D14). */
+const CHAT_TURNS = ["chatdgc_send", "chatdgc_continue", "chatdgc_edit", "chatdgc_regenerate",
+  "chatdgc_answer", "chatdgc_research", "chatdgc_research_start", "chatdgc_action",
+  "chatdgc_compact", "chatdgc_carry", "chatdgc_work_brief"];
+
 /** ChatDGC's context window presets, as main DGC's sizes run (a backend offers the ones it takes). */
 export const CHATDGC_WINDOWS = ["8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "max"];
 const WIDGET_ID = /^wg_[a-f0-9]{16}$/;
@@ -419,6 +424,13 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
    *  process that doesn't offer it. */
   private folderOffered(): boolean {
     try { return Number(this.host?.chatdgcOffers?.()?.folder) >= 1; } catch { return false; }
+  }
+
+  /** A chat's fallback model (D14, ready.capabilities.chatdgc.fallback): each chat's, as it opened or as you chose it
+   *  in its model menu, added to every turn it sends. */
+  private fallbacks = new Map<string, string>();
+  private fallbackOffered(): boolean {
+    try { return Number(this.host?.chatdgcOffers?.()?.fallback) >= 1; } catch { return false; }
   }
 
   /** Which folder a tab's chat reads: asked as it opens, since a chat's summary doesn't carry it. */
@@ -1219,11 +1231,21 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   }
 
   private deliver(asker: Asker, cmd: Record<string, unknown>): void {
+    // D14: the chat's fallback goes with every turn it sends, and a saved provider's route with it, for that turn only.
+    if (!("fallback" in cmd) && CHAT_TURNS.includes(String(cmd.type)) && this.fallbackOffered()
+        && this.fallbacks.has(String(cmd.conversation_id || ""))) {
+      const fallback = this.fallbacks.get(String(cmd.conversation_id || "")) || "";
+      if (fallback.startsWith("provider:") && this.host?.chatdgcProviderRoute) {
+        void this.host.chatdgcProviderRoute(fallback).then(
+          (route) => { if (!this.closing) this.deliver(asker, { ...cmd, fallback, fallback_provider: route }); },
+          () => { if (!this.closing) this.deliver(asker, { ...cmd, fallback: "" }); });   // its provider is gone: none
+        return;
+      }
+      cmd = { ...cmd, fallback };
+    }
     const model = String(cmd.model || asker.tab?.summary?.model || "");
     if (model.startsWith("provider:") && !cmd.provider && this.host?.chatdgcProviderRoute
-        && ["chatdgc_send", "chatdgc_continue", "chatdgc_edit", "chatdgc_regenerate",
-            "chatdgc_answer", "chatdgc_research", "chatdgc_research_start", "chatdgc_action",
-            "chatdgc_compact", "chatdgc_carry", "chatdgc_work_brief"].includes(String(cmd.type))) {
+        && CHAT_TURNS.includes(String(cmd.type))) {
       void this.host.chatdgcProviderRoute(model).then((provider) => {
         if (!this.closing) this.deliver(asker, { ...cmd, provider });
       }).catch((error) => {
@@ -1275,6 +1297,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     // And whether a chat can have a folder: a tab already open asks its chat's folder of this process.
     for (const tab of this.tabs) {
       this.post(tab, { type: "folderOffered", on: this.folderOffered() });
+      this.post(tab, { type: "fallbackOffered", on: this.fallbackOffered() });
       if (tab.opened && !tab.held.some((cmd) => cmd.type === "chatdgc_open")) this.askFolder(tab);
     }
     this.restoreWidgets();
@@ -1385,7 +1408,9 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         return;
       case "chatdgc_opened": {
         { const id = String(ev.conversation?.id || "");
-          if (id) { if (ev.busy === true) this.answering.add(id); else this.answering.delete(id); } }
+          if (id) { if (ev.busy === true) this.answering.add(id); else this.answering.delete(id); }
+          // D14: the chat's own fallback, as kept with its last reply (a new chat's: the last one you chose).
+          if (id && !this.fallbacks.has(id)) this.fallbacks.set(id, typeof ev.conversation?.fallback === "string" ? ev.conversation.fallback.slice(0, 200) : ""); }
         if (asker?.kind === "branch") {
           // Branch in new chat: it opens in a tab of its own, as ChatGPT opens one; the chat it came from stays.
           this.requests.delete(requestId);
@@ -1782,6 +1807,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         this.post(tab, { type: "windows", presets: this.windowPresets() });
         this.post(tab, { type: "artifacts", offered: this.artifactsOffer() ?? null });
         this.post(tab, { type: "folderOffered", on: this.folderOffered() });
+        this.post(tab, { type: "fallbackOffered", on: this.fallbackOffered() });
         this.modsReady(tab);
         // Plugins' cards in a reply (MCP Apps): ChatDGC's screens draw them, once its backend offers them.
         if (this.host?.mcpAppsOffered?.()) this.host.chatdgcSend({ type: "watch_mcp_apps", surface: "chat" });
@@ -2255,6 +2281,12 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "models":
         void this.models(tab, typeof message.provider === "string" ? message.provider : "");
         return;
+      case "fallback": {
+        // D14: this chat's fallback, chosen in its model menu: it goes with every turn it sends from now.
+        const value = typeof message.value === "string" && message.value.length <= 200 ? message.value : "";
+        if (conversation) this.fallbacks.set(conversation, value);
+        return;
+      }
       case "research": {
         const text = typeof message.text === "string" ? message.text : "";
         const model = typeof message.model === "string" && message.model.length <= 200 ? message.model : "";

@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
 import threading
 import time
 from contextlib import contextmanager
 import unicodedata
 import uuid
+from pathlib import Path
 from typing import Callable
 
 from ..editor_protocol import CHATDGC_THINKING as THINKING
@@ -328,6 +330,20 @@ class ChatEngineError(Exception):
     """A turn didn't happen; the text says why, for the user."""
 
 
+def shown_model(value) -> str:
+    """A chat's model string as the user knows it: Claude Code or Codex for a subscription, the model for a saved
+    provider's (provider:<id>:<model>), else the model itself."""
+    value = str(value or "")
+    if value.startswith("subscription:"):
+        parts = value.split(":", 2)
+        name = {"claude": "Claude Code", "codex": "Codex"}.get(parts[1], parts[1].title() if len(parts) > 1 else "Subscription")
+        return f"{name} · {parts[2]}" if len(parts) == 3 and parts[2] else name
+    if value.startswith("provider:"):
+        parts = value.split(":", 2)
+        return parts[2] if len(parts) == 3 else value
+    return value
+
+
 class ChatEngine:
     def __init__(self, config, store: ChatStore | None = None, *, client_factory: Callable | None = None,
                  searcher: Callable | None = None, fetcher: Callable | None = None,
@@ -373,6 +389,9 @@ class ChatEngine:
         # The editor supplies a saved provider's key for this turn only. Chats persist
         # its opaque id and model, never the URL credential pair.
         self._provider_turn = threading.local()
+        # The chat's fallback model for this turn (D14): the model string, its saved provider's route (registered with
+        # the routes below), and what to call when a reply switches to it. Set by the service per turn, never saved.
+        self._fallback_turn = threading.local()
         # Naming, follow-ups and the context meter run on their own threads after
         # the reply. Keep only recently supplied routes in this process, never in
         # the chat or on the wire back to the editor. A restarted backend must be
@@ -403,6 +422,43 @@ class ChatEngine:
                         self._provider_routes[route["id"]] = (time.monotonic() + 600, cached[1])
             self._provider_turn.route = previous
 
+    def _last_fallback(self) -> str:
+        """The last fallback you chose for a chat (D14), which a new chat starts with: "" none."""
+        try:
+            value = json.loads((Path(self.store.root) / "fallback.json").read_text(encoding="utf-8")).get("fallback")
+            return str(value)[:200] if isinstance(value, str) else ""
+        except (OSError, ValueError, AttributeError):
+            return ""
+
+    def _keep_last_fallback(self, value: str) -> None:
+        if value == self._last_fallback():
+            return
+        path = Path(self.store.root) / "fallback.json"
+        try:
+            temp = path.with_name(f".fallback-{os.getpid()}.tmp")
+            fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump({"fallback": value}, handle)
+            os.replace(temp, path)
+        except OSError:
+            pass                               # only what a new chat starts with
+
+    @contextmanager
+    def fallback_turn(self, model: str | None, route: dict | None = None, on_switch=None):
+        """This turn's fallback (D14): ``model`` as a chat's model string ("" none; None when the editor didn't say, so
+        the chat's saved choice stays), a saved provider's ``route`` when it names one, and ``on_switch(model)`` when a
+        reply hands over to it."""
+        previous = (getattr(self._fallback_turn, "model", None), getattr(self._fallback_turn, "on_switch", None))
+        self._fallback_turn.model, self._fallback_turn.on_switch = model, on_switch
+        try:
+            if route is not None:
+                with self.provider_turn(getattr(self._provider_turn, "route", None)):
+                    with self._provider_routes_lock:
+                        self._provider_routes[route["id"]] = (time.monotonic() + 600, route.copy())
+            yield
+        finally:
+            self._fallback_turn.model, self._fallback_turn.on_switch = previous
+
     # -- the model
 
     def client(self, model: str | None, *, base_url: str | None = None, api_key: str | None = None,
@@ -412,7 +468,8 @@ class ChatEngine:
         if route.startswith("provider:"):
             parts = route.split(":", 2)
             chosen = getattr(self._provider_turn, "route", None)
-            if chosen is None and len(parts) == 3:
+            if (chosen is None or chosen.get("id") != parts[1]) and len(parts) == 3:
+                # Another provider than this turn's own: its fallback's (D14), or one supplied a moment ago.
                 with self._provider_routes_lock:
                     cached = self._provider_routes.get(parts[1])
                     if cached is not None and cached[0] > time.monotonic():
@@ -497,6 +554,9 @@ class ChatEngine:
         chat = {"id": new_chat_id(), "title": "Incognito chat" if temporary else "New chat", "created_at": stamp,
                 "updated_at": stamp, "model": default, "thinking": None, "pinned": False, "archived": False,
                 "messages": []}
+        last = self._last_fallback()
+        if last:
+            chat["fallback"] = last            # D14: a new chat starts with the last fallback you chose
         chat["temporary" if temporary else "draft"] = True
         if project:
             chat["project"] = project
@@ -2700,10 +2760,33 @@ class ChatEngine:
 
     def _reply(self, chat, build, existing, reply_id, on_text, on_thinking, cancel, *, search: str = "off",
                on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None, on_widget=None,
-               prefix: str = "") -> dict:
+               prefix: str = "", _fallback_from: str = "") -> dict:
         """One reply. ``build(chat, room)`` is what the model reads, for a window of ``room`` tokens: when it would
-        fill more than COMPACT_AT of it, the older turns are summarized first (said on screen, never silent)."""
-        model = chat.get("model") or None
+        fill more than COMPACT_AT of it, the older turns are summarized first (said on screen, never silent).
+
+        D14: when its model fails before the reply wrote or did anything (a usage limit, unreachable, signed out), and
+        the chat has a fallback, the whole reply runs once more on the fallback (``_fallback_from`` names the model it
+        stands in for), with the same chat, so it doesn't start blind."""
+        chosen_fallback = getattr(self._fallback_turn, "model", None)
+        if chosen_fallback is not None and not _fallback_from:
+            if chosen_fallback:
+                chat["fallback"] = str(chosen_fallback)[:200]
+            else:
+                chat.pop("fallback", None)
+            if chosen_fallback != (self._last_fallback() or ""):
+                self._keep_last_fallback(str(chosen_fallback or "")[:200])
+        fallback = "" if _fallback_from else str(chat.get("fallback") or "")
+        model = (chat.get("fallback") if _fallback_from else chat.get("model")) or None
+        rerun = dict(build=build, existing=existing, reply_id=reply_id, on_text=on_text, on_thinking=on_thinking,
+                     cancel=cancel, search=search, on_activity=on_activity, on_compacted=on_compacted,
+                     on_question=on_question, on_images=on_images, on_action=on_action, on_file=on_file,
+                     on_canvas=on_canvas, on_widget=on_widget, prefix=prefix)
+
+        def hand_over(main_name):
+            switch = getattr(self._fallback_turn, "on_switch", None)
+            if switch is not None:
+                switch(fallback)
+            return self._reply(chat, **rerun, _fallback_from=str(main_name or "")[:200])
         thinking = chat.get("thinking") or str(self.config.get("thinking", "off") or "off")
         streamed, thought = [], []
         # What this reply does, step by step, for its Trace (dgc/reply_trace.py), and the app's own notes it must not
@@ -2728,7 +2811,12 @@ class ChatEngine:
         if prefix:
             text_part(prefix)
 
-        client = self.client(model)
+        try:
+            client = self.client(model)
+        except Exception:                      # noqa: BLE001 -- a CLI not installed or signed out: nothing ran yet
+            if fallback and fallback != (model or "") and not existing and not prefix:
+                return hand_over(model or self.config.model)
+            raise
         room, _ = fit_window.window(client, self._preset())
         history = build(chat, room)
         if fit_window.estimate(history) > room * fit_window.COMPACT_AT:
@@ -3018,13 +3106,24 @@ class ChatEngine:
             plugins.close()
         if hasattr(client, "close"):
             client.close()
+        if (failure is not None and not text and fallback and fallback != (model or "") and not existing
+                and not (cancel is not None and cancel.is_set())
+                and not (searches or questions or memory_ops or actions or files or canvases or queries or widgets
+                         or artifact_cards or apps or used or web_images)):
+            # Its model failed before the reply wrote or did anything: the fallback takes the whole reply (D14).
+            if picturing is not None:
+                with self._lock:
+                    for meta in picturing["items"]:
+                        self._live_pictures.pop((chat["id"], meta["id"]), None)
+            return hand_over(name)
         try:
             message = self._keep_reply(chat, existing, reply_id, model, client, text, thought_text, finish, failure,
                                        usage, counted, sources, searches, questions, memory_ops, web_images,
                                        actions=actions, files=files, canvases=canvases, queries=queries,
                                        widgets=widgets, plugins_used=used, artifacts=artifact_cards, apps=apps,
                                        output_note=(artifact_tools.missing_note(chosen, artifact_state["made"])
-                                                    if chosen and finish == "stop" else ""), trace=measured)
+                                                    if chosen and finish == "stop" else ""), trace=measured,
+                                       fallback_from=_fallback_from)
             return message
         finally:
             if picturing is not None:
@@ -3035,7 +3134,7 @@ class ChatEngine:
     def _keep_reply(self, chat, existing, reply_id, model, client, text, thought_text, finish, failure, usage, counted,
                     sources, searches, questions, memory_ops, web_images, *, actions=None, files=None,
                     canvases=None, queries=None, widgets=None, plugins_used=None, artifacts=None, apps=None,
-                    output_note: str = "", trace=None) -> dict:
+                    output_note: str = "", trace=None, fallback_from: str = "") -> dict:
         """The reply as it ended, saved (with what it looked up, asked, remembered and showed)."""
         if failure is not None and not text:
             raise ChatEngineError(_failure_text(failure)) from failure
@@ -3108,6 +3207,14 @@ class ChatEngine:
             message["counted"] = counted
         if chat.get("summary"):
             chat["summary"].pop("written_at", None)     # this reply was counted with the summary as it is now
+        # D14: a reply its fallback wrote says so, the first of an outage in one line; the chat says its fallback answers
+        # (the prompt box shows it) until its own model writes a reply again.
+        if fallback_from and finish in ("stop", "length"):
+            line = "" if chat.get("fallback_on") else f"{shown_model(fallback_from)} didn't answer; {shown_model(model)} did"[:160]
+            message["fallback"] = {"for": str(fallback_from)[:200], **({"line": line} if line else {})}
+            chat["fallback_on"] = {"model": str(model or "")[:200], "since": now()}
+        elif finish in ("stop", "length"):
+            chat.pop("fallback_on", None)
         self._save(chat)
         return message
 

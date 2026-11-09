@@ -91,7 +91,8 @@
   // has no switch for it (reported 2026-10-18: "it anyway uses web, so let's not confuse users"). Settings -> Web
   // search -> Search in ChatDGC turns it off for every chat.
   const searchMode = () => "auto";
-  const state = { conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "", modelProfiles: [], providerModels: {}, providerErrors: {}, menuProvider: "", menuProviders: false, windows: [], breakdown: null,
+  const state = { fallback: "", fallbackOn: null, fallbackOffered: false, fallbackMore: "",
+                  conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "", modelProfiles: [], providerModels: {}, providerErrors: {}, menuProvider: "", menuProviders: false, windows: [], breakdown: null,
                   model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "",
                   context: null, compacting: false, editingSummary: false, picks: {},
                   research: false, planAsked: false, countdowns: {}, lastSent: null, forgotten: new Set(), planEditing: "", steerDraft: "", open: new Set(),
@@ -1675,6 +1676,9 @@
       // When it was written, first in the row, where the reply begins (media/msgtime.js).
       const writtenAt = window.DgcTime?.node(Date.parse(message.created_at), "cd-time");
       if (writtenAt) actions.prepend(writtenAt);
+      // D14: the first reply its fallback wrote in an outage says so, on a line of its own above the reply's icons (beside
+      // them it was squeezed into a column in a narrow chat).
+      if (message.fallback?.line) node.append(el("div", "cd-fallback-line", String(message.fallback.line).slice(0, 160)));
       node.append(actions);
     }
     if (next) node.append(next);
@@ -3820,6 +3824,16 @@
     pill.dataset.level = LEVELS[level][0];
     pill.title = `${name || "No model"} · thinking: ${LEVELS[level][1]}. Click to change`;
     pill.setAttribute("aria-label", `Model ${name || "not chosen"}, thinking ${LEVELS[level][1]}. Change model and thinking`);
+    // D14: its model didn't answer and its fallback does: the pill names the fallback, in olive, with the word.
+    const on = state.fallbackOn && state.fallbackOffered ? modelName(state.fallbackOn.model) : "";
+    pill.classList.toggle("on-fallback", !!on);
+    let word = pill.querySelector(".cd-fallback-word");
+    if (on) {
+      $("cd-model-name").textContent = on;
+      if (!word) { word = el("span", "cd-fallback-word", "fallback"); $("cd-model-name").after(word); }
+      pill.title = `${name || "Its model"} didn’t answer, so its fallback ${on} is answering. It tries ${name || "its model"} again with your next message.`;
+      pill.setAttribute("aria-label", `${on}, its fallback, is answering. Change model and thinking`);
+    } else word?.remove();
     fitModelName();
   }
   // The model's name stays readable: when the row is too full for it, the chips give up their words first, a step at a
@@ -3955,14 +3969,43 @@
           const row = el("button", `cd-menu-row dgc-menu-row${on ? " sel is-selected" : ""}`);
           row.type = "button";
           row.setAttribute("role", "menuitemradio"); row.setAttribute("aria-checked", String(on));
-          row.append(menuIcon("zap"), el("span", "cd-menu-name dgc-menu-label", modelName(option.value)), ...(on ? [icon("check")] : []));
-          row.addEventListener("click", () => {
+          const useAsMain = () => {
+            state.fallbackMore = "";
             modelPick.value = option.value;
             modelPick.dispatchEvent(new Event("change"));
             updatePill(); renderModelMenu();
             modelMenu.querySelector(".cd-menu-row.sel")?.focus();
+          };
+          // D14: Main and Fallback at the row's end, once a fallback is set; a model DGC runs itself has a ⋯ with Use
+          // as main and Use as fallback (Claude Code and Codex can't be a fallback).
+          const pills = state.fallback ? (on ? DgcMenu.pill("Main", "main") : option.value === state.fallback ? DgcMenu.pill("Fallback", "fallback") : "") : "";
+          row.append(menuIcon("zap"), el("span", "cd-menu-name dgc-menu-label", modelName(option.value)), ...(on ? [icon("check")] : []));
+          if (pills) row.insertAdjacentHTML("beforeend", pills);
+          row.addEventListener("click", useAsMain);
+          if (!state.fallbackOffered || !fallbackable(option.value)) return row;
+          const open = state.fallbackMore === option.value, isFallback = option.value === state.fallback && !on;
+          const item = el("div", "dgc-menu-item"); item.setAttribute("role", "presentation");
+          item.append(row);
+          item.insertAdjacentHTML("beforeend", DgcMenu.more(`More for ${modelName(option.value)}`, "", open));
+          item.lastElementChild.addEventListener("click", (event) => {
+            event.stopPropagation();
+            state.fallbackMore = open ? "" : option.value; renderModelMenu();
+            const again = [...modelMenu.querySelectorAll(".dgc-menu-item")].find((n) => n.firstElementChild?.dataset.value === option.value);
+            (state.fallbackMore ? again?.nextElementSibling?.querySelector("button:not(:disabled)") : again?.querySelector(".dgc-menu-more"))?.focus();
           });
-          return row;
+          row.dataset.value = option.value;
+          if (!open) return item;
+          const choices = el("div", "dgc-menu-choices"); choices.setAttribute("role", "group"); choices.setAttribute("aria-label", modelName(option.value));
+          if (!on) {
+            const main = el("button", "cd-menu-row dgc-menu-row", "Use as main"); main.type = "button";
+            main.addEventListener("click", useAsMain); choices.append(main);
+          }
+          const fb = el("button", "cd-menu-row dgc-menu-row", isFallback ? "Stop using as fallback" : "Use as fallback"); fb.type = "button";
+          fb.disabled = on;
+          fb.addEventListener("click", () => setFallback(isFallback ? "" : option.value));
+          choices.append(fb);
+          const both = document.createDocumentFragment(); both.append(item, choices);
+          return both;
         });
     // A provider with nothing to choose from yet says why, rather than showing an empty list.
     if (profilesOn && !state.menuProviders && !options.length) {
@@ -3984,6 +4027,16 @@
     showDial();
     const selected = list.querySelector(".cd-menu-row.sel");
     if (selected) list.scrollTop = Math.max(0, selected.offsetTop - list.offsetTop - list.clientHeight / 2);
+  }
+  // D14: a chat's fallback model. One DGC runs itself (this host's or a saved provider's), never a subscription. The host
+  // adds it to every turn this chat sends; the chat keeps it with its next reply, and a new chat starts with the last one.
+  const fallbackable = (value) => !!value && !String(value).startsWith("subscription:");
+  function setFallback(value) {
+    state.fallback = value; state.fallbackMore = "";
+    if (!value) state.fallbackOn = null;
+    vscode.postMessage({ type: "fallback", value });
+    announce(value ? `${modelName(value)} answers when ${modelName(modelPick.value) || "its model"} doesn’t.` : "No fallback model for this chat.");
+    updatePill(); renderModelMenu();
   }
   function closeModelMenu(focusPill) {
     if (modelMenu.hidden) return;
@@ -4131,6 +4184,9 @@
       case "folderOffered":
         folderOffered(msg.on === true);
         return;
+      case "fallbackOffered":
+        state.fallbackOffered = msg.on === true; updatePill();
+        return;
       case "folder": {
         // The folder this chat reads, asked as it opened or changed in any tab on it ("" for none).
         if (!state.conversation || msg.conversation !== state.conversation.id) return;
@@ -4191,6 +4247,10 @@
         // model and thinking you picked stay, and so does where you were reading.
         const keep = msg.keep === true && state.conversation?.id === msg.conversation?.id;
         if (state.elsewhere && state.elsewhere.conversation !== msg.conversation?.id) { state.elsewhere = null; elsewhereBar(); }
+        // D14: the chat's own fallback, and whether its fallback is answering now.
+        if (!keep) state.fallback = typeof msg.conversation?.fallback === "string" ? msg.conversation.fallback.slice(0, 200) : "";
+        state.fallbackOn = msg.conversation?.fallback_on && typeof msg.conversation.fallback_on.model === "string" ? { model: msg.conversation.fallback_on.model } : null;
+        state.fallbackMore = "";
         if (state.conversation?.id !== msg.conversation?.id) {
           state.picks = {}; removedWidgets.clear(); closeWidgets(false);
           // Another chat: its own folder is asked for as it opens (the host does), and nothing of this one's carries.
@@ -4289,6 +4349,8 @@
           message = { id: msg.messageId, role: "assistant", text: "", thinking: "" };
           state.messages.push(message);
         }
+        // D14: the waiting line names its fallback: its model didn't answer, and the fallback writes this reply.
+        if (msg.model && state.fallback && String(msg.model) === state.fallback && msg.model !== modelPick.value) { state.fallbackOn = { model: String(msg.model) }; updatePill(); }
         if (!message || message.text || message.thinking) return;
         const since = message.waiting?.since;
         message.waiting = { model: String(msg.model || message.waiting?.model || "").slice(0, 200),
@@ -4316,6 +4378,10 @@
         // A picture that couldn't be had while the reply was written is asked for once more now it's kept.
         for (const item of Array.isArray(message.images?.items) ? message.images.items : []) {
           if (images.get(item?.id)?.error) images.delete(item.id);
+        }
+        // D14: a reply its fallback wrote keeps the pill olive; one its own model wrote ends the outage.
+        if (message.role === "assistant" && ["stop", "length"].includes(message.finish) && !earlierThanShown(message)) {
+          state.fallbackOn = message.fallback ? { model: String(message.model || state.fallback) } : null; updatePill();
         }
         const at = state.messages.findIndex((m) => m.id === message.id);
         if (at < 0 && state.earlier > 0 && message.role === "assistant" && earlierThanShown(message)) {

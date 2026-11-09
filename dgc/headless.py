@@ -3315,9 +3315,10 @@ class Backend:
         # holder: chatdgc_holder is understood (where a chat another window holds is open, and whether it is writing).
         # folder: chatdgc_folder, chatdgc_set_folder and chatdgc_work_brief (a folder the chat reads; Continue in Work).
         # mentions: chatdgc_mentions is understood, and chatdgc_send takes display_mentions.
+        # fallback: a chat's turn commands take `fallback` (and `fallback_provider`): its fallback model (D14).
         return {"chatdgc": {"version": 1, "widget_report": 1, "widget_library": 1, "windows": list(CHATDGC_WINDOWS),
                             "context_breakdown": 1, "voice_replies": 1, "question_forms": 1, "outline": 1,
-                            "holder": 1, "folder": 1, "mentions": 1},
+                            "holder": 1, "folder": 1, "mentions": 1, "fallback": 1},
                 # history: memory_history and memory_undo; learned: memory_watch, then memory_learned when a
                 # Work session's look back keeps something (dgc/memory_review.py).
                 "memory": {"version": 1, "history": 1, "learned": 1}, "voice": {"version": 1}}

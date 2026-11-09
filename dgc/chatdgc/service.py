@@ -2161,6 +2161,17 @@ class ChatService:
             def run(cancel, on_start, stream_for, activity):
                 with self.engine.provider_turn(route):
                     return original_run(cancel, on_start, stream_for, activity)
+        if "fallback" in cmd:
+            # The chat's fallback model (D14, capabilities.chatdgc.fallback): taken when its model fails before the
+            # reply wrote or did anything. Its saved provider's route is for this turn only, as `provider` is.
+            fallback = str(cmd.get("fallback") or "")[:200]
+            fallback_route = _provider_route(cmd.get("fallback_provider")) if fallback.startswith("provider:") else None
+            inner_run = run
+
+            def run(cancel, on_start, stream_for, activity):
+                with self.engine.fallback_turn(fallback, fallback_route,
+                                               on_switch=lambda model: self._fallback_switched(conversation_id, model)):
+                    return inner_run(cancel, on_start, stream_for, activity)
         chat = self.engine.open(conversation_id)     # an unknown chat is refused here, not on the thread
         cancel = threading.Event()
         with self._lock:
@@ -2178,6 +2189,20 @@ class ChatService:
         turn["thread"] = thread
         thread.start()
         self._turns_changed()
+
+    def _fallback_switched(self, conversation_id: str, model: str) -> None:
+        """The reply's model failed before it wrote anything and its fallback takes over: the waiting line names the
+        fallback now, so the screen (and its prompt box) shows which model is answering."""
+        with self._lock:
+            turn = self._turns.get(conversation_id)
+        if not turn or not turn.get("reply_id"):
+            return
+        live = turn.get("live")
+        waiting = {"model": str(model or "")[:200], "usual_s": 0.0, "since": time.time()}
+        if live is not None:
+            live.waiting = waiting
+            live.said("chatdgc_waiting", conversation_id=conversation_id, message_id=turn["reply_id"],
+                      model=waiting["model"], usual_s=0.0)
 
     def _waiting_for(self, chat) -> dict | None:
         """A new reply about to ask its model: which model, and how long it usually takes to start. None for a reply
