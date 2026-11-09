@@ -407,6 +407,32 @@ class SharedGateTests(Store):
         self.assertEqual(rows["sent"]["resolved_by"], "pip-level:approve")
         self.assertTrue(rows["pending"]["summary"]["payment"])
 
+    def test_what_its_level_sends_is_noted_before_it_goes_so_a_rerun_never_sends_it_twice(self):
+        # The submit is noted before the browser lets it go: stopped between the two, the run still counts as having
+        # sent something, so the watchdog and a restart don't submit it again. When DGC can't note it, the step waits
+        # for you on a card instead of going (the 9 Nov plan review).
+        from dgc import pip_run_watchdog as watchdog
+        pip, host = self.host("approve", unattended=True)
+        def stopped(request_id):
+            raise KeyboardInterrupt("the runner is stopped as the form goes")
+        host.browser.release = stopped
+        host._queued.append(host.browser.hold("r1"))
+        with self.assertRaises(KeyboardInterrupt):
+            host._record_held()
+        self.assertTrue(watchdog.sent_something(self.registry.db, host.run_id), "noted before it went")
+        host.browser, host._queued = _FakeBrowser(), [_FakeBrowser().hold("r2")]
+        host.browser.held["r2"] = host._queued[0]
+        from dgc.workspace_registry import WorkspaceRegistry
+        real = WorkspaceRegistry.event
+        def full(this, workspace_id, event_type, **kw):
+            if event_type == "pip_level_sending":
+                raise OSError("disk full")
+            return real(this, workspace_id, event_type, **kw)
+        with patch.object(WorkspaceRegistry, "event", full):
+            made = host._record_held()
+        self.assertEqual(host.browser.released, [], "not noted: it didn't go")
+        self.assertEqual(len(made), 1, "it waits for you on a card")
+
     def test_a_level_changed_mid_run_applies_from_its_next_step(self):
         # The level chip in its prompt box changes the level while a reply runs: its next held step is decided by the
         # new level, both ways, and a level it was given at the start no longer decides.

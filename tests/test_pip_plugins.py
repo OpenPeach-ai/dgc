@@ -435,6 +435,26 @@ class PluginAccessTests(PluginWorld, unittest.TestCase):
         self.assertIsInstance(self.use("call_plugin", session, plugin="airtable", tool="create_record",
                                        arguments={"table": "T", "fields": {"Ref": "4829137755"}}), str)
 
+    def test_at_do_it_all_a_change_is_noted_before_it_goes_so_a_rerun_never_sends_it_twice(self):
+        # A change at Do it all is noted before the call, so a call that never comes back (the plugin hangs after the
+        # send went through, the runner is killed) still counts as sent: the watchdog and a restart don't run it again.
+        # And when DGC can't note it, nothing goes out (the 9 Nov plan review).
+        from dgc import pip_run_watchdog as watchdog
+        session = self.session_for(unattended=True)
+        session.level_now = lambda: "full"
+        self.assertFalse(watchdog.sent_something(self.registry.db, self.RUN))
+        def dies(this, route, args, **kw):
+            this.calls.append((route, copy.deepcopy(args)))
+            raise KeyboardInterrupt("the runner is stopped mid-call")
+        with patch.object(Vendor, "call", dies), self.assertRaises(KeyboardInterrupt):
+            self.use("call_plugin", session, plugin="airtable", tool="create_record", arguments={"table": "T"})
+        self.assertTrue(watchdog.sent_something(self.registry.db, self.RUN), "noted before the call")
+        calls = len(Vendor.made[-1].calls)
+        with patch.object(self.registry, "event", side_effect=OSError("disk full")):
+            said = self.use("call_plugin", session, plugin="airtable", tool="create_record", arguments={"table": "T"})
+        self.assertEqual(len(Vendor.made[-1].calls), calls, "not noted: it never ran")
+        self.assertIn("did not run", said)
+
     def test_careful_mode_holds_a_change_that_carries_what_it_read_from_your_apps(self):
         # Never ask lets a change through; careful mode still shows one carrying app data before it goes.
         plugins.set_permission("airtable", "never_ask", money=False)

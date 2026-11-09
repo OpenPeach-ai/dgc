@@ -225,10 +225,14 @@ def line_for(db, run_id) -> str:
 
 
 def sent_something(db, run_id) -> bool:
-    """Whether anything this run did has gone out: a computer submit that was sent, or an app action that went (or
-    may have gone: ``unknown``). Drafts and cards waiting for the user haven't."""
+    """Whether anything this run did has gone out: a computer submit that was sent, an app action that went (or
+    may have gone: ``unknown``), or anything its level sent in the turn: noted before it goes (``pip_level_sending``,
+    a computer submit or a plugin change) and, for a plugin change, kept after (``pip_level_approved``: pip_plugins).
+    Drafts and cards waiting for the user haven't."""
     for query in ("SELECT 1 FROM pip_computer_actions WHERE run_id=? AND status='sent' LIMIT 1",
-                  "SELECT 1 FROM pip_app_actions WHERE source_run_id=? AND status IN ('dispatching','succeeded','unknown') LIMIT 1"):
+                  "SELECT 1 FROM pip_app_actions WHERE source_run_id=? AND status IN ('dispatching','succeeded','unknown') LIMIT 1",
+                  "SELECT 1 FROM workspace_events WHERE run_id=? AND (event_type='pip_level_sending' "
+                  "OR (event_type='pip_level_approved' AND json_extract(payload,'$.kind')='plugin')) LIMIT 1"):
         try:
             if db.execute(query, (str(run_id),)).fetchone() is not None:
                 return True

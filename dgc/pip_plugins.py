@@ -1011,6 +1011,18 @@ class Session:
         from .pip_levels import may_pay
         return may_pay(registry, self.pip_id)
 
+    def _level_sending(self, registry, info, tool) -> bool:
+        """Note a change its level runs (Do it all) before it goes, in its own commit: a call that never comes back (the
+        plugin hangs after the send went through, the runner is stopped) still counts as sent, so the watchdog and a
+        restart never run it again (pip_run_watchdog.sent_something). False when it can't be noted: then it doesn't go."""
+        try:
+            with registry.transaction():
+                registry.event(self.workspace_id, "pip_level_sending", pip_id=self.pip_id, run_id=self.run_id,
+                               payload={"kind": "plugin", "what": f"Ran {tool} in {info['display_name']}"[:200]})
+            return True
+        except Exception:                  # noqa: BLE001 - not noted, not sent
+            return False
+
     def _level_record(self, registry, info, tool, paid=False) -> None:
         """Keep one change its level ran (Do it all): listed under "What it did on its own" and counted by the fuse, and
         a payment counted against today's (pip_levels.paid)."""
@@ -1110,6 +1122,9 @@ class Session:
             # A read, or a change the plugin's level lets through while the user is here: it runs now.
             changed = not reads
             self.reads += 0 if changed else 1
+            if by_level and not self._level_sending(registry, info, tool):
+                return (f"{tool} did not run: DGC couldn't note it before sending, so nothing went to the user's "
+                        f"{info['display_name']}. Tell the user it couldn't run this time.")[:MAX_TEXT]
             cancel = apps.DeadlineCancellation(time.monotonic() + CALL_SECONDS)
             from .chatdgc.plugins import app_capture
             app = app_capture(manager, server, tool) if not self.unattended and len(self.app_cards) < 8 else None

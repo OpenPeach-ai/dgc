@@ -661,9 +661,9 @@ class Host:
             fused = Host._fused(self)
             approval = Host._level_approves(self, held)        # (names a payment's reason even while the fuse holds)
             approval = None if fused else approval
-            if approval is not None:
-                # Its level lets this through (pip_levels): sent now, kept on record, and the run goes on.
-                Host._release_by_level(self, held, approval)
+            if approval is not None and Host._release_by_level(self, held, approval):
+                # Its level lets this through (pip_levels): sent now, kept on record, and the run goes on. Not noted
+                # before it went (the registry can't be written): it waits for you on a card like any other.
                 continue
             summary = Host._held_summary(self, held)
             if getattr(held, "asks_because", None):
@@ -834,7 +834,18 @@ class Host:
             self.level = value if value in LEVELS else "ask"
         return getattr(self, "level", "ask")
 
-    def _release_by_level(self, held, approval) -> None:
+    def _release_by_level(self, held, approval) -> bool:
+        """Send what its level lets through. Noted before it goes, in its own commit, so a run stopped between the two
+        still counts as having sent it (pip_run_watchdog.sent_something) and is never run again to send it twice. False,
+        and nothing sent, when it can't be noted."""
+        try:
+            from .workspace_registry import WorkspaceRegistry
+            with WorkspaceRegistry(self.state_directory) as registry:
+                with registry.transaction():
+                    registry.event(self.workspace_id, "pip_level_sending", pip_id=self.pip_id, run_id=self.run_id,
+                                   payload={"kind": "computer", "what": str(approval.get("what") or "")[:200]})
+        except Exception:                                  # noqa: BLE001 - not noted, not sent
+            return False
         if approval.get("site"):
             self.sites.add(approval["site"])
         summary = Host._held_summary(self, held)
@@ -845,6 +856,7 @@ class Host:
         self.browser.release(held.request_id)
         self.browser.pump(1.5)
         Host._level_record(self, summary, approval["what"], held.request_id)
+        return True
 
     def _level_record(self, summary, what, ref) -> str:
         """Keep one thing its level approved: a computer action already sent by ``pip-level:<level>``, its words for

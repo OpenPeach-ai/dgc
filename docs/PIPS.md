@@ -1429,8 +1429,9 @@ Existing Pips keep the level you chose for them. A Project Pip has no chip: it a
   Always allow let through; a new site's first visit doesn't count), it asks before each one again until the hour has
   passed, whatever its level. Its card says so, with the time. The level you chose stays as it was.
 - **Every Personal Pip has its computer and your plugins**, a routine's run too. The model decides which it needs.
-  What it read from your apps goes freely to a site you named, allowed or it used before; to a site it has never used
-  it asks once, and **Allow** adds that site. A Terminal command carrying it asks.
+  What it read from your apps goes freely to a site you named or allowed, or one you sent to before (your Allow, or an
+  Always allow you gave). A site it sent to on its own level doesn't count, so a page can't make its own site trusted.
+  To any other site it asks once, and **Allow** adds that site. A Terminal command carrying it asks.
 - **Routines run at its level.** With nobody at the keyboard, what its level let through says so ("nobody at the
   keyboard").
 - **Sites you gave it count as yours.** A site you wrote in its chat already never asked; now a site written out

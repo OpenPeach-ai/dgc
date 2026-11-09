@@ -1118,8 +1118,9 @@ site adds it to the Pip's sites, approving text allows exactly that text once fo
 continuation tells the Pip to do it now.
 `always_allow_pip_computer_action` refuses them (`asks_once`, `asks_every_time`). Since 0.52 `type`, `choose`
 and `open` carrying such text to a site in the run's carry list go without a hold: `pip_careful.carry_sites`, the
-Pip's sites plus the site of each `sent` computer action it has (a site it used before); a site its level opened
-for the first time in this run is not on it. Approving a `text` hold on a site adds that site to the Pip's sites.
+Pip's sites plus the site of each `sent` computer action you sent (`resolved_by` not `pip-level:*`: a site it
+sent to on its own level never counts, so a page can't make its own site trusted); a site its level opened for the
+first time in this run is not on it. Approving a `text` hold on a site adds that site to the Pip's sites.
 A Terminal `run` carrying it is still held. Every Personal Pip's run, a routine, schedule or event run included,
 has its computer socket and its plugins (the old `computer_paused` and `Lane` are gone). Local-only
 commands: `list_pip_sites {pip_id}` → `{pip_id, careful, sites: [{site, at, by}]}`; `set_pip_careful

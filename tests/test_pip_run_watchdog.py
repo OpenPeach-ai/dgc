@@ -269,6 +269,19 @@ class WatchdogTests(unittest.TestCase):
         self.store.recover()
         self.assertEqual(self.store.run(row["id"])["error"]["code"], "interrupted_after_send")
 
+    def test_a_restart_never_reruns_a_plugin_change_its_level_made(self):
+        # A plugin change at Do it all runs in the same turn and is kept as a pip_level_approved event (pip_plugins): a run
+        # that made one has sent something, so neither a restart nor the watchdog runs it again (a second go could send
+        # the same thing twice). Found by the 9 Nov plan review.
+        row = self.claimed()
+        self.assertFalse(watchdog.sent_something(self.registry.db, row["id"]))
+        with self.registry.transaction():
+            self.registry.event(row["workspace_id"], "pip_level_approved", pip_id=row["pip_id"], run_id=row["id"],
+                                payload={"kind": "plugin", "level": "full", "what": "Ran send_email in Gmail"})
+        self.assertTrue(watchdog.sent_something(self.registry.db, row["id"]))
+        self.store.recover()
+        self.assertEqual(self.store.run(row["id"])["error"]["code"], "interrupted_after_send")
+
     def test_a_rerun_after_a_restart_clears_what_the_cut_off_try_left(self):
         row = self.claimed()
         left = self.registry.directory / "runs" / row["id"] / "worker-home"

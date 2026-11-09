@@ -10,8 +10,8 @@ On by default for every Pip with a computer; only you turn it off, on its page. 
   (pip_levels) a new site's first visit is routine: it opens, and is kept on record.
 - **What it read from your apps goes only where you'd expect.** Text the Pip types into a page, an option it
   picks, an address it opens and a Terminal command are checked against what it read from your apps (emails,
-  events, plugin answers) in the last day. To a site you named, allowed or it used before, it goes (0.52, your
-  D3). To a site it has never used it asks once, and Allow adds the site; a Terminal command carrying it asks.
+  events, plugin answers) in the last day. To a site you named or allowed, or one you sent to before, it goes (0.52,
+  your D3); a site it sent to on its own level never counts. To a site it has never used it asks once, and Allow adds the site; a Terminal command carrying it asks.
 - **Every Personal Pip has its computer and your plugins**, a routine's run too (0.52, your D3): the model decides
   which it needs. The fuse (pip_levels.fuse) stops a run that does too much on its own.
 
@@ -256,11 +256,13 @@ def known(registry, pip_id) -> set[str]:
 
 def carry_sites(registry, pip_id) -> set[str]:
     """Where it may carry what it read from your apps without asking (0.52, your D3): the sites it may visit (known)
-    and the sites it already used, in an earlier run, with its level or your Allow. A site it has never used asks once;
-    Allow adds it here for good."""
+    and the sites you already sent to: your Allow, or an Always allow you gave. A site it reached on its own level never
+    counts, or a poisoned page could get one harmless submit through and make its site trusted (the 9 Nov review). A
+    site it has never used asks once; Allow adds it here for good."""
     found = set(known(registry, pip_id))
     try:
         for row in registry.db.execute("SELECT summary FROM pip_computer_actions WHERE pip_id=? AND status='sent' "
+                                       "AND COALESCE(resolved_by,'') NOT LIKE 'pip-level:%' "
                                        "ORDER BY resolved_at DESC LIMIT 500", (pip_id,)):
             summary = json.loads(row[0])
             site = summary.get("site") or site_of(str(summary.get("host") or ""))

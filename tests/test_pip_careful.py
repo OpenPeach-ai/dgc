@@ -141,23 +141,29 @@ class CarefulStoreTests(unittest.TestCase):
         taint = careful.taint_for(self.registry.directory, pip["id"])
         taint.add("Invoice 48291377 for Ada is due on Friday.")
         # Sites it may carry to: the ones it may visit, and the ones it already used (a sent action), not a held one.
-        for n, (status, host_name) in enumerate((("sent", "used.example"), ("pending", "waiting.example"))):
+        # A site counts only when you sent to it (your Allow, or an Always allow you gave): never one its own level reached,
+        # or a poisoned page could get one harmless submit through to its site and make it trusted (9 Nov plan review).
+        rows = (("sent", "used.example", "editor-user"), ("pending", "waiting.example", None),
+                ("sent", "attacker.example", "pip-level:full"), ("sent", "granted.example", "pip-grant:grant_1"))
+        for n, (status, host_name, by) in enumerate(rows):
             summary = {"method": "POST", "host": host_name, "path": "/", "fields": [], "more_fields": 0, "body_bytes": 0}
             with self.registry.transaction():
                 self.registry.db.execute("INSERT INTO pip_computer_actions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)",
                     (f"compact_{n}" + "u" * 31, pip["id"], pip["workspace_id"], None, "host_x", "r", json.dumps(summary),
                      pip_computer._digest(summary), None, status, "2026-10-08T00:00:00.000Z", "2099-01-01T00:00:00.000Z",
-                     "2026-10-08T00:00:00.000Z" if status == "sent" else None, "editor-user" if status == "sent" else None))
+                     "2026-10-08T00:00:00.000Z" if status == "sent" else None, by))
         carry = careful.carry_sites(self.registry, pip["id"])
         self.assertIn("used.example", carry)
+        self.assertIn("granted.example", carry, "an Always allow you gave is yours")
         self.assertNotIn("waiting.example", carry)
+        self.assertNotIn("attacker.example", carry, "a site its own level reached never becomes trusted")
         host = pip_computer.Host.__new__(pip_computer.Host)
         host.browser = SimpleNamespace(current_url="https://used.example/form")
         host.taint, host.said, host.sites, host.level = taint, "", {"used.example", "new.example"}, "full"
         host.carry_sites = carry
         held = []
         host._careful_hold = lambda kind, summary, text=None, found=(): held.append((kind, summary["host"])) or "Held"
-        self.assertIsNone(host._careful("type", {"text": "Ref 48291377"}), "a site it used before: it goes")
+        self.assertIsNone(host._careful("type", {"text": "Ref 48291377"}), "a site you sent to before: it goes")
         self.assertIsNone(host._careful("open", {"url": "https://used.example/search?q=48291377"}))
         host.browser.current_url = "https://new.example/form"     # its level opened this one for the first time
         self.assertEqual(host._careful("type", {"text": "Ref 48291377"}), "Held", "a site it never used asks")
