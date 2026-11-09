@@ -30,6 +30,14 @@ class ChatFallbackTests(unittest.TestCase):
         self.assertEqual([c.model for c in self.clients][-2:], [OWN, SPARE])
         self.assertEqual(reply["fallback"], {"for": OWN, "line": f"{OWN} didn't answer; {SPARE} did"})
         self.assertEqual(switched, [SPARE], "the screen is told which model answers now")
+        # Its Trace keeps what happened: the try that failed, with why, then the fallback's rounds (9 Nov, your note).
+        steps = reply["trace"]["steps"]
+        failed = [s for s in steps if s.get("error")]
+        self.assertEqual([(s["kind"], s["detail"], s["to"]) for s in failed],
+                         [("model", f"{OWN} didn't answer: HTTP 429: You've hit your usage limit", SPARE)])
+        after = steps[steps.index(failed[0]) + 1:]
+        self.assertIn("model.response · fallback", [s["label"] for s in after])
+        self.assertTrue(all(s["label"].endswith(" · fallback") for s in after if s["kind"] == "model"), after)
         self.assertEqual(self.asked_users(self.clients[-1], "Capital of France?"), 1, "the whole chat, its message once")
         saved = self.store.get(chat["id"])
         self.assertEqual((saved["model"], saved["fallback"]), (OWN, SPARE), "its own model stays its model")

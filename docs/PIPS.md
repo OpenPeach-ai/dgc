@@ -1426,8 +1426,9 @@ Existing Pips keep the level you chose for them. A Project Pip has no chip: it a
   new Pip starts with the last one you chose. When a Pip's own model doesn't answer (a usage limit, a host that is down,
   a Claude Code or Codex that is signed out), its turn carries on with the fallback. Its prompt box names the fallback,
   in olive with the word **fallback**, until its own model answers again; the first reply says so once, in a line before
-  its time ("Its own model didn't answer; X did"). The next run tries its own model first. A subscription turn that
-  already said or did something isn't run again. `dgc pips backup --pip PIP MODEL [--provider ID]` (or `none`) sets it
+  its time ("Its own model didn't answer; X did"). Its **Trace** keeps the change: the try that failed, how long it
+  took and why, then the fallback's steps, marked as the fallback's. The next run tries its own model first. A
+  subscription turn that already said or did something isn't run again. `dgc pips backup --pip PIP MODEL [--provider ID]` (or `none`) sets it
   from the terminal; without `--pip` it sets the one new Pips start with.
 - **The fuse.** If a Pip does 25 things on its own in an hour (a submit, a send or a plugin change its level or an
   Always allow let through; a new site's first visit doesn't count), it asks before each one again until the hour has

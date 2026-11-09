@@ -383,7 +383,10 @@ class Turns(unittest.TestCase):
         self.assertEqual(result["text"], "Here are your shirt ideas, from the backup.")
         self.assertEqual(set(asked), {"backup-model"})
         self.assertEqual(len(prompts[0]), 1, "a first message: the backup sees it once, not twice (9 Nov)")
-        self.assertIn({"kind": "backup", "model": "backup-model"}, events)
+        switched = [e for e in events if e.get("kind") == "backup"]
+        self.assertEqual([e["model"] for e in switched], ["backup-model"])
+        self.assertTrue(switched[0]["trace"]["why"].startswith("Claude Code didn't finish this turn"), switched[0])
+        self.assertLess(switched[0]["trace"]["since"], switched[0]["trace"]["t"], "its Trace keeps how long the failed try took")
 
     def test_a_subscription_that_already_spoke_or_acted_is_not_redone_on_the_backup(self):
         for key, value in (("fallback_model", "backup-model"), ("fallback_base_url", "http://127.0.0.1:9/v1"), ("fallback_api_key", "k")):

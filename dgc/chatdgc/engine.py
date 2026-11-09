@@ -2760,7 +2760,7 @@ class ChatEngine:
 
     def _reply(self, chat, build, existing, reply_id, on_text, on_thinking, cancel, *, search: str = "off",
                on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None, on_widget=None,
-               prefix: str = "", _fallback_from: str = "") -> dict:
+               prefix: str = "", _fallback_from: str = "", _trace=None) -> dict:
         """One reply. ``build(chat, room)`` is what the model reads, for a window of ``room`` tokens: when it would
         fill more than COMPACT_AT of it, the older turns are summarized first (said on screen, never silent).
 
@@ -2782,16 +2782,19 @@ class ChatEngine:
                      on_question=on_question, on_images=on_images, on_action=on_action, on_file=on_file,
                      on_canvas=on_canvas, on_widget=on_widget, prefix=prefix)
 
-        def hand_over(main_name):
+        def hand_over(main_name, failed):
+            # Its Trace keeps the try that failed, as a row of its own with why, and the fallback's steps after it.
+            why = reply_trace.failed_why(failed) if failed is not None else ""
+            trace.handed_over(f"{shown_model(main_name)} didn't answer" + (f": {why}" if why else ""), to=shown_model(fallback))
             switch = getattr(self._fallback_turn, "on_switch", None)
             if switch is not None:
                 switch(fallback)
-            return self._reply(chat, **rerun, _fallback_from=str(main_name or "")[:200])
+            return self._reply(chat, **rerun, _fallback_from=str(main_name or "")[:200], _trace=trace)
         thinking = chat.get("thinking") or str(self.config.get("thinking", "off") or "off")
         streamed, thought = [], []
         # What this reply does, step by step, for its Trace (dgc/reply_trace.py), and the app's own notes it must not
         # repeat (_EchoedNotes).
-        trace, notes = reply_trace.ReplyTrace(), _EchoedNotes()
+        trace, notes = (_trace if _trace is not None else reply_trace.ReplyTrace()), _EchoedNotes()
 
         def text_part(part):
             streamed.append(part)
@@ -2813,9 +2816,9 @@ class ChatEngine:
 
         try:
             client = self.client(model)
-        except Exception:                      # noqa: BLE001 -- a CLI not installed or signed out: nothing ran yet
+        except Exception as exc:               # noqa: BLE001 -- a CLI not installed or signed out: nothing ran yet
             if fallback and fallback != (model or "") and not existing and not prefix:
-                return hand_over(model or self.config.model)
+                return hand_over(model or self.config.model, exc)
             raise
         room, _ = fit_window.window(client, self._preset())
         history = build(chat, room)
@@ -3115,7 +3118,7 @@ class ChatEngine:
                 with self._lock:
                     for meta in picturing["items"]:
                         self._live_pictures.pop((chat["id"], meta["id"]), None)
-            return hand_over(name)
+            return hand_over(name, failure)
         try:
             message = self._keep_reply(chat, existing, reply_id, model, client, text, thought_text, finish, failure,
                                        usage, counted, sources, searches, questions, memory_ops, web_images,

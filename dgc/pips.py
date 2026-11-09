@@ -2970,11 +2970,19 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             client = super()._new_client(*args, **kwargs)
             return specialist_budget.wrap(client, self._pip_specialist_record) if specialist_budget is not None else client
 
-        def _fallback_client(self, model):
+        def _fallback_client(self, model, why=None, since=None):
             # Pips package 6 (pip_backup): its own model didn't answer, so its backup carries the turn on; the worker
-            # says which model, and the controller decides what the chat says.
+            # says which model, and the controller decides what the chat says. Its stamp says why and since when, for
+            # the run's Trace (D14): the failed try is a row of its own.
+            import sys
+            from .reply_trace import failed_why, words, worker_mark
+            if why is None:
+                own = str(getattr(getattr(self, "client", None), "model", "") or self.config.get("model", "") or "its model")
+                failed = sys.exc_info()[1]
+                why = f"{own} didn't answer" + (f": {failed_why(failed)}" if failed is not None else "")
             client = Agent._fallback_client(self, model)
-            ui.emit({"kind": "backup", "model": str(model)[:256]})
+            ui.emit({"kind": "backup", "model": str(model)[:256],
+                     "trace": worker_mark(why=words(why, 110), **({"since": since} if since is not None else {}))})
             return client
 
         def run_turn(self, user_text, **kwargs):
@@ -2990,6 +2998,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             self._pending_images = None
             self._last_turn_error = ''
             turn = Turn(self, brain_launch, brain)
+            from .reply_trace import now_ms
+            began = now_ms()
             ok = turn.run(user_text, images=photos)
             backup_model = str(self.config.get("fallback_model") or "")
             if (not ok and backup_model and not turn.calls and not "".join(turn.said).strip() and not turn.stray
@@ -2997,7 +3007,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 # Its subscription didn't answer (a usage limit, signed out, unreachable) before it said or did
                 # anything: its backup takes the whole turn on DGC's own connection (pip_backup).
                 self._on_backup = True
-                self.client = self._fallback_client(backup_model)
+                self.client = self._fallback_client(backup_model, why=self._last_turn_error or "Its subscription didn't answer", since=began)
                 self._pending_images, self._last_turn_error = pending, ''
                 if (self.messages and self.messages[-1].get("role") == "user"
                         and self.messages[-1].get("content") == user_text):

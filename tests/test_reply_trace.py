@@ -391,6 +391,44 @@ class PipWorker(unittest.TestCase):
         recorder.feed("model_start", {}, {"t": 1.0})
         self.assertIsNone(recorder.saved())
 
+    def test_a_model_change_keeps_the_failed_try_and_marks_the_fallback_s_rounds(self):
+        # D14: its own model failed and its fallback carried the run on. The try that failed is a row of its own, with why,
+        # from when it began; the rounds after it are the fallback's. So Trace can say later what happened, and when.
+        recorder = reply_trace.RunRecorder()
+        recorder.feed("model_start", {}, {"t": 1000.0})
+        recorder.feed("backup", {"kind": "backup", "model": "glm"}, {"t": 2200.0, "why": "deepseek didn't answer: rate limited (429)"})
+        recorder.feed("model_start", {}, {"t": 2210.0})
+        recorder.feed("model_end", {}, {"t": 3000.0, "tokens": 900})
+        self.assertEqual(recorder.saved()["steps"], [
+            {"kind": "model", "label": "model.response", "error": True, "detail": "deepseek didn't answer: rate limited (429)",
+             "to": "glm", "start": 0, "end": 1200},
+            {"kind": "model", "label": "model.response · fallback", "tokens": 900, "start": 1210, "end": 2000}])
+        # A subscription's try marks no round of its own: it runs from when the turn began.
+        brain = reply_trace.RunRecorder()
+        brain.feed("backup", {"kind": "backup"}, {"t": 5000.0, "since": 1000.0, "why": "Claude Code didn't finish this turn: usage limit"})
+        brain.feed("model_start", {}, {"t": 5010.0})
+        brain.feed("model_end", {}, {"t": 6000.0})
+        failed, then = brain.saved()["steps"]
+        self.assertEqual((failed["start"], failed["end"], failed["error"]), (0, 4000, True))
+        self.assertEqual(then["label"], "model.response · fallback")
+        self.assertNotIn("to", failed, "a switch event that names no model says none")
+        self.assertIsNone(reply_trace.validated({"v": 1, "ms": 5, "steps": [{"kind": "model", "label": "m", "start": 0, "end": 5, "to": 7}]}))
+
+    def test_why_a_model_failed_reads_in_a_few_words(self):
+        from dgc.model_errors import FailureCause
+        def failed(**cause):
+            error = RuntimeError("HTTP 503 from http://127.0.0.1:11998/v1/chat/completions after 4 tries")
+            error.cause = FailureCause(kind=cause.pop("kind", "http"), summary="x", **cause)
+            return error
+        self.assertEqual(reply_trace.failed_why(failed(http_status=429, kind="rate_limited")), "rate limited (429)")
+        self.assertEqual(reply_trace.failed_why(failed(http_status=401, kind="auth")), "key rejected (401)")
+        self.assertEqual(reply_trace.failed_why(failed(http_status=503)), "unavailable (503)", "no address, no cut word")
+        self.assertEqual(reply_trace.failed_why(failed(kind="dns")), "could not resolve host")
+        self.assertEqual(reply_trace.failed_why(RuntimeError("You've hit your usage limit. It resets at 3pm.")),
+                         "You've hit your usage limit.")
+        long = reply_trace.failed_why(RuntimeError("word " * 40))
+        self.assertTrue(len(long) <= 80 and long.endswith("word…"), long)
+
     def test_events_that_measure_nothing_change_nothing(self):
         recorder = reply_trace.RunRecorder()
         recorder.feed("progress", {"kind": "progress"}, None)

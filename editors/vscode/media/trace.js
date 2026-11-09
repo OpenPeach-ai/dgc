@@ -88,12 +88,18 @@
       if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || end > saved.ms) return null;
       if (kind !== "model" && kind !== "tool") return null;
       const hits = Number.isSafeInteger(step.hits) && step.hits >= 0 ? step.hits : null;
-      const detail = step.denied === true ? "Denied" : step.error === true ? "Failed"
+      // A model round that failed says why when it was kept (D14: "X didn't answer: …", before its fallback's rows).
+      const detail = step.denied === true ? "Denied" : step.error === true ? (kind === "model" && clean(step.detail, 110) || "Failed")
         : hits !== null ? `${hits} ${hits === 1 ? "hit" : "hits"}` : clean(step.detail, 110);
-      rows.push({ kind, label: clean(step.label, 72) || kind, detail, start, end, error: step.error === true,
+      // D14: a model round that failed and was handed over says which model took over (`to`).
+      const to = kind === "model" && step.error === true ? clean(step.to, 72) : "";
+      rows.push({ kind, label: clean(step.label, 72) || kind, detail, start, end, error: step.error === true, ...(to ? { to } : {}),
         tokens: Number.isSafeInteger(step.tokens) && step.tokens > 0 ? step.tokens : null });
     }
-    return { start: 0, end: saved.ms, id: clean(id, 40), model: clean(model, 80), rows };
+    // A model change (D14): one plain line each, above the rows, and the header names the model that wrote the reply.
+    const changes = rows.filter((row) => row.to).map((row) => ({ at: row.end, detail: row.detail, to: row.to }));
+    return { start: 0, end: saved.ms, id: clean(id, 40), model: clean(changes.length ? changes[changes.length - 1].to : model, 80), rows,
+      ...(changes.length ? { changes } : {}) };
   }
   function open(trace) {
     if (!trace?.rows?.length) return;
@@ -110,6 +116,12 @@
     const close = document.createElement("button"); close.type = "button"; close.className = "dgc-trace-close";
     close.setAttribute("aria-label", "Close trace"); close.textContent = "×";
     header.append(title, model, state, close);
+    // What happened when the model changed, readable at any width (the rows' own words are cut to fit the columns).
+    const notes = (trace.changes || []).map((change) => {
+      const note = document.createElement("p"); note.className = "dgc-trace-note";
+      note.textContent = `Model changed at ${fmt(change.at)}: ${change.detail}; ${change.to} took over.`;
+      return note;
+    });
     const duration = Math.max(1, trace.end - trace.start);
     const ruler = document.createElement("div"); ruler.className = "dgc-trace-ruler";
     const ticks = document.createElement("div"); ticks.className = "dgc-trace-ticks";
@@ -134,6 +146,7 @@
       const detail = document.createElement("span"); detail.textContent = row.tokens && !row.error ? `${row.tokens.toLocaleString()} tk` : row.detail || "";
       const time = document.createElement("span"); time.textContent = fmt(row.end - row.start);
       meta.append(detail, time); item.append(label, lane, meta); body.appendChild(item);
+      item.title = [row.label, row.tokens && !row.error ? `${row.tokens.toLocaleString()} tk` : row.detail, fmt(row.end - row.start)].filter(Boolean).join(" · ");
     }
     const cursor = document.createElement("div"); cursor.className = "dgc-trace-cursor"; body.appendChild(cursor);
     const transport = document.createElement("div"); transport.className = "dgc-trace-transport";
@@ -148,7 +161,7 @@
     scrub.min = "0"; scrub.max = String(duration); scrub.value = String(duration); scrub.step = "1";
     scrub.setAttribute("aria-label", "Trace playback position");
     const elapsed = document.createElement("span"); elapsed.className = "dgc-trace-clock";
-    transport.append(play, scrub, elapsed); dialog.append(header, ruler, body, transport); backdrop.appendChild(dialog);
+    transport.append(play, scrub, elapsed); dialog.append(header, ...notes, ruler, body, transport); backdrop.appendChild(dialog);
     let frame = 0, last = 0, position = duration;
     const paint = () => { const fraction = position / duration;
       cursor.style.left = `calc(var(--trace-name-width) + (100% - var(--trace-name-width) - var(--trace-meta-width)) * ${fraction})`;

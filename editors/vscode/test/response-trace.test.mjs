@@ -207,3 +207,23 @@ test("saved task batch display cards do not fabricate child durations", () => {
   assert.equal(rows.length, 3, "model, measured parent task, model");
   assert.deepEqual(view.errors, []);
 });
+
+test("a model change (D14): the failed try says why, then its fallback's rounds; a failed tool still says Failed", () => {
+  const view = makeDom();
+  const steps = { v: 1, ms: 3000, steps: [
+    { kind: "model", label: "model.response", start: 0, end: 1200, error: true, detail: "deepseek-v4.1-flash:cloud didn't answer: rate limited (429)", to: "glm-5.3:cloud" },
+    { kind: "model", label: "model.response · fallback", start: 1200, end: 2400, tokens: 900 },
+    { kind: "tool", label: "web_search", detail: "kings", start: 2400, end: 2600, error: true },
+    { kind: "model", label: "model.response · fallback", start: 2600, end: 3000, tokens: 950 }] };
+  view.dom.window.DgcTrace.open(view.dom.window.DgcTrace.fromSaved(steps, "msg_7c41f2", "deepseek-v4.1-flash:cloud"));
+  const dialog = view.doc.querySelector(".dgc-trace-dialog");
+  assert.equal(dialog.querySelector(".dgc-trace-model").textContent, "glm-5.3:cloud · 4 spans", "the model that wrote the reply");
+  assert.equal(dialog.querySelector(".dgc-trace-note").textContent,
+    "Model changed at 1.20s: deepseek-v4.1-flash:cloud didn't answer: rate limited (429); glm-5.3:cloud took over.");
+  const rows = [...view.doc.querySelectorAll(".dgc-trace-dialog .dgc-trace-row")];
+  assert.deepEqual(rows.map((row) => row.querySelector(".dgc-trace-meta span").textContent),
+    ["deepseek-v4.1-flash:cloud didn't answer: rate limited (429)", "900 tk", "Failed", "950 tk"]);
+  assert.ok(rows[0].classList.contains("error"));
+  assert.match(rows[1].textContent, /model\.response · fallback/);
+  assert.equal(rows[0].title, "model.response · deepseek-v4.1-flash:cloud didn't answer: rate limited (429) · 1.20s", "its whole words on hover");
+});

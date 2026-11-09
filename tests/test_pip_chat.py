@@ -553,6 +553,13 @@ with patch.object(LLMClient, "chat", chat), patch("requests.sessions.Session.req
 
         first = turn("out-1", False)
         self.assertEqual(first["text"], "Answered by backup-model.")
+        # Its Trace keeps the model change (9 Nov): the try that failed, with why, then the fallback's rounds.
+        kept = json.loads(self.registry.db.execute("SELECT trace FROM pip_run_traces WHERE run_id=?", (first["run_id"],)).fetchone()[0])
+        failed = [step for step in kept["steps"] if step.get("error")]
+        self.assertEqual(len(failed), 1, kept)
+        self.assertTrue(failed[0]["detail"].startswith("fixture didn't answer: ") and "signed out" in failed[0]["detail"], failed[0])
+        self.assertIn("model.response · fallback", [step["label"] for step in kept["steps"]])
+        self.assertEqual(failed[0]["to"], "backup-model", "and the model that took over")
         self.assertEqual(first["backup"], "Its own model didn't answer; backup-model did")
         self.assertEqual(pip_backup.out(self.registry, self.job["id"])["model"], "backup-model")
         second = turn("out-2", False)

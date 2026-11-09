@@ -9,7 +9,9 @@ never filled in from the end of the reply.
 A saved trace is an open object on the reply, never a field of an event:
     {"v": 1, "ms": total, "steps": [{"kind": "model"|"tool", "label": str, "start": ms, "end": ms,
                                      "tokens"?: int, "detail"?: str, "hits"?: int, "error"?: true, "denied"?: true}]}
-Times are whole milliseconds from the first step, and steps stay in the order they started.
+Times are whole milliseconds from the first step, and steps stay in the order they started. A model change (D14) is kept:
+the try that failed is a model step with ``error`` and ``detail`` ("X didn't answer: why"), and every model step after it
+is labelled as its fallback's (``... · fallback``); the failed step names the model that took over (``to``).
 """
 from __future__ import annotations
 
@@ -26,6 +28,8 @@ MAX_MS = 30 * 24 * 3600 * 1000
 # Kept with a reply, and read back in one answer: well past what MAX_STEPS rows of these lengths can reach.
 MAX_BYTES = 96 * 1024
 MODEL_LABEL = "model.response"
+# D14: a model round after its own model failed and its fallback took over says so; the failed try is a row of its own.
+FALLBACK_LABEL = MODEL_LABEL + " · fallback"
 # The tools whose answer is a list of finds: their row counts hits, as a Work grep's does.
 SEARCH_TOOLS = frozenset({"grep", "web_search"})
 _NUMBERED_RESULT = re.compile(r"^(?:\[\d+\] |\d+\. )", re.M)     # ChatDGC's "[1] Title", the shared search's "1. Title"
@@ -64,6 +68,29 @@ def summary_of(name: str, args) -> str:
         return ""
 
 
+def failed_why(error) -> str:
+    """Why a model request failed, in a few words for its Trace row (D14): from its measured cause when it has one
+    ("rate limited (429)", "key rejected (401)", "unavailable (503)", "connection refused"), else the first sentence of
+    what it said, cut at a word."""
+    cause = getattr(error, "cause", None)
+    try:
+        from .model_errors import FailureCause, short_cause
+        if isinstance(cause, FailureCause):
+            code = cause.http_status
+            if code == 429:
+                return "rate limited (429)"
+            if code in (401, 403):
+                return f"key rejected ({code})"
+            if code and 500 <= int(code) < 600:
+                return f"unavailable ({code})"
+            return short_cause(cause)
+    except Exception:                         # noqa: BLE001 -- only words for a row
+        pass
+    text = " ".join(str(error or "").split())
+    first = re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0]
+    return first if len(first) <= 80 else first[:79].rsplit(" ", 1)[0] + "…"
+
+
 def said_no(output) -> bool:
     """A tool's own answer says it didn't happen: an error, or a Pip's tool turning it down."""
     return str(output or "").lstrip().lower().startswith(REFUSALS)
@@ -90,6 +117,7 @@ class ReplyTrace:
         self._rows: list[dict] = []
         self._open: dict[str, dict] = {}
         self._model = None                # (start, label) of the model request running now
+        self.round_label = MODEL_LABEL    # what a model round is called: its fallback's after handed_over
         self._tokens = None               # what the running request reported, before it closed
         self._broken = False              # it outgrew its bound: a part of a trace is not its trace
 
@@ -106,13 +134,36 @@ class ReplyTrace:
         self._rows.append(row)
         return row
 
-    def model_start(self, label: str = MODEL_LABEL, *, at=None) -> None:
+    def model_start(self, label: str | None = None, *, at=None) -> None:
         """A model request begins. One already running stays the same round: a retry is still that round."""
         when = self._at(at)
         if self._model is None:
+            label = label or self.round_label
+            if self.round_label == FALLBACK_LABEL and not label.endswith(" · fallback"):
+                label += " · fallback"            # a small call after the switch ran on the fallback too
             self._model = (when, label)
 
-    def model_end(self, tokens=None, *, at=None, error: bool = False) -> None:
+    def handed_over(self, why, *, at=None, since=None, to=None) -> None:
+        """Its model failed and its fallback takes over (D14): the try that failed is a row of its own, with why and the
+        model that took over (``to``), from its start (the round running now, else ``since``, else this moment); the
+        rounds after it are its fallback's."""
+        if self._model is None and type(since) in (int, float) and self._origin is None:
+            self._at(since)
+        when = self._at(at)
+        if self._model is not None:
+            self.model_end(at=when, error=True, detail=why)
+            row = self._rows[-1] if self._rows and self._rows[-1]["kind"] == "model" else None
+        else:
+            start = since if type(since) in (int, float) and self._origin <= since <= when else when
+            row = self._add({"kind": "model", "label": words(self.round_label, MAX_LABEL), "start": start, "end": when,
+                             "error": True})
+            if row is not None and words(why, MAX_DETAIL):
+                row["detail"] = words(why, MAX_DETAIL)
+        if row is not None and words(to, MAX_LABEL):
+            row["to"] = words(to, MAX_LABEL)
+        self.round_label = FALLBACK_LABEL
+
+    def model_end(self, tokens=None, *, at=None, error: bool = False, detail=None) -> None:
         """The running request answered. With nothing running, it has nothing to close."""
         if self._model is None:
             return
@@ -128,6 +179,8 @@ class ReplyTrace:
             row["tokens"] = tokens
         if error:
             row["error"] = True
+        if words(detail, MAX_DETAIL):
+            row["detail"] = words(detail, MAX_DETAIL)
 
     def model_tokens(self, tokens) -> None:
         """A model request's measured tokens, which can come just before or just after it closes."""
@@ -229,6 +282,8 @@ def validated(value) -> dict | None:
                 return None
             if any(key in step and step[key] is not True for key in ("error", "denied")):
                 return None
+            if "to" in step and (not isinstance(step["to"], str) or not 0 < len(step["to"]) <= MAX_LABEL):
+                return None
         if len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > MAX_BYTES:
             return None
     except (TypeError, ValueError, RecursionError):
@@ -294,6 +349,9 @@ class RunRecorder:
                                     denied=kind == "tool_denied", hits=mark.get("hits"))
             elif kind == "step_end":
                 self.trace.tool_end(mark.get("call_id"), at=at, error=mark.get("failed") is True, hits=mark.get("hits"))
+            elif kind == "backup":
+                # D14: its own model failed and its fallback carries the turn on: the failed try, then the fallback's.
+                self.trace.handed_over(mark.get("why"), at=at, since=mark.get("since"), to=event.get("model"))
         except (TypeError, ValueError):
             self._broken = True
 
