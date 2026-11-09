@@ -2537,6 +2537,28 @@ def pips_box_row() -> str:
             if not reason else "unavailable: " + reason)
 
 
+def _doctor_node(c) -> None:
+    """The Node.js that Claude Code, Codex and `npx` MCP servers run on: a warning when one is behind Node's latest
+    security release or past end of life, with the command that updates it. Never fails doctor (0.52)."""
+    from . import node_check
+    try:
+        findings = node_check.report()
+    except Exception:                                   # noqa: BLE001 -- a diagnostic, never the reason doctor fails
+        return
+    c.print("  [bold]node.js[/bold] — what Claude Code, Codex and npx MCP servers run on")
+    if not findings:
+        c.print("    [dim]not installed[/dim] — only needed for Claude Code, Codex or MCP servers started with npx\n")
+        return
+    for f in findings:
+        mark = "[green]✓[/green]" if f.state == "ok" else "[yellow]![/yellow]"
+        # The version and what it means on one line; the path (copyable, so never folded) and the fix under it.
+        c.print(f"    {mark} {_markup_literal(f.version or 'node')} {_markup_literal(f.words)}", highlight=False)
+        c.print(f"      {_markup_literal(node_check.shown(f.path))}", highlight=False, soft_wrap=True)
+        if f.fix:
+            c.print(f"      → {_markup_literal(f.fix)}", highlight=False, soft_wrap=True)
+    c.print("")
+
+
 def run_doctor(config: Config) -> int:
     """`dgc doctor` — verify the endpoint is reachable and the model is available.
 
@@ -2647,6 +2669,7 @@ def run_doctor(config: Config) -> int:
                     "select [bold]/mode auto[/bold] or another engine\n")
     else:
         c.print("")
+    _doctor_node(c)
     client = LLMClient(config.base_url, config.api_key, config.model,
                        api_mode=str(config.get("api_mode", "auto")))
     try:

@@ -61,6 +61,9 @@ and extension provenance without permitting non-site changes after the core sour
 version. Ensure required CI and CodeQL checks are green and the source branch is clean. Commit the
    reviewed **product** sources as commit A and create annotated tag `vX.Y.Z` at A. Do not commit
    `site/` or `site-src/`.
+   Before A, refresh `SECURITY_RELEASES` and `AS_OF` in `dgc/node_check.py` from Node's latest
+   security release (nodejs.org/en/blog/vulnerability), so `dgc doctor` names the right fix for an
+   out-of-date Node; drop a line from the table when Node ends it, and raise `OLDEST_SUPPORTED`.
 2. At A, run `scripts/preflight.sh`, `scripts/build-release.sh`, and (when applicable)
    `scripts/release-extension.sh --build` (or reuse the verified captured precursor bundle).
    Preflight includes `scripts/check-public-content.py`, which rejects website paths in the git

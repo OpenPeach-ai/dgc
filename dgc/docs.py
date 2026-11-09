@@ -128,7 +128,11 @@ To choose deliberately instead:
 - `dgc doctor` — check the endpoint is reachable and the model is offered. It
   exits non-zero when the endpoint cannot be reached, so a script can gate on
   it. A model the server does not list is a warning, not a failure: a proxy may
-  serve one it does not advertise, so that exits 0 and says so.
+  serve one it does not advertise, so that exits 0 and says so. It also names
+  the Node.js that Claude Code, Codex and `npx` MCP servers run on, and says
+  when one is behind Node's latest security release or past end of life, with
+  the command that updates it (`nvm install 22`, `brew upgrade node`, ...); that
+  is a warning too, and it goes online for nothing. DGC itself does not run on Node.
 
 ## Talking to the agent
 
@@ -342,7 +346,8 @@ API-key environment reference is process-only:
 ## Subcommands
 
 - `dgc setup` — configure provider / model / context.
-- `dgc doctor` — check that the endpoint and model are reachable, and show the installation.
+- `dgc doctor` — check that the endpoint and model are reachable, and show the installation and
+  whether the Node.js your CLIs and MCP servers run on is up to date.
 - `dgc update` — install the latest DGC beside the current version; `--rollback`,
   `--version X` and `--list` switch between the versions kept on disk.
 - `dgc export-training` — export sessions as scrubbed fine-tuning JSONL.
