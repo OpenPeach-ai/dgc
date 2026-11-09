@@ -354,6 +354,9 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "busy": _B(False),
     },
     "model_changed": {"model": _S(), "base_url": _S(), "request_id": _S(False)},
+    # A Work chat's model failed and its fallback answers (D14, capabilities.model_fallback): `model` is the fallback, and
+    # `active` false (model "") says its own model answers again.
+    "model_fallback": {"model": _S(), "active": _B()},
     "model_defaults_changed": {"base_url": _S(), "model": _S(), "request_id": _S(False)},
     "model_provider_saved": {"id": _S(), "removed": _B(), "request_id": _S(False)},
     "subscription_default_changed": {"engine": _f("string", enum=("claude", "codex")),

@@ -2019,6 +2019,38 @@ class Config:
                            ("subscription_effort", route["effort"])):
             self.hold(key, value)
 
+    def restore_fallback_route(self, saved: dict | None = None) -> None:
+        """A Work chat's fallback (D14): its own as saved, or the one in Settings for a new chat. A session file never
+        holds its key: the one in Settings is used for its own address, the editor supplies any other."""
+        from .sessions import _clean_fallback_route
+        route = _clean_fallback_route(saved)
+        defaults = _read_config_payload(USER_CONFIG) or {}
+        default_route = _clean_fallback_route({key: str(defaults.get(f"fallback_{key}", DEFAULTS[f"fallback_{key}"]) or "")
+                                               for key in ("model", "base_url", "api_mode")})
+        route = route or default_route or {"model": "", "base_url": "", "api_mode": ""}
+        identity = _provider_secret_identity({**self.data, "fallback_base_url": route["base_url"]}, "fallback_api_key")
+        secret = ""
+        if default_route and route["base_url"] == default_route["base_url"]:
+            stored = _read_config_payload(USER_SECRETS) or {}
+            bindings = stored.get("provider_identity")
+            if isinstance(bindings, dict) and bindings.get("fallback_api_key") == identity:
+                value = stored.get("fallback_api_key")
+                if isinstance(value, str):
+                    secret = value
+        if not secret and getattr(self, "_provider_secret_identity", {}).get("fallback_api_key") == identity \
+                and route["base_url"] == str(self.data.get("fallback_base_url") or ""):
+            current = self.data.get("fallback_api_key")
+            if isinstance(current, str):
+                secret = current
+        for key in ("model", "base_url", "api_mode"):
+            self.hold(f"fallback_{key}", route[key])
+        self.hold("fallback_api_key", secret)
+        bindings = self.__dict__.setdefault("_provider_secret_identity", {})
+        if secret and identity:
+            bindings["fallback_api_key"] = identity
+        else:
+            bindings.pop("fallback_api_key", None)
+
     def restore_native_route(self, saved: dict | None = None) -> None:
         """Restore a chat's native endpoint/model without borrowing another host's key.
 

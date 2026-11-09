@@ -3515,3 +3515,13 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .mod-bar-part { outl
 .pic-fold-open[hidden], .pic-fold-body[hidden] { display: none; }
 .pic-fold-body > .made-files { margin-top: var(--sp-1, 4px); }
 @media (prefers-reduced-motion: reduce) { .pic-fold-chev { transition: none; } }
+/* D14: this session's model didn't answer and its fallback does. The button names the fallback, in the olive DGC uses
+   when something isn't answering (tokens.css --err), on its soft wash, with the word. */
+#btn-model.on-fallback { background: var(--err-soft); color: var(--err-text); }
+#btn-model.on-fallback #modelname, #btn-model.on-fallback #effortname { color: var(--err-text); }
+#btn-model .model-fallback-word {
+  flex: none; margin-left: 5px; padding: 0 5px; border: 1px solid color-mix(in srgb, var(--err) 60%, transparent);
+  border-radius: 999px; font: var(--w-semi) 10px/14px var(--sans); color: var(--err-text);
+}
+/* A provider row's Fallback word sits before its chevron. */
+#modelmenu .mrow > .dgc-menu-pill + .codicon-chevron-right { margin-left: 6px; }

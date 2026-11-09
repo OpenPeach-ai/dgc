@@ -257,6 +257,28 @@ def _clean_subscription_route(value) -> dict[str, str] | None:
     return {"engine": engine, "model": model, "effort": effort}
 
 
+def _clean_fallback_route(value) -> dict[str, str] | None:
+    """A Work chat's fallback model (D14): its model, its address ("" its own model's) and API; never its key."""
+    from urllib.parse import urlsplit
+    if not isinstance(value, dict) or set(value) != {"model", "base_url", "api_mode"}:
+        return None
+    model, base_url, api_mode = (value.get(key) for key in ("model", "base_url", "api_mode"))
+    if (not all(isinstance(part, str) for part in (model, base_url, api_mode)) or len(model) > 256 or len(base_url) > 2048
+            or any(ord(ch) < 32 for ch in model + base_url)
+            or api_mode not in ("", "auto", "ollama", "anthropic", "chat_completions", "responses")):
+        return None
+    if base_url:
+        try:
+            parsed = urlsplit(base_url)
+            if (parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password
+                    or parsed.query or parsed.fragment):
+                return None
+            parsed.port
+        except ValueError:
+            return None
+    return {"model": model, "base_url": base_url, "api_mode": api_mode}
+
+
 def _clean_native_route(value) -> dict[str, str] | None:
     """A Work chat's non-secret native route; credentials are never session data."""
     from urllib.parse import urlsplit
@@ -468,6 +490,7 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
          subscription_sessions: dict | None = None,
          subscription_route: dict | None = None,
          native_route: dict | None = None,
+         fallback_route: dict | None = None,
          chat_changes: dict | None = None,
          images: list | None = None,
          agents: dict | None = None,
@@ -568,6 +591,9 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
         clean_native_route = _clean_native_route(native_route)
         if clean_native_route:
             data["native_route"] = clean_native_route
+        clean_fallback_route = _clean_fallback_route(fallback_route)
+        if clean_fallback_route:
+            data["fallback_route"] = clean_fallback_route
         if images:
             # images: the viewed-image index, metadata only (the bytes live in <session>.images/).
             # A name is display text a page or tool chose, so it is redacted like any other.

@@ -1735,6 +1735,16 @@ class HeadlessUI:
         if recording is not None:
             recording.model_start()
 
+    def trace_handed_over(self, why: str, to: str) -> None:
+        """Its model failed and its fallback took over (D14): the turn's Trace keeps the try that failed and why."""
+        recording = self.__dict__.get("_turn_trace")
+        if recording is not None:
+            recording.handed_over(why, to=to)
+
+    def model_fallback(self, model: str, active: bool) -> None:
+        """The chat's fallback answers now (or no longer, model ""): the prompt box shows it (capabilities.model_fallback)."""
+        self.em.emit("model_fallback", model=str(model or "")[:256], active=bool(active))
+
     def take_turn_trace(self, model: str) -> dict | None:
         """The finished turn's record, once. None when it isn't whole: a Trace never fills in what wasn't measured."""
         recording = self.__dict__.get("_turn_trace")
@@ -2686,6 +2696,10 @@ class Backend:
                           # set_model and set_config with scope=session keep the provider,
                           # model and effort in this Work chat only, even after reload.
                           "session_model_route": True,
+                          # model_fallback: set_config with scope=session takes fallback_model, fallback_base_url,
+                          # fallback_api_mode and fallback_api_key (this chat's fallback, kept with it, never its key),
+                          # and model_fallback says while the fallback answers (D14).
+                          "model_fallback": 1,
                           "model_defaults": True,
                           "subscription_defaults": True,
                           # False: nothing chose a model (no saved route, no DGC_MODEL, no subscription), so the model
@@ -9299,9 +9313,10 @@ class Backend:
                              **_request_fields(request_id))
                 return
             if session_route and not set(values).issubset({
-                    "subscription_engine", "subscription_model", "subscription_effort"}):
+                    "subscription_engine", "subscription_model", "subscription_effort",
+                    "fallback_model", "fallback_base_url", "fallback_api_mode", "fallback_api_key"}):
                 self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="session route may only change its subscription engine, model and effort",
+                             message="session route may only change its subscription engine, model and effort, and its fallback",
                              **_request_fields(request_id))
                 return
             config_get = getattr(self.config, "get", None)

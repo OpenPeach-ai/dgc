@@ -799,6 +799,7 @@ most applications use:
 | `plan_proposal` | `id`, `plan`, `choices` |
 | `todos` | `todos` |
 | `model_retry` | `state`, `kind`, `attempt`, `summary`, `http_status` |
+| `model_fallback` | `model` (the fallback now answering, `""` once the chat's own model answers again), `active`; with `capabilities.model_fallback` |
 | `context` | `used`, `size`, `input_tokens`, `output_tokens`, `cached_input_tokens` |
 | `error` | `message` |
 | `turn_end` | `turn_id`, `reason` (`completed`, `cancelled`, `error`) |

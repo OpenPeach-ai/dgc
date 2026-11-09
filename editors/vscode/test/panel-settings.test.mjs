@@ -3452,3 +3452,28 @@ test("the first provider saved with All models isn't the default until its row h
   assert.deepEqual([after.defaultId, after.defaultModel], [said.profiles[0].id, "gpt-a"]);
   assert.equal(world.provider.noProvider(), false);
 });
+
+test("Work's fallback (D14): a saved provider's address, API and key go with it, a model on its own host needs none, an older CLI is asked nothing, and model_fallback reaches the page", async () => {
+  const world = allModelsWorld();
+  const row = await addProviderProfile(world, { name: "Spare", base_url: "https://spare.example/v1", model: "gpt-oss:120b",
+    api_mode: "chat_completions", api_key: "sk-spare" });
+  const sent = [];
+  world.provider.backend = { ready: true, send: (command) => { sent.push(JSON.parse(JSON.stringify(command))); return true; } };
+  const sets = () => sent.filter((c) => c.type === "set_config");
+  await world.provider.setSessionFallback(row.id, "gpt-oss:120b");
+  assert.equal(sets().length, 0, "an older CLI keeps no fallback per session: nothing sent");
+  world.provider.lastReadyEvent.capabilities.model_fallback = 1;
+  await world.provider.setSessionFallback(row.id, "gpt-oss:120b");
+  assert.equal(sets().at(-1).scope, "session", "this session only");
+  assert.deepEqual(sets().at(-1).values, { fallback_model: "gpt-oss:120b", fallback_base_url: "https://spare.example/v1",
+    fallback_api_mode: "chat_completions", fallback_api_key: "sk-spare" });
+  await world.provider.setSessionFallback("", "glm-5.3:cloud");
+  assert.deepEqual(sets().at(-1).values, { fallback_model: "glm-5.3:cloud", fallback_base_url: "", fallback_api_mode: "", fallback_api_key: "" });
+  const posted = [];
+  world.provider.post = (message) => posted.push(message);
+  const told = () => posted.filter((m) => m.type === "fallbackActive").at(-1);
+  world.provider.onEvent({ type: "model_fallback", model: "glm-5.3:cloud", active: true });
+  assert.deepEqual(told(), { type: "fallbackActive", model: "glm-5.3:cloud" });
+  world.provider.onEvent({ type: "model_fallback", model: "", active: false });
+  assert.deepEqual(told(), { type: "fallbackActive", model: "" });
+});

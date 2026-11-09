@@ -58,9 +58,10 @@
 }
 .dgc-menu .dgc-menu-div { height: 1px; margin: 4px 6px; background: var(--hair); }
 /* A model row and its ⋯ (D14). The row keeps the whole width; the ⋯ is a quiet square over its right end, seen while the
-   row is hovered or focused (always on a touch screen, and while its choices are open). The row's Main or Fallback word
-   sits at that same end and steps aside for the ⋯, so the words line up at the edge on every row. Its choices open as two
-   short rows under the model, indented. */
+   row is hovered or focused (always on a touch screen, and while its choices are open). At rest the row's Main or
+   Fallback word sits at that same end, so the words line up at the edge on every row; while the ⋯ shows, the word moves
+   just left of it and stays in sight (hidden, the Fallback just chosen vanished as focus stayed on its ⋯). Its choices
+   open as two short rows under the model, indented. */
 .dgc-menu .dgc-menu-item { position: relative; display: flex; align-items: center; }
 .dgc-menu .dgc-menu-item > .dgc-menu-row { flex: 1 1 auto; min-width: 0; }
 .dgc-menu .dgc-menu-more {
@@ -72,8 +73,6 @@
 .dgc-menu .dgc-menu-item:is(:hover, :focus-within) > .dgc-menu-more, .dgc-menu .dgc-menu-more[aria-expanded="true"] { opacity: 1; }
 .dgc-menu .dgc-menu-item:is(:hover, :focus-within) > .dgc-menu-row,
 .dgc-menu .dgc-menu-item:has(> .dgc-menu-more[aria-expanded="true"]) > .dgc-menu-row { padding-right: 34px; }
-.dgc-menu .dgc-menu-item:is(:hover, :focus-within) > .dgc-menu-row .dgc-menu-pill,
-.dgc-menu .dgc-menu-item:has(> .dgc-menu-more[aria-expanded="true"]) > .dgc-menu-row .dgc-menu-pill { display: none; }
 .dgc-menu .dgc-menu-more:is(:hover, :focus-visible, [aria-expanded="true"]) { background: var(--wash); color: var(--text); }
 .dgc-menu .dgc-menu-more:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
 @media (hover: none) {

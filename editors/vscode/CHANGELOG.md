@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A fallback model for each Work session, chosen in Work's model picker (the ⋯ beside a model, a saved provider or a model an All models provider lists; Main and Fallback at the rows' end). While the fallback answers, the model button names it in olive with the word fallback.
 - Trace shows a model change: a failed model step says why ("X didn't answer: …"), and the fallback's steps after it say fallback.
 - A fallback model for each ChatDGC chat, chosen the same way in its model menu (the ⋯ beside a model; Main and Fallback at the row's end). While the fallback writes a reply, the model button names it in olive with the word fallback.
 - A fallback model for each Pip, chosen in its model picker: the ⋯ beside a model offers Use as main and Use as fallback, and once one is set the rows say Main and Fallback. While the fallback answers, the prompt box names it in olive with the word fallback. A reply the fallback answered says so before its time, the first of an outage only.

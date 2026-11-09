@@ -4861,6 +4861,9 @@ class Agent(GoalLifecycle):
             if callable(restore_native):
                 restore_native()
                 self.refresh_client()
+            restore_fallback = getattr(self.config, "restore_fallback_route", None)
+            if callable(restore_fallback):
+                restore_fallback()            # and from the fallback in Settings (D14)
         self._mode_chosen_for_chat = False
         self._mode_restore_note = ""
         self._active_tool_intents: set[str] = set()
@@ -6339,6 +6342,9 @@ class Agent(GoalLifecycle):
             # state. Serialized frontends clear at dequeue and pass reset_cancel=False, preserving
             # a cancel that races with worker startup.
             if self.depth == 0:
+                if getattr(self, "_on_fallback", False):
+                    self._on_fallback = False         # D14: every turn tries its own model first
+                    self.refresh_client()
                 # A fresh ledger entry per foreground turn. Detached children started by an
                 # EARLIER turn keep charging that turn, so their spend is never mistaken
                 # for this one's.
@@ -6487,6 +6493,12 @@ class Agent(GoalLifecycle):
             complete_for_agent(self, turn_completion,
                                completed=completed and not bool(self._last_turn_pause), saved=saved,
                                revision_before_save=revision_before_save)
+            if (self.depth == 0 and completed is not False and getattr(self, "_fallback_outage", False)
+                    and not getattr(self, "_on_fallback", False)):
+                self._fallback_outage = False         # its own model answered this turn: the outage is over
+                told = getattr(self.ui, "model_fallback", None)
+                if callable(told):
+                    told("", False)
             return bool(saved and completed is not False)
 
     def run_monitor_turn(self, notification: Notification, *, reset_cancel: bool = True) -> bool:
@@ -6946,6 +6958,10 @@ class Agent(GoalLifecycle):
                             key: str(self.config.get(key, "") or "")
                             for key in ("base_url", "model", "api_mode", "thinking")
                         },
+                        fallback_route={      # D14: this chat's fallback, never its key
+                            key: str(self.config.get(f"fallback_{key}", "") or "")
+                            for key in ("model", "base_url", "api_mode")
+                        },
                         images=image_index,
                         agents=self.subagents.saved_state(),
                         mode=self.mode, plan_return_mode=self.plan_return_mode,
@@ -7387,6 +7403,9 @@ class Agent(GoalLifecycle):
             restore_route = getattr(self.config, "restore_subscription_route", None)
             if callable(restore_route):
                 restore_route(record.get("subscription_route"))
+            restore_fallback = getattr(self.config, "restore_fallback_route", None)
+            if callable(restore_fallback):
+                restore_fallback(record.get("fallback_route"))
             restore_native = getattr(self.config, "restore_native_route", None)
             if callable(restore_native):
                 prior_model = str(self.config.model or "")
@@ -8720,8 +8739,19 @@ class Agent(GoalLifecycle):
                 fb = str(self.config.get("fallback_model") or "")
                 if fb and fb != self.client.model:      # retry the turn on a fallback model
                     self._close_runs("gave_up")         # the primary's retry lines end here
-                    self.ui.info(self._safe_text(f"⤳ primary model failed; falling back to {fb}"))
+                    if not getattr(self, "_fallback_outage", False):     # said once an outage (D14)
+                        self.ui.info(self._safe_text(f"⤳ primary model failed; falling back to {fb}"))
+                    from .reply_trace import failed_why
+                    handed = getattr(self.ui, "trace_handed_over", None)
+                    if callable(handed):                # its Trace keeps the try that failed, and why
+                        handed(self._safe_text(f"{self.client.model} didn't answer: {failed_why(e)}"), fb)
                     self.client = self._fallback_client(fb)
+                    self._on_fallback = True            # the next turn tries its own model first
+                    if not getattr(self, "_fallback_outage", False):
+                        self._fallback_outage = True
+                        told = getattr(self.ui, "model_fallback", None)
+                        if callable(told):
+                            told(fb, True)              # the prompt box shows the fallback answering
                     try:
                         result = self._chat(tools, effort, cancel=chat_cancel,
                                             read_timeout=chat_timeout,

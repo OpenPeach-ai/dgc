@@ -98,6 +98,7 @@ then told that nobody can answer and gives the options in its final answer.
 | Browse skills | Skills, View instructions, Use skill | `/skills`, `/skills show NAME` |
 | Change permission mode | Mode selector | `/mode MODE` or the full-screen mode selector |
 | Change model | Model picker, for this chat only: providers saved in Settings → Models, then their models (a provider saved with All models lists everything its API offers, and the chat moves when you choose one) | `/model NAME` or the full-screen model selector |
+| Fallback model | The ⋯ beside a model in the model picker: Use as fallback (this chat only; a new chat starts from Settings → Models → Fallback). When the chat's model fails, the turn carries on with it, the model button names it in olive with the word fallback, the next turn tries the chat's own model first, and Trace keeps the change (`capabilities.model_fallback`; `set_config` with `scope: "session"` takes `fallback_model`, `fallback_base_url`, `fallback_api_mode` and `fallback_api_key`) | Settings → Models → Fallback |
 | Stop work | Stop, including the separate button while drafting or while a question is open | Esc or Ctrl+C (Ctrl+C on an open question) |
 | Close a question | × or Esc (with its text field empty) | Esc |
 

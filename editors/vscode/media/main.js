@@ -1718,10 +1718,60 @@
     if (!lastModelMenu) return;
     renderProviderChoices();
   }
-  function renderModelMenu(ids, current, err, subscription, label, supportsEffort, routes, cliDefaultModel, cliDefaultListed, currentRouteKey) {
+  function renderModelMenu(ids, current, err, subscription, label, supportsEffort, routes, cliDefaultModel, cliDefaultListed, currentRouteKey, fallback) {
     lastModelMenu = { ids, current, err, subscription, label, supportsEffort, routes,
-                      cliDefaultModel, cliDefaultListed, currentRouteKey };
+                      cliDefaultModel, cliDefaultListed, currentRouteKey,
+                      fallback: fallback && typeof fallback === "object" ? fallback : { offered: false } };
+    fbOpen = "";
     renderProviderModels(lastModelMenu);
+  }
+  // D14: this session's fallback. A model DGC runs itself (this host's, or a saved provider's) has a ⋯ with Use as main
+  // and Use as fallback; once one is set, Main and Fallback sit at the rows' right end. Claude Code, Codex, DGC's own
+  // Current host row and an All models provider row have no ⋯ (the last two name no one model).
+  let fbOpen = "", fallbackActive = "", lastAllListed = null;
+  const fbView = () => lastModelMenu?.fallback || { offered: false };
+  const fbPills = (isMain, isFallback) => (fbView().model ? (isMain ? DgcMenu.pill("Main", "main") : isFallback ? DgcMenu.pill("Fallback", "fallback") : "") : "");
+  function fbItem(key, rowHtml, label, isMain, isFallback) {
+    if (!fbView().offered) return rowHtml;
+    const open = fbOpen === key;
+    const choices = open ? `<div class="dgc-menu-choices" role="group" aria-label="${esc(label)}">`
+      + (isMain ? "" : `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-fb-main="${key}"><span>Use as main</span></button>`)
+      + `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-fb-set="${key}"${isMain ? " disabled" : ""}><span>${isFallback ? "Stop using as fallback" : "Use as fallback"}</span></button></div>` : "";
+    return DgcMenu.item(rowHtml, DgcMenu.more(`More for ${label}`, `data-fb-more="${key}"`, open), choices);
+  }
+  // key: "m:<i>" a model of this session's route, "p:<i>" a saved provider, "a:<i>" a model an All models provider lists.
+  function fbTarget(key) {
+    const [kind, at] = [key[0], Number(key.slice(2))];
+    if (kind === "m") return { provider: "", model: lastModelMenu.ids[at], base_url: "" };
+    if (kind === "p") { const row = (lastModelMenu.routes || [])[at]; return { provider: row.key, model: row.model, base_url: row.base_url }; }
+    return { provider: allModelsStep?.key, model: (lastAllListed?.ids || [])[at], base_url: allModelsStep?.base_url || "" };
+  }
+  function fbRedraw(key, focusChoice) {
+    const kind = key[0];
+    if (kind === "m") renderProviderModels(lastModelMenu);
+    else if (kind === "p") renderProviderChoices();
+    else if (allModelsStep) showAllModels(allModelsStep, lastAllListed);
+    const mm = $("modelmenu"), dots = mm.querySelector(`[data-fb-more="${key}"]`);
+    (focusChoice ? dots?.closest(".dgc-menu-item")?.nextElementSibling?.querySelector("button:not(:disabled)") : dots)?.focus();
+  }
+  function bindFallback(mm, useAsMain) {
+    mm.querySelectorAll("[data-fb-more]").forEach((button) => button.onclick = (event) => {
+      event.stopPropagation();
+      const key = button.dataset.fbMore;
+      fbOpen = fbOpen === key ? "" : key;
+      fbRedraw(key, !!fbOpen);
+    });
+    mm.querySelectorAll("[data-fb-main]").forEach((button) => button.onclick = (event) => { event.stopPropagation(); fbOpen = ""; useAsMain(button.dataset.fbMain); });
+    mm.querySelectorAll("[data-fb-set]").forEach((button) => button.onclick = (event) => {
+      event.stopPropagation();
+      const key = button.dataset.fbSet, target = fbTarget(key), view = fbView();
+      const already = view.model && view.model === target.model && (view.base_url || "") === (target.base_url || "") ;
+      const chosen = already ? { provider: "", model: "", base_url: "" } : target;
+      vscode.postMessage({ type: "setFallback", provider: chosen.provider || "", model: chosen.model || "" });
+      lastModelMenu.fallback = { ...view, model: chosen.model || "", base_url: chosen.base_url || "" };
+      fbOpen = "";
+      fbRedraw(key, false);
+    });
   }
   function renderProviderChoices() {
     const { routes, currentRouteKey } = lastModelMenu;
@@ -1736,7 +1786,10 @@
         const selected = row.key === currentRouteKey;
         const note = row.installed === false ? " · install CLI first"
           : row.auth_state === "signed_out" ? " · sign in first" : "";
-        return `<button type="button" role="menuitemradio" aria-checked="${selected}" class="mrow dgc-menu-row${selected ? " sel" : ""}" data-provider-i="${i}"><span class="mi dgc-menu-icon ${selected ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(String(row.label || row.key) + note)}</span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`;
+        const fb = fbView(), isFallback = !!fb.model && !!row.model && fb.model === row.model && fb.base_url === row.base_url && !selected;
+        const html = `<button type="button" role="menuitemradio" aria-checked="${selected}" class="mrow dgc-menu-row${selected ? " sel" : ""}" data-provider-i="${i}"><span class="mi dgc-menu-icon ${selected ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(String(row.label || row.key) + note)}</span>${fbPills(selected, isFallback)}<span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`;
+        const can = row.kind && row.kind !== "subscription" && !row.allModels && row.key !== "native" && !!row.model;
+        return can ? fbItem(`p:${i}`, html, String(row.label || row.key), selected, isFallback) : html;
       }).join("")
       + `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-manage-providers="1"><span class="mi dgc-menu-icon codicon codicon-add" aria-hidden="true"></span><span>Add provider in Settings…</span></button></div>`;
     options.hidden = false;
@@ -1757,6 +1810,7 @@
     options.querySelector("[data-manage-providers]").onclick = () => {
       vscode.postMessage({ type: "openSettings", section: "models" }); hideModelMenu();
     };
+    bindFallback(options, (key) => { const row = choices[Number(key.slice(2))]; vscode.postMessage({ type: "setSubscription", engine: row.key === "native" ? "" : row.key }); hideModelMenu(); });
     mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true");
     (options.querySelector(".sel") || options.querySelector("button"))?.focus();
   }
@@ -1766,13 +1820,15 @@
     const mm = $("modelmenu"), options = mm.querySelector(".model-options");
     if (!options) return;
     allModelsStep = row;
+    lastAllListed = listed;
     if (!listed) vscode.postMessage({ type: "providerModels", id: row.key });
     const ids = listed?.ids || [];
     const wait = !listed ? `<div class="mhead dgc-menu-head"><span>Listing its models…</span></div>`
       : !ids.length ? `<div class="mhead dgc-menu-head"><span>${listed.error ? "Couldn’t list its models" : "It lists no models"}</span></div>` : "";
     options.innerHTML = `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-provider-back="1"><span class="mi dgc-menu-icon codicon codicon-arrow-left" aria-hidden="true"></span><span>Providers</span></button>`
       + `<div class="mhead dgc-menu-head"><span>${esc(row.label)} model</span></div><div class="model-list-scroll">${wait}`
-      + ids.map((id, i) => `<button type="button" role="menuitemradio" aria-checked="false" class="mrow dgc-menu-row" data-provider-model="${i}"><span class="mi dgc-menu-icon" aria-hidden="true"></span><span>${esc(id)}</span></button>`).join("")
+      + ids.map((id, i) => { const fb = fbView(), isFallback = !!fb.model && fb.model === id && fb.base_url === row.base_url;
+        return fbItem(`a:${i}`, `<button type="button" role="menuitemradio" aria-checked="false" class="mrow dgc-menu-row" data-provider-model="${i}"><span class="mi dgc-menu-icon" aria-hidden="true"></span><span>${esc(id)}</span>${fbPills(false, isFallback)}</button>`, id, false, isFallback); }).join("")
       + (listed ? `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-provider-typed="1"><span class="mi dgc-menu-icon codicon codicon-edit" aria-hidden="true"></span><span>Enter another model…</span></button>` : "")
       + `</div>`;
     options.hidden = false;
@@ -1782,6 +1838,7 @@
       vscode.postMessage({ type: "setSubscription", engine: row.key, model: ids[Number(button.dataset.providerModel)] });
       hideModelMenu();
     });
+    bindFallback(options, (key) => { allModelsStep = null; vscode.postMessage({ type: "setSubscription", engine: row.key, model: ids[Number(key.slice(2))] }); hideModelMenu(); });
     const typed = options.querySelector("[data-provider-typed]");
     if (typed) typed.onclick = () => { allModelsStep = null; vscode.postMessage({ type: "providerModelTyped", id: row.key }); hideModelMenu(); };
     (options.querySelector("[data-provider-model]") || options.querySelector("button"))?.focus();
@@ -1815,12 +1872,15 @@
       mm.querySelector("[data-provider-back]").onclick = (event) => { event.stopPropagation(); showProviderStep(); };
       mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true"); mm.querySelector("button")?.focus(); return;
     }
+    const fb = fbView(), ownHost = (base) => !base || base === fb.route_base;
     mm.innerHTML = profile + `<div class="mhead dgc-menu-head"><span>Model</span></div>` +
-      ids.map((id, i) => `<button type="button" role="menuitemradio" aria-checked="${id === current}" class="mrow dgc-menu-row${id === current ? " sel" : ""}" data-i="${i}"><span class="mi dgc-menu-icon ${id === current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(id)}</span></button>`).join("");
+      ids.map((id, i) => { const isFallback = !!fb.model && fb.model === id && ownHost(fb.base_url) && id !== current;
+        return fbItem(`m:${i}`, `<button type="button" role="menuitemradio" aria-checked="${id === current}" class="mrow dgc-menu-row${id === current ? " sel" : ""}" data-i="${i}"><span class="mi dgc-menu-icon ${id === current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(id)}</span>${fbPills(id === current, isFallback)}</button>`, id, id === current, isFallback); }).join("");
     bindProfiles(mm);
     mm.querySelector(".model-options").insertAdjacentHTML("afterbegin", back);
     mm.querySelector(".model-summary")?.click();
     mm.querySelectorAll("[data-i]").forEach((r) => r.onclick = () => { vscode.postMessage({ type: "setModel", model: ids[+r.dataset.i] }); hideModelMenu(); });
+    bindFallback(mm, (key) => { vscode.postMessage({ type: "setModel", model: ids[Number(key.slice(2))] }); hideModelMenu(); });
     mm.querySelector("[data-provider-back]").onclick = (event) => { event.stopPropagation(); showProviderStep(); };
     mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true");
     mm.querySelector(".model-summary")?.focus();
@@ -1848,6 +1908,15 @@
     $("btn-model").classList.toggle("ultra", curUltra);
     $("btn-model").title = `${model} · ${effort} reasoning — click to change`;
     $("btn-model").setAttribute("aria-label", `Change model and reasoning. Current model: ${model}. Profile: ${effort}.`);
+    // D14: its model didn't answer and its fallback does: the button names the fallback, in olive, with the word.
+    $("btn-model").classList.toggle("on-fallback", !!fallbackActive);
+    let word = $("btn-model").querySelector(".model-fallback-word");
+    if (fallbackActive) {
+      $("modelname").textContent = fallbackActive;
+      if (!word) { word = el("span", "model-fallback-word", "fallback"); $("modelname").after(word); }
+      $("btn-model").title = `${model} didn’t answer, so its fallback ${fallbackActive} is answering. It tries ${model} again with your next message.`;
+      $("btn-model").setAttribute("aria-label", `${fallbackActive}, its fallback, is answering. Change model and reasoning.`);
+    } else word?.remove();
   }
 
   // The keys every menu answers, the same in ChatDGC and a Pip's chat (media/shared/menu.js): arrows, Home and End move,
@@ -11644,7 +11713,8 @@ function permissionChoices(ev) {
       setGoalState(msg.state.goal || { text: "", status: "none", elapsed_seconds: 0 });
     }
     else if (msg.type === "providerModels") { if (allModelsStep && allModelsStep.key === msg.id && !$("modelmenu").hidden) showAllModels(allModelsStep, { ids: Array.isArray(msg.ids) ? msg.ids.filter((id) => typeof id === "string" && id) : [], error: msg.error }); }
-    else if (msg.type === "models" && !$("modelmenu").hidden) { renderModelMenu(msg.ids || [], msg.current, msg.err, msg.subscription, msg.label, msg.supportsEffort, msg.routes, msg.cliDefaultModel, msg.cliDefaultListed, msg.currentRouteKey); }
+    else if (msg.type === "models" && !$("modelmenu").hidden) { renderModelMenu(msg.ids || [], msg.current, msg.err, msg.subscription, msg.label, msg.supportsEffort, msg.routes, msg.cliDefaultModel, msg.cliDefaultListed, msg.currentRouteKey, msg.fallback); }
+    else if (msg.type === "fallbackActive") { fallbackActive = typeof msg.model === "string" ? msg.model.slice(0, 256) : ""; updateModelControl(); }
     else if (msg.type === "chat_changes") {
       if (!msg.sessionId || msg.sessionId === draftSession) setChatChanges(msg);
     }

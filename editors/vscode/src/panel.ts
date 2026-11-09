@@ -667,11 +667,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private autoModePrompt?: { id: string; settle(accepted: boolean): void };
   private correlatedStateRequests = false;
   private routeState: {
-    subagentBaseUrl: string; fallbackBaseUrl: string;
+    subagentBaseUrl: string; fallbackBaseUrl: string; fallbackModel: string;
     nativeModel: string; nativeThink: string;
     subscriptionEngine: string; subscriptionModel: string; subscriptionEffort: string;
     subscriptionEngines: any[];
-  } = { subagentBaseUrl: "", fallbackBaseUrl: "", nativeModel: "", nativeThink: "off",
+  } = { subagentBaseUrl: "", fallbackBaseUrl: "", fallbackModel: "", nativeModel: "", nativeThink: "off",
         subscriptionEngine: "", subscriptionModel: "", subscriptionEffort: "",
         subscriptionEngines: [] };
   private behaviorState = { showReasoning: true, thinkingInline: true, preserveThinking: false, codeAction: false };
@@ -4206,6 +4206,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                        goal: ev.goal || { text: "", status: "none", elapsed_seconds: 0 } };
         this.routeState.subagentBaseUrl = String(ev.subagent_base_url || "");
         this.routeState.fallbackBaseUrl = String(ev.fallback_base_url || "");
+        this.routeState.fallbackModel = String(ev.fallback_model || "");
         this.slashAliases.clear();
         for (const command of (Array.isArray(ev.commands) ? ev.commands : [])) {
           if (!command || typeof command !== "object") { continue; }
@@ -4300,6 +4301,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           ollama_keep_alive: String((ev as any).ollama_keep_alive ?? ""),
         };
         break;
+      case "model_fallback":
+        // D14: the session's model failed and its fallback answers (or, active false, its own model is back).
+        this.fallbackActive = ev.active === true ? String(ev.model || "") : "";
+        this.post({ type: "fallbackActive", model: this.fallbackActive });
+        break;
       case "model_changed":
         if (this.routeState.subscriptionEngine) {
           this.routeState.subscriptionModel = String(ev.model || "");
@@ -4357,6 +4363,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           ? ev.subscription_engines : [];
         this.routeState.subagentBaseUrl = String(ev.subagent_base_url || "");
         this.routeState.fallbackBaseUrl = String(ev.fallback_base_url || "");
+        this.routeState.fallbackModel = String(ev.fallback_model || "");
+        // D14: a session's fallback on another saved provider, its key gone with a reload: supplied again from where
+        // the editor keeps keys, found by the provider's address. (A session file never holds a key.)
+        if (ev.fallback_base_url && ev.fallback_api_key_set === false) void this.resupplyFallbackKey(String(ev.fallback_base_url));
         this.behaviorState.showReasoning = ev.show_reasoning !== false;
         this.behaviorState.thinkingInline = ev.thinking_inline !== false;
         this.behaviorState.preserveThinking = ev.preserve_thinking === true;
@@ -5669,6 +5679,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (typeof msg.id === "string" && msg.id.startsWith("provider_")) {
           this.post(await this.providerModels(msg.id).catch(() => ({ type: "providerModels" as const, id: String(msg.id), ids: [], error: "DGC didn't answer" })));
         }
+        break;
+      case "setFallback":
+        await this.setSessionFallback(String(msg.provider || ""), typeof msg.model === "string" ? msg.model.trim().slice(0, 256) : "");
         break;
       case "setModel":
         {
@@ -7748,7 +7761,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const currentSubscription = saved.find(row => row.kind === "subscription"
       && row.engine === this.routeState.subscriptionEngine);
     // allModels: choosing it lists what its host offers, and the session moves only once a model is chosen from them.
-    const routes: { key: string; label: string; allModels?: boolean }[] = saved.map(row => ({ key: row.id, label: row.name,
+    // kind, base_url and model: where a row's Fallback word goes, and which rows can be one (D14).
+    const routes: { key: string; label: string; allModels?: boolean; kind?: string; base_url?: string; model?: string }[] = saved.map(row => ({ key: row.id, label: row.name,
+      kind: row.kind, ...(row.kind !== "subscription" ? { base_url: row.base_url, model: startingModel(this.context, row) } : {}),
       ...(row.kind !== "subscription" && !startingModel(this.context, row) ? { allModels: true } : {}) }));
     if (!this.routeState.subscriptionEngine && !currentProfile) {
       routes.unshift({ key: "native", label: `Current host · ${nativeLabel}` });
@@ -7771,17 +7786,58 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                   label: String(subscription?.label || this.routeState.subscriptionEngine),
                   cliDefaultModel: String(subscription?.cli_default_model || ""),
                   cliDefaultListed: subscription?.cli_default_listed !== false, routes,
-                  currentRouteKey });
+                  currentRouteKey, fallback: this.fallbackView() });
       return;
     }
     const base = this.state.baseUrl || PROVIDERS.ollama.url;
     try {
       const ids = await this.fetchModels();
       this.post({ type: "models", ids, current: this.state.model, base, supportsEffort: true,
-                  routes, currentRouteKey });
+                  routes, currentRouteKey, fallback: this.fallbackView() });
     } catch {
-      this.post({ type: "models", ids: [], base, err: true, routes, currentRouteKey });
+      this.post({ type: "models", ids: [], base, err: true, routes, currentRouteKey, fallback: this.fallbackView() });
     }
+  }
+
+  /** This Work session's fallback (D14), for its model menu: offered only by a CLI that keeps one per session. */
+  private fallbackView() {
+    return { offered: (this.lastReadyEvent?.capabilities as any)?.model_fallback === 1,
+             model: this.routeState.fallbackModel || "", base_url: this.routeState.fallbackBaseUrl || "",
+             route_base: this.state.baseUrl || "" };
+  }
+
+  /** Use as fallback (or Stop using as fallback) from Work's model menu: this session only. A saved provider's own
+   *  address, API and key go with it; a model on the session's own host needs none. */
+  private async setSessionFallback(provider: string, model: string): Promise<void> {
+    const be = this.backend;
+    if (!be) return;
+    try {
+      if ((this.lastReadyEvent?.capabilities as any)?.model_fallback !== 1) throw new Error("Update DGC CLI to give a Work session a fallback model.");
+      let values: Record<string, string> = { fallback_model: model, fallback_base_url: "", fallback_api_mode: "", fallback_api_key: "" };
+      if (model && provider.startsWith("provider_")) {
+        const { route, api_key } = await profileCredential(this.context, provider);
+        if (route.kind === "subscription") throw new Error("Claude Code and Codex can't be a fallback.");
+        values = { fallback_model: model, fallback_base_url: route.base_url, fallback_api_mode: route.api_mode, fallback_api_key: api_key };
+      }
+      be.send(this.stateCommand("fallback", { type: "set_config", scope: "session", values }));
+      this.routeState.fallbackModel = values.fallback_model;
+      this.routeState.fallbackBaseUrl = values.fallback_base_url;
+    } catch (error) {
+      void vscode.window.showWarningMessage(error instanceof Error && error.message ? error.message : "DGC could not set this fallback.");
+    }
+  }
+
+  private fallbackKeyAsked = new Set<string>();
+  private fallbackActive = "";
+  private async resupplyFallbackKey(baseUrl: string): Promise<void> {
+    if ((this.lastReadyEvent?.capabilities as any)?.model_fallback !== 1 || this.fallbackKeyAsked.has(baseUrl) || !this.backend) return;
+    this.fallbackKeyAsked.add(baseUrl);
+    const row = listProfiles(this.context).find((p: any) => p.kind !== "subscription" && p.base_url === baseUrl);
+    if (!row) return;
+    try {
+      const { api_key } = await profileCredential(this.context, row.id);
+      if (api_key) this.backend.send(this.stateCommand("fallback", { type: "set_config", scope: "session", values: { fallback_api_key: api_key } }));
+    } catch { /* no key there: the fallback asks as any keyless host does */ }
   }
 
   private async selectSubscription(engine: string, chosenModel = ""): Promise<void> {
