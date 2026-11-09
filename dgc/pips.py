@@ -206,8 +206,8 @@ _COMMAND_ARGS = {
     "get_pips_keep_running": set(), "set_pips_keep_running": {"enabled"},
     "get_pips_desktop_notifications": set(), "set_pips_desktop_notifications": {"enabled"},
     "get_pips_payments": set(), "set_pips_payments": {"enabled"},
-    "get_pips_backup": set(), "set_pips_backup": {"model", "provider"},
-    "get_pip_backup": {"pip_id"}, "set_pip_backup": {"pip_id", "model", "provider"},
+    "get_pips_backup": set(), "set_pips_backup": {"model", "provider", "engine", "router"},
+    "get_pip_backup": {"pip_id"}, "set_pip_backup": {"pip_id", "model", "provider", "engine", "router"},
     "get_pip_usage": {"pip_id"}, "set_pip_daily_cap": {"pip_id", "daily_tokens"}, "export_pip": {"pip_id"},
     "set_pip_feedback": {"run_id", "rating", "note"}, "list_pip_feedback": {"pip_id"},
     "mark_pip_notification_read": {"workspace_id", "notification_id", "expected_revision"},
@@ -2985,34 +2985,103 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                      "trace": worker_mark(why=words(why, 110), **({"since": since} if since is not None else {}))})
             return client
 
-        def run_turn(self, user_text, **kwargs):
-            if brain is None or getattr(self, '_on_backup', False):
-                return super().run_turn(user_text, **kwargs)
+        def _photos(self, pending):
             import base64 as _b64
-            from .pip_brain import Turn
-            pending, photos = self._pending_images, []
-            for uri in self._pending_images or ():
+            photos = []
+            for uri in pending or ():
                 head, _, data = str(uri).partition(';base64,')
                 if head.startswith('data:image/') and data:
                     photos.append((head[5:], _b64.b64decode(data)))
+            return photos
+
+        def _lease_backup_route(self):
+            """DGC Router as its fallback (9 Nov): leased now, when it is needed, by the controller, which leaves the
+            system it leased (its address, model and key, for this run alone) in this run's private folder."""
+            path = snapshot.parent / "backup-route.json"
+            emit({"kind": "backup_route_needed"})
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline and not self.cancelled.is_set():
+                if path.exists():
+                    try:
+                        value = json.loads(path.read_text(encoding="utf-8"))
+                    except (OSError, ValueError):
+                        value = None
+                    try:
+                        path.unlink()
+                    except OSError:
+                        pass
+                    if isinstance(value, dict) and value.get("model") and value.get("base_url"):
+                        return value
+                    self._last_turn_error = str((value or {}).get("none") or "DGC Router had no system for it")[:300]
+                    return None
+                time.sleep(0.2)
+            self._last_turn_error = "DGC Router didn't answer in time"
+            return None
+
+        def _backup_turn(self, user_text, kwargs, *, why, since=None, pending=None, keep=None):
+            """Its own model or CLI failed before it said or did anything: its fallback takes the whole turn (pip_backup):
+            a model on DGC's own connection or a saved provider, Claude Code or Codex, or DGC Router (9 Nov)."""
+            from .reply_trace import words, worker_mark
+            other = self.config.data.get("fallback_brain")
+            routed = self.config.data.get("fallback_router")
+            model = str(self.config.get("fallback_model") or "")
+            if not (isinstance(other, dict) or isinstance(routed, dict) or model):
+                return False
+            self._on_backup = True
+            self._pending_images, self._last_turn_error = pending, ''
+            if keep is not None and 0 <= keep <= len(self.messages):
+                del self.messages[keep:]   # the failed try kept only the prompt; the fallback's turn adds it again (once)
+            elif (self.messages and self.messages[-1].get("role") == "user"
+                    and self.messages[-1].get("content") == user_text):
+                self.messages.pop()
+            if isinstance(other, dict):
+                from .pip_brain import Turn, launch_from_env
+                label = str(self.config.data.get("fallback_brain_label") or other.get("engine") or "")[:256]
+                emit({"kind": "backup", "model": label, "trace": worker_mark(why=words(why, 110),
+                                                                            **({"since": since} if since is not None else {}))})
+                self._pending_images = None
+                return Turn(self, launch_from_env(other, var="DGC_PIP_BACKUP_BRAIN"), other).run(user_text, images=self._photos(pending))
+            if isinstance(routed, dict):
+                route = self._lease_backup_route()
+                if route is None:
+                    return False
+                for key in ("model", "base_url", "api_mode", "api_key"):
+                    self.config.set("fallback_" + key, str(route.get(key) or ""), persist=False)
+                model = route["model"]
+            self.client = self._fallback_client(model, why=why, since=since)
+            return super().run_turn(user_text, **kwargs)
+
+        def run_turn(self, user_text, **kwargs):
+            if getattr(self, '_on_backup', False):
+                return super().run_turn(user_text, **kwargs)
+            if brain is None:
+                # Its own model on DGC's connection. A model fallback carries the turn on inside it (Agent's own); a CLI
+                # or DGC Router takes the whole turn after a try that said and did nothing (9 Nov).
+                before, pending = len(self.messages), self._pending_images
+                own = str(getattr(self.client, "model", "") or self.config.get("model", "") or "its model")
+                ok = super().run_turn(user_text, **kwargs)
+                if (not ok and (self.config.data.get("fallback_brain") or self.config.data.get("fallback_router"))
+                        and not self.cancelled.is_set()
+                        and not any(m.get("role") in ("assistant", "tool") for m in self.messages[before:])):
+                    from .reply_trace import failed_why
+                    return self._backup_turn(user_text, kwargs, pending=pending, keep=before,
+                                             why=f"{own} didn't answer: {failed_why(self._last_turn_error or 'it failed')}")
+                return ok
+            from .pip_brain import Turn
+            pending = self._pending_images
+            photos = self._photos(pending)
             self._pending_images = None
             self._last_turn_error = ''
             turn = Turn(self, brain_launch, brain)
             from .reply_trace import now_ms
-            began = now_ms()
+            began, before = now_ms(), len(self.messages)
             ok = turn.run(user_text, images=photos)
-            backup_model = str(self.config.get("fallback_model") or "")
-            if (not ok and backup_model and not turn.calls and not "".join(turn.said).strip() and not turn.stray
-                    and turn.end_at is None):
+            if (not ok and not turn.calls and not "".join(turn.said).strip() and not turn.stray
+                    and turn.end_at is None and not self.cancelled.is_set()):
                 # Its subscription didn't answer (a usage limit, signed out, unreachable) before it said or did
-                # anything: its backup takes the whole turn on DGC's own connection (pip_backup).
-                self._on_backup = True
-                self.client = self._fallback_client(backup_model, why=self._last_turn_error or "Its subscription didn't answer", since=began)
-                self._pending_images, self._last_turn_error = pending, ''
-                if (self.messages and self.messages[-1].get("role") == "user"
-                        and self.messages[-1].get("content") == user_text):
-                    self.messages.pop()        # the brain's try kept the prompt; run_turn adds it again (once)
-                return super().run_turn(user_text, **kwargs)
+                # anything: its fallback takes the whole turn (pip_backup).
+                return self._backup_turn(user_text, kwargs, pending=pending, since=began, keep=before,
+                                         why=self._last_turn_error or "Its subscription didn't answer") or ok
             return ok
 
         def _deliver_images(self, call_id, name, entries, *, omitted=0):
@@ -4096,7 +4165,8 @@ def _worker_main():
     for key, value in {
         "api_key": payload.get("api_key", ""), "mode": "default", "subscription_engine": "",
         # A Pip's backup model (pip_backup), when it has one: the model it carries on with if its own doesn't answer.
-        "fallback_model": str(backup.get("model") or ""), "fallback_base_url": str(backup.get("base_url") or ""),
+        "fallback_model": "" if ("brain" in backup or "router" in backup) else str(backup.get("model") or ""),
+        "fallback_base_url": str(backup.get("base_url") or ""),
         "fallback_api_key": str(backup.get("api_key") or ""), "fallback_api_mode": str(backup.get("api_mode") or ""),
         "mcp_servers": {}, "hooks": {}, "code_action": False, "ultra_mode": False,
         "verify_before_done": False, "verify_command": "", "autonomous_gate": "",
@@ -4106,6 +4176,15 @@ def _worker_main():
         "router": {"enabled": False, "when_busy": "wait", "systems": []},
     }.items():
         config.set(key, value, persist=False)
+    # A fallback that is Claude Code or Codex, or DGC Router (9 Nov): the worker takes the whole turn there after a try
+    # that said and did nothing (ReadOnlyAuditor._backup_turn). Kept on this worker's config only, never saved.
+    if isinstance(backup.get("brain"), dict):
+        from . import pip_brain as _brain
+        config.data["fallback_brain"] = _brain.validate_route(backup["brain"])
+        config.data["fallback_brain_label"] = str(backup.get("model") or "")[:256]
+    elif isinstance(backup.get("router"), dict):
+        config.data["fallback_router"] = {"system": str(backup["router"].get("system") or "")[:128],
+                                          "model": str(backup["router"].get("model") or "")[:256]}
     # A worker's immutable manifest, not the empty private HOME's user default,
     # owns its provider route. Agent.reset() runs during construction.
     config._pinned_run_route = True
@@ -4615,6 +4694,13 @@ def _execute_run(registry, row, config):
         backup = pip_backup.for_run(registry, saved_route_view(config), row, manifest)
     except Exception:                            # noqa: BLE001 - no backup: the run is as before
         backup = None
+    if backup is not None and isinstance(backup.get("brain"), dict):
+        # Claude Code or Codex as its fallback (9 Nov): pinned as a run on it is, so the worker can start it if needed.
+        try:
+            from . import pip_brain
+            worker_env["DGC_PIP_BACKUP_BRAIN"] = _json(pip_brain.launch_pin(backup["brain"], run_dir / "backup-brain"))
+        except Exception:                        # noqa: BLE001 - not installed or signed out: no fallback
+            backup = None
     if backup is not None:
         payload["backup"] = backup
     backup_model = ""
@@ -4704,6 +4790,9 @@ def _execute_run(registry, row, config):
                 result = event.get("result")
             elif kind == "failure":
                 failure = event.get("error")
+            elif kind == "backup_route_needed" and backup is not None and isinstance(backup.get("router"), dict):
+                # DGC Router as its fallback (9 Nov): a system leased now, for this run, released when it ends.
+                _backup_route_lease(config, row, manifest, backup, run_dir)
             elif kind == "backup":
                 backup_model = str(event.get("model") or "")[:256]     # believed only if it is the fallback it was given
                 if backup is not None:
@@ -5055,6 +5144,32 @@ def _history_window(config, model) -> int:
     return size
 
 
+def _backup_route_lease(config, row, manifest, backup, run_dir) -> None:
+    """A run's DGC Router fallback, leased when its worker asks (its own model failed): the system's address, model and
+    key go to the run's private folder for the worker alone; the lease is kept with the run and released with it."""
+    from . import router as router_mod
+    target = Path(run_dir) / "backup-route.json"
+    pin = backup["router"]
+    try:
+        route, _why = router_mod.ROUTER.acquire(config, "pips", system=pin.get("system", ""), model=pin.get("model", ""),
+                                                 owner=f"Pip run {row['id']} fallback", wait=False,
+                                                 label=_router_label(manifest))
+    except router_mod.RouteRefused as exc:
+        route, value = None, {"none": f"DGC Router: {exc}"[:300]}
+    else:
+        value = {"none": "DGC Router: no system with the Pips job is online"} if route is None else None
+    if route is not None:
+        with _ROUTER_RUNS_LOCK:
+            _ROUTER_RUNS[f"{row['id']}:fallback"] = route
+        backup["model"] = str(route.model)[:256]   # what the worker will say it switched to
+        value = {"model": route.model, "base_url": route.client_url, "api_mode": route.client_api_mode,
+                 "api_key": route.key}
+    fd = os.open(target.with_suffix(".tmp"), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(value, handle)
+    os.replace(target.with_suffix(".tmp"), target)
+
+
 def _router_release(run_id):
     from . import router as router_mod
     with _ROUTER_RUNS_LOCK:
@@ -5085,6 +5200,7 @@ def _run_claimed(registry, store, row, config, directory):
         _routine_after_run(registry, row, error)
     finally:
         _router_release(row["id"])            # its DGC Router worker, whatever happened
+        _router_release(f"{row['id']}:fallback")   # and the one its fallback leased, if it did
         with _THREAD_LOCK:
             owned = _ACTIVE_RUNS.get(str(directory), set())
             owned.discard(row["id"])
@@ -5243,7 +5359,7 @@ def _reset_run_directory(registry, row):
     if manifest.get("run_kind") == "draft" and not current_tree:
         _remove_tree(run_dir)
         return
-    for name in (*COPIES, WORKER_HOME, "brain"):
+    for name in (*COPIES, WORKER_HOME, "brain", "backup-brain"):   # the second try pins its CLIs (and its fallback's) anew
         if name == "source" and current_tree:
             continue
         _remove_tree(run_dir / name)
@@ -6017,11 +6133,13 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 if command == "get_pips_backup":
                     result = {"backup": pip_backup.pips_wide(registry)}
                 elif command == "set_pips_backup":
-                    result = {"backup": pip_backup.set_pips_wide(registry, request.get("model"), actor, request.get("provider"))}
+                    result = {"backup": pip_backup.set_pips_wide(registry, request.get("model"), actor, request.get("provider"),
+                                                                request.get("engine") or "", request.get("router") is True)}
                 elif command == "get_pip_backup":
                     result = {"backup": pip_backup.listing(registry, pip_id)}
                 else:
-                    result = {"backup": pip_backup.set_own(registry, pip_id, request.get("model"), actor, request.get("provider"))}
+                    result = {"backup": pip_backup.set_own(registry, pip_id, request.get("model"), actor, request.get("provider"),
+                                                          request.get("engine") or "", request.get("router") is True)}
             elif command in ("get_pips_payments", "set_pips_payments"):
                 # Pips API 75 (your P1): whether a Pip at Do it all may pay by itself, at most three a day. Off by default.
                 from . import pip_levels

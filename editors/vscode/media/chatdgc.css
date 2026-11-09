@@ -1012,8 +1012,11 @@ path.cd-chart-mark, rect.cd-chart-mark { stroke: none; }
 /* While the fallback answers: the pill names it, in the olive DGC uses when something isn't answering, with the word. */
 .cd-model-pill.on-fallback { background: var(--err-soft); color: var(--err-text); }
 .cd-model-pill.on-fallback .cd-model-name { color: var(--err-text); }
+.cd-model-pill.on-fallback .cd-model-chevron { color: var(--err-text); opacity: .7; }
+.cd-model-pill.on-fallback .cd-arc-track { stroke: color-mix(in srgb, var(--err) 35%, transparent); }
+.cd-model-pill.on-fallback .cd-arc-fill { stroke: var(--err-text); }
 .cd-fallback-word {
-  flex: none; padding: 0 5px; border: 1px solid color-mix(in srgb, var(--err) 60%, transparent); border-radius: 999px;
+  flex: none; margin: 0 2px; padding: 0 5px; border: 1px solid color-mix(in srgb, var(--err) 60%, transparent); border-radius: 999px;
   font: var(--w-semi) 10px/14px var(--sans); color: var(--err-text);
 }
 .cd-fallback-line { margin: var(--sp-1) 0 0; font: var(--w-reg) var(--t-sm)/1.35 var(--sans); color: var(--muted); overflow-wrap: anywhere; }

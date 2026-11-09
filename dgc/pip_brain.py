@@ -291,7 +291,7 @@ def codex_catalog(launch: dict, folder: Path) -> Path:
             catalog = value
             break
     if catalog is None:
-        raise RegistryError("model_failed", "Codex didn't list its models, so the Pip's run didn't start.")
+        raise RegistryError("model_failed", "Codex didn't list its models, so it couldn't start.")   # a chat's or a Pip's
     for model in catalog["models"]:
         if isinstance(model, dict):
             model.update(CATALOG_OFF)
@@ -680,6 +680,9 @@ class Turn:
                 stdin = text
                 env = child_env(self.launch, tools.env())
             agent._activity("waiting", "Waiting for " + self.engine.short_label)
+            start = getattr(agent.ui, "trace_model_start", None)
+            if callable(start):
+                start()                            # its answer is a round in the run's Trace (a fallback's, after a switch)
             # Same process group as the worker: when the controller stops the run, the CLI stops with it.
             self.proc = subprocess.Popen(argv, cwd=str(folder), env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                          stderr=subprocess.STDOUT, bufsize=0)
@@ -727,6 +730,10 @@ class Turn:
                 agent._record_usage(self.usage, "user_turn")
             except Exception:                      # noqa: BLE001
                 pass
+        end = getattr(agent.ui, "trace_usage", None)
+        if callable(end) and self.proc is not None:
+            from .reply_trace import usage_tokens
+            end(usage_tokens(self.usage))          # its round ends with the tokens it reported, if it did
         said = "".join(self.said).strip()
         if self.stray:
             agent._last_turn_error = (f"{self.engine.short_label} tried to use its own {self.stray}, which a Pip can't. "
@@ -765,8 +772,8 @@ def _private_write(path: Path, data) -> None:
         handle.write(data.encode("utf-8") if isinstance(data, str) else data)
 
 
-def launch_from_env(brain: dict) -> dict:
-    raw = os.environ.get("DGC_PIP_BRAIN", "")
+def launch_from_env(brain: dict, var: str = "DGC_PIP_BRAIN") -> dict:
+    raw = os.environ.get(var, "")
     try:
         value = json.loads(raw) if raw else None
     except ValueError:

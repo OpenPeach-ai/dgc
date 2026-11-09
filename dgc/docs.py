@@ -5247,6 +5247,8 @@ Useful keys:
 - `mcp_servers`, `hooks`, `fallback_model`, `subagent_model` — extend the agent. When a fallback or
   sub-agent uses another endpoint, its transport is inferred independently instead of inheriting a
   forced main-provider mode; set `fallback_api_mode` or `subagent_api_mode` only to override that.
+  `fallback_engine` (`claude` or `codex`) makes Claude Code or Codex the fallback instead: when the main
+  model (or the other CLI) fails before it wrote or did anything, the CLI takes the turn with the whole chat.
   Lifecycle-hook batches are capped at 32 entries and one 20-second deadline, drain only a bounded
   redacted head/tail, own a process group and checkout mutation lease, and honor `/sandbox`.
 - `pips_model` — the model every Pip on Default uses, on DGC's own connection; empty (the default)

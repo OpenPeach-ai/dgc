@@ -45,8 +45,23 @@ def _model(value, field="model") -> str:
     return value
 
 
-def _choice(model, provider="") -> dict:
-    """{provider, model}: a model on DGC's own connection (provider ""), or on a saved provider; model "" is none."""
+ENGINES = ("claude", "codex")
+_ROUTED = re.compile(r"[^/\s]{1,128}/\S{1,256}\Z")
+
+
+def _choice(model, provider="", engine="", router=False) -> dict:
+    """{provider, model}: a model on DGC's own connection (provider ""), or on a saved provider; model "" is none.
+    {provider "", model, engine}: Claude Code or Codex (model "" its own default). {provider "", model, router true}: DGC
+    Router, any Pip system (model "") or "<system>/<model>"."""
+    if engine:
+        if engine not in ENGINES:
+            raise RegistryError("invalid_request", "engine must be claude or codex.")
+        return {"provider": "", "model": _model("" if model is None else model), "engine": engine}
+    if router is True:
+        routed = "" if model is None else str(model).strip()
+        if routed and not _ROUTED.fullmatch(routed):
+            raise RegistryError("invalid_request", "A DGC Router fallback is any system, or <system>/<model>.")
+        return {"provider": "", "model": routed, "router": True}
     model = _model("" if model is None else model)
     if provider is None:
         provider = ""
@@ -55,13 +70,19 @@ def _choice(model, provider="") -> dict:
     return {"provider": provider if model else "", "model": model}
 
 
+def is_set(choice) -> bool:
+    """A fallback is set: a model, Claude Code or Codex (whatever its model), or DGC Router (any system)."""
+    return bool(choice and (choice.get("model") or choice.get("engine") or choice.get("router")))
+
+
 def _read(registry, key) -> dict | None:
     try:
         row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (key,)).fetchone()
         if row is None:
             return None
         value = json.loads(row["value"])
-        return _choice(value.get("model") or "", value.get("provider") or "")
+        return _choice(value.get("model") or "", value.get("provider") or "", value.get("engine") or "",
+                       value.get("router") is True)
     except Exception:                      # noqa: BLE001 - unreadable is none
         return None
 
@@ -73,10 +94,10 @@ def pips_wide(registry) -> dict:
     return _read(registry, WIDE) or dict(NONE)
 
 
-def set_pips_wide(registry, value, actor, provider="") -> dict:
+def set_pips_wide(registry, value, actor, provider="", engine="", router=False) -> dict:
     if actor not in LOCAL:
         raise RegistryError("local_only", "The fallback model is set on this computer only.")
-    choice = _choice(value, provider)
+    choice = _choice(value, provider, engine, router)
     with registry.transaction():
         registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
                             (WIDE, json.dumps({**choice, "at": utc_now(), "by": actor})))
@@ -90,10 +111,11 @@ def start_new(db, pip_id) -> None:
         return
     try:
         value = json.loads(row[0])
-        choice = _choice(value.get("model") or "", value.get("provider") or "")
+        choice = _choice(value.get("model") or "", value.get("provider") or "", value.get("engine") or "",
+                         value.get("router") is True)
     except Exception:                      # noqa: BLE001 - unreadable starts with none
         return
-    if choice["model"]:
+    if is_set(choice):
         db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
                    (KEY + str(pip_id), json.dumps({**choice, "at": utc_now(), "by": "new-pip"})))
 
@@ -105,14 +127,14 @@ def listing(registry, pip_id) -> dict:
     return {"pip_id": pip_id, **choice, **({"on": out(registry, pip_id)} if out(registry, pip_id) else {})}
 
 
-def set_own(registry, pip_id, value, actor, provider="") -> dict:
+def set_own(registry, pip_id, value, actor, provider="", engine="", router=False) -> dict:
     """A Pip's fallback; null or "" is none. Also what new Pips start with from now on."""
     if actor not in LOCAL:
         raise RegistryError("local_only", "A Pip's fallback model is set on this computer only.")
     _pip(registry, pip_id)
-    choice = _choice(value, provider)
+    choice = _choice(value, provider, engine, router)
     with registry.transaction():
-        if choice["model"]:
+        if is_set(choice):
             registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
                                 (KEY + pip_id, json.dumps({**choice, "at": utc_now(), "by": actor})))
         else:
@@ -140,8 +162,23 @@ def for_run(registry, config, row, manifest) -> dict | None:
     choice = chosen(registry, row["pip_id"])
     model = choice["model"]
     settings = manifest.get("model_settings") if isinstance(manifest.get("model_settings"), dict) else {}
-    if not model or "router" in settings:
+    if not is_set(choice) or "router" in settings:
         return None                        # none set; DGC Router moves a run to another system itself
+    if choice.get("engine"):
+        # Claude Code or Codex (9 Nov): the controller pins its launch for the worker, as for a Pip that runs on it.
+        own = settings.get("brain") if isinstance(settings.get("brain"), dict) else {}
+        if own.get("engine") == choice["engine"] and str(own.get("model") or "") == model:
+            return None                    # its own CLI is the fallback: nothing to switch to
+        from .pip_brain import name as engine_name, route as brain_route
+        try:
+            brain = brain_route(config, {"mode": "subscription", "engine": choice["engine"], "model": model})
+        except RegistryError:
+            return None                    # not installed or signed out: no fallback, the run is as before
+        return {"brain": brain, "model": engine_name(choice["engine"]) + (f" · {model}" if model else "")}
+    if choice.get("router"):
+        # DGC Router (9 Nov): leased only when the fallback is needed, by the controller, for this run (pips.py).
+        system, _, routed = model.partition("/")
+        return {"router": {"system": system, "model": routed}, "model": "DGC Router"}
     if "brain" not in settings and settings.get("model") == model and str(settings.get("provider") or "") == choice["provider"]:
         return None                        # its own model is the fallback: nothing to switch to
     if choice["provider"]:

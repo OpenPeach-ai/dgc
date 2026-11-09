@@ -1280,11 +1280,16 @@ export function fallbackOn(value) {
     && typeof value.since === 'string' ? { model: value.model, since: value.since } : null;
 }
 export function pipBackup(value, pip) {
-  const keys = Object.keys(value || {}).sort().join();
-  if (!record(value) || !['model,pip_id,provider', 'model,on,pip_id,provider'].includes(keys) || value.pip_id !== pip
-    || !fallbackPair(value) || ('on' in value && !fallbackOn(value.on)))
+  // engine: Claude Code or Codex; router: DGC Router (9 Nov). Its model then is that CLI's, or "<system>/<model>".
+  const keys = Object.keys(value || {}).filter((k) => !['on', 'engine', 'router'].includes(k)).sort().join();
+  if (!record(value) || keys !== 'model,pip_id,provider' || value.pip_id !== pip
+    || typeof value.model !== 'string' || value.model.length > 400 || typeof value.provider !== 'string' || !BACKUP_PROVIDER.test(value.provider)
+    || ('engine' in value && !['claude', 'codex'].includes(value.engine)) || ('router' in value && value.router !== true)
+    || (!('engine' in value) && !('router' in value) && !BACKUP_MODEL.test(value.model))
+    || ('on' in value && !fallbackOn(value.on)))
     throw Error('This Pip’s fallback model didn’t load. Refresh this Pip.');
-  return { pip_id: value.pip_id, provider: value.provider, model: value.model, on: 'on' in value ? fallbackOn(value.on) : null };
+  return { pip_id: value.pip_id, provider: value.provider, model: value.model, on: 'on' in value ? fallbackOn(value.on) : null,
+    ...('engine' in value ? { engine: value.engine } : {}), ...('router' in value ? { router: true } : {}) };
 }
 
 export function pipOutcomes(value, pip) {

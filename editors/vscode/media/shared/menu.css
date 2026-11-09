@@ -39,6 +39,10 @@
 /* The name keeps its width (it shrinks only when it alone is too long); the hint takes the room that is left, and is the
    one cut short. A shrink shared between them, however weighted, cut "Auto" to "A…" by half a pixel. */
 .dgc-menu .dgc-menu-label { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A long name, while its row is pointed at or focused (DgcMenu.slide): it slides to show its end, pauses, and back. */
+.dgc-menu .dgc-menu-label.is-sliding { text-overflow: clip; animation: dgc-menu-slide var(--dgc-slide-time, 3s) ease-in-out var(--dgc-slide-delay, .35s) infinite alternate both; }
+@keyframes dgc-menu-slide { 0%, 12% { text-indent: 0; } 88%, 100% { text-indent: var(--dgc-slide, 0px); } }
+@media (prefers-reduced-motion: reduce) { .dgc-menu .dgc-menu-label.is-sliding { animation: none; text-overflow: ellipsis; } }
 .dgc-menu .dgc-menu-hint {
   flex: 1 1 0%; min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font: var(--w-reg) var(--t-sm)/1.2 var(--sans); color: var(--faint); text-align: right;
@@ -68,9 +72,12 @@
   position: absolute; top: 50%; right: 2px; transform: translateY(-50%);
   display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; margin: 0;
   padding: 0; border: 0; border-radius: var(--r-row); background: transparent; color: var(--muted); cursor: pointer;
-  opacity: 0; transition: opacity var(--dur-hover) ease, background-color var(--dur-hover) ease, color var(--dur-hover) ease;
+  opacity: 0; transition: background-color var(--dur-hover) ease, color var(--dur-hover) ease;
 }
-.dgc-menu .dgc-menu-item:is(:hover, :focus-within) > .dgc-menu-more, .dgc-menu .dgc-menu-more[aria-expanded="true"] { opacity: 1; }
+/* It fades in, and goes at once: the row's room for it goes at once too, so a fade-out let the row's word slide under it
+   for a moment (seen 9 Nov). */
+.dgc-menu .dgc-menu-item:is(:hover, :focus-within) > .dgc-menu-more, .dgc-menu .dgc-menu-more[aria-expanded="true"] {
+  opacity: 1; transition: opacity var(--dur-hover) ease, background-color var(--dur-hover) ease, color var(--dur-hover) ease; }
 .dgc-menu .dgc-menu-item:is(:hover, :focus-within) > .dgc-menu-row,
 .dgc-menu .dgc-menu-item:has(> .dgc-menu-more[aria-expanded="true"]) > .dgc-menu-row { padding-right: 34px; }
 .dgc-menu .dgc-menu-more:is(:hover, :focus-visible, [aria-expanded="true"]) { background: var(--wash); color: var(--text); }

@@ -70,6 +70,7 @@ export const PIPS_API_VERSION=9;
 export function mountPips(options) {
   const nativeDocument=window.document,root=options.root||nativeDocument;
   const embedded=root!==nativeDocument,owner=root.ownerDocument||nativeDocument,disposers=[];
+  if(typeof DgcMenu!=='undefined'&&DgcMenu.slide)DgcMenu.slide(root);   // a long model name slides while its row is pointed at (9 Nov)
   const remoteHost=options.host==='remote';
   let disposed=false,motionPaused=false;
   // A notice says what just happened, then goes: longer ones stay long enough to read. Errors stay, and so does a
@@ -570,7 +571,7 @@ function chatModelListMarkup(selected,locked,reviewed,current,subs,usage){
   ...subs.map(x=>({key:'subscription:'+x.engine,label:x.name}))];
  const provider=providers.some(x=>x.key===S.modelProviderChoice)?S.modelProviderChoice:currentChatProvider(selected);
  // The rows as Work's: a check where it is chosen, the name beside it.
- const row=(attr,value,label,on,sub='',off=locked,after='')=>`<button type="button" class="composer-model-option dgc-menu-row" role="option" ${attr}="${esc(value)}" aria-selected="${on}"${off?' disabled':''}><span class="composer-model-check dgc-menu-icon">${on?composerIcon('check'):''}</span><span class="composer-model-row">${esc(label)}${sub?`<small>${esc(sub)}</small>`:''}</span>${after}</button>`;
+ const row=(attr,value,label,on,sub='',off=locked,after='')=>`<button type="button" class="composer-model-option dgc-menu-row" role="option" ${attr}="${esc(value)}" aria-selected="${on}"${off?' disabled':''}><span class="composer-model-check dgc-menu-icon">${on?composerIcon('check'):''}</span><span class="composer-model-row dgc-menu-label" title="${esc(label)}">${esc(label)}${sub?`<small>${esc(sub)}</small>`:''}</span>${after}</button>`;
  // D14: a row DGC runs itself (your connection or a saved provider) has a ⋯ with Use as main and Use as fallback, and
 // small Main and Fallback words; a subscription, the Router and Default have neither.
  const fallback=fallbackValue(pipFallback()),pills=(value,on)=>fallback?(on?DgcMenu.pill('Main','main'):'')+(value===fallback&&!on?DgcMenu.pill('Fallback','fallback'):''):'';
@@ -3684,14 +3685,20 @@ async function loadPipBackup(){
   pipBackupState.pip=pip;pipBackupState.value=value;pipBackupState.error='';render();}
  catch(error){if(token===scope()&&sequence===pipBackupState.seq){pipBackupState.error=errorText(error);render();}}
 }
-const fallbackValue=v=>v&&v.model?(v.provider?`provider:${v.provider}:${v.model}`:`model:${v.model}`):'';
-const fallbackChoice=value=>{const m=/^provider:(provider_[a-f0-9]{32}):(.+)$/.exec(value);return m?{provider:m[1],model:m[2]}:value.startsWith('model:')?{provider:'',model:value.slice(6)}:null;};
+// D14: a fallback's row value both ways. A model DGC runs (its connection or a saved provider), Claude Code or Codex
+// (9 Nov), or DGC Router (any system, or one system's model); Default follows, so it is never one.
+const fallbackValue=v=>!v?'':v.engine?`subscription:${v.engine}${v.model?':'+v.model:''}`:v.router?(v.model?`router:${v.model}`:'router')
+ :v.model?(v.provider?`provider:${v.provider}:${v.model}`:`model:${v.model}`):'';
+const fallbackChoice=value=>{const m=/^provider:(provider_[a-f0-9]{32}):(.+)$/.exec(value),sub=/^subscription:(claude|codex)(?::(.+))?$/.exec(value);
+ return m?{provider:m[1],model:m[2]}:sub?{engine:sub[1],model:sub[2]||''}:value==='router'?{router:true,model:''}
+  :value.startsWith('router:')?{router:true,model:value.slice(7)}:value.startsWith('model:')?{provider:'',model:value.slice(6)}:null;};
 const pipFallback=()=>S.apiVersion>=76&&!remoteHost&&pipBackupState.pip===S.selected?pipBackupState.value:null;
 async function setPipBackup(choice){
  if(pipBackupState.busy||!usable()||S.apiVersion<76)return;const token=scope(),pip=S.selected,name=S.pip?.name||'It';pipBackupState.busy=true;pipBackupState.seq++;S.fallbackMenu='';render();
- try{const value=pipBackup((await send('set_pip_backup',{pip_id:pip,model:choice?.model||'',provider:choice?.provider||''})).backup,pip);if(token!==scope()||S.selected!==pip)return;pipBackupState.pip=pip;pipBackupState.value=value;pipBackupState.error='';
-  if(!value.model)S.fallbackOn=null;
-  S.notice=value.model?`${name} carries on with ${value.model} when its own model doesn\u2019t answer.`:`${name} has no fallback model: it stops when its model doesn\u2019t answer.`;}
+ try{const value=pipBackup((await send('set_pip_backup',{pip_id:pip,model:choice?.model||'',provider:choice?.provider||'',...(choice?.engine?{engine:choice.engine}:{}),...(choice?.router?{router:true}:{})})).backup,pip);if(token!==scope()||S.selected!==pip)return;pipBackupState.pip=pip;pipBackupState.value=value;pipBackupState.error='';
+  const set=!!(value.model||value.engine||value.router),shown=value.engine?modelLabel({mode:'subscription',engine:value.engine,model:value.model}):value.router?(value.model||'DGC Router'):value.model;
+  if(!set)S.fallbackOn=null;
+  S.notice=set?`${name} carries on with ${shown} when its own model doesn\u2019t answer.`:`${name} has no fallback model: it stops when its model doesn\u2019t answer.`;}
  catch(error){if(token===scope()){pipBackupState.error=errorText(error);S.notice=pipBackupState.error;}}
  finally{pipBackupState.busy=false;if(token===scope())render();}
 }

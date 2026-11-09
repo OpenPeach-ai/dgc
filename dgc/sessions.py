@@ -258,9 +258,13 @@ def _clean_subscription_route(value) -> dict[str, str] | None:
 
 
 def _clean_fallback_route(value) -> dict[str, str] | None:
-    """A Work chat's fallback model (D14): its model, its address ("" its own model's) and API; never its key."""
+    """A Work chat's fallback model (D14): its model, its address ("" its own model's) and API; never its key. Or
+    Claude Code or Codex (engine "claude" or "codex"); a file saved before there was one has no engine."""
     from urllib.parse import urlsplit
-    if not isinstance(value, dict) or set(value) != {"model", "base_url", "api_mode"}:
+    if not isinstance(value, dict) or set(value) not in ({"model", "base_url", "api_mode"},
+                                                         {"model", "base_url", "api_mode", "engine"}):
+        return None
+    if value.get("engine", "") not in ("", "claude", "codex"):
         return None
     model, base_url, api_mode = (value.get(key) for key in ("model", "base_url", "api_mode"))
     if (not all(isinstance(part, str) for part in (model, base_url, api_mode)) or len(model) > 256 or len(base_url) > 2048
@@ -276,7 +280,7 @@ def _clean_fallback_route(value) -> dict[str, str] | None:
             parsed.port
         except ValueError:
             return None
-    return {"model": model, "base_url": base_url, "api_mode": api_mode}
+    return {"model": model, "base_url": base_url, "api_mode": api_mode, "engine": value.get("engine", "")}
 
 
 def _clean_native_route(value) -> dict[str, str] | None:

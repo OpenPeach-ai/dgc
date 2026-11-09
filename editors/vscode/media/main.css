@@ -1452,7 +1452,9 @@ body.vscode-light .rail-pop { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
 /* `.fbtn.mode` (210px) outranks `.model-control`, so its 100% never applied: the button kept 210px
    inside a picker that had shrunk for the agents pill, and the model name ran under Queue. Both caps. */
 .fbtn.mode.model-control { max-width: min(210px, 100%); }
-.model-control .model-copy { min-width: 0; display: flex; align-items: center; gap: var(--sp-1); }
+/* One text baseline for the name, a fallback's word and the reasoning: centred boxes of different sizes left an 11px
+   profile on a half pixel, a pixel below the 12px name. */
+.model-control .model-copy { min-width: 0; display: flex; align-items: baseline; gap: var(--sp-1); }
 .model-control #modelname { min-width: 0; color: var(--text); font: var(--w-med) var(--t-sm)/1 var(--sans); }
 /* The reasoning profile is the short half of the label, so it keeps its width and the model name
    gives way first -- "qwen3.8:27b-instruct… xhigh" reads; "qwen3.8:27b-instruct… Xhi…" does not. */
@@ -3519,8 +3521,9 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .mod-bar-part { outl
    when something isn't answering (tokens.css --err), on its soft wash, with the word. */
 #btn-model.on-fallback { background: var(--err-soft); color: var(--err-text); }
 #btn-model.on-fallback #modelname, #btn-model.on-fallback #effortname { color: var(--err-text); }
+#btn-model.on-fallback .model-chevron { color: var(--err-text); opacity: .7; }
 #btn-model .model-fallback-word {
-  flex: none; margin-left: 5px; padding: 0 5px; border: 1px solid color-mix(in srgb, var(--err) 60%, transparent);
+  flex: none; margin: 0 2px; padding: 0 5px; border: 1px solid color-mix(in srgb, var(--err) 60%, transparent);
   border-radius: 999px; font: var(--w-semi) 10px/14px var(--sans); color: var(--err-text);
 }
 /* A provider row's Fallback word sits before its chevron. */

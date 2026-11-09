@@ -20,8 +20,8 @@ function fixture(version) {
 }
 
 test('a backup model for Pips: refused before API 76, then sent', async () => {
-  assert.deepEqual([...COMMAND_FIELDS.set_pips_backup], ['model', 'provider']);
-  assert.deepEqual([...COMMAND_FIELDS.set_pip_backup], ['pip_id', 'model', 'provider']);
+  assert.deepEqual([...COMMAND_FIELDS.set_pips_backup], ['model', 'provider', 'engine', 'router']);
+  assert.deepEqual([...COMMAND_FIELDS.set_pip_backup], ['pip_id', 'model', 'provider', 'engine', 'router']);
   const old = fixture(75);
   await assert.rejects(old.session.pips.read('get_pips_backup', {}), (e) => e instanceof DGCUnsupportedError && /API 76/.test(e.message));
   await assert.rejects(old.session.pips.mutate('set_pip_backup', { pip_id: PIP, model: null }, { approved: true }), DGCUnsupportedError);

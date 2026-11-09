@@ -443,6 +443,19 @@ class PipWorker(unittest.TestCase):
         long = reply_trace.failed_why(RuntimeError("word " * 40))
         self.assertTrue(len(long) <= 80 and long.endswith("word…"), long)
 
+    def test_a_failure_said_only_in_words_reads_the_same_and_names_no_address(self):
+        # A Pip's fallback has its own model's error as text, with no measured cause (seen live, 9 Nov): its Trace
+        # said "HTTP 503 from http://127.0.0.1:11998/v1/chat/completions after 4 trie".
+        said = 'HTTP 503 from http://127.0.0.1:11998/v1/chat/completions after 4 tries: {"error": {"message": "x"}}'
+        self.assertEqual(reply_trace.failed_why(said), "unavailable (503)")
+        self.assertEqual(reply_trace.failed_why("HTTP 429 from https://api.example/v1 after 2 tries"), "rate limited (429)")
+        self.assertEqual(reply_trace.failed_why("HTTP 401 from https://api.example/v1"), "key rejected (401)")
+        self.assertEqual(reply_trace.failed_why("HTTP 429: You've hit your usage limit"), "HTTP 429: You've hit your usage limit",
+                         "a provider's own words say more than its status")
+        refused = reply_trace.failed_why("cannot connect to http://127.0.0.1:45161/v1 — is your local LLM server running?")
+        self.assertNotIn("127.0.0.1", refused)
+        self.assertNotIn("http", refused)
+
     def test_events_that_measure_nothing_change_nothing(self):
         recorder = reply_trace.RunRecorder()
         recorder.feed("progress", {"kind": "progress"}, None)

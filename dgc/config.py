@@ -564,6 +564,7 @@ DEFAULTS: dict = {
     "fallback_base_url": "",                    # optional endpoint for the fallback (default: same)
     "fallback_api_key": "",                     # credential for another fallback endpoint
     "fallback_api_mode": "",                    # transport override; empty=infer for another endpoint
+    "fallback_engine": "",                      # D14: Claude Code ("claude") or Codex ("codex") as a Work chat's fallback
     "subagent_model": "",                       # model for `task` sub-agents (empty: inherit main)
     "subagent_base_url": "",                    # host for sub-agents (empty: inherit main host)
     "subagent_api_key": "",                     # key for another sub-agent endpoint
@@ -1418,7 +1419,7 @@ _SESSION_KEYS = frozenset({
     "think_budget_tokens", "max_tokens", "temperature", "top_p", "top_k", "min_p",
     "tool_profile", "tool_profile_chosen", "subscription_engine", "subscription_model",
     "subscription_effort", "provider_state", "prompt_cache", "prompt_cache_key", "prompt_cache_ttl",
-    "provider_capabilities", "fallback_model", "fallback_base_url", "fallback_api_mode",
+    "provider_capabilities", "fallback_model", "fallback_base_url", "fallback_api_mode", "fallback_engine",
     "subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_context_size", "subagent_thinking",
 })
 
@@ -2026,8 +2027,8 @@ class Config:
         route = _clean_fallback_route(saved)
         defaults = _read_config_payload(USER_CONFIG) or {}
         default_route = _clean_fallback_route({key: str(defaults.get(f"fallback_{key}", DEFAULTS[f"fallback_{key}"]) or "")
-                                               for key in ("model", "base_url", "api_mode")})
-        route = route or default_route or {"model": "", "base_url": "", "api_mode": ""}
+                                               for key in ("model", "base_url", "api_mode", "engine")})
+        route = route or default_route or {"model": "", "base_url": "", "api_mode": "", "engine": ""}
         identity = _provider_secret_identity({**self.data, "fallback_base_url": route["base_url"]}, "fallback_api_key")
         secret = ""
         if default_route and route["base_url"] == default_route["base_url"]:
@@ -2042,7 +2043,7 @@ class Config:
             current = self.data.get("fallback_api_key")
             if isinstance(current, str):
                 secret = current
-        for key in ("model", "base_url", "api_mode"):
+        for key in ("model", "base_url", "api_mode", "engine"):
             self.hold(f"fallback_{key}", route[key])
         self.hold("fallback_api_key", secret)
         bindings = self.__dict__.setdefault("_provider_secret_identity", {})

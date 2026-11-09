@@ -113,6 +113,12 @@ const WORK_READ_ONLY_REFUSES = new Set(["prompt", "slash", "slashText", "cancel"
   "startGoal", "updateGoal", "clearGoal", "resumeGoal", "drop_uris", "stopAgent", "stopMonitor", "restartMonitor",
   "stopBackgroundShell", "stopTroupe", "stopArtifact", "startPipFix", "undoPipFix", "backgroundNow", "continueAgent"]);
 /** The Sessions home's last backend, by its chat's session: a reload asks for it back (it may be writing a ChatDGC reply). */
+// The opt-in fields of the `config` event this editor reads (an older editor never sees them; every supported CLI takes
+// `fields` and ignores names it doesn't know). Each get_config that names fields replaces the ones asked before, so
+// Settings and Work's model menu ask for the same list. fallback_engine: Claude Code or Codex as a session's fallback.
+const CONFIG_EVENT_FIELDS = ["search_url", "search_api_key_set", "chatdgc_about", "chatdgc_style", "chatdgc_personality",
+  "chatdgc_window", "memory", "chatdgc_web", "chatdgc_followups", "turn_token_budget", "subagent_context_size",
+  "fallback_engine"];
 const HOME_BACKEND_KEY = "dgc.homeBackend.v1";
 /** The folders Continue in Work opened Work sessions in (this workspace's): a reloaded tab comes back in one unasked. */
 const WORK_FOLDERS_KEY = "dgc.workFolders.v1";
@@ -667,11 +673,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private autoModePrompt?: { id: string; settle(accepted: boolean): void };
   private correlatedStateRequests = false;
   private routeState: {
-    subagentBaseUrl: string; fallbackBaseUrl: string; fallbackModel: string;
+    subagentBaseUrl: string; fallbackBaseUrl: string; fallbackModel: string; fallbackEngine: string;
     nativeModel: string; nativeThink: string;
     subscriptionEngine: string; subscriptionModel: string; subscriptionEffort: string;
     subscriptionEngines: any[];
-  } = { subagentBaseUrl: "", fallbackBaseUrl: "", fallbackModel: "", nativeModel: "", nativeThink: "off",
+  } = { subagentBaseUrl: "", fallbackBaseUrl: "", fallbackModel: "", fallbackEngine: "", nativeModel: "", nativeThink: "off",
         subscriptionEngine: "", subscriptionModel: "", subscriptionEffort: "",
         subscriptionEngines: [] };
   private behaviorState = { showReasoning: true, thinkingInline: true, preserveThinking: false, codeAction: false };
@@ -1277,7 +1283,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.sb.show();
       return;
     }
-    const profile = this.state.ultra ? "Ultra" : this.state.think;
+    // A CLI's own effort is "Default", as its model button says, not "off" (9 Nov).
+    const profile = this.state.ultra ? "Ultra" : this.state.subscriptionEngine && this.state.think === "off" ? "Default" : this.state.think;
     // With no tab on screen it describes what a new chat would use: the side bar's own chat started on whatever was the
     // default when the window opened, and the saved default moves on without it.
     const saved = this.tab ? undefined : listProfiles(this.context).find((row) => row.id === defaultProfileId(this.context));
@@ -2975,9 +2982,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const info = this.activeSubscription();
     const short = String(info?.label || engine).split(" (")[0];
     const cliDefault = String(info?.cli_default_model || "");
+    // Its own default model is named by the CLI alone: the reasoning beside it already says "Default" (9 Nov).
     this.state.model = this.routeState.subscriptionModel
       || (cliDefault ? `${short} · ${cliDefault}${info?.cli_default_listed === false ? " (not listed)" : ""}`
-                     : `${short} default`);
+                     : short);
     this.state.think = this.routeState.subscriptionEffort || "off";
   }
 
@@ -4364,6 +4372,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.routeState.subagentBaseUrl = String(ev.subagent_base_url || "");
         this.routeState.fallbackBaseUrl = String(ev.fallback_base_url || "");
         this.routeState.fallbackModel = String(ev.fallback_model || "");
+        // D14: Claude Code or Codex as its fallback, an opt-in field (CONFIG_EVENT_FIELDS): absent, it isn't known here.
+        if (typeof ev.fallback_engine === "string") this.routeState.fallbackEngine = ev.fallback_engine;
         // D14: a session's fallback on another saved provider, its key gone with a reload: supplied again from where
         // the editor keeps keys, found by the provider's address. (A session file never holds a key.)
         if (ev.fallback_base_url && ev.fallback_api_key_set === false) void this.resupplyFallbackKey(String(ev.fallback_base_url));
@@ -7733,8 +7743,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // slider always belong to the same provider that will run the next prompt.
     try {
       const ev: any = await this.requestState(this.ensureBackend(), "models-route",
-        { type: "get_config" }, "config", 10000);
+        { type: "get_config", fields: CONFIG_EVENT_FIELDS }, "config", 10000);
       this.routeState.nativeModel = String(ev.model || this.routeState.nativeModel);
+      if (typeof ev.fallback_engine === "string") this.routeState.fallbackEngine = ev.fallback_engine;
       this.routeState.nativeThink = String(ev.think || this.routeState.nativeThink);
       this.routeState.subscriptionEngine = String(ev.subscription_engine || "");
       this.routeState.subscriptionModel = String(ev.subscription_model || "");
@@ -7762,13 +7773,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       && row.engine === this.routeState.subscriptionEngine);
     // allModels: choosing it lists what its host offers, and the session moves only once a model is chosen from them.
     // kind, base_url and model: where a row's Fallback word goes, and which rows can be one (D14).
-    const routes: { key: string; label: string; allModels?: boolean; kind?: string; base_url?: string; model?: string }[] = saved.map(row => ({ key: row.id, label: row.name,
-      kind: row.kind, ...(row.kind !== "subscription" ? { base_url: row.base_url, model: startingModel(this.context, row) } : {}),
+    const routes: { key: string; label: string; allModels?: boolean; kind?: string; base_url?: string; model?: string; engine?: string }[] = saved.map(row => ({ key: row.id, label: row.name,
+      kind: row.kind, ...(row.kind !== "subscription" ? { base_url: row.base_url, model: startingModel(this.context, row) } : { engine: String(row.engine || "") }),
       ...(row.kind !== "subscription" && !startingModel(this.context, row) ? { allModels: true } : {}) }));
     if (!this.routeState.subscriptionEngine && !currentProfile) {
       routes.unshift({ key: "native", label: `Current host · ${nativeLabel}` });
     } else if (this.routeState.subscriptionEngine && !currentSubscription) {
-      routes.unshift({ key: this.routeState.subscriptionEngine,
+      routes.unshift({ key: this.routeState.subscriptionEngine, kind: "subscription", engine: this.routeState.subscriptionEngine,
                       label: String(subscription?.label || this.routeState.subscriptionEngine) });
     }
     const currentRouteKey = currentSubscription?.id || this.routeState.subscriptionEngine || currentProfile?.id || "native";
@@ -7799,29 +7810,34 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /** This Work session's fallback (D14), for its model menu: offered only by a CLI that keeps one per session. */
+  /** This Work session's fallback (D14), for its model menu: offered only by a CLI that keeps one per session. engine:
+   *  Claude Code ("claude") or Codex ("codex") as its fallback. */
   private fallbackView() {
     return { offered: (this.lastReadyEvent?.capabilities as any)?.model_fallback === 1,
              model: this.routeState.fallbackModel || "", base_url: this.routeState.fallbackBaseUrl || "",
-             route_base: this.state.baseUrl || "" };
+             engine: this.routeState.fallbackEngine || "", route_base: this.state.baseUrl || "" };
   }
 
   /** Use as fallback (or Stop using as fallback) from Work's model menu: this session only. A saved provider's own
-   *  address, API and key go with it; a model on the session's own host needs none. */
+   *  address, API and key go with it; a model on the session's own host needs none; Claude Code or Codex is named by
+   *  its CLI (fallback_engine), on its own default model. */
   private async setSessionFallback(provider: string, model: string): Promise<void> {
     const be = this.backend;
     if (!be) return;
     try {
       if ((this.lastReadyEvent?.capabilities as any)?.model_fallback !== 1) throw new Error("Update DGC CLI to give a Work session a fallback model.");
-      let values: Record<string, string> = { fallback_model: model, fallback_base_url: "", fallback_api_mode: "", fallback_api_key: "" };
-      if (model && provider.startsWith("provider_")) {
+      let values: Record<string, string> = { fallback_model: model, fallback_base_url: "", fallback_api_mode: "", fallback_api_key: "", fallback_engine: "" };
+      let engine = provider === "claude" || provider === "codex" ? provider : "";
+      if (provider.startsWith("provider_") || provider.startsWith("subscription_")) {
         const { route, api_key } = await profileCredential(this.context, provider);
-        if (route.kind === "subscription") throw new Error("Claude Code and Codex can't be a fallback.");
-        values = { fallback_model: model, fallback_base_url: route.base_url, fallback_api_mode: route.api_mode, fallback_api_key: api_key };
+        if (route.kind === "subscription") engine = String(route.engine || "");
+        else if (model) values = { fallback_model: model, fallback_base_url: route.base_url, fallback_api_mode: route.api_mode, fallback_api_key: api_key, fallback_engine: "" };
       }
+      if (engine) values = { fallback_model: "", fallback_base_url: "", fallback_api_mode: "", fallback_api_key: "", fallback_engine: engine };
       be.send(this.stateCommand("fallback", { type: "set_config", scope: "session", values }));
       this.routeState.fallbackModel = values.fallback_model;
       this.routeState.fallbackBaseUrl = values.fallback_base_url;
+      this.routeState.fallbackEngine = values.fallback_engine;
     } catch (error) {
       void vscode.window.showWarningMessage(error instanceof Error && error.message ? error.message : "DGC could not set this fallback.");
     }
@@ -8391,12 +8407,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (adopted) this.savedProvidersChanged();
     });
     const be = this.ensureBackend();
-    // The web search's address and whether its key is saved are opt-in fields (an older editor never
-    // sees them); every supported CLI takes `fields` and ignores names it doesn't know.
+    // The web search's address and whether its key is saved are opt-in fields (CONFIG_EVENT_FIELDS).
     be.send({ type: "get_config", request_id: this.nextRequestId("config-read"),
-              fields: ["search_url", "search_api_key_set", "chatdgc_about", "chatdgc_style", "chatdgc_personality",
-                       "chatdgc_window", "memory", "chatdgc_web", "chatdgc_followups", "turn_token_budget",
-                       "subagent_context_size", "cache_settings", "pips_settings", "model_wait_settings",
+              fields: [...CONFIG_EVENT_FIELDS, "cache_settings", "pips_settings", "model_wait_settings",
                        "subagent_settings"] });
     this.sendPluginCommand({ type: "list_plugins", request_id: this.nextRequestId("plugins") });
     this.sendPluginCommand({ type: "list_plugin_marketplaces", request_id: this.nextRequestId("marketplaces") });

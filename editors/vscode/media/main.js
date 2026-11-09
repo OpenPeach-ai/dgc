@@ -1725,12 +1725,13 @@
     fbOpen = "";
     renderProviderModels(lastModelMenu);
   }
-  // D14: this session's fallback. A model DGC runs itself (this host's, or a saved provider's) has a ⋯ with Use as main
-  // and Use as fallback; once one is set, Main and Fallback sit at the rows' right end. Claude Code, Codex, DGC's own
-  // Current host row and an All models provider row have no ⋯ (the last two name no one model).
+  // D14: this session's fallback. A model DGC runs itself (this host's, or a saved provider's), Claude Code and Codex
+  // have a ⋯ with Use as main and Use as fallback; once one is set, Main and Fallback sit at the rows' right end. DGC's
+  // own Current host row and an All models provider row have no ⋯ (they name no one model), and neither have a CLI's
+  // own models (a CLI is a fallback on its default model).
   let fbOpen = "", fallbackActive = "", lastAllListed = null;
   const fbView = () => lastModelMenu?.fallback || { offered: false };
-  const fbPills = (isMain, isFallback) => (fbView().model ? (isMain ? DgcMenu.pill("Main", "main") : isFallback ? DgcMenu.pill("Fallback", "fallback") : "") : "");
+  const fbPills = (isMain, isFallback) => (fbView().model || fbView().engine ? (isMain ? DgcMenu.pill("Main", "main") : isFallback ? DgcMenu.pill("Fallback", "fallback") : "") : "");
   function fbItem(key, rowHtml, label, isMain, isFallback) {
     if (!fbView().offered) return rowHtml;
     const open = fbOpen === key;
@@ -1743,7 +1744,11 @@
   function fbTarget(key) {
     const [kind, at] = [key[0], Number(key.slice(2))];
     if (kind === "m") return { provider: "", model: lastModelMenu.ids[at], base_url: "" };
-    if (kind === "p") { const row = (lastModelMenu.routes || [])[at]; return { provider: row.key, model: row.model, base_url: row.base_url }; }
+    if (kind === "p") {
+      const row = (lastModelMenu.routes || [])[at];
+      if (row.kind === "subscription") return { provider: row.key, model: "", base_url: "", engine: row.engine || row.key };
+      return { provider: row.key, model: row.model, base_url: row.base_url };
+    }
     return { provider: allModelsStep?.key, model: (lastAllListed?.ids || [])[at], base_url: allModelsStep?.base_url || "" };
   }
   function fbRedraw(key, focusChoice) {
@@ -1765,10 +1770,11 @@
     mm.querySelectorAll("[data-fb-set]").forEach((button) => button.onclick = (event) => {
       event.stopPropagation();
       const key = button.dataset.fbSet, target = fbTarget(key), view = fbView();
-      const already = view.model && view.model === target.model && (view.base_url || "") === (target.base_url || "") ;
+      const already = target.engine ? view.engine === target.engine
+        : !!view.model && view.model === target.model && (view.base_url || "") === (target.base_url || "");
       const chosen = already ? { provider: "", model: "", base_url: "" } : target;
       vscode.postMessage({ type: "setFallback", provider: chosen.provider || "", model: chosen.model || "" });
-      lastModelMenu.fallback = { ...view, model: chosen.model || "", base_url: chosen.base_url || "" };
+      lastModelMenu.fallback = { ...view, model: chosen.model || "", base_url: chosen.base_url || "", engine: chosen.engine || "" };
       fbOpen = "";
       fbRedraw(key, false);
     });
@@ -1786,9 +1792,12 @@
         const selected = row.key === currentRouteKey;
         const note = row.installed === false ? " · install CLI first"
           : row.auth_state === "signed_out" ? " · sign in first" : "";
-        const fb = fbView(), isFallback = !!fb.model && !!row.model && fb.model === row.model && fb.base_url === row.base_url && !selected;
-        const html = `<button type="button" role="menuitemradio" aria-checked="${selected}" class="mrow dgc-menu-row${selected ? " sel" : ""}" data-provider-i="${i}"><span class="mi dgc-menu-icon ${selected ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(String(row.label || row.key) + note)}</span>${fbPills(selected, isFallback)}<span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`;
-        const can = row.kind && row.kind !== "subscription" && !row.allModels && row.key !== "native" && !!row.model;
+        const fb = fbView(), engine = row.kind === "subscription" ? String(row.engine || row.key) : "";
+        const cli = engine === "claude" || engine === "codex" ? engine : "";
+        const isFallback = !selected && (cli ? !!fb.engine && fb.engine === cli
+          : !!fb.model && !!row.model && fb.model === row.model && fb.base_url === row.base_url);
+        const html = `<button type="button" role="menuitemradio" aria-checked="${selected}" class="mrow dgc-menu-row${selected ? " sel" : ""}" data-provider-i="${i}"><span class="mi dgc-menu-icon ${selected ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span class="dgc-menu-label" title="${esc(String(row.label || row.key) + note)}">${esc(String(row.label || row.key) + note)}</span>${fbPills(selected, isFallback)}<span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`;
+        const can = !!cli || (row.kind && row.kind !== "subscription" && !row.allModels && row.key !== "native" && !!row.model);
         return can ? fbItem(`p:${i}`, html, String(row.label || row.key), selected, isFallback) : html;
       }).join("")
       + `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-manage-providers="1"><span class="mi dgc-menu-icon codicon codicon-add" aria-hidden="true"></span><span>Add provider in Settings…</span></button></div>`;
@@ -1828,7 +1837,7 @@
     options.innerHTML = `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-provider-back="1"><span class="mi dgc-menu-icon codicon codicon-arrow-left" aria-hidden="true"></span><span>Providers</span></button>`
       + `<div class="mhead dgc-menu-head"><span>${esc(row.label)} model</span></div><div class="model-list-scroll">${wait}`
       + ids.map((id, i) => { const fb = fbView(), isFallback = !!fb.model && fb.model === id && fb.base_url === row.base_url;
-        return fbItem(`a:${i}`, `<button type="button" role="menuitemradio" aria-checked="false" class="mrow dgc-menu-row" data-provider-model="${i}"><span class="mi dgc-menu-icon" aria-hidden="true"></span><span>${esc(id)}</span>${fbPills(false, isFallback)}</button>`, id, false, isFallback); }).join("")
+        return fbItem(`a:${i}`, `<button type="button" role="menuitemradio" aria-checked="false" class="mrow dgc-menu-row" data-provider-model="${i}"><span class="mi dgc-menu-icon" aria-hidden="true"></span><span class="dgc-menu-label" title="${esc(id)}">${esc(id)}</span>${fbPills(false, isFallback)}</button>`, id, false, isFallback); }).join("")
       + (listed ? `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-provider-typed="1"><span class="mi dgc-menu-icon codicon codicon-edit" aria-hidden="true"></span><span>Enter another model…</span></button>` : "")
       + `</div>`;
     options.hidden = false;
@@ -1850,8 +1859,8 @@
     const back = `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-provider-back="1"><span class="mi dgc-menu-icon codicon codicon-arrow-left" aria-hidden="true"></span><span>Providers</span></button>`;
     if (subscription) {
       mm.innerHTML = profile + `<div class="mhead dgc-menu-head"><span>${esc(label || "Subscription")} model</span></div>`
-        + `<button type="button" role="menuitemradio" aria-checked="${!current}" class="mrow dgc-menu-row${!current ? " sel" : ""}" data-default="1"${cliDefaultListed === false ? " disabled" : ""}><span class="mi dgc-menu-icon ${!current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(cliDefaultModel ? `CLI default · ${cliDefaultModel}${cliDefaultListed === false ? " (not listed)" : ""}` : "CLI default")}</span></button>`
-        + ids.map((id, i) => `<button type="button" role="menuitemradio" aria-checked="${id === current}" class="mrow dgc-menu-row${id === current ? " sel" : ""}" data-i="${i}"><span class="mi dgc-menu-icon ${id === current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(id)}</span></button>`).join("")
+        + `<button type="button" role="menuitemradio" aria-checked="${!current}" class="mrow dgc-menu-row${!current ? " sel" : ""}" data-default="1"${cliDefaultListed === false ? " disabled" : ""}><span class="mi dgc-menu-icon ${!current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span class="dgc-menu-label" title="${esc(cliDefaultModel ? `CLI default · ${cliDefaultModel}${cliDefaultListed === false ? " (not listed)" : ""}` : "CLI default")}">${esc(cliDefaultModel ? `CLI default · ${cliDefaultModel}${cliDefaultListed === false ? " (not listed)" : ""}` : "CLI default")}</span></button>`
+        + ids.map((id, i) => `<button type="button" role="menuitemradio" aria-checked="${id === current}" class="mrow dgc-menu-row${id === current ? " sel" : ""}" data-i="${i}"><span class="mi dgc-menu-icon ${id === current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span class="dgc-menu-label" title="${esc(id)}">${esc(id)}</span></button>`).join("")
         + `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-custom="1"><span class="mi dgc-menu-icon codicon codicon-edit" aria-hidden="true"></span><span>Enter another model…</span></button>`;
       bindProfiles(mm);
       mm.querySelector(".model-options").insertAdjacentHTML("afterbegin", back);
@@ -1875,7 +1884,7 @@
     const fb = fbView(), ownHost = (base) => !base || base === fb.route_base;
     mm.innerHTML = profile + `<div class="mhead dgc-menu-head"><span>Model</span></div>` +
       ids.map((id, i) => { const isFallback = !!fb.model && fb.model === id && ownHost(fb.base_url) && id !== current;
-        return fbItem(`m:${i}`, `<button type="button" role="menuitemradio" aria-checked="${id === current}" class="mrow dgc-menu-row${id === current ? " sel" : ""}" data-i="${i}"><span class="mi dgc-menu-icon ${id === current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(id)}</span>${fbPills(id === current, isFallback)}</button>`, id, id === current, isFallback); }).join("");
+        return fbItem(`m:${i}`, `<button type="button" role="menuitemradio" aria-checked="${id === current}" class="mrow dgc-menu-row${id === current ? " sel" : ""}" data-i="${i}"><span class="mi dgc-menu-icon ${id === current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span class="dgc-menu-label" title="${esc(id)}">${esc(id)}</span>${fbPills(id === current, isFallback)}</button>`, id, id === current, isFallback); }).join("");
     bindProfiles(mm);
     mm.querySelector(".model-options").insertAdjacentHTML("afterbegin", back);
     mm.querySelector(".model-summary")?.click();
@@ -1926,6 +1935,7 @@
   DgcMenu.keys($("modemenu"), { close: hideModeMenu, trigger: $("btn-mode"), rows: ROWS });
   DgcMenu.keys($("outputmenu"), { close: hideOutputMenu, trigger: $("btn-output"), rows: ROWS });
   DgcMenu.keys($("modelmenu"), { close: hideModelMenu, trigger: $("btn-model"), rows: ROWS });
+  DgcMenu.slide($("modelmenu"));     // a long model or provider name slides while its row is pointed at (9 Nov)
 
   // animated DGC mark — the three stripes light up one-by-one, hold all three,
   // then repeat (CSS-driven, ~1.2s loop, single purple). Replaces the old braille
@@ -2603,6 +2613,8 @@
       const delay = instant || Date.now() - warm < TIP_WARM_MS ? 0 : TIP_DELAY_MS;
       timer = setTimeout(() => {
         if (target !== el0 || !el0.isConnected) return;
+        // A long name sliding in a menu shows its whole self (DgcMenu.slide): a label would only cover the row above.
+        if (el0.classList.contains("is-sliding")) return;
         if (native) el0.removeAttribute("title");
         paint(el0, (native || el0.dataset.tip || "").trim() || label);
       }, delay);

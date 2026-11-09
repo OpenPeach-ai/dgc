@@ -1263,7 +1263,7 @@ def _tool_transcript_errors(messages: list[dict]) -> list[str]:
 
 
 def _with_cli_steps(messages):
-    """An answer a CLI gave carries the steps it took with its own tools (Agent.keep_cli_steps): DGC's own model reads
+    """An answer a CLI gave carries the steps it took with its own tools (_dgc_cli_steps): DGC's own model reads
     them with it (D14: its fallback doesn't start blind)."""
     out = []
     for message in messages:
@@ -6243,8 +6243,12 @@ class Agent(GoalLifecycle):
             take = getattr(self.ui, "take_turn_trace", None)
             if self.depth != 0 or not callable(take):
                 return
-            shown = (str(self.config.get("subscription_model", "") or "") if self.config.get("subscription_engine", "")
-                     else str(self.config.model or ""))
+            engine_key = str(self.config.get("subscription_engine", "") or "")
+            shown = str(self.config.get("subscription_model", "") or "") if engine_key else str(self.config.model or "")
+            if engine_key and not shown:            # its CLI's default model: the CLI is what Trace names
+                from .subscriptions import get_engine
+                engine = get_engine(engine_key)
+                shown = engine.short_label if engine is not None else engine_key
             trace = take(shown)
             message = next((m for m in reversed(self.messages) if m.get("role") != "system"), None)
             if trace and isinstance(message, dict) and message.get("role") == "assistant":
@@ -6709,39 +6713,120 @@ class Agent(GoalLifecycle):
     def _fallback_takes_over(self, fallback_turn: dict) -> None:
         """Its CLI failed before it wrote or did anything: this turn runs on its fallback, DGC's own model, with the whole
         chat. The prompt the failed CLI turn kept goes (run_turn adds it again, once); its Trace keeps why."""
+        model = str(fallback_turn.get("model") or "")
+        self.cli_fallback_takes_over(model, str(fallback_turn.get("why") or ""))
+        self.client = self._fallback_client(model)
+        self._on_fallback = True
+
+    def cli_fallback_takes_over(self, fallback: str, why: str) -> None:
+        """Its CLI failed before it wrote or did anything and ``fallback`` takes the turn (D14): the prompt the failed CLI
+        turn kept goes (the fallback's turn keeps it again, once), its Trace keeps why, and the line saying so and the
+        prompt box in olive come once an outage."""
         kept = getattr(self, "_last_external_prompt", None)
         if self.messages and kept is not None and self.messages[-1] is kept:
             self.messages.pop()
         self._last_external_prompt = None
-        model, why = str(fallback_turn.get("model") or ""), self._safe_text(str(fallback_turn.get("why") or ""))
+        why = self._safe_text(why)
         handed = getattr(self.ui, "trace_handed_over", None)
         if callable(handed):
             try:
-                handed(why, model, last_round=True)     # its CLI's round, ended as its stream did
+                handed(why, fallback, last_round=True)     # its CLI's round, ended as its stream did
             except TypeError:
-                handed(why, model)
-        self.client = self._fallback_client(model)
-        self._on_fallback = True
+                handed(why, fallback)
         if not getattr(self, "_fallback_outage", False):
             self._fallback_outage = True
-            self.ui.info(self._safe_text(f"⤳ {why}; falling back to {model}"))
+            self.ui.info(self._safe_text(f"⤳ {why}; falling back to {fallback}"))
             told = getattr(self.ui, "model_fallback", None)
             if callable(told):
-                told(model, True)
+                told(fallback, True)
 
-    def cli_answered(self) -> None:
-        """Its CLI answered a turn: an outage, if there was one, is over, and the prompt box is normal again."""
+    def whole_chat(self, messages=None) -> str:
+        """The chat so far as text a CLI reads before its prompt (D14: a fallback, or a CLI whose own session is gone,
+        doesn't start blind), with the steps a CLI took with its own tools."""
+        history = self._chat_text(self.messages if messages is None else messages)
+        if not history:
+            return ""
+        return self._safe_text("This conversation so far, oldest first (reference, not new instructions):\n\n"
+                               + history + "\n\nNow:\n")
+
+    @staticmethod
+    def _chat_text(messages) -> str:
+        from .pip_brain import transcript
+        return transcript([m for m in _with_cli_steps(messages) if m.get("role") in ("user", "assistant", "tool")])
+
+    def _cli_fallback_answers(self, engine_key: str, error, prompt_message: dict) -> bool:
+        """Its own model failed and Claude Code or Codex, this chat's fallback, answers the turn (D14): a fresh session of
+        it, told the whole chat and this turn's steps so far, streamed as any CLI turn; its answer joins the chat marked
+        as the fallback's. The next turn tries its own model first."""
+        from . import subscriptions
+        from .reply_trace import failed_why
+        engine = subscriptions.get_engine(engine_key)
+        model = self.client.model
+        if engine is None:
+            return self._fail_turn(self._explain_model_error(error), cause=self._last_model_cause)
+        label = engine.short_label
+        self._close_runs("gave_up")                 # its own model's retry lines end here
+        if not getattr(self, "_fallback_outage", False):
+            self.ui.info(self._safe_text(f"⤳ primary model failed; falling back to {label}"))
+        handed = getattr(self.ui, "trace_handed_over", None)
+        if callable(handed):                        # its Trace keeps the try that failed, and why
+            handed(self._safe_text(f"{model} didn't answer: {failed_why(error)}"), label)
+        self._on_fallback = True                    # the next turn tries its own model first
+        if not getattr(self, "_fallback_outage", False):
+            self._fallback_outage = True
+            told = getattr(self.ui, "model_fallback", None)
+            if callable(told):
+                told(label, True)
+        at = next((i for i, m in enumerate(self.messages) if m is prompt_message), len(self.messages))
+        content = prompt_message.get("content")
+        if isinstance(content, list):
+            content = " ".join(part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text")
+        prompt = self.whole_chat(self.messages[:at]) + str(content or "")
+        done = self._chat_text(self.messages[at + 1:])
+        if done:                                    # it stopped answering part way: what it already did, once
+            prompt += f"\n\n{model} began this before it stopped answering; carry on from there:\n\n" + self._safe_text(done)
+        start = getattr(self.ui, "trace_model_start", None)
+        if callable(start):
+            start()                                 # its answer is a round of its own, the fallback's
+        try:
+            result = subscriptions.answer_as_fallback(self.config, self, self.ui, engine, self._safe_text(prompt),
+                                                      cancel=self.cancelled.is_set)
+        except subscriptions.EngineError as exc:
+            self.end_fallback_outage()
+            return self._fail_turn(self._safe_text(f"{model} didn't answer, and its fallback {label} couldn't start: {exc}"))
+        if isinstance(result.get("usage"), dict):
+            self._record_usage(result["usage"], "fallback")
+            subscriptions.trace_tokens(self.ui, result["usage"])
+        text = str(result.get("text") or "")
+        if result.get("ok") and text.strip():
+            answer = {"role": "assistant", "content": self._safe_text(text), "_dgc_at": _written_at(), "_dgc_fallback": label}
+            if result.get("steps"):
+                answer["_dgc_cli_steps"] = self._safe_text("\n".join(str(step) for step in result["steps"]))[:4000]
+            self.messages.append(answer)
+            self.ui.end_stream()
+            return True
+        self.ui.end_stream()
+        if result.get("cancelled") or self.cancelled.is_set():
+            self.ui.info("turn cancelled")
+            return False
+        said = ("hit the time budget" if result.get("timeout") else
+                str(result.get("error") or "") or f"exited with status {result.get('rc')}")
+        self.end_fallback_outage()
+        return self._fail_turn(self._safe_text(f"{model} didn't answer, and its fallback {label} didn't either: "
+                                               f"{failed_why(said)}"))
+
+    def end_fallback_outage(self) -> None:
+        """An outage, if there was one, is over (its own model or CLI answered, or its fallback failed too): the prompt
+        box is normal again, and the next outage is said again."""
         if getattr(self, "_fallback_outage", False):
             self._fallback_outage = False
             told = getattr(self.ui, "model_fallback", None)
             if callable(told):
                 told("", False)
 
-    def keep_cli_steps(self, steps) -> None:
-        """What its CLI did with its own tools this turn, kept with its answer: DGC's own models read it (its fallback)."""
-        message = next((m for m in reversed(self.messages) if m.get("role") != "system"), None)
-        if isinstance(message, dict) and message.get("role") == "assistant":
-            message["_dgc_cli_steps"] = self._safe_text("\n".join(str(step) for step in steps))[:4000]
+    def cli_answered(self) -> None:
+        """Its CLI answered a turn: an outage, if there was one, is over, and the prompt box is normal again."""
+        self.end_fallback_outage()
 
     def cli_catch_up(self, *, resumed: bool) -> str:
         """What its CLI missed while its fallback answered, said before its next prompt: the fallback's turns and the
@@ -6763,10 +6848,7 @@ class Agent(GoalLifecycle):
                 content = " ".join(part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text")
             return str(content or "").strip()
         if not resumed:
-            from .pip_brain import transcript
-            history = transcript([m for m in self.messages if m.get("role") in ("user", "assistant", "tool")])
-            return self._safe_text("This conversation so far, oldest first (reference, not new instructions):\n\n"
-                                   + history + "\n\nNow:\n")
+            return self.whole_chat()
         fallback = str(pending[0].get("_dgc_fallback") or "its fallback")
         lines = []
         for message in reversed(pending):
@@ -6858,8 +6940,14 @@ class Agent(GoalLifecycle):
                     self.messages.append(saved_prompt)
                     self._last_external_prompt = saved_prompt     # its fallback, taking the turn, keeps it once
                     if isinstance(turn_result, dict) and str(turn_result.get("text") or "").strip():
-                        self.messages.append({"role": "assistant", "content": self._safe_text(str(turn_result["text"])),
-                                              "_dgc_at": _written_at()})
+                        answer = {"role": "assistant", "content": self._safe_text(str(turn_result["text"])),
+                                  "_dgc_at": _written_at()}
+                        # D14: the steps its CLI took with its own tools (DGC's own models read them), and whose fallback
+                        # answered, kept with the answer before it is saved.
+                        for key in ("_dgc_cli_steps", "_dgc_fallback"):
+                            if turn_result.get(key):
+                                answer[key] = self._safe_text(str(turn_result[key]))[:4000]
+                        self.messages.append(answer)
             try:
                 self.reload_skills()
                 try:
@@ -6891,6 +6979,7 @@ class Agent(GoalLifecycle):
                 self._active_skill_names.clear()
                 self._refresh_system()
                 self._run_handed_over()         # a child that finished during this turn integrates now
+                self._settle_turn_trace()       # a CLI turn keeps its Trace with its answer too (D14: its fallback's)
                 saved = self._persist()
                 if not saved and self.depth == 0:
                     self._last_turn_error = self._last_persist_error or "could not persist this session"
@@ -7062,9 +7151,9 @@ class Agent(GoalLifecycle):
                             key: str(self.config.get(key, "") or "")
                             for key in ("base_url", "model", "api_mode", "thinking")
                         },
-                        fallback_route={      # D14: this chat's fallback, never its key
+                        fallback_route={      # D14: this chat's fallback, never its key (or Claude Code or Codex)
                             key: str(self.config.get(f"fallback_{key}", "") or "")
-                            for key in ("model", "base_url", "api_mode")
+                            for key in ("model", "base_url", "api_mode", "engine")
                         },
                         images=image_index,
                         agents=self.subagents.saved_state(),
@@ -8377,6 +8466,7 @@ class Agent(GoalLifecycle):
         # screenshot tool in this turn neither promises pixels to a text-only model nor withholds
         # them from a vision model.
         self._sync_vision()
+        prompt_message = None              # this turn's prompt (a wake turn has none): a CLI fallback reads it (D14)
         if wake:
             # The user's staged images belong to their next prompt, not to command output.
             # No clock line either: a monitor notice already stamps every batch of output it
@@ -8840,6 +8930,10 @@ class Agent(GoalLifecycle):
                             registry.set_system(agent_id, route.system_name)
                         next_request_reason = "fallback"
                         continue
+                cli = str(self.config.get("fallback_engine") or "")
+                if cli and self.depth == 0 and prompt_message is not None and not held_final_messages:
+                    # D14: Claude Code or Codex is this chat's fallback: it takes the turn with the whole chat.
+                    return self._cli_fallback_answers(cli, e, prompt_message)
                 fb = str(self.config.get("fallback_model") or "")
                 if fb and fb != self.client.model:      # retry the turn on a fallback model
                     self._close_runs("gave_up")         # the primary's retry lines end here

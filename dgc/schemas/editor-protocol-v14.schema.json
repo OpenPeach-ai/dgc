@@ -2438,6 +2438,9 @@
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
             },
+            "fallback_engine": {
+              "type": "string"
+            },
             "sandbox": {
               "type": "boolean"
             },

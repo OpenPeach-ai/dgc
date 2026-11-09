@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Model menus in Work, ChatDGC and a Pip: a long model or provider name stays on one line (its "…" at rest) and slides to show its end while you point at its row or reach it with the keyboard; it stays still if you asked your system for less motion. The ⋯ beside a row goes at once when the pointer leaves, so a Main or Fallback word never slides under it. The model button's name, its fallback word and its reasoning sit on one line; a session on Claude Code's or Codex's own model is named "Claude Code" (not "Claude Code default" beside "Default").
+- Claude Code, Codex and DGC Router can be a fallback: in a Pip's model picker (all three), in ChatDGC's model menu (Claude Code or Codex), and in Work's model picker (Claude Code or Codex, beside it in Providers). The rows say Main and Fallback as for any model, and the prompt box names it in olive while it answers.
 - A fallback model for each Work session, chosen in Work's model picker (the ⋯ beside a model, a saved provider or a model an All models provider lists; Main and Fallback at the rows' end). While the fallback answers, the model button names it in olive with the word fallback.
 - Trace shows a model change: a failed model step says why ("X didn't answer: …"), and the fallback's steps after it say fallback.
 - A fallback model for each ChatDGC chat, chosen the same way in its model menu (the ⋯ beside a model; Main and Fallback at the row's end). While the fallback writes a reply, the model button names it in olive with the word fallback.

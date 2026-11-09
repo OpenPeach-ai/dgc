@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Pips API 76: `set_pip_backup` and `set_pips_backup` also take `engine` (`claude` or `codex`: Claude Code or Codex as the fallback, `model` its model or "" its default) and `router` (`true`: DGC Router, `model` "" any Pip system or `<system>/<model>`), and `get_pip_backup` / `get_pips_backup` say them.
 - Pips API 76: a Pip's fallback model. `get_pip_backup` / `set_pip_backup {pip_id, model, provider?}` read and set the model a Pip carries on with when its own doesn't answer: one provider ("" DGC's own connection, or a saved provider's id) and one model ("" none). `get_pips_backup` / `set_pips_backup {model, provider?}` read and set the one new Pips start with. DGC takes them only from this computer. Both SDKs refuse them before API 76.
 - Pips API 75: `get_pips_payments` and `set_pips_payments {enabled}` read and set whether a Pip at Do it all may pay by itself, at most three times a day across all Pips (off by default; DGC takes it only from this computer). Both SDKs refuse them before API 75.
 

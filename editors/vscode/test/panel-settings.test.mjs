@@ -3466,9 +3466,18 @@ test("Work's fallback (D14): a saved provider's address, API and key go with it,
   await world.provider.setSessionFallback(row.id, "gpt-oss:120b");
   assert.equal(sets().at(-1).scope, "session", "this session only");
   assert.deepEqual(sets().at(-1).values, { fallback_model: "gpt-oss:120b", fallback_base_url: "https://spare.example/v1",
-    fallback_api_mode: "chat_completions", fallback_api_key: "sk-spare" });
+    fallback_api_mode: "chat_completions", fallback_api_key: "sk-spare", fallback_engine: "" });
   await world.provider.setSessionFallback("", "glm-5.3:cloud");
-  assert.deepEqual(sets().at(-1).values, { fallback_model: "glm-5.3:cloud", fallback_base_url: "", fallback_api_mode: "", fallback_api_key: "" });
+  assert.deepEqual(sets().at(-1).values, { fallback_model: "glm-5.3:cloud", fallback_base_url: "", fallback_api_mode: "", fallback_api_key: "", fallback_engine: "" });
+  // Claude Code or Codex (part E): named by its CLI, as a saved provider or the session's own route key; nothing else goes.
+  const claude = await addProviderProfile(world, { kind: "subscription", engine: "claude" });
+  await world.provider.setSessionFallback(claude.id, "");
+  assert.deepEqual(sets().at(-1).values, { fallback_model: "", fallback_base_url: "", fallback_api_mode: "", fallback_api_key: "", fallback_engine: "claude" });
+  await world.provider.setSessionFallback("codex", "");
+  assert.deepEqual(sets().at(-1).values, { fallback_model: "", fallback_base_url: "", fallback_api_mode: "", fallback_api_key: "", fallback_engine: "codex" });
+  assert.equal(world.provider.fallbackView().engine, "codex", "its model menu shows it");
+  await world.provider.setSessionFallback("", "");
+  assert.deepEqual(sets().at(-1).values, { fallback_model: "", fallback_base_url: "", fallback_api_mode: "", fallback_api_key: "", fallback_engine: "" });
   const posted = [];
   world.provider.post = (message) => posted.push(message);
   const told = () => posted.filter((m) => m.type === "fallbackActive").at(-1);
@@ -3476,4 +3485,22 @@ test("Work's fallback (D14): a saved provider's address, API and key go with it,
   assert.deepEqual(told(), { type: "fallbackActive", model: "glm-5.3:cloud" });
   world.provider.onEvent({ type: "model_fallback", model: "", active: false });
   assert.deepEqual(told(), { type: "fallbackActive", model: "" });
+});
+
+test("A session on Claude Code's own default model is named Claude Code: its reasoning already says Default (9 Nov)", async () => {
+  const world = allModelsWorld();
+  world.provider.routeState.subscriptionEngine = "claude";
+  world.provider.routeState.subscriptionModel = "";
+  world.provider.routeState.subscriptionEngines = [{ key: "claude", label: "Claude Code (Pro / Max subscription)" },
+    { key: "codex", label: "Codex (ChatGPT Plus / Pro subscription)", cli_default_model: "gpt-5.6-sol" }];
+  world.provider.syncActiveRouteState();
+  assert.equal(world.provider.state.model, "Claude Code", "not \"Claude Code default\" beside a Default reasoning label");
+  world.provider.state.think = "off";
+  world.provider.tab = {};
+  world.provider.ownsStatusBar = () => true;
+  world.provider.paintStatusBar();
+  assert.match(world.provider.sb.text, /Claude Code · Default · /, "the status bar says Default too, not off");
+  world.provider.routeState.subscriptionEngine = "codex";
+  world.provider.syncActiveRouteState();
+  assert.equal(world.provider.state.model, "Codex · gpt-5.6-sol", "a CLI that names its default keeps the name");
 });

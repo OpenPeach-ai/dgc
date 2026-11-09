@@ -242,3 +242,135 @@ test("ChatDGC's and a Pip's menus draw exactly as Work's, and ChatDGC's model me
     assert.deepEqual(pageLook, workLook, "and so is a Pip's page menu");
   } finally { await pip.close(); }
 });
+
+test("the ⋯ fades in, but goes at once when the pointer leaves: a Main or Fallback word never slides under it (9 Nov)", async () => {
+  // Seen live: the row's room for the ⋯ goes at once when the pointer leaves, so for the 100 ms the ⋯ took to fade out,
+  // the word moved back under it.
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../media/shared/menu.css", import.meta.url), "utf8");
+  const resting = css.match(/\.dgc-menu \.dgc-menu-more \{([^}]*)\}/)[1];
+  assert.doesNotMatch(resting.match(/transition:[^;]*/)?.[0] || "", /opacity/, "at rest it has no fade: leaving takes it away at once");
+  const shown = css.match(/\.dgc-menu \.dgc-menu-item:is\(:hover, :focus-within\) > \.dgc-menu-more, \.dgc-menu \.dgc-menu-more\[aria-expanded="true"\] \{([^}]*)\}/)[1];
+  assert.match(shown, /opacity: 1/);
+  assert.match(shown, /transition:[^;]*opacity/, "it still fades in");
+});
+
+test("a long name stays on one line and slides to show its end while its row is pointed at or focused; a short one never moves (9 Nov)", async () => {
+  const dom = new JSDOM(`<!doctype html><body><div id="m" class="dgc-menu"><button class="dgc-menu-row" id="long"><span class="dgc-menu-label">deepseek-v4.1-flash:cloud</span></button><button class="dgc-menu-row" id="short"><span class="dgc-menu-label">glm</span></button></div></body>`,
+    { runScripts: "outside-only", pretendToBeVisual: true });
+  dom.window.eval(read("media/shared/menu.js"));
+  const $ = (id) => dom.window.document.getElementById(id);
+  const label = (id) => $(id).querySelector(".dgc-menu-label");
+  for (const [id, scroll, client] of [["long", 260, 180], ["short", 40, 180]]) {
+    Object.defineProperty(label(id), "scrollWidth", { value: scroll });
+    Object.defineProperty(label(id), "clientWidth", { value: client });
+  }
+  dom.window.DgcMenu.slide($("m"));
+  const frame = () => new Promise((resolve) => dom.window.requestAnimationFrame(() => resolve()));
+  $("long").dispatchEvent(new dom.window.Event("pointerover", { bubbles: true })); await frame(); await frame();
+  assert.ok(label("long").classList.contains("is-sliding"), "pointed at: it slides");
+  assert.equal(label("long").style.getPropertyValue("--dgc-slide"), "-80px", "as far as its hidden end, no further");
+  $("long").dispatchEvent(new dom.window.Event("pointerout", { bubbles: true }));
+  assert.ok(!label("long").classList.contains("is-sliding"), "left: it stops, at rest with its …");
+  $("short").dispatchEvent(new dom.window.Event("focusin", { bubbles: true })); await frame(); await frame();
+  assert.ok(!label("short").classList.contains("is-sliding"), "a name that fits never moves");
+  const own = $("long").matches.bind($("long"));
+  $("long").matches = (selector) => (selector === ":focus-visible" ? true : own(selector));     // reached by the keyboard
+  $("long").dispatchEvent(new dom.window.Event("focusin", { bubbles: true })); await frame(); await frame();
+  assert.ok(label("long").classList.contains("is-sliding"), "reached by the keyboard: it slides too");
+  const css = read("media/shared/menu.css");
+  assert.match(css, /\.dgc-menu \.dgc-menu-label\.is-sliding \{[^}]*animation: dgc-menu-slide/);
+  assert.match(css, /@keyframes dgc-menu-slide/);
+  assert.match(css, /prefers-reduced-motion: reduce\) \{[^}]*\.dgc-menu \.dgc-menu-label\.is-sliding \{ animation: none;/, "still for reduced motion");
+});
+
+test("a menu that redraws its rows keeps the pointed or focused long name sliding from where it was (9 Nov)", async () => {
+  // Seen live: a Pip's menu redraws every second or so, and each redraw stopped the slide (a new row, at rest).
+  const dom = new JSDOM(`<!doctype html><body><div id="m" class="dgc-menu"></div></body>`, { runScripts: "outside-only", pretendToBeVisual: true });
+  dom.window.eval(read("media/shared/menu.js"));
+  const doc = dom.window.document, menu = doc.getElementById("m");
+  const draw = () => {
+    menu.innerHTML = `<button class="dgc-menu-row" data-chat-model="default"><span class="dgc-menu-label">Default (deepseek-v4.1-flash:cloud)</span></button>`;
+    const label = menu.querySelector(".dgc-menu-label");
+    Object.defineProperty(label, "scrollWidth", { value: 240 });
+    Object.defineProperty(label, "clientWidth", { value: 200 });
+    return menu.querySelector(".dgc-menu-row");
+  };
+  dom.window.DgcMenu.slide(menu);
+  const frame = () => new Promise((resolve) => dom.window.requestAnimationFrame(() => resolve()));
+  let row = draw();
+  row.focus(); row.dispatchEvent(new dom.window.Event("focusin", { bubbles: true })); await frame(); await frame();
+  assert.ok(row.querySelector(".dgc-menu-label").classList.contains("is-sliding"));
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  row = draw(); row.focus();                       // the menu redraws; the same row keeps the focus
+  await frame(); await frame(); await frame();
+  const label = row.querySelector(".dgc-menu-label");
+  assert.ok(label.classList.contains("is-sliding"), "the new row slides too");
+  assert.match(label.style.getPropertyValue("--dgc-slide-delay"), /^-0\.[0-9]+s$/, "from where it was: its animation started that far back");
+});
+
+test("a row the menu focused by itself (on opening) doesn't slide; one reached by the keyboard does; a start no longer wanted is dropped (9 Nov)", async () => {
+  const dom = new JSDOM(`<!doctype html><body><div id="m" class="dgc-menu"><button class="dgc-menu-row" id="r"><span class="dgc-menu-label">deepseek-v4.1-flash:cloud</span></button></div></body>`,
+    { runScripts: "outside-only", pretendToBeVisual: true });
+  dom.window.eval(read("media/shared/menu.js"));
+  const row = dom.window.document.getElementById("r"), label = row.querySelector(".dgc-menu-label");
+  Object.defineProperty(label, "scrollWidth", { value: 260 });
+  Object.defineProperty(label, "clientWidth", { value: 180 });
+  let keyboard = false;
+  const matches = row.matches.bind(row);
+  row.matches = (selector) => (selector === ":focus-visible" ? keyboard : matches(selector));
+  dom.window.DgcMenu.slide(dom.window.document.getElementById("m"));
+  const frame = () => new Promise((resolve) => dom.window.requestAnimationFrame(() => resolve()));
+  row.dispatchEvent(new dom.window.Event("focusin", { bubbles: true })); await frame(); await frame();
+  assert.ok(!label.classList.contains("is-sliding"), "focused by the menu as it opened: still");
+  keyboard = true;
+  row.dispatchEvent(new dom.window.Event("focusin", { bubbles: true })); await frame(); await frame();
+  assert.ok(label.classList.contains("is-sliding"), "reached by the keyboard: it slides");
+  keyboard = false;
+  row.dispatchEvent(new dom.window.Event("focusout", { bubbles: true }));
+  assert.ok(!label.classList.contains("is-sliding"), "the focus gone: still");
+  row.dispatchEvent(new dom.window.Event("pointerover", { bubbles: true }));
+  row.dispatchEvent(new dom.window.Event("pointerout", { bubbles: true }));   // gone before its frame came
+  await frame(); await frame();
+  assert.ok(!label.classList.contains("is-sliding"), "a start no longer wanted is dropped");
+});
+
+test("a row redrawn under a pointer that doesn't move keeps its long name sliding (found by where the pointer is) (9 Nov)", async () => {
+  // Seen live: choosing a fallback redraws Work's menu, and a redrawn row isn't hovered until the pointer moves.
+  const dom = new JSDOM(`<!doctype html><body><div id="m" class="dgc-menu"></div></body>`, { runScripts: "outside-only", pretendToBeVisual: true });
+  dom.window.eval(read("media/shared/menu.js"));
+  const doc = dom.window.document, menu = doc.getElementById("m");
+  const draw = () => {
+    menu.innerHTML = `<button class="dgc-menu-row" data-i="2"><span class="dgc-menu-label">deepseek-v4.1-flash:cloud</span></button>`;
+    const label = menu.querySelector(".dgc-menu-label");
+    Object.defineProperty(label, "scrollWidth", { value: 260 });
+    Object.defineProperty(label, "clientWidth", { value: 180 });
+    return menu.querySelector(".dgc-menu-row");
+  };
+  doc.elementFromPoint = () => menu.querySelector(".dgc-menu-label");
+  dom.window.DgcMenu.slide(menu);
+  const frame = () => new Promise((resolve) => dom.window.requestAnimationFrame(() => resolve()));
+  const first = draw();
+  first.dispatchEvent(new dom.window.MouseEvent("pointerover", { bubbles: true, clientX: 60, clientY: 15 }));
+  draw();                                          // redrawn before its first frame, the pointer still
+  await frame(); await frame(); await frame();
+  assert.ok(menu.querySelector(".dgc-menu-label").classList.contains("is-sliding"), "the new row under the pointer slides");
+});
+
+test("while a long name slides, its tooltip stays away (it would cover the row above); still, for reduced motion, it keeps it (9 Nov)", async () => {
+  for (const reduced of [false, true]) {
+    const dom = new JSDOM(`<!doctype html><body><div id="m" class="dgc-menu"><button class="dgc-menu-row" id="r"><span class="dgc-menu-label" title="deepseek-v4.1-flash:cloud">deepseek-v4.1-flash:cloud</span></button></div></body>`,
+      { runScripts: "outside-only", pretendToBeVisual: true });
+    dom.window.matchMedia = (query) => ({ matches: reduced && /prefers-reduced-motion: reduce/.test(query) });
+    dom.window.eval(read("media/shared/menu.js"));
+    const row = dom.window.document.getElementById("r"), label = row.querySelector(".dgc-menu-label");
+    Object.defineProperty(label, "scrollWidth", { value: 260 });
+    Object.defineProperty(label, "clientWidth", { value: 180 });
+    dom.window.DgcMenu.slide(dom.window.document.getElementById("m"));
+    const frame = () => new Promise((resolve) => dom.window.requestAnimationFrame(() => resolve()));
+    row.dispatchEvent(new dom.window.Event("pointerover", { bubbles: true })); await frame(); await frame();
+    assert.equal(label.getAttribute("title"), reduced ? "deepseek-v4.1-flash:cloud" : null, reduced ? "still: its tooltip says it" : "sliding: no tooltip over the row above");
+    row.dispatchEvent(new dom.window.Event("pointerout", { bubbles: true }));
+    assert.equal(label.getAttribute("title"), "deepseek-v4.1-flash:cloud", "at rest its tooltip is back");
+  }
+});

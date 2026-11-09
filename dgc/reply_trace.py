@@ -68,25 +68,44 @@ def summary_of(name: str, args) -> str:
         return ""
 
 
+# DGC's own transport line, which says nothing past its status: "HTTP 503 from http://… after 4 tries". A provider's own
+# words ("HTTP 429: You've hit your usage limit") are kept, with no address.
+_HTTP_STATUS = re.compile(r"^HTTP (\d{3}) from \S+")
+# An address in what a failure said: a URL, an IP with or without its port, localhost. Trace names none (D14).
+_ADDRESS = re.compile(r"\b[a-z][a-z0-9+.-]*://\S+|\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?(?:/\S*)?|\blocalhost(?::\d+)?(?:/\S*)?",
+                      re.IGNORECASE)
+
+
+def _status_words(code) -> str:
+    code = int(code)
+    if code == 429:
+        return "rate limited (429)"
+    if code in (401, 403):
+        return f"key rejected ({code})"
+    if 500 <= code < 600:
+        return f"unavailable ({code})"
+    return ""
+
+
 def failed_why(error) -> str:
     """Why a model request failed, in a few words for its Trace row (D14): from its measured cause when it has one
-    ("rate limited (429)", "key rejected (401)", "unavailable (503)", "connection refused"), else the first sentence of
-    what it said, cut at a word."""
+    ("rate limited (429)", "key rejected (401)", "unavailable (503)", "connection refused"), else from its words (an
+    HTTP status they name, else their first sentence, cut at a word), never with an address in it."""
     cause = getattr(error, "cause", None)
     try:
         from .model_errors import FailureCause, short_cause
         if isinstance(cause, FailureCause):
             code = cause.http_status
-            if code == 429:
-                return "rate limited (429)"
-            if code in (401, 403):
-                return f"key rejected ({code})"
-            if code and 500 <= int(code) < 600:
-                return f"unavailable ({code})"
+            if code and _status_words(code):
+                return _status_words(code)
             return short_cause(cause)
     except Exception:                         # noqa: BLE001 -- only words for a row
         pass
     text = " ".join(str(error or "").split())
+    status = _HTTP_STATUS.match(text)
+    if status and _status_words(status.group(1)):
+        return _status_words(status.group(1))   # a Pip's fallback reads its own model's error as words (9 Nov)
+    text = _ADDRESS.sub("its host", text)
     first = re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0]
     return first if len(first) <= 80 else first[:79].rsplit(" ", 1)[0] + "…"
 

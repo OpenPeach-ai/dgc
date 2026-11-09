@@ -85,6 +85,18 @@ class ChatFallbackTests(unittest.TestCase):
         self.assertEqual((reply["text"], self.clients[-1].model), ("Done.", SPARE))
         self.assertEqual(reply["fallback"]["line"], f"Claude Code didn't answer; {SPARE} did")
 
+    def test_claude_code_or_codex_can_be_the_fallback_too(self):
+        # 9 Nov, your call: a subscription can be the fallback. ChatDGC runs a reply on it as on any chat's model, with the
+        # whole chat (the CLI is given it every request).
+        chat = self.engine.open()
+        self.script.extend([{"raise": "HTTP 503: unreachable"}, {"parts": ["Paris."]}])
+        with self.engine.fallback_turn("subscription:codex"):
+            reply = self.engine.send(chat["id"], "Capital of France?", model=OWN)
+        self.assertEqual((reply["text"], self.clients[-1].model), ("Paris.", "subscription:codex"))
+        self.assertEqual(reply["fallback"]["line"], f"{OWN} didn't answer; Codex did")
+        failed = [s for s in reply["trace"]["steps"] if s.get("error")]
+        self.assertEqual(failed[0]["to"], "Codex")
+
     def test_a_new_chat_starts_with_the_last_fallback_you_chose(self):
         first = self.engine.open()
         self.assertNotIn("fallback", first, "none until you choose one")

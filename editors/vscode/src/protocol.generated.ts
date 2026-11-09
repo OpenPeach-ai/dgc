@@ -1902,6 +1902,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       ],
       "required": false
     },
+    "fallback_engine": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
     "sandbox": {
       "types": [
         "boolean"

@@ -472,9 +472,11 @@ _EDITOR_CONTEXT_LIMIT = 64_000
 # chatdgc_*: ChatDGC's custom instructions and personality, for Settings.
 # memory: whether DGC keeps one memory about you (dgc/shared_memory.py), for Settings -> Memory.
 # turn_token_budget: the cap on what one turn spends, sub-agents included, for Settings -> General.
+# fallback_engine: a Work session's fallback when it is Claude Code or Codex (D14), for its model menu.
 _CONFIG_OPT_IN_FIELDS = frozenset({"subagent_context_size", "search_url", "search_api_key_set",
                                    "chatdgc_about", "chatdgc_style", "chatdgc_personality", "chatdgc_window",
-                                   "memory", "chatdgc_web", "chatdgc_followups", "turn_token_budget"})
+                                   "memory", "chatdgc_web", "chatdgc_followups", "turn_token_budget",
+                                   "fallback_engine"})
 _CONFIG_BOOLEAN_KEYS = frozenset({
     "prompt_cache", "sandbox", "sandbox_network", "show_reasoning", "preserve_thinking",
     "code_action", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
@@ -511,6 +513,7 @@ _CONFIG_ENUMS = {
                                      "chat_completions", "responses"}),
     "fallback_api_mode": frozenset({"", "auto", "ollama", "anthropic",
                                      "chat_completions", "responses"}),
+    "fallback_engine": frozenset({"", "claude", "codex"}),
     "provider_state": frozenset({"stateless", "server"}),
     "search_provider": frozenset(SEARCH_PROVIDERS),
     "tool_profile": frozenset({"standard", "adaptive", "full"}),
@@ -2699,7 +2702,8 @@ class Backend:
                           "session_model_route": True,
                           # model_fallback: set_config with scope=session takes fallback_model, fallback_base_url,
                           # fallback_api_mode and fallback_api_key (this chat's fallback, kept with it, never its key),
-                          # and model_fallback says while the fallback answers (D14).
+                          # or fallback_engine (Claude Code or Codex as its fallback; get_config's opt-in field of the
+                          # same name says which), and model_fallback says while the fallback answers (D14).
                           "model_fallback": 1,
                           "model_defaults": True,
                           "subscription_defaults": True,
@@ -5982,6 +5986,9 @@ class Backend:
                 extra["turn_token_budget"] = max(0, int(c.get("turn_token_budget", 0) or 0))
             except (TypeError, ValueError):
                 extra["turn_token_budget"] = 0
+        if "fallback_engine" in self._config_fields:
+            engine = str(c.get("fallback_engine", "") or "")
+            extra["fallback_engine"] = engine if engine in ("claude", "codex") else ""
         from . import subscriptions as _subs
         self.em.emit("config", model=c.model, mode=self.agent.mode,
                      subscription_engine=str(c.get("subscription_engine", "")),
@@ -9305,7 +9312,8 @@ class Backend:
                 return
             if session_route and not set(values).issubset({
                     "subscription_engine", "subscription_model", "subscription_effort",
-                    "fallback_model", "fallback_base_url", "fallback_api_mode", "fallback_api_key"}):
+                    "fallback_model", "fallback_base_url", "fallback_api_mode", "fallback_api_key",
+                    "fallback_engine"}):
                 self.em.emit("command_rejected", command=t, reason="invalid_config_value",
                              message="session route may only change its subscription engine, model and effort, and its fallback",
                              **_request_fields(request_id))

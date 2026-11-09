@@ -3,6 +3,7 @@
 // level's one line, the short "What it did on its own" list right under it, one click back to Ask me first, the floor's
 // card in its chat, and an older DGC asked for nothing. (Harness from pip-memory-learns.)
 import { test, after } from "node:test";
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
 import { JSDOM } from "jsdom";
@@ -46,7 +47,7 @@ const floorHold = { id: "compact_" + "f".repeat(32), pip_id: PIP, workspace_id: 
   summary: { kind: "floor", method: "RUN", host: "Terminal", path: "/", page: "", fields: [{ name: "command", value: "rm -rf ~/*" }],
     more_fields: 0, body_bytes: 0, floor: "could delete everything in its Files", text: "rm -rf ~/*", text_digest: "e".repeat(64) } };
 async function flush() { for (let i = 0; i < 15; i++) await Promise.resolve(); }
-function pipsPage({ apiVersion = 58, state = level("approve", DONE), actions = [], activeRun = null, pipPatch = {}, backupLine = "", models = [], fallback = { provider: "", model: "" }, fallbackOn = null } = {}) {
+function pipsPage({ apiVersion = 58, state = level("approve", DONE), actions = [], activeRun = null, pipPatch = {}, backupLine = "", models = [], fallback = { provider: "", model: "" }, fallbackOn = null, subscriptions = undefined } = {}) {
   const thePip = { ...pip, ...pipPatch };
   const dom = new JSDOM(viewModule.pipsDocument(), { runScripts: "outside-only", pretendToBeVisual: true }), w = dom.window; windows.push(w);
   const sent = [], answered = new Set();
@@ -61,7 +62,7 @@ function pipsPage({ apiVersion = 58, state = level("approve", DONE), actions = [
     list_pip_types: () => ({ types }), list_pip_setups: () => ({ setups: [] }), list_pips: () => ({ pips: [thePip] }), get_pip: () => ({ pip: thePip }),
     list_pip_runs: () => ({ runs: [] }), list_pip_starters: () => ({ starters: [] }), get_pip_runner: () => ({ runner }),
     get_workspace_context: () => ({ context: { workspace_id: PW, revision: 0, entries: [] } }),
-    list_pip_models: () => ({ default_model: "m", models, connection: "configured" }),
+    list_pip_models: () => ({ default_model: "m", models, connection: "configured", ...(subscriptions ? { subscriptions } : {}) }),
     list_pip_messages: () => ({ pip_id: PIP, workspace_id: PW, messages: [
       { id: "message_" + "1".repeat(32), pip_id: PIP, workspace_id: PW, run_id: RUN, role: "user", text: "Tidy my files", model: "m", created_at: now, status: "succeeded" },
       { id: "message_" + "2".repeat(32), pip_id: PIP, workspace_id: PW, run_id: RUN, role: "assistant", text: "I want to clear the folder.", model: "m", created_at: now, status: "succeeded",
@@ -269,6 +270,22 @@ test("a fallback model: the ⋯ beside a model in its picker, Main and Fallback 
   assert.equal(old.requests("get_pip_backup").length, 0);
 });
 
+test("Claude Code or Codex can be a Pip's fallback too (9 Nov): its rows have the ⋯", async () => {
+  const x = pipsPage({ apiVersion: 76, models: [{ id: "m", name: "m" }], subscriptions: [{ engine: "claude", name: "Claude Code" }, { engine: "codex", name: "Codex" }] });
+  await x.drain(); x.click(`[data-job="${PIP}"]`); await x.drain();
+  x.click("#chat-model"); await x.drain();
+  x.click("#chat-model-providers"); await x.drain();
+  x.click('[data-chat-provider="subscription:claude"]'); await x.drain();
+  assert.ok(x.d.querySelector('[data-chat-model-more="subscription:claude"]'), "Claude Code's own default has a ⋯");
+  x.click('[data-chat-model-more="subscription:claude"]'); await x.drain();
+  x.click('[data-chat-fallback="subscription:claude"]'); await flush();
+  const set = x.requests("set_pip_backup").at(-1);
+  assert.deepEqual(JSON.parse(JSON.stringify(set.request)), { type: "set_pip_backup", pip_id: PIP, model: "", provider: "", engine: "claude" });
+  x.answer(set, { backup: { pip_id: PIP, provider: "", model: "", engine: "claude" } }); await x.drain();
+  assert.match(x.d.body.textContent, /Ava carries on with Claude Code when its own model doesn’t answer\./);
+  assert.deepEqual([...x.d.querySelectorAll('[data-chat-model="subscription:claude"] .dgc-menu-pill')].map((p) => p.textContent), ["Fallback"]);
+});
+
 test("a fallback on a saved provider: the host saves that provider first, as for a Pip's main model", async () => {
   const sent = [], posted = [], saved = [];
   const editor = new viewModule.PipsEditor({}, (m) => { sent.push(m); return true; }, () => {}); editor.attach((m) => posted.push(m));
@@ -353,4 +370,23 @@ test("the page's level is checked before it is shown", () => {
     { ...good, on_its_own: [{ ...DONE[0], level: "ask" }] }, { ...good, on_its_own: [{ ...DONE[0], kind: "other" }] }])
     assert.throws(() => levels.levelPage(bad, PIP));
   assert.equal(levels.levelNotice(levels.levelPage(good, PIP)), `Approve for me: ${SAYS.approve}`);
+});
+
+test("A Pip's prompt box: its model name, a fallback's word and its reasoning share one text baseline", () => {
+  // Centred boxes of different sizes put the 11px reasoning a pixel below the 12px name (seen in Work, 9 Nov).
+  const css = readFileSync(new URL("../src/pips.css", import.meta.url), "utf8");
+  const rule = css.match(/(?:^|\})\s*\.model-copy\{([^}]*)\}/);
+  assert.ok(rule, "the prompt box's text row has its rule");
+  assert.match(rule[1], /align-items:baseline/);
+  assert.match(css.match(/\.composer-fallback-word\{([^}]*)\}/)[1], /margin:0 2px;/, "the word has the same room on both sides");
+  assert.match(css, /\.pip-composer \.model-control\.on-fallback \.composer-chevron\{color:var\(--err-text\);opacity:\.7\}/, "its chevron as Work's and ChatDGC's");
+});
+
+test("A Pip's model rows: a long name stays on one line, slides while pointed at, and its whole name is its tooltip (9 Nov)", async () => {
+  const x = pipsPage({ apiVersion: 76, models: [{ id: "deepseek-v4.1-flash:cloud", name: "deepseek-v4.1-flash:cloud" }] });
+  await x.drain(); x.click(`[data-job="${PIP}"]`); await x.drain();
+  x.click("#chat-model"); await x.drain();
+  const label = x.d.querySelector('[data-chat-model="model:deepseek-v4.1-flash:cloud"] .composer-model-row');
+  assert.ok(label.classList.contains("dgc-menu-label"), "one line, its … at rest");
+  assert.equal(label.getAttribute("title"), "deepseek-v4.1-flash:cloud");
 });

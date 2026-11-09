@@ -1421,15 +1421,17 @@ Existing Pips keep the level you chose for them. A Project Pip has no chip: it a
   billing page, with nothing certain) goes at Do it all, and still asks at Approve for me.
 - **A fallback model.** In a Pip's model picker, the **⋯** beside a model offers **Use as main** and **Use as fallback**
   (or **Stop using as fallback**); once a fallback is set, the two rows say **Main** and **Fallback**. It is one model
-  on your own connection or on one of your saved providers, so it is clear which provider it falls back to; Claude Code,
-  Codex and DGC Router can't be a fallback. Each Pip has its own; choosing one for a Pip never changes another's, and a
+  on your own connection or on one of your saved providers, so it is clear which provider it falls back to, or Claude
+  Code or Codex (on its own default model, or one of its models), or DGC Router (any of your Pip systems, or one model
+  on one; it takes a worker only when the fallback is needed, and gives it back when the run ends). Each Pip has its own; choosing one for a Pip never changes another's, and a
   new Pip starts with the last one you chose. When a Pip's own model doesn't answer (a usage limit, a host that is down,
   a Claude Code or Codex that is signed out), its turn carries on with the fallback. Its prompt box names the fallback,
   in olive with the word **fallback**, until its own model answers again; the first reply says so once, in a line before
   its time ("Its own model didn't answer; X did"). Its **Trace** keeps the change: the try that failed, how long it
   took and why, then the fallback's steps, marked as the fallback's. The next run tries its own model first. A
   subscription turn that already said or did something isn't run again. `dgc pips backup --pip PIP MODEL [--provider ID]` (or `none`) sets it
-  from the terminal; without `--pip` it sets the one new Pips start with.
+  from the terminal, `--engine claude` or `--engine codex` (MODEL then its model, if any) and `--router` (MODEL then
+  SYSTEM/MODEL, if any) too; without `--pip` it sets the one new Pips start with.
 - **The fuse.** If a Pip does 25 things on its own in an hour (a submit, a send or a plugin change its level or an
   Always allow let through; a new site's first visit doesn't count), it asks before each one again until the hour has
   passed, whatever its level. Its card says so, with the time. The level you chose stays as it was.

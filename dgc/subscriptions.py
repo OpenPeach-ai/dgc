@@ -843,14 +843,14 @@ def run_cli_turn(config, agent, ui, engine: SubEngine, prompt: str) -> bool:
     try:
         result = delegate_turn(config, agent, ui, engine, prompt)
     except EngineError as exc:
-        handed = _hand_over(config, agent, prompt, f"{engine.short_label} couldn't start: {failed_why(exc)}")
+        handed = _hand_over(config, agent, ui, engine, prompt, f"{engine.short_label} couldn't start: {failed_why(exc)}")
         if handed is not None:
             return handed
         ui.error(str(exc))
         return False
     if (not result.get("ok") and not result.get("timeout") and not result.get("cancelled") and not result.get("did")):
         said = str(result.get("error") or "") or f"exited with status {result.get('rc')}"
-        handed = _hand_over(config, agent, prompt, f"{engine.short_label} didn't answer: {failed_why(said)}")
+        handed = _hand_over(config, agent, ui, engine, prompt, f"{engine.short_label} didn't answer: {failed_why(said)}")
         if handed is not None:
             return handed
     if result.get("timeout"):
@@ -864,18 +864,166 @@ def run_cli_turn(config, agent, ui, engine: SubEngine, prompt: str) -> bool:
     return bool(result.get("ok"))
 
 
-def _hand_over(config, agent, prompt: str, why: str):
-    """The session's fallback takes this turn (D14), or None when it has none (or the turn was stopped)."""
-    fallback = str(config.get("fallback_model") or "").strip()
+def _hand_over(config, agent, ui, engine: SubEngine, prompt: str, why: str):
+    """The session's fallback takes this turn (D14): DGC's own model, or its other CLI (Claude Code for Codex, or the
+    other way round; never the CLI that failed). None when it has none, or the turn was stopped."""
     cancelled = getattr(agent, "cancelled", None)
-    if not fallback or (cancelled is not None and cancelled.is_set()):
+    if cancelled is not None and cancelled.is_set():
+        return None
+    other_key = str(config.get("fallback_engine") or "").strip()
+    if other_key:
+        other = get_engine(other_key)
+        if other is None or other.key == engine.key:
+            return None
+        return _other_cli_answers(config, agent, ui, other, prompt, why)
+    fallback = str(config.get("fallback_model") or "").strip()
+    if not fallback:
         return None
     return agent.run_turn(prompt, reset_cancel=False, fallback_turn={"model": fallback, "why": why})
 
 
+def _other_cli_answers(config, agent, ui, other: SubEngine, prompt: str, why: str) -> bool:
+    """Its other CLI, this chat's fallback, takes the turn (D14): a session of its own, told the whole chat (the prompt
+    once), on its own default model; its answer is kept as the fallback's, so the chat's CLI, back, is told."""
+    from .reply_trace import failed_why
+    label = other.short_label
+    agent.cli_fallback_takes_over(label, why)
+    try:
+        result = delegate_turn(config, agent, ui, other, prompt, cont=False, model="", effort="",
+                               preamble=agent.whole_chat(), as_fallback=label)
+    except EngineError as exc:
+        agent.end_fallback_outage()
+        ui.error(f"{why}, and its fallback {label} couldn't start: {exc}")
+        return False
+    if result.get("ok"):
+        return True
+    if result.get("cancelled"):
+        return False
+    said = ("hit the time budget" if result.get("timeout") else
+            str(result.get("error") or "") or f"exited with status {result.get('rc')}")
+    agent.end_fallback_outage()
+    ui.error(f"{why}, and its fallback {label} didn't either: {failed_why(said)}")
+    return False
+
+
+def answer_as_fallback(config, agent, ui, engine: SubEngine, prompt: str, *, cancel=None) -> dict:
+    """Claude Code or Codex answering one turn as the fallback of a chat on DGC's own model (D14), inside the turn that
+    model began (Agent._cli_fallback_answers): a session of its own, never this chat's, on its default model, its
+    events shown as any CLI turn's. ``prompt`` holds the whole chat. Returns run_turn's result with ``did`` and
+    ``steps``; raises EngineError when it isn't installed or signed in."""
+    from .ultra import delegated_prompt
+    mode = str(config.data.get("mode", "default"))
+    budget = int(config.get("turn_budget_s") or 0) or 1800
+    relay = _Relay(agent, ui, engine, "")
+    try:
+        result = run_turn(engine, delegated_prompt(config, prompt, mode), config.project_root, cont=False, session_id="",
+                          mode=mode, timeout=budget, on_event=relay.on_event,
+                          cancel=cancel if cancel is not None else agent.cancelled.is_set, model="", effort="",
+                          redact_secrets=agent._secret_values())
+    finally:
+        relay.finish()
+    result["did"], result["steps"] = relay.did["any"], list(relay.steps)
+    return result
+
+
+class _Relay:
+    """How a CLI's events reach the screen, as a native turn's do: tool cards with prebuilt edit diffs, reasoning,
+    status, the terminal ``result`` shown once when no text streamed. Shared by a CLI turn (delegate_turn) and a CLI
+    answering as another model's fallback (answer_as_fallback). D14: ``did`` says whether it wrote or did anything (a
+    turn that did is never redone on a fallback), ``steps`` the steps it took with its own tools, which DGC keeps with
+    its answer so DGC's own models read them too."""
+
+    def __init__(self, agent, ui, engine: SubEngine, model: str):
+        from .reasoning import ReasoningOrigin, ReasoningTracker, resolve_source
+        self.agent, self.ui, self.engine = agent, ui, engine
+        self.names: dict[str, str] = {}
+        self.diffs: dict[str, str] = {}
+        self.shown = {"text": False}
+        self.did = {"any": False}
+        self.steps: list[str] = []
+        self.step_at: dict[str, int] = {}
+        self.held_space: list[str] = []
+        self.ended = False                 # its stream was ended where the turn's round closes
+
+        def next_reasoning_seq() -> int:
+            agent._reasoning_seq = int(getattr(agent, "_reasoning_seq", 0) or 0) + 1
+            return agent._reasoning_seq
+
+        # A subscription engine cannot report the endpoint it really talks to, so every block it
+        # streams is ``unknown``. run_turn already redacts its thinking stream; the tracker only owns
+        # block identity, timing and the one thinking_end per block (v14 requires both).
+        self.reasoning = ReasoningTracker(ui, seq=next_reasoning_seq, inline_enabled=False)
+        self.engine_origin = ReasoningOrigin(**{**resolve_source(
+            api_mode="", channel="subscription", base_url="", model=str(model or ""))._asdict(),
+            "part": f"subscription:{engine.key}"})
+
+    def on_event(self, event: dict) -> None:
+        kind = event.get("kind")
+        if kind in ("tool_call", "tool_result") or (kind in ("text", "result") and str(event.get("text") or "").strip()):
+            self.did["any"] = True
+        if kind == "tool_call" and len(self.steps) < 60:
+            from .reply_trace import summary_of
+            args = event.get("args") if isinstance(event.get("args"), dict) else {}
+            self.step_at[str(event.get("id") or "")] = len(self.steps)
+            self.steps.append(f"{str(event.get('name') or 'tool')[:60]}: {summary_of(str(event.get('name') or ''), args)}".rstrip(": "))
+        elif kind == "tool_result" and event.get("error") and str(event.get("id") or "") in self.step_at:
+            self.steps[self.step_at[str(event.get("id"))]] += " (failed)"
+        if kind in ("text", "thinking", "tool_call", "tool_result"):
+            progressed = getattr(self.agent, "_engine_progress", None)   # reconnecting: a retry is over
+            if callable(progressed):
+                progressed()
+        if kind in ("tool_call", "tool_result") or (
+                kind in ("text", "result") and str(event.get("text") or "").strip()):
+            self.reasoning.finish(round_called_tools=None)     # the open block ends at this boundary
+        if kind == "text" and event.get("text"):
+            value = str(event["text"])
+            if not value.strip() and self.reasoning.open:
+                # Whitespace inside an open block is not prose: sent now, a frontend would end the
+                # block early. It joins the next text instead.
+                self.held_space.append(value)
+                return
+            self.shown["text"] = True
+            self.ui.on_text("".join(self.held_space) + value)
+            self.held_space.clear()
+        elif kind == "thinking" and event.get("text"):
+            self.reasoning.thinking(str(event["text"]), self.engine_origin)
+        elif kind == "tool_call":
+            name = str(event.get("name") or "tool")
+            call_id = str(event.get("id") or "") or None
+            args = event.get("args") if isinstance(event.get("args"), dict) else {}
+            if call_id:
+                self.names[call_id] = name
+                diff = edit_diff(name, args)
+                if diff:
+                    self.diffs[call_id] = diff
+            self.ui.tool_call(name, args, call_id)
+        elif kind == "tool_result":
+            call_id = str(event.get("id") or "") or None
+            output = self.diffs.get(call_id or "") or str(event.get("output") or "")
+            if event.get("error"):
+                output = "error: " + str(event.get("output") or "tool failed")
+            self.ui.tool_result(self.names.get(call_id or "", ""), output, call_id)
+        elif kind == "status" and event.get("text"):
+            self.ui.info(str(event["text"]))
+        elif kind == "retry":
+            relay = getattr(self.agent, "_engine_retry", None)           # reconnecting
+            if callable(relay):
+                relay(event, self.engine)
+        elif kind == "result" and not self.shown["text"] and str(event.get("text") or "").strip():
+            self.shown["text"] = True
+            self.ui.on_text("".join(self.held_space) + str(event["text"]))
+            self.held_space.clear()
+
+    def finish(self) -> None:
+        self.reasoning.finish(round_called_tools=None)
+        if self.held_space:
+            self.ui.on_text("".join(self.held_space))
+            self.held_space.clear()
+
+
 def delegate_turn(config, agent, ui, engine: SubEngine, prompt: str, *, cancel=None,
                   model: str | None = None, effort: str | None = None,
-                  cont: bool | None = None) -> dict:
+                  cont: bool | None = None, preamble: str = "", as_fallback: str = "") -> dict:
     """One delegated turn through DGC's session boundary, rendered through ``ui`` like a native turn.
 
     Every front-end shares this — the full-screen app, the classic inline REPL, the editor bridge
@@ -886,6 +1034,10 @@ def delegate_turn(config, agent, ui, engine: SubEngine, prompt: str, *, cancel=N
     (``dgc -p`` without --continue) and still resumes exactly for the steps that follow. The caller
     reports the outcome; this returns the normalized result and raises ``EngineError`` only when
     the engine is missing or signed out.
+
+    ``as_fallback`` (D14): this CLI answers as the fallback of the chat's other CLI (its label is kept with the answer,
+    so the other, back, is told what it missed). It runs in a session of its own, never remembered as this chat's, and
+    reads ``preamble`` (the whole chat) before its prompt.
     """
     from .ultra import delegated_effort, delegated_prompt
     mode = str(config.data.get("mode", "default"))
@@ -897,123 +1049,80 @@ def delegate_turn(config, agent, ui, engine: SubEngine, prompt: str, *, cancel=N
     budget = int(config.get("turn_budget_s") or 0) or 1800
     if cancel is None:
         cancel = agent.cancelled.is_set
-    names: dict[str, str] = {}
-    diffs: dict[str, str] = {}
-    shown = {"text": False}
-    # D14: whether it wrote or did anything (a turn that did is never redone on its fallback), and the steps it took with
-    # its own tools, which DGC keeps with its answer so DGC's own models (its fallback) read them too.
-    did = {"any": False}
-    steps: list[str] = []
-    step_at: dict[str, int] = {}
+    relay = _Relay(agent, ui, engine, model)
+    did, steps, shown, on_event = relay.did, relay.steps, relay.shown, relay.on_event
     fresh = {"first": cont is False}
-    from .reasoning import ReasoningOrigin, ReasoningTracker, resolve_source
-
-    def next_reasoning_seq() -> int:
-        agent._reasoning_seq = int(getattr(agent, "_reasoning_seq", 0) or 0) + 1
-        return agent._reasoning_seq
-
-    # A subscription engine cannot report the endpoint it really talks to, so every block it
-    # streams is ``unknown``. run_turn already redacts its thinking stream; the tracker only owns
-    # block identity, timing and the one thinking_end per block (v14 requires both).
-    reasoning = ReasoningTracker(ui, seq=next_reasoning_seq, inline_enabled=False)
-    engine_origin = ReasoningOrigin(**{**resolve_source(
-        api_mode="", channel="subscription", base_url="", model=str(model or ""))._asdict(),
-        "part": f"subscription:{engine.key}"})
-
-    held_space: list[str] = []
-
-    def on_event(event: dict) -> None:
-        kind = event.get("kind")
-        if kind in ("tool_call", "tool_result") or (kind in ("text", "result") and str(event.get("text") or "").strip()):
-            did["any"] = True
-        if kind == "tool_call" and len(steps) < 60:
-            from .reply_trace import summary_of
-            args = event.get("args") if isinstance(event.get("args"), dict) else {}
-            step_at[str(event.get("id") or "")] = len(steps)
-            steps.append(f"{str(event.get('name') or 'tool')[:60]}: {summary_of(str(event.get('name') or ''), args)}".rstrip(": "))
-        elif kind == "tool_result" and event.get("error") and str(event.get("id") or "") in step_at:
-            steps[step_at[str(event.get("id"))]] += " (failed)"
-        if kind in ("text", "thinking", "tool_call", "tool_result"):
-            progressed = getattr(agent, "_engine_progress", None)   # reconnecting: a retry is over
-            if callable(progressed):
-                progressed()
-        if kind in ("tool_call", "tool_result") or (
-                kind in ("text", "result") and str(event.get("text") or "").strip()):
-            reasoning.finish(round_called_tools=None)     # the open block ends at this boundary
-        if kind == "text" and event.get("text"):
-            value = str(event["text"])
-            if not value.strip() and reasoning.open:
-                # Whitespace inside an open block is not prose: sent now, a frontend would end the
-                # block early. It joins the next text instead.
-                held_space.append(value)
-                return
-            shown["text"] = True
-            ui.on_text("".join(held_space) + value)
-            held_space.clear()
-        elif kind == "thinking" and event.get("text"):
-            reasoning.thinking(str(event["text"]), engine_origin)
-        elif kind == "tool_call":
-            name = str(event.get("name") or "tool")
-            call_id = str(event.get("id") or "") or None
-            args = event.get("args") if isinstance(event.get("args"), dict) else {}
-            if call_id:
-                names[call_id] = name
-                diff = edit_diff(name, args)
-                if diff:
-                    diffs[call_id] = diff
-            ui.tool_call(name, args, call_id)
-        elif kind == "tool_result":
-            call_id = str(event.get("id") or "") or None
-            output = diffs.get(call_id or "") or str(event.get("output") or "")
-            if event.get("error"):
-                output = "error: " + str(event.get("output") or "tool failed")
-            ui.tool_result(names.get(call_id or "", ""), output, call_id)
-        elif kind == "status" and event.get("text"):
-            ui.info(str(event["text"]))
-        elif kind == "retry":
-            relay = getattr(agent, "_engine_retry", None)           # reconnecting
-            if callable(relay):
-                relay(event, engine)
-        elif kind == "result" and not shown["text"] and str(event.get("text") or "").strip():
-            shown["text"] = True
-            ui.on_text("".join(held_space) + str(event["text"]))
-            held_space.clear()
+    own = {"session": ""}                  # as_fallback: its own run's session, for a goal's later steps
 
     def delegate(safe_prompt: str) -> dict:
-        session_id = "" if fresh["first"] else agent.subscription_session_id(
-            engine.key, mode, model, effort)
+        if as_fallback:
+            session_id = own["session"]
+        else:
+            session_id = "" if fresh["first"] else agent.subscription_session_id(
+                engine.key, mode, model, effort)
         fresh["first"] = False
         shown["text"] = False
-        # D14: back after its fallback answered: first what it missed (on its own session), or the whole chat (when its
-        # session is gone, it knows nothing of this chat).
-        catch_up = getattr(agent, "cli_catch_up", None)
-        missed = catch_up(resumed=bool(session_id)) if callable(catch_up) else ""
+        began = len(steps)
+        start = getattr(ui, "trace_model_start", None)
+        if callable(start):
+            start()                        # this step's round (the first is open already; a fallback's is its own)
+        relay.ended = False
+        if as_fallback:
+            missed = "" if session_id else preamble
+        else:
+            # D14: back after its fallback answered: first what it missed (on its own session), or the whole chat (when
+            # its session is gone, it knows nothing of this chat).
+            catch_up = getattr(agent, "cli_catch_up", None)
+            missed = catch_up(resumed=bool(session_id)) if callable(catch_up) else ""
         result = run_turn(engine, delegated_prompt(config, (missed + safe_prompt) if missed else safe_prompt, mode), config.project_root,
                           cont=bool(session_id), session_id=session_id, mode=mode, timeout=budget,
                           on_event=on_event, cancel=cancel, model=model, effort=effort,
                           goal_request=agent._active_goal_request,
                           redact_secrets=agent._secret_values())
         if result.get("session_id") and not result.get("cancelled") and not result.get("timeout"):
-            agent.remember_subscription_session(
-                engine.key, result["session_id"], mode, model, effort)
-        if missed and result.get("ok") and callable(getattr(agent, "cli_caught_up", None)):
+            if as_fallback:
+                own["session"] = result["session_id"]
+            else:
+                agent.remember_subscription_session(
+                    engine.key, result["session_id"], mode, model, effort)
+        if missed and not as_fallback and result.get("ok") and callable(getattr(agent, "cli_caught_up", None)):
             agent.cli_caught_up()
+        if steps[began:]:
+            result["_dgc_cli_steps"] = "\n".join(steps[began:])
+        if as_fallback:
+            result["_dgc_fallback"] = as_fallback
+        if isinstance(result.get("usage"), dict):
+            trace_tokens(ui, result["usage"])
+        relay.finish()
+        ui.end_stream()                    # its round ends here, so the turn's Trace is whole when the turn is saved
+        relay.ended = True
         return result
 
     try:
         outcome = agent.run_external_turn(prompt, delegate, reset_cancel=False)
         if isinstance(outcome, dict):
             outcome["did"] = did["any"]
-            if steps and str(outcome.get("text") or "").strip() and callable(getattr(agent, "keep_cli_steps", None)):
-                agent.keep_cli_steps(steps)
+            for kept in ("_dgc_cli_steps", "_dgc_fallback"):     # kept with its answer; not the caller's to show
+                outcome.pop(kept, None)
         return outcome
     finally:
         try:
-            reasoning.finish(round_called_tools=None)
-            if held_space:
-                ui.on_text("".join(held_space))
+            relay.finish()
         finally:
-            ui.end_stream()
+            if not relay.ended:
+                ui.end_stream()
+
+
+def trace_tokens(ui, usage) -> None:
+    """A CLI's measured tokens for its round in the turn's Trace."""
+    from .llm import normalize_usage
+    hook = getattr(ui, "trace_usage", None)
+    if not callable(hook):
+        return
+    counted = normalize_usage(usage)
+    tokens = int(counted.get("input_tokens", 0) or 0) + int(counted.get("output_tokens", 0) or 0)
+    if tokens > 0:
+        hook(tokens)
 
 
 def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,

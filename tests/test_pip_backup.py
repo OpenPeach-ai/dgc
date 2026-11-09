@@ -1,6 +1,7 @@
 """A fallback model for Pips (Pips package 6, Pips API 76; D14): each Pip's own provider and model, what new Pips start
 with, which runs get one, and the one line said once an outage. The worker's switch itself: test_pip_chat (a real worker) and test_pip_brain (a
 subscription at its limit)."""
+import json
 import unittest
 from unittest.mock import patch
 
@@ -96,6 +97,58 @@ class BackupTests(unittest.TestCase):
         self.control("set_pip_backup", pip_id=pip["id"], model="")
         self.assertIsNone(pip_backup.for_run(self.registry, self.cfg, row, brain), "this Pip chose none")
 
+    def test_claude_code_codex_or_dgc_router_can_be_its_fallback(self):
+        # 9 Nov, your call.
+        pip = self.pip()
+        got = self.control("set_pip_backup", pip_id=pip["id"], model="", engine="claude")["backup"]
+        self.assertEqual((got["engine"], got["model"]), ("claude", ""), "Claude Code's own default")
+        got = self.control("set_pip_backup", pip_id=pip["id"], model="gpt-5.6-sol", engine="codex")["backup"]
+        self.assertEqual((got["engine"], got["model"]), ("codex", "gpt-5.6-sol"))
+        got = self.control("set_pip_backup", pip_id=pip["id"], model="", router=True)["backup"]
+        self.assertIs(got["router"], True)
+        got = self.control("set_pip_backup", pip_id=pip["id"], model="Workstation/glm-5.3:cloud", router=True)["backup"]
+        self.assertEqual(got["model"], "Workstation/glm-5.3:cloud")
+        for fields in ({"engine": "kimi", "model": ""}, {"router": True, "model": "no-slash"}):
+            with self.subTest(fields=fields), self.assertRaises(RegistryError):
+                self.control("set_pip_backup", pip_id=pip["id"], **fields)
+        row = {"pip_id": pip["id"], "id": "run_" + "d" * 32, "workspace_id": pip["workspace_id"]}
+        own = {"model_settings": {"model": "fixture", "base_url": str(self.cfg.get("base_url")).rstrip("/")}}
+        self.assertEqual(pip_backup.for_run(self.registry, self.cfg, row, own),
+                         {"router": {"system": "Workstation", "model": "glm-5.3:cloud"}, "model": "DGC Router"})
+        self.assertIsNone(pip_backup.for_run(self.registry, self.cfg, row, {"model_settings": {"model": "r", "router": {}}}),
+                          "a Router run moves itself")
+        pip_backup.set_own(self.registry, pip["id"], "", "editor-user", engine="claude")
+        with patch("dgc.pip_brain.available", return_value=""):
+            got = pip_backup.for_run(self.registry, self.cfg, row, own)
+            self.assertEqual((got["brain"]["engine"], got["model"]), ("claude", "Claude Code"))
+            on_it = {"model_settings": {"model": "claude", "brain": {"engine": "claude", "model": "", "effort": ""}}}
+            self.assertIsNone(pip_backup.for_run(self.registry, self.cfg, row, on_it), "its own CLI is no fallback for itself")
+        with patch("dgc.pip_brain.available", return_value="Claude Code is not signed in"):
+            self.assertIsNone(pip_backup.for_run(self.registry, self.cfg, row, own), "signed out: no fallback")
+
+    def test_a_router_fallback_is_leased_when_asked_and_released_with_its_run(self):
+        import tempfile
+        from pathlib import Path
+        from types import SimpleNamespace
+        from dgc import router as router_mod
+        route = SimpleNamespace(model="glm-5.3:cloud", client_url="http://ws:11434/v1", client_api_mode="chat_completions", key="k-ws")
+        row = {"id": "run_" + "e" * 32}
+        backup = {"router": {"system": "", "model": ""}, "model": "DGC Router"}
+        folder = Path(tempfile.mkdtemp())
+        released = []
+        with patch.object(router_mod.ROUTER, "acquire", return_value=(route, "")), \
+                patch.object(router_mod.ROUTER, "release", side_effect=released.append):
+            pips._backup_route_lease(self.cfg, row, {"job": {"name": "Tees"}}, backup, folder)
+            left = json.loads((folder / "backup-route.json").read_text())
+            self.assertEqual(left, {"model": "glm-5.3:cloud", "base_url": "http://ws:11434/v1", "api_mode": "chat_completions", "api_key": "k-ws"})
+            self.assertEqual(oct((folder / "backup-route.json").stat().st_mode & 0o777), "0o600")
+            self.assertEqual(backup["model"], "glm-5.3:cloud", "what the worker will say it switched to")
+            pips._router_release(f"{row['id']}:fallback")
+        self.assertEqual(released, [route], "released with its run")
+        with patch.object(router_mod.ROUTER, "acquire", return_value=(None, "")):
+            pips._backup_route_lease(self.cfg, row, {}, {"router": {}, "model": "DGC Router"}, folder)
+        self.assertIn("none", json.loads((folder / "backup-route.json").read_text()))
+
     def test_its_chat_says_the_fallback_answers_until_its_own_model_is_back(self):
         from dgc import pip_chat
         pip = self.pip()
@@ -160,6 +213,23 @@ class BackupTests(unittest.TestCase):
         self.assertIn("This Pip's fallback: qwen3:8b on a saved provider",
                       _format({"backup": {"pip_id": "pip_x", "provider": self.PROVIDER, "model": "qwen3:8b"}}))
         self.assertIn("This Pip has no fallback", _format({"backup": {"pip_id": "pip_x", "provider": "", "model": ""}}))
+
+    def test_the_cli_sets_claude_code_codex_or_dgc_router_too(self):
+        from dgc.pip_cli import _backup_request, _format, parser
+        ask = lambda *words: _backup_request(parser().parse_args(["backup", *words]))
+        self.assertEqual(ask("--pip", "pip_x", "--engine", "claude"),
+                         {"type": "set_pip_backup", "pip_id": "pip_x", "model": "", "provider": "", "engine": "claude"})
+        self.assertEqual(ask("gpt-5.6-sol", "--engine", "codex"),
+                         {"type": "set_pips_backup", "model": "gpt-5.6-sol", "provider": "", "engine": "codex"})
+        self.assertEqual(ask("--pip", "pip_x", "--router", "Workstation/glm-5.3:cloud"),
+                         {"type": "set_pip_backup", "pip_id": "pip_x", "model": "Workstation/glm-5.3:cloud", "provider": "", "router": True})
+        self.assertEqual(ask("--pip", "pip_x"), {"type": "get_pip_backup", "pip_id": "pip_x"})
+        self.assertEqual(ask("none"), {"type": "set_pips_backup", "model": "", "provider": ""})
+        self.assertEqual(ask("qwen3:8b", "--provider", self.PROVIDER),
+                         {"type": "set_pips_backup", "model": "qwen3:8b", "provider": self.PROVIDER})
+        self.assertIn("This Pip's fallback: Claude Code.", _format({"backup": {"pip_id": "pip_x", "provider": "", "model": "", "engine": "claude"}}))
+        self.assertIn("New Pips start with the fallback DGC Router.", _format({"backup": {"provider": "", "model": "", "router": True}}))
+        self.assertIn("Codex · gpt-5.6-sol", _format({"backup": {"provider": "", "model": "gpt-5.6-sol", "engine": "codex"}}))
 
 
 if __name__ == "__main__":

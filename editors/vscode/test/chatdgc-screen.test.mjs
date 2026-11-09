@@ -4575,7 +4575,7 @@ test("a chat's fallback (D14): the ⋯ beside a model, Main and Fallback lined u
   } finally { await s.page.close(); }
 });
 
-test("a chat's fallback: never a subscription, and nothing offered by an older process", async (t) => {
+test("a chat's fallback: Claude Code or Codex can be one too, and nothing is offered by an older process", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
   try {
@@ -4586,7 +4586,12 @@ test("a chat's fallback: never a subscription, and nothing offered by an older p
     await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
     await s.send({ type: "models", profiles, defaultId: "subscription_codex", providerId: "subscription_codex", current: "subscription:codex", ids: ["", "gpt-5.6-sol"] });
     await s.page.locator("#cd-model-pill").click();
-    assert.equal(await s.page.locator("#cd-model-menu .dgc-menu-more").count(), 0, "Codex can't be a fallback");
+    assert.equal(await s.page.locator("#cd-model-menu .dgc-menu-more").count(), 2, "Codex's rows have a ⋯: a subscription can be the fallback (9 Nov)");
+    assert.equal(await s.page.locator("#cd-model-menu .dgc-menu-label", { hasText: "gpt-5.6-sol" }).getAttribute("title"), "Codex gpt-5.6-sol",
+                 "a long name's whole name is its tooltip (it slides while pointed at)");
+    await s.page.locator("#cd-model-menu .dgc-menu-item", { hasText: "gpt-5.6-sol" }).locator(".dgc-menu-more").click();
+    await s.page.locator("#cd-model-menu .dgc-menu-choices button", { hasText: "Use as fallback" }).click();
+    assert.deepEqual((await s.posted("fallback")).at(-1), { type: "fallback", value: "subscription:codex:gpt-5.6-sol" });
     await s.page.keyboard.press("Escape");
     await s.send({ type: "fallbackOffered", on: false });
     await s.send({ type: "models", profiles, defaultId: nativeId, providerId: nativeId, current: `provider:${nativeId}:deepseek-v4.1-flash:cloud`, ids: ["deepseek-v4.1-flash:cloud"] });
@@ -4594,4 +4599,13 @@ test("a chat's fallback: never a subscription, and nothing offered by an older p
     assert.equal(await s.page.locator("#cd-model-menu .dgc-menu-more").count(), 0, "an older process: no ⋯");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
+});
+
+test("ChatDGC: the fallback word in the model button has the same room on both sides (as in Work and a Pip)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../media/chatdgc.css", import.meta.url), "utf8");
+  assert.match(css.match(/\.cd-fallback-word\s*\{([^}]*)\}/)[1], /margin:\s*0 2px;/);
+  // Its dial and chevron take the olive too, as the button does (Work's and a Pip's reasoning words do).
+  assert.match(css, /\.cd-model-pill\.on-fallback \.cd-model-chevron \{ color: var\(--err-text\); opacity: \.7; \}/);
+  assert.match(css, /\.cd-model-pill\.on-fallback \.cd-arc-fill \{ stroke: var\(--err-text\); \}/);
 });

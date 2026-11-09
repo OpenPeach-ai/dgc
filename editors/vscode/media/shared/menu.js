@@ -104,5 +104,93 @@
     return () => menu.removeEventListener("keydown", listener);
   }
 
-  root.DgcMenu = Object.freeze({ html, keys, handle, hintHtml, KEY, esc, CHECK, DOTS, more, pill, item });
+  /** A long name stays on one line (its "…" at rest), and while its row is pointed at or focused it slides to show its
+   *  end, pauses, and slides back (9 Nov, the user's call). Measured when the row is reached, so the room the row's ⋯
+   *  takes is counted; a name that fits never moves; menu.css keeps it still for reduced motion. Once per menu (or a
+   *  shadow root that redraws its menus): it listens on `menu` for every row drawn in it later. */
+  function slide(menu) {
+    if (!menu || menu.__dgcSlide) return;
+    menu.__dgcSlide = true;
+    const view = menu.ownerDocument?.defaultView || root;
+    const DELAY = 0.35;                       // a moment's rest before it starts (menu.css's default)
+    const labelOf = (row) => row && row.querySelector(".dgc-menu-label");
+    // Which row is sliding, by what it shows: a menu that redraws gives it a new element.
+    const keyOf = (row) => [row.getAttribute("data-i"), row.getAttribute("data-chat-model"), row.getAttribute("data-provider-i"),
+                            labelOf(row)?.textContent || ""].join("|");
+    const clock = () => (view.performance && view.performance.now ? view.performance.now() : Date.now());
+    let active = null;                        // {key, started} of the name sliding now
+    let pointer = null;                       // where the pointer last was over this menu
+    const scope = menu.getRootNode ? menu.getRootNode() : menu.ownerDocument;
+    // The row under the pointer, found again by where it is: a redrawn row isn't hovered until the pointer moves.
+    const rowAtPointer = () => {
+      if (!pointer || !scope || typeof scope.elementFromPoint !== "function") return null;
+      const under = scope.elementFromPoint(pointer.x, pointer.y);
+      const row = under && under.closest ? under.closest(".dgc-menu-row") : null;
+      return row && menu.contains(row) ? row : null;
+    };
+    // The same name again (its row redrawn under the pointer or the focus) carries on from where it was.
+    const start = (row) => {
+      const label = labelOf(row);
+      if (!label || label.classList.contains("is-sliding")) return;
+      row.__dgcSlideWanted = true;
+      view.requestAnimationFrame(() => {
+        if (!row.__dgcSlideWanted) return;   // the pointer or the focus left before this frame
+        if (!row.isConnected) {               // redrawn meanwhile: the same name in its new row
+          const again = rowAtPointer();
+          if (again && again !== row) { start(again); }
+          return;
+        }
+        const hidden = Math.ceil(label.scrollWidth - label.clientWidth);
+        if (hidden <= 1) return;
+        const key = keyOf(row), resumed = !!active && active.key === key;
+        if (!resumed) active = { key, started: clock() };
+        const ran = (clock() - active.started) / 1000 - DELAY;
+        label.style.setProperty("--dgc-slide", `${-hidden}px`);
+        label.style.setProperty("--dgc-slide-time", `${Math.min(6, Math.max(1.6, hidden / 40)).toFixed(2)}s`);
+        label.style.setProperty("--dgc-slide-delay", resumed && ran > 0 ? `${-ran.toFixed(2)}s` : `${DELAY}s`);
+        label.classList.add("is-sliding");
+        // Sliding, it shows its whole name itself: its tooltip would only cover the row above. Kept when it can't
+        // move (reduced motion).
+        const still = typeof view.matchMedia === "function" && view.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        if (!still && label.hasAttribute("title")) { label.dataset.dgcTitle = label.getAttribute("title"); label.removeAttribute("title"); }
+      });
+    };
+    const stop = (row) => {
+      if (row) row.__dgcSlideWanted = false;
+      const label = labelOf(row);
+      if (label) {
+        label.classList.remove("is-sliding");
+        if (label.dataset.dgcTitle !== undefined) { label.setAttribute("title", label.dataset.dgcTitle); delete label.dataset.dgcTitle; }
+      }
+      active = null;
+    };
+    // A row focused from the keyboard (not one the menu focused by itself as it opened, or after a click).
+    const keyboardFocused = (row) => { try { return row.matches(":focus-visible"); } catch { return true; } };
+    const rowOf = (event) => (event.target && event.target.closest ? event.target.closest(".dgc-menu-row") : null);
+    menu.addEventListener("pointerover", (event) => { pointer = { x: event.clientX, y: event.clientY }; const row = rowOf(event); if (row && !row.contains(event.relatedTarget)) start(row); });
+    menu.addEventListener("pointermove", (event) => { pointer = { x: event.clientX, y: event.clientY }; });
+    menu.addEventListener("pointerout", (event) => { const row = rowOf(event); if (row && !row.contains(event.relatedTarget) && !keyboardFocused(row)) stop(row); });
+    menu.addEventListener("focusin", (event) => { const row = rowOf(event); if (row && keyboardFocused(row)) start(row); });
+    menu.addEventListener("focusout", (event) => { const row = rowOf(event); if (row && !row.contains(event.relatedTarget) && row.isConnected) stop(row); });
+    // A menu that redraws its rows (a Pip's does every second or so) keeps the name under the pointer or the focus
+    // sliding, from where it was, not from the start.
+    if (view.MutationObserver) {
+      const again = () => {
+        if (!active) return;
+        let row = null;
+        try { row = menu.querySelector(".dgc-menu-row:hover"); } catch { row = null; }
+        if (!row) row = rowAtPointer();
+        if (!row) {
+          const focused = (menu.activeElement !== undefined ? menu.activeElement : menu.ownerDocument?.activeElement) || null;
+          row = focused && focused.closest ? focused.closest(".dgc-menu-row") : null;
+          if (row && !menu.contains(row)) row = null;
+        }
+        if (row && keyOf(row) === active.key) start(row);
+      };
+      // After the redraw is laid out: the browser moves its hover to the new row only then.
+      new view.MutationObserver(() => { again(); view.requestAnimationFrame(again); }).observe(menu, { childList: true, subtree: true });
+    }
+  }
+
+  root.DgcMenu = Object.freeze({ html, keys, handle, hintHtml, KEY, esc, CHECK, DOTS, more, pill, item, slide });
 })();

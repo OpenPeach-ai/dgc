@@ -3796,6 +3796,8 @@
   // ---- the model and its thinking, as main DGC shows them: one pill (the model's name and a small arc for how much it
   // thinks) opening a menu of the models and a dial for thinking. The selects underneath are what a send reads.
   const pill = $("cd-model-pill"), modelMenu = $("cd-model-menu");
+  DgcMenu.slide(modelMenu);           // a long name slides to show its end while its row is pointed at (9 Nov)
+  const labelEl = (text) => Object.assign(el("span", "cd-menu-name dgc-menu-label", text), { title: text });
   const SVG = "http://www.w3.org/2000/svg";
   const levelOf = (value) => Math.max(0, LEVELS.findIndex(([v]) => v === value));
   const svgEl = (tag, attrs) => { const n = document.createElementNS(SVG, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v)); return n; };
@@ -3954,7 +3956,7 @@
           row.type = "button";
           row.setAttribute("role", "menuitemradio"); row.setAttribute("aria-checked", String(on));
           row.append(menuIcon(profile.kind === "subscription" ? "terminal" : "server"),
-                     el("span", "cd-menu-name dgc-menu-label", profile.name), ...(on ? [icon("check")] : []));
+                     labelEl(profile.name), ...(on ? [icon("check")] : []));
           row.addEventListener("click", () => {
             state.menuProvider = profile.id;
             state.menuProviders = false;
@@ -3976,10 +3978,10 @@
             updatePill(); renderModelMenu();
             modelMenu.querySelector(".cd-menu-row.sel")?.focus();
           };
-          // D14: Main and Fallback at the row's end, once a fallback is set; a model DGC runs itself has a ⋯ with Use
-          // as main and Use as fallback (Claude Code and Codex can't be a fallback).
+          // D14: Main and Fallback at the row's end, once a fallback is set; every model row has a ⋯ with Use as main and
+          // Use as fallback (Claude Code and Codex too, 9 Nov).
           const pills = state.fallback ? (on ? DgcMenu.pill("Main", "main") : option.value === state.fallback ? DgcMenu.pill("Fallback", "fallback") : "") : "";
-          row.append(menuIcon("zap"), el("span", "cd-menu-name dgc-menu-label", modelName(option.value)), ...(on ? [icon("check")] : []));
+          row.append(menuIcon("zap"), labelEl(modelName(option.value)), ...(on ? [icon("check")] : []));
           if (pills) row.insertAdjacentHTML("beforeend", pills);
           row.addEventListener("click", useAsMain);
           if (!state.fallbackOffered || !fallbackable(option.value)) return row;
@@ -4028,9 +4030,9 @@
     const selected = list.querySelector(".cd-menu-row.sel");
     if (selected) list.scrollTop = Math.max(0, selected.offsetTop - list.offsetTop - list.clientHeight / 2);
   }
-  // D14: a chat's fallback model. One DGC runs itself (this host's or a saved provider's), never a subscription. The host
-  // adds it to every turn this chat sends; the chat keeps it with its next reply, and a new chat starts with the last one.
-  const fallbackable = (value) => !!value && !String(value).startsWith("subscription:");
+  // D14: a chat's fallback model: any model it can run, Claude Code or Codex included (9 Nov). The host adds it to every
+  // turn this chat sends; the chat keeps it with its next reply, and a new chat starts with the last one.
+  const fallbackable = (value) => !!value;
   function setFallback(value) {
     state.fallback = value; state.fallbackMore = "";
     if (!value) state.fallbackOn = null;

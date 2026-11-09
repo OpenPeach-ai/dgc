@@ -146,7 +146,7 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
   the model thought before answering, **Thought** above the reply opens what it thought.
 - **A fallback model.** The **⋯** beside a model in that menu offers **Use as main** and **Use as fallback** (or **Stop
   using as fallback**); once a fallback is set, the two rows say **Main** and **Fallback** at their right end. It is one
-  model on your own connection or a saved provider, never Claude Code or Codex. When the chat's model fails before the
+  model on your own connection, a saved provider, Claude Code or Codex. When the chat's model fails before the
   reply wrote or did anything (a usage limit, unreachable, signed out), the fallback writes the whole reply, with the
   whole chat; the button by Send names it in olive with the word **fallback**, and the first such reply says so once
   ("X didn't answer; Y did"). Its **Trace** keeps the change: the try that failed, how long it took and why, then the

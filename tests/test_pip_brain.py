@@ -388,6 +388,107 @@ class Turns(unittest.TestCase):
         self.assertTrue(switched[0]["trace"]["why"].startswith("Claude Code didn't finish this turn"), switched[0])
         self.assertLess(switched[0]["trace"]["since"], switched[0]["trace"]["t"], "its Trace keeps how long the failed try took")
 
+    def native_turn(self, *, backup, chat, events, text="design me my birthday shirts", on_event=None):
+        """A Personal Pip on DGC's own model ("fixture"), with a fallback that is Claude Code or DGC Router (9 Nov)."""
+        pip = self.store.create(self.registry.personal()["id"], "Tees", None, "editor-user", pip_type="lens",
+                                model_choice={"mode": "default"})
+        run = pip_chat.send(self.store, pip["id"], text, "k-" + os.urandom(3).hex(), "editor-user", self.cfg)["run"]
+        manifest = json.loads(self.registry.db.execute("SELECT manifest FROM pip_runs WHERE id=?", (run["id"],)).fetchone()[0])
+        self.assertNotIn("brain", manifest["model_settings"])
+        from dgc import pip_brain
+        from dgc.llm import LLMClient
+        env = {"DGC_SESSION_POLICY": pips._json(pips.native_policy(personal=True))}
+        if "brain" in backup:
+            env["DGC_PIP_BACKUP_BRAIN"] = json.dumps(pip_brain.launch_pin(backup["brain"], self.base / ("backup-" + os.urandom(3).hex())))
+            self.cfg.data.update(fallback_brain=backup["brain"], fallback_brain_label=backup["model"])
+        else:
+            self.cfg.data.update(fallback_router=backup["router"])
+        self.addCleanup(lambda: [self.cfg.data.pop(k, None) for k in ("fallback_brain", "fallback_brain_label", "fallback_router")])
+        told = (lambda event: (events.append(event), on_event(event))) if on_event else events.append
+        with patch.dict(os.environ, env), patch.object(LLMClient, "chat", chat), \
+                patch("dgc.vision.has_vision", return_value=False), patch("dgc.agent.discover_skills", return_value={}), \
+                patch("dgc.agent.load_memories", side_effect=AssertionError("No ambient memory")):
+            result = pips.execute_native(self.cfg, self.root, manifest, told)
+        seen_file = self.bin / "seen.json"
+        return result, (json.loads(seen_file.read_text()) if seen_file.exists() else {})
+
+    def test_its_own_model_out_claude_code_as_its_fallback_takes_the_whole_turn(self):
+        # 9 Nov, your call: Claude Code or Codex can be a Pip's fallback. Its own model failed before it said or did
+        # anything: the turn runs on Claude Code, with the whole chat and your message once, and its Trace says why.
+        from dgc import pip_brain
+        from dgc.llm import LLMError
+        (self.bin / "script.json").write_text(json.dumps([{"say": "Here are your shirt ideas, from Claude Code."}]))
+
+        def chat(client, messages, tools=None, on_text=None, **kwargs):
+            raise LLMError("rate limited (429) after 3 retries")
+        events = []
+        brain = pip_brain.route(self.cfg, {"mode": "subscription", "engine": "claude", "model": ""})
+        result, seen = self.native_turn(backup={"brain": brain, "model": "Claude Code"}, chat=chat, events=events)
+        self.assertEqual(result["text"], "Here are your shirt ideas, from Claude Code.")
+        switched = [e for e in events if e.get("kind") == "backup"]
+        self.assertEqual([e["model"] for e in switched], ["Claude Code"])
+        self.assertTrue(switched[0]["trace"]["why"].startswith("fixture didn't answer: rate limited"), switched[0])
+        self.assertEqual(seen["prompt"].count("design me my birthday shirts"), 1, "your message once")
+        # Its Trace: the failed try, then Claude Code's answer as a round of its own, the fallback's (seen live, 9 Nov:
+        # only the failed try was there).
+        from dgc.reply_trace import RunRecorder
+        recorder = RunRecorder()
+        for event in events:
+            recorder.feed(event.get("kind"), event, event.get("trace"))
+        models = [s for s in (recorder.saved() or {}).get("steps", []) if s["kind"] == "model"]
+        self.assertTrue(models and models[0].get("error") and models[0].get("to") == "Claude Code", models)
+        self.assertEqual(models[-1]["label"], "model.response · fallback")
+
+    def test_its_own_model_out_dgc_router_as_its_fallback_is_leased_then_and_takes_the_whole_turn(self):
+        # DGC Router as a Pip's fallback (9 Nov): the worker asks for a system only once its own model failed; the
+        # controller leases one and leaves it in the run's folder; the turn runs there.
+        from dgc.llm import ChatResult, LLMError
+        asked = []
+
+        def chat(client, messages, tools=None, on_text=None, **kwargs):
+            asked.append(client.model)
+            if client.model != "routed-model":
+                raise LLMError("cannot connect to 127.0.0.1:11434")
+            return ChatResult(content="Here are your shirt ideas, from the Router.")
+        events = []
+
+        def controller(event):
+            if event.get("kind") == "backup_route_needed":
+                (self.root.parent / "backup-route.json").write_text(json.dumps(
+                    {"model": "routed-model", "base_url": "http://127.0.0.1:9/v1", "api_mode": "chat_completions", "api_key": "k"}))
+        result, _ = self.native_turn(backup={"router": {"system": "", "model": ""}, "model": "DGC Router"}, chat=chat,
+                                     events=events, on_event=controller)
+        self.assertEqual(result["text"], "Here are your shirt ideas, from the Router.")
+        self.assertIn("backup_route_needed", [e.get("kind") for e in events], "asked for only when needed")
+        self.assertEqual([e["model"] for e in events if e.get("kind") == "backup"], ["routed-model"])
+        self.assertEqual(asked[-1], "routed-model")
+        why = next(e for e in events if e.get("kind") == "backup")["trace"]["why"]
+        self.assertNotIn("127.0.0.1", why, "its Trace names no address")
+
+    def test_a_runs_second_try_clears_its_fallbacks_folder_too(self):
+        # A run tried again (after a restart, or stuck once) pins its CLIs again in new folders: the fallback's folder
+        # from the first try went with the main one's, or the second try lost its fallback.
+        pip = self.store.create(self.registry.personal()["id"], "Tees", None, "editor-user", pip_type="lens",
+                                model_choice={"mode": "default"})
+        run = pip_chat.send(self.store, pip["id"], "hi", "k-" + os.urandom(3).hex(), "editor-user", self.cfg)["run"]
+        row = self.registry.db.execute("SELECT * FROM pip_runs WHERE id=?", (run["id"],)).fetchone()
+        run_dir = self.registry.directory / "runs" / run["id"]
+        for name in ("brain", "backup-brain"):
+            (run_dir / name).mkdir(parents=True, mode=0o700)
+        pips._reset_run_directory(self.registry, row)
+        self.assertFalse((run_dir / "brain").exists())
+        self.assertFalse((run_dir / "backup-brain").exists())
+
+    def test_codex_not_listing_its_models_is_said_for_a_chat_too(self):
+        # ChatDGC's Codex route reads the same catalog: its words fit a chat and a Pip alike.
+        from dgc import pip_brain
+        launch = {"binary": "/nonexistent/codex", "env": {}, "home": str(self.base), "engine": "codex", "folder": str(self.base)}
+        with self.assertRaises(Exception) as caught:
+            pip_brain.codex_catalog(launch, self.base)
+        self.assertIn("Codex didn't list its models", str(caught.exception))
+        self.assertNotIn("Pip", str(caught.exception))
+        self.assertFalse((self.root.parent / "backup-route.json").exists(), "the key's file is gone once read")
+
     def test_a_subscription_that_already_spoke_or_acted_is_not_redone_on_the_backup(self):
         for key, value in (("fallback_model", "backup-model"), ("fallback_base_url", "http://127.0.0.1:9/v1"), ("fallback_api_key", "k")):
             self.cfg.set(key, value, persist=False)

@@ -1184,6 +1184,17 @@ marked as soon as the worker reports the switch, so `list_pip_messages` carries 
 `get_pip_backup` `on`) while the fallback answers, and the prompt box says so. Each use is a
 `pip_backup_used` workspace event.
 
+Claude Code, Codex or DGC Router as the fallback (9 Nov): the choice is `{provider: "", model, engine}` (`engine`
+`claude` or `codex`, `model` "" its own default) or `{provider: "", model, router: true}` (`model` "" any Pip system, or
+`<system>/<model>`). For Claude Code or Codex the controller pins its launch for the worker in `DGC_PIP_BACKUP_BRAIN`
+(`pip_brain.route`; not installed or signed out, the run has no fallback, as before), and the worker's `backup` is its
+label. For DGC Router nothing is leased when the run starts: the worker, needing the fallback, emits
+`backup_route_needed`; the controller leases a worker of the chosen system for this run (`_backup_route_lease`, kept in
+`_ROUTER_RUNS` as `<run>:fallback` and released when the run ends) and writes its route to the run's own
+`backup-route.json` (mode 0600), which the worker reads within 30 s and deletes. Either way the turn the fallback takes
+is the failed turn rolled back to before it began (the chat's prompt once, never twice), then run on the fallback with
+the whole chat.
+
 Words are matched whole on the lower-cased text, split at anything but letters and digits and at camelCase. "What was
 pressed" is the step's own target (the accessible name `click` returns, the option `choose` picked, the label
 `check` set, a confirm's message, `element_at` for a click by position); with none (Enter in a field, a desktop step),
@@ -2325,4 +2336,4 @@ Clients check it before using a newer control.
 | 73 | A text message can join one running Personal Pip conversation as a mid-turn update. It stays in that run's history and does not start a second reply. One that reply never read becomes the next turn, or says it wasn't sent if the reply was stopped or failed; `list_pip_messages` lists those waiting for a turn in `waiting` (see PIPS_EDITOR_PROTOCOL.md). |
 | 74 | A Pip on a provider saved in the editor's Settings → Models: `model_choice` `{"mode": "provider", "provider", "model"}`. |
 | 75 | Payments at Do it all: `get_pips_payments` / `set_pips_payments {enabled}` (local only) → `{payments: {on, limit, paid}}`. Off by default; on, a Pip at Do it all may pay by itself, at most `limit` (3) times in 24 hours across all Pips, never a request carrying a card number. |
-| 76 | A Pip's fallback model: `get_pip_backup {pip_id}` / `set_pip_backup {pip_id, model, provider?}` → `{backup: {pip_id, provider, model, on?}}` (`provider` "" DGC's own connection or `provider_<32 hex>`, `model` "" or null none; `on` `{since, model}` while it answers) and the one new Pips start with, `get_pips_backup` / `set_pips_backup {model, provider?}` → `{backup: {provider, model}}`, all local only. When a run's own model doesn't answer, it carries on with the fallback; the first reply of an outage carries `backup`, its one line, and `list_pip_messages` carries `fallback_on {model, since}` while the fallback answers. |
+| 76 | A Pip's fallback model: `get_pip_backup {pip_id}` / `set_pip_backup {pip_id, model, provider?, engine?, router?}` → `{backup: {pip_id, provider, model, engine?, router?, on?}}` (`provider` "" DGC's own connection or `provider_<32 hex>`, `model` "" or null none; `engine` `claude` or `codex` for Claude Code or Codex, `model` then its model or "" its default; `router: true` for DGC Router, `model` "" or `<system>/<model>`; `on` `{since, model}` while it answers) and the one new Pips start with, `get_pips_backup` / `set_pips_backup {model, provider?}` → `{backup: {provider, model}}`, all local only. When a run's own model doesn't answer, it carries on with the fallback; the first reply of an outage carries `backup`, its one line, and `list_pip_messages` carries `fallback_on {model, since}` while the fallback answers. |

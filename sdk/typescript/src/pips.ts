@@ -182,8 +182,8 @@ export type PipMutationParams = {
   set_pip_daily_cap: { pip_id: string; daily_tokens: number | null };
   set_pips_desktop_notifications: { enabled: boolean };
   set_pips_payments: { enabled: boolean };
-  set_pips_backup: { model: string; provider?: string };
-  set_pip_backup: { pip_id: string; model: string | null; provider?: string };
+  set_pips_backup: { model: string; provider?: string; engine?: "claude" | "codex"; router?: boolean };
+  set_pip_backup: { pip_id: string; model: string | null; provider?: string; engine?: "claude" | "codex"; router?: boolean };
   set_pips_keep_running: { enabled: boolean };
   mark_pip_digest_seen: { until: string };
   mark_pip_news_seen: { pip_ids: string[]; until: string };
@@ -347,9 +347,9 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   get_pips_payments: [],
   set_pips_payments: ["enabled"],
   get_pips_backup: [],
-  set_pips_backup: ["model", "provider"],
+  set_pips_backup: ["model", "provider", "engine", "router"],
   get_pip_backup: ["pip_id"],
-  set_pip_backup: ["pip_id", "model", "provider"],
+  set_pip_backup: ["pip_id", "model", "provider", "engine", "router"],
   get_pips_keep_running: [],
   set_pips_keep_running: ["enabled"],
   get_pip_digest: [],

@@ -326,6 +326,8 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "memory": _B(False), "chatdgc_web": _B(False), "chatdgc_followups": _B(False),
         # Opt-in too: tokens one turn may spend, sub-agents included; 0 is no cap (Settings -> General).
         "turn_token_budget": _I(False),
+        # Opt-in too: a Work session's fallback when it is Claude Code ("claude") or Codex ("codex"), else "" (D14).
+        "fallback_engine": _S(False),
         "sandbox": _B(False), "sandbox_network": _B(False),
         "show_reasoning": _B(False), "preserve_thinking": _B(False),
         "ultra_mode": _B(False),

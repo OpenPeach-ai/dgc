@@ -558,6 +558,10 @@ def parser():
     backup.add_argument("model", nargs="?")
     backup.add_argument("--pip", dest="backup_pip", help="one Pip's fallback")
     backup.add_argument("--provider", dest="backup_provider", default="", help="a saved provider's id (provider_...); none: DGC's own connection")
+    backup.add_argument("--engine", dest="backup_engine", choices=("claude", "codex"), default="",
+                        help="Claude Code or Codex as the fallback (MODEL, if given, is its model; none: its default)")
+    backup.add_argument("--router", dest="backup_router", action="store_true",
+                        help="DGC Router as the fallback (MODEL, if given, is SYSTEM/MODEL; none: any Pip system)")
     paying = command("payments", "whether a Pip at Do it all may pay by itself, at most 3 times a day (off by default): show, or turn on or off")
     paying.add_argument("state", nargs="?", choices=("on", "off"))
     stop = command("stop", "emergency stop: pause all jobs and cancel their work")
@@ -985,12 +989,13 @@ def _format(value):
         return usage_text(value["usage"])
     if set(value) == {"backup"} and isinstance(value["backup"], dict):
         item = value["backup"]
-        where = " on a saved provider" if item.get("provider") else " on DGC's own connection"
+        chosen = bool(item.get("model") or item.get("engine") or item.get("router"))
         if "pip_id" in item:
-            return ((f"This Pip's fallback: {item['model']}{where}. When its own model doesn't answer, it carries on with it "
-                     "and says so once." if item.get("model") else "This Pip has no fallback: when its model doesn't answer, it stops.")
-                    + " Set it in its model picker, or: dgc pips backup --pip PIP MODEL [--provider ID] (or none).")
-        return ((f"New Pips start with the fallback {item['model']}{where}." if item.get("model")
+            return ((f"This Pip's fallback: {_backup_name(item)}. When its own model doesn't answer, it carries on with it "
+                     "and says so once." if chosen else "This Pip has no fallback: when its model doesn't answer, it stops.")
+                    + " Set it in its model picker, or: dgc pips backup --pip PIP MODEL [--provider ID], --engine claude|codex"
+                      " or --router (or none).")
+        return ((f"New Pips start with the fallback {_backup_name(item)}." if chosen
                  else "New Pips start with no fallback.")
                 + " Each Pip's own: dgc pips backup --pip PIP MODEL. This one: dgc pips backup MODEL (or none).")
     if set(value) == {"payments"} and isinstance(value["payments"], dict):
@@ -1547,6 +1552,35 @@ def _workspace_command(config, args):
         return registry.sessions(workspace["id"], after=args.after, limit=args.limit)
 
 
+def _backup_request(args) -> dict:
+    """dgc pips backup: show or set a Pip's fallback (--pip), or the one new Pips start with: a model (on a saved
+    provider with --provider), Claude Code or Codex (--engine, MODEL its model), DGC Router (--router), or none."""
+    word = (getattr(args, "model", None) or "").strip()
+    engine, router = getattr(args, "backup_engine", "") or "", bool(getattr(args, "backup_router", False))
+    pip = {"pip_id": args.backup_pip} if getattr(args, "backup_pip", None) else {}
+    if not (word or engine or router):
+        return {"type": "get_pip_backup" if pip else "get_pips_backup", **pip}
+    if word == "none":
+        choice = {"model": "", "provider": ""}
+    else:
+        choice = {"model": word, "provider": "" if engine or router else (args.backup_provider or "")}
+        if engine:
+            choice["engine"] = engine
+        elif router:
+            choice["router"] = True
+    return {"type": "set_pip_backup" if pip else "set_pips_backup", **pip, **choice}
+
+
+def _backup_name(item) -> str:
+    """A fallback as its picker names it: a model on its connection, Claude Code or Codex, or DGC Router."""
+    model = str(item.get("model") or "")
+    if item.get("engine"):
+        return {"claude": "Claude Code", "codex": "Codex"}.get(item["engine"], str(item["engine"])) + (f" · {model}" if model else "")
+    if item.get("router"):
+        return "DGC Router" + (f" · {model}" if model else "")
+    return model + (" on a saved provider" if item.get("provider") else " on DGC's own connection")
+
+
 def _digest_command(config, args):
     """`digest`, `notify` and `outcomes`: read through the same local controls as the Pips view."""
     from . import pips
@@ -1576,16 +1610,7 @@ def _digest_command(config, args):
     if args.command == "usage":
         return control({"type": "get_pip_usage", "pip_id": args.pip_id})
     if args.command == "backup":
-        word = (args.model or "").strip()
-        if args.backup_pip:
-            if not word:
-                return control({"type": "get_pip_backup", "pip_id": args.backup_pip})
-            return control({"type": "set_pip_backup", "pip_id": args.backup_pip, "model": "" if word == "none" else word,
-                            "provider": "" if word == "none" else (args.backup_provider or "")})
-        if not word:
-            return control({"type": "get_pips_backup"})
-        return control({"type": "set_pips_backup", "model": "" if word == "none" else word,
-                        "provider": "" if word == "none" else (args.backup_provider or "")})
+        return control(_backup_request(args))
     if args.command == "payments":
         if args.state is None:
             return control({"type": "get_pips_payments"})

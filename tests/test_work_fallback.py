@@ -74,7 +74,7 @@ class SessionFallback(window.IsolatedHome):
         host.default.agent._persist()
         record = json.loads(saved.read_text())
         self.assertEqual(record["fallback_route"], {"model": "spare", "base_url": "https://spare.example/v1",
-                                                    "api_mode": "chat_completions"})
+                                                    "api_mode": "chat_completions", "engine": ""})
         self.assertNotIn("sk-spare", saved.read_text(), "a session file never holds a key")
         host.dispatch({"type": "new_session", "request_id": "fresh"})
         self.assertEqual((config.get("fallback_model"), config.get("fallback_base_url")), ("glm-default", ""),
