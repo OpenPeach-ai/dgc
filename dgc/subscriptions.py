@@ -835,6 +835,44 @@ def preflight(engine: SubEngine) -> str:
     return binary
 
 
+def run_cli_turn(config, agent, ui, engine: SubEngine, prompt: str) -> bool:
+    """One Work turn on Claude Code or Codex, with its session's fallback (D14): when the CLI fails before it wrote or did
+    anything (a usage limit, signed out, can't start), the turn runs on the fallback, DGC's own model, with the whole
+    chat; a turn that already wrote or did something is never redone. Says what went wrong otherwise, as before."""
+    from .reply_trace import failed_why
+    try:
+        result = delegate_turn(config, agent, ui, engine, prompt)
+    except EngineError as exc:
+        handed = _hand_over(config, agent, prompt, f"{engine.short_label} couldn't start: {failed_why(exc)}")
+        if handed is not None:
+            return handed
+        ui.error(str(exc))
+        return False
+    if (not result.get("ok") and not result.get("timeout") and not result.get("cancelled") and not result.get("did")):
+        said = str(result.get("error") or "") or f"exited with status {result.get('rc')}"
+        handed = _hand_over(config, agent, prompt, f"{engine.short_label} didn't answer: {failed_why(said)}")
+        if handed is not None:
+            return handed
+    if result.get("timeout"):
+        ui.error("the delegated turn hit the time budget and was stopped")
+    elif result.get("error") and result.get("persisted", True):
+        ui.error(str(result["error"]))
+    elif result.get("rc") not in (0, None):
+        ui.error(f"{engine.short_label} exited with status {result['rc']}")
+    if result.get("ok") and callable(getattr(agent, "cli_answered", None)):
+        agent.cli_answered()
+    return bool(result.get("ok"))
+
+
+def _hand_over(config, agent, prompt: str, why: str):
+    """The session's fallback takes this turn (D14), or None when it has none (or the turn was stopped)."""
+    fallback = str(config.get("fallback_model") or "").strip()
+    cancelled = getattr(agent, "cancelled", None)
+    if not fallback or (cancelled is not None and cancelled.is_set()):
+        return None
+    return agent.run_turn(prompt, reset_cancel=False, fallback_turn={"model": fallback, "why": why})
+
+
 def delegate_turn(config, agent, ui, engine: SubEngine, prompt: str, *, cancel=None,
                   model: str | None = None, effort: str | None = None,
                   cont: bool | None = None) -> dict:
@@ -862,6 +900,11 @@ def delegate_turn(config, agent, ui, engine: SubEngine, prompt: str, *, cancel=N
     names: dict[str, str] = {}
     diffs: dict[str, str] = {}
     shown = {"text": False}
+    # D14: whether it wrote or did anything (a turn that did is never redone on its fallback), and the steps it took with
+    # its own tools, which DGC keeps with its answer so DGC's own models (its fallback) read them too.
+    did = {"any": False}
+    steps: list[str] = []
+    step_at: dict[str, int] = {}
     fresh = {"first": cont is False}
     from .reasoning import ReasoningOrigin, ReasoningTracker, resolve_source
 
@@ -881,6 +924,15 @@ def delegate_turn(config, agent, ui, engine: SubEngine, prompt: str, *, cancel=N
 
     def on_event(event: dict) -> None:
         kind = event.get("kind")
+        if kind in ("tool_call", "tool_result") or (kind in ("text", "result") and str(event.get("text") or "").strip()):
+            did["any"] = True
+        if kind == "tool_call" and len(steps) < 60:
+            from .reply_trace import summary_of
+            args = event.get("args") if isinstance(event.get("args"), dict) else {}
+            step_at[str(event.get("id") or "")] = len(steps)
+            steps.append(f"{str(event.get('name') or 'tool')[:60]}: {summary_of(str(event.get('name') or ''), args)}".rstrip(": "))
+        elif kind == "tool_result" and event.get("error") and str(event.get("id") or "") in step_at:
+            steps[step_at[str(event.get("id"))]] += " (failed)"
         if kind in ("text", "thinking", "tool_call", "tool_result"):
             progressed = getattr(agent, "_engine_progress", None)   # reconnecting: a retry is over
             if callable(progressed):
@@ -932,7 +984,11 @@ def delegate_turn(config, agent, ui, engine: SubEngine, prompt: str, *, cancel=N
             engine.key, mode, model, effort)
         fresh["first"] = False
         shown["text"] = False
-        result = run_turn(engine, delegated_prompt(config, safe_prompt, mode), config.project_root,
+        # D14: back after its fallback answered: first what it missed (on its own session), or the whole chat (when its
+        # session is gone, it knows nothing of this chat).
+        catch_up = getattr(agent, "cli_catch_up", None)
+        missed = catch_up(resumed=bool(session_id)) if callable(catch_up) else ""
+        result = run_turn(engine, delegated_prompt(config, (missed + safe_prompt) if missed else safe_prompt, mode), config.project_root,
                           cont=bool(session_id), session_id=session_id, mode=mode, timeout=budget,
                           on_event=on_event, cancel=cancel, model=model, effort=effort,
                           goal_request=agent._active_goal_request,
@@ -940,10 +996,17 @@ def delegate_turn(config, agent, ui, engine: SubEngine, prompt: str, *, cancel=N
         if result.get("session_id") and not result.get("cancelled") and not result.get("timeout"):
             agent.remember_subscription_session(
                 engine.key, result["session_id"], mode, model, effort)
+        if missed and result.get("ok") and callable(getattr(agent, "cli_caught_up", None)):
+            agent.cli_caught_up()
         return result
 
     try:
-        return agent.run_external_turn(prompt, delegate, reset_cancel=False)
+        outcome = agent.run_external_turn(prompt, delegate, reset_cancel=False)
+        if isinstance(outcome, dict):
+            outcome["did"] = did["any"]
+            if steps and str(outcome.get("text") or "").strip() and callable(getattr(agent, "keep_cli_steps", None)):
+                agent.keep_cli_steps(steps)
+        return outcome
     finally:
         try:
             reasoning.finish(round_called_tools=None)

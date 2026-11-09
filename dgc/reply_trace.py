@@ -143,14 +143,23 @@ class ReplyTrace:
                 label += " · fallback"            # a small call after the switch ran on the fallback too
             self._model = (when, label)
 
-    def handed_over(self, why, *, at=None, since=None, to=None) -> None:
+    def handed_over(self, why, *, at=None, since=None, to=None, last_round: bool = False) -> None:
         """Its model failed and its fallback takes over (D14): the try that failed is a row of its own, with why and the
         model that took over (``to``), from its start (the round running now, else ``since``, else this moment); the
-        rounds after it are its fallback's."""
+        rounds after it are its fallback's. ``last_round``: the try was the round that just closed (a CLI's, ended as its
+        stream did), which becomes the failed row itself, with its own time."""
         if self._model is None and type(since) in (int, float) and self._origin is None:
             self._at(since)
         when = self._at(at)
-        if self._model is not None:
+        closed = self._rows[-1] if (last_round and self._model is None and self._rows and self._rows[-1]["kind"] == "model"
+                                    and not self._rows[-1].get("error")) else None
+        if closed is not None:
+            closed["error"] = True
+            if words(why, MAX_DETAIL):
+                closed["detail"] = words(why, MAX_DETAIL)
+            closed.pop("tokens", None)
+            row = closed
+        elif self._model is not None:
             self.model_end(at=when, error=True, detail=why)
             row = self._rows[-1] if self._rows and self._rows[-1]["kind"] == "model" else None
         else:

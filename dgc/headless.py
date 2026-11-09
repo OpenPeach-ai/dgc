@@ -1735,11 +1735,12 @@ class HeadlessUI:
         if recording is not None:
             recording.model_start()
 
-    def trace_handed_over(self, why: str, to: str) -> None:
-        """Its model failed and its fallback took over (D14): the turn's Trace keeps the try that failed and why."""
+    def trace_handed_over(self, why: str, to: str, last_round: bool = False) -> None:
+        """Its model failed and its fallback took over (D14): the turn's Trace keeps the try that failed and why (a CLI's:
+        the round that just closed, ``last_round``)."""
         recording = self.__dict__.get("_turn_trace")
         if recording is not None:
-            recording.handed_over(why, to=to)
+            recording.handed_over(why, to=to, last_round=last_round)
 
     def model_fallback(self, model: str, active: bool) -> None:
         """The chat's fallback answers now (or no longer, model ""): the prompt box shows it (capabilities.model_fallback)."""
@@ -4169,18 +4170,8 @@ class Backend:
         if engine is None:
             self.ui.error(f"unknown subscription engine '{engine_key}'")
             return False
-        try:
-            result = subs.delegate_turn(self.config, self.agent, self.ui, engine, prompt)
-        except subs.EngineError as exc:
-            self.ui.error(str(exc))
-            return False
-        if result.get("timeout"):
-            self.ui.error("the delegated turn hit the time budget and was stopped")
-        elif result.get("error") and result.get("persisted", True):
-            self.ui.error(str(result["error"]))
-        elif result.get("rc") not in (0, None):
-            self.ui.error(f"{engine.short_label} exited with status {result['rc']}")
-        return bool(result.get("ok"))
+        # With its session's fallback (D14): a CLI that fails before it wrote or did anything hands the turn over.
+        return subs.run_cli_turn(self.config, self.agent, self.ui, engine, prompt)
 
     def _run_turn_queue(self) -> None:
         """Drain the prompt FIFO in one worker so completion and enqueue cannot race."""

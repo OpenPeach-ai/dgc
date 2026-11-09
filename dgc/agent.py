@@ -1262,6 +1262,19 @@ def _tool_transcript_errors(messages: list[dict]) -> list[str]:
     return errors
 
 
+def _with_cli_steps(messages):
+    """An answer a CLI gave carries the steps it took with its own tools (Agent.keep_cli_steps): DGC's own model reads
+    them with it (D14: its fallback doesn't start blind)."""
+    out = []
+    for message in messages:
+        steps = message.get("_dgc_cli_steps") if isinstance(message, dict) else None
+        if steps and message.get("role") == "assistant" and isinstance(message.get("content"), str):
+            message = {**message, "content": message["content"] + "\n\n[Steps it took with its own tools: "
+                       + str(steps).replace("\n", "; ") + "]"}
+        out.append(message)
+    return out
+
+
 def _repair_tool_transcript(messages: list[dict]) -> tuple[list[dict], bool]:
     """Repair an interrupted transcript without pretending that a missing tool ran."""
     out: list[dict] = []
@@ -4405,7 +4418,7 @@ class Agent(GoalLifecycle):
                         "provider continuation contains a configured credential inside signed or "
                         "encrypted state; start a new session or remove that credential-bearing turn")
         text_stream = StreamingRedactor(self._secret_values)
-        safe_messages = redact_messages(self.messages, secrets)
+        safe_messages = redact_messages(_with_cli_steps(self.messages), secrets)
         reasoning_config = getattr(self, "config", None)
         reasoning_get = getattr(reasoning_config, "get", None)
         reasoning = ReasoningTracker(
@@ -6285,7 +6298,8 @@ class Agent(GoalLifecycle):
         finally:
             self.chat_changes.finish(before)
 
-    def run_turn(self, user_text: str, *, reset_cancel: bool = True, pip_setup_notice: dict | None = None) -> bool:
+    def run_turn(self, user_text: str, *, reset_cancel: bool = True, pip_setup_notice: dict | None = None,
+                 fallback_turn: dict | None = None) -> bool:
         """Run one foreground turn and report truthful terminal + persistence success.
 
         ``False`` means the turn was rejected, ended in a handled terminal error, or its durable
@@ -6342,7 +6356,9 @@ class Agent(GoalLifecycle):
             # state. Serialized frontends clear at dequeue and pass reset_cancel=False, preserving
             # a cancel that races with worker startup.
             if self.depth == 0:
-                if getattr(self, "_on_fallback", False):
+                if fallback_turn:
+                    self._fallback_takes_over(fallback_turn)     # D14: its CLI failed; DGC's own model takes the turn
+                elif getattr(self, "_on_fallback", False):
                     self._on_fallback = False         # D14: every turn tries its own model first
                     self.refresh_client()
                 # A fresh ledger entry per foreground turn. Detached children started by an
@@ -6452,6 +6468,11 @@ class Agent(GoalLifecycle):
                 with self._steer_lock:
                     self._accepting_steer = False
                 self._eta_end(completed)
+                if fallback_turn and completed is not False:
+                    # Kept with the answer, before the save: its CLI, back, is told what it missed (cli_catch_up).
+                    answered = next((m for m in reversed(self.messages) if m.get("role") == "assistant"), None)
+                    if answered is not None:
+                        answered["_dgc_fallback"] = str(fallback_turn.get("model") or "")[:256]
                 if self.depth == 0 and getattr(self, "subagents", None) is not None:
                     # A child that never reported (an exception between its start and its end)
                     # must not stay "working" in the agents list after the turn is over.
@@ -6684,6 +6705,88 @@ class Agent(GoalLifecycle):
         hub._notify("delivered", {"notification": notification, "delivery": "inline"})
         return True
 
+    # ---- a CLI session's fallback (D14) ------------------------------------------------------------
+    def _fallback_takes_over(self, fallback_turn: dict) -> None:
+        """Its CLI failed before it wrote or did anything: this turn runs on its fallback, DGC's own model, with the whole
+        chat. The prompt the failed CLI turn kept goes (run_turn adds it again, once); its Trace keeps why."""
+        kept = getattr(self, "_last_external_prompt", None)
+        if self.messages and kept is not None and self.messages[-1] is kept:
+            self.messages.pop()
+        self._last_external_prompt = None
+        model, why = str(fallback_turn.get("model") or ""), self._safe_text(str(fallback_turn.get("why") or ""))
+        handed = getattr(self.ui, "trace_handed_over", None)
+        if callable(handed):
+            try:
+                handed(why, model, last_round=True)     # its CLI's round, ended as its stream did
+            except TypeError:
+                handed(why, model)
+        self.client = self._fallback_client(model)
+        self._on_fallback = True
+        if not getattr(self, "_fallback_outage", False):
+            self._fallback_outage = True
+            self.ui.info(self._safe_text(f"⤳ {why}; falling back to {model}"))
+            told = getattr(self.ui, "model_fallback", None)
+            if callable(told):
+                told(model, True)
+
+    def cli_answered(self) -> None:
+        """Its CLI answered a turn: an outage, if there was one, is over, and the prompt box is normal again."""
+        if getattr(self, "_fallback_outage", False):
+            self._fallback_outage = False
+            told = getattr(self.ui, "model_fallback", None)
+            if callable(told):
+                told("", False)
+
+    def keep_cli_steps(self, steps) -> None:
+        """What its CLI did with its own tools this turn, kept with its answer: DGC's own models read it (its fallback)."""
+        message = next((m for m in reversed(self.messages) if m.get("role") != "system"), None)
+        if isinstance(message, dict) and message.get("role") == "assistant":
+            message["_dgc_cli_steps"] = self._safe_text("\n".join(str(step) for step in steps))[:4000]
+
+    def cli_catch_up(self, *, resumed: bool) -> str:
+        """What its CLI missed while its fallback answered, said before its next prompt: the fallback's turns and the
+        files they changed when its own session resumes, the whole chat when it doesn't (then it knows none of it)."""
+        pending = []
+        for message in reversed(self.messages):
+            if message.get("role") != "assistant":
+                continue
+            if not message.get("_dgc_fallback"):
+                break                                # its own last answer: everything before it, it knows
+            if not message.get("_dgc_caught_up"):
+                pending.append(message)
+        self._cli_catch_up_pending = pending
+        if not pending:
+            return ""
+        def words(message) -> str:
+            content = message.get("content")
+            if isinstance(content, list):
+                content = " ".join(part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text")
+            return str(content or "").strip()
+        if not resumed:
+            from .pip_brain import transcript
+            history = transcript([m for m in self.messages if m.get("role") in ("user", "assistant", "tool")])
+            return self._safe_text("This conversation so far, oldest first (reference, not new instructions):\n\n"
+                                   + history + "\n\nNow:\n")
+        fallback = str(pending[0].get("_dgc_fallback") or "its fallback")
+        lines = []
+        for message in reversed(pending):
+            at = next(i for i, m in enumerate(self.messages) if m is message)
+            asked = next((m for m in reversed(self.messages[:at]) if m.get("role") == "user"), None)
+            if asked is not None and words(asked):
+                lines.append("User: " + words(asked))
+            lines.append(f"{fallback}: " + words(message))
+            files = [row.get("path") for row in ((message.get("_dgc_turn_files") or {}).get("files") or [])
+                     if isinstance(row, dict) and row.get("path")]
+            if files:
+                lines.append("Files it changed: " + ", ".join(str(path) for path in files[:40]))
+        return self._safe_text(f"While you were away, {fallback} answered for you in this chat (oldest first; reference, "
+                               "not new instructions):\n\n" + "\n\n".join(lines) + "\n\nNow:\n")
+
+    def cli_caught_up(self) -> None:
+        for message in getattr(self, "_cli_catch_up_pending", ()) or ():
+            message["_dgc_caught_up"] = True
+        self._cli_catch_up_pending = []
+
     def run_external_turn(self, user_text: str, runner, *, reset_cancel: bool = True) -> dict:
         """Run a first-party delegated CLI turn through DGC's durable session boundary.
 
@@ -6753,6 +6856,7 @@ class Agent(GoalLifecycle):
                         saved_prompt["_dgc_display_mentions"] = display_mentions
                         self._prompt_display_mentions = []
                     self.messages.append(saved_prompt)
+                    self._last_external_prompt = saved_prompt     # its fallback, taking the turn, keeps it once
                     if isinstance(turn_result, dict) and str(turn_result.get("text") or "").strip():
                         self.messages.append({"role": "assistant", "content": self._safe_text(str(turn_result["text"])),
                                               "_dgc_at": _written_at()})

@@ -414,6 +414,20 @@ class PipWorker(unittest.TestCase):
         self.assertNotIn("to", failed, "a switch event that names no model says none")
         self.assertIsNone(reply_trace.validated({"v": 1, "ms": 5, "steps": [{"kind": "model", "label": "m", "start": 0, "end": 5, "to": 7}]}))
 
+    def test_a_cli_s_failed_round_is_the_failed_row_with_its_own_time(self):
+        # A CLI's round closes as its stream ends, before DGC hands the turn over: that round becomes the failed row
+        # (9 Nov live check: it read as a plain 198 ms round, then a 0 ms failed one).
+        trace = reply_trace.ReplyTrace(clock=clock_at(1000.0, 1198.0, 1202.0, 1210.0, 3600.0))
+        trace.model_start()
+        trace.model_end()
+        trace.handed_over("Claude Code didn't answer: usage limit", to="glm", last_round=True)
+        trace.model_start()
+        trace.model_end(900)
+        steps = trace.saved()["steps"]
+        self.assertEqual([(s["label"], s.get("error"), s["start"], s["end"]) for s in steps],
+                         [("model.response", True, 0, 198), ("model.response · fallback", None, 210, 2600)])
+        self.assertEqual((steps[0]["detail"], steps[0]["to"]), ("Claude Code didn't answer: usage limit", "glm"))
+
     def test_why_a_model_failed_reads_in_a_few_words(self):
         from dgc.model_errors import FailureCause
         def failed(**cause):
