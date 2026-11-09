@@ -1,6 +1,6 @@
 DGC bundled maths renderer — third-party license
 
-katex 0.16.47 (the library, its stylesheet and its fonts)
+katex 0.19.1 (the library, its stylesheet and its fonts)
 ------------------------------------------------------------
 The MIT License (MIT)
 

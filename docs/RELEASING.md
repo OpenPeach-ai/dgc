@@ -64,6 +64,16 @@ version. Ensure required CI and CodeQL checks are green and the source branch is
    Before A, refresh `SECURITY_RELEASES` and `AS_OF` in `dgc/node_check.py` from Node's latest
    security release (nodejs.org/en/blog/vulnerability), so `dgc doctor` names the right fix for an
    out-of-date Node; drop a line from the table when Node ends it, and raise `OLDEST_SUPPORTED`.
+   Also before A, every dependency that reaches users is at its latest version, tested with this
+   release, or has a written reason: `pip index versions <name>` for each pin in `requirements.lock`
+   and `pyproject.toml` (and `sdk/scripts/requirements-release.txt`), `npm outdated` in
+   `editors/vscode` and `sdk/typescript`, and the commit pins in `.github/workflows` (resolve an
+   annotated tag with `git ls-remote <repo> 'refs/tags/vX^{}'`). Then, in `editors/vscode`, run
+   `node scripts/bundle-licenses.mjs` and set the versions in `THIRD_PARTY_NOTICES.md`;
+   `test/bundle-licenses.test.mjs` fails until both match what ships. Held on purpose: the
+   setuptools build floor (pip takes the newest at install), `@types/vscode` (the editor floor),
+   `@types/node` (the oldest supported editor's Node), and build-only majors (TypeScript, jsdom)
+   until each is its own change.
 2. At A, run `scripts/preflight.sh`, `scripts/build-release.sh`, and (when applicable)
    `scripts/release-extension.sh --build` (or reuse the verified captured precursor bundle).
    Preflight includes `scripts/check-public-content.py`, which rejects website paths in the git

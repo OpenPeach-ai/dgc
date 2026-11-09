@@ -11,16 +11,12 @@ updates:
         patterns: ["*"]
     ignore:
       # `[build-system] requires` is a FLOOR, not a version to track: pip already
-      # resolves the newest setuptools under `>=68`. Raising it only shrinks the set
-      # of indexes on which `install.sh` and `dgc update` succeed — a surface no CI
-      # job can exercise. Ignore every version-update level; security updates use
-      # their own update type and still need review because this dependency executes
-      # on every end user's machine at install time.
+      # resolves the newest setuptools under `>=68`, security fixes included, on
+      # every install. Raising it only shrinks the set of indexes on which
+      # `install.sh` and `dgc update` succeed — a surface no CI job can exercise.
+      # Ignored by name alone: the update-types form still let the grouped
+      # "requirement" update through (PR #61, >=68 to >=84.2.1).
       - dependency-name: "setuptools"
-        update-types:
-          - "version-update:semver-patch"
-          - "version-update:semver-minor"
-          - "version-update:semver-major"
   - package-ecosystem: npm
     directories:
       - /editors/vscode

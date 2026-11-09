@@ -66,16 +66,17 @@ are included in `licenses/MARKDOWN-LICENSES.txt`.
 
 ## Diagram renderer
 
-`dist/mermaid.js` bundles [mermaid](https://github.com/mermaid-js/mermaid) 12.0.0 and the 62
+`dist/mermaid.js` bundles [mermaid](https://github.com/mermaid-js/mermaid) 12.3.0 and the 67
 browser packages it draws with — d3 and its modules, dagre-d3-es, cytoscape, elkjs, chevrotain,
-katex, dompurify, roughjs and the rest. It is a separate file from `dist/extension.js` and is
+katex, dompurify, roughjs and the rest (a few of them in two versions, as mermaid's own
+dependencies ask). elkjs is offered under EPL-2.0 or GPL-3.0-or-later; DGC uses it under EPL-2.0. It is a separate file from `dist/extension.js` and is
 fetched by the panel only when an answer actually contains a diagram. Exact dependency versions
 are locked in `package-lock.json`. Every package's copyright notice and license is reproduced in
-`licenses/MERMAID-LICENSES.txt`.
+`licenses/MERMAID-LICENSES.txt`, which `scripts/bundle-licenses.mjs` writes from what the bundle holds.
 
 ## Maths renderer
 
-`dist/katex/` bundles [KaTeX](https://github.com/KaTeX/KaTeX) 0.16.47: `katex.js`, its stylesheet
+`dist/katex/` bundles [KaTeX](https://github.com/KaTeX/KaTeX) 0.19.1: `katex.js`, its stylesheet
 `katex.css` and its WOFF2 fonts (`fonts/`). ChatDGC's chat loads them only when a reply holds a
 formula. KaTeX is MIT-licensed by Khan Academy and other contributors; its copyright notice and
 license are reproduced in `licenses/KATEX-LICENSE.txt`.
@@ -83,8 +84,8 @@ license are reproduced in `licenses/KATEX-LICENSE.txt`.
 ## Formatted canvas editor
 
 `dist/canvas.js` is ChatDGC's formatted canvas. It bundles [ProseMirror](https://prosemirror.net)
-(prosemirror-model 1.25.12, -state 1.4.4, -view 1.42.6, -transform 1.12.2, -commands 1.7.2, -history 1.5.1,
--inputrules 1.5.1, -keymap 1.2.3, -schema-list 1.5.1, -markdown 1.13.8 and -tables 1.8.5) with its dependencies orderedmap,
+(prosemirror-model 1.25.13, -state 1.4.4, -view 1.42.9, -transform 1.12.5, -commands 1.7.2, -history 1.5.1,
+-inputrules 1.5.1, -keymap 1.2.3, -schema-list 1.6.0, -markdown 1.13.9 and -tables 1.8.5) with its dependencies orderedmap,
 rope-sequence and w3c-keyname, all MIT-licensed by Marijn Haverbeke and others, and the same markdown-it build
 described above. Exact versions are locked in `package-lock.json`. Their copyright notices and licenses are
 reproduced in `licenses/PROSEMIRROR-LICENSES.txt`.

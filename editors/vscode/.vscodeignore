@@ -11,6 +11,7 @@ esbuild.js
 .gitignore
 **/.DS_Store
 cap-*.mjs
+scripts/**
 media/seti-codepoints.json
 SETTINGS_HANDOFF.md
 media/pips/computer-wallpaper.jpg
