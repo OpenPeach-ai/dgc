@@ -117,6 +117,8 @@ const wheelUp = async (p) => {
   let last = -1, top = await p.evaluate(() => document.querySelector(".conversation-log").scrollTop);
   while (top !== last) { last = top; await p.waitForTimeout(80); top = await p.evaluate(() => document.querySelector(".conversation-log").scrollTop); }
 };
+// Three replies already: a test waits for the fourth, the one it sends for (waiting for three passed at once, and on a
+// busy machine the pill was read before the reply was drawn).
 const CHAT = [["assistant", "Hi, I'm Planner."], ["user", "Plan my week"], ["assistant", "LONG"], ["user", "And the next one?"], ["assistant", "LONG"]];
 
 test("the rules are Work's: the same numbers as media/main.js, and the same words on the pill", () => {
@@ -147,7 +149,7 @@ test("scrolled up, a send brings your message into view and the reply is followe
     assert.equal(sent.atEnd, true);
     assert.equal(sent.pill, "");
     await p.evaluate(() => window.__reply("LONG"));
-    await p.waitForFunction(() => document.querySelectorAll(".conversation-log .pip-message.assistant").length === 3);
+    await p.waitForFunction(() => document.querySelectorAll(".conversation-log .pip-message.assistant").length === 4);
     await p.waitForTimeout(80);
     const after = await view(p);
     assert.equal(after.atEnd, true, "the reply is followed to its end");
@@ -165,7 +167,7 @@ test("a reader who scrolled away is left there: the pill says New when more arri
     const before = await view(p);
     assert.equal(before.atEnd, false);
     await p.evaluate(() => window.__reply("LONG"));
-    await p.waitForFunction(() => document.querySelectorAll(".conversation-log .pip-message.assistant").length === 3);
+    await p.waitForFunction(() => document.querySelectorAll(".conversation-log .pip-message.assistant").length === 4);
     await p.waitForTimeout(80);
     const after = await view(p);
     assert.equal(after.top, before.top, "the reply didn't take them away from what they read");
@@ -255,7 +257,7 @@ test("your message pins while you read its answer, the next one pushes it off, a
     assert.equal(tall.pinned, "relative");
     // A redraw draws the row afresh: the decision stays.
     await p.evaluate(() => window.__reply("A short answer."));
-    await p.waitForFunction(() => document.querySelectorAll(".conversation-log .pip-message.assistant").length === 3);
+    await p.waitForFunction(() => document.querySelectorAll(".conversation-log .pip-message.assistant").length === 4);
     await p.waitForTimeout(80);
     assert.equal((await view(p)).pinOff, true);
     assert.deepEqual(errors, []);
