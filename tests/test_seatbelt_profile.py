@@ -65,6 +65,8 @@ class ShellSandboxProfileTests(unittest.TestCase):
         repo = self.home / 'repo'; (repo / '.git' / 'worktrees' / 'wt').mkdir(parents=True)
         (repo / '.git' / 'worktrees' / 'wt' / 'commondir').write_text('../..\n')
         root = self.base / 'wt'; root.mkdir(); (root / '.git').write_text(f'gitdir: {repo}/.git/worktrees/wt\n')
+        # git's own record of the worktree points back at it (a real linked worktree; a bare pointer is not trusted)
+        (repo / '.git' / 'worktrees' / 'wt' / 'gitdir').write_text(f'{root}/.git\n')
         argv = self.wrap(root, Cfg(), {'DGC_SDK_ISOLATED': '1', 'DGC_HOME': str(self.base / 'state' / 'home')})
         self.assertEqual(argv[2],
             f'(version 1)(allow default)(deny file-write*)(allow file-write* (subpath "{root}") (subpath "/tmp") '

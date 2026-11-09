@@ -76,6 +76,14 @@ _write_lock = threading.Lock()       # one journal read-modify-write at a time i
 
 
 # ---- the journal -------------------------------------------------------------------------------
+
+def same_folder(saved, own) -> bool:
+    """Whether a saved record's folder is this session's (resolved; unreadable is not)."""
+    try:
+        return Path(saved).resolve(strict=False) == Path(own).resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        return False
+
 def journal_path(session_file, session_root, suffix: str = SUFFIX) -> Path:
     from . import sessions
     return sessions.resolve_path(session_root, session_file).with_suffix(suffix)
@@ -524,18 +532,25 @@ def _bring_back(agent, target, record: dict, *, by_user: bool) -> Outcome:
                         f'{mid} "{name}" was NOT restarted: {blocked}. It is not running; nothing '
                         f"has watched it since {since}. The user can restart it from the chat.",
                         stopped_at, now, restart=True)
-    cancel = threading.Event()
-    timer = threading.Timer(LEASE_WAIT_S, cancel.set)
-    timer.daemon = True
-    timer.start()
-    try:
-        ctx = SimpleNamespace(project_root=Path(record.get("cwd") or agent.config.project_root),
-                              config=agent.config, cancelled=cancel)
-        result, monitor = agent.monitors.start_monitor(
-            {**args, "_dgc_permission": {"mode": agent.mode, "allowed_by": allowed_by}}, ctx,
-            restart=record)
-    finally:
-        timer.cancel()
+    # The session's own folder, never one read back from a saved record (9 Nov: the record lives in DGC's state, which a
+    # sandboxed command could once change, and its folder became the sandbox's writable root). A record that names
+    # another folder is not restarted at all.
+    own = Path(agent.config.project_root)
+    saved = str(record.get("cwd") or "").strip()
+    if saved and not same_folder(saved, own):
+        result, monitor = f"error: its folder {saved} is not this session's folder", None
+    else:
+        cancel = threading.Event()
+        timer = threading.Timer(LEASE_WAIT_S, cancel.set)
+        timer.daemon = True
+        timer.start()
+        try:
+            ctx = SimpleNamespace(project_root=own, config=agent.config, cancelled=cancel)
+            result, monitor = agent.monitors.start_monitor(
+                {**args, "_dgc_permission": {"mode": agent.mode, "allowed_by": allowed_by}}, ctx,
+                restart=record)
+        finally:
+            timer.cancel()
     if monitor is None:
         why = str(result or "it did not start").removeprefix("error:").strip().rstrip(".")
         _set_end(target, record["key"], "failed")

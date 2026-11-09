@@ -81,7 +81,8 @@ class SubEngine:
 
     def build_argv(self, binary: str, prompt: str, *, cont: bool,
                    session_id: str = "", mode: str = "default",
-                   model: str = "", effort: str = "") -> list[str]:
+                   model: str = "", effort: str = "", sandboxed: bool = False,
+                   network: bool = False) -> list[str]:
         """Build an argv-only invocation of the vendor CLI.
 
         Permission modes are mapped explicitly instead of silently turning every delegated turn
@@ -114,13 +115,29 @@ class SubEngine:
             else:
                 argv += list(self.resume)
         argv += list(self.flags)
-        if self.key == "claude":
+        if self.key == "claude" and sandboxed:
+            # DGC's sandbox applies to it through its own (9 Nov, the user's call): its shell in Claude Code's sandbox
+            # with no way out of it, and in auto mode edits in the project without a prompt rather than every check
+            # skipped.
+            argv += ["--settings", json.dumps({"sandbox": {"enabled": True, "autoAllowBashIfSandboxed": True,
+                                                           "allowUnsandboxedCommands": False}}, separators=(",", ":"))]
+            if mode in ("auto", "acceptEdits"):
+                argv += ["--permission-mode", "acceptEdits"]
+            elif mode == "plan":
+                argv += ["--permission-mode", "plan"]
+        elif self.key == "claude":
             if mode == "auto":
                 argv += ["--dangerously-skip-permissions"]
             elif mode == "plan":
                 argv += ["--permission-mode", "plan"]
             elif mode == "acceptEdits":
                 argv += ["--permission-mode", "acceptEdits"]
+        elif self.key == "codex" and not cont and sandboxed:
+            # DGC's sandbox on (9 Nov): Codex's own, never bypassed; it reaches the network only when DGC's does.
+            writes = mode in ("auto", "acceptEdits")
+            argv += ["--sandbox", "workspace-write" if writes else "read-only"]
+            if writes and network:
+                argv += ["-c", "sandbox_workspace_write.network_access=true"]
         elif self.key == "codex" and not cont:
             # ``codex exec resume`` retains the sandbox selected when its thread was created and
             # does not expose --sandbox. A mode mismatch therefore starts a new vendor thread.
@@ -835,6 +852,22 @@ def preflight(engine: SubEngine) -> str:
     return binary
 
 
+def session_mode(mode: str, *, sandboxed: bool) -> str:
+    """The mode a vendor session is kept under: with DGC's sandbox on it is another session, since Codex keeps the
+    sandbox its thread was made with (turning the sandbox on must never resume a thread made without it)."""
+    return f"{mode}+sandbox" if sandboxed else mode
+
+
+def _sandbox_of(config) -> tuple[bool, bool]:
+    """DGC's sandbox for a delegated CLI (9 Nov): on when Settings or the session's policy asks for it, whatever DGC's
+    own backend; and whether it may reach the network."""
+    from . import sandbox
+    try:
+        return bool(sandbox.requested(config)), bool(sandbox._network_allowed(config))
+    except Exception:                         # noqa: BLE001 -- an unreadable policy: as configured
+        return bool(config.get("sandbox", False)), bool(config.get("sandbox_network", False))
+
+
 def run_cli_turn(config, agent, ui, engine: SubEngine, prompt: str) -> bool:
     """One Work turn on Claude Code or Codex, with its session's fallback (D14): when the CLI fails before it wrote or did
     anything (a usage limit, signed out, can't start), the turn runs on the fallback, DGC's own model, with the whole
@@ -916,10 +949,11 @@ def answer_as_fallback(config, agent, ui, engine: SubEngine, prompt: str, *, can
     budget = int(config.get("turn_budget_s") or 0) or 1800
     relay = _Relay(agent, ui, engine, "")
     try:
+        sandboxed, network = _sandbox_of(config)
         result = run_turn(engine, delegated_prompt(config, prompt, mode), config.project_root, cont=False, session_id="",
                           mode=mode, timeout=budget, on_event=relay.on_event,
                           cancel=cancel if cancel is not None else agent.cancelled.is_set, model="", effort="",
-                          redact_secrets=agent._secret_values())
+                          redact_secrets=agent._secret_values(), sandboxed=sandboxed, network=network)
     finally:
         relay.finish()
     result["did"], result["steps"] = relay.did["any"], list(relay.steps)
@@ -1052,6 +1086,8 @@ def delegate_turn(config, agent, ui, engine: SubEngine, prompt: str, *, cancel=N
     relay = _Relay(agent, ui, engine, model)
     did, steps, shown, on_event = relay.did, relay.steps, relay.shown, relay.on_event
     fresh = {"first": cont is False}
+    sandboxed, network = _sandbox_of(config)
+    kept_mode = session_mode(mode, sandboxed=sandboxed)
     own = {"session": ""}                  # as_fallback: its own run's session, for a goal's later steps
 
     def delegate(safe_prompt: str) -> dict:
@@ -1059,7 +1095,7 @@ def delegate_turn(config, agent, ui, engine: SubEngine, prompt: str, *, cancel=N
             session_id = own["session"]
         else:
             session_id = "" if fresh["first"] else agent.subscription_session_id(
-                engine.key, mode, model, effort)
+                engine.key, kept_mode, model, effort)
         fresh["first"] = False
         shown["text"] = False
         began = len(steps)
@@ -1078,13 +1114,13 @@ def delegate_turn(config, agent, ui, engine: SubEngine, prompt: str, *, cancel=N
                           cont=bool(session_id), session_id=session_id, mode=mode, timeout=budget,
                           on_event=on_event, cancel=cancel, model=model, effort=effort,
                           goal_request=agent._active_goal_request,
-                          redact_secrets=agent._secret_values())
+                          redact_secrets=agent._secret_values(), sandboxed=sandboxed, network=network)
         if result.get("session_id") and not result.get("cancelled") and not result.get("timeout"):
             if as_fallback:
                 own["session"] = result["session_id"]
             else:
                 agent.remember_subscription_session(
-                    engine.key, result["session_id"], mode, model, effort)
+                    engine.key, result["session_id"], kept_mode, model, effort)
         if missed and not as_fallback and result.get("ok") and callable(getattr(agent, "cli_caught_up", None)):
             agent.cli_caught_up()
         if steps[began:]:
@@ -1130,7 +1166,7 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
              env: dict | None = None, cancel: Callable[[], bool] | None = None,
              session_id: str = "", mode: str = "default",
              model: str = "", effort: str = "", goal_request: dict | None = None,
-             redact_secrets: tuple[str, ...] = ()) -> dict:
+             redact_secrets: tuple[str, ...] = (), sandboxed: bool = False, network: bool = False) -> dict:
     """Delegate one turn to the engine's official CLI in ``workdir``, streaming
     normalized events to ``on_event``. Returns {rc, text, timeout, cancelled, events}.
     Raises only for a missing binary / not-authenticated engine (via preflight); a
@@ -1151,7 +1187,7 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
     if goal_request is not None:
         prompt = delegated_instruction(prompt, goal_request)
     argv = engine.build_argv(binary, prompt, cont=cont, session_id=session_id,
-                             mode=mode, model=model, effort=effort)
+                             mode=mode, model=model, effort=effort, sandboxed=sandboxed, network=network)
     started = time.monotonic()
     if cancel is not None and cancel():
         return {"rc": None, "text": "", "timeout": False, "cancelled": True,

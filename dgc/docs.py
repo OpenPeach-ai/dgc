@@ -406,8 +406,15 @@ When one of your own `ask` rules is what asks, the card offers **Allow once** an
 allow rule never beats an ask rule, so an Always allow there would save a rule that never applies.
 Subscription turns map the mode into the selected vendor CLI's own flags and policy instead.
 `/sandbox on` uses the strongest supported host boundary for native-loop spawned shell commands
-and hooks; it does not confine parent-process structured file tools or delegated vendor CLIs, and
-does **not** skip normal permission prompts. Linux/bubblewrap makes the project the only persistent
+and hooks; it does not confine parent-process structured file tools, and does **not** skip normal
+permission prompts. Delegated Claude Code and Codex get their own sandbox instead: Codex runs with
+`--sandbox workspace-write` (read-only in Ask and Plan, never bypassed; the network only with
+`/sandbox network on`), and Claude Code with its shell sandbox on and no way out of it, accepting
+edits in the project rather than skipping every check in auto mode. A sandboxed session's Codex
+thread is its own: turning the sandbox on never resumes a thread made without it. A project that
+holds DGC's own state (a session started in your home folder) keeps it hidden from sandboxed
+commands, and a task worktree's repository is shown read-only only when git's own record of the
+worktree points back at it. Linux/bubblewrap makes the project the only persistent
 writable host path for those commands, masks ambient user state, and provides private home, temporary,
 runtime, process, and network namespaces. macOS/sandbox-exec denies ambient-home
 reads outside the project and host writes except the project and shared system

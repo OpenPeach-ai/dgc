@@ -373,17 +373,40 @@ def _worktree_git_common_dir(root: Path) -> Path | None:
         if not private.is_absolute():
             private = root / private
         private = private.resolve(strict=False)
-        # `commondir` is how a worktree names the repository it shares (usually `../..`). Binding
-        # the common directory covers the worktree's own private directory, which lives inside it.
+        # Only a real linked worktree (9 Nov). The pointer file sits in the project, where the model can write: a
+        # forged `gitdir: /home/<you>` re-exposed the hidden home. Git's own record of the worktree, in the repository's
+        # `.git/worktrees/<name>`, must point back at this folder, and the repository is that record's grandparent.
+        if private.parent.name != "worktrees":
+            return None
+        back = (private / "gitdir").read_text(encoding="utf-8", errors="replace")[:4096].strip()
+        if not back or Path(back).resolve(strict=False) != (root / ".git").resolve(strict=False):
+            return None
+        shared = private.parent.parent
+        # `commondir` is how a worktree names the repository it shares (`../..`): when it says anything else, nothing.
         commondir = private / "commondir"
         if commondir.is_file():
             value = commondir.read_text(encoding="utf-8", errors="replace")[:4096].strip()
-            if value:
-                shared = Path(value)
-                return (shared if shared.is_absolute() else private / shared).resolve(strict=False)
-        return private
+            named = Path(value) if value else None
+            if named is not None and (named if named.is_absolute() else private / named).resolve(strict=False) != shared:
+                return None
+        return shared
     except (OSError, ValueError, RuntimeError):
         return None
+
+
+def _dgc_state_inside(root: Path, homes) -> list[Path]:
+    """DGC's own state (config, keys, sessions) when the project holds it, as a session started in the home folder's
+    does: it is never the project's to read or change from a sandboxed command (9 Nov)."""
+    from .config import USER_HOME
+    found: list[Path] = []
+    for candidate in (USER_HOME, *(Path(home) / ".dgc" for home in homes if home is not None)):
+        try:
+            candidate = Path(candidate).resolve(strict=False)
+        except (OSError, RuntimeError):
+            continue
+        if candidate not in found and candidate != root and _inside(candidate, root) and candidate.exists():
+            found.append(candidate)
+    return found
 
 
 def _mask_with_workspace_link(argv: list[str], masked: Path, root: Path) -> None:
@@ -443,6 +466,7 @@ def wrap(command: str, project_root, config=None) -> list[str] | None:
         # Hide ambient credentials and user state. The real project stays reachable at
         # /mnt and, when nested below a masked path, through a compatibility link.
         seen: set[Path] = set()
+        masked_above: list[Path] = []          # masks the project sits under (its own path is then a link to /mnt)
         # HOME and the account's home differ for an SDK child (a private HOME under its state
         # directory); both hold user state, so both are hidden.
         homes = [Path.home()] + ([account] if (account := _account_home()) else [])
@@ -456,6 +480,8 @@ def wrap(command: str, project_root, config=None) -> list[str] | None:
             if candidate not in seen:
                 seen.add(candidate)
                 _mask_with_workspace_link(argv, candidate, root)
+                if candidate != root and _inside(root, candidate):
+                    masked_above.append(candidate)
         # AFTER the masks, so this re-exposes the one path inside them that a delegated child
         # cannot work without. Read-only, and `.git` ONLY: binding the whole source repository
         # would hand the child back exactly the ignored files -- `.env`, `node_modules` -- that its
@@ -464,6 +490,12 @@ def wrap(command: str, project_root, config=None) -> list[str] | None:
         shared_git = _worktree_git_common_dir(root)
         if shared_git is not None and shared_git.is_dir() and not _inside(shared_git, root):
             argv += ["--ro-bind", str(shared_git), str(shared_git)]
+        # A project that holds DGC's own state (a session started in the home folder): hidden at both of its names,
+        # where it is and inside the project's /mnt, after the binds so the mask wins.
+        for state in _dgc_state_inside(root, homes):
+            argv += ["--tmpfs", str(Path("/mnt") / state.relative_to(root))]
+            if not masked_above:              # reachable at its own path too (under a mask, that path is the /mnt link)
+                argv += ["--tmpfs", str(state)]
         argv += [
             "--dir", "/tmp/dgc-home", "--proc", "/proc", "--dev", "/dev",
             "--chdir", "/mnt", "/bin/bash", "-o", "pipefail", "-c", command,
@@ -508,6 +540,9 @@ def wrap(command: str, project_root, config=None) -> list[str] | None:
         # narrower deny even when it lives inside writable temp.
         rules = [f"(deny file-write* {seatbelt.subpath(home)})" for home in hidden]
         rules.append(f"({'deny' if read_only else 'allow'} file-write* {seatbelt.subpath(root)})")
+        # DGC's own state inside the project (started in the home folder): last, so it wins over the project's allow.
+        for state in _dgc_state_inside(root, homes):
+            rules += [f"(deny file-write* {seatbelt.subpath(state)})", f"(deny file-read* {seatbelt.subpath(state)})"]
         profile = seatbelt.profile(writable=writable, hidden=hidden, readable=readable,
                                    reachable=reachable, network=network, rules=rules)
         return [str(executable), "-p", profile, "/bin/bash", "-o", "pipefail", "-c", command]

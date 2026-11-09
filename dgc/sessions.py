@@ -58,6 +58,8 @@ _LOCKS: dict[str, "_SessionLock"] = {}
 _SESSION_LOCK_TIMEOUT_S = 30.0
 _SUBSCRIPTION_ENGINES = frozenset({"claude", "codex", "qwen", "kimi", "copilot"})
 _SUBSCRIPTION_MODES = frozenset({"default", "acceptEdits", "plan", "auto"})
+# A vendor thread made with DGC's sandbox on is kept under its mode + "+sandbox" (subscriptions.session_mode, 9 Nov).
+_SUBSCRIPTION_MODES = _SUBSCRIPTION_MODES | frozenset(f"{mode}+sandbox" for mode in _SUBSCRIPTION_MODES)
 
 
 def _session_family(path: Path) -> Path:

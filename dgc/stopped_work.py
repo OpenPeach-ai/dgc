@@ -362,7 +362,11 @@ def _start_shell(agent, record) -> tuple[str, str]:
     from . import tools
     from pathlib import Path
     ctx = copy.copy(agent.ctx)
-    cwd = Path(str(record.get("cwd") or agent.config.project_root))
+    cwd = Path(str(agent.config.project_root))      # the session's own folder, never a saved record's (9 Nov)
+    from .monitor_restart import same_folder
+    saved = str(record.get("cwd") or "").strip()
+    if saved and not same_folder(saved, cwd):
+        return f"error: it ran in {saved}, not this session's folder, so it was not run again", ""
     if not cwd.is_dir():
         return f"error: its folder {cwd} is no longer there", ""
     ctx.project_root = cwd

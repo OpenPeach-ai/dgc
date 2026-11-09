@@ -346,6 +346,7 @@ class ReopenTests(unittest.TestCase):
         agent, outcomes = self.reopen(path, mode="auto")
         self.assertEqual([o.state for o in outcomes], ["failed"])
         self.assertIn("could not be restarted: its folder", outcomes[0].message)
+        self.assertIn("is not this session's folder", outcomes[0].message, "a saved record's folder is never used")
         self.assertEqual(agent.monitors.running(), [])
         _, again = self.reopen(path, mode="auto")
         self.assertEqual(again, [], "no retry loop")
