@@ -46,7 +46,7 @@ const floorHold = { id: "compact_" + "f".repeat(32), pip_id: PIP, workspace_id: 
   summary: { kind: "floor", method: "RUN", host: "Terminal", path: "/", page: "", fields: [{ name: "command", value: "rm -rf ~/*" }],
     more_fields: 0, body_bytes: 0, floor: "could delete everything in its Files", text: "rm -rf ~/*", text_digest: "e".repeat(64) } };
 async function flush() { for (let i = 0; i < 15; i++) await Promise.resolve(); }
-function pipsPage({ apiVersion = 58, state = level("approve", DONE), actions = [], activeRun = null, pipPatch = {} } = {}) {
+function pipsPage({ apiVersion = 58, state = level("approve", DONE), actions = [], activeRun = null, pipPatch = {}, backupLine = "" } = {}) {
   const thePip = { ...pip, ...pipPatch };
   const dom = new JSDOM(viewModule.pipsDocument(), { runScripts: "outside-only", pretendToBeVisual: true }), w = dom.window; windows.push(w);
   const sent = [], answered = new Set();
@@ -64,7 +64,8 @@ function pipsPage({ apiVersion = 58, state = level("approve", DONE), actions = [
     list_pip_models: () => ({ default_model: "m", models: [], connection: "configured" }),
     list_pip_messages: () => ({ pip_id: PIP, workspace_id: PW, messages: [
       { id: "message_" + "1".repeat(32), pip_id: PIP, workspace_id: PW, run_id: RUN, role: "user", text: "Tidy my files", model: "m", created_at: now, status: "succeeded" },
-      { id: "message_" + "2".repeat(32), pip_id: PIP, workspace_id: PW, run_id: RUN, role: "assistant", text: "I want to clear the folder.", model: "m", created_at: now, status: "succeeded" }],
+      { id: "message_" + "2".repeat(32), pip_id: PIP, workspace_id: PW, run_id: RUN, role: "assistant", text: "I want to clear the folder.", model: "m", created_at: now, status: "succeeded",
+        ...(backupLine ? { backup: backupLine } : {}) }],
       next_before_id: null, active_run: activeRun, history_context_omitted_count: 0, chat_controls: controls }),
     get_pip_computer: () => ({ computer: { pip_id: PIP, granted: true, available: true, reason: "", pending: actions.length, actions } }),
     list_pip_app_links: () => ({ pip_id: PIP, links: [], composio: true }), list_pip_message_drafts: () => ({ drafts: [], next_cursor: null }),
@@ -78,7 +79,9 @@ function pipsPage({ apiVersion = 58, state = level("approve", DONE), actions = [
     list_pip_attention: () => ({ as_of: now, total: 0, counts: {}, by_pip: {}, items: [], truncated: false }),
     get_pip_working_notes: () => ({ pip_id: PIP, lines: [], text: "", max_lines: 60, max_bytes: 6000, bytes: 0, revision: "r0", updated_at: null }),
     list_pip_daily_log: () => ({ pip_id: PIP, days: [], next_before: null }),
-    get_pip_level: () => (typeof state === "function" ? state() : state) }[r.type]?.());
+    get_pip_level: () => (typeof state === "function" ? state() : state),
+    get_pip_backup: () => ({ backup: { pip_id: PIP, model: null, follows: "backup-model", backup: "backup-model" } }),
+    get_pips_backup: () => ({ backup: { model: "backup-model" } }), get_pip_computers: () => null }[r.type]?.());
   async function drain() { for (let n = 0; n < 15; n++) { await flush(); for (const m of sent.filter((m) => m.type === "pipsRequest" && !answered.has(m.id))) { const result = defaults(m.request); if (result !== undefined) answer(m, result); } } }
   message({ type: "pipsConnection", apiVersion, generation: 1, connected: true, supported: true, enabled: true });
   const click = (s) => { const el = w.document.querySelector(s); assert.ok(el, "Missing " + s); el.click(); };
@@ -206,6 +209,45 @@ test("a Project Pip, an older DGC and a remote one keep the shield: no level chi
   const older = pipsPage({ apiVersion: 57 }); await openChat(older);
   assert.equal(chip(older), null);
   assert.ok(older.d.querySelector("#chat-permissions"));
+});
+
+// ---- a backup model for Pips (API 76, Pips package 6)
+test("a backup model: one in Pips settings, each Pip's own on its page, and the reply that used it says so", async () => {
+  const x = pipsPage({ apiVersion: 76 }); await x.drain();
+  x.click("#pips-settings-open"); await x.drain();
+  x.click('[data-pips-settings="models"]'); await x.drain();
+  const wide = x.d.getElementById("pipsBackup");
+  assert.ok(wide, "Pips settings has a Models tab with the backup model");
+  assert.equal(wide.value, "backup-model");
+  assert.match(x.d.body.textContent, /it carries on with backup-model and says so once/);
+  wide.value = ""; wide.dispatchEvent(new x.w.Event("change", { bubbles: true })); await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(x.requests("set_pips_backup").at(-1).request)), { type: "set_pips_backup", model: "" });
+  // Its page: follow Pips settings, none, or a model of its own.
+  const y = pipsPage({ apiVersion: 76 }); await openInfo(y);
+  const own = y.d.getElementById("pipBackup");
+  assert.ok(own, "its page has its own backup model");
+  assert.deepEqual([...own.options].slice(0, 2).map((o) => [o.value, o.textContent]), [["__follow", "As in Pips settings (backup-model)"], ["", "None"]]);
+  assert.equal(own.value, "__follow");
+  own.value = ""; own.dispatchEvent(new y.w.Event("change", { bubbles: true })); await flush();
+  const set = y.requests("set_pip_backup").at(-1);
+  assert.deepEqual(JSON.parse(JSON.stringify(set.request)), { type: "set_pip_backup", pip_id: PIP, model: "" });
+  y.answer(set, { backup: { pip_id: PIP, model: "", follows: "backup-model", backup: "" } }); await y.drain();
+  assert.match(y.d.body.textContent, /Ava has no backup model: it stops when its model doesn’t answer\./);
+  own.value = "__follow"; y.d.getElementById("pipBackup").value = "__follow";
+  y.d.getElementById("pipBackup").dispatchEvent(new y.w.Event("change", { bubbles: true })); await flush();
+  assert.equal(y.requests("set_pip_backup").at(-1).request.model, null, "follow is null");
+  // An older DGC: no tab, no row, asked for nothing.
+  const z = pipsPage({ apiVersion: 75 }); await openInfo(z);
+  assert.equal(z.d.getElementById("pipBackup"), null);
+  assert.equal(z.requests("get_pip_backup").length, 0);
+});
+
+test("the reply its backup answered carries one line before its time", async () => {
+  const x = pipsPage({ apiVersion: 76, backupLine: "Its own model didn't answer; backup-model did" }); await x.drain();
+  x.click(`[data-job="${PIP}"]`); await x.drain();
+  const reply = [...x.d.querySelectorAll(".pip-message.assistant")].at(-1);
+  assert.ok(reply, "the reply");
+  assert.match(reply.querySelector(".msg-time, time")?.parentElement?.textContent || reply.textContent, /Its own model didn't answer; backup-model did · /);
 });
 
 test("an older DGC shows no level and is asked for none; the host refuses the requests below API 58", async () => {

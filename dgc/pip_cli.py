@@ -554,6 +554,9 @@ def parser():
     spend.add_argument("pip_id")
     desktop = command("desktop-notifications", "the runner's desktop notifications for new alerts and reviews: show, or turn on or off")
     desktop.add_argument("state", nargs="?", choices=("on", "off"))
+    backup = command("backup", "the model a Pip carries on with when its own doesn't answer: show, set (a model, or none), or with --pip one Pip's own (follow uses Pips settings)")
+    backup.add_argument("model", nargs="?")
+    backup.add_argument("--pip", dest="backup_pip", help="one Pip's own backup")
     paying = command("payments", "whether a Pip at Do it all may pay by itself, at most 3 times a day (off by default): show, or turn on or off")
     paying.add_argument("state", nargs="?", choices=("on", "off"))
     stop = command("stop", "emergency stop: pause all jobs and cancel their work")
@@ -979,6 +982,16 @@ def _format(value):
         return dumps(value["shared_pip"]).rstrip()
     if set(value) == {"usage"} and isinstance(value["usage"], dict) and "last_30_days" in value["usage"]:
         return usage_text(value["usage"])
+    if set(value) == {"backup"} and isinstance(value["backup"], dict):
+        item = value["backup"]
+        if "pip_id" in item:
+            own = item["model"]
+            return ((f"This Pip follows Pips settings: {item['follows'] or 'no backup'}." if own is None else
+                     f"This Pip's own backup: {own}." if own else "This Pip has no backup model.")
+                    + " Set it: dgc pips backup --pip PIP MODEL (none, or follow).")
+        return ((f"Backup model for Pips: {item['model']}. A Pip whose own model doesn't answer carries on with it and says so once."
+                 if item["model"] else "No backup model for Pips: a Pip whose model doesn't answer stops, as before.")
+                + " Set it: dgc pips backup MODEL (or none).")
     if set(value) == {"payments"} and isinstance(value["payments"], dict):
         item = value["payments"]
         return ((f"Pips at Do it all may pay by themselves: at most {item['limit']} payments a day across your Pips "
@@ -1561,6 +1574,16 @@ def _digest_command(config, args):
         return {"shared_pip": value["document"]}
     if args.command == "usage":
         return control({"type": "get_pip_usage", "pip_id": args.pip_id})
+    if args.command == "backup":
+        word = (args.model or "").strip()
+        if args.backup_pip:
+            if not word:
+                return control({"type": "get_pip_backup", "pip_id": args.backup_pip})
+            return control({"type": "set_pip_backup", "pip_id": args.backup_pip,
+                            "model": None if word == "follow" else "" if word == "none" else word})
+        if not word:
+            return control({"type": "get_pips_backup"})
+        return control({"type": "set_pips_backup", "model": "" if word == "none" else word})
     if args.command == "payments":
         if args.state is None:
             return control({"type": "get_pips_payments"})
@@ -1850,8 +1873,10 @@ def agent_shell_allows(args) -> bool:
         return True
     if args.command == "notify":
         return args.min_severity is None and args.alerts is None
-    if args.command in ("keep-running", "desktop-notifications"):
+    if args.command in ("keep-running", "desktop-notifications", "payments"):
         return args.state is None
+    if args.command == "backup":
+        return not args.model                   # showing it; setting it is the user's
     if args.command == "usage":
         return True
     if args.command == "allowed":
@@ -1949,7 +1974,7 @@ def handle_command(config, argv, *, in_chat=False):
             result = _import_command(config, args)
             if result is None:
                 return 0
-        elif args.command in ("digest", "notify", "outcomes", "keep-running", "desktop-notifications", "usage", "export", "feedback"):
+        elif args.command in ("digest", "notify", "outcomes", "keep-running", "desktop-notifications", "payments", "backup", "usage", "export", "feedback"):
             result = _digest_command(config, args)
         elif args.command == "computer":
             result = _computer_command(config, args)

@@ -1263,6 +1263,22 @@ export function pipsPayments(value) {
   return value;
 }
 
+// Pips API 76 (0.52, Pips package 6): the backup model for Pips ({model}, "" none) and one Pip's ({pip_id, model: its own
+// choice, null follows Pips settings, "" none; follows: Pips settings'; backup: what its runs use now}).
+const BACKUP_MODEL = /^(?:|[A-Za-z0-9][A-Za-z0-9._:/@+\-]{0,255})$/;
+export function pipsBackup(value) {
+  if (!record(value) || Object.keys(value).join() !== 'model' || typeof value.model !== 'string' || !BACKUP_MODEL.test(value.model))
+    throw Error('The backup model didn’t load. Refresh the Pips view.');
+  return value;
+}
+export function pipBackup(value, pip) {
+  if (!record(value) || Object.keys(value).sort().join() !== 'backup,follows,model,pip_id' || value.pip_id !== pip
+    || !(value.model === null || (typeof value.model === 'string' && BACKUP_MODEL.test(value.model)))
+    || typeof value.follows !== 'string' || !BACKUP_MODEL.test(value.follows) || typeof value.backup !== 'string' || !BACKUP_MODEL.test(value.backup))
+    throw Error('This Pip’s backup model didn’t load. Refresh this Pip.');
+  return value;
+}
+
 export function pipOutcomes(value, pip) {
   const counts = ['reported','accepted','dismissed','still_reported','gone_after_change','gone_without_change','checkpoints_examined'];
   if (!digestKeys(value, ['pip_id','name','pip_type','history_truncated',...counts]) || value.pip_id !== pip || typeof value.name !== 'string'

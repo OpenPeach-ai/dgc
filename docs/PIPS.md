@@ -1419,6 +1419,12 @@ Existing Pips keep the level you chose for them. A Project Pip has no chip: it a
   your Pips. Only you turn it on, on this computer. It never types a card number: a request carrying one still asks,
   and your own Pay on its screen is still yours. Something that only might be a payment (one money word, such as a
   billing page, with nothing certain) goes at Do it all, and still asks at Approve for me.
+- **A backup model.** Pips settings → Models has one **Backup model for Pips**, and each Pip's page can choose its own
+  (or none, or follow Pips settings). When a Pip's own model doesn't answer (a usage limit, a host that is down, a
+  Claude Code or Codex that is signed out), its turn carries on with the backup, a model on DGC's own connection. The
+  first reply says so once, in a line before its time ("Its own model didn't answer; X did"); the next run tries its own
+  model first, and goes back to it as soon as it answers. A subscription turn that already said or did something isn't
+  run again. `dgc pips backup MODEL` (or `none`) sets it from the terminal; `--pip PIP` sets one Pip's.
 - **The fuse.** If a Pip does 25 things on its own in an hour (a submit, a send or a plugin change its level or an
   Always allow let through; a new site's first visit doesn't count), it asks before each one again until the hour has
   passed, whatever its level. Its card says so, with the time. The level you chose stays as it was.

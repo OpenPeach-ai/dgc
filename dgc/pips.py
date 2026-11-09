@@ -67,6 +67,7 @@ CONTROL_COMMANDS = frozenset({
     "get_pips_keep_running", "set_pips_keep_running",
     "get_pips_desktop_notifications", "set_pips_desktop_notifications",
     "get_pips_payments", "set_pips_payments",
+    "get_pips_backup", "set_pips_backup", "get_pip_backup", "set_pip_backup",
     "get_pip_usage", "set_pip_daily_cap", "export_pip", "set_pip_feedback", "list_pip_feedback",
     "list_pip_app_links", "start_pip_app_link", "check_pip_app_link", "decline_pip_app_link", "disconnect_pip_app_link",
     "finish_pip_computer_check",
@@ -205,6 +206,8 @@ _COMMAND_ARGS = {
     "get_pips_keep_running": set(), "set_pips_keep_running": {"enabled"},
     "get_pips_desktop_notifications": set(), "set_pips_desktop_notifications": {"enabled"},
     "get_pips_payments": set(), "set_pips_payments": {"enabled"},
+    "get_pips_backup": set(), "set_pips_backup": {"model"},
+    "get_pip_backup": {"pip_id"}, "set_pip_backup": {"pip_id", "model"},
     "get_pip_usage": {"pip_id"}, "set_pip_daily_cap": {"pip_id", "daily_tokens"}, "export_pip": {"pip_id"},
     "set_pip_feedback": {"run_id", "rating", "note"}, "list_pip_feedback": {"pip_id"},
     "mark_pip_notification_read": {"workspace_id", "notification_id", "expected_revision"},
@@ -2959,25 +2962,43 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     if name in specialist_pin['grant']['roles']}
 
         def _new_client(self, *args, **kwargs):
-            if brain is not None:
+            if brain is not None and not getattr(self, '_on_backup', False):
                 from .pip_brain import BrainClient
                 return BrainClient(brain)        # the CLI is its model: DGC sends no request of its own
             client = super()._new_client(*args, **kwargs)
             return specialist_budget.wrap(client, self._pip_specialist_record) if specialist_budget is not None else client
 
+        def _fallback_client(self, model):
+            # Pips package 6 (pip_backup): its own model didn't answer, so its backup carries the turn on; the worker
+            # says which model, and the controller decides what the chat says.
+            client = Agent._fallback_client(self, model)
+            ui.emit({"kind": "backup", "model": str(model)[:256]})
+            return client
+
         def run_turn(self, user_text, **kwargs):
-            if brain is None:
+            if brain is None or getattr(self, '_on_backup', False):
                 return super().run_turn(user_text, **kwargs)
             import base64 as _b64
             from .pip_brain import Turn
-            photos = []
+            pending, photos = self._pending_images, []
             for uri in self._pending_images or ():
                 head, _, data = str(uri).partition(';base64,')
                 if head.startswith('data:image/') and data:
                     photos.append((head[5:], _b64.b64decode(data)))
             self._pending_images = None
             self._last_turn_error = ''
-            return Turn(self, brain_launch, brain).run(user_text, images=photos)
+            turn = Turn(self, brain_launch, brain)
+            ok = turn.run(user_text, images=photos)
+            backup_model = str(self.config.get("fallback_model") or "")
+            if (not ok and backup_model and not turn.calls and not "".join(turn.said).strip() and not turn.stray
+                    and turn.end_at is None):
+                # Its subscription didn't answer (a usage limit, signed out, unreachable) before it said or did
+                # anything: its backup takes the whole turn on DGC's own connection (pip_backup).
+                self._on_backup = True
+                self.client = self._fallback_client(backup_model)
+                self._pending_images, self._last_turn_error = pending, ''
+                return super().run_turn(user_text, **kwargs)
+            return ok
 
         def _deliver_images(self, call_id, name, entries, *, omitted=0):
             if getattr(self, '_brain_images', None) is not None:
@@ -4056,9 +4077,12 @@ def _worker_main():
     for key, value in settings.items():
         if key not in ("brain", "provider"):    # a subscription's CLI (pip_brain) or a saved provider's id: not DGC settings
             config.set(key, value, persist=False)
+    backup = payload.get("backup") if isinstance(payload.get("backup"), dict) else {}
     for key, value in {
         "api_key": payload.get("api_key", ""), "mode": "default", "subscription_engine": "",
-        "fallback_model": "", "fallback_base_url": "", "fallback_api_key": "",
+        # A Pip's backup model (pip_backup), when it has one: the model it carries on with if its own doesn't answer.
+        "fallback_model": str(backup.get("model") or ""), "fallback_base_url": str(backup.get("base_url") or ""),
+        "fallback_api_key": str(backup.get("api_key") or ""), "fallback_api_mode": str(backup.get("api_mode") or ""),
         "mcp_servers": {}, "hooks": {}, "code_action": False, "ultra_mode": False,
         "verify_before_done": False, "verify_command": "", "autonomous_gate": "",
         "artifact_autostart": False, "tool_profile": "standard",
@@ -4568,6 +4592,17 @@ def _execute_run(registry, row, config):
     if attempt_note:
         manifest = {**manifest, "attempt_note": attempt_note}     # this worker's copy only; the stored run is unchanged
     payload = {"snapshot": str(snapshot), "manifest": manifest, "api_key": api_key}
+    # Pips package 6 (pip_backup): the model this run carries on with if its own doesn't answer, on DGC's own
+    # connection, read from today's settings (never pinned in the manifest).
+    from . import pip_backup
+    from .pip_models import saved_route_view
+    try:
+        backup = pip_backup.for_run(registry, saved_route_view(config), row, manifest)
+    except Exception:                            # noqa: BLE001 - no backup: the run is as before
+        backup = None
+    if backup is not None:
+        payload["backup"] = backup
+    backup_model = ""
     payload_bytes = _worker_payload(payload)
     if time.monotonic() >= deadline:
         raise RegistryError("timeout", "The run exceeded its five-minute budget before model execution.")
@@ -4654,6 +4689,8 @@ def _execute_run(registry, row, config):
                 result = event.get("result")
             elif kind == "failure":
                 failure = event.get("error")
+            elif kind == "backup":
+                backup_model = str(event.get("model") or "")[:256]     # believed only if it is the backup it was given
             elif kind == 'steer_applied' and manifest.get('run_kind') == 'conversation':
                 from .pip_steering import applied
                 applied(PipStore(registry), row['id'], event.get('ids'))
@@ -4674,6 +4711,13 @@ def _execute_run(registry, row, config):
                 failed.full_message = str(failure.get("full_message") or "")
                 raise failed
             raise RegistryError("worker_failed", "The audit worker stopped without a verified structured result.")
+        try:
+            if backup is not None and backup_model:
+                pip_backup.used(registry, row, backup, backup_model)       # said once, under the first reply of an outage
+            else:
+                pip_backup.answered_itself(registry, row)                  # its own model answered: an outage is over
+        except Exception:                        # noqa: BLE001 - the reply stands either way
+            pass
         result["snapshot"] = snapshot_info
         if live_commands is not None:
             # The record is the controller's: its outputs, and the worker's summary only if it is grounded in them.
@@ -5946,6 +5990,20 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     raise RegistryError("local_only", "Desktop notifications are set on this computer only.")
                 result = {"desktop_notifications": pip_desktop.status(registry) if command == "get_pips_desktop_notifications"
                           else pip_desktop.set_enabled(registry, request.get("enabled"), actor)}
+            elif command in ("get_pips_backup", "set_pips_backup", "get_pip_backup", "set_pip_backup"):
+                # Pips API 76 (Pips package 6): the model a Pip carries on with when its own doesn't answer. One in Pips
+                # settings, and each Pip's own choice (null follows it, "" is none). Local only.
+                from . import pip_backup
+                if actor not in ("editor-user", "local-console"):
+                    raise RegistryError("local_only", "The backup model is set on this computer only.")
+                if command == "get_pips_backup":
+                    result = {"backup": {"model": pip_backup.pips_wide(registry)}}
+                elif command == "set_pips_backup":
+                    result = {"backup": pip_backup.set_pips_wide(registry, request.get("model"), actor)}
+                elif command == "get_pip_backup":
+                    result = {"backup": pip_backup.listing(registry, pip_id)}
+                else:
+                    result = {"backup": pip_backup.set_own(registry, pip_id, request.get("model"), actor)}
             elif command in ("get_pips_payments", "set_pips_payments"):
                 # Pips API 75 (your P1): whether a Pip at Do it all may pay by itself, at most three a day. Off by default.
                 from . import pip_levels

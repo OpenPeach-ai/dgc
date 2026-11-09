@@ -512,6 +512,71 @@ with patch.object(LLMClient, "chat", chat), patch("requests.sessions.Session.req
         self.assertEqual(page["messages"][-1]["text"], "The queued model answered this Pip.")
 
 
+    def test_real_worker_carries_on_with_the_backup_and_says_so_once(self):
+        # Pips package 6 (pip_backup): its own model doesn't answer (here: refused, as a usage limit or a sign-out is),
+        # so the turn carries on with the backup; the first reply says so in one line, the next on the backup says
+        # nothing, and a reply from its own model again ends the outage.
+        from dgc import pip_backup
+        self.setup_job()
+        pip_backup.set_pips_wide(self.registry, "backup-model", "editor-user")
+        fixture = r'''from unittest.mock import patch
+from dgc.llm import ChatResult, LLMClient, LLMError
+from dgc.pips import _worker_main
+OWN_WORKS = OWN_WORKS_FLAG
+
+def chat(self, messages, tools=None, on_text=None, **kwargs):
+    if self.model == "fixture" and not OWN_WORKS:
+        raise LLMError("HTTP 401: the account is signed out")
+    reply = "Answered by " + self.model + "."
+    if on_text:
+        on_text(reply)
+    return ChatResult(content=reply)
+with patch.object(LLMClient, "chat", chat), patch("requests.sessions.Session.request", side_effect=AssertionError("No network")):
+    raise SystemExit(_worker_main())
+'''
+        original = subprocess.Popen
+
+        def turn(key, own_works):
+            sent = self.send(key=key)
+            row = self.store.claim_next()
+            script = fixture.replace("OWN_WORKS_FLAG", str(own_works))
+
+            def launch(argv, *args, **kwargs):
+                if argv[1:] == ["-m", "dgc.pips", "--worker"]:
+                    argv = [sys.executable, "-c", script]
+                return original(argv, *args, **kwargs)
+            with patch.object(pips.subprocess, "Popen", side_effect=launch):
+                result = pips._execute_run(self.registry, row, self.cfg)
+            final = self.store.finish(sent["run"]["id"], result=result)
+            self.assertEqual(final["status"], "succeeded", final.get("error"))
+            return pip_chat.list_messages(self.store, self.job["id"])["messages"][-1]
+
+        first = turn("out-1", False)
+        self.assertEqual(first["text"], "Answered by backup-model.")
+        self.assertEqual(first["backup"], "Its own model didn't answer; backup-model did")
+        self.assertEqual(pip_backup.out(self.registry, self.job["id"])["model"], "backup-model")
+        second = turn("out-2", False)
+        self.assertEqual(second["text"], "Answered by backup-model.")
+        self.assertNotIn("backup", second, "said once: the rest of the outage carries on quietly")
+        back = turn("back", True)
+        self.assertEqual(back["text"], "Answered by fixture.", "the next run tries its own model first")
+        self.assertNotIn("backup", back)
+        self.assertIsNone(pip_backup.out(self.registry, self.job["id"]), "its own model answered: the outage is over")
+        again = turn("out-3", False)
+        self.assertEqual(again["backup"], "Its own model didn't answer; backup-model did", "a new outage says so again")
+        # No backup set: a model that doesn't answer fails the turn, as before.
+        pip_backup.set_pips_wide(self.registry, "", "editor-user")
+        sent = self.send(key="none")
+        row = self.store.claim_next()
+        script = fixture.replace("OWN_WORKS_FLAG", "False")
+
+        def launch(argv, *args, **kwargs):
+            if argv[1:] == ["-m", "dgc.pips", "--worker"]:
+                argv = [sys.executable, "-c", script]
+            return original(argv, *args, **kwargs)
+        with patch.object(pips.subprocess, "Popen", side_effect=launch), self.assertRaises(Exception):
+            pips._execute_run(self.registry, row, self.cfg)
+
     def test_model_cli_flags_chat_messages_and_disabled_controls(self):
         from dgc.pip_cli import parser, _request, _format
         made = _request(parser().parse_args(["create", "Reviewer", "--goal", "Review", "--model", "fixture"]))

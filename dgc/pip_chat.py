@@ -1565,6 +1565,10 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             again = line_for(store.db, row["run_id"])
             if again:
                 message["started_again"] = again    # "Got stuck, started again" (Pips package 1)
+            from .pip_backup import line_for as backup_line
+            backup = backup_line(store.db, row["run_id"])
+            if backup:
+                message["backup"] = backup          # "Its own model didn't answer; X did", once an outage (Pips package 6)
             if quiet_reply(store.db, row["run_id"], row["text"]):
                 message["quiet"] = True             # a routine with nothing to say: one faint line (Pips package 2)
         # A running reply can have several mid-turn user messages. They are

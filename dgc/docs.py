@@ -3973,6 +3973,9 @@ bubblewrap profile is missing; DGC does not fall back to an unsandboxed browser.
   change included, and says what it chose). A change while it works applies from its next step. After
   25 things on its own in an hour it asks again until the hour has passed. New Pips start at Ask me
   first; existing Pips keep their chosen level. Payments ask at every level.
+- **Backup model.** Pips settings → Models has one backup model for Pips, and each Pip's page can
+  choose its own. When a Pip's model doesn't answer (a usage limit, a host that is down, a signed-out
+  Claude Code or Codex), its turn carries on with the backup and the first reply says so once.
 - **Always allow** lets one exact kind of action through from then on, for the same account, tool or
   site; its page lists them, with **Stop allowing**. A payment never offers it.
 - **Saved logins.** Save a site's login once, with its authenticator key if it has one, and DGC types

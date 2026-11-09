@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Pips API 76: a backup model for Pips. `get_pips_backup` / `set_pips_backup {model}` read and set the one every Pip carries on with when its own model doesn't answer; `get_pip_backup` / `set_pip_backup {pip_id, model}` read and set one Pip's own (null follows, "" none). DGC takes them only from this computer. Both SDKs refuse them before API 76.
 - Pips API 75: `get_pips_payments` and `set_pips_payments {enabled}` read and set whether a Pip at Do it all may pay by itself, at most three times a day across all Pips (off by default; DGC takes it only from this computer). Both SDKs refuse them before API 75.
 
 ## 0.9.0 — 2026-11-07

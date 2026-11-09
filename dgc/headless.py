@@ -404,8 +404,11 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # same run and session history instead of starting a competing reply.
 # API 74: a provider saved in the editor's Settings -> Models. API 75 (0.52): get_pips_payments / set_pips_payments
 # ({enabled}) -> {payments: {on, limit, paid}}, local only: whether a Pip at Do it all may pay by itself, at most
-# three times a day across all Pips (off by default).
-PIPS_API_VERSION = 75
+# three times a day across all Pips (off by default). API 76 (0.52): a backup model for Pips (pip_backup):
+# get_pips_backup / set_pips_backup {model} -> {backup: {model}} (registry metadata), get_pip_backup {pip_id} / set_pip_backup {pip_id, model}
+# -> {backup: {pip_id, model, follows, backup}} (model null follows Pips settings, "" none), all local only; and a
+# reply the backup answered, the first of an outage, carries `backup`, its one line.
+PIPS_API_VERSION = 76
 
 
 def _pips_platform_supported() -> bool:

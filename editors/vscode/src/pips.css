@@ -792,6 +792,9 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .simple-pips.chat-open .pip-conversation.chat-style .message-body p{margin-bottom:10px}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message .response-actions{min-height:22px;margin-top:2px;gap:3px}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message .msg-time{font-variant-numeric:tabular-nums}
+/* A reply's one line before its time ("Got stuck, started again", or that its backup model answered) wraps in a narrow
+   chat rather than losing its time off the edge. */
+.chat-style .pip-message .response-actions .msg-time{flex:0 1 auto;min-width:0;white-space:normal;overflow-wrap:anywhere}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message .ract:active,
 .simple-pips.chat-open .pip-conversation.chat-style .allow-card button:active{transform:scale(.97)}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-composer{border-radius:19px;border-color:color-mix(in srgb,var(--vscode-foreground) 16%,transparent);box-shadow:0 3px 14px rgba(0,0,0,.08)}

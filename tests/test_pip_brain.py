@@ -289,7 +289,7 @@ class Turns(unittest.TestCase):
             return {"text": "The shop's page.", "image": base64.b64encode(JPEG).decode(), "width": 4, "height": 3}
         return {"text": "Teeforge: Design your tee. Upload a design."}
 
-    def turn(self, engine, script, *, text="design me my birthday shirts", computer=True, choice=None, events=None):
+    def turn(self, engine, script, *, text="design me my birthday shirts", computer=True, choice=None, events=None, chat=None):
         (self.bin / "script.json").write_text(json.dumps(script))
         pip = self.store.create(self.registry.personal()["id"], "Tees", None, "editor-user", pip_type="lens",
                                 model_choice=choice or {"mode": "subscription", "engine": engine},
@@ -308,12 +308,14 @@ class Turns(unittest.TestCase):
         events = [] if events is None else events
         with patch.dict(os.environ, {"DGC_SESSION_POLICY": pips._json(pips.native_policy(personal=True)),
                                      "DGC_PIP_BRAIN": json.dumps(launch)}), \
-                patch.object(LLMClient, "chat", side_effect=AssertionError("a subscription run sends DGC no request")), \
+                (patch.object(LLMClient, "chat", side_effect=AssertionError("a subscription run sends DGC no request")) if chat is None
+                 else patch.object(LLMClient, "chat", chat)), \
                 patch("dgc.vision.has_vision", side_effect=AssertionError("its CLI sees; nothing is probed")), \
                 patch("dgc.agent.discover_skills", return_value={}), \
                 patch("dgc.agent.load_memories", side_effect=AssertionError("No ambient memory")):
             result = pips.execute_native(self.cfg, self.root, manifest, events.append)
-        seen = json.loads((self.bin / "seen.json").read_text())
+        seen_file = self.bin / "seen.json"         # a CLI that failed at once may not have written it
+        seen = json.loads(seen_file.read_text()) if seen_file.exists() else {}
         return result, seen, launch
 
     def test_a_personal_quill_runs_on_its_schedule(self):
@@ -360,6 +362,33 @@ class Turns(unittest.TestCase):
                          {"pip_type": "quill", "trigger": "event", "run_kind": "draft", "source_policy": {"mode": "personal"}}):
             with self.subTest(manifest=manifest), self.assertRaisesRegex(pips.RegistryError, "reviewed immutable grant"):
                 automation.validate_manifest(manifest)
+
+    def test_a_subscription_at_its_limit_hands_the_whole_turn_to_the_backup(self):
+        # Pips package 6 (pip_backup): Claude Code out of its usage limit before it said or did anything: the worker's
+        # backup (what _worker_main sets from the payload) takes the turn on DGC's own connection, and says so.
+        from dgc.llm import ChatResult
+        for key, value in (("fallback_model", "backup-model"), ("fallback_base_url", "http://127.0.0.1:9/v1"), ("fallback_api_key", "k")):
+            self.cfg.set(key, value, persist=False)
+        asked = []
+
+        def chat(client, messages, tools=None, on_text=None, **kwargs):
+            asked.append(client.model)
+            return ChatResult(content="Here are your shirt ideas, from the backup.")
+        events = []
+        result, _, _ = self.turn("claude", [{"fail": "You've hit your usage limit. It resets at 3pm."}], computer=False,
+                                 events=events, chat=chat)
+        self.assertEqual(result["text"], "Here are your shirt ideas, from the backup.")
+        self.assertEqual(set(asked), {"backup-model"})
+        self.assertIn({"kind": "backup", "model": "backup-model"}, events)
+
+    def test_a_subscription_that_already_spoke_or_acted_is_not_redone_on_the_backup(self):
+        for key, value in (("fallback_model", "backup-model"), ("fallback_base_url", "http://127.0.0.1:9/v1"), ("fallback_api_key", "k")):
+            self.cfg.set(key, value, persist=False)
+        events = []
+        with self.assertRaises(Exception):
+            self.turn("claude", [{"say": "Looking at the shop now."}, {"fail": "You've hit your usage limit."}], computer=False,
+                      events=events)
+        self.assertNotIn("backup", [e.get("kind") for e in events], "what it said stands; a second go could repeat it")
 
     def test_a_pip_runs_on_an_older_claude_code(self):
         """It doesn't have --restricted and refuses the whole command for it (seen with 2.1.220)."""
