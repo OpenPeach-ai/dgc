@@ -118,47 +118,51 @@ class CarefulStoreTests(unittest.TestCase):
         self.assertTrue({"decathlon.in", "nike.com"} <= sites, sites)
         self.assertNotIn("phish.example", sites, "a routine's turn (an email) never adds a site")
 
-    def test_an_unattended_run_that_can_read_apps_gets_no_computer(self):
-        pip = self.make()
-        self.assertFalse(careful.computer_paused(self.registry, self.cfg, pip["id"], "local-routine", {}), "no apps: computer on")
-        self.assertFalse(careful.computer_paused(self.registry, self.cfg, pip["id"], "editor-user", {"app_plan": {}}), "you are watching")
-        self.assertTrue(careful.computer_paused(self.registry, self.cfg, pip["id"], "local-scheduler", {"app_plan": {}}))
-        with patch("dgc.pip_app_links.connected", return_value=[{"app": "Gmail"}]):
-            self.assertTrue(careful.computer_paused(self.registry, self.cfg, pip["id"], "local-routine", {}))
-        careful.set_on(self.registry, pip["id"], False, "editor-user")
-        self.assertFalse(careful.computer_paused(self.registry, self.cfg, pip["id"], "local-scheduler", {"app_plan": {}}), "you turned it off")
-
-    def test_plugins_no_longer_take_a_routines_computer(self):
-        # Every plugin turned on is every Pip's since 2026-10-09: counting them here would take the computer from
-        # every routine of every Pip. Lane decides in the run instead.
-        pip = self.make()
-        with patch("dgc.pip_plugins.installed", return_value={"aave": {"display_name": "Aave", "money": True, "servers": {}}}):
-            self.assertFalse(careful.computer_paused(self.registry, self.cfg, pip["id"], "local-routine", {}))
-
-    def test_nobody_watching_a_run_gets_its_computer_or_the_plugins_whichever_comes_first(self):
-        lane = careful.Lane()
-        self.assertIsNone(lane("computer"))
-        self.assertIsNone(lane("computer"), "the same again is fine")
-        self.assertEqual(lane("plugins"), careful.Lane.PLUGINS_OFF)
-        lane = careful.Lane()
-        self.assertIsNone(lane("plugins"))
-        self.assertEqual(lane("computer"), careful.Lane.COMPUTER_OFF)
-
-    def test_both_run_sockets_keep_to_the_lane(self):
+    def test_a_routine_uses_both_its_computer_and_your_plugins(self):
+        # 0.52 (your D3): every Personal Pip has its computer and your plugins, a routine's run too. Careful mode no
+        # longer takes one away when nobody is watching; what it read from your apps, and the fuse, are what guard it.
         from dgc import pip_app_links as links, pip_computer
+        self.assertFalse(hasattr(careful, "computer_paused") or hasattr(careful, "Lane"))
         pip = self.make()
-        lane = careful.Lane()
         apps = links.RunSocket(self.registry.directory, self.cfg, pip["id"], pip["workspace_id"], "run_" + "e" * 32, unattended=True)
         self.addCleanup(apps.close)
-        apps.lane = lane
         host = SimpleNamespace(call=lambda op, args: "the page")
         computer = pip_computer.RunSocket(host, "run_" + "f" * 32)
         self.addCleanup(computer.close)
-        computer.lane = lane
         self.assertEqual(pip_computer.worker_call(computer.pin(), "open", {"url": "https://example.com"}), "the page")
         said = links.worker_call(apps.pin(), "call_plugin", {"plugin": "aave", "tool": "get_markets", "arguments": {}})
-        self.assertEqual(said, careful.Lane.PLUGINS_OFF, "the computer came first in this run")
-        self.assertIn("No answer is waiting", links.worker_call(apps.pin(), "plugin_answer", {}), "reading a past answer is not a use")
+        self.assertNotIn("nobody is watching this run", said, "its plugins are still there after its computer")
+        self.assertEqual(pip_computer.worker_call(computer.pin(), "open", {"url": "https://example.com"}), "the page",
+                         "and its computer after its plugins")
+
+    def test_what_it_read_goes_to_a_site_you_know_and_a_new_site_asks_once(self):
+        from dgc import pip_computer
+        pip = self.make()
+        taint = careful.taint_for(self.registry.directory, pip["id"])
+        taint.add("Invoice 48291377 for Ada is due on Friday.")
+        # Sites it may carry to: the ones it may visit, and the ones it already used (a sent action), not a held one.
+        for n, (status, host_name) in enumerate((("sent", "used.example"), ("pending", "waiting.example"))):
+            summary = {"method": "POST", "host": host_name, "path": "/", "fields": [], "more_fields": 0, "body_bytes": 0}
+            with self.registry.transaction():
+                self.registry.db.execute("INSERT INTO pip_computer_actions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)",
+                    (f"compact_{n}" + "u" * 31, pip["id"], pip["workspace_id"], None, "host_x", "r", json.dumps(summary),
+                     pip_computer._digest(summary), None, status, "2026-10-08T00:00:00.000Z", "2099-01-01T00:00:00.000Z",
+                     "2026-10-08T00:00:00.000Z" if status == "sent" else None, "editor-user" if status == "sent" else None))
+        carry = careful.carry_sites(self.registry, pip["id"])
+        self.assertIn("used.example", carry)
+        self.assertNotIn("waiting.example", carry)
+        host = pip_computer.Host.__new__(pip_computer.Host)
+        host.browser = SimpleNamespace(current_url="https://used.example/form")
+        host.taint, host.said, host.sites, host.level = taint, "", {"used.example", "new.example"}, "full"
+        host.carry_sites = carry
+        held = []
+        host._careful_hold = lambda kind, summary, text=None, found=(): held.append((kind, summary["host"])) or "Held"
+        self.assertIsNone(host._careful("type", {"text": "Ref 48291377"}), "a site it used before: it goes")
+        self.assertIsNone(host._careful("open", {"url": "https://used.example/search?q=48291377"}))
+        host.browser.current_url = "https://new.example/form"     # its level opened this one for the first time
+        self.assertEqual(host._careful("type", {"text": "Ref 48291377"}), "Held", "a site it never used asks")
+        self.assertEqual(held, [("text", "new.example")])
+        self.assertIsNone(host._careful("type", {"text": "my own words"}), "its own words never ask")
 
     def test_always_allow_is_refused_for_a_site_or_app_data(self):
         pip = self.make()
@@ -191,4 +195,5 @@ if __name__ == "__main__":
         pip_computer.tick(self.registry, self.cfg)
         self.assertEqual(pip_computer.list_actions(self.registry, pip["id"])[0]["status"], "sent")
         self.assertEqual(careful.taint_for(self.registry.directory, pip["id"]).carried("code 482913"), [], "exactly that text, allowed once")
+        self.assertIn("shop.example", careful.known(self.registry, pip["id"]), "and a site it never used asks once: Allow adds it")
 

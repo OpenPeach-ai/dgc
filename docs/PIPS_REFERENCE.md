@@ -1116,12 +1116,12 @@ features only, in `<state>/careful/<pip>.json` (owner-only), the oldest dropped 
 pause nothing in the browser (`request_ref` `careful:<id>`) and outlive a closed computer: approving a
 site adds it to the Pip's sites, approving text allows exactly that text once for 30 minutes, and the
 continuation tells the Pip to do it now.
-`always_allow_pip_computer_action` refuses them (`asks_once`, `asks_every_time`). A routine, schedule or
-event run (`local-routine`, `local-scheduler`, `local-event-trigger`) of a Pip with an `app_plan` or a
-connected app gets no computer socket and `computer_paused: true`. Plugins are every Pip's since API 45, so
-they don't decide it before the run: in such a run with a computer, `pip_careful.Lane` lets the Pip use its
-computer or the user's plugins, whichever it reaches for first, and refuses the other for the rest of the
-run. Local-only
+`always_allow_pip_computer_action` refuses them (`asks_once`, `asks_every_time`). Since 0.52 `type`, `choose`
+and `open` carrying such text to a site in the run's carry list go without a hold: `pip_careful.carry_sites`, the
+Pip's sites plus the site of each `sent` computer action it has (a site it used before); a site its level opened
+for the first time in this run is not on it. Approving a `text` hold on a site adds that site to the Pip's sites.
+A Terminal `run` carrying it is still held. Every Personal Pip's run, a routine, schedule or event run included,
+has its computer socket and its plugins (the old `computer_paused` and `Lane` are gone). Local-only
 commands: `list_pip_sites {pip_id}` → `{pip_id, careful, sites: [{site, at, by}]}`; `set_pip_careful
 {pip_id, on}` and `forget_pip_site {pip_id, site}` return the same.
 
@@ -1155,6 +1155,18 @@ position, a desktop step or a subscription brain's call: all end in `Host._recor
   as a search by its `query` field: payment and consequential words in the operation's name as above, a `query` is
   `routine`, and a `mutation` is `routine` only by its own name (`AddToCart`), else `unsure`;
 - `unsure` (none of these) asks at `approve`; `full` lets through everything but a payment.
+
+At `full` (Do it all, 0.52) a plugin's change runs in the same turn instead of becoming a connector draft
+(`pip_plugins.asks` with `pip_level`; the run's plugin session reads the level at each call through
+`pip_levels.follow`), a routine's too, unless the plugin is set to `always_ask` or can move money. Its answer says it
+ran as the level allows, and it is kept as a `pip_level_approved` workspace event with `payload.kind: "plugin"`,
+listed in `on_its_own` with `kind: "app"`. **The fuse** (`pip_levels.fuse`): when 25 things a Pip did on its own
+fall within an hour (`pip_levels.outward`: `sent` computer actions resolved by `pip-level:*` or `pip-grant:*` other
+than a new site's first visit, app actions resolved by either that succeeded or are `unknown`, and those plugin
+events), `pip_levels.effective` is `ask` until the hour from the 25th-newest has passed: `follow`, the run's plugins
+and `dispatch_for_run` use it, the computer sends nothing by an Always allow meanwhile, and a submit it holds then
+carries `summary.asks_because: "fuse"` and `summary.fuse_until` (the instant it may act on its own again).
+`get_pip_level` still says the level the user chose.
 
 Words are matched whole on the lower-cased text, split at anything but letters and digits and at camelCase. "What was
 pressed" is the step's own target (the accessible name `click` returns, the option `choose` picked, the label
@@ -1850,7 +1862,7 @@ Credentials DGC knows in the address or tools are refused (`secret_detected`).
   most), over the run's socket, while their definitions fit 32 KiB: a read answers at once, at every level, as
   untrusted data; a change becomes the reply's connector draft (`pip_plugins.offer`), one per reply, and
   `app_answer` reads what the app answered to the change the user last allowed (half an hour). Careful mode counts
-  them as plugins (its lane, and what a read brings in).
+  what a read brings in, as for plugins.
 - **Changes** are `connector_call` actions with `server` `app:<name>` and `account` `connection_managed`, proposed
   with `propose_pip_connector_action` or prepared from a connector draft, accepted once with `accept_pip_app_action`
   (or `always_allow_pip_app_action`; grants and levels as for any connector call). A read tool is refused there

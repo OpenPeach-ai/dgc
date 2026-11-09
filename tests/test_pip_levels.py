@@ -70,6 +70,7 @@ class LevelSettingTests(Store):
             self.assertLess(len(line), 160, "one plain line a level")
             self.assertNotRegex(line, r"\bAI\b")
         self.assertIn("payment", got["levels"][2]["says"])
+        self.assertIn("could talk it into sending something", got["levels"][2]["says"], "Do it all says its risk plainly")
 
     def test_a_personal_pip_made_now_starts_at_ask_and_one_made_before_keeps_ask(self):
         self.cfg.data["pips_enabled"] = True
@@ -113,6 +114,10 @@ class LevelSettingTests(Store):
         self.assertIn("Placing an order, a payment, sending to someone new", approve)
         self.assertIn("A payment still waits for the user", full)
         self.assertIn("sends your drafts without asking", full)
+        # Do it all finishes the job: the sensible default, said in one line, and only what only the user can do asks.
+        self.assertIn("Finish the whole job without stopping to ask", full)
+        self.assertIn("take it and say in one line what you chose", full)
+        self.assertIn("Ask the user only for what only they can do: a payment, a sign-in or a key only they have", full)
         self.assertIn("Nobody is at the keyboard", full)
 
 
@@ -399,6 +404,37 @@ class SharedGateTests(Store):
         import inspect
         source = inspect.getsource(pips._execute_run)
         self.assertEqual(source.count("level_now=pip_levels.follow(registry.directory, row['pip_id'])"), 2, source[:0])
+        self.assertIn("app_socket.plugins.level_now = pip_levels.follow(registry.directory, row['pip_id'])", source,
+                      "and its plugins")
+
+    def test_the_fuse_stops_it_after_25_things_on_its_own_in_an_hour(self):
+        pip, host = self.host("approve")
+        levels.set_level(self.registry, pip["id"], "approve", "editor-user")
+        host._level_now = levels.follow(self.registry.directory, pip["id"])
+        host._queued.append(host.browser.hold("site", site=True, method="GET", url="https://new.example/", fields=[]))
+        self.assertEqual(host._record_held(), [], "a new site's first visit is routine, and not a thing it sent")
+        for n in range(levels.FUSE_ACTIONS):
+            host._queued.append(host.browser.hold(f"r{n}"))
+            self.assertEqual(host._record_held(), [], f"cart {n} goes by itself")
+        self.assertEqual(len(host.browser.released), levels.FUSE_ACTIONS + 1)
+        self.assertEqual(len(levels.outward(self.registry, pip["id"])), levels.FUSE_ACTIONS)
+        until = levels.fuse(self.registry, pip["id"])
+        self.assertTrue(until, "25 in an hour: the fuse blows")
+        self.assertEqual((levels.effective(self.registry, pip["id"]), levels.level(self.registry, pip["id"])), ("ask", "approve"),
+                         "it asks again, and its level is still the one you chose")
+        host._queued.append(host.browser.hold("r25"))
+        [made] = host._record_held()
+        held = next(a for a in pip_computer.list_actions(self.registry, pip["id"]) if a["id"] == made)
+        self.assertEqual((held["status"], held["summary"]["asks_because"], held["summary"]["fuse_until"]), ("pending", "fuse", until))
+        self.assertIn("25 things on its own in the last hour", levels.fuse_words(until))
+        self.assertEqual(levels.fuse_words(until)[-60:], f"asks before each one until {until[11:16]} UTC. Allow lets this one go."[-60:])
+        # An hour on, it acts on its own again.
+        with self.registry.transaction():
+            self.registry.db.execute("UPDATE pip_computer_actions SET resolved_at='2020-01-01T00:00:00.000Z' WHERE status='sent'")
+        self.assertEqual(levels.fuse(self.registry, pip["id"]), "")
+        host._queued.append(host.browser.hold("r26"))
+        self.assertEqual(host._record_held(), [])
+        self.assertIn("r26", host.browser.released)
 
     def test_at_ask_the_shared_gate_is_as_before(self):
         pip, host = self.host("ask")

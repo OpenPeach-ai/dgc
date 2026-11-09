@@ -554,7 +554,7 @@ class Host:
     # -- a run's session ---------------------------------------------------------------------
 
     def begin(self, run_id: str, frames_dir: Path, *, careful: bool = False, said: str = "", sites=(),
-              level: str = "ask", unattended: bool = False, level_now=None) -> None:
+              level: str = "ask", unattended: bool = False, level_now=None, carry=None) -> None:
         """`level` is the Pip's level as the run starts; `level_now` (pip_levels.follow) reads it again at each held step,
         so a change in its prompt box while the reply runs applies from the next step."""
         from .pip_levels import LEVELS
@@ -563,6 +563,9 @@ class Host:
             self.shot = None
             self.frames_dir.mkdir(parents=True, exist_ok=True)
             self.careful, self.said, self.sites = bool(careful), str(said or ""), set(sites)
+            # Where it may carry what it read from the user's apps (pip_careful.carry_sites): not a site its level
+            # opened for the first time in this run, which asks once.
+            self.carry_sites = set(carry) if carry is not None else set(sites)
             self.level = level if level in LEVELS else "ask"
             self._level_now = level_now if callable(level_now) else None
             self.unattended, self.target, self.upload_from_chat, self._level_pending = bool(unattended), "", None, []
@@ -653,7 +656,11 @@ class Host:
                 self._back_from_drop()
                 self.card_note = CARD_EMPTY
                 continue
-            approval = Host._level_approves(self, held)
+            # The fuse (pip_levels.fuse): 25 things done on its own in the last hour, and it asks again, its level and
+            # its Always allows both, until the hour has passed. Its card says so.
+            fused = Host._fused(self)
+            approval = Host._level_approves(self, held)        # (names a payment's reason even while the fuse holds)
+            approval = None if fused else approval
             if approval is not None:
                 # Its level lets this through (pip_levels): sent now, kept on record, and the run goes on.
                 Host._release_by_level(self, held, approval)
@@ -663,7 +670,9 @@ class Host:
                 summary["asks_because"] = held.asks_because      # payment, maybe_payment, consequential or unsure (pip_levels)
                 if held.asks_because == "maybe_payment":
                     summary["asks_word"] = str(getattr(held, "asks_word", ""))[:40]
-            if self.run_id is not None and held.request_id in self.browser.held:
+            if fused and not is_payment(summary) and summary.get("kind") not in CAREFUL_KINDS:
+                summary["asks_because"], summary["fuse_until"] = "fuse", fused
+            if not fused and self.run_id is not None and held.request_id in self.browser.held:
                 # Always allowed for this Pip (same site, method and route): sent now, as the grant, and the run goes on.
                 # Told to stop and wait, a Pip said it was waiting on a card that never came.
                 grant = Host._grant_for(self, summary)
@@ -686,7 +695,7 @@ class Host:
                     # A page's own submit, with no run, on a route the user always allows: the supervisor sends it
                     # within seconds and the user is told after. A payment asks every time: no grant sends one.
                     from .pip_action_grants import computer_grant_for
-                    grant = (None if summary.get("kind") in CAREFUL_KINDS or is_payment(summary)
+                    grant = (None if fused or summary.get("kind") in CAREFUL_KINDS or is_payment(summary)
                              else computer_grant_for(registry, self.pip_id, summary))
                     if grant is not None:
                         registry.db.execute("UPDATE pip_computer_actions SET status='approved',resolved_at=?,resolved_by=? "
@@ -696,6 +705,16 @@ class Host:
             made.append(action_id)
             self.waiting.append(action_id)
         return made
+
+    def _fused(self) -> str:
+        """While the fuse holds for this Pip (pip_levels.fuse): when it may act on its own again; else ""."""
+        from .pip_levels import fuse
+        from .workspace_registry import WorkspaceRegistry
+        try:
+            with WorkspaceRegistry(self.state_directory) as registry:
+                return fuse(registry, self.pip_id)
+        except Exception:                                  # noqa: BLE001 - a registry that can't say: as before
+            return ""
 
     def _grant_for(self, summary) -> dict | None:
         """The Always allow that covers this held submit, or None. A payment asks every time: no grant sends one."""
@@ -1211,7 +1230,7 @@ class Host:
         if op == "open":
             url = _safe_url(args.get("url"))
             parts = urlsplit(url)
-            carried = self.taint.carried(url, self.said)
+            carried = [] if allowed(parts.hostname or "", Host._carry(self)) else self.taint.carried(url, self.said)
             if carried:
                 return self._careful_hold("text", {"method": "OPEN", "host": parts.hostname or "", "path": (parts.path or "/")[:300],
                                                    "fields": [{"name": "address", "value": _preview(url)}]}, url, carried)
@@ -1234,14 +1253,18 @@ class Host:
         if op in ("type", "choose", "desktop_type", "dialog"):
             # Typing on the desktop reaches the browser's window too: checked like typing into the page.
             text = str((args.get("value") if op == "choose" else args.get("text")) or "")
-            carried = self.taint.carried(text, self.said)
+            parts = urlsplit(page)
+            carried = [] if allowed(parts.hostname or "", Host._carry(self)) else self.taint.carried(text, self.said)
             if carried:
-                parts = urlsplit(page)
                 return self._careful_hold("text", {"method": "CHOOSE" if op == "choose" else "TYPE", "host": parts.hostname or "",
                                                    "path": (parts.path or "/")[:300],
                                                    "fields": [{"name": "typed" if op in ("type", "dialog") else "chosen", "value": _preview(text)}]},
                                           text, carried)
         return None
+
+    def _carry(self) -> set:
+        """The sites it may carry what it read from the user's apps to: begin's carry, and any a card allowed since."""
+        return set(getattr(self, "carry_sites", None) or ())
 
     def _careful_hold(self, kind, summary, text=None, carried=()) -> str:
         """Record a careful hold: nothing is paused in the browser; Allow lets the Pip do it once."""
@@ -1540,7 +1563,6 @@ class RunSocket:
         os.chmod(self.path, 0o600)
         self.server.listen(4)
         self.calls = 0
-        self.lane = None             # careful mode (pip_careful.Lane): in a run nobody watches, computer or plugins
         self._stopped = threading.Event()
         threading.Thread(target=self._serve, name="pip-computer-run", daemon=True).start()
 
@@ -1567,11 +1589,9 @@ class RunSocket:
                         reply = {"text": "error: refused"}
                     else:
                         self.calls += 1
-                        refused = self.lane("computer") if self.lane is not None else None
                         act = getattr(self.host, "act", None)
                         op, args = str(request.get("op", "")), request.get("args") or {}
-                        reply = ({"text": refused} if refused else act(op, args) if callable(act)
-                                 else {"text": self.host.call(op, args)})
+                        reply = act(op, args) if callable(act) else {"text": self.host.call(op, args)}
                     client.sendall(json.dumps(reply).encode("utf-8") + b"\n")
                 except (OSError, ValueError):
                     continue
@@ -1794,8 +1814,15 @@ def tick(registry, config) -> dict:
         continuation = None
         summary = json.loads(row["summary"])
         if careful and summary.get("kind") == "text" and row["status"] == "approved" and summary.get("text_digest"):
-            from .pip_careful import taint_for
+            from .pip_careful import add_site, site_of, taint_for
             taint_for(registry.directory, row["pip_id"]).allow_digest(summary["text_digest"])
+            # A site it had never used asks once (0.52, D3): allowed, it is a site it may carry to from then on.
+            site = site_of(str(summary.get("host") or "")) if summary.get("host") not in ("Terminal", "") else ""
+            if site:
+                add_site(registry, row["pip_id"], site, "you")
+                if live:
+                    host.sites.add(site)
+                    host.carry_sites = set(getattr(host, "carry_sites", set())) | {site}
         if careful and summary.get("kind") == "floor" and row["status"] == "approved" and summary.get("text_digest"):
             from .pip_levels import allow_floor
             allow_floor(registry, row["pip_id"], summary["text_digest"])      # that exact command, once

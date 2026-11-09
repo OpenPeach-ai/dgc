@@ -250,6 +250,17 @@ test("a card its level still asks for says why: a saved card's payment, at Do it
   assert.match(card.querySelector(".primary").textContent, /Review…/, "reviewed as any payment");
 });
 
+test("a card the fuse holds says so: 25 things on its own in the last hour, and until when", async () => {
+  const hold = { ...floorHold, id: "compact_" + "8".repeat(32), summary: { method: "POST", host: "shop.pip-test.example", path: "/cart/add",
+    page: "", fields: [{ name: "item", value: "tee" }], more_fields: 0, body_bytes: 9, asks_because: "fuse", fuse_until: "2026-11-09T07:12:00.000Z" } };
+  assert.match(careful.asksWords(hold.summary), /^It has done 25 things on its own in the last hour, so it asks before each one until .+\.$/);
+  assert.equal(careful.asksWords({ asks_because: "fuse" }), "It has done 25 things on its own in the last hour, so it asks before each one for now.");
+  const x = pipsPage({ state: level("full"), actions: [hold] }); await x.drain(); x.click(`[data-job="${PIP}"]`); await x.drain();
+  const card = x.d.querySelector(`[data-computer-card="${hold.id}"]`);
+  assert.ok(card, "its card is under the reply");
+  assert.match(card.textContent, /It has done 25 things on its own in the last hour, so it asks before each one until/);
+});
+
 test("the page's level is checked before it is shown", () => {
   const good = level("approve", DONE);
   assert.equal(levels.levelPage(good, PIP).level, "approve");

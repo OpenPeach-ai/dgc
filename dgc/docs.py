@@ -3969,9 +3969,10 @@ bubblewrap profile is missing; DGC does not fall back to an unsandboxed browser.
 - **How much it asks.** Each Personal Pip has a level, on the chip at the left of its prompt box and on
   its page: **Ask me first** (every submit and send waits for you), **Approve for me** (routine steps
   such as a search, adding to a cart or saving a draft go by themselves; orders, posting, deleting and
-  sending to someone new still ask) or **Do it all**. A change while it works applies from its next
-  step. New Pips start at Ask me first; existing Pips keep their chosen level. Payments ask at every
-  level.
+  sending to someone new still ask) or **Do it all** (it finishes the job without stopping, a plugin's
+  change included, and says what it chose). A change while it works applies from its next step. After
+  25 things on its own in an hour it asks again until the hour has passed. New Pips start at Ask me
+  first; existing Pips keep their chosen level. Payments ask at every level.
 - **Always allow** lets one exact kind of action through from then on, for the same account, tool or
   site; its page lists them, with **Stop allowing**. A payment never offers it.
 - **Saved logins.** Save a site's login once, with its authenticator key if it has one, and DGC types

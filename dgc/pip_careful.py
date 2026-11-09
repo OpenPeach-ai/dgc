@@ -8,11 +8,12 @@ On by default for every Pip with a computer; only you turn it off, on its page. 
   document you attached to one (Pips API 58: its text read by DGC, never the model), the computer's home page, and
   sites you opened on its screen yourself never ask. Allow adds the site for good. At Approve for me and Do it all
   (pip_levels) a new site's first visit is routine: it opens, and is kept on record.
-- **What it read from your apps is yours to send.** Text the Pip types into a page, an option it picks, an
-  address it opens and a Terminal command are checked against what it read from your apps (emails, events,
-  plugin answers) in the last day. Carrying any of it out is held for your Allow, like a form it submits.
-- **Unattended runs that read your apps get no computer.** A routine, schedule or event run of a Pip that can
-  read your apps runs without its computer, since nobody is watching what it would carry where.
+- **What it read from your apps goes only where you'd expect.** Text the Pip types into a page, an option it
+  picks, an address it opens and a Terminal command are checked against what it read from your apps (emails,
+  events, plugin answers) in the last day. To a site you named, allowed or it used before, it goes (0.52, your
+  D3). To a site it has never used it asks once, and Allow adds the site; a Terminal command carrying it asks.
+- **Every Personal Pip has its computer and your plugins**, a routine's run too (0.52, your D3): the model decides
+  which it needs. The fuse (pip_levels.fuse) stops a run that does too much on its own.
 
 Everything here runs in the supervisor, which the Pip's own process can't reach: the worker only ever sees
 "Held:" in a tool's answer. Approving lets the Pip do it once (the site stays allowed); it retries itself.
@@ -253,6 +254,23 @@ def known(registry, pip_id) -> set[str]:
     return {s["site"] for s in _sites(registry, pip_id)} | user_sites(registry, pip_id) | file_sites(registry, pip_id)
 
 
+def carry_sites(registry, pip_id) -> set[str]:
+    """Where it may carry what it read from your apps without asking (0.52, your D3): the sites it may visit (known)
+    and the sites it already used, in an earlier run, with its level or your Allow. A site it has never used asks once;
+    Allow adds it here for good."""
+    found = set(known(registry, pip_id))
+    try:
+        for row in registry.db.execute("SELECT summary FROM pip_computer_actions WHERE pip_id=? AND status='sent' "
+                                       "ORDER BY resolved_at DESC LIMIT 500", (pip_id,)):
+            summary = json.loads(row[0])
+            site = summary.get("site") or site_of(str(summary.get("host") or ""))
+            if site and summary.get("host") not in ("Terminal", ""):
+                found.add(site)
+    except Exception:                       # noqa: BLE001 - a registry without computers
+        pass
+    return found
+
+
 # --------------------------------------------------------------------------- what it read from your apps
 
 def _norm(text) -> str:
@@ -360,51 +378,3 @@ def _digest(text) -> str:
 def preview(text, limit=200) -> str:
     flat = " ".join(str(text or "").split())
     return flat if len(flat) <= limit else flat[:limit - 1] + "…"
-
-
-# --------------------------------------------------------------------------- unattended runs
-
-def computer_paused(registry, config, pip_id, requested_by, manifest) -> bool:
-    """A routine, schedule or event run that reads the user's apps gets no computer while careful is on: apps it
-    reads before the run (its reads, its references) or apps connected to it. Plugins are every Pip's since
-    2026-10-09, so they don't decide it here: Lane does, in the run, whichever the Pip reaches for first."""
-    if requested_by not in UNATTENDED or not is_on(registry, pip_id):
-        return False
-    if manifest.get("app_plan") is not None or manifest.get("app_references"):
-        return True
-    from . import pip_app_links
-    try:
-        return bool(pip_app_links.connected(registry, pip_id))
-    except Exception:
-        return True
-
-
-class Lane:
-    """In a run nobody is watching, careful mode lets a Pip use its computer or the user's plugins, not both:
-    whichever it reaches for first, the other stays off for the run. With every plugin every Pip's, deciding it
-    before the run (as connected apps still do) would take the computer from every routine of every Pip."""
-
-    COMPUTER_OFF = ("Careful mode: nobody is watching this run and you have used the user's plugins in it, so your "
-                    "computer stays off until they're here. Do what you can without it; if the task needs the computer, "
-                    "say so in one sentence, and the user can run it from your chat.")
-    PLUGINS_OFF = ("Careful mode: nobody is watching this run and you have used your computer in it, so the user's "
-                   "plugins stay off in this run. Do what you can without them; if the task needs a plugin, say so in "
-                   "one sentence, and the user can run it from your chat.")
-
-    def __init__(self):
-        self._first = None
-        self._lock = threading.Lock()
-
-    def __call__(self, kind: str):
-        """None when ``kind`` ("computer" or "plugins") may be used in this run, else what to tell the Pip."""
-        with self._lock:
-            if self._first is None:
-                self._first = kind
-            if self._first == kind:
-                return None
-        return self.COMPUTER_OFF if kind == "computer" else self.PLUGINS_OFF
-
-
-PAUSED_NOTE = ("Careful mode: your computer is off in this run. Nobody is watching it and you can read the user's "
-               "apps here, so nothing you read can be carried to a website. Do what you can without it; if the "
-               "task needs the computer, say so in one sentence, and the user can run it from your chat.")

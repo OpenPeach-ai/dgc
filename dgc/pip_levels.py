@@ -49,9 +49,17 @@ SAYS = {
     ASK: "Asks before every new site, every submit and every send.",
     APPROVE: ("Opens new sites, searches, adds to carts and saves drafts by itself. Asks before it orders, pays, "
               "sends to someone new, posts, deletes or changes an account."),
-    FULL: "Does it all by itself, sends included. Still asks before any payment.",
+    # The risk, said plainly where the level is chosen: sending is what Do it all allows.
+    FULL: ("Does the whole job by itself, sends included. Stops only for a payment or a sign-in. A page or an email "
+           "it reads could talk it into sending something."),
 }
 NOBODY = "nobody at the keyboard"
+# The fuse: more than this many things a Pip did on its own (sent, submitted, ran) in an hour, and it asks again until
+# the hour has passed, whatever its level. A runaway Pip, or one a page talked into a loop, stops at 25.
+FUSE_ACTIONS = 25
+FUSE_SECONDS = 3600
+FUSE_WORDS = ("It has done 25 things on its own in the last hour, so it asks before each one until {until}. "
+              "Allow lets this one go.")
 MAX_LISTED = 20
 
 
@@ -88,14 +96,75 @@ def level(registry, pip_id) -> str:
 def follow(directory, pip_id):
     """The Pip's level as it is now, for a run's supervisor to ask at each held step (pip_computer.Host, pip_borrow): a
     change in its prompt box or on its page while a reply runs applies from the next step, both ways. Read afresh each
-    time; a registry that can't be read is Ask, so nothing goes by itself on a guess."""
+    time, with the fuse (effective); a registry that can't be read is Ask, so nothing goes by itself on a guess."""
     def now() -> str:
         try:
             with WorkspaceRegistry(directory) as registry:
-                return level(registry, pip_id)
+                return effective(registry, pip_id)
         except Exception:                   # noqa: BLE001 - unreadable means the safe default
             return ASK
     return now
+
+
+# --------------------------------------------------------------------------- the fuse
+
+def _since(seconds, registry=None) -> str:
+    """`seconds` before now, by the registry's own clock (the wall clock, but a test's fixed one in tests)."""
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    clock = getattr(registry, "clock", None)
+    if callable(clock):
+        try:
+            now = datetime.fromisoformat(str(clock()).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            pass
+    return (now - timedelta(seconds=seconds)).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def outward(registry, pip_id, seconds=FUSE_SECONDS) -> list[str]:
+    """When each thing it did on its own in the last `seconds` went, oldest first: a submit or a send its level or an
+    Always allow let through (a new site's first visit isn't one), and a plugin change its level ran."""
+    since, times = _since(seconds, registry), []
+    queries = (
+        ("SELECT resolved_at FROM pip_computer_actions WHERE pip_id=? AND status='sent' AND resolved_at>=? "
+         "AND (resolved_by LIKE 'pip-level:%' OR resolved_by LIKE 'pip-grant:%') "
+         "AND coalesce(json_extract(summary,'$.kind'),'')<>'site'"),
+        ("SELECT resolved_at FROM pip_app_actions WHERE pip_id=? AND resolved_at>=? AND status IN ('succeeded','unknown') "
+         "AND (resolved_by LIKE 'pip-level:%' OR resolved_by LIKE 'pip-grant:%')"),
+        ("SELECT created_at FROM workspace_events WHERE pip_id=? AND created_at>=? AND event_type='pip_level_approved' "
+         "AND json_extract(payload,'$.kind')='plugin'"))
+    for query in queries:
+        try:
+            times += [str(r[0]) for r in registry.db.execute(query, (pip_id, since))]
+        except Exception:                   # noqa: BLE001 - a registry without that kind of action
+            pass
+    return sorted(times)
+
+
+def fuse(registry, pip_id) -> str:
+    """When the fuse lets it act on its own again (an ISO instant), or "" while it hasn't blown."""
+    times = outward(registry, pip_id)
+    if len(times) < FUSE_ACTIONS:
+        return ""
+    from datetime import datetime, timedelta
+    try:
+        first = datetime.fromisoformat(times[-FUSE_ACTIONS].replace("Z", "+00:00"))
+    except ValueError:
+        return _since(-FUSE_SECONDS, registry)
+    return (first + timedelta(seconds=FUSE_SECONDS)).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def fuse_words(until) -> str:
+    """What the Pip and its card say while the fuse holds: the time it acts on its own again, as HH:MM UTC."""
+    return FUSE_WORDS.format(until=(str(until)[11:16] + " UTC") if until else "the hour has passed")
+
+
+def effective(registry, pip_id) -> str:
+    """The level that decides now: the Pip's own, or Ask me first while the fuse holds."""
+    chosen = level(registry, pip_id)
+    if chosen != ASK and fuse(registry, pip_id):
+        return ASK
+    return chosen
 
 
 # New Personal Pips start with Ask. Existing Pips retain their saved level; creating a workflow
@@ -164,6 +233,17 @@ def on_its_own(registry, pip_id, limit=MAX_LISTED) -> list[dict]:
             rows.append({"at": row["resolved_at"], "what": what[:200], "level": row["resolved_by"].split(":", 1)[1],
                          "unattended": _unattended_run(registry, payload.get("source", {}).get("run_id")), "kind": "app"})
     except Exception:                       # noqa: BLE001 - a registry without app actions
+        pass
+    try:
+        # A plugin change its level ran in the same turn (Do it all, pip_plugins): an app's line on its page.
+        for row in registry.db.execute(
+                "SELECT created_at,payload FROM workspace_events WHERE pip_id=? AND event_type='pip_level_approved' "
+                "AND json_extract(payload,'$.kind')='plugin' ORDER BY seq DESC LIMIT ?", (pip_id, limit)):
+            payload = json.loads(row["payload"])
+            rows.append({"at": row["created_at"], "what": str(payload.get("what") or "")[:200],
+                         "level": payload.get("level") if payload.get("level") in (APPROVE, FULL) else FULL,
+                         "unattended": payload.get("unattended") is True, "kind": "app"})
+    except Exception:                       # noqa: BLE001 - a registry that can't say
         pass
     rows.sort(key=lambda r: str(r["at"]), reverse=True)
     out, seen = [], set()
@@ -578,9 +658,11 @@ def instructions(value, *, drafting=False, unattended=False) -> str:
             line += (" After your reply, DGC sends a draft to someone the user named or already wrote to; any other "
                      "draft waits for them.")
     elif value == FULL:
-        line = ("How much you ask: the user chose Do it all. DGC lets your submits, new sites and sends through without "
-                "asking, and the tool says so: carry on without stopping. A payment still waits for the user. Do only "
-                "what they asked.")
+        line = ("How much you ask: the user chose Do it all. Finish the whole job without stopping to ask: DGC lets your "
+                "submits, new sites, plugin changes and sends through, and each tool's answer says what went. When a "
+                "choice has a sensible default, take it and say in one line what you chose. Ask the user only for what "
+                "only they can do: a payment, a sign-in or a key only they have, or a question with no sensible default. "
+                "A payment still waits for the user. Do only what they asked.")
         if drafting:
             line += " After your reply, DGC sends your drafts without asking (a payment excepted); never say one already went."
     else:
@@ -699,7 +781,7 @@ def dispatch_for_run(registry, config, run_id) -> list:
         row = registry.db.execute("SELECT pip_id,workspace_id FROM pip_runs WHERE id=?", (run_id,)).fetchone()
         if row is None:
             return outcomes
-        chosen = level(registry, row[0])
+        chosen = effective(registry, row[0])
         if chosen == ASK:
             return outcomes
     except Exception:                       # noqa: BLE001
@@ -715,6 +797,8 @@ def dispatch_for_run(registry, config, run_id) -> list:
         except Exception:                   # noqa: BLE001 - a registry without that kind of draft
             continue
         for draft_id in ids:
+            if effective(registry, row[0]) == ASK:
+                break                       # the fuse blew partway: the rest wait for the user as drafts
             try:
                 draft = drafts.get(store, draft_id, kind=draft_kind)
                 field = "action" if draft_kind == "connector" else "event" if draft_kind == "calendar" else "message"

@@ -396,6 +396,38 @@ class PluginAccessTests(PluginWorld, unittest.TestCase):
         self.assertFalse(runs("clear_table", self.session_for(unattended=True)), "nobody watching: every change waits")
         self.assertTrue(runs("list_records", self.session_for(unattended=True)), "a read still runs")
 
+    def test_at_do_it_all_a_change_runs_in_the_same_turn_and_is_listed_but_money_and_always_ask_still_ask(self):
+        # 0.52 (Pips package 4): at Do it all a change runs now, a routine's too: no Allow card, no "card below", no
+        # second turn after the reply. It is kept for "What it did on its own" and counted by the fuse.
+        from dgc import pip_levels
+        level = ["full"]
+        session = self.session_for(unattended=True)
+        session.level_now = lambda: level[0]
+        said = self.use("call_plugin", session, plugin="airtable", tool="create_record", arguments={"table": "Plans", "fields": {"Name": "Run"}})
+        self.assertIsInstance(said, str, "it ran: no draft, no card")
+        self.assertIn("create_record ran in the user's Airtable just now, as their level allows (Do it all): no card", said)
+        self.assertNotIn("below your reply", said)
+        self.assertEqual(Vendor.made[-1].calls[-1][1], {"table": "Plans", "fields": {"Name": "Run"}})
+        listed = self.use("plugin_tools", session, plugin="airtable")
+        self.assertIn("- create_record [runs]", listed, "the tool list says so too")
+        mine = pip_levels.on_its_own(self.registry, self.pip["id"])
+        self.assertEqual([(r["what"], r["level"], r["kind"], r["unattended"]) for r in mine],
+                         [("Ran create_record in Airtable", "full", "app", True)])
+        self.assertEqual(len(pip_levels.outward(self.registry, self.pip["id"])), 1, "the fuse counts it")
+        # A plugin that can move money still asks at Do it all, and so does one set to Always ask.
+        self.assertIn("draft", self.use("call_plugin", session, plugin="aave", tool="create_record", arguments={}))
+        plugins.set_permission("airtable", "always_ask", money=False)
+        self.assertIn("draft", self.use("call_plugin", session, plugin="airtable", tool="create_record", arguments={"table": "T"}))
+        plugins.set_permission("airtable", "important", money=False)
+        # The level is read at each call: back at Approve for me, the change asks again in the same run.
+        level[0] = "approve"
+        self.assertIn("draft", self.use("call_plugin", session, plugin="airtable", tool="create_record", arguments={"table": "T"}))
+        # And at Do it all careful mode lets what it read from your apps go to your own plugin: sending is what it allows.
+        level[0] = "full"
+        session.carries = lambda text: "4829137755" in text
+        self.assertIsInstance(self.use("call_plugin", session, plugin="airtable", tool="create_record",
+                                       arguments={"table": "T", "fields": {"Ref": "4829137755"}}), str)
+
     def test_careful_mode_holds_a_change_that_carries_what_it_read_from_your_apps(self):
         # Never ask lets a change through; careful mode still shows one carrying app data before it goes.
         plugins.set_permission("airtable", "never_ask", money=False)

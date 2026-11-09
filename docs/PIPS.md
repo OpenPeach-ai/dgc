@@ -1399,17 +1399,29 @@ Existing Pips keep the level you chose for them. A Project Pip has no chip: it a
 - **Payments always ask.** At every level: a request carrying a card number, a payment's words, or card and bank
   fields (a saved card's token too). The card rule is the same: the Pip never types a card, and your own Pay on its
   screen is your approval. A saved login is still sent only to its own site, and careful mode still asks before
-  anything it read from your apps goes onto a website.
+  anything it read from your apps goes onto a site it has never used.
 - **The safety floor.** At every level, a command in its Terminal (or typed on its desktop) that could wipe its Files,
   like `rm -rf ~` or `find . -delete`, waits as a card: **Let PIP run this in its Terminal?** with **Allow once**,
   which lets exactly that command run once. It never gets Always allow. Ordinary commands run as before.
 - **What it did on its own is one click away.** Each thing its level let through goes at once, in the same run, and
   is kept: the step's picture in **What it saw…** says "Approved by its level: Approve for me · Added to cart on
   shop.example", and its page lists the newest under **What it did on its own**, right under the picker, with **Ask
-  me again from now on**. A desktop notification says what it sent (an email, a submit at Do it all). Its drafts
-  (an email, an event, a plugin's action) go after the reply, re-checked against the level when they run.
+  me again from now on**. A desktop notification says what it sent (an email, a submit at Do it all). Its email and
+  calendar drafts go after the reply, re-checked against the level when they run.
+- **Do it all finishes the job.** At Do it all a Pip doesn't stop to ask: a plugin's change runs in the same turn
+  (no Allow card, and no second turn after the reply), and when a choice has a sensible default it takes it and says
+  in one line what it chose. It stops only for a payment, a sign-in or a key only you have, a command that would wipe
+  its Files, or a real question with no sensible default. A plugin set to **Always ask**, or one that can move money,
+  still asks. The line under the level says the risk plainly: a page or an email it reads could talk it into sending
+  something.
+- **The fuse.** If a Pip does 25 things on its own in an hour (a submit, a send or a plugin change its level or an
+  Always allow let through; a new site's first visit doesn't count), it asks before each one again until the hour has
+  passed, whatever its level. Its card says so, with the time. The level you chose stays as it was.
+- **Every Personal Pip has its computer and your plugins**, a routine's run too. The model decides which it needs.
+  What it read from your apps goes freely to a site you named, allowed or it used before; to a site it has never used
+  it asks once, and **Allow** adds that site. A Terminal command carrying it asks.
 - **Routines run at its level.** With nobody at the keyboard, what its level let through says so ("nobody at the
-  keyboard"). Careful mode still keeps a routine that can read your apps off its computer.
+  keyboard").
 - **Sites you gave it count as yours.** A site you wrote in its chat already never asked; now a site written out
   (`https://…` or `www.…`) in a document you attach to your message counts too: a PDF's text, a Word, OpenDocument or
   text file's, read by DGC itself. Photos don't count yet: DGC has no way of its own to read the text in a picture, so

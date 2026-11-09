@@ -3181,9 +3181,6 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     base_instructions += ("\nWhen the user tells you something lasting about themselves or the people in their "
                         "life (a diet, an allergy, a dislike, a name, a birthday, a routine, how they like things done), keep it "
                         "with remember in this turn, in their words, then answer. Don't keep what only matters today.")
-                if personal and manifest.get('computer_paused') is True:
-                    from .pip_careful import PAUSED_NOTE
-                    base_instructions += '\n' + PAUSED_NOTE
                 if apps_pin is not None and conversation is not None and not (lent or {}).get('refused'):
                     # Borrowing the user's own Chrome (pip_borrow): how to ask, and, in the reply it was lent to, how to use it.
                     base_instructions += '\n' + pip_borrow.NOTICE
@@ -4447,7 +4444,7 @@ def _execute_run(registry, row, config):
                 manifest = pip_eyes.pin(registry, row, manifest, config)
             except (RegistryError, OSError, ValueError):
                 pass                        # it reads text, as before
-    computer_socket = computer_host = taint = lane = None
+    computer_socket = computer_host = taint = None
     if personal and manifest.get('run_kind') in ('personal_task', 'conversation'):
         # Careful mode remembers what every run of this Pip read from apps, with or without its computer:
         # a routine's run reads mail now, and the user's next run could carry it to a page.
@@ -4462,36 +4459,32 @@ def _execute_run(registry, row, config):
     if personal and manifest.get('computer') is not None and manifest.get('run_kind') in ('personal_task', 'conversation'):
         from . import pip_careful
         careful = pip_careful.is_on(registry, row['pip_id'])
-        if careful and pip_careful.computer_paused(registry, config, row['pip_id'], row['requested_by'], manifest):
-            # Careful mode: nobody watches a routine's run, and it can read the user's apps: no computer.
-            manifest = {**manifest, 'computer_paused': True}
-        else:
-            # The Pip's own computer lives in this supervisor process and outlives the run; the
-            # worker reaches it through a socket only this run's token opens.
-            from . import pip_computer
-            computer_host = pip_computer.host_for(registry.directory, row['pip_id'], row['workspace_id'])
-            conversation_pin = manifest.get('conversation') if isinstance(manifest.get('conversation'), dict) else {}
-            # The user's own words this turn are theirs to type; a turn DGC wrote (a hello, a routine) is not.
-            said = str(conversation_pin.get('text') or '') if manifest.get('user_turn') is True else ''
-            if row['requested_by'] in pip_careful.UNATTENDED and conversation_pin.get('text'):
-                from .pip_routines import split_turn
-                said = split_turn(registry, row['id'], conversation_pin['text'])[0]    # the words the user gave a routine
-            from . import pip_levels
-            computer_host.begin(row['id'], run_dir / 'artifacts' / 'computer', careful=careful, said=said,
-                                sites=pip_careful.known(registry, row['pip_id']) if careful else (),
-                                level=pip_levels.level(registry, row['pip_id']),
-                                level_now=pip_levels.follow(registry.directory, row['pip_id']),
-                                unattended=row['requested_by'] in pip_careful.UNATTENDED)
-            computer_socket = pip_computer.RunSocket(computer_host, row['id'])
-            if careful and row['requested_by'] in pip_careful.UNATTENDED:
-                lane = pip_careful.Lane()         # nobody watching: its computer or the user's plugins, not both
-                computer_socket.lane = lane
-            from . import pip_desktop_eyes, pip_screen
-            try:
-                whole = pip_desktop_eyes.supported() and pip_screen.availability()["available"] is True
-            except Exception:                       # noqa: BLE001 - no desktop: the browser's steps, as before
-                whole = False
-            manifest = {**manifest, 'computer_socket': {**computer_socket.pin(), 'desktop': whole}}
+        # Every Personal Pip has its computer and the user's plugins, a routine's run too (0.52, D3): careful mode's
+        # rule on what it read from apps and the fuse (pip_levels.fuse) are what guard a run nobody watches.
+        # The Pip's own computer lives in this supervisor process and outlives the run; the
+        # worker reaches it through a socket only this run's token opens.
+        from . import pip_computer
+        computer_host = pip_computer.host_for(registry.directory, row['pip_id'], row['workspace_id'])
+        conversation_pin = manifest.get('conversation') if isinstance(manifest.get('conversation'), dict) else {}
+        # The user's own words this turn are theirs to type; a turn DGC wrote (a hello, a routine) is not.
+        said = str(conversation_pin.get('text') or '') if manifest.get('user_turn') is True else ''
+        if row['requested_by'] in pip_careful.UNATTENDED and conversation_pin.get('text'):
+            from .pip_routines import split_turn
+            said = split_turn(registry, row['id'], conversation_pin['text'])[0]    # the words the user gave a routine
+        from . import pip_levels
+        computer_host.begin(row['id'], run_dir / 'artifacts' / 'computer', careful=careful, said=said,
+                            sites=pip_careful.known(registry, row['pip_id']) if careful else (),
+                            carry=pip_careful.carry_sites(registry, row['pip_id']) if careful else (),
+                            level=pip_levels.level(registry, row['pip_id']),
+                            level_now=pip_levels.follow(registry.directory, row['pip_id']),
+                            unattended=row['requested_by'] in pip_careful.UNATTENDED)
+        computer_socket = pip_computer.RunSocket(computer_host, row['id'])
+        from . import pip_desktop_eyes, pip_screen
+        try:
+            whole = pip_desktop_eyes.supported() and pip_screen.availability()["available"] is True
+        except Exception:                       # noqa: BLE001 - no desktop: the browser's steps, as before
+            whole = False
+        manifest = {**manifest, 'computer_socket': {**computer_socket.pin(), 'desktop': whole}}
     app_socket = None
     if personal and manifest.get('run_kind') in ('personal_task', 'conversation'):
         # The Pip's own apps (connect_app, read_app): the controller holds the Composio connection;
@@ -4500,7 +4493,9 @@ def _execute_run(registry, row, config):
         from .pip_careful import UNATTENDED
         app_socket = pip_app_links.RunSocket(registry.directory, config, row['pip_id'], row['workspace_id'], row['id'],
                                              unattended=row['requested_by'] in UNATTENDED)
-        app_socket.lane = lane
+        from . import pip_levels
+        # Its plugins read its level at each call: at Do it all a change runs in the same turn (and the fuse holds it).
+        app_socket.plugins.level_now = pip_levels.follow(registry.directory, row['pip_id'])
         app_socket.taint = taint
         if taint is not None:
             from . import pip_careful

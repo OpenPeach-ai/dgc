@@ -73,6 +73,12 @@ export function asksWords(summary) {
   if (because === 'maybe_payment') return `It mentions “${summary.asks_word || 'money'}”, so DGC asks. Nothing shows it’s a payment.`;
   if (because === 'consequential') return 'Its level asks before this.';
   if (because === 'unsure') return 'DGC can’t tell what this does, so it asks.';
+  if (because === 'fuse') {
+    // The fuse (pip_levels.fuse, 0.52): 25 things on its own in an hour, and it asks again until the hour has passed.
+    const at = new Date(String(summary.fuse_until || ''));
+    const shown = Number.isNaN(at.getTime()) ? '' : at.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+    return `It has done 25 things on its own in the last hour, so it asks before each one${shown ? ` until ${shown}` : ' for now'}.`;
+  }
   return '';
 }
 

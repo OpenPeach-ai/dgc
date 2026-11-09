@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A Pip's card says when the fuse is why it asks: "It has done 25 things on its own in the last hour, so it asks before each one until 8:12 AM."
 - A Pip's level is in its prompt box. A chip at the left, where Work's mode picker is, says the level's name: Ask me first, Approve for me or Do it all (the names Ask and Full access are gone). Its menu gives each level with one line saying what it means, a check on the chosen one, and a last row, What this Pip can do, which the shield used to open. The chip takes the shield's place. A change works while a reply runs and applies from the next step. The Pip's page says the same level, and a change in either place shows in the other. A Project Pip keeps its shield: it always asks.
 - One prompt box in Work, ChatDGC and a Pip's chat: an attached picture is a pill (a small picture, its name, a remove button) and a click shows it large just above the box without moving the prompt; files dragged over the box say "Drop to attach"; Stop is a square inside a spinning arc. ChatDGC's "+" replaces the paperclip (Files and folders through @, your Library, or Upload from this computer, which alone opens the file window), and a Pip's "+" replaces its picture button (pictures and files, or @ for a Pip or an app).
 - ChatDGC's Temporary is now Incognito, with a ghost in place of the checkbox (a white square in dark themes): the ghost and its word, lit when on, the ghost alone in a narrow box. The chat's header says Incognito too. As before, it's never saved, listed or remembered.

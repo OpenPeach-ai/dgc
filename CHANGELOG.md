@@ -6,6 +6,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- Do it all finishes the job. At Do it all a Pip's plugin change runs in the same turn, a routine's too, instead of becoming an Allow card that ran after the reply and started a second turn; the Pip is told to take the sensible default and say in one line what it chose, and to ask only for a payment, a sign-in, a key or a real question. A plugin set to Always ask, or one that can move money, still asks. The level's line says the risk plainly. Each change is listed under What it did on its own.
+- A fuse: after 25 things a Pip did on its own in an hour (submits, sends and plugin changes its level or an Always allow let through), it asks before each one again until the hour has passed. Its card says so, with the time (`summary.asks_because: "fuse"`, `fuse_until`).
+- Every Personal Pip has its computer and your plugins, a routine's run too: careful mode no longer takes the computer from a routine that reads your apps, or one of the two from a run nobody watches. What it read from your apps now goes freely to a site you named, allowed or it used before; a site it has never used asks once, and Allow adds the site.
 - A Pip's levels are now called Ask me first, Approve for me and Do it all (`ask`, `approve` and `full` are unchanged). A change made while a reply runs applies from its next step: its computer and a borrowed Chrome tab read the level again at each step they hold (`pip_levels.follow`), where the run used to keep the level it started with.
 - `dgc chat --incognito` starts a chat that's never saved, listed or remembered, as ChatDGC's Incognito does. `--temporary` still works.
 - Pip reports say new or still there. Each review sees its last report and marks every finding with the earlier one it repeats, so the chat's card says "1 new · 3 still there" and names the new one, and a run with nothing new makes no new card, however the model words the same problems.

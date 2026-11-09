@@ -546,7 +546,6 @@ class RunSocket:
         self.server.listen(4)
         self.calls, self.asked, self.reads = 0, [], 0
         self.on_read = None          # careful mode (pip_careful): what the Pip reads from apps, for its computer
-        self.lane = None             # careful mode (pip_careful.Lane): in a run nobody watches, computer or plugins
         self.taint, self.said = None, ""   # careful mode: what it read from apps, and the user's own words this turn
         from .pip_plugins import Session
         self.plugins = Session(directory, config, pip_id, workspace_id, run_id, unattended=unattended)
@@ -614,18 +613,12 @@ class RunSocket:
         try:
             with WorkspaceRegistry(self.directory) as registry:
                 if op in SDK_APP_OPS:
-                    # Your own apps (pip_sdk_apps): as plugins' tools, in careful mode's plugins lane.
-                    refused = self.lane("plugins") if self.lane is not None and op == "app_tool" else None
-                    if refused:
-                        return refused
+                    # Your own apps (pip_sdk_apps): as plugins' tools.
                     said = self.sdk_apps.call(registry, op, args)
                     if isinstance(said, str) and not said.startswith("error"):
                         self._read(said)
                     return said
                 if op in PLUGIN_TOOLS:
-                    refused = self.lane("plugins") if self.lane is not None and op != "plugin_answer" else None
-                    if refused:
-                        return refused
                     said = self.plugins.call(registry, op, args)
                     if op in ("call_plugin", "plugin_answer"):
                         self._read(said)
