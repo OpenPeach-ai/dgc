@@ -111,6 +111,33 @@ test('dismissing a proposed Pip checks its fresh digest, rejects it, then remove
  assert.equal(x.requests('accept_pip_setup').length,0);
 });
 
+// A new Pip waiting for you (asked 11 Nov): the Pips page showed it twice, in a section above the list ("1 new Pip waiting
+// for you") and as a row in Needs attention. It shows once now, as a card in Needs attention, and every way there
+// (the Sessions home's link, another surface's "a new Pip is waiting") lands on that card, the list opened to show it.
+test('a new Pip waiting shows once, as a card in Needs attention, and a link to it from elsewhere lands on that card',async()=>{
+ const proposal={id:SETUP,digest:'a'.repeat(64),workspace_id:PW,project_root:'/private/pips',pip_id:null,name:'Blog writer',goal:'Draft a post for review.',pip_type:'scout',work_kind:'personal_task',source_ref:'HEAD',schedule:null,run_now:false,next_run_at:null,status:'pending',created_at:'2099-10-02T04:00:00Z',expires_at:'2099-10-02T06:00:00Z',receipt:null,reason:'Draft posts.',expected_version:null,expected_lifecycle_revision:null,permissions:'read_only',source_policy:'personal',runner_notice:'Runs only while Pips are on.',scope_notice:'Reads only what you share.',run_now_policy:null};
+ const many=Array.from({length:7},(_,i)=>item('email','maildraft_'+String(i).repeat(32).slice(0,32).replace(/[^a-f0-9]/g,'0'),PIP,`Email ${i+1}`,{created_at:ago(i+1)}));
+ const found=page([...many,item('setup',SETUP,null,'Create the Pip “Blog writer”?',{created_at:ago(30),detail:'Draft a post for review.'})]);
+ const x=setup({found,proposal,embedded:true});await x.drain();
+ assert.equal(x.d.querySelector('.setup-inbox,.setup-card,.setup-inbox-toggle'),null,'no section above the list');
+ assert.doesNotMatch(x.d.querySelector('.pip-app-root').textContent,/new Pips? waiting for you/);
+ assert.equal(x.d.querySelector('.attention-count').textContent,'8','counted once, with what else waits');
+ assert.equal(x.d.querySelector('[data-setup-card]'),null,'the list is folded until you open it');
+ x.click(`[data-job="${PIP}"]`);await x.drain();
+ const navigating=x.app.navigate({setup:SETUP,workspace:PW});await x.drain();await navigating;
+ const card=x.d.querySelector(`.attention [data-setup-card="${SETUP}"]`);
+ assert.ok(card,'the list opened to its card, though it is the oldest of eight');
+ assert.equal(x.d.querySelectorAll('[data-setup-card]').length,1,'once');
+ assert.equal(card.querySelector('.dgc-card-title').textContent,'Create the Pip “Blog writer”?');
+ assert.equal(card.querySelector('.dgc-card-sub').textContent,'Draft a post for review.');
+ assert.deepEqual([...card.querySelectorAll('.dgc-chip:not(.dgc-chip-more)')].map(c=>c.textContent),['Scout','Personal','Only when you ask']);
+ assert.deepEqual([...card.querySelectorAll('.dgc-card-actions > button')].map(b=>b.textContent),['Review','Reject']);
+ assert.equal(x.d.activeElement,card.querySelector('[data-setup]'),'the keyboard is on Review');
+ assert.equal(x.d.querySelector(`.attention-row[data-attention="setup:${SETUP}"]`),null,'not a second row beside its card');
+ x.click(`[data-setup="${SETUP}"]`);await x.drain();
+ assert.match(x.d.querySelector('[role=dialog]').textContent,/Create Blog writer\?/,'Review opens its full details, as before');
+});
+
 test('a row opens its Pip at the card: the chat scrolls to the Connect card; a held submit opens its computer',async()=>{
  const found=page([item('app_link',LINK,PIP,'Connect Gmail?'),item('computer_action',HELD,PIP,'Send this on shop.example?')]);
  const x=setup({found});await x.drain();

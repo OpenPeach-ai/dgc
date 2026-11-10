@@ -105,7 +105,7 @@ test('a routine the Pip suggests is a card under its message: Add routine or Not
  const x=setup({list:[routine({id:R2,status:'suggested',created_by:'pip',run_id:RUN,next_due_at:null,title:'Bank alerts',prompt:'Tell me what the bank email says.',trigger:{kind:'email',query:'from:alerts@bank.example',every_minutes:10}})]});
  await x.drain();x.click(`[data-job="${PIP}"]`);await x.drain();
  const card=x.d.querySelector(`[data-routine-card="${R2}"]`);assert.ok(card,'the card is in the chat');
- assert.match(card.textContent,/Add this routine\? Bank alerts.*When an email matching “from:alerts@bank.example” arrives.*Tell me what the bank email says\./);
+ assert.match(card.textContent,/Add the routine “Bank alerts”\?.*When an email matching “from:alerts@bank.example” arrives.*Tell me what the bank email says\./);
  x.click(`[data-routine-add="${R2}"]`);await flush();
  assert.deepEqual(JSON.parse(JSON.stringify(x.requests('decide_pip_routine')[0].request)),{type:'decide_pip_routine',pip_id:PIP,routine_id:R2,add:true});
  const accepted=routine({id:R2,status:'on',created_by:'pip',run_id:RUN,updated_at:new Date().toISOString(),title:'Bank alerts',prompt:'Tell me what the bank email says.',trigger:{kind:'email',query:'from:alerts@bank.example',every_minutes:10}});

@@ -202,7 +202,8 @@ test("at 360px nothing runs off the edge: the Library's rows and the chat's Outp
   } finally { await s.page.close(); }
 });
 
-// ui-04: the same card in ChatDGC: a coloured square tile, its name, a quiet line, and the whole card opens it.
+// ui-04: the same card in ChatDGC: its mark, its name, a quiet line, and the whole card opens it. Its mark (approved
+// 11 Nov) is a small sheet of its kind with the kind's name on a coloured tab; the Library's rows carry the same sheet.
 test("ChatDGC's artifact and file cards are the shared card, and a click anywhere on one opens it", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openChat(browser, { width: 760 });
@@ -213,14 +214,30 @@ test("ChatDGC's artifact and file cards are the shared card, and a click anywher
       reply({ artifacts: [DECK] })] });
     const card = s.page.locator(".cd-artifact").first();
     assert.ok(await card.evaluate((n) => n.classList.contains("dgc-doc-card")), "the shared card");
-    const tile = await card.locator(".dgc-doc-tile").evaluate((n) => { const r = n.getBoundingClientRect(), c = getComputedStyle(n);
-      return { w: Math.round(r.width), h: Math.round(r.height), bg: c.backgroundColor }; });
-    assert.ok(tile.w >= 40 && tile.w === tile.h, `a square tile: ${JSON.stringify(tile)}`);
-    assert.ok(!/rgba\(0, 0, 0, 0\)|transparent/.test(tile.bg), `coloured: ${tile.bg}`);
+    const f = await card.evaluate((n) => { const s = n.querySelector(".dgc-doc-tile .dgc-sheet"), tag = s?.querySelector(".dgc-sheet-tag"), r = s?.getBoundingClientRect(), pill = n.querySelector(".dgc-doc-open-pill"), dl = n.querySelector(".dgc-doc-dl");
+      const shown = (e) => !!e && e.getClientRects().length > 0, c = (e, p) => getComputedStyle(e)[p];
+      return { kind: s?.dataset.kind, tag: tag?.textContent, tab: tag ? c(tag, "backgroundColor") : "", w: Math.round(r?.width || 0), h: Math.round(r?.height || 0), page: !!s?.querySelector(".dgc-sheet-page > *"),
+        open: shown(pill) ? [pill.textContent, c(pill, "backgroundColor"), c(pill, "pointerEvents")] : null, dl: dl ? [shown(dl), dl.textContent.trim(), Math.round(dl.getBoundingClientRect().width), !!dl.querySelector("svg"), c(dl, "backgroundColor")] : null }; });
+    assert.deepEqual([f.kind, f.tag, f.tab, f.w, f.h, f.page], ["slides", "Slides", "rgb(217, 119, 6)", 44, 56, true], `a sheet of slides, its tab in the kind's colour: ${JSON.stringify(f)}`);
+    assert.equal(f.open[0], "Open", "Open, seen");
+    assert.deepEqual(f.dl.slice(0, 4), [true, "Download", 28, true], "Download is a round icon that keeps its word");
     const name = await card.locator(".cd-file-name").boundingBox();
     await s.page.mouse.click(name.x + name.width / 2, name.y + name.height / 2);
     assert.equal((await s.posted("artifactOpen")).length, 1, "a click on its name opens it");
     assert.equal(await card.locator(".dgc-doc-open").getAttribute("aria-label"), "Open Q3 plan");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
+  // The Library's rows: the same sheet, smaller, for what DGC made and for a file by its ending.
+  const lib = await openLibrary(browser, { width: 700 });
+  try {
+    const file = (n, name, type) => ({ source: "chat", chat_id: `chat_${"a".repeat(32)}`, id: `att_${String(n).repeat(32)}`, name, kind: "document", type, size: 5000, created_at: "2026-10-28T08:39:00Z", chat_title: "Q3" });
+    await lib.send({ type: "library", files: [file(1, "invoice.pdf", "pdf"), file(2, "review.docx", "document"), file(3, "auth/redirect.ts", "code")], total: 3, next: 3, counts: { pdf: 1, document: 1, code: 1 } });
+    const rows = () => lib.page.locator(".lib-row .lib-preview .dgc-sheet").evaluateAll((ns) => ns.map((n) => [n.dataset.kind, n.querySelector(".dgc-sheet-tag").textContent, Math.round(n.getBoundingClientRect().width)]));
+    assert.deepEqual(await rows(), [["pdf", "PDF", 33], ["doc", "DOCX", 33], ["code", "TS", 33]], "a file's row: its kind's sheet, its ending on the tab");
+    await lib.send({ type: "artifactsOffered", on: true });
+    await lib.page.click("#lib-views .lib-view:has-text('Artifacts')");
+    await lib.send({ type: "artifacts", items: ITEMS });
+    assert.deepEqual((await rows()).map((r) => r[0]), ["slides", "sheet", "dashboard", "page", "doc"], "what DGC made: a sheet for each kind");
+    assert.deepEqual(lib.errors, []);
+  } finally { await lib.page.close(); }
 });

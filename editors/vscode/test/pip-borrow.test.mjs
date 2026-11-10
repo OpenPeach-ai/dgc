@@ -1,5 +1,5 @@
 // Borrowing your own signed-in Chrome (Pips API 59), in a Personal Pip's chat: the card it asks with (the sites and why,
-// Allow once and Not now, never Always allow), "Using your Chrome · site" with Stop while lent, the line it leaves when
+// Allow once and Not now, never Always allow), "Using your Chrome" and the site as a chip, with Stop, while lent, the line it leaves when
 // it gives it back, and an older DGC asked for nothing. (Harness from pip-levels.)
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -86,6 +86,7 @@ test("the card says who wants your Chrome, where and why, once: Allow once and N
   assert.equal(el.querySelector("strong").textContent, "Let Ava use your Chrome?");
   assert.match(el.textContent, /Read your order history to find the mug order\./);
   assert.match(el.textContent, /Only on shop\.example, in a new tab of its own, for this one task \(10 minutes at most\)\. It never sees your other tabs, and you can stop it any time\. Chrome asks you too\./);
+  assert.deepEqual([...el.querySelectorAll(".dgc-chip:not(.dgc-chip-more)")].map((c) => c.textContent), ["shop.example", "10 minutes at most"], "where and for how long, as chips");
   assert.deepEqual([...el.querySelectorAll("button")].map((b) => b.textContent), ["Allow once", "Not now"]);
   assert.doesNotMatch(x.d.body.textContent, /Always allow/);
   assert.doesNotMatch(el.textContent, /\bAI\b/);
@@ -96,15 +97,17 @@ test("the card says who wants your Chrome, where and why, once: Allow once and N
   assert.match(x.d.body.textContent, /Ava can use your Chrome once now\. Chrome asks you too: choose Allow there\./);
   const lent = x.d.querySelector(`[data-borrow-card="${BORROW}"]`);
   assert.equal(lent.dataset.state, "allowed");
-  assert.match(lent.querySelector("strong").textContent, /^Using your Chrome · shop\.example$/);
+  assert.equal(lent.querySelector("strong").textContent, "Using your Chrome");
+  assert.deepEqual([...lent.querySelectorAll(".dgc-chip:not(.dgc-chip-more)")].map((c) => c.textContent), ["shop.example"], "the site is a chip, not a run-on in the title");
   assert.equal(lent.querySelector(`[data-borrow-stop="${BORROW}"]`).textContent, "Stop");
 });
 
-test("while lent: Using your Chrome · site, with Stop, and the line it leaves when you stop it", async () => {
+test("while lent: Using your Chrome and its site, with Stop, and the line it leaves when you stop it", async () => {
   const x = pipsPage({ borrows: [card({ status: "in_use", allowed_at: ago(4), started_at: ago(3), chrome: "Google Chrome" })] }); await openChat(x);
   const el = x.d.querySelector(`[data-borrow-card="${BORROW}"]`);
   assert.equal(el.dataset.state, "in_use");
-  assert.equal(el.querySelector("strong").textContent, "Using your Chrome · shop.example");
+  assert.equal(el.querySelector("strong").textContent, "Using your Chrome");
+  assert.deepEqual([...el.querySelectorAll(".dgc-chip:not(.dgc-chip-more)")].map((c) => c.textContent), ["shop.example"]);
   assert.match(el.textContent, /In a tab of its own\. It gives your Chrome back when it’s done, or after 10 minutes\./);
   const asking = borrow.borrowMarkup(card({ status: "in_use", allowed_at: ago(4) }), { esc: (s) => String(s), pipName: "Ava" });
   assert.match(asking, /Chrome asks you too: choose Allow there\./, "until Chrome lets it in, Chrome's own dialog is what waits");

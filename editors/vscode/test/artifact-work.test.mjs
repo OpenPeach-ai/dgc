@@ -130,7 +130,7 @@ test("a Work turn's artifact gets a card: Open, and Export over exactly its form
     assert.equal(await card.count(), 1);
     assert.equal(await card.locator(".anm").textContent(), "Q3 plan");
     assert.equal(await card.locator(".ameta").textContent(), "Slides · version 1 · made");
-    assert.equal(await card.locator(".aico svg").getAttribute("data-icon"), "presentation");
+    assert.equal(await card.locator(".aico .dgc-sheet").getAttribute("data-kind"), "slides", "its mark is a sheet of slides (it was the same tile and a glyph for every kind)");
     await card.locator("button:has-text('Open')").click();
     assert.deepEqual(await s.posted("artifactOpen"), [{ type: "artifactOpen", id: DECK.id, artifactType: "slides", title: "Q3 plan" }]);
     await card.locator(".amenu-button").click();
@@ -216,9 +216,11 @@ test("at 360px the chosen Output stays inside the composer with its choice acces
   } finally { await s.page.close(); }
 });
 
-// ui-04 (the user's note, 9 Nov, from Claude Code's chat): an artifact in a chat is one calm card on every surface: a
-// coloured square tile with its icon, its name and a quiet second line, and a click anywhere on it opens it.
-test("a Work artifact is the shared card: a coloured square tile, its name and a quiet line, and the whole card opens it", async (t) => {
+// ui-04 (the user's note, 9 Nov, from Claude Code's chat): an artifact in a chat is one calm card on every surface: its
+// mark, its name and a quiet second line, and a click anywhere on it opens it. Its mark (approved 11 Nov) is a small
+// sheet of its kind with the kind's name on a coloured tab, where every kind had the same blue tile; Open is a pill in
+// the text colour and Download a round icon with that kind's formats, both in the editor's greys.
+test("a Work artifact is the shared card: a sheet of its kind with its name on a coloured tab, Open, Download, and the whole card opens it", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openWork({ width: 640 });
   try {
@@ -226,15 +228,51 @@ test("a Work artifact is the shared card: a coloured square tile, its name and a
     await s.send({ type: "artifact_changed", artifact: DECK, op: "made", surface: "work" });
     const card = s.page.locator(".artifact-card");
     assert.ok(await card.evaluate((n) => n.classList.contains("dgc-doc-card")), "the shared card");
-    const tile = await card.locator(".dgc-doc-tile").evaluate((n) => { const r = n.getBoundingClientRect(), c = getComputedStyle(n);
-      return { w: Math.round(r.width), h: Math.round(r.height), bg: c.backgroundColor }; });
-    assert.ok(tile.w >= 40 && tile.w === tile.h, `a square tile: ${JSON.stringify(tile)}`);
-    assert.ok(!/rgba\(0, 0, 0, 0\)|transparent/.test(tile.bg), `coloured: ${tile.bg}`);
+    const f = await card.evaluate((n) => { const s = n.querySelector(".dgc-doc-tile .dgc-sheet"), tag = s?.querySelector(".dgc-sheet-tag"), r = s?.getBoundingClientRect(), pill = n.querySelector(".dgc-doc-open-pill"), dl = n.querySelector(".dgc-doc-dl");
+      const shown = (e) => !!e && e.getClientRects().length > 0, c = (e, p) => getComputedStyle(e)[p];
+      return { kind: s?.dataset.kind, tag: tag?.textContent, tab: tag ? c(tag, "backgroundColor") : "", w: Math.round(r?.width || 0), h: Math.round(r?.height || 0), page: !!s?.querySelector(".dgc-sheet-page > *"),
+        open: shown(pill) ? [pill.textContent, c(pill, "backgroundColor"), c(pill, "pointerEvents")] : null, dl: dl ? [shown(dl), dl.textContent.trim(), Math.round(dl.getBoundingClientRect().width), !!dl.querySelector("svg"), c(dl, "backgroundColor")] : null }; });
+    assert.deepEqual([f.kind, f.tag, f.tab, f.w, f.h, f.page], ["slides", "Slides", "rgb(217, 119, 6)", 44, 56, true], `a sheet of slides, its tab in the kind's colour: ${JSON.stringify(f)}`);
+    assert.equal(f.open[0], "Open", "Open, seen");
+    assert.equal(f.open[2], "none", "the pill takes no clicks: the card's own Open lies over all of it");
+    const grey = (rgb) => { const v = (rgb.match(/[\d.]+/g) || []).slice(0, 3).map(Number); return Math.max(...v) - Math.min(...v) <= 12; };
+    assert.ok(grey(f.open[1]) && grey(f.dl[4]), `the buttons stay in the editor's greys: ${f.open[1]}, ${f.dl[4]}`);
+    assert.deepEqual(f.dl.slice(0, 4), [true, "Download", 28, true], "Download is a round icon that keeps its word");
+    await card.locator(".dgc-doc-dl").click();
+    assert.deepEqual(await card.locator(".amenu-item").allTextContents(), ["PowerPoint (.pptx)", "PDF", "Web page (.html)"], "its menu offers what slides can be saved as");
+    await s.page.keyboard.press("Escape");
     const name = await card.locator(".anm").boundingBox();
     await s.page.mouse.click(name.x + name.width / 2, name.y + name.height / 2);
     assert.deepEqual(await s.posted("artifactOpen"), [{ type: "artifactOpen", id: DECK.id, artifactType: "slides", title: "Q3 plan" }],
       "a click on its name opens it");
     assert.equal(await card.locator(".dgc-doc-open").getAttribute("aria-label"), "Open Q3 plan", "the keyboard and a reader get Open, by name");
+    // Every kind has its own sheet and tab: a page, a document, a sheet and a dashboard are told apart at a glance.
+    const made = [["page", "Page", "rgb(234, 88, 12)"], ["doc", "Doc", "rgb(37, 99, 235)"], ["sheet", "Sheet", "rgb(5, 150, 105)"], ["dashboard", "Board", "rgb(8, 145, 178)"]];
+    for (const [i, [type]] of made.entries()) await s.send({ type: "artifact_changed", artifact: { ...DECK, id: "ar_" + String(i + 5).repeat(16), type, title: `A ${type}` }, op: "made", surface: "work" });
+    const tabs = await s.page.locator(".artifact-card .dgc-sheet").evaluateAll((ns) => ns.slice(1).map((n) => [n.dataset.kind, n.querySelector(".dgc-sheet-tag").textContent, getComputedStyle(n.querySelector(".dgc-sheet-tag")).backgroundColor]));
+    assert.deepEqual(tabs, made);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("in a 300 px side bar the card is the sheet, the name, the line and the download icon, and a click elsewhere opens it", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openWork({ width: 300 });
+  try {
+    await s.send({ type: "turn_start", turn_id: "t1", prompt: "Make a deck", kind: "prompt" });
+    await s.send({ type: "artifact_changed", artifact: DECK, op: "made", surface: "work" });
+    const card = s.page.locator(".artifact-card");
+    const f = await card.evaluate((n) => { const s = n.querySelector(".dgc-doc-tile .dgc-sheet"), tag = s?.querySelector(".dgc-sheet-tag"), r = s?.getBoundingClientRect(), pill = n.querySelector(".dgc-doc-open-pill"), dl = n.querySelector(".dgc-doc-dl");
+      const shown = (e) => !!e && e.getClientRects().length > 0, c = (e, p) => getComputedStyle(e)[p];
+      return { kind: s?.dataset.kind, tag: tag?.textContent, tab: tag ? c(tag, "backgroundColor") : "", w: Math.round(r?.width || 0), h: Math.round(r?.height || 0), page: !!s?.querySelector(".dgc-sheet-page > *"),
+        open: shown(pill) ? [pill.textContent, c(pill, "backgroundColor"), c(pill, "pointerEvents")] : null, dl: dl ? [shown(dl), dl.textContent.trim(), Math.round(dl.getBoundingClientRect().width), !!dl.querySelector("svg"), c(dl, "backgroundColor")] : null }; });
+    assert.equal(f.open, null, "no Open pill when narrow");
+    assert.deepEqual([f.kind, f.w, f.dl[0], f.dl[2]], ["slides", 44, true, 28], "the sheet and the download icon stay");
+    const box = await card.boundingBox(), sheet = await card.locator(".dgc-sheet").boundingBox(), dl = await card.locator(".dgc-doc-dl").boundingBox();
+    assert.ok(dl.x + dl.width <= box.x + box.width && Math.abs(dl.y + dl.height / 2 - (sheet.y + sheet.height / 2)) < 8, "on one line, inside the card");
+    assert.equal(await s.page.evaluate(() => document.documentElement.scrollWidth), 300);
+    await s.page.mouse.click(sheet.x + sheet.width / 2, sheet.y + sheet.height / 2);
+    assert.equal((await s.posted("artifactOpen")).length, 1, "a click on its sheet opens it");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });

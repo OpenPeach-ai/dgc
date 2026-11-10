@@ -348,7 +348,8 @@ test("a card its level still asks for says why: a saved card's payment, at Do it
   const x = pipsPage({ state: level("full"), actions: [hold] }); await x.drain(); x.click(`[data-job="${PIP}"]`); await x.drain();
   const card = x.d.querySelector(`[data-computer-card="${hold.id}"]`);
   assert.match(card.querySelector("strong").textContent, /^Pay on pay\.metropower\.pip-test\.example\?$/);
-  assert.match(card.textContent, /consumer 1100223344.*It looks like a payment, so it asks at every level\. Nothing has been sent\./);
+  assert.match(card.textContent, /It looks like a payment, so it asks at every level\. Nothing has been sent\..*consumer: 1100223344/);
+  assert.deepEqual([...card.querySelectorAll(".dgc-chip:not(.dgc-chip-more)")].map((c) => c.textContent), ["consumer: 1100223344", "saved_card: tok_saved_visa_4242"], "what it pays, a chip for each field");
   assert.match(card.querySelector(".primary").textContent, /Review…/, "reviewed as any payment");
 });
 

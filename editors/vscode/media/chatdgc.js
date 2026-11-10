@@ -1926,7 +1926,10 @@
     if (file.removed) box.dataset.removed = "true";
     box.setAttribute("role", "group");
     box.setAttribute("aria-label", `${file.name || "file"}, ${label}`);
-    box.append(el("span", "cd-file-badge dgc-doc-tile", badge));
+    // Its mark is a small sheet of its kind, its name on a coloured tab (media/shared/filesheet.js).
+    const sheets = window.DgcFileSheet, tile = el("span", "cd-file-badge dgc-doc-tile", sheets ? "" : badge);
+    if (sheets) { tile.classList.add("has-sheet"); tile.setAttribute("aria-hidden", "true"); tile.innerHTML = sheets.forFile(file.format || file.kind, file.name); }
+    box.append(tile);
     const words = el("div", "cd-file-words dgc-doc-words");
     words.append(el("strong", "cd-file-name dgc-doc-name", file.name || "file"));
     const pages = Number(file.pages) || 0;
@@ -1944,7 +1947,11 @@
       const save = el("button", "cd-edit-cancel cd-file-save", "Save a copy…");
       save.type = "button";
       save.addEventListener("click", () => vscode.postMessage({ type: "fileSave", messageId: message.id, fileId: file.id, name: file.name }));
-      buttons.append(open, save);
+      // Save a copy is the round download icon; its words stay for a tip and a screen reader.
+      if (sheets) { save.className = "cd-file-save dgc-doc-dl"; save.title = "Save a copy…"; save.innerHTML = `<span class="dgc-doc-dl-word">Save a copy…</span>${sheets.DOWNLOAD}`; }
+      buttons.append(open);
+      if (sheets) buttons.insertAdjacentHTML("beforeend", sheets.openPill());
+      buttons.append(save);
       if (file.kind === "image") {
         // A picture the chat made is in DGC's own folder: this puts a copy in the project (assets/, or where you pick).
         const project = el("button", "cd-edit-cancel cd-file-project", "Save to project…");
@@ -1998,8 +2005,9 @@
     const kind = ARTIFACT_KIND[card.type];
     if (removed) box.dataset.removed = "true"; else delete box.dataset.removed;     // .cd-file[data-removed] dims it
     box.setAttribute("aria-label", `${kind}: ${shown.title || kind}`);
-    const mark = el("span", "cd-file-badge cd-artifact-badge dgc-doc-tile");
-    mark.append(icon(ARTIFACT_ICON[card.type]));
+    const sheets = window.DgcFileSheet, mark = el("span", "cd-file-badge cd-artifact-badge dgc-doc-tile");
+    if (sheets) { mark.classList.add("has-sheet"); mark.setAttribute("aria-hidden", "true"); mark.innerHTML = sheets.html(card.type); }
+    else mark.append(icon(ARTIFACT_ICON[card.type]));
     const words = el("div", "cd-file-words dgc-doc-words");
     words.append(el("strong", "cd-file-name dgc-doc-name", shown.title || kind));
     const did = card.op === "made" ? "made" : card.op === "restored" ? "restored" : "changed";
@@ -2014,13 +2022,15 @@
       open.setAttribute("aria-label", `Open ${shown.title || kind}`);
       open.addEventListener("click", () => vscode.postMessage({ type: "artifactOpen", id: card.id, artifactType: card.type, title: shown.title || "" }));
       buttons.append(open);
+      if (sheets) buttons.insertAdjacentHTML("beforeend", sheets.openPill());
       const formats = artifactFormats(card);
       if (formats.length) {
         const wrap = el("span", "cd-artifact-export");
         const button = el("button", "cd-edit-cancel cd-artifact-export-button");
         button.type = "button";
         button.setAttribute("aria-haspopup", "menu"); button.setAttribute("aria-expanded", "false");
-        button.append(el("span", "", "Download"), icon("chevron-down"));
+        if (sheets) { button.className = "cd-artifact-export-button dgc-doc-dl"; button.title = "Download"; button.innerHTML = `<span class="dgc-doc-dl-word">Download</span>${sheets.DOWNLOAD}`; }
+        else button.append(el("span", "", "Download"), icon("chevron-down"));
         const menu = el("span", "cd-artifact-menu");
         menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", "Download as"); menu.hidden = true;
         for (const format of formats) {
@@ -2253,8 +2263,9 @@
     box.dataset.tone = canvas.kind === "code" ? "code" : "document";
     box.setAttribute("role", "group");
     box.setAttribute("aria-label", `Canvas: ${canvas.title || "Canvas"}`);
-    const mark = el("span", "cd-file-badge cd-canvas-badge dgc-doc-tile");
-    mark.append(icon(canvas.kind === "code" ? "code" : "file-text"));
+    const sheets = window.DgcFileSheet, mark = el("span", "cd-file-badge cd-canvas-badge dgc-doc-tile");
+    if (sheets) { mark.classList.add("has-sheet"); mark.setAttribute("aria-hidden", "true"); mark.innerHTML = sheets.html(canvas.kind === "code" ? "code" : "doc"); }
+    else mark.append(icon(canvas.kind === "code" ? "code" : "file-text"));
     box.append(mark);
     const words = el("div", "cd-file-words dgc-doc-words");
     words.append(el("strong", "cd-file-name dgc-doc-name", canvas.title || "Canvas"));
@@ -2267,6 +2278,7 @@
     open.setAttribute("aria-label", `Open ${canvas.title || "the canvas"}`);
     open.addEventListener("click", () => vscode.postMessage({ type: "canvasOpen", canvasId: canvas.id }));
     buttons.append(open);
+    if (sheets) buttons.insertAdjacentHTML("beforeend", sheets.openPill());
     box.append(buttons);
     return box;
   }

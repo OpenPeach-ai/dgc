@@ -1,7 +1,9 @@
 @import url("./shared/tokens.css");
 @import url("./shared/menu.css");
 @import url("./shared/composer.css");
+@import url("./shared/card.css");
 @import url("./shared/doccard.css");
+@import url("./shared/filesheet.css");
 @import url("./pips/wordmark.css");
 /* DGC panel — Codex's quiet editor hierarchy with a restrained DGC accent. */
 * { box-sizing: border-box; }
@@ -1209,6 +1211,14 @@ body.vscode-light .approval-dock > .card { box-shadow: 0 -8px 20px -14px rgba(0,
 .card.perm-card pre { margin: 6px 0 0; padding: 3px 8px; border: 0; border-radius: var(--r-chip, 6px); font-size: 12px;
   background: color-mix(in srgb, var(--text) 5%, transparent); }
 .card.perm-card .feedback { margin: var(--sp-2) 0 0; }
+/* The same look as every card that asks (media/shared/card.css): its corner and hairline, the mark in a small grey
+   tile, and its answers as pills: one filled, the others quiet. Its ground stays the editor's own (opaque: the dock
+   floats over the chat). What it asks, and when, is unchanged. */
+.card.perm-card { border-color: var(--hair); border-radius: var(--r-card); }
+.card.perm-card > .q { font-weight: var(--w-med); gap: 9px; }
+.card.perm-card > .q > svg, .card.perm-card > .q > .ic { flex: none; box-sizing: border-box; width: 22px; height: 22px; padding: 4px; border-radius: 7px; background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+.card.perm-card .btns button.act { border-radius: var(--r-full); padding: 0 12px; font-weight: var(--w-med); }
+.card.perm-card pre { border-radius: var(--r-sm); }
 .card.perm-card[data-deny="1"] > .btns { grid-column: 1 / -1; grid-row: auto; margin-top: var(--sp-2); }
 @media (max-width: 420px) {
   .card.perm-card > .btns { grid-column: 1 / -1; grid-row: auto; justify-content: flex-start; flex-wrap: wrap; margin-top: var(--sp-2); }

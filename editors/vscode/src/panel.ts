@@ -9746,6 +9746,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const menuJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "menu.js"));
     // The prompt box's shared pieces, the same in ChatDGC and a Pip's chat (media/shared/composer.js, window.DgcComposer).
     const composerJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "composer.js"));
+    // One card for everything that asks or reports, the same in ChatDGC and a Pip's chat (media/shared/card.js, window.DgcCard).
+    const cardJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "card.js"));
+    // The small sheet of its kind on an output card and a Library row (media/shared/filesheet.js, window.DgcFileSheet).
+    const sheetJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "filesheet.js"));
     const queueJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "messagequeue.js"));
     const genuiCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "genui.css"));
     const js = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.js"));
@@ -10063,6 +10067,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 </footer>
 <script nonce="${nonce}" src="${menuJs}"></script>
 <script nonce="${nonce}" src="${composerJs}"></script>
+<script nonce="${nonce}" src="${cardJs}"></script>
+<script nonce="${nonce}" src="${sheetJs}"></script>
 <script nonce="${nonce}" src="${mcpAppsJs}"></script>
 <script nonce="${nonce}" src="${markdown}"></script>
 <script nonce="${nonce}" src="${breakdownScript}"></script>

@@ -93,7 +93,7 @@ test('changing selected Pip while setup details load discards the obsolete respo
 });
 
 
-test('setup inbox and New stay visible at 300px without showing the duplicate detail pane',async(t)=>{
+test('a new Pip waiting (in Needs attention) and New stay visible at 300px without showing the duplicate detail pane',async(t)=>{
  const browser=await launchOrSkip(t);if(!browser)return;
  try{
   const page=await browser.newPage({viewport:{width:300,height:900}});
@@ -109,12 +109,13 @@ test('setup inbox and New stay visible at 300px without showing the duplicate de
    const respond=request=>({list_workspaces:{workspaces:[workspace],current_workspace_id:workspace.id},list_pip_types:{types},list_pip_setups:{setups:[proposal]},list_pips:{pips:[pip]},get_pip_runner:{runner:{runner_id:'r',status:'running',online:true,paused:false,counts:{queued:0,running:0,cancelling:0}}},get_workspace_context:{context:{workspace_id:workspace.id,revision:0,entries:[]}},list_pip_models:{default_model:'model',models:[],connection:'configured'}}[request.type]);
    window.DgcPips.mount({root,stylesheetText:css,onSetupPrompt:()=>true,onMessage:listener=>{receive=listener;},postMessage:message=>{queueMicrotask(()=>{if(message.type==='pipsReady')receive({type:'pipsConnection',apiVersion:23,generation:1,connected:true,supported:true,enabled:true});else if(message.type==='pipsRequest'){const result=respond(message.request);if(result!==undefined)receive({type:'pipsReply',id:message.id,ok:true,result});}});}});
   },{css,workspace,types,proposal:fixture(),pip:job()});
-  const review=page.getByRole('button',{name:'Review…',exact:true}),create=page.getByRole('button',{name:'New Pip',exact:true});
-  await page.locator('.setup-inbox-toggle').click();await review.waitFor({state:'visible'});assert.equal(await create.isVisible(),true);assert.equal(await page.locator('.layout.overview>.content').isVisible(),false);assert.equal(await page.locator('.setup-inbox').count(),1);
+  // The new Pip waiting is a card in Needs attention (open, on this older layout), and nowhere else.
+  const review=page.getByRole('button',{name:'Review',exact:true}),create=page.getByRole('button',{name:'New Pip',exact:true});
+  await review.waitFor({state:'visible'});assert.equal(await create.isVisible(),true);assert.equal(await page.locator('.layout.overview>.content').isVisible(),false);assert.equal(await page.locator('.attention [data-setup-card]').count(),1);assert.equal(await page.locator('.setup-inbox').count(),0);
   const bounds=await review.boundingBox();assert.ok(bounds.width>0&&bounds.x>=0&&bounds.x+bounds.width<=300);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
-  await page.setViewportSize({width:1000,height:900});assert.equal(await review.isVisible(),true);assert.equal(await page.locator('.setup-inbox').count(),1);assert.equal(await page.locator('.layout.overview>.content').isVisible(),false);
-  await page.setViewportSize({width:300,height:900});await create.click();await page.getByRole('heading',{name:'What should your Pip look after?'}).waitFor({state:'visible'});assert.equal(await page.locator('#setupTask').isVisible(),true);assert.equal(await page.getByRole('button',{name:'Describe to DGC',exact:true}).isVisible(),true);assert.equal(await page.locator('.setup-inbox').count(),1);
+  await page.setViewportSize({width:1000,height:900});assert.equal(await review.isVisible(),true);assert.equal(await page.locator('.attention [data-setup-card]').count(),1);assert.equal(await page.locator('.layout.overview>.content').isVisible(),false);
+  await page.setViewportSize({width:300,height:900});await create.click();await page.getByRole('heading',{name:'What should your Pip look after?'}).waitFor({state:'visible'});assert.equal(await page.locator('#setupTask').isVisible(),true);assert.equal(await page.getByRole('button',{name:'Describe to DGC',exact:true}).isVisible(),true);assert.equal(await page.locator('.attention [data-setup-card]').count(),1);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  }finally{await browser.close();}
 });

@@ -1155,11 +1155,11 @@ test('when rejecting a waiting change fails, nothing is archived and the dialog 
  x.answer(x.requests('reject_pip_update')[0],{message:'That change was already decided.'},false);await x.drain();
  assert.equal(x.requests('archive_pip').length,0);assert.match(x.d.querySelector('[role=dialog]').textContent,/already decided/);
 });
-test('a change waiting for the user shows above the other tabs with Review and Reject',async()=>{
+test('a change waiting for the user shows above the other tabs, as its card: Allow, Not now and the full review',async()=>{
  const x=setup({jobs:[job('a',{proposals:[proposal()]})],conversation:true});await x.drain();x.click('[data-tab=runs]');await x.drain();
- const card=x.d.querySelector('[aria-label="Changes waiting for you"]');assert.ok(card);assert.match(card.textContent,/A change is waiting for you/);assert.match(card.textContent,/When it runs: Every 60 minutes/);
- assert.ok(card.querySelector('[data-proposal="proposal-schedule"]'));assert.ok(card.querySelector('[data-reject="proposal-schedule"]'));
- x.click('[data-tab=chat]');await x.drain();assert.equal(x.d.querySelector('[aria-label="Changes waiting for you"]'),null,'the chat shows its own row instead');assert.match(x.d.querySelector('[aria-label="Change waiting for you"]').textContent,/Every 60 minutes/);
+ const card=x.d.querySelector('[aria-label="Changes waiting for you"]');assert.ok(card);assert.match(card.textContent,/A change is waiting for you/);assert.equal(card.querySelector('.dgc-card-title').textContent,'Auditor a wants to run every hour','what it wants, as a sentence');assert.doesNotMatch(card.querySelector('.dgc-card-title').textContent,/When it runs:| · /,'never the run-on of its data');
+ assert.ok(card.querySelector('[data-change-allow="proposal-schedule"]'),'Allow');assert.ok(card.querySelector('[data-reject="proposal-schedule"]'),'Not now');assert.ok(card.querySelector('.dgc-card-details [data-proposal="proposal-schedule"]'),'and the full review from Details');
+ x.click('[data-tab=chat]');await x.drain();assert.equal(x.d.querySelector('[aria-label="Changes waiting for you"]'),null,'the chat shows its own row instead');assert.match(x.d.querySelector('[aria-label="Change waiting for you"]').textContent,/wants to run every hour.*Every 60 minutes/);
 });
 test('archived Pips stay discoverable with readable history and no job/composer/handoff mutations',async()=>{
  const jobs=[lifecycleJob({status:'archived',lifecycle_revision:3})],x=lifecycleSetup({jobs,autoSelect:false,conversation:true});await x.drain();assert.equal(x.d.querySelector('[data-job]'),null);x.click('#show-archived');x.click('[data-job]');await x.drain();assert.match(x.d.body.textContent,/Archived\. Its chat and results are kept/);assert.equal(x.d.querySelector('#chatText').disabled,true);x.input('#chatText','Do something');x.submit('#chat-form');assert.equal(x.requests('send_pip_message').length,0);x.click('[data-tab=job]');assert.ok(x.d.querySelector('#restore-pip'));assert.equal(x.d.querySelector('#toggle-pip,#model-form,#source-form,#adaptation-form'),null);x.click('[data-tab=schedule]');assert.equal(x.d.querySelector('#schedule-form'),null);x.click('[data-tab=revisions]');assert.equal(x.d.querySelector('#revision-form'),null);assert.ok(x.d.querySelector('#load-history'));assert.ok(x.d.querySelector('#load-approvals'));assert.equal(model.exports.presentation(jobs[0],[],true,runner).label,'Archived');
@@ -1451,17 +1451,20 @@ test('Markdown opening rejects payload injection, wrong run, failed runs and ove
  }
 });
 
-test('own-chat setup uses a slim review row and opens the durable human review',async()=>{
+test('own-chat setup is a card with two answers, and its Details still opens the durable human review',async()=>{
  const proposed={...proposal(),actor:'pip_chat:run_chat',approval_status:'pending'};
  const x=setup({conversation:true,jobs:[job('a',{proposals:[proposed]})]});await x.drain();
- const row=x.d.querySelector('.chat-setup-review');assert.ok(row);assert.match(row.textContent,/Waiting for you/);
- assert.equal(row.querySelectorAll('button').length,2);assert.equal(x.requests('accept_pip_update').length,0);
- x.click('.chat-setup-review [data-proposal]');assert.ok(x.d.querySelector('[role=dialog]'));
- assert.equal(x.requests('accept_pip_update').length,0);
+ const row=x.d.querySelector('[data-change-card]');assert.ok(row);assert.equal(row.getAttribute('aria-label'),'Change waiting for you');
+ assert.deepEqual([...row.querySelectorAll('.dgc-card-actions > .dgc-card-btn')].map(b=>b.textContent),['Allow','Not now']);assert.equal(x.requests('accept_pip_update').length,0);
+ x.click('[data-change-card] .dgc-card-details [data-proposal]');assert.ok(x.d.querySelector('[role=dialog]'));
+ assert.equal(x.requests('accept_pip_update').length,0,'opening the review accepts nothing');
+ x.click('#review-cancel');x.click('[data-change-card] [data-change-allow]');await x.drain();
+ assert.deepEqual(JSON.parse(JSON.stringify(x.requests('accept_pip_update').map(r=>r.request))),[{type:'accept_pip_update',pip_id:'a',proposal_id:proposed.id,expected_version:proposed.expected_version}],'Allow on the card sends what the review page sends');
+ assert.equal(x.d.querySelector('[role=dialog]'),null,'with no page first');
 });
 test('resolved own-chat proposals never appear as another pending chat card',async()=>{
  const x=setup({conversation:true,jobs:[job('a',{proposals:[{...proposal(),actor:'pip_chat:run_chat',approval_status:'approved'}]})]});await x.drain();
- assert.equal(x.d.querySelector('.chat-setup-review'),null);
+ assert.equal(x.d.querySelector('[data-change-card]'),null);
 });
 
 test('account picker requires explicit identity and saves a proposal, never grants immediately',async()=>{

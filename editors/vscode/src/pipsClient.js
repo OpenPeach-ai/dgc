@@ -5,7 +5,14 @@ import '../media/shared/tokens.css';
 // One menu for every "+" and picker, as in Work and ChatDGC (window.DgcMenu).
 import '../media/shared/menu.css';
 import '../media/shared/menu.js';
-import '../media/shared/doccard.css';   // an artifact or a document in a chat: one card on every surface (ui-04)
+// One card for everything that asks or reports, as in Work and ChatDGC (window.DgcCard).
+import '../media/shared/card.css';
+import '../media/shared/card.js';
+import {changeCard,scheduleWords} from './pipChangeCard.js';
+import '../media/shared/doccard.css';
+// The small sheet of its kind on a document's card (window.DgcFileSheet).
+import '../media/shared/filesheet.css';
+import '../media/shared/filesheet.js';   // an artifact or a document in a chat: one card on every surface (ui-04)
 // The prompt box's shared pieces (pills, the picture island, the drop overlay, Stop), as in Work and ChatDGC.
 import '../media/shared/composer.css';
 import '../media/shared/composer.js';
@@ -39,10 +46,10 @@ import {mountHomePips} from './pipHomeStrip.js';
 import {healthMarkup,failedRoutine,foldRoutineLines,failedRoutineMarkup,quietLineMarkup,noteMarkup,routineNotes,withNotes} from './pipRoutineHealth.js';
 import {appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup,appLinkSettledMarkup,allowCardMarkup,calendarCardMarkup} from './pipAppLinks.js';
 import {pluginsPage,pluginResult,shownPluginCards,pluginForServer,installedForServer,pluginCardMarkup,pluginActionMarkup,pluginsPageMarkup,pluginUsesPage,pluginUsesMarkup,argumentValues,editedArguments,PLUGIN_LEVELS} from './pipPlugins.js';
-import {attentionPage,waitingOn,needWords,attentionMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
+import {attentionPage,waitingOn,needWords,attentionMarkup,setupCardMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
 import {notesPage,notesMarkup,keptMarkup} from './pipNotes.js';
 import {workingNotesPage,dailyLogPage,workingNotesMarkup,dailyLogMarkup,learnCardMarkup,learnRequest} from './pipWorkingNotes.js';
-import {carefulPage,carefulMarkup,carefulWords,settledWords,sendsWords,isPayment,asksWords,coversWords,coversDetail} from './pipCareful.js';
+import {carefulPage,carefulMarkup,carefulWords,settledWords,isPayment,asksWords,coversWords,coversDetail} from './pipCareful.js';
 import {loginsMarkup,loginFormMarkup,readLoginForm,loginFormProblem,clearLoginForm} from './pipLogins.js';
 import {pipLogins,pipLogin} from './pipsModel.js';
 import {mergeChatPage} from './pipsModel.js';
@@ -71,6 +78,7 @@ export const PIPS_API_VERSION=9;
 export function mountPips(options) {
   const nativeDocument=window.document,root=options.root||nativeDocument;
   const embedded=root!==nativeDocument,owner=root.ownerDocument||nativeDocument,disposers=[];
+  if(typeof DgcCard!=='undefined')disposers.push(DgcCard.watch(embedded?root.host:nativeDocument.body,root));   // a card's chips stay on one line ("+N")
   if(typeof DgcMenu!=='undefined'&&DgcMenu.slide)DgcMenu.slide(root);   // a long model name slides while its row is pointed at (9 Nov)
   const remoteHost=options.host==='remote';
   let disposed=false,motionPaused=false;
@@ -715,14 +723,30 @@ function chatResultCards(){
     return executionCardMarkup(run,{changedFiles,tests,error,formatDate:date});
   }).join('');
 }
+// A change waiting for you, as a card: what it wants in a sentence, what exactly as chips, Allow and Not now, and every
+// value one click away (media/shared/card.js; the words are pipChangeCard.js). Allow accepts it right here, with the
+// request and the checks the review page makes; the page itself is one more click, from Details.
+const changeErrors=new Map();
+function changeCardMarkup(p,where='chat'){
+ const c=changeCard(p,S.pip),off=S.busy||!usable(),id=esc(p.id),stale=p.expected_version!==S.pip.current_version;
+ const others=waitingProposals().filter(v=>v.id!==p.id&&v.expected_version===p.expected_version).length;
+ return DgcCard.html({id:`${where}-${p.id}`,label:'Change waiting for you',attrs:{'data-change-card':p.id,'data-kinds':c.kinds.join(' ')},icon:c.icon,title:c.title,sub:c.sub,chips:c.chips,
+  note:stale?'':others===1?'Allowing this sets the other waiting change aside. It is not approved.':others>1?`Allowing this sets the ${others} other waiting changes aside. They are not approved.`:'',
+  // A change written for an older version of this Pip can't be accepted: the review page says so too, in these words.
+  error:changeErrors.get(p.id)||(stale?STALE_CHANGE:''),
+  actions:[{label:S.busy&&S.changeAllowing===p.id?'Allowing…':'Allow',primary:true,attrs:{'data-change-allow':p.id,id:`change-allow-${where}-${p.id}`},disabled:off||stale},
+   {label:'Not now',attrs:{'data-reject':p.id,id:`change-reject-${where}-${p.id}`},disabled:off}],
+  details:{rows:c.rows,link:{label:'Open the full review',attrs:{'data-proposal':p.id,id:`change-review-${where}-${p.id}`,...(off?{disabled:true}:{})}}}});
+}
+const STALE_CHANGE='This was written for an older version of this Pip. Turn it down and ask again.';
 function chatSetupCards(){
  // Every change waiting for the user shows here, whoever saved it: the Pip, the main chat or an older build.
- return waitingProposals().map(p=>`<div class="chat-setup-review" aria-label="Change waiting for you"><span class="chat-setup-label">${esc(changeSummary(p))} <small>Waiting for you</small></span><button type="button" class="primary" data-proposal="${esc(p.id)}"${S.busy||!usable()?' disabled':''}>Review</button><button type="button" data-reject="${esc(p.id)}"${S.busy||!usable()?' disabled':''}>Reject</button></div>`).join('');
+ return waitingProposals().map(p=>changeCardMarkup(p)).join('');
 }
-// Above every other tab: what is waiting, in words, with the two choices.
+// Above every other tab: what is waiting, as the same cards.
 function waitingMarkup(){
  const waiting=waitingProposals();if(!waiting.length||archived())return '';
- return `<section class="waiting" aria-label="Changes waiting for you"><h3>${waiting.length===1?'A change is waiting for you':`${waiting.length} changes are waiting for you`}</h3>${waiting.map(p=>`<div class="waiting-row"><p>${esc(changeSummary(p))}</p><div class="actions"><button type="button" class="primary" data-proposal="${esc(p.id)}"${S.busy||!usable()?' disabled':''}>Review</button><button type="button" data-reject="${esc(p.id)}"${S.busy||!usable()?' disabled':''}>Reject</button></div></div>`).join('')}</section>`;
+ return `<section class="waiting" aria-label="Changes waiting for you"><h3>${waiting.length===1?'A change is waiting for you':`${waiting.length} changes are waiting for you`}</h3>${waiting.map(p=>changeCardMarkup(p,'tab')).join('')}</section>`;
 }
 // Sending with no provider, or its model's name missing: the same words and link as Work's.
 // A turn DGC sent itself (a new Pip's hello, a follow-up) has no bubble, so when it fails nothing was said at all: a new Pip
@@ -1721,14 +1745,16 @@ function waitingCard(a,count){
  if(!words)return computerSubmitCard(a,name,off,count);
  const yes=s.kind==='login'?`<button type="button" class="primary" data-login-card="${esc(a.id)}"${off}>${esc(words[2])}</button>`
   :`<button type="button" class="primary" data-computer-decide="${esc(a.id)}" data-approve="1"${off}>${esc(words[2])}</button>`;
- return `<div class="app-link" data-state="waiting" data-computer-card="${esc(a.id)}" role="group" aria-label="${esc(words[0])}"><div class="app-link-head"><span class="app-link-mark" aria-hidden="true">!</span><div class="app-link-words"><strong>${esc(words[0])}</strong><small>${esc(words[1])}</small></div>${count}</div><div class="app-link-actions">${yes}<button type="button" class="quiet" data-computer-decide="${esc(a.id)}" data-approve="0"${off}>Not now</button></div></div>`;
+ return `<div class="dgc-card app-link" data-state="waiting" data-computer-card="${esc(a.id)}" role="group" aria-label="${esc(words[0])}"><div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">!</span><div class="dgc-card-words app-link-words"><strong>${esc(words[0])}</strong><small>${esc(words[1])}</small></div>${count}</div><div class="dgc-card-actions app-link-actions">${yes}<button type="button" class="quiet" data-computer-decide="${esc(a.id)}" data-approve="0"${off}>Not now</button></div></div>`;
 }
 // A submit its computer holds, as the Soft card (approved 2026-11-05): what it is, what Always allow would cover, Send once /
 // Always allow / Reject, and the rest under Details. A payment is never sent in one tap and never always allowed: Review…
 // shows it first.
 function computerSubmitCard(a,name,off,count=''){
  const s=a.summary,id=esc(a.id),pay=isPayment(s),title=pay?`Pay on ${s.host}?`:`Send a form to ${s.host}?`;
- const line=[pay?sendsWords(s):'',s.payment===true?'It sends payment card details.':'',asksWords(s),'Nothing has been sent.'].filter(Boolean).join(' ');
+ // What it sends is chips, one a field ("amount: 5350.00"), hidden ones (a card number) left out; the line under the title says why DGC asks.
+ const line=[s.payment===true?'It sends payment card details.':'',asksWords(s),'Nothing has been sent.'].filter(Boolean).join(' ');
+ const sends=DgcCard.chips((Array.isArray(s.fields)?s.fields:[]).filter(f=>f&&typeof f.value==='string'&&f.value.trim()&&f.value!=='•••').map(f=>({label:`${f.name}: ${f.value.replace(/\s+/g,' ').trim()}`})),'What it sends');
  const rows=(Array.isArray(s.fields)?s.fields:[]).filter(f=>f.value!=='•••').map(f=>`<dt>${esc(f.name)}</dt><dd>${esc(f.value)}</dd>`).join('');
  const details=`<details class="allow-details"><summary><span class="allow-preview" title="${esc(pay?`${s.method} ${s.host}${s.path}`:coversWords(s))}">${esc(pay?`${s.method} ${s.host}${s.path}`:coversWords(s))}</span><span>Details</span></summary>`
   +`<dl class="allow-meta"><dt>Sends to</dt><dd>${esc(s.host)}${esc(s.path)}</dd>${s.page?`<dt>From page</dt><dd>${esc(s.page)}</dd>`:''}${rows}</dl>`
@@ -1737,7 +1763,7 @@ function computerSubmitCard(a,name,off,count=''){
   +'</details>';
  const actions=pay?`<button type="button" class="primary" data-computer-action="${id}"${off}>Review…</button>`
   :`<button type="button" class="primary" data-computer-decide="${id}" data-approve="1"${off}>Send once</button><button type="button" class="quiet" data-computer-always="${id}"${off} title="${esc(coversDetail(s,name))}">Always allow</button>`;
- return `<div class="allow-card" data-state="waiting" data-computer-card="${id}" role="group" aria-label="${esc(title)}"><div class="app-link-head"><span class="app-link-mark" aria-hidden="true">${pay?'!':'↗'}</span><div class="app-link-words"><strong>${esc(title)}</strong><small>${esc(line)}</small></div>${count}</div>${details}<div class="app-link-actions">${actions}<button type="button" class="quiet" data-computer-decide="${id}" data-approve="0"${off}>Reject</button></div></div>`;
+ return `<div class="dgc-card allow-card" data-state="waiting" data-computer-card="${id}" role="group" aria-label="${esc(title)}"><div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">${pay?'!':'↗'}</span><div class="dgc-card-words app-link-words"><strong>${esc(title)}</strong><small>${esc(line)}</small></div>${count}</div>${sends}${details}<div class="dgc-card-actions app-link-actions">${actions}<button type="button" class="quiet" data-computer-decide="${id}" data-approve="0"${off}>Reject</button></div></div>`;
 }
 async function decideInChat(id,approve){
  const pip=S.selected,a=computerState.pip===pip?computerState.value?.actions?.find(x=>x.id===id):null;if(!a||S.busy||!usable())return;
@@ -1775,13 +1801,13 @@ function refuseCard(pip){
 function cardRefusedCard(){
  if(!cardRefused||cardRefused!==S.selected)return '';
  const name=esc(S.pip?.name||'this Pip'),open=computerState.pip===S.selected&&computerState.value?.granted;
- return `<div class="app-link" data-state="needs" data-card-refused="1" role="group" aria-label="${CARD_REFUSED}"><div class="app-link-head"><span class="app-link-mark" aria-hidden="true">!</span><div class="app-link-words"><strong>${CARD_REFUSED}</strong><small>Type it on ${name}’s screen instead. Nothing you typed was sent or kept.</small></div></div><div class="app-link-actions">${open?`<button type="button" class="primary" data-card-open="1">Open its computer</button>`:''}<button type="button" class="quiet" data-card-dismiss="1">OK</button></div></div>`;
+ return `<div class="dgc-card app-link" data-state="needs" data-card-refused="1" role="group" aria-label="${CARD_REFUSED}"><div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">!</span><div class="dgc-card-words app-link-words"><strong>${CARD_REFUSED}</strong><small>Type it on ${name}’s screen instead. Nothing you typed was sent or kept.</small></div></div><div class="dgc-card-actions app-link-actions">${open?`<button type="button" class="primary" data-card-open="1">Open its computer</button>`:''}<button type="button" class="quiet" data-card-dismiss="1">OK</button></div></div>`;
 }
 // A site asked a person to prove they are not a robot: the Pip stopped; the user finishes it on its screen.
 function needsYouCard(){
  const n=computerState.pip===S.selected?computerState.value?.needs_you:null;if(!n||S.apiVersion<43)return '';
  const name=esc(S.pip?.name||'This Pip');
- return `<div class="app-link" data-state="needs" role="group" aria-label="${name} needs you"><div class="app-link-head"><span class="app-link-mark" aria-hidden="true">!</span><div class="app-link-words"><strong>${name} needs you</strong><small>${esc(n.host)} wants to check you’re not a robot. Finish it on ${name}’s computer; ${name} carries on after.</small></div></div><div class="app-link-actions"><button type="button" class="primary" data-needs-open="1"${archived()?' disabled':''}>Open its computer</button><button type="button" class="quiet" data-needs-done="1"${S.busy?' disabled':''}>I’ve done it</button></div></div>`;
+ return `<div class="dgc-card app-link" data-state="needs" role="group" aria-label="${name} needs you"><div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">!</span><div class="dgc-card-words app-link-words"><strong>${name} needs you</strong><small>${esc(n.host)} wants to check you’re not a robot. Finish it on ${name}’s computer; ${name} carries on after.</small></div></div><div class="dgc-card-actions app-link-actions"><button type="button" class="primary" data-needs-open="1"${archived()?' disabled':''}>Open its computer</button><button type="button" class="quiet" data-needs-done="1"${S.busy?' disabled':''}>I’ve done it</button></div></div>`;
 }
 async function finishedCheck(){
  const pip=S.selected;if(!usable()||!pip||S.busy)return;
@@ -2544,11 +2570,23 @@ function prepareStarter(review){
   if(card&&token===scope())await openSetup(card.id);   // the card opens straight into its review
  })();
 }
+// A new Pip waiting for you is a card in Needs attention, and only there (the home had a second section above it,
+// "1 new Pip waiting for you", showing the same request twice). What it would look after is its sentence; where and
+// when are its chips.
+function setupCardFor({setup,item}){
+ const s=setup,type=s?S.types.find(t=>t.id===s.pip_type):characterType(item?.pip_type);
+ const folder=s&&s.source_policy!=='personal'?String(s.project_root||'').replace(/[\\/]+$/,'').split(/[\\/]/).pop():'';
+ const chips=s?[{label:type?.name||s.pip_type,icon:'pip'},s.source_policy==='personal'?{label:'Personal',icon:'name',title:'Personal · across your projects'}:{label:folder||'This project',icon:'doc',title:s.project_root},
+  s.event_trigger?{label:`After each new commit to ${s.source_ref}`,icon:'code'}:{label:(w=>w.slice(0,1).toUpperCase()+w.slice(1))(scheduleWords(s.schedule).words),icon:'clock',title:scheduleLabel(s.schedule)},
+  ...(s.run_now?[{label:'Also runs once now',icon:'repeat'}]:[])]:[];
+ return setupCardMarkup({setup:s,item,chips,busy:S.busy||!usable(),face:s?avatar('waiting_approval',type,`setup-${s.id}`):''});
+}
+// The older layout (a remote host, or a DGC from before simple Pips) has no Needs attention of DGC's own: the same
+// section, open, with only the new Pips waiting here. A list that did not load says so, with Check again.
 function setupsMarkup(){
- // Setups for other Pips belong to the Pips overview, never another Pip's conversation.
- if(S.apiVersion>=23&&!S.overview&&!S.create&&S.tab==='chat')return '';
- if(S.apiVersion<23||!setupRows.length&&!setupError&&(S.create||S.selected&&!S.overview))return '';
- return `<section class="setup-inbox" aria-label="Pip setup reviews"><details data-details="setup-inbox"${setupError?' open':''}><summary class="setup-inbox-toggle">${setupRows.length?`${setupRows.length} new ${setupRows.length===1?'Pip':'Pips'} waiting for you`:'Set up a Pip with DGC'}<span>Review</span></summary><div class="section-head"><h2>New Pips${setupRows.length?' · '+setupRows.length:''}</h2>${button('refresh-setups',setupLoading?'Checking…':'Check again',setupLoading||S.busy||!usable())}</div>${errorMarkup(setupError)}${setupRows.map(s=>`<article class="setup-card">${avatar('waiting_approval',S.types.find(t=>t.id===s.pip_type),`setup-${s.id}`)}<div class="setup-card-copy"><span class="badge">Waiting for you</span><h3>${esc(s.name)}</h3><p class="goal">${esc(s.goal)}</p><p class="muted">${esc(s.source_policy==='personal'?'Personal · across your projects':s.project_root)} · ${esc((s.event_trigger?`After each new commit to ${s.source_ref}`:scheduleLabel(s.schedule)))}${s.run_now?' · also runs once now':''}</p></div><div class="actions"><button type="button" data-setup="${esc(s.id)}"${S.busy||!usable()?' disabled':''}>Review…</button><button type="button" data-reject-setup="${esc(s.id)}"${S.busy||!usable()?' disabled':''}>Reject</button></div></article>`).join('')}${setupRows.length>=5?'<p class="muted">Showing 5. Answer one to see more.</p>':''}${!setupRows.length&&!setupError?'<p class="muted">Ask the DGC chat for a new Pip. It appears above the chat box for you to create.</p>':''}</details></section>`;
+ if(S.apiVersion<23)return '';
+ if(!setupRows.length)return setupError?`<section class="attention" aria-label="Needs attention">${errorMarkup(setupError)}${button('refresh-setups',setupLoading?'Checking…':'Check again',setupLoading||S.busy||!usable())}</section>`:'';
+ return attentionMarkup(null,{esc,face:()=>'',expanded:2,busy:!usable(),setups:setupRows,setupCard:setupCardFor,error:setupError,more:setupRows.length>=5?'Showing 5 new Pips. Answer one to see more.':''});
 }
 async function loadSetups(){
 
@@ -2724,7 +2762,9 @@ function attentionHomeMarkup(){
  const face=i=>{if(!i.pip_id)return '<span class="attention-mark" aria-hidden="true">+</span>';
   const current=S.jobs.find(p=>p.id===i.pip_id),pip=current||{id:i.pip_id,name:i.pip_name,pip_type:i.pip_type,workspace_id:i.workspace_id};
   return pipAvatar(pip,'waiting_approval',`attn-${i.card}`,characterType(pip.pip_type));};
- return attentionMarkup(S.attention,{esc,face,expanded:attentionExpanded,busy:!usable()});
+ // A project's home shows none of the Personal Pips' rows: only the new Pips waiting in this project.
+ const more=setupRows.length>=5?'Showing 5 new Pips. Answer one to see more.':'';
+ return attentionMarkup(projectHome()?null:S.attention,{esc,face,expanded:attentionExpanded,busy:!usable(),setups:S.apiVersion>=23?setupRows:[],setupCard:setupCardFor,error:setupRows.length?setupError:'',more});
 }
 // What it remembers (#6): its notes about you, on its page and under the reply that kept them.
 S.notes=null;S.notesPip='';S.notesError='';let notesSeq=0,notesBusy=false,noteConfirmAll=false;
@@ -2982,8 +3022,14 @@ async function navigateAttention(value){
   (document.querySelector('.attention')||document.querySelector('.simple-home'))?.scrollIntoView?.({block:'start'});return;
  }
  if(typeof setup==='string'){
-  clearSelection();S.selected='';S.create=false;S.overview=true;rememberView();render();await loadSetups();render();
-  const box=document.querySelector('[data-details="setup-inbox"]');if(box){box.open=true;box.scrollIntoView?.({block:'start'});}return;
+  // A new Pip waiting: its card in Needs attention, opened if the list is folded (or cut short of it), and the keyboard on Review.
+  clearSelection();S.selected='';S.create=false;S.overview=true;rememberView();render();await loadSetups();await loadAttention();
+  const at=()=>[...document.querySelectorAll('[data-setup-card]')].find(e=>e.dataset.setupCard===setup);
+  attentionExpanded=attentionExpanded||1;render();
+  if(!at()){attentionExpanded=2;render();}
+  const el=at()||document.querySelector('.attention');el?.scrollIntoView?.({block:'start'});
+  if(el?.dataset.setupCard){cardFlash.selector=`[data-setup-card="${setup}"]`;cardFlash.until=Date.now()+2400;el.classList.add('attention-flash');el.querySelector('button:not([disabled])')?.focus?.({preventScroll:true});}
+  return;
  }
  await navigateFromHost({...rest,section:rest.section||'chat'});
  if(S.selected!==value.pip)return;
@@ -3072,9 +3118,9 @@ function reviewFlow(){
 }
 function simpleHomeMarkup(){
  const all=S.jobs.filter(p=>S.showArchived||p.status!=='archived'),live=S.jobs.filter(p=>p.status!=='archived');
- if(projectHome())return simpleHomeList(all,live)+(S.pipSearch?'':flowMarkup());
+ if(projectHome())return (S.pipSearch?'':attentionHomeMarkup())+simpleHomeList(all,live)+(S.pipSearch?'':flowMarkup());
  // Only once the list has come back empty: while it's being read a Pip's owner saw Meet Core's large face, and could press Create Core.
- if(!live.length&&!S.jobs.length&&!S.pipSearch)return S.jobsRead?meetCoreMarkup():loadingMark();   // a search that finds nothing is not an empty home
+ if(!live.length&&!S.jobs.length&&!S.pipSearch)return S.jobsRead?attentionHomeMarkup()+meetCoreMarkup():loadingMark();   // a search that finds nothing is not an empty home
  return (S.pipSearch?'':attentionHomeMarkup())+simpleHomeList(all,live)+(S.pipSearch?'':flowMarkup());
 }
 // A project's home: where the Personal home has Pips settings, a menu with the project's own pages (its context and its
@@ -3284,7 +3330,7 @@ function simpleMarkup(){
  if(project&&S.create)return `<header class="pip-topbar">${back('create-back',setupEditing&&S.pip?`Back to ${S.pip.name}`:'Your Pips')}<div class="pip-pill settings-pill"><span>${setupEditing&&S.pip?`Change ${esc(S.pip.name)}`:'New Pip'}</span></div><span></span></header>${notes}<div class="simple-content" data-view="create">${createMarkup()}</div>`;
  // The project's context and notifications, opened from its home's menu (the old side bar's two buttons).
  if(project&&!S.selected&&!S.overview&&['context','notifications'].includes(S.tab))return `<header class="pip-topbar">${back('workspace-back','Your Pips')}<div class="pip-pill settings-pill"><span>${S.tab==='context'?'Workspace context':'Notifications'}</span></div><span></span></header><div class="simple-content" data-view="${esc(S.tab)}">${notes}${S.tab==='context'?contextMarkup():notificationsMarkup()}</div>`;
- if(!S.selected||S.overview||S.create)return `${bar}${notes}${setupRows.length?setupsMarkup():''}<div class="simple-content"${scopePanelAttrs()}>${S.switching?'':simpleHomeMarkup()}</div>`;
+ if(!S.selected||S.overview||S.create)return `${bar}${notes}<div class="simple-content"${scopePanelAttrs()}>${S.switching?'':simpleHomeMarkup()}</div>`;
  if(!S.pip)return `${bar}${loadingMark()}`;
  return `${simplePipHeader()}${pipSetupNotes()}<div class="simple-content${S.tab==='chat'?' chat':''}" data-view="${esc(S.tab)}">${S.tab==='chat'?chatMarkup():`${notes}${waitingMarkup()}${simpleTabContent()}`}</div>`;
 }
@@ -4163,10 +4209,10 @@ async function navigateFromHost(value) {
     }
   }
 }
-async function mutate(request,after) {
+async function mutate(request,after,told) {
   if(S.busy||!usable())return;if(archived()&&['propose_pip_update','accept_pip_update','reject_pip_update','propose_pip_handoff','propose_pip_artifact_handoff','accept_pip_handoff','pause_pip','resume_pip','run_pip','send_pip_message','record_pip_statement'].includes(request.type)){setError(`${S.pip?.name||'This Pip'} is archived. Restore it in Settings first.`);return;}const token=scope();S.busy=true;S.error='';render();if(S.review)renderReview();
   try{const result=await broker.request(request);if(token!==scope()||!usable())return;closeReview();await after?.(result);if(token===scope())await refresh(true);}
-  catch(error){if(token===scope()){if(S.review){S.review.error=errorText(error);renderReview();}else S.error=errorText(error);}}
+  catch(error){if(token===scope()){if(told)told(errorText(error));else if(S.review){S.review.error=errorText(error);renderReview();}else S.error=errorText(error);}}
   finally{if(token===scope()){S.busy=false;render();if(S.review)renderReview();}}
 }
 async function history(more=false) {
@@ -4220,6 +4266,29 @@ function personalProposalBody(proposal){
 function readList(plan){const words=appReadWords(plan);return words.length?`<ul class="web-reads">${words.map(w=>`<li>${esc(w)}</li>`).join('')}</ul>`:'<p class="muted">None</p>';}
 function proposalReview(id,reject=false) {
   const proposal=S.pip?.proposals?.find(p=>p.id===id);if(!proposal)return;
+  openReview(proposalReviewSpec(proposal,reject));
+}
+// Allow on a change's card: the request the review page sends (the proposal's own expected version), refused when the
+// page would refuse it (written for an older version, expired, set aside, or not supported here), with what went
+// wrong said in the card. Nothing is opened first; the page is still there, from the card's Details.
+async function allowChange(id){
+  const proposal=S.pip?.proposals?.find(p=>p.id===id);if(!proposal||S.busy||!usable())return;
+  const review=proposalReviewSpec(proposal,false);
+  if(reviewBlocked(review)){changeErrors.set(id,proposal.expected_version!==S.pip.current_version?STALE_CHANGE:'This expired or was changed. Refresh and try again.');render();return;}
+  changeErrors.delete(id);S.changeAllowing=id;
+  try{await mutate(JSON.parse(JSON.stringify(review.request)),result=>updateDecided(review,result),error=>{changeErrors.set(id,error);});}
+  finally{S.changeAllowing='';}
+}
+/** After a change was accepted or turned down, from its review page or its card: the drafts it settles, and the notice. */
+function updateDecided(review,result){
+  const type=review.request.type;
+  if(type==='accept_pip_update'){S.adaptationDirty=false;draft.adaptationReason='';S.scheduleDirty=false;S.modelDirty=false;draft.modelReason='';draft.scheduleReason='';}
+  if(S.approvalsLoaded)void loadApprovals();
+  const named=S.pip?.name||'This Pip',aside=review.setsAside?` ${review.setsAside===1?'The other waiting change was':`The ${review.setsAside} other waiting changes were`} set aside, not approved.`:'';
+  S.notice=type==='accept_pip_update'?`${named} is updated.${aside}`+keepRunningTold(result):`Dismissed. ${named} stays as it was.`;
+}
+/** What the review page of a waiting change shows and sends: its words, its request, and whether it can be accepted. */
+function proposalReviewSpec(proposal,reject=false) {
   const stale=proposal.expected_version!==S.pip.current_version;
   // Two changes written for the same version: accepting one sets the other aside (the registry marks it
   // superseded). Say so before, so the other one does not seem to have been approved with it.
@@ -4231,12 +4300,13 @@ function proposalReview(id,reject=false) {
   const pulseChange=Object.hasOwn(proposal.definition||{},'verification_plan')||Object.hasOwn(proposal.definition||{},'live_plan')||pulsePip(S.pip)&&(S.pip.verification_plan!=null||S.pip.live_plan!=null||!!proposal.definition?.schedule);let pulseUnsupported=pulseChange&&S.apiVersion<21;try{pulsePlan(proposal.definition?.verification_plan);livePlan(proposal.definition?.live_plan);}catch{pulseUnsupported=true;}
   const unavailable=(!reject&&(sourceUnsupported||sessionUnsupported||pathUnsupported||quillUnsupported||pulseUnsupported))||proposal.approval_status&&proposal.approval_status!=='pending';
   const currentSchedule=S.pip.event_trigger?'No time schedule':scheduleLabel(S.pip.schedule),proposedSchedule=proposal.definition?.event_trigger?'No time schedule':scheduleLabel(proposal.definition?.schedule);
-  openReview({title:reject?'Turn this down?':`Change ${S.pip.name}?`,description:reject?`${S.pip.name} stays as it is.`:'Here’s what changes. Work already started isn’t affected.',body:personalPip()?personalProposalBody(proposal):pulseChange?pulseProposalBody(proposal,{stale,unavailable,pulseUnsupported,reject}):pathTrigger||S.pip.event_trigger?.commit_paths?pathProposalBody(proposal,{stale,unavailable,pathUnsupported,reject}):`<dl class="meta"><dt>Name</dt><dd>${esc(proposal.definition?.name)}</dd><dt>Branch or commit</dt><dd>${esc(proposal.definition?.source_ref)}</dd><dt>Model now</dt><dd>${esc(modelLabel(S.pip.model_choice))}</dd><dt>Model after</dt><dd>${esc(modelLabel(proposal.definition?.model_choice))}</dd><dt>Asked</dt><dd>${proposal.actor?esc(requester(proposal.actor)):'Not recorded'}</dd><dt>Expires</dt><dd>${proposal.expires_at?esc(date(proposal.expires_at)):'Not recorded'}</dd></dl><h3>What it would do</h3><p class="goal">${esc(proposal.definition?.goal)}</p><h3>Source</h3><dl class="meta"><dt>Now</dt><dd>${esc(sourcePolicyLabel(S.pip.source_policy))}</dd><dt>After</dt><dd>${esc(sourcePolicyLabel(proposal.definition?.source_policy))}</dd></dl><p class="muted">With your current files, it copies your saved files each time you ask (skipping files that may hold secrets); that isn’t a commit. It then runs only when you ask, with no handoffs. Changing this turns off its schedule and triggers, and switching back doesn’t bring them back.</p><h3>Changes it may make to itself</h3><dl class="meta"><dt>Now</dt><dd>${esc(adaptationLabel(S.pip.adaptation_policy))}</dd><dt>After</dt><dd>${esc(adaptationLabel(proposal.definition?.adaptation_policy))}</dd></dl><p class="muted">If it may move to a newer commit, later runs read that commit. It can never change its goal, model, schedule, triggers or permissions, or this setting. Accepting this alone runs nothing.</p>${pulseChange?`<h3>Commands now</h3>${pulsePlanReview(S.pip.verification_plan)}<h3>Commands after</h3>${pulsePlanReview(proposal.definition?.verification_plan)}`:''}<h3>Schedule</h3><dl class="meta"><dt>Now</dt><dd>${esc(currentSchedule)}</dd><dt>After</dt><dd>${esc(proposedSchedule)}</dd></dl><h3>Events</h3><dl class="meta"><dt>Now</dt><dd>${esc(eventTriggerLabel(S.pip.event_trigger))}</dd><dt>After</dt><dd>${esc(eventTriggerLabel(proposal.definition?.event_trigger))}</dd></dl>${commitRulesMarkup(S.pip.event_trigger?.commit_paths,'Paths it watches now')}${commitRulesMarkup(proposal.definition?.event_trigger?.commit_paths,'Paths it would watch')}${pathTrigger?`<p class="notice">Any other event you ticked can also start it, even without a path change. The minimum gap applies to all of them.</p><p class="muted">${esc(commitPathNotice)}</p>`:''}${quillAutomation?`<p class="notice">${esc(quillAutomationNotice)}</p>`:''}${sessionTrigger?`<p class="muted">${esc(sessionTurnNotice)}</p>`:''}<p class="muted">It runs on a schedule or on events, not both. Accepting doesn’t replay past events; if several happen while Pips are off, an active Pip runs once, and a paused or busy one skips them. ${documentationPip(S.pip)?'Events start private drafts.':'Events start read-only audits.'} They never start handoffs, fixes or tests.</p><p class="muted">A schedule runs while this Pip is active and Pips are running. If Pips were off, it runs once for the times it missed. A paused or busy Pip skips a scheduled time and picks up at the next one. When clocks change, a missing time is skipped and a repeated one runs once. What it may use doesn’t change.</p><p class="muted">${esc(proposal.reason)}</p><details><summary>Full setup (JSON)</summary><pre>${esc(JSON.stringify(proposal.definition,null,2))}</pre></details>${!reject&&stale?'<p class="notice error">This was written for an older version of this Pip. Turn it down and ask again.</p>':''}${pulseUnsupported?'<p class="notice error">This command plan can’t be accepted here. Update DGC, then refresh.</p>':''}${quillUnsupported?'<p class="notice error">Update DGC to accept a Quill schedule or events.</p>':''}${pathUnsupported?'<p class="notice error">These paths can’t be accepted here. Update DGC, then refresh.</p>':''}${sessionUnsupported?'<p class="notice error">Update DGC to accept a chat-turn trigger.</p>':''}${sourceUnsupported?'<p class="notice error">Update DGC to accept this source change.</p>':''}${unavailable?'<p class="notice error">This was already answered or is no longer available. Refresh to see it.</p>':''}${proposal.expires_at&&Date.parse(proposal.expires_at)<=Date.now()?'<p class="notice error">This expired. Ask again for a new one.</p>':''}`,confirm:reject?'Turn down':'Accept',requiresCommitPaths:!reject&&pathTrigger,requiresPulsePlan:!reject&&pulseChange,requiresQuillAutomation:!reject&&quillAutomation,requiresSessionTurn:!reject&&sessionTrigger,blocked:unavailable||(!reject&&stale),expiresAt:proposal.expires_at,request:{type:reject?'reject_pip_update':'accept_pip_update',pip_id:S.selected,proposal_id:proposal.id,expected_version:proposal.expected_version}});
+  const review={title:reject?'Turn this down?':`Change ${S.pip.name}?`,description:reject?`${S.pip.name} stays as it is.`:'Here’s what changes. Work already started isn’t affected.',body:personalPip()?personalProposalBody(proposal):pulseChange?pulseProposalBody(proposal,{stale,unavailable,pulseUnsupported,reject}):pathTrigger||S.pip.event_trigger?.commit_paths?pathProposalBody(proposal,{stale,unavailable,pathUnsupported,reject}):`<dl class="meta"><dt>Name</dt><dd>${esc(proposal.definition?.name)}</dd><dt>Branch or commit</dt><dd>${esc(proposal.definition?.source_ref)}</dd><dt>Model now</dt><dd>${esc(modelLabel(S.pip.model_choice))}</dd><dt>Model after</dt><dd>${esc(modelLabel(proposal.definition?.model_choice))}</dd><dt>Asked</dt><dd>${proposal.actor?esc(requester(proposal.actor)):'Not recorded'}</dd><dt>Expires</dt><dd>${proposal.expires_at?esc(date(proposal.expires_at)):'Not recorded'}</dd></dl><h3>What it would do</h3><p class="goal">${esc(proposal.definition?.goal)}</p><h3>Source</h3><dl class="meta"><dt>Now</dt><dd>${esc(sourcePolicyLabel(S.pip.source_policy))}</dd><dt>After</dt><dd>${esc(sourcePolicyLabel(proposal.definition?.source_policy))}</dd></dl><p class="muted">With your current files, it copies your saved files each time you ask (skipping files that may hold secrets); that isn’t a commit. It then runs only when you ask, with no handoffs. Changing this turns off its schedule and triggers, and switching back doesn’t bring them back.</p><h3>Changes it may make to itself</h3><dl class="meta"><dt>Now</dt><dd>${esc(adaptationLabel(S.pip.adaptation_policy))}</dd><dt>After</dt><dd>${esc(adaptationLabel(proposal.definition?.adaptation_policy))}</dd></dl><p class="muted">If it may move to a newer commit, later runs read that commit. It can never change its goal, model, schedule, triggers or permissions, or this setting. Accepting this alone runs nothing.</p>${pulseChange?`<h3>Commands now</h3>${pulsePlanReview(S.pip.verification_plan)}<h3>Commands after</h3>${pulsePlanReview(proposal.definition?.verification_plan)}`:''}<h3>Schedule</h3><dl class="meta"><dt>Now</dt><dd>${esc(currentSchedule)}</dd><dt>After</dt><dd>${esc(proposedSchedule)}</dd></dl><h3>Events</h3><dl class="meta"><dt>Now</dt><dd>${esc(eventTriggerLabel(S.pip.event_trigger))}</dd><dt>After</dt><dd>${esc(eventTriggerLabel(proposal.definition?.event_trigger))}</dd></dl>${commitRulesMarkup(S.pip.event_trigger?.commit_paths,'Paths it watches now')}${commitRulesMarkup(proposal.definition?.event_trigger?.commit_paths,'Paths it would watch')}${pathTrigger?`<p class="notice">Any other event you ticked can also start it, even without a path change. The minimum gap applies to all of them.</p><p class="muted">${esc(commitPathNotice)}</p>`:''}${quillAutomation?`<p class="notice">${esc(quillAutomationNotice)}</p>`:''}${sessionTrigger?`<p class="muted">${esc(sessionTurnNotice)}</p>`:''}<p class="muted">It runs on a schedule or on events, not both. Accepting doesn’t replay past events; if several happen while Pips are off, an active Pip runs once, and a paused or busy one skips them. ${documentationPip(S.pip)?'Events start private drafts.':'Events start read-only audits.'} They never start handoffs, fixes or tests.</p><p class="muted">A schedule runs while this Pip is active and Pips are running. If Pips were off, it runs once for the times it missed. A paused or busy Pip skips a scheduled time and picks up at the next one. When clocks change, a missing time is skipped and a repeated one runs once. What it may use doesn’t change.</p><p class="muted">${esc(proposal.reason)}</p><details><summary>Full setup (JSON)</summary><pre>${esc(JSON.stringify(proposal.definition,null,2))}</pre></details>${!reject&&stale?'<p class="notice error">This was written for an older version of this Pip. Turn it down and ask again.</p>':''}${pulseUnsupported?'<p class="notice error">This command plan can’t be accepted here. Update DGC, then refresh.</p>':''}${quillUnsupported?'<p class="notice error">Update DGC to accept a Quill schedule or events.</p>':''}${pathUnsupported?'<p class="notice error">These paths can’t be accepted here. Update DGC, then refresh.</p>':''}${sessionUnsupported?'<p class="notice error">Update DGC to accept a chat-turn trigger.</p>':''}${sourceUnsupported?'<p class="notice error">Update DGC to accept this source change.</p>':''}${unavailable?'<p class="notice error">This was already answered or is no longer available. Refresh to see it.</p>':''}${proposal.expires_at&&Date.parse(proposal.expires_at)<=Date.now()?'<p class="notice error">This expired. Ask again for a new one.</p>':''}`,confirm:reject?'Turn down':'Accept',requiresCommitPaths:!reject&&pathTrigger,requiresPulsePlan:!reject&&pulseChange,requiresQuillAutomation:!reject&&quillAutomation,requiresSessionTurn:!reject&&sessionTrigger,blocked:unavailable||(!reject&&stale),expiresAt:proposal.expires_at,request:{type:reject?'reject_pip_update':'accept_pip_update',pip_id:S.selected,proposal_id:proposal.id,expected_version:proposal.expected_version}};
   // GitHub reads are shown whichever body variant reviewed the rest; a plan this view cannot read blocks acceptance.
   // A Personal Pip's computer is shown whenever the proposal keeps, gives or removes one.
-  if(S.review&&personalPip()&&(S.pip?.computer_plan||proposal.definition?.computer_plan)){const label=v=>v?'Its own browser, Terminal and files. Anything it would submit waits for your OK.':'None';S.review.body+=`<dl class="meta"><dt>Computer now</dt><dd>${label(S.pip.computer_plan)}</dd><dt>Computer after</dt><dd>${label(proposal.definition?.computer_plan)}</dd></dl>`;renderReview();}
-  if(S.review&&others.length){S.review.setsAside=others.length;S.review.body+=`<p class="notice">${others.length===1?'Another change for this Pip is waiting too. It was written for the same version, so accepting this one sets that one aside. It is not approved. Ask the Pip again if you still want it.':`${others.length} other changes for this Pip are waiting too. They were written for the same version, so accepting this one sets them aside. They are not approved. Ask the Pip again if you still want them.`}</p>`;renderReview();}
-  if(S.review&&!personalPip()&&(S.pip?.github_plan||proposal.definition?.github_plan)){let section;try{if(proposal.definition?.github_plan)githubReadPlan(proposal.definition.github_plan);section=githubProposalMarkup(proposal);}catch{section='<p class="notice">These GitHub reads are not supported by this view. Update DGC before accepting.</p>';if(!reject)S.review.blocked=true;}S.review.body+=section;renderReview();}
+  if(personalPip()&&(S.pip?.computer_plan||proposal.definition?.computer_plan)){const label=v=>v?'Its own browser, Terminal and files. Anything it would submit waits for your OK.':'None';review.body+=`<dl class="meta"><dt>Computer now</dt><dd>${label(S.pip.computer_plan)}</dd><dt>Computer after</dt><dd>${label(proposal.definition?.computer_plan)}</dd></dl>`;}
+  if(others.length){review.setsAside=others.length;review.body+=`<p class="notice">${others.length===1?'Another change for this Pip is waiting too. It was written for the same version, so accepting this one sets that one aside. It is not approved. Ask the Pip again if you still want it.':`${others.length} other changes for this Pip are waiting too. They were written for the same version, so accepting this one sets them aside. They are not approved. Ask the Pip again if you still want them.`}</p>`;}
+  if(!personalPip()&&(S.pip?.github_plan||proposal.definition?.github_plan)){let section;try{if(proposal.definition?.github_plan)githubReadPlan(proposal.definition.github_plan);section=githubProposalMarkup(proposal);}catch{section='<p class="notice">These GitHub reads are not supported by this view. Update DGC before accepting.</p>';if(!reject)review.blocked=true;}review.body+=section;}
+  return review;
 }
 function updateDraft(event) {
   if(event.target.id==='pip-search'){draft.pipSearch=event.target.value;searchPips(event.target.value);return;}
@@ -4407,6 +4477,7 @@ document.addEventListener('pointerover',event=>{
 });
 document.addEventListener('click',event=>{
   if(picker.click(event))return;
+  if(DgcCard.click(event.target))return;   // a card's Details opens in place
   if(S.composerPanel&&!event.target.closest?.('.composer-model-menu,.pip-routines-popover,.composer-add-menu,.composer-level-menu,#chat-model,#chat-context-toggle,#chat-routines,#chat-attach,#chat-level')){S.composerPanel='';render();}
   // Opening Controls reads the payments switch again: how many it paid today changes as Pips pay.
   if(event.target.closest?.('#runner-controls-toggle')&&paymentsState.asked)void loadPayments();
@@ -4572,6 +4643,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.handoff){void openSavedHandoff(target.dataset.handoff);return;}
   if(target.dataset.rejectHandoff){void openSavedHandoff(target.dataset.rejectHandoff,true);return;}
   if(target.dataset.lineagePip){void openLineage(target.dataset.lineagePip,target.dataset.lineageRun);return;}
+  if(target.dataset.changeAllow){void allowChange(target.dataset.changeAllow);return;}
   if(target.dataset.proposal){proposalReview(target.dataset.proposal);return;}
   if(target.dataset.reject){proposalReview(target.dataset.reject,true);return;}
   if(target.dataset.archive){const entry=S.context?.entries.find(e=>e.id===target.dataset.archive);if(entry)openReview({title:'Archive this note?',description:'Runs that start from now on won’t see it. Runs that already started keep it.',body:`<h3>${esc(entry.title)}</h3><p class="goal">${esc(entry.kind==='execution'?executionContextWords(entry.provenance):entry.content)}</p>`,confirm:'Archive',request:{type:'archive_workspace_context',workspace_id:S.workspace.id,entry_id:entry.id,expected_revision:S.context.revision}});return;}
@@ -4898,11 +4970,8 @@ document.addEventListener('click',event=>{
         if(review.request.type==='review_pip_finding'){const checkpoint=runCheckpoint(result.checkpoint,{id:review.request.run_id,pip_id:S.selected,workspace_id:S.workspace.id});if(!checkpoint)throw new Error('Your decision didn’t save as expected. Refresh the report.');if(S.run?.id===review.request.run_id)S.run={...S.run,checkpoint};draft.findingReviewReason='';}
         if(review.request.type==='pips_enable'){S.enabled=result.enabled===true;S.runner=null;}
         if(review.request.type==='record_workspace_context'){draft.contextTitle='';draft.contextContent='';}
-        if(review.request.type==='accept_pip_update'){S.adaptationDirty=false;draft.adaptationReason='';S.scheduleDirty=false;S.modelDirty=false;draft.modelReason='';draft.scheduleReason='';}
-        if(['accept_pip_update','reject_pip_update'].includes(review.request.type)&&S.approvalsLoaded)void loadApprovals();
-        const named=S.pip?.name||'This Pip',aside=review.setsAside?` ${review.setsAside===1?'The other waiting change was':`The ${review.setsAside} other waiting changes were`} set aside, not approved.`:'';
-        S.notice=review.request.type==='review_pip_finding'?'Saved. Workspace context didn’t change.':review.request.type==='stop_pips'?'All Pips are stopping.':review.request.type==='pips_enable'?'Pips are off.':review.request.type==='accept_pip_update'?`${named} is updated.${aside}`:review.request.type==='reject_pip_update'?`Dismissed. ${named} stays as it was.`:'Saved.';
-        if(review.request.type==='accept_pip_update')S.notice+=keepRunningTold(result);
+        if(['accept_pip_update','reject_pip_update'].includes(review.request.type)){updateDecided(review,result);return;}
+        S.notice=review.request.type==='review_pip_finding'?'Saved. Workspace context didn’t change.':review.request.type==='stop_pips'?'All Pips are stopping.':review.request.type==='pips_enable'?'Pips are off.':'Saved.';
       });break;
     }
   }
@@ -4936,6 +5005,7 @@ if(typeof document!=='undefined'){document.addEventListener('pointerdown',event=
 if(typeof document!=='undefined'){document.addEventListener('pointerdown',()=>markEffortInput(false),true);document.addEventListener('keydown',event=>{if(event.key==='Tab'||event.composedPath?.()[0]?.id==='chat-thinking')markEffortInput(true);},true);}
 document.addEventListener('keydown',event=>{
   if(picker.keydown(event))return;
+  if(!S.review&&DgcCard.key(event)){event.preventDefault();return;}   // Esc closes a card's open detail
   // Personal | Project keys, as the Sessions home's tabs take them: an arrow goes to the other tab, Home and End to
   // the first and the last, and the tab chosen takes the focus.
   if(!S.review&&event.target.dataset?.pipsTab&&['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();chooseScopeTab(event.key==='Home'?'personal':event.key==='End'?'project':scopeTab()==='personal'?'project':'personal',true);return;}

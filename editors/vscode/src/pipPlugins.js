@@ -70,10 +70,10 @@ const PLUGIN_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 // Composio's tools), never the app inside it.
 const mark = (name, id = '', logo = null) => {
   const own = PLUGIN_ID.test(id) ? id : '', src = own && typeof logo === 'function' ? logo(own) : '';
-  return `<span class="app-link-mark${src ? ' has-logo' : ''}" aria-hidden="true"${own ? ` data-plugin-mark="${own}"` : ''}>`
+  return `<span class="dgc-card-icon app-link-mark${src ? ' has-logo' : ''}" aria-hidden="true"${own ? ` data-plugin-mark="${own}"` : ''}>`
     + (src && /^data:image\/(png|svg\+xml|x-icon);base64,/.test(src) ? `<img alt="" src="${src}">` : name.slice(0, 1).toUpperCase()) + '</span>';
 };
-const head = (esc, name, title, sub, id = '', logo = null) => `<div class="app-link-head">${mark(esc(name), id, logo)}<div class="app-link-words"><strong>${title}</strong>${sub ? `<small>${sub}</small>` : ''}</div></div>`;
+const head = (esc, name, title, sub, id = '', logo = null) => `<div class="dgc-card-head app-link-head">${mark(esc(name), id, logo)}<div class="dgc-card-words app-link-words"><strong>${title}</strong>${sub ? `<small>${sub}</small>` : ''}</div></div>`;
 
 export function pluginCardMarkup(card, { esc, busy = false, pipName = 'This Pip' }) {
   const id = esc(card.id), name = esc(card.name), off = busy ? ' disabled' : '';
@@ -85,14 +85,14 @@ export function pluginCardMarkup(card, { esc, busy = false, pipName = 'This Pip'
       : 'What its maker marks read-only runs at once. Anything else waits for your Allow.');
   } else if (!card.installed) {
     body = head(esc, card.name, `${name} isn’t added in DGC`, `${esc(card.reason)} Add it in Settings → Plugins, then choose Allow here.`)
-      + `<div class="app-link-actions"><button type="button" class="primary" data-plugin-settings="${id}">Open Settings</button>`
+      + `<div class="dgc-card-actions app-link-actions"><button type="button" class="primary" data-plugin-settings="${id}">Open Settings</button>`
       + `<button type="button" class="quiet" data-plugin-allow="${id}"${off}>Allow</button>${no}</div>`;
   } else {
     body = head(esc, card.name, `Let ${esc(pipName)} use ${name}?`, esc(card.reason))
-      + `<div class="app-link-actions"><button type="button" class="primary" data-plugin-allow="${id}"${off}>${busy ? 'Allowing…' : 'Allow'}</button>${no}</div>`;
+      + `<div class="dgc-card-actions app-link-actions"><button type="button" class="primary" data-plugin-allow="${id}"${off}>${busy ? 'Allowing…' : 'Allow'}</button>${no}</div>`;
   }
   const label = card.status === 'allowed' ? `${card.name} allowed` : `Use ${card.name}`;
-  return `<div class="app-link plugin-card" data-plugin-card="${id}" data-state="${esc(card.status)}" role="group" aria-label="${esc(label)}">${body}</div>`;
+  return `<div class="dgc-card app-link plugin-card" data-plugin-card="${id}" data-state="${esc(card.status)}" role="group" aria-label="${esc(label)}">${body}</div>`;
 }
 
 // Every input of a call waiting for Allow, each in full: what it sends is in sight before Allow (an email's recipient,
@@ -134,12 +134,12 @@ export function pluginActionMarkup(draft, plugin, { esc, busy = false, pipName =
   // Which account it runs on, in sight: the one linked to this Pip, which is what the call sends.
   const accounts = [...new Set((Array.isArray(args.tools) ? args.tools : []).map(c => c && c.account).filter(v => typeof v === 'string' && v))];
   const uses = accounts.length ? `<p class="app-link-note plugin-account">Uses ${accounts.map(v => `<strong>${esc(accountLabel?.(v) || v)}</strong>`).join(', ')}</p>` : '';
-  return `<div class="allow-card plugin-action" data-plugin-action="${id}"${edit ? ' data-editing' : ''} role="group" aria-label="${accessibleTitle}">`
+  return `<div class="dgc-card allow-card plugin-action" data-plugin-action="${id}"${edit ? ' data-editing' : ''} role="group" aria-label="${accessibleTitle}">`
     + head(esc, plugin.name, title, sub, plugin.plugin, logo)
     + askedAgainLine(esc, draft) + uses
     + (edit ? `<div class="allow-fields">${argumentFields(args).map(f => field(esc, draft.id, f.name, f.label, edit.values[f.name] ?? '', { ...f, disabled: busy })).join('') || '<p class="app-link-note">No inputs.</p>'}</div>` : shown)
     + editError(esc, edit)
-    + `<div class="app-link-actions"><button type="button" class="primary" data-plugin-run="${id}"${off}>${busy ? 'Running…' : plugin.asks ? 'Allow once' : 'Allow'}</button>${always}`
+    + `<div class="dgc-card-actions app-link-actions"><button type="button" class="primary" data-plugin-run="${id}"${off}>${busy ? 'Running…' : plugin.asks ? 'Allow once' : 'Allow'}</button>${always}`
     + (Object.keys(args).length ? editButton(id, Boolean(edit), off) : '')
     + `<button type="button" class="quiet" data-plugin-skip="${id}"${off}>Don’t</button></div></div>`;
 }
@@ -247,7 +247,7 @@ function levelsMarkup(uses, { esc, busy, error }) {
       return `<option value="${value}"${p.permission === value ? ' selected' : ''}${blocked ? ' disabled' : ''}>${esc(label)}${blocked ? ' (not for money)' : ''}</option>`;
     }).join('');
     const now = PLUGIN_LEVELS.find(l => l[0] === p.permission)?.[2] || '';
-    return `<div class="pip-page-row static plugin-level"><span class="app-link-mark" aria-hidden="true">${esc(p.name.slice(0, 1))}</span><span class="row-words"><strong>${esc(p.name)}</strong><small>${esc(p.money ? 'It can move money, so it always asks before a change. ' + now : now)}</small></span>`
+    return `<div class="pip-page-row static plugin-level"><span class="dgc-card-icon app-link-mark" aria-hidden="true">${esc(p.name.slice(0, 1))}</span><span class="row-words"><strong>${esc(p.name)}</strong><small>${esc(p.money ? 'It can move money, so it always asks before a change. ' + now : now)}</small></span>`
       + `<label class="sr-only" for="${id}">What ${esc(p.name)} may do without asking</label><select id="${id}" data-plugin-level="${esc(p.plugin)}" data-plugin-name="${esc(p.name)}"${off}>${options}</select></div>`;
   }).join('');
   return intro + `<section class="pip-page-group" aria-label="Your plugins">${rows}</section>${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}`;
@@ -259,7 +259,7 @@ export function pluginUsesMarkup(uses, { esc, busy = false, error = '' }) {
   if (!uses) return '<p class="muted" role="status">Loading…</p>';
   if (uses.levels) return levelsMarkup(uses, { esc, busy, error });
   const asks = p => p.money ? 'Asks before every action: it can move money' : 'Asks before anything its maker doesn’t mark read-only';
-  const used = uses.plugins.map(p => `<section class="pip-page-group"><div class="pip-page-row static"><span class="app-link-mark" aria-hidden="true">${esc(p.name.slice(0, 1))}</span><span class="row-words"><strong>${esc(p.name)}</strong><small>${p.installed ? asks(p) : 'Not added in DGC now, so no Pip can use it'} · ${p.count === 1 ? '1 Pip' : `${p.count.toLocaleString('en-US')} Pips`}</small></span></div>`
+  const used = uses.plugins.map(p => `<section class="pip-page-group"><div class="pip-page-row static"><span class="dgc-card-icon app-link-mark" aria-hidden="true">${esc(p.name.slice(0, 1))}</span><span class="row-words"><strong>${esc(p.name)}</strong><small>${p.installed ? asks(p) : 'Not added in DGC now, so no Pip can use it'} · ${p.count === 1 ? '1 Pip' : `${p.count.toLocaleString('en-US')} Pips`}</small></span></div>`
     + `<ul class="pip-page-list">${p.pips.map(x => `<li class="pip-page-row static sub"><span class="row-words"><span>${esc(x.name)} can use it</span></span><button type="button" class="quiet pill" data-plugin-use-remove="${esc(x.grant_id)}" data-plugin-use-pip="${esc(x.pip_id)}" aria-label="Stop ${esc(x.name)} using ${esc(p.name)}"${off}>Remove</button></li>`).join('')}</ul>`
     + (p.count > p.pips.length ? `<p class="muted">And ${(p.count - p.pips.length).toLocaleString('en-US')} more. Search your Pips to find one.</p>` : '') + '</section>').join('');
   const idle = uses.installed.filter(i => !uses.plugins.some(p => p.plugin === i.plugin));

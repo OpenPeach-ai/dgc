@@ -159,12 +159,12 @@ const mark = '<span class="app-link-mark routine-mark" aria-hidden="true"><svg v
 /** A routine the Pip suggested, under its message: Add routine or Not now. */
 export function routineCardMarkup(r, { esc, busy = false, formatDate }) {
   const id = esc(r.id), off = busy ? ' disabled' : '', when = esc(routineWhen(r.trigger, formatDate));
-  const head = (title, sub) => `<div class="app-link-head">${mark}<div class="app-link-words"><strong>${title}</strong><small>${sub}</small></div></div>`;
-  if (r.status === 'on') return `<div class="app-link routine-card" data-routine-card="${id}" data-state="on" role="group" aria-label="Routine added">${head(`Routine added: ${esc(r.title)}`, `${when}. Change it in Settings.`)}</div>`;
-  return `<div class="app-link routine-card" data-routine-card="${id}" data-state="suggested" role="group" aria-label="Add this routine?">`
-    + head(`Add this routine? ${esc(r.title)}`, when)
+  const head = (title, sub) => `<div class="dgc-card-head app-link-head">${mark.replace('app-link-mark', 'dgc-card-icon app-link-mark')}<div class="dgc-card-words app-link-words"><strong>${title}</strong>${sub ? `<small>${sub}</small>` : ''}</div></div>`;
+  if (r.status === 'on') return `<div class="dgc-card app-link routine-card" data-routine-card="${id}" data-state="on" role="group" aria-label="Routine added">${head(`Routine added: ${esc(r.title)}`, `${when}. Change it in Settings.`)}</div>`;
+  return `<div class="dgc-card app-link routine-card" data-routine-card="${id}" data-state="suggested" role="group" aria-label="Add this routine?">`
+    + head(`Add the routine “${esc(r.title)}”?`, '') + (globalThis.DgcCard?.chips([{ label: routineWhen(r.trigger, formatDate), icon: r.trigger?.kind === 'email' ? 'mail' : r.trigger?.kind === 'calendar' ? 'calendar' : 'clock' }], 'When it runs') || `<p class="app-link-note">${when}</p>`)
     + `<p class="routine-prompt">${esc(r.prompt)}</p>`
-    + `<div class="app-link-actions"><button type="button" class="primary" data-routine-add="${id}"${off}>${busy ? 'Adding…' : 'Add routine'}</button>`
+    + `<div class="dgc-card-actions app-link-actions"><button type="button" class="primary" data-routine-add="${id}"${off}>${busy ? 'Adding…' : 'Add routine'}</button>`
     + `<button type="button" class="quiet" data-routine-decline="${id}"${off}>Not now</button></div></div>`;
 }
 

@@ -1,7 +1,7 @@
 // One "Needs attention" list across your Personal Pips (list_pip_attention, Pips API 44), like Grok's
 // sidebar and Dots' activity view: each card a Pip is waiting on you for, newest first. A row opens that
-// Pip at the card (its chat, its computer, or the setup on the Pips home). Words are the Pips' and the
-// user's own: text only.
+// Pip at the card (its chat, its computer). A new Pip waiting for you is a card in the list itself, and nowhere else
+// on the page: Review and Reject are on it. Words are the Pips' and the user's own: text only.
 
 export const KINDS = ['email', 'event', 'action', 'app_action', 'app_link', 'plugin', 'setup', 'computer_action', 'computer_check', 'routine'];
 const LABELS = {email: 'Email', event: 'Calendar', action: 'Action', app_action: 'Ready to send', app_link: 'App', plugin: 'Plugin',
@@ -79,20 +79,44 @@ const ago = (iso, now) => {
   return `${Math.floor(s / 86400)} d ago`;
 };
 
-/** The Pips home's list. `face(item)` draws the Pip's face (the home's own avatars). */
-export function attentionMarkup(page, {esc, face, expanded = false, now = Date.now(), busy = false}) {
-  if (!page || !page.total) return '';
-  const shown = expanded === 2 ? page.items : expanded ? page.items.slice(0, SHOWN) : [];
-  const rows = shown.map(i => `<li class="attention-item"><button type="button" class="attention-row" data-attention="${esc(i.id)}"${busy ? ' disabled' : ''}>`
+/** A new Pip waiting for you, as a thin shared card in the list (media/shared/card.js): its face, "Create the Pip …?",
+ *  what it would do, where and when as chips, Review (the full details, as before) and Reject. `setup` is its saved
+ *  setup when this view has read it; a row DGC lists without one (another page of setups) opens from the row itself. */
+export function setupCardMarkup({setup = null, item = null, face = '', chips = [], busy = false, now = Date.now()}) {
+  const card = globalThis.DgcCard, id = setup ? setup.id : item.card, clip = (v, n) => { const t = String(v || '').trim(); return t.length > n ? t.slice(0, n - 1).trimEnd() + '…' : t; };
+  // Review opens its full details. Reject: where DGC lists it (Needs attention), it is turned down at once, as that
+  // list's Dismiss did (its digest is read again first); elsewhere it opens the Turn-down page.
+  const answers = [{label: 'Review', primary: true, attrs: setup ? {'data-setup': id, id: `setup-review-${id}`} : {'data-attention': item.id, id: `setup-review-${id}`}, disabled: busy},
+    {label: 'Reject', attrs: item ? {'data-attention-dismiss': item.id, id: `setup-reject-${id}`, 'aria-label': `Reject ${item.title}`} : {'data-reject-setup': id, id: `setup-reject-${id}`}, disabled: busy}];
+  return card.html({id: `setup-${id}`, cls: 'dgc-card-thin', label: 'New Pip waiting for you', attrs: {'data-setup-card': id}, icon: face ? {html: face, face: true} : 'pip',
+    title: setup ? `Create the Pip “${setup.name}”?` : item.title, sub: setup ? clip(setup.goal, 140) : item.detail,
+    chips: setup ? chips : [{label: 'New Pip', icon: 'pip'}, ...(ago(item.created_at, now) ? [{label: ago(item.created_at, now), icon: 'clock'}] : [])], actions: answers});
+}
+
+/** The Pips home's list. `face(item)` draws the Pip's face (the home's own avatars). `setups` are the new Pips waiting in
+ *  this place, each drawn as a card by `setupCard` ({setup} or {item}); the list is theirs alone when `page` is null (a
+ *  project's home, which shows none of the Personal Pips' rows). */
+export function attentionMarkup(page, {esc, face, expanded = false, now = Date.now(), busy = false, setups = [], setupCard = null, error = '', more = ''}) {
+  const listed = page?.items || [], known = new Map(setups.map(s => [s.id, s]));
+  // A new Pip this view has read but DGC's list doesn't name (a project's, or an older DGC's): first, and counted.
+  const extra = setupCard ? setups.filter(s => !listed.some(i => i.kind === 'setup' && i.card === s.id)) : [];
+  const total = (page?.total || 0) + extra.length;
+  if (!total) return '';
+  const all = [...extra.map(s => ({setup: s})), ...listed.map(i => (i.kind === 'setup' && setupCard ? {setup: known.get(i.card) || null, item: i} : {item: i}))];
+  const shown = expanded === 2 ? all : expanded ? all.slice(0, SHOWN) : [];
+  const rows = shown.map(({setup, item: i}) => setup !== undefined
+    ? `<li class="attention-item attention-card">${setupCard({setup, item: i})}</li>`
+    : `<li class="attention-item"><button type="button" class="attention-row" data-attention="${esc(i.id)}"${busy ? ' disabled' : ''}>`
     + `${face(i)}<span class="attention-copy"><strong>${esc(i.title)}</strong>${i.detail ? `<span class="attention-detail">${esc(i.detail)}</span>` : ''}`
     + `<small>${esc(i.pip_name || 'DGC')} · ${LABELS[i.kind]} · ${esc(ago(i.created_at, now))}</small></span></button>`
     + (i.kind === 'setup' ? `<button type="button" class="attention-dismiss" data-attention-dismiss="${esc(i.id)}" aria-label="Dismiss ${esc(i.title)}"${busy ? ' disabled' : ''}>Dismiss</button>` : '')
     + '</li>').join('');
-  const toggle = expanded && page.items.length > SHOWN
-    ? `<button type="button" class="link attention-more" data-attention-more="${expanded === 2 ? 1 : 2}">${expanded === 2 ? 'Show fewer' : `Show all ${page.total.toLocaleString('en-US')}`}</button>` : '';
-  const cut = page.truncated && expanded ? `<p class="muted attention-cut">The newest ${page.items.length} of ${page.total.toLocaleString('en-US')}. Each Pip’s chat has the rest.</p>` : '';
-  return `<section class="attention" aria-label="Needs attention"><button type="button" class="attention-toggle" data-attention-more="${expanded ? '0' : '1'}" aria-expanded="${Boolean(expanded)}" aria-controls="attention-list">Needs attention <span class="attention-count">${page.total.toLocaleString('en-US')}</span><span class="codicon codicon-chevron-${expanded ? 'up' : 'down'}" aria-hidden="true"></span></button>`
-    + `<ul class="attention-list" id="attention-list"${expanded ? '' : ' hidden'}>${rows}</ul>${toggle}${cut}</section>`;
+  const toggle = expanded && all.length > SHOWN
+    ? `<button type="button" class="link attention-more" data-attention-more="${expanded === 2 ? 1 : 2}">${expanded === 2 ? 'Show fewer' : `Show all ${total.toLocaleString('en-US')}`}</button>` : '';
+  const cut = page?.truncated && expanded ? `<p class="muted attention-cut">The newest ${listed.length} of ${page.total.toLocaleString('en-US')}. Each Pip’s chat has the rest.</p>` : '';
+  const said = expanded ? (error ? `<p class="notice error" role="alert">${esc(error)}</p>` : '') + (more ? `<p class="muted attention-cut">${esc(more)}</p>` : '') : '';
+  return `<section class="attention" aria-label="Needs attention"><button type="button" class="attention-toggle" data-attention-more="${expanded ? '0' : '1'}" aria-expanded="${Boolean(expanded)}" aria-controls="attention-list">Needs attention <span class="attention-count">${total.toLocaleString('en-US')}</span><span class="codicon codicon-chevron-${expanded ? 'up' : 'down'}" aria-hidden="true"></span></button>`
+    + `<ul class="attention-list" id="attention-list"${expanded ? '' : ' hidden'}>${rows}</ul>${toggle}${cut}${said}</section>`;
 }
 
 /** The chat card a row points at, for scrolling to it once the chat has drawn it. */

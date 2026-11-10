@@ -48,8 +48,8 @@ export function appLinkSettledMarkup(link, { esc, pipName = 'This Pip' }) {
 
 export function appLinkMarkup(link, { esc, busy = false, composio = true, host = '', pipName = 'This Pip', choice = null }) {
   const id = esc(link.id), app = esc(link.app), off = busy ? ' disabled' : '';
-  const mark = `<span class="app-link-mark" aria-hidden="true">${esc(link.app.slice(0, 1).toUpperCase())}</span>`;
-  const head = (title, sub) => `<div class="app-link-head">${mark}<div class="app-link-words"><strong>${title}</strong>${sub ? `<small>${sub}</small>` : ''}</div></div>`;
+  const mark = `<span class="dgc-card-icon app-link-mark" aria-hidden="true">${esc(link.app.slice(0, 1).toUpperCase())}</span>`;
+  const head = (title, sub) => `<div class="dgc-card-head app-link-head">${mark}<div class="dgc-card-words app-link-words"><strong>${title}</strong>${sub ? `<small>${sub}</small>` : ''}</div></div>`;
   const no = `<button type="button" class="quiet" data-app-link-decline="${id}"${off}>Not now</button>`;
   let body;
   const another = (main, words = 'Use another account') => `<button type="button" class="${main ? 'primary' : 'quiet'}" data-app-link-another="${id}"${off}>${words}</button>`;
@@ -57,7 +57,7 @@ export function appLinkMarkup(link, { esc, busy = false, composio = true, host =
     body = head(`${app} connected`, link.label ? esc(link.label) : '');
   } else if (link.status === 'authorizing') {
     body = head(`Finish signing in to ${app}`, `Your browser opened ${esc(host || 'Composio')}. Come back here once it says you are connected.`)
-      + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-check="${id}"${off}>${busy ? 'Checking…' : 'I’ve signed in'}</button>`
+      + `<div class="dgc-card-actions app-link-actions"><button type="button" class="primary" data-app-link-check="${id}"${off}>${busy ? 'Checking…' : 'I’ve signed in'}</button>`
       + another(false, 'Open sign-in again') + (choice?.accounts?.length ? `<button type="button" class="quiet" data-app-link-start="${id}"${off}>Choose from your accounts</button>` : '') + `${no}</div>`;
   } else if (link.status === 'requested' && choice?.accounts?.length) {
     // Composio has accounts: the person chooses. Nothing is linked until they do, whatever the Pip's reason named.
@@ -65,26 +65,26 @@ export function appLinkMarkup(link, { esc, busy = false, composio = true, host =
     body = head(`Which ${app} should ${esc(pipName)} use?`, esc(link.reason))
       + (missing ? `<p class="app-link-note app-link-wanted">${esc(pipName)} asked for <strong>${esc(choice.wanted)}</strong>. None of your ${app} accounts in Composio is that address.</p>` : '')
       + `<div class="app-link-accounts" role="group" aria-label="Your ${app} accounts">${choice.accounts.map(a => `<button type="button" class="app-link-account${a.named ? ' named' : ''}" data-app-link-account="${esc(a.id)}" data-app-link-for="${id}"${off}><span>${esc(a.label)}</span>${a.named ? `<small>${esc(pipName)} asked for this one</small>` : ''}</button>`).join('')}</div>`
-      + `<div class="app-link-actions">${another(!!missing)}${no}</div>`;
+      + `<div class="dgc-card-actions app-link-actions">${another(!!missing)}${no}</div>`;
   } else if (!composio && link.toolkit !== 'outlook') {
     body = head(link.toolkit === 'gmail' ? `Link Gmail to ${esc(pipName)}` : `Connect ${app}`, esc(link.reason))
       + `<p class="app-link-note">To connect apps, first turn on Composio in Settings → Plugins (once). Then choose Connect here.</p>`
-      + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-settings="${id}" data-app-link-app="${app}">Browse plugins</button>`
+      + `<div class="dgc-card-actions app-link-actions"><button type="button" class="primary" data-app-link-settings="${id}" data-app-link-app="${app}">Browse plugins</button>`
       + `<button type="button" class="quiet" data-app-link-start="${id}"${off}>Connect ${app}</button>${no}</div>`;
   } else if (link.status === 'requested' && link.known_label !== undefined) {
     // An account your other Pips already use: no sign-in, only your yes (Grok asks before a bot uses a connector).
     body = head(`Let ${esc(pipName)} use your ${app}?`, `${link.known_label ? `${esc(link.known_label)} · ` : ''}already connected. ${esc(link.reason)}`)
-      + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-start="${id}"${off}>${busy ? 'Listing…' : 'Choose an account'}</button>${no}</div>`;
+      + `<div class="dgc-card-actions app-link-actions"><button type="button" class="primary" data-app-link-start="${id}"${off}>${busy ? 'Listing…' : 'Choose an account'}</button>${no}</div>`;
   } else if (link.status === 'failed') {
     body = head(`Couldn’t connect ${app}`, esc(link.error || 'Try again.'))
-      + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-settings="${id}" data-app-link-app="${app}">Browse plugins</button>`
+      + `<div class="dgc-card-actions app-link-actions"><button type="button" class="primary" data-app-link-settings="${id}" data-app-link-app="${app}">Browse plugins</button>`
       + `<button type="button" class="quiet" data-app-link-start="${id}"${off}>Try again</button>${no}</div>`;
   } else {
     body = head(link.toolkit === 'gmail' ? `Link Gmail to ${esc(pipName)}` : `Connect ${app}`, esc(link.reason))
       + (link.toolkit === 'gmail' ? '<p class="app-link-note">Linking Gmail to this Pip also lets its email-trigger routines run. If Composio already has Gmail accounts, you choose which one; this does not require the Google Workspace plugin.</p>' : '')
-      + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-start="${id}"${off}>${busy ? 'Opening…' : link.toolkit === 'gmail' ? 'Link Gmail' : `Connect ${app}`}</button>${no}</div>`;
+      + `<div class="dgc-card-actions app-link-actions"><button type="button" class="primary" data-app-link-start="${id}"${off}>${busy ? 'Opening…' : link.toolkit === 'gmail' ? 'Link Gmail' : `Connect ${app}`}</button>${no}</div>`;
   }
-  return `<div class="app-link" data-app-link="${id}" data-state="${esc(link.status)}" role="group" aria-label="${link.status === 'connected' ? `${app} connected` : link.known_label !== undefined && link.status === 'requested' ? `Use ${app}` : `Connect ${app}`}">${body}</div>`;
+  return `<div class="dgc-card app-link" data-app-link="${id}" data-state="${esc(link.status)}" role="group" aria-label="${link.status === 'connected' ? `${app} connected` : link.known_label !== undefined && link.status === 'requested' ? `Use ${app}` : `Connect ${app}`}">${body}</div>`;
 }
 
 /** A Pip's email draft as Grok's Allow card: what it would send, and the user's Send / Always allow.
@@ -102,10 +102,10 @@ export function allowCardMarkup(draft, { esc, link = null, busy = false, pipName
       + `${field(esc, draft.id, 'subject', 'Subject', edit.values.subject, { max: 200, disabled: busy })}${field(esc, draft.id, 'body', 'Message', edit.values.body, { area: 8, max: 12000, disabled: busy })}</div>`
     : `<details class="allow-details"><summary><span class="allow-preview">Subject: ${esc(m.subject)}</span><span>Details</span></summary>`
       + `<dl class="allow-meta"><dt>To</dt><dd>${esc(m.recipient_email)}</dd><dt>Subject</dt><dd>${esc(m.subject)}</dd></dl><div class="allow-body">${esc(m.body)}</div></details>`;
-  return `<div class="allow-card" data-allow-card="${id}"${editing ? ' data-editing' : ''} role="group" aria-label="Send this email?">`
-    + `<div class="app-link-head"><span class="app-link-mark" aria-hidden="true">@</span><div class="app-link-words"><strong>Send email to ${esc(m.recipient_email)}?</strong><small>${from}</small></div></div>`
+  return `<div class="dgc-card allow-card" data-allow-card="${id}"${editing ? ' data-editing' : ''} role="group" aria-label="Send this email?">`
+    + `<div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">@</span><div class="dgc-card-words app-link-words"><strong>Send email to ${esc(m.recipient_email)}?</strong><small>${from}</small></div></div>`
     + askedAgainLine(esc, draft) + shown + editError(esc, edit)
-    + `<div class="app-link-actions">${actions}<button type="button" class="quiet" data-allow-dismiss="${id}"${off}>Don’t send</button></div></div>`;
+    + `<div class="dgc-card-actions app-link-actions">${actions}<button type="button" class="quiet" data-allow-dismiss="${id}"${off}>Don’t send</button></div></div>`;
 }
 
 /** Why a card came back though you chose Always allow: its grant is pinned, and what it was pinned to changed. */
@@ -138,10 +138,10 @@ export function calendarCardMarkup(draft, { esc, link = null, busy = false, pipN
       + (guests.length ? `<dt>Guests</dt><dd>${esc(guests.join(', '))} · invited</dd>` : '')
       + (repeat ? `<dt>Repeats</dt><dd>${esc(repeatWords(repeat))}</dd>` : '')
       + '</dl>' + (e.description ? `<div class="allow-body">${esc(e.description)}</div>` : '') + '</details>';
-  return `<div class="allow-card calendar-card" data-allow-card="${id}"${editing ? ' data-editing' : ''} role="group" aria-label="Add this event?">`
-    + `<div class="app-link-head"><span class="app-link-mark" aria-hidden="true">▦</span><div class="app-link-words"><strong>Add this event?</strong><small>${to}</small></div></div>`
+  return `<div class="dgc-card allow-card calendar-card" data-allow-card="${id}"${editing ? ' data-editing' : ''} role="group" aria-label="Add this event?">`
+    + `<div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">▦</span><div class="dgc-card-words app-link-words"><strong>Add this event?</strong><small>${to}</small></div></div>`
     + askedAgainLine(esc, draft) + shown + editError(esc, edit)
-    + `<div class="app-link-actions">${actions}<button type="button" class="quiet" data-allow-dismiss="${id}"${off}>Don’t add</button></div></div>`;
+    + `<div class="dgc-card-actions app-link-actions">${actions}<button type="button" class="quiet" data-allow-dismiss="${id}"${off}>Don’t add</button></div></div>`;
 }
 
 const repeatWords = r => `${r.count} times, every ${r.interval === 1 ? '' : r.interval + ' '}${{ daily: 'day', weekly: 'week', monthly: 'month' }[r.frequency]}${r.interval === 1 ? '' : 's'}`;

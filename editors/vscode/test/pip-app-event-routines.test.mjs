@@ -117,5 +117,5 @@ test('a routine on an app event, checked and in words',()=>{
  assert.throws(()=>routines.routineFromDraft({...d,routineApp:'',routineEvent:'a'}),/Choose the app/);
  assert.deepEqual(routines.routineFromDraft({...d,routineEvent:' order.created '}).trigger,WHEN);
  const card=routines.routineCardMarkup(routine({status:'suggested',created_by:'pip'}),{esc:s=>String(s)});
- assert.match(card,/Add this routine\? New orders.*When the shop app sends order\.created/s);
+ assert.match(card,/Add the routine “New orders”\?.*When the shop app sends order\.created/s);
 });

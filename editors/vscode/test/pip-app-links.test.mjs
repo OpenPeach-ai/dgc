@@ -302,7 +302,9 @@ test('what its computer holds shows in the chat: a site to allow, and a payment 
  cards=[...x.d.querySelectorAll('[data-computer-card]')];assert.equal(cards.length,1,'the site card is gone');
  assert.equal(cards[0].dataset.computerCard,id('b'),'the payment takes its place');
  assert.equal(cards[0].querySelector('.perm-count').textContent,'2 of 2');
- assert.match(cards[0].textContent,/Pay on pay\.sunrisehospital\.example\?billno SMH\/OP\/26\/118734 · amount 5350\.00 It sends payment card details\. Nothing has been sent\..*Review….*Reject/);
+ assert.match(cards[0].textContent,/Pay on pay\.sunrisehospital\.example\?It sends payment card details\. Nothing has been sent\..*Review….*Reject/);
+ // What it pays is chips, a field each (it was a run-on in the line under the title); the card number is never one.
+ assert.deepEqual([...cards[0].querySelectorAll('.dgc-chip:not(.dgc-chip-more)')].map(c=>c.textContent),['billno: SMH/OP/26/118734','amount: 5350.00']);
  assert.doesNotMatch(cards[0].textContent,/card_number/);
  assert.equal(cards[0].querySelector('[data-approve="1"]'),null,'a payment is never sent from the chat in one tap: Review… shows it first');
  x.click(`[data-computer-decide="${id('b')}"][data-approve="0"]`);

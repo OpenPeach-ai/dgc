@@ -112,7 +112,7 @@ export function ownAppDecisionNotice(decision) {
 /** The line a settled card leaves: "Shop app accepted create_dispatch · Decided in Shop app. It ran once." */
 export function ownAppDecisionMarkup(id, decision, { esc }) {
   const title = `${decision.name} ${decision.accepted ? 'accepted' : 'declined'} ${decision.tool}`;
-  return `<div class="app-link own-app-decided" data-state="connected" data-own-app-decided="${esc(id)}" role="status" aria-label="${esc(title)}">`
-    + `<div class="app-link-head"><span class="app-link-mark" aria-hidden="true">${esc(decision.name.slice(0, 1))}</span>`
-    + `<div class="app-link-words"><strong>${esc(title)}</strong><small>Decided in ${esc(decision.name)}. ${esc(decision.words)}</small></div></div></div>`;
+  return `<div class="dgc-card app-link own-app-decided" data-state="connected" data-own-app-decided="${esc(id)}" role="status" aria-label="${esc(title)}">`
+    + `<div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">${esc(decision.name.slice(0, 1))}</span>`
+    + `<div class="dgc-card-words app-link-words"><strong>${esc(title)}</strong><small>Decided in ${esc(decision.name)}. ${esc(decision.words)}</small></div></div></div>`;
 }

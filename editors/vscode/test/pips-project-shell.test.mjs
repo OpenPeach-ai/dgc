@@ -105,10 +105,12 @@ test('a Project Pip gets the Personal Pips page: the paged list, then its top ba
   assert.equal(x.requests('list_pips').at(-1).limit,100,'read a page at a time, as the Personal list is');
   assert.deepEqual(x.$$('.simple-home-head .pip-menu .tabs-menu button').map(text),['Workspace context','Notifications'],'the project’s own pages, in its menu');
   for(const old of ['aside','.layout','#new-pip','#back-pips','nav.tabs','.hero'])assert.equal(x.$(old),null,`no ${old}`);
-  for(const personal of ['#pips-settings-open','.core-offer','.meet-core','.attention'])assert.equal(x.$(personal),null,`not the Personal ${personal}`);
-  // It reads Needs attention's page for its tab's number and its rows' (`projects`), and shows none of the Personal list.
+  for(const personal of ['#pips-settings-open','.core-offer','.meet-core','.attention-row'])assert.equal(x.$(personal),null,`not the Personal ${personal}`);
+  // It reads Needs attention's page for its tab's number and its rows' (`projects`), and shows none of the Personal list:
+  // its own Needs attention holds only the new Pip waiting in this project (the section that was above the list).
   assert.ok(x.requests('list_pip_attention').length>=attention);
-  assert.equal(x.$('.attention'),null,'its home doesn’t show the Personal Pips’ cards');
+  assert.equal(text(x.$('.attention-count')),'1','the project’s new Pip, and none of the Personal Pips’ cards');
+  assert.equal(x.$('.setup-inbox'),null,'no second section above it');
   await x.click(`[data-job="${AUDIT}"]`);
   assert.ok(x.$('.pip-topbar #simple-back'),'back to the list');
   assert.equal(pill(x),'Billing audit');
@@ -202,11 +204,12 @@ test('Run now is one click from a Project Pip’s page, and runs what History’
 
 test('a Project Pip’s own change stays in its chat while other Pip setups stay on the Pips overview',async()=>{
   const x=setup();await x.drain();await x.tab('project');
-  assert.match(text(x.$('.setup-inbox-toggle')),/1 new Pip waiting for you/,'the setup card on the list');
+  assert.equal(text(x.$('.attention-count')),'1','the new Pip waiting, counted in Needs attention on the list');
   await x.click(`[data-job="${AUDIT}"]`);
-  const card=x.$('.conversation-log .chat-setup-review');
-  assert.match(text(card),/When it runs: Daily at 09:00 · Asia\/Kolkata/,'the change, in its chat');
-  assert.ok(card.querySelector(`[data-proposal="${PROPOSAL}"]`)&&card.querySelector(`[data-reject="${PROPOSAL}"]`),'with Review and Reject');
+  const card=x.$('.conversation-log [data-change-card]');
+  assert.equal(text(card.querySelector('.dgc-card-title')),'Billing audit wants to run every day at 09:00','the change, in its chat, as a sentence');
+  assert.deepEqual([...card.querySelectorAll('.dgc-chip:not(.dgc-chip-more)')].map(text),['Asia/Kolkata'],'and its time zone as a chip');
+  assert.ok(card.querySelector(`[data-change-allow="${PROPOSAL}"]`)&&card.querySelector(`[data-reject="${PROPOSAL}"]`)&&card.querySelector(`[data-proposal="${PROPOSAL}"]`),'with Allow, Not now and the full review');
   assert.equal(x.$('.pip-setup-strip'),null,'other Pip setup reviews do not interrupt its chat');
   await x.click('.pip-topbar .pip-menu [data-tab="runs"]');
   assert.equal(text(x.$('.waiting h3')),'A change is waiting for you','above its other pages too');
@@ -217,8 +220,9 @@ test('a Project Pip’s own change stays in its chat while other Pip setups stay
   await x.click('#simple-to-chat');
   await x.click('#simple-back');
   assert.ok(x.$('.simple-home'),'the overview holds pending setup reviews');
-  assert.match(text(x.$('.setup-inbox-toggle')),/1 new Pip waiting for you/);
-  x.$('[data-details="setup-inbox"]').open=true;
+  assert.equal(x.$('.setup-inbox'),null,'only in Needs attention');
+  await x.click('.attention-toggle');
+  assert.match(text(x.$(`[data-setup-card="${SETUP}"] .dgc-card-title`)),/Create the Pip “Nightly review”\?/);
   await x.click(`[data-setup="${SETUP}"]`);
   assert.equal(x.requests('get_pip_setup').at(-1).setup_id,SETUP);
   assert.match(text(x.$('.dialog h2')),/Create Nightly review\?/);
@@ -230,9 +234,9 @@ test('Personal Pip setup reviews stay on the Personal overview, outside a Pip ch
   await x.click(`[data-job="${PLANNER}"]`);
   assert.equal(x.$('.pip-setup-strip'),null);
   await x.click('#simple-back');
-  assert.match(text(x.$('.setup-inbox-toggle')),/1 new Pip waiting for you/);
-  x.$('[data-details="setup-inbox"]').open=true;
-  assert.match(text(x.$('.setup-card')),/Nightly review/);
+  assert.equal(x.$('.setup-inbox'),null,'only in Needs attention');
+  await x.click('.attention-toggle');
+  assert.match(text(x.$('.attention [data-setup-card]')),/Nightly review/);
 });
 
 // The old form, on the old page (a DGC from before Pips API 51), and the character picker: the same create_pip.

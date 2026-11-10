@@ -56,3 +56,29 @@
 .dgc-doc-card.stopped:hover, .dgc-doc-card[data-removed="true"]:hover { border-color: var(--border); background: var(--surface); }
 
 @media (prefers-reduced-motion: reduce) { .dgc-doc-card { transition: none; } }
+
+/* The card's mark is a small sheet of its kind (media/shared/filesheet.js): the tile only holds it. */
+.dgc-doc-card .dgc-doc-tile.has-sheet { width: 44px; height: 56px; margin-right: 5px; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; overflow: visible; }
+/* A card whose Download menu is open lies over the cards after it. */
+.dgc-doc-card:has([aria-expanded="true"]) { z-index: 2; }
+.dgc-doc-card:has(.dgc-doc-tile.has-sheet) { container-type: inline-size; min-height: 76px; padding: 9px 12px; border-color: var(--hair); background: color-mix(in srgb, var(--text) 4.5%, transparent); }
+.dgc-doc-card:has(.dgc-doc-tile.has-sheet):hover { border-color: var(--hair-strong); background: color-mix(in srgb, var(--text) 6.5%, transparent); }
+/* Open, seen: a pill filled with the text colour. The card's own Open button lies over the whole card, so a click on
+   the pill, the sheet or the name opens it; the pill takes no clicks of its own. */
+.dgc-doc-card .dgc-doc-open-pill {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 13px; border-radius: var(--r-full); pointer-events: none;
+  background: var(--solid); color: var(--on-solid); font: var(--w-med) var(--t-sm)/1 var(--sans); white-space: nowrap;
+}
+.dgc-doc-card .dgc-doc-open-pill svg { width: 14px; height: 14px; }
+.dgc-doc-card.stopped .dgc-doc-open-pill, .dgc-doc-card[data-removed="true"] .dgc-doc-open-pill { display: none; }
+/* Download (or Save a copy): a round icon button in the editor's greys; its word stays for a screen reader and a tip. */
+.dgc-doc-card .dgc-doc-acts button.dgc-doc-dl:not(.dgc-doc-open) {
+  display: inline-grid; place-items: center; width: 28px; height: 28px; min-width: 0; min-height: 0; padding: 0; border: 1px solid var(--hair-strong); border-radius: var(--r-full);
+  background: transparent; color: var(--text); cursor: pointer; box-shadow: none;
+}
+.dgc-doc-card .dgc-doc-acts button.dgc-doc-dl:not(.dgc-doc-open):hover:not(:disabled), .dgc-doc-card .dgc-doc-acts button.dgc-doc-dl[aria-expanded="true"]:not(.dgc-doc-open) { border-color: var(--hair-strong); background: var(--wash); color: var(--text); }
+.dgc-doc-card .dgc-doc-acts button.dgc-doc-dl:focus-visible { outline: 2px solid var(--vscode-focusBorder, var(--ring)); outline-offset: 2px; }
+.dgc-doc-card .dgc-doc-dl > svg { width: 14px; height: 14px; }
+.dgc-doc-card .dgc-doc-dl > .dgc-doc-dl-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* Narrow (a 300 px side bar): the sheet, the name, the line and the download icon; a click anywhere else opens it. */
+@container (max-width: 380px) { .dgc-doc-card .dgc-doc-open-pill { display: none; } }

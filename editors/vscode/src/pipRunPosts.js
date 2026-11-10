@@ -280,8 +280,11 @@ export function postArtifact(p){
 }
 export function docCardMarkup(a){
   const kind=a.type==='sheet'?'Sheet':'Document',name=a.title.trim()||kind;
-  return `<div class="dgc-doc-card run-post-doc" data-tone="${a.type}"><span class="dgc-doc-tile" aria-hidden="true">${icon(a.type,'run-post-doc-icon')}</span>`
+  // Its mark is a small sheet of its kind, its name on a coloured tab (media/shared/filesheet.js), and Open is seen.
+  const sheets=globalThis.DgcFileSheet;
+  return `<div class="dgc-doc-card run-post-doc" data-tone="${a.type}"><span class="dgc-doc-tile${sheets?' has-sheet':''}" aria-hidden="true">${sheets?sheets.html(a.type):icon(a.type,'run-post-doc-icon')}</span>`
     +`<span class="dgc-doc-words"><span class="dgc-doc-name">${esc(name)}</span><span class="dgc-doc-meta">${kind} · version ${a.version}</span></span>`
+    +(sheets?`<span class="dgc-doc-acts">${sheets.openPill()}</span>`:'')
     +`<button type="button" class="dgc-doc-open" data-artifact-open="${esc(a.id)}" data-artifact-type="${a.type}" aria-label="Open ${esc(name)}, ${kind.toLowerCase()} version ${a.version}">Open</button></div>`;
 }
 // Under a fold: "✓ Passed 12 times since Monday", which opens to every time it ran, by day; each opens that run.

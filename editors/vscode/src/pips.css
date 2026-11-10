@@ -36,12 +36,10 @@
 .check-field{display:flex;align-items:center;gap:8px}.check-field input[type=checkbox]{width:16px;height:16px;flex:none;margin:0}.form fieldset{border:1px solid var(--line);padding:10px;display:grid;gap:8px;min-width:0}.form legend{font-size:12px;padding:0 4px}
 
 /* A setup review stays on the Pips overview. */
-.setup-inbox{border-bottom:1px solid var(--line);padding:0 0 12px;margin-bottom:14px}.setup-inbox>.section-head h2{font-size:14px}.setup-inbox>.muted{font-size:12px;margin:4px 0}.setup-card{border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:8px;background:var(--surface)}.setup-card h3{font-size:15px;margin:7px 0}.setup-card .goal{margin:5px 0}.setup-card .muted{overflow-wrap:anywhere;font-size:12px}.setup-summary dd{overflow-wrap:anywhere}.setup-compose h2{font-size:21px;line-height:1.2}.setup-compose textarea{min-height:120px}.setup-compose .form{border:0;padding:0}.setup-compose .actions{margin-top:18px}.starters{display:grid;gap:8px;margin:14px 0 18px}.starters .step{margin:0}.starter{display:grid;gap:3px;justify-items:start;text-align:left;width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:inherit;font:inherit;cursor:pointer}.starter:hover:not(:disabled){border-color:var(--vscode-focusBorder)}.starter strong{font-size:13px}.starter span{color:var(--muted);font-size:12px;overflow-wrap:anywhere}.starters>.muted{margin:2px 0 0;font-size:12px}.setup-inbox .section-head{flex-wrap:wrap}.setup-inbox .actions button{min-height:32px}
+.setup-summary dd{overflow-wrap:anywhere}.setup-compose h2{font-size:21px;line-height:1.2}.setup-compose textarea{min-height:120px}.setup-compose .form{border:0;padding:0}.setup-compose .actions{margin-top:18px}.starters{display:grid;gap:8px;margin:14px 0 18px}.starters .step{margin:0}.starter{display:grid;gap:3px;justify-items:start;text-align:left;width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:inherit;font:inherit;cursor:pointer}.starter:hover:not(:disabled){border-color:var(--vscode-focusBorder)}.starter strong{font-size:13px}.starter span{color:var(--muted);font-size:12px;overflow-wrap:anywhere}.starters>.muted{margin:2px 0 0;font-size:12px}
 
 /* Overview detail content is hidden in a narrow sidebar. Its review inbox must
    remain a sibling of the layout, rather than disappearing with that content. */
-#app>.setup-inbox{padding:12px 16px;margin:0;flex:none}
-@container(max-width:700px){#app>.setup-inbox{padding:12px}}
 
 /* A Pip conversation uses the same anchored composer rhythm as the main chat.
    Both editor documents and embedded views own a finite height; only the log
@@ -103,12 +101,10 @@ body.vscode-light .pip-approval-dock>:is(.allow-card,.app-link),body.vscode-ligh
 .pips-first-job{grid-column:1/-1;text-align:center;border:1px dashed var(--line);border-radius:14px;padding:28px 20px;max-width:640px;background:radial-gradient(ellipse at 50% 0%,color-mix(in srgb,var(--accent) 3.5%,transparent),transparent 70%)}
 .pips-welcome-cast{display:flex;align-items:center;justify-content:center;gap:14px;margin-bottom:22px}.pips-welcome-cast .avatar{width:44px;height:44px}.pips-welcome-cast .avatar:nth-child(2){transform:translateY(-5px)}
 .pips-first-job h3{font-size:15px;letter-spacing:-.02em;font-weight:500}.pips-first-job p{color:var(--muted);font-size:12px;max-width:300px;margin:8px auto 16px}.pips-first-job small{display:block;font-size:10px;margin-top:14px}.pips-first-job button{border-radius:7px;padding:7px 13px}
-.setup-card{display:grid;grid-template-columns:24px minmax(0,1fr);gap:7px 10px;border-radius:7px;padding:9px 11px;background:linear-gradient(130deg,color-mix(in srgb,var(--accent) 4%,transparent),transparent 80%)}.setup-card>.avatar{width:24px;height:24px}.setup-card-copy{min-width:0}.setup-card h3{font-size:13px;margin:5px 0}.setup-card>.actions{grid-column:2;margin:0;gap:6px}.setup-card .badge{border:0;padding:0;font-size:10px;color:var(--vscode-textLink-foreground)}
 .type-card{border-radius:12px;background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 3%,transparent),transparent);transition:border-color .16s}.type-card:hover{border-color:var(--vscode-focusBorder)}
 .hero{border-bottom:1px solid var(--line);padding-bottom:10px}.hero .copy h2{font-weight:550;letter-spacing:-.02em}.tabs button{transition:color .16s}.tabs button[aria-pressed=true]{border-bottom-color:var(--accent)}
 @container(max-width:400px){.layout.overview>aside{padding:14px 12px}.pips-overview-intro h2{font-size:20px}.layout.overview .job{padding:9px;gap:8px}.layout.overview .job-copy{column-gap:6px}.layout.overview .job-schedule{max-width:135px}}
 @media(prefers-reduced-motion:reduce){.layout.overview .job,.type-card,.tabs button{transition:none}}
-.setup-inbox-toggle{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;list-style:none;padding:8px 0;font-size:12px;font-weight:500}.setup-inbox-toggle::-webkit-details-marker{display:none}.setup-inbox-toggle>span{font-size:11px;font-weight:400;color:var(--vscode-textLink-foreground)}.setup-inbox details[open]>.section-head{margin-top:10px}.setup-inbox details[open]>.setup-inbox-toggle>span{visibility:hidden}
 
 /* Personal | Project: the Sessions home's Chat | Work (main.css .home-tabs), the same box, type, colours and keys, so the
    two pages read as one. main.css's tokens are spelled out with their fallbacks: this sheet also draws the Pips editor
@@ -170,12 +166,10 @@ input,textarea,select{border-radius:6px;padding:7px 10px}
 .hero .muted{font-size:12px}
 .review-count{display:inline-block;margin-top:4px;padding:1px 8px;border-radius:999px;background:var(--pip-tint);color:var(--pip-ink);font-size:11px}
 /* What is waiting for the user: a card, with the two choices beside each change. */
-.waiting{margin:0 0 18px;padding:12px 14px;border:1px solid var(--pip-edge);border-radius:var(--r-md,10px);background:var(--pip-tint)}
-.waiting h3{margin:0 0 6px;font-size:13px}
-.waiting-row{display:flex;align-items:center;justify-content:space-between;gap:8px 14px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--pip-edge)}
-.waiting-row:first-of-type{border-top:0;padding-top:2px}
-.waiting-row p{margin:0;flex:1 1 220px;line-height:1.45}
-.waiting-row .actions{margin:0}
+/* Changes waiting for you, above every tab: a quiet heading, then one shared card each (media/shared/card.css). */
+.waiting{margin:0 0 18px}
+.waiting h3{margin:0 0 2px;font-size:12px;font-weight:500;color:var(--text-2)}
+.waiting .dgc-card{margin:8px 0 0}
 .waiting-list{margin:8px 0 0;padding-left:18px;line-height:1.6}
 /* When it runs: one line. */
 .quick-schedule{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -415,25 +409,25 @@ button.pill{border-radius:999px;padding:6px 16px}
 @keyframes topbar-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.topbar-spinner{animation:none;border-right-color:currentColor;opacity:.6}}
 /* A Pip's Connect card (pip_app_links): what it asks for, in its chat, with the user's buttons. */
-.app-link{display:flex;flex-direction:column;gap:10px;margin:12px 0;padding:12px 14px;border:1px solid var(--pip-edge);border-radius:12px;background:color-mix(in srgb,var(--pip-accent) 7%,transparent);max-width:560px}
+/* Every card a Pip shows in its chat (connect an app, an email or event to send, a form its computer holds, a routine it
+   suggests, your Chrome on loan) is the shared card (media/shared/card.css): its box, its mark, its words and its
+   answers come from there. Here: only what these cards hold between their words and their answers. */
+.dgc-card:is(.app-link,.allow-card){display:flex;flex-direction:column;gap:8px}
+.dgc-card:is(.app-link,.allow-card)>:not(.dgc-card-head){margin-top:0;margin-bottom:0;margin-left:31px}
+@container(max-width:380px){.dgc-card:is(.app-link,.allow-card)>:not(.dgc-card-head){margin-left:0}}
 .app-link[data-state=connected]{background:transparent;padding:9px 12px}
-.app-link-head{display:flex;align-items:center;gap:10px;min-width:0}
-.app-link-mark{flex:none;width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:var(--pip-accent);color:#fff;font-weight:600;font-size:14px}
-.app-link[data-state=connected] .app-link-mark{width:22px;height:22px;border-radius:7px;font-size:11px}
+/* A mark outside a card (a routine's row in Settings) keeps its tile. */
+:not(.dgc-card-head)>.app-link-mark{flex:none;width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:var(--pip-accent);color:#fff;font-weight:600;font-size:14px}
 /* A plugin's own logo in place of its letter (an action card): on a light tile in both themes. */
 .app-link-mark.has-logo{background:transparent;border:1px solid var(--line,rgba(128,128,128,.35))}
 .app-link-mark.logo-on-light{background:#fff}.app-link-mark.logo-on-dark{background:#1b1b1f;border-color:#1b1b1f}
 .app-link-mark img{width:20px;height:20px;border-radius:4px;object-fit:contain}
+.dgc-card-icon.app-link-mark img{width:16px;height:16px}
 .allow-calls{margin:6px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:2px;font-size:12px;overflow-wrap:anywhere}
 .allow-sent{margin:0;font-size:12px}.allow-sent pre{margin:6px 0 0;max-height:260px;overflow:auto}
-.app-link-words{display:flex;flex-direction:column;gap:2px;min-width:0}
-.app-link-words strong{font-weight:600;overflow-wrap:anywhere}
-.app-link-words small{color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.45;overflow-wrap:anywhere}
 .app-link-note{margin:0;color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.45}
 .card-settled{margin:-14px 0 20px 4px;color:var(--vscode-descriptionForeground);font-size:11px;line-height:1.45;overflow-wrap:anywhere}
 .pip-failed-turn{display:flex;flex-direction:column;align-items:flex-start;margin:0 0 12px}
-.app-link-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
-.app-link-actions button{min-height:28px;border-radius:999px;padding:4px 12px}
 /* Borrowing your own Chrome (API 59): the card, the line while lent, and the line it leaves when it gives it back. */
 .borrow-card[data-state=in_use],.borrow-card[data-state=allowed]{border-color:color-mix(in srgb,var(--pip-accent) 55%,var(--pip-edge))}
 .borrow-line{margin:8px 0;color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.45;max-width:560px;overflow-wrap:anywhere}
@@ -442,25 +436,17 @@ button.pill{border-radius:999px;padding:6px 16px}
 .app-list li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)}
 .app-list small{color:var(--vscode-descriptionForeground);margin-left:6px}
 /* Grok's Allow card: an email the Pip wrote, with Send / Always allow / Edit / Don't send. */
-.allow-card{display:flex;flex-direction:column;gap:7px;margin:9px 0;padding:10px 12px;border:1px solid var(--pip-edge);border-radius:13px;max-width:560px;background:color-mix(in srgb,var(--pip-accent) 6%,var(--vscode-editor-background))}
-.allow-card .app-link-head{gap:8px;align-items:flex-start}
-.allow-card .app-link-mark{width:26px;height:26px;border-radius:8px;font-size:12px}
-.allow-card .app-link-words strong{font-size:13px;line-height:1.3}
-.allow-card .app-link-words small{font-size:11px;line-height:1.35}
-.allow-card .app-link-actions{gap:6px}
-.allow-card .app-link-actions button{min-height:26px;padding:3px 9px;border-radius:8px;font-size:11px}
-.allow-details{min-width:0;font-size:11px}
+
+.allow-details{min-width:0;font-size:12px}
 .allow-details>summary{display:flex;gap:8px;align-items:center;list-style:none;cursor:pointer;color:var(--vscode-descriptionForeground);min-width:0}
 .allow-details>summary::-webkit-details-marker{display:none}
 .allow-details>summary .allow-preview{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.allow-details>summary>span:last-child{flex:none;color:var(--vscode-textLink-foreground,var(--link))}
-.allow-details>summary>span:last-child::after{content:'⌄';margin-left:3px}
-.allow-details[open]>summary>span:last-child::after{content:'⌃'}
-.allow-details[open]{border-top:1px solid var(--pip-edge);padding-top:8px}
+.allow-details>summary>span:last-child{flex:none;color:var(--text-2);text-decoration:underline;text-underline-offset:2px;text-decoration-color:var(--hair-strong)}
+.allow-details[open]{border-top:1px solid var(--hair);padding-top:8px}
 .allow-details[open]>summary{margin-bottom:8px}
 .allow-details>.app-link-note{margin:6px 0 0}
 .allow-see{margin:4px 0 0 -6px;font-size:12px}
-.allow-card .allow-again{color:var(--vscode-foreground);font-size:11px;line-height:1.35}
+.allow-card .allow-again{color:var(--vscode-foreground);font-size:12px;line-height:1.4}
 .allow-meta{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 12px;margin:0;font-size:12px}
 .allow-meta dt{color:var(--vscode-descriptionForeground)}.allow-meta dd{margin:0;overflow-wrap:anywhere;white-space:pre-wrap;max-height:14em;overflow:auto}
 .allow-calls .allow-meta{margin:2px 0 4px 8px}
@@ -689,6 +675,8 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .attention-row:hover{background:var(--vscode-list-hoverBackground)}.attention-row .avatar,.attention-row .pip-avatar{width:34px;height:34px;flex:none}.attention-copy{display:grid;gap:1px;min-width:0}.attention-copy strong{font-size:12px;font-weight:600;overflow-wrap:anywhere}
 .attention-item{display:flex;align-items:center;gap:8px}.attention-item .attention-row{min-width:0;flex:1}.attention-dismiss{background:transparent;color:var(--accent-text);flex:none;font-size:12px;padding:2px 6px}.attention-dismiss:hover{background:color-mix(in srgb,var(--accent-fill) 14%,transparent)}
 .attention-detail{font-size:12px;color:var(--vscode-foreground);opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.attention-copy small{font-size:11px}.attention-mark{width:34px;height:34px;flex:none;display:grid;place-items:center;border-radius:50%;background:var(--surface);border:1px solid var(--line)}
+/* A new Pip waiting for you: a thin shared card in the list (media/shared/card.css), the width of its rows. */
+.attention-item.attention-card{display:block;margin:2px 0 6px}.attention-card .dgc-card{max-width:none}
 .attention-more{margin:4px 0 0 52px;font-size:12px}.attention-cut{font-size:11px;margin:4px 0 0 52px}
 .attention-flash{animation:attention-flash 2.4s ease-out 1}@keyframes attention-flash{0%,30%{box-shadow:0 0 0 2px var(--vscode-focusBorder)}100%{box-shadow:0 0 0 0 transparent}}@media(prefers-reduced-motion:reduce){.attention-flash{animation:none;outline:2px solid var(--vscode-focusBorder)}}
 /* What it remembers (#6): notes on its page, and "Remembered" under the reply that kept one. */
@@ -813,14 +801,8 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .simple-pips.chat-open .pip-conversation.chat-style .allow-card button:active{transform:scale(.97)}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-composer{border-radius:19px;border-color:color-mix(in srgb,var(--vscode-foreground) 16%,transparent);box-shadow:0 3px 14px rgba(0,0,0,.08)}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-composer:focus-within{border-color:var(--vscode-focusBorder,var(--accent));box-shadow:0 0 0 1px color-mix(in srgb,var(--vscode-focusBorder,var(--accent)) 30%,transparent)}
-.simple-pips.chat-open .pip-conversation.chat-style .allow-card,
-.simple-pips.chat-open .pip-conversation.chat-style .app-link[data-state=waiting],
-.simple-pips.chat-open .pip-conversation.chat-style .app-link[data-state=needs]{max-width:min(100%,540px);border:1px solid color-mix(in srgb,var(--pip-accent) 22%,var(--pip-edge));border-radius:14px;background:color-mix(in srgb,var(--pip-accent) 5%,var(--vscode-editor-background));box-shadow:0 2px 8px rgba(0,0,0,.05)}
-.simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-words strong{letter-spacing:-.005em}
 .simple-pips.chat-open .pip-conversation.chat-style .allow-card .allow-details>summary{min-height:23px;border-radius:5px}
 .simple-pips.chat-open .pip-conversation.chat-style .allow-card .allow-details>summary:hover{color:var(--vscode-foreground)}
-.simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-actions{padding-top:2px}
-.simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-actions button{min-height:28px}
 .simple-pips.chat-open .pip-conversation.chat-style :is(.allow-details>summary,.app-link-actions button,.ract):focus-visible{outline:2px solid var(--vscode-focusBorder,var(--accent));outline-offset:2px}
 @container(max-width:390px){.simple-pips.chat-open .simple-content.chat{padding-inline:10px}.simple-pips.chat-open .simple-content.chat .conversation-log{margin-right:-10px;padding-right:10px}.simple-pips.chat-open .pip-conversation.chat-style .pip-message.user .bubble,.simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer.split .reply-part,.simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer:not(.split){max-width:93%}}
 @media(prefers-reduced-motion:reduce){.simple-pips.chat-open .pip-conversation.chat-style .pip-message .ract:active,.simple-pips.chat-open .pip-conversation.chat-style .allow-card button:active{transform:none}}
@@ -948,7 +930,7 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .simple-pips.chat-open .pip-conversation.chat-style .message-body p{margin-bottom:8px}
 .simple-pips.chat-open .pip-conversation.chat-style .message-body p:last-child{margin-bottom:0}
 /* A link is a mark, so it takes the one purple's link tone, not the editor's blue beside it. */
-.simple-pips.chat-open .pip-conversation.chat-style :is(.message-body .md-link,.run-post-show,.run-post-time,.allow-details>summary>span:last-child){color:var(--link)}
+.simple-pips.chat-open .pip-conversation.chat-style :is(.message-body .md-link,.run-post-show,.run-post-time){color:var(--link)}
 @media(prefers-contrast:more){.simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant :is(.answer:not(.split),.reply-part){border:1px solid var(--vscode-foreground)}}
 
 /* Under a message: its time and figures at 11 px in the UI's own font (monospace is for code), its buttons quiet. */
@@ -990,21 +972,10 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
   .simple-pips.chat-open .pip-conversation.chat-style .pip-working-meta{align-self:start}
 }
 
-/* The Soft permission card keeps its look (its tint, its mark, its words). It takes the card corner, 12 px second words,
-   and the shared buttons: one filled, the others outlines in the text's ink, 26 px high. */
-.simple-pips.chat-open .pip-conversation.chat-style :is(.allow-card,.app-link[data-state=waiting],.app-link[data-state=needs]){border-radius:var(--r-card,12px);gap:8px;padding:12px}
+/* A card in the chat's column (not docked over the prompt box) has no shadow. */
 .simple-pips.chat-open .pip-conversation.chat-style :not(.pip-approval-dock)>:is(.allow-card,.app-link[data-state=waiting],.app-link[data-state=needs]){box-shadow:none;margin:8px 0}
-.simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-words small,.simple-pips.chat-open .pip-conversation.chat-style .allow-card .allow-details{font-size:12px;line-height:1.4}
-.simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-words small,.simple-pips.chat-open .pip-conversation.chat-style .allow-card .allow-details>summary{color:var(--pc-quiet)}
 .simple-pips.chat-open .pip-conversation.chat-style .allow-card .allow-details[open]{border-top-color:var(--hair)}
-.simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-actions{gap:8px;padding-top:0}
-.simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-actions button{height:26px;min-height:26px;padding:0 12px;border-radius:var(--r-row,8px);font-size:12px;font-weight:500;line-height:1;white-space:nowrap;
-  transition:background-color var(--pc-move),border-color var(--pc-move),transform var(--pc-move)}
-.simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-actions button.quiet{border:1px solid var(--hair-strong);background:transparent;color:var(--vscode-foreground)}
-.simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-actions button.quiet:hover:not(:disabled){border-color:var(--pc-firm);background:var(--wash)}
 
-/* In a 300 px side bar its three buttons still share one line. */
-@container(max-width:390px){.simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-actions{gap:4px}.simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-actions button{padding:0 8px}}
 
 /* The prompt box: the shared box's corner and hairline, its soft shadow its own. Focused, its line firms (the caret says
    the rest); its placeholder and the marks of its controls are the quiet ink, and each control answers the press. */

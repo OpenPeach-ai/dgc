@@ -56,10 +56,13 @@ export function endedWords(card) {
   return { stop: 'you stopped it', timeout: `its ${card.minutes} minutes ran out`, lost: 'its tab closed' }[card.ended] || '';
 }
 
+// What exactly, as chips on one line (media/shared/card.js, loaded by every page that draws these cards).
+const chips = (list, label) => globalThis.DgcCard?.chips(list, label) || '';
+
 export function borrowMarkup(card, { esc, busy = false, pipName = 'This Pip', replying = false }) {
   const id = esc(card.id), name = esc(pipName), sites = esc(sitesWords(card.sites)), off = busy ? ' disabled' : '';
-  const mark = '<span class="app-link-mark borrow-mark" aria-hidden="true">C</span>';
-  const head = (title, sub) => `<div class="app-link-head">${mark}<div class="app-link-words"><strong>${title}</strong>${sub ? `<small>${sub}</small>` : ''}</div></div>`;
+  const mark = '<span class="dgc-card-icon app-link-mark borrow-mark" aria-hidden="true">C</span>';
+  const head = (title, sub) => `<div class="dgc-card-head app-link-head">${mark}<div class="dgc-card-words app-link-words"><strong>${title}</strong>${sub ? `<small>${sub}</small>` : ''}</div></div>`;
   if (card.status === 'returned') {
     const never = ['chrome_no', 'no_answer', 'unreachable', 'error'].includes(card.ended);
     const line = never
@@ -75,18 +78,19 @@ export function borrowMarkup(card, { esc, busy = false, pipName = 'This Pip', re
     const sub = card.status === 'allowed' || !card.started_at
       ? 'Allowed once. Chrome asks you too: choose Allow there.'
       : `In a tab of its own. It gives your Chrome back when it’s done, or after ${card.minutes} minutes.`;
-    return `<div class="app-link borrow-card" data-borrow-card="${id}" data-state="${esc(card.status)}" role="group" aria-label="Using your Chrome">`
-      + head(`Using your Chrome · ${sites}`, sub)
-      + `<div class="app-link-actions"><button type="button" class="quiet" data-borrow-stop="${id}"${off}>${busy ? 'Stopping…' : 'Stop'}</button></div></div>`;
+    return `<div class="dgc-card app-link borrow-card" data-borrow-card="${id}" data-state="${esc(card.status)}" role="group" aria-label="Using your Chrome">`
+      + head('Using your Chrome', sub) + chips(card.sites.map(s => ({ label: s, icon: 'web' })), 'Sites')
+      + `<div class="dgc-card-actions app-link-actions"><button type="button" class="quiet" data-borrow-stop="${id}"${off}>${busy ? 'Stopping…' : 'Stop'}</button></div></div>`;
   }
   // Waiting for you: what it wants, where, and that this is once.
   const note = `Only on ${sites}, in a new tab of its own, for this one task (${card.minutes} minutes at most). It never sees your other tabs, and you can stop it any time. Chrome asks you too.`;
   const away = card.reachable ? '' : `<p class="app-link-note borrow-unreachable" role="note">${esc(card.unreachable)}</p>`;
   const wait = replying ? '<p class="app-link-note">You can answer once its reply is done.</p>' : '';
   const hold = busy || replying ? ' disabled' : '';
-  return `<div class="app-link borrow-card" data-borrow-card="${id}" data-state="requested" role="group" aria-label="Let ${name} use your Chrome?">`
+  return `<div class="dgc-card app-link borrow-card" data-borrow-card="${id}" data-state="requested" role="group" aria-label="Let ${name} use your Chrome?">`
     + head(`Let ${name} use your Chrome?`, esc(card.why))
+    + chips([...card.sites.map(s => ({ label: s, icon: 'web' })), { label: `${card.minutes} minutes at most`, icon: 'clock' }], 'Where, and for how long')
     + `<p class="app-link-note">${note}</p>${away}${wait}`
-    + `<div class="app-link-actions"><button type="button" class="primary" data-borrow-allow="${id}"${hold}>${busy ? 'Allowing…' : 'Allow once'}</button>`
+    + `<div class="dgc-card-actions app-link-actions"><button type="button" class="primary" data-borrow-allow="${id}"${hold}>${busy ? 'Allowing…' : 'Allow once'}</button>`
     + `<button type="button" class="quiet" data-borrow-decline="${id}"${hold}>Not now</button></div></div>`;
 }

@@ -208,7 +208,15 @@
       else if (!known) { images.set(file.id, "asked"); vscode.postMessage({ type: "image", file }); }
       if (!known?.error) { box.append(img); return box; }
     }
-    box.append(icon(TYPE_ICON[file.type] || "file"));
+    return sheetIn(box, file.type, file.name, TYPE_ICON[file.type] || "file");
+  }
+  /** A row's mark: a small sheet of its kind, its name on a coloured tab (media/shared/filesheet.js); the icon without it. */
+  function sheetIn(box, what, name, fallback) {
+    const sheets = window.DgcFileSheet;
+    if (!sheets) { box.append(icon(fallback)); return box; }
+    box.classList.add("lib-sheet");
+    box.innerHTML = name ? sheets.forFile(what, name) : sheets.html(what);
+    box.firstElementChild.classList.add("dgc-sheet-sm");
     return box;
   }
   function action(name, label, onClick) {
@@ -415,8 +423,7 @@
       actions.append(wrap);
     }
     actions.append(action("trash", "Remove: it goes to DGC's trash, where it can be recovered", () => vscode.postMessage({ type: "artifactRemove", artifact: a })));
-    const box = el("span", "lib-preview");
-    box.append(icon(A_ICON[a.type] || "file"));
+    const box = sheetIn(el("span", "lib-preview"), a.type, "", A_ICON[a.type] || "file");
     item.append(box, main, actions);
     return item;
   }

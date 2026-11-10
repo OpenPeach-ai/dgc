@@ -5443,7 +5443,9 @@
     // The shared card (media/shared/doccard.css, ui-04): its tile, its name over a quiet line, and Open over the whole card.
     card.classList.add("dgc-doc-card");
     card.dataset.tone = a.type;
-    card.innerHTML = `<span class="aico dgc-doc-tile" aria-hidden="true">${icon(ARTIFACT_MARK[a.type])}</span>`
+    // Its mark is a small sheet of its kind, its name on a coloured tab (media/shared/filesheet.js).
+    const sheets = window.DgcFileSheet;
+    card.innerHTML = `<span class="aico dgc-doc-tile${sheets ? " has-sheet" : ""}" aria-hidden="true">${sheets ? sheets.html(a.type) : icon(ARTIFACT_MARK[a.type])}</span>`
       + `<div class="ahead dgc-doc-words"><span class="anm dgc-doc-name"></span><div class="ameta dgc-doc-meta"></div></div>`;
     card.querySelector(".anm").textContent = a.title || kind;
     card.querySelector(".ameta").textContent = `${kind} · ${status}`;
@@ -5454,11 +5456,14 @@
     open.title = a.type === "doc" ? "Open it in the editor, over its own file" : "Open it in a panel of its own";
     open.onclick = () => vscode.postMessage({ type: "artifactOpen", id: a.id, artifactType: a.type, title: a.title || "" });
     row.appendChild(open);
+    if (sheets && !removed) row.insertAdjacentHTML("beforeend", sheets.openPill());   // Open, seen (the button above is the whole card)
     const formats = artifactFormats(a);
     if (formats.length) {
       const wrap = el("div", "amenu-wrap");
       const button = el("button", "abtn amenu-button"); button.type = "button";
-      button.innerHTML = `<span>Download</span>${icon("chevron-down", "xs")}`;
+      // Download is a round icon; its menu offers this kind's own formats.
+      if (sheets) { button.classList.add("dgc-doc-dl"); button.innerHTML = `<span class="dgc-doc-dl-word">Download</span>${sheets.DOWNLOAD}`; button.title = "Download"; }
+      else button.innerHTML = `<span>Download</span>${icon("chevron-down", "xs")}`;
       button.setAttribute("aria-haspopup", "menu"); button.setAttribute("aria-expanded", "false");
       button.disabled = removed;
       const menu = el("div", "amenu"); menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", "Download as"); menu.hidden = true;

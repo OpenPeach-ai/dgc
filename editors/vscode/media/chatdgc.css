@@ -745,6 +745,8 @@ button.cd-project-card:hover { border-color: var(--border-strong); background: v
 .lib-preview { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; overflow: hidden;
   border-radius: var(--r-md); background: var(--surface2); color: var(--muted); }
 .lib-preview img { width: 100%; height: 100%; object-fit: cover; }
+/* A row's small sheet of its kind (media/shared/filesheet.css) needs no tile under it, and room for its tab. */
+.lib-preview.lib-sheet { overflow: visible; background: none; border: 0; box-shadow: none; }
 .lib-preview .codicon { font-size: 18px; }
 .lib-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .lib-name { overflow: hidden; color: var(--text); font: var(--w-med) var(--t-sm)/1.35 var(--sans); text-overflow: ellipsis; white-space: nowrap; }
@@ -809,6 +811,16 @@ body.vscode-light .lib-menu { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
 .cd-card-answer summary { color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); cursor: pointer; }
 .cd-card-answer pre { max-height: 200px; overflow: auto; margin: var(--sp-1) 0 0; padding: var(--sp-2); border-radius: var(--r-md);
   background: var(--bg); color: var(--text); font: var(--w-reg) var(--t-xs)/1.45 var(--mono, ui-monospace, monospace); white-space: pre-wrap; }
+
+/* The same look as every card that asks (media/shared/card.css): its corner and hairline, its ground a step off the
+   page, its mark in a small grey tile, and its answers as pills. What the card holds and does is unchanged. */
+.cd-card { border-color: var(--hair); border-radius: var(--r-card); background: color-mix(in srgb, var(--text) 4.5%, transparent); }
+.cd-card-head { align-items: flex-start; gap: 9px; }
+.cd-card-mark { width: 22px; height: 22px; margin-top: 1px; border-radius: 7px; background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); font: var(--w-med) 11px/1 var(--sans); }
+.cd-card-mark img { width: 16px; height: 16px; }
+.cd-card-words strong { font: var(--w-med) var(--t-chat)/1.35 var(--sans); }
+.cd-card-words small { color: var(--text-2); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
+.cd-card-actions button { border-radius: var(--r-full); }
 
 /* A finished plugin card, folded to one row where it happened in the reply (as Work's tool steps): chevron, logo, what
    it did, how it went. The card itself opens under the row, on a rule, without its own head (the row is its head). */
