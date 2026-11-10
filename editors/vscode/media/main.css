@@ -425,6 +425,17 @@ body.vscode-light .agent-mark[data-mark="6"] { --mark: #5A9E28; }
 /* transcript */
 #log { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto;
   overscroll-behavior: contain; overflow-anchor: none; padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); }
+/* A new session isn't a blank window: DGC's mark (media/dgc.svg), muted, in the middle of the empty transcript, as Codex
+   shows its own. The first message takes its place. It fades in after a moment, so a resumed chat whose history
+   arrives at once never flashes it. */
+#log:empty { justify-content: center; align-items: center; }
+#log:empty::before { content: ""; display: block; flex: none; width: 44px; height: 44px; margin-bottom: var(--sp-6, 24px);
+  background: color-mix(in srgb, var(--text) 20%, transparent);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%3E%3Cpath%20d='M7.63%204.67%20L3.44%206.76%20L1%2021.43%20L5.19%2019.33%20Z'/%3E%3Cpath%20d='M15.32%202.57%20L11.13%204.67%20L8.68%2021.43%20L12.87%2019.33%20Z'/%3E%3Cpath%20d='M23%204.67%20L18.81%206.76%20L16.37%2019.33%20L20.56%2017.24%20Z'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%3E%3Cpath%20d='M7.63%204.67%20L3.44%206.76%20L1%2021.43%20L5.19%2019.33%20Z'/%3E%3Cpath%20d='M15.32%202.57%20L11.13%204.67%20L8.68%2021.43%20L12.87%2019.33%20Z'/%3E%3Cpath%20d='M23%204.67%20L18.81%206.76%20L16.37%2019.33%20L20.56%2017.24%20Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  animation: dgc-empty-mark .4s ease .25s both; }
+@keyframes dgc-empty-mark { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { #log:empty::before { animation: none; } }
+@media (forced-colors: active) { #log:empty::before { forced-color-adjust: none; background: GrayText; } }
 .msg { flex: none; display: flex; flex-direction: column; gap: var(--sp-1); }
 /* The space between transcript blocks is #log's gap and nothing else, so a block only gets it as a
    flex item of #log. Restored history is kept in one wrapper so it can be replaced as a unit, and as
