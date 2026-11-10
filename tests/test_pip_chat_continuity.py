@@ -189,6 +189,50 @@ class ContinuityTests(unittest.TestCase):
         self.assertEqual(self.send('second')['manifest']['conversation'],second['manifest']['conversation'])
 
 
+    def steered_and_briefed(self, *, earlier_code=False):
+        """A reply that took a mid-turn update and wrote the brief (it does once the conversation outgrows its budget).
+        earlier_code: the brief is written as before the fix, its own exchange hashed without the update."""
+        from contextlib import nullcontext
+        from dgc import pip_steering
+        self.job(); first = self.send()
+        update = pip_chat.send(self.store, self.pip['id'], 'Also: keep it to one line.', 'steer-1', 'user', self.cfg)
+        self.assertTrue(update['message']['steered'])
+        self.store.claim_next()
+        pip_steering.applied(self.store, first['id'], [update['message']['id']])
+        with patch('dgc.pip_steering.applied_text', return_value=[]) if earlier_code else nullcontext():
+            self.store.finish(first['id'], result={'text': 'Noted, one line.', 'continuity': self.candidate(first)})
+        return first
+
+    def test_a_mid_turn_update_in_a_reply_that_writes_the_brief_leaves_the_chat_usable(self):
+        # Found live on 11 Nov: the brief hashed the user message without the update, the archive check with it, and
+        # every later message was refused ("The conversation archive disagrees with the saved brief").
+        self.steered_and_briefed()
+        saved = continuity.latest(self.store, self.pip['id'], verify_archive=True)
+        self.assertEqual(saved['state']['messages'], 2)
+        third = self.send('third', 'What did I ask for?')
+        self.assertEqual(third['manifest']['conversation']['continuity']['head']['messages'], 2)
+
+    def test_a_chat_whose_brief_was_written_without_the_update_carries_on(self):
+        # A brief written by the earlier code (steering shipped in 0.51): its own exchange hashed without the update.
+        # Such a chat was stuck; it now carries on, and the next brief is written right.
+        self.steered_and_briefed(earlier_code=True)
+        self.assertEqual(continuity.latest(self.store, self.pip['id'], verify_archive=True)['state']['messages'], 2)
+        third = self.send('third', 'What did I ask for?')
+        self.assertEqual(third['manifest']['conversation']['continuity']['head']['messages'], 2)
+        self.store.claim_next()
+        self.store.finish(third['id'], result={'text': 'One line.', 'continuity': self.candidate(third)})
+        self.assertEqual(continuity.latest(self.store, self.pip['id'], verify_archive=True)['state']['messages'], 4)
+        self.send('fourth', 'And now?')
+
+    def test_a_brief_that_disagrees_for_any_other_reason_is_still_refused(self):
+        self.steered_and_briefed()
+        with self.registry.transaction():
+            self.registry.db.execute("UPDATE pip_chat_steers SET text='Something else entirely.'")
+        with self.assertRaisesRegex(RegistryError, 'disagrees with the saved brief'):
+            continuity.latest(self.store, self.pip['id'], verify_archive=True)
+        with self.assertRaisesRegex(RegistryError, 'disagrees with the saved brief'):
+            self.send('third', 'What did I ask for?')
+
 class WorkerBriefTests(unittest.TestCase):
     def fixture(self, *, error=False, malformed=False, cancelled=False):
         cfg=SimpleNamespace(get=lambda key,default=None: 'sk-test-secret-value' if key=='api_key' else default,

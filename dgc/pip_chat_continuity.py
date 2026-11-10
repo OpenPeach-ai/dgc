@@ -107,27 +107,52 @@ def _pairs(store, pip_id, conversation_id=None):
         for r in pair:
             content = store.db.execute('SELECT text FROM pip_chat_messages WHERE seq=?', (r['seq'],)).fetchone()[0]
             validate_text(content, reply=r['role'] == 'assistant')
-            if r['role'] == 'user':
-                from .pip_steering import applied_text
-                updates = applied_text(store.db, r['run_id'])
-                if updates:
-                    content += ''.join('\n\n[User update during this reply]\n' + text for text in updates)
-            messages.append({'role': r['role'], 'content': content})
+            messages.append({'role': r['role'], 'content': with_updates(store, r, content)})
         yield pair, messages
 
 
-def archive(store, pip_id, through=None, conversation_id=None):
-    chain, count, end = EMPTY_DIGEST, 0, 0
+def with_updates(store, row, content):
+    """A stored message as its reply read it: a user message with the updates the user sent during that reply (the
+    archive, its check and a new brief all hash it this way)."""
+    if row['role'] != 'user':
+        return content
+    from .pip_steering import applied_text
+    updates = applied_text(store.db, row['run_id'])
+    return content + ''.join('\n\n[User update during this reply]\n' + text for text in updates) if updates else content
+
+
+def _chain(previous, row, pip_id, content):
+    return digest({'previous': previous, 'seq': row['seq'], 'id': row['id'], 'run_id': row['run_id'],
+                   'workspace_id': row['workspace_id'], 'pip_id': pip_id, 'model': row['model'],
+                   'role': row['role'], 'content': content})
+
+
+def _written_without_updates(store, pip_id, previous, rows):
+    """A brief's own exchange as the earlier code hashed it: its user message without the updates sent during the reply
+    (11 Nov: that left such a chat refusing every later message). Read only to accept that brief once more."""
+    chain = previous
+    for r in rows:
+        text_now = store.db.execute('SELECT text FROM pip_chat_messages WHERE seq=?', (r['seq'],)).fetchone()[0]
+        chain = _chain(chain, r, pip_id, text_now)
+    return chain
+
+
+def archive(store, pip_id, through=None, conversation_id=None, *, as_written=False):
+    """The archive's coverage up to `through`. as_written: its last exchange hashed as the earlier code wrote a brief's
+    own exchange (_written_without_updates), to accept such a brief."""
+    chain, count, end, previous, last = EMPTY_DIGEST, 0, 0, EMPTY_DIGEST, None
     for rows, messages in _pairs(store, pip_id, conversation_id):
         if through is not None and rows[-1]['seq'] > through:
             break
+        previous, last = chain, rows
         for r, m in zip(rows, messages):
-            chain = digest({'previous': chain, 'seq': r['seq'], 'id': r['id'], 'run_id': r['run_id'],
-                            'workspace_id': r['workspace_id'], 'pip_id': pip_id, 'model': r['model'], **m})
+            chain = _chain(chain, r, pip_id, m['content'])
             count += 1
             end = r['seq']
     if through is not None and end != through:
         fail('The saved brief no longer matches its covered archive boundary.')
+    if as_written and last is not None:
+        chain = _written_without_updates(store, pip_id, previous, last)
     return {'through_seq': end, 'messages': count, 'archive_digest': chain}
 
 
@@ -171,7 +196,9 @@ def latest(store, pip_id, *, verify_archive=True, conversation_id=None):
     if verify_archive:
         expected = archive(store, pip_id, body['state']['through_seq'], conversation_id=conversation_id)
         if any(body['state'][k] != v for k, v in expected.items()):
-            fail('The conversation archive disagrees with the saved brief. No unverified brief was loaded.')
+            earlier = archive(store, pip_id, body['state']['through_seq'], conversation_id=conversation_id, as_written=True)
+            if any(body['state'][k] != v for k, v in earlier.items()):
+                fail('The conversation archive disagrees with the saved brief. No unverified brief was loaded.')
     return {'id': row['id'], 'digest': row['digest'], **body}
 
 
@@ -213,13 +240,14 @@ def prepare(store, pip_id, context_size, *, secrets=(), conversation_id=None):
     recent, history = [], []
     chain, count, end = EMPTY_DIGEST, 0, 0
     for rows, pair in _pairs(store, pip_id, conversation_id):
+        previous = chain
         for r, m in zip(rows, pair):
-            chain = digest({'previous': chain, 'seq': r['seq'], 'id': r['id'], 'run_id': r['run_id'],
-                            'workspace_id': r['workspace_id'], 'pip_id': pip_id, 'model': r['model'], **m})
+            chain = _chain(chain, r, pip_id, m['content'])
             count += 1
         end = rows[-1]['seq']
         if end == covered['through_seq']:
-            if count != covered['messages'] or chain != covered['archive_digest']:
+            if count != covered['messages'] or (chain != covered['archive_digest'] and
+                                                _written_without_updates(store, pip_id, previous, rows) != covered['archive_digest']):
                 fail('The conversation archive disagrees with the saved brief. No unverified brief was loaded.')
             verified = True
         if rows[-1]['seq'] <= state['through_seq']:
@@ -369,9 +397,8 @@ def commit(store, run, result, now):
         if len(rows) != 2:
             fail('A checkpoint requires the complete current exchange.')
         for r in rows:
-            chain = digest({'previous': chain, 'seq': r['seq'], 'id': r['id'], 'run_id': r['run_id'],
-                            'workspace_id': r['workspace_id'], 'pip_id': r['pip_id'], 'model': r['model'],
-                            'role': r['role'], 'content': r['text']})
+            # As the archive and its check hash it: a user message with the updates sent during this reply.
+            chain = _chain(chain, r, r['pip_id'], with_updates(store, r, r['text']))
         state.update(summary=candidate['summary'], strategy=candidate['strategy'],
                      through_seq=rows[-1]['seq'], messages=actual['messages'] + 2, archive_digest=chain)
     elif candidate['summary'] != state['summary'] or candidate['strategy'] != state['strategy']:
