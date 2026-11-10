@@ -119,7 +119,7 @@ test("a permission the fix needs is asked on its card, and the agents pill says 
   assert.match(file.textContent, /Copy \.env from your project into the fix copy\?/);
   assert.match(file.textContent, /the API tests read DATABASE_URL/);
   assert.match(file.textContent, /copied, never linked/);
-  assert.deepEqual([...file.querySelectorAll(".btns button")].map((b) => b.textContent), ["Copy it", "Not now"]);
+  assert.deepEqual([...file.querySelectorAll(".btns button")].map((b) => b.textContent), ["Not now", "Copy it"]);
   assert.deepEqual(s.errors, []);
 });
 

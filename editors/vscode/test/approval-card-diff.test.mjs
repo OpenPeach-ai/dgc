@@ -60,10 +60,10 @@ async function collapseThenAllow(s, card, id) {
     resolved: c.classList.contains("resolved"),
     answersEnabled: [...c.querySelectorAll(".btns button")].filter((b) => !b.disabled).map((b) => b.dataset.d),
   }));
-  assert.deepEqual(await state(), { open: true, expanded: "true", resolved: false, answersEnabled: ["once", "always", "deny"] });
+  assert.deepEqual(await state(), { open: true, expanded: "true", resolved: false, answersEnabled: ["always", "deny", "once"] });
 
   await toggle.click();
-  assert.deepEqual(await state(), { open: false, expanded: "false", resolved: false, answersEnabled: ["once", "always", "deny"] },
+  assert.deepEqual(await state(), { open: false, expanded: "false", resolved: false, answersEnabled: ["always", "deny", "once"] },
     "the arrow collapses the diff, and the card stays open and undecided");
   assert.deepEqual(await s.posted("permission_response"), [], "collapsing a diff answers nothing");
   await toggle.click();

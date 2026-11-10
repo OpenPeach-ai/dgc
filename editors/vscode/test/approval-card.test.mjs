@@ -76,13 +76,14 @@ for (const theme of ["dark-modern", "light-modern"]) {
     const s = await scene(theme);
     try {
       const open = await s.facts("once");
-      assert.equal(open.feedbackShown, true, "an open card asks for the optional deny note");
+      assert.equal(open.feedbackShown, false, "an open card asks for no note until Deny (ui-04, U4)");
       assert.equal(open.buttonsShown, 3);
       assert.equal(open.decision, "");
 
       await s.card("once").locator('button[data-d="once"]').click();
+      await s.card("deny").locator('button[data-d="deny"]').click();          // the note box opens
       await s.card("deny").locator(".feedback").fill("Use the fixture database instead");
-      await s.card("deny").locator('button[data-d="deny"]').click();
+      await s.card("deny").locator("button[data-send-note]").click();
       await s.card("always").locator('button[data-d="always"]').click();
       // Answered elsewhere (the backend resolved it): the card still says how.
       await s.send({ type: "permission_resolved", id: "req-backend", decision: "no", message: "Denied by a rule" });
@@ -181,7 +182,7 @@ test("a signed-in Chrome card names the site and what it can do there", async (t
     const card = s.card("chrome");
     assert.equal((await card.locator(".q").innerText()).trim(), "Use your signed-in Chrome on mail.google.com?");
     assert.match(await card.innerText(), /DGC wants to open mail\.google\.com in a window of its own in your Chrome, where you're signed in\. It can read and act on that site as you\./);
-    assert.deepEqual(await card.locator("button").allInnerTexts(), ["Allow once", "Always allow mail.google.com", "Deny"]);
+    assert.deepEqual(await card.locator("button").allInnerTexts(), ["Always allow mail.google.com", "Deny", "Allow once"]);
     assert.equal(await card.locator("pre").innerText(), "https://mail.google.com/mail/u/0/#inbox");
     assert.equal(await s.card("evil").locator("b b, .q b b").count(), 0, "a name is text, never markup");
     await card.locator('button[data-d="always"]').click();
@@ -214,7 +215,7 @@ for (const theme of ["dark-modern", "light-modern"]) {
       assert.equal((await card.locator(".perm-prompt").innerText()).trim(), args.prompt);
       const text = await card.innerText();
       assert.doesNotMatch(text, /Run generate_image|\{|"provider"|If you deny/);
-      assert.deepEqual(await card.locator(".btns button").allInnerTexts(), ["Make it · about $0.003", "Edit", "Always allow", "Don't"]);
+      assert.deepEqual(await card.locator(".btns button").allInnerTexts(), ["Edit", "Always allow", "Don't", "Make it · about $0.003"]);
       if (process.env.DGC_SHOTS) await card.screenshot({ path: `${process.env.DGC_SHOTS}/image-card-${theme}.png` });
       await card.locator("[data-edit-prompt]").click();
       await card.locator(".perm-edit textarea").fill("A small round sticker of a smiling lemon");
@@ -229,7 +230,7 @@ for (const theme of ["dark-modern", "light-modern"]) {
         suggested_rule: "GenerateImage", choices: ["once", "always", "deny"] });
       const two = s.card("two");
       assert.equal((await two.locator(".q").innerText()).trim(), "Make these 2 images with fal.ai FLUX Schnell?");
-      assert.equal(await two.locator(".btns button").first().innerText(), "Make it · about $0.006");
+      assert.equal(await two.locator(".btns button").last().innerText(), "Make it · about $0.006", "the filled button, at the right end");
       assert.match(await two.locator(".perm-note").innerText(), /pass this month's limit/);
       await two.locator('button[data-d="always"]').click();
       const always = await s.page.evaluate(() => window.__posted.filter((m) => m.type === "permission_response" && m.id === "req-two"));
@@ -265,7 +266,7 @@ for (const theme of ["dark-modern", "light-modern"]) {
       assert.equal(await batch.locator(".perm-brief p").first().isVisible(), false, "each brief is one click away");
       await batch.locator(".perm-brief summary").first().click();
       assert.equal((await batch.locator(".perm-brief p").first().innerText()).trim(), tasks[0].prompt);
-      assert.deepEqual(await batch.locator(".btns button").allInnerTexts(), ["Start them", "Always allow", "Deny"]);
+      assert.deepEqual(await batch.locator(".btns button").allInnerTexts(), ["Always allow", "Deny", "Start them"]);
       assert.equal(await batch.locator(".deny-note").count(), 1, "a note for the model if you deny");
       if (process.env.DGC_SHOTS) await batch.screenshot({ path: `${process.env.DGC_SHOTS}/helpers-card-${theme}.png` });
       await s.send({ type: "permission_request", id: "req-one", call_id: "t2", name: "task",
@@ -273,7 +274,7 @@ for (const theme of ["dark-modern", "light-modern"]) {
       const one = s.card("one");
       assert.equal((await one.locator(".q").innerText()).trim(), "Start a helper?");
       assert.match(await one.innerText(), /Map the auth module[\s\S]*In the background/);
-      assert.equal(await one.locator(".btns button").first().innerText(), "Start it");
+      assert.equal(await one.locator(".btns button").last().innerText(), "Start it", "the filled button, at the right end");
 
       await s.send({ type: "permission_request", id: "req-mcp", call_id: "m1", name: "mcp__example__get-time", args: {},
         summary: "", suggested_rule: "mcp__example__get-time", choices: ["once", "always", "deny"] });
@@ -307,7 +308,7 @@ test("a plugin's tool's Allow card names the plugin as its card does", async (t)
       summary: "", suggested_rule: "mcp__example__get-time", choices: ["once", "deny"] });
     const card = s.card("named");
     assert.equal((await card.locator(".q").innerText()).trim(), "Use Get time from MCP Apps example?");
-    assert.deepEqual(await card.locator(".btns button").allInnerTexts(), ["Allow once", "Deny"]);
+    assert.deepEqual(await card.locator(".btns button").allInnerTexts(), ["Deny", "Allow once"]);
     await card.locator('button[data-d="once"]').click();
     assert.match(await card.innerText(), /Get time · MCP Apps example · Allowed once/);
     await s.send({ type: "permission_request", id: "req-other", call_id: "n2", name: "mcp__notes__save_note", args: {},

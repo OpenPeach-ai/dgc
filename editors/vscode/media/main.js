@@ -8369,12 +8369,14 @@ function permissionChoices(ev) {
         // (router_update) and a look on the network (router_find) send ["once", "deny"], asked every time, so they get
         // no Always allow. An older CLI sends no list (or all three): every button, as before.
         const offered = permissionChoices(ev);
+        // The same order on every card (ui-04, U5): Always allow, Deny, then Allow once, the only filled button, at the
+        // right end, where the eye ends and the hand already is.
         const buttons = fixFile
-          ? `<button type="button" class="act primary" data-d="once">Copy it</button><button type="button" class="act" data-d="deny">Not now</button>`
-          : (offered.has("once") ? `<button type="button" class="act primary" data-d="once"${plain?.blocked ? ' disabled title="It would pass this month\'s limit"' : ""}>${esc(plain?.labels.once || "Allow once")}</button>` : "")
-            + (plain?.edit != null && offered.has("deny") ? '<button type="button" class="act" data-edit-prompt aria-expanded="false">Edit</button>' : "")
+          ? `<button type="button" class="act" data-d="deny">Not now</button><button type="button" class="act primary" data-d="once">Copy it</button>`
+          : (plain?.edit != null && offered.has("deny") ? '<button type="button" class="act" data-edit-prompt aria-expanded="false">Edit</button>' : "")
             + (offered.has("always") ? `<button type="button" class="act" data-d="always">${signedIn ? `Always allow ${esc(site || "this site")}` : esc(plain?.labels.always || "Always allow")}</button>` : "")
-            + (offered.has("deny") ? `<button type="button" class="act" data-d="deny">${esc(plain?.labels.deny || "Deny")}</button>` : "");
+            + (offered.has("deny") ? `<button type="button" class="act" data-d="deny">${esc(plain?.labels.deny || "Deny")}</button>` : "")
+            + (offered.has("once") ? `<button type="button" class="act primary" data-d="once"${plain?.blocked ? ' disabled title="It would pass this month\'s limit"' : ""}>${esc(plain?.labels.once || "Allow once")}</button>` : "");
         // Edit: the prompt in a box; "Ask again with this prompt" answers the card with the new prompt for the model,
         // which asks again with it (a new card, its price), so nothing is made from words you didn't see.
         const editor = plain?.edit != null ? `<div class="perm-edit" hidden><label class="sr-only" for="perm-edit-${esc(ev.id)}">The prompt</label>`
@@ -8385,15 +8387,44 @@ function permissionChoices(ev) {
         // A plugin's tool whose logo this page doesn't have yet: the shield for now, and the host is asked for it.
         const logoFor = !fixAsk && !logo ? (/^mcp__([a-z0-9_-]{1,64})__/.exec(String(ev.name || "")) || [])[1] : "";
         if (logoFor) vscode.postMessage({ type: "pluginLogos", plugins: [logoFor] });
-        const inner = `<div class="q">${logo ? `<span class="perm-logo">${logo}</span>` : logoFor ? `<span data-logo-for="${esc(logoFor)}">${icon("shield")}</span>` : icon("shield")}<span>${title}</span></div>${helperHeading}${signedIn || fixFile ? "" : summary}${fixFile ? fixDetail : detail}${fixFile || plain && !plain.note ? "" : `<textarea class="feedback deny-note" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea>`}<div class="btns">${buttons}</div>${editor}`;
+        const inner = `<div class="q">${logo ? `<span class="perm-logo">${logo}</span>` : logoFor ? `<span data-logo-for="${esc(logoFor)}">${icon("shield")}</span>` : icon("shield")}<span>${title}</span></div>${helperHeading}${signedIn || fixFile ? "" : summary}${fixFile ? fixDetail : detail}${fixFile || plain && !plain.note ? "" : `<textarea class="feedback deny-note" rows="1" hidden aria-label="A note for the model (optional)" placeholder="A note for the model (optional)"></textarea>`}<div class="btns">${buttons}</div>${editor}`;
         // On the fix's card it is built there: drawn into a running turn first, it would break that turn's prose.
         const c = requestCard(fixAsk ? fixAskCard(fixAsk, inner) : decisionCard(inner, "Tool permission request"), ev.id);
+        if (!fixAsk) c.classList.add("perm-card");      // one line, then what it does (media/main.css, ui-04)
         const logoMark = c.querySelector(".q .perm-logo");
         if (logoMark) globalThis.DgcPluginCalls?.backdrop(logoMark.querySelector("img"), logoMark);
         if (ev.diff) { c.querySelector(".feedback")?.before(renderDiff(String(ev.diff))); }
         // Only the answers answer. The diff's own toggle and open button are buttons too: given this handler, collapsing
         // the diff on a fix's Allow card sent an answer with no decision, which denied the call (0.51.0 release candidate).
+        const noteBox = c.querySelector(".feedback.deny-note");
+        const answer = (b) => {
+          const edited = b.hasAttribute("data-edited") ? (c.querySelector(".perm-edit-text")?.value || "").trim().slice(0, 2000) : "";
+          if (b.hasAttribute("data-edited") && !edited) return;
+          // Read by the model and shown in the step's row: plain words for both.
+          const note = edited ? `Changed the prompt to: ${edited} — make it with this prompt instead (same generator, ${plain?.video ? "length and resolution" : "size and count"}).`
+            : b.hasAttribute("data-no-note") ? "" : (c.querySelector(".feedback")?.value || "").trim().slice(0, 2000);
+          if (!resolveCard(c, edited ? "Asked again with your prompt" : permissionDecision(b.dataset.d, plain?.rule === false ? "" : ev.suggested_rule, note))) return;
+          compactPermissionCard(c, plain ? plain.name : ev.name);
+          vscode.postMessage({ type: "permission_response", id: ev.id, decision: b.dataset.d,
+            rule: b.dataset.d === "always" ? ev.suggested_rule : undefined,
+            reason: b.dataset.d === "deny" && note ? note : undefined });
+        };
         c.querySelectorAll("button[data-d], button[data-edit-prompt]").forEach((b) => b.onclick = () => {
+          // Deny first asks for an optional note (ui-04, U4): the box opens with the keyboard in it, and the buttons
+          // become Deny without a note and Send note. Until then the card asks for nothing it may not need.
+          if (b.dataset.d === "deny" && noteBox && !c.dataset.deny && !b.hasAttribute("data-edited")) {
+            c.dataset.deny = "1";
+            noteBox.hidden = false;
+            c.querySelectorAll('.btns button:not([data-d="deny"])').forEach((x) => { x.hidden = true; });
+            b.textContent = "Deny without a note";
+            b.setAttribute("data-no-note", "");
+            const send = el("button", "act primary", "Send note");
+            send.type = "button"; send.dataset.d = "deny"; send.setAttribute("data-send-note", "");
+            send.onclick = () => answer(send);
+            b.after(send);
+            noteBox.focus();
+            return;
+          }
           if (b.hasAttribute("data-edit-prompt")) {
             const box = c.querySelector(".perm-edit");
             box.hidden = !box.hidden;
@@ -8401,16 +8432,7 @@ function permissionChoices(ev) {
             if (!box.hidden) box.querySelector("textarea").focus();
             return;
           }
-          const edited = b.hasAttribute("data-edited") ? (c.querySelector(".perm-edit-text")?.value || "").trim().slice(0, 2000) : "";
-          if (b.hasAttribute("data-edited") && !edited) return;
-          // Read by the model and shown in the step's row: plain words for both.
-          const note = edited ? `Changed the prompt to: ${edited} — make it with this prompt instead (same generator, ${plain?.video ? "length and resolution" : "size and count"}).`
-            : (c.querySelector(".feedback")?.value || "").trim().slice(0, 2000);
-          if (!resolveCard(c, edited ? "Asked again with your prompt" : permissionDecision(b.dataset.d, plain?.rule === false ? "" : ev.suggested_rule, note))) return;
-          compactPermissionCard(c, plain ? plain.name : ev.name);
-          vscode.postMessage({ type: "permission_response", id: ev.id, decision: b.dataset.d,
-            rule: b.dataset.d === "always" ? ev.suggested_rule : undefined,
-            reason: b.dataset.d === "deny" && note ? note : undefined });
+          answer(b);
         });
         break;
       }

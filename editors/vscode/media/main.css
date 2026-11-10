@@ -1107,6 +1107,23 @@ body.hide-reasoning .tool-group-label .tg-thought { display: none; }
 /* One line until you actually want to write in it — most approvals never need a note. */
 .card .feedback:focus { outline: none; min-height: 64px; border-color: var(--vscode-focusBorder, var(--accent)); }
 /* A card in plain words (a paid picture, a look on the network): its facts, the prompt as you wrote it, and Edit. */
+/* The approval card (ui-04, U4 and U5): one line, then what it does. A muted shield and its title at the left, Always
+   allow, Deny and Allow once at the right (only the last filled, 26 px high), the command in a small chip under it, and
+   the note for the model only after Deny. In a narrow panel the buttons go under the command, in the same order. */
+.card.perm-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--sp-3); align-items: center; }
+.card.perm-card > * { grid-column: 1 / -1; min-width: 0; }
+.card.perm-card > .q { grid-column: 1; grid-row: 1; margin: 0; padding: 0; border: 0; }
+.card.perm-card > .btns { grid-column: 2; grid-row: 1; justify-content: flex-end; flex-wrap: nowrap; gap: 6px; }
+.card.perm-card .q .ic, .card.perm-card .q > svg { color: var(--muted); }
+.card.perm-card .btns button.act { min-height: 26px; padding: 0 10px; }
+.card.perm-card .btns button.act:not(.primary) { background: transparent; border-color: var(--border-strong); }
+.card.perm-card pre { margin: 6px 0 0; padding: 3px 8px; border: 0; border-radius: var(--r-chip, 6px); font-size: 12px;
+  background: color-mix(in srgb, var(--text) 5%, transparent); }
+.card.perm-card .feedback { margin: var(--sp-2) 0 0; }
+.card.perm-card[data-deny="1"] > .btns { grid-column: 1 / -1; grid-row: auto; margin-top: var(--sp-2); }
+@media (max-width: 420px) {
+  .card.perm-card > .btns { grid-column: 1 / -1; grid-row: auto; justify-content: flex-start; flex-wrap: wrap; margin-top: var(--sp-2); }
+}
 .card .perm-facts { margin: var(--sp-1) 0 0; }
 .card .perm-note { margin: var(--sp-1) 0 0; color: var(--need-text); }
 .card .perm-prompt { margin: var(--sp-2) 0; padding: var(--sp-1) var(--sp-2); border-left: 2px solid var(--border-strong);

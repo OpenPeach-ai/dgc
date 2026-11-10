@@ -98,7 +98,7 @@ test("Work: a video's Allow card has its length, resolution, price and spend, an
     assert.equal(card.title, "Make this video with fal Wan 2.2 5B?");
     assert.equal(card.facts, "5 s · 720p · about $0.15 · this month $0.20 of your $5.00 limit · about 1–2 min");
     assert.equal(card.prompt, CARD.prompt);
-    assert.deepEqual(card.buttons, ["Make it · about $0.15", "Edit", "Don't"]);
+    assert.deepEqual(card.buttons, ["Edit", "Don't", "Make it · about $0.15"]);
     await panel.events([{ type: "permission_request", id: "p2", call_id: "v2", name: "generate_video", choices: ["once", "deny"],
       args: { ...CARD, over_limit: true, note: "This would pass this month's $0.30 limit on this key, so it can't be made." } }]);
     await panel.settle();

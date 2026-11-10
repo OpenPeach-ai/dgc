@@ -1630,7 +1630,8 @@ test("the activity verb is the backend's, and does not outlive the turn", () => 
   event({ type: "permission_request", id: "p1", name: "bash", command: "npm test", args: { command: "npm test" } });
   assert.equal(verb(), "waiting for your input");
   assert.ok(doc.querySelector(".thinking").classList.contains("waiting-input"));
-  doc.querySelector('.card button[data-d="deny"]').click();
+  doc.querySelector('.card button[data-d="deny"]').click();   // Deny asks for a note first (ui-04, U4)
+  doc.querySelector('.card button[data-no-note]').click();
   assert.equal(verb(), "Finishing open todos", "answered, and the backend's own state comes back");
   // A question docked in the composer is a request card too.
   event({ type: "tool_call", call_id: "q", name: "propose_options", args: {}, summary: "1 question · Pick" });
@@ -2303,8 +2304,11 @@ test("the approval card shows what the step will do, and Deny carries the note b
   assert.match(diff.textContent, /return a \+ b/, "the diff shows the new line");
   const note = card.querySelector("textarea.feedback");
   assert.ok(note, "a denial can carry a note");
-  note.value = "  keep subtraction, add a helper instead  ";
+  assert.ok(note.hidden, "asked for only after Deny (ui-04, U4)");
   card.querySelector('button[data-d="deny"]').click();
+  assert.equal(note.hidden, false, "Deny opens the note box first");
+  note.value = "  keep subtraction, add a helper instead  ";
+  card.querySelector("button[data-send-note]").click();
   const reply = posted.at(-1);
   assert.equal(reply.type, "permission_response");
   assert.equal(reply.id, "p1");

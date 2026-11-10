@@ -30,10 +30,10 @@ test("a Router change's card offers Allow once and Deny, never Always; an older 
   try {
     await send({ type: "permission_request", id: "r1", call_id: "c1", name: "router_update", args: { action: "turn_on" },
       suggested_rule: "RouterUpdate", choices: ["once", "deny"], summary: "Turn DGC Router on" });
-    assert.deepEqual(await buttons(page, "r1"), ["Allow once", "Deny"]);
+    assert.deepEqual(await buttons(page, "r1"), ["Deny", "Allow once"]);
     await send({ type: "permission_request", id: "r2", call_id: "c2", name: "router_find", args: {}, suggested_rule: "RouterFind",
       choices: ["once", "deny"] });
-    assert.deepEqual(await buttons(page, "r2"), ["Allow once", "Deny"]);
+    assert.deepEqual(await buttons(page, "r2"), ["Deny", "Allow once"]);
     // In plain words: what it looks for and where, never "Run router_find {}".
     const look = await page.evaluate(() => document.querySelector('.card[data-request-id="r2"]').innerText);
     assert.match(look, /Look for model servers on your network\?/);
@@ -43,10 +43,10 @@ test("a Router change's card offers Allow once and Deny, never Always; an older 
     assert.match(look, new RegExp(ports.replace(/\s+/g, " ").trim().replace(/[()]/g, "")), "the backend's own list");
     await send({ type: "permission_request", id: "r3", call_id: "c3", name: "bash", args: { command: "ls" }, command: "ls",
       suggested_rule: "Bash(ls)", choices: ["once", "always", "deny"] });
-    assert.deepEqual(await buttons(page, "r3"), ["Allow once", "Always allow", "Deny"]);
+    assert.deepEqual(await buttons(page, "r3"), ["Always allow", "Deny", "Allow once"]);
     await send({ type: "permission_request", id: "r4", call_id: "c4", name: "bash", args: { command: "pwd" }, command: "pwd",
       suggested_rule: "Bash(pwd)" });
-    assert.deepEqual(await buttons(page, "r4"), ["Allow once", "Always allow", "Deny"], "no list: as before");
+    assert.deepEqual(await buttons(page, "r4"), ["Always allow", "Deny", "Allow once"], "no list: as before");
     // Answering the Router's card sends exactly once.
     await page.evaluate(() => { window.__posted.length = 0; });
     await page.evaluate(() => [...document.querySelectorAll('.card[data-request-id="r1"] .btns button')].find((b) => b.textContent === "Allow once").click());
