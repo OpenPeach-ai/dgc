@@ -35,6 +35,12 @@ from .image_views import parse_dimensions
 
 MODEL_LONG_SIDE = 2500          # what the model is sent: the long side, in pixels
 MODEL_JPEG_QUALITY = 90         # high enough that 7-point print on a photographed page stays sharp
+# What a provider takes (Limits for everyone, 10 Nov: a message may now carry 20 photos of up to 20 MB): one picture
+# about 4.5 MB (Anthropic's is 5 MB a picture), a message's pictures together about 24 MB (its request is 32 MB). Past
+# either, a picture is sent as a JPEG and, if it must, smaller, in these steps of its long side.
+MODEL_IMAGE_BYTES = 4_500_000
+MODEL_IMAGES_BYTES = 24 * 1024 * 1024
+SMALLER_SIDES = (2000, 1600, 1280, 1024, 768, 512)
 # Shrinking softens edges, and small print is all edges. Measured with deepseek-v4.1-flash on a phone photo of a
 # bill (24 runs each, 5 photos per message): a 6.5-point claim reference read exactly 24/24 at 2,500 px from a
 # Lanczos shrink with this light unsharp mask (Pillow or ffmpeg), 23/24 without it, and 14-21/24 from GdkPixbuf's
@@ -353,8 +359,10 @@ def heic_to_jpeg(raw: bytes) -> bytes:
     return made
 
 
-def for_model(uri: str) -> str:
-    """The image a model is sent: a very large photo shrunk to MODEL_LONG_SIDE, anything else as it is.
+def for_model(uri: str, *, side: int = MODEL_LONG_SIDE, quality: int = MODEL_JPEG_QUALITY,
+              max_bytes: int = MODEL_IMAGE_BYTES) -> str:
+    """The image a model is sent: a very large photo shrunk to ``side``, one over ``max_bytes`` sent as a JPEG and, if it
+    must, smaller; anything else as it is.
 
     Never raises: when nothing on this computer can shrink it, the model gets the original."""
     try:
@@ -367,12 +375,24 @@ def for_model(uri: str) -> str:
         payload = match.group(2)
         head = base64.b64decode(payload[:4 * 87382], validate=True)   # 256 KiB covers any header
         size = parse_dimensions(head)
-        if size is None or max(size) <= MODEL_LONG_SIDE:
+        weight = len(payload.rstrip("=")) * 3 // 4
+        if size is None or (max(size) <= side and weight <= max_bytes):
             return uri
         raw = base64.b64decode(payload, validate=True)
         kind = "png" if mime == "image/png" else "jpeg"
         suffix = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/bmp": ".bmp"}[mime]
-        made = _convert(raw, suffix, kind, MODEL_LONG_SIDE, MODEL_JPEG_QUALITY, heic=False)
+        made = _convert(raw, suffix, kind, min(side, max(size)), quality, heic=False) if max(size) > side else None
+        if made is None or len(made) > max_bytes:
+            # Still too heavy for the provider (a big PNG, a dense photo): a JPEG, then a smaller one, until it fits.
+            kind = "jpeg"
+            steps = []
+            for step in (side,) + tuple(n for n in SMALLER_SIDES if n < side):
+                if min(step, max(size)) not in steps:
+                    steps.append(min(step, max(size)))          # each size once: a small photo isn't redone at its own size
+            for step in steps:
+                made = _convert(raw, suffix, kind, step, min(quality, 85), heic=False)
+                if made is None or len(made) <= max_bytes:
+                    break
         if made is None:
             return uri
         return f"data:image/{kind};base64," + base64.b64encode(made).decode("ascii")
@@ -380,9 +400,23 @@ def for_model(uri: str) -> str:
         return uri
 
 
+def _uri_bytes(uri) -> int:
+    match = _DATA_URI.fullmatch(uri) if isinstance(uri, str) else None
+    return len(match.group(2).rstrip("=")) * 3 // 4 if match else 0
+
+
 def for_model_all(images):
-    """``for_model`` for each of a prompt's images, in order."""
-    return [for_model(uri) for uri in images] if images else images
+    """``for_model`` for each of a prompt's images, in order; and together within what one request takes
+    (MODEL_IMAGES_BYTES): past it, each gets an even share and a smaller long side, step by step, until they fit."""
+    if not images:
+        return images
+    out = [for_model(uri) for uri in images]
+    share = max(1, MODEL_IMAGES_BYTES // len(images))
+    for step in SMALLER_SIDES:
+        if sum(_uri_bytes(uri) for uri in out) <= MODEL_IMAGES_BYTES:
+            break
+        out = [for_model(uri, side=step, quality=82, max_bytes=min(MODEL_IMAGE_BYTES, share)) for uri in images]
+    return out
 
 
 def converters() -> dict:

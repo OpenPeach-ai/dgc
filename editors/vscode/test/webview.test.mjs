@@ -4830,3 +4830,23 @@ test("a Codex CLI default missing from its model list is labelled and cannot be 
   assert.equal(posted.at(-1).model, "gpt-5.6-terra");
   assert.deepEqual(errors, []);
 });
+
+// Limits for everyone (10 Nov): a backend that says what one prompt may carry (ready.capabilities.attachment_limits)
+// lets Work's composer take that much (200 MB of images); one that doesn't keeps the spool's 32 MB.
+test("Work takes the images a backend says it takes, and 32 MB from one that doesn't say", () => {
+  for (const [limits, ok] of [[{ images_bytes: 200 * 1024 * 1024, image_bytes: 20 * 1024 * 1024 }, true], [undefined, false]]) {
+    const { dom, doc, send, errors } = makeDom();
+    send({ type: "event", event: { type: "ready", session_id: "chat-a",
+      capabilities: { image_spool: true, image_spool_dir: "/tmp/dgc-spool-test", ...(limits ? { attachment_limits: limits } : {}) } } });
+    dom.window.FileReader = class HoldingReader { readAsDataURL() {} };
+    const big = new dom.window.File([new Uint8Array(40 * 1024 * 1024)], "scan.png", { type: "image/png" });
+    const paste = new dom.window.Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, "clipboardData", { value: { items: [{ type: "image/png", getAsFile: () => big }] } });
+    doc.getElementById("input").dispatchEvent(paste);
+    const said = doc.getElementById("log").textContent;
+    if (ok) assert.doesNotMatch(said, /prompt limit/, "a 40 MB picture goes to a backend that takes 200 MB");
+    else assert.match(said, /32 MiB prompt limit/, "and not to one that doesn't say");
+    assert.deepEqual(errors, []);
+    dom.window.close();
+  }
+});

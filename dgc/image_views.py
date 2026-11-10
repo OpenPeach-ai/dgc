@@ -31,7 +31,7 @@ IMAGE_MIMES = frozenset(_IMAGE_TYPES.values())
 MODEL_MIMES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 MIME_EXTENSIONS = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif",
                    "image/webp": "webp", "image/bmp": "bmp"}
-MAX_VIEW_BYTES = MAX_IMAGE_FILE_BYTES        # 8 MB: view_image and the store's per-file ceiling
+MAX_VIEW_BYTES = MAX_IMAGE_FILE_BYTES        # 20 MB (was 8; Limits for everyone): view_image and the store's per-file ceiling
 MAX_IMAGES_PER_CALL = 8                      # images kept per step; the rest count as omitted
 MAX_INDEX = 512                              # records a session index keeps, oldest dropped
 STORE_BUDGET_BYTES = 256 * 1024 * 1024       # per-session sidecar; oldest files pruned on save
@@ -269,7 +269,7 @@ def store(session_file, data: bytes, *, name: object = "", source: str = "browse
           host: object = "", tool: str = "", call_id: str | None = None,
           live_call_id: str | None = None, anchor: int = 0, folded: int = 0) -> ImageRecord:
     """Keep ``data`` in the session's store and return its record. Idempotent: identical bytes are
-    one file. Raises ValueError for bytes that are not a supported image or exceed 8 MB."""
+    one file. Raises ValueError for bytes that are not a supported image or exceed MAX_VIEW_BYTES."""
     data = bytes(data or b"")
     mime = sniff(data)
     if mime is None:

@@ -424,6 +424,15 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 PIPS_API_VERSION = 79
 
 
+def attachment_limits() -> dict:
+    """What one prompt may carry, for the editor (ready.capabilities.attachment_limits): images by the spool, each up to
+    20 MB and 200 MB together; up to 50 files, a document up to 100 MB, 200 MB of them together."""
+    from . import attachments
+    return {"images_bytes": attachments.MAX_SPOOLED_IMAGE_TOTAL_BYTES, "image_bytes": attachments.MAX_SPOOLED_IMAGE_FILE_BYTES,
+            "files": attachments.MAX_ATTACHMENT_MENTIONS, "document_bytes": attachments.MAX_DOCUMENT_FILE_BYTES,
+            "files_bytes": attachments.MAX_DOCUMENT_TOTAL_BYTES}
+
+
 def _pips_platform_supported() -> bool:
     """Linux and macOS: the editor shows Windows a plain explanation instead (pip_access)."""
     from .pip_access import PLATFORM_SUPPORTED
@@ -2843,6 +2852,9 @@ class Backend:
                           # field on `ready` is fatal to a client that has not opted in -- the SDK
                           # refuses the whole event with "ready has an undeclared field".
                           "image_spool": True, "image_spool_dir": str(self._image_spool()),
+                          # What one prompt may carry (Limits for everyone, 10 Nov), so the editor allows what this
+                          # backend takes and an older one keeps its own.
+                          "attachment_limits": attachment_limits(),
                           # A spooled `image/heic` or `image/heif` (an iPhone photo) is taken and sent on as
                           # a JPEG (photos.heic_to_jpeg), or refused with one sentence saying what to install.
                           "heic_images": True,
@@ -3348,9 +3360,11 @@ class Backend:
         # folder: chatdgc_folder, chatdgc_set_folder and chatdgc_work_brief (a folder the chat reads; Continue in Work).
         # mentions: chatdgc_mentions is understood, and chatdgc_send takes display_mentions.
         # fallback: a chat's turn commands take `fallback` (and `fallback_provider`): its fallback model (D14).
+        # attachments: how many things one message may carry (Limits for everyone, 10 Nov: 50; it was 10).
+        from .chatdgc.attachments import MAX_ATTACHMENTS as chat_attachments
         return {"chatdgc": {"version": 1, "widget_report": 1, "widget_library": 1, "windows": list(CHATDGC_WINDOWS),
                             "context_breakdown": 1, "voice_replies": 1, "question_forms": 1, "outline": 1,
-                            "holder": 1, "folder": 1, "mentions": 1, "fallback": 1},
+                            "holder": 1, "folder": 1, "mentions": 1, "fallback": 1, "attachments": chat_attachments},
                 # history: memory_history and memory_undo; learned: memory_watch, then memory_learned when a
                 # Work session's look back keeps something (dgc/memory_review.py).
                 "memory": {"version": 1, "history": 1, "learned": 1}, "voice": {"version": 1}}

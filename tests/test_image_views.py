@@ -947,7 +947,7 @@ class ViewImageToolTests(unittest.TestCase):
                          f"error: {self.root / 'notes.txt'} is not an image DGC can show (PNG, JPEG, GIF, WebP or BMP)")
         (self.root / "huge.png").write_bytes(png(extra=b"\0" * image_views.MAX_VIEW_BYTES))
         self.assertEqual(execute("view_image", {"path": "huge.png"}, self.ctx),
-                         f"error: {self.root / 'huge.png'} is 8.0 MB; view_image reads images up to 8 MB")
+                         f"error: {self.root / 'huge.png'} is 20.0 MB; view_image reads images up to 20 MB")
         outside = Path(self.tmp.name) / "secret.png"
         outside.write_bytes(png())
         self.assertRegex(execute("view_image", {"path": str(outside)}, self.ctx),
@@ -972,7 +972,7 @@ class ViewImageToolTests(unittest.TestCase):
         self.assertEqual([q["source"] for q in tools.take_pending_images("view-image-test", "")], ["read_file"])
         (self.root / "huge.png").write_bytes(png(extra=b"\0" * image_views.MAX_VIEW_BYTES))
         self.assertEqual(execute("read_file", {"path": "huge.png"}, self.ctx),
-                         f"error: {self.root / 'huge.png'} is an image of 8.0 MB; images up to 8 MB can be viewed")
+                         f"error: {self.root / 'huge.png'} is an image of 20.0 MB; images up to 20 MB can be viewed")
         self.assertEqual(tools.take_pending_images("view-image-test", ""), [])
         self.ctx.vision = False
         self.assertIn("cannot read images", execute("read_file", {"path": "logo.png"}, self.ctx))

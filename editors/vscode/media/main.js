@@ -1180,6 +1180,9 @@
   // sent rather than what a JSON line can carry. `imageSpool` is set from ready.capabilities.
   const SPOOL_IMAGE_TOTAL_BYTES = 32 * 1024 * 1024;
   let imageSpool = false;
+  // What this backend takes in one prompt (ready.capabilities.attachment_limits, Limits for everyone, 10 Nov: 200 MB of
+  // images); a backend that doesn't say keeps the 32 MB above.
+  let spoolImageTotalBytes = SPOOL_IMAGE_TOTAL_BYTES;
   // An iPhone photo (HEIC/HEIF): Chromium can't show one, but a backend with capabilities.heic_images takes it
   // through the spool and sends the model a JPEG (photos.heic_to_jpeg).
   let heicImages = false;
@@ -1187,7 +1190,7 @@
   const heicFile = (file) => HEIC_IMAGE_TYPES.has(String(file.type || "").toLowerCase())
     || (!file.type && /\.hei[cf]$/i.test(String(file.name || "")));
   const imageFileCeiling = () => (imageSpool ? Infinity : MAX_IMAGE_FILES);
-  const imageByteCeiling = () => (imageSpool ? SPOOL_IMAGE_TOTAL_BYTES : MAX_IMAGE_TOTAL_BYTES);
+  const imageByteCeiling = () => (imageSpool ? spoolImageTotalBytes : MAX_IMAGE_TOTAL_BYTES);
   const SUPPORTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"]);
   const PASTED_TEXT_LIMIT = 5000;   // characters; past this a paste becomes an attachment
   let pendingImageFiles = 0, pendingImageBytes = 0;
@@ -8297,6 +8300,8 @@ function permissionChoices(ev) {
         if (pipRunsLive) vscode.postMessage({ type: "pipRunsWatch" });
         agentMapCapabilities();
         imageSpool = ev.capabilities?.image_spool === true;
+        { const limits = ev.capabilities?.attachment_limits, said = limits && limits.images_bytes;
+          spoolImageTotalBytes = Number.isSafeInteger(said) && said > 0 && said <= 1024 * 1024 * 1024 ? said : SPOOL_IMAGE_TOTAL_BYTES; }
         heicImages = imageSpool && ev.capabilities?.heic_images === true;
         pipReferencesSupported = ev.capabilities?.pip_references === 1;
         displayMentionsVersion = Number(ev.capabilities?.display_mentions) || 0;

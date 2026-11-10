@@ -19,9 +19,12 @@ import stat
 import uuid
 from pathlib import Path
 
-MAX_ATTACHMENTS = 10
-MAX_FILE_BYTES = 25 * 1024 * 1024
-MAX_IMAGE_BYTES = 8 * 1024 * 1024
+# Raised for everyone (Limits for everyone, 10 Nov; they were 10, 25 MB and 8 MB): what the model is sent is still what
+# its provider takes (photos.for_model_all).
+MAX_ATTACHMENTS = 50
+MAX_FILE_BYTES = 100 * 1024 * 1024
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_MESSAGE_BYTES = 200 * 1024 * 1024
 MAX_PASTE_CHARS = 1_000_000
 MAX_MODEL_CHARS = 200_000          # of one attachment's text, for the model
 ATTACHMENT_ID = re.compile(r"att_[a-f0-9]{32}\Z")
@@ -100,6 +103,8 @@ def prepare(items) -> list[dict]:
             out.append(_pasted_text(item))
         else:
             raise AttachmentError("An attachment is a file, an image or pasted text.")
+        if sum(len(made["raw"]) for made in out if isinstance(made.get("raw"), (bytes, bytearray))) > MAX_MESSAGE_BYTES:
+            raise AttachmentError(f"Attach up to {MAX_MESSAGE_BYTES // (1024 * 1024)} MB to one message.")
     return out
 
 

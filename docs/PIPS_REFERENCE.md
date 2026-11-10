@@ -1815,8 +1815,8 @@ files 0600) and sends only names.
 
 | Field | Shape | Limits |
 | --- | --- | --- |
-| `spooled_images` | `[{name, media_type}]`: the file's bare name in the spool, and `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/bmp`, `image/heic` or `image/heif` | 1 to 64; 8 MiB a photo, 32 MiB in all (`attachments.MAX_SPOOLED_IMAGE_*`) |
-| `spooled_files` | `[{name, spool}]`: your file's own name, and its bare name in the spool | 1 to 16; a document 16 MiB, a text or code file (CSV and TSV too) 1 MiB, 32 MiB in all (`attachments.MAX_DOCUMENT_*`, `MAX_TEXT_FILE_BYTES`) |
+| `spooled_images` | `[{name, media_type}]`: the file's bare name in the spool, and `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/bmp`, `image/heic` or `image/heif` | 1 to 64; 20 MiB a photo, 200 MiB in all (`attachments.MAX_SPOOLED_IMAGE_*`; from API 79, they were 8 and 32 MiB) |
+| `spooled_files` | `[{name, spool}]`: your file's own name, and its bare name in the spool | 1 to 50; a document 100 MiB, a text or code file (CSV and TSV too) 1 MiB, 200 MiB in all (`attachments.MAX_DOCUMENT_*`, `MAX_TEXT_FILE_BYTES`; from API 79, they were 16 files, 16 and 32 MiB). Photos and files together are at most 200 MiB a message. |
 
 A name is a bare file name: no folder, no `..`, nothing absolute. The backend reads each one no
 further than its limit, checks it exactly as an inline one (an image's bytes must be the type it
@@ -1838,7 +1838,8 @@ is kept.
 The registry schema stays 46. A registry made earlier holds `pip_chat_images` and `pip_chat_files`
 with the inline limits in their `CHECK`s (index 0–3, 2 MiB); the first message that brings images
 or files rebuilds both, rows kept, in its own transaction, with the new bounds (images: index
-0–63, 8 MiB; files: index 0–15, 16 MiB). An older DGC still opens the registry and reads them.
+0–63, 20 MiB; files: index 0–49, 100 MiB, since API 79; a table with API 52's bounds is rebuilt the same way). An
+older DGC still opens the registry and reads them.
 
 `get_pip_message_image` takes `as_file` (API 52): with `true` the result is `{pip_id, message_id,
 index, path, mime, bytes}`, where the kept file is, instead of `image`. A photo of 8 MiB is more

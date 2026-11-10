@@ -348,8 +348,8 @@ class LibraryTests(Phase7):
         self.assertEqual(self.store.library()["total"], 2, "and it's in the Library as this chat's too")
         with self.assertRaisesRegex(ChatEngineError, "no longer in your Library"):
             self.say(two["id"], "Again", attachments=[{"kind": "library", "conversation_id": one["id"], "attachment_id": "att_" + "0" * 32}])
-        with self.assertRaisesRegex(ChatEngineError, "up to 10"):
-            self.say(two["id"], "Too many", attachments=[{"kind": "library", "conversation_id": one["id"], "attachment_id": source["id"]}] * 11)
+        with self.assertRaisesRegex(ChatEngineError, "up to 50"):          # 50 a message (Limits for everyone)
+            self.say(two["id"], "Too many", attachments=[{"kind": "library", "conversation_id": one["id"], "attachment_id": source["id"]}] * 51)
 
     def test_deleting_a_file_from_the_library_leaves_its_chat_saying_so(self):
         one = self.engine.open()

@@ -416,7 +416,7 @@ TOOL_SCHEMAS = [
          "offset": {"type": "integer", "description": "1-based start line"},
          "limit": {"type": "integer", "description": "Max lines to read"}}, ["path"]),
     _fn("view_image", "Look at an image file in the workspace (PNG, JPEG, GIF or WebP, up to "
-        "8 MB) when the task depends on what it shows: a screenshot, mockup, diagram, icon or "
+        "20 MB) when the task depends on what it shows: a screenshot, mockup, diagram, icon or "
         "rendered output. The image is attached for you to see after this batch.",
         {"path": {"type": "string"}}, ["path"]),
     _fn("show_file", "Show the user a file you made (recording, screenshot, export) as a chip they "
@@ -872,7 +872,7 @@ SCHEMAS_BY_NAME = {t["function"]["name"] for t in TOOL_SCHEMAS}
 # dgc/vision.py): the same tool, answering in text. It replaces the entry above, never joins it.
 VIEW_IMAGE_RELAY_SCHEMA = _fn(
     "view_image", "Find out what an image file in the workspace shows (PNG, JPEG, GIF or WebP, up to "
-    "8 MB): a screenshot, mockup, diagram, icon or rendered output. You cannot read images, so DGC "
+    "20 MB): a screenshot, mockup, diagram, icon or rendered output. You cannot read images, so DGC "
     "sends the image and your question to a vision model and returns its answer as text. Ask "
     "exactly what you need to know from the picture.",
     {"path": {"type": "string"},
@@ -1007,7 +1007,7 @@ def read_file(args: dict, ctx) -> str:
         # see also receives the pixels; one that cannot is told so.
         if len(raw) > image_views.MAX_VIEW_BYTES:
             return (f"error: {p} is an image of {image_views.human_size(len(raw))}; "
-                    "images up to 8 MB can be viewed")
+                    f"images up to {image_views.MAX_VIEW_BYTES // (1024 * 1024)} MB can be viewed")
         viewed = _view_image_bytes(p, raw, ctx, source="read_file")
         if _vision_available(ctx):
             return viewed
@@ -4949,7 +4949,7 @@ def view_image(args: dict, ctx) -> str:
         return f"error: {p} is a directory, not an image"
     if stat.S_ISREG(info.st_mode) and info.st_size > image_views.MAX_VIEW_BYTES:
         return (f"error: {p} is {image_views.human_size(info.st_size)}; "
-                "view_image reads images up to 8 MB")
+                f"view_image reads images up to {image_views.MAX_VIEW_BYTES // (1024 * 1024)} MB")
     try:
         captured = read_regular_bytes(p, maximum=image_views.MAX_VIEW_BYTES, missing_ok=True)
     except (OSError, WorkspaceBoundaryError) as e:
@@ -5006,7 +5006,7 @@ def _look_through_vision_model(ctx, p: Path, data: bytes, question: str, viewed:
 
 def _view_image_bytes(p: Path, data: bytes, ctx, *, source: str) -> str:
     """Queue a workspace image file for this call (the chat shows it; a model that can see gets it
-    after the batch) and say what was viewed. ``data`` is a sniffed image of at most 8 MB."""
+    after the batch) and say what was viewed. ``data`` is a sniffed image of at most image_views.MAX_VIEW_BYTES (20 MB)."""
     mime = image_views.sniff(data) or "image/png"
     try:
         rel = p.relative_to(Path(ctx.project_root).resolve(strict=False)).as_posix()

@@ -1255,14 +1255,16 @@ def unit_tests(tmp: Path):
           and "sanitization failed" in " ".join(_failed_sanitizer_attachment.notices))
 
     _png = b"\x89PNG\r\n\x1a\n" + b"fixture-payload"
-    for _image_index in range(5):
+    # One more image than a prompt takes (20 since Limits for everyone, 10 Nov; it was 4).
+    from dgc.attachments import MAX_IMAGE_FILES as _MAX_IMAGES
+    for _image_index in range(_MAX_IMAGES + 1):
         (_attachment_root / f"image-{_image_index}.png").write_bytes(_png)
     (_attachment_root / "spoof.png").write_bytes(b"not-a-png")
     _image_result = _expand_attachments(
-        "view @spoof.png " + " ".join(f"@image-{i}.png" for i in range(5)),
+        "view @spoof.png " + " ".join(f"@image-{i}.png" for i in range(_MAX_IMAGES + 1)),
         _attachment_root)
     check("image attachments validate magic bytes and enforce a bounded image count",
-          _image_result.image_files == 4 and len(_image_result.images) == 4
+          _image_result.image_files == _MAX_IMAGES and len(_image_result.images) == _MAX_IMAGES
           and all(value.startswith("data:image/png;base64,") for value in _image_result.images)
           and "image count limit reached" in " ".join(_image_result.notices)
           and "spoof.png" in " ".join(_image_result.notices))
@@ -1272,7 +1274,7 @@ def unit_tests(tmp: Path):
             (["https://example.com/image.png"], {}),
             (["data:image/png;base64,%%%"], {}),
             (["data:image/png;base64,bm90LXBuZw=="], {}),
-            ([*_image_result.images, _image_result.images[0]], {}),
+            ([_image_result.images[0]] * (_MAX_IMAGES + 1), {}),
             ([_image_result.images[0]], {"maximum_total_bytes": len(_png) - 1})):
         try:
             _validate_image_data_uris(_typed_images, **_typed_kwargs)
@@ -11996,6 +11998,7 @@ def test_acp_protocol():
               len(set(session_ids)) == 2 and len(server._sessions) == 2)
         state = server._sessions[session_ids[0]]
         import base64 as _acp_base64
+        from dgc.attachments import MAX_IMAGE_FILES as _ACP_MAX_IMAGES   # one more than a prompt takes
         _acp_png = b"\x89PNG\r\n\x1a\nacp-image"
         _acp_png64 = _acp_base64.b64encode(_acp_png).decode()
         _acp_valid_images = _ACP._prompt_images([
@@ -12004,7 +12007,7 @@ def test_acp_protocol():
         for _acp_blocks in (
                 [{"type": "image", "mimeType": "image/png", "data": "%%%"}],
                 [{"type": "image", "mimeType": "image/jpeg", "data": _acp_png64}],
-                [{"type": "image", "mimeType": "image/png", "data": _acp_png64}] * 5):
+                [{"type": "image", "mimeType": "image/png", "data": _acp_png64}] * (_ACP_MAX_IMAGES + 1)):
             try:
                 _ACP._prompt_images(_acp_blocks)
             except ValueError as _acp_image_error:

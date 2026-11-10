@@ -22,7 +22,10 @@ from .redaction import bounded_redacted_view
 from .workspace import WorkspaceBoundaryError, canonical_root, read_regular_bytes
 
 
-MAX_ATTACHMENT_MENTIONS = 16
+# Raised for everyone (Limits for everyone, 10 Nov): 50 files, a document up to 100 MB, 200 MB of documents and 200 MB
+# of images a message, an image up to 20 MB (they were 16, 16 MiB, 32 MiB, and 8 MiB an image). What a model is sent
+# is still what its provider takes (photos.for_model_all).
+MAX_ATTACHMENT_MENTIONS = 50
 MAX_ATTACHMENT_PATH_CHARS = 4_096
 MAX_TEXT_FILE_BYTES = 1_048_576
 MAX_TEXT_TOTAL_BYTES = 4_194_304
@@ -31,14 +34,14 @@ MAX_TEXT_TOTAL_CHARS = 64_000
 # A document is read for its text, so its bytes buy far less prompt than a plain text file's do:
 # a 4 MiB .docx is a few thousand words. The character budget below is what actually bounds what
 # reaches the model; these only bound what is read off disk before extraction.
-MAX_DOCUMENT_FILE_BYTES = 16_777_216
-MAX_DOCUMENT_TOTAL_BYTES = 33_554_432
+MAX_DOCUMENT_FILE_BYTES = 104_857_600
+MAX_DOCUMENT_TOTAL_BYTES = 209_715_200
 # .csv and .tsv are in documents.SUPPORTED but stay on the plain-text path: they already read
 # correctly there, and a release is not the place to change what already works.
 DOCUMENT_SUFFIXES = frozenset({".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp", ".rtf", ".pdf"})
-MAX_IMAGE_FILES = 4
-MAX_IMAGE_FILE_BYTES = 8_388_608
-MAX_IMAGE_TOTAL_BYTES = 20_971_520
+MAX_IMAGE_FILES = 20
+MAX_IMAGE_FILE_BYTES = 20_971_520
+MAX_IMAGE_TOTAL_BYTES = 209_715_200
 MAX_EDITOR_IMAGE_TOTAL_BYTES = 2_097_152
 # Out-of-band images. A pasted image used to ride inside the JSON command as a base64 data URI,
 # and the 4 MiB protocol frame (editor_protocol.MAX_COMMAND_BYTES) had to hold the prompt text,
@@ -46,7 +49,7 @@ MAX_EDITOR_IMAGE_TOTAL_BYTES = 2_097_152
 # comes from. Handed over as files in a directory the BACKEND owns, none of that applies: the
 # ceiling becomes what a model can actually be sent, and the 4-image count limit, which only ever
 # existed to keep the frame small, goes away.
-MAX_SPOOLED_IMAGE_TOTAL_BYTES = 33_554_432
+MAX_SPOOLED_IMAGE_TOTAL_BYTES = 209_715_200
 MAX_SPOOLED_IMAGE_FILE_BYTES = MAX_IMAGE_FILE_BYTES
 # Not a product limit: a loop bound, so a malformed command cannot make the backend stat forever.
 # The real bound on how many images you may send is the aggregate byte budget above.

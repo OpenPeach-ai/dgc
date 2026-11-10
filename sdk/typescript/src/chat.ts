@@ -27,7 +27,7 @@ export const CHAT_THINKING = ["off", "low", "medium", "high", "xhigh"] as const;
 export type ChatThinking = (typeof CHAT_THINKING)[number];
 export type ChatSearch = "off" | "auto" | "on";
 const SEARCH: readonly string[] = ["off", "auto", "on"];
-const MAX_FILES = 10;
+const MAX_FILES = 50;             // what one message may carry (Limits for everyone, 10 Nov; it was 10)
 
 /** A page a reply cites: `[n]` in its text. */
 export type ChatSource = { n: number; title: string; url: string; snippet: string };

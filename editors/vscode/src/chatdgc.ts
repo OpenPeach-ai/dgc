@@ -42,7 +42,7 @@ const TITLE_CHARS = 40;
 const HOME_FIRST = 6;          // the home shows a few chats; "Show more" pages on
 const HOME_PAGE = 50;
 const MAX_REQUESTS = 512;
-const MAX_ATTACHMENTS = 10;
+const MAX_ATTACHMENTS = 10;      // what a backend that doesn't say takes (ready.capabilities.chatdgc.attachments)
 /** What one send may carry inline (pasted images and text), under the 4 MiB command frame; a picked file
  *  goes by its path and costs the frame nothing. */
 const MAX_INLINE_CHARS = 3_000_000;
@@ -1140,6 +1140,15 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     panel.onDidDispose(() => { if (this.widgetPanels.get(key) === panel) { this.widgetPanels.delete(key); this.widgetPages.delete(key); } });
   }
 
+  /** How many things one message may carry: what the backend says (ready.capabilities.chatdgc.attachments; 50 from the
+   *  Limits for everyone, 10 Nov), or 10 from one that doesn't. */
+  private attachmentLimit(): number {
+    try {
+      const said = this.host?.chatdgcOffers?.()?.attachments;
+      return Number.isSafeInteger(said) && (said as number) >= 1 && (said as number) <= 500 ? said as number : MAX_ATTACHMENTS;
+    } catch { return MAX_ATTACHMENTS; }
+  }
+
   /** The window presets the backend takes (ready.capabilities.chatdgc.windows); none from one that doesn't say. */
   private windowPresets(): string[] {
     try {
@@ -1290,7 +1299,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     this.homeHeld = false;
     if (this.host) this.homeRefresh();
     // A tab that loaded before the backend was up was told of no window sizes: now it knows them.
-    for (const tab of this.tabs) this.post(tab, { type: "windows", presets: this.windowPresets() });
+    for (const tab of this.tabs) { this.post(tab, { type: "windows", presets: this.windowPresets() }); this.post(tab, { type: "attachmentLimit", count: this.attachmentLimit() }); }
     for (const tab of this.tabs) this.post(tab, { type: "artifacts", offered: this.artifactsOffer() ?? null });
     // A new process's mods: each tab asks for them again.
     for (const tab of this.tabs) this.modsReady(tab);
@@ -1805,6 +1814,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         try { favicons = vscode.workspace.getConfiguration("dgc").get<boolean>("linkFavicons", true) !== false; } catch { /* default */ }
         this.post(tab, { type: "favicons", on: favicons });
         this.post(tab, { type: "windows", presets: this.windowPresets() });
+        this.post(tab, { type: "attachmentLimit", count: this.attachmentLimit() });
         this.post(tab, { type: "artifacts", offered: this.artifactsOffer() ?? null });
         this.post(tab, { type: "folderOffered", on: this.folderOffered() });
         this.post(tab, { type: "fallbackOffered", on: this.fallbackOffered() });
@@ -1940,7 +1950,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           title: "Attach files to this chat" });
         if (!chosen?.length) return;
         const items = [];
-        for (const uri of chosen.slice(0, MAX_ATTACHMENTS)) {
+        for (const uri of chosen.slice(0, this.attachmentLimit())) {
           if (uri.scheme !== "file") continue;
           let size = 0;
           try { size = (await vscode.workspace.fs.stat(uri)).size; } catch { continue; }
@@ -1959,7 +1969,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         // A webview can name arbitrary file URIs in a forged drop message. Confirm the exact paths in VS Code
         // before they become picked attachments; hidden folders are still reserved for the file picker.
         const items: { kind: string; path: string; name: string; size: number }[] = [];
-        for (const raw of (Array.isArray(message.uris) ? message.uris : []).slice(0, MAX_ATTACHMENTS)) {
+        for (const raw of (Array.isArray(message.uris) ? message.uris : []).slice(0, this.attachmentLimit())) {
           let uri: vscode.Uri;
           try { uri = vscode.Uri.parse(String(raw), true); } catch { continue; }
           if (uri.scheme !== "file" || uri.path.split("/").some((part) => part.startsWith("."))) continue;
@@ -2229,7 +2239,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         if (!PROJECT_ID.test(project)) return;
         const chosen = await vscode.window.showOpenDialog({ canSelectMany: true, openLabel: "Add to project",
           title: "Add files to this project: every chat in it can read them" });
-        const items = (chosen || []).filter((uri) => uri.scheme === "file").slice(0, MAX_ATTACHMENTS)
+        const items = (chosen || []).filter((uri) => uri.scheme === "file").slice(0, this.attachmentLimit())
           .map((uri) => ({ kind: "file", path: uri.fsPath }));
         if (items.length) {
           this.ask({ tab, kind: "projectFiles", project }, { type: "chatdgc_project", op: "add_files", project_id: project, attachments: items });
@@ -2374,7 +2384,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     if (!Array.isArray(raw)) return [];
     const out: Record<string, string>[] = [];
     let inline = 0;
-    for (const item of raw.slice(0, MAX_ATTACHMENTS)) {
+    for (const item of raw.slice(0, this.attachmentLimit())) {
       const name = typeof item?.name === "string" ? item.name.slice(0, 120) : "";
       if (item?.kind === "file" && typeof item.path === "string" && tab.picked.has(item.path)) {
         out.push({ kind: "file", path: item.path, ...(name ? { name } : {}) });

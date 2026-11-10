@@ -956,9 +956,10 @@ files, and PDF, Word, Excel, PowerPoint, OpenDocument, RTF, CSV and TSV files ar
 Pip sees the photos and reads the files' text; a Pip with a computer also finds the files in its
 Files, under **From chat**.
 
-- **How much:** a photo can be up to 8 MB and one message up to 32 MB of photos, with no limit on
-  how many beyond that (64 at most). Files can be up to 16 at a time: a document up to 16 MB, a text
-  or code file up to 1 MB, 32 MB in all. The editor hands them to DGC the way the main chat does, so
+- **How much:** a photo can be up to 20 MB and one message up to 200 MB of photos and files together, with
+  no limit on how many photos beyond that (64 at most). Files can be up to 50 at a time: a document up to 100 MB, a
+  text or code file up to 1 MB. (Before Pips API 79: 8 MB a photo, 32 MB of photos, 16 files, a 16 MB document.) The
+  model is sent what its provider takes: a big photo is shrunk to about 4.5 MB, a message's photos to about 24 MB. The editor hands them to DGC the way the main chat does, so
   a phone photo of a bill goes as it is. (With a DGC CLI before Pips API 52, the old limit stays:
   4 images and 4 files, 2 MB in all.)
 - **iPhone photos:** a HEIC or HEIF photo is turned into a JPEG automatically, and the chat keeps the

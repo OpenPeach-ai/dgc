@@ -137,8 +137,9 @@ test("a temporary chat is never listed; bad options are refused before anything 
     assert.throws(() => chat.stream("x", { search: "sometimes" }), DGCConfigError);
     assert.throws(() => chat.stream("   "), DGCConfigError);
     assert.throws(() => chat.stream("x", { files: [join(stateDir, "missing.txt")] }), /not a file/);
-    const many = Array.from({ length: 11 }, (_, i) => { const f = join(stateDir, `f${i}.txt`); writeFileSync(f, "x"); return f; });
-    assert.throws(() => chat.stream("x", { files: many }), /at most 10 files/);
+    // A message takes up to 50 files (Limits for everyone, 10 Nov; it was 10).
+    const many = Array.from({ length: 51 }, (_, i) => { const f = join(stateDir, `f${i}.txt`); writeFileSync(f, "x"); return f; });
+    assert.throws(() => chat.stream("x", { files: many }), /at most 50 files/);
     await assert.rejects(chats.open(""), DGCConfigError);
   });
 });

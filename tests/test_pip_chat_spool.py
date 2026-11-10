@@ -115,8 +115,9 @@ class SpooledPhotoTests(unittest.TestCase):
     def test_the_limits_are_the_work_chats_and_say_so(self):
         pip = self.pip()
         for name, images in (
-                ("a photo over 8 MB", [jpeg(size=8 * MB + 1)]),
-                ("over 32 MB in all", [jpeg(size=7 * MB + i) for i in range(5)]),
+                # The Work chat's limits, raised for everyone (10 Nov): 20 MB a photo, 200 MB in all.
+                ("a photo over 20 MB", [jpeg(size=20 * MB + 1)]),
+                ("over 200 MB in all", [jpeg(size=19 * MB + i) for i in range(11)]),
                 ("not what it says", [b"not a jpeg at all"]),
         ):
             with self.subTest(name):
@@ -127,7 +128,7 @@ class SpooledPhotoTests(unittest.TestCase):
         too_many = [{"name": self.spool(jpeg(size=100)), "media_type": "image/jpeg"} for _ in range(65)]
         refused = self.send(pip, spooled_images=too_many)
         self.assertFalse(refused["ok"])
-        self.assertEqual(refused["error"]["message"], "Send up to 64 photos, 32 MB in all.")
+        self.assertEqual(refused["error"]["message"], "Send up to 64 photos, 200 MB in all.")
         self.assertEqual(self.spooled(), [])
         self.assertEqual(pip_chat.list_messages(self.store, pip["id"])["messages"], [])
 
@@ -228,10 +229,11 @@ class SpooledFileTests(unittest.TestCase):
     def test_the_work_chats_document_limits(self):
         pip = self.pip()
         for name, files, says in (
-                ("a document over 16 MB", [("big.pdf", self.pdf(16 * MB + 1))], "big.pdf is over 16 MB"),
+                # The Work chat's limits, raised for everyone (10 Nov): 100 MB a document, 200 MB in all, 50 files.
+                ("a document over 100 MB", [("big.pdf", self.pdf(100 * MB + 1))], "big.pdf is over 100 MB"),
                 ("a text file over 1 MB", [("log.txt", b"x" * (MB + 1))], "log.txt is over 1 MB"),
-                ("over 32 MB in all", [(f"part{i}.pdf", self.pdf(11 * MB)) for i in range(3)], "32 MB"),
-                ("seventeen files", [(f"n{i}.txt", b"hi") for i in range(17)], "16 files"),
+                ("over 200 MB in all", [(f"part{i}.pdf", self.pdf(70 * MB)) for i in range(3)], "200 MB"),
+                ("fifty-one files", [(f"n{i}.txt", b"hi") for i in range(51)], "50 files"),
                 ("a program", [("setup.exe", b"MZ")], "send text, code"),
         ):
             with self.subTest(name):
@@ -292,8 +294,8 @@ class OlderRegistryTests(unittest.TestCase):
         sent = self.send(pip, spooled_images=[{"name": self.spool(jpeg(size=3 * MB)), "media_type": "image/jpeg"} for _ in range(6)])
         self.assertTrue(sent["ok"], sent.get("error"))
         sql = db.execute("SELECT sql FROM sqlite_master WHERE name='pip_chat_images'").fetchone()[0]
-        self.assertNotIn("2097152", sql)
-        self.assertNotIn("2097152", db.execute("SELECT sql FROM sqlite_master WHERE name='pip_chat_files'").fetchone()[0])
+        self.assertNotIn("AND 2097152)", sql)                 # (20 MiB, 20971520, holds the digits of 2 MiB)
+        self.assertNotIn("AND 2097152)", db.execute("SELECT sql FROM sqlite_master WHERE name='pip_chat_files'").fetchone()[0])
         self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION,
                          "spooling a large image must not change the registry schema version")
         messages = pip_chat.list_messages(self.store, pip["id"])["messages"]
@@ -302,7 +304,7 @@ class OlderRegistryTests(unittest.TestCase):
 
     def test_a_new_registry_has_the_new_bounds_from_the_start(self):
         sql = self.registry.db.execute("SELECT sql FROM sqlite_master WHERE name='pip_chat_images'").fetchone()[0]
-        self.assertIn(f"BETWEEN 1 AND {8 * MB}", sql)
+        self.assertIn(f"BETWEEN 1 AND {pip_chat.MAX_CHAT_IMAGE_BYTES}", sql)
         self.assertIn("BETWEEN 0 AND 63", sql)
 
 

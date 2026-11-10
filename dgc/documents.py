@@ -50,7 +50,7 @@ UNSUPPORTED: dict[str, tuple[str, str]] = {
     '.ole': ('legacy or encrypted Office container', 'save an unencrypted .docx, .xlsx or .pptx file'),
 }
 
-MAX_INPUT_BYTES = 32 * 1024 * 1024
+MAX_INPUT_BYTES = 100 * 1024 * 1024      # a document up to 100 MB (Limits for everyone, 10 Nov; it was 32 MiB)
 MAX_OUTPUT_CHARS = 1_000_000
 MAX_ZIP_ENTRIES = 2048
 MAX_CENTRAL_BYTES = 2 * 1024 * 1024
@@ -131,7 +131,7 @@ def _check_raw(raw: bytes) -> None:
     if not isinstance(raw, bytes):
         raise TypeError('raw must be bytes')
     if len(raw) > MAX_INPUT_BYTES:
-        raise _error('document exceeds the 32 MiB input limit; split it into smaller files')
+        raise _error(f'document exceeds the {MAX_INPUT_BYTES // (1024 * 1024)} MiB input limit; split it into smaller files')
 
 
 def _integer(value: int, name: str, minimum: int, maximum: int) -> None:

@@ -1188,6 +1188,9 @@ function fileExtension(name){const i=name.lastIndexOf('.');return i>0?name.slice
 function fileSize(n){return n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(n<10240?1:0)} KB`:`${(n/1048576).toFixed(1)} MB`;}
 function canAttachImages(){return S.apiVersion>=43&&!remoteHost&&personalPip();}
 function spoolsPhotos(){return S.apiVersion>=52;}
+// What one message may carry: from Pips API 79 (Limits for everyone, 10 Nov) 20 MB a photo, 50 files, 100 MB a
+// document and 200 MB in all; an older runtime keeps API 52's.
+function pipLimits(){const raised=S.apiVersion>=79;return {photo:raised?20*MB:PIP_PHOTO_BYTES,photos:raised?200*MB:PIP_PHOTOS_BYTES,files:raised?50:PIP_SPOOL_FILES,document:raised?100*MB:PIP_DOCUMENT_BYTES,filesBytes:raised?200*MB:PIP_FILES_BYTES,message:raised?200*MB:Infinity};}
 function pendingImages(){return chatImages.get(S.selected)||[];}
 function heicFile(f){return PIP_HEIC_TYPES.includes(String(f.type||'').toLowerCase())||!f.type&&['.heic','.heif'].includes(fileExtension(f.name||''));}
 function imageStripMarkup(){
@@ -1209,22 +1212,26 @@ function addImageFiles(files){
  if(usable.length<docs.length)setError('Add images, text or code files, or PDF, Word, Excel, PowerPoint, OpenDocument, RTF, CSV or TSV files.');
  if(!list.length&&!usable.length)return;
  const images=pendingImages(),filesNow=pendingFiles();
- const takeImages=list.slice(0,Math.max(0,(spool?PIP_SPOOL_IMAGES:PIP_MAX_IMAGES)-images.length)),takeFiles=usable.slice(0,Math.max(0,(spool?PIP_SPOOL_FILES:PIP_MAX_FILES)-filesNow.length));
+ const L=pipLimits(),mb=n=>`${Math.round(n/MB)} MB`;
+ const takeImages=list.slice(0,Math.max(0,(spool?PIP_SPOOL_IMAGES:PIP_MAX_IMAGES)-images.length)),takeFiles=usable.slice(0,Math.max(0,(spool?L.files:PIP_MAX_FILES)-filesNow.length));
  if(spool){
   // The Work chat's limits, one plain sentence each.
   if(takeImages.length<list.length){setError(`Send up to ${PIP_SPOOL_IMAGES} photos with one message.`);return;}
-  if(takeFiles.length<usable.length){setError(`Send up to ${PIP_SPOOL_FILES} files with one message.`);return;}
-  const big=takeImages.find(f=>f.size>PIP_PHOTO_BYTES);if(big){setError(`${big.name||'That photo'} is over 8 MB; send a smaller photo.`);return;}
-  if(images.reduce((n,i)=>n+i.bytes,0)+takeImages.reduce((n,f)=>n+f.size,0)>PIP_PHOTOS_BYTES){setError('Send up to 32 MB of photos with one message.');return;}
-  const over=takeFiles.find(f=>f.size>(PIP_DOCUMENT_EXTENSIONS.includes(fileExtension(f.name))?PIP_DOCUMENT_BYTES:PIP_TEXT_FILE_BYTES));
-  if(over){setError(PIP_DOCUMENT_EXTENSIONS.includes(fileExtension(over.name))?`${over.name} is over 16 MB; send a document of 16 MB or less.`:`${over.name} is over 1 MB; send a text or code file of 1 MB or less.`);return;}
-  if(filesNow.reduce((n,f)=>n+f.bytes,0)+takeFiles.reduce((n,f)=>n+f.size,0)>PIP_FILES_BYTES){setError('Send up to 32 MB of files with one message.');return;}
+  if(takeFiles.length<usable.length){setError(`Send up to ${L.files} files with one message.`);return;}
+  const big=takeImages.find(f=>f.size>L.photo);if(big){setError(`${big.name||'That photo'} is over ${mb(L.photo)}; send a smaller photo.`);return;}
+  const photoBytes=images.reduce((n,i)=>n+i.bytes,0)+takeImages.reduce((n,f)=>n+f.size,0);
+  if(photoBytes>L.photos){setError(`Send up to ${mb(L.photos)} of photos with one message.`);return;}
+  const over=takeFiles.find(f=>f.size>(PIP_DOCUMENT_EXTENSIONS.includes(fileExtension(f.name))?L.document:PIP_TEXT_FILE_BYTES));
+  if(over){setError(PIP_DOCUMENT_EXTENSIONS.includes(fileExtension(over.name))?`${over.name} is over ${mb(L.document)}; send a document of ${mb(L.document)} or less.`:`${over.name} is over 1 MB; send a text or code file of 1 MB or less.`);return;}
+  const fileBytes=filesNow.reduce((n,f)=>n+f.bytes,0)+takeFiles.reduce((n,f)=>n+f.size,0);
+  if(fileBytes>L.filesBytes){setError(`Send up to ${mb(L.filesBytes)} of files with one message.`);return;}
+  if(photoBytes+fileBytes>L.message){setError(`Send up to ${mb(L.message)} of photos and files with one message.`);return;}
  }else{
   const used=images.reduce((n,i)=>n+i.bytes,0)+filesNow.reduce((n,f)=>n+f.bytes,0),bytes=used+takeImages.reduce((n,f)=>n+f.size,0)+takeFiles.reduce((n,f)=>n+f.size,0);
   if(takeImages.length<list.length||takeFiles.length<usable.length)setError(`Send up to ${PIP_MAX_IMAGES} images and ${PIP_MAX_FILES} files with one message.`);
   if(bytes>PIP_MAX_IMAGE_BYTES){setError('Send up to 2 MB of images and files with one message.');return;}
  }
- const cap=spool?PIP_SPOOL_IMAGES:PIP_MAX_IMAGES,fileCap=spool?PIP_SPOOL_FILES:PIP_MAX_FILES;
+ const cap=spool?PIP_SPOOL_IMAGES:PIP_MAX_IMAGES,fileCap=spool?L.files:PIP_MAX_FILES;
  // Each is read in the background; they join the message in the order you picked them, not the order they finish.
  const read=file=>new Promise(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(typeof reader.result==='string'?reader.result:'');reader.onerror=()=>resolve('');reader.readAsDataURL(file);});
  void Promise.all(takeImages.map(read)).then(results=>{

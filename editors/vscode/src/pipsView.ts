@@ -20,11 +20,16 @@ const MAX_IMAGE_URI_CHARS = 2_800_000;
  *  and the Work chat's document limits for files (16 MiB a document, 1 MiB a text or code file, 32 MiB). */
 const MiB = 1024 * 1024;
 const SPOOL_PHOTO_TYPES: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/bmp': 'bmp', 'image/heic': 'heic', 'image/heif': 'heif' };
-const MAX_SPOOLED_PHOTOS = 64, MAX_PHOTO_BYTES = 8 * MiB, MAX_PHOTOS_BYTES = 32 * MiB;
-const MAX_SPOOLED_FILES = 16, MAX_DOCUMENT_BYTES = 16 * MiB, MAX_TEXT_FILE_BYTES = MiB, MAX_FILES_BYTES = 32 * MiB;
+const MAX_SPOOLED_PHOTOS = 64, MAX_TEXT_FILE_BYTES = MiB;
+/** What one message may carry: from Pips API 79 (Limits for everyone, 10 Nov) 20 MB a photo, 50 files, 100 MB a
+ *  document and 200 MB in all; an older runtime keeps API 52's, so it is never sent what it would refuse. */
+type SpoolLimits = { photo: number; photos: number; files: number; document: number; filesBytes: number; message: number };
+const OLD_LIMITS: SpoolLimits = { photo: 8 * MiB, photos: 32 * MiB, files: 16, document: 16 * MiB, filesBytes: 32 * MiB, message: Infinity };
+const RAISED_LIMITS: SpoolLimits = { photo: 20 * MiB, photos: 200 * MiB, files: 50, document: 100 * MiB, filesBytes: 200 * MiB, message: 200 * MiB };
 const DOCUMENT_EXTENSIONS = new Set(['.pdf', '.docx', '.xlsx', '.pptx', '.odt', '.ods', '.odp', '.rtf']);
-const PHOTO_LIMITS = 'Send photos of up to 8 MB each, 32 MB in all.';
-const FILE_LIMITS = 'Send up to 16 files: documents up to 16 MB, text and code up to 1 MB, 32 MB in all.';
+const mb = (n: number) => `${Math.round(n / MiB)} MB`;
+const photoLimits = (l: SpoolLimits) => `Send photos of up to ${mb(l.photo)} each, ${mb(l.photos)} in all.`;
+const fileLimits = (l: SpoolLimits) => `Send up to ${l.files} files: documents up to ${mb(l.document)}, text and code up to 1 MB, ${mb(l.filesBytes)} in all.`;
 const DATA_URI = /^data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/]*={0,2})$/i;
 const decodedBytes = (b64: string) => Math.floor(b64.length * 3 / 4) - (b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0);
 /** A Pip chat's kept photo: <state>/chat_images/<pip_id>/<sha256>.<ext>, as the backend names it. */
@@ -396,7 +401,7 @@ export class PipsEditor implements vscode.Disposable {
     if (want.generation !== this.generation || !this.state.connected) throw new Error('The DGC connection changed. Refresh and try again.');
     const path = result?.path, bytes = result?.bytes;
     if (result?.message_id !== want.message || result?.index !== want.index || typeof path !== 'string' || !nodePath.isAbsolute(path)
-      || !Number.isSafeInteger(bytes) || bytes < 1 || bytes > MAX_PHOTO_BYTES) throw gone();
+      || !Number.isSafeInteger(bytes) || bytes < 1 || bytes > RAISED_LIMITS.photo) throw gone();
     const info = await fs.lstat(path).catch(() => undefined);
     if (!info || !info.isFile() || info.isSymbolicLink() || info.size !== bytes) throw gone();
     const real = await fs.realpath(path);
@@ -421,18 +426,22 @@ export class PipsEditor implements vscode.Disposable {
   }
   /** What is wrong with a message's photos and files for the spool (API 52), or '' when they fit. */
   private spoolProblem(images: unknown, files: unknown): string {
+    let carried = 0;                 // photos and files together (API 79: 200 MB a message)
     if (images !== undefined) {
       if (!Array.isArray(images) || images.length < 1 || images.length > MAX_SPOOLED_PHOTOS) return `Send up to ${MAX_SPOOLED_PHOTOS} photos with one message.`;
       let total = 0;
+      const L = this.apiVersion >= 79 ? RAISED_LIMITS : OLD_LIMITS;
       for (const image of images) {
         const match = typeof image === 'string' ? DATA_URI.exec(image) : null;
         if (!match || !SPOOL_PHOTO_TYPES[match[1].toLowerCase()]) return 'Send photos as PNG, JPEG, GIF, WebP, BMP or iPhone (HEIC) images.';
         const size = decodedBytes(match[2]);
-        if (size < 1 || size > MAX_PHOTO_BYTES || (total += size) > MAX_PHOTOS_BYTES) return PHOTO_LIMITS;
+        if (size < 1 || size > L.photo || (total += size) > L.photos) return photoLimits(L);
+        carried += size;
       }
     }
     if (files !== undefined) {
-      if (!Array.isArray(files) || files.length < 1 || files.length > MAX_SPOOLED_FILES) return FILE_LIMITS;
+      const L = this.apiVersion >= 79 ? RAISED_LIMITS : OLD_LIMITS;
+      if (!Array.isArray(files) || files.length < 1 || files.length > L.files) return fileLimits(L);
       let total = 0;
       for (const f of files as any[]) {
         if (!f || typeof f !== 'object' || Object.keys(f).sort().join() !== 'data,name' || typeof f.name !== 'string' || !f.name.trim()
@@ -440,7 +449,9 @@ export class PipsEditor implements vscode.Disposable {
         const match = typeof f.data === 'string' ? DATA_URI.exec(f.data) : null;
         const dot = f.name.lastIndexOf('.'), ext = dot > 0 ? f.name.slice(dot).toLowerCase() : '';
         const size = match ? decodedBytes(match[2]) : 0;
-        if (!match || size < 1 || size > (DOCUMENT_EXTENSIONS.has(ext) ? MAX_DOCUMENT_BYTES : MAX_TEXT_FILE_BYTES) || (total += size) > MAX_FILES_BYTES) return FILE_LIMITS;
+        if (!match || size < 1 || size > (DOCUMENT_EXTENSIONS.has(ext) ? L.document : MAX_TEXT_FILE_BYTES) || (total += size) > L.filesBytes) return fileLimits(L);
+        carried += size;
+        if (carried > L.message) return `Send up to ${mb(L.message)} of photos and files with one message.`;
       }
     }
     return '';

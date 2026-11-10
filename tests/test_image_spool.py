@@ -62,10 +62,11 @@ class SpoolTest(unittest.TestCase):
         self.assertEqual(len(read_spooled_images(entries, self.root)), 12)
 
     def test_the_aggregate_budget_still_bites(self):
-        big = b"\x89PNG\r\n\x1a\n" + b"\x00" * (MAX_SPOOLED_IMAGE_FILE_BYTES - 8)
-        entries = [self.entry(self.put(f"b{n}.png", big)) for n in range(6)]
+        # The budget is 200 MiB (Limits for everyone, 10 Nov); made small here so the test doesn't write 220 MiB.
+        big = b"\x89PNG\r\n\x1a\n" + b"\x00" * (1024 * 1024 - 8)
+        entries = [self.entry(self.put(f"b{n}.png", big)) for n in range(4)]
         with self.assertRaises(ValueError) as caught:
-            read_spooled_images(entries, self.root)
+            read_spooled_images(entries, self.root, maximum_total_bytes=3 * 1024 * 1024)
         self.assertIn("aggregate", str(caught.exception))
 
     def test_a_single_image_over_its_ceiling_is_refused(self):
@@ -155,7 +156,7 @@ class UnchangedElsewhereTest(unittest.TestCase):
     def test_the_spool_budget_is_larger_than_the_inline_one(self):
         from dgc.attachments import MAX_EDITOR_IMAGE_TOTAL_BYTES
         self.assertGreater(MAX_SPOOLED_IMAGE_TOTAL_BYTES, MAX_EDITOR_IMAGE_TOTAL_BYTES)
-        self.assertEqual(MAX_SPOOLED_IMAGE_TOTAL_BYTES, 32 * 1024 * 1024)
+        self.assertEqual(MAX_SPOOLED_IMAGE_TOTAL_BYTES, 200 * 1024 * 1024)      # Limits for everyone, 10 Nov (it was 32 MiB)
 
 
 if __name__ == "__main__":

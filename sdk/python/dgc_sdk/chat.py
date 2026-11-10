@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 THINKING = ("off", "low", "medium", "high", "xhigh")
 SEARCH = ("off", "auto", "on")
 EXPORT_FORMATS = ("markdown", "json")
-MAX_FILES = 10
+MAX_FILES = 50                     # what one message may carry (Limits for everyone, 10 Nov; it was 10)
 _DONE = object()
 
 

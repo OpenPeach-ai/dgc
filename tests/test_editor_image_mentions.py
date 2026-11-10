@@ -61,13 +61,13 @@ class EditorImageMentionTests(unittest.TestCase):
                                         self.mention("gone.png")], self.root)
         self.assertEqual(result.images, ())
         self.assertEqual(result.notices, (
-            "attachment skipped (big.png): an image is limited to 8 MiB",
+            f"attachment skipped (big.png): an image is limited to {MAX_SPOOLED_IMAGE_FILE_BYTES // 1048576} MiB",
             "attachment skipped (fake.png): extension does not match image data",
             "attachment skipped (gone.png): file not found"))
 
     def test_a_photo_over_the_old_2_mib_is_attached_now(self):
         # The backend reads a mentioned file itself, so no protocol frame bounds it: the spooled
-        # images' limits apply (8 MiB a photo, 32 MiB in all), not the inline 2 MiB.
+        # images' limits apply (20 MiB a photo, 200 MiB in all), not the inline 2 MiB.
         photo = self.root / "photo.png"
         photo.write_bytes(PNG + b"\0" * (MAX_EDITOR_IMAGE_TOTAL_BYTES + 1))
         result = editor_image_mentions([self.mention("photo.png")], self.root)
@@ -75,7 +75,7 @@ class EditorImageMentionTests(unittest.TestCase):
         self.assertEqual(result.notices, ("attached 1 image",))
 
     def test_pasted_images_count_toward_the_same_limits(self):
-        pasted = ["data:image/png;base64," + base64.b64encode(PNG + b"\0" * (MAX_SPOOLED_IMAGE_FILE_BYTES - len(PNG))).decode()] * 4
+        pasted = ["data:image/png;base64," + base64.b64encode(PNG + b"\0" * (MAX_SPOOLED_IMAGE_FILE_BYTES - len(PNG))).decode()] * (MAX_SPOOLED_IMAGE_TOTAL_BYTES // MAX_SPOOLED_IMAGE_FILE_BYTES)
         result = editor_image_mentions([self.mention("shot.png")], self.root, pasted)
         self.assertEqual(result.images, ())
         self.assertEqual(result.notices, ("attachment skipped (shot.png): the editor's images are limited to "

@@ -205,3 +205,33 @@ test('opening a photo shows the original in an editor tab, under a name a person
  await settle(()=>info.length);assert.deepEqual(info,['That photo is no longer available.']);
  assert.ok(existsSync(target.fsPath));
 });
+
+// Limits for everyone (10 Nov), from Pips API 79: 20 MB a photo, 50 files, 100 MB a document, 200 MB a message. A runtime
+// before 79 keeps API 52's (the tests above), so it is never sent what it would refuse.
+test('from API 79 a message takes 20 MB photos, 50 files and 100 MB documents, 200 MB in all', async()=>{
+ const x=setup({apiVersion:79});await open(x);
+ await drop(x,[photo(x,18*MB,'scan.jpg')]);
+ await settle(()=>x.d.querySelectorAll('.chat-images > span').length===1);
+ assert.equal(x.d.querySelector('.error'),null,'an 18 MB photo goes');
+ const raised=setup({apiVersion:79});await open(raised);
+ await drop(raised,Array.from({length:30},(_,i)=>new raised.w.File([new Uint8Array(1000)],`page-${i}.txt`,{type:'text/plain'})));
+ await settle(()=>raised.d.querySelectorAll('.chat-file-chip').length===30);
+ for(const [files,says] of [
+  [x=>[photo(x,20*MB+1,'huge.jpg')],/huge\.jpg is over 20 MB; send a smaller photo\./],
+  [x=>[new x.w.File([new Uint8Array(100*MB+1)],'scan.pdf',{type:'application/pdf'})],/scan\.pdf is over 100 MB; send a document of 100 MB or less\./],
+  [x=>Array.from({length:51},(_,i)=>new x.w.File([new Uint8Array(10)],`n${i}.txt`,{type:'text/plain'})),/Send up to 50 files with one message\./],
+ ]){
+  const y=setup({apiVersion:79});await open(y);await drop(y,files(y));
+  assert.match(y.d.querySelector('.error')?.textContent||'',says);
+ }
+});
+
+test('the host takes the raised limits only from a runtime at API 79', async()=>{
+ const h=host(79);
+ h.editor.receive({type:'pipsRequest',id:'e',request:{...base,files:[{name:'scan.pdf',data:uri(Buffer.alloc(60*MB),'application/octet-stream')}]}});
+ await new Promise(r=>setTimeout(r,50));
+ assert.ok(!/documents up to/.test(h.posted.at(-1)?.error?.message||''),'a 60 MB document goes to a runtime at 79');
+ const old=host(78);
+ old.editor.receive({type:'pipsRequest',id:'f',request:{...base,files:[{name:'scan.pdf',data:uri(Buffer.alloc(60*MB),'application/octet-stream')}]}});
+ assert.match(old.posted.at(-1).error.message,/documents up to 16 MB/,'and not to one before it');
+});

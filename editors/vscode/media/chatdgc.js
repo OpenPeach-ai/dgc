@@ -92,7 +92,7 @@
   // search -> Search in ChatDGC turns it off for every chat.
   const searchMode = () => "auto";
   const state = { fallback: "", fallbackOn: null, fallbackOffered: false, fallbackMore: "",
-                  conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "", modelProfiles: [], providerModels: {}, providerErrors: {}, menuProvider: "", menuProviders: false, windows: [], breakdown: null,
+                  conversation: null, messages: [], earlier: 0, busy: false, maxAttachments: 10, replyId: "", models: [], defaultModel: "", modelProfiles: [], providerModels: {}, providerErrors: {}, menuProvider: "", menuProviders: false, windows: [], breakdown: null,
                   model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "",
                   context: null, compacting: false, editingSummary: false, picks: {},
                   research: false, planAsked: false, countdowns: {}, lastSent: null, forgotten: new Set(), planEditing: "", steerDraft: "", open: new Set(),
@@ -4688,6 +4688,10 @@
           if (!$("cd-context-pop").hidden) popover();
         }
         return;
+      case "attachmentLimit":
+        // How many things one message may carry, as its backend says (10 from one that doesn't).
+        state.maxAttachments = Number.isSafeInteger(msg.count) && msg.count >= 1 && msg.count <= 500 ? msg.count : 10;
+        return;
       case "windows":
         // The window sizes its backend takes (none from an older one: the details then point to Settings).
         state.windows = Array.isArray(msg.presets) ? msg.presets.filter((p) => typeof p === "string") : [];
@@ -4768,7 +4772,7 @@
       }
       case "attached":
         for (const item of Array.isArray(msg.items) ? msg.items : []) {
-          if (state.pending.length >= 10) { showNotice("Attach up to 10 things to one message.", "info"); break; }
+          if (state.pending.length >= state.maxAttachments) { showNotice(`Attach up to ${state.maxAttachments} things to one message.`, "info"); break; }
           const same = (p) => (p.path && p.path === item.path) || (item.kind === "library" && p.attachment_id === item.attachment_id);
           if (!state.pending.some(same)) state.pending.push(item);
         }

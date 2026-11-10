@@ -397,7 +397,7 @@ class ChatDGCTests(unittest.TestCase):
         self.assertIn("a.bin isn't text, an image or a document", str(refused.exception))
         for bad, says in (([{"kind": "file", "path": "relative.txt"}], "choose the file again"),
                           ([{"kind": "file", "path": str(folder / "gone.txt")}], "no longer there"),
-                          ([{"kind": "text", "text": "x"}] * 11, "up to 10"),
+                          ([{"kind": "text", "text": "x"}] * 51, "up to 50"),          # 50 a message (Limits for everyone)
                           ([{"kind": "zip"}], "a file, an image or pasted text")):
             with self.subTest(says=says), self.assertRaises(ChatEngineError) as refused:
                 self.engine.send(chat["id"], "x", attachments=bad)

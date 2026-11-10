@@ -972,7 +972,8 @@ class HostTests(unittest.TestCase):
                           "voice_replies": 1, "question_forms": 1, "outline": 1, "holder": 1,   # holder: 25 Oct, Open here
                           "folder": 1,                                     # folder: 28 Oct, a folder the chat reads
                           "mentions": 1,                                   # mentions: 7 Nov, @ marks in the box
-                          "fallback": 1})                                  # fallback: 9 Nov, a chat's fallback model (D14)
+                          "fallback": 1,                                   # fallback: 9 Nov, a chat's fallback model (D14)
+                          "attachments": 50})                              # attachments: 11 Nov, how many a message carries
 
     def test_no_frame_carries_a_sessions_chat_id_even_with_several_sessions(self):
         self.host.dispatch({"type": "open_chat", "request_id": "oc", "cwd": str(self.tmp / "b")})

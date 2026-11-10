@@ -71,8 +71,8 @@ CREATE INDEX IF NOT EXISTS pip_chat_history ON pip_chat_messages(pip_id,seq);
 MAX_INLINE_IMAGES = 4
 MAX_INLINE_BYTES = 2 * 1024 * 1024
 MAX_CHAT_IMAGES = 64
-MAX_CHAT_IMAGE_BYTES = 8 * 1024 * 1024            # one image
-MAX_CHAT_IMAGES_BYTES = 32 * 1024 * 1024          # one message's images
+MAX_CHAT_IMAGE_BYTES = 20 * 1024 * 1024           # one image (was 8 MiB; Limits for everyone, 10 Nov)
+MAX_CHAT_IMAGES_BYTES = 200 * 1024 * 1024         # one message's images (was 32 MiB)
 IMAGE_ONLY_TEXT = "(sent an image)"
 # Images in transit, as data URIs: 2 MiB of image is at most 2,796,204 base64 characters, plus headers.
 MAX_CHAT_IMAGE_URI_CHARS = 2_800_000
@@ -102,10 +102,12 @@ def image_directory(directory, pip_id) -> Path:
 # document up to 16 MiB, a text or code file (CSV and TSV among them) up to 1 MiB, 32 MiB in all and
 # up to 16 (the mentions one prompt reads). Inline (API 43) they share the images' 2 MiB and four.
 MAX_INLINE_FILES = 4
-MAX_CHAT_FILES = 16                                # attachments.MAX_ATTACHMENT_MENTIONS
-MAX_CHAT_DOCUMENT_BYTES = 16 * 1024 * 1024         # attachments.MAX_DOCUMENT_FILE_BYTES
+MAX_CHAT_FILES = 50                                # attachments.MAX_ATTACHMENT_MENTIONS (was 16)
+MAX_CHAT_DOCUMENT_BYTES = 100 * 1024 * 1024        # attachments.MAX_DOCUMENT_FILE_BYTES (was 16 MiB)
 MAX_CHAT_TEXT_FILE_BYTES = 1024 * 1024             # attachments.MAX_TEXT_FILE_BYTES
-MAX_CHAT_FILE_BYTES = 32 * 1024 * 1024             # all of one message's files (MAX_DOCUMENT_TOTAL_BYTES)
+MAX_CHAT_FILE_BYTES = 200 * 1024 * 1024            # all of one message's files (MAX_DOCUMENT_TOTAL_BYTES; was 32 MiB)
+# Its images and files together (Limits for everyone, 10 Nov).
+MAX_MESSAGE_ATTACHMENT_BYTES = 200 * 1024 * 1024
 FILE_ONLY_TEXT = "(sent a file)"
 TEXT_FILE_EXTENSIONS = frozenset({
     ".txt", ".md", ".markdown", ".rst", ".log", ".json", ".jsonl", ".yaml", ".yml", ".toml", ".ini",
@@ -125,16 +127,19 @@ CREATE TABLE IF NOT EXISTS pip_chat_files (
 
 
 def widen_tables(db) -> None:
-    """Hold API 52's images and files in a registry made before it, once.
+    """Hold today's images and files in a registry whose tables were made with smaller bounds, once.
 
-    The tables were created with the inline limits in their CHECKs (four of each, 2 MiB). The first
-    message that brings images or files rebuilds them with the new bounds, rows kept, inside that
-    message's transaction. The registry schema stays 46: an older DGC still opens it and reads them.
+    The tables were created with the bounds of their day in their CHECKs (API 43's inline four of each and 2 MiB, then
+    API 52's 16 files of 16 MiB and 8 MiB images). The first message that brings images or files rebuilds a table whose
+    CHECK isn't today's, rows kept, inside that message's transaction. The registry schema doesn't change for it: an
+    older DGC still opens it and reads them.
     """
     from .workspace_registry import _execute_schema
+    today = {"pip_chat_images": (f"AND {MAX_CHAT_IMAGES - 1})", f"AND {MAX_CHAT_IMAGE_BYTES})"),
+             "pip_chat_files": (f"AND {MAX_CHAT_FILES - 1})", f"AND {MAX_CHAT_DOCUMENT_BYTES})")}
     for table, schema in (("pip_chat_images", IMAGES_SCHEMA), ("pip_chat_files", FILES_SCHEMA)):
         row = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()
-        if row is None or "AND 2097152)" not in row[0]:
+        if row is None or all(bound in row[0] for bound in today[table]):
             continue
         db.execute(f"DROP TABLE IF EXISTS {table}_widened")
         _execute_schema(db, schema.replace(f"CREATE TABLE IF NOT EXISTS {table} (", f"CREATE TABLE {table}_widened ("))
@@ -243,7 +248,7 @@ def _file_fits(name: str, raw: bytes) -> None:
         if not raw.startswith(starts) or sniff(name, raw) != ext:
             raise RegistryError("invalid_files", f"{name} is not the kind of file its name says.")
         if len(raw) > MAX_CHAT_DOCUMENT_BYTES:
-            raise RegistryError("invalid_files", f"{name} is over 16 MB; send a document of 16 MB or less.")
+            raise RegistryError("invalid_files", f"{name} is over {MAX_CHAT_DOCUMENT_BYTES // 1048576} MB; send a document of {MAX_CHAT_DOCUMENT_BYTES // 1048576} MB or less.")
         return
     if ext in TEXT_FILE_EXTENSIONS or ext in (".csv", ".tsv", ""):
         if b"\0" in raw[:8192]:
@@ -319,7 +324,7 @@ def _take_spooled(spool: str, maximum: int, refusal) -> bytes:
     except WorkspaceBoundaryError as exc:
         raise refusal("is not a regular file.") from exc
     except OSError as exc:
-        raise refusal("is over 16 MB; send a document of 16 MB or less.") from exc
+        raise refusal(f"is over {MAX_CHAT_DOCUMENT_BYTES // 1048576} MB; send a document of {MAX_CHAT_DOCUMENT_BYTES // 1048576} MB or less.") from exc
     finally:
         # The spool is a hand-over, not a store: what was read, or refused, does not stay.
         try:
@@ -344,7 +349,7 @@ def store_files(directory, pip_id, values=None, spooled=None):
     """Check the files a message brings and keep each once, by its digest, readable only by you.
 
     ``values`` are inline data URIs (API 43: four, 2 MB in all); ``spooled`` names files the editor put
-    in the backend's spool (API 52: a document up to 16 MB, a text file up to 1 MB, 32 MB in all)."""
+    in the backend's spool (a document up to 100 MB, a text file up to 1 MB, 200 MB in all; API 52's were 16 and 32)."""
     decoded, inline_only = [], spooled is None
     try:
         if values is not None:
@@ -461,7 +466,7 @@ def store_images(directory, pip_id, values=None, spooled=None):
     """Check the images a message brings and keep each once, by its digest.
 
     ``values`` are inline data URIs (API 43: four, 2 MB in all); ``spooled`` names files the editor
-    put in the backend's spool (API 52: 8 MB a photo, 32 MB in all). An iPhone photo is kept as the
+    put in the backend's spool (20 MB a photo, 200 MB in all; API 52's were 8 and 32). An iPhone photo is kept as the
     JPEG it becomes, and refused with one sentence when this computer can't convert it."""
     from .attachments import read_spooled_images, spool_root, validate_image_data_uris
     from .photos import PhotoError
@@ -623,6 +628,8 @@ def request(text, key, chat_options=None, images=None, files=None):
         files = validate_files(files)
         if isinstance(text, str) and not text.strip():
             text = FILE_ONLY_TEXT
+    if sum(i["bytes"] for i in (images or [])) + sum(f["bytes"] for f in (files or [])) > MAX_MESSAGE_ATTACHMENT_BYTES:
+        raise RegistryError("invalid_files", f"Send up to {MAX_MESSAGE_ATTACHMENT_BYTES // 1048576} MB of photos and files with one message.")
     text = validate_text(text)
     if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", key):
         raise RegistryError("invalid_request", "Conversation retry keys use 1–128 letters, digits, underscores or hyphens.")
