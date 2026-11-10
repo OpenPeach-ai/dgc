@@ -1771,7 +1771,13 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
    never --faint: --faint is VS Code's disabledForeground, rgba(97,97,97,.5) in the light themes,
    which reads 2.13:1 under Light Modern and 2.09:1 under Light+. This line tells the reader what
    Enter does, so it is text they need. Measured in settings-contrast.test.mjs. */
-#followup-hint { padding: var(--sp-2) var(--sp-1) 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+/* The line under the box while a turn runs ("Enter to steer · Alt+Enter to queue"). Its room is kept when it has nothing
+   to say, and it is one line however narrow, so the box never jumps up on send and back down when the turn ends. */
+#followup-hint { padding: var(--sp-2) var(--sp-1) 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-sizing: border-box; min-height: calc(var(--sp-2) + 1.45em); }
+#followup-hint[hidden] { display: block !important; visibility: hidden; }
+/* A short panel (the bottom panel, a small window) keeps every row for the transcript: no line there at all. */
+@media (max-height: 420px) { #followup-hint, #followup-hint[hidden] { display: none !important; } }
 .set-head .fbtn { color: var(--muted); }
 .set-head .fbtn:hover { color: var(--text); }
 

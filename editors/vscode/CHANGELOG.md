@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Work's prompt box stays where it is when you send: the line under it while a turn runs ("Enter to steer · Alt+Enter to queue") now has its room kept, so the box no longer jumps up on send and back down when the turn ends. The line is always one line, and in a short panel (under about 420 px tall) it is left out so the transcript keeps its rows.
 - A Pip's chat is calmer: one column the Pip's words start from and your prompts end at, a steady rhythm between turns, bubbles on the shared corners, choices as outline rows with a quiet letter, the Soft permission card's second buttons as outlines, links in the one purple, figures in the UI font, a prompt box on the shared corner whose border firms on focus, and quieter top-bar buttons. Placeholder and control words now clear 4.5:1 in light and dark. The faces and how they move are unchanged.
 - Work's "Edited N files" card takes the changed-files look: the + and − totals beside its title, then Undo, a chevron that folds the card and Open diff; under it the files grouped by folder in the order they came, each folder a row with its own counts that folds. One file stays one row with its folder dimmed before its name; a turn of more than six files starts with its folders folded.
 - A Pip's report card in Work reads in words: "High · GST total skips cess · gst.py, line 88", the exact place in its tooltip and, opened, under a quiet "Show the code" with a failed run's technical detail; Fix and Ask DGC to fix are the card's one accent, as text, and Open and ✕ are small outline chips.
