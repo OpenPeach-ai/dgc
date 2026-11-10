@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A message to a Pip up to 256 KB goes through: the editor itself stopped one over 16 KB, though DGC took it.
+- A new Pip turned down on the Pips page is turned down in the Work chat that made it too, at once: its card no longer offers Create Pip.
 - ChatDGC and a Pip's chat have the same bar on the prompt box as Work: one line, in a soft shell round the bar and the box. In ChatDGC it shows the messages you queued, a file or a canvas being made, the chat being summarized, and its fallback model answering; in a Pip's chat, the messages queued for it, a routine of its running, its computer busy with another request, and a fix DGC is making for it. Wide, each is a pill with its words; narrow, an icon with its count; what does not fit goes behind "+N", which lists the rest. One thing alone is said in full on the same line ("2 queued messages"). Click a pill, or press Enter on it, and its detail opens just above: the queued messages to reorder, edit or remove, or what is happening and what you can do about it. Esc closes it and goes back to the pill. Nothing going on means no bar.
 - The queue no longer takes room inside ChatDGC's box or as a block above a Pip's box: the box stays the same size and in the same place however many messages wait.
 - Work: while a pill's detail was open, the bar's shading covered the top of the prompt box and hid what you were typing. The box now stays in front.

@@ -119,6 +119,14 @@ def _bounded_pips_command(cmd):
         from .pip_computer_files import bound_bulk
         request, bulk = bound_bulk(request.get("type"), request)
     pending, count, chars = [(request, 0)], 0, 0
+    # A message to a Pip can be up to 256 KB (Limits for everyone, Pips API 79): as large as the Pips handler's own
+    # request limit (pips.CHAT_REQUEST_BYTES). Every other request keeps the 32 KiB budget.
+    limit = _MAX_PIPS_REQUEST_BYTES
+    if cmd["type"] == "pips_control" and isinstance(request, dict) and request.get("type") == "send_pip_message":
+        from .pips import CHAT_REQUEST_BYTES
+        limit = CHAT_REQUEST_BYTES
+    too_big = "Pips requests must fit within 32 KiB." if limit == _MAX_PIPS_REQUEST_BYTES else \
+        f"A message to a Pip must fit within {limit // (1024 * 1024)} MiB with what it carries."
     # An app's tools (register_app, update_app: Pips API 61) are schemas: the SDKs' own bounds, 2,048 values and 12 levels.
     tools = cmd["type"] == "pips_control" and isinstance(request, dict) and request.get("type") in (
         "register_app", "update_app", "ensure_pip_template", "prune_pip_templates")   # a Pip template (API 64) too
@@ -130,8 +138,8 @@ def _bounded_pips_command(cmd):
             raise RegistryError("invalid_request", "Pips requests must be small, shallow JSON objects.")
         if isinstance(value, str):
             chars += len(value)
-            if chars > _MAX_PIPS_REQUEST_BYTES:
-                raise RegistryError("invalid_request", "Pips requests must fit within 32 KiB.")
+            if chars > limit:
+                raise RegistryError("invalid_request", too_big)
         elif isinstance(value, dict):
             if len(value) > (128 if tools else 64) or any(not isinstance(key, str) for key in value):
                 raise RegistryError("invalid_request", "Pips request objects contain unsupported fields.")
@@ -149,8 +157,8 @@ def _bounded_pips_command(cmd):
         chunks, length = [], 0
         for chunk in json.JSONEncoder(ensure_ascii=False, separators=(",", ":"), allow_nan=False).iterencode(request):
             length += len(chunk.encode("utf-8"))
-            if length > _MAX_PIPS_REQUEST_BYTES:
-                raise RegistryError("invalid_request", "Pips requests must fit within 32 KiB.")
+            if length > limit:
+                raise RegistryError("invalid_request", too_big)
             chunks.append(chunk)
         detached = json.loads("".join(chunks))
     except (ValueError, TypeError, UnicodeError, RecursionError) as exc:

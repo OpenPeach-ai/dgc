@@ -114,6 +114,12 @@ export class PipsEditor implements vscode.Disposable {
   /** A Pip's messages were marked read here (mark_pip_read answered): the home's count and the other Pips pages follow. */
   private unreadRead?: () => void;
   useUnreadRead(notify: () => void): void { this.unreadRead = notify; }
+  /** A new-Pip card was created or turned down here (accept_pip_setup or reject_pip_setup answered): the same card in
+   *  every other chat and Pips page follows at once (Reject turns it down everywhere, 11 Nov). */
+  private setupDecided?: (setupId: string) => void;
+  useSetupDecided(notify: (setupId: string) => void): void { this.setupDecided = notify; }
+  /** A new-Pip card was decided somewhere else: this page's copy reads it again. */
+  setupChanged(setupId: string): void { this.post({ type: 'pipSetupChanged', setup_id: setupId }); }
   private profileChangeNotice?: () => void;
   useProfileChanged(notify: () => void): void { this.profileChangeNotice = notify; }
   profileChanged(): void { this.post({ type: 'pipsProfileChanged' }); }
@@ -316,6 +322,10 @@ export class PipsEditor implements vscode.Disposable {
     }
     if (owner.command === 'mark_pip_read' && event.type === 'pips_result' && event.ok === true) this.unreadRead?.();
     if (owner.command === 'set_pip_profile' && event.type === 'pips_result' && event.ok === true) this.profileChangeNotice?.();
+    if ((owner.command === 'accept_pip_setup' || owner.command === 'reject_pip_setup') && event.type === 'pips_result' && event.ok === true) {
+      const decided = event.result?.setup?.id;
+      if (typeof decided === 'string' && /^setup_[a-f0-9]{32}$/.test(decided)) this.setupDecided?.(decided);
+    }
     this.post({ type: 'pipsReply', id: owner.client,
       ok: event.type !== 'command_rejected' && (event.type === 'pips_status' || event.ok === true),
       result: event.type === 'pips_status' ? event : event.result,
@@ -786,7 +796,9 @@ export class PipsEditor implements vscode.Disposable {
       command = {type: 'pips_runtime', action: request.action, request_id: requestId};
     } else if (commands.has(request.type)) {
       const nested = {...request, request_id: requestId};
-      const maxBytes = ['prepare_pip_connector_draft','propose_pip_connector_action','propose_pip_handoff', 'propose_pip_artifact_handoff', 'propose_pip_personal_handoff', 'propose_pip_app_action','propose_pip_calendar_action','prepare_pip_message_draft','prepare_pip_calendar_draft'].includes(request.type) ? 32768 : 16384;
+      const maxBytes = ['prepare_pip_connector_draft','propose_pip_connector_action','propose_pip_handoff', 'propose_pip_artifact_handoff', 'propose_pip_personal_handoff', 'propose_pip_app_action','propose_pip_calendar_action','prepare_pip_message_draft','prepare_pip_calendar_draft'].includes(request.type) ? 32768
+        // A message to a Pip can be up to 256 KB from API 79 (Limits for everyone): as much as DGC's own request limit.
+        : request.type === 'send_pip_message' && this.apiVersion >= 79 ? 2 * 1024 * 1024 : 16384;
       // A message's images, or a file added to a Pip's computer, travel outside the request budget,
       // bounded on their own (2 MB of data); every other field keeps the budget.
       const fileData = request.type === 'add_pip_computer_file' && Object.prototype.hasOwnProperty.call(request, 'data') ? request.data : undefined;

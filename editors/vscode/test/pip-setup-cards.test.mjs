@@ -215,3 +215,57 @@ test('a revised Pip keeps its place and new identity in a grouped setup card',as
  group.querySelector('.pip-setup-batch-toggle').click();
  assert.equal([...group.querySelectorAll('.pip-setup-card')].find(el=>el.dataset.setupId===next.id).querySelector('select').value,'local-large');
 });
+
+// Reject on a new Pip turns it down everywhere at once (agreed 11 Nov). Turned down on the Pips page, the same card in a
+// Work chat still offered Create Pip until the chat was opened again (found live, 11 Nov): the host now says so to every
+// page (pipSetupChanged), and the card reads its setup again.
+test('a card decided somewhere else reads itself again at once: no Create Pip left on a rejected one',async t=>{
+ const x=harness(t),s=setup();await x.loaded(s);x.cards.finish(x.d.querySelector('#turn'));
+ assert.ok(x.find('Create Pip'),'waiting');
+ const before=x.requests('get_pip_setup').length;
+ x.cards.receive({type:'pipSetupChanged',setup_id:'setup_'+'9'.repeat(32)});await flush();
+ assert.equal(x.requests('get_pip_setup').length,before,'another card: nothing read');
+ x.cards.receive({type:'pipSetupChanged',setup_id:s.id});await flush();
+ assert.equal(x.requests('get_pip_setup').length,before+1,'this card: read again');
+ x.answer(x.requests('get_pip_setup').at(-1),{setup:resolved(s,false)});await flush();
+ assert.equal(x.find('Create Pip'),undefined,'nothing left to create');
+ assert.match(x.d.body.textContent,/Not created/);
+});
+
+import {createRequire as _req} from 'node:module';
+test('the host says a setup was decided when Create Pip or Reject is answered, and tells its page when told',async()=>{
+ const require=_req(import.meta.url);
+ const view=buildSync({entryPoints:[new URL('../src/pipsView.ts',import.meta.url).pathname],bundle:true,write:false,platform:'node',format:'cjs',external:['vscode']}).outputFiles[0].text;
+ const out={exports:{}};new Function('module','exports','require',view)(out,out.exports,name=>name==='vscode'?{}:require(name));
+ const posted=[],sent=[],decided=[];const editor=new out.exports.PipsEditor({},m=>{sent.push(m);return true;},()=>{});editor.attach(m=>posted.push(m));
+ editor.useSetupDecided(id=>decided.push(id));
+ editor.ready({pips_supported:true,pips_enabled:true,pips_api_version:79},{});
+ const s=setup();
+ for(const [type,accepted] of [['reject_pip_setup',false],['accept_pip_setup',true]]){
+  editor.receive({type:'pipsRequest',id:type,request:{type,setup_id:s.id,workspace_id:ws,expected_digest:s.digest}});
+  const forwarded=sent.at(-1).request;
+  editor.event({type:'pips_result',request_id:forwarded.request_id,command:type,ok:true,result:{setup:resolved(s,accepted)}});
+ }
+ assert.deepEqual(decided,[s.id,s.id]);
+ editor.event({type:'pips_result',request_id:'unknown',command:'reject_pip_setup',ok:true,result:{setup:resolved(s,false)}});
+ assert.equal(decided.length,2,'only an answer to its own request');
+ editor.setupChanged(s.id);
+ assert.deepEqual(posted.filter(m=>m.type==='pipSetupChanged'),[{type:'pipSetupChanged',setup_id:s.id}]);
+});
+
+test('the real Work page hands a setup decided elsewhere to its card, which reads itself again',async()=>{
+ const p=makeDom({scope:'review-scope',script:bundle+';window.DgcPips={mountSetupCards:Cards.mountSetupCards};document.documentElement.dataset.pipsDocumentId="test-document";\n'+mainJs});
+ const s=setup(),event=e=>p.send({type:'event',event:e});
+ p.send({type:'session_ready',sessionId:'review-session'});event({type:'ready',session_id:'review-session',capabilities:{pips_supported:true,pips_enabled:true,pips_api_version:25}});
+ event({type:'turn_start'});event({type:'tool_call',name:'pips_setup',call_id:'setup-tool',args:{},summary:'Daily review'});event({type:'tool_result',name:'pips_setup',call_id:'setup-tool',output:JSON.stringify({setup:s}),is_error:false});
+ p.send({type:'pipsConnection',generation:1,connected:true,enabled:true,backgroundSetup:true,apiVersion:25});
+ const reads=()=>p.posted.filter(m=>m.type==='pipsRequest'&&m.request.type==='get_pip_setup');
+ p.send({type:'pipsReply',id:reads().at(-1).id,ok:true,result:{setup:s}});await flush();
+ event({type:'turn_end',reason:'completed'});
+ const before=reads().length;
+ p.send({type:'pipSetupChanged',setup_id:s.id});await flush();
+ assert.equal(reads().length,before+1,'read again');
+ p.send({type:'pipsReply',id:reads().at(-1).id,ok:true,result:{setup:resolved(s,false)}});await flush();
+ assert.equal([...p.doc.querySelectorAll('button')].some(b=>/^Create( & run| Pip)$/.test(b.textContent)),false,'nothing left to create');
+ assert.deepEqual(p.errors,[]);
+});

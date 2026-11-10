@@ -230,6 +230,8 @@ export function mountSetupCards(options) {
  }
  function receive(message){
   if(message.type==='pipsVisibility'){runs.setVisible(message.visible);return;}
+  // Decided somewhere else (another chat, the Pips page): read it again now, so a turned-down card offers nothing.
+  if(message.type==='pipSetupChanged'){const e=entries.get(message.setup_id);if(e&&supported)load(e);return;}
   if(message.type==='pipsConnection'){
    const changed=generation!==message.generation;generation=message.generation;connected=message.connected===true;api=message.apiVersion||0;backgroundSetup=message.backgroundSetup===true;supported=connected&&message.enabled===true&&api>=23;
    if(changed){epoch++;for(const p of pending.values()){clearTimeout(p.timer);p.reject(Error('The chat connection changed. Refresh the setup card.'));}pending.clear();for(const e of entries.values()){e.loading=false;e.busy=false;}}

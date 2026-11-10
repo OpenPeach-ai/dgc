@@ -58,7 +58,8 @@ class PipChatImageTests(unittest.TestCase):
         for name, changed in (("over 2 MB in all", {"images": [PHOTO, PHOTO]}),
                               ("five images", {"images": [DOT] * 5}),
                               ("not an image", {"images": ["data:text/plain;base64,aGk="]}),
-                              ("a long text still has its limit", {"text": "x" * 40000}),
+                              # A message's text may be up to 256 KB (Pips API 79); past the handler's own request limit it never goes.
+                              ("a long text still has its limit", {"text": "x" * (pips.CHAT_REQUEST_BYTES + 1)}),
                               ("another command gets no image budget", {"type": "run_pip", "images": [PHOTO]})):
             with self.subTest(name):
                 with self.assertRaises(RegistryError):

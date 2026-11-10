@@ -7981,6 +7981,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.post({ type: "pipReportsHidden", pipIds, until });
       });
       this.pipsEditor.useUnreadRead(() => this.pipUnreadRead());
+      this.pipsEditor.useSetupDecided((id) => this.pipSetupDecided(id));
       this.pipsEditor.useProfileChanged(() => this.pipProfileChanged());
     }
     if (this.sessionReady) this.pipsEditor.ready(this.lastReadyEvent?.capabilities, this.backend);
@@ -8030,6 +8031,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     home.pipsEditor?.unreadChanged();
     home.pipsTab?.unreadChanged();
   }
+  /** A new-Pip card was created or turned down in one place: every chat's copy and every Pips page read it again, so a
+   *  card turned down on the Pips page offers nothing in the Work chat that made it (11 Nov). */
+  private pipSetupDecided(setupId: string): void {
+    const home = this.tab?.host || this;
+    for (const owner of [home, ...home.tabProviders]) owner.pipsEditor?.setupChanged(setupId);
+    home.pipsTab?.setupChanged(setupId);
+  }
   private pipProfileChanged(): void {
     const home = this.tab?.host || this;
     home.post({ type: "pipNewsRefresh" });
@@ -8068,6 +8076,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.post({ type: "pipReportsHidden", pipIds, until });
       });
       this.pipsTab.useUnreadRead(() => this.pipUnreadRead());
+      this.pipsTab.useSetupDecided((id) => this.pipSetupDecided(id));
       this.pipsTab.useProfileChanged(() => this.pipProfileChanged());
     }
     if (this.sessionReady) this.pipsTab.ready(this.lastReadyEvent?.capabilities, this.backend);

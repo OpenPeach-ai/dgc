@@ -5184,6 +5184,7 @@ const stopMessages=options.onMessage(message=>{
   // A Pip was marked read somewhere else (its pill on the home, a card in a Work chat): the counts are read again.
   if(message.type==='pipsUnreadChanged'){lastUnreadAt=0;void loadUnread(true);return;}
   if(message.type==='pipsProfileChanged'){void refresh(false);return;}
+  if(message.type==='pipSetupChanged'){void refresh(false);return;}   // a new-Pip card decided in a chat: Needs attention follows
   if(message.type==='pipsModelsChanged'){if(usable()&&(S.models.length||S.defaultModel||S.router)&&!S.modelsLoading)void loadModels();return;}
   if(message.type==='pipsVisibility'){S.visible=message.visible===true;motion();if(S.visible)void refresh(false);return;}
   if(message.type==='pipsConnection'){
