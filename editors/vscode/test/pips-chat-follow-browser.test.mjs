@@ -272,8 +272,9 @@ test("the boxes change no spacing: one message to the next is the same inside a 
       const all = [...document.querySelectorAll(".conversation-log .pip-message")]; return all.map((m, i) => {
       const next = all[i + 1];
       return next ? [m.className.includes("user") ? "user" : "reply", next.className.includes("user") ? "user" : "reply", Math.round(next.getBoundingClientRect().top - m.getBoundingClientRect().bottom)] : null; }).filter(Boolean); });
-    // A reply's bottom margin (20) and the next prompt's top margin (7) meet as one, as they did before the boxes (27 if they don't).
-    for (const [from, to, gap] of gaps) if (from === "reply" && to === "user") assert.equal(gap, 20, JSON.stringify(gaps));
+    // A reply's bottom margin (16) and the next prompt's top margin (24) meet as one, as they did before the boxes (40 if
+    // they don't). The numbers are the design pass's (0.52): 16 inside a turn, 24 between turns; they were 20 and 7.
+    for (const [from, to, gap] of gaps) if (from === "reply" && to === "user") assert.equal(gap, 24, JSON.stringify(gaps));
     assert.ok(gaps.some(([from, to]) => from === "reply" && to === "user"));
   } finally { await close(); }
 });

@@ -891,3 +891,132 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .own-change-list dt{color:var(--vscode-descriptionForeground)}
 .own-change-list dd{margin:0;color:var(--vscode-foreground);white-space:pre-wrap;overflow-wrap:anywhere}
 .own-change-error{margin:4px 0 0;color:var(--vscode-errorForeground);overflow-wrap:anywhere}
+
+/* ==== Pip chat design pass (0.52, asked 5 Nov): a Personal and a Project Pip's chat, calm, clear and physical. ====
+   What it holds to, each measured in test/pip-chat-design-browser.test.mjs:
+   - One column. Everything the Pip says starts at one left edge and is at most one measure wide (a reply, its choices);
+     everything you said ends at one right edge. The gutter is the side bar's 12 px, the editor's 16 px when there is room.
+   - The shared corners (6 chips, 8 rows and buttons, 12 cards, 16 bubbles and the box) and the 4 px unit; nothing that
+     sits in the chat casts a shadow (lift 0). Only what floats does: the box, and what waits above it.
+   - One purple: the sent bubble, the one main button, and marks (links, Undo). A choice, a second button and a chip are
+     drawn in the text's own ink on a hairline.
+   - Two inks besides the text: --pc-quiet for second words, figures, placeholders and the marks of controls. It is the
+     editor's own text at 72%, so it follows every theme and clears 4.5:1 on the dark and the light grounds (the
+     editor's disabled grey, used before, was 3.2:1 dark and 2.2:1 light).
+   - Motion answers the press at once, on the shared curve and durations, only on what changes, and is off under
+     reduced motion (the tokens take the durations to zero; the press's give is switched off below).
+   The faces are not touched here: not their boxes, not their motion. */
+.simple-pips.chat-open{--pc-quiet:color-mix(in srgb,var(--vscode-foreground) 72%,transparent);--pc-firm:color-mix(in srgb,var(--vscode-foreground) 32%,transparent);--pc-measure:min(calc(100% - 24px),600px);--pc-gutter:16px;
+  --pc-move:var(--dur-hover,120ms) var(--ease-out,ease-out)}
+@container(max-width:390px){.simple-pips.chat-open{--pc-gutter:12px}}
+
+/* The frame: the gutter, and a top bar of quiet marks over a hairline (three ringed circles read louder than the chat). */
+.simple-pips.chat-open .simple-content.chat{padding:0 var(--pc-gutter) 12px}
+.simple-pips.chat-open .simple-content.chat .conversation-log{margin-right:calc(0px - var(--pc-gutter));padding:12px var(--pc-gutter) 4px 0}
+/* The pinned prompt's ground reaches the column's edges and no further: at 300 px it reached 6 px past them, and the chat
+   could be pushed sideways by that much. */
+.simple-pips.chat-open .chat-style .pip-turn>.pip-message.user::before{inset:-16px calc(0px - var(--pc-gutter)) -12px 0}
+.simple-pips.chat-open .pip-topbar{padding:8px 12px;border-bottom:1px solid var(--hair)}
+.simple-pips.chat-open .pip-topbar .topbar-icon{width:28px;height:28px;min-height:28px;border:0;border-radius:var(--r-row,8px);color:var(--pc-quiet);transition:background-color var(--pc-move),color var(--pc-move),transform var(--pc-move)}
+.simple-pips.chat-open .pip-topbar .topbar-icon:hover:not(:disabled){background:var(--wash);color:var(--vscode-foreground)}
+.simple-pips.chat-open .pip-topbar .topbar-icon:active:not(:disabled){transform:scale(.96)}
+.simple-pips.chat-open .pip-topbar .pip-pill small{color:var(--pc-quiet)}
+
+/* The rhythm: 4 px inside a message, 16 between a prompt and its reply, 24 before the next prompt (the two margins
+   meet as one, so it is 24 and not 40), so a turn reads as one thing. */
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message.msg{gap:4px;margin:0 0 16px}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message.msg.user{margin-top:24px}
+.simple-pips.chat-open .pip-conversation.chat-style .chat-time{margin:16px 0 12px;font-size:11px;color:var(--pc-quiet)}
+
+/* Bubbles: 16 with a 6 tail, 8 x 12 inside, flat. Yours keeps the accent and its soft light (as Work's and ChatDGC's);
+   the Pip's is a wash of the text's own colour, with no line around it. */
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message.user .bubble{max-width:min(calc(100% - 40px),600px);padding:8px 12px;border-radius:16px 16px 6px 16px;box-shadow:none;
+  background-image:radial-gradient(130% 110% at 14% 0%,var(--bubble-grain,transparent),transparent 70%)}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer.split{gap:4px}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer.split .reply-part,
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer:not(.split){max-width:var(--pc-measure);padding:8px 12px;border:0;border-radius:16px 16px 16px 6px;box-shadow:none}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message.typing{padding:12px;border-radius:16px 16px 16px 6px;margin-bottom:16px}
+.simple-pips.chat-open .pip-conversation.chat-style .message-body p{margin-bottom:8px}
+.simple-pips.chat-open .pip-conversation.chat-style .message-body p:last-child{margin-bottom:0}
+/* A link is a mark, so it takes the one purple's link tone, not the editor's blue beside it. */
+.simple-pips.chat-open .pip-conversation.chat-style :is(.message-body .md-link,.run-post-show,.run-post-time,.allow-details>summary>span:last-child){color:var(--link)}
+@media(prefers-contrast:more){.simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant :is(.answer:not(.split),.reply-part){border:1px solid var(--vscode-foreground)}}
+
+/* Under a message: its time and figures at 11 px in the UI's own font (monospace is for code), its buttons quiet. */
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message .response-actions{min-height:20px;margin-top:0;gap:4px}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message .msg-time{color:var(--pc-quiet)}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message .reply-stats{margin-left:4px;font:400 11px/1.2 var(--vscode-font-family,system-ui);font-variant-numeric:tabular-nums;color:var(--pc-quiet)}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message .ract{color:var(--pc-quiet);transition:background-color var(--pc-move),color var(--pc-move),transform var(--pc-move)}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message .ract:hover:not(:disabled){background:var(--wash);color:var(--vscode-foreground)}
+
+/* The choices under its latest reply: outline rows, all as wide as the longest of them needs and never wider than a
+   reply may be, the letter in a quiet circle. Pointed at, a row lifts by a wash; pressed, it gives by 2% at once and
+   comes back when let go. */
+.simple-pips.chat-open .pip-conversation.chat-style .msg-choices{gap:4px;margin:4px 0 0;max-width:var(--pc-measure);width:fit-content;min-width:min(240px,100%)}
+.simple-pips.chat-open .pip-conversation.chat-style .msg-choice{min-height:32px;gap:8px;padding:4px 12px 4px 8px;border:1px solid var(--hair-strong);border-radius:var(--r-row,8px);background:transparent;line-height:1.4;
+  transition:background-color var(--pc-move),border-color var(--pc-move),transform var(--pc-move)}
+.simple-pips.chat-open .pip-conversation.chat-style .msg-choice:hover:not(:disabled){border-color:var(--pc-firm);background:var(--wash)}
+.simple-pips.chat-open .pip-conversation.chat-style .msg-choice:active:not(:disabled){transform:scale(.98)}
+.simple-pips.chat-open .pip-conversation.chat-style .msg-choice:focus-visible{outline:2px solid var(--vscode-focusBorder,var(--accent));outline-offset:1px}
+.simple-pips.chat-open .pip-conversation.chat-style .msg-choice-key{width:20px;height:20px;border:0;border-radius:50%;background:var(--wash);color:var(--pc-quiet);font-size:11px;font-weight:600}
+
+/* The line for a change it made: second words, with Undo and Details as marks. */
+.simple-pips.chat-open .pip-conversation.chat-style .own-change{margin:0;color:var(--pc-quiet)}
+.simple-pips.chat-open .pip-conversation.chat-style .own-change-words{color:var(--pc-quiet);opacity:1}
+.simple-pips.chat-open .pip-conversation.chat-style .own-change-sep{opacity:1}
+.simple-pips.chat-open .pip-conversation.chat-style .own-change :is(button.own-change-undo,button.own-change-more){color:var(--link)}
+.simple-pips.chat-open .pip-conversation.chat-style .own-change-undone,.simple-pips.chat-open .pip-conversation.chat-style .own-change-list dt{color:var(--pc-quiet)}
+.simple-pips.chat-open .pip-conversation.chat-style .own-change-list{gap:4px 12px;margin:4px 0 0;padding:4px 0 4px 12px;border-left:1px solid var(--hair-strong)}
+
+/* The Pip at work: its face as it is, its words, and its figures at 11 px in the UI's font, never broken mid-figure.
+   In a narrow chat the figures go under the words, beside the face, rather than wrapping where they fall. */
+.simple-pips.chat-open .pip-conversation.chat-style .pip-working{gap:4px 8px;margin:0 0 16px}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-working-meta{margin-left:0;font:400 11px/1.2 var(--vscode-font-family,system-ui);font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--pc-quiet)}
+@container(max-width:390px){
+  .simple-pips.chat-open .pip-conversation.chat-style .pip-working{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center}
+  .simple-pips.chat-open .pip-conversation.chat-style .pip-working>:first-child{grid-row:1/span 2}
+  .simple-pips.chat-open .pip-conversation.chat-style .pip-working>:not(:first-child){grid-column:2}
+  .simple-pips.chat-open .pip-conversation.chat-style .pip-working-verb{align-self:end}
+  .simple-pips.chat-open .pip-conversation.chat-style .pip-working-meta{align-self:start}
+}
+
+/* The Soft permission card keeps its look (its tint, its mark, its words). It takes the card corner, 12 px second words,
+   and the shared buttons: one filled, the others outlines in the text's ink, 26 px high. */
+.simple-pips.chat-open .pip-conversation.chat-style :is(.allow-card,.app-link[data-state=waiting],.app-link[data-state=needs]){border-radius:var(--r-card,12px);gap:8px;padding:12px}
+.simple-pips.chat-open .pip-conversation.chat-style :not(.pip-approval-dock)>:is(.allow-card,.app-link[data-state=waiting],.app-link[data-state=needs]){box-shadow:none;margin:8px 0}
+.simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-words small,.simple-pips.chat-open .pip-conversation.chat-style .allow-card .allow-details{font-size:12px;line-height:1.4}
+.simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-words small,.simple-pips.chat-open .pip-conversation.chat-style .allow-card .allow-details>summary{color:var(--pc-quiet)}
+.simple-pips.chat-open .pip-conversation.chat-style .allow-card .allow-details[open]{border-top-color:var(--hair)}
+.simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-actions{gap:8px;padding-top:0}
+.simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-actions button{height:26px;min-height:26px;padding:0 12px;border-radius:var(--r-row,8px);font-size:12px;font-weight:500;line-height:1;white-space:nowrap;
+  transition:background-color var(--pc-move),border-color var(--pc-move),transform var(--pc-move)}
+.simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-actions button.quiet{border:1px solid var(--hair-strong);background:transparent;color:var(--vscode-foreground)}
+.simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-actions button.quiet:hover:not(:disabled){border-color:var(--pc-firm);background:var(--wash)}
+
+/* In a 300 px side bar its three buttons still share one line. */
+@container(max-width:390px){.simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-actions{gap:4px}.simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-actions button{padding:0 8px}}
+
+/* The prompt box: the shared box's corner and hairline, its soft shadow its own. Focused, its line firms (the caret says
+   the rest); its placeholder and the marks of its controls are the quiet ink, and each control answers the press. */
+.simple-pips.chat-open .pip-conversation.chat-style .pip-composer{--composer-faint:var(--pc-quiet);border-radius:var(--r-2xl,16px);border-color:var(--hair-strong);box-shadow:var(--lift-box);transition:border-color var(--pc-move)}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-composer:focus-within{border-color:var(--pc-firm);box-shadow:var(--lift-box)}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-composer :is(.composer-chip,.model-control,.composer-routines,.chat-send){transition:background-color var(--pc-move),color var(--pc-move),transform var(--pc-move)}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-composer :is(.composer-chip,.model-control,.composer-routines):hover:not(:disabled){background:var(--wash)}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-composer :is(.composer-chip,.composer-routines,.chat-send):active:not(:disabled){transform:scale(.96)}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-composer .chat-send:not(.ready):hover:not(:disabled){background:var(--wash)}
+
+/* An empty chat: one title, then what it is for, in a readable measure. */
+.simple-pips.chat-open .pip-conversation.chat-style .conversation-empty{padding:16px 0 24px;max-width:44ch}
+.simple-pips.chat-open .pip-conversation.chat-style .conversation-empty h3{margin:0 0 8px;font-size:15px;font-weight:600;line-height:1.3;letter-spacing:-.01em}
+.simple-pips.chat-open .pip-conversation.chat-style .conversation-empty p{margin:0 0 8px;font-size:13px;line-height:1.5;color:var(--pc-quiet)}
+
+/* Reduced motion: colours still change (at once: the tokens' durations are zero), and nothing gives under the press. */
+@media(prefers-reduced-motion:reduce){
+  .simple-pips.chat-open .pip-topbar .topbar-icon:active:not(:disabled),.simple-pips.chat-open .pip-conversation.chat-style .pip-composer :is(.composer-chip,.composer-routines,.chat-send):active:not(:disabled),
+  .simple-pips.chat-open .pip-conversation.chat-style .msg-choice:active:not(:disabled){transform:none}
+}
+@media(forced-colors:active){
+  .simple-pips.chat-open .pip-conversation.chat-style :is(.msg-choice,.allow-card .app-link-actions button.quiet){border-color:ButtonText}
+  .simple-pips.chat-open .pip-conversation.chat-style .msg-choice-key{border:1px solid ButtonText;background:transparent;color:ButtonText}
+  .simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant :is(.answer:not(.split),.reply-part){border:1px solid CanvasText}
+}

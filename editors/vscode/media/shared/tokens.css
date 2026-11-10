@@ -98,6 +98,8 @@
   --lift-1: 0 1px 2px rgba(0,0,0,.12), 0 8px 24px -8px rgba(0,0,0,.28);
   --lift-2: 0 2px 6px rgba(0,0,0,.14), 0 24px 48px -16px rgba(0,0,0,.40);
   --scrim: rgba(0,0,0,.42); --scrim-blur: 2px;
+  /* The prompt box floats just over the chat: one soft shadow of its own, at half strength on a light ground (below). */
+  --lift-box: 0 3px 14px rgba(0,0,0,.14);
   /* Corners by role, on the scale above: chips and key caps, rows and buttons, cards and menus, dialogs. */
   --r-chip: var(--r-sm); --r-row: var(--r-md); --r-card: var(--r-xl); --r-menu: var(--r-xl); --r-dialog: var(--r-2xl);
   --t-dialog: 15px;
@@ -135,6 +137,7 @@ body.vscode-light, body.vscode-high-contrast-light {
   --lift-1: 0 1px 2px rgba(0,0,0,.06), 0 8px 24px -8px rgba(0,0,0,.14);
   --lift-2: 0 2px 6px rgba(0,0,0,.07), 0 24px 48px -16px rgba(0,0,0,.20);
   --scrim: rgba(0,0,0,.21);
+  --lift-box: 0 3px 14px rgba(0,0,0,.07);
   --mark-word: #6242d8; --mark-word-shimmer: linear-gradient(105deg,#6242d8,#8a6df0,#4f30c4,#7657e6,#6242d8);
   --mark-plugin: #5d3cd2; --mark-icon: #6d49e8;
   --mark-plugin-glow: linear-gradient(90deg, transparent, rgba(124,92,255,.12), rgba(124,92,255,.22), rgba(124,92,255,.12), transparent);
