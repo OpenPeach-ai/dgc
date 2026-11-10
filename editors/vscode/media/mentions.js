@@ -938,8 +938,10 @@
       if (open) { el.setAttribute("aria-expanded", "false"); el.removeAttribute("aria-activedescendant"); }
       open = false;
     };
-    const show = (rows) => {
+    const show = (rows, list = "marks") => {
       items = rows; index = 0;
+      // A box's own commands (a Pip's /setup) are a few fixed rows: that list is as tall as they are (mentions.css).
+      pop.dataset.list = list;
       // Nothing to show yet may be a catalog still on its way: the first "@comp" in a new tab is typed before it comes.
       if (!rows.length) { const keep = pipMode; hide(); pipMode = keep; awaiting = true; return; }
       open = true; awaiting = false;
@@ -983,7 +985,7 @@
         const query = slash[1].toLowerCase();
         const rows = commands.filter((c) => c.name.startsWith(query))
           .map((c) => ({ label: "/" + c.name, kind: "Command", detail: c.detail || "", command: c.name }));
-        return rows.length ? show(rows) : hide();
+        return rows.length ? show(rows, "commands") : hide();
       }
       const token = /(^|\s)(@[^\s]*)$/.exec(value.slice(0, from));
       if (!token) return hide();

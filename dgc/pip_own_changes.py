@@ -148,18 +148,35 @@ def undo(store, pip_id, change_id, actor) -> dict:
 SETUP = ("The user typed /setup: they want to set you up for a job{job}. Ask at most three short numbered questions, "
          "only what you need and can't work out yourself (what it is for, what a good result looks like, when to do it), "
          "in one message. When they answer, change your own job with draft_pip_change: a name that fits the job, the "
-         "instructions (goal) that make you good at it, and a schedule if they want one; add a routine with add_routine "
-         "for something you should do by yourself regularly or at a time. These apply at once and the user can undo "
+         "instructions (goal) that make you good at it, and a schedule for when to do the job if they want one: every "
+         "day, weekdays, weekends or the days they name, at a time (your schedule, not a routine for the same thing); "
+         "add a routine with add_routine only for something else you should do by yourself regularly or at a time, "
+         "such as a reminder. These apply at once and the user can undo "
          "them. If the job is already clear, skip the questions and set it up now.")
 ASK_JOB = " (they didn't say which: ask what job they want you to do first)"
+# The turn after /setup, which usually answers its questions: the /setup words reach only the /setup turn, so without
+# these the answers ("every weekday at 9") followed the standing rule for something regular and became a routine (live,
+# 10 Nov).
+SETUP_ANSWER = ("Your last message answered the user's /setup. If this message answers your questions, set yourself up "
+                "now with draft_pip_change: a name that fits the job, the instructions (goal) that make you good at it, "
+                "and a schedule for when to do the job if they said when: every day, weekdays, weekends or the days "
+                "they name, at a time (your schedule, not a routine for the same thing). Add a routine with add_routine "
+                "only for something else you should do by yourself, such as a reminder. These apply at once and the "
+                "user can undo them. Otherwise, answer as usual.")
+_SETUP = re.compile(r"/setup(?:\s+(.*))?", re.S)
 
 
-def setup_instructions(text) -> str | None:
-    """The words a /setup message adds to the turn, or None when the message isn't /setup."""
+def setup_instructions(text, history=()) -> str | None:
+    """The words a /setup message adds to the turn, or the turn right after one (``history``: the turn's earlier
+    user/assistant pairs), or None."""
     if not isinstance(text, str):
         return None
-    match = re.fullmatch(r"/setup(?:\s+(.*))?", text.strip(), re.S)
+    match = _SETUP.fullmatch(text.strip())
     if match is None:
+        previous = history[-2] if isinstance(history, (list, tuple)) and len(history) >= 2 else None
+        if (isinstance(previous, dict) and previous.get("role") == "user" and isinstance(previous.get("content"), str)
+                and _SETUP.fullmatch(previous["content"].strip())):
+            return SETUP_ANSWER
         return None
     job = (match.group(1) or "").strip()
     return SETUP.format(job=f": \"{job[:2000]}\"" if job else ASK_JOB)

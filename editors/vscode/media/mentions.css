@@ -122,6 +122,9 @@ body:is(.vscode-light, .vscode-high-contrast-light) {
    which is worse than the collapsing it replaced. `max-height: min(210px, 40vh)` is the other half:
    refusing to shrink must not mean pushing the composer off a short panel. */
 .pop { display: none; margin: 0 var(--sp-1); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); flex: 0 0 auto; height: 210px; max-height: min(210px, 40vh); overflow-y: auto; box-shadow: 0 -12px 34px -10px rgba(0,0,0,.75); align-content: start; }
+/* A box's own commands (a Personal Pip's /setup, asked 10 Nov) are a few rows that never narrow into a stray line as you
+   type: that list is as tall as its rows, up to the same cap. Work's "/" list is its own (main.js) and keeps 210px. */
+.pop[data-list="commands"] { height: auto; }
 .pop .pi { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-2); padding: var(--sp-2) var(--sp-3); cursor: pointer; font: var(--w-med) var(--t-sm)/1.2 var(--sans); color: var(--text); }
 .pop .pi-label { display: flex; align-items: center; gap: 7px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The icon carries the kind, so the row can drop the sigil and read as a name. Sized to the row's

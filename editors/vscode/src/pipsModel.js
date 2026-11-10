@@ -1,5 +1,6 @@
 import {extraReadTools,validateExtraRead} from './pipsAppPicker.js';
 import {validAccountId} from './pipAccountId.js';
+import {cronDays} from './pipRoutines.js';
 // Pure presentation boundaries shared by the editor and deterministic tests.
 export const record = value => !!value && typeof value === 'object' && !Array.isArray(value);
 export const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -84,10 +85,9 @@ export function scheduleLabel(value) {
   if (record(value) && value.type === 'daily' && typeof value.time === 'string' && typeof value.timezone === 'string') return `Daily at ${value.time} · ${value.timezone}`;
   if(record(value)&&value.type==='once'&&typeof value.at==='string')return `Once at ${value.at}`;
   if(record(value)&&value.type==='cron'&&typeof value.cron==='string'&&typeof value.timezone==='string'){
-    // The two shapes starters write, in words; anything else stays the exact expression.
-    const m=/^(\d{1,2}) (\d{1,2}) \* \* (1-5|1)$/.exec(value.cron);
-    if(m&&Number(m[1])<60&&Number(m[2])<24)return `${m[3]==='1-5'?'Weekdays':'Mondays'} at ${m[2].padStart(2,'0')}:${m[1].padStart(2,'0')} · ${value.timezone}`;
-    return `Cron ${value.cron} · ${value.timezone}`;
+    // Once a day on any days, in words (weekdays, weekends, the days named); anything else stays the exact expression.
+    const days=cronDays(value.cron);
+    return days?`${days.days} at ${days.time} · ${value.timezone}`:`Cron ${value.cron} · ${value.timezone}`;
   }
   return 'Schedule unavailable';
 }

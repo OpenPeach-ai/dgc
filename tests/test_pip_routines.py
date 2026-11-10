@@ -68,6 +68,16 @@ class RoutineTests(unittest.TestCase):
         self.assertEqual(pip_routines.label(pip_routines.validate_trigger(DAILY)), "every day at 08:00")
         weekdays = {"kind": "schedule", "schedule": {"type": "cron", "cron": "30 7 * * 1-5", "timezone": "Asia/Kolkata"}}
         self.assertEqual(pip_routines.label(pip_routines.validate_trigger(weekdays)), "on weekdays at 07:30")
+        # Any days, in words (pips-07b): weekends, the days named, every day; anything else stays the exact expression.
+        for cron, words in (("0 10 * * 0,6", "on weekends at 10:00"), ("0 10 * * 6,0", "on weekends at 10:00"),
+                            ("0 8 * * 1,4", "on Mondays and Thursdays at 08:00"),
+                            ("30 7 * * 1,3,5", "on Mondays, Wednesdays and Fridays at 07:30"),
+                            ("0 18 * * 5", "every Friday at 18:00"), ("0 9 * * 7", "every Sunday at 09:00"),
+                            ("0 9 * * *", "every day at 09:00"), ("0 9 * * 0-6", "every day at 09:00"),
+                            ("0 9,17 * * 1-5", "on the schedule 0 9,17 * * 1-5"), ("0 9 1 * *", "on the schedule 0 9 1 * *")):
+            with self.subTest(cron=cron):
+                trigger = {"kind": "schedule", "schedule": {"type": "cron", "cron": cron, "timezone": "Asia/Kolkata"}}
+                self.assertEqual(pip_routines.label(pip_routines.validate_trigger(trigger)), words)
         self.assertEqual(pip_routines.label(pip_routines.validate_trigger(EMAIL)),
                          "when a new email matching from:alerts@bank.example arrives")
         self.assertEqual(pip_routines.validate_trigger({"kind": "calendar"})["lead_minutes"], 15, "sensible defaults")

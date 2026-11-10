@@ -3878,7 +3878,9 @@ instructions, its schedule, its model, and a routine it adds (on at once). Each 
 after its reply, with **Undo** (while nothing has changed it since) and **Details**. A routine's run,
 or a follow-up after a page it read, can't change its job and asks instead; web reads, its own
 computer, apps and its level always ask. **/setup** in its box ("/setup Write one-page sales
-sheets") asks up to three short questions, then sets it up.
+sheets") asks up to three short questions, then sets it up. Its schedule can be every day,
+weekdays, weekends or the days you name, at a time ("every weekday at 9"): its own schedule, not
+an extra routine.
 
 After you accept all of Core's proposed Pips, **Personal → Workflows** offers their order as a
 starting point. Write the exact receiving tasks and review the route. A workflow can ask you at

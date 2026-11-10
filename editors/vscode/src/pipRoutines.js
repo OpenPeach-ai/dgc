@@ -45,6 +45,26 @@ export function routinesPage(value, pip) {
   return value.routines.map(r => routine(r, pip));
 }
 
+/** Once a day at one time, on any days: {days: 'Weekdays' | 'Weekends' | 'Every day' | 'Mondays and Thursdays', time:
+ *  'HH:MM'}, or null for anything else (several times a day, steps, a day of the month), which is said as it is. The
+ *  Pip's page, its routines and the line of a change it made say the same (pip_routines.cron_words for its turn). */
+export function cronDays(cron) {
+  const m = /^(\d{1,2}) (\d{1,2}) \* \* (\*|[0-7](?:-[0-7])?(?:,[0-7](?:-[0-7])?)*)$/.exec(String(cron || ''));
+  if (!m || Number(m[1]) > 59 || Number(m[2]) > 23) return null;
+  const days = new Set();
+  for (const part of m[3] === '*' ? ['1-7'] : m[3].split(',')) {
+    const [lo, hi = lo] = part.split('-').map(Number);
+    for (let d = lo; d <= hi; d++) days.add(d === 0 ? 7 : d);
+  }
+  if (!days.size) return null;
+  const time = `${pad(m[2])}:${pad(m[1])}`, has = (...list) => days.size === list.length && list.every((d) => days.has(d));
+  if (days.size === 7) return { days: 'Every day', time };
+  if (has(1, 2, 3, 4, 5)) return { days: 'Weekdays', time };
+  if (has(6, 7)) return { days: 'Weekends', time };
+  const names = [...days].sort((a, b) => a - b).map((d) => WEEKDAYS[d % 7]);   // Monday first, Sunday last
+  return { days: names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`, time };
+}
+
 /** When it runs, in words. */
 export function routineWhen(trigger, formatDate = v => new Date(v).toLocaleString()) {
   if (trigger.kind === 'app') return `When ${appPhrase(trigger.app)} sends ${trigger.event}`;
@@ -54,9 +74,8 @@ export function routineWhen(trigger, formatDate = v => new Date(v).toLocaleStrin
   if (s.type === 'daily') return `Every day at ${s.time}`;
   if (s.type === 'interval') return s.minutes === 60 ? 'Every hour' : s.minutes % 60 === 0 ? `Every ${s.minutes / 60} hours` : `Every ${s.minutes} minutes`;
   if (s.type === 'once') return `Once, ${shortDate(s.at)}`;
-  const m = /^(\d{1,2}) (\d{1,2}) \* \* (1-5|[0-6])$/.exec(s.cron || '');
-  if (m) return `${m[3] === '1-5' ? 'Weekdays' : `${WEEKDAYS[Number(m[3])]}`} at ${pad(m[2])}:${pad(m[1])}`;
-  return `On the schedule ${s.cron}`;
+  const days = cronDays(s.cron);
+  return days ? `${days.days} at ${days.time}` : `On the schedule ${s.cron}`;
 }
 
 /** The form's fields for a routine (a new one when there is none). */

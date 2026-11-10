@@ -3437,7 +3437,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     base_instructions += '\n' + pip_chat_setup.notice(direct=chat_setup['direct'])
                     # "/setup <a job>" in the user's own turn: a few questions, then it sets itself up (pip_own_changes).
                     from .pip_own_changes import setup_instructions
-                    setup_words = setup_instructions(conversation.get('text')) if chat_setup['direct'] and conversation else None
+                    setup_words = (setup_instructions(conversation.get('text'), conversation.get('history') or [])
+                                   if chat_setup['direct'] and conversation else None)
                     if setup_words:
                         base_instructions += '\n' + setup_words
                 if kind == 'personal_task' and (email_drafting or calendar_drafting or connector_context is not None):

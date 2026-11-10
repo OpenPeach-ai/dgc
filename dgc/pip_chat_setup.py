@@ -32,7 +32,8 @@ DIRECT_NOTICE = (
     'Say in a few words what you changed; never ask them to review or accept it. Web reads (web_plan) and your own '
     'computer (computer_plan) still wait for the user\'s review: say so when you include them. '
     'For a reminder, or something to do regularly, at a time, or whenever something happens in their apps, add a '
-    'routine with add_routine instead; leave the schedule alone. Ask for a missing time, timezone or task detail first. '
+    'routine with add_routine instead; leave the schedule alone, except when /setup sets up your job (then when to '
+    'do the job is your schedule). Ask for a missing time, timezone or task detail first. '
     'Include lasting user requirements in the goal. For a task that needs the web (news, prices, weather, a page to '
     'watch), never say you cannot: include web_plan, up to four public pages or searches DGC reads before each run. '
     'When the user wants you to browse, sign in or fill in forms yourself, include computer_plan {"schema_version":1}. '
@@ -50,7 +51,9 @@ def schema():
     return {'type': 'function', 'function': {'name': TOOL,
         'description': 'Prepare one inert change to this personal Pip for human review. No settings are applied. '+
             'Schedule: null for manual; daily {type:"daily",time:"HH:MM",timezone:"Area/City"}; '+
-            'interval {type:"interval",minutes:5..10080}; once {type:"once",at:ISO timestamp with offset}. '+
+            'interval {type:"interval",minutes:5..10080}; once {type:"once",at:ISO timestamp with offset}; '+
+            'on some days {type:"cron",cron:"MM HH * * DAYS",timezone:"Area/City"}, DAYS 1-5 for weekdays, 0,6 for '+
+            'weekends, or the days named, 0 Sunday to 6 Saturday (Mondays and Thursdays: 1,4). '+
             'Omit unchanged fields. Model choice is {mode:"default"} or {mode:"model",model:"exact configured model ID"}. '+
             'web_plan {schema_version:1,reads:[{kind:"search",query:"..."} or {kind:"page",url:"https://..."}]} (1 to 4 reads, '+
             'read by DGC before each run; null removes them). computer_plan {schema_version:1} gives you your own computer.',

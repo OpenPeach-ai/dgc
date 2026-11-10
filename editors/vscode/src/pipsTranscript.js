@@ -1,4 +1,5 @@
 import {esc,activityLabel,personalStatusLabel} from './pipsModel.js';
+import {cronDays} from './pipRoutines.js';
 import '../media/mentions.js';   // globalThis.DgcMentions: @ marks in the bubble, the same in all three chats
 import '../media/msgtime.js';   // globalThis.DgcTime: a message's time, the same in all three chats
 import '../media/pictureFold.js';   // globalThis.DgcPictureFold: a reply's pictures fold away, the same in all three chats
@@ -53,7 +54,10 @@ function scheduleWords(s){
   if(s.type==='daily')return `every day at ${s.time}${s.timezone?` (${s.timezone})`:''}`;
   if(s.type==='interval')return `every ${s.minutes} minutes`;
   if(s.type==='once')return `once, at ${s.at}`;
-  if(s.type==='cron')return `${s.cron}${s.timezone?` (${s.timezone})`:''}`;
+  if(s.type==='cron'){
+    const d=cronDays(s.cron),when=!d?s.cron:d.days==='Every day'?`every day at ${d.time}`:`on ${/^Week/.test(d.days)?d.days.toLowerCase():d.days} at ${d.time}`;
+    return `${when}${s.timezone?` (${s.timezone})`:''}`;
+  }
   return String(s.type||'');
 }
 function modelWords(c){

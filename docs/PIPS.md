@@ -937,7 +937,9 @@ Undo · Details": **Undo** puts it back (only while nothing has changed it since
 **Details** shows the new values. Only in a turn you started: a routine's run, or a follow-up after a page it read,
 can't change its job, and still asks. Web reads, its own computer, apps and its level always ask.
 **/setup** in its box ("/setup Write one-page sales sheets for Acme Notes") asks you up to three short questions, then
-sets it up the same way. A DGC CLI before Pips API 77 asks you to review each change instead.
+sets it up the same way. Its schedule can be every day, weekdays, weekends or the days you name, at a time ("every
+weekday at 9", "Mondays and Thursdays at 8"): that is its own schedule, shown in those words on its page, not an extra
+routine. A DGC CLI before Pips API 77 asks you to review each change instead.
 
 **Queue.** Alt+Enter keeps a later message above the box until its turn begins, as in Work and ChatDGC. Drag it or use
 the arrow keys to reorder it, steer it in, remove it, copy it or move it to the top.

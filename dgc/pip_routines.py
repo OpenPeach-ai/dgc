@@ -170,14 +170,35 @@ def label(trigger: dict) -> str:
             "every hour" if minutes == 60 else f"every {minutes} minutes"
     if spec["type"] == "once":
         return f"once, at {spec['at']}"
-    weekdays = re.fullmatch(r"(\d+) (\d+) \* \* 1-5", spec["cron"])
-    if weekdays:
-        return f"on weekdays at {int(weekdays.group(2)):02d}:{int(weekdays.group(1)):02d}"
-    weekly = re.fullmatch(r"(\d+) (\d+) \* \* ([0-6])", spec["cron"])
-    if weekly:
-        day = ("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")[int(weekly.group(3))]
-        return f"every {day} at {int(weekly.group(2)):02d}:{int(weekly.group(1)):02d}"
-    return f"on the schedule {spec['cron']}"
+    return cron_words(spec["cron"])
+
+
+_DAY = ("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
+
+
+def cron_words(cron: str) -> str:
+    """Once a day at one time, on any days, in words: "on weekdays at 09:00", "on weekends at 10:00", "on Mondays and
+    Thursdays at 08:00", "every Friday at 18:00", "every day at 09:00". Anything else (several times a day, steps, a
+    day of the month) is said as the exact expression. The editor says the same (pipRoutines.js cronDays)."""
+    match = re.fullmatch(r"(\d{1,2}) (\d{1,2}) \* \* (\*|[0-7](?:-[0-7])?(?:,[0-7](?:-[0-7])?)*)", cron)
+    days = set()
+    for part in (match.group(3).split(",") if match and match.group(3) != "*" else ()):
+        low, _, high = part.partition("-")
+        days.update(range(int(low), int(high or low) + 1))
+    days = {7 if day == 0 else day for day in days} if match and match.group(3) != "*" else set(range(1, 8))
+    if not match or not days or int(match.group(1)) > 59 or int(match.group(2)) > 23:
+        return f"on the schedule {cron}"
+    at = f"at {int(match.group(2)):02d}:{int(match.group(1)):02d}"
+    if len(days) == 7:
+        return f"every day {at}"
+    if days == {1, 2, 3, 4, 5}:
+        return f"on weekdays {at}"
+    if days == {6, 7}:
+        return f"on weekends {at}"
+    names = [_DAY[day % 7] + "s" for day in sorted(days)]          # Monday first, Sunday last
+    if len(names) == 1:
+        return f"every {names[0][:-1]} {at}"
+    return f"on {', '.join(names[:-1])} and {names[-1]} {at}"
 
 
 def _troupe(row):

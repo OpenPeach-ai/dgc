@@ -69,6 +69,56 @@ class AtOnceWithUndo(unittest.TestCase):
         self.assertEqual((change["kind"], change["fields"], change["status"]), ("job", ["name", "goal"], "applied"))
         self.assertEqual(change["after"]["name"], "Pitch")
 
+    def test_weekdays_weekends_or_named_days_become_its_own_schedule(self):
+        # pips-07b (asked 10 Nov): the tool knew only daily, every so often and once, so "every weekday at 9" came out
+        # as an extra routine. Now it is the Pip's own schedule, in the cron shape its routines already run on.
+        job = self.job()
+        for i, cron in enumerate(("0 9 * * 1-5", "0 10 * * 0,6", "0 8 * * 1,4")):
+            with self.subTest(cron=cron):
+                run = self.turn(job, key=f"reply{i}", text=f"Do your job on {cron}")
+                self.store.finish(run["id"], result={"text": "Done.", "setup_draft": self.draft(
+                    schedule={"type": "cron", "cron": cron, "timezone": "Asia/Kolkata"})})
+                saved = self.store.get(job["id"])
+                self.assertEqual((saved["schedule"]["type"], saved["schedule"]["cron"]), ("cron", cron))
+                self.assertEqual(saved["proposals"], [], "no review card")
+                [change] = self.changes_of(run)
+                self.assertEqual(change["fields"], ["schedule"])
+        self.assertEqual(self.registry.db.execute("SELECT COUNT(*) FROM pip_routines WHERE pip_id=?",
+                                                  (job["id"],)).fetchone()[0], 0, "no routine as well")
+
+    def prompt_of(self, job, text, key):
+        """The system prompt of the reply to ``text``, as the worker builds it (no network, no model)."""
+        from dgc.llm import LLMClient, ChatResult
+        run = pip_chat.send(self.store, job["id"], text, key, "user", self.cfg)["run"]
+        raw = json.loads(self.registry.db.execute("SELECT manifest FROM pip_runs WHERE id=?", (run["id"],)).fetchone()[0])
+        seen = []
+
+        def chat(client, messages, tools=None, **kwargs):
+            seen.append(messages[0]["content"])
+            return ChatResult(content="Done.")
+        with patch.dict(os.environ, {"DGC_SESSION_POLICY": pips._json(pips.native_policy(personal=True))}), \
+                patch.object(LLMClient, "chat", chat), patch("dgc.agent.discover_skills", return_value={}), \
+                patch("dgc.agent.load_memories", side_effect=AssertionError("No ambient memory")):
+            pips.execute_native(self.cfg, self.root, raw, lambda e: None)
+        return run, seen[0] if isinstance(seen[0], str) else json.dumps(seen[0])
+
+    def test_the_answers_to_its_setup_questions_set_its_own_schedule_too(self):
+        # Live 10 Nov: the /setup words reached only the /setup turn, so the turn with the answers ("every weekday at
+        # 9") followed the standing rule for something regular and added a weekday routine instead of its schedule.
+        job = self.job()
+        first, words = self.prompt_of(job, "/setup Send me a short morning news brief", "reply-setup")
+        self.assertIn("three short numbered questions", words)
+        self.store.claim_next()
+        self.store.finish(first["id"], result={"text": "Three quick questions: 1. What for? 2. How long? 3. When?"})
+        answers, words = self.prompt_of(job, "1. To start my day. 2. Five bullets. 3. Every weekday at 9:00.", "reply-answers")
+        self.assertIn(own.SETUP_ANSWER, words)
+        self.assertIn("weekends", words)
+        self.store.claim_next()
+        self.store.finish(answers["id"], result={"text": "Set."})
+        _, words = self.prompt_of(job, "Thanks! What's the weather like?", "reply-later")
+        self.assertNotIn(own.SETUP_ANSWER, words, "only the turn right after /setup")
+        self.assertNotIn("three short numbered questions", words)
+
     def test_undo_puts_every_changed_field_back(self):
         job = self.job(); run = self.turn(job)
         schedule = {"type": "daily", "time": "09:00", "timezone": "Asia/Kolkata"}
@@ -265,6 +315,20 @@ class SetupCommand(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIsNone(own.setup_instructions(text))
 
+
+    def test_setup_and_its_tool_know_any_days(self):
+        described = setup.schema()["function"]["description"]
+        self.assertIn('type:"cron"', described)
+        for days in ("1-5", "0,6", "1,4"):
+            self.assertIn(days, described)
+        words = own.setup_instructions("/setup Send me a morning news brief")
+        for want in ("weekdays", "weekends", "schedule", "not a routine for the same"):
+            self.assertIn(want, words)
+        after = [{"role": "user", "content": "/setup Send me a morning news brief"}, {"role": "assistant", "content": "Three questions…"}]
+        self.assertEqual(own.setup_instructions("3. Every weekday at 9", after), own.SETUP_ANSWER)
+        self.assertIn("not a routine for the same", own.SETUP_ANSWER)
+        self.assertIsNone(own.setup_instructions("Thanks", after[:0]))
+        self.assertIsNone(own.setup_instructions("Thanks", [{"role": "user", "content": "hello /setup"}, after[1]]))
 
 if __name__ == "__main__":
     unittest.main()

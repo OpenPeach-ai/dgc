@@ -5,6 +5,8 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
 import { messageMarkup } from "../src/pipsTranscript.js";
+import { scheduleLabel } from "../src/pipsModel.js";
+import { routineWhen } from "../src/pipRoutines.js";
 import { createRequire } from "node:module";
 
 const OWN = "own_" + "a".repeat(32), ROUTINE = "own_" + "b".repeat(32);
@@ -121,6 +123,36 @@ test("each change it made shows after its reply, in words, with Undo and Details
   assert.match(html, /every day at 08:00/);
 });
 
+// Its own schedule on any days, the way routines run (pips-07b, asked 10 Nov): "weekdays at 9" is the Pip's schedule,
+// said in the same words on its page, in a routine and on the line of the change that set it.
+test("a schedule on weekdays, weekends or named days is said in words on its page, in routines and on its change line", () => {
+  const cron = (c) => ({ type: "cron", cron: c, timezone: "Asia/Kolkata", missed_policy: "coalesce_latest", dst_policy: "skip_gap_first_fold" });
+  const cases = [
+    ["0 9 * * 1-5", "Weekdays at 09:00", "on weekdays at 09:00"],
+    ["0 10 * * 0,6", "Weekends at 10:00", "on weekends at 10:00"],
+    ["0 10 * * 6,0", "Weekends at 10:00", "on weekends at 10:00"],
+    ["0 8 * * 1,4", "Mondays and Thursdays at 08:00", "on Mondays and Thursdays at 08:00"],
+    ["30 7 * * 1,3,5", "Mondays, Wednesdays and Fridays at 07:30", "on Mondays, Wednesdays and Fridays at 07:30"],
+    ["0 9 * * 0,1", "Mondays and Sundays at 09:00", "on Mondays and Sundays at 09:00"],
+    ["0 18 * * 5", "Fridays at 18:00", "on Fridays at 18:00"],
+    ["0 9 * * 7", "Sundays at 09:00", "on Sundays at 09:00"],
+    ["0 9 * * *", "Every day at 09:00", "every day at 09:00"],
+    ["0 9 * * 0-6", "Every day at 09:00", "every day at 09:00"],
+  ];
+  for (const [c, page, line] of cases) {
+    assert.equal(scheduleLabel(cron(c)), `${page} · Asia/Kolkata`, c);
+    assert.equal(routineWhen({ kind: "schedule", schedule: cron(c) }), page, c);
+    const html = messageMarkup({ id: "message_s", role: "assistant", text: "Done.", changes: [{ ...JOB_CHANGE, fields: ["schedule"],
+      after: { by: "Pitch", schedule: cron(c) } }] }, options);
+    assert.ok(html.includes(`${line} (Asia/Kolkata)`), `${c}: ${html.match(/<dd>[^<]*<\/dd>/g)}`);
+  }
+  // Anything else (several times a day, steps, a day of the month) stays the exact expression.
+  for (const c of ["*/30 9-17 * * 1-5", "0 9,17 * * 1-5", "0 9 1 * *", "0 9 * * 1-5/2"]) {
+    assert.equal(scheduleLabel(cron(c)), `Cron ${c} · Asia/Kolkata`, c);
+    assert.equal(routineWhen({ kind: "schedule", schedule: cron(c) }), `On the schedule ${c}`, c);
+  }
+});
+
 test("a line names the Pip as it was called then, not after a later rename", () => {
   const html = messageMarkup({ id: "message_e", role: "assistant", text: "Done.", changes: [{ ...JOB_CHANGE, fields: ["goal"],
     after: { goal: "Sales sheets", by: "Brief" } }] }, { ...options, name: "Acme Notes sales sheets" });
@@ -175,10 +207,20 @@ test("/ at the start of the box offers /setup; choosing it puts /setup in the bo
     await p.waitForFunction(() => getComputedStyle(document.getElementById("chat-pop")).display !== "none");
     const rows = await p.locator("#chat-pop .pi").allInnerTexts();
     assert.ok(rows.some((r) => /setup/.test(r) && /job/i.test(r)), rows.join(" | "));
+    // As tall as its one row (asked 10 Nov): not the @ list's fixed 210 px with an empty space under /setup.
+    const fit = await p.evaluate(() => { const pop = document.getElementById("chat-pop"), r = pop.getBoundingClientRect();
+      const rows = [...pop.querySelectorAll(".pi")].map((x) => x.getBoundingClientRect());
+      return { height: r.height, rows: rows.reduce((a, x) => a + x.height, 0) }; });
+    assert.ok(fit.height <= fit.rows + 4, `the / list is ${fit.height}px for ${fit.rows}px of rows`);
     await p.keyboard.press("Enter");
     assert.equal(await p.evaluate(() => document.getElementById("chatText").innerText.replace(/ /g, " ")), "/setup ");
     await p.keyboard.type("Write sales sheets");
     assert.equal(await p.evaluate(() => getComputedStyle(document.getElementById("chat-pop")).display), "none", "the list closes as the job is typed");
+    // The @ list keeps its one fixed height, so narrowing it as you type never makes the box jump.
+    await p.evaluate(() => { const box = document.getElementById("chatText"); box.focus(); document.execCommand("selectAll"); document.execCommand("delete"); });
+    await p.keyboard.type("@");
+    await p.waitForFunction(() => getComputedStyle(document.getElementById("chat-pop")).display !== "none");
+    assert.equal(await p.evaluate(() => Math.round(document.getElementById("chat-pop").getBoundingClientRect().height)), 210, "the @ list keeps 210px");
     assert.deepEqual(errors, []);
   } finally { await close(); }
 });
