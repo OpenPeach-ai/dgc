@@ -930,6 +930,15 @@ and apply to its replies and to everything it does on its own (schedules, routin
 triggers, handoffs). A new Pip starts with DGC's context window. They don't change the
 Pip's job. A Pip answers only while the runner is running.
 
+**A Personal Pip changes itself at once, with Undo.** Ask it to ("call yourself Pitch and write one-page sales sheets",
+"check in every weekday at 9") and its name, instructions, schedule or model change as soon as its reply is in, and a
+routine it adds is on. Each change is one line after that reply, such as "Pitch updated its job: name, instructions ·
+Undo · Details": **Undo** puts it back (only while nothing has changed it since; then change it in its Settings), and
+**Details** shows the new values. Only in a turn you started: a routine's run, or a follow-up after a page it read,
+can't change its job, and still asks. Web reads, its own computer, apps and its level always ask.
+**/setup** in its box ("/setup Write one-page sales sheets for Acme Notes") asks you up to three short questions, then
+sets it up the same way. A DGC CLI before Pips API 77 asks you to review each change instead.
+
 **Queue.** Alt+Enter keeps a later message above the box until its turn begins, as in Work and ChatDGC. Drag it or use
 the arrow keys to reorder it, steer it in, remove it, copy it or move it to the top.
 
@@ -1111,8 +1120,9 @@ A routine is something a Personal Pip does on its own. It has a name, what to do
 | Your app's event | When the shop app sends order.created | Choose one of your own apps (see [Your own app](#your-own-app)) and the event: type it, or pick one it sent lately. Once for each event |
 
 Add one with **+ Add routine** on its page, or ask the Pip ("every morning, tell me what my day
-looks like", or "remind me at 5:30 to call the supplier", which runs once): it suggests a routine as a
-card under its reply, and nothing runs until you choose **Add routine** (**Not now** puts it away). Each routine has an on/off switch; tap one to edit or
+looks like", or "remind me at 5:30 to call the supplier", which runs once): it adds the routine, on at once, with one
+line under its reply to **Undo** it. A routine one of its own runs suggests is a card instead, and nothing runs until
+you choose **Add routine** (**Not now** puts it away). Each routine has an on/off switch; tap one to edit or
 delete it.
 
 When a routine is due, DGC writes a turn in the Pip's chat (you see only its reply) and the Pip does

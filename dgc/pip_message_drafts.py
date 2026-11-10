@@ -259,7 +259,8 @@ def _commit_reply(store,run_id,result,kind):
     else:
         from .pip_chat_setup import validate_pin as setup_pin
         pin=setup_pin(run['manifest'])
-        stale=pin is None or job['current_version']!=pin['job_version'] or job['lifecycle_revision']!=pin['lifecycle_revision'] or job['status']=='archived'
+        from .pip_own_changes import own_versions
+        stale=pin is None or job['current_version']!=pin['job_version']+own_versions(store.db,run_id) or job['lifecycle_revision']!=pin['lifecycle_revision'] or job['status']=='archived'
     if stale:
         store.registry.event(run['workspace_id'],('pip_connector_draft_stale' if kind=='connector' else 'pip_calendar_draft_stale' if kind=='calendar' else 'pip_message_draft_stale'),pip_id=run['pip_id'],run_id=run_id,payload={})
         return

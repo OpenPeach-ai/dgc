@@ -869,3 +869,20 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .pip-composer .composer-fallback-word{flex:none;margin:0 2px;padding:0 5px;border:1px solid color-mix(in srgb,var(--err) 60%,transparent);border-radius:999px;font-size:10px;font-weight:600;line-height:14px;color:var(--err-text)}
 /* A row with Main or Fallback keeps its name on one line, cut short, so the word never pushes it onto two. */
 .composer-model-option:has(.dgc-menu-pill) .composer-model-row{flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;overflow-wrap:normal}
+/* A Personal Pip's own change, applied at once in a turn you started (API 77, D6): one quiet line after the reply that
+   made it, as .memory-kept is, with Undo and Details; Details lists the new values under it. */
+.own-change{margin:6px 0 2px;font-size:12px;line-height:1.5;color:var(--vscode-descriptionForeground)}
+.own-change-line{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:6px;row-gap:2px;margin:0}
+.own-change-words{color:var(--vscode-foreground);opacity:.82;overflow-wrap:anywhere}
+.own-change-sep{opacity:.55}
+.own-change-acts{display:inline-flex;align-items:baseline;gap:6px;white-space:nowrap}
+.own-change button.own-change-undo,.own-change button.own-change-more{min-height:0;padding:0;border:0;background:none;font:inherit;line-height:inherit;color:var(--pip-ink);text-decoration:underline;text-decoration-color:color-mix(in srgb,currentColor 40%,transparent);text-underline-offset:2px;cursor:pointer}
+.own-change button.own-change-undo:hover,.own-change button.own-change-more:hover{text-decoration-color:currentColor}
+.own-change button.own-change-undo:focus-visible,.own-change button.own-change-more:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:2px;border-radius:2px}
+.own-change button.own-change-undo:disabled{opacity:.6;cursor:default;text-decoration:none}
+.own-change-undone{color:var(--vscode-descriptionForeground)}
+.own-change-list{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:2px 10px;margin:6px 0 0;padding:4px 0 4px 10px;border-left:2px solid color-mix(in srgb,var(--vscode-foreground) 18%,transparent)}
+.own-change-list[hidden]{display:none}
+.own-change-list dt{color:var(--vscode-descriptionForeground)}
+.own-change-list dd{margin:0;color:var(--vscode-foreground);white-space:pre-wrap;overflow-wrap:anywhere}
+.own-change-error{margin:4px 0 0;color:var(--vscode-errorForeground);overflow-wrap:anywhere}

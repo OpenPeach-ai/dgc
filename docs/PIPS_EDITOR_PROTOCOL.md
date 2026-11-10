@@ -3,7 +3,7 @@
 This page is for integrators who drive `dgc serve` over the editor protocol. Pips add
 a few commands and events to **protocol v14**; the protocol version does not change.
 The Pips controls themselves are versioned separately as the **Pips API** (currently
-73). The authoritative declarations are in `dgc/editor_protocol.py`, which also
+77). The authoritative declarations are in `dgc/editor_protocol.py`, which also
 generates the JSON schemas and the extension's `protocol.generated.ts`.
 
 The SDKs wrap the same controls as `session.pips`; see [sdk/PIPS.md](../sdk/PIPS.md).
@@ -296,6 +296,12 @@ time after asking the user, changes a Pip's model (a new job version, as the Pip
 context window (the Pip's own chat options, as its prompt box saves them with `set_pip_chat_options`),
 the Pips default, or a new Pip's pick on its setup card. The Pip's page shows a window the chat set the
 next time it reads the Pip's messages (at most every 4 seconds while its chat is open).
+
+**A Pip's own changes, with Undo** (API 77). No new event. In a turn the user started, `list_pip_messages` gives the
+reply that changed the Pip itself a `changes` list (`{id, kind: "job"|"routine", fields, after, status:
+"applied"|"undone", created_at, undone_at}`), each drawn after the reply as one line with Undo; `undo_pip_change
+{pip_id, change_id}` (local only) answers `{change, pip}`, or `conflict` when the job changed since. A client before API
+77 doesn't draw `changes`, and on an older backend a Pip's own changes are review cards, as before.
 
 **Saved providers** (API 74). `model_choice` also takes `{mode: "provider", provider: "provider_<32 hex>", model}`, a
 provider saved in Settings → Models. The saved list belongs to the editor, so its host adds `providers` (`[{id, name,

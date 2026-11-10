@@ -366,9 +366,10 @@ def decide(store, pip_id, routine_id, add_it: bool) -> dict:
 TOOL = "add_routine"
 
 
-def schema(own_apps=()) -> dict:
+def schema(own_apps=(), *, direct=False) -> dict:
     """The add_routine tool. ``own_apps``: the names of the user's own apps registered with DGC (pip_sdk_apps), whose
-    events a routine may wait on (Pips API 63)."""
+    events a routine may wait on (Pips API 63). ``direct``: the user started this turn, so a routine is on at once, with
+    Undo (pip_own_changes); otherwise it is a card the user adds."""
     own = sorted({a for a in own_apps or () if isinstance(a, str) and APP_NAME.fullmatch(a)})[:16]
     events = (" | {kind:'app', app:'<name>', event:'<event name>'} when the user's own app sends that event (their apps: "
               + ", ".join(own) + "). Use the event name the user gives, such as order.created; each event runs it once, "
@@ -377,8 +378,10 @@ def schema(own_apps=()) -> dict:
         "Suggest a routine: something you will do by yourself, once at a set time, on a schedule or when an app "
         "event happens, like reminding the user to call someone at 5 pm, however soon that is (kind 'schedule' with "
         "type 'once': at that time you post the reminder in this chat, and they are told), a morning news brief or "
-        "telling the user when an email from their bank arrives. It shows as a card below your reply; it starts "
-        "once the user chooses Add routine there. Use it when the user asks for a reminder, or asks you to do "
+        "telling the user when an email from their bank arrives. " + (
+        "It is on as soon as your reply is saved, and the user sees one line with Undo below your reply; say in one "
+        "sentence what it will do and when. " if direct else
+        "It shows as a card below your reply; it starts once the user chooses Add routine there. ") + "Use it when the user asks for a reminder, or asks you to do "
         "something later, regularly or whenever something happens, instead of saying you cannot or sending them "
         "to another app. "
         "when: {kind:'schedule', schedule:{type:'daily', time:'HH:MM', timezone:'Area/City'} or "
@@ -402,7 +405,7 @@ def validate_candidate(value) -> dict:
             "trigger": validate_trigger(value["trigger"])}
 
 
-def tool_result(arguments: dict, connected_toolkits, own_apps=()) -> tuple[dict | None, str]:
+def tool_result(arguments: dict, connected_toolkits, own_apps=(), *, direct=False) -> tuple[dict | None, str]:
     """In the worker: (the candidate, what the model is told). ``own_apps``: the user's own apps, from the run's pin."""
     try:
         when = arguments.get("when") if isinstance(arguments, dict) else None
@@ -418,6 +421,9 @@ def tool_result(arguments: dict, connected_toolkits, own_apps=()) -> tuple[dict 
     if kind in APP_KINDS and APP_KINDS[kind][0] not in connected_toolkits:
         app = "Gmail" if kind == "email" else "Google Calendar"
         return None, f"Not suggested: this routine reads {app}, which is not connected to you. Ask the user to connect it first (connect_app)."
+    if direct:
+        return candidate, ("Added: it is on when your reply is saved and runs " + label(candidate["trigger"]) + "; the user "
+                           "sees it below your reply with Undo. Say in one sentence what it will do and when.")
     return candidate, ("Suggested: it shows as a card below your reply with Add routine, and runs "
                        + label(candidate["trigger"]) + " once the user adds it. Say in one sentence what it will do and when.")
 
@@ -430,16 +436,44 @@ def commit(store, run, result) -> None:
     if not isinstance(candidates, list) or len(candidates) > 2:
         raise RegistryError("invalid_routine", "A reply suggests at most two routines.")
     registry = store.registry
+    from . import pip_own_changes as own
+    from .pip_chat_setup import validate_pin
+    pinned = validate_pin(run["manifest"]) if isinstance(run.get("manifest"), dict) else None
+    # In a turn the user started (the user's call D6), a routine the Pip adds is on at once, with Undo; in a turn DGC
+    # started (a routine, a follow-up after a page) it is a card the user adds, as before.
+    direct = bool(pinned and pinned["direct"]) and own.user_started(store, run)
     waiting = registry.db.execute("SELECT count(*) FROM pip_routines WHERE pip_id=? AND status='suggested'",
                                   (run["pip_id"],)).fetchone()[0]
     for value in candidates:
-        if waiting >= MAX_SUGGESTED:
+        if not direct and waiting >= MAX_SUGGESTED:
             break
         candidate = validate_candidate(value)
         if candidate["trigger"]["kind"] == "app":
             from .pip_sdk_apps import get
             if get(candidate["trigger"]["app"]) is None:
                 continue                            # the app went away while it replied: no card, the reply stays
+        if direct:
+            # The same routine again (its name and when): it is already on, so nothing changes and there is no line to
+            # undo. A model asked for one more change can add its routine a second time.
+            same = registry.db.execute("SELECT 1 FROM pip_routines WHERE pip_id=? AND status IN ('on','off') AND "
+                                       "lower(title)=lower(?) AND trigger=? LIMIT 1",
+                                       (run["pip_id"], candidate["title"], json.dumps(candidate["trigger"]))).fetchone()
+            if same:
+                continue
+            try:
+                routine = _insert(store, run["pip_id"], candidate["title"], candidate["prompt"], candidate["trigger"],
+                                  status="on", created_by="pip", run_id=run["id"])
+            except RegistryError as exc:
+                if exc.code != "routine_limit":
+                    raise
+                # Its reply said it added one: say plainly that it couldn't, rather than lose the reply.
+                from .pip_chat_continuity import clipped
+                result["text"] = clipped(result.get("text") or "", 23000) + (
+                    f"\n\nI couldn't add \u201c{candidate['title']}\u201d: a Pip has at most {MAX_ROUTINES} routines. "
+                    "Remove one in my Settings and ask me again.")
+                continue
+            own.record_routine(store, run, routine, registry.clock())
+            continue
         _insert(store, run["pip_id"], candidate["title"], candidate["prompt"], candidate["trigger"],
                 status="suggested", created_by="pip", run_id=run["id"])
         waiting += 1

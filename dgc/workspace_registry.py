@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 51
+SCHEMA_VERSION = 52
 MAX_WORKSPACES = 256
 MAX_SESSION_ASSOCIATIONS = 100000
 MAX_EVENTS = 5000
@@ -411,6 +411,11 @@ class WorkspaceRegistry:
             # receives only that run's inbox; the chat archive keeps each message.
             from .pip_steering import SCHEMA as steering_schema
             _execute_schema(self.db, steering_schema)
+        if version < 52:
+            # A Personal Pip's own changes that applied at once in a turn the user started, and their Undo
+            # (pip_own_changes.SCHEMA). No existing job, run or review receives new authority in migration.
+            from .pip_own_changes import SCHEMA as own_changes_schema
+            _execute_schema(self.db, own_changes_schema)
         if 41 <= version < 51:
             # Replace the seven-colour CHECK with the eight established Pip colours.
             # Rows and their owner-only notification choices are copied unchanged.

@@ -9,9 +9,9 @@ Pips API history. For a guided introduction, start with [PIPS.md](PIPS.md).
 | DGC CLI | 0.51.0 |
 | VS Code extension | 0.35.0 |
 | SDK (Python and TypeScript) | 0.9.0 |
-| Pips API | 76 |
+| Pips API | 77 |
 | Editor protocol | v14 |
-| Pips registry schema | 51 |
+| Pips registry schema | 52 |
 
 ## Security model
 
@@ -1168,6 +1168,20 @@ events), `pip_levels.effective` is `ask` until the hour from the 25th-newest has
 and `dispatch_for_run` use it, the computer sends nothing by an Always allow meanwhile, and a submit it holds then
 carries `summary.asks_because: "fuse"` and `summary.fuse_until` (the instant it may act on its own again).
 `get_pip_level` still says the level the user chose.
+
+**A Pip's own changes, at once, with Undo** (`pip_own_changes`, Pips API 77, registry schema 52). A conversation run's
+`chat_setup` pin (schema 2) carries `direct`: true only when the turn's user message has a request key that isn't one
+of DGC's (`pip_chat.DGC_KEYS`: intro, routine, computer, apps, check, plugins, borrow). In such a turn the worker is told
+that `draft_pip_change` applies at once, and when the reply is saved the controller re-checks the stored key and writes
+the draft's `name`, `goal`, `schedule` and `model_choice` as the next version (actor `pip_own_change`, never an approved
+review; adaptation authority passes over it), then proposes anything else (`web_plan`, `computer_plan`) for review
+against that version. A routine `add_routine` returns in such a turn is inserted `on`. Each is a `pip_own_changes` row
+(`job`: from/to version and fields; `routine`: its id), listed on the reply as `changes`
+(`[{id, kind, fields, after, status, created_at, undone_at}]`). `undo_pip_change {pip_id, change_id}` (local only) →
+`{change, pip}`: a job change only while `current_version` is still the version it wrote (else `conflict`), restoring
+those fields from the version before as a new version; a routine change deletes the routine. A draft saved with the
+same reply (an email, an event, a connector action) counts the reply's own versions, so it isn't stale. A user message
+that is `/setup` (optionally followed by a job) adds instructions to ask up to three short questions, then set the job.
 
 **A fallback model** (`pip_backup`, Pips API 76; chosen in the Pip's model picker since D14). The controller reads the
 Pip's fallback when a run starts (metadata `pip_backup:<pip>` = `{provider, model}`, read by every process alike; a new
@@ -2337,3 +2351,4 @@ Clients check it before using a newer control.
 | 74 | A Pip on a provider saved in the editor's Settings → Models: `model_choice` `{"mode": "provider", "provider", "model"}`. |
 | 75 | Payments at Do it all: `get_pips_payments` / `set_pips_payments {enabled}` (local only) → `{payments: {on, limit, paid}}`. Off by default; on, a Pip at Do it all may pay by itself, at most `limit` (3) times in 24 hours across all Pips, never a request carrying a card number. |
 | 76 | A Pip's fallback model: `get_pip_backup {pip_id}` / `set_pip_backup {pip_id, model, provider?, engine?, router?}` → `{backup: {pip_id, provider, model, engine?, router?, on?}}` (`provider` "" DGC's own connection or `provider_<32 hex>`, `model` "" or null none; `engine` `claude` or `codex` for Claude Code or Codex, `model` then its model or "" its default; `router: true` for DGC Router, `model` "" or `<system>/<model>`; `on` `{since, model}` while it answers) and the one new Pips start with, `get_pips_backup` / `set_pips_backup {model, provider?}` → `{backup: {provider, model}}`, all local only. When a run's own model doesn't answer, it carries on with the fallback; the first reply of an outage carries `backup`, its one line, and `list_pip_messages` carries `fallback_on {model, since}` while the fallback answers. |
+| 77 | A Personal Pip's own changes at once, with Undo: in a turn the user started, its `name`, `goal`, `schedule` and `model_choice` change when its reply is saved, and a routine it adds is `on`; the reply carries `changes` (`[{id, kind, fields, after, status}]`), and `undo_pip_change {pip_id, change_id}` (local only) → `{change, pip}` puts one back while nothing changed it since. `/setup` in a user message sets the Pip up after up to three questions. Registry schema 52. |

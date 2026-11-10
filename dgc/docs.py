@@ -3873,6 +3873,13 @@ researcher, writer and image designer together, but creating them does not autom
 apps or pass results between them. An image Pip uses your configured generators under their cost
 approvals; never put a generator key in its goal.
 
+A Personal Pip changes itself at once when you ask it to, in your own message: its name, its
+instructions, its schedule, its model, and a routine it adds (on at once). Each change is one line
+after its reply, with **Undo** (while nothing has changed it since) and **Details**. A routine's run,
+or a follow-up after a page it read, can't change its job and asks instead; web reads, its own
+computer, apps and its level always ask. **/setup** in its box ("/setup Write one-page sales
+sheets") asks up to three short questions, then sets it up.
+
 After you accept all of Core's proposed Pips, **Personal → Workflows** offers their order as a
 starting point. Write the exact receiving tasks and review the route. A workflow can ask you at
 each handoff or pass each exact result unattended, up to three starts in any 24 hours. Project workflows can

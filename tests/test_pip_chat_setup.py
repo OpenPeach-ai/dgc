@@ -16,7 +16,12 @@ class ChatSetupTests(unittest.TestCase):
         return self.store.create(self.registry.personal()['id'], 'Planner', 'Help plan my day', 'user')
 
     def reply(self, job, key='reply'):
-        run = pip_chat.send(self.store, job['id'], 'Plan walking and reading each morning', key, 'user', self.cfg)['run']
+        # A key DGC uses (routine_, computer_, ...) is a turn DGC started: its drafts are reviews. The user's own
+        # turn changes the job at once, with Undo (D6, tests/test_pip_own_changes.py).
+        dgc_turn = key.startswith(pip_chat.DGC_KEYS)
+        run = pip_chat.send(self.store, job['id'], 'This message is from DGC, not the user.' if dgc_turn else
+                            'Plan walking and reading each morning', key, 'local-routine' if dgc_turn else 'user', self.cfg,
+                            _intro=dgc_turn)['run']
         self.store.claim_next()
         return run
 
@@ -26,8 +31,9 @@ class ChatSetupTests(unittest.TestCase):
                 'reason': 'The user requested this morning routine.'}
 
     def test_native_tool_makes_one_review_after_success_not_before(self):
+        """In a turn DGC started (a routine reading a page), a draft is a review, as before D6."""
         from dgc.llm import LLMClient, ChatResult, ToolCall
-        job = self.job(); run = self.reply(job)
+        job = self.job(); run = self.reply(job, key='routine_due')
         raw = json.loads(self.registry.db.execute('SELECT manifest FROM pip_runs WHERE id=?', (run['id'],)).fetchone()[0])
         turns = []
         def chat(client, messages, tools=None, **kwargs):
@@ -59,6 +65,34 @@ class ChatSetupTests(unittest.TestCase):
         # Duplicate finish never manufactures another proposal.
         self.store.finish(run['id'], result=result)
         self.assertEqual(self.registry.db.execute('SELECT count(*) FROM pip_proposals').fetchone()[0], 1)
+
+    def test_native_tool_in_your_turn_changes_the_job_after_success_not_before(self):
+        from dgc.llm import LLMClient, ChatResult, ToolCall
+        job = self.job(); run = self.reply(job)
+        self.assertTrue(run['manifest']['chat_setup']['direct'])
+        raw = json.loads(self.registry.db.execute('SELECT manifest FROM pip_runs WHERE id=?', (run['id'],)).fetchone()[0])
+        turns = []
+        def chat(client, messages, tools=None, **kwargs):
+            turns.append(messages)
+            self.assertEqual(self.store.get(job['id'])['current_version'], 1, 'nothing changes before the reply is saved')
+            if len(turns) == 1:
+                self.assertIn('change at once when your reply is saved', json.dumps(messages))
+                return ChatResult(content='', tool_calls=[ToolCall('draft1', setup.TOOL, self.candidate())])
+            self.assertIn('Undo', json.dumps(messages))
+            self.assertNotIn('No settings changed', json.dumps(messages))
+            return ChatResult(content='Done: every morning at 9, walking and reading, no spending.')
+        with patch.dict(os.environ, {'DGC_SESSION_POLICY': pips._json(pips.native_policy(personal=True))}), \
+             patch.object(LLMClient, 'chat', chat), patch('dgc.agent.discover_skills', return_value={}), \
+             patch('dgc.agent.load_memories', side_effect=AssertionError('No ambient memory')), \
+             patch('requests.sessions.Session.request', side_effect=AssertionError('No network')):
+            result = pips.execute_native(self.cfg, self.root, raw, lambda e: None)
+        self.store.finish(run['id'], result=result)
+        saved = self.store.get(job['id'])
+        self.assertEqual((saved['current_version'], saved['proposals']), (2, []))
+        self.assertEqual(saved['goal'], self.candidate()['changes']['goal'])
+        self.assertEqual(saved['schedule']['time'], '09:00')
+        self.store.finish(run['id'], result=result)
+        self.assertEqual(self.store.get(job['id'])['current_version'], 2, 'a duplicate finish changes nothing more')
 
     def test_cancelled_reply_does_not_save_review(self):
         job = self.job(); run = self.reply(job)
@@ -126,10 +160,12 @@ class ChatSetupTests(unittest.TestCase):
         job = self.job(); run = self.reply(job)
         self.store.finish(run['id'], result={'text': 'Review the brief I set up.', 'setup_draft': draft})
         saved = self.store.get(job['id'])
+        # In the user's own turn (D6) its instructions and schedule apply at once; its web reads and computer still ask.
+        self.assertEqual((saved['current_version'], saved['schedule']['time']), (2, '08:00'))
         self.assertIsNone(saved.get('web_plan')); self.assertIsNone(saved.get('computer_plan'))
         proposal = saved['proposals'][0]
         self.assertEqual(proposal['approval_status'], 'pending')
-        self.store.accept(job['id'], proposal['id'], 1, 'local-console')
+        self.store.accept(job['id'], proposal['id'], 2, 'local-console')
         applied = self.store.get(job['id'])
         self.assertEqual(applied['web_plan'], web)
         self.assertEqual(applied['computer_plan'], {'schema_version': 1})

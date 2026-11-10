@@ -82,7 +82,8 @@ class ProfileTests(unittest.TestCase):
             self.registry.db.execute("ALTER TABLE pip_profiles_old RENAME TO pip_profiles")
             self.registry.db.execute("PRAGMA user_version=50")
         with WorkspaceRegistry(self.registry.directory) as upgraded:
-            self.assertEqual(upgraded.db.execute("PRAGMA user_version").fetchone()[0], 51)
+            from dgc.workspace_registry import SCHEMA_VERSION
+            self.assertEqual(upgraded.db.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION, "the latest")
             self.assertEqual(pip_profile.get(upgraded.db, self.pip["id"])["color"], "mint")
             self.assertFalse(pip_profile.get(upgraded.db, self.pip["id"])["notify"])
             self.assertEqual(pip_profile.update(self.store, self.pip["id"], {"color": "lens"}, "editor-user")["profile"]["color"], "lens")

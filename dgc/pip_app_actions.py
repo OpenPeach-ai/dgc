@@ -129,7 +129,9 @@ def _source(store, run_id):
     else:
         from .pip_chat import validate_text
         validate_text(run['result'].get('text'),reply=True)
-    if job['current_version']!=run['manifest']['job_version']:
+    # What the Pip changed about itself in this same reply (pip_own_changes, D6) is part of the result, not a change since.
+    from .pip_own_changes import own_versions
+    if job['current_version']!=run['manifest']['job_version']+own_versions(store.db,run_id):
         raise RegistryError('stale_source','This Pip changed since the result. Prepare a fresh result first.')
     return {'run_id':run_id,'pip_id':job['id'],'workspace_id':job['workspace_id'],
             'job_version':job['current_version'],'lifecycle_revision':job['lifecycle_revision'],

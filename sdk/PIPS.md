@@ -221,6 +221,7 @@ job with `create_pip` and a reviewed update.
 | 74 | A provider saved in the editor's Settings → Models: `model_choice` `{"mode": "provider", "provider": "provider_<32 hex>", "model": id}`. The Pip keeps only those; the key stays with the CLI. |
 | 75 | `get_pips_payments`, `set_pips_payments {enabled}`: whether a Pip at Do it all may pay by itself, at most three times a day (off by default; local only in DGC) |
 | 76 | `get_pip_backup {pip_id}`, `set_pip_backup {pip_id, model, provider?, engine?, router?}`: a Pip's fallback model, one provider ("" DGC's own connection, or `provider_<32 hex>`) and one model ("" none), or Claude Code or Codex (`engine`) or DGC Router (`router: true`); `get_pips_backup`, `set_pips_backup {model, provider?, engine?, router?}`: the one new Pips start with (local only in DGC) |
+| 77 | `undo_pip_change {pip_id, change_id}`: Undo on a change a Personal Pip made about itself at once in a turn the user started (local only in DGC); a reply's `changes` lists them |
 | 58 | How much a Personal Pip asks: `get_pip_level {pip_id}` (R: `level`, `default`, `levels` [{level, name, says}], `on_its_own` [{at, what, level, unattended, kind}]) and `set_pip_level {pip_id, level}` (M, local only; `ask`, `approve` or `full`). What a level let through is a computer action already `sent` by `pip-level:<level>` or an app action resolved by it; a payment asks at every level. |
 | 57 | A Personal Pip's own working notes: `get_pip_working_notes {pip_id}` (R: `lines`, `text`, `revision`, `max_lines`, `max_bytes`, `bytes`, `updated_at`) and `set_pip_working_notes {pip_id, text, expected_revision}` (M, local only, never a secret); `list_pip_daily_log {pip_id, before?, limit?}` (R): what it did each day, `{days: [{day, lines, more}], next_before}`. The Pip keeps its notes itself with a `working_notes` tool and starts every run with them; the log is never given to a run. |
 
@@ -498,6 +499,7 @@ approves, rejects or starts nothing. Open the referenced record before acting.
 | `set_pips_backup` | M | `model` (string, "" none), `provider?` ("" or a saved provider's id), `engine?` (`claude` or `codex`: Claude Code or Codex, `model` its model or ""), `router?` (`true`: DGC Router, `model` "" or `<system>/<model>`): the fallback new Pips start with; from API 76 |
 | `get_pip_backup` | R | `pip_id`; from API 76 |
 | `set_pip_backup` | M | `pip_id`, `model` (string; "" or null none), `provider?` ("" DGC's own connection, or a saved provider's id), `engine?` (`claude` or `codex`), `router?` (`true`), as `set_pips_backup`; from API 76 |
+| `undo_pip_change` | M | `pip_id`, `change_id` (`own_<32 hex>`, from a reply's `changes`); from API 77 |
 | `get_pips_payments` | R | none; from API 75 |
 | `set_pips_payments` | M | `enabled` (bool): whether a Pip at Do it all may pay by itself, at most 3 times a day; from API 75 |
 | `get_pip_usage` | R | `pip_id` |

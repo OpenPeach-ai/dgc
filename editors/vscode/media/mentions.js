@@ -926,7 +926,8 @@
   /** The @ list of a box that isn't Work's. `sources()`: what this box can really use, right now -- {plugins: [{id,
    *  name}], outputs: [[value, label, desc, glyph]], pips: [{pip_id, name, pip_type, kind, detail}] or null, pipsLoading,
    *  pipsError, files: [{label, ...}]}; `refresh()`: asks for it again (it answers through update()); `fileRow(file)`
-   *  and `pipPart(row)` and `plainFile`: how those become marks; `icon(it)`: a row's own icon markup, `logo(id)`. */
+   *  and `pipPart(row)` and `plainFile`: how those become marks; `icon(it)`: a row's own icon markup, `logo(id)`;
+   *  `commands()`: [{name, detail}] the box offers after a "/" as its first character (a Personal Pip's /setup). */
   function picker(field, pop, opts) {
     const el = field.el;
     let items = [], index = 0, start = 0, end = 0, open = false, pipMode = false, awaiting = false;
@@ -972,6 +973,18 @@
       if (el.disabled || el.readOnly) return hide();
       const value = el.value, [from, to] = selectedOffsets(el);
       if (from !== to) return hide();
+      // A box's own commands (a Personal Pip's /setup): "/" as its very first character lists them. Chosen, a command
+      // goes in as plain words the backend reads, never a mark.
+      const commands = opts.commands ? opts.commands() : [];
+      const slash = commands.length ? /^\/([^\s]*)$/.exec(value.slice(0, from)) : null;
+      if (slash) {
+        pipMode = false; start = 0;
+        end = from + (value.slice(from).match(/^[^\s]*/)?.[0].length || 0);
+        const query = slash[1].toLowerCase();
+        const rows = commands.filter((c) => c.name.startsWith(query))
+          .map((c) => ({ label: "/" + c.name, kind: "Command", detail: c.detail || "", command: c.name }));
+        return rows.length ? show(rows) : hide();
+      }
       const token = /(^|\s)(@[^\s]*)$/.exec(value.slice(0, from));
       if (!token) return hide();
       const next = from - token[2].length;
@@ -999,6 +1012,14 @@
     function choose(i) {
       const it = items[i];
       if (!it || it.disabled) return;
+      if (it.command) {
+        const [from, to] = [start, end];
+        hide();
+        opts.edit(() => field.replace(from, to, "/" + it.command + " "));
+        el.focus({ preventScroll: true });
+        el.dispatchEvent(new (el.ownerDocument.defaultView?.Event || Event)("input", { bubbles: true, composed: true }));
+        return;
+      }
       if (it.pipPicker) {
         pipMode = { query: "" };
         opts.edit(() => field.replace(start, end, "@"));

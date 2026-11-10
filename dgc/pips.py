@@ -72,6 +72,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_app_links", "start_pip_app_link", "check_pip_app_link", "decline_pip_app_link", "disconnect_pip_app_link",
     "finish_pip_computer_check",
     "list_pip_routines", "add_pip_routine", "update_pip_routine", "delete_pip_routine", "decide_pip_routine",
+    "undo_pip_change",
     "set_pip_profile", "list_pip_shared", "get_pip_computers", "update_pip_computers", "reset_pip_computer", "list_pip_apps",
     "list_pip_plugins", "allow_pip_plugin", "decline_pip_plugin", "list_pip_plugin_uses", "get_pip_chat_context",
     "set_pip_chat_options",
@@ -124,6 +125,8 @@ _COMMAND_ARGS = {
     "list_pip_routines": {"pip_id", "app_events"}, "add_pip_routine": {"pip_id", "title", "prompt", "trigger"},
     "update_pip_routine": {"pip_id", "routine_id", "changes"}, "delete_pip_routine": {"pip_id", "routine_id"},
     "decide_pip_routine": {"pip_id", "routine_id", "add"},
+    # API 77: Undo on a change a Personal Pip made about itself at once, in a turn the user started (pip_own_changes).
+    "undo_pip_change": {"pip_id", "change_id"},
     "set_pip_profile": {"pip_id", "changes"}, "list_pip_shared": {"pip_id", "kind"},
     "get_pip_computers": set(), "update_pip_computers": set(), "reset_pip_computer": {"pip_id"}, "list_pip_apps": set(),
     "list_pip_plugins": {"pip_id"}, "allow_pip_plugin": {"pip_id", "grant_id"}, "decline_pip_plugin": {"pip_id", "grant_id"},
@@ -1047,6 +1050,84 @@ class PipStore:
     def reject(self, pip_id, proposal_id, expected_version, actor):
         return self._review(pip_id, proposal_id, expected_version, actor, accept=False)
 
+    _OWN_KEYS = ("name", "goal", "source_ref", "schedule", "model_choice", "adaptation_policy", "event_trigger",
+                 "source_policy", "verification_plan", "app_plan", "web_plan", "github_plan", "computer_plan", "live_plan")
+
+    def _own_version(self, pip, expected_version, changes, reason, now):
+        """A Personal Pip's own change (pip_own_changes) as its next version, inside the caller's transaction: the
+        fields given, every other field (and every reviewed grant) carried over. Returns (definition, changed fields)."""
+        from . import pip_approvals
+        from . import pip_own_changes as own
+        from .pip_schedules import reset_schedule
+        from .pip_event_triggers import reset_trigger
+        if not isinstance(changes, dict) or not changes or set(changes) - set(own.DIRECT_FIELDS):
+            raise RegistryError("review_required", "Only its name, instructions, schedule and model change at once.")
+        if not self.db.in_transaction:
+            raise RegistryError("invalid_state", "A Pip's own change is saved with its reply.")
+        if pip["current_version"] != expected_version:
+            raise RegistryError("conflict", "This Pip changed. Refresh and try again.")
+        if expected_version >= 999999:
+            raise RegistryError("limit", "This Pip has reached its version limit.")
+        if self.registry.get(pip["workspace_id"])["kind"] != "personal" or pip.get("verification_plan") is not None:
+            raise RegistryError("permission_denied", "Only a Personal Pip changes itself at once.")
+        from .pip_archive import require_live
+        require_live(self, pip["id"])
+        merged = {key: changes.get(key, pip[key]) for key in self._OWN_KEYS}
+        merged["pip_type"] = pip["pip_type"]
+        checked = _definition(**merged)
+        fields = [field for field in own.DIRECT_FIELDS if field in changes and checked[field] != pip[field]]
+        if not fields:
+            return checked, []
+        next_version = expected_version + 1
+        self.db.execute("INSERT INTO pip_versions VALUES(?,?,?,?,?,?)",
+                        (pip["id"], next_version, _json(checked), own.ACTOR, _text(reason, "reason", 1000, empty=True), now))
+        moved = self.db.execute("UPDATE pips SET current_version=?,updated_at=? WHERE id=? AND current_version=?",
+                                (next_version, now, pip["id"], expected_version))
+        if moved.rowcount != 1:
+            raise RegistryError("conflict", "This Pip changed. Refresh and try again.")
+        reset_schedule(self.registry, pip["id"], next_version, checked["schedule"], now)
+        reset_trigger(self.registry, pip["id"], next_version, checked["event_trigger"], now)
+        # A review still waiting for the user (its computer, its web reads) is a whole definition written against the
+        # version before, so, as when a change is accepted, it is superseded; but it waits on, carried over to the new
+        # version with the same request: otherwise the card a Pip asked for went away the next time it changed itself.
+        # A field it just changed is the newest word and is not carried.
+        waiting = self.db.execute("SELECT * FROM pip_proposals WHERE pip_id=? AND status='proposed' AND expected_version=? "
+                                  "ORDER BY rowid", (pip["id"], expected_version)).fetchall()
+        for other in self.db.execute("SELECT * FROM pip_approvals WHERE pip_id=? AND status='pending' AND expected_version<=?",
+                                     (pip["id"], expected_version)).fetchall():
+            pip_approvals.resolve(self.registry, other, "superseded", own.ACTOR, now)
+        self.db.execute("UPDATE pip_proposals SET status='superseded' WHERE pip_id=? AND status='proposed' AND expected_version<=?",
+                        (pip["id"], expected_version))
+        for row in waiting:
+            try:
+                proposed = json.loads(row["definition"])
+            except (TypeError, ValueError):
+                continue
+            carried = {key: proposed[key] for key in self._OWN_KEYS
+                       if key in proposed and proposed[key] != pip[key] and key not in fields}
+            if carried:
+                self.propose(pip["id"], next_version, carried, row["actor"], row["reason"],
+                             expected_workspace_id=pip["workspace_id"])
+        return checked, fields
+
+    def apply_own_change(self, pip_id, expected_version, changes, run, reason):
+        """In a turn the user started, what a Personal Pip changes about itself applies with its reply (the user's call
+        D6, 0.52): one new version and one change the chat shows with Undo. None when nothing would change."""
+        from . import pip_own_changes as own
+        pip = self._job(pip_id)
+        now = self.registry.clock()
+        checked, fields = self._own_version(pip, expected_version, changes, reason, now)
+        if not fields:
+            return None
+        change_id = own.record_job(self, run, pip_id, pip["workspace_id"], expected_version, fields, checked, now)
+        self.registry.event(pip["workspace_id"], "pip_own_change_applied", pip_id=pip_id, run_id=run["id"],
+                            payload={"change_id": change_id, "fields": fields, "version": expected_version + 1})
+        return change_id
+
+    def restore_own_change(self, pip_id, expected_version, previous, reason, now):
+        """Undo (pip_own_changes.undo): the changed fields back to what they were, as the next version."""
+        self._own_version(self._job(pip_id), expected_version, previous, reason, now)
+
     def adapt(self, pip_id, expected_version, changes, reason, *, origin_session_id, request_key, expected_workspace_id):
         from .pip_adaptation import adapt
         return adapt(self, pip_id, expected_version, changes, reason, origin_session_id=origin_session_id,
@@ -1513,7 +1594,11 @@ class PipStore:
                     manifest["generative_ui_supported"] = actor == "editor-user"
                     if personal:
                         from .pip_chat_setup import pin as pin_chat_setup
-                        manifest['chat_setup'] = pin_chat_setup(latest)
+                        # The user started this turn (their own message, not one DGC sent: a routine, a hello, a
+                        # follow-up after a page or an app): its own changes apply at once, with Undo (D6, 0.52).
+                        turn_key = conversation_request.get("request_key") if isinstance(conversation_request, dict) else None
+                        manifest['chat_setup'] = pin_chat_setup(latest, direct=isinstance(turn_key, str) and bool(turn_key)
+                                                                and not turn_key.startswith(pip_chat.DGC_KEYS))
                         manifest['email_draft'] = {'schema_version':1}
                         manifest['calendar_draft'] = {'schema_version':1}
                         manifest['connector_draft'] = connector_context
@@ -3215,7 +3300,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
 
         def _tool_schemas(self, *args, **kwargs):
             if personal:
-                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_core_setup.schema()] if selected_type.id == 'core' and pip_core_setup.pinned(manifest) else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)])] if personal and conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
+                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_core_setup.schema()] if selected_type.id == 'core' and pip_core_setup.pinned(manifest) else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)], direct=bool(chat_setup and chat_setup['direct']))] if personal and conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
             schemas = super()._tool_schemas(*args, **kwargs)
             if specialist_pin is not None:
                 return [pip_specialists.schema(specialist_pin['grant'])
@@ -3349,7 +3434,12 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     if pip_core_setup.pinned(manifest):
                         base_instructions += '\n' + pip_core_setup.NOTICE
                 if chat_setup is not None and chat_setup['allowed']:
-                    base_instructions += '\n' + pip_chat_setup.NOTICE
+                    base_instructions += '\n' + pip_chat_setup.notice(direct=chat_setup['direct'])
+                    # "/setup <a job>" in the user's own turn: a few questions, then it sets itself up (pip_own_changes).
+                    from .pip_own_changes import setup_instructions
+                    setup_words = setup_instructions(conversation.get('text')) if chat_setup['direct'] and conversation else None
+                    if setup_words:
+                        base_instructions += '\n' + setup_words
                 if kind == 'personal_task' and (email_drafting or calendar_drafting or connector_context is not None):
                     allowed = manifest.get('action_grants') or []
                     base_instructions += ('\nThis run is unattended. Draft an action only when your approved goal calls for it. '
@@ -3476,6 +3566,17 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     if setup_candidate is not None and candidate != setup_candidate:
                         return 'Draft already prepared. Explain it to the user; make another change in a later reply.'
                     setup_candidate = candidate
+                    if chat_setup['direct']:
+                        # A computer it already has is no request: only what would change waits for the user.
+                        has_computer = computer_pin is not None and 'computer_plan' in candidate['changes']
+                        asks = [key for key in ('web_plan', 'computer_plan') if key in candidate['changes']
+                                and not (key == 'computer_plan' and has_computer)]
+                        return ('Saved with your reply: ' + ('your name, instructions, schedule or model change at once when your reply is saved; there is '
+                                'nothing for the user to review or accept, and they see one line with Undo below your reply. '
+                                if set(candidate['changes']) - set(asks) else '')
+                                + ('You already have your own computer: nothing to ask for. ' if has_computer else '')
+                                + ('Your web reads and computer still wait for the user to review them: say so. ' if asks else '')
+                                + 'Say in a few words what you changed' + (' and that the rest waits for them.' if asks else '; never ask them to review it.'))
                     return 'Candidate prepared in this reply only. No settings changed. The controller will save a review after a successful reply. Ask the user to review it.'
                 except RegistryError as exc:
                     return 'Invalid setup draft: ' + str(exc)
@@ -3511,7 +3612,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 toolkits = {a.get('toolkit') for a in (apps_pin or {}).get('apps', [])}
                 own_apps = {a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)}
                 candidate, told = pip_routines.tool_result(call.arguments if isinstance(call.arguments, dict) else {}, toolkits,
-                                                           own_apps)
+                                                           own_apps, direct=bool(chat_setup and chat_setup['direct']))
                 if candidate is not None:
                     routine_candidates.append(candidate)
                 return told
@@ -5951,6 +6052,13 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     result = {'routine': pip_routines.decide(store, pip_id, request.get('routine_id'), request['add'])}
                 else:
                     result = pip_routines.delete(store, pip_id, request.get('routine_id'))
+            elif command == 'undo_pip_change':
+                # A change a Personal Pip made about itself at once (pip_own_changes): only the user undoes it, here.
+                from . import pip_own_changes
+                if actor not in ('editor-user', 'local-console'):
+                    raise RegistryError('local_only', "Only you undo a Pip's own change, on this computer.")
+                result = {'change': pip_own_changes.undo(store, pip_id, request.get('change_id'), actor),
+                          'pip': store.get(pip_id)}
             elif command in ('register_app', 'update_app', 'accept_app_update', 'list_apps', 'remove_app', 'rotate_app_secret'):
                 # Your own apps' tools (pip_sdk_apps, API 61): your code registers them; only this computer changes them.
                 from . import pip_sdk_apps

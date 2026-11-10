@@ -207,7 +207,9 @@ if(Mentions){
   // The name is the words: the model reads "ask Scout", and what a Pip is comes beside them (named_pips).
   pipPart:p=>{const name=p.name.replace(/\s+/g,' ').trim();return{kind:'pip',label:name,wire:name,identity:p.pip_id,pipType:p.pip_type};},
   // A project's Pip reads the project: the path is the words.
-  filePart:file=>({kind:'file',label:file.label,wire:file.label,identity:''})});
+  filePart:file=>({kind:'file',label:file.label,wire:file.label,identity:''}),
+  // "/" at the start: a Personal Pip's commands (API 77). /setup asks a few questions, then it sets itself up (Undo).
+  commands:()=>personalPip()&&S.apiVersion>=77&&!archived()?[{name:'setup',detail:'Set it up for a job: a few questions, then it changes itself (Undo)'}]:[]});
  if(chatBox.note){chatBox.note.id='chat-paste-note';chatBox.note.setAttribute('data-dom-own','1');}
  disposers.push(()=>chatBox.dispose());
 }
@@ -260,6 +262,20 @@ const chatQueues=new Map();
 // when one starts or ends: a conversation read that overlapped a save never takes its choice back.
 const chatOptionsSaving=new Set();let chatOptionsEpoch=0;
 const chatActivities=new Map();
+// A change a Personal Pip made about itself at once (Pips API 77, D6): which lines show their Details, and the one being
+// undone now.
+const ownDetailsOpen=new Set(),ownUndoErrors=new Map();let ownUndoing='';
+const canUndoOwn=()=>S.apiVersion>=77&&usable()&&!archived();
+async function undoOwnChange(id){
+ if(ownUndoing||!canUndoOwn())return;const token=scope(),pip=S.selected;ownUndoing=id;ownUndoErrors.delete(id);render();
+ try{
+  const result=await send('undo_pip_change',{pip_id:pip,change_id:id});if(token!==scope())return;
+  if(!record(result?.change)||result.change.id!==id)throw new Error('That didn\u2019t undo. Refresh to see where it stands.');
+  // Its name, instructions, schedule and model as the host now has them, and the line saying Undone.
+  ownUndoing='';await loadSelected();if(result.change.kind==='routine'&&S.routines)await loadRoutines();
+ }catch(error){if(token===scope())ownUndoErrors.set(id,errorText(error));}
+ finally{if(ownUndoing===id){ownUndoing='';render();}}
+}
 let setupEditing=false,setupRows=[],setupLoading=false,setupError='',setupSeq=0,setupDetailSeq=0;
 // The browser may still name a zone by its old name (Chromium says Asia/Calcutta); the current name is
 // what every runner has installed (Ubuntu 24.04+ keeps old names in tzdata-legacy).
@@ -785,7 +801,7 @@ function chatMarkup(){
     if(failedHidden(m))return timed(m,false)+failedHiddenMarkup(m);
     const prompt=S.messages.find(p=>p.role==='user'&&p.run_id===m.run_id),routine=m.role==='assistant'&&prompt?.intro===true?postRoutineTitle(prompt.text):null;
     if(routine&&m.quiet===true)return timed(m,false)+quietLineMarkup(m,routine);
-    return timed(m,!routine)+messageMarkup(m,{imageSrc:messageImageSrc,pluginLogo:pluginLogoSrc,split:simple,name:S.pip?.name||type?.name||'Pip',formatDate:date,renderMarkdown:routine?markdown:renderPipReply,canSend,prompt,activity:chatActivities.get(m.run_id),choices:m===answerable?m.choices:null,stats:m.role==='assistant'?replyStats.get(m.run_id):null,...(routine?routineReply(m,routine,type):{})});
+    return timed(m,!routine)+messageMarkup(m,{imageSrc:messageImageSrc,pluginLogo:pluginLogoSrc,split:simple,name:S.pip?.name||type?.name||'Pip',formatDate:date,renderMarkdown:routine?markdown:renderPipReply,canSend,prompt,activity:chatActivities.get(m.run_id),choices:m===answerable?m.choices:null,stats:m.role==='assistant'?replyStats.get(m.run_id):null,undo:canUndoOwn(),openChanges:ownDetailsOpen,undoing:ownUndoing,undoErrors:ownUndoErrors,...(routine?routineReply(m,routine,type):{})});
   };
   // Its runs, each a message from the Pip where it falls among the messages, all-clear runs in a row as one (Pips API
   // 51, pipRunPosts.js).
@@ -4553,6 +4569,8 @@ document.addEventListener('click',event=>{
     }catch(error){setError(error);}return;
   }
   if(target.dataset.finding!==undefined){const index=Number(target.dataset.finding),finding=report(S.run?.result)?.findings[index];if(!finding||!S.context)return;openReview({title:'Save this finding to context?',description:'Every Pip in this project sees the quoted code and the model’s conclusion in future runs, marked as the model’s view, not a checked fact.',body:`<h3>${esc(finding.title)}</h3><p class="mono">${esc(finding.path)}:${finding.line}</p><pre>${esc(finding.evidence)}</pre>`,confirm:'Save to context',request:{type:'accept_pip_finding',workspace_id:S.workspace.id,run_id:S.run.id,finding_index:index,expected_revision:S.context.revision}});return;}
+  if(target.dataset.ownUndo!==undefined){void undoOwnChange(target.dataset.ownUndo);return;}
+  if(target.dataset.ownDetails!==undefined){const id=target.dataset.ownDetails;if(ownDetailsOpen.has(id))ownDetailsOpen.delete(id);else ownDetailsOpen.add(id);render();return;}
   if(target.dataset.pipChoice!==undefined){
     // A tap answers with that choice; with words or files already in the box it joins them instead.
     const choice=target.dataset.pipChoice;

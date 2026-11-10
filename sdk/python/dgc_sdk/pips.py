@@ -390,6 +390,9 @@ API76_READS = frozenset({'get_pips_backup', 'get_pip_backup'})
 API76_MUTATIONS = frozenset({'set_pips_backup', 'set_pip_backup'})
 READ_COMMANDS |= API76_READS
 MUTATION_COMMANDS |= API76_MUTATIONS
+# API 77: Undo on a change a Personal Pip made about itself at once, in a turn the user started (local only in DGC).
+API77_MUTATIONS = frozenset({'undo_pip_change'})
+MUTATION_COMMANDS |= API77_MUTATIONS
 PIP_REPORT_AS = frozenset({'chat', 'doc', 'sheet'})
 TEMPLATE_CHANGE_ID = re.compile(r"tmplchange_[a-f0-9]{32}\Z")
 COMMAND_FIELDS = {
@@ -498,6 +501,7 @@ COMMAND_FIELDS = {
     'set_pips_backup': frozenset({'model', 'provider', 'engine', 'router'}),
     'get_pip_backup': frozenset({'pip_id'}),
     'set_pip_backup': frozenset({'pip_id', 'model', 'provider', 'engine', 'router'}),
+    'undo_pip_change': frozenset({'pip_id', 'change_id'}),
     'get_pips_payments': frozenset(),
     'set_pips_payments': frozenset({'enabled'}),
     'get_pips_desktop_notifications': frozenset(),
@@ -814,7 +818,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API76_READS | API76_MUTATIONS:
+        if command in API77_MUTATIONS:
+            minimum = 77
+        elif command in API76_READS | API76_MUTATIONS:
             minimum = 76
         elif command in API75_READS | API75_MUTATIONS:
             minimum = 75

@@ -45,9 +45,50 @@ function promptWithMarks(m,pluginLogo){
   return node?node.innerHTML:'';
 }
 
+// What a Personal Pip changed about itself at once, in a turn you started (Pips API 77, D6): one line per change after
+// the reply that made it, "Pitch updated its job: name, instructions · Undo · Details", and Undone after an Undo.
+const OWN_FIELD_WORDS={name:'name',goal:'instructions',schedule:'schedule',model_choice:'model'};
+function scheduleWords(s){
+  if(!s)return 'none (only when you ask)';
+  if(s.type==='daily')return `every day at ${s.time}${s.timezone?` (${s.timezone})`:''}`;
+  if(s.type==='interval')return `every ${s.minutes} minutes`;
+  if(s.type==='once')return `once, at ${s.at}`;
+  if(s.type==='cron')return `${s.cron}${s.timezone?` (${s.timezone})`:''}`;
+  return String(s.type||'');
+}
+function modelWords(c){
+  if(!c||c.mode==='default')return 'DGC\u2019s default';
+  if(c.mode==='router')return 'DGC Router';
+  if(c.mode==='subscription')return c.engine==='codex'?'Codex':'Claude Code';
+  return String(c.model||c.mode||'');
+}
+export function ownChangesMarkup(m,{name,undo=false,open=new Set(),busy='',errors=new Map()}){
+  const changes=Array.isArray(m.changes)?m.changes.filter(c=>c&&typeof c.id==='string'&&/^own_[0-9a-f]{32}$/.test(c.id)).slice(0,8):[];
+  if(!changes.length)return '';
+  return changes.map(c=>{
+    const after=c.after&&typeof c.after==='object'?c.after:{},routine=c.kind==='routine';
+    // As it was called when it made the change: a later rename doesn't change what an older line says.
+    const who=typeof after.by==='string'&&after.by?after.by:typeof after.name==='string'&&after.name?after.name:name;
+    const words=routine?`${who} added a routine: ${String(after.title||'')}`
+      :`${who} updated its job: ${(Array.isArray(c.fields)?c.fields:[]).map(f=>OWN_FIELD_WORDS[f]||f).join(', ')}`;
+    const rows=routine?[['When',after.when],['What it does',after.prompt]]
+      :(c.fields||[]).map(f=>[f==='goal'?'Instructions':f==='model_choice'?'Model':f[0].toUpperCase()+f.slice(1),
+        f==='schedule'?scheduleWords(after.schedule):f==='model_choice'?modelWords(after.model_choice):after[f]]);
+    const undone=c.status==='undone',shown=open.has(c.id);
+    const act=undone?'<span class="own-change-undone">Undone</span>'
+      :undo?`<button type="button" class="own-change-undo" data-own-undo="${esc(c.id)}"${busy?' disabled':''}>${busy===c.id?'Undoing\u2026':'Undo'}</button>`:'';
+    // The dot after the words stays with them, and Undo · Details stay together, so a narrow chat never starts a line on a dot.
+    return `<div class="own-change" data-own-change="${esc(c.id)}" data-status="${undone?'undone':'applied'}"><p class="own-change-line"><span class="own-change-words">${esc(words)}<span class="own-change-sep" aria-hidden="true">\u00a0\u00b7</span></span>`
+      +`<span class="own-change-acts">${act?`${act}<span class="own-change-sep" aria-hidden="true">\u00b7</span>`:''}<button type="button" class="own-change-more" data-own-details="${esc(c.id)}" aria-expanded="${shown}">Details</button></span></p>`
+      // Why an Undo couldn't happen, on the line itself: the page's own error slot is at the top of a long chat.
+      +(errors.get(c.id)?`<p class="own-change-error" role="alert">${esc(errors.get(c.id))}</p>`:'')
+      +`<dl class="own-change-list"${shown?'':' hidden'}>${rows.filter(([,v])=>v!==undefined&&v!==null&&v!=='').map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(String(v))}</dd>`).join('')}</dl></div>`;
+  }).join('');
+}
+
 // `head`: a line above a reply the Pip sent unasked (a routine's: its face, name, routine and time); `clip`: {text, open,
 // key}, a long one's start and its Show all.
-export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false,imageSrc=()=>'',pluginLogo=()=>'',choices=null,stats=null,head='',clip=null}) {
+export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false,imageSrc=()=>'',pluginLogo=()=>'',choices=null,stats=null,head='',clip=null,undo=false,openChanges=new Set(),undoing='',undoErrors=new Map()}) {
   const m=message,user=m.role==='user',label=user?'You':name;
   // Every photo the message brought (no four-photo cap from Pips API 52); a click opens the original.
   // A Pip's reply shows the images it made (generate_image) the same way, below its words.
@@ -97,7 +138,7 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   const startedAgain=line?esc(line.slice(0,120)):'';
   const replyTime=startedAgain&&time?time.replace(/(<time[^>]*>)/,`$1${startedAgain} · `):startedAgain?`<span class="msg-time">${startedAgain}</span>`:time;
   const activityRow=!user?`<button type="button" class="chat-activity-toggle" data-chat-activity="${esc(m.run_id)}" aria-expanded="${activity?.open===true}">${transcriptIcon('tool')}<span>${activity?.loading?'Loading…':'What it did'}</span><span class="activity-chevron">${transcriptIcon('chevron')}</span></button>${activity?.open?activityMarkup(activity,m.run_id):''}`:'';
-  return `<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}" data-message="${esc(m.id)}">${user?'':head}<span class="sr-only role">${esc(label)}</span>${activityRow}${shownCards}${body}${used}${offered}${status}<div class="response-actions">${user?'':head?(startedAgain?`<span class="msg-time">${startedAgain}</span>`:''):replyTime}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${options}${details}${trace}${!user&&stats?replyStats(stats):''}${user?sentTime:''}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
+  return `<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}" data-message="${esc(m.id)}">${user?'':head}<span class="sr-only role">${esc(label)}</span>${activityRow}${shownCards}${body}${used}${offered}${user?'':ownChangesMarkup(m,{name,undo,open:openChanges,busy:undoing,errors:undoErrors})}${status}<div class="response-actions">${user?'':head?(startedAgain?`<span class="msg-time">${startedAgain}</span>`:''):replyTime}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${options}${details}${trace}${!user&&stats?replyStats(stats):''}${user?sentTime:''}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
 }
 
 // What a reply took, beside its actions: its time and its tokens (in and out, all its model requests).

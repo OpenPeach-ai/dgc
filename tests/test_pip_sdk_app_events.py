@@ -305,7 +305,9 @@ class SuggestedTests(EventWorld, unittest.TestCase):
         candidate, told = pip_routines.tool_result(arguments, set(), own_apps={"shop"})
         self.assertIn("Add routine", told)
         self.assertIn("when the shop app sends order.created", told)
-        sent = pip_chat.send(self.store, self.pip["id"], "When an order comes in, check it", "chat-2", "editor-user", self.cfg)
+        # A card in a turn DGC started; in one the user started it is on at once, with Undo (D6, test_pip_own_changes).
+        sent = pip_chat.send(self.store, self.pip["id"], "This message is from DGC, not the user.", "routine_due", "local-routine",
+                             self.cfg, _intro=True)
         self.store.claim_next()
         self.store.finish(sent["run"]["id"], result={"text": "I can do that for every new order.", "routine_drafts": [candidate]})
         [suggested] = self.control("list_pip_routines", pip_id=self.pip["id"], app_events=True)["routines"]

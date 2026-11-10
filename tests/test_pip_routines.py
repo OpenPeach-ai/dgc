@@ -143,7 +143,10 @@ class RoutineTests(unittest.TestCase):
         candidate, told = pip_routines.tool_result({"title": "Morning brief", "prompt": "Send me the news.", "when": DAILY},
                                                    connected_toolkits=set())
         self.assertIn("Add routine", told)
-        sent = pip_chat.send(self.store, self.pip["id"], "Every morning send me the news", "chat-1", "editor-user", self.cfg)
+        # A card in a turn DGC started (a routine's, a follow-up); in a turn the user started it is on at once, with
+        # Undo (D6, tests/test_pip_own_changes.py).
+        sent = pip_chat.send(self.store, self.pip["id"], "This message is from DGC, not the user.", "routine_due", "local-routine",
+                             self.cfg, _intro=True)
         self.store.claim_next()
         self.store.finish(sent["run"]["id"], result={"text": "I can do that every morning at 8.", "routine_drafts": [candidate]})
         [suggested] = pip_routines.listing(self.store, self.pip["id"])["routines"]
@@ -156,7 +159,8 @@ class RoutineTests(unittest.TestCase):
                          "decided once: a second answer changes nothing")
 
     def test_not_now_hides_the_suggestion(self):
-        sent = pip_chat.send(self.store, self.pip["id"], "Every morning send me the news", "chat-1", "editor-user", self.cfg)
+        sent = pip_chat.send(self.store, self.pip["id"], "This message is from DGC, not the user.", "routine_due", "local-routine",
+                             self.cfg, _intro=True)
         self.store.claim_next()
         self.store.finish(sent["run"]["id"], result={"text": "Shall I?", "routine_drafts": [
             {"title": "Morning brief", "prompt": "Send me the news.", "trigger": DAILY}]})

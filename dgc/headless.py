@@ -408,7 +408,10 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # get_pips_backup / set_pips_backup {model} -> {backup: {model}} (registry metadata), get_pip_backup {pip_id} / set_pip_backup {pip_id, model}
 # -> {backup: {pip_id, model, follows, backup}} (model null follows Pips settings, "" none), all local only; and a
 # reply the backup answered, the first of an outage, carries `backup`, its one line.
-PIPS_API_VERSION = 76
+# API 77 (0.52, D6): in a turn the user started, a Personal Pip's own name, instructions, schedule and model change at
+# once and a routine it adds is on; a reply carries `changes` (each {id, kind, fields, after, status}), and
+# undo_pip_change {pip_id, change_id} -> {change, pip} puts one back, local only.
+PIPS_API_VERSION = 77
 
 
 def _pips_platform_supported() -> bool:

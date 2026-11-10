@@ -85,9 +85,10 @@ def carry_schedule_version(store, pip_id, before, after):
 
 
 def _authority(store, pip_id, selected, before):
-    """Every automatic grant must trace to an actual approved human definition."""
+    """Every automatic grant must trace to an actual approved human definition. A Personal Pip's own change
+    (pip_own_changes) never touches its adaptation policy, so it is passed over like an adaptation."""
     row = store.db.execute("SELECT version,length(CAST(definition AS BLOB)) AS size FROM pip_versions "
-                           "WHERE pip_id=? AND version<=? AND actor!='core_adaptation' ORDER BY version DESC LIMIT 1",
+                           "WHERE pip_id=? AND version<=? AND actor NOT IN ('core_adaptation','pip_own_change') ORDER BY version DESC LIMIT 1",
                            (pip_id, before)).fetchone()
     if row is None or row["size"] > 16384:
         raise RegistryError("adaptation_review_required", "Review this adaptation policy with the user before allowing automatic changes.")
