@@ -278,7 +278,7 @@ export function postArtifact(p){
   return record(a)&&ART.test(String(a.id||''))&&['doc','sheet'].includes(a.type)&&typeof a.title==='string'
     &&Number.isInteger(a.version)&&a.version>0?a:null;
 }
-function docCardMarkup(a){
+export function docCardMarkup(a){
   const kind=a.type==='sheet'?'Sheet':'Document',name=a.title.trim()||kind;
   return `<div class="dgc-doc-card run-post-doc" data-tone="${a.type}"><span class="dgc-doc-tile" aria-hidden="true">${icon(a.type,'run-post-doc-icon')}</span>`
     +`<span class="dgc-doc-words"><span class="dgc-doc-name">${esc(name)}</span><span class="dgc-doc-meta">${kind} · version ${a.version}</span></span>`

@@ -27,7 +27,7 @@ KINDS = ("requirement", "decision", "attempt", "failure", "outcome", "state")
 
 MAX_TEXT = 2_000            # one note's text
 MAX_EVIDENCE = 1_000        # the command/output tail that justifies it
-MAX_ROWS = 5_000            # per project; the oldest are pruned past this
+MAX_ROWS = 50_000           # per project; the oldest are pruned past this (was 5,000; 10 Nov)
 DEFAULT_LIMIT = 8
 
 

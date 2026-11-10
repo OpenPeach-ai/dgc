@@ -171,6 +171,46 @@ def archive(registry, pip_id, conversation_id, archived=True) -> dict:
     return view(registry.db, conversation_id)
 
 
+def is_full(db, conversation_id) -> bool:
+    """A conversation holds at most MAX_ARCHIVE_MESSAGES messages (the bound its history and checkpoints are read
+    within); one with no room for another exchange is full."""
+    from .pip_chat import MAX_ARCHIVE_MESSAGES
+    count = db.execute("SELECT count(*) FROM pip_chat_messages WHERE conversation_id=?", (conversation_id,)).fetchone()[0]
+    return count >= MAX_ARCHIVE_MESSAGES - 1
+
+
+def roll_over(registry, pip_id, conversation_id) -> str:
+    """A full conversation: the Pip carries on in a fresh one (its memory is the Pip's, so nothing it knows is lost).
+    When the full one was its first, the new one becomes its first, so routines and an older editor follow it, and the
+    full one keeps a dated name; otherwise the new one is "<name> (2)" and the routines that posted there move to it."""
+    import contextlib
+    from datetime import datetime
+    db = registry.db
+    with contextlib.nullcontext() if db.in_transaction else registry.transaction():
+        full = _own(db, pip_id, conversation_id)
+        if db.execute("SELECT count(*) FROM pip_conversations WHERE pip_id=?", (pip_id,)).fetchone()[0] >= MAX_CONVERSATIONS:
+            raise RegistryError("limit", f"A Pip keeps up to {MAX_CONVERSATIONS} conversations. Archive or delete one first.")
+        now = registry.clock()
+        try:
+            day = datetime.fromisoformat(now.replace("Z", "+00:00")).strftime("%-d %b %Y")
+        except ValueError:
+            day = now[:10]
+        name = full["title"] or "Chat"
+        new_id = identifier("conv")
+        if full["first"]:
+            db.execute("UPDATE pip_conversations SET first=0, title=? WHERE id=?", (f"{name}, until {day}"[:MAX_TITLE], conversation_id))
+            title, first_flag = "", 1
+        else:
+            match = re.fullmatch(r"(.*) \((\d+)\)", name)
+            title = f"{match.group(1)} ({int(match.group(2)) + 1})" if match else f"{name} (2)"
+            first_flag = 0
+        db.execute("INSERT INTO pip_conversations(id,pip_id,workspace_id,title,first,created_at,updated_at) "
+                   "VALUES(?,?,?,?,?,?,?)", (new_id, pip_id, full["workspace_id"], title[:MAX_TITLE], first_flag, now, now))
+        if not first_flag and db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pip_routines'").fetchone():
+            db.execute("UPDATE pip_routines SET conversation_id=? WHERE pip_id=? AND conversation_id=?", (new_id, pip_id, conversation_id))
+    return new_id
+
+
 def touch(db, conversation_id, now) -> None:
     """A message came: the conversation moves up the list."""
     db.execute("UPDATE pip_conversations SET updated_at=? WHERE id=?", (now, conversation_id))

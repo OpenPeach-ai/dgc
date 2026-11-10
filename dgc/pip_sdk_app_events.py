@@ -46,7 +46,7 @@ PER_MINUTE = 60                        # events an app may send in any minute
 MAX_WAITING = 20                       # app events one Pip keeps waiting
 KEEP_DAYS = 30                         # how long DGC remembers an idempotency_key
 MAX_LISTED = 50                        # Pips an answer names, one by one
-TURN_CHARS = 4000                      # what one chat turn holds (pip_chat.validate_text)
+TURN_CHARS = 4000                      # what an event's chat turn holds: its own bound (send ids; the Pip reads the rest)
 TURN_BYTES = 8000
 SHOWN = 2500                           # what a Pip is sure to see of a payload, with a short routine
 BUSY_RETRY = timedelta(seconds=5)

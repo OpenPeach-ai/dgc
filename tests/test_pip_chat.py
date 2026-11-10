@@ -248,7 +248,8 @@ class PipChatTests(unittest.TestCase):
             self.store.claim_next()
             pip_steering.applied(self.store, sent['run']['id'], [item['message']['id'] for item in updates])
             self.store.finish(sent['run']['id'], result={'text': f'Batch {turn} checked.'})
-        page = pip_chat.list_messages(self.store, self.job['id'], limit=50)
+        with patch.object(pip_chat, 'LIST_PAGE_BYTES', 96 * 1024):       # the page's size, made small enough to fill here
+            page = pip_chat.list_messages(self.store, self.job['id'], limit=50)
         self.assertLessEqual(len(json.dumps(page['messages']).encode()), 96 * 1024)
         self.assertIsNotNone(page['next_before_id'])
         self.assertEqual(len({item['id'] for item in page['messages']}), len(page['messages']))
@@ -312,7 +313,8 @@ class PipChatTests(unittest.TestCase):
 
     def test_invalid_text_fields_and_archive_caps_have_no_side_effects(self):
         self.setup_job()
-        for text in (None, "", " \n", "x" * 4001, "🍄" * 3000, "a\x00b"):
+        # A message is up to 256 KB (Limits for everyone, 10 Nov); one byte more is refused, emoji counted as bytes.
+        for text in (None, "", " \n", "x" * (pip_chat.MAX_USER_BYTES + 1), "🍄" * (pip_chat.MAX_USER_BYTES // 4 + 1), "a\x00b"):
             with self.subTest(text=str(text)[:10]), self.assertRaises(RegistryError):
                 self.send(text=text)
         for key in (None, "", "x" * 129, "../x"):
@@ -383,7 +385,7 @@ class PipChatTests(unittest.TestCase):
         exact = {"x": "a" * (pips.MAX_WORKER_INPUT_BYTES - overhead)}
         self.assertEqual(len(pips._worker_payload(exact)), pips.MAX_WORKER_INPUT_BYTES)
         exact["x"] += "a"
-        with self.assertRaisesRegex(RegistryError, "128 KiB"):
+        with self.assertRaisesRegex(RegistryError, "input budget"):
             pips._worker_payload(exact)
         events = []
         self.cfg.set("api_key", "sk-fixture-secret-value", persist=False)

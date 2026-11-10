@@ -139,7 +139,8 @@ def controls(store, pip_id, config):
         FROM pip_chat_messages m JOIN pip_runs r ON r.id=m.run_id
         WHERE m.pip_id=? AND m.role='user' ORDER BY m.seq DESC LIMIT 1''', (pip_id,)).fetchone()
     if row is not None:
-        if row['size'] is None or row['size'] > 128 * 1024:
+        from .pips import MAX_STORED_MANIFEST_BYTES
+        if row['size'] is None or row['size'] > MAX_STORED_MANIFEST_BYTES:
             raise RegistryError('stored_data_limit', 'The saved reply manifest exceeds its read budget.')
         manifest = json.loads(store.db.execute('SELECT manifest FROM pip_runs WHERE id=?', (row['id'],)).fetchone()[0])
         if manifest.get('pip_id') != pip_id or manifest.get('workspace_id') != pip['workspace_id']:

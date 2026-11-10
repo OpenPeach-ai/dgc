@@ -38,7 +38,9 @@ OUTPUTS = {"auto": None, "document": "doc", "slides": "slides", "spreadsheet": "
 EXPORTS = {"doc": ("docx", "pdf", "md"), "slides": ("pptx", "pdf", "html"), "sheet": ("xlsx", "csv"),
            "dashboard": ("pdf", "html"), "page": ("docx", "pdf", "html", "zip")}
 LABELS = {"doc": "Document", "slides": "Slides", "sheet": "Spreadsheet", "dashboard": "Dashboard", "page": "Page"}
-MAX_DOC_CHARS = 200_000
+# A document holds about a megabyte of text (it was 200,000 characters): a Pip's reply past 256 KB is kept whole as its
+# document (pips.keep_long_reply, Limits for everyone, 10 Nov).
+MAX_DOC_CHARS = 1_048_576
 MAX_PAGE_BYTES = 2 * 1024 * 1024
 
 

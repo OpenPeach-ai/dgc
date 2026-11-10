@@ -282,7 +282,19 @@ MAX_RUNS = 20000               # project runs
 MAX_PERSONAL_RUNS = 20000      # Personal tasks and replies
 MAX_QUEUE = 20
 MAX_WALL_SECONDS = 300
-MAX_WORKER_INPUT_BYTES = 128 * 1024
+# What the worker reads at start: room for a chat's history sized from a 1M-token window (pip_chat.MAX_CONTEXT_BYTES),
+# which the supervisor puts back into the manifest from pip_run_inputs. A stored run manifest itself stays small.
+MAX_WORKER_INPUT_BYTES = 4 * 1024 * 1024
+MAX_STORED_MANIFEST_BYTES = 128 * 1024
+# A chat message is up to 256 KB (Limits for everyone, 10 Nov): its request is bounded at 2 MiB (escaped text, at worst six
+# bytes a byte, plus the rest), and a result can be up to 3 MiB, under the editor's 4 MiB event frame
+# (editor_protocol.MAX_EVENT_BYTES); it was 128 KiB, which a long reply or a page of long messages outgrew.
+CHAT_REQUEST_BYTES = 2 * 1024 * 1024
+RESPONSE_BYTES = 3 * 1024 * 1024
+# What one line of a worker's output may be (its final result carries a reply of up to 256 KB and, past that, the
+# whole reply for the Pip's document, up to 1 MiB), and all of a bounded run's output.
+MAX_WORKER_LINE_BYTES = 8 * 1024 * 1024
+MAX_BOUNDED_OUTPUT_BYTES = 16 * 1024 * 1024
 TERMINAL = frozenset({"succeeded", "failed", "cancelled"})
 _THREAD_LOCK = threading.Lock()
 _THREADS: dict[str, threading.Thread] = {}
@@ -1598,9 +1610,14 @@ class PipStore:
                 from .workspace_context import ContextStore
                 if not standalone and run_kind != "live":
                     manifest["workspace_context"] = ContextStore(self.registry).snapshot(pip["workspace_id"])
+                pinned_history = None
                 if conversation_request is not None:
                     manifest["conversation"] = pip_chat.prepare(self, latest, conversation_request,
                         context_size=_history_window(frozen_config, model), secrets=secret_values(frozen_config))
+                    # A big window's history, and a long message, are kept beside the run, pinned by their digest
+                    # (pip_run_inputs): a stored manifest stays small.
+                    from . import pip_run_inputs
+                    manifest["conversation"], pinned_history = pip_run_inputs.split(manifest["conversation"])
                     # Only the editor has a renderer for interactive answer cards. Terminal and SDK
                     # conversations keep the ordinary reply without card instructions or raw JSON.
                     manifest["generative_ui_supported"] = actor == "editor-user"
@@ -1660,7 +1677,11 @@ class PipStore:
                     feedback = feedback_for_run(self.registry, pip_id, secret_values(frozen_config))
                     if feedback:
                         manifest["user_feedback"] = feedback
-                if len(_json(manifest).encode()) > MAX_WORKER_INPUT_BYTES - 16384:
+                # The stored manifest stays small, and with what is kept beside it (pip_run_inputs) it fits the
+                # worker's input.
+                stored = len(_json(manifest).encode())
+                kept = len(_json(pinned_history).encode()) if pinned_history is not None else 0
+                if stored > MAX_STORED_MANIFEST_BYTES - 16384 or stored + kept > MAX_WORKER_INPUT_BYTES - 16384:
                     raise RegistryError("input_limit", "The pinned job and conversation exceed the worker input budget.")
                 from .pip_sources import validate_manifest as validate_source_manifest
                 validate_source_manifest(manifest)
@@ -1668,6 +1689,9 @@ class PipStore:
                     (id,pip_id,workspace_id,binding_id,idempotency_key,requested_by,manifest,status,created_at)
                     VALUES(?,?,?,?,?,?,?,?,?)""", (run_id, pip_id, pip["workspace_id"], binding["id"], key,
                                                    actor, _json(manifest), "queued", self.registry.clock()))
+                if pinned_history is not None:
+                    from . import pip_run_inputs
+                    pip_run_inputs.put(self.db, run_id, pinned_history)
                 if conversation_request is not None:
                     pip_chat.insert_user(self, latest, conversation_request, run_id, model["model"], self.registry.clock(),
                                          waiting=_waiting_message)
@@ -2740,7 +2764,7 @@ class _ConversationUI(_WorkerUI):
             chunk = text[start:start + 256]
             self.stream_bytes += len(chunk.encode("utf-8"))
             self.stream_events += 1
-            if self.stream_bytes > MAX_REPLY_BYTES or self.stream_events > 512:
+            if self.stream_bytes > MAX_REPLY_BYTES or self.stream_events > 4096:
                 # A long run says more than a reply: past this the live view stops; the reply itself still arrives.
                 continue
             self.emit({"kind": "text_delta", "text": chunk})
@@ -4187,7 +4211,11 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                                                                           or connector_candidate) is not None
                          else final)
             from .redaction import redact_text, secret_values
-            result = {"text": pip_chat.validate_text(redact_text(final, secret_values(config)), reply=True)}
+            # A reply past 256 KB: its start here, the whole of it passed up for the Pip's document (keep_long_reply).
+            reply_text, long_text = pip_chat.cut_long_reply(redact_text(final, secret_values(config)))
+            result = {"text": pip_chat.validate_text(reply_text, reply=True)}
+            if long_text is not None:
+                result['long_text'] = long_text
             if setup_candidate is not None:
                 result['setup_draft'] = setup_candidate
             if core_setup_candidates:
@@ -4259,7 +4287,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
 def _worker_payload(value):
     raw = _json(value).encode("utf-8")
     if len(raw) > MAX_WORKER_INPUT_BYTES:
-        raise RegistryError("input_limit", "The complete worker request exceeds its 128 KiB input budget.")
+        raise RegistryError("input_limit", "The complete worker request exceeds its input budget.")
     return raw
 
 
@@ -4503,6 +4531,27 @@ def _run_live_commands(registry, row, manifest, config, binding):
     return commands
 
 
+def keep_long_reply(registry, row, result):
+    """A reply past 256 KB (Limits for everyone, 10 Nov): the whole of it becomes the newest version of the Pip's own
+    document (artifact_pips.keep_draft, by the Pip), and the chat keeps its start with "The rest is in its document."
+    and the document's card. A store that can't take it leaves the start, saying the rest couldn't be kept."""
+    long_text = result.pop("long_text", None)
+    if not isinstance(long_text, str) or not long_text.strip():
+        return result
+    from . import pip_chat
+    from .artifact_pips import keep_draft
+    from .pip_report_delivery import _pip
+    named = _pip(registry.db, row["pip_id"]) or {}
+    first = next((line.strip().lstrip("#").strip() for line in long_text.splitlines() if line.strip()), "")
+    title = (first[:80] + ("…" if len(first) > 80 else "")) or "A long reply"
+    aid = keep_draft(row["pip_id"], named.get("name", ""), title, long_text, workspace=str(row["workspace_id"]))
+    if aid:
+        result["kept_document"] = aid
+    else:
+        result["text"] = result["text"].replace(pip_chat.LONG_REPLY_FOOTER, pip_chat.LONG_REPLY_LOST)
+    return result
+
+
 def _execute_run(registry, row, config):
     _require_runner_platform()
     # What still has a clock: a standalone Pulse, the app reads before the model, reviewed tests. The model's own run
@@ -4513,6 +4562,10 @@ def _execute_run(registry, row, config):
         PipStore(registry).cancel(row["id"], "runner-stop")
         raise RegistryError("cancelled", "The runner stopped before execution.")
     manifest = json.loads(row["manifest"])
+    # The user's whole message this turn, even a long one kept beside the run (pip_run_inputs), for what reads it
+    # before the worker's copy is put together below (careful mode, the app socket).
+    from . import pip_run_inputs
+    turn_text = pip_run_inputs.turn_text(registry.db, row["id"], manifest)
     # On a server (dgc pips serve --server), a personal Claude Code or Codex plan is never a Pip's model: the run is
     # refused here, before anything starts, in words that say how to change it (pip_server).
     from .pip_server import refuse_subscription
@@ -4697,10 +4750,9 @@ def _execute_run(registry, row, config):
         taint = pip_careful.taint_for(registry.directory, row['pip_id'])
         for reference in manifest.get('app_references') or []:
             taint.add(str(reference.get('text', '')) if isinstance(reference, dict) else '')
-        conversation_turn = manifest.get('conversation') if isinstance(manifest.get('conversation'), dict) else {}
-        if row['requested_by'] in pip_careful.UNATTENDED and conversation_turn.get('text'):
+        if row['requested_by'] in pip_careful.UNATTENDED and turn_text:
             from .pip_routines import split_turn
-            taint.add(split_turn(registry, row['id'], conversation_turn['text'])[1])    # the app items its turn carries
+            taint.add(split_turn(registry, row['id'], turn_text)[1])    # the app items its turn carries
     if personal and manifest.get('computer') is not None and manifest.get('run_kind') in ('personal_task', 'conversation'):
         from . import pip_careful
         careful = pip_careful.is_on(registry, row['pip_id'])
@@ -4711,15 +4763,14 @@ def _execute_run(registry, row, config):
         from . import pip_computer
         # Its computers (a Pip may have several, shared by its conversations): the run takes a free one (Pool).
         computer_host = pip_computer.pool_for(registry, row['pip_id'], row['workspace_id'])
-        conversation_pin = manifest.get('conversation') if isinstance(manifest.get('conversation'), dict) else {}
         # The user's own words this turn are theirs to type; a turn DGC wrote (a hello, a routine) is not.
-        said = str(conversation_pin.get('text') or '') if manifest.get('user_turn') is True else ''
-        if row['requested_by'] in pip_careful.UNATTENDED and conversation_pin.get('text'):
+        said = turn_text if manifest.get('user_turn') is True else ''
+        if row['requested_by'] in pip_careful.UNATTENDED and turn_text:
             from .pip_routines import split_turn
-            said = split_turn(registry, row['id'], conversation_pin['text'])[0]    # the words the user gave a routine
+            said = split_turn(registry, row['id'], turn_text)[0]    # the words the user gave a routine
         from . import pip_levels
         # What this run is doing, in the user's words, for a reply in another conversation waiting on the computer.
-        doing = str(conversation_pin.get('text') or '').strip().splitlines()[0] if conversation_pin.get('text') else ''
+        doing = turn_text.strip().splitlines()[0] if turn_text.strip() else ''
         computer_host.begin(row['id'], run_dir / 'artifacts' / 'computer', careful=careful, said=said, label=doing,
                             sites=pip_careful.known(registry, row['pip_id']) if careful else (),
                             carry=pip_careful.carry_sites(registry, row['pip_id']) if careful else (),
@@ -4750,7 +4801,7 @@ def _execute_run(registry, row, config):
             if pip_careful.is_on(registry, row['pip_id']):
                 app_socket.plugins.carries = lambda text: bool(taint.carried(text, app_socket.said))
         if isinstance(manifest.get('conversation'), dict) and manifest.get('user_turn') is True:
-            app_socket.said = str(manifest['conversation'].get('text') or '')
+            app_socket.said = turn_text
             app_socket.images.user_turn = True          # a priced image it asked about may be made in this turn
             app_socket.videos.user_turn = True          # and a video it asked about
             app_socket.images.user_message = app_socket.said
@@ -4813,6 +4864,9 @@ def _execute_run(registry, row, config):
     attempt_note = run_watchdog.note_for(registry.db, row["id"])
     if attempt_note:
         manifest = {**manifest, "attempt_note": attempt_note}     # this worker's copy only; the stored run is unchanged
+    # A big history or a long message pinned beside the run goes back in, digest checked, for this worker only
+    # (pip_run_inputs).
+    manifest = pip_run_inputs.attach(registry.db, row["id"], manifest)
     payload = {"snapshot": str(snapshot), "manifest": manifest, "api_key": api_key}
     # Pips package 6 (pip_backup): the model this run carries on with if its own doesn't answer, on DGC's own
     # connection, read from today's settings (never pinned in the manifest).
@@ -4891,13 +4945,13 @@ def _execute_run(registry, row, config):
         proc.stdin.write(payload_bytes)
         proc.stdin.close()
         while True:
-            line = proc.stdout.readline(65537)
+            line = proc.stdout.readline(MAX_WORKER_LINE_BYTES + 1)
             if not line:
                 break
             activity.heard()
             total += len(line)
             # One line is bounded; a run that keeps going says as much as it needs over its life.
-            if len(line) > 65536 or (bounded and total > 512 * 1024):
+            if len(line) > MAX_WORKER_LINE_BYTES or (bounded and total > MAX_BOUNDED_OUTPUT_BYTES):
                 raise RegistryError("output_limit", "The worker exceeded its bounded output budget.")
             try:
                 event = json.loads(line)
@@ -5038,6 +5092,8 @@ def _execute_run(registry, row, config):
             named = _pip(registry.db, row["pip_id"]) or {}
             keep_draft(row["pip_id"], named.get("name", ""), str(result.get("title") or ""),
                        result["draft"]["markdown"], workspace=str(row["workspace_id"]))
+        if manifest.get("run_kind") == "conversation" and isinstance(result, dict) and "long_text" in result:
+            result = keep_long_reply(registry, row, result)
         steps = measured.saved()
         return {**result, RUN_TRACE_KEY: steps} if steps else result
     finally:
@@ -5600,7 +5656,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
             raise RegistryError("disabled", "Pips are disabled in this profile. Run dgc pips enable to turn them on.")
         from .pip_access import require_unrestricted
         require_unrestricted(config)
-        request_limit = 32768 if command in ("register_app", "update_app", "ensure_pip_template", "prepare_pip_connector_draft", "propose_pip_connector_action", "propose_pip_handoff", "propose_pip_artifact_handoff", "propose_pip_personal_handoff", "propose_pip_app_action", "propose_pip_calendar_action", "prepare_pip_message_draft", "prepare_pip_calendar_draft") else 16384
+        request_limit = CHAT_REQUEST_BYTES if command == "send_pip_message" else 32768 if command in ("register_app", "update_app", "ensure_pip_template", "prepare_pip_connector_draft", "propose_pip_connector_action", "propose_pip_handoff", "propose_pip_artifact_handoff", "propose_pip_personal_handoff", "propose_pip_app_action", "propose_pip_calendar_action", "prepare_pip_message_draft", "prepare_pip_calendar_draft") else 16384
         if (command == 'propose_pip_update' and isinstance(request, dict)
                 and isinstance(request.get('changes'), dict) and 'verification_plan' in request['changes']):
             from .pip_pulse_plans import _encode as bounded_pulse_request
@@ -6677,7 +6733,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
         from .pip_pulse_results import prepare_display
         result = prepare_display(result, secret_values(config))
         response.update(ok=True, result=redact_value(result, secret_values(config)))
-        if len(_json(response).encode()) > 128 * 1024:
+        if len(_json(response).encode()) > RESPONSE_BYTES:
             raise RegistryError("output_limit", "This result is too large to return at once; inspect individual Pips or runs.")
         if start_worker and command in ("run_pip", "resume_pip", "send_pip_message", "introduce_pip", "accept_pip_handoff"):
             start_queued(config)

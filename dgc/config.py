@@ -530,7 +530,7 @@ DEFAULTS: dict = {
     "memory_review_idle_s": 120,                # a chat this quiet is looked back over for what to remember
     "chatdgc_web": True,                        # ChatDGC searches the web when an answer depends on it
     "chatdgc_followups": True,                  # ChatDGC suggests next messages under a reply
-    "notes_max_rows": 5000,                     # oldest notes are pruned past this, per project
+    "notes_max_rows": 50000,                    # oldest notes are pruned past this, per project
     "mouse": "capture",                         # capture (wheel scrolls DGC, rows clickable) | off (terminal selection)
     "session_redaction": True,                  # strip credentials from durable transcript/plan history;
                                                 # exact file rewind snapshots stay private and unchanged

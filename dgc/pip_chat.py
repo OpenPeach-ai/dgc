@@ -14,9 +14,21 @@ from pathlib import Path
 from . import reply_trace
 from .workspace_registry import RegistryError, identifier
 
-MAX_USER_BYTES = 8192
-MAX_REPLY_BYTES = 24576
-MAX_CONTEXT_BYTES = 65536
+# A message and a reply are each up to 256 KB (Limits for everyone, 10 Nov; they were 8 KB, 4,000 characters, and 24 KB,
+# and a longer reply failed its turn). A reply past it is kept whole as the Pip's document, its start in the chat
+# (pips: keep_long_reply).
+MAX_USER_BYTES = 256 * 1024
+MAX_REPLY_BYTES = 256 * 1024
+# One page of the chat: about 1 MiB, and always at least the newest message however long (it was 96 KB).
+LIST_PAGE_BYTES = 1024 * 1024
+# A reply longer than MAX_REPLY_BYTES: the chat keeps its start, cut at a paragraph, then this line; the whole of it, up to
+# MAX_LONG_REPLY_BYTES, is the Pip's document (pips.keep_long_reply).
+LONG_REPLY_FOOTER = "The rest is in its document."
+LONG_REPLY_LOST = "The rest was too long for the chat and couldn't be kept as its document."
+MAX_LONG_REPLY_BYTES = 1024 * 1024
+# A reply's history is sized from its chat's context window, about half of it (snapshot: context_size * 2 bytes), up
+# to the 1M-token window's 2 MiB (was a flat 64 KB, which a 1M window never got past; 10 Nov).
+MAX_CONTEXT_BYTES = 2 * 1024 * 1024
 # Serialized pair overhead means this can only bind tiny messages. Do not drop
 # a week of short exchanges simply because six replies have completed.
 MAX_CONTEXT_PAIRS = 1024
@@ -563,12 +575,43 @@ def _json(value):
 
 def validate_text(value, *, reply=False):
     maximum = MAX_REPLY_BYTES if reply else MAX_USER_BYTES
-    if (not isinstance(value, str) or not value.strip() or "\x00" in value
-            or len(value) > (MAX_REPLY_BYTES if reply else 4000)
-            or len(value.encode("utf-8")) > maximum):
+    if not isinstance(value, str) or not value.strip() or "\x00" in value:
         raise RegistryError("invalid_reply" if reply else "invalid_request",
-                            f"Conversation {'reply' if reply else 'message'} exceeds its text limit or is empty.")
+                            f"Conversation {'reply' if reply else 'message'} is empty or not text.")
+    size = len(value.encode("utf-8"))
+    if size > maximum:
+        raise RegistryError("invalid_reply" if reply else "invalid_request",
+                            f"This {'reply' if reply else 'message'} is {size // 1024:,} KB; one can be up to 256 KB."
+                            + ("" if reply else " Attach the rest as a file."))
     return value
+
+
+def cut_long_reply(text):
+    """(what the chat keeps, the whole reply or None). Within MAX_REPLY_BYTES it is the reply itself; past it the chat keeps
+    its start, cut at the last paragraph (or line, or word) that fits, then LONG_REPLY_FOOTER."""
+    if not isinstance(text, str) or len(text.encode("utf-8")) <= MAX_REPLY_BYTES:
+        return text, None
+    room = MAX_REPLY_BYTES - len(("\n\n" + LONG_REPLY_FOOTER).encode("utf-8")) - 16
+    head = text.encode("utf-8")[:room].decode("utf-8", "ignore")
+    for mark in ("\n\n", "\n", " "):
+        at = head.rfind(mark)
+        if at > room // 2:
+            head = head[:at]
+            break
+    whole = text
+    if len(whole.encode("utf-8")) > MAX_LONG_REPLY_BYTES:
+        whole = whole.encode("utf-8")[:MAX_LONG_REPLY_BYTES - 64].decode("utf-8", "ignore").rstrip() + "\n\n…"
+    return head.rstrip() + "\n\n" + LONG_REPLY_FOOTER, whole
+
+
+def kept_document(db, run_id):
+    """The Pip's document a reply past 256 KB was kept in (pips.keep_long_reply), as a post's card, or None."""
+    row = db.execute("SELECT CASE WHEN json_valid(result) THEN json_extract(result, '$.kept_document') END "
+                     "FROM pip_runs WHERE id=?", (run_id,)).fetchone()
+    if row is None or not isinstance(row[0], str) or not row[0]:
+        return None
+    from .pip_run_posts import artifact_ref
+    return artifact_ref(row[0])
 
 
 def request(text, key, chat_options=None, images=None, files=None):
@@ -1216,10 +1259,12 @@ def _last_report(store, pip_id):
 
 
 def prepare(store, pip, req, *, context_size=32768, secrets=()):
-    if store.db.execute("SELECT count(*) FROM pip_chat_messages").fetchone()[0] >= MAX_ARCHIVE_MESSAGES - 1:
-        raise RegistryError("limit", "The local conversation archive has reached its 20,000-message limit. No reply was queued; removing old conversations is not available yet.")
-    from .pip_conversations import first, resolve
+    from .pip_conversations import first, is_full, resolve
     conversation_id = resolve(store.db, pip["id"], req.get("conversation_id"))
+    # The bound is one conversation's, never the machine's (it once stopped every Pip at 20,000 messages); send() rolls a
+    # full one over, so this only guards a path that didn't.
+    if is_full(store.db, conversation_id):
+        raise RegistryError("conversation_full", "This conversation is full. Send again: the Pip carries on in a fresh one.")
     if store.db.execute("SELECT 1 FROM pip_chat_messages m JOIN pip_runs r ON r.id=m.run_id "
                         "WHERE m.pip_id=? AND m.conversation_id=? AND m.role='user' "
                         "AND r.status IN ('queued','running','cancelling') LIMIT 1",
@@ -1420,10 +1465,13 @@ def valid_apps(value):
 
 
 def insert_reply(store, run, result, now):
-    if set(result) - {"text", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "core_setup_drafts", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes", "apps"}:
+    if set(result) - {"text", "kept_document", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "core_setup_drafts", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes", "apps"}:
         raise RegistryError("invalid_reply", "Conversation replies cannot contain source findings or control actions.")
     if "apps" in result and valid_apps(result["apps"]) is None:
         raise RegistryError("invalid_reply", "This reply's plugin cards are invalid.")
+    if "kept_document" in result and (not isinstance(result["kept_document"], str)
+                                      or not re.fullmatch(r"[A-Za-z0-9_-]{1,96}", result["kept_document"])):
+        raise RegistryError("invalid_reply", "This reply's document is invalid.")
     if "context" in result:
         # What filled its window besides the chat (pip_chat_breakdown), for the meter's breakdown.
         from .pip_chat_breakdown import validate as validate_context
@@ -1604,6 +1652,9 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             backup = backup_line(store.db, row["run_id"])
             if backup:
                 message["backup"] = backup          # "Its own model didn't answer; X did", once an outage (Pips package 6)
+            kept = kept_document(store.db, row["run_id"])
+            if kept is not None:
+                message["artifact"] = kept          # a reply past 256 KB: the rest is in the Pip's document (Pips API 79)
             if quiet_reply(store.db, row["run_id"], row["text"]):
                 message["quiet"] = True             # a routine with nothing to say: one faint line (Pips package 2)
             from .pip_own_changes import for_runs as own_changes
@@ -1616,8 +1667,8 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
         steers = ([steer_message(steering, message['status']) for steering in in_run(store.db, row['run_id'])]
                   if row['role'] == 'user' else [])
         amount = len(_json(message).encode()) + sum(len(_json(item).encode()) for item in steers)
-        if size + amount > 96 * 1024:
-            break
+        if messages and size + amount > LIST_PAGE_BYTES:
+            break                               # the newest always comes, however long
         messages.append(message)
         size += amount
     next_id = messages[-1]["id"] if messages and len(rows) > len(messages) else None
@@ -1662,9 +1713,11 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
     """Queue a reply to a message, with what it brings: images and files inline (API 43) or handed
     over through the backend's spool (API 52, ``spooled_images`` and ``spooled_files``). ``conversation_id``: which of
     the Pip's conversations (API 79, pip_conversations); none names the first one, as an older client means."""
-    from .pip_conversations import resolve as resolve_conversation
+    from .pip_conversations import is_full, resolve as resolve_conversation, roll_over
     try:
         conversation_id = resolve_conversation(store.db, pip_id, conversation_id)
+        if is_full(store.db, conversation_id):
+            conversation_id = roll_over(store.registry, pip_id, conversation_id)   # a full one: carry on in a fresh one
         # Validate the request identity before copying attachments into the kept store.
         if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", key):
             raise RegistryError("invalid_request", "Conversation retry keys use 1–128 letters, digits, underscores or hyphens.")
@@ -1787,6 +1840,9 @@ def answer_waiting(store, row, config):
     req = request(row["text"], row["request_key"])
     if "conversation_id" in row.keys() and row["conversation_id"]:
         req["conversation_id"] = row["conversation_id"]      # its own conversation's next turn
+        from .pip_conversations import is_full, roll_over
+        if is_full(store.db, req["conversation_id"]):
+            req["conversation_id"] = roll_over(store.registry, row["pip_id"], req["conversation_id"])
     marks = message_mentions(store.db, row["id"])
     if marks:
         req["display_mentions"] = marks     # its bubble keeps them, and its turn is told which Pips it names
@@ -1840,7 +1896,7 @@ def _left_waiting(store, run, result) -> bool:
 
 def validate_context(value):
     if (not isinstance(value, dict) or set(value) - {"images", "files", "run_posts", "card_context", "cards_waiting", "named_pips",
-                                                    "long_waits", "conversation_id"} not in (
+                                                    "long_waits", "conversation_id", "inputs_ref"} not in (
             {"text", "history", "history_omitted_count", "last_report"},
             {"text", "history", "history_omitted_count", "last_report", "continuity"})):
         raise RegistryError("invalid_history", "Conversation context has an unsupported shape.")
@@ -1855,6 +1911,10 @@ def validate_context(value):
         _valid_card_context(value["card_context"])
     if "cards_waiting" in value and (type(value["cards_waiting"]) is not int or not 0 < value["cards_waiting"] <= 2000):
         raise RegistryError("invalid_history", "The waiting card count is outside its bounded context contract.")
+    if "inputs_ref" in value:
+        from .pip_run_inputs import valid_ref
+        if not valid_ref(value["inputs_ref"], value):
+            raise RegistryError("invalid_history", "What is kept beside its run is named by its digest only.")
     if "conversation_id" in value and not (isinstance(value["conversation_id"], str)
                                            and re.fullmatch(r"conv_[0-9a-f]{32}", value["conversation_id"])):
         raise RegistryError("invalid_history", "The conversation a reply belongs to is named by its id.")

@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 53
+SCHEMA_VERSION = 55
 MAX_WORKSPACES = 256
 MAX_SESSION_ASSOCIATIONS = 100000
 MAX_EVENTS = 5000
@@ -421,6 +421,15 @@ class WorkspaceRegistry:
             # every message, checkpoint and steer in it. No run, job or review receives new authority in migration.
             from . import pip_conversations
             pip_conversations.migrate(self.db)
+        if version < 54:
+            # A big window's history kept beside its run, pinned by its digest (pip_run_inputs). A new table only.
+            from .pip_run_inputs import SCHEMA as run_inputs_schema
+            _execute_schema(self.db, run_inputs_schema)
+        if version < 55:
+            # A message that joins a running reply takes 256 KB like any other (pip_steering.widen): the steers table is
+            # rebuilt with the new bound, every row and its order kept. No run, job or review receives new authority.
+            from .pip_steering import widen as widen_steers
+            widen_steers(self.db)
         if 41 <= version < 51:
             # Replace the seven-colour CHECK with the eight established Pip colours.
             # Rows and their owner-only notification choices are copied unchanged.

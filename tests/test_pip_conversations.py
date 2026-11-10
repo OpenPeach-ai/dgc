@@ -35,7 +35,9 @@ class Conversations(unittest.TestCase):
         return sent
 
     def history(self, run_id):
+        from dgc import pip_run_inputs
         manifest = json.loads(self.registry.db.execute("SELECT manifest FROM pip_runs WHERE id=?", (run_id,)).fetchone()[0])
+        manifest = pip_run_inputs.attach(self.registry.db, run_id, manifest)     # as the worker gets it
         return [m["content"] for m in manifest["conversation"]["history"]]
 
     def test_a_pip_starts_with_one_first_conversation_and_an_older_client_talks_to_it(self):
@@ -236,6 +238,109 @@ class RoutinesPost(unittest.TestCase):
         self.assertNotIn("conversation_id", back, "None moves it back to the first")
         with self.assertRaises(RegistryError):
             pip_routines.update(self.store, self.pip["id"], routine["id"], {"conversation_id": "conv_" + "0" * 32})
+
+
+class FullConversations(unittest.TestCase):
+    """No machine-wide cap (it stopped every Pip at 20,000 messages): the bound is one conversation's, and a Pip whose
+    conversation is full carries on in a fresh one, its first one when that was its first, so routines and an older
+    editor follow it. Its memory stays the Pip's."""
+    setUp = fixtures.LocalPipsTests.setUp
+    say = Conversations.say
+
+    def test_a_full_first_conversation_rolls_into_a_new_first_one(self):
+        from dgc import pip_routines
+        job = Conversations.job(self)
+        with patch.object(pip_chat, "MAX_ARCHIVE_MESSAGES", 6):
+            for n in range(3):
+                self.say(job, f"Message {n}", f"k{n}", finish=f"Reply {n}.")
+            old = conversations.first(self.registry.db, job["id"])
+            sent = self.say(job, "One more", "k9", finish="And on.")
+        new = conversations.first(self.registry.db, job["id"])
+        self.assertNotEqual(new, old, "a fresh first conversation")
+        self.assertEqual(sent["message"]["conversation_id"], new)
+        listed = {c["id"]: c for c in conversations.listed(self.registry.db, job["id"])}
+        self.assertTrue(listed[old]["title"], "the full one keeps a name of its own and stays readable")
+        self.assertEqual(len(pip_chat.list_messages(self.store, job["id"], conversation_id=old)["messages"]), 6)
+        self.assertEqual([m["text"] for m in pip_chat.list_messages(self.store, job["id"])["messages"]], ["One more", "And on."],
+                         "an older client (no conversation) now talks to the new first one")
+
+    def test_one_pip_full_never_stops_another(self):
+        mine, theirs = Conversations.job(self, "Mine"), Conversations.job(self, "Theirs")
+        with patch.object(pip_chat, "MAX_ARCHIVE_MESSAGES", 6):
+            for n in range(3):
+                self.say(mine, f"Mine {n}", f"m{n}", finish="ok")
+            self.say(theirs, "Theirs", "t1", finish="Still answering.")       # 8 messages on the machine: fine
+            self.say(theirs, "Theirs again", "t2", finish="Still answering.")
+
+
+class HistoryFromTheWindow(unittest.TestCase):
+    """A Pip sees its history sized from its chat's context window (about half of it, as Work does), not a flat 64 KB:
+    at a 128k window, 200 KB of history is all there. A run's view never carries that history to the editor."""
+    setUp = fixtures.LocalPipsTests.setUp
+
+    def test_a_bigger_window_sees_more_history_and_the_run_view_stays_small(self):
+        from dgc import pips
+        job = Conversations.job(self)
+        asked, said = "A detail. " * 390, "A detail worth keeping. " * 660    # about 4 KB asked, 16 KB replied
+        for n in range(10):
+            sent = pip_chat.send(self.store, job["id"], f"{n}: {asked}", f"k{n}", "user", self.cfg,
+                                 chat_options={"context_size": 131072, "thinking": "off"})
+            self.assertEqual(self.store.claim_next()["id"], sent["run"]["id"])
+            self.store.finish(sent["run"]["id"], result={"text": f"Noted {n}. {said}"})
+        last = pip_chat.send(self.store, job["id"], "And now?", "k-last", "user", self.cfg,
+                             chat_options={"context_size": 131072, "thinking": "off"})
+        history = Conversations.history(self, last["run"]["id"])
+        self.assertEqual(len(history), 20, "all ten exchanges, about 200 KB: more than the old 64 KB held")
+        stored = self.registry.db.execute("SELECT manifest FROM pip_runs WHERE id=?", (last["run"]["id"],)).fetchone()[0]
+        self.assertLess(len(stored), 128 * 1024, "the stored manifest stays small: the history is kept beside the run")
+        self.assertEqual(json.loads(stored)["conversation"]["history"], [])
+        self.assertEqual(self.store.run(last["run"]["id"])["manifest"]["conversation"]["inputs_ref"]["history"], 20)
+
+    def test_the_real_worker_gets_the_whole_big_history(self):
+        import subprocess, sys
+        from dgc import pips
+        job = Conversations.job(self)
+        said = "A detail worth keeping. " * 660                              # about 16 KB a reply: 96 KB in all
+        for n in range(6):
+            pip_chat.send(self.store, job["id"], f"Note {n}", f"k{n}", "user", self.cfg, chat_options={"context_size": 131072, "thinking": "off"})
+            self.store.finish(self.store.claim_next()["id"], result={"text": f"{n} {said}"})
+        last = pip_chat.send(self.store, job["id"], "How many notes?", "k-last", "user", self.cfg,
+                             chat_options={"context_size": 131072, "thinking": "off"})
+        row = self.store.claim_next()
+        fixture = r'''from unittest.mock import patch
+from dgc.llm import ChatResult, LLMClient
+from dgc.pips import _worker_main
+
+def chat(self, messages, tools=None, on_text=None, **kwargs):
+    seen = sum(1 for m in messages if "A detail worth keeping." in str(m.get("content", "")))
+    return ChatResult(content=f"I see {seen} earlier replies.")
+with patch.object(LLMClient, "chat", chat), patch("requests.sessions.Session.request", side_effect=AssertionError("No network")):
+    raise SystemExit(_worker_main())
+'''
+        original = subprocess.Popen
+        def launch(argv, *args, **kwargs):
+            if argv[1:] == ["-m", "dgc.pips", "--worker"]:
+                argv = [sys.executable, "-c", fixture]
+            return original(argv, *args, **kwargs)
+        with patch.object(pips.subprocess, "Popen", side_effect=launch):
+            result = pips._execute_run(self.registry, row, self.cfg)
+        final = self.store.finish(last["run"]["id"], result=result)
+        self.assertEqual(final["status"], "succeeded", final.get("error"))
+        self.assertEqual(pip_chat.list_messages(self.store, job["id"])["messages"][-1]["text"], "I see 6 earlier replies.")
+
+    def test_a_history_changed_after_it_was_pinned_is_refused(self):
+        from dgc import pip_run_inputs
+        job = Conversations.job(self)
+        said = "A detail worth keeping. " * 660
+        for n in range(5):
+            sent = pip_chat.send(self.store, job["id"], f"{n}", f"k{n}", "user", self.cfg, chat_options={"context_size": 131072, "thinking": "off"})
+            self.store.finish(self.store.claim_next()["id"], result={"text": f"{n} {said}"})
+        last = pip_chat.send(self.store, job["id"], "Next", "k-next", "user", self.cfg, chat_options={"context_size": 131072, "thinking": "off"})
+        with self.registry.transaction():
+            self.registry.db.execute("UPDATE pip_run_inputs SET inputs=? WHERE run_id=?", ('{"history":[]}', last["run"]["id"]))
+        manifest = json.loads(self.registry.db.execute("SELECT manifest FROM pip_runs WHERE id=?", (last["run"]["id"],)).fetchone()[0])
+        with self.assertRaises(RegistryError):
+            pip_run_inputs.attach(self.registry.db, last["run"]["id"], manifest)
 
 
 class ComputerTakesTurns(unittest.TestCase):

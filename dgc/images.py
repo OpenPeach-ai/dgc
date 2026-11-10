@@ -38,7 +38,8 @@ MAX_COUNT = 4
 MAX_PROMPT = 8000
 MAX_INPUT_IMAGES = 8
 MAX_INPUT_BYTES = 20 * 1024 * 1024
-LIBRARY_MAX = 5000
+LIBRARY_MAX = 100_000           # images (or videos) the Library lists, newest first (was 5,000; 10 Nov)
+LIBRARY_TRIM_BYTES = 64 * 1024 * 1024    # the index is trimmed to the newest LIBRARY_MAX only past this size
 CHECK_FRESH_S = 6 * 3600
 PROVIDER_LABELS = {"comfyui": "ComfyUI", "a1111": "Automatic1111-compatible", "openai": "OpenAI", "xai": "xAI",
                    "together": "Together", "localai": "LocalAI", "ollama": "Ollama", "openai_compatible":
@@ -766,7 +767,9 @@ def _index(row: dict, *, folder: Path | None = None) -> None:
             path = (_ensure_dir() if folder is None else folder) / "library.jsonl"
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-            if path.stat().st_size > 4 * 1024 * 1024:
+            # Trimmed rarely: past LIBRARY_TRIM_BYTES, to the newest LIBRARY_MAX, so the index is never rewritten on
+            # every new image (at 100,000 images a 4 MB trigger would have).
+            if path.stat().st_size > LIBRARY_TRIM_BYTES:
                 lines = path.read_text(encoding="utf-8").splitlines()[-LIBRARY_MAX:]
                 path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     except OSError:

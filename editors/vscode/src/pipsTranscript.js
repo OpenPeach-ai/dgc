@@ -1,5 +1,6 @@
 import {esc,activityLabel,personalStatusLabel} from './pipsModel.js';
 import {cronDays} from './pipRoutines.js';
+import {postArtifact,docCardMarkup} from './pipRunPosts.js';   // a long reply's document: the card a run's post draws
 import '../media/mentions.js';   // globalThis.DgcMentions: @ marks in the bubble, the same in all three chats
 import '../media/msgtime.js';   // globalThis.DgcTime: a message's time, the same in all three chats
 import '../media/pictureFold.js';   // globalThis.DgcPictureFold: a reply's pictures fold away, the same in all three chats
@@ -142,7 +143,7 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   const startedAgain=line?esc(line.slice(0,120)):'';
   const replyTime=startedAgain&&time?time.replace(/(<time[^>]*>)/,`$1${startedAgain} · `):startedAgain?`<span class="msg-time">${startedAgain}</span>`:time;
   const activityRow=!user?`<button type="button" class="chat-activity-toggle" data-chat-activity="${esc(m.run_id)}" aria-expanded="${activity?.open===true}">${transcriptIcon('tool')}<span>${activity?.loading?'Loading…':'What it did'}</span><span class="activity-chevron">${transcriptIcon('chevron')}</span></button>${activity?.open?activityMarkup(activity,m.run_id):''}`:'';
-  return `<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}" data-message="${esc(m.id)}">${user?'':head}<span class="sr-only role">${esc(label)}</span>${activityRow}${shownCards}${body}${used}${offered}${user?'':ownChangesMarkup(m,{name,undo,open:openChanges,busy:undoing,errors:undoErrors})}${status}<div class="response-actions">${user?'':head?(startedAgain?`<span class="msg-time">${startedAgain}</span>`:''):replyTime}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${options}${details}${trace}${!user&&stats?replyStats(stats):''}${user?sentTime:''}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
+  return `<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}" data-message="${esc(m.id)}">${user?'':head}<span class="sr-only role">${esc(label)}</span>${activityRow}${shownCards}${body}${!user&&postArtifact(m)?docCardMarkup(postArtifact(m)):''}${used}${offered}${user?'':ownChangesMarkup(m,{name,undo,open:openChanges,busy:undoing,errors:undoErrors})}${status}<div class="response-actions">${user?'':head?(startedAgain?`<span class="msg-time">${startedAgain}</span>`:''):replyTime}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${options}${details}${trace}${!user&&stats?replyStats(stats):''}${user?sentTime:''}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
 }
 
 // What a reply took, beside its actions: its time and its tokens (in and out, all its model requests).

@@ -136,7 +136,8 @@ class ContinuityTests(unittest.TestCase):
 
     def test_oversize_stored_text_is_refused_before_body_fetch(self):
         self.job(); run = self.send(); self.finish(run)
-        self.registry.db.execute("UPDATE pip_chat_messages SET text=? WHERE role='assistant'", ('x' * 30000,))
+        from dgc.pip_chat import MAX_REPLY_BYTES
+        self.registry.db.execute("UPDATE pip_chat_messages SET text=? WHERE role='assistant'", ('x' * (MAX_REPLY_BYTES + 1),))
         queries=[]; self.registry.db.set_trace_callback(queries.append)
         with self.assertRaises(RegistryError):
             continuity.prepare(self.store, self.pip['id'], 32768)

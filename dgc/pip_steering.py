@@ -19,14 +19,17 @@ from pathlib import Path
 
 from .workspace_registry import RegistryError, identifier
 
-SCHEMA = """
+# A message that joins a running reply is a message like any other: up to 256 KB (Limits for everyone, 10 Nov; it was
+# 8 KiB). widen() moves an older registry's table to this bound, every row kept.
+MAX_TEXT_BYTES = 256 * 1024
+SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS pip_chat_steers (
  seq INTEGER PRIMARY KEY AUTOINCREMENT,
  id TEXT NOT NULL UNIQUE,
  pip_id TEXT NOT NULL REFERENCES pips(id),
  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
  run_id TEXT NOT NULL REFERENCES pip_runs(id),
- text TEXT NOT NULL CHECK(length(CAST(text AS BLOB))<=8192),
+ text TEXT NOT NULL CHECK(length(CAST(text AS BLOB))<={MAX_TEXT_BYTES}),
  request_key TEXT NOT NULL,
  request_digest TEXT NOT NULL,
  requested_by TEXT NOT NULL,
@@ -37,6 +40,8 @@ CREATE TABLE IF NOT EXISTS pip_chat_steers (
 CREATE INDEX IF NOT EXISTS pip_chat_steers_run ON pip_chat_steers(run_id,seq);
 """
 MAX_PER_RUN = 8
+# The worker's inbox holds every update a reply has not read yet: eight at most, each escaped at worst six bytes a byte.
+MAX_INBOX_BYTES = MAX_PER_RUN * (6 * MAX_TEXT_BYTES + 256) + 2
 # Messages waiting for a turn of their own: the reply they joined finished without reading them. Each conversation of a
 # Pip has its own queue (pip_conversations): a steer belongs to the conversation of the reply it joined.
 WAITING = ("SELECT s.* FROM pip_chat_steers s JOIN pip_runs r ON r.id=s.run_id "
@@ -142,7 +147,7 @@ def stage(db, run_id, folder: Path):
     rows = db.execute("SELECT id,text FROM pip_chat_steers WHERE run_id=? AND status='pending' ORDER BY seq", (run_id,)).fetchall()
     path = folder / 'steering.json'
     encoded = json.dumps([{'id': row['id'], 'text': row['text']} for row in rows], ensure_ascii=False).encode()
-    if len(encoded) > 70_000:
+    if len(encoded) > MAX_INBOX_BYTES:
         raise RegistryError('steer_limit', 'The Pip steering inbox exceeded its size limit.')
     temporary = folder / 'steering.tmp'
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, 'O_NOFOLLOW', 0), 0o600)
@@ -156,7 +161,7 @@ def read_worker(folder: Path, seen: set[str]):
         raw = (folder / 'steering.json').read_bytes()
     except FileNotFoundError:
         return []
-    if len(raw) > 70_000:
+    if len(raw) > MAX_INBOX_BYTES:
         return []
     try:
         items = json.loads(raw)
@@ -166,7 +171,7 @@ def read_worker(folder: Path, seen: set[str]):
         return []
     return [item for item in items if isinstance(item, dict) and set(item) == {'id', 'text'}
             and isinstance(item['id'], str) and item['id'].startswith('message_')
-            and isinstance(item['text'], str) and len(item['text'].encode()) <= 8192
+            and isinstance(item['text'], str) and len(item['text'].encode()) <= MAX_TEXT_BYTES
             and item['id'] not in seen]
 
 
@@ -268,3 +273,22 @@ def forget_resent(store, pip_id, req, actor):
                 store.db.execute("DELETE FROM pip_chat_mentions WHERE message_id IN "
                                  "(SELECT id FROM pip_chat_steers WHERE " + match + ")", values)
             store.db.execute("DELETE FROM pip_chat_steers WHERE " + match, values)
+
+
+def widen(db) -> None:
+    """An older registry's table took 8 KiB a message: rebuilt with the 256 KB bound, every row, its seq (so the order
+    carries on), its conversation and its indexes kept. Running it again changes nothing."""
+    row = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='pip_chat_steers'").fetchone()
+    if row is None or f"<={MAX_TEXT_BYTES}" in (row[0] or ""):
+        return
+    columns = [r[1] for r in db.execute("PRAGMA table_info(pip_chat_steers)").fetchall()]
+    db.execute("ALTER TABLE pip_chat_steers RENAME TO pip_chat_steers_8k")
+    db.execute(SCHEMA.strip().split(";")[0])
+    if "conversation_id" in columns:
+        db.execute("ALTER TABLE pip_chat_steers ADD COLUMN conversation_id TEXT")
+    names = ",".join(columns)
+    db.execute(f"INSERT INTO pip_chat_steers({names}) SELECT {names} FROM pip_chat_steers_8k")
+    db.execute("DROP TABLE pip_chat_steers_8k")
+    db.execute("CREATE INDEX IF NOT EXISTS pip_chat_steers_run ON pip_chat_steers(run_id,seq)")
+    if "conversation_id" in columns:
+        db.execute("CREATE INDEX IF NOT EXISTS pip_chat_steers_conversation ON pip_chat_steers(conversation_id)")
