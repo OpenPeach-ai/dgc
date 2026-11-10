@@ -18,7 +18,8 @@ function chat() {
   const dom = makeDom();
   const event = (data) => dom.send({ type: "event", event: data });
   const $ = (id) => dom.doc.getElementById(id);
-  const visible = (id) => !$(id).hidden && !$("composer-rail").hidden;
+  // A troupe shows as its pill on the bar above the box; its row is that pill's detail.
+  const visible = (id) => !$(id).hidden && !!dom.doc.querySelector('#rail-chips .rail-chip[data-kind="troupe"]');
   const rows = () => [...dom.doc.querySelectorAll("#troupe-panel .troupe-stages li")]
     .map((li) => [...li.children].map((part) => part.textContent).filter(Boolean).join(" "));
   return { ...dom, event, $, visible, rows };
@@ -30,7 +31,7 @@ test("a troupe is one slim row above the prompt, never a card in the chat, and S
   assert.equal(visible("troupebar"), false, "no troupe, no row");
   event({ type: "troupe_started", ...run() });
   assert.equal(doc.querySelector("#log .artifact.troupe, #log .troupe-stages"), null, "nothing in the transcript");
-  assert.ok(visible("troupebar"), "the row is in the rail above the prompt");
+  assert.ok(visible("troupebar"), "the troupe is on the bar above the prompt");
   assert.ok($("composer-rail").classList.contains("has-troupes"));
   assert.equal($("troupebar").dataset.state, "running");
   assert.equal($("troupe-label").textContent, "Troupe");

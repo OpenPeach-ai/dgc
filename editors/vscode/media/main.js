@@ -7094,24 +7094,21 @@ function permissionChoices(ev) {
   }
   $("paste-close").onclick = () => { forgetPasteRemoved(); input.focus({ preventScroll: true }); };
 
-  // One kind of work showing keeps its full row above the box. Two or more fold into one line of chips
-  // (renderRailChips), and the rail itself then holds only the invisible-characters notice, if any. Pip fixes count
-  // as a kind (reported 24 Oct): a fix's chip beside this chat's changes folds the changes into a chip too, as the
-  // checklist does, so the space above the box stays one line.
+  // Every kind of work showing is one pill on the bar above the box (renderRailChips): the bar is one line at one
+  // height, whatever shows. One kind alone is that same line, said in full; its row opens above like any pill's. The
+  // rail itself holds only the invisible-characters notice, if any. Pip fixes and running Pips count as kinds.
   function syncComposerRail() {
     const present = RAIL_KINDS.filter(([, bar]) => !bar.hidden).map(([kind]) => kind);
     const fixes = pipFixesForChip().length ? ["pipfixes"] : [];
     if (pipRunning.size) fixes.push("piprunning");
-    const asChips = present.length + fixes.length >= 2;
-    composerRail.classList.toggle("as-chips", asChips);
-    composerRail.hidden = pasteBar.hidden && (asChips || !present.length);
+    composerRail.classList.add("as-chips");
+    composerRail.hidden = pasteBar.hidden;
     composerRail.classList.toggle("has-monitors", !monitorsBar.hidden);
     composerRail.classList.toggle("has-troupes", !troupeBar.hidden);
     composerRail.classList.toggle("has-changes", !changesBar.hidden);
     composerRail.classList.toggle("has-tasks", !tasksBar.hidden);
     composerRail.classList.toggle("has-goal", !goalBar.hidden);
-    // Pip fixes and running Pips are always chips on this line: they have no row of their own.
-    renderRailChips([...(asChips ? present : []), ...fixes]);
+    renderRailChips([...present, ...fixes]);
   }
   function setChatChanges(next) {
     const files = Array.isArray(next?.files) ? next.files.filter((item) => item
@@ -7181,7 +7178,10 @@ function permissionChoices(ev) {
   }
   function closeChangesReview() {
     $("changes-review").hidden = true;
-    (reviewScope === "workspace" || changesBar.hidden ? $("workspace-changes") : $("changes-main")).focus();
+    // Back where it was opened from: the row in its popover, else the bar's own line for the changes.
+    const back = reviewScope === "workspace" || changesBar.hidden ? $("workspace-changes")
+      : railPop.contains(changesBar) ? $("changes-main") : (railSoloAct.isConnected ? railSoloAct : railAnchor("changes")) || $("workspace-changes");
+    back.focus();
   }
 
   // Standing goal — the objective and clock stay attached immediately above the composer.
@@ -7395,7 +7395,8 @@ function permissionChoices(ev) {
   }
   function closeGoalReview(restoreFocus = true) {
     $("goal-review").hidden = true;
-    if (restoreFocus) focusQuietly($("goal-review-button"));
+    // Back on the row's button while its popover is open, else on the goal's pill.
+    if (restoreFocus) focusQuietly(railPop.contains(goalBar) ? $("goal-review-button") : railAnchor("goal") || input);
   }
   const goalClockTimer = setInterval(paintGoalClock, 500);
   if (goalClockTimer && typeof goalClockTimer.unref === "function") goalClockTimer.unref();
@@ -7416,7 +7417,21 @@ function permissionChoices(ev) {
   const RAIL_ROW_ORDER = ["queuebar", "pipsbar", "monitorsbar", "troupebar", "changesbar", "tasksbar", "goalbar", "pastebar"];
   const RAIL_POP_TITLES = { goal: "Goal", troupe: "Troupe", monitors: "Monitors", tasks: "Tasks",
     changes: "Changes in this chat", pips: "Pips", queue: "Queued messages", pipfixes: "Pip fixes", piprunning: "Pips running" };
-  const RAIL_FITS = ["full", "compact", "tight", "tighter", "wrap"];
+  // How a narrow bar says less: the words go, then the extras, then the number of a pill that needs you. A wide bar
+  // (RAIL_WIDE and up) keeps whole pills. Either way, what still does not fit goes behind "+N": never a second line.
+  const RAIL_FITS = ["full", "compact", "tight", "tighter"], RAIL_WIDE = 520;
+  // Which kinds stay on the bar longest when it is short of room; a kind that needs you outstays them all.
+  const RAIL_KEEP = ["queue", "changes", "tasks", "pipfixes", "troupe", "piprunning", "monitors", "goal", "pips"];
+  let railHidden = [];                           // the kinds behind "+N", in the bar's order
+  const railMore = el("button", "rail-more");
+  railMore.type = "button"; railMore.id = "rail-more"; railMore.dataset.kind = "more"; railMore.tabIndex = -1;
+  railMore.setAttribute("aria-haspopup", "dialog"); railMore.setAttribute("aria-expanded", "false");
+  railMore.setAttribute("aria-controls", "rail-pop");
+  railMore.addEventListener("click", () => { if (railOpen?.kind === "more") closeRailPop(); else openRailMore(); });
+  railMore.addEventListener("focus", () => { if (railStop !== "more") { railStop = "more"; railRove(); } });
+  // One kind alone has its everyday action at the end of its line (the queue's Steer all, the changes' Review).
+  const railSoloAct = el("button", "rail-text-action rail-solo-act");
+  railSoloAct.type = "button"; railSoloAct.id = "rail-solo-act";   // on the line only while it has something to do
   const railChipNodes = new Map();               // kind -> its chip, kept across repaints so a focused chip keeps focus
   let railKinds = [], railStop = "", railOpen = null, railFit = { width: -1, shape: "" }, railLinksSig = "";
   // A kind's real row; Pip fixes have no row (their cards are in the chat): their popover lists them.
@@ -7433,7 +7448,7 @@ function permissionChoices(ev) {
   function railChipSpec(kind) {
     if (kind === "queue") {
       const count = Math.max(queuedCount, queuedPrompts.size);
-      return { icon: "list-ordered", word: "Queue", num: String(count),
+      return { icon: "list-ordered", num: String(count), after: "queued", detail: count === 1 ? "message" : "messages",
         label: `${count} ${count === 1 ? "message" : "messages"} queued for the next turn`,
         tip: `Queue · ${count} ${count === 1 ? "message" : "messages"} waiting` };
     }
@@ -7441,6 +7456,7 @@ function permissionChoices(ev) {
       const status = goalState.status, blocked = status === "blocked", paused = status === "paused";
       const state = blocked ? "blocked" : paused ? "paused" : "pursuing";
       return { icon: "target", word: paused ? "Paused" : "Goal", num: formatDuration(currentGoalElapsed()),
+        detail: String(goalState.text || "").replace(/\s+/g, " ").slice(0, 160),
         live: status === "active", need: blocked, tone: "error", needWord: blocked ? "blocked" : "",
         label: `Goal, ${state}: ${String(goalState.text || "").replace(/\s+/g, " ").slice(0, 160)}`,
         tip: `Goal · ${blocked ? "blocked: it needs your decision" : state}` };
@@ -7460,6 +7476,7 @@ function permissionChoices(ev) {
       // A failed lead says so in its number ("Failed"); one that failed behind a running lead says it beside it.
       return { icon: "troupe", word: runs.length > 1 ? `${runs.length} troupes` : "Troupe", num, live: state === "running",
         share: sum.share, need: failed > 0, tone: "error", needWord: failed && state !== "failed" ? `${failed} failed` : "",
+        detail: title.replace(/\s+/g, " ").slice(0, 160),
         label: `Troupe${title ? ` ${title}` : ""}: ${sum.text}`, tip: `Troupe · ${title ? `${title} · ` : ""}${sum.text}` };
     }
     if (kind === "monitors") {
@@ -7476,7 +7493,9 @@ function permissionChoices(ev) {
       const statusOf = (t) => (Object.hasOwn(TODO_GLYPHS, t.status) ? t.status : "pending");
       const rows = paintedTodos, done = rows.filter((t) => t.status === "done").length;
       const blocked = rows.filter((t) => statusOf(t) === "blocked").length;
-      return { icon: "checklist", word: "Tasks", num: `${done}/${rows.length}`, live: rows.some((t) => statusOf(t) === "in_progress"),
+      const doing = rows.find((t) => statusOf(t) === "in_progress");
+      return { icon: "checklist", word: "Tasks", num: `${done}/${rows.length}`, live: !!doing,
+        detail: String(doing?.content || "").replace(/\s+/g, " ").slice(0, 160),
         need: blocked > 0, tone: "error", needWord: blocked ? `${blocked} blocked` : "",
         label: $("tasks-main").getAttribute("aria-label") || `Tasks, ${done} of ${rows.length} done`,
         tip: `Tasks · ${done} of ${rows.length} done${blocked ? ` · ${blocked} blocked: needs you` : ""}` };
@@ -7514,7 +7533,7 @@ function permissionChoices(ev) {
     }
     if (kind === "pips") {
       const alert = pipsBar.dataset.reason === "alert", headline = $("pips-digest-text").textContent;
-      return { icon: "bell", num: "Pips", need: alert, tone: "warn", needWord: alert ? "alert" : "",
+      return { icon: "bell", num: "Pips", need: alert, tone: "warn", needWord: alert ? "alert" : "", detail: headline,
         label: `Pips: ${headline}`, tip: `Pips · ${headline}` };
     }
     return null;
@@ -7530,7 +7549,9 @@ function permissionChoices(ev) {
     // What needs you is said in words and coloured as the rows were before the chip line (reported 19 Oct):
     // blocked or failed in the error red, the icon with it; waiting or an alert in amber. No dot, no outline.
     const need = spec.need ? part("chip-need", spec.needWord) : "";
-    return icon + part("chip-word", spec.word) + part("chip-num", spec.num) + part("chip-word", spec.after) + mini + extra + need;
+    // The detail and the caret show only where the kind has the whole line (one kind alone) or a row of the "+N" list.
+    return icon + part("chip-word", spec.word) + part("chip-num", spec.num) + part("chip-word", spec.after) + mini + extra + need
+      + part("chip-detail", spec.detail) + '<span class="chip-caret codicon codicon-chevron-up" aria-hidden="true"></span>';
   }
   function railChip(kind) {
     const chip = el("button", "rail-chip");
@@ -7565,6 +7586,7 @@ function permissionChoices(ev) {
     // Only a change of shape can change what fits: a ticking clock keeps its width.
     const shape = sig.replace(/\d/g, "0");
     if (chip._shape !== shape) { chip._shape = shape; fitRailChips(); }
+    if (railHidden.includes(kind)) { paintRailMoreButton(); if (railOpen?.kind === "more") paintRailMore(); }
   }
   function renderRailChips(present) {
     if (!railChipsReady) return;
@@ -7574,10 +7596,11 @@ function permissionChoices(ev) {
     railChips.hidden = !present.length;
     railLine.classList.toggle("has-chips", present.length > 0);
     // Its kind ended (a cleared checklist, a dismissed troupe), or it is the last one left and has its row back.
-    if (railOpen && !present.includes(railOpen.kind)) closeRailPop({ restore: false });
+    if (railOpen && railOpen.kind !== "more" && !present.includes(railOpen.kind)) closeRailPop({ restore: false });
     for (const [kind, chip] of railChipNodes) {
       if (!present.includes(kind)) { chip.remove(); railChipNodes.delete(kind); }
     }
+    paintRailSolo();                             // before the pills are painted: each paint may fit the line
     present.forEach((kind, index) => {
       let chip = railChipNodes.get(kind);
       if (!chip) { chip = railChip(kind); railChipNodes.set(kind, chip); }
@@ -7589,7 +7612,7 @@ function permissionChoices(ev) {
     fitRailChips();
     // Focus that was on the line or in its popover and has nowhere left to be goes to the line, else the prompt.
     if (hadFocus && !railShown(document.activeElement)) {
-      const stop = railChips.querySelector('.rail-chip[tabindex="0"]');
+      const stop = railChips.querySelector('[tabindex="0"]');
       if (stop && !railChips.hidden) focusQuietly(stop); else input.focus({ preventScroll: true });
     }
   }
@@ -7600,25 +7623,135 @@ function permissionChoices(ev) {
       && !(composerRail.classList.contains("as-chips") && composerRail.contains(node) && !pasteBar.contains(node));
   }
   // One Tab stop for the whole line: the chip last used, else the first.
+  const railStops = () => [...railChips.children].filter((chip) => !chip.hidden);
   function railRove() {
-    const chips = [...railChips.children];
+    const chips = railStops();
     const keep = chips.find((chip) => chip.dataset.kind === railStop) || chips[0];
-    for (const chip of chips) { const want = chip === keep ? 0 : -1; if (chip.tabIndex !== want) chip.tabIndex = want; }
+    for (const chip of railChips.children) { const want = chip === keep ? 0 : -1; if (chip.tabIndex !== want) chip.tabIndex = want; }
   }
-  // The line never scrolls sideways and never clips a chip: as room runs out it drops the words, then the extras
-  // (the diff counts and the troupe's bar), then the number of a chip that needs you (its reason, dot and amber
-  // stay), and only then wraps onto a second line.
+  // One kind alone: the line says it in full, with its everyday action at the end.
+  function paintRailSolo() {
+    const kind = railKinds.length === 1 ? railKinds[0] : "";
+    if (kind) railLine.dataset.solo = kind; else delete railLine.dataset.solo;
+    const act = kind === "queue" && !queueSteerAll.hidden
+      ? ["Steer all", "Send every queued message into this turn now", () => queueSteerAll.click()]
+      : kind === "changes" && changeState.total
+        ? ["Review", "Open the list of changed files", () => $("changes-review-button").click()] : null;
+    if (!act) { if (railSoloAct.isConnected) { const held = railSoloAct === document.activeElement; railSoloAct.remove(); if (held) focusQuietly(railAnchor(kind) || input); } return; }
+    if (!railSoloAct.isConnected) railChips.after(railSoloAct);
+    if (railSoloAct.textContent !== act[0]) railSoloAct.textContent = act[0];
+    railSoloAct.title = act[1]; railSoloAct.onclick = act[2];
+  }
+  // The bar is one line, always. It never wraps, scrolls sideways or clips a pill: a narrow bar drops the words, then
+  // the extras (the diff counts and the troupe's bar), then the number of a pill that needs you (its reason stays); a
+  // wide one keeps whole pills. What still does not fit goes behind "+N", the kinds that matter least first.
   function fitRailChips(force = false) {
     if (!railChipsReady) return;
-    if (!railKinds.length) { delete railLine.dataset.fit; railFit = { width: -1, shape: "" }; return; }
+    if (!railKinds.length) {
+      delete railLine.dataset.fit; delete railLine.dataset.squeeze; railFit = { width: -1, shape: "" };
+      railMore.remove(); setRailHidden([]);
+      return;
+    }
+    if (railKinds.some((kind) => !railChipNodes.has(kind))) return;   // mid-repaint: the last pill's paint fits them all
     const width = railLine.clientWidth;
-    const shape = railKinds.map((kind) => railChipNodes.get(kind)?._shape || "").join("|");
+    const shape = railKinds.map((kind) => `${kind}:${railChipNodes.get(kind)?._shape || ""}`).join("|") + (railSoloAct.isConnected ? "|act" : "");
     if (!force && width === railFit.width && shape === railFit.shape) return;
     railFit = { width, shape };
-    for (const fit of RAIL_FITS) {
+    const solo = railKinds.length === 1, hidden = [];
+    for (const chip of railChipNodes.values()) if (chip.hidden) chip.hidden = false;
+    railMore.remove();
+    delete railLine.dataset.squeeze;
+    const fits = () => railChips.scrollWidth <= railChips.clientWidth + 1;
+    // One kind alone keeps its words at any width; "solo" only folds Workspace changes to its icon on a narrow bar.
+    // A wide bar short of room first folds Workspace changes to its icon ("roomy"): the pills keep their words.
+    for (const fit of width >= RAIL_WIDE ? ["full", "roomy"] : solo ? ["solo"] : RAIL_FITS) {
       railLine.dataset.fit = fit;
-      if (fit === "wrap" || railChips.scrollWidth <= railChips.clientWidth + 1) break;
+      if (fits()) break;
     }
+    if (!solo && !fits()) {
+      railChips.appendChild(railMore);
+      const rank = (kind) => (railChipNodes.get(kind)?.hasAttribute("data-need") ? 0 : 100) + RAIL_KEEP.indexOf(kind);
+      for (const kind of [...railKinds].sort((a, b) => rank(b) - rank(a))) {
+        if (hidden.length >= railKinds.length - 1) break;      // one pill always stays beside "+N"
+        railChipNodes.get(kind).hidden = true;
+        hidden.push(kind);
+        railMore.textContent = `+${hidden.length}`;
+        if (fits()) break;
+      }
+      if (!fits()) railLine.dataset.squeeze = "";
+    }
+    setRailHidden(railKinds.filter((kind) => hidden.includes(kind)));
+  }
+  function setRailHidden(kinds) {
+    const changed = kinds.join() !== railHidden.join();
+    railHidden = kinds;
+    paintRailMoreButton();
+    if (!changed) return;
+    railRove();
+    if (railOpen?.kind === "more") { if (kinds.length) paintRailMore(); else closeRailPop({ restore: false }); }
+    else if (railOpen) {
+      // The open kind's pill went behind "+N" or came back: its popover hangs off whichever stands for it now.
+      const anchor = railAnchor(railOpen.kind);
+      for (const chip of [...railChipNodes.values(), railMore]) chip.setAttribute("aria-expanded", String(chip === anchor));
+      railOpen.chip = anchor || railOpen.chip;
+    }
+  }
+  function paintRailMoreButton() {
+    const specs = railHidden.map((kind) => railChipSpec(kind)).filter(Boolean);
+    const need = specs.find((spec) => spec.need && spec.tone === "error") || specs.find((spec) => spec.need);
+    if (need) railMore.dataset.need = need.tone === "error" ? "error" : "warn"; else delete railMore.dataset.need;
+    const label = `${railHidden.length} more`;
+    if (railMore.textContent !== `+${railHidden.length}`) railMore.textContent = `+${railHidden.length}`;
+    railMore.setAttribute("aria-label", `${label}${need ? ", one needs you" : ""}. Show the rest of what is running`);
+    hoverTip.retitle(railMore, specs.map((spec) => spec.tip.split("\n")[0]).join("\n"));
+  }
+  // The pill that stands for a kind on the bar: its own, or "+N" while it is behind it.
+  function railAnchor(kind) {
+    if (kind === "more") return railMore.isConnected ? railMore : null;
+    const chip = railChipNodes.get(kind);
+    return chip && !chip.hidden ? chip : railMore.isConnected ? railMore : chip || null;
+  }
+  // "+N" opened: the rest as a list, each row opening its own detail (the same popover its pill would open).
+  function paintRailMore() {
+    const rows = [...railPopBody.querySelectorAll(".rail-more-row")];
+    const held = rows.find((row) => row === document.activeElement)?.dataset.kind || "";
+    const list = el("div", "rail-more-list");
+    list.setAttribute("role", "group");
+    list.setAttribute("aria-label", "The rest of what is running in this chat");
+    for (const kind of railHidden) {
+      const spec = railChipSpec(kind);
+      if (!spec) continue;
+      const row = el("button", "rail-more-row");
+      row.type = "button"; row.dataset.kind = kind;
+      row.innerHTML = railChipFace(spec) + '<span class="row-open" aria-hidden="true">Open</span>';
+      row.toggleAttribute("data-live", !!spec.live);
+      if (spec.need) row.dataset.need = spec.tone === "error" ? "error" : "warn";
+      row.setAttribute("aria-label", `${spec.label}${spec.need ? `. Needs you${spec.needWord ? `: ${spec.needWord}` : ""}` : ""}. Open`);
+      row.addEventListener("click", () => {
+        if (kind === "piprunning" && pipRunningList().length === 1) { closeRailPop({ restore: false }); openRunningPip(pipRunningList()[0]); return; }
+        openRailPop(kind);
+      });
+      list.appendChild(row);
+    }
+    railPopBody.replaceChildren(list);
+    $("rail-pop-title").textContent = `${railHidden.length} more`;
+    if (held) focusQuietly(list.querySelector(`.rail-more-row[data-kind="${held}"]`) || list.firstElementChild || railPop, { preventScroll: true });
+  }
+  function openRailMore() {
+    if (!railHidden.length || !railMore.isConnected) return;
+    if (railOpen) closeRailPop({ restore: false });
+    hoverTip.hide();
+    railOpen = { kind: "more", bar: null, chip: railMore, unfolded: [] };
+    paintRailMore();
+    railLinksSig = "";
+    paintRailPopLinks("more");
+    railPop.dataset.kind = "more";
+    railPop.hidden = false;
+    railLine.classList.add("pop-open");
+    sizeRailPop();
+    railMore.setAttribute("aria-expanded", "true");
+    railStop = "more"; railRove();
+    focusQuietly(railPopBody.querySelector(".rail-more-row") || railPop, { preventScroll: true });
   }
   if (typeof ResizeObserver === "function") new ResizeObserver(() => { fitRailChips(); sizeRailPop(); }).observe(railLine);
   window.addEventListener("resize", () => sizeRailPop());
@@ -7665,7 +7798,7 @@ function permissionChoices(ev) {
     if (row) amFocusRow(row, { quiet: false });
   }
   function openRailPop(kind) {
-    const chip = railChipNodes.get(kind), bar = railBar(kind);
+    const chip = railAnchor(kind), bar = railBar(kind);
     if (!chip || !bar || bar.hidden) return;
     if (railOpen) closeRailPop({ restore: false });
     hoverTip.hide();
@@ -7682,7 +7815,7 @@ function permissionChoices(ev) {
     railLine.classList.add("pop-open");
     sizeRailPop();
     chip.setAttribute("aria-expanded", "true");
-    railStop = kind; railRove();
+    railStop = chip.dataset.kind; railRove();
     // Into the popover: the row's own main control (never a Stop), else the popover itself.
     const main = [...bar.querySelectorAll(".rail-main")].find((node) => !node.disabled && !node.closest("[hidden]"));
     focusQuietly(main || railPop, { preventScroll: true });
@@ -7691,11 +7824,13 @@ function permissionChoices(ev) {
   // elsewhere, or Tab out of it, leaves the focus where it went.
   function closeRailPop({ restore = true } = {}) {
     if (!railChipsReady || !railOpen) return;
-    const { bar, chip, unfolded } = railOpen;
+    const { kind, bar, unfolded } = railOpen;
+    const chip = railAnchor(kind) || railOpen.chip;
     const active = document.activeElement, inside = railPop.contains(active);
     railOpen = null;
     unfolded.forEach((fold) => fold());
-    if (bar === pipRunningPanel) bar.remove();   // the running Pips list is the popover's own too
+    if (!bar) railPopBody.replaceChildren();     // the "+N" list is the popover's own
+    else if (bar === pipRunningPanel) bar.remove();   // the running Pips list is the popover's own too
     else if (bar === pipFixesPanel) {
       // The panel is an inbox for this batch, not the whole fix archive. Dismissing it
       // acknowledges only finished fixes; active work stays visible until its result arrives.
@@ -7712,15 +7847,26 @@ function permissionChoices(ev) {
     delete railPop.dataset.kind;
     railPopLinks.replaceChildren(); railPopLinks.hidden = true; railLinksSig = "";
     railLine.classList.remove("pop-open");
-    chip.setAttribute("aria-expanded", "false");
+    for (const node of [...railChipNodes.values(), railMore]) node.setAttribute("aria-expanded", "false");
     if (!inside) return;
-    if (restore && chip.isConnected && !railChips.hidden) { focusQuietly(chip); return; }
+    if (restore && chip.isConnected && !chip.hidden && !railChips.hidden) { focusQuietly(chip); return; }
+    if (!bar) return;
     // Moving the row took the focus off it. Where the row is on screen again (the last kind left has its full row
     // back), the focus goes back to the same control.
     if (active?.isConnected && bar.contains(active) && railShown(active)) focusQuietly(active);
   }
   $("rail-pop-close").onclick = () => closeRailPop();
   railPop.addEventListener("keydown", (event) => {
+    // The "+N" list: the arrows move along its rows.
+    if (railOpen?.kind === "more" && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      const rows = [...railPopBody.querySelectorAll(".rail-more-row")], at = rows.indexOf(document.activeElement);
+      if (!rows.length) return;
+      event.preventDefault();
+      const to = event.key === "Home" ? 0 : event.key === "End" ? rows.length - 1
+        : event.key === "ArrowDown" ? (at + 1) % rows.length : (at - 1 + rows.length) % rows.length;
+      rows[to].focus();
+      return;
+    }
     if (event.key !== "Escape" || !railOpen) return;
     event.preventDefault(); event.stopPropagation();    // Esc in the composer is Stop: this one must not reach it
     closeRailPop();
@@ -7731,12 +7877,12 @@ function permissionChoices(ev) {
     if (event.key !== "Escape" || !railOpen || event.defaultPrevented) return;
     if (document.activeElement && document.activeElement !== document.body) return;
     event.preventDefault();
-    const chip = railOpen.chip;
+    const chip = railAnchor(railOpen.kind) || railOpen.chip;
     closeRailPop();
-    if (chip.isConnected && !railChips.hidden) focusQuietly(chip);
+    if (chip.isConnected && !chip.hidden && !railChips.hidden) focusQuietly(chip);
   });
   railChips.addEventListener("keydown", (event) => {
-    const chips = [...railChips.children], at = chips.indexOf(event.target);
+    const chips = railStops(), at = chips.indexOf(event.target);
     if (at < 0) return;
     if (event.key === "Escape") {
       if (!railOpen) return;

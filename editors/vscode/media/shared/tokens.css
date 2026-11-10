@@ -119,6 +119,14 @@
   --on-solid: var(--surface2);
   /* A prompt box's ground: a step off the page it sits on, in Work, ChatDGC and a Pip's chat. */
   --box: color-mix(in srgb, var(--text) 4%, var(--surface));
+  /* The shell a prompt box sits in while something is going on: a faint tint of the text on the page, opaque so its
+     parts can overlap. The bar in its upper part is one line of this height, always. */
+  --shell: color-mix(in srgb, var(--text) 4%, var(--bg));
+  /* A pill on the shell: one more step of the same tint. No stronger: the words that say a kind needs you
+     (--err-text, --need-text) have to stay 4.5:1 on it. */
+  --shell-pill: color-mix(in srgb, var(--text) 4%, transparent);
+  --add-text: var(--good); --del-ink: var(--del-text);
+  --shell-pad: 6px; --tray: 36px;
   /* A sent prompt's bubble: a quiet raised grey, the same in Work, ChatDGC and a Pip's chat. */
   --bubble: color-mix(in srgb, var(--text) 9%, var(--surface));
   /* Three lifts. 0: an inline card, a hairline and no shadow. 1: menus, tips and popovers: a half-pixel ring and one low
@@ -150,6 +158,9 @@ body.vscode-light { --link:#6D49E8; --accent-text:#6D49E8; }
 /* #D1902B is 2.7:1 on white. These clear 3:1 (the border and dot: 4.4 on white, 3.6 on the hover grey) and 4.5:1
    (the words: 6.0 on white, 4.9 on the hover grey). */
 body.vscode-light, body.vscode-high-contrast-light { --need:#A86A12; --need-text:#8F5600; }
+/* Lines added and removed, as words on the bar's pills: the dark theme's green and pink are 1.7:1 and 2.3:1 on a light
+   pill. These are the same hues at 5.4:1 and 5.3:1 there. */
+body.vscode-light, body.vscode-high-contrast-light { --add-text:#0F6B3F; --del-ink:#B3261E; }
 /* The olive as text on a light ground: #839900 is 3.2:1 on white, so blocked tasks and errors read faint in light
    themes. The same hue, darker: 5.9:1 on white, 4.8:1 on the darkest light surface. */
 body.vscode-light { --err-text:#5C6B00; }

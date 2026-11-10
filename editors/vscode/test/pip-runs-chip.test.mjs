@@ -71,7 +71,7 @@ test("it goes when the run ends (the card then arrives as today), and beside oth
   assert.deepEqual([...c.$("rail-chips").children].map((n) => n.dataset.kind), ["tasks", "piprunning"]);
   c.event({ type: "pip_runs_running", items: [] });
   assert.equal(c.chip(), null, "the run ended: the chip goes");
-  assert.equal(c.$("rail-chips").hidden, true, "the checklist alone has its row back");
+  assert.deepEqual([...c.$("rail-chips").children].map((n) => n.dataset.kind), ["tasks"], "the checklist alone keeps the bar's one line");
   assert.equal(c.$("tasksbar").hidden, false);
 });
 

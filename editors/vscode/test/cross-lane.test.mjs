@@ -289,7 +289,9 @@ test("the goal rail leaves out an objective it has no room for, and brings it ba
     });
     const wide = await facts();
     assert.ok(wide.shown && wide.width >= 48, `460 px shows the objective (${JSON.stringify(wide)})`);
-    for (const width of [340, 320, 300]) {
+    // The popover is as wide as the box now (24 px wider than the old chip line), so the objective keeps its room
+    // down to about 326 px.
+    for (const width of [320, 310, 300]) {
       await page.setViewportSize({ width, height: 620 });
       await page.waitForTimeout(120);
       const narrow = await facts();

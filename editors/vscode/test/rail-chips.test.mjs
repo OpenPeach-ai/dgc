@@ -51,13 +51,14 @@ function chat(options = {}) {
   return { ...v, event, $, chips, chip, face, key, press, posts, pile, open, inPop };
 }
 
-test("one kind keeps its full row; a second folds both into one line of chips, in a fixed order", () => {
+test("one kind is one line on the bar; a second joins it as a pill, in a fixed order", () => {
   const c = chat();
   c.pile({ goal: false, monitors: false, tasks: false, changes: false });
-  assert.equal(c.$("composer-rail").hidden, false, "a troupe alone: today's full row");
-  assert.equal(c.$("composer-rail").classList.contains("as-chips"), false);
-  assert.equal(c.$("rail-chips").hidden, true, "and no chip line");
-  assert.equal(c.chips().length, 0);
+  assert.equal(c.$("composer-rail").hidden, true, "a troupe alone: no row above the box");
+  assert.equal(c.$("rail-chips").hidden, false, "it is the bar's one line");
+  assert.deepEqual(c.chips().map((n) => n.dataset.kind), ["troupe"]);
+  assert.equal(c.$("rail-line").dataset.solo, "troupe", "said in full");
+  assert.equal(c.chip("troupe").querySelector(".chip-detail").textContent, TROUPE.title);
 
   c.event({ type: "todos", todos: TODOS });
   assert.equal(c.$("rail-chips").hidden, false, "two kinds: chips");
@@ -267,7 +268,7 @@ test("whatever needs you turns its chip amber and says why, to the eye and to a 
   assert.deepEqual(c.errors, []);
 });
 
-test("the last kind left gets its full row back, focus and all", () => {
+test("the last kind left keeps the bar's one line and its open detail, focus and all", () => {
   const c = chat();
   c.pile({ monitors: false, tasks: false, changes: false });
   c.chip("goal").click();
@@ -275,10 +276,11 @@ test("the last kind left gets its full row back, focus and all", () => {
   c.event({ type: "troupe_finished", ...TROUPE, state: "done" });
   c.event({ type: "turn_start", turn_id: "t2", prompt: "next", kind: "prompt" });   // your next message moves on
   assert.equal(c.$("troupebar").hidden, true);
-  assert.equal(c.$("rail-chips").hidden, true, "one kind: no chips");
-  assert.equal(c.open(), false);
-  assert.equal(c.$("goalbar").parentElement, c.$("composer-rail"));
-  assert.equal(c.$("composer-rail").hidden, false, "the goal's full row");
+  assert.deepEqual(c.chips().map((n) => n.dataset.kind), ["goal"], "one kind: still a line on the bar");
+  assert.equal(c.$("rail-line").dataset.solo, "goal");
+  assert.equal(c.open(), true, "its detail stays open");
+  assert.ok(c.inPop("goalbar"));
+  assert.equal(c.$("composer-rail").hidden, true, "no row above the box");
   assert.equal(c.doc.activeElement, c.$("goal-main"), "the focus stays on the control it was on");
   assert.deepEqual(c.errors, []);
 });

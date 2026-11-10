@@ -1,9 +1,11 @@
 // The chip line (B2) is a layout fact, so it is measured in real Chromium. A user's case -- a goal, a troupe, two
 // monitors, a checklist and this chat's changes all showing -- stacked five rows above the prompt box: 204px of a
-// 460x820 side bar. Folded into one line of chips it must take at most 40px at 460 and at 900; each chip's popover
-// must float over the transcript (moving nothing), hold the kind's real row with controls that take their clicks,
-// close on Esc or a click elsewhere with the focus back on its chip; amber must clear contrast in both themes; one
-// kind alone keeps today's full row; 300px wraps without clipping or scrolling sideways; reduced motion is honoured.
+// 460x820 side bar. Folded into one line of pills it must take 44px at 460 and at 900 (the 36px bar and the footer's
+// edge); each chip's popover must float over the transcript (moving nothing), hold the kind's real row with controls
+// that take their clicks, close on Esc or a click elsewhere with the focus back on its chip; amber must clear contrast
+// in both themes; one kind alone is the same one line; 300px stays one line, with what does not fit behind "+N",
+// without clipping or scrolling sideways; reduced motion is honoured. The bar's own rules (one height at every width
+// and count, "+N", the keyboard path, the box never moving) are measured in prompt-tray-layout.test.mjs.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { contrastRatio } from "./support/webview-dom.mjs";
@@ -44,23 +46,25 @@ const chipSel = (kind) => `#rail-chips .rail-chip[data-kind="${kind}"]`;
 const lineFacts = (page) => page.evaluate(() => {
   const rect = (node) => node.getBoundingClientRect();
   const line = rect(document.getElementById("rail-line"));
-  const chips = [...document.querySelectorAll("#rail-chips .rail-chip")].map((chip) => ({ kind: chip.dataset.kind, ...rect(chip).toJSON(),
-    clipped: chip.scrollWidth > chip.clientWidth + 1 }));
+  const chips = [...document.querySelectorAll("#rail-chips .rail-chip")].filter((chip) => !chip.hidden)
+    .map((chip) => ({ kind: chip.dataset.kind, ...rect(chip).toJSON(), clipped: chip.scrollWidth > chip.clientWidth + 1 }));
+  const more = document.getElementById("rail-more");
   const ws = rect(document.getElementById("workspace-changes"));
-  return { line: line.toJSON(), chips, ws: ws.toJSON(), fit: document.getElementById("rail-line").dataset.fit,
+  return { line: line.toJSON(), chips, ws: ws.toJSON(), more: more ? more.textContent : "",
+    behind: [...document.querySelectorAll("#rail-chips .rail-chip[hidden]")].map((chip) => chip.dataset.kind), fit: document.getElementById("rail-line").dataset.fit,
     overflowX: document.documentElement.scrollWidth > innerWidth || document.body.scrollWidth > innerWidth,
     rows: getComputedStyle(document.getElementById("composer-rail")).display };
 });
 const overlaps = (a, b) => a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
 
 for (const width of [460, 900]) {
-  test(`${width}x820, a goal, a troupe, monitors, tasks and changes: one line, at most 40px above the box`, async (t) => {
+  test(`${width}x820, a goal, a troupe, monitors, tasks and changes: one line, 44px above the box`, async (t) => {
     if (skipOrFail(t)) return;
     const { page, errors } = await openRailScene(browser, { width, height: 820 });
     try {
       const pile = await measurePile(page);
       t.diagnostic(`above the box ${pile.above}px, transcript ${pile.log}px`);
-      assert.ok(pile.above <= 40, `the pile takes ${pile.above}px above the box (it took 204px as five rows)`);
+      assert.ok(pile.above <= 44, `the pile takes ${pile.above}px above the box (it took 204px as five rows)`);
       assert.ok(pile.log >= 560, `the transcript keeps ${pile.log}px of 820`);
       const g = await lineFacts(page);
       assert.deepEqual(g.chips.map((chip) => chip.kind), ALL_KINDS);
@@ -206,35 +210,40 @@ for (const theme of ["dark-modern", "light-modern"]) {
         return [kind, need && getComputedStyle(need).display !== "none" ? need.textContent : ""];
       }));
       assert.deepEqual(narrow, [["tasks", "1 blocked"], ["monitors", "3 waiting"]]);
-      assert.ok((await measurePile(page)).above <= 40);
+      assert.ok((await measurePile(page)).above <= 44);
       assert.deepEqual(errors, []);
     } finally { await page.close(); }
   });
 }
 
-test("one kind alone keeps today's full row, and no chip", async (t) => {
+test("one kind alone is the bar's one line, its row a click away, and never a row above the box", async (t) => {
   if (skipOrFail(t)) return;
   const { page, errors } = await openRailScene(browser, { width: 460, height: 820, kinds: ["troupe"] });
   try {
     const g = await page.evaluate(() => ({
-      chips: getComputedStyle(document.getElementById("rail-chips")).display,
+      chips: [...document.querySelectorAll("#rail-chips .rail-chip")].map((chip) => chip.dataset.kind),
+      line: document.getElementById("rail-line").getBoundingClientRect().height,
       rows: getComputedStyle(document.getElementById("composer-rail")).display,
-      troupe: document.getElementById("troupebar").getBoundingClientRect().height,
       inRail: document.getElementById("troupebar").parentElement.id }));
-    assert.deepEqual({ chips: g.chips, rows: g.rows, inRail: g.inRail }, { chips: "none", rows: "flex", inRail: "composer-rail" });
-    assert.ok(g.troupe >= 33, `the full row (${g.troupe}px)`);
+    assert.deepEqual(g, { chips: ["troupe"], line: 36, rows: "none", inRail: "composer-rail" });
+    assert.ok((await measurePile(page)).above <= 44);
+    await page.click(chipSel("troupe"));
+    const row = await page.evaluate(() => ({ held: document.getElementById("rail-pop-body").contains(document.getElementById("troupebar")),
+      height: document.getElementById("troupebar").getBoundingClientRect().height }));
+    assert.ok(row.held && row.height >= 33, `the full row opens above (${row.height}px)`);
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
 });
 
 for (const attention of [false, true]) {
-  test(`300px${attention ? " with chips that need you" : ""}: the line wraps whole chips, never clips or scrolls sideways`, async (t) => {
+  test(`300px${attention ? " with chips that need you" : ""}: one line, the rest behind "+N", never clipped or scrolled sideways`, async (t) => {
     if (skipOrFail(t)) return;
     const { page, errors } = await openRailScene(browser, { width: 300, height: 760, attention });
     try {
       const g = await lineFacts(page);
       assert.equal(g.overflowX, false);
-      assert.equal(g.chips.length, 5);
+      assert.deepEqual([...g.chips.map((chip) => chip.kind), ...g.behind].sort(), [...ALL_KINDS].sort(), "every kind is on the line or behind +N");
+      assert.equal(g.more, g.behind.length ? `+${g.behind.length}` : "");
       for (const chip of g.chips) {
         assert.ok(chip.left >= -0.5 && chip.right <= 300.5, `${chip.kind} on screen (${chip.left}–${chip.right})`);
         assert.equal(chip.clipped, false, `${chip.kind} not cut off`);
@@ -244,16 +253,16 @@ for (const attention of [false, true]) {
         assert.ok(!overlaps(g.chips[i], g.chips[j]), `${g.chips[i].kind} and ${g.chips[j].kind} overlap`);
       }
       const rows = new Set(g.chips.map((chip) => Math.round(chip.top))).size;
-      assert.ok(rows <= 2, `${rows} lines of chips`);
+      assert.equal(rows, 1, `${rows} lines of chips`);
       const pile = await measurePile(page);
-      assert.ok(pile.above <= 64, `${pile.above}px above the box at 300px`);
+      assert.ok(pile.above <= 44, `${pile.above}px above the box at 300px`);
       if (attention) {
-        const words = await page.evaluate(() => [...document.querySelectorAll("#rail-chips .chip-need")]
+        const words = await page.evaluate(() => [...document.querySelectorAll("#rail-chips .rail-chip:not([hidden]) .chip-need")]
           .filter((node) => getComputedStyle(node).display !== "none").map((node) => node.textContent));
-        assert.deepEqual(words, ["3 waiting", "1 blocked"], "the reasons stay on screen");
+        assert.deepEqual(words, ["3 waiting", "1 blocked"], "the reasons stay on screen: a kind that needs you is the last to go behind +N");
       }
-      // A popover is as wide as the line and stays on screen.
-      await page.click(chipSel("goal"));
+      // A popover is as wide as the box and stays on screen.
+      await page.click(chipSel(g.chips[0].kind));
       const pop = await page.evaluate(() => document.getElementById("rail-pop").getBoundingClientRect().toJSON());
       assert.ok(pop.left >= -0.5 && pop.right <= 300.5 && pop.top >= 0, JSON.stringify(pop));
       assert.deepEqual(errors, []);

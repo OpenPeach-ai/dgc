@@ -84,7 +84,7 @@ test("the queue joins the composer chip rail when changes are also present", () 
   p.send({ type: "chat_changes", total: 1, additions: 2, deletions: 1, files: [{ path: "src/view.ts" }] });
   const rail = p.doc.getElementById("composer-rail");
   assert.ok(rail.classList.contains("as-chips"));
-  const chip = [...p.doc.querySelectorAll("#rail-chips button")].find((button) => /Queue/.test(button.textContent));
+  const chip = [...p.doc.querySelectorAll("#rail-chips button")].find((button) => /1\s*queued/.test(button.textContent));
   assert.ok(chip, "queued messages have a chip beside changed files");
   chip.click();
   assert.match(p.doc.getElementById("rail-pop").textContent, /check the mobile view/);

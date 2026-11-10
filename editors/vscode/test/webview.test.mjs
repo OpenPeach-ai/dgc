@@ -101,15 +101,17 @@ test("the session checklist is a composer-rail row above the goal and updates in
   assert.deepEqual([...rail.children].map(node => node.id),
     ["queuebar", "pipsbar", "monitorsbar", "troupebar", "changesbar", "tasksbar", "goalbar", "pastebar"],
     "rail order: queue, Pips, monitors, troupes, changes, tasks, goal — the whole rail sits on the prompt box");
-  // The rail sits on the box; a waiting approval docks just above the rail (ui-04).
+  // The rail sits on the box, under the bar of pills; a waiting approval docks just above the bar (ui-04).
   assert.equal(rail.nextElementSibling.id, "cbox");
-  assert.equal(rail.previousElementSibling.id, "approval-dock");
+  assert.equal(rail.previousElementSibling.id, "rail-line");
+  assert.equal(rail.previousElementSibling.previousElementSibling.id, "approval-dock");
   assert.equal(bar.classList.contains("rail-item"), true);
   assert.equal(bar.hidden, true, "an empty checklist takes no room");
   assert.equal(rail.hidden, true, "nor does the rail with nothing in it");
   event({ type: "history", items: [], todos: tasks });
   assert.equal(bar.hidden, false);
-  assert.equal(rail.hidden, false, "the rail shows for the tasks row alone");
+  assert.equal(rail.hidden, true, "the tasks alone are one pill on the bar, never a row above the box");
+  assert.deepEqual([...doc.querySelectorAll("#rail-chips .rail-chip")].map((chip) => chip.dataset.kind), ["tasks"]);
   assert.equal(rail.classList.contains("has-tasks"), true);
   assert.equal(count(), "Tasks 1/2");
   assert.equal(log.querySelector("#tasks-list, .t"), null, "the checklist is not a card in the transcript");
@@ -285,6 +287,7 @@ test("Clear is never a dead button: it posts during a turn and the row goes on t
   event({ type: "todos", todos: [{ content: "Inspect", status: "in_progress" }] });
   event({ type: "turn_start", prompt: "Go" });
   assert.equal(button.disabled, false, "a running turn no longer switches Clear off");
+  doc.querySelector('#rail-chips .rail-chip[data-kind="tasks"]').click();   // the checklist's row opens from its pill
   button.focus();
   button.click();
   assert.equal(cleared().length, 1, "the button posts the backend command mid-turn");
@@ -1084,6 +1087,7 @@ test("goal review exposes saved evidence, bounded editing, and keyboard focus", 
     elapsed_seconds: 125, details: { cycles: 3, tokens_used: 520, token_budget: 2000,
       running: false, reason: "Checking the build", evidence: ["<script>private()</script>", "Build passed"],
       history: [{ status: "active", reason: "Goal started" }, { status: "active", reason: "Build passed" }] } } });
+  doc.querySelector('#rail-chips .rail-chip[data-kind="goal"]').click();    // the goal's row opens from its pill
   doc.getElementById("goal-review-button").click();
   assert.equal(doc.getElementById("goal-review").hidden, false);
   assert.equal(posted.at(-1).type, "reviewGoal");
@@ -4043,7 +4047,8 @@ test("monitor_event renders a bounded card inside the current turn; the rail's c
     { id: "mon2", description: "old", command: "true", state: "ended", events: 0, pending_events: 0,
       persistent: false, timeout_ms: 1000, started_at: 1, end_reason: "exited", exit_code: 0 }] });
   assert.equal(bar.hidden, false);
-  assert.equal(rail.hidden, false);
+  assert.equal(rail.hidden, true, "the monitors are a pill on the bar, not a row");
+  assert.ok(doc.querySelector('#rail-chips .rail-chip[data-kind="monitors"]'));
   assert.equal(rail.classList.contains("has-monitors"), true);
   const chips = [...doc.querySelectorAll(".monitor-chip")];
   assert.deepEqual(chips.map((chip) => chip.dataset.monitorId), ["mon1"], "only live monitors get a chip");
