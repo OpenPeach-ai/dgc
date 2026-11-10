@@ -326,7 +326,7 @@ class CarefulComputerTests(unittest.TestCase):
     setUp = PipComputerTests.setUp
     MAIL = "Your one-time code for the transfer is 482913. Statement for account 004417829931 attached."
 
-    def host(self, *, sites=(), said="", taint=""):
+    def host(self, *, sites=(), said="", taint="", level="ask"):
         from dgc import pip_careful
         pip = self.store.create(self.registry.personal()["id"], "Shopper", "Shop for me", "local-console")
         proposal = self.store.propose(pip["id"], 1, {"computer_plan": PLAN}, "local-console")
@@ -338,8 +338,10 @@ class CarefulComputerTests(unittest.TestCase):
         host = pip_computer.host_for(self.registry.directory, pip["id"], pip["workspace_id"])
         if taint:
             host.taint.add(taint)
-        host.begin(queued["id"], self.registry.directory / "frames", careful=True, said=said,
-                   sites=pip_careful.known(self.registry, pip["id"]))
+        # As the runner starts a run (pips._execute_run): where it may carry what it read from the user's apps is
+        # pip_careful.carry_sites, not every site it may visit.
+        host.begin(queued["id"], self.registry.directory / "frames", careful=True, said=said, level=level,
+                   sites=pip_careful.known(self.registry, pip["id"]), carry=pip_careful.carry_sites(self.registry, pip["id"]))
         self.addCleanup(host.end)
         return pip, host
 
@@ -364,8 +366,11 @@ class CarefulComputerTests(unittest.TestCase):
         self.assertIn("Order desk", host.call("open", {"url": self.url}), "the next time it just opens")
 
     def test_typing_what_it_read_from_your_apps_waits_for_you_once(self):
-        pip, host = self.host(sites=[TEST_HOST], taint=self.MAIL)
-        page = host.call("open", {"url": self.url})
+        # 0.52 (his D3, commit 78cf02a5): it may carry what it read from the user's apps to the sites they allowed or
+        # already sent to (pip_careful.carry_sites). A site its level opened for the first time in this run asks once
+        # before it types that there; Allow adds the site for good.
+        pip, host = self.host(taint=self.MAIL, level="approve")
+        page = host.call("open", {"url": self.url})                 # its level opens a new site: routine, on record
         ref = __import__("re").search(r'textbox[^\n]*\[(e\d+)\]', page).group(1)
         self.assertNotIn("Held", host.call("type", {"ref": ref, "text": "Ada Lovelace"}), "your own words type freely")
         said = host.call("type", {"ref": ref, "text": "code 482913"})
@@ -376,9 +381,18 @@ class CarefulComputerTests(unittest.TestCase):
         pip_computer.decide(self.registry, action["id"], action["digest"], True, "editor-user")
         self.assertEqual(pip_computer.tick(self.registry, self.cfg)["sent"], 1)
         host.waiting = []
-        self.assertNotIn("Held", host.call("type", {"ref": ref, "text": "code 482913"}), "allowed once: it types it now")
-        self.assertTrue(host.call("open", {"url": self.url + "?q=004417829931"}).startswith("Held:"), "an address carrying it asks too")
+        self.assertNotIn("Held", host.call("type", {"ref": ref, "text": "code 482913"}), "allowed: it types it now")
+        from dgc import pip_careful
+        self.assertIn(TEST_HOST, pip_careful.carry_sites(self.registry, pip["id"]), "and the site takes it for good")
         self.assertEqual(self.received, [], "nothing left the computer")
+
+    def test_a_site_you_allowed_takes_what_it_read_from_your_apps(self):
+        # D3: on a site the user allowed, typing what it read from their apps is the job, not a question.
+        pip, host = self.host(sites=[TEST_HOST], taint=self.MAIL)
+        page = host.call("open", {"url": self.url})
+        ref = __import__("re").search(r'textbox[^\n]*\[(e\d+)\]', page).group(1)
+        self.assertNotIn("Held", host.call("type", {"ref": ref, "text": "code 482913"}))
+        self.assertEqual([a for a in pip_computer.list_actions(self.registry, pip["id"]) if a["status"] == "pending"], [])
 
     def test_a_link_to_a_new_site_waits_at_the_browser_and_frames_inside_a_page_never_ask(self):
         port = self.server.server_address[1]
