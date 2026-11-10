@@ -583,7 +583,7 @@ class CarriesOnAfterApproval(Gate):
         first, host = self.conversation_hold(pip)
         [card] = self.waiting(pip)
         pip_computer.decide(self.registry, card["id"], card["digest"], True, "editor-user")
-        with patch.dict(pip_computer.HOSTS, {pip["id"]: host}):
+        with patch.dict(pip_computer.HOSTS, {(pip["id"], 1): host}):
             pip_computer.tick(self.registry, self.cfg)        # the reply that held it hasn't closed yet: the chat is busy
             row = pip_computer.list_actions(self.registry, pip["id"])[0]
             self.assertEqual((row["status"], row["continuation_run_id"]), ("sent", None))
@@ -616,7 +616,7 @@ class CarriesOnAfterApproval(Gate):
         first, host = self.conversation_hold(pip)
         [card] = self.waiting(pip)
         pip_computer.decide(self.registry, card["id"], card["digest"], True, "editor-user")
-        with patch.dict(pip_computer.HOSTS, {pip["id"]: host}):
+        with patch.dict(pip_computer.HOSTS, {(pip["id"], 1): host}):
             pip_computer.tick(self.registry, self.cfg)
             key = next(r[0] for r in self.registry.db.execute("SELECT key FROM metadata WHERE key LIKE ?", (pip_chat.OWED_KEY + "%",)))
             value = json.loads(self.registry.db.execute("SELECT value FROM metadata WHERE key=?", (key,)).fetchone()[0])

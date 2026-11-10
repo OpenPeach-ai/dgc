@@ -83,6 +83,7 @@ CONTROL_COMMANDS = frozenset({
     "check_pip_source", "get_pip_run_source",
     "list_pip_run_posts", "list_pip_run_fixes", "list_pip_unread", "mark_pip_read",
     "list_pip_conversations", "create_pip_conversation", "rename_pip_conversation", "archive_pip_conversation",
+    "add_pip_computer",
     "get_pip_eyes", "set_pip_eyes",
     "get_pip_artifacts", "set_pip_artifacts",
     "get_pip_computer_apps", "set_pip_computer_apps",
@@ -235,6 +236,7 @@ _COMMAND_ARGS = {
     "list_pip_conversations": {"pip_id", "archived"}, "create_pip_conversation": {"pip_id", "title"},
     "rename_pip_conversation": {"pip_id", "conversation_id", "title"},
     "archive_pip_conversation": {"pip_id", "conversation_id", "archived"},
+    "add_pip_computer": {"pip_id"},
     "get_pip_message_image": {"pip_id", "message_id", "index", "as_file"},
     "create_pip": {"workspace_id", "name", "goal", "source_ref", "pip_type", "model_choice", "computer"}, "get_pip": {"pip_id"},
     "propose_pip_update": {"pip_id", "expected_version", "changes", "reason"},
@@ -3725,7 +3727,11 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                         args = self._eyes_points('click_at' if op == 'upload' else op, args)
                     except ValueError as exc:
                         return f'error: {exc}'
-                reply = pip_computer.worker_reply(computer_pin, op, args)
+                # Its turn on the computer: when another conversation's reply has it, the chat says so and the step
+                # waits (pip_computer.worker_step).
+                shown = getattr(self, 'ui', None)
+                reply = pip_computer.worker_step(computer_pin, op, args, on_wait=(
+                    (lambda line: shown.turn_activity('waiting', line)) if hasattr(shown, 'turn_activity') else None))
                 # What its computer holds is a card too (DGC's, shown whatever the Pip says). Not counted, a reply that
                 # truly said "a card below" was told it made none, and wrote that DGC hadn't shown the user an approval.
                 if reply.get('card') or 'below your reply' in str(reply.get('text', '')):
@@ -4703,7 +4709,8 @@ def _execute_run(registry, row, config):
         # The Pip's own computer lives in this supervisor process and outlives the run; the
         # worker reaches it through a socket only this run's token opens.
         from . import pip_computer
-        computer_host = pip_computer.host_for(registry.directory, row['pip_id'], row['workspace_id'])
+        # Its computers (a Pip may have several, shared by its conversations): the run takes a free one (Pool).
+        computer_host = pip_computer.pool_for(registry, row['pip_id'], row['workspace_id'])
         conversation_pin = manifest.get('conversation') if isinstance(manifest.get('conversation'), dict) else {}
         # The user's own words this turn are theirs to type; a turn DGC wrote (a hello, a routine) is not.
         said = str(conversation_pin.get('text') or '') if manifest.get('user_turn') is True else ''
@@ -4711,7 +4718,9 @@ def _execute_run(registry, row, config):
             from .pip_routines import split_turn
             said = split_turn(registry, row['id'], conversation_pin['text'])[0]    # the words the user gave a routine
         from . import pip_levels
-        computer_host.begin(row['id'], run_dir / 'artifacts' / 'computer', careful=careful, said=said,
+        # What this run is doing, in the user's words, for a reply in another conversation waiting on the computer.
+        doing = str(conversation_pin.get('text') or '').strip().splitlines()[0] if conversation_pin.get('text') else ''
+        computer_host.begin(row['id'], run_dir / 'artifacts' / 'computer', careful=careful, said=said, label=doing,
                             sites=pip_careful.known(registry, row['pip_id']) if careful else (),
                             carry=pip_careful.carry_sites(registry, row['pip_id']) if careful else (),
                             level=pip_levels.level(registry, row['pip_id']),
@@ -4952,7 +4961,7 @@ def _execute_run(registry, row, config):
                       "usage": result.get("usage") if isinstance(result.get("usage"), dict) else {},
                       "tools_called": 0, "snapshot": snapshot_info}
         if computer_socket is not None:
-            result["computer"] = {"calls": computer_socket.calls, "held": list(computer_host.waiting)}
+            result["computer"] = {"calls": computer_socket.calls, "held": computer_host.waiting_for(row["id"])}
         # The plugins a chat reply took an answer from ("Used Aave" under it): what this controller saw, never the
         # worker's word for it.
         result.pop("plugins", None)
@@ -5694,7 +5703,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 "get_workspace_session_outcome", "list_workspace_session_outcomes",
                 "accept_workspace_session_outcome", "reject_workspace_session_outcome", "get_workspace_context")
             receipt_command = command in ("list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context")
-            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("list_pip_flows", "get_pip_flow", "create_pip_flow", "set_pip_flow", "get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret", "list_app_approvals", "decide_app_approval", "trigger_app_event", "list_app_events", "ensure_pip_template", "prune_pip_templates", "list_pip_templates", "decide_pip_template_change", "export_pip", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "delete_archived_pip", "list_pip_attention") else registry.resolve(config.project_root)
+            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("list_pip_flows", "get_pip_flow", "create_pip_flow", "set_pip_flow", "get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret", "list_app_approvals", "decide_app_approval", "trigger_app_event", "list_app_events", "ensure_pip_template", "prune_pip_templates", "list_pip_templates", "decide_pip_template_change", "export_pip", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "add_pip_computer", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "delete_archived_pip", "list_pip_attention") else registry.resolve(config.project_root)
             workspace_id = request.get("workspace_id", current["id"] if current else "")
             if actor not in ('editor-user','local-console'):
                 # Personal scope is deliberately local for this milestone. Existing
@@ -6185,11 +6194,16 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     result = {"outcomes": pip_digest.outcomes(registry, pip_id)}
             elif command in ("get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action",
                              "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer",
-                             "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action"):
+                             "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action",
+                             "add_pip_computer"):
                 from . import pip_computer
                 if actor not in ("editor-user", "local-console"):
                     raise RegistryError("local_only", "A Pip's computer is used on this computer only.")
-                if command == "get_pip_computer":
+                if command == "add_pip_computer":
+                    # API 79: one more computer, shared by all its conversations (his call, 10 Nov).
+                    store._job(pip_id)
+                    result = pip_computer.add_computer(registry, pip_id)
+                elif command == "get_pip_computer":
                     result = {"computer": pip_computer.status(registry, pip_id)}
                 elif command == "list_pip_computer_actions":
                     result = {"actions": pip_computer.list_actions(registry, pip_id, limit=request.get("limit", 20))}

@@ -193,7 +193,7 @@ class HostTests(unittest.TestCase):
         (root / "home" / ".browser" / "Cookies").write_text("session=secret")
         os.symlink("../../.browser/Cookies", files / "From chat" / "cookies.jpg")
         host = fake_host(self.dir)
-        host.root, chosen = root, []
+        host.root, host.files_dir, chosen = root, files, []          # a Host's own Files (shared by its computers)
         host.browser.set_files = lambda paths, ref="", point=None: chosen.append((paths, ref, point)) or "chooser"
         host._record_held, host._read = (lambda: []), (lambda: "page text")
         host._upload = pip_computer.Host._upload.__get__(host)

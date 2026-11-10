@@ -189,6 +189,7 @@ export type PipMutationParams = {
   create_pip_conversation: { pip_id: string; title?: string };
   rename_pip_conversation: { pip_id: string; conversation_id: string; title: string };
   archive_pip_conversation: { pip_id: string; conversation_id: string; archived?: boolean };
+  add_pip_computer: { pip_id: string };
   set_pips_keep_running: { enabled: boolean };
   mark_pip_digest_seen: { until: string };
   mark_pip_news_seen: { pip_ids: string[]; until: string };
@@ -360,6 +361,7 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   create_pip_conversation: ["pip_id", "title"],
   rename_pip_conversation: ["pip_id", "conversation_id", "title"],
   archive_pip_conversation: ["pip_id", "conversation_id", "archived"],
+  add_pip_computer: ["pip_id"],
   get_pips_keep_running: [],
   set_pips_keep_running: ["enabled"],
   get_pip_digest: [],
@@ -863,7 +865,7 @@ for (const command of API77_MUTATIONS) MUTATIONS.add(command);
 // API 79: several conversations per Pip (local only in DGC): list them, start, rename, archive or restore one; send,
 // list, mark read and the context meter name one by conversation_id (none: the Pip's first, as before).
 const API79_READS = new Set(["list_pip_conversations"]);
-const API79_MUTATIONS = new Set(["create_pip_conversation", "rename_pip_conversation", "archive_pip_conversation"]);
+const API79_MUTATIONS = new Set(["create_pip_conversation", "rename_pip_conversation", "archive_pip_conversation", "add_pip_computer"]);
 for (const command of API79_READS) READS.add(command);
 for (const command of API79_MUTATIONS) MUTATIONS.add(command);
 const API79_FIELDS = new Set(["send_pip_message", "list_pip_messages", "mark_pip_read", "get_pip_chat_context"]);

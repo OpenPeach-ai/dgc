@@ -619,6 +619,7 @@ class Box:
     read_fd: int = -1
     write_fd: int = -1
     display_dir: Path | None = None       # a desktop's X socket directory: the browser draws there
+    files_dir: Path | None = None         # a Pip's second computer: the first one's Files, shared (pip_computer.Pool)
 
     def argv(self, forwarder: Path) -> list[str]:
         chrome_dir = self.chrome.parent
@@ -643,6 +644,7 @@ class Box:
                 "--ro-bind-try", "/etc/ld.so.cache", "/etc/ld.so.cache",
                 "--dev", "/dev", "--proc", "/proc", "--size", str(512 * 1024 * 1024), "--tmpfs", "/tmp", *display,
                 "--bind", str(self.home), "/home/pip", "--setenv", "HOME", "/home/pip",
+                *(["--bind", str(self.files_dir), "/home/pip/Files"] if self.files_dir is not None else []),
                 "--setenv", "TMPDIR", "/tmp", "--unsetenv", "DBUS_SESSION_BUS_ADDRESS", *timezone_args(),
                 "--ro-bind", str(chrome_dir), "/opt/chrome", *_own_libraries(self.chrome),
                 "--dir", "/run/dgc", "--bind", str(self.egress_socket), "/run/dgc/egress.sock",
@@ -890,6 +892,7 @@ class BoxedBrowser(BrowserSession):
         super().__init__(chrome, allow_unsandboxed=True, viewport=viewport)
         self.home = Path(home)
         self.display_dir: Path | None = None      # set by the Host when the computer has a desktop
+        self.files_dir: Path | None = None        # set by the Host of a Pip's second or later computer: shared Files
         self.egress_socket = Path(egress_socket)
         self.log_path = Path(log_path)
         self.on_write = on_write            # called with a HeldWrite after it is held
@@ -946,7 +949,8 @@ class BoxedBrowser(BrowserSession):
             from .pip_container import ContainerBox     # Chrome in the computer's VM, the same pipe
             self._box = ContainerBox(self.home, self.egress_socket, self.viewport, on_screen=self.display_dir is not None)
         else:
-            self._box = Box(self.home, self.egress_socket, self.binary, self.viewport, display_dir=self.display_dir)
+            self._box = Box(self.home, self.egress_socket, self.binary, self.viewport, display_dir=self.display_dir,
+                            files_dir=self.files_dir)
         self.launch(lambda: self._box.start(self.log_path))
         self._pipe = _Pipe(self._box.read_fd, self._box.write_fd)
         try:

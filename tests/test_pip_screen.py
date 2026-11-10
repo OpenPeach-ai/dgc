@@ -290,7 +290,9 @@ class DesktopWithoutBrowserTests(unittest.TestCase):
         def no_browser():
             raise BoxError("Setting up its computer. This happens once.")
         browser = types.SimpleNamespace(display_dir=None, start=no_browser, close=lambda: closed.append(1))
-        host = types.SimpleNamespace(lock=threading.RLock(), desktop=None, pip_id="pip_" + "a" * 32, root=root,
+        from dgc.pip_computer_files import files_root
+        host = types.SimpleNamespace(lock=threading.RLock(), desktop=None, pip_id="pip_" + "a" * 32, root=root, tag="a" * 12,
+                                     files_dir=files_root(root),
                                      proxy=types.SimpleNamespace(path=root / "egress.sock"), browser=browser,
                                      _dock_launch=lambda what: None, _launch=lambda start: start(),
                                      _pump_thread=object())

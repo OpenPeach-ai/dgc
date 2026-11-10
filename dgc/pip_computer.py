@@ -145,11 +145,13 @@ APP_KEYS = ("images", "documents", "pdf", "files", "terminal", "browser")
 # Files and the Terminal: no browser, so they never wait on (or hold) the browser.
 DESK_OPS = ("files", "open_file", "run")
 # A Pip answers in its conversations in parallel (pip_conversations), and its computer is one screen: the reply that has
-# it keeps it until it ends, and another reply's computer step waits for it this long (the worker waits 120 s for an
-# answer), then is told plainly, so it can do what doesn't need the computer and try again.
-LEASE_WAIT = 75.0
-BUSY = ("Your computer is busy: your reply in another conversation is using it. Do the parts that don't need the "
-        "computer first, then try this step again.")
+# it keeps it until it ends, and another reply's computer step waits its turn, with no cut-off (his call, 10 Nov). The
+# first look answers at once with what the computer is busy with (FIRST_LOOK), so the chat can say so; the worker then
+# asks again patiently, each ask waiting at most LEASE_WAIT (under the worker's 120 s socket timeout), until it is free
+# (worker_step). While it waits, the run counts as waiting (pip_run_watchdog), not stuck.
+FIRST_LOOK = 1.5
+LEASE_WAIT = 90.0
+BUSY = "Your computer is busy with your other request ({what}). This step waits until it's free."
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
 VISUAL_SHARE = 0.15                  # this much of the screen on canvases: a page its text can't show
 UPLOADS = ".dgc-uploads"            # in the computer's home, beside Files: the Terminal never sees it
@@ -339,11 +341,13 @@ def _now():
     return timestamp(datetime.now(timezone.utc))
 
 
-def computer_root(state_directory, pip_id: str) -> Path:
+def computer_root(state_directory, pip_id: str, number: int = 1) -> Path:
+    """A Pip's computer's folder: its first computer's is computers/<pip id> (as always); a second or later one's
+    computers/<pip id>.c<n>, its own browser and home, with the first one's Files (Pool)."""
     from .workspace_registry import _private_directory
     root = Path(state_directory) / "computers"
     _private_directory(root)
-    path = root / pip_id
+    path = root / (pip_id if number == 1 else f"{pip_id}.c{int(number)}")
     _private_directory(path)
     _private_directory(path / "home")
     return path
@@ -376,26 +380,33 @@ def _safe_url(url: str) -> str:
 class Host:
     """One Pip's live computer, owned by the supervisor process."""
 
-    def __init__(self, state_directory, pip_id: str, workspace_id: str, *, policy=None):
+    def __init__(self, state_directory, pip_id: str, workspace_id: str, *, policy=None, number: int = 1):
         from .pip_computer_box import BoxedBrowser, EgressProxy, find_chrome
         self.state_directory = Path(state_directory)
         self.pip_id, self.workspace_id = pip_id, workspace_id
-        self.root = computer_root(state_directory, pip_id)
+        self.number = int(number)
+        self.root = computer_root(state_directory, pip_id, self.number)
         from .pip_computer_files import files_root
-        files_root(self.root)            # before the box starts, so downloads have somewhere to land
+        # One Files for all of a Pip's computers: the first one's (his call, 10 Nov). Before the box starts, so
+        # downloads have somewhere to land.
+        self.files_dir = files_root(computer_root(state_directory, pip_id))
+        if self.number > 1:
+            _start_from_first(state_directory, pip_id, self.root)    # the first one's sign-ins, copied once
         self.id = "host_" + _secrets.token_hex(8)
         self.lock = threading.RLock()
-        self._turns = threading.Condition(self.lock)    # a reply waiting for the computer hears when it is free
-        self._turn_waiting = {}                         # run id -> its settings, for a reply waiting its turn
+        self.label = ""                                 # what the run that has it is doing, in the user's words
         self.last_used = time.monotonic()
-        self.proxy = EgressProxy(socket_dir() / f"{pip_id[-12:]}-egress.sock", policy=policy)
+        self.tag = pip_id[-12:] + ("" if self.number == 1 else f"-c{self.number}")    # its sockets' names
+        self.proxy = EgressProxy(socket_dir() / f"{self.tag}-egress.sock", policy=policy)
         self.proxy.start()
         from .pip_apps import Apps
-        self.apps = Apps(self.root / "home", self.root / "home" / "Files")
+        self.apps = Apps(self.root / "home", self.files_dir)
         self.desk_shot = None            # (picture pixels per screen pixel, (screen width, height)) of the last desktop_look
         self._queued = []
         self.browser = BoxedBrowser(self.root / "home", self.proxy.path, chrome=find_chrome(),
                                     log_path=self.root / "browser.log", on_write=self._queued.append)
+        if self.number > 1:
+            self.browser.files_dir = self.files_dir
         self.browser_closed_by_request = False
         # The box dies with the thread that launched it, so one keeper thread launches it and
         # lives until this computer closes; runs and views come and go on other threads.
@@ -482,7 +493,7 @@ class Host:
             if not pip_screen.availability()["available"]:
                 return False
             from .pip_computer_files import files_root
-            desktop = pip_screen.make_desktop(socket_dir() / f"{self.pip_id[-12:]}-desk", files_root(self.root), "Pip",
+            desktop = pip_screen.make_desktop(socket_dir() / f"{self.tag}-desk", self.files_dir, "Pip",
                                               egress=self.proxy.path)
             desktop.on_launch = self._dock_launch
             desktop.start(self._launch)
@@ -536,7 +547,7 @@ class Host:
             self._dock_launch("browser")
             return "the browser"
         from .pip_computer_files import files_root
-        inside = pip_apps.inside_path(files_root(self.root), path) if path else None
+        inside = pip_apps.inside_path(self.files_dir, path) if path else None
         program = self.apps.open(key, self.desktop.x11_dir, file=inside, launch=self._launch,
                                  log=self.root / "apps.log", egress=self.proxy.path)
         return program + (f" with Files/{inside[len('/home/pip/Files/'):]}" if inside else "")
@@ -561,30 +572,12 @@ class Host:
 
     # -- a run's session ---------------------------------------------------------------------
 
-    def begin(self, run_id: str, frames_dir: Path, **settings) -> None:
-        """A run starts. It has the computer now, unless another conversation's reply has it: then its settings wait
-        until that reply ends and this one's first computer step takes it (act_for)."""
+    def begin(self, run_id: str, frames_dir: Path, *, label: str = "", **settings) -> None:
+        """A run starts on this computer (its Pool chose it; a test may call it directly). ``label``: what the run is
+        doing, in the user's words, for a reply waiting on the Pip's computers."""
         with self.lock:
-            if self.run_id is not None and self.run_id != run_id:
-                self._turn_waiting[run_id] = (frames_dir, settings)
-                return
+            self.label = " ".join(str(label or "").split())[:80]
             self._begin(run_id, frames_dir, **settings)
-
-    def act_for(self, run_id: str, op: str, args: dict) -> dict:
-        """A step from one run's socket: it waits its turn on the computer (LEASE_WAIT), then steps as that run."""
-        deadline = time.monotonic() + LEASE_WAIT
-        with self.lock:
-            while self.run_id is not None and self.run_id != run_id:
-                left = deadline - time.monotonic()
-                if left <= 0:
-                    return {"text": BUSY}
-                self._turns.wait(min(left, 1.0))
-            if self.run_id is None:
-                queued = self._turn_waiting.pop(run_id, None)
-                if queued is None:
-                    return {"text": "error: this run has ended; its computer steps are over."}
-                self._begin(run_id, queued[0], **queued[1])
-        return self.act(op, args)
 
     def _begin(self, run_id: str, frames_dir: Path, *, careful: bool = False, said: str = "", sites=(),
                level: str = "ask", unattended: bool = False, level_now=None, carry=None) -> None:
@@ -614,13 +607,12 @@ class Host:
                 pass
 
     def end(self, run_id: str | None = None) -> None:
-        """A run ended. One that never had the computer (it waited its turn) leaves the other's alone."""
+        """A run ended on this computer. Another run's end leaves it alone."""
         with self.lock:
             if run_id is not None and run_id != self.run_id:
-                self._turn_waiting.pop(run_id, None)
                 return
+            self.label = ""
             self._end()
-            self._turns.notify_all()
 
     def _end(self) -> None:
         with self.lock:
@@ -1245,7 +1237,7 @@ class Host:
         import os
         import shutil
         from . import pip_computer_files as desk
-        files = desk.files_root(self.root)
+        files = self.files_dir
         parts = desk._parts(args.get("path"))
         if not parts:
             raise ValueError("say which file in your Files to upload (path), such as From chat/photo.jpg")
@@ -1378,7 +1370,7 @@ class Host:
             return ("A change is already waiting for the user's approval, as a card below your reply. Stop now "
                     "and tell the user what is waiting; the next run continues after they decide.")
         try:
-            files = desk.files_root(self.root)
+            files = self.files_dir
             if op == "files":
                 listing = desk.list_files(files, args.get("path") or "")
                 rows = [f"{e['name']}/" if e["kind"] == "folder" else f"{e['name']} ({e['bytes']} bytes)"
@@ -1590,30 +1582,197 @@ class Host:
             pass
 
 
-HOSTS: dict[str, Host] = {}
+HOSTS: dict = {}                    # (pip id, computer number) -> Host
+POOLS: dict = {}                    # pip id -> Pool
 _HOSTS_LOCK = threading.Lock()
 
 
-def host_for(state_directory, pip_id: str, workspace_id: str) -> Host:
+def host_for(state_directory, pip_id: str, workspace_id: str, number: int = 1) -> Host:
     with _HOSTS_LOCK:
-        host = HOSTS.get(pip_id)
+        host = HOSTS.get((pip_id, number))
         if host is None:
-            host = Host(state_directory, pip_id, workspace_id)
-            HOSTS[pip_id] = host
+            host = Host(state_directory, pip_id, workspace_id, number=number)
+            HOSTS[(pip_id, number)] = host
         return host
+
+
+def hosts_of(pip_id: str) -> list:
+    """The Pip's computers running in this process, the first one first."""
+    with _HOSTS_LOCK:
+        return [HOSTS[key] for key in sorted(k for k in HOSTS if k[0] == pip_id)]
 
 
 def stop_host(pip_id: str) -> bool:
     with _HOSTS_LOCK:
-        host = HOSTS.pop(pip_id, None)
-    if host is None:
-        return False
-    host.close()
-    return True
+        hosts = [HOSTS.pop(key) for key in [k for k in HOSTS if k[0] == pip_id]]
+        POOLS.pop(pip_id, None)
+    for host in hosts:
+        host.close()
+    return bool(hosts)
+
+
+# --------------------------------------------------------------------------- several computers per Pip
+
+# His calls of 10 Nov: a Pip may have up to 3 computers, shared by all its conversations (Dev Mode raises the limit to
+# any number: COMPUTERS_LIMIT_KEY); a reply takes a free one, else waits for the first to come free; a new one starts as
+# a copy of the first one's browser (its sign-ins), with the first one's Files.
+COMPUTERS_KEY = "pip_computers:"            # + pip id -> how many it has (1 when unset)
+COMPUTERS_LIMIT_KEY = "pips_computers_max"   # how many one Pip may have; Dev Mode sets it
+COMPUTERS_DEFAULT_LIMIT = 3
+
+
+def computers(db, pip_id) -> int:
+    row = db.execute("SELECT value FROM metadata WHERE key=?", (COMPUTERS_KEY + pip_id,)).fetchone()
+    try:
+        value = json.loads(row[0]) if row else 1
+    except (TypeError, ValueError):
+        value = 1
+    return value if type(value) is int and value >= 1 else 1
+
+
+def computers_limit(db) -> int:
+    row = db.execute("SELECT value FROM metadata WHERE key=?", (COMPUTERS_LIMIT_KEY,)).fetchone()
+    try:
+        value = json.loads(row[0]) if row else COMPUTERS_DEFAULT_LIMIT
+    except (TypeError, ValueError):
+        value = COMPUTERS_DEFAULT_LIMIT
+    return value if type(value) is int and value >= 1 else COMPUTERS_DEFAULT_LIMIT
+
+
+def add_computer(registry, pip_id) -> dict:
+    """One more computer for the Pip, shared by all its conversations (the next run uses it)."""
+    with registry.transaction():
+        if registry.db.execute("SELECT 1 FROM pips WHERE id=?", (pip_id,)).fetchone() is None:
+            raise RegistryError("not_found", "That Pip doesn't exist.")
+        have, limit = computers(registry.db, pip_id), computers_limit(registry.db)
+        if have >= limit:
+            raise RegistryError("limit", f"A Pip can have up to {limit} computers. Dev Mode can raise this.")
+        registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (COMPUTERS_KEY + pip_id, json.dumps(have + 1)))
+    return {"pip_id": pip_id, "computers": have + 1, "limit": limit}
+
+
+_BROWSER_LOCKS = ("SingletonLock", "SingletonSocket", "SingletonCookie", "lockfile")
+
+
+def _start_from_first(state_directory, pip_id, root: Path) -> None:
+    """A new computer's browser starts as a copy of the first one's (its sign-ins), once, and only while the first one's
+    browser isn't running (a copy of a running profile can be torn). It starts fresh otherwise; saved logins work."""
+    target = root / "home" / ".browser"
+    marker = root / "home" / ".started-from-first"
+    if target.exists() or marker.exists():
+        return
+    first = computer_root(state_directory, pip_id) / "home" / ".browser"
+    host = HOSTS.get((pip_id, 1))
+    running = host is not None and getattr(host.browser, "alive", lambda: False)()
+    if first.is_dir() and not running:
+        import shutil
+        try:
+            shutil.copytree(first, target, symlinks=False, ignore=shutil.ignore_patterns(*_BROWSER_LOCKS))
+        except OSError:
+            shutil.rmtree(target, ignore_errors=True)
+            return
+    try:
+        marker.write_text("1")
+    except OSError:
+        pass
+
+
+class Pool:
+    """A Pip's computers and whose turn it is on each. A run takes a free one as it starts; one that finds all busy
+    waits, and its first computer step takes the first to come free (act_for). The run's own settings travel with it."""
+
+    def __init__(self, state_directory, pip_id: str, workspace_id: str):
+        self.state_directory, self.pip_id, self.workspace_id = state_directory, pip_id, workspace_id
+        self.count = 1
+        self.lock = threading.RLock()
+        self._turns = threading.Condition(self.lock)
+        self._held = {}                  # run id -> its Host
+        self._waiting = {}               # run id -> (frames dir, settings, label), a run waiting for a computer
+
+    def resize(self, count: int) -> None:
+        with self.lock:
+            self.count = max(1, int(count))
+            self._turns.notify_all()     # a new computer is a free one
+
+    def hosts(self) -> list:
+        return [host_for(self.state_directory, self.pip_id, self.workspace_id, n) for n in range(1, self.count + 1)]
+
+    def _free(self):
+        held = {id(h) for h in self._held.values()}
+        for number in range(1, self.count + 1):
+            host = host_for(self.state_directory, self.pip_id, self.workspace_id, number)
+            if host.run_id is None and id(host) not in held:
+                return host
+        return None
+
+    def begin(self, run_id: str, frames_dir: Path, *, label: str = "", **settings) -> None:
+        with self.lock:
+            host = self._free()
+            if host is None:
+                self._waiting[run_id] = (frames_dir, settings, label)
+                return
+            self._held[run_id] = host
+            host.begin(run_id, frames_dir, label=label, **settings)
+
+    def act_for(self, run_id: str, op: str, args: dict, patient: bool = False) -> dict:
+        """A step from one run's socket, on its computer. While all are busy, the first look answers at once with what
+        one of them is doing ({text, waiting}); a patient ask waits up to LEASE_WAIT first (worker_step asks again)."""
+        from . import pip_run_watchdog
+        deadline = time.monotonic() + (LEASE_WAIT if patient else FIRST_LOOK)
+        with pip_run_watchdog.waiting_on_you(run_id):          # waiting its turn is not being stuck
+            with self.lock:
+                while run_id not in self._held:
+                    if run_id not in self._waiting:             # this run ended while it waited
+                        return {"text": "error: this run has ended; its computer steps are over."}
+                    host = self._free()
+                    if host is not None:
+                        frames_dir, settings, label = self._waiting.pop(run_id)
+                        self._held[run_id] = host
+                        host.begin(run_id, frames_dir, label=label, **settings)
+                        break
+                    left = deadline - time.monotonic()
+                    if left <= 0:
+                        what = next((h.label for h in self._held.values() if h.label), "")
+                        return {"text": BUSY.format(what=f"'{what}'" if what else "another reply"), "waiting": what}
+                    self._turns.wait(min(left, 1.0))
+                host = self._held[run_id]
+        return host.act(op, args)
+
+    def end(self, run_id: str) -> None:
+        with self.lock:
+            host = self._held.pop(run_id, None)
+            self._waiting.pop(run_id, None)
+            if host is not None:
+                host.end(run_id)
+            self._turns.notify_all()
+
+    def waiting_for(self, run_id: str) -> list:
+        """The actions this run's computer holds for the user (its cards)."""
+        with self.lock:
+            host = self._held.get(run_id)
+            return list(host.waiting) if host is not None else []
+
+
+def pool_for(registry, pip_id: str, workspace_id: str) -> Pool:
+    """The Pip's computers, as many as it has now (read when a run starts: add_computer applies from the next run)."""
+    with _HOSTS_LOCK:
+        pool = POOLS.get(pip_id)
+        if pool is None:
+            pool = POOLS[pip_id] = Pool(registry.directory, pip_id, workspace_id)
+    pool.resize(computers(registry.db, pip_id))
+    return pool
+
+
+def stop_one(key) -> None:
+    """One computer (pip id, number), the Pip's others left running."""
+    with _HOSTS_LOCK:
+        host = HOSTS.pop(key, None)
+    if host is not None:
+        host.close()
 
 
 def stop_all() -> None:
-    for pip_id in list(HOSTS):
+    for pip_id in {key[0] for key in list(HOSTS)}:
         stop_host(pip_id)
 
 
@@ -1662,7 +1821,7 @@ class RunSocket:
                         op, args = str(request.get("op", "")), request.get("args") or {}
                         # This run's own turn on the computer (Host.act_for): another conversation's reply may have it.
                         act_for, act = getattr(self.host, "act_for", None), getattr(self.host, "act", None)
-                        reply = (act_for(self.run_id, op, args) if callable(act_for) else
+                        reply = (act_for(self.run_id, op, args, patient=request.get("patient") is True) if callable(act_for) else
                                  act(op, args) if callable(act) else {"text": self.host.call(op, args)})
                     client.sendall(json.dumps(reply).encode("utf-8") + b"\n")
                 except (OSError, ValueError):
@@ -1688,14 +1847,29 @@ def worker_call(pin: dict, op: str, args: dict, *, timeout: float = 120) -> str:
     return worker_reply(pin, op, args, timeout=timeout)["text"]
 
 
-def worker_reply(pin: dict, op: str, args: dict, *, timeout: float = 120) -> dict:
+def worker_step(pin: dict, op: str, args: dict, *, on_wait=None) -> dict:
+    """One computer step from the worker, waiting its turn when another reply has the computer: ``on_wait`` hears
+    the line for the chat ("Waiting for its computer: it's finishing '...'"), then the step is asked again patiently,
+    for as long as it takes (the run's own limits and Stop still end it)."""
+    reply = worker_reply(pin, op, args)
+    while isinstance(reply.get("waiting"), str):
+        what = reply["waiting"]
+        if on_wait is not None:
+            on_wait(f"Waiting for its computer: it's finishing '{what}'" if what
+                    else "Waiting for its computer: it's finishing your other request")
+        reply = worker_reply(pin, op, args, patient=True)
+    return reply
+
+
+def worker_reply(pin: dict, op: str, args: dict, *, timeout: float = 120, patient: bool = False) -> dict:
     """{text}, and for look and the position ops {image: JPEG bytes, width, height}. Never raises."""
     import base64
     try:
         with socket.socket(socket.AF_UNIX) as client:
             client.settimeout(timeout)
             client.connect(pin["socket"])
-            client.sendall(json.dumps({"token": pin["token"], "op": op, "args": args}).encode("utf-8") + b"\n")
+            client.sendall(json.dumps({"token": pin["token"], "op": op, "args": args,
+                                       **({"patient": True} if patient else {})}).encode("utf-8") + b"\n")
             raw = b""
             while not raw.endswith(b"\n") and len(raw) <= MAX_SHOT_CHARS + 4 * MAX_TEXT:
                 chunk = client.recv(1 << 20)
@@ -1708,6 +1882,8 @@ def worker_reply(pin: dict, op: str, args: dict, *, timeout: float = 120) -> dic
             out["visual"] = True          # the page draws on a canvas its text can't show (pip_eyes)
         if reply.get("card") is True:
             out["card"] = True            # this run holds something for the user: a card shows below its reply
+        if isinstance(reply.get("waiting"), str):
+            out["waiting"] = reply["waiting"][:80]    # its computer is busy with another reply's request (worker_step)
         image, width, height = reply.get("image"), reply.get("width"), reply.get("height")
         if (isinstance(image, str) and 0 < len(image) <= MAX_SHOT_CHARS and type(width) is int and type(height) is int
                 and 0 < width <= 4096 and 0 < height <= 4096):
@@ -1848,8 +2024,8 @@ def tick(registry, config) -> dict:
                 registry.db.execute("UPDATE pip_computer_actions SET continuation_run_id=? WHERE id=? AND continuation_run_id IS NULL",
                                     (follow, row["id"]))
     for row in rows:
-        host = HOSTS.get(row["pip_id"])
-        live = host is not None and host.id == row["host_id"]
+        host = next((h for h in hosts_of(row["pip_id"]) if h.id == row["host_id"]), None)   # the computer that held it
+        live = host is not None
         careful = str(row["request_ref"]).startswith(CAREFUL_REF)     # nothing paused: no computer needed to decide
         if row["status"] == "pending":
             if not live and not careful:
@@ -1915,9 +2091,9 @@ def tick(registry, config) -> dict:
                                 "AND status='approved'", (outcome, continuation,
                                                           LOST_BY_RESTART if restarted else row["resolved_by"], row["id"]))
         done[outcome] += 1
-    for pip_id, host in list(HOSTS.items()):
+    for key, host in list(HOSTS.items()):
         if host.run_id is None and not host.browser.held and time.monotonic() - host.last_used > IDLE_SECONDS:
-            stop_host(pip_id)
+            stop_one(key)                # that computer only: another of the Pip's may be busy
             done["closed"] += 1
     # What the user approved while its chat was busy: its next turn, now the chat is free (pip_chat.send_owed_turns).
     from .pip_chat import send_owed_turns
@@ -2059,6 +2235,8 @@ def status(registry, pip_id: str) -> dict:
     return {"pip_id": pip_id, "granted": job.get("computer_plan") is not None,
             "available": machine["available"], "reason": machine["reason"], "pending": pending,
             "actions": (waiting_rows + others)[:5],
+            # Several computers per Pip (API 79): how many it has, and how many it may have.
+            "computers": computers(registry.db, pip_id), "computers_limit": computers_limit(registry.db),
             **({"needs_you": {"host": waiting["host"], "at": waiting.get("at", "")}} if waiting else {})}
 
 
@@ -3159,7 +3337,8 @@ def handle_opens(registry) -> int:
             registry.db.execute("DELETE FROM metadata WHERE key=?", (key,))
         if workspace is None:
             continue
-        host = host_for(registry.directory, pip_id, workspace[0])
+        # The computer at work, when one of its computers is (a Pip may have several), else its first.
+        host = next((h for h in hosts_of(pip_id) if h.run_id), None) or host_for(registry.directory, pip_id, workspace[0])
         with host.lock:
             if getattr(host, "viewer", None) is None:
                 host.viewer = ViewServer(host)
@@ -3167,7 +3346,7 @@ def handle_opens(registry) -> int:
             registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
                                 ("computer_view:" + pip_id, json.dumps(host.viewer.endpoint())))
         opened += 1
-    for pip_id, host in list(HOSTS.items()):
+    for _key, host in list(HOSTS.items()):
         viewer = getattr(host, "viewer", None)
         if viewer is not None and time.monotonic() - viewer.last_used > VIEW_IDLE_SECONDS:
             close_view(registry, host)

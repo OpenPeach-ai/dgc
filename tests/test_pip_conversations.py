@@ -245,20 +245,21 @@ class ComputerTakesTurns(unittest.TestCase):
     setUp = fixtures.LocalPipsTests.setUp
 
     def host(self):
+        """The Pip's computers (one here): the Pool takes turns on them."""
         from dgc import pip_computer
         self.addCleanup(pip_computer.stop_all)
         pip = self.store.create(self.registry.personal()["id"], "Shopper", "Shop for me", "local-console")
-        host = pip_computer.host_for(self.registry.directory, pip["id"], pip["workspace_id"])
-        stepped = patch.object(type(host), "_act", lambda self, op, args: {"text": f"{op} by {self.run_id} careful={self.careful}"})
+        pool = pip_computer.pool_for(self.registry, pip["id"], pip["workspace_id"])
+        stepped = patch.object(pip_computer.Host, "_act", lambda self, op, args: {"text": f"{op} by {self.run_id} careful={self.careful}"})
         stepped.start(); self.addCleanup(stepped.stop)
-        return host
+        return pool
 
     def test_a_second_reply_waits_for_the_computer_and_gets_it_when_the_first_ends(self):
         host = self.host()
         a, b = "run_" + "a" * 32, "run_" + "b" * 32
         host.begin(a, self.registry.directory / "fa", careful=False)
         host.begin(b, self.registry.directory / "fb", careful=True)
-        self.assertEqual(host.run_id, a, "the first reply keeps it; the second's settings wait")
+        self.assertEqual(host.hosts()[0].run_id, a, "the first reply keeps it; the second's settings wait")
         self.assertEqual(host.act_for(a, "read", {})["text"], f"read by {a} careful=False")
         done = []
         waiter = threading.Thread(target=lambda: done.append(host.act_for(b, "read", {})))
@@ -269,7 +270,7 @@ class ComputerTakesTurns(unittest.TestCase):
         waiter.join(5)
         self.assertEqual(done[0]["text"], f"read by {b} careful=True", "then B has it, with its own settings")
         host.end(b)
-        self.assertIsNone(host.run_id)
+        self.assertIsNone(host.hosts()[0].run_id)
 
     def test_a_reply_that_never_got_the_computer_ending_leaves_the_other_alone(self):
         host = self.host()
@@ -277,19 +278,54 @@ class ComputerTakesTurns(unittest.TestCase):
         host.begin(a, self.registry.directory / "fa")
         host.begin(b, self.registry.directory / "fb")
         host.end(b)
-        self.assertEqual(host.run_id, a)
+        self.assertEqual(host.hosts()[0].run_id, a)
         self.assertEqual(host.act_for(a, "read", {})["text"], f"read by {a} careful=False")
 
-    def test_a_long_wait_says_so_plainly(self):
+    def test_the_pip_learns_at_once_what_its_computer_is_busy_with(self):
+        host = self.host()
+        a, b = "run_" + "a" * 32, "run_" + "b" * 32
+        host.begin(a, self.registry.directory / "fa", label="Book the 9 am train from Pune")
+        host.begin(b, self.registry.directory / "fb", label="Find a beach stay")
+        started = time.monotonic()
+        reply = host.act_for(b, "read", {})
+        self.assertLess(time.monotonic() - started, 5, "at once, not after a long wait")
+        self.assertEqual(reply["waiting"], "Book the 9 am train from Pune")
+        self.assertIn("Book the 9 am train from Pune", reply["text"])
+        self.assertEqual(host.hosts()[0].run_id, a, "and A still has it")
+
+    def test_the_worker_step_waits_for_the_computer_saying_so_then_steps(self):
+        from dgc import pip_computer, pip_run_watchdog
+        host = self.host()
+        a, b = "run_" + "a" * 32, "run_" + "b" * 32
+        host.begin(a, self.registry.directory / "fa", label="Book the 9 am train")
+        host.begin(b, self.registry.directory / "fb")
+        sock = pip_computer.RunSocket(host, b)
+        self.addCleanup(sock.close)
+        said, watched = [], []
+        def end_a():
+            time.sleep(1.0)                     # after the first look (0.2 s here) and a patient ask or two
+            watched.append(pip_run_watchdog.is_waiting(b))
+            host.end(a)
+        threading.Thread(target=end_a).start()
+        with patch.object(pip_computer, "FIRST_LOOK", 0.2), patch.object(pip_computer, "LEASE_WAIT", 0.3):
+            reply = pip_computer.worker_step(sock.pin(), "read", {}, on_wait=said.append)
+        self.assertEqual(reply["text"], f"read by {b} careful=False", "once A ended, B's step ran as B")
+        self.assertTrue(said and said[0] == "Waiting for its computer: it's finishing 'Book the 9 am train'", said)
+        self.assertEqual(watched, [True], "waiting for its computer isn't being stuck: the watchdog leaves it")
+        self.assertFalse(pip_run_watchdog.is_waiting(b))
+
+    def test_a_reply_that_ends_while_waiting_stops_waiting(self):
         from dgc import pip_computer
         host = self.host()
         a, b = "run_" + "a" * 32, "run_" + "b" * 32
         host.begin(a, self.registry.directory / "fa")
         host.begin(b, self.registry.directory / "fb")
-        with patch.object(pip_computer, "LEASE_WAIT", 0.2):
-            said = host.act_for(b, "read", {})["text"]
-        self.assertIn("your reply in another conversation is using it", said)
-        self.assertEqual(host.run_id, a, "and A still has it")
+        threading.Thread(target=lambda: (time.sleep(0.3), host.end(b))).start()
+        with patch.object(pip_computer, "LEASE_WAIT", 5):
+            reply = host.act_for(b, "read", {}, patient=True)
+        self.assertIn("this run has ended", reply["text"])
+        self.assertNotIn("waiting", reply)
+        self.assertEqual(host.hosts()[0].run_id, a)
 
     def test_a_run_s_socket_steps_as_that_run(self):
         from dgc import pip_computer
@@ -299,9 +335,114 @@ class ComputerTakesTurns(unittest.TestCase):
         host.begin(b, self.registry.directory / "fb")
         sock = pip_computer.RunSocket(host, b)
         self.addCleanup(sock.close)
-        with patch.object(pip_computer, "LEASE_WAIT", 0.2):
-            said = pip_computer.worker_reply(sock.pin(), "read", {}, timeout=10)["text"]
-        self.assertIn("another conversation", said, "B's socket never steps as A")
+        said = pip_computer.worker_reply(sock.pin(), "read", {}, timeout=10)
+        self.assertIn("waiting", said, "B's socket never steps as A: it says the computer is busy")
+
+
+class SeveralComputers(unittest.TestCase):
+    """A Pip can have several computers (his calls, 10 Nov): up to 3 (a Dev Mode limit can raise it), shared by all its
+    conversations. A reply takes a free one; when all are busy it waits for the first to come free. A new computer
+    starts as a copy of the first one's browser (its sign-ins) and uses the same Files."""
+    setUp = fixtures.LocalPipsTests.setUp
+
+    def pool(self, computers=2):
+        from dgc import pip_computer
+        self.addCleanup(pip_computer.stop_all)
+        pip = self.store.create(self.registry.personal()["id"], "Shopper", "Shop for me", "local-console")
+        for _ in range(computers - 1):
+            pip_computer.add_computer(self.registry, pip["id"])
+        pool = pip_computer.pool_for(self.registry, pip["id"], pip["workspace_id"])
+        stepped = patch.object(pip_computer.Host, "_act",
+                               lambda self, op, args: {"text": f"{op} by {self.run_id} on {self.number}"})
+        stepped.start(); self.addCleanup(stepped.stop)
+        return pip, pool
+
+    def test_two_computers_serve_two_replies_at_once(self):
+        pip, pool = self.pool(2)
+        a, b = "run_" + "a" * 32, "run_" + "b" * 32
+        pool.begin(a, self.registry.directory / "fa")
+        pool.begin(b, self.registry.directory / "fb")
+        self.assertEqual(pool.act_for(a, "read", {})["text"], f"read by {a} on 1")
+        self.assertEqual(pool.act_for(b, "read", {})["text"], f"read by {b} on 2", "no wait: its own computer")
+
+    def test_a_third_reply_waits_for_the_first_computer_to_come_free(self):
+        pip, pool = self.pool(2)
+        a, b, c = ("run_" + x * 32 for x in "abc")
+        pool.begin(a, self.registry.directory / "fa", label="Book the train")
+        pool.begin(b, self.registry.directory / "fb", label="Find a stay")
+        pool.begin(c, self.registry.directory / "fc")
+        first = pool.act_for(c, "read", {})
+        self.assertIn(first["waiting"], ("Book the train", "Find a stay"), "it says what one of them is doing")
+        threading.Thread(target=lambda: (time.sleep(0.4), pool.end(b))).start()
+        from dgc import pip_computer
+        with patch.object(pip_computer, "LEASE_WAIT", 5):
+            self.assertEqual(pool.act_for(c, "read", {}, patient=True)["text"], f"read by {c} on 2", "B's computer")
+        self.assertEqual(pool.waiting_for(c), [], "the held actions of the computer it used")
+
+    def test_a_second_computer_shares_files_and_starts_from_the_first_ones_sign_ins(self):
+        from dgc import pip_computer
+        from dgc.pip_computer_files import files_root
+        pip = self.store.create(self.registry.personal()["id"], "Shopper", "Shop for me", "local-console")
+        first = pip_computer.computer_root(self.registry.directory, pip["id"])
+        profile = first / "home" / ".browser" / "Default"
+        profile.mkdir(parents=True)
+        (profile / "Cookies").write_text("signed in")
+        (first / "home" / ".browser" / "SingletonLock").write_text("x")      # a running Chrome's lock never comes along
+        self.addCleanup(pip_computer.stop_all)
+        made = pip_computer.add_computer(self.registry, pip["id"])
+        self.assertEqual(made["computers"], 2)
+        pool = pip_computer.pool_for(self.registry, pip["id"], pip["workspace_id"])
+        one, two = pool.hosts()
+        self.assertNotEqual(one.root, two.root, "its own folder")
+        self.assertEqual(two.files_dir, files_root(first), "the same Files")
+        self.assertEqual((two.root / "home" / ".browser" / "Default" / "Cookies").read_text(), "signed in", "the first's sign-ins")
+        self.assertFalse((two.root / "home" / ".browser" / "SingletonLock").exists())
+        self.assertNotEqual(one.proxy.path, two.proxy.path, "its own sockets")
+        self.assertEqual(two.browser.files_dir, files_root(first))
+        from pathlib import Path
+        from dgc.pip_computer_box import Box
+        argv = Box(two.root / "home", Path("/run/x.sock"), Path("/opt/chrome/chrome"), files_dir=two.browser.files_dir).argv(Path("/run/f.py"))
+        at = argv.index(str(files_root(first)))
+        self.assertEqual(argv[at - 1:at + 2], ["--bind", str(files_root(first)), "/home/pip/Files"],
+                         "the browser box mounts the shared Files over its own home")
+
+    def test_three_computers_at_most_unless_the_limit_is_raised(self):
+        from dgc import pip_computer
+        pip = self.store.create(self.registry.personal()["id"], "Shopper", "Shop for me", "local-console")
+        self.assertEqual(pip_computer.add_computer(self.registry, pip["id"])["computers"], 2)
+        self.assertEqual(pip_computer.add_computer(self.registry, pip["id"])["computers"], 3)
+        with self.assertRaises(RegistryError) as caught:
+            pip_computer.add_computer(self.registry, pip["id"])
+        self.assertEqual(caught.exception.code, "limit")
+        with self.registry.transaction():
+            self.registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (pip_computer.COMPUTERS_LIMIT_KEY, "100"))
+        self.assertEqual(pip_computer.add_computer(self.registry, pip["id"])["computers"], 4, "Dev Mode: any number")
+
+
+class ComputersApi(unittest.TestCase):
+    """Pips API 79: add_pip_computer {pip_id} (local only) adds one, up to the limit; get_pip_computer says how many it
+    has and may have."""
+    setUp = fixtures.LocalPipsTests.setUp
+    control = UnreadAndApi.control
+
+    def test_add_a_computer_and_see_how_many(self):
+        pip = self.store.create(self.registry.personal()["id"], "Shopper", "Shop for me", "local-console")
+        before = self.control("get_pip_computer", pip_id=pip["id"])["computer"]
+        self.assertEqual((before["computers"], before["computers_limit"]), (1, 3))
+        added = self.control("add_pip_computer", pip_id=pip["id"])
+        self.assertEqual((added["computers"], added["limit"]), (2, 3))
+        self.assertEqual(self.control("get_pip_computer", pip_id=pip["id"])["computer"]["computers"], 2)
+        with self.assertRaises(RegistryError) as caught:
+            self.control("add_pip_computer", actor="device_1", pip_id=pip["id"])
+        self.assertEqual(caught.exception.code, "local_only")
+
+    def test_the_sdks_know_the_command(self):
+        import sys
+        sys.path.insert(0, "sdk/python")
+        from dgc_sdk.pips import COMMAND_FIELDS, MUTATION_COMMANDS
+        from dgc.pips import _COMMAND_ARGS
+        self.assertEqual(COMMAND_FIELDS["add_pip_computer"], _COMMAND_ARGS["add_pip_computer"])
+        self.assertIn("add_pip_computer", MUTATION_COMMANDS)
 
 
 if __name__ == "__main__":

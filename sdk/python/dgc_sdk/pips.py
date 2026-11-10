@@ -396,7 +396,7 @@ MUTATION_COMMANDS |= API77_MUTATIONS
 # API 79: several conversations per Pip (local only in DGC): list them, start, rename, archive or restore one; send,
 # list, mark read and the context meter name one by conversation_id (none: the Pip's first, as before).
 API79_READS = frozenset({'list_pip_conversations'})
-API79_MUTATIONS = frozenset({'create_pip_conversation', 'rename_pip_conversation', 'archive_pip_conversation'})
+API79_MUTATIONS = frozenset({'create_pip_conversation', 'rename_pip_conversation', 'archive_pip_conversation', 'add_pip_computer'})
 READ_COMMANDS |= API79_READS
 MUTATION_COMMANDS |= API79_MUTATIONS
 API79_FIELDS = {command: frozenset({'conversation_id'})
@@ -515,6 +515,7 @@ COMMAND_FIELDS = {
     'create_pip_conversation': frozenset({'pip_id', 'title'}),
     'rename_pip_conversation': frozenset({'pip_id', 'conversation_id', 'title'}),
     'archive_pip_conversation': frozenset({'pip_id', 'conversation_id', 'archived'}),
+    'add_pip_computer': frozenset({'pip_id'}),
     'get_pips_payments': frozenset(),
     'set_pips_payments': frozenset({'enabled'}),
     'get_pips_desktop_notifications': frozenset(),

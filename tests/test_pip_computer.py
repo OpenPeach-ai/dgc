@@ -269,16 +269,16 @@ class PipComputerTests(unittest.TestCase):
         pip_computer.decide(self.registry, action["id"], action["digest"], False, "editor-user")
         self.assertEqual(pip_computer.tick(self.registry, self.cfg)["rejected"], 1)
         self.assertEqual(self.received, [])
-        self.assertFalse(pip_computer.HOSTS[pip["id"]].browser.held)
+        self.assertFalse(pip_computer.HOSTS[(pip["id"], 1)].browser.held)
         # Back on the page that made it, not Chrome's "This page has been blocked" (three-asks test, 2026-10-20).
-        where = json.loads(pip_computer.HOSTS[pip["id"]].browser.evaluate_json("JSON.stringify(location.href)"))
+        where = json.loads(pip_computer.HOSTS[(pip["id"], 1)].browser.evaluate_json("JSON.stringify(location.href)"))
         self.assertFalse(where.startswith("chrome-error:"), where)
         self.run_worker(pip)                           # a second hold, then the kill switch
         pending = [a for a in pip_computer.list_actions(self.registry, pip["id"]) if a["status"] == "pending"]
         self.assertEqual(len(pending), 1)
         pip_computer.request_stop(self.registry, pip["id"], "editor-user")
         self.assertEqual(pip_computer.handle_stops(self.registry), 1)
-        self.assertNotIn(pip["id"], pip_computer.HOSTS)
+        self.assertNotIn((pip["id"], 1), pip_computer.HOSTS)
         self.assertEqual(pip_computer.list_actions(self.registry, pip["id"])[0]["status"], "lost")
         self.assertEqual(self.received, [])
 
@@ -294,7 +294,7 @@ class PipComputerTests(unittest.TestCase):
         self.assertTrue(first["image"].startswith("data:image/jpeg;base64,"))
         page = pip_computer.view_call(self.registry, pip["id"], "go", {"url": self.url}, "editor-user")
         self.assertTrue(page["ok"], page)
-        host = pip_computer.HOSTS[pip["id"]]
+        host = pip_computer.HOSTS[(pip["id"], 1)]
         box_ = host.browser.evaluate_json("(() => { const r=document.getElementById('go').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()")
         clicked = pip_computer.view_call(self.registry, pip["id"], "click", {"x": box_["x"], "y": box_["y"]}, "editor-user")
         self.assertTrue(clicked["ok"], clicked)
