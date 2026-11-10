@@ -5273,12 +5273,16 @@
     card.setAttribute("aria-label", `${ARTIFACT_KIND[a.type]}: ${a.title || ARTIFACT_KIND[a.type]}`);
     const kind = ARTIFACT_KIND[a.type];
     const status = removed ? "removed: it's in DGC's trash" : `version ${Number(a.version) || 1}${card.dataset.op ? ` · ${card.dataset.op}` : ""}`;
-    card.innerHTML = `<div class="ahead"><span class="aico" aria-hidden="true">${icon(ARTIFACT_MARK[a.type])}</span><span class="anm"></span></div>`
-      + `<div class="ameta"></div>`;
+    // The shared card (media/shared/doccard.css, ui-04): its tile, its name over a quiet line, and Open over the whole card.
+    card.classList.add("dgc-doc-card");
+    card.dataset.tone = a.type;
+    card.innerHTML = `<span class="aico dgc-doc-tile" aria-hidden="true">${icon(ARTIFACT_MARK[a.type])}</span>`
+      + `<div class="ahead dgc-doc-words"><span class="anm dgc-doc-name"></span><div class="ameta dgc-doc-meta"></div></div>`;
     card.querySelector(".anm").textContent = a.title || kind;
     card.querySelector(".ameta").textContent = `${kind} · ${status}`;
-    const row = el("div", "abtns");
-    const open = el("button", "abtn primary", "Open"); open.type = "button";
+    const row = el("div", "abtns dgc-doc-acts");
+    const open = el("button", "abtn primary dgc-doc-open", "Open"); open.type = "button";
+    open.setAttribute("aria-label", `Open ${a.title || kind}`);
     open.disabled = removed;
     open.title = a.type === "doc" ? "Open it in the editor, over its own file" : "Open it in a panel of its own";
     open.onclick = () => vscode.postMessage({ type: "artifactOpen", id: a.id, artifactType: a.type, title: a.title || "" });

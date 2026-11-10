@@ -10992,7 +10992,7 @@ def test_extension_vsix_guard():
         "extension/dist/dgc-voice.vsix",
         "extension/media/main.js", "extension/media/main.css", "extension/media/shared/tokens.css",
         "extension/media/shared/menu.css", "extension/media/shared/menu.js",
-        "extension/media/shared/composer.css", "extension/media/shared/composer.js",
+        "extension/media/shared/composer.css", "extension/media/shared/composer.js", "extension/media/shared/doccard.css",
         "extension/media/trace.js",
         "extension/media/trace.css",
         "extension/media/messagequeue.js",
@@ -11163,7 +11163,7 @@ def test_extension_vsix_guard():
         "extension/licenses/PROSEMIRROR-LICENSES.txt",
     }
     check("VSIX validator has an exact reviewed member allowlist",
-          guard.EXPECTED_MEMBERS == expected_members and len(expected_members) == 205)
+          guard.EXPECTED_MEMBERS == expected_members and len(expected_members) == 206)
     # The diagram renderer is the one member allowed past the general size ceiling, and the only
     # one exempt from the `key = "value"` heuristic -- it is 5MB of minified third-party code that
     # bundles a tokeniser. Both exemptions are BY NAME, so an unexpected large file, or a real

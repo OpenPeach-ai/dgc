@@ -215,3 +215,26 @@ test("at 360px the chosen Output stays inside the composer with its choice acces
     assert.equal(await s.page.evaluate(() => document.documentElement.scrollWidth), 360);
   } finally { await s.page.close(); }
 });
+
+// ui-04 (the user's note, 9 Nov, from Claude Code's chat): an artifact in a chat is one calm card on every surface: a
+// coloured square tile with its icon, its name and a quiet second line, and a click anywhere on it opens it.
+test("a Work artifact is the shared card: a coloured square tile, its name and a quiet line, and the whole card opens it", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openWork({ width: 640 });
+  try {
+    await s.send({ type: "turn_start", turn_id: "t1", prompt: "Make a deck", kind: "prompt" });
+    await s.send({ type: "artifact_changed", artifact: DECK, op: "made", surface: "work" });
+    const card = s.page.locator(".artifact-card");
+    assert.ok(await card.evaluate((n) => n.classList.contains("dgc-doc-card")), "the shared card");
+    const tile = await card.locator(".dgc-doc-tile").evaluate((n) => { const r = n.getBoundingClientRect(), c = getComputedStyle(n);
+      return { w: Math.round(r.width), h: Math.round(r.height), bg: c.backgroundColor }; });
+    assert.ok(tile.w >= 40 && tile.w === tile.h, `a square tile: ${JSON.stringify(tile)}`);
+    assert.ok(!/rgba\(0, 0, 0, 0\)|transparent/.test(tile.bg), `coloured: ${tile.bg}`);
+    const name = await card.locator(".anm").boundingBox();
+    await s.page.mouse.click(name.x + name.width / 2, name.y + name.height / 2);
+    assert.deepEqual(await s.posted("artifactOpen"), [{ type: "artifactOpen", id: DECK.id, artifactType: "slides", title: "Q3 plan" }],
+      "a click on its name opens it");
+    assert.equal(await card.locator(".dgc-doc-open").getAttribute("aria-label"), "Open Q3 plan", "the keyboard and a reader get Open, by name");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});

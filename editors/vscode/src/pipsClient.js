@@ -5,6 +5,7 @@ import '../media/shared/tokens.css';
 // One menu for every "+" and picker, as in Work and ChatDGC (window.DgcMenu).
 import '../media/shared/menu.css';
 import '../media/shared/menu.js';
+import '../media/shared/doccard.css';   // an artifact or a document in a chat: one card on every surface (ui-04)
 // The prompt box's shared pieces (pills, the picture island, the drop overlay, Stop), as in Work and ChatDGC.
 import '../media/shared/composer.css';
 import '../media/shared/composer.js';

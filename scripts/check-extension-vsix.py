@@ -41,6 +41,7 @@ STATIC_MEMBERS = {
     "extension/media/shared/menu.js": "media/shared/menu.js",
     # The prompt box's shared pieces: pills, the picture island, the drop overlay, Stop.
     "extension/media/shared/composer.css": "media/shared/composer.css",
+    "extension/media/shared/doccard.css": "media/shared/doccard.css",
     "extension/media/shared/composer.js": "media/shared/composer.js",
     "extension/media/genui.css": "media/genui.css",
     "extension/media/tool-insights.js": "media/tool-insights.js",

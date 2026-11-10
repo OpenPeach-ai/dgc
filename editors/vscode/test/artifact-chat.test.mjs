@@ -201,3 +201,26 @@ test("at 360px nothing runs off the edge: the Library's rows and the chat's Outp
     assert.equal(await s.page.locator("#cd-output .cd-tool-label").innerText(), "Spreadsheet", "narrow: the choice, without its prefix");
   } finally { await s.page.close(); }
 });
+
+// ui-04: the same card in ChatDGC: a coloured square tile, its name, a quiet line, and the whole card opens it.
+test("ChatDGC's artifact and file cards are the shared card, and a click anywhere on one opens it", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openChat(browser, { width: 760 });
+  try {
+    await s.send({ type: "artifacts", offered: OFFER });
+    await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Make me a Q3 deck", created_at: "2026-10-28T08:39:00Z" },
+      reply({ artifacts: [DECK] })] });
+    const card = s.page.locator(".cd-artifact").first();
+    assert.ok(await card.evaluate((n) => n.classList.contains("dgc-doc-card")), "the shared card");
+    const tile = await card.locator(".dgc-doc-tile").evaluate((n) => { const r = n.getBoundingClientRect(), c = getComputedStyle(n);
+      return { w: Math.round(r.width), h: Math.round(r.height), bg: c.backgroundColor }; });
+    assert.ok(tile.w >= 40 && tile.w === tile.h, `a square tile: ${JSON.stringify(tile)}`);
+    assert.ok(!/rgba\(0, 0, 0, 0\)|transparent/.test(tile.bg), `coloured: ${tile.bg}`);
+    const name = await card.locator(".cd-file-name").boundingBox();
+    await s.page.mouse.click(name.x + name.width / 2, name.y + name.height / 2);
+    assert.equal((await s.posted("artifactOpen")).length, 1, "a click on its name opens it");
+    assert.equal(await card.locator(".dgc-doc-open").getAttribute("aria-label"), "Open Q3 plan");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});

@@ -1,0 +1,58 @@
+/* An artifact or a document in a chat: one calm card on every surface (ui-04; the user's note, 9 Nov, from Claude Code's
+   chat). A coloured square tile with its icon on the left, its name, and a quiet second line saying what it is
+   ("Document · MD · 79 kB"). The whole card opens it: its Open button lies over the card (the words stay readable
+   under it, and the keyboard and a screen reader still reach Open, by name); anything else it offers (Download, Save a
+   copy) sits small at the right, above that layer. Each surface keeps its own markup and adds these classes:
+   .dgc-doc-card on the box, .dgc-doc-tile on its mark (data-tone on the box picks the colour), .dgc-doc-words,
+   .dgc-doc-name and .dgc-doc-meta on its words, .dgc-doc-acts on its buttons and .dgc-doc-open on Open. */
+.dgc-doc-card {
+  --doc-tile: var(--fk-neutral);
+  position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+  max-width: 520px; min-height: 64px; box-sizing: border-box; margin: 8px 0; padding: 9px 12px 9px 10px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card);
+  transition: border-color var(--dur-hover) var(--ease-out), background-color var(--dur-hover) var(--ease-out);
+}
+.dgc-doc-card:hover { border-color: var(--border-strong); background: color-mix(in srgb, var(--surface) 94%, var(--text)); }
+.dgc-doc-card[data-tone="doc"], .dgc-doc-card[data-tone="docx"], .dgc-doc-card[data-tone="md"], .dgc-doc-card[data-tone="document"] { --doc-tile: var(--fk-blue); }
+.dgc-doc-card[data-tone="slides"], .dgc-doc-card[data-tone="pptx"] { --doc-tile: var(--fk-orange); }
+.dgc-doc-card[data-tone="sheet"], .dgc-doc-card[data-tone="xlsx"], .dgc-doc-card[data-tone="csv"] { --doc-tile: var(--fk-green); }
+.dgc-doc-card[data-tone="pdf"] { --doc-tile: var(--fk-red); }
+.dgc-doc-card[data-tone="dashboard"] { --doc-tile: var(--fk-pink); }
+.dgc-doc-card[data-tone="page"], .dgc-doc-card[data-tone="artifact"], .dgc-doc-card[data-tone="html"] { --doc-tile: var(--fk-violet); }
+.dgc-doc-card[data-tone="code"] { --doc-tile: var(--fk-neutral); }
+
+.dgc-doc-card .dgc-doc-tile {
+  flex: none; display: grid; place-items: center; width: 44px; height: 44px; box-sizing: border-box; margin: 0; padding: 0;
+  border: 0; border-radius: 10px; background: var(--doc-tile); color: #fff;
+  font: var(--w-bold) 10px/1 var(--sans); letter-spacing: .04em;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
+}
+.dgc-doc-card .dgc-doc-tile svg, .dgc-doc-card .dgc-doc-tile .codicon { width: 20px; height: 20px; font-size: 20px; color: #fff; }
+/* Its name stays beside the tile however narrow the chat: only the buttons go to a line of their own, at the right. */
+.dgc-doc-card .dgc-doc-words { flex: 1 1 80px; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.dgc-doc-card .dgc-doc-name {
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: var(--w-med) var(--t-base)/1.3 var(--sans); color: var(--text-strong);
+}
+.dgc-doc-card .dgc-doc-meta {
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: var(--w-reg) var(--t-sm)/1.3 var(--sans); color: var(--muted);
+}
+.dgc-doc-card .dgc-doc-acts { flex: none; display: flex; align-items: center; gap: 6px; width: auto; margin: 0 0 0 auto; }
+.dgc-doc-card .dgc-doc-acts > :not(.dgc-doc-open) { position: relative; z-index: 1; }
+
+/* Open is the card: a transparent layer over all of it, its word kept for the keyboard and a screen reader. */
+.dgc-doc-card .dgc-doc-open {
+  position: absolute; inset: 0; z-index: 0; width: auto; height: auto; min-height: 0; margin: 0; padding: 0;
+  border: 0; border-radius: inherit; background: transparent; box-shadow: none;
+  color: transparent; font-size: 0; line-height: 0; overflow: hidden; cursor: pointer;
+}
+.dgc-doc-card .dgc-doc-open:hover, .dgc-doc-card .dgc-doc-open:active { background: transparent; color: transparent; }
+.dgc-doc-card .dgc-doc-open:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.dgc-doc-card .dgc-doc-open:disabled { cursor: default; }
+
+/* A deleted file or a removed artifact keeps its card, dimmed, and opens nothing. */
+.dgc-doc-card.stopped, .dgc-doc-card[data-removed="true"] { cursor: default; }
+.dgc-doc-card.stopped:hover, .dgc-doc-card[data-removed="true"]:hover { border-color: var(--border); background: var(--surface); }
+
+@media (prefers-reduced-motion: reduce) { .dgc-doc-card { transition: none; } }

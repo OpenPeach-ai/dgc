@@ -1914,7 +1914,9 @@
                  png: ["Image", "PNG"], jpg: ["Image", "JPG"], webp: ["Image", "WEBP"] };
   function fileCard(message, file) {
     const [label, badge] = MADE[file.format] || ["File", "FILE"];
-    const box = el("div", "cd-file");
+    // The shared card (media/shared/doccard.css, ui-04): its tile, its name over a quiet line, and Open over the card.
+    const box = el("div", "cd-file dgc-doc-card");
+    box.dataset.tone = String(file.format || "");
     // An image the reply made (generate_image): the picture itself, as an attached image shows, then its card.
     if (file.kind === "image" && !file.removed && /^att_[a-f0-9]{32}$/.test(file.id || "")) {
       box.classList.add("cd-file-image");
@@ -1924,18 +1926,19 @@
     if (file.removed) box.dataset.removed = "true";
     box.setAttribute("role", "group");
     box.setAttribute("aria-label", `${file.name || "file"}, ${label}`);
-    box.append(el("span", "cd-file-badge", badge));
-    const words = el("div", "cd-file-words");
-    words.append(el("strong", "cd-file-name", file.name || "file"));
+    box.append(el("span", "cd-file-badge dgc-doc-tile", badge));
+    const words = el("div", "cd-file-words dgc-doc-words");
+    words.append(el("strong", "cd-file-name dgc-doc-name", file.name || "file"));
     const pages = Number(file.pages) || 0;
     const meta = [label, Number(file.size) ? sizeText(Number(file.size)) : "", pages ? `${pages} page${pages === 1 ? "" : "s"}` : ""];
-    words.append(el("small", "cd-file-meta", file.removed ? "Deleted from your Library" : meta.filter(Boolean).join(" · ")));
+    words.append(el("small", "cd-file-meta dgc-doc-meta", file.removed ? "Deleted from your Library" : meta.filter(Boolean).join(" · ")));
     if (file.note && !file.removed) words.append(el("small", "cd-file-note", String(file.note)));
     box.append(words);
     if (!file.removed) {
-      const buttons = el("div", "cd-file-actions");
-      const open = el("button", "cd-continue cd-file-open", "Open");
+      const buttons = el("div", "cd-file-actions dgc-doc-acts");
+      const open = el("button", "cd-continue cd-file-open dgc-doc-open", "Open");
       open.type = "button";
+      open.setAttribute("aria-label", `Open ${file.name || "the file"}`);
       if (file.kind === "image") open.dataset.picOpen = "";     // a folded block's Open opens the picture, as this does
       open.addEventListener("click", () => vscode.postMessage({ type: "fileOpen", messageId: message.id, fileId: file.id, name: file.name }));
       const save = el("button", "cd-edit-cancel cd-file-save", "Save a copy…");
@@ -1980,9 +1983,10 @@
   });
   function artifactCard(card) {
     if (!card || !/^ar_[a-f0-9]{16}$/.test(String(card.id || "")) || !ARTIFACT_KIND[card.type]) return null;
-    const box = el("div", "cd-file cd-artifact");
+    const box = el("div", "cd-file cd-artifact dgc-doc-card");
     box.dataset.artifact = card.id;
     box.dataset.type = card.type;
+    box.dataset.tone = card.type;
     box.setAttribute("role", "group");
     paintArtifact(box, card);
     return box;
@@ -1994,19 +1998,20 @@
     const kind = ARTIFACT_KIND[card.type];
     if (removed) box.dataset.removed = "true"; else delete box.dataset.removed;     // .cd-file[data-removed] dims it
     box.setAttribute("aria-label", `${kind}: ${shown.title || kind}`);
-    const mark = el("span", "cd-file-badge cd-artifact-badge");
+    const mark = el("span", "cd-file-badge cd-artifact-badge dgc-doc-tile");
     mark.append(icon(ARTIFACT_ICON[card.type]));
-    const words = el("div", "cd-file-words");
-    words.append(el("strong", "cd-file-name", shown.title || kind));
+    const words = el("div", "cd-file-words dgc-doc-words");
+    words.append(el("strong", "cd-file-name dgc-doc-name", shown.title || kind));
     const did = card.op === "made" ? "made" : card.op === "restored" ? "restored" : "changed";
     const version = Number(shown.version) || Number(card.version) || 1;
     const moved = now && Number(now.version) > Number(card.version);
-    words.append(el("small", "cd-file-meta", removed ? `${kind} · removed: it's in DGC's trash, where it can be recovered`
+    words.append(el("small", "cd-file-meta dgc-doc-meta", removed ? `${kind} · removed: it's in DGC's trash, where it can be recovered`
       : moved ? `${kind} · ${did} here as version ${card.version} · now version ${version}` : `${kind} · ${did} · version ${version}`));
-    const buttons = el("div", "cd-file-actions");
+    const buttons = el("div", "cd-file-actions dgc-doc-acts");
     if (!removed) {
-      const open = el("button", "cd-continue cd-artifact-open", "Open");
+      const open = el("button", "cd-continue cd-artifact-open dgc-doc-open", "Open");
       open.type = "button";
+      open.setAttribute("aria-label", `Open ${shown.title || kind}`);
       open.addEventListener("click", () => vscode.postMessage({ type: "artifactOpen", id: card.id, artifactType: card.type, title: shown.title || "" }));
       buttons.append(open);
       const formats = artifactFormats(card);
@@ -2243,21 +2248,23 @@
 
   /** A canvas the reply made or changed: it's open in an editor beside the chat; Open brings it back. */
   function canvasCard(canvas) {
-    const box = el("div", "cd-file cd-canvas");
+    const box = el("div", "cd-file cd-canvas dgc-doc-card");
     box.dataset.kind = String(canvas.kind || "document");
+    box.dataset.tone = canvas.kind === "code" ? "code" : "document";
     box.setAttribute("role", "group");
     box.setAttribute("aria-label", `Canvas: ${canvas.title || "Canvas"}`);
-    const mark = el("span", "cd-file-badge cd-canvas-badge");
+    const mark = el("span", "cd-file-badge cd-canvas-badge dgc-doc-tile");
     mark.append(icon(canvas.kind === "code" ? "code" : "file-text"));
     box.append(mark);
-    const words = el("div", "cd-file-words");
-    words.append(el("strong", "cd-file-name", canvas.title || "Canvas"));
+    const words = el("div", "cd-file-words dgc-doc-words");
+    words.append(el("strong", "cd-file-name dgc-doc-name", canvas.title || "Canvas"));
     const what = canvas.kind === "code" ? `${canvas.language && canvas.language !== "text" ? canvas.language[0].toUpperCase() + canvas.language.slice(1) + " code" : "Code"}` : "Document";
-    words.append(el("small", "cd-file-meta", `Canvas \u00b7 ${what} \u00b7 ${canvas.op === "created" ? "made" : "changed"}, version ${Number(canvas.version) || 1}`));
+    words.append(el("small", "cd-file-meta dgc-doc-meta", `Canvas \u00b7 ${what} \u00b7 ${canvas.op === "created" ? "made" : "changed"}, version ${Number(canvas.version) || 1}`));
     box.append(words);
-    const buttons = el("div", "cd-file-actions");
-    const open = el("button", "cd-continue cd-canvas-open", "Open");
+    const buttons = el("div", "cd-file-actions dgc-doc-acts");
+    const open = el("button", "cd-continue cd-canvas-open dgc-doc-open", "Open");
     open.type = "button";
+    open.setAttribute("aria-label", `Open ${canvas.title || "the canvas"}`);
     open.addEventListener("click", () => vscode.postMessage({ type: "canvasOpen", canvasId: canvas.id }));
     buttons.append(open);
     box.append(buttons);
