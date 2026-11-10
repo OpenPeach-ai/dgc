@@ -1,8 +1,10 @@
 // The home side bar's look (0.52), in real Chromium with the real panel page, the real Pips bundle and its faces
-// (test/support/home-scene.mjs). The Pips block is a plain list under "Pips · 2 need you · 6 new" with a chevron that
-// collapses it; the collapse is kept on this computer by the host and the count keeps updating. Dismiss all and Open Pips
-// are quiet text, a number is a soft pill, every block starts on one 12 px edge, and New session (New chat on the Chat
-// tab) is the one filled button. Read from computed style and geometry, dark and light, at 300 and 700 px.
+// (test/support/home-scene.mjs). The Pips block is a plain list under a quiet "Pips" heading with a chevron that
+// collapses it; collapsed, the heading's end says "2 need you" and "6 new" (a screen reader hears the count in the
+// heading either way), the collapse is kept on this computer by the host and the count keeps updating. Dismiss all and
+// Open Pips are quiet text, a number is a soft neutral pill, every block starts on one 12 px edge, and nothing on the
+// home is filled purple: a new session or chat is the + on the Sessions heading (test/codex-look-home.test.mjs has the
+// Sessions heading's own fold). Read from computed style and geometry, dark and light, at 300 and 700 px.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -32,7 +34,7 @@ const EDGE = 12;
 // Shown to the eye: not display:none, not visibility:hidden, and with some height of its own.
 const seen = (page, selector) => page.evaluate((s) => [...document.querySelectorAll(s)].map((n) => n.checkVisibility({ visibilityProperty: true }) && n.getBoundingClientRect().height > 1), selector);
 const block = (page) => page.evaluate(() => { const r = (id) => document.getElementById(id).getBoundingClientRect();
-  return { pips: Math.round(r("sessions-pips").height), head: Math.round(document.querySelector(".home-pips-head").getBoundingClientRect().height), search: Math.round(r("sessions-search").top) }; });
+  return { pips: Math.round(r("sessions-pips").height), head: Math.round(document.querySelector(".home-pips-head").getBoundingClientRect().height), search: Math.round(r("sessions-fold").top) }; });   // what is under the block: the Sessions heading
 const settle = (page) => page.waitForTimeout(260);     // past the 150 ms fold
 
 for (const theme of THEMES) for (const width of WIDTHS) {
@@ -52,13 +54,14 @@ for (const theme of THEMES) for (const width of WIDTHS) {
       assert.ok(shut.pips <= shut.head + 14, `collapsed, the block is its head and a hairline: ${JSON.stringify(shut)}`);
       assert.ok(shut.search < open.search - 100, `and what is under it moves up: ${JSON.stringify([open, shut])}`);
       assert.equal(await x.page.getAttribute(".home-pips-toggle", "aria-expanded"), "false");
-      assert.deepEqual(await seen(x.page, ".home-pips-toggle, .home-pips-dismiss-all, .home-pips-open"), [true, true, true], "the heading, Dismiss all and Open Pips stay");
+      assert.deepEqual(await seen(x.page, ".home-pips-toggle, .home-pips-count, .home-pips-dismiss-all, .home-pips-open"), [true, true, false, false], "the heading stays, and its count takes the place of Dismiss all and Open Pips");
+      assert.deepEqual(await x.page.evaluate(() => [...document.querySelectorAll(".home-pips-count > *")].map((n) => n.textContent)), ["2 need you", "6 new"]);
       assert.deepEqual(await x.posted("pipHomeCollapsed"), [{ type: "pipHomeCollapsed", collapsed: true }], "the host keeps it for this computer");
-      // The keyboard skips the rows folded away: the chevron, Dismiss all, Open Pips, then the search box.
+      // The keyboard skips everything folded away: the chevron, then the Sessions heading, its + and the tabs.
       await x.page.focus(".home-pips-toggle");
       const stops = [];
       for (let n = 0; n < 3; n++) { await x.page.keyboard.press("Tab"); stops.push(await x.page.evaluate(() => document.activeElement.id || document.activeElement.className)); }
-      assert.deepEqual(stops, ["home-pips-dismiss-all", "home-pips-open", "sessions-search"]);
+      assert.deepEqual(stops, ["sessions-fold", "sessions-new", "home-tab-work"]);
       // Something new arrives while it is collapsed: the heading says so, and it stays collapsed.
       await x.page.evaluate(([ws, pip]) => { window.__state.unread[ws] = window.__state.unread[ws].map((u) => (u.pip_id === pip ? { ...u, count: 9, messages: 9, latest_message_id: "message_" + "9".repeat(32) } : u)); }, [P, pipId("c")]);
       await x.refresh();
@@ -103,17 +106,22 @@ for (const theme of THEMES) for (const width of WIDTHS) {
           .map((n) => { const r = words.includes(selector) ? box(n) : n.getBoundingClientRect(); return [selector, Math.round((side === "left" ? r.left - inner.left : inner.right - r.right) * 10) / 10]; });
         const left = [".home-pip-face-row", "#sessions-search", "#home-tabs", ".home-library .codicon", "#sessions-list .session-name", "#chats-list .session-name",
           "#projects-title", "#chats-sub", ".home-pips-more", "#sessions-all"].flatMap((s) => at(s, "left"));
-        const right = [".home-pips-open", ".home-pip-badge", "#sessions-search", "#home-tabs", ".sessions-new", "#sessions-list .session-age", "#chats-list .session-delete",
+        const right = [".home-pips-open", ".home-pip-badge", "#sessions-search", "#home-tabs", "#sessions-list .session-age", "#chats-list .session-delete",
           "#projects-new", ".project-count"].flatMap((s) => at(s, "right"));
         // The heading's chevron: its glyph stands on the edge, so its 16px box, with 4px of air in it, starts 4px before.
         const chevron = document.querySelector(".home-pips-chevron").getBoundingClientRect().left - inner.left;
         const title = document.querySelector(".home-pips-title").getBoundingClientRect().left - inner.left;
-        return { left, right, chevron, title, sideways: host.scrollWidth > host.clientWidth + 1 };
+        // The + on the Sessions heading: its glyph stands on the right edge, so its 22px box, with 3px of air in it, ends 3px past.
+        const plus = inner.right - [...document.querySelectorAll(".sessions-new")].find((n) => n.checkVisibility()).getBoundingClientRect().right;
+        const fold = document.querySelector("#sessions-fold .home-fold-chevron").getBoundingClientRect().left - inner.left;
+        return { left, right, chevron, title, plus, fold, sideways: host.scrollWidth > host.clientWidth + 1 };
       });
       assert.ok(m.left.length >= 6 && m.right.length >= 5, `the blocks are on the page: ${JSON.stringify(m)}`);
       assert.deepEqual(m.left.filter(([, v]) => Math.abs(v - EDGE) > 0.6), [], `one left edge: ${JSON.stringify(m.left)}`);
       assert.deepEqual(m.right.filter(([, v]) => Math.abs(v - EDGE) > 0.6), [], `one right edge: ${JSON.stringify(m.right)}`);
       assert.ok(Math.abs(m.chevron - (EDGE - 4)) <= 0.6 && m.title > m.chevron + 16, `the chevron's glyph on the edge, the heading's words after it: ${m.chevron}, ${m.title}`);
+      assert.ok(Math.abs(m.plus - (EDGE - 3)) <= 0.6, `the +'s glyph on the right edge: ${m.plus}`);
+      assert.ok(Math.abs(m.fold - m.chevron) <= 0.6, `the Sessions heading's chevron under the Pips heading's: ${m.fold}, ${m.chevron}`);
       assert.equal(m.sideways, false, "no sideways scroll");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
@@ -144,13 +152,13 @@ for (const theme of THEMES) {
           word: [css(".home-pip-read-word").display, css(".home-pip-read-word").backgroundColor, css(".home-pip-read-word").color], more: css(".home-pips-more")?.color ?? null };
       });
       const rest = await look();
-      assert.deepEqual(rest.panel, ["rgba(0, 0, 0, 0)", "1px", "solid"], "no tinted panel: the side bar's own ground, and a hairline under the block");
+      assert.deepEqual(rest.panel, ["rgba(0, 0, 0, 0)", "0px", "none"], "no tinted panel and no line under it: the side bar's own ground, and the Sessions heading after it");
       assert.deepEqual([rest.dismiss, rest.open], [rest.tokens.muted, rest.tokens.muted], "Dismiss all and Open Pips are the same quiet text");
       assert.notEqual(rest.open, rest.tokens.link, "Open Pips is no longer a purple link");
       assert.deepEqual(rest.decoration, ["none", "none"]);
       assert.deepEqual(rest.badge, [rest.tokens.soft, rest.tokens.countInk, "18px", "9999px"], "a number is a soft pill: the accent's wash under the accent's text");
       assert.notEqual(rest.tokens.countInk, "rgb(0, 0, 0)", "the ink is defined");
-      assert.deepEqual(rest.filled, ["sessions-new"], "New session is the one filled thing on the home");
+      assert.deepEqual(rest.filled, [], "nothing on the home is filled purple: a new session is the + on the Sessions heading");
       // Pointed at: the row takes the neutral wash (no purple), and its dot reads "Read" in the same soft pill, which
       // covers the number under it rather than showing it through.
       await x.page.hover("#sessions-pips .home-pip-item >> nth=0");
@@ -165,17 +173,18 @@ for (const theme of THEMES) {
       assert.notEqual(pointed.word[1], pointed.tokens.fill, "on a soft ground, not the filled purple");
       const ground = await x.page.evaluate(() => getComputedStyle(document.querySelector(".home-pip-read-word")).backgroundImage + " / " + getComputedStyle(document.querySelector(".home-pip-read-word")).backgroundColor);
       assert.equal(alpha(pointed.word[1]), 1, `its ground is solid under the wash, so the number never shows through: ${ground}`);
-      assert.deepEqual(pointed.filled, ["sessions-new"], "still the one filled thing");
+      assert.deepEqual(pointed.filled, [], "still nothing filled purple");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
-    // The Chat tab's filled button is New chat, and only it.
+    // The Chat tab has no filled purple either: New chat is the same +.
     const chat = await openHome(browser, { theme, width: 300, tab: "chat", motion: "reduce" });
     try {
       await chat.page.waitForSelector("#sessions-pips .home-pip-badge");
       const filled = await chat.page.evaluate(() => { const probe = document.createElement("i"); probe.style.backgroundColor = "var(--accent-fill)"; document.body.append(probe);
         const fill = getComputedStyle(probe).backgroundColor; probe.remove();
         return [...document.querySelectorAll("#sessions-host button, #sessions-host span")].filter((n) => n.checkVisibility({ visibilityProperty: true }) && getComputedStyle(n).backgroundColor === fill).map((n) => n.id || n.className); });
-      assert.deepEqual(filled, ["chats-new"]);
+      assert.deepEqual(filled, []);
+      assert.deepEqual(await seen(chat.page, "#chats-new, #sessions-new"), [false, true], "of the two + buttons (New session, New chat) the Chat tab shows New chat");
     } finally { await chat.close(); }
   });
 
@@ -279,7 +288,16 @@ test("the host keeps the collapse as one flag for this computer and stamps it on
   assert.deepEqual(context.globalState.value["dgc.pipHomeDismissed"], { [pipId("a")]: entry });
   // The panel: the attribute on the home page only, and the page's message handed to the store before the backend.
   const panel = readFileSync(src + "panel.ts", "utf8"), page = readFileSync(new URL("../media/main.js", import.meta.url), "utf8");
-  assert.match(panel, /place === "home" \? pipHomeCollapsedAttr\(this\.context\) : ""/);
+  assert.match(panel, /place === "home" \? pipHomeCollapsedAttr\(this\.context\) \+ sessionsHomeCollapsedAttr\(this\.context\) : ""/);
+  // The Sessions heading's fold is a second flag, kept the same way.
+  assert.equal(store.sessionsHomeCollapsedAttr(context), "", "Sessions: open by default, whatever the Pips block is");
+  assert.equal(store.rememberSessionsHomeCollapsed(context, { type: "pipHomeCollapsed", collapsed: true }), false, "not its message");
+  assert.equal(store.rememberSessionsHomeCollapsed(context, { type: "sessionsHomeCollapsed", collapsed: true }), true);
+  assert.equal(store.sessionsHomeCollapsedAttr(context), ' data-sessions-home-collapsed="1"');
+  store.rememberSessionsHomeCollapsed(context, { type: "sessionsHomeCollapsed", collapsed: false });
+  assert.equal(store.sessionsHomeCollapsedAttr(context), "");
+  assert.match(panel, /if \(rememberSessionsHomeCollapsed\(this\.context, msg\)\) return;/);
+  assert.match(page, /type: "sessionsHomeCollapsed", collapsed/);
   assert.match(panel, /<html lang="en"[^>]*\$\{pipHomeCollapsed\}[^>]*>/);
   assert.match(panel, /if \(rememberPipHomeCollapsed\(this\.context, msg\)\) return;/);
   assert.match(page, /collapsed: document\.documentElement\.dataset\.pipHomeCollapsed === "1"/);

@@ -49,10 +49,10 @@ for (const theme of ["dark", "light"]) for (const [where, width] of PLACES) {
       assert.equal(f.choices["max-width"], f.replies[0]["max-width"], "choices and replies share one measure");
       assert.ok(f.choices.right <= right + 1 && f.replies.every((r) => r.right <= right + 1));
       // Corners on the shared scale: 16 for a bubble with a 6 tail, 8 for a row; and nothing in the chat casts a shadow.
-      for (const b of f.prompts) assert.deepEqual([b["border-top-left-radius"], b["border-bottom-right-radius"], b["box-shadow"]], ["16px", "6px", "none"], say(b));
-      for (const r of f.replies) assert.deepEqual([r["border-top-left-radius"], r["border-bottom-left-radius"], r["box-shadow"], r["border-top-width"]], ["16px", "6px", "none", "0px"], say(r));
-      for (const c of f.choices.rows) assert.equal(c["border-top-left-radius"], "8px");
-      assert.equal(f.form["border-top-left-radius"], "16px", "the box keeps the composer's corner");
+      for (const b of f.prompts) assert.deepEqual([b["border-top-left-radius"], b["border-bottom-right-radius"], b["box-shadow"]], ["20px", "7.5px", "none"], say(b));   // the shared scale, a quarter rounder (0.52 look)
+      for (const r of f.replies) assert.deepEqual([r["border-top-left-radius"], r["border-bottom-left-radius"], r["box-shadow"], r["border-top-width"]], ["20px", "7.5px", "none", "0px"], say(r));
+      for (const c of f.choices.rows) assert.equal(c["border-top-left-radius"], "10px");
+      assert.equal(f.form["border-top-left-radius"], "22px", "the box keeps the composer's corner");
       // The 4 px unit: a bubble's padding, the gap inside a message, the space between turns.
       for (const b of [...f.prompts, ...f.replies]) assert.deepEqual([b["padding-top"], b["padding-left"]], ["8px", "12px"]);
       for (const m of f.messages) assert.deepEqual([m["row-gap"], m["margin-bottom"], m["margin-top"]], ["4px", "16px", m.user ? "24px" : "0px"], say(m));
@@ -98,10 +98,10 @@ for (const theme of ["dark", "light"]) for (const [where, width] of PLACES) {
       const f = await p.evaluate(facts), say = JSON.stringify;
       assert.ok(f.sideways <= 0 && f.pageSideways <= 0);
       // The Soft card keeps its look; it takes the card corner and the shared buttons: one filled, the rest outlines.
-      assert.equal(f.card["border-top-left-radius"], "12px");
+      assert.equal(f.card["border-top-left-radius"], "15px");
       assert.deepEqual(f.card.buttons.map((b) => b.text), ["Send once", "Always allow", "Reject"]);
       for (const b of f.card.buttons) {
-        assert.deepEqual([b.height, b["border-top-left-radius"]], [26, "8px"], say(b));
+        assert.deepEqual([b.height, b["border-top-left-radius"]], [26, "10px"], say(b));
         assert.ok(b.ink.ratio >= 4.5, `${b.text} is ${b.ink.ratio}:1`);
       }
       // Purple is for the one main button: the two beside it are drawn in the text's own ink.
@@ -127,7 +127,7 @@ for (const theme of ["dark", "light"]) for (const [where, width] of PLACES) {
       for (const r of f.replies) assert.ok(near(r.left, left) && r.right <= right + 1);
       assert.ok(near(f.doc.left, left) && f.doc.right <= right + 1, "the document card sits in the column");
       for (const c of f.chips) assert.ok(c.left >= left - 1 && c.right <= right + 1 && c.ink.ratio >= 4.5, `a chip is in the column and ${c.ink.ratio}:1`);
-      for (const r of f.replies) assert.deepEqual([r["border-top-left-radius"], r["box-shadow"], r["padding-top"], r["padding-left"]], ["16px", "none", "8px", "12px"]);
+      for (const r of f.replies) assert.deepEqual([r["border-top-left-radius"], r["box-shadow"], r["padding-top"], r["padding-left"]], ["20px", "none", "8px", "12px"]);
       for (const x of f.times) assert.ok(x.ink.ratio >= 4.5 && x["font-size"] === "11px", `a time is ${x.ink.ratio}:1 at ${x["font-size"]}`);
       for (const i of [f.doc.name, f.doc.meta, f.placeholder, ...f.replies.map((r) => r.ink), ...f.prompts.map((b) => b.ink)]) assert.ok(i.ratio >= 4.5, `${i.ratio}:1`);
       for (const c of [...f.controls, ...f.topbar]) assert.ok(c.ink.ratio >= 3, `${c.id} is ${c.ink.ratio}:1`);

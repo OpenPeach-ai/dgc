@@ -13,9 +13,11 @@
 // (each feed's count and newest id; the host keeps it over a reload, src/pipHomeDismiss.ts) and counts only what came
 // after. A Pip's dot reads "Read" on hover or focus, and clears its new messages and finished-run
 // news together (mark_pip_read, then mark_pip_news_seen). What waits for you still needs an answer.
-// The block folds (0.52): its heading is a button with a chevron, and everything under the head folds away. The head
-// stays, with its count, Dismiss all and Open Pips, so a folded block still says what is new. The choice is kept on this
-// computer by the host (options.collapsed, options.onCollapsed; src/pipHomeDismiss.ts), never in the page.
+// The block folds (0.52): its heading is a button with a chevron, and everything under the head folds away. Open, the
+// head is "Pips" with Dismiss all and Open Pips at its end; folded, their place is taken by the count ("2 need you",
+// and what is new in a soft pill), so a folded block still says what is new. A screen reader hears the count in the
+// heading either way. The choice is kept on this computer by the host (options.collapsed, options.onCollapsed;
+// src/pipHomeDismiss.ts), never in the page.
 import {pipDigest, pendingReviews} from './pipsModel.js';
 import {attentionPage, attentionNavigation, waitingOn, needWords} from './pipAttention.js';
 import {profile} from './pipProfile.js';
@@ -221,8 +223,17 @@ export function mountHomePips(options) {
   const body = node('div', 'home-pips-body'), inner = node('div', 'home-pips-body-in');
   toggle.type = 'button'; chevron.setAttribute('aria-hidden', 'true');
   body.id = `${root.id || 'home-pips'}-body`; toggle.setAttribute('aria-controls', body.id);
-  toggle.append(chevron, node('span', 'home-pips-title', need || unreadCount ? `Pips · ${needWords(need, unreadCount)}` : 'Pips'));
+  const words = node('span', 'home-pips-title', 'Pips');
+  // The heading's own words carry the count for a screen reader; the eye gets it at the head's end when folded.
+  if (need || unreadCount) words.append(node('span', 'home-pips-said', ` · ${needWords(need, unreadCount)}`));
+  toggle.append(chevron, words);
   title.append(toggle); head.append(title); body.append(inner);
+  if (need || unreadCount) {
+   const count = node('span', 'home-pips-count'); count.setAttribute('aria-hidden', 'true');
+   if (need) count.append(node('span', 'home-pips-count-need', needWords(need, 0)));
+   if (unreadCount) count.append(node('span', 'home-pips-count-new', needWords(0, unreadCount)));
+   head.append(count);
+  }
   const fold = () => {
    root.toggleAttribute('data-collapsed', collapsed); body.toggleAttribute('inert', collapsed);
    toggle.setAttribute('aria-expanded', String(!collapsed));
@@ -327,7 +338,7 @@ export function mountHomePips(options) {
   if (failure) { const said = node('p', 'home-pips-error', failure); said.setAttribute('role', 'status'); root.append(said); }
   // A dismissed (or read) row's place goes to the next one: the keyboard stays there, never on the page's top. Folded,
   // there is no row to take it: it stays in the head.
-  if (refocus !== null && collapsed) { (root.querySelector('.home-pips-dismiss-all') || toggle).focus(); refocus = null; }
+  if (refocus !== null && collapsed) { toggle.focus(); refocus = null; }
   else if (refocus !== null) {
    const items = root.querySelectorAll('.home-pip-item'), item = items[Math.min(refocus, items.length - 1)];
    (item?.querySelector('.home-pip-dismiss, .home-pip-read') || item?.querySelector('.home-pip-row') || all).focus();

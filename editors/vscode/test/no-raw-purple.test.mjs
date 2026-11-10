@@ -170,7 +170,7 @@ const PROBE = `(() => {
   const swatch = (value, prop = "color") => { const s = document.createElement("i"); s.style[prop] = value;
     at.parentNode.append(s); const c = getComputedStyle(s)[prop]; s.remove(); return c; };
   return { link: swatch(v("--link")), accentText: swatch(v("--accent-text")), accentFill: swatch(v("--accent-fill")),
-           lift: swatch(v("--lift-1"), "boxShadow"), primary: button && getComputedStyle(button).backgroundColor };
+           lift: swatch(v("--lift-1"), "boxShadow"), solid: swatch(v("--solid")), primary: button && getComputedStyle(button).backgroundColor };
 })()`;
 const rgb = (hex) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(", ")})`;
 
@@ -202,19 +202,21 @@ test("the tokens follow the editor's dark, light and high-contrast themes", asyn
   assert.equal(light.link, rgb("#6D49E8"));
   assert.equal(light.accentText, rgb("#6D49E8"), "accent text on a light ground takes the deeper step (it read 2.6:1)");
   assert.equal(dark.accentFill, rgb("#7654F6")); assert.equal(light.accentFill, rgb("#7654F6"));
-  assert.match(dark.lift, /rgba\(0, 0, 0, 0\.28\)/); assert.match(light.lift, /rgba\(0, 0, 0, 0\.14\)/, "light lifts at half strength");
+  // A menu's lift (0.52): a half-pixel ring of the text colour and one low shadow, the same on dark and light.
+  for (const lift of [dark.lift, light.lift]) { assert.match(lift, /0px 0px 0px 0\.5px/); assert.match(lift, /rgba\(0, 0, 0, 0\.12\) 0px 8px 16px -4px/); }
   const hc = await measure("vscode-high-contrast", "work"), hcLight = await measure("vscode-high-contrast-light", "work");
   assert.equal(hc.link, rgb("#A78BFA"), "high contrast dark keeps the pale purple, 7.6:1 on its black");
   assert.equal(hcLight.link, rgb("#6D49E8"), "on high-contrast light the pale purple read 2.6:1");
   assert.equal(hcLight.accentText, rgb("#6D49E8"));
 });
 
-test("a Pip's main button is the panel's purple in its own tab and inside Work's side bar", async (t) => {
+test("a Pip's main button is the panel's one filled pill, the text colour, in its own tab and inside Work's side bar", async (t) => {
   if (skipOrFail(t)) return;
   for (const theme of ["vscode-dark", "vscode-light"]) {
     for (const how of ["pip tab", "pip in work"]) {
       const got = await measure(theme, how);
-      assert.equal(got.primary, rgb("#7654F6"), `${how}, ${theme}: a Pip's main button is the panel's fill, not Pips' own #6D49E8`);
+      assert.equal(got.primary, got.solid, `${how}, ${theme}: a Pip's main button is the shared fill of the text colour (0.52), not a purple of Pips' own`);
+      assert.notEqual(got.primary, rgb("#7654F6"), "purple is Send's alone");
       assert.equal(got.link, rgb(theme === "vscode-light" ? "#6D49E8" : "#A78BFA"), `${how}, ${theme}: links follow the theme`);
     }
   }

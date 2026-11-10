@@ -93,29 +93,45 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 /* One 12px gutter (0.52): every block's words, boxes and icons start 12px in and end 12px from the other side. A row's
    hover wash reaches 8px past its words on both sides (--home-bleed), so the words keep the edge and the wash has room. */
 #sessions-host { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; --home-bleed:var(--sp-2);
-  /* Quiet marks and the search box's hint: the editor's text at 70%, which clears 4.5:1 on an input ground and 3:1 on
-     the side bar's in dark and light (the disabled tone these rode on was 2.1:1 on a light side bar). */
-  --home-quiet:color-mix(in srgb, var(--text) 70%, transparent);
-  /* A number's ink on its soft pill: the accent's text a step toward the editor's own, since the accent's text alone is
-     4.2:1 on a pill over a pointed-at row in a light theme. This is 4.8:1 there and 5.2:1 at rest; dark is 5.7:1 and 6.4:1. */
-  --home-count-ink:color-mix(in srgb, var(--accent-text) 82%, var(--text-strong));
   display:flex; flex-direction:column; gap:var(--sp-3); padding:var(--sp-2) var(--sp-3) var(--sp-5); }
 /* A long home scrolls; nothing in it gives up its height (the search box was squeezed from 28px to 18px once the list ran
    past the side bar's end). */
 #sessions-host > * { flex:none; }
 /* The heading, the status line and each row's words start on one edge: the gutter. */
-#sessions-host .sessions-head { display:flex; align-items:center; justify-content:space-between; gap:var(--sp-2); padding:0; }
-#sessions-host .sessions-head h2 { margin:0; font:var(--w-semi) var(--t-sm)/1.3 var(--sans); color:var(--text-strong); letter-spacing:.01em; }
-#sessions-host .sessions-new { flex:none; display:inline-flex; align-items:center; gap:var(--sp-1); min-height:var(--control-sm);
-  padding:0 var(--sp-3) 0 var(--sp-2); border:1px solid var(--accent-fill); border-radius:var(--r-md); background:var(--accent-fill);
-  color:#fff; font:var(--w-semi) var(--t-xs)/1 var(--sans); cursor:pointer; }
-#sessions-host .sessions-new:hover { background:var(--accent-hover); border-color:var(--accent-hover); }
+/* Each list's own heading names it for a screen reader; the eye has the Sessions heading above the tabs. */
+#sessions-host .sessions-head { display:none; }
+/* Two quiet headings, each a button with a chevron that folds what is under it (0.52): "Pips", then "Sessions". 12px
+   medium in the quiet tone, sentence case. At a heading's end: what it offers while open (Open Pips; "+" for a new
+   session or chat), and its count while folded. The chevron's glyph, not its box, stands on the 12px edge. */
+#sessions-host .home-fold-head { display:flex; align-items:center; justify-content:space-between; gap:var(--sp-2); min-height:var(--control); }
+#sessions-host .home-fold-h { margin:0 0 0 calc(-1 * var(--sp-2)); min-width:0; font:var(--w-med) var(--t-sm)/1.3 var(--sans); color:var(--muted); }
+#sessions-host .home-fold-toggle { display:inline-flex; align-items:center; gap:2px; max-width:100%; min-height:var(--control-sm); margin:0; padding:2px var(--sp-2) 2px var(--sp-1);
+  border:0; border-radius:var(--r-sm); background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; transition:background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out); }
+#sessions-host .home-fold-toggle:hover { background:var(--wash); color:var(--text); }
+#sessions-host .home-fold-chevron { flex:none; font-size:16px; transition:transform var(--dur-hover) var(--ease-out); }
+#sessions-host[data-sessions-collapsed] .home-fold-chevron { transform:rotate(-90deg); }
+#sessions-host .home-fold-end { flex:none; display:inline-flex; align-items:center; gap:var(--sp-2); }
+#sessions-host .home-fold-count { display:inline-flex; align-items:center; gap:6px; color:var(--home-quiet); font:var(--w-reg) var(--t-sm)/1 var(--sans); font-variant-numeric:tabular-nums; }
+#sessions-host .home-fold-count[hidden] { display:none; }
+#sessions-host .home-fold-dot { width:6px; height:6px; border-radius:50%; background:var(--link, var(--accent-text)); }
+/* The +'s glyph, not its box, stands on the right edge: 16px of glyph in a 22px box, so the box reaches 3px past it. */
+#sessions-host .home-fold-add { display:inline-flex; margin-right:-3px; }
+#sessions-host .sessions-new { flex:none; display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; padding:0; border:0; border-radius:var(--r-sm);
+  background:transparent; color:var(--home-quiet); cursor:pointer; transition:background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out); }
+#sessions-host .sessions-new[hidden] { display:none; }
+#sessions-host .sessions-new:hover { background:var(--wash); color:var(--text); }
+#sessions-host :is(.home-fold-toggle, .sessions-new):focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:-1px; }
+/* Everything under the Sessions heading folds as the Pips block's does: a grid row from its height to none in 150ms. */
+#sessions-host .home-fold-body { display:grid; grid-template-rows:1fr; transition:grid-template-rows var(--dur-menu) var(--ease-out), visibility 0s; }
+#sessions-host .home-fold-body-in { min-height:0; overflow:hidden; display:flex; flex-direction:column; gap:var(--sp-3); margin:0 calc(-1 * var(--home-bleed)); padding:0 var(--home-bleed); }
+#sessions-host[data-sessions-collapsed] .home-fold-body { grid-template-rows:0fr; visibility:hidden; transition:grid-template-rows var(--dur-menu) var(--ease-out), visibility 0s var(--dur-menu); }
+@media (forced-colors: active) { #sessions-host .home-fold-dot { forced-color-adjust:none; background:Highlight; } }
 #sessions-host .sessions-status { margin:0; padding:0; color:var(--muted); font:var(--w-reg) var(--t-sm)/1.5 var(--sans); }
 #sessions-host .sessions-status[data-kind="error"] { color:var(--err-text); }
 #sessions-host .sessions-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:var(--sp-1); }
 #sessions-host .session-row { display:flex; align-items:center; gap:var(--sp-2); min-width:0; margin:0 calc(-1 * var(--home-bleed)); padding:var(--sp-2) calc(var(--home-bleed) - 1px);
   border:1px solid transparent; border-radius:var(--r-md); cursor:default; user-select:none; }
-#sessions-host .session-row:hover { background:var(--surface2); }
+#sessions-host .session-row:hover { background:var(--row-hover); }
 #sessions-host .session-row:focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:-1px; }
 #sessions-host .session-main { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:2px; }
 /* A session is known by its first words: two lines of them, not one. */
@@ -130,8 +146,12 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
    right. Pointed at or focused, the age gives its place to Open in Editor and Delete; that place keeps one width, so the
    title never moves. A session open in a tab, or running with no window, has a dot before its age. */
 #sessions-host .home-work .sessions-list { gap:1px; }
-#sessions-host .home-work .session-row { min-height:var(--control); padding-top:var(--sp-1); padding-bottom:var(--sp-1); cursor:pointer; }
-#sessions-host .home-work .session-name { display:block; white-space:nowrap; text-overflow:ellipsis; }
+#sessions-host .home-work .session-row { box-sizing:border-box; min-height:var(--row); padding-top:0; padding-bottom:0; border-radius:var(--r-full); cursor:pointer; }
+#sessions-host .home-work .session-name { display:block; white-space:nowrap; text-overflow:ellipsis; font-weight:var(--w-reg); }
+/* A session with a card waiting for you says so where its age was, in the tone of something that needs you. */
+#sessions-host .session-age.session-waiting { display:inline-flex; align-items:center; gap:4px; color:var(--need-text); }
+#sessions-host .session-age.session-waiting .codicon { font-size:12px; }
+#sessions-host .session-row:is(:hover, :focus-within) .session-age.session-waiting { display:none; }
 #sessions-host .session-end { flex:none; display:inline-flex; align-items:center; gap:6px; }
 #sessions-host .session-age, #sessions-host .session-actions { flex:none; min-width:42px; justify-content:flex-end; }
 #sessions-host .session-age { display:inline-block; text-align:right; color:var(--muted); font:var(--w-reg) var(--t-xs)/1.4 var(--sans); font-variant-numeric:tabular-nums; white-space:nowrap; }
@@ -159,7 +179,7 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 #sessions-host .sessions-popover .sessions-all-search { flex:none; margin:0; }
 #sessions-host .sessions-popover .sessions-all-list { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; }
 #sessions-host .sessions-popover .session-row { margin:0; }
-#sessions-host .sessions-popover .session-row:hover { background:var(--wash); }
+#sessions-host .sessions-popover .session-row:hover { background:color-mix(in srgb, var(--text) 10%, transparent); }
 #sessions-host .sessions-popover .sessions-all-status { padding:var(--sp-2); }
 #sessions-host .sessions-popover .sessions-all-more-row { padding:0 var(--sp-2); }
 #sessions-host .sessions-popover .sessions-all-more-row[hidden] { display:none; }
@@ -221,9 +241,9 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 #sessions-host .chat-project { padding:0 6px; border-radius:var(--r-full); background:var(--surface2); color:var(--text); }
 #sessions-host .drop-here { background:color-mix(in srgb, var(--accent) 16%, transparent); outline:1px dashed var(--accent); outline-offset:-1px; }
 #sessions-host .home-library { display:flex; align-items:center; gap:var(--sp-2); width:calc(100% + 2 * var(--home-bleed)); margin:0 calc(-1 * var(--home-bleed)); padding:var(--sp-1) var(--home-bleed);
-  border:0; border-radius:var(--r-md); background:transparent; color:var(--text); font:var(--w-med) var(--t-sm)/1.35 var(--sans); text-align:left; cursor:pointer; }
+  border:0; border-radius:var(--r-full); background:transparent; color:var(--text); font:var(--w-reg) var(--t-sm)/1.35 var(--sans); text-align:left; cursor:pointer; min-height:var(--row); }
 #sessions-host .home-library[hidden] { display:none; }
-#sessions-host .home-library:hover { background:var(--surface2); }
+#sessions-host .home-library:hover { background:var(--row-hover); }
 #sessions-host .home-library:focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:-1px; }
 #sessions-host .home-library .codicon { color:var(--muted); }
 /* A project's colour: its folder's, here and on its page (chatdgc.css). Mid tones that hold on both themes. */
@@ -234,22 +254,30 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 .project-icon[data-color="gray"] { color:#9CA3AF; }
 body.vscode-light .project-icon[data-color="yellow"] { color:#CA8A04; } body.vscode-light .project-icon[data-color="teal"] { color:#0D9488; }
 body.vscode-light .project-icon[data-color="green"] { color:#16A34A; } body.vscode-light .project-icon[data-color="gray"] { color:#6B7280; }
+body.vscode-light .project-icon[data-color="orange"] { color:#EA580C; }   /* #F97316 is 2.6:1 on a light side bar */
 /* Your Pips, above your sessions: the ones that need you, each with its face waiting, or a quiet row of faces. A plain
    list on the side bar's own ground (0.52; it was a violet panel, five purple things before the first session), with a
    hairline under it. Purple here is a mark only: a number's soft pill and the dot for something new. */
-#sessions-host .home-pips { display:flex; flex-direction:column; padding:0 0 var(--sp-2); border-bottom:1px solid var(--hair); }
+#sessions-host .home-pips { display:flex; flex-direction:column; padding:0; }
 #sessions-host .home-pips[hidden] { display:none; }
 #sessions-host .home-pips-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:0 var(--sp-2); min-height:var(--control); }
-#sessions-host .home-pips-head h2 { margin:0 0 0 calc(-1 * var(--sp-2)); min-width:0; font:var(--w-semi) var(--t-sm)/1.3 var(--sans); color:var(--text-strong); }
+#sessions-host .home-pips-head h2 { margin:0 0 0 calc(-1 * var(--sp-2)); min-width:0; font:var(--w-med) var(--t-sm)/1.3 var(--sans); color:var(--muted); }
 /* The heading folds the block. Its chevron's glyph, not its box, stands on the 12px edge (the glyph has 4px of air in
    its 16px box), and the words follow it; the button's wash reaches a little past both. */
 #sessions-host .home-pips-toggle { display:inline-flex; align-items:center; gap:2px; max-width:100%; min-height:var(--control-sm); margin:0; padding:2px var(--sp-2) 2px var(--sp-1);
   border:0; border-radius:var(--r-sm); background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; transition:background-color var(--dur-hover) var(--ease-out); }
-#sessions-host .home-pips-toggle:hover { background:var(--wash); }
-#sessions-host .home-pips-chevron { flex:none; font-size:16px; color:var(--muted); transition:transform var(--dur-hover) var(--ease-out); }
+#sessions-host .home-pips-toggle:hover { background:var(--wash); color:var(--text); }
+#sessions-host .home-pips-chevron { flex:none; font-size:16px; color:inherit; transition:transform var(--dur-hover) var(--ease-out); }
 #sessions-host .home-pips-toggle:hover .home-pips-chevron { color:var(--text); }
 #sessions-host .home-pips[data-collapsed] .home-pips-chevron { transform:rotate(-90deg); }
 #sessions-host .home-pips-title { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* The count: in the heading's own words for a screen reader, and at the head's end for the eye while the block is folded
+   ("2 need you", then what is new in a soft pill). Open, that end holds Dismiss all and Open Pips. */
+#sessions-host .home-pips-said { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+#sessions-host .home-pips-count { display:none; flex:none; align-items:center; gap:var(--sp-2); margin-left:auto; color:var(--home-quiet); font:var(--w-reg) var(--t-sm)/1 var(--sans); font-variant-numeric:tabular-nums; white-space:nowrap; }
+#sessions-host .home-pips-count-new { display:inline-flex; align-items:center; height:18px; padding:0 7px; border-radius:var(--r-full); background:var(--accent-soft); color:var(--home-count-ink); font:var(--w-med) var(--t-xs)/1 var(--sans); }
+#sessions-host .home-pips[data-collapsed] .home-pips-count { display:inline-flex; }
+#sessions-host .home-pips[data-collapsed] .home-pips-actions { display:none; }
 /* Dismiss all and Open Pips: quiet text, one tone, firmer when pointed at. */
 #sessions-host .home-pips-actions { display:inline-flex; align-items:center; flex:none; margin:0 calc(-1 * var(--sp-1)) 0 auto; }
 #sessions-host :is(.home-pips-open, .home-pips-dismiss-all) { border:0; background:transparent; color:var(--muted); font:var(--w-reg) var(--t-sm)/1 var(--sans);
@@ -260,7 +288,6 @@ body.vscode-light .project-icon[data-color="green"] { color:#16A34A; } body.vsco
    takes a click or the keyboard (the page marks it inert too). Reduced motion folds at once. */
 #sessions-host .home-pips-body { display:grid; grid-template-rows:1fr; transition:grid-template-rows var(--dur-menu) var(--ease-out), visibility 0s; }
 #sessions-host .home-pips-body-in { min-height:0; overflow:hidden; display:flex; flex-direction:column; gap:var(--sp-1); margin:0 calc(-1 * var(--home-bleed)); padding:0 var(--home-bleed); }
-#sessions-host .home-pips[data-collapsed] { padding-bottom:var(--sp-1); }
 #sessions-host .home-pips[data-collapsed] .home-pips-body { grid-template-rows:0fr; visibility:hidden; transition:grid-template-rows var(--dur-menu) var(--ease-out), visibility 0s var(--dur-menu); }
 #sessions-host .home-pips-list { list-style:none; margin:0; padding:var(--sp-1) 0 0; display:flex; flex-direction:column; gap:2px; }
 #sessions-host .home-pips-unread { margin-top:var(--sp-1); }
@@ -268,9 +295,9 @@ body.vscode-light .project-icon[data-color="green"] { color:#16A34A; } body.vsco
 #sessions-host .home-pips-unread .home-pip-copy small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 /* A row and, for news, its dismiss beside it (never over the name): the ✕ keeps its room and shows on
    hover or focus; it is always in the tab order. The face stands on the edge and the row's wash reaches past it. */
-#sessions-host .home-pip-item { position:relative; display:flex; align-items:center; gap:2px; min-width:0; margin:0 calc(-1 * var(--home-bleed)); padding:0 var(--sp-1); border-radius:var(--r-md);
+#sessions-host .home-pip-item { position:relative; display:flex; align-items:center; gap:2px; min-width:0; margin:0 calc(-1 * var(--home-bleed)); padding:0 var(--sp-1); border-radius:var(--r-lg);
   transition:background-color var(--dur-hover) var(--ease-out); }
-#sessions-host .home-pip-item:hover { background:var(--wash); }
+#sessions-host .home-pip-item:hover { background:var(--row-hover); }
 #sessions-host .home-pip-row { flex:1 1 auto; min-width:0; display:flex; align-items:center; gap:var(--sp-2); padding:var(--sp-1); border:0; border-radius:var(--r-sm);
   background:transparent; color:inherit; text-align:left; cursor:pointer; }
 #sessions-host .home-pip-dismiss { flex:none; width:24px; height:24px; margin-right:2px; display:inline-flex; align-items:center; justify-content:center;
@@ -547,25 +574,8 @@ body.vscode-light .agent-mark[data-mark="6"] { --mark: #5A9E28; }
    reasoning draws nothing.) */
 .msg.dgc > .role + .msg.user,
 body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { margin-top: var(--sp-2); }
-.user .bubble { max-width: 92%; background: var(--prompt-fill); border: var(--prompt-border); box-shadow: var(--prompt-rail); border-radius: var(--r-2xl); padding: var(--sp-2) var(--sp-3); white-space: normal; color: var(--text); }
-/* Static, soft grain on sent prompts. The overlay cannot intercept selection or fold controls. */
-.user .bubble {
-  position: relative;
-  background-image: radial-gradient(130% 110% at 14% 0%, var(--bubble-grain), transparent 70%);
-}
-.user .bubble::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  z-index: 1;
-  opacity: .19;
-  mix-blend-mode: soft-light;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.72' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='96' height='96' filter='url(%23n)' opacity='.62'/%3E%3C/svg%3E");
-}
-body:is(.vscode-high-contrast, .vscode-high-contrast-light) .user .bubble::before { content: none; }
-@media (forced-colors: active) { .user .bubble::before { content: none; } }
+/* A sent prompt: a quiet raised grey, flat (0.52; it was a purple tint under a soft light and a grain). */
+.user .bubble { position: relative; max-width: 92%; background: var(--bubble); border: 0; border-radius: var(--r-2xl); padding: var(--sp-2) var(--sp-3); white-space: normal; color: var(--text); }
 /* A prompt reads at the answer's size and spacing: it inherited the page's tight default line height. */
 /* The question, inside the answer's own bubble: the card that asked it is removed as soon as the
    answer lands, so without this the transcript shows an answer to nothing. */
@@ -602,14 +612,6 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .user .bubble::befor
   border: 1px solid var(--border); border-radius: var(--r-md); background: var(--vscode-editorWidget-background, var(--surface));
   color: var(--text); font: var(--w-reg) var(--t-sm)/1.45 var(--mono); white-space: pre-wrap; word-break: break-word; }
 .goal-prompt .bubble { box-shadow: inset 2px 0 0 var(--border-strong); }
-:root, body {
-  --prompt-fill: color-mix(in srgb, var(--accent) 12%, var(--surface));
-  --prompt-border: 0;
-  --prompt-rail: none;
-}
-body.vscode-light, body.vscode-high-contrast-light {
-  --prompt-fill: color-mix(in srgb, var(--accent) 10%, var(--surface));
-}
 .text { white-space: normal; overflow-wrap: anywhere; font-size: var(--t-chat); line-height: 1.62; color: var(--text); font-family: var(--sans); }
 .text > :first-child, .surface-markdown > :first-child { margin-top: 0; }
 .text > :last-child, .surface-markdown > :last-child { margin-bottom: 0; }
@@ -976,8 +978,8 @@ body.vscode-light, body.vscode-high-contrast-light {
     background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent;
     animation: dgc-activity-shimmer 4s linear .6s infinite;
   }
+  /* Purple is the live verb's and an open step's own verb; a folded group's label shimmers in the text colour. */
   .tg-live[data-state="running"] .tg-live-verb,
-  .tool-group.running > summary .tg-label-text,
   .tool-group[open] .tool[data-status="running"] .verb {
     --shimmer-base: var(--accent-text);
     --shimmer-peak: color-mix(in srgb, var(--accent-text) 35%, var(--text-strong));
@@ -1243,10 +1245,10 @@ body.vscode-light .approval-dock > .card { box-shadow: 0 -8px 20px -14px rgba(0,
   border: 1px solid var(--border-strong); border-radius: var(--r-sm); padding: var(--sp-1) var(--sp-2); }
 .card .mcp-field select[multiple] { min-height: 82px; }
 button.act { min-height: var(--control); display: inline-flex; align-items: center; justify-content: center; font: var(--w-med) var(--t-sm)/1 var(--sans); cursor: pointer; border: 1px solid var(--border-strong); border-radius: var(--r-md); padding: 0 var(--sp-3); background: var(--surface2); color: var(--text); text-align: left; white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
-/* recommended = accent bar + soft tint, NOT a solid-purple fill (that was white-on-#7C5CFF ≈ 4.3:1, unreadable) */
-button.act.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; font-weight: var(--w-semi); }
-button.act.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
-button.act:hover { border-color: var(--accent); }
+/* The one main button on a card: a fill of the text colour (0.52; purple is Send's alone). */
+button.act.primary { background: var(--solid); border-color: var(--solid); color: var(--on-solid); font-weight: var(--w-med); }
+button.act.primary:hover { background: var(--solid-hover); border-color: var(--solid-hover); }
+button.act:hover { border-color: var(--text); }
 .card.resolved { box-shadow: none; border-color: var(--border-strong); }
 /* The question fades once it is settled; the line saying how it was settled does not. */
 .card.resolved > :not(.decision) { opacity: .5; }
@@ -1476,7 +1478,7 @@ body.vscode-light .rail-pop { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
 #attachments .chip:not(.dgc-att) .x { cursor: pointer; border: 0; padding: 0 0; background: transparent; color: var(--faint); line-height: 1; flex: 0 0 auto; }
 #attachments .chip:not(.dgc-att) .x:hover { color: var(--err-text); }
 
-#cbox { position: relative; z-index: 2; background: var(--surface2); border: 1px solid var(--border-strong); border-radius: var(--r-2xl); display: flex; flex-direction: column; box-shadow: 0 7px 24px rgba(0,0,0,.18); }
+#cbox { position: relative; z-index: 2; background: var(--box); border: 1px solid var(--border-strong); border-radius: var(--r-box); display: flex; flex-direction: column; box-shadow: var(--lift-box); }
 #cbox:focus-within { border-color: var(--border-strong); }
 /* Auto mode is announced by the control that NAMES it, not by a ring around the box you look at
    all day. The accent at high visual weight on a 700px border was the same complaint as the link
@@ -1653,8 +1655,8 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
    overflowed, its negative margin no longer took back its height, and after Latest the view stopped
    ~15px short of the end. Its height is its own. */
 #to-latest { flex: none; }
-#to-latest:hover { border-color: var(--accent); color: var(--text-strong); }
-#to-latest.unread { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; }
+#to-latest:hover { border-color: var(--text); color: var(--text-strong); }
+#to-latest.unread { background: var(--solid); border-color: var(--solid); color: var(--on-solid); }
 #to-latest .codicon { font-size: var(--t-sm); }
 
 /* One hover label for the whole panel: the panel's own surface and type, not the operating
@@ -1952,8 +1954,8 @@ pre.code .copy.done, .md-table-wrap .copy.done, blockquote > .copy.done { opacit
 :is(.artifact, .card) .abtns { display: flex; gap: var(--sp-2); }
 :is(.artifact, .card) .abtn:not(.dgc-doc-open) { cursor: pointer; font: var(--w-semi) var(--t-sm)/1 var(--sans); border-radius: var(--r-sm); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border-strong); background: transparent; color: var(--text); }
 :is(.artifact, .card) .abtn:not(.dgc-doc-open):hover { border-color: var(--accent); }
-:is(.artifact, .card) .abtn.primary:not(.dgc-doc-open) { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; }
-:is(.artifact, .card) .abtn.primary:not(.dgc-doc-open):hover { background: var(--accent-hover); }
+:is(.artifact, .card) .abtn.primary:not(.dgc-doc-open) { background: var(--solid); border-color: var(--solid); color: var(--on-solid); }
+:is(.artifact, .card) .abtn.primary:not(.dgc-doc-open):hover { background: var(--solid-hover); border-color: var(--solid-hover); }
 :is(.artifact, .card) .abtn:not(.dgc-doc-open):disabled { cursor: default; background: var(--surface2); border-color: var(--border); color: var(--faint); opacity: 1; }
 .artifact-list-row.stopping { opacity: .72; }
 /* An artifact a Work turn made or changed (artifact_changed): its title, what it is and its version, Open and Export. */
@@ -2150,7 +2152,7 @@ textarea[data-held="1"], input[data-held="1"]:not([type="radio"]):not([type="che
 .user .bubble[data-fold="folded"]:has(> .prompt-atts) > .prompt-text { max-height: 1.62em; -webkit-mask-image: none; mask-image: none; }
 .user .bubble[data-fold="folded"]:has(> .prompt-atts)::after { content: ""; position: absolute; left: 0; right: 0;
   bottom: calc(var(--sp-2) + 26px); height: calc(1.62 * var(--t-chat)); pointer-events: none;
-  background: linear-gradient(transparent, var(--prompt-fill)); }
+  background: linear-gradient(transparent, var(--bubble)); }
 .prompt-fold { display: inline-flex; align-items: center; gap: var(--sp-1); min-height: 24px; padding: 0 var(--sp-2) 0 var(--sp-3);
   border: 1px solid var(--border-strong); border-radius: var(--r-full); background: var(--surface2); color: var(--text);
   box-shadow: var(--shadow-1); font: var(--w-med) var(--t-xs)/1 var(--sans); white-space: nowrap; cursor: pointer; user-select: none; }
@@ -2693,8 +2695,8 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
 #image-viewer .iv-btn:hover:not(:disabled) { background: var(--surface2); color: var(--text-strong); }
 #image-viewer .iv-btn:disabled { color: var(--faint); cursor: default; }
 #image-viewer .iv-btn:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
-#image-viewer .iv-btn.iv-stop { margin-left: var(--sp-1); background: var(--accent-fill); color: #fff; }
-#image-viewer .iv-btn.iv-stop:hover { background: var(--accent-hover); color: #fff; }
+#image-viewer .iv-btn.iv-stop { margin-left: var(--sp-1); background: var(--solid); color: var(--on-solid); }
+#image-viewer .iv-btn.iv-stop:hover { background: var(--solid-hover); color: var(--on-solid); }
 #image-viewer .iv-btn.iv-stop:focus-visible { outline-offset: 1px; }
 #image-viewer .iv-notice { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3);
   border-color: var(--border-strong); color: var(--text-strong); font: var(--w-med) var(--t-sm)/1.45 var(--sans); }
@@ -2928,8 +2930,8 @@ body.ask-docked #tasks-panel { display: none; }
 .ask-act { flex: none; min-height: var(--control); padding: 0 var(--sp-3); border: 1px solid var(--border-strong); border-radius: var(--r-full);
   background: transparent; color: var(--text); font: var(--w-med) var(--t-sm)/1 var(--sans); cursor: pointer; white-space: nowrap; }
 .ask-act:hover:not(:disabled) { border-color: var(--text); }
-.ask-act.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; }
-.ask-act.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.ask-act.primary { background: var(--solid); border-color: var(--solid); color: var(--on-solid); }
+.ask-act.primary:hover:not(:disabled) { background: var(--solid-hover); border-color: var(--solid-hover); }
 /* Skip beside Next/Submit when the question already has a pick or words: quieter, still explicit. */
 .ask-skip { flex: none; min-height: var(--control); padding: 0 var(--sp-2); border: 0; border-radius: var(--r-full); background: transparent;
   color: var(--muted); font: var(--w-med) var(--t-sm)/1 var(--sans); cursor: pointer; white-space: nowrap; }
@@ -3087,9 +3089,10 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 .open-ask-collapse:hover { color:var(--text); }
 
 /* Thousands of sessions: the search box, the words a search found, Load more. */
-.sessions-search { width: 100%; height: 28px; margin: 0 0 var(--sp-2); border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--surface2); color: var(--text-strong); padding: 0 var(--sp-2); font: inherit; font-size: var(--t-sm); }
-.sessions-search:focus { outline: none; border-color: var(--accent); }
-.sessions-search::placeholder { color: var(--home-quiet, var(--muted)); opacity: 1; }
+/* A field's wash with no line round it; focused, the editor's own focus line. */
+.sessions-search { box-sizing: border-box; width: 100%; height: var(--row); margin: 0 0 var(--sp-2); border: 1px solid transparent; border-radius: var(--r-lg); background: var(--field); color: var(--text-strong); padding: 0 10px; font: inherit; font-size: var(--t-sm); }
+.sessions-search:focus { outline: none; border-color: var(--vscode-focusBorder, var(--text)); }
+.sessions-search::placeholder { color: var(--muted); opacity: 1; }
 .sessions-search[hidden], .sessions-more[hidden] { display: none; }
 .session-match { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--muted); font-size: var(--t-xs); line-height: 1.45; }
 .sessions-more { margin: var(--sp-2) 0; padding: 0; border: 0; background: none; color: var(--link); font: inherit; font-size: var(--t-sm); cursor: pointer; }
@@ -3489,7 +3492,7 @@ button.mod-status-item:hover { background: var(--surface2); }
 .mod-button { min-height: 24px; padding: 0 var(--sp-2); border: 1px solid var(--border-strong); border-radius: var(--r-sm);
   background: var(--surface2); color: var(--text); font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; }
 .mod-button:hover:not(:disabled) { border-color: var(--accent); }
-.mod-button[data-tone="accent"] { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; }
+.mod-button[data-tone="accent"] { background: var(--solid); border-color: var(--solid); color: var(--on-solid); }
 .mod-button[data-tone="bad"] { color: var(--err-text); }
 .mod-button:disabled { opacity: .6; cursor: default; }
 .mod-input, .mod-select { min-height: 24px; max-width: 100%; padding: 0 var(--sp-2); border: 1px solid var(--border-strong);

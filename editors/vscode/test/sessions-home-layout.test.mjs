@@ -191,7 +191,8 @@ for (const [width, theme] of [[380, "dark-modern"], [260, "dark-modern"], [380, 
             .filter((n) => { const r = n.getBoundingClientRect(); return r.right > view.right + 0.5 || r.left < view.left - 0.5; }).length,
           clipped: [...document.querySelectorAll(".session-age")].filter((n) => n.scrollWidth > n.clientWidth + 1).length,
           nameLines: rows.map((row) => { const n = row.querySelector(".session-name"); return Math.round(n.getBoundingClientRect().height / parseFloat(getComputedStyle(n).lineHeight)); }),
-          head: Math.round(document.getElementById("sessions-title").getBoundingClientRect().left),
+          // The Sessions heading (0.52) starts with its chevron, whose glyph, with 4px of air in its box, stands on the edge.
+          head: Math.round(document.querySelector("#sessions-fold .home-fold-chevron").getBoundingClientRect().left + 4),
           text: Math.round(rows[0].querySelector(".session-name").getBoundingClientRect().left),
         };
       });
@@ -199,7 +200,7 @@ for (const [width, theme] of [[380, "dark-modern"], [260, "dark-modern"], [380, 
       assert.equal(m.outside, 0, "every control inside the side bar");
       assert.equal(m.clipped, 0, "no age cut off");
       assert.ok(m.nameLines.length === 3 && m.nameLines.every((n) => n === 1), `a name takes one line, cut with an ellipsis (${m.nameLines})`);
-      assert.ok(Math.abs(m.head - m.text) <= 1, `the heading and the rows' words start on one edge (${m.head} vs ${m.text})`);
+      assert.ok(Math.abs(m.head - m.text) <= 1, `the heading's chevron and the rows' words start on one edge (${m.head} vs ${m.text})`);
       await s.page.hover(".session-row:nth-child(1)");
       const buttons = await s.page.evaluate(() => { const view = document.getElementById("sessions-host").getBoundingClientRect();
         return [...document.querySelectorAll(".session-row:nth-child(1) :is(.session-open, .session-delete)")].map((b) => { const r = b.getBoundingClientRect(); return b.checkVisibility() && r.left >= view.left && r.right <= view.right; }); });

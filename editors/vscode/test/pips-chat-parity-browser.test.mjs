@@ -105,14 +105,17 @@ test("a Project Pip’s chat paints as a Personal Pip’s, in the same page", as
   assert.equal(project.shell, "simple", "a Project Pip has the Personal Pips page too (24 Oct)");
   const { shell: _a, ...personalChat } = personal, { shell: _b, ...projectChat } = project;
   assert.deepEqual(projectChat, personalChat, "the same chat");
-  assert.equal(project.you.color, "rgb(255, 255, 255)", "your message: white on the accent");
-  assert.equal(project.you.backgroundColor, "rgb(118, 84, 246)", "the panel's purple (#7654F6); Pips' own #6D49E8 is gone (0.52)");
-  assert.equal(project.reply.borderTopLeftRadius, "16px", "its reply: short rounded bubbles, on the shared corner scale (the design pass, 0.52; it was 17)");
+  // The 0.52 look: your message is the shared grey bubble (a mix of the text colour over the editor's ground) in the
+  // page's own text colour. It was white on the panel's purple.
+  assert.equal(project.you.color, "rgb(215, 215, 218)", "your message: the page's own text colour");
+  assert.match(project.you.backgroundColor, /^color\(srgb 0\.\d+ 0\.\d+ 0\.\d+\)$/, "on the shared grey, solid");
+  { const [r, g, b] = project.you.backgroundColor.match(/0\.\d+/g).map(Number); assert.ok(Math.max(r, g, b) - Math.min(r, g, b) < 0.02, `a grey, not a purple: ${project.you.backgroundColor}`); }
+  assert.equal(project.reply.borderTopLeftRadius, "20px", "its reply: short rounded bubbles, on the shared corner scale (20 in the 0.52 look; it was 17, then 16)");
   assert.equal(project.parts, 2, "a bubble for each short message the Pip parted with ---");
   assert.equal(project.buttons, 0, "the buttons wait for the pointer");
   assert.equal(project.time, 1, "the time shows without it");
   assert.equal(project.whatItDid.display, "none", "What it did is one click away, in the reply's details");
-  assert.equal(project.box.borderTopLeftRadius, "16px", "the box's corner is the shared composer's (it was 19)");
+  assert.equal(project.box.borderTopLeftRadius, "22px", "the box's corner is the shared prompt box's (22 in the 0.52 look; it was 19, then 16)");
   assert.equal(project.hint.display, "none");
 });
 

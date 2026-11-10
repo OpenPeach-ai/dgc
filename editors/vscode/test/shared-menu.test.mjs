@@ -171,8 +171,8 @@ test("Work's + menu: three groups with headings, key caps for the keys, plain wo
     assert.doesNotMatch(menu.hintFont, /mono/i, "hints in the UI font, not monospace");
     assert.equal(menu.focused, "files", "it opens on its first row");
     const look = await s.page.evaluate(LOOK, ["#addmenu", ".dgc-menu-row"]);
-    assert.equal(look.rowHeight, 30); assert.equal(look.rowRadius, "8px"); assert.equal(look.menuRadius, "12px");
-    assert.match(look.shadow, /rgba\(0, 0, 0, 0\.28\)/, "the soft lift, not the old black hole of shadow");
+    assert.equal(look.rowHeight, 30); assert.equal(look.rowRadius, "10px"); assert.equal(look.menuRadius, "15px");   // the shared corner scale, a quarter rounder (0.52 look)
+    assert.match(look.shadow, /0px 0px 0px 0\.5px, rgba\(0, 0, 0, 0\.12\) 0px 8px 16px -4px/, "the 0.52 lift: a half-pixel ring and one low shadow, not the old black hole of shadow");
     await s.page.keyboard.press("ArrowDown");
     assert.equal(await s.page.evaluate(() => document.activeElement.dataset.add), "skill", "Down moves (it answered no arrows before)");
     await s.page.keyboard.press("End");

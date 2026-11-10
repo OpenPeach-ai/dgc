@@ -1,12 +1,12 @@
 /* One menu for every "+" and picker: Work's "+", mode, output, model, context and cache menus, ChatDGC's model, output
    and folder menus, and a Pip's model, context, routines and page menus. Each keeps its own place and size; this is how
-   all of them look. A soft lift (not a hole of shadow), a 12 px corner, 30 px rows on an 8 px corner, small group
+   all of them look. The raised grey with a half-pixel ring and one low shadow, a 15 px corner, 30 px rows on a 10 px corner, small group
    headings, quiet hints in the UI font and small key caps for real keys, and a 150 ms open from just below.
    The selected row is a light wash with only its icon in the accent. media/shared/menu.js answers the same keys in all
    of them. Tokens from media/shared/tokens.css. */
 .dgc-menu {
-  padding: 6px; border: 1px solid var(--hair-strong); border-radius: var(--r-menu);
-  background: var(--vscode-editorWidget-background, var(--surface)); color: var(--text);
+  padding: 6px; border: 1px solid var(--hair); border-radius: var(--r-menu);
+  background: var(--surface2); color: var(--text);
   box-shadow: var(--lift-1);
 }
 .dgc-menu .dgc-menu-head {

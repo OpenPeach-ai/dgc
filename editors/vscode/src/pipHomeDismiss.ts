@@ -68,6 +68,22 @@ export function pipHomeCollapsedAttr(context: vscode.ExtensionContext): string {
   return context?.globalState?.get?.<boolean>(COLLAPSED) === true ? ' data-pip-home-collapsed="1"' : "";
 }
 
+// The home's Sessions section folded under its heading (0.52): the same kind of flag, kept the same way.
+const SESSIONS_COLLAPSED = "dgc.sessionsHomeCollapsed";
+
+/** The home page's attribute when Sessions is folded; nothing when it is open. */
+export function sessionsHomeCollapsedAttr(context: vscode.ExtensionContext): string {
+  return context?.globalState?.get?.<boolean>(SESSIONS_COLLAPSED) === true ? ' data-sessions-home-collapsed="1"' : "";
+}
+
+/** The home's {type: "sessionsHomeCollapsed", collapsed}: kept when true, forgotten otherwise. False when it isn't one. */
+export function rememberSessionsHomeCollapsed(context: vscode.ExtensionContext, message: any): boolean {
+  if (!message || message.type !== "sessionsHomeCollapsed") return false;
+  if (typeof context?.globalState?.update !== "function") return true;
+  void Promise.resolve(context.globalState.update(SESSIONS_COLLAPSED, message.collapsed === true ? true : undefined)).catch(() => { /* kept for this window still */ });
+  return true;
+}
+
 /** The home's {type: "pipHomeCollapsed", collapsed}: kept when true, forgotten otherwise. False when it isn't one. */
 export function rememberPipHomeCollapsed(context: vscode.ExtensionContext, message: any): boolean {
   if (!message || message.type !== "pipHomeCollapsed") return false;

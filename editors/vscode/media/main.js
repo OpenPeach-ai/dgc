@@ -688,10 +688,46 @@
     e.currentTarget.disabled = true; e.currentTarget.textContent = "Loading…";
     vscode.postMessage({ type: "sessionsMore" });
   });
+  // The Sessions section folds under its heading, as the Pips block does (0.52): the chevron turns, everything under the
+  // heading folds away, and the heading then says how many there are, with a dot when one of them needs you. The "+"
+  // stays. The host keeps the choice for this computer (src/pipHomeDismiss.ts) and stamps it on the page.
+  let sessionsFolded = document.documentElement.dataset.sessionsHomeCollapsed === "1";
+  function sessionsFoldCount() {
+    const count = $("sessions-fold-count");
+    if (!count) return;
+    const chat = chatsAvailable && homeTab === "chat", items = chat ? null : sessionItems;
+    count.replaceChildren();
+    count.hidden = !sessionsFolded || !items || !items.length;
+    if (count.hidden) return;
+    if (items.some(sessionNeedsYou)) count.append(el("span", "home-fold-dot"));
+    count.append(`${items.length}${sessionsMoreToLoad ? "+" : ""}`);
+  }
+  function foldSessions() {
+    const toggle = $("sessions-fold"), body = $("sessions-body");
+    if (!toggle || !body) return;
+    $("sessions-host").toggleAttribute("data-sessions-collapsed", sessionsFolded);
+    body.toggleAttribute("inert", sessionsFolded);
+    toggle.setAttribute("aria-expanded", String(!sessionsFolded));
+    toggle.title = sessionsFolded ? "Show your sessions here" : "Hide your sessions here. The count stays.";
+    if (sessionsFolded) closeAllSessions();
+    sessionsFoldCount();
+  }
+  $("sessions-fold")?.addEventListener("click", () => {
+    sessionsFolded = !sessionsFolded; foldSessions();
+    vscode.postMessage({ type: "sessionsHomeCollapsed", collapsed: sessionsFolded });
+  });
+  /** A session that needs you: it runs with no window to watch it in, or it waits for your okay. */
+  const sessionNeedsYou = (item) => !!item.windowless || item.waiting === true;
+  /** What the home lists: the sessions that need you first, then the newest, three or every one that needs you. */
+  function sessionsShown(items) {
+    const need = items.filter(sessionNeedsYou);
+    return [...need, ...items.filter((item) => !sessionNeedsYou(item))].slice(0, Math.max(SESSIONS_SHOWN, need.length));
+  }
   // Session names and previews are the user's own words: text nodes only, never markup.
-  // The home lists the three newest, each a plain row: its title at the left and its age at the right ("2h", "1w",
-  // "1mo"), then "View all (N)", which opens every session in a popover over the list with a search field (asked for
-  // 2026-11-10, the way Codex lists its chats). A search from the home's own box still lists everything it found.
+  // The home lists three, or every one that needs you (sessionsShown), each a plain row: its title at the left and its
+  // age at the right ("2h", "1w", "1mo"), then "View all (N)", which opens every session in a popover over the list with
+  // a search field (asked for 2026-11-10, the way Codex lists its chats). A search from the home's own box still lists
+  // everything it found.
   const SESSIONS_SHOWN = 3;
   let sessionItems = [], sessionsMoreToLoad = false, allSessions = null;
   /** How long ago, in a few characters. `when` is the host's "YYYY-MM-DD HH:MM"; anything else is shown as it is. */
@@ -735,6 +771,12 @@
     const count = Number(item.count) || 0;
     const age = el("span", "session-age"); age.textContent = sessionAge(item.when);
     age.title = [item.when, `${count} message${count === 1 ? "" : "s"}`].filter(Boolean).join(" · ");
+    // A session with a card waiting for you says so where its age was.
+    if (item.waiting === true) {
+      age.classList.add("session-waiting"); age.textContent = "";
+      const shield = el("span", "codicon codicon-shield"); shield.setAttribute("aria-hidden", "true");
+      age.append(shield, "wants your okay");
+    }
     const actions = el("span", "session-actions");
     const open = sessionButton("session-open", "go-to-file", open_);
     open.title = "Open in an editor tab";
@@ -782,12 +824,14 @@
     homeCount("work", query ? items.length : null, msg.more === true);
     status.textContent = msg.error ? String(msg.error)
       : items.length ? "" : query ? `No session mentions “${query}”.`
-      : "No sessions in this project yet. Start one with New session: it opens in an editor tab.";
+      : "No sessions in this project yet. Start one with + above: it opens in an editor tab.";
     if (msg.error) status.dataset.kind = "error"; else delete status.dataset.kind;
     status.hidden = !status.textContent;
-    fillSessions(list, query ? items : items.slice(0, SESSIONS_SHOWN));
+    const shown = query ? items : sessionsShown(items);
+    fillSessions(list, shown);
     const all = viewAllButton();
-    all.hidden = !!query || (items.length <= SESSIONS_SHOWN && !sessionsMoreToLoad);
+    all.hidden = !!query || (items.length <= shown.length && !sessionsMoreToLoad);
+    sessionsFoldCount();
     all.textContent = `View all (${items.length}${sessionsMoreToLoad ? "+" : ""})`;
     if (allSessions) { if (all.hidden) closeAllSessions(); else fillAllSessions(); }
   }
@@ -892,7 +936,7 @@
     const query = String(msg.query || "");
     homeCount("chat", query ? items.length : null, msg.more === true);
     status.textContent = msg.error ? String(msg.error) : items.length ? "" : query ? `No chat mentions “${query}”.`
-      : "No chats yet. Start one with New chat: it's the same in every folder.";
+      : "No chats yet. Start one with + above: it's the same in every folder.";
     if (msg.error) status.dataset.kind = "error"; else delete status.dataset.kind;
     status.hidden = !status.textContent;
     if (more) { more.hidden = msg.more !== true; more.disabled = false; more.textContent = "Show more"; }
@@ -1062,6 +1106,11 @@
     const tabbed = chatsAvailable;
     bar.hidden = !tabbed;
     $("sessions-host")?.classList.toggle("home-tabbed", tabbed);
+    // The "+" on the Sessions heading starts what the list under it holds: a chat on the Chat tab, a session otherwise.
+    const newChat = $("chats-new"), newSession = $("sessions-new"), onChat = tabbed && homeTab === "chat";
+    if (newChat) newChat.hidden = !onChat;
+    if (newSession) newSession.hidden = onChat;
+    sessionsFoldCount();
     for (const name of ["chat", "work"]) {
       const tab = $(`home-tab-${name}`), panel = panels[name], chosen = homeTab === name;
       tab.setAttribute("aria-selected", String(tabbed && chosen));
@@ -10614,6 +10663,7 @@ function permissionChoices(ev) {
     back.lastChild.textContent = "Sessions";
     back.title = "Back to Sessions"; back.setAttribute("aria-label", "Back to Sessions");
     $("sessions-new").onclick = () => vscode.postMessage({ type: "newSessionInEditor" });
+    foldSessions();
     // Your Pips, above your sessions: the ones that need you, or a quiet row of faces.
     if (window.DgcPips?.mountHomePips && document.documentElement.dataset.pipsDocumentId) {
       let dismissed = {};

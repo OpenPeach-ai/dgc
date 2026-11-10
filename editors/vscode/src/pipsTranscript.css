@@ -2,7 +2,7 @@
    the same 13px / 1.62 prose, and quiet 20px response controls. */
 .pip-message{display:flex;flex-direction:column;gap:4px;flex:none;margin:0 0 16px;font-size:13px;line-height:1.62;min-width:0;color:var(--vscode-foreground,#d7d7da)}
 .pip-message.user{align-items:flex-end;margin-top:8px;padding:0;border:0;background:transparent;border-radius:0}
-.pip-message.user .bubble{max-width:92%;background:var(--prompt-fill,color-mix(in srgb,var(--accent) 12%,var(--vscode-editor-background,#202021)));border:var(--prompt-border,0);box-shadow:var(--prompt-rail,none);border-radius:16px;padding:8px 12px;min-width:0}
+.pip-message.user .bubble{max-width:92%;background:var(--bubble,color-mix(in srgb,var(--vscode-foreground) 9%,var(--vscode-editor-background,#202021)));border:0;border-radius:16px;padding:8px 12px;min-width:0}
 .prompt-text{white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.62}
 .pip-message .answer{margin:0;padding:0;border:0;background:transparent;min-width:0}
 .message-body{font-size:13px;line-height:1.62;color:var(--vscode-foreground,#d7d7da)}

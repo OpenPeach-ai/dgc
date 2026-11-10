@@ -1,5 +1,5 @@
 @import "../media/pips/wordmark.css";
-:host,:root{color-scheme:light dark;font-family:var(--vscode-font-family,system-ui);font-size:var(--vscode-font-size,13px);color:var(--vscode-foreground);background:var(--vscode-editor-background);--line:var(--vscode-panel-border,#ffffff20);--muted:var(--vscode-descriptionForeground);--surface:var(--vscode-sideBar-background,var(--vscode-editor-background))}*{box-sizing:border-box}body,.pip-app-root{margin:0}.pip-app-root{container-type:inline-size;min-width:0;min-height:100%;font:13px var(--vscode-font-family,system-ui)}button,input,textarea,select{font:inherit;color:inherit}button{cursor:pointer;min-height:28px;border:1px solid transparent;border-radius:4px;padding:4px 10px;background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}button:hover{background:var(--vscode-button-secondaryHoverBackground)}button.primary{background:var(--vscode-button-background);color:var(--vscode-button-foreground)}button.primary:hover{background:var(--vscode-button-hoverBackground)}button.danger{border-color:var(--vscode-inputValidation-errorBorder,#bd6666)}button:disabled{opacity:.5;cursor:default}button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,summary:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:2px}input,textarea,select{width:100%;border:1px solid var(--vscode-input-border,var(--line));border-radius:3px;padding:6px 8px;background:var(--vscode-input-background);color:var(--vscode-input-foreground)}textarea{resize:vertical;min-height:84px}label{display:grid;gap:5px;margin:12px 0}h1{font-size:19px;font-weight:600;margin:0}h2{font-size:15px;font-weight:600;margin:0 0 10px}h3{font-size:13px;margin:0 0 8px}p{margin:7px 0;line-height:1.5}small,.muted{color:var(--muted);line-height:1.5}.mono,code,pre{font-family:var(--vscode-editor-font-family,monospace)}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.55;background:var(--vscode-textCodeBlock-background,var(--surface));padding:10px;border-radius:3px;margin:8px 0}h1,h2,h3,p,code,strong,span{overflow-wrap:anywhere}header{padding:16px 22px 12px;border-bottom:1px solid var(--line)}.heading,.actions,.row,.runner{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.heading{justify-content:space-between}.heading p{margin:4px 0 0}.runner{font-size:12px;gap:10px;padding-top:10px}.runner .actions{margin-left:auto}.badge{display:inline-block;font-size:11px;padding:2px 6px;border:1px solid var(--line);border-radius:3px;color:var(--muted)}.layout{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:calc(100vh - 110px)}aside{padding:16px 12px;background:var(--surface);border-right:1px solid var(--line)}.aside-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.aside-heading h2{margin:0}.job-list{display:grid;gap:4px}.job{width:100%;text-align:left;background:transparent;display:grid;gap:3px;padding:9px 10px;border-radius:4px}.job[aria-current=true]{background:var(--vscode-list-activeSelectionBackground);color:var(--vscode-list-activeSelectionForeground)}.job[aria-current=true] small{color:inherit}.job:hover{background:var(--vscode-list-hoverBackground)}.content{padding:20px 24px 48px;min-width:0;max-width:1080px;width:100%}.hero{display:flex;align-items:center;gap:14px;margin-bottom:18px}.avatar{width:calc(82px * var(--pip-character-scale,1));height:calc(78px * var(--pip-character-scale,1));flex:none}.avatar svg{width:100%;height:100%}.hero .copy{flex:1;min-width:0}.hero h2{margin:0 0 5px;font-size:17px}.tabs{display:flex;gap:16px;border-bottom:1px solid var(--line);margin:0 0 18px}.tabs button{background:transparent;border-radius:0;border:0;border-bottom:2px solid transparent;padding:7px 0}.tabs button[aria-pressed=true]{border-bottom-color:var(--vscode-focusBorder);color:var(--vscode-foreground)}.section{padding:14px 0;border-bottom:1px solid var(--line)}.section:first-child{padding-top:0}.section:last-child{border-bottom:0}.section-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:0 0 10px}.section-head h2{margin:0}.run-row{display:flex;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}.run-row>button{flex:1;text-align:left;background:transparent;display:flex;justify-content:space-between;gap:8px}.run-row>button[aria-current=true]{outline:1px solid var(--vscode-focusBorder)}.empty{padding:30px 0;max-width:500px}.empty .avatar{width:calc(122px * var(--pip-character-scale,1));height:calc(116px * var(--pip-character-scale,1));margin-bottom:10px}.notice{padding:9px 12px;margin:10px 0;border:1px solid var(--line);border-radius:4px;line-height:1.5}.error{color:var(--vscode-errorForeground);border-color:var(--vscode-inputValidation-errorBorder)}.success{color:var(--vscode-foreground)}.goal{white-space:pre-wrap;line-height:1.6;font-size:13px}.meta{display:grid;grid-template-columns:120px minmax(0,1fr);gap:7px 14px;font-size:12px;margin:12px 0}.meta dt{color:var(--muted)}.meta dd{margin:0;overflow-wrap:anywhere}.finding,.entry,.proposal,.version{padding:13px 0;border-bottom:1px solid var(--line)}.entry:last-child,.finding:last-child,.version:last-child{border:0}.finding .actions,.entry .actions,.proposal .actions{margin-top:9px}.finding h3{margin-top:8px}.context-form{margin-top:18px}.two-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}details{margin:10px 0}summary{cursor:pointer;line-height:1.5;color:var(--muted)}.form{max-width:650px}.form .actions{margin-top:14px}.overlay{position:fixed;inset:0;background:#0008;display:flex;align-items:center;justify-content:center;padding:20px;z-index:40}.dialog{width:100%;max-width:640px;max-height:85vh;overflow:auto;padding:22px;background:var(--vscode-editor-background);color:var(--vscode-foreground);border:1px solid var(--vscode-focusBorder);border-radius:6px;box-shadow:0 8px 36px #0005}.dialog .actions{justify-content:flex-end;margin-top:20px}.dialog h2{font-size:17px}.dialog .goal{padding:10px;background:var(--surface)}.status-dot{height:6px;width:6px;background:var(--vscode-descriptionForeground);border-radius:50%;display:inline-block;margin-right:5px}.status-dot.online{background:var(--vscode-testing-iconPassed,#80b78b)}.pip-app-root.motion-paused .dgc-plush *{animation-play-state:paused!important}@media(prefers-reduced-motion:reduce){.dgc-plush *{animation:none!important}}@container(max-width:650px){header{padding:14px 16px}.layout{grid-template-columns:minmax(0,1fr)}aside{border-right:0;border-bottom:1px solid var(--line);padding:12px 16px}.job-list{display:grid;grid-template-columns:minmax(0,1fr);overflow-x:hidden;overflow-y:auto;max-height:220px}.job{min-width:0;width:100%;max-width:100%;white-space:normal}.content{padding:18px 16px 40px}.runner .actions{margin-left:0}.two-fields{grid-template-columns:1fr;gap:0}.hero{gap:8px}.avatar{width:calc(64px * var(--pip-character-scale,1));height:calc(62px * var(--pip-character-scale,1))}.overlay{padding:12px}.dialog{padding:17px}.meta{grid-template-columns:95px minmax(0,1fr)}.tabs{gap:14px}}
+:host,:root{color-scheme:light dark;font-family:var(--vscode-font-family,system-ui);font-size:var(--vscode-font-size,13px);color:var(--vscode-foreground);background:var(--vscode-editor-background);--line:var(--hair,var(--vscode-panel-border,#ffffff20));--muted:var(--vscode-descriptionForeground);--surface:var(--vscode-sideBar-background,var(--vscode-editor-background))}*{box-sizing:border-box}body,.pip-app-root{margin:0}.pip-app-root{container-type:inline-size;min-width:0;min-height:100%;font:13px var(--vscode-font-family,system-ui)}button,input,textarea,select{font:inherit;color:inherit}button{cursor:pointer;min-height:28px;border:1px solid transparent;border-radius:4px;padding:4px 10px;background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}button:hover{background:var(--vscode-button-secondaryHoverBackground)}button.primary{background:var(--vscode-button-background);color:var(--vscode-button-foreground)}button.primary:hover{background:var(--vscode-button-hoverBackground)}button.danger{border-color:var(--vscode-inputValidation-errorBorder,#bd6666)}button:disabled{opacity:.5;cursor:default}button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,summary:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:2px}input,textarea,select{width:100%;border:1px solid var(--vscode-input-border,var(--line));border-radius:3px;padding:6px 8px;background:var(--vscode-input-background);color:var(--vscode-input-foreground)}textarea{resize:vertical;min-height:84px}label{display:grid;gap:5px;margin:12px 0}h1{font-size:19px;font-weight:600;margin:0}h2{font-size:15px;font-weight:600;margin:0 0 10px}h3{font-size:13px;margin:0 0 8px}p{margin:7px 0;line-height:1.5}small,.muted{color:var(--muted);line-height:1.5}.mono,code,pre{font-family:var(--vscode-editor-font-family,monospace)}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.55;background:var(--vscode-textCodeBlock-background,var(--surface));padding:10px;border-radius:3px;margin:8px 0}h1,h2,h3,p,code,strong,span{overflow-wrap:anywhere}header{padding:16px 22px 12px;border-bottom:1px solid var(--line)}.heading,.actions,.row,.runner{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.heading{justify-content:space-between}.heading p{margin:4px 0 0}.runner{font-size:12px;gap:10px;padding-top:10px}.runner .actions{margin-left:auto}.badge{display:inline-block;font-size:11px;padding:2px 6px;border:1px solid var(--line);border-radius:3px;color:var(--muted)}.layout{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:calc(100vh - 110px)}aside{padding:16px 12px;background:var(--surface);border-right:1px solid var(--line)}.aside-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.aside-heading h2{margin:0}.job-list{display:grid;gap:4px}.job{width:100%;text-align:left;background:transparent;display:grid;gap:3px;padding:9px 10px;border-radius:4px}.job[aria-current=true]{background:var(--vscode-list-activeSelectionBackground);color:var(--vscode-list-activeSelectionForeground)}.job[aria-current=true] small{color:inherit}.job:hover{background:var(--vscode-list-hoverBackground)}.content{padding:20px 24px 48px;min-width:0;max-width:1080px;width:100%}.hero{display:flex;align-items:center;gap:14px;margin-bottom:18px}.avatar{width:calc(82px * var(--pip-character-scale,1));height:calc(78px * var(--pip-character-scale,1));flex:none}.avatar svg{width:100%;height:100%}.hero .copy{flex:1;min-width:0}.hero h2{margin:0 0 5px;font-size:17px}.tabs{display:flex;gap:16px;border-bottom:1px solid var(--line);margin:0 0 18px}.tabs button{background:transparent;border-radius:0;border:0;border-bottom:2px solid transparent;padding:7px 0}.tabs button[aria-pressed=true]{border-bottom-color:var(--vscode-focusBorder);color:var(--vscode-foreground)}.section{padding:14px 0;border-bottom:1px solid var(--line)}.section:first-child{padding-top:0}.section:last-child{border-bottom:0}.section-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:0 0 10px}.section-head h2{margin:0}.run-row{display:flex;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}.run-row>button{flex:1;text-align:left;background:transparent;display:flex;justify-content:space-between;gap:8px}.run-row>button[aria-current=true]{outline:1px solid var(--vscode-focusBorder)}.empty{padding:30px 0;max-width:500px}.empty .avatar{width:calc(122px * var(--pip-character-scale,1));height:calc(116px * var(--pip-character-scale,1));margin-bottom:10px}.notice{padding:9px 12px;margin:10px 0;border:1px solid var(--line);border-radius:4px;line-height:1.5}.error{color:var(--vscode-errorForeground);border-color:var(--vscode-inputValidation-errorBorder)}.success{color:var(--vscode-foreground)}.goal{white-space:pre-wrap;line-height:1.6;font-size:13px}.meta{display:grid;grid-template-columns:120px minmax(0,1fr);gap:7px 14px;font-size:12px;margin:12px 0}.meta dt{color:var(--muted)}.meta dd{margin:0;overflow-wrap:anywhere}.finding,.entry,.proposal,.version{padding:13px 0;border-bottom:1px solid var(--line)}.entry:last-child,.finding:last-child,.version:last-child{border:0}.finding .actions,.entry .actions,.proposal .actions{margin-top:9px}.finding h3{margin-top:8px}.context-form{margin-top:18px}.two-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}details{margin:10px 0}summary{cursor:pointer;line-height:1.5;color:var(--muted)}.form{max-width:650px}.form .actions{margin-top:14px}.overlay{position:fixed;inset:0;background:#0008;display:flex;align-items:center;justify-content:center;padding:20px;z-index:40}.dialog{width:100%;max-width:640px;max-height:85vh;overflow:auto;padding:22px;background:var(--vscode-editor-background);color:var(--vscode-foreground);border:1px solid var(--vscode-focusBorder);border-radius:6px;box-shadow:0 8px 36px #0005}.dialog .actions{justify-content:flex-end;margin-top:20px}.dialog h2{font-size:17px}.dialog .goal{padding:10px;background:var(--surface)}.status-dot{height:6px;width:6px;background:var(--vscode-descriptionForeground);border-radius:50%;display:inline-block;margin-right:5px}.status-dot.online{background:var(--vscode-testing-iconPassed,#80b78b)}.pip-app-root.motion-paused .dgc-plush *{animation-play-state:paused!important}@media(prefers-reduced-motion:reduce){.dgc-plush *{animation:none!important}}@container(max-width:650px){header{padding:14px 16px}.layout{grid-template-columns:minmax(0,1fr)}aside{border-right:0;border-bottom:1px solid var(--line);padding:12px 16px}.job-list{display:grid;grid-template-columns:minmax(0,1fr);overflow-x:hidden;overflow-y:auto;max-height:220px}.job{min-width:0;width:100%;max-width:100%;white-space:normal}.content{padding:18px 16px 40px}.runner .actions{margin-left:0}.two-fields{grid-template-columns:1fr;gap:0}.hero{gap:8px}.avatar{width:calc(64px * var(--pip-character-scale,1));height:calc(62px * var(--pip-character-scale,1))}.overlay{padding:12px}.dialog{padding:17px}.meta{grid-template-columns:95px minmax(0,1fr)}.tabs{gap:14px}}
 /* The editor can be a very narrow split, independently of the workbench width. */
 @container(max-width:420px){.hero{display:grid;grid-template-columns:calc(52px * var(--pip-character-scale,1)) minmax(0,1fr);gap:10px}.hero .avatar{width:calc(52px * var(--pip-character-scale,1));height:calc(50px * var(--pip-character-scale,1))}.hero .copy{min-width:0}.hero>button{grid-column:1/-1;justify-self:start}.tabs{flex-wrap:wrap;gap:6px 14px}.run-row>button{flex-wrap:wrap}.meta{grid-template-columns:80px minmax(0,1fr);gap:7px 10px}}
 
@@ -113,10 +113,10 @@ body.vscode-light .pip-approval-dock>:is(.allow-card,.app-link),body.vscode-ligh
 /* Personal | Project: the Sessions home's Chat | Work (main.css .home-tabs), the same box, type, colours and keys, so the
    two pages read as one. main.css's tokens are spelled out with their fallbacks: this sheet also draws the Pips editor
    tab, which has no main.css, and its :host gives --surface and --muted other values. */
-.pips-tabs{display:flex;flex:none;gap:2px;padding:2px;margin:8px 12px 0;border:1px solid var(--vscode-panel-border,var(--vscode-widget-border,#303032));border-radius:8px;background:var(--vscode-editor-background,#202021)}
-.pips-tabs>.pips-tab{flex:1 1 0;display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:0;min-height:20px;margin:0;padding:0 8px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--vscode-descriptionForeground,#B2B2B6);font:600 12px/1 var(--vscode-font-family,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif);white-space:nowrap;cursor:pointer}
+.pips-tabs{display:flex;flex:none;gap:2px;padding:2px;margin:8px 12px 0;border:1px solid var(--border,var(--vscode-panel-border,#303032));border-radius:var(--r-md,10px);background:var(--vscode-editor-background,#202021)}
+.pips-tabs>.pips-tab{flex:1 1 0;display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:0;min-height:20px;margin:0;padding:0 8px;border:1px solid transparent;border-radius:var(--r-sm,7.5px);background:transparent;color:var(--vscode-descriptionForeground,#B2B2B6);font:600 12px/1 var(--vscode-font-family,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif);white-space:nowrap;cursor:pointer}
 .pips-tabs>.pips-tab:hover{background:transparent;color:var(--vscode-foreground,#D7D7DA)}
-.pips-tabs>.pips-tab[aria-selected=true]{border-color:var(--vscode-input-border,var(--vscode-widget-border,#3A3A3D));background:var(--vscode-input-background,var(--vscode-dropdown-background,#29292B));color:var(--vscode-editor-foreground,var(--vscode-foreground,#F5F5F6))}
+.pips-tabs>.pips-tab[aria-selected=true]{border-color:var(--border-strong,var(--vscode-input-border,#3A3A3D));background:var(--vscode-input-background,var(--vscode-dropdown-background,#29292B));color:var(--vscode-editor-foreground,var(--vscode-foreground,#F5F5F6))}
 .pips-tabs>.pips-tab:focus-visible{outline:1px solid var(--vscode-focusBorder,var(--accent));outline-offset:1px}
 @media(forced-colors:active){.pips-tabs{border-color:CanvasText;background:Canvas}.pips-tabs>.pips-tab{color:CanvasText}.pips-tabs>.pips-tab[aria-selected=true]{border-color:CanvasText;background:ButtonFace}}
 /* The project's bar is as tall as the Personal one above the tabs, so switching never moves them. */
@@ -141,15 +141,18 @@ body.vscode-light .pip-approval-dock>:is(.allow-card,.app-link),body.vscode-ligh
 .grant-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:6px 0;border-top:1px solid var(--line)}
 /* Polish pass (2026-10): one purple action per section, quiet outlines for the rest, room between things.
    Placed last on purpose: these equal-specificity rules replace the grey button look above. */
-:host,:root{--pip-accent:var(--accent-fill);--pip-accent-hover:var(--accent-hover);--pip-ink:color-mix(in srgb,var(--vscode-foreground) 35%,var(--accent));--pip-edge:color-mix(in srgb,var(--vscode-foreground) 20%,transparent);--pip-wash:color-mix(in srgb,var(--vscode-foreground) 7%,transparent);--pip-tint:color-mix(in srgb,var(--accent) 12%,transparent)}
+:host,:root{--pip-accent:var(--accent-fill);--pip-accent-hover:var(--accent-hover);--pip-ink:color-mix(in srgb,var(--vscode-foreground) 35%,var(--accent));--pip-edge:var(--hair-strong,color-mix(in srgb,var(--vscode-foreground) 12%,transparent));--pip-wash:color-mix(in srgb,var(--vscode-foreground) 7%,transparent);--pip-tint:var(--wash,color-mix(in srgb,var(--vscode-foreground) 6%,transparent))}
 /* Plain buttons only (no class, or the helper's empty one): special buttons such as list rows, tabs and
    the rail keep their own look. :is() takes [class=""]'s weight, so these beat the base `button` rule. */
 button:is(:not([class]),[class=""]):not([data-tab]),button.primary,button.quiet,button.link,button.danger{min-height:30px;border-radius:6px;padding:5px 12px;font-weight:500;transition:background-color .12s,border-color .12s}
 button:is(:not([class]),[class=""]):not([data-tab]),button.danger{background:transparent;color:var(--vscode-foreground);border:1px solid var(--pip-edge)}
 button:is(:not([class]),[class=""]):not([data-tab]):hover{background:var(--pip-wash);border-color:color-mix(in srgb,var(--vscode-foreground) 32%,transparent)}
-button.primary{background:var(--pip-accent);border-color:var(--pip-accent);color:#fff}
-button.primary:hover{background:var(--pip-accent-hover);border-color:var(--pip-accent-hover)}
-button.quiet,button.link{background:transparent;border:1px solid transparent;color:var(--pip-ink)}
+/* The 0.52 look: the one main button is a fill of the text colour, a quiet one is second-level text. Purple is left for
+   Send, links, the Pips wordmark and live marks (a dot for something new, a switch that is on). */
+button.primary{background:var(--solid);border-color:var(--solid);color:var(--on-solid)}
+button.primary:hover{background:var(--solid-hover);border-color:var(--solid-hover)}
+button.quiet{background:transparent;border:1px solid transparent;color:var(--text-2)}button.quiet:hover{color:var(--vscode-foreground)}
+button.link{background:transparent;border:1px solid transparent;color:var(--pip-ink)}
 button.quiet:hover,button.link:hover{background:var(--pip-wash);border-color:transparent}
 button.link{min-height:24px;padding:2px 6px;font-weight:400}
 button.danger{border-color:color-mix(in srgb,var(--vscode-errorForeground,#f14c4c) 60%,transparent);color:var(--vscode-errorForeground,#f14c4c)}
@@ -167,7 +170,7 @@ input,textarea,select{border-radius:6px;padding:7px 10px}
 .hero .muted{font-size:12px}
 .review-count{display:inline-block;margin-top:4px;padding:1px 8px;border-radius:999px;background:var(--pip-tint);color:var(--pip-ink);font-size:11px}
 /* What is waiting for the user: a card, with the two choices beside each change. */
-.waiting{margin:0 0 18px;padding:12px 14px;border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);border-radius:8px;background:var(--pip-tint)}
+.waiting{margin:0 0 18px;padding:12px 14px;border:1px solid var(--pip-edge);border-radius:var(--r-md,10px);background:var(--pip-tint)}
 .waiting h3{margin:0 0 6px;font-size:13px}
 .waiting-row{display:flex;align-items:center;justify-content:space-between;gap:8px 14px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--pip-edge)}
 .waiting-row:first-of-type{border-top:0;padding-top:2px}
@@ -206,12 +209,14 @@ details.advanced>.section:first-of-type{padding-top:12px}
 .runner-menu{z-index:30}
 .tabs button[aria-pressed=true]{background:transparent;border-bottom-color:var(--accent)}
 label>span{display:block}
-#new-pip{background:var(--pip-accent);border-color:var(--pip-accent);color:#fff}
-#new-pip:hover{background:var(--pip-accent-hover)}
+#new-pip{background:var(--solid);border-color:var(--solid);color:var(--on-solid)}
+#new-pip:hover{background:var(--solid-hover);border-color:var(--solid-hover)}
 aside>button:not(.job){margin:6px 6px 0 0}
 /* Simple Pips (API 43): Personal Pips as characters you chat with. Their chat (.chat-style) is every Pip's from 24 Oct:
    a Project Pip's chat looks and works the same, inside its own page. */
-:host,:root{--pip-bubble:color-mix(in srgb,var(--vscode-foreground) 8%,transparent)}
+/* Your message's grey and the prompt box's ground are mixed over the editor's ground here (the Pips page names the side
+   bar's ground --surface), so both are the same greys in a tab and in the side bar. */
+:host,:root{--pip-bubble:color-mix(in srgb,var(--vscode-foreground) 8%,transparent);--bubble:color-mix(in srgb,var(--vscode-foreground,#d7d7da) 9%,var(--vscode-editor-background,#1f1f1f));--box:color-mix(in srgb,var(--vscode-foreground,#d7d7da) 4%,var(--vscode-editor-background,#1f1f1f))}
 .simple-pips #app{display:flex;flex-direction:column;min-height:100%}
 .simple-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);flex:none}
 .simple-bar h1{font-size:15px;margin:0;flex:none;white-space:nowrap}
@@ -250,20 +255,22 @@ button.pill{border-radius:999px;padding:6px 16px}
 .pip-flow-review li{margin-bottom:10px}
 .pip-flow-review p{margin:3px 0 0;overflow-wrap:anywhere}
 @media(max-width:440px){.pip-flow-row{align-items:flex-start;flex-direction:column}.pip-flow-actions{align-self:flex-end}}
-.core-offer{display:grid;grid-template-columns:44px minmax(0,1fr) auto;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--pip-edge);border-radius:14px;margin:0 0 12px}
+.core-offer{display:grid;grid-template-columns:44px minmax(0,1fr) auto;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--pip-edge);border-radius:var(--r-xl,15px);margin:0 0 12px}
+/* Beside New Pip, Create is the second button: an outline. */
+.core-offer button.primary{background:transparent;border-color:var(--pip-edge);color:var(--vscode-foreground)}.core-offer button.primary:hover{background:var(--pip-wash);border-color:color-mix(in srgb,var(--vscode-foreground) 30%,transparent)}
 .core-offer p{margin:0;display:grid;gap:2px}
 .core-offer span{color:var(--muted);font-size:12px}
 .core-offer .avatar,.pip-row .avatar{width:44px;height:42px}
 .pip-rows{display:grid;gap:2px}
-.pip-row{display:grid;grid-template-columns:44px minmax(0,1fr);align-items:center;gap:12px;padding:8px 10px;border:0;border-radius:12px;background:transparent;text-align:left;width:100%;color:var(--vscode-foreground);min-height:0}
-.pip-row:hover{background:var(--pip-wash)}
+.pip-row{display:grid;grid-template-columns:44px minmax(0,1fr);align-items:center;gap:12px;padding:8px 10px;border:0;border-radius:var(--r-lg,12.5px);background:transparent;text-align:left;width:100%;color:var(--vscode-foreground);min-height:0}
+.pip-row:hover{background:var(--row-hover,var(--pip-wash))}
 .pip-row-copy{display:grid;gap:2px;min-width:0}
-.pip-row-copy strong{font-size:14px;font-weight:600;display:flex;align-items:center;gap:6px}
+.pip-row-copy strong{font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px}
 .pip-row-copy small{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pip-row-marked{grid-template-columns:44px minmax(0,1fr) auto}
-/* A number means something needs you: the only thing filled purple with a digit. A dot means there's something new to read,
+/* A number means something needs you: a soft neutral pill, as on the home. A dot means there's something new to read,
    and it sits where a number's centre sits: its 24px target stands 2px past the number's edge. */
-.pip-row-count,.pip-tab-count{flex:none;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--pip-accent);color:#fff;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums}
+.pip-row-count,.pip-tab-count{flex:none;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--accent-soft);color:var(--home-count-ink,var(--vscode-foreground));font-size:11px;font-weight:600;font-variant-numeric:tabular-nums}
 .pip-tab-count{min-width:16px;height:16px;padding:0 4px;font-size:10px}
 .pip-new-dot,.pip-tab-new{flex:none;display:block;width:8px;height:8px;border-radius:50%;background:var(--pip-ink)}
 .pip-tab-new{width:7px;height:7px}
@@ -271,7 +278,7 @@ button.pill{border-radius:999px;padding:6px 16px}
 .pip-row-marks{display:inline-flex;align-items:center;justify-content:flex-end;gap:4px;justify-self:end}
 .pip-row-read,.pip-row-read-slot{position:relative;flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;max-width:none;height:24px;margin-right:-2px;padding:0}
 /* Its dot is a button over the row's end; the row keeps that room with a hidden copy of what's there. */
-.pip-row-item{position:relative;min-width:0}.pip-row-item:hover>.pip-row{background:var(--pip-wash)}
+.pip-row-item{position:relative;min-width:0}.pip-row-item:hover>.pip-row{background:var(--row-hover,var(--pip-wash))}
 .pip-row-room{visibility:hidden}
 .pip-row-marks-live{position:absolute;top:50%;right:10px;transform:translateY(-50%);pointer-events:none}
 .pip-row-dot>.pip-row-marks-live{right:25px}
@@ -281,8 +288,8 @@ button.pill{border-radius:999px;padding:6px 16px}
 .pip-row-both>:is(.pip-row-read,.pip-row-read-slot){margin:0 -6px 0 -8px}
 .pip-row-read:hover{background:transparent}
 /* "Read" ends where a number ends (the marks' own edge) and starts where the row's words stop (their 12px gap). */
-.pip-read-word{display:none;position:absolute;z-index:1;top:50%;right:0;transform:translateY(-50%);box-sizing:border-box;width:34px;height:20px;padding:0;align-items:center;justify-content:center;border-radius:10px;background:var(--pip-accent);color:#fff;font-size:11px;font-weight:700;white-space:nowrap}
-.pip-row-read:hover .pip-read-word{background:var(--pip-accent-hover)}
+.pip-read-word{display:none;position:absolute;z-index:1;top:50%;right:0;transform:translateY(-50%);box-sizing:border-box;width:34px;height:20px;padding:0;align-items:center;justify-content:center;border-radius:10px;background:var(--solid);color:var(--on-solid);font-size:11px;font-weight:600;white-space:nowrap}
+.pip-row-read:hover .pip-read-word{background:var(--solid-hover)}
 .pip-row-read:is(:hover,:focus-visible) .pip-new-dot{visibility:hidden}
 .pip-row-read:is(:hover,:focus-visible) .pip-read-word{display:inline-flex}
 .pip-row-read:focus-visible{outline:none}.pip-row-read:focus-visible .pip-read-word{outline:1px solid var(--vscode-focusBorder,var(--accent));outline-offset:1px}
@@ -310,7 +317,7 @@ button.pill{border-radius:999px;padding:6px 16px}
 .chat-style .pip-message.assistant .answer p:first-child{margin-top:0}
 .chat-style .pip-message.assistant .answer p:last-child{margin-bottom:0}
 .chat-style .pip-message.user{border:0;background:transparent;padding:0;display:flex;flex-direction:column;align-items:flex-end}
-.chat-style .pip-message.user .bubble{max-width:85%;background:var(--pip-accent);color:#fff;border-radius:18px;padding:9px 14px}
+.chat-style .pip-message.user .bubble{max-width:85%;background:var(--bubble);color:var(--text,var(--vscode-foreground));border-radius:18px;padding:9px 14px}
 /* pipsTranscript.css loads after this file with equal weight: these carry one more class. */
 .chat-style .pip-message.msg .response-actions{opacity:1}
 .chat-style .pip-message .response-actions>*{transition:opacity .12s}
@@ -668,7 +675,9 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .reply-stats{margin-left:6px;font:500 11px/1.2 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap}
 /* Thousands of Pips: a search over names and titles, and how many are shown. */
 .pip-search{display:flex;align-items:center;gap:10px;margin:0 0 12px}
-.pip-search input{flex:1;min-width:0;height:30px;border-radius:8px;padding:0 10px;font-size:12px}
+.pip-search input{flex:1;min-width:0;height:var(--row,29px);border:1px solid transparent;border-radius:var(--r-lg,12.5px);padding:0 10px;font-size:12px;background:var(--field)}
+.pip-search input:focus-visible{outline:1px solid var(--vscode-focusBorder,var(--accent));outline-offset:-1px}
+.pip-search input::placeholder{color:var(--muted);opacity:1}
 .pip-search-count{flex:none;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
 .pip-match{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal}
 /* An Allow card being edited: its fields right on the card (Edit, then Send what it shows). */
@@ -823,8 +832,8 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .pip-turn{display:block;min-width:0}
 .pip-to-latest{position:relative;z-index:1;flex:none;align-self:center;display:inline-flex;align-items:center;gap:4px;height:28px;min-height:28px;margin:-36px 0 8px;padding:0 12px;cursor:pointer;border:1px solid var(--vscode-input-border,var(--vscode-widget-border,var(--line)));border-radius:9999px;background:var(--vscode-input-background,var(--vscode-dropdown-background,var(--vscode-editor-background)));color:var(--vscode-foreground);box-shadow:0 4px 16px rgba(0,0,0,.18);font:500 11px/1 var(--vscode-font-family,system-ui)}
 .pip-to-latest[hidden]{display:none}
-.pip-to-latest:hover{border-color:var(--accent);color:var(--vscode-editor-foreground,var(--vscode-foreground))}
-.pip-to-latest.unread{background:var(--accent-fill);border-color:var(--accent-fill);color:#fff}
+.pip-to-latest:hover{border-color:var(--vscode-foreground);color:var(--vscode-editor-foreground,var(--vscode-foreground))}
+.pip-to-latest.unread{background:var(--solid);border-color:var(--solid);color:var(--on-solid)}
 .chat-style .pip-turn>.pip-message.user{position:sticky;top:0;z-index:2}
 .chat-style .pip-turn>.pip-message.user::before{content:"";position:absolute;z-index:-1;pointer-events:none;inset:-16px -16px -12px;background:var(--vscode-editor-background);-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 12px),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 12px),transparent)}
 .chat-style .pip-turn>.pip-message.user .bubble{cursor:pointer}
@@ -896,10 +905,11 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
    What it holds to, each measured in test/pip-chat-design-browser.test.mjs:
    - One column. Everything the Pip says starts at one left edge and is at most one measure wide (a reply, its choices);
      everything you said ends at one right edge. The gutter is the side bar's 12 px, the editor's 16 px when there is room.
-   - The shared corners (6 chips, 8 rows and buttons, 12 cards, 16 bubbles and the box) and the 4 px unit; nothing that
-     sits in the chat casts a shadow (lift 0). Only what floats does: the box, and what waits above it.
-   - One purple: the sent bubble, the one main button, and marks (links, Undo). A choice, a second button and a chip are
-     drawn in the text's own ink on a hairline.
+   - The shared corners (7.5 chips, 10 rows and buttons, 15 cards, 20 bubbles, 22 the box) and the 4 px unit; nothing
+     that sits in the chat casts a shadow (lift 0). Only what floats does: the box, and what waits above it.
+   - Purple is for Send and links. Your message is a quiet raised grey in the page's own text colour, the one main
+     button is a fill of the text colour, and Undo, Details, a choice, a second button and a chip are drawn in the
+     text's own ink.
    - Two inks besides the text: --pc-quiet for second words, figures, placeholders and the marks of controls. It is the
      editor's own text at 72%, so it follows every theme and clears 4.5:1 on the dark and the light grounds (the
      editor's disabled grey, used before, was 3.2:1 dark and 2.2:1 light).
@@ -928,14 +938,13 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message.msg.user{margin-top:24px}
 .simple-pips.chat-open .pip-conversation.chat-style .chat-time{margin:16px 0 12px;font-size:11px;color:var(--pc-quiet)}
 
-/* Bubbles: 16 with a 6 tail, 8 x 12 inside, flat. Yours keeps the accent and its soft light (as Work's and ChatDGC's);
-   the Pip's is a wash of the text's own colour, with no line around it. */
-.simple-pips.chat-open .pip-conversation.chat-style .pip-message.user .bubble{max-width:min(calc(100% - 40px),600px);padding:8px 12px;border-radius:16px 16px 6px 16px;box-shadow:none;
-  background-image:radial-gradient(130% 110% at 14% 0%,var(--bubble-grain,transparent),transparent 70%)}
+/* Bubbles: 20 with a 7.5 tail, 8 x 12 inside, flat. Yours is the shared grey (as Work's and ChatDGC's); the Pip's is a
+   wash of the text's own colour, with no line around it. */
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message.user .bubble{max-width:min(calc(100% - 40px),600px);padding:8px 12px;border-radius:var(--r-2xl,20px) var(--r-2xl,20px) var(--r-sm,7.5px) var(--r-2xl,20px);box-shadow:none}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer.split{gap:4px}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer.split .reply-part,
-.simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer:not(.split){max-width:var(--pc-measure);padding:8px 12px;border:0;border-radius:16px 16px 16px 6px;box-shadow:none}
-.simple-pips.chat-open .pip-conversation.chat-style .pip-message.typing{padding:12px;border-radius:16px 16px 16px 6px;margin-bottom:16px}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer:not(.split){max-width:var(--pc-measure);padding:8px 12px;border:0;border-radius:var(--r-2xl,20px) var(--r-2xl,20px) var(--r-2xl,20px) var(--r-sm,7.5px);box-shadow:none}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message.typing{padding:12px;border-radius:var(--r-2xl,20px) var(--r-2xl,20px) var(--r-2xl,20px) var(--r-sm,7.5px);margin-bottom:16px}
 .simple-pips.chat-open .pip-conversation.chat-style .message-body p{margin-bottom:8px}
 .simple-pips.chat-open .pip-conversation.chat-style .message-body p:last-child{margin-bottom:0}
 /* A link is a mark, so it takes the one purple's link tone, not the editor's blue beside it. */
@@ -964,7 +973,8 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .simple-pips.chat-open .pip-conversation.chat-style .own-change{margin:0;color:var(--pc-quiet)}
 .simple-pips.chat-open .pip-conversation.chat-style .own-change-words{color:var(--pc-quiet);opacity:1}
 .simple-pips.chat-open .pip-conversation.chat-style .own-change-sep{opacity:1}
-.simple-pips.chat-open .pip-conversation.chat-style .own-change :is(button.own-change-undo,button.own-change-more){color:var(--link)}
+.simple-pips.chat-open .pip-conversation.chat-style .own-change :is(button.own-change-undo,button.own-change-more){color:var(--text-2)}
+.simple-pips.chat-open .pip-conversation.chat-style .own-change :is(button.own-change-undo,button.own-change-more):hover{color:var(--vscode-foreground)}
 .simple-pips.chat-open .pip-conversation.chat-style .own-change-undone,.simple-pips.chat-open .pip-conversation.chat-style .own-change-list dt{color:var(--pc-quiet)}
 .simple-pips.chat-open .pip-conversation.chat-style .own-change-list{gap:4px 12px;margin:4px 0 0;padding:4px 0 4px 12px;border-left:1px solid var(--hair-strong)}
 
@@ -998,7 +1008,7 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 
 /* The prompt box: the shared box's corner and hairline, its soft shadow its own. Focused, its line firms (the caret says
    the rest); its placeholder and the marks of its controls are the quiet ink, and each control answers the press. */
-.simple-pips.chat-open .pip-conversation.chat-style .pip-composer{--composer-faint:var(--pc-quiet);border-radius:var(--r-2xl,16px);border-color:var(--hair-strong);box-shadow:var(--lift-box);transition:border-color var(--pc-move)}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-composer{--composer-faint:var(--pc-quiet);border-radius:var(--r-box,22px);border-color:var(--hair-strong);background:var(--box);box-shadow:var(--lift-box);transition:border-color var(--pc-move)}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-composer:focus-within{border-color:var(--pc-firm);box-shadow:var(--lift-box)}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-composer :is(.composer-chip,.model-control,.composer-routines,.chat-send){transition:background-color var(--pc-move),color var(--pc-move),transform var(--pc-move)}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-composer :is(.composer-chip,.model-control,.composer-routines):hover:not(:disabled){background:var(--wash)}

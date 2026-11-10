@@ -248,7 +248,7 @@ test("narrow Settings keeps labeled, scrollable icon navigation and restores the
     for (const width of [270, 360, 520, 620]) {
       await p.setViewportSize({ width, height: 300 });
       assert.equal(await nav.isVisible(), true);
-      assert.equal(Math.round((await nav.boundingBox()).width), 52);
+      assert.equal(Math.round((await nav.boundingBox()).width), 54);   // the 0.52 side menu: 54 folded to icons, 200 open (it was 52 and 172)
       assert.equal(await p.locator(".nav-text").first().isVisible(), false);
       assert.equal(await p.locator("#collapse-nav").isVisible(), false);
       for (const { id, label, title } of entries) {
@@ -265,14 +265,14 @@ test("narrow Settings keeps labeled, scrollable icon navigation and restores the
       }
     }
     await p.setViewportSize({ width: 900, height: 900 });
-    assert.equal(Math.round((await nav.boundingBox()).width), 172);
+    assert.equal(Math.round((await nav.boundingBox()).width), 200);
     assert.equal(await p.locator(".nav-text").first().isVisible(), true);
     await p.click("#collapse-nav");
-    assert.equal(Math.round((await nav.boundingBox()).width), 52);
+    assert.equal(Math.round((await nav.boundingBox()).width), 54);
     assert.equal(await p.locator("#collapse-nav").getAttribute("title"), "Expand navigation");
     await p.setViewportSize({ width: 360, height: 900 });
     await p.setViewportSize({ width: 900, height: 900 });
-    assert.equal(Math.round((await nav.boundingBox()).width), 52, "manual collapse survives resizing");
+    assert.equal(Math.round((await nav.boundingBox()).width), 54, "manual collapse survives resizing");
     await p.click("#collapse-nav");
     assert.equal(await p.locator(".nav-text").first().isVisible(), true);
   } finally { await close(); }

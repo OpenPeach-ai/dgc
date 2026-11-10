@@ -3,9 +3,11 @@
    canvas.css. Grounds, text and borders are the editor's own theme tokens, so light, dark and high contrast follow it;
    only the accent and the washes are ours.
 
-   One purple, and three jobs for it on a screen: the sent bubble, the one main button, and marks (links, the selected
-   row's icon, switches that are on). Never a container larger than a pill, never a secondary button, never a second
-   purple. Every raw purple lives in this file; test/no-raw-purple.test.mjs fails on one anywhere else.
+   The greys and whites are the editor's own, the way Codex's extension takes them: grounds from the theme, and every
+   line, quiet word and filled pill derived from the text colour. One purple on top, on at most a tenth of what is
+   coloured on a screen: Send, links, DGC's mark, and live marks (an unread dot, a spinner, a switch that is on). Never a
+   bubble, a container, a count or a second button. Every raw purple lives in this file; test/no-raw-purple.test.mjs
+   fails on one anywhere else.
 
    Pips embedded in Work's side bar sit in a shadow root, where :root and body rules here do not match; they inherit
    every token from Work's page, which loads this file through main.css. */
@@ -21,12 +23,22 @@
   --surface2:var(--vscode-input-background, var(--vscode-dropdown-background, var(--fallback-surface2)));
   --code:var(--vscode-textCodeBlock-background, var(--vscode-editor-background, var(--fallback-code)));
   --term:var(--vscode-editor-background, var(--fallback-code));
-  --border:var(--vscode-panel-border, var(--vscode-widget-border, var(--fallback-border)));
-  --border-strong:var(--vscode-input-border, var(--vscode-widget-border, var(--fallback-border-strong)));
+  /* Lines are hairlines of the text colour (below), not the theme's panel and input borders: one line weight on every
+     page, in any theme. High contrast takes the theme's own border back (below). */
+  --border: var(--hair);
+  --border-strong: var(--hair-strong);
   --text:var(--vscode-foreground, var(--fallback-text));
   --text-strong:var(--vscode-editor-foreground, var(--vscode-foreground, var(--fallback-text-strong)));
   --muted:var(--vscode-descriptionForeground, var(--fallback-muted));
-  --faint:var(--vscode-disabledForeground, var(--vscode-descriptionForeground, var(--fallback-faint)));
+  /* Quiet words are the text colour, thinned. Second-level words (a row's second line, a menu row at rest) at 65%:
+     5.3:1 on the dark side bar. Faint ones (hints, ages, placeholders) at 68%, which also clears 4.5:1 on the raised
+     grey of a menu. This was the editor's disabled grey (50%), 2.1:1 on a light side bar. A light ground takes both at
+     72% (below): 65% of the light text is 3.9:1 there. */
+  --text-2: color-mix(in srgb, var(--text) 65%, transparent);
+  --faint: color-mix(in srgb, var(--text) 68%, transparent);
+  /* A number's ink on its soft pill, and the home's quiet marks: shared by the home, Pips and Settings. */
+  --home-count-ink: var(--text);
+  --home-quiet: var(--text-2);
   --accent:#7C5CFF; --accent-text:#A78BFA; --accent-fill:#7654F6;
   /* Links and their marks, which are body text and must clear 4.5:1 to be read comfortably.
      --accent cannot do that job: at 4.08:1 on this panel's dark ground and 4.09:1 on its light
@@ -41,12 +53,13 @@
   --fk-blue:#519aba; --fk-yellow:#cbcb41; --fk-orange:#e37933; --fk-green:#8dc149;
   --fk-violet:#a074c4; --fk-pink:#f55385; --fk-red:#cc3e44; --fk-neutral:#d4d7d6;
   --accent-hover:#6A4BF0; --lav:#A78BFA;
-  --accent-soft:rgba(124,92,255,.12);
+  /* A count's pill and a chosen mark: a neutral wash. Purple is for Send, links and live marks. */
+  --accent-soft: color-mix(in srgb, var(--text) 8%, transparent);
   /* Selection and focus are structural, not chromatic. Codex marks a chosen row by lifting its
      surface and a focused field by firming its border; purple is reserved for the primary action,
      links and live status. A 2px accent rail down every selected row read as decoration. */
   --sel:var(--vscode-list-activeSelectionBackground, rgba(255,255,255,.06));
-  --ring:rgba(124,92,255,.30);
+  --ring: color-mix(in srgb, var(--text) 30%, transparent);
   --good:#5BCB8B; --good-soft:rgba(91,203,139,.1);
   --warn:#D1902B;
   /* Something on the chip line needs you. Amber, and lifted for words: --need is 6.1:1 on the dark editor ground and
@@ -70,7 +83,8 @@
      is a 4px unit, which is what makes a dense editor panel look deliberate rather than busy. */
   --sp: 4px;                     /* the unit: every gap and pad is a multiple of it */
   --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px;  --sp-4: 16px;  --sp-5: 20px;  --sp-6: 24px;
-  --r-sm: 6px;  --r-md: 8px;  --r-lg: 10px;  --r-xl: 12px;  --r-2xl: 16px;  --r-full: 9999px;
+  /* Corners on one scale, a quarter rounder than the 6 / 8 / 10 / 12 / 16 it replaces; a prompt box takes 22. */
+  --r-sm: 7.5px;  --r-md: 10px;  --r-lg: 12.5px;  --r-xl: 15px;  --r-2xl: 20px;  --r-box: 22px;  --r-full: 9999px;
   /* Five sizes and four weights, on Codex's steps (11 · 12 · 14 · 16 · 18). The panel had
      grown 13 sizes including half-pixels and seven weights; the eye reads that as noise even
      when no single choice is wrong. Line heights are 1 · 1.2 · 1.45 · 1.6, chosen by role. */
@@ -84,22 +98,36 @@
   --w-reg: 400; --w-med: 500; --w-semi: 600; --w-bold: 700;
   --control: 28px;               /* every button, chip and field lands on this height */
   --control-sm: 20px;
+  --row: 29px;                   /* a row in a list: a session, a Pip, a settings menu entry */
   /* Soft and low, so a raised surface reads as raised without a drop shadow shouting about it. */
   --shadow-1: 0 1px 2px rgba(0,0,0,.14);
   --shadow-2: 0 4px 16px rgba(0,0,0,.18);
 
   /* Lines and washes, relative to the editor's own text so they hold on every theme: a hairline, a firmer one for
      anything raised, and the hover wash. */
-  --hair: color-mix(in srgb, var(--text) 12%, transparent);
-  --hair-strong: color-mix(in srgb, var(--text) 18%, transparent);
-  --wash: color-mix(in srgb, var(--text) 5%, transparent);
-  /* Three lifts. 0: an inline card, a hairline and no shadow. 1: menus, tips and popovers. 2: dialogs, over the scrim.
-     Light themes take both at half strength (below): the same shadow on white reads twice as heavy. */
-  --lift-1: 0 1px 2px rgba(0,0,0,.12), 0 8px 24px -8px rgba(0,0,0,.28);
+  /* (Mixed with transparent, so the colour space changes nothing but how the value is written out.) */
+  --hair: color-mix(in srgb, var(--text) 8%, transparent);
+  --hair-strong: color-mix(in srgb, var(--text) 12%, transparent);
+  --hair-faint: color-mix(in srgb, var(--text) 5%, transparent);
+  --wash: color-mix(in srgb, var(--text) 6%, transparent);
+  /* A row pointed at takes the editor's own list hover; a search field's fill is a wash of the text. */
+  --row-hover: var(--vscode-list-hoverBackground, var(--wash));
+  --field: color-mix(in srgb, var(--text) 6%, transparent);
+  /* The one filled pill on a page that is not Send: the text colour, with the ground's colour for its words. */
+  --solid: var(--text);
+  --solid-hover: color-mix(in srgb, var(--text) 86%, #fff);
+  --on-solid: var(--surface2);
+  /* A prompt box's ground: a step off the page it sits on, in Work, ChatDGC and a Pip's chat. */
+  --box: color-mix(in srgb, var(--text) 4%, var(--surface));
+  /* A sent prompt's bubble: a quiet raised grey, the same in Work, ChatDGC and a Pip's chat. */
+  --bubble: color-mix(in srgb, var(--text) 9%, var(--surface));
+  /* Three lifts. 0: an inline card, a hairline and no shadow. 1: menus, tips and popovers: a half-pixel ring and one low
+     shadow, the same on dark and light. 2: dialogs, over the scrim, at half strength on a light ground (below). */
+  --lift-1: 0 0 0 .5px var(--hair), 0 8px 16px -4px rgba(0,0,0,.12);
   --lift-2: 0 2px 6px rgba(0,0,0,.14), 0 24px 48px -16px rgba(0,0,0,.40);
   --scrim: rgba(0,0,0,.42); --scrim-blur: 2px;
-  /* The prompt box floats just over the chat: one soft shadow of its own, at half strength on a light ground (below). */
-  --lift-box: 0 3px 14px rgba(0,0,0,.14);
+  /* The prompt box: an inner hairline of light on a dark ground, three soft steps of shadow on a light one (below). */
+  --lift-box: inset 0 0 1px 0 rgba(255,255,255,.2);
   /* Corners by role, on the scale above: chips and key caps, rows and buttons, cards and menus, dialogs. */
   --r-chip: var(--r-sm); --r-row: var(--r-md); --r-card: var(--r-xl); --r-menu: var(--r-xl); --r-dialog: var(--r-2xl);
   --t-dialog: 15px;
@@ -107,8 +135,8 @@
      bounces. Reduced motion takes every duration to zero (below). */
   --ease-out: cubic-bezier(.23,1,.32,1);
   --dur-hover: 120ms; --dur-menu: 150ms; --dur-dialog: 180ms;
-  /* The sent bubble's soft light (the grain stays as approved), the same in all three chats. */
-  --bubble-grain: rgba(174,145,255,.08);
+  /* The sent bubble's soft light: none on the neutral bubble (it was a purple light on a purple tint). */
+  --bubble-grain: transparent;
   /* The marks of a prompt box and the @ list (media/mentions.css). On a dark ground these are the ones chosen in the box
      and the bubble; a light theme takes the same effects in darker steps of the same hues (below). */
   --mark-word: #c7b5ff; --mark-word-shimmer: linear-gradient(105deg,#c7b5ff,#ece4ff,#ad96f4,#d8caff,#c7b5ff);
@@ -134,13 +162,19 @@ body.vscode-light {
    pale one, 7.6:1 on its black.) */
 body.vscode-high-contrast-light { --link:#6D49E8; --accent-text:#6D49E8; }
 body.vscode-light, body.vscode-high-contrast-light {
-  --lift-1: 0 1px 2px rgba(0,0,0,.06), 0 8px 24px -8px rgba(0,0,0,.14);
+  --text-2: color-mix(in srgb, var(--text) 72%, transparent); --faint: color-mix(in srgb, var(--text) 72%, transparent);
+  --solid-hover: color-mix(in srgb, var(--text) 86%, #000); --home-quiet: var(--text-2);
   --lift-2: 0 2px 6px rgba(0,0,0,.07), 0 24px 48px -16px rgba(0,0,0,.20);
   --scrim: rgba(0,0,0,.21);
-  --lift-box: 0 3px 14px rgba(0,0,0,.07);
+  --lift-box: 0 0 0 1px rgba(0,0,0,.04), 0 2px 8px 0 rgba(0,0,0,.04), 0 4px 40px 8px rgba(0,0,0,.024);
   --mark-word: #6242d8; --mark-word-shimmer: linear-gradient(105deg,#6242d8,#8a6df0,#4f30c4,#7657e6,#6242d8);
   --mark-plugin: #5d3cd2; --mark-icon: #6d49e8;
   --mark-plugin-glow: linear-gradient(90deg, transparent, rgba(124,92,255,.12), rgba(124,92,255,.22), rgba(124,92,255,.12), transparent);
+}
+/* High contrast: a hairline of the text at 8% is no line at all there, so every line is the theme's own border. */
+body.vscode-high-contrast, body.vscode-high-contrast-light {
+  --hair: var(--vscode-contrastBorder, var(--vscode-panel-border, var(--text)));
+  --hair-strong: var(--hair); --hair-faint: var(--hair); --border: var(--hair); --border-strong: var(--hair);
 }
 @media (prefers-reduced-motion: reduce) {
   :root { --dur-hover: 0ms; --dur-menu: 0ms; --dur-dialog: 0ms; }
@@ -150,7 +184,8 @@ body.vscode-light, body.vscode-high-contrast-light {
   :root {
     --bg:Canvas; --surface:Canvas; --surface2:ButtonFace; --code:Canvas; --term:Canvas;
     --border:CanvasText; --border-strong:CanvasText;
-    --text:CanvasText; --text-strong:CanvasText; --muted:CanvasText; --faint:GrayText;
+    --text:CanvasText; --text-strong:CanvasText; --muted:CanvasText; --faint:GrayText; --text-2:CanvasText;
+    --hair:CanvasText; --hair-strong:CanvasText; --hair-faint:CanvasText; --solid:ButtonText; --solid-hover:ButtonText; --on-solid:ButtonFace; --bubble:Canvas; --box:Canvas;
     --accent:Highlight; --accent-text:LinkText; --accent-fill:Highlight; --link:LinkText;
     /* In forced colours the user's palette wins; a hue per file kind is exactly what they turned off. */
     --fk-blue:CanvasText; --fk-yellow:CanvasText; --fk-orange:CanvasText; --fk-green:CanvasText;

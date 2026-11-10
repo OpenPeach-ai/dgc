@@ -71,7 +71,9 @@ async function iconContrast(page) {
   await page.evaluate(() => document.getAnimations().filter((a) => a instanceof CSSTransition).forEach((a) => a.finish()));   // mid-transition is not the colour
   const box = await page.locator("#cache-clock svg").boundingBox();
   const png = await page.screenshot({ clip: { x: box.x, y: box.y, width: box.width, height: box.height } });
-  const ground = await page.evaluate(() => getComputedStyle(document.getElementById("cbox")).backgroundColor.match(/\d+/g).slice(0, 3).map(Number));
+  // The box's ground is a mix now (--box), which computes to color(srgb r g b) in 0..1 rather than rgb().
+  const ground = await page.evaluate(() => { const c = getComputedStyle(document.getElementById("cbox")).backgroundColor, m = c.match(/-?[\d.]+(e-?\d+)?/g).slice(0, 3).map(Number);
+    return c.startsWith("color(srgb") ? m.map((v) => Math.round(v * 255)) : m; });
   const pixels = await page.evaluate(async (b64) => {
     const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob());
     const canvas = new OffscreenCanvas(bitmap.width, bitmap.height), ctx = canvas.getContext("2d");

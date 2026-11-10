@@ -63,7 +63,7 @@ body.vscode-light .cd-wpanel { box-shadow: 0 10px 30px -10px rgba(0, 0, 0, .25);
 .cd-wbtn { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--r-md);
   background: transparent; color: var(--text); font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; white-space: nowrap; }
 .cd-wbtn:hover { background: var(--surface2); }
-.cd-wrow:hover .cd-wopen, .cd-wopen:focus-visible { border-color: var(--accent-fill); background: var(--accent-fill); color: #fff; }
+.cd-wrow:hover .cd-wopen, .cd-wopen:focus-visible { border-color: var(--solid); background: var(--solid); color: var(--on-solid); }
 .cd-wicon { display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--r-sm);
   background: transparent; color: var(--muted); cursor: pointer; }
 .cd-wicon:hover { background: var(--surface2); color: var(--text); }
@@ -108,25 +108,8 @@ body.cd-blank .cd-fine { display: none; }
 .cd-msg { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
 .cd-user { align-items: flex-end; gap: 2px; }
 .cd-bubble { max-width: min(85%, 640px); padding: var(--sp-2) var(--sp-4); border-radius: var(--r-2xl);
-  background: var(--prompt-fill, color-mix(in srgb, var(--accent) 14%, var(--surface))); color: var(--text-strong);
+  background: var(--bubble); color: var(--text);
   font: var(--w-reg) var(--t-chat)/1.6 var(--sans); white-space: pre-wrap; overflow-wrap: anywhere; }
-/* Match the Work prompt finish without changing assistant messages. */
-.cd-user .cd-bubble {
-  position: relative;
-  background-image: radial-gradient(130% 110% at 14% 0%, var(--bubble-grain), transparent 70%);
-}
-.cd-user .cd-bubble::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  opacity: .19;
-  mix-blend-mode: soft-light;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.72' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='96' height='96' filter='url(%23n)' opacity='.62'/%3E%3C/svg%3E");
-}
-body:is(.vscode-high-contrast, .vscode-high-contrast-light) .cd-user .cd-bubble::before { content: none; }
-@media (forced-colors: active) { .cd-user .cd-bubble::before { content: none; } }
 .cd-assistant .cd-body { font-size: calc(var(--t-chat) + 1px); }
 /* What it's doing while it works, as Work's status row says it: DGC's slashes lighting in turn, then the words (the
    slashes' rules are main.css's .thinking ones, which name .cd-wave too). The words hold still: no pulse. */
@@ -162,9 +145,9 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .cd-user .cd-bubble:
 .cd-end { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: 0; color: var(--muted);
   font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
 .cd-end-error { color: var(--err-text); }
-.cd-continue { padding: 2px var(--sp-3); border: 1px solid var(--accent-fill); border-radius: var(--r-full); background: var(--accent-fill);
-  color: #fff; font: var(--w-semi) var(--t-xs)/1.6 var(--sans); cursor: pointer; }
-.cd-continue:hover { background: var(--accent-hover); }
+.cd-continue { padding: 2px var(--sp-3); border: 1px solid var(--solid); border-radius: var(--r-full); background: var(--solid);
+  color: var(--on-solid); font: var(--w-med) var(--t-xs)/1.6 var(--sans); cursor: pointer; }
+.cd-continue:hover { background: var(--solid-hover); border-color: var(--solid-hover); }
 .cd-continue:disabled { opacity: .6; cursor: default; }
 
 /* A question in the answer: a card with the options where the reply asked it; Continue sends the answer. */
@@ -253,7 +236,7 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .cd-user .cd-bubble:
 .cd-versions-count { min-width: 34px; text-align: center; }
 /* Editing a message you sent. */
 .cd-edit { display: flex; flex-direction: column; gap: var(--sp-2); width: min(85%, 640px); padding: var(--sp-2) var(--sp-3);
-  border: 1px solid var(--accent); border-radius: var(--r-2xl); background: var(--surface2); }
+  border: 1px solid var(--hair-strong); border-radius: var(--r-2xl); background: var(--box); }
 .cd-edit-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
 .cd-edit-cancel { padding: 2px var(--sp-3); border: 1px solid var(--border-strong); border-radius: var(--r-full); background: transparent;
   color: var(--text); font: var(--w-semi) var(--t-xs)/1.6 var(--sans); cursor: pointer; }
@@ -274,7 +257,7 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .cd-user .cd-bubble:
 .cd-notice-detail[hidden] { display: none; }
 /* As main DGC's box: no accent ring around what you look at all day; the send button carries the accent. */
 .cd-box { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-3) var(--sp-2);
-  border: 1px solid var(--border-strong); border-radius: var(--r-2xl); background: var(--surface2); box-shadow: 0 7px 24px rgba(0,0,0,.18); }
+  border: 1px solid var(--border-strong); border-radius: var(--r-box); background: var(--box); box-shadow: var(--lift-box); }
 .cd-box:focus-within { border-color: var(--border-strong); }
 /* Attachments: chips in the box before sending, and on the message once sent. */
 .cd-chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin: 0; padding: 0; list-style: none; }
@@ -789,10 +772,10 @@ body.vscode-light .lib-menu { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
 /* A plugin's card under a reply (ChatGPT's confirmation): what it would do, its inputs (editable), and the choice. */
 .cd-card { display: flex; flex-direction: column; gap: var(--sp-2); max-width: 560px; margin: var(--sp-2) 0; padding: var(--sp-3);
   border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--surface); }
-.cd-card[data-status="waiting"] { border-color: color-mix(in srgb, var(--accent) 55%, var(--border-strong)); }
+.cd-card[data-status="waiting"] { border-color: color-mix(in srgb, var(--text) 30%, transparent); }
 .cd-card-head { display: flex; align-items: center; gap: var(--sp-2); }
 .cd-card-mark { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
-  border-radius: var(--r-md); background: color-mix(in srgb, var(--accent) 22%, var(--surface2)); color: var(--text-strong);
+  border-radius: var(--r-md); background: var(--surface2); color: var(--text-strong);
   font: var(--w-semi) var(--t-sm)/1 var(--sans); }
 /* The plugin's own logo in place of its letter: on a light tile in both themes, as the logo was drawn for one. */
 .cd-card-mark.has-logo { background: transparent; border: 1px solid var(--border); }

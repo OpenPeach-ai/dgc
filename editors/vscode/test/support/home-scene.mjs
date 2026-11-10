@@ -61,10 +61,10 @@ export const PROJECTS = [{ id: PROJECT, name: "Goa trip", color: "teal", chats: 
   { id: "project_" + "b".repeat(32), name: "House hunt", color: "orange", chats: 5, files: [], memory: "shared" }];
 const PROJECT_CHATS = [{ id: "chat_3", title: "Packing list", updated_at: "2026-11-04T09:00:00Z" }, { id: "chat_4", title: "Flights and the ferry", updated_at: "2026-11-03T09:00:00Z" }];
 
-/** Opens the home. tab: "work" | "chat" (the Chat tab, with two projects, the first open). theme: "dark-modern" | "light-modern" | "hc"; collapsed: what the host kept (the page's attribute);
+/** Opens the home. sessionsCollapsed: the Sessions section folded on this computer (the page's attribute). tab: "work" | "chat" (the Chat tab, with two projects, the first open). theme: "dark-modern" | "light-modern" | "hc"; collapsed: what the host kept (the page's attribute);
     tabs: Work | Chat and the search box (ChatDGC seen); library: Work's Library row; srcRoot: another tree's sources. */
 export async function openHome(browser, { state = homeState(), width = 300, height = 760, theme = "dark-modern", collapsed = false, tabs = true, library = true,
-  sessions = SESSIONS, tab = "work", api = 69, scale = 1, motion = "no-preference", srcRoot } = {}) {
+  sessions = SESSIONS, tab = "work", api = 69, scale = 1, motion = "no-preference", sessionsCollapsed = false, srcRoot } = {}) {
   const { html, mainJs, markdownJs, themes, pipsJs, pipsCss, sprite } = await sources(srcRoot);
   const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale, reducedMotion: motion });
   const page = await context.newPage();
@@ -82,7 +82,7 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
   await page.goto("https://home.test/webview/index.html");
   await page.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; --vscode-font-size: 13px; ${themes[theme]} }` });
   await page.evaluate((t) => document.body.classList.add(t.startsWith("light") ? "vscode-light" : t === "hc" ? "vscode-high-contrast" : "vscode-dark"), theme);
-  await page.evaluate(([mjs, mdjs, initial, kept, withTabs, apiVersion, ids, saved]) => {
+  await page.evaluate(([mjs, mdjs, initial, kept, withTabs, apiVersion, ids, saved, sessionsKept]) => {
     const [P, Q] = ids;
     document.documentElement.dataset.chatPlace = "home";
     document.documentElement.dataset.pipsDocumentId = "doc1";
@@ -90,6 +90,7 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
     if (withTabs) document.documentElement.dataset.chatdgcSeen = "1";
     // What the host stamps on the page when the block was collapsed on this computer (src/pipHomeDismiss.ts).
     if (kept) document.documentElement.dataset.pipHomeCollapsed = "1";
+    if (sessionsKept) document.documentElement.dataset.sessionsHomeCollapsed = "1";
     window.__state = initial; window.__posted = [];
     const S = () => window.__state;
     const answers = {
@@ -112,7 +113,7 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
     eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
     eval(mjs);
     connect();
-  }, [mainJs, markdownJs, state, collapsed, tabs, api, [P, Q], tab === "chat" ? { homeTab: "chat", projectsOpen: [PROJECT] } : undefined]);
+  }, [mainJs, markdownJs, state, collapsed, tabs, api, [P, Q], tab === "chat" ? { homeTab: "chat", projectsOpen: [PROJECT] } : undefined, sessionsCollapsed]);
   const send = (data) => page.evaluate((d) => window.dispatchEvent(new MessageEvent("message", { data: d })), data);
   if (sessions) await send({ type: "sessions_list", items: sessions, error: "" });
   if (tabs) {
