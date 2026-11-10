@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Agent Map: pointing at the Pip's face beside a helper says that Pip's name, and a screen reader hears it.
 - Attachments follow what the backend takes: Work's prompt up to 200 MB of images, ChatDGC up to 50 things a message, and a Pip's chat 20 MB photos, 50 files and 100 MB documents, 200 MB in all, from Pips API 79. An older backend keeps its own limits, so nothing is sent that it would refuse.
 - Reject on a new Pip's card turns it down at once, on Personal and in a project alike, with a few seconds of "Rejected. No Pip was created. Undo" in case it was a slip. Needs attention opens when something is in it; fold it and it stays folded, even after a reload, until something new comes in. A page's Download offers PDF (and Word) as well as HTML and zip, as DGC exports it.
 - A Pip's chat takes a message of up to 256 KB from a runtime at Pips API 79 (it was 4,000 characters); past that it says how long the message is and to attach the rest as a file, and sends nothing. An older runtime keeps its limit. A reply too long for the chat shows its document's card under its start.

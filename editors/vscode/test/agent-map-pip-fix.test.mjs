@@ -57,3 +57,30 @@ for (const width of [300, 460, 900]) {
     } finally { await page.close(); }
   });
 }
+
+// Pointing at the Pip's face beside a helper names the Pip (the user, 11 Nov): the face takes the pointer, says its
+// name on hover, and a screen reader hears it too.
+test("pointing at a Pip's face in the Agent Map shows its name", async (t) => {
+  if (!browser) { t.skip("Chromium unavailable"); return; }
+  const { page, send, errors } = await openMapScene(browser, { width: 460, faces: true, reducedMotion: true });
+  try {
+    await page.evaluate((script) => {
+      eval(script);
+      const style = document.createElement("style"); style.textContent = window.PipConcepts.plush.styles;
+      document.head.append(style);
+    }, faceScript);
+    await send({ type: "pip_fix", fix: fix("c", sid(1), "Invoice Pip", "running") });
+    const face = await page.evaluate((id) => {
+      const el = document.querySelector(`.am-row[data-agent-id="${id}"] .am-pip-float`), r = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return { title: el.title, label: el.getAttribute("aria-label"), role: el.getAttribute("role"), hidden: el.getAttribute("aria-hidden"),
+        takesPointer: !!hit && (hit === el || el.contains(hit)) };
+    }, sid(1));
+    assert.equal(face.takesPointer, true, "the face takes the pointer");
+    assert.equal(face.title, "Invoice Pip", "its name on hover");
+    assert.equal(face.label, "Invoice Pip", "and to a screen reader");
+    assert.equal(face.role, "img");
+    assert.equal(face.hidden, null);
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});

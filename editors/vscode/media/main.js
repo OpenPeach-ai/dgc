@@ -14036,8 +14036,15 @@ function permissionChoices(ev) {
           `agent-pip-${record.id.replace(/[^a-z0-9]/gi, "")}`, { includeStyles: false });
         pipFace.dataset.key = key;
       }
+      // Pointing at the face names the Pip, and a screen reader hears it (the user, 11 Nov).
+      pipFace.title = name; pipFace.setAttribute("role", "img"); pipFace.setAttribute("aria-label", name);
+      pipFace.removeAttribute("aria-hidden");
       pipFace.hidden = false;
-    } else { pipFace.hidden = true; pipFace.replaceChildren(); delete pipFace.dataset.key; }
+    } else {
+      pipFace.hidden = true; pipFace.replaceChildren(); delete pipFace.dataset.key;
+      pipFace.removeAttribute("title"); pipFace.removeAttribute("role"); pipFace.removeAttribute("aria-label");
+      pipFace.setAttribute("aria-hidden", "true");
+    }
     // Work held back is why an older agent is still in view: its row says so, where "Finished" was.
     const name = agentDisplayName(record), word = amHeldBack(record) ? "Held back" : amStateWord(record);
     // A helper asked to do more keeps its row: "Continued · 2 runs" says so (agent_runs).

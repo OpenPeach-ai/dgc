@@ -2571,7 +2571,7 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
 .am-row .agent-dot { margin-top: 0; }
 .am-face { width: 16px; height: 16px; }
 .am-pip-float { position: absolute; left: calc(100% + 7px); top: 50%; transform: translateY(-50%);
-  width: 18px; height: 18px; z-index: 3; pointer-events: none; filter: drop-shadow(0 1px 2px #0009); }
+  width: 18px; height: 18px; z-index: 3; cursor: default; filter: drop-shadow(0 1px 2px #0009); }
 .am-pip-float .dgc-plush { width: 100%; height: 100%; }
 .am-pip-float[hidden] { display: none; }
 @media (max-width: 360px) { .am-pip-float { width: 15px; height: 15px; } }
