@@ -75,18 +75,43 @@ test("a bare filename gets no dimmed half", () => {
   assert.equal(path.querySelector(".path-name").textContent, "README.md");
 });
 
-test("a long list collapses to three rows behind an expander", () => {
-  const many = ["a", "b", "c", "d", "e"].map((n) => ({ path: `src/${n}.py`, diff: true }));
+// The user's changed-files look (their reference card, 7 Nov): files grouped by folder, each folder a row with its own
+// counts that folds. A long turn starts with its folders folded (Codex's three rows and "Show N more" did that job).
+test("files are grouped by folder, each folder with its counts, folding both ways", () => {
+  const card = turnThatEdited([{ path: "README.md", diff: true }, { path: "src/a.py", diff: true }, { path: "src/b.py", diff: true },
+                               { path: "docs/guide.md", diff: true }]);
+  const folders = [...card.querySelectorAll(".ts-folder-row")];
+  assert.deepEqual(folders.map((f) => f.querySelector(".ts-folder-name").textContent), ["src", "docs"], "in the order their first file came");
+  assert.equal(folders[0].querySelector(".change-add").textContent, "+2", "a folder's counts add up its files");
+  assert.equal(folders[0].getAttribute("aria-expanded"), "true", "a short turn starts open");
+  const srcFiles = folders[0].nextElementSibling;
+  assert.deepEqual([...srcFiles.querySelectorAll(".ts-row .path-name")].map((n) => n.textContent), ["a.py", "b.py"]);
+  assert.equal(srcFiles.querySelector(".path-dir"), null, "inside its folder a file is just its name");
+  assert.equal(card.querySelector(".ts-list > .ts-row .path-name").textContent, "README.md", "a top-level file has no folder row");
+  folders[0].click();
+  assert.equal(srcFiles.hidden, true, "a folder folds");
+  assert.equal(folders[0].getAttribute("aria-expanded"), "false");
+  folders[0].click();
+  assert.equal(srcFiles.hidden, false, "and opens again: a one-way control is a trap");
+});
+
+test("a long turn starts with its folders folded, and the whole card folds from its chevron", () => {
+  const many = ["a", "b", "c", "d", "e", "f", "g"].map((n) => ({ path: `src/${n}.py`, diff: true }));
   const card = turnThatEdited(many);
-  const visible = card.querySelectorAll(".ts-list > .ts-row");
-  assert.equal(visible.length, 3, "three files, then an expander");
-  const more = card.querySelector(".ts-more");
-  assert.ok(more.hidden, "the rest start hidden");
-  const expand = card.querySelector(".ts-expand");
-  assert.match(expand.textContent, /Show 2 more files/);
-  expand.click();
-  assert.equal(more.hidden, false, "clicking reveals them");
-  assert.equal(card.querySelectorAll(".ts-row").length, 5);
+  const folder = card.querySelector(".ts-folder-row");
+  assert.equal(folder.getAttribute("aria-expanded"), "false", "seven files: folded to start, the header stays near");
+  assert.equal(folder.nextElementSibling.hidden, true);
+  assert.equal(folder.querySelector(".change-add").textContent, "+7", "its counts still say what changed");
+  folder.click();
+  assert.equal(card.querySelectorAll(".ts-row").length, 7);
+  const fold = card.querySelector(".ts-head .ts-fold"), list = card.querySelector(".ts-list");
+  assert.equal(fold.getAttribute("aria-controls"), list.id);
+  fold.click();
+  assert.equal(list.hidden, true, "the card folds to its header");
+  assert.equal(fold.getAttribute("aria-expanded"), "false");
+  assert.equal(fold.getAttribute("aria-label"), "Show the changed files", "it says what it does next");
+  fold.click();
+  assert.equal(list.hidden, false);
 });
 
 test("a short list has no expander at all", () => {
@@ -103,12 +128,17 @@ test("rows carry no chevron, and the actions sit in the header", () => {
   assert.ok(actions.querySelector(".ts-undo") && actions.querySelector(".ts-review"));
 });
 
-test("the totals sit under the title, not beside it", () => {
+test("the totals sit beside the title, and Open diff is the last action", () => {
   const card = turnThatEdited([{ path: "src/a.py", diff: true }]);
   const heading = card.querySelector(".ts-head .ts-heading");
   assert.ok(heading.querySelector(".ts-title"), "title inside the heading block");
   assert.ok(heading.querySelector(".ts-totals"), "and the totals with it");
-  assert.match(mainCss, /\.ts-heading \{[^}]*flex-direction: column/, "stacked, not side by side");
+  assert.match(mainCss, /\.ts-heading \{[^}]*flex-direction: row/, "side by side, as in the user's reference card");
+  const actions = [...card.querySelectorAll(".ts-actions > button")].map((b) => b.className.split(" ").find((c) => c.startsWith("ts-")));
+  assert.deepEqual(actions, ["ts-undo", "ts-fold", "ts-review"]);
+  assert.equal(card.querySelector(".ts-review").textContent.trim(), "Open diff");
+  assert.equal(card.querySelector(".ts-folder-row"), null, "one file is one row");
+  assert.equal(card.querySelector(".ts-row .path-dir").textContent, "src/", "with its folder dimmed before its name");
 });
 
 test("Undo and Review still do what they did", () => {

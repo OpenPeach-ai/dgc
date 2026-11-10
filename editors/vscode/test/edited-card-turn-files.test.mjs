@@ -75,7 +75,6 @@ test("a new, a binary and a deleted file each say what they are instead of a lin
                               row("old.py", 0, 0, "deleted", false), row("src/a.py", 3, 1)],
                       total: 4, checkpoint_index: 0, checkpoint_preview: "p" } });
   const card = v.doc.querySelector(".turn-summary");
-  card.querySelector(".ts-expand").click();
   const labels = [...card.querySelectorAll(".ts-row")].map((r) => r.querySelector(".ts-uncounted")?.textContent || "");
   assert.deepEqual(labels, ["Changed", "New", "Deleted", ""]);
   for (const r of [...card.querySelectorAll(".ts-row")].slice(0, 3)) {

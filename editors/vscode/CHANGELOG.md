@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Work's "Edited N files" card takes the changed-files look: the + and − totals beside its title, then Undo, a chevron that folds the card and Open diff; under it the files grouped by folder in the order they came, each folder a row with its own counts that folds. One file stays one row with its folder dimmed before its name; a turn of more than six files starts with its folders folded.
 - A Pip's chat shows the document a run kept as the same card Work and ChatDGC draw: a coloured tile, its name, "Document · version 3", and a click anywhere on it opens it. It shows on the run's post in the Pips side bar and in a Pip's own tab, from Pips API 78.
 - Enter in a new Work session before it is ready sends your message by itself once it is, with no second Enter. The line while it waits says "Starting this chat" (a real reconnect still says "reconnecting"), and it goes away once the chat is ready; before, it said "reconnecting" even for a first start and stayed in the chat for good. Switching to another chat first drops the waiting message rather than sending it there.
 - Work's box at about 300 px wide no longer draws one button over another while a turn runs: Queue becomes the queue's icon (its name stays in the tooltip and for screen readers), the footer's buttons are 24 px below 320 px, and below 290 px the cache clock gives way, as the context meter already does.

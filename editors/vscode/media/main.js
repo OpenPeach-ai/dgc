@@ -1957,6 +1957,7 @@
     "activity": '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
     "app-window": '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 4v4"/><path d="M2 8h20"/><path d="M6 4v4"/>',
     "chevron-down": '<path d="m6 9 6 6 6-6"/>',
+    "folder": '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
     "layout-dashboard": '<rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>',
     "presentation": '<path d="M2 3h20"/><path d="M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3"/><path d="m7 21 5-5 5 5"/>',
     "sheet": '<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="3" x2="21" y1="9" y2="9"/><line x1="3" x2="21" y1="15" y2="15"/><line x1="9" x2="9" y1="9" y2="21"/><line x1="15" x2="15" y1="9" y2="21"/>',
@@ -4650,14 +4651,16 @@
     if (following) scroll();
   }
   // ---- what the turn changed, and what you can do about it ----
-  // Codex shows three files then "Show N more files". A turn that touched twenty files should not
-  // push its own Undo/Review controls off the screen.
-  const TS_VISIBLE_ROWS = 3;
+  // The user's changed-files look (their reference card, 7 Nov; ui-04): "Edited N files" with its + and − totals beside
+  // it, Undo, a chevron that folds the card, and Open diff; under it the files grouped by folder, each folder a row
+  // with its own counts that folds, in the order their first file came. One file stays one row, its folder dimmed
+  // before its name. A turn of more than TS_OPEN_FILES files starts with its folders folded, so a big turn stays short
+  // (Codex's three rows and "Show N more" did that before) and the header with Undo stays where it is.
+  const TS_OPEN_FILES = 6;
+  let tsSeq = 0;
   function turnSummaryCard(edits, prompt, cli = null) {
     const files = [...(edits || new Map()).entries()];
     if (!files.length) return null;
-    const additions = files.reduce((n, [, v]) => n + v.additions, 0);
-    const deletions = files.reduce((n, [, v]) => n + v.deletions, 0);
     const card = el("div", "turn-summary");
     card.setAttribute("role", "group");
     card.setAttribute("aria-label", "Files changed in this turn");
@@ -4667,10 +4670,18 @@
       const cut = String(path).lastIndexOf("/");
       return cut < 0 ? ["", String(path)] : [String(path).slice(0, cut + 1), String(path).slice(cut + 1)];
     };
-    const row = ([path, v], i) => {
+    // + and − of what could be counted: a file a command changed, or one with no diff, adds nothing (and says so).
+    const countsOf = (entries, { empty = "" } = {}) => {
+      const counted = entries.filter(([, v]) => v.counted !== false && !v.command);
+      if (!counted.length) return empty;
+      const add = counted.reduce((n, [, v]) => n + v.additions, 0), del = counted.reduce((n, [, v]) => n + v.deletions, 0);
+      return `<span class="ts-counts"><span class="change-add">+${add}</span><span class="change-del">\u2212${del}</span></span>`;
+    };
+    const row = ([path, v], i, nested = false) => {
       const [dir, name] = splitPath(path);
-      return `<button type="button" class="ts-row" data-file="${i}" title="Review ${esc(path)}">`
-        + `<span class="change-path">${dir ? `<span class="path-dir">${esc(dir)}</span>` : ""}`
+      return `<button type="button" class="ts-row${nested ? " ts-nested" : ""}" data-file="${i}" title="Review ${esc(path)}">`
+        + `${icon("file-text", "sm")}`
+        + `<span class="change-path">${dir && !nested ? `<span class="path-dir">${esc(dir)}</span>` : ""}`
         + `<span class="path-name">${esc(name)}</span></span>`
         // A file outside the project changed by a DGC that has since restarted: its earlier version went with that
         // process (it is never saved), so Undo leaves it as it is, and says so here and in its count.
@@ -4689,46 +4700,51 @@
             : `<span class="change-add">+${v.additions}</span><span class="change-del">\u2212${v.deletions}</span>`)
         + `</button>`;
     };
-    const counted = files.filter(([, v]) => v.counted !== false);
-    const totals = counted.length
-      ? `<span class="change-add">+${additions}</span><span class="change-del">\u2212${deletions}</span>`
-      : `<span class="ts-uncounted">no line count</span>`;
     // The CLI lists at most 500 files and says how many there are in all.
     const many = cli ? Math.max(Number(cli.total) || 0, files.length) : files.length;
     const head = many === 1 ? "Edited 1 file" : `Edited ${many} files`;
-    const shown = files.slice(0, TS_VISIBLE_ROWS);
-    const rest = files.slice(TS_VISIBLE_ROWS);
-    card.innerHTML = `<div class="ts-head"><span class="ts-mark">${icon("file-diff")}</span>`
+    const totals = countsOf(files, { empty: `<span class="ts-uncounted">no line count</span>` });
+    // Groups in the order their first file came; "" is the files at the top level, drawn without a folder row.
+    const groups = new Map();
+    files.forEach((entry, i) => {
+      const folder = files.length === 1 ? "" : splitPath(entry[0])[0].replace(/\/$/, "");
+      if (!groups.has(folder)) groups.set(folder, []);
+      groups.get(folder).push([entry, i]);
+    });
+    const folded = files.length > TS_OPEN_FILES;
+    const listId = `ts-list-${++tsSeq}`;
+    const body = [...groups].map(([folder, entries]) => folder
+      ? `<div class="ts-folder"><button type="button" class="ts-folder-row" aria-expanded="${!folded}" title="${esc(folder)}">`
+        + `<span class="ts-chev">${icon("chevron-down", "sm")}</span>${icon("folder", "sm")}`
+        + `<span class="ts-folder-name">${esc(folder)}</span>${countsOf(entries.map(([entry]) => entry))}</button>`
+        + `<div class="ts-folder-files"${folded ? " hidden" : ""}>${entries.map(([entry, i]) => row(entry, i, true)).join("")}</div></div>`
+      : entries.map(([entry, i]) => row(entry, i)).join("")).join("");
+    card.innerHTML = `<div class="ts-head">`
       + `<span class="ts-heading"><span class="ts-title">${head}</span>`
       + `<span class="ts-totals">${totals}</span></span>`
       + `<span class="ts-actions">`
       + `<button type="button" class="ts-undo" title="Put these files back as they were before this turn">Undo <span class="codicon codicon-discard" aria-hidden="true"></span></button>`
-      + `<button type="button" class="act ts-review" title="Open the diff for every file this chat changed">Review</button>`
+      + `<button type="button" class="ts-fold" aria-expanded="true" aria-controls="${listId}" aria-label="Fold the changed files" title="Fold the changed files"><span class="ts-chev">${icon("chevron-down", "sm")}</span></button>`
+      + `<button type="button" class="act ts-review" title="Open the diff for every file this chat changed">${icon("file-text", "sm")}<span>Open diff</span></button>`
       + `</span></div>`
-      + `<div class="ts-list">${shown.map(row).join("")}`
-      + (rest.length
-          ? `<div class="ts-more" hidden>${rest.map((entry, i) => row(entry, i + TS_VISIBLE_ROWS)).join("")}</div>`
-            + `<button type="button" class="ts-expand" aria-expanded="false">Show ${rest.length} more `
-            + `${rest.length === 1 ? "file" : "files"} <span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>`
-          : "")
-      + `</div>`;
+      + `<div class="ts-list" id="${listId}">${body}</div>`;
+    card.querySelectorAll(".ts-folder-row").forEach((button) => button.onclick = () => {
+      const files = button.nextElementSibling, open = files.hidden;      // about to open?
+      files.hidden = !open;
+      button.setAttribute("aria-expanded", String(open));
+    });
+    const fold = card.querySelector(".ts-fold");
+    fold.onclick = () => {
+      const list = card.querySelector(".ts-list"), open = list.hidden;
+      list.hidden = !open;
+      fold.setAttribute("aria-expanded", String(open));
+      const words = open ? "Fold the changed files" : "Show the changed files";
+      fold.setAttribute("aria-label", words); fold.title = words;
+    };
     card.querySelectorAll("[data-file]").forEach((row) => row.onclick = () => {
       const entry = files[Number(row.dataset.file)];
       if (entry) vscode.postMessage({ type: "reviewChange", path: entry[0], scope: "chat" });
     });
-    const expand = card.querySelector(".ts-expand");
-    if (expand) expand.onclick = () => {
-      const more = card.querySelector(".ts-more");
-      const open = more.hidden;      // about to open?
-      more.hidden = !open;
-      expand.setAttribute("aria-expanded", String(open));
-      // A one-way control is a trap: expanding a twenty-file list used to hide the only button on
-      // the card, leaving no way back to three rows. The button stays and says what it does next.
-      expand.innerHTML = open
-        ? 'Show fewer <span class="codicon codicon-chevron-up" aria-hidden="true"></span>'
-        : `Show ${rest.length} more ${rest.length === 1 ? "file" : "files"} `
-          + '<span class="codicon codicon-chevron-down" aria-hidden="true"></span>';
-    };
     card.querySelector(".ts-review").onclick = () => openChangesReview("chat");
     // Undo restores the workspace to the recovery point this turn opened. The extension
     // identifies it by the prompt, refuses when it can no longer find it, and confirms first.

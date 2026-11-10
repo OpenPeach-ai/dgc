@@ -789,38 +789,47 @@ body.vscode-light, body.vscode-high-contrast-light {
 .msg.dgc > :is(.tool-group, .tg-live) + .text.commentary.commentary-detail { margin-top: var(--sp-3); }
 .text.commentary.commentary-detail > :has(+ .commentary-actions:last-child) { padding-right: calc(var(--control-sm) + var(--sp-1)); }
 
-/* What this turn changed — the same shell as every other card, with the two actions that
-   matter once an answer lands: put it back, or look at it. */
-.turn-summary { margin-top: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); overflow: hidden; }
-/* The header is one block: a boxed mark, the count, and the totals UNDER it -- the two are one
-   statement, not two columns. Undo and Review sit at its right edge rather than in a footer,
-   so the card ends with its file list instead of a second bar. */
-.ts-head { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3); border-bottom: 1px solid var(--border); color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1 var(--sans); }
-.ts-mark { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface2); }
-.ts-mark .ic { color: var(--accent-text); }
-.ts-heading { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+/* What this turn changed: the user's changed-files look (their reference card, 7 Nov; ui-04). "Edited N files" with
+   its + and − totals beside it, then Undo, the chevron that folds the card and Open diff at the right; under it the
+   files grouped by folder, each folder a row with its own counts that folds. */
+.turn-summary { margin-top: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-card); background: var(--surface); overflow: hidden; }
+.ts-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3); background: color-mix(in srgb, var(--surface2) 45%, transparent); color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1 var(--sans); }
+.ts-heading { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: row; align-items: baseline; gap: var(--sp-2); }
 .ts-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ts-totals { display: flex; gap: var(--sp-2); font: var(--w-med) var(--t-xs)/1 var(--mono); }
+.ts-totals { flex: none; display: flex; gap: 6px; font: var(--w-med) var(--t-xs)/1 var(--mono); font-variant-numeric: tabular-nums; }
+.ts-counts { flex: none; display: flex; gap: var(--sp-3); margin-left: auto; font: var(--w-med) var(--t-xs)/1 var(--mono); font-variant-numeric: tabular-nums; }
 .ts-uncounted { flex: none; color: var(--muted); font: var(--w-med) var(--t-xs)/1.45 var(--sans); }
-.ts-list { display: flex; flex-direction: column; }
-/* A row is path on the left, counts hard against the right edge -- packing the counts straight
-   after the path leaves them ragged down the list and unreadable as a column. */
-.ts-row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: var(--sp-2) var(--sp-3); border: 0; background: transparent; color: var(--text); cursor: pointer; text-align: left; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
-.ts-row .change-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ts-list { display: flex; flex-direction: column; padding: var(--sp-1) 0; border-top: 1px solid var(--border); }
+.ts-list[hidden] { display: none; }
+/* A row: its icon, the name, and the counts hard against the right edge, so they read as a column down the list. */
+.ts-row, .ts-folder-row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: 30px; padding: 0 var(--sp-3) 0 34px; border: 0; background: transparent; color: var(--text); cursor: pointer; text-align: left; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
+.ts-row.ts-nested { padding-left: 52px; }
+.ts-folder-row { padding-left: var(--sp-3); color: var(--muted); }
+.ts-row > .ic, .ts-folder-row > .ic { flex: none; color: var(--muted); }
+.ts-row .change-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: var(--t-xs); }
+.ts-folder-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: var(--t-xs); }
 .ts-row .change-add, .ts-row .change-del, .ts-row .ts-uncounted { flex: none; font-variant-numeric: tabular-nums; }
+.ts-row .change-add { margin-left: auto; }
+.ts-row .ts-uncounted { margin-left: auto; }
+.ts-row .ts-uncounted ~ .change-add { margin-left: 0; }
+.ts-row .change-add, .ts-row .change-del { font: var(--w-med) var(--t-xs)/1 var(--mono); }
+.ts-row .change-del { margin-left: var(--sp-3); }
 /* "Changed by a command — Undo leaves it" is long: in a narrow panel it gives way to the name first, then ends in
    an ellipsis (its title says it in full), so the file it is about stays readable. */
 .ts-row .ts-by-command { flex: 0 1 auto; min-width: 0; max-width: 62%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .path-dir { color: var(--muted); }
 .path-name { color: var(--text-strong); }
-.ts-row:hover { background: var(--surface2); }
-.ts-expand { display: flex; align-items: center; gap: 6px; width: 100%; padding: var(--sp-2) var(--sp-3); border: 0; border-top: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; text-align: left; font: var(--w-med) var(--t-sm)/1.45 var(--sans); }
-.ts-expand:hover { background: var(--surface2); color: var(--text); }
-.ts-more { display: contents; }
-.ts-actions { flex: none; display: flex; align-items: center; gap: var(--sp-2); }
-.ts-undo { display: inline-flex; align-items: center; gap: 5px; min-height: var(--control); padding: 0 var(--sp-2); border: 0; background: transparent; color: var(--muted); cursor: pointer; font: var(--w-med) var(--t-sm)/1 var(--sans); border-radius: var(--r-sm); }
-.ts-undo:hover { background: var(--surface2); color: var(--text); }
-.ts-actions .act { min-height: var(--control); }
+.ts-row:hover, .ts-folder-row:hover { background: var(--surface2); }
+.ts-row:focus-visible, .ts-folder-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ts-chev { flex: none; display: inline-grid; place-items: center; transition: transform var(--dur-hover) var(--ease-out); }
+.ts-folder-row[aria-expanded="false"] .ts-chev, .ts-fold[aria-expanded="false"] .ts-chev { transform: rotate(-90deg); }
+.ts-folder-files[hidden] { display: none; }
+.ts-actions { flex: none; display: flex; align-items: center; gap: var(--sp-1); margin-left: auto; }
+.ts-undo, .ts-fold { display: inline-flex; align-items: center; gap: 5px; min-height: var(--control); padding: 0 var(--sp-2); border: 0; background: transparent; color: var(--muted); cursor: pointer; font: var(--w-med) var(--t-sm)/1 var(--sans); border-radius: var(--r-sm); }
+.ts-fold { width: var(--control); justify-content: center; padding: 0; }
+.ts-undo:hover, .ts-fold:hover { background: var(--surface2); color: var(--text); }
+.ts-actions .act { min-height: var(--control); display: inline-flex; align-items: center; gap: 5px; }
+@media (prefers-reduced-motion: reduce) { .ts-chev { transition: none; } }
 .code-language { display: block; color: var(--muted); font: var(--t-xs)/1.45 var(--mono); margin-bottom: var(--sp-3); user-select: none; }
 .text b { font-weight: var(--w-bold); color: var(--text-strong); } .text i { font-style: italic; }
 .text code { font-family: var(--mono); font-size: .88em; background: var(--surface2); color: var(--text); padding: .12em .4em; border-radius: var(--r-sm); }

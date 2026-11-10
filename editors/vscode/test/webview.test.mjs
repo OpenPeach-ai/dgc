@@ -3299,9 +3299,9 @@ test("a finished turn summarises what it changed and offers Undo and Review", ()
   assert.equal(card.querySelector(".ts-title").textContent, "Edited 2 files");
   assert.equal(card.querySelector(".ts-head .change-add").textContent, "+1");
   assert.equal(card.querySelector(".ts-head .change-del").textContent, "−1");
-  const rows = [...card.querySelectorAll(".ts-row .change-path")].map((n) => n.textContent);
+  const rows = [...card.querySelectorAll(".ts-row")].map((n) => `${n.closest(".ts-folder")?.querySelector(".ts-folder-name").textContent}/${n.querySelector(".path-name").textContent}`);
   assert.equal(rows.join(" · "), "src/clamp.py · tests/test_clamp.py",
-    "a write with no diff still names the file it created");
+    "a write with no diff still names the file it created (in its folder)");
   card.querySelector(".ts-row").click();
   assert.equal(posted.at(-1).type, "reviewChange");
   assert.equal(posted.at(-1).path, "src/clamp.py");
@@ -3318,7 +3318,7 @@ test("a finished turn summarises what it changed and offers Undo and Review", ()
   assert.deepEqual(errors, []);
 });
 
-test("a long list of edited files expands AND collapses again", () => {
+test("a list of edited files folds by folder AND the card folds and opens again", () => {
   // A user expanded a file list and found no way back: the control hid itself on open, with a
   // comment saying "there is nothing to re-collapse to". Three rows is the collapsed shape, so
   // there always was.
@@ -3337,22 +3337,23 @@ test("a long list of edited files expands AND collapses again", () => {
 
   const card = doc.querySelector(".turn-summary");
   assert.ok(card, "a turn that changed five files must produce the card");
-  const button = card.querySelector(".ts-expand");
-  const more = card.querySelector(".ts-more");
   assert.equal(card.querySelector(".ts-title").textContent, "Edited 5 files");
-  assert.equal(button.textContent.trim(), "Show 2 more files");
-  assert.equal(more.hidden, true, "three rows to start; Codex's shape");
+  const folders = [...card.querySelectorAll(".ts-folder-row")];
+  assert.deepEqual(folders.map((f) => f.querySelector(".ts-folder-name").textContent),
+    ["src", "tests", "src/app/routes/deeply/nested", "docs", "editors/vscode/media"], "each folder once, in the order they came");
+  assert.ok(folders.every((f) => f.getAttribute("aria-expanded") === "true"), "five files: every folder open");
 
-  button.click();
-  assert.equal(more.hidden, false, "the rest are shown");
-  assert.equal(button.hidden, false, "and the way back must still be on screen");
-  assert.equal(button.textContent.trim(), "Show fewer", "the label says what it does NEXT");
-  assert.equal(button.getAttribute("aria-expanded"), "true");
-
-  button.click();
-  assert.equal(more.hidden, true, "and it really collapses");
-  assert.equal(button.textContent.trim(), "Show 2 more files");
-  assert.equal(button.getAttribute("aria-expanded"), "false");
+  // The card folds to its header and opens again; its chevron says what it does next.
+  const fold = card.querySelector(".ts-fold"), list = card.querySelector(".ts-list");
+  fold.click();
+  assert.equal(list.hidden, true, "it really folds");
+  assert.equal(fold.hidden, false, "and the way back must still be on screen");
+  assert.equal(fold.getAttribute("aria-label"), "Show the changed files", "the label says what it does NEXT");
+  assert.equal(fold.getAttribute("aria-expanded"), "false");
+  fold.click();
+  assert.equal(list.hidden, false, "the rest are shown");
+  assert.equal(fold.getAttribute("aria-label"), "Fold the changed files");
+  assert.equal(fold.getAttribute("aria-expanded"), "true");
   assert.deepEqual(errors, []);
 });
 
