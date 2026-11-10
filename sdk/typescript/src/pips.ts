@@ -41,7 +41,7 @@ export type PipReadParams = {
   list_pip_attention: { limit?: number };
   list_pip_notes: { pip_id: string; shared?: true };
   list_pip_sites: { pip_id: string };
-  get_pip_chat_context: { pip_id: string; context_size?: number };
+  get_pip_chat_context: { pip_id: string; context_size?: number; conversation_id?: string };
   check_pip_source: { pip_id: string; source_policy?: Record<string, unknown> };
   get_pip_run_source: { run_id: string };
   list_pip_run_posts: { pip_id: string; before_id?: string; limit?: number };
@@ -112,7 +112,7 @@ export type PipReadParams = {
   list_pip_approvals: { before_id?: string; limit?: number; pip_id: string };
   list_pip_checkpoints: { before_id?: number; limit?: number; pip_id: string };
   list_pip_handoffs: { before_id?: string; limit?: number; pip_id: string };
-  list_pip_messages: { before_id?: string; limit?: number; pip_id: string };
+  list_pip_messages: { before_id?: string; limit?: number; pip_id: string; conversation_id?: string };
   list_pip_models: { [key: string]: never };
   list_pip_run_activity: { after?: number; run_id: string };
   list_pip_runs: { pip_id: string };
@@ -125,7 +125,7 @@ export type PipReadParams = {
 export type PipMutationParams = {
   create_pip_flow: { name: string; pip_ids: string[]; tasks: string[]; mode: "reviewed" | "unattended" };
   set_pip_flow: { flow_id: string; expected_revision: number; status: "on" | "paused" | "retired" };
-  mark_pip_read: { pip_id: string; message_id?: string; post_id?: string };
+  mark_pip_read: { pip_id: string; message_id?: string; post_id?: string; conversation_id?: string };
   ensure_pip_template: { template: PipTemplate | PipTemplateInput | PipTemplateWire; accept_widening?: boolean; overwrite_user_changes?: boolean };
   prune_pip_templates: { keep: string[] };
   decide_pip_template_change: { change_id: string; decision: "accept" | "reject"; expected_digest: string };
@@ -185,6 +185,10 @@ export type PipMutationParams = {
   set_pips_backup: { model: string; provider?: string; engine?: "claude" | "codex"; router?: boolean };
   set_pip_backup: { pip_id: string; model: string | null; provider?: string; engine?: "claude" | "codex"; router?: boolean };
   undo_pip_change: { pip_id: string; change_id: string };
+  list_pip_conversations: { pip_id: string; archived?: boolean };
+  create_pip_conversation: { pip_id: string; title?: string };
+  rename_pip_conversation: { pip_id: string; conversation_id: string; title: string };
+  archive_pip_conversation: { pip_id: string; conversation_id: string; archived?: boolean };
   set_pips_keep_running: { enabled: boolean };
   mark_pip_digest_seen: { until: string };
   mark_pip_news_seen: { pip_ids: string[]; until: string };
@@ -235,7 +239,7 @@ export type PipMutationParams = {
   review_pip_finding: { expected_revision: number; finding_index: number; reason: string; run_id: string; status: string };
   run_pip: { idempotency_key: string; pip_id: string; expected_version?: number; expected_lifecycle_revision?: number; expected_plan_digest?: string };
   send_pip_message: { idempotency_key: string; pip_id: string; text: string; chat_options?: PipChatOptions; images?: string[]; files?: { name: string; data: string }[]; display_mentions?: unknown[];
-    spooled_images?: { name: string; media_type: string }[]; spooled_files?: { name: string; spool: string }[] };
+    spooled_images?: { name: string; media_type: string }[]; spooled_files?: { name: string; spool: string }[]; conversation_id?: string };
   introduce_pip: { pip_id: string };
   stop_pips: { [key: string]: never };
 };
@@ -298,13 +302,13 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   set_pip_careful: ["pip_id", "on"],
   set_plugin_permission: ["level", "plugin"],
   forget_pip_site: ["pip_id", "site"],
-  get_pip_chat_context: ["pip_id", "context_size"],
+  get_pip_chat_context: ["pip_id", "context_size", "conversation_id"],
   set_pip_chat_options: ["pip_id", "chat_options"],
   check_pip_source: ["pip_id", "source_policy"],
   get_pip_run_source: ["run_id"],
   list_pip_run_posts: ["pip_id", "before_id", "limit"],
   list_pip_unread: ["workspace_id"],
-  mark_pip_read: ["pip_id", "message_id", "post_id"],
+  mark_pip_read: ["pip_id", "message_id", "post_id", "conversation_id"],
   list_pip_reply_stats: ["pip_id", "run_ids"],
   get_pips_limit: [],
   set_pips_limit: ["max_pips"],
@@ -352,6 +356,10 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   get_pip_backup: ["pip_id"],
   set_pip_backup: ["pip_id", "model", "provider", "engine", "router"],
   undo_pip_change: ["pip_id", "change_id"],
+  list_pip_conversations: ["pip_id", "archived"],
+  create_pip_conversation: ["pip_id", "title"],
+  rename_pip_conversation: ["pip_id", "conversation_id", "title"],
+  archive_pip_conversation: ["pip_id", "conversation_id", "archived"],
   get_pips_keep_running: [],
   set_pips_keep_running: ["enabled"],
   get_pip_digest: [],
@@ -428,11 +436,13 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   "list_pip_models": [],
   "list_pip_messages": [
     "before_id",
+    "conversation_id",
     "limit",
     "pip_id"
   ],
   "send_pip_message": [
     "chat_options",
+    "conversation_id",
     "display_mentions",
     "files",
     "idempotency_key",
@@ -850,6 +860,14 @@ for (const command of API76_MUTATIONS) MUTATIONS.add(command);
 // API 77: Undo on a change a Personal Pip made about itself at once, in a turn the user started (local only in DGC).
 const API77_MUTATIONS = new Set(["undo_pip_change"]);
 for (const command of API77_MUTATIONS) MUTATIONS.add(command);
+// API 79: several conversations per Pip (local only in DGC): list them, start, rename, archive or restore one; send,
+// list, mark read and the context meter name one by conversation_id (none: the Pip's first, as before).
+const API79_READS = new Set(["list_pip_conversations"]);
+const API79_MUTATIONS = new Set(["create_pip_conversation", "rename_pip_conversation", "archive_pip_conversation"]);
+for (const command of API79_READS) READS.add(command);
+for (const command of API79_MUTATIONS) MUTATIONS.add(command);
+const API79_FIELDS = new Set(["send_pip_message", "list_pip_messages", "mark_pip_read", "get_pip_chat_context"]);
+const CONVERSATION_ID = /^conv_[0-9a-f]{32}$/;
 const MAX_EVENT_PAYLOAD = 32768;
 /** What an app sends with an event: plain JSON of at most 32 KB, outside the 32 KiB request budget (the runtime checks
  *  it again). */
@@ -998,7 +1016,7 @@ export class Pips {
     if (this.restricted) throw new DGCUnsupportedError("Pips cannot inherit this session's RuntimePolicy or sandbox; use a separate unrestricted, explicitly authorized control session");
     if (mutation && this.plan) throw new DGCUnsupportedError("Pip mutations are unavailable in plan mode");
     if (appEvent && this.plan) throw new DGCUnsupportedError("Sending your app's events to Pips is unavailable in plan mode");
-    const minimum = API77_MUTATIONS.has(command) ? 77 : API76_READS.has(command) || API76_MUTATIONS.has(command) ? 76 : API75_READS.has(command) || API75_MUTATIONS.has(command) ? 75 : API72_READS.has(command) || API72_MUTATIONS.has(command) ? 72 : API69_READS.has(command) || API69_MUTATIONS.has(command) ? 69 : API68_MUTATIONS.has(command) ? 68 : API67_READS.has(command) || API67_MUTATIONS.has(command) ? 67 : API65_READS.has(command) ? 65 : API64_READS.has(command) || API64_MUTATIONS.has(command) ? 64 : API63_READS.has(command) || API63_EVENTS.has(command) ? 63 : API62_READS.has(command) || API62_MUTATIONS.has(command) ? 62 : API61_READS.has(command) || API61_MUTATIONS.has(command) ? 61 : API59_READS.has(command) || API59_MUTATIONS.has(command) ? 59 : API58_READS.has(command) || API58_MUTATIONS.has(command) ? 58 : API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
+    const minimum = API79_READS.has(command) || API79_MUTATIONS.has(command) ? 79 : API77_MUTATIONS.has(command) ? 77 : API76_READS.has(command) || API76_MUTATIONS.has(command) ? 76 : API75_READS.has(command) || API75_MUTATIONS.has(command) ? 75 : API72_READS.has(command) || API72_MUTATIONS.has(command) ? 72 : API69_READS.has(command) || API69_MUTATIONS.has(command) ? 69 : API68_MUTATIONS.has(command) ? 68 : API67_READS.has(command) || API67_MUTATIONS.has(command) ? 67 : API65_READS.has(command) ? 65 : API64_READS.has(command) || API64_MUTATIONS.has(command) ? 64 : API63_READS.has(command) || API63_EVENTS.has(command) ? 63 : API62_READS.has(command) || API62_MUTATIONS.has(command) ? 62 : API61_READS.has(command) || API61_MUTATIONS.has(command) ? 61 : API59_READS.has(command) || API59_MUTATIONS.has(command) ? 59 : API58_READS.has(command) || API58_MUTATIONS.has(command) ? 58 : API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
     if (this.caps.pips_supported !== true || !Number.isSafeInteger(this.caps.pips_api_version)
       || (this.caps.pips_api_version as number) < minimum) {
       throw new DGCUnsupportedError(`This control requires a runtime advertising Pips API ${minimum} or newer`);
@@ -1156,6 +1174,14 @@ export class Pips {
     if (["pause_pip", "resume_pip"].includes(command) && Object.hasOwn(values, "expected_lifecycle_revision")
       && (this.caps.pips_api_version as number) < 16) {
       throw new DGCUnsupportedError("Reviewed lifecycle revisions require a runtime advertising Pips API 16 or newer");
+    }
+    if (API79_FIELDS.has(command) && Object.hasOwn(values, "conversation_id")) {
+      if ((this.caps.pips_api_version as number) < 79) {
+        throw new DGCUnsupportedError("A Pip's conversations (conversation_id) require a runtime advertising Pips API 79 or newer");
+      }
+    }
+    if (Object.hasOwn(values, "conversation_id") && !(typeof values.conversation_id === "string" && CONVERSATION_ID.test(values.conversation_id))) {
+      throw new DGCConfigError("conversation_id names one of the Pip's conversations (conv_ and 32 hex digits)");
     }
     if ((API52_FIELDS[command] || []).some((key) => Object.hasOwn(values, key))) {
       if ((this.caps.pips_api_version as number) < 52) {

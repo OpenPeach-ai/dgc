@@ -414,7 +414,14 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # API 78 (0.52): a run's post may carry `artifact` {id, type ("doc" or "sheet"), title, version}: the review it kept as
 # the Pip's document or sheet, or the Quill draft that became its document, at the version that run made, so the Pip's
 # chat shows the document's card. No command is added; a client reads the field only from a runtime advertising 78.
-PIPS_API_VERSION = 78
+# API 79 (0.52, D11): several conversations per Pip (pip_conversations). list_pip_conversations {pip_id, archived?} ->
+# {conversations: [{id, title, first, created_at, updated_at, archived, unread}]}, create_pip_conversation {pip_id,
+# title?}, rename_pip_conversation {pip_id, conversation_id, title}, archive_pip_conversation {pip_id,
+# conversation_id, archived?} (archived false restores; the first stays), all -> {conversation}, all local only.
+# send_pip_message, list_pip_messages, mark_pip_read and get_pip_chat_context take an optional conversation_id; a
+# request without one is about the Pip's first conversation, as before. A Pip answers in its conversations in
+# parallel, and its replies take turns on its computer.
+PIPS_API_VERSION = 79
 
 
 def _pips_platform_supported() -> bool:

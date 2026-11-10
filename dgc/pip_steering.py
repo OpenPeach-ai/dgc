@@ -37,9 +37,17 @@ CREATE TABLE IF NOT EXISTS pip_chat_steers (
 CREATE INDEX IF NOT EXISTS pip_chat_steers_run ON pip_chat_steers(run_id,seq);
 """
 MAX_PER_RUN = 8
-# Messages waiting for a turn of their own: the reply they joined finished without reading them.
+# Messages waiting for a turn of their own: the reply they joined finished without reading them. Each conversation of a
+# Pip has its own queue (pip_conversations): a steer belongs to the conversation of the reply it joined.
 WAITING = ("SELECT s.* FROM pip_chat_steers s JOIN pip_runs r ON r.id=s.run_id "
            "WHERE s.pip_id=? AND s.status='pending' AND r.status='succeeded'")
+_IN_CONVERSATION = " AND s.conversation_id IS ?"
+
+
+def conversation_of(db, run_id):
+    """The conversation a chat reply is in: its user message says which."""
+    row = db.execute("SELECT conversation_id FROM pip_chat_messages WHERE run_id=? AND role='user'", (run_id,)).fetchone()
+    return row[0] if row else None
 
 
 def send(store, pip, run, req, actor):
@@ -69,10 +77,10 @@ def _insert(store, pip, run_id, req, actor):
     if store.db.execute("SELECT 1 FROM pip_chat_messages WHERE pip_id=? AND request_key=?", (pip['id'], req['request_key'])).fetchone():
         raise RegistryError('conflict', 'This message key already belongs to an earlier Pip message.')
     message_id = identifier('message')
-    store.db.execute('INSERT INTO pip_chat_steers(id,pip_id,workspace_id,run_id,text,request_key,request_digest,requested_by,created_at,status) '
-                     'VALUES(?,?,?,?,?,?,?,?,?,?)',
+    store.db.execute('INSERT INTO pip_chat_steers(id,pip_id,workspace_id,run_id,text,request_key,request_digest,requested_by,created_at,status,'
+                     'conversation_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
                      (message_id, pip['id'], pip['workspace_id'], run_id, req['text'], req['request_key'], req['digest'], actor,
-                      store.registry.clock(), 'pending'))
+                      store.registry.clock(), 'pending', conversation_of(store.db, run_id)))
     from .pip_chat import save_mentions
     save_mentions(store.db, pip['id'], message_id, req.get('display_mentions'))
     return store.db.execute('SELECT * FROM pip_chat_steers WHERE id=?', (message_id,)).fetchone()
@@ -91,10 +99,12 @@ def wait_behind(store, pip, req, actor):
     """Send with no reply running yet while earlier messages wait for theirs (their run has just closed): this one goes
     behind them, never ahead. None when nothing is waiting any more, or it brings photos or files, which only a turn of
     its own can take."""
-    if req.get('images') or req.get('files') or not waiting(store.db, pip['id']):
+    conversation_id = req.get('conversation_id')
+    if req.get('images') or req.get('files') or not waiting(store.db, pip['id'], conversation_id):
         return None
     with store.registry.transaction():
-        ahead = store.db.execute(WAITING + ' ORDER BY s.seq DESC LIMIT 1', (pip['id'],)).fetchone()
+        ahead = store.db.execute(WAITING + _IN_CONVERSATION + ' ORDER BY s.seq DESC LIMIT 1',
+                                 (pip['id'], conversation_id)).fetchone()
         if ahead is None:
             return None
         row = _insert(store, pip, ahead['run_id'], req, actor)
@@ -174,8 +184,12 @@ def miss_pending(store, run_id):
         store.db.execute("UPDATE pip_chat_steers SET status='missed' WHERE run_id=? AND status='pending'", (run_id,))
 
 
-def waiting(db, pip_id):
-    return db.execute(WAITING + ' ORDER BY s.seq', (pip_id,)).fetchall()
+def waiting(db, pip_id, conversation_id=None):
+    """What waits for a turn in one conversation (the first when none is named, as an older client means)."""
+    if conversation_id is None:
+        from .pip_conversations import first
+        conversation_id = first(db, pip_id)
+    return db.execute(WAITING + _IN_CONVERSATION + ' ORDER BY s.seq', (pip_id, conversation_id)).fetchall()
 
 
 def stopped(db, pip_id, run_id):
@@ -183,19 +197,25 @@ def stopped(db, pip_id, run_id):
     beside the reply that was stopped."""
     db.execute("UPDATE pip_chat_steers SET status='missed',run_id=? WHERE status='pending' AND (run_id=? OR id IN "
                "(SELECT s.id FROM pip_chat_steers s JOIN pip_runs r ON r.id=s.run_id "
-               "WHERE s.pip_id=? AND s.status='pending' AND r.status='succeeded'))", (run_id, run_id, pip_id))
+               "WHERE s.pip_id=? AND s.status='pending' AND r.status='succeeded' AND s.conversation_id IS ?))",
+               (run_id, run_id, pip_id, conversation_of(db, run_id)))
 
 
-def advance(store, pip_id, config):
-    """The oldest waiting message becomes the Pip's next turn, once nothing else is answering. A message that can't
-    (the Pip was archived, the queue is full) says it wasn't sent; it is never left waiting for nothing."""
+def advance(store, pip_id, config, conversation_id=None):
+    """The oldest waiting message of a conversation becomes its next turn, once nothing else is answering in it. A
+    message that can't (the Pip was archived, the queue is full) says it wasn't sent; it is never left waiting for
+    nothing."""
     from .pip_chat import answer_waiting
+    if conversation_id is None:
+        from .pip_conversations import first
+        conversation_id = first(store.db, pip_id)
     while True:
-        rows = waiting(store.db, pip_id)
+        rows = waiting(store.db, pip_id, conversation_id)
         if not rows:
             return
         if store.db.execute("SELECT 1 FROM pip_runs r JOIN pip_chat_messages m ON m.run_id=r.id WHERE m.pip_id=? AND "
-                            "m.role='user' AND r.status IN ('queued','running','cancelling') LIMIT 1", (pip_id,)).fetchone():
+                            "m.conversation_id IS ? AND m.role='user' AND r.status IN ('queued','running','cancelling') LIMIT 1",
+                            (pip_id, conversation_id)).fetchone():
             return                                  # that reply's end brings this back
         try:
             answer_waiting(store, rows[0], config)
@@ -224,7 +244,7 @@ def settle(store, run_id, config):
         return
     if row['status'] == 'failed':
         miss_pending(store, run_id)
-    advance(store, row['pip_id'], config)
+    advance(store, row['pip_id'], config, conversation_of(store.db, run_id))
 
 
 def recover(store, config):
@@ -233,9 +253,9 @@ def recover(store, config):
     with store.registry.transaction():
         store.db.execute("UPDATE pip_chat_steers SET status='missed' WHERE status='pending' AND run_id IN "
                          "(SELECT id FROM pip_runs WHERE status IN ('failed','cancelled'))")
-    for pip in store.db.execute("SELECT DISTINCT s.pip_id FROM pip_chat_steers s JOIN pip_runs r ON r.id=s.run_id "
+    for pip in store.db.execute("SELECT DISTINCT s.pip_id,s.conversation_id FROM pip_chat_steers s JOIN pip_runs r ON r.id=s.run_id "
                                 "WHERE s.status='pending' AND r.status='succeeded'").fetchall():
-        advance(store, pip['pip_id'], config)
+        advance(store, pip['pip_id'], config, pip['conversation_id'])
 
 
 def forget_resent(store, pip_id, req, actor):

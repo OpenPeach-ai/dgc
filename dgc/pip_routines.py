@@ -214,6 +214,8 @@ def projection(row) -> dict:
     if _troupe(row):
         from .troupe_routines import summary
         value["troupe"] = summary(json.loads(row["troupe"]))     # only on a troupe routine: older editors ignore it
+    if "conversation_id" in row.keys() and row["conversation_id"]:
+        value["conversation_id"] = row["conversation_id"]       # moved out of its Pip's first conversation (API 79)
     return value
 
 
@@ -308,8 +310,8 @@ def update(store, pip_id, routine_id, changes: dict) -> dict:
     """The user edits a routine, or turns it on or off. A new "when" starts its schedule afresh."""
     registry = store.registry
     _personal(store, pip_id)
-    if not isinstance(changes, dict) or not changes or set(changes) - {"title", "prompt", "trigger", "status"}:
-        raise RegistryError("invalid_request", "Change its name, what it does, when it runs, or whether it is on.")
+    if not isinstance(changes, dict) or not changes or set(changes) - {"title", "prompt", "trigger", "status", "conversation_id"}:
+        raise RegistryError("invalid_request", "Change its name, what it does, when it runs, whether it is on, or where it posts.")
     row = _row(registry, pip_id, routine_id)
     if row["status"] in ("suggested", "declined"):
         raise RegistryError("invalid_state", "Add this routine first.")
@@ -323,6 +325,12 @@ def update(store, pip_id, routine_id, changes: dict) -> dict:
         fields["title"] = _text(changes["title"], 160, "its name")
     if "prompt" in changes:
         fields["prompt"] = _text(changes["prompt"], 4000, "what to do")
+    if "conversation_id" in changes:
+        # Which of the Pip's conversations it posts in (API 79): None, or the first one, is the first.
+        from .pip_conversations import first_id, resolve
+        chosen = changes["conversation_id"]
+        chosen = None if chosen is None else resolve(registry.db, pip_id, chosen)
+        fields["conversation_id"] = None if chosen == first_id(registry.db, pip_id) else chosen
     trigger = json.loads(row["trigger"])
     now = _now(registry)
     if "trigger" in changes:
@@ -641,7 +649,15 @@ def _fire(store, row, config, extra: str, occurrence: str) -> dict:
     trigger = json.loads(row["trigger"])
     text = turn_text(row, trigger) + extra
     key = KEY + row["id"][-16:] + "_" + hashlib.sha256(occurrence.encode()).hexdigest()[:24]
-    return pip_chat.send(store, row["pip_id"], _fits(text), key, ACTOR, config, _intro=True)
+    # Its Pip's first conversation, or the one it was moved to; one archived since posts in the first, never lost.
+    conversation_id = row["conversation_id"] if "conversation_id" in row.keys() else None
+    if conversation_id:
+        from .pip_conversations import resolve
+        try:
+            resolve(store.db, row["pip_id"], conversation_id)
+        except RegistryError:
+            conversation_id = None
+    return pip_chat.send(store, row["pip_id"], _fits(text), key, ACTOR, config, conversation_id=conversation_id, _intro=True)
 
 
 def check(registry, config, row, *, reader=None, now=None) -> str:

@@ -735,6 +735,8 @@ def review(registry, setup_id, workspace_id, expected_digest, actor, config, acc
             version = request.get('expected_version', 0) + 1
             if 'pip_id' not in request:
                 registry.db.execute('INSERT INTO pips VALUES(?,?,?,?,?,?)', (pip_id, workspace_id, 'active', version, now, now))
+                from .pip_conversations import first as first_conversation
+                first_conversation(registry.db, pip_id, workspace_id=workspace_id, now=now)
                 if personal:
                     from .pip_levels import start as start_level
                     start_level(registry, pip_id)

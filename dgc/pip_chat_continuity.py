@@ -77,14 +77,22 @@ def mechanical(prior, messages, maximum=MAX_SUMMARY_BYTES):
     return clipped(_mechanical_compaction_brief(prior, lines, max(2000, maximum)), maximum)
 
 
-def _pairs(store, pip_id):
-    """Stream complete successful exchanges; bound each body before SELECT."""
+def _conversation(store, pip_id, conversation_id=None):
+    """The conversation a history or checkpoint belongs to (pip_conversations): the one named, else the Pip's first,
+    where every message from before conversations is."""
+    from .pip_conversations import first
+    return conversation_id or first(store.db, pip_id)
+
+
+def _pairs(store, pip_id, conversation_id=None):
+    """Stream complete successful exchanges of one conversation; bound each body before SELECT."""
+    conversation_id = _conversation(store, pip_id, conversation_id)
     from .pip_chat import MAX_ARCHIVE_MESSAGES, MAX_REPLY_BYTES, validate_text
     bounds = store.db.execute('''SELECT m.seq,m.id,m.pip_id,m.workspace_id,m.run_id,m.role,m.model,
         length(CAST(m.text AS BLOB)) size, r.pip_id owner,r.workspace_id workspace
         FROM pip_chat_messages m JOIN pip_runs r ON r.id=m.run_id
-        WHERE m.pip_id=? AND r.status='succeeded' ORDER BY m.seq LIMIT ?''',
-        (pip_id, MAX_ARCHIVE_MESSAGES + 1)).fetchall()
+        WHERE m.pip_id=? AND m.conversation_id=? AND r.status='succeeded' ORDER BY m.seq LIMIT ?''',
+        (pip_id, conversation_id, MAX_ARCHIVE_MESSAGES + 1)).fetchall()
     if len(bounds) > MAX_ARCHIVE_MESSAGES or len(bounds) % 2:
         fail('The conversation archive is oversized or has incomplete successful pairs.')
     for offset in range(0, len(bounds), 2):
@@ -108,9 +116,9 @@ def _pairs(store, pip_id):
         yield pair, messages
 
 
-def archive(store, pip_id, through=None):
+def archive(store, pip_id, through=None, conversation_id=None):
     chain, count, end = EMPTY_DIGEST, 0, 0
-    for rows, messages in _pairs(store, pip_id):
+    for rows, messages in _pairs(store, pip_id, conversation_id):
         if through is not None and rows[-1]['seq'] > through:
             break
         for r, m in zip(rows, messages):
@@ -123,12 +131,18 @@ def archive(store, pip_id, through=None):
     return {'through_seq': end, 'messages': count, 'archive_digest': chain}
 
 
-def latest(store, pip_id, *, verify_archive=True):
+def latest(store, pip_id, *, verify_archive=True, conversation_id=None):
+    conversation_id = _conversation(store, pip_id, conversation_id)
+    # A checkpoint saved before conversations has none (checkpoints are immutable, so the migration leaves them): it is
+    # the first conversation's.
+    from .pip_conversations import first_id
+    is_first = 1 if conversation_id == first_id(store.db, pip_id) else 0
     row = store.db.execute('''SELECT c.id,c.pip_id,c.workspace_id,c.run_id,c.digest,
         length(CAST(c.body AS BLOB)) size,length(CAST(r.manifest AS BLOB)) manifest_size,
         r.status,r.pip_id owner,r.workspace_id workspace
         FROM pip_chat_checkpoints c JOIN pip_runs r ON r.id=c.run_id
-        WHERE c.pip_id=? ORDER BY c.id DESC LIMIT 1''', (pip_id,)).fetchone()
+        WHERE c.pip_id=? AND (c.conversation_id=? OR (c.conversation_id IS NULL AND ?=1)) ORDER BY c.id DESC LIMIT 1''',
+        (pip_id, conversation_id, is_first)).fetchone()
     if row is None:
         return None
     if row['size'] is None or row['size'] > MAX_RECORD_BYTES or row['manifest_size'] is None or row['manifest_size'] > 128 * 1024:
@@ -154,7 +168,7 @@ def latest(store, pip_id, *, verify_archive=True):
     if body['provenance'] != provenance:
         fail('Conversation checkpoint provenance differs from its producing run.')
     if verify_archive:
-        expected = archive(store, pip_id, body['state']['through_seq'])
+        expected = archive(store, pip_id, body['state']['through_seq'], conversation_id=conversation_id)
         if any(body['state'][k] != v for k, v in expected.items()):
             fail('The conversation archive disagrees with the saved brief. No unverified brief was loaded.')
     return {'id': row['id'], 'digest': row['digest'], **body}
@@ -181,10 +195,11 @@ def empty():
             'messages': 0, 'archive_digest': EMPTY_DIGEST}
 
 
-def prepare(store, pip_id, context_size, *, secrets=()):
+def prepare(store, pip_id, context_size, *, secrets=(), conversation_id=None):
     # Verify coverage while streaming the tail below, avoiding three complete
     # archive reads while enqueue holds the writer transaction.
-    saved = latest(store, pip_id, verify_archive=False)
+    conversation_id = _conversation(store, pip_id, conversation_id)
+    saved = latest(store, pip_id, verify_archive=False, conversation_id=conversation_id)
     state = dict(saved['state']) if saved else empty()
     covered = dict(state)
     verified = covered['through_seq'] == 0
@@ -196,7 +211,7 @@ def prepare(store, pip_id, context_size, *, secrets=()):
     budget = min(MAX_HISTORY_BYTES, max(4096, context_size * 2))
     recent, history = [], []
     chain, count, end = EMPTY_DIGEST, 0, 0
-    for rows, pair in _pairs(store, pip_id):
+    for rows, pair in _pairs(store, pip_id, conversation_id):
         for r, m in zip(rows, pair):
             chain = digest({'previous': chain, 'seq': r['seq'], 'id': r['id'], 'run_id': r['run_id'],
                             'workspace_id': r['workspace_id'], 'pip_id': pip_id, 'model': r['model'], **m})
@@ -322,11 +337,14 @@ def commit(store, run, result, now):
             fail('A legacy reply cannot inject a conversation checkpoint.')
         return
     _validate_envelope(pin)
+    # The reply's own conversation: its user message says which (pip_conversations).
+    own = store.db.execute("SELECT conversation_id FROM pip_chat_messages WHERE run_id=? AND role='user'", (run['id'],)).fetchone()
+    conversation_id = _conversation(store, run['pip_id'], own[0] if own else None)
     # The whole-head check below includes the covered prefix; do not re-read it.
-    saved = latest(store, run['pip_id'], verify_archive=False)
+    saved = latest(store, run['pip_id'], verify_archive=False, conversation_id=conversation_id)
     if (saved['digest'] if saved else None) != pin['base_digest']:
         fail('A newer conversation checkpoint exists. This stale reply cannot replace it.')
-    actual = archive(store, run['pip_id'])  # Current run remains running until finish commits.
+    actual = archive(store, run['pip_id'], conversation_id=conversation_id)  # Current run remains running until finish commits.
     if actual != pin['head']:
         fail('The conversation archive changed after this reply was queued.')
     candidate = result.get('continuity')
@@ -367,12 +385,12 @@ def commit(store, run, result, now):
     raw = encoded(body)
     if len(raw) > MAX_RECORD_BYTES:
         fail('The complete conversation checkpoint exceeds its storage budget.')
-    store.db.execute('INSERT INTO pip_chat_checkpoints(pip_id,workspace_id,run_id,body,digest,created_at) VALUES(?,?,?,?,?,?)',
-        (run['pip_id'], run['workspace_id'], run['id'], raw.decode(), hashlib.sha256(raw).hexdigest(), now))
+    store.db.execute('INSERT INTO pip_chat_checkpoints(pip_id,workspace_id,run_id,body,digest,created_at,conversation_id) VALUES(?,?,?,?,?,?,?)',
+        (run['pip_id'], run['workspace_id'], run['id'], raw.decode(), hashlib.sha256(raw).hexdigest(), now, conversation_id))
 
 
-def projection(store, pip_id):
-    saved = latest(store, pip_id, verify_archive=False)
+def projection(store, pip_id, conversation_id=None):
+    saved = latest(store, pip_id, verify_archive=False, conversation_id=conversation_id)
     if saved is None:
         return None
     state = saved['state']

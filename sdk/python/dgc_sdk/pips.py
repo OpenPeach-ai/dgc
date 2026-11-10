@@ -393,6 +393,15 @@ MUTATION_COMMANDS |= API76_MUTATIONS
 # API 77: Undo on a change a Personal Pip made about itself at once, in a turn the user started (local only in DGC).
 API77_MUTATIONS = frozenset({'undo_pip_change'})
 MUTATION_COMMANDS |= API77_MUTATIONS
+# API 79: several conversations per Pip (local only in DGC): list them, start, rename, archive or restore one; send,
+# list, mark read and the context meter name one by conversation_id (none: the Pip's first, as before).
+API79_READS = frozenset({'list_pip_conversations'})
+API79_MUTATIONS = frozenset({'create_pip_conversation', 'rename_pip_conversation', 'archive_pip_conversation'})
+READ_COMMANDS |= API79_READS
+MUTATION_COMMANDS |= API79_MUTATIONS
+API79_FIELDS = {command: frozenset({'conversation_id'})
+                for command in ('send_pip_message', 'list_pip_messages', 'mark_pip_read', 'get_pip_chat_context')}
+CONVERSATION_ID = re.compile(r"conv_[0-9a-f]{32}\Z")
 PIP_REPORT_AS = frozenset({'chat', 'doc', 'sheet'})
 TEMPLATE_CHANGE_ID = re.compile(r"tmplchange_[a-f0-9]{32}\Z")
 COMMAND_FIELDS = {
@@ -436,7 +445,7 @@ COMMAND_FIELDS = {
     'set_pip_eyes': frozenset({'pip_id', 'choice'}),
     'list_pip_run_posts': frozenset({'pip_id', 'before_id', 'limit'}),
     'list_pip_unread': frozenset({'workspace_id'}),
-    'mark_pip_read': frozenset({'pip_id', 'message_id', 'post_id'}),
+    'mark_pip_read': frozenset({'pip_id', 'message_id', 'post_id', 'conversation_id'}),
     'check_pip_source': frozenset({'pip_id', 'source_policy'}),
     'get_pip_run_source': frozenset({'run_id'}),
     'list_pip_plugins': frozenset({'pip_id'}),
@@ -451,7 +460,7 @@ COMMAND_FIELDS = {
     'set_pip_careful': frozenset({'pip_id', 'on'}),
     'set_plugin_permission': frozenset({'level', 'plugin'}),
     'forget_pip_site': frozenset({'pip_id', 'site'}),
-    'get_pip_chat_context': frozenset({'pip_id', 'context_size'}),
+    'get_pip_chat_context': frozenset({'pip_id', 'context_size', 'conversation_id'}),
     'set_pip_chat_options': frozenset({'pip_id', 'chat_options'}),
     'list_pip_reply_stats': frozenset({'pip_id', 'run_ids'}),
     'get_pips_limit': frozenset(),
@@ -502,6 +511,10 @@ COMMAND_FIELDS = {
     'get_pip_backup': frozenset({'pip_id'}),
     'set_pip_backup': frozenset({'pip_id', 'model', 'provider', 'engine', 'router'}),
     'undo_pip_change': frozenset({'pip_id', 'change_id'}),
+    'list_pip_conversations': frozenset({'pip_id', 'archived'}),
+    'create_pip_conversation': frozenset({'pip_id', 'title'}),
+    'rename_pip_conversation': frozenset({'pip_id', 'conversation_id', 'title'}),
+    'archive_pip_conversation': frozenset({'pip_id', 'conversation_id', 'archived'}),
     'get_pips_payments': frozenset(),
     'set_pips_payments': frozenset({'enabled'}),
     'get_pips_desktop_notifications': frozenset(),
@@ -590,7 +603,7 @@ COMMAND_FIELDS = {
     'list_pip_approvals': frozenset(['before_id', 'limit', 'pip_id']),
     'list_pip_checkpoints': frozenset(['before_id', 'limit', 'pip_id']),
     'list_pip_handoffs': frozenset(['before_id', 'limit', 'pip_id']),
-    'list_pip_messages': frozenset(['before_id', 'limit', 'pip_id']),
+    'list_pip_messages': frozenset(['before_id', 'conversation_id', 'limit', 'pip_id']),
     'list_pip_models': frozenset([]),
     'list_pip_run_activity': frozenset(['after', 'run_id']),
     'list_pip_runs': frozenset(['pip_id']),
@@ -610,7 +623,7 @@ COMMAND_FIELDS = {
     'review_pip_execution': frozenset(['expected_revision', 'reason', 'run_id', 'status']),
     'review_pip_finding': frozenset(['expected_revision', 'finding_index', 'reason', 'run_id', 'status']),
     'run_pip': frozenset(['idempotency_key', 'pip_id', 'expected_version', 'expected_lifecycle_revision', 'expected_plan_digest']),
-    'send_pip_message': frozenset(['chat_options', 'display_mentions', 'files', 'idempotency_key', 'images', 'pip_id', 'spooled_files', 'spooled_images', 'text']),
+    'send_pip_message': frozenset(['chat_options', 'conversation_id', 'display_mentions', 'files', 'idempotency_key', 'images', 'pip_id', 'spooled_files', 'spooled_images', 'text']),
     'get_pip_message_image': frozenset(['as_file', 'index', 'message_id', 'pip_id']),
     'introduce_pip': frozenset(['pip_id']),
     'stop_pips': frozenset([]),
@@ -818,7 +831,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API77_MUTATIONS:
+        if command in API79_READS | API79_MUTATIONS:
+            minimum = 79
+        elif command in API77_MUTATIONS:
             minimum = 77
         elif command in API76_READS | API76_MUTATIONS:
             minimum = 76
@@ -957,6 +972,12 @@ class Pips:
             from .pips_app import wire_tools
             params = {**params, 'tools': wire_tools(params['tools'])}
         values = _detach(params)
+        if API79_FIELDS.get(command, frozenset()) & set(values) or command in API79_READS | API79_MUTATIONS:
+            if version < 79:
+                raise DGCUnsupportedError("A Pip's conversations (conversation_id) require a runtime advertising Pips API 79 or newer")
+            if 'conversation_id' in values and not (isinstance(values['conversation_id'], str)
+                                                    and CONVERSATION_ID.match(values['conversation_id'])):
+                raise DGCConfigError("conversation_id names one of the Pip's conversations (conv_ and 32 hex digits)")
         if API52_FIELDS.get(command, frozenset()) & set(values):
             if version < 52:
                 raise DGCUnsupportedError('Photos and files through the spool, and as_file, require a runtime advertising Pips API 52 or newer')

@@ -179,7 +179,7 @@ def controls(store, pip_id, config):
             'reasoning_note': note}
 
 
-def context_estimate(store, pip_id, config, context_size=None) -> dict:
+def context_estimate(store, pip_id, config, context_size=None, *, conversation_id=None) -> dict:
     """How much of the context window this chat takes in the next reply: its brief and the recent
     messages that fit, as the reply itself prepares them, and what its last reply measured besides (its
     instructions, tools, job, memory, skills, apps and references), part by part in `breakdown`
@@ -192,7 +192,11 @@ def context_estimate(store, pip_id, config, context_size=None) -> dict:
         raise RegistryError('invalid_request', f'Choose a context window from {CONTEXT_MIN:,} to {CONTEXT_MAX:,} tokens.')
     from .pip_chat_continuity import encoded, prepare
     from .redaction import secret_values
-    continuity, history = prepare(store, pip_id, size, secrets=secret_values(config))
+    if conversation_id is not None:
+        from .pip_conversations import view
+        if view(store.db, conversation_id)["pip_id"] != pip_id:
+            raise RegistryError("not_found", "That conversation isn't this Pip's.")
+    continuity, history = prepare(store, pip_id, size, secrets=secret_values(config), conversation_id=conversation_id)
     brief = len(continuity['state']['summary'].encode())
     recent = len(encoded(history)) if history else 0
     # Part by part (pip_chat_breakdown): what its last reply measured, then its brief and these messages.

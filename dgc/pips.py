@@ -82,6 +82,7 @@ CONTROL_COMMANDS = frozenset({
     "set_plugin_permission",
     "check_pip_source", "get_pip_run_source",
     "list_pip_run_posts", "list_pip_run_fixes", "list_pip_unread", "mark_pip_read",
+    "list_pip_conversations", "create_pip_conversation", "rename_pip_conversation", "archive_pip_conversation",
     "get_pip_eyes", "set_pip_eyes",
     "get_pip_artifacts", "set_pip_artifacts",
     "get_pip_computer_apps", "set_pip_computer_apps",
@@ -136,7 +137,7 @@ _COMMAND_ARGS = {
     "get_pip_working_notes": {"pip_id"}, "set_pip_working_notes": {"pip_id", "text", "expected_revision"},
     "list_pip_daily_log": {"pip_id", "before", "limit"},
     "set_plugin_permission": {"plugin", "level"},
-    "forget_pip_site": {"pip_id", "site"}, "get_pip_chat_context": {"pip_id", "context_size"},
+    "forget_pip_site": {"pip_id", "site"}, "get_pip_chat_context": {"pip_id", "context_size", "conversation_id"},
     "set_pip_chat_options": {"pip_id", "chat_options"},
     "get_pip_eyes": {"pip_id"}, "set_pip_eyes": {"pip_id", "choice"},
     # API 67: where a Pip's reports are kept (the chat card, or also its own document or sheet) and the dashboards
@@ -228,8 +229,12 @@ _COMMAND_ARGS = {
     "list_pip_adaptations": {"pip_id", "before_id", "limit"},
     "list_workspaces": set(), "list_pips": {"workspace_id", "limit", "offset", "query", "order"}, "list_pip_types": set(),
     "list_pip_models": set(),
-    "list_pip_messages": {"pip_id", "before_id", "limit"},
-    "send_pip_message": {"pip_id", "text", "idempotency_key", "chat_options", "images", "files", "spooled_images", "spooled_files", "display_mentions"}, "introduce_pip": {"pip_id"},
+    "list_pip_messages": {"pip_id", "before_id", "limit", "conversation_id"},
+    "send_pip_message": {"pip_id", "text", "idempotency_key", "chat_options", "images", "files", "spooled_images", "spooled_files", "display_mentions", "conversation_id"}, "introduce_pip": {"pip_id"},
+    # API 79: several conversations per Pip (pip_conversations).
+    "list_pip_conversations": {"pip_id", "archived"}, "create_pip_conversation": {"pip_id", "title"},
+    "rename_pip_conversation": {"pip_id", "conversation_id", "title"},
+    "archive_pip_conversation": {"pip_id", "conversation_id", "archived"},
     "get_pip_message_image": {"pip_id", "message_id", "index", "as_file"},
     "create_pip": {"workspace_id", "name", "goal", "source_ref", "pip_type", "model_choice", "computer"}, "get_pip": {"pip_id"},
     "propose_pip_update": {"pip_id", "expected_version", "changes", "reason"},
@@ -239,7 +244,7 @@ _COMMAND_ARGS = {
     "get_pip_run": {"run_id"}, "cancel_pip_run": {"run_id"},
     "check_pip_source": {"pip_id", "source_policy"}, "get_pip_run_source": {"run_id"},
     "list_pip_run_posts": {"pip_id", "before_id", "limit"},
-    "list_pip_unread": {"workspace_id"}, "mark_pip_read": {"pip_id", "message_id", "post_id"},
+    "list_pip_unread": {"workspace_id"}, "mark_pip_read": {"pip_id", "message_id", "post_id", "conversation_id"},
     # API 65: what Ask DGC to fix did for a Pip's runs (pip_fix.for_pip).
     "list_pip_run_fixes": {"pip_id"},
     "list_workspace_activity": {"workspace_id", "after"},
@@ -874,6 +879,8 @@ class PipStore:
             pip_id, now = identifier("pip"), self.registry.clock()
             self.db.execute("INSERT INTO pips VALUES(?,?,?,?,?,?)", (pip_id, workspace_id, "active", 1, now, now))
             self.db.execute("INSERT INTO pip_versions VALUES(?,?,?,?,?,?)", (pip_id, 1, _json(definition), actor, "Created by user", now))
+            from .pip_conversations import first as first_conversation
+            first_conversation(self.db, pip_id, workspace_id=workspace_id, now=now)   # its chat (pip_conversations)
             self.registry.event(workspace_id, "pip_created", pip_id=pip_id, payload={"actor": actor, "version": 1})
             from .pip_backup import start_new
             start_new(self.db, pip_id)          # the last fallback you chose (D14)
@@ -1252,11 +1259,14 @@ class PipStore:
             if schedule_occurrence is not None or not isinstance(conversation_request, dict):
                 raise RegistryError("invalid_request", "Conversation requests cannot carry a schedule occurrence.")
             marks = conversation_request.get("display_mentions")
+            conversation_id = conversation_request.get("conversation_id")
             conversation_request = pip_chat.request(conversation_request.get("text"), conversation_request.get("request_key"),
                                                     conversation_request.get('chat_options'), images=conversation_request.get('images'),
                                                     files=conversation_request.get('files'))
             if marks:
                 conversation_request["display_mentions"] = marks      # display-only: never part of the retry key
+            if conversation_id is not None:
+                conversation_request["conversation_id"] = conversation_id   # which of its conversations (pip_conversations)
             if conversation_request.get('images'):
                 pip_chat.image_paths(self.registry.directory, pip_id, conversation_request['images'])
             if conversation_request.get('files'):
@@ -1900,11 +1910,15 @@ class PipStore:
             from .pip_daemon import is_runtime_paused
             if is_runtime_paused(self.registry):
                 return None
-            # The oldest queued run of a Pip that has none running: several Pips run together, each one at a time.
+            # The oldest queued run that nothing running holds back: several Pips run together. A Pip answers in its
+            # conversations in parallel (pip_conversations), never twice in one; its other work (scheduled runs,
+            # reviews, tasks) still runs one at a time, alone.
             rows = self.db.execute("""SELECT r.id, r.manifest FROM pip_runs r JOIN pips p ON p.id=r.pip_id
-                WHERE r.status='queued' AND (p.status='active' OR (p.status='paused' AND EXISTS
-                  (SELECT 1 FROM pip_chat_messages m WHERE m.run_id=r.id AND m.role='user')))
-                  AND NOT EXISTS (SELECT 1 FROM pip_runs o WHERE o.pip_id=r.pip_id AND o.status IN ('running','cancelling'))
+                LEFT JOIN pip_chat_messages rm ON rm.run_id=r.id AND rm.role='user'
+                WHERE r.status='queued' AND (p.status='active' OR (p.status='paused' AND rm.id IS NOT NULL))
+                  AND NOT EXISTS (SELECT 1 FROM pip_runs o LEFT JOIN pip_chat_messages om ON om.run_id=o.id AND om.role='user'
+                    WHERE o.pip_id=r.pip_id AND o.status IN ('running','cancelling')
+                      AND (rm.id IS NULL OR om.id IS NULL OR om.conversation_id IS rm.conversation_id))
                 ORDER BY r.created_at,r.id LIMIT ?""", (1 if admit is None else 64,)).fetchall()
             row = next((item for item in rows if admit is None or admit(item["id"], item["manifest"])), None)
             if row is None:
@@ -5023,7 +5037,7 @@ def _execute_run(registry, row, config):
         proc.wait()
         if computer_socket is not None:
             computer_socket.close()
-            computer_host.end()
+            computer_host.end(row['id'])
         if app_socket is not None:
             app_socket.close()
         if not proc.stdin.closed:
@@ -5853,7 +5867,8 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 from .pip_chat_options import context_estimate
                 if actor not in ('editor-user', 'local-console'):
                     raise RegistryError('local_only', "A Pip's chat is on this computer only.")
-                result = context_estimate(store, pip_id, config, request.get('context_size'))
+                result = context_estimate(store, pip_id, config, request.get('context_size'),
+                                          conversation_id=request.get('conversation_id'))
             elif command in ('list_pip_plugins', 'allow_pip_plugin', 'decline_pip_plugin'):
                 # A Personal Pip's plugins (pip_plugins): it asks; only the user, on this computer, allows.
                 from . import pip_plugins
@@ -6323,7 +6338,31 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 result = capability()
             elif command == "list_pip_messages":
                 from .pip_chat import list_messages
-                result = list_messages(store, pip_id, request.get("before_id"), request.get("limit", 20), config=config)
+                result = list_messages(store, pip_id, request.get("before_id"), request.get("limit", 20), config=config,
+                                       conversation_id=request.get("conversation_id"))
+            elif command in ("list_pip_conversations", "create_pip_conversation", "rename_pip_conversation",
+                             "archive_pip_conversation"):
+                # API 79: a Pip's conversations (pip_conversations). Its chat is on this computer: only here.
+                from . import pip_conversations
+                if actor not in ("editor-user", "local-console"):
+                    raise RegistryError("local_only", "A Pip's conversations are on this computer only.")
+                store._job(pip_id)
+                if command == "list_pip_conversations":
+                    archived = request.get("archived", False)
+                    if type(archived) is not bool:
+                        raise RegistryError("invalid_request", "Say whether to list archived conversations too.")
+                    result = {"pip_id": pip_id, "conversations": pip_conversations.listed(registry.db, pip_id, archived=archived)}
+                elif command == "create_pip_conversation":
+                    with registry.transaction():
+                        result = {"conversation": pip_conversations.create(registry, pip_id, request.get("title", ""))}
+                elif command == "rename_pip_conversation":
+                    with registry.transaction():
+                        result = {"conversation": pip_conversations.rename(registry, pip_id, request.get("conversation_id"),
+                                                                           request.get("title", ""))}
+                else:
+                    with registry.transaction():
+                        result = {"conversation": pip_conversations.archive(registry, pip_id, request.get("conversation_id"),
+                                                                            request.get("archived", True))}
             elif command == "list_pip_unread":
                 from .pip_unread import list_unread
                 result = list_unread(store, workspace_id)
@@ -6331,7 +6370,8 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 if actor not in ("editor-user", "local-console"):
                     raise RegistryError("local_only", "Only the local Pip chat marks messages read.")
                 from .pip_unread import mark_read
-                result = mark_read(store, pip_id, request.get("message_id"), request.get("post_id"))
+                result = mark_read(store, pip_id, request.get("message_id"), request.get("post_id"),
+                                   conversation_id=request.get("conversation_id"))
             elif command == "list_pip_run_posts":
                 # API 51: what its runs posted in its own chat, a page at a time (pip_run_posts).
                 from .pip_run_posts import page as run_posts
@@ -6369,7 +6409,8 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                               chat_options=request.get('chat_options'), images=request.get('images'),
                               files=request.get('files'), spooled_images=request.get('spooled_images'),
                               spooled_files=request.get('spooled_files'),
-                              display_mentions=request.get('display_mentions'))
+                              display_mentions=request.get('display_mentions'),
+                              conversation_id=request.get('conversation_id'))
             elif command == "list_pips":
                 # A page at a time (100 at most, the reply's size), oldest first unless `order` says
                 # "recent"; `query` keeps those whose name or title contains it. `total` is how many

@@ -6,6 +6,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- A Pip can have several conversations (Pips API 79). Its chat so far becomes its first, nothing lost; each conversation keeps its own history, steering and unread count, while the Pip keeps one memory, computer and set of routines. It answers in two conversations at once, and its replies take turns on its computer. Routines post in the first conversation unless you move one. The editor's menu and column come next.
 - Every chat tells its model how big its context window is: Work, ChatDGC and a Pip's chat each say the size they really send ("Context window: 1,048,576 tokens, set in your prompt box"), so "how much context do you have?" gets a real answer. Only the size, never how full it is, so the provider's prompt cache keeps working; changing the window changes what the model is told next.
 - A Pip's chat shows the document a run kept: when a review is kept as the Pip's document or sheet, or a Quill draft becomes its document, that run's post carries it (Pips API 78), and the chat draws the same document card as Work and ChatDGC; a click opens it.
 - A Pip's own schedule runs on any days. In /setup or in its chat, "every weekday at 9", "weekends at 10" or "Mondays and Thursdays at 8" becomes its schedule, not an extra routine, and its page, its routines and the line of the change say it in those words. In a Pip's box the "/" list is as tall as its rows.

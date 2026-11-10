@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Pips API 79: several conversations per Pip. `list_pip_conversations`, `create_pip_conversation`, `rename_pip_conversation` and `archive_pip_conversation`, and an optional `conversation_id` on `send_pip_message`, `list_pip_messages`, `mark_pip_read` and `get_pip_chat_context` (none: the Pip's first conversation). Both SDKs refuse them before API 79 and check the id's form.
 - Pips API 78: no new command. A run's post (`list_pip_run_posts`) may carry `artifact` `{id, type, title, version}`: the review it kept as the Pip's document or sheet, or the Quill draft that became its document.
 - Pips API 77: `undo_pip_change {pip_id, change_id}` puts back a change a Personal Pip made about itself at once in a turn the user started (a reply's `changes` lists them). DGC takes it only from this computer. Both SDKs refuse it before API 77.
 - Pips API 76: `set_pip_backup` and `set_pips_backup` also take `engine` (`claude` or `codex`: Claude Code or Codex as the fallback, `model` its model or "" its default) and `router` (`true`: DGC Router, `model` "" any Pip system or `<system>/<model>`), and `get_pip_backup` / `get_pips_backup` say them.

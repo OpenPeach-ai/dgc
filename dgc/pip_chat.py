@@ -624,6 +624,8 @@ def _answered_by(store, run) -> str:
 def _message(row):
     message = {key: row[key] for key in ("id", "pip_id", "workspace_id", "role", "text", "run_id",
                                         "status", "model", "created_at")}
+    if "conversation_id" in row.keys() and row["conversation_id"]:
+        message["conversation_id"] = row["conversation_id"]
     if row["role"] == "user" and str(row["request_key"] or "").startswith(DGC_KEYS):
         message["intro"] = True        # DGC wrote this turn (a hello, a follow-up); the editor shows no bubble
     return message
@@ -1004,16 +1006,19 @@ def failure_detail(row) -> str:
     return redact_text(scrub_urls(whole or text), secret_values())[:FAILURE_DETAIL_CHARS]
 
 
-def _bounded_rows(db, pip_id, before=2**63 - 1, limit=50, *, successful=False):
+def _bounded_rows(db, pip_id, before=2**63 - 1, limit=50, *, successful=False, conversation_id=None):
     mismatch = db.execute("SELECT 1 FROM pip_chat_messages m JOIN pip_runs r ON r.id=m.run_id "
                           "WHERE m.pip_id=? AND (m.pip_id<>r.pip_id OR m.workspace_id<>r.workspace_id) LIMIT 1",
                           (pip_id,)).fetchone()
     if mismatch:
         raise RegistryError("invalid_history", "Stored conversation identity does not match its run.")
-    predicate = "m.pip_id=? AND m.seq<?" + (" AND r.status='succeeded'" if successful else "")
+    if conversation_id is None:
+        from .pip_conversations import first
+        conversation_id = first(db, pip_id)
+    predicate = "m.pip_id=? AND m.conversation_id=? AND m.seq<?" + (" AND r.status='succeeded'" if successful else "")
     bounds = db.execute("SELECT m.seq,length(CAST(m.text AS BLOB)) FROM pip_chat_messages m "
                         "JOIN pip_runs r ON r.id=m.run_id WHERE " + predicate +
-                        " ORDER BY m.seq DESC LIMIT ?", (pip_id, before, limit)).fetchall()
+                        " ORDER BY m.seq DESC LIMIT ?", (pip_id, conversation_id, before, limit)).fetchall()
     if any(row[1] is None or row[1] > MAX_REPLY_BYTES for row in bounds):
         raise RegistryError("stored_data_limit", "Stored conversation text exceeds its bounded archive contract.")
     return [db.execute("SELECT m.*,r.status FROM pip_chat_messages m JOIN pip_runs r ON r.id=m.run_id "
@@ -1021,17 +1026,19 @@ def _bounded_rows(db, pip_id, before=2**63 - 1, limit=50, *, successful=False):
 
 
 def prior(store, pip_id, req, actor):
-    row = store.db.execute("SELECT m.run_id,m.request_digest,r.requested_by FROM pip_chat_messages m "
+    row = store.db.execute("SELECT m.run_id,m.request_digest,m.conversation_id,r.requested_by FROM pip_chat_messages m "
                            "JOIN pip_runs r ON r.id=m.run_id WHERE m.pip_id=? AND m.request_key=?",
                            (pip_id, req["request_key"])).fetchone()
     if row:
         if row["request_digest"] != req["digest"] or row["requested_by"] != actor:
             raise RegistryError("conflict", "This conversation request key was used with different content or by another device.")
+        if req.get("conversation_id") and row["conversation_id"] and req["conversation_id"] != row["conversation_id"]:
+            raise RegistryError("conflict", "This message key was already used in another conversation.")
         return store.run(row["run_id"])
     return None
 
 
-def snapshot(store, pip_id, *, context_size=32768):
+def snapshot(store, pip_id, *, context_size=32768, conversation_id=None):
     """Newest complete successful pairs, bounded before reading their text.
 
     Reserve at least half the selected operating window for the current message,
@@ -1048,16 +1055,19 @@ def snapshot(store, pip_id, *, context_size=32768):
         "WHERE m.pip_id=? AND (m.pip_id<>r.pip_id OR m.workspace_id<>r.workspace_id) LIMIT 1", (pip_id,)).fetchone()
     if mismatch:
         raise RegistryError("invalid_history", "Stored conversation identity does not match its run.")
+    if conversation_id is None:
+        from .pip_conversations import first
+        conversation_id = first(store.db, pip_id)
     total = store.db.execute("SELECT count(*) FROM pip_chat_messages m JOIN pip_runs r ON r.id=m.run_id "
-                             "WHERE m.pip_id=? AND r.status='succeeded'", (pip_id,)).fetchone()[0]
+                             "WHERE m.pip_id=? AND m.conversation_id=? AND r.status='succeeded'", (pip_id, conversation_id)).fetchone()[0]
     if total % 2:
         raise RegistryError("invalid_history", "Stored conversation pairs are incomplete; review this Pip's archive.")
     # Read only identities and sizes first. Fetching MAX_CONTEXT_PAIRS bodies
     # would allocate tens of MiB before discovering that almost all are omitted.
     rows = store.db.execute("SELECT m.seq,m.role,m.run_id,length(CAST(m.text AS BLOB)) AS size "
         "FROM pip_chat_messages m JOIN pip_runs r ON r.id=m.run_id "
-        "WHERE m.pip_id=? AND r.status='succeeded' ORDER BY m.seq DESC LIMIT ?",
-        (pip_id, MAX_CONTEXT_PAIRS * 2)).fetchall()
+        "WHERE m.pip_id=? AND m.conversation_id=? AND r.status='succeeded' ORDER BY m.seq DESC LIMIT ?",
+        (pip_id, conversation_id, MAX_CONTEXT_PAIRS * 2)).fetchall()
     history, size = [], 2  # JSON array brackets, including the empty case.
     for offset in range(0, len(rows) - 1, 2):
         assistant, user = rows[offset:offset + 2]
@@ -1208,17 +1218,21 @@ def _last_report(store, pip_id):
 def prepare(store, pip, req, *, context_size=32768, secrets=()):
     if store.db.execute("SELECT count(*) FROM pip_chat_messages").fetchone()[0] >= MAX_ARCHIVE_MESSAGES - 1:
         raise RegistryError("limit", "The local conversation archive has reached its 20,000-message limit. No reply was queued; removing old conversations is not available yet.")
+    from .pip_conversations import first, resolve
+    conversation_id = resolve(store.db, pip["id"], req.get("conversation_id"))
     if store.db.execute("SELECT 1 FROM pip_chat_messages m JOIN pip_runs r ON r.id=m.run_id "
-                        "WHERE m.pip_id=? AND m.role='user' AND r.status IN ('queued','running','cancelling') LIMIT 1",
-                        (pip["id"],)).fetchone():
+                        "WHERE m.pip_id=? AND m.conversation_id=? AND m.role='user' "
+                        "AND r.status IN ('queued','running','cancelling') LIMIT 1",
+                        (pip["id"], conversation_id)).fetchone():
         raise RegistryError("conversation_busy", "This Pip already has a queued or active reply. Wait for it or stop it before sending another message.")
     from .pip_chat_continuity import prepare as prepare_continuity
-    continuity, history = prepare_continuity(store, pip["id"], context_size, secrets=secrets)
+    continuity, history = prepare_continuity(store, pip["id"], context_size, secrets=secrets, conversation_id=conversation_id)
     report = _last_report(store, pip["id"])
     context = {"text": req["text"], "history": history, "history_omitted_count": 0,
-               "last_report": report, "continuity": continuity}
+               "last_report": report, "continuity": continuity, "conversation_id": conversation_id}
     from .pip_run_posts import recent as recent_posts
-    posts = recent_posts(store, pip["id"])
+    # Its runs post in its first conversation (the user's call: routines keep posting there).
+    posts = recent_posts(store, pip["id"]) if conversation_id == first(store.db, pip["id"]) else []
     if posts:
         # What its runs posted in this chat, as reference beside last_report: never a turn, never the user's words.
         context["run_posts"] = posts
@@ -1244,14 +1258,14 @@ def prepare(store, pip, req, *, context_size=32768, secrets=()):
     if req.get("images"):
         context["images"] = req["images"]
     elif str(req.get("request_key") or "").startswith(FOLLOW_UP_KEYS):
-        again = _photos_of_the_ask(store, pip["id"], within=2)
+        again = _photos_of_the_ask(store, pip["id"], within=2, conversation_id=conversation_id)
         if again:
             context["images"] = again
-    elif not str(req.get("request_key") or "").startswith(DGC_KEYS) and not _answers_eyes_card(store, pip["id"]):
+    elif not str(req.get("request_key") or "").startswith(DGC_KEYS) and not _answers_eyes_card(store, pip["id"], conversation_id):
         # The user's next message answers what the Pip asked about that ask (a card, an address): the photos come
         # once more. Given only "Use my card 4242…", a Pip paying three bills said "I couldn't find the UHID anywhere
         # in what you've sent" -- it was on the bills (three-asks test, 2026-10-20). Only the message right after.
-        again = _photos_of_the_ask(store, pip["id"])
+        again = _photos_of_the_ask(store, pip["id"], conversation_id=conversation_id)
         if again:
             context["images"] = again
     if req.get("files"):
@@ -1259,22 +1273,22 @@ def prepare(store, pip, req, *, context_size=32768, secrets=()):
     return context
 
 
-def _answers_eyes_card(store, pip_id) -> bool:
+def _answers_eyes_card(store, pip_id, conversation_id=None) -> bool:
     """The Pip's latest reply was DGC's "<model> can't see images." card (pip_eyes): the photos go with its answer
     there, through the model that sees, not again here."""
-    last = store.db.execute("SELECT text FROM pip_chat_messages WHERE pip_id=? AND role='assistant' ORDER BY seq DESC LIMIT 1",
-                            (pip_id,)).fetchone()
+    last = store.db.execute("SELECT text FROM pip_chat_messages WHERE pip_id=? AND conversation_id IS ? AND role='assistant' "
+                            "ORDER BY seq DESC LIMIT 1", (pip_id, conversation_id)).fetchone()
     return last is not None and str(last[0] or "").rstrip().endswith("can't see images.**")
 
 
-def _photos_of_the_ask(store, pip_id, within=1):
+def _photos_of_the_ask(store, pip_id, within=1, conversation_id=None):
     """A turn DGC writes so the Pip carries on (after an Allow, a Reject, a connected app, a robot check) sees the
     photos the user's own latest message brought: three bills, sent once. Without them, the turn after "Allow" on the
     hospital's site said "I don't have the bill photos or their numbers" (three-asks test, 2026-10-20). ``within``: how
     many of the user's own latest messages to look back over (2 for DGC's turns, so "here's my card" after the photos
     keeps them). None when those brought none, or a kept photo is gone."""
-    for row in store.db.execute("SELECT id,request_key FROM pip_chat_messages WHERE pip_id=? AND role='user' "
-                                "ORDER BY seq DESC LIMIT 40", (pip_id,)):
+    for row in store.db.execute("SELECT id,request_key FROM pip_chat_messages WHERE pip_id=? AND conversation_id IS ? "
+                                "AND role='user' ORDER BY seq DESC LIMIT 40", (pip_id, conversation_id)):
         if str(row["request_key"] or "").startswith(DGC_KEYS):
             continue
         # The user's own latest messages (the one being written is not saved yet): the newest photos among them.
@@ -1303,9 +1317,12 @@ def insert_user(store, pip, req, run_id, model, now, *, waiting=None):
         message_id, digest, now = waiting["id"], waiting["request_digest"], waiting["created_at"]
         if store.db.execute("DELETE FROM pip_chat_steers WHERE id=? AND status='pending'", (message_id,)).rowcount != 1:
             raise RegistryError("conflict", "That waiting message has already moved on.")
-    store.db.execute("INSERT INTO pip_chat_messages(id,pip_id,workspace_id,run_id,role,text,model,created_at,request_key,request_digest) "
-                     "VALUES(?,?,?,?,?,?,?,?,?,?)", (message_id, pip["id"], pip["workspace_id"], run_id,
-                     "user", req["text"], model, now, req["request_key"], digest))
+    from .pip_conversations import resolve, touch
+    conversation_id = resolve(store.db, pip["id"], req.get("conversation_id") or (waiting["conversation_id"] if waiting is not None else None))
+    store.db.execute("INSERT INTO pip_chat_messages(id,pip_id,workspace_id,run_id,role,text,model,created_at,request_key,request_digest,conversation_id) "
+                     "VALUES(?,?,?,?,?,?,?,?,?,?,?)", (message_id, pip["id"], pip["workspace_id"], run_id,
+                     "user", req["text"], model, now, req["request_key"], digest, conversation_id))
+    touch(store.db, conversation_id, now)
     save_mentions(store.db, pip["id"], message_id, req.get("display_mentions"))
     if req.get("images") or req.get("files"):
         widen_tables(store.db)
@@ -1453,7 +1470,7 @@ def insert_reply(store, run, result, now):
     from .pip_notes import commit as commit_notes            # notes it kept about you: on its page
     commit_notes(store, run, result)
     text = validate_text(result.get("text"), reply=True)
-    row = store.db.execute("SELECT workspace_id,pip_id FROM pip_chat_messages WHERE run_id=? AND role='user'", (run["id"],)).fetchone()
+    row = store.db.execute("SELECT workspace_id,pip_id,conversation_id FROM pip_chat_messages WHERE run_id=? AND role='user'", (run["id"],)).fetchone()
     if not row or (row["workspace_id"], row["pip_id"]) != (run["workspace_id"], run["pip_id"]):
         raise RegistryError("invalid_history", "The conversation run has no matching user message.")
     choices = validate_choices(result["choices"]) if "choices" in result else []
@@ -1462,9 +1479,12 @@ def insert_reply(store, run, result, now):
         # "Allow the site, go ahead" beside it only sent words, so the site asked again (three-asks test, 2026-10-20).
         choices = []
     reply_id = identifier("message")
-    store.db.execute("INSERT INTO pip_chat_messages(id,pip_id,workspace_id,run_id,role,text,model,created_at) "
-                     "VALUES(?,?,?,?,?,?,?,?)", (reply_id, run["pip_id"], run["workspace_id"], run["id"],
-                     "assistant", text, _answered_by(store, run), now))
+    store.db.execute("INSERT INTO pip_chat_messages(id,pip_id,workspace_id,run_id,role,text,model,created_at,conversation_id) "
+                     "VALUES(?,?,?,?,?,?,?,?,?)", (reply_id, run["pip_id"], run["workspace_id"], run["id"],
+                     "assistant", text, _answered_by(store, run), now, row["conversation_id"]))
+    if row["conversation_id"]:
+        from .pip_conversations import touch
+        touch(store.db, row["conversation_id"], now)
     for index, label in enumerate(choices):
         store.db.execute("INSERT INTO pip_chat_choices VALUES(?,?,?)", (reply_id, index, label))
     from .pip_images import attach as attach_images         # images it made this run (generate_image): on its reply
@@ -1482,7 +1502,13 @@ def insert_reply(store, run, result, now):
     commit(store, run, result, now)
 
 
-def list_messages(store, pip_id, before_id=None, limit=20, *, config=None):
+def list_messages(store, pip_id, before_id=None, limit=20, *, config=None, conversation_id=None):
+    """One conversation's messages, newest page first: the one named (API 79), else the Pip's first."""
+    from .pip_conversations import first, first_id
+    if conversation_id is None and not store.db.in_transaction and first_id(store.db, pip_id) is None:
+        store._job(pip_id)
+        with store.registry.transaction():
+            first(store.db, pip_id)        # made for good: the read below is rolled back, its id must not be
     owns_transaction = not store.db.in_transaction
     if owns_transaction:
         store.db.execute("BEGIN")
@@ -1492,7 +1518,8 @@ def list_messages(store, pip_id, before_id=None, limit=20, *, config=None):
             from .pip_chat_options import controls
             chat_controls = controls(store, pip_id, config)
         result = _list_messages(store, pip_id, before_id, limit,
-            context_size=chat_controls['options']['context_size'] if chat_controls is not None else 32768)
+            context_size=chat_controls['options']['context_size'] if chat_controls is not None else 32768,
+            conversation_id=conversation_id)
         if chat_controls is not None:
             result['chat_controls'] = chat_controls
         return result
@@ -1501,19 +1528,27 @@ def list_messages(store, pip_id, before_id=None, limit=20, *, config=None):
             store.db.rollback()
 
 
-def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=32768):
+def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=32768, conversation_id=None):
     if type(limit) is not int or not 1 <= limit <= 50:
         raise RegistryError("invalid_request", "Conversation page limit must be between 1 and 50.")
     pip = store._job(pip_id)
+    from .pip_conversations import resolve, view as conversation_view
+    if conversation_id is not None:
+        conversation_view(store.db, conversation_id)     # an archived one stays readable; it must exist
+        if store.db.execute("SELECT pip_id FROM pip_conversations WHERE id=?", (conversation_id,)).fetchone()[0] != pip_id:
+            raise RegistryError("not_found", "That conversation isn't this Pip's.")
+    else:
+        conversation_id = resolve(store.db, pip_id)
     before = 2**63 - 1
     if before_id is not None:
         if not isinstance(before_id, str) or len(before_id) > 128:
             raise RegistryError("invalid_cursor", "Use a message ID from this Pip as the history cursor.")
-        cursor = store.db.execute("SELECT seq FROM pip_chat_messages WHERE id=? AND pip_id=?", (before_id, pip_id)).fetchone()
+        cursor = store.db.execute("SELECT seq FROM pip_chat_messages WHERE id=? AND pip_id=? AND conversation_id=?",
+                                  (before_id, pip_id, conversation_id)).fetchone()
         if not cursor:
             raise RegistryError("invalid_cursor", "That message cursor does not belong to this Pip.")
         before = cursor[0]
-    rows = _bounded_rows(store.db, pip_id, before, limit + 1)
+    rows = _bounded_rows(store.db, pip_id, before, limit + 1, conversation_id=conversation_id)
     from .pip_steering import in_run, waiting, message as steer_message
     selected = []
     projected = 0
@@ -1587,12 +1622,13 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
         size += amount
     next_id = messages[-1]["id"] if messages and len(rows) > len(messages) else None
     from .pip_chat_continuity import projection
-    continuity = projection(store, pip_id)
-    _, omitted = snapshot(store, pip_id, context_size=context_size)
+    continuity = projection(store, pip_id, conversation_id)
+    _, omitted = snapshot(store, pip_id, context_size=context_size, conversation_id=conversation_id)
     if continuity is not None:
         omitted = max(0, omitted - continuity['summarized_messages'])
     active = store.db.execute("SELECT r.id,r.status,r.created_at,r.started_at FROM pip_runs r JOIN pip_chat_messages m ON m.run_id=r.id "
-                              "WHERE m.pip_id=? AND m.role='user' AND r.status IN ('queued','running','cancelling') LIMIT 1", (pip_id,)).fetchone()
+                              "WHERE m.pip_id=? AND m.conversation_id=? AND m.role='user' AND r.status IN ('queued','running','cancelling') LIMIT 1",
+                              (pip_id, conversation_id)).fetchone()
     expanded = []
     for item in reversed(messages):
         expanded.append(item)
@@ -1610,22 +1646,25 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
     noted = routine_notes(store.db, pip_id)
     from .pip_backup import out as fallback_out
     fallback_on = fallback_out(store.registry, pip_id)
-    return {"pip_id": pip_id, "workspace_id": pip["workspace_id"], "messages": expanded,
+    return {"pip_id": pip_id, "workspace_id": pip["workspace_id"], "conversation_id": conversation_id, "messages": expanded,
             # Routines that didn't run (missed, or couldn't start): lines the chat places by time (Pips package 2).
             **({"routine_notes": noted} if noted else {}),
             # Its own model is out and its fallback answers (D14): the prompt box says so until its own model is back.
             **({"fallback_on": {"model": str(fallback_on.get("model") or "")[:256], "since": str(fallback_on.get("since") or "")}}
                if fallback_on else {}),
-            "waiting": [{key: row[key] for key in ("id", "text", "created_at")} for row in waiting(store.db, pip_id)[:8]],
+            "waiting": [{key: row[key] for key in ("id", "text", "created_at")} for row in waiting(store.db, pip_id, conversation_id)[:8]],
             "next_before_id": next_id, "active_run": {**dict(active), "run_kind": "conversation"} if active else None,
             "history_context_omitted_count": omitted, "continuity": continuity}
 
 
 def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=None, files=None,
-         spooled_images=None, spooled_files=None, display_mentions=None, _intro=False):
+         spooled_images=None, spooled_files=None, display_mentions=None, conversation_id=None, _intro=False):
     """Queue a reply to a message, with what it brings: images and files inline (API 43) or handed
-    over through the backend's spool (API 52, ``spooled_images`` and ``spooled_files``)."""
+    over through the backend's spool (API 52, ``spooled_images`` and ``spooled_files``). ``conversation_id``: which of
+    the Pip's conversations (API 79, pip_conversations); none names the first one, as an older client means."""
+    from .pip_conversations import resolve as resolve_conversation
     try:
+        conversation_id = resolve_conversation(store.db, pip_id, conversation_id)
         # Validate the request identity before copying attachments into the kept store.
         if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", key):
             raise RegistryError("invalid_request", "Conversation retry keys use 1–128 letters, digits, underscores or hyphens.")
@@ -1640,8 +1679,8 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
         if images is not None or files is not None or spooled_images is not None or spooled_files is not None:
             active_for_attachment = store.db.execute(
                 "SELECT 1 FROM pip_runs r JOIN pip_chat_messages m ON m.run_id=r.id "
-                "WHERE m.pip_id=? AND m.role='user' AND r.status IN ('queued','running','cancelling') LIMIT 1",
-                (pip_id,)).fetchone()
+                "WHERE m.pip_id=? AND m.conversation_id=? AND m.role='user' AND r.status IN ('queued','running','cancelling') LIMIT 1",
+                (pip_id, conversation_id)).fetchone()
             saved_retry = store.db.execute(
                 "SELECT 1 FROM pip_chat_messages WHERE pip_id=? AND request_key=? LIMIT 1",
                 (pip_id, key)).fetchone()
@@ -1664,6 +1703,7 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
         _drop_spooled(spooled_images if isinstance(spooled_images, list) else None, "name")
         _drop_spooled(spooled_files if isinstance(spooled_files, list) else None, "spool")
     req = request(text, key, chat_options, images=images, files=files)
+    req["conversation_id"] = conversation_id
     if display_mentions is not None and not _intro:
         from .prompt_display import checked_mentions
         marks = checked_mentions(display_mentions, req["text"])
@@ -1690,9 +1730,11 @@ def _deliver(store, pip_id, req, actor, config, _intro):
     attempts = 4
     while run is None:
         attempts -= 1
+        # Its own conversation's reply: a Pip answers in its conversations in parallel (pip_conversations).
         active = store.db.execute("SELECT r.id FROM pip_runs r JOIN pip_chat_messages m ON m.run_id=r.id "
-                                  "WHERE m.pip_id=? AND m.role='user' AND r.status IN ('queued','running','cancelling') "
-                                  "ORDER BY m.seq DESC LIMIT 1", (pip_id,)).fetchone()
+                                  "WHERE m.pip_id=? AND m.conversation_id=? AND m.role='user' "
+                                  "AND r.status IN ('queued','running','cancelling') "
+                                  "ORDER BY m.seq DESC LIMIT 1", (pip_id, req["conversation_id"])).fetchone()
         if active:
             if _intro:
                 # Routine, app and computer follow-ups are separate turns. Only the
@@ -1743,6 +1785,8 @@ def answer_waiting(store, row, config):
     from .pip_eyes import answer, bind
     decided = answer(store, row["pip_id"], row["text"], row["requested_by"], config)
     req = request(row["text"], row["request_key"])
+    if "conversation_id" in row.keys() and row["conversation_id"]:
+        req["conversation_id"] = row["conversation_id"]      # its own conversation's next turn
     marks = message_mentions(store.db, row["id"])
     if marks:
         req["display_mentions"] = marks     # its bubble keeps them, and its turn is told which Pips it names
@@ -1796,7 +1840,7 @@ def _left_waiting(store, run, result) -> bool:
 
 def validate_context(value):
     if (not isinstance(value, dict) or set(value) - {"images", "files", "run_posts", "card_context", "cards_waiting", "named_pips",
-                                                    "long_waits"} not in (
+                                                    "long_waits", "conversation_id"} not in (
             {"text", "history", "history_omitted_count", "last_report"},
             {"text", "history", "history_omitted_count", "last_report", "continuity"})):
         raise RegistryError("invalid_history", "Conversation context has an unsupported shape.")
@@ -1811,6 +1855,9 @@ def validate_context(value):
         _valid_card_context(value["card_context"])
     if "cards_waiting" in value and (type(value["cards_waiting"]) is not int or not 0 < value["cards_waiting"] <= 2000):
         raise RegistryError("invalid_history", "The waiting card count is outside its bounded context contract.")
+    if "conversation_id" in value and not (isinstance(value["conversation_id"], str)
+                                           and re.fullmatch(r"conv_[0-9a-f]{32}", value["conversation_id"])):
+        raise RegistryError("invalid_history", "The conversation a reply belongs to is named by its id.")
     if "named_pips" in value and (not isinstance(value["named_pips"], list) or len(value["named_pips"]) > 8
                                   or len(_json(value["named_pips"]).encode()) > 8192):
         raise RegistryError("invalid_history", "The named Pips exceed their bounded context contract.")

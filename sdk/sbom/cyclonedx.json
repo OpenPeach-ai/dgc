@@ -3,7 +3,7 @@
   "specVersion": "1.5",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-11-09T21:52:10Z",
+    "timestamp": "2026-11-10T16:30:47Z",
     "component": {
       "type": "library",
       "name": "dgc-sdk",
@@ -135,7 +135,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "77df2e40380e6dc015785555b0f1c1443d574295a644f772782772b5977d2a41"
+          "content": "e235e0b492d3d3156383c11e5d5d03a98b361f07c2e7e5adf1760a41d6fb220e"
         }
       ]
     },
@@ -410,7 +410,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "7d37ed4a44283f8e0e1e6b6b1c5a9551914c622e2568f9a68fb4c8b29c7bd39b"
+          "content": "d1b32140600932b6b1cabe21762881144b8e647badc8a82fc3d76e2216d3b18e"
         }
       ]
     },

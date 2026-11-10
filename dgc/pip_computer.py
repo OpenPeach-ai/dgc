@@ -144,6 +144,12 @@ OPS = TEXT_OPS + ("look",) + POINT_OPS + ("upload",) + DESKTOP_OPS
 APP_KEYS = ("images", "documents", "pdf", "files", "terminal", "browser")
 # Files and the Terminal: no browser, so they never wait on (or hold) the browser.
 DESK_OPS = ("files", "open_file", "run")
+# A Pip answers in its conversations in parallel (pip_conversations), and its computer is one screen: the reply that has
+# it keeps it until it ends, and another reply's computer step waits for it this long (the worker waits 120 s for an
+# answer), then is told plainly, so it can do what doesn't need the computer and try again.
+LEASE_WAIT = 75.0
+BUSY = ("Your computer is busy: your reply in another conversation is using it. Do the parts that don't need the "
+        "computer first, then try this step again.")
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
 VISUAL_SHARE = 0.15                  # this much of the screen on canvases: a page its text can't show
 UPLOADS = ".dgc-uploads"            # in the computer's home, beside Files: the Terminal never sees it
@@ -379,6 +385,8 @@ class Host:
         files_root(self.root)            # before the box starts, so downloads have somewhere to land
         self.id = "host_" + _secrets.token_hex(8)
         self.lock = threading.RLock()
+        self._turns = threading.Condition(self.lock)    # a reply waiting for the computer hears when it is free
+        self._turn_waiting = {}                         # run id -> its settings, for a reply waiting its turn
         self.last_used = time.monotonic()
         self.proxy = EgressProxy(socket_dir() / f"{pip_id[-12:]}-egress.sock", policy=policy)
         self.proxy.start()
@@ -553,8 +561,33 @@ class Host:
 
     # -- a run's session ---------------------------------------------------------------------
 
-    def begin(self, run_id: str, frames_dir: Path, *, careful: bool = False, said: str = "", sites=(),
-              level: str = "ask", unattended: bool = False, level_now=None, carry=None) -> None:
+    def begin(self, run_id: str, frames_dir: Path, **settings) -> None:
+        """A run starts. It has the computer now, unless another conversation's reply has it: then its settings wait
+        until that reply ends and this one's first computer step takes it (act_for)."""
+        with self.lock:
+            if self.run_id is not None and self.run_id != run_id:
+                self._turn_waiting[run_id] = (frames_dir, settings)
+                return
+            self._begin(run_id, frames_dir, **settings)
+
+    def act_for(self, run_id: str, op: str, args: dict) -> dict:
+        """A step from one run's socket: it waits its turn on the computer (LEASE_WAIT), then steps as that run."""
+        deadline = time.monotonic() + LEASE_WAIT
+        with self.lock:
+            while self.run_id is not None and self.run_id != run_id:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    return {"text": BUSY}
+                self._turns.wait(min(left, 1.0))
+            if self.run_id is None:
+                queued = self._turn_waiting.pop(run_id, None)
+                if queued is None:
+                    return {"text": "error: this run has ended; its computer steps are over."}
+                self._begin(run_id, queued[0], **queued[1])
+        return self.act(op, args)
+
+    def _begin(self, run_id: str, frames_dir: Path, *, careful: bool = False, said: str = "", sites=(),
+               level: str = "ask", unattended: bool = False, level_now=None, carry=None) -> None:
         """`level` is the Pip's level as the run starts; `level_now` (pip_levels.follow) reads it again at each held step,
         so a change in its prompt box while the reply runs applies from the next step."""
         from .pip_levels import LEVELS
@@ -580,7 +613,16 @@ class Host:
             except Exception:                  # noqa: BLE001 - a browser that won't say is caught at its first step
                 pass
 
-    def end(self) -> None:
+    def end(self, run_id: str | None = None) -> None:
+        """A run ended. One that never had the computer (it waited its turn) leaves the other's alone."""
+        with self.lock:
+            if run_id is not None and run_id != self.run_id:
+                self._turn_waiting.pop(run_id, None)
+                return
+            self._end()
+            self._turns.notify_all()
+
+    def _end(self) -> None:
         with self.lock:
             self.last_run_id = self.run_id          # the chat turn a payment the user then makes on its screen follows
             self.run_id = None
@@ -1617,9 +1659,11 @@ class RunSocket:
                         reply = {"text": "error: refused"}
                     else:
                         self.calls += 1
-                        act = getattr(self.host, "act", None)
                         op, args = str(request.get("op", "")), request.get("args") or {}
-                        reply = act(op, args) if callable(act) else {"text": self.host.call(op, args)}
+                        # This run's own turn on the computer (Host.act_for): another conversation's reply may have it.
+                        act_for, act = getattr(self.host, "act_for", None), getattr(self.host, "act", None)
+                        reply = (act_for(self.run_id, op, args) if callable(act_for) else
+                                 act(op, args) if callable(act) else {"text": self.host.call(op, args)})
                     client.sendall(json.dumps(reply).encode("utf-8") + b"\n")
                 except (OSError, ValueError):
                     continue

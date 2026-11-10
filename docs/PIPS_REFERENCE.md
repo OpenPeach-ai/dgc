@@ -1188,6 +1188,33 @@ those fields from the version before as a new version; a routine change deletes 
 same reply (an email, an event, a connector action) counts the reply's own versions, so it isn't stale. A user message
 that is `/setup` (optionally followed by a job) adds instructions to ask up to three short questions, then set the job.
 
+### Several conversations per Pip (API 79)
+
+A Pip keeps one identity, memory, computer and set of routines, with as many conversations as the user starts
+(`pip_conversations`, registry schema 53, at most 500 a Pip, archived ones included). Each conversation has its own
+history and continuity checkpoints, its own mid-turn steering queue and its own unread cursor. Migration makes every
+Pip's chat so far its **first** conversation, every message, checkpoint and steer in it; a new Pip gets an empty first
+one. A request that names no conversation is about the first, so an editor or SDK from before API 79 keeps working on it.
+
+- `list_pip_conversations {pip_id, archived?}` → `{pip_id, conversations: [{id, pip_id, title, first, created_at,
+  updated_at, archived, unread}]}`, newest message first; archived ones only with `archived: true`.
+- `create_pip_conversation {pip_id, title?}`, `rename_pip_conversation {pip_id, conversation_id, title}`,
+  `archive_pip_conversation {pip_id, conversation_id, archived?}` → `{conversation}`. Titles are one line of at most
+  120 characters (`""` until named). The first conversation can't be archived (`first_conversation`). An archived one
+  stays readable; sending to it is refused (`archived`) until it is restored with `archived: false`.
+- `send_pip_message`, `list_pip_messages`, `mark_pip_read`, `get_pip_chat_context` take `conversation_id`; a
+  conversation of another Pip is `not_found`. Messages carry their `conversation_id`; `list_pip_messages` returns the
+  page's `conversation_id`. A request key belongs to one conversation (`conflict` if reused in another).
+- A Pip answers in its conversations in parallel: a message in one conversation starts its own reply while another
+  conversation's reply runs; two replies of one conversation never run together, and a second message in a running
+  conversation joins its reply as before. Its other work (scheduled runs, reviews, tasks) still runs alone.
+- Its computer is one screen: the reply that has it keeps it until it ends, and another reply's first computer step
+  waits for it (up to 75 s, then the model is told the computer is busy and can do other parts first).
+- Unread is per conversation; `list_pip_unread` counts a Pip's sum, plus its run posts (in its first conversation).
+  The first conversation keeps the Pip's own read cursor, so an older client marks it read as before.
+- Routines post in the first conversation; `update_pip_routine` `changes.conversation_id` moves one (`null`, or the
+  first's id, moves it back), and a routine whose conversation was archived posts in the first again.
+
 **A fallback model** (`pip_backup`, Pips API 76; chosen in the Pip's model picker since D14). The controller reads the
 Pip's fallback when a run starts (metadata `pip_backup:<pip>` = `{provider, model}`, read by every process alike; a new
 Pip is given the last one chosen, metadata `pips_backup_model`, when it is made, and never follows it afterwards) and,
@@ -2358,3 +2385,4 @@ Clients check it before using a newer control.
 | 76 | A Pip's fallback model: `get_pip_backup {pip_id}` / `set_pip_backup {pip_id, model, provider?, engine?, router?}` → `{backup: {pip_id, provider, model, engine?, router?, on?}}` (`provider` "" DGC's own connection or `provider_<32 hex>`, `model` "" or null none; `engine` `claude` or `codex` for Claude Code or Codex, `model` then its model or "" its default; `router: true` for DGC Router, `model` "" or `<system>/<model>`; `on` `{since, model}` while it answers) and the one new Pips start with, `get_pips_backup` / `set_pips_backup {model, provider?}` → `{backup: {provider, model}}`, all local only. When a run's own model doesn't answer, it carries on with the fallback; the first reply of an outage carries `backup`, its one line, and `list_pip_messages` carries `fallback_on {model, since}` while the fallback answers. |
 | 77 | A Personal Pip's own changes at once, with Undo: in a turn the user started, its `name`, `goal`, `schedule` and `model_choice` change when its reply is saved, and a routine it adds is `on`; the reply carries `changes` (`[{id, kind, fields, after, status}]`), and `undo_pip_change {pip_id, change_id}` (local only) → `{change, pip}` puts one back while nothing changed it since. `/setup` in a user message sets the Pip up after up to three questions. Registry schema 52. |
 | 78 | No new command. A run's post may carry `artifact` `{id, type ("doc" or "sheet"), title, version}`: the review it kept as the Pip's document or sheet, or the Quill draft that became its document; the editor draws the document card. Read it only from a runtime advertising 78 |
+| 79 | Several conversations per Pip (`pip_conversations`): list, start, rename, archive or restore one (all local only); send, list, mark read and the context meter take an optional `conversation_id`, none meaning the first. Each has its own history, checkpoints, steering and unread; the Pip answers in them in parallel and its replies take turns on its computer. Routines post in the first unless moved (`update_pip_routine` `changes.conversation_id`). |

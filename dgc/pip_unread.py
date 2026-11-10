@@ -11,6 +11,10 @@ Allow (a follow-up turn, pip_chat.FOLLOW_UP_KEYS) carries on the item above it r
 than standing alone. An item is unread while it has a reply after the cursor. Runs that
 passed or found nothing, one after another with no message between, are one message
 in the chat (pipRunPosts.js ``timeline``), and count once too.
+
+Each of a Pip's conversations (pip_conversations) has its own cursor; the Pip's count is their sum, plus its run
+posts, which are in its first conversation. The first conversation keeps the Pip's own cursor (pip_read_state), so an
+older client that marks "the chat" read marks it; the others keep theirs in pip_conversation_reads.
 """
 from __future__ import annotations
 
@@ -61,14 +65,15 @@ def _post_preview(text: str) -> str:
     return words[:1].upper() + words[1:]
 
 
-def _unread_items(db, pip_id: str, seq: int) -> int:
+def _unread_items(db, pip_id: str, seq: int, conversation_id=None) -> int:
     """How many of the chat's items have a reply after the cursor. An item is the turn the user sees with its
     replies: the reply to a follow-up turn DGC wrote belongs to the nearest turn before it that is not one."""
     from .pip_chat import FOLLOW_UP_KEYS, ROUTINE_KEY
     from .pip_routine_care import is_quiet
     replies = db.execute("""SELECT a.seq,u.seq,u.request_key,a.text FROM pip_chat_messages a
         LEFT JOIN pip_chat_messages u ON u.run_id=a.run_id AND u.role='user'
-        WHERE a.pip_id=? AND a.role='assistant' AND a.seq>?""", (pip_id, seq)).fetchall()
+        WHERE a.pip_id=? AND a.conversation_id IS ? AND a.role='assistant' AND a.seq>?""",
+                         (pip_id, conversation_id, seq)).fetchall()
     items = set()
     for reply, turn, key, text in replies:
         if isinstance(key, str) and key.startswith(ROUTINE_KEY) and is_quiet(text):
@@ -78,12 +83,39 @@ def _unread_items(db, pip_id: str, seq: int) -> int:
             continue
         while isinstance(key, str) and key.startswith(FOLLOW_UP_KEYS):
             row = db.execute("""SELECT seq,request_key FROM pip_chat_messages
-                WHERE pip_id=? AND role='user' AND seq<? ORDER BY seq DESC LIMIT 1""", (pip_id, turn)).fetchone()
+                WHERE pip_id=? AND conversation_id IS ? AND role='user' AND seq<? ORDER BY seq DESC LIMIT 1""",
+                             (pip_id, conversation_id, turn)).fetchone()
             if row is None:
                 break                          # nothing above it: the follow-up is its own item
             turn, key = row
         items.add(turn)
     return len(items)
+
+
+def _cursors(db, pip_id: str) -> dict:
+    """Each live conversation's read cursor: the first keeps the Pip's own (pip_read_state), the others theirs."""
+    state = db.execute("SELECT message_seq FROM pip_read_state WHERE pip_id=?", (pip_id,)).fetchone()
+    first_seq = state[0] if state else 0
+    rows = db.execute("""SELECT c.id,c.first,COALESCE(r.message_seq,0) FROM pip_conversations c
+        LEFT JOIN pip_conversation_reads r ON r.conversation_id=c.id
+        WHERE c.pip_id=? AND c.archived_at IS NULL""", (pip_id,)).fetchall()
+    return {cid: (first_seq if first else seq) for cid, first, seq in rows}
+
+
+def conversation_counts(db, pip_id: str) -> dict:
+    """How many unread items each live conversation has (those with none are left out)."""
+    cursors = _cursors(db, pip_id)
+    if not cursors:
+        return {}
+    newest = db.execute("""SELECT conversation_id,max(seq) FROM pip_chat_messages WHERE pip_id=? AND role='assistant'
+        AND seq>? GROUP BY conversation_id""", (pip_id, min(cursors.values()))).fetchall()
+    counts = {}
+    for cid, top in newest:
+        if cid in cursors and top > cursors[cid]:
+            count = _unread_items(db, pip_id, cursors[cid], cid)
+            if count:
+                counts[cid] = count
+    return counts
 
 
 def _fold(kind, outcome, checks) -> str:
@@ -127,14 +159,16 @@ def _unread_posts(db, pip_id: str, post_rowid: int) -> int:
 def _summary(db, pip_id: str) -> dict:
     from .pip_run_posts import _has_table
     state = db.execute("SELECT message_seq,post_rowid FROM pip_read_state WHERE pip_id=?", (pip_id,)).fetchone()
-    seq, post_rowid = (state[0], state[1]) if state else (0, 0)
-    messages = _unread_items(db, pip_id, seq)
+    post_rowid = state[1] if state else 0
+    cursors = _cursors(db, pip_id)
+    messages = sum(conversation_counts(db, pip_id).values())
     has_posts = _has_table(db)
     posts = _unread_posts(db, pip_id, post_rowid) if has_posts else 0
     from .pip_chat import quiet_reply
-    latest_message = next((row for row in db.execute("""SELECT id,text,created_at,run_id FROM pip_chat_messages
-        WHERE pip_id=? AND role='assistant' AND seq>? ORDER BY seq DESC LIMIT 20""", (pip_id, seq))
-        if not quiet_reply(db, row[3], row[1])), None)
+    # The newest reply past its own conversation's cursor, in any live conversation.
+    latest_message = next((row for row in db.execute("""SELECT id,text,created_at,run_id,conversation_id,seq FROM pip_chat_messages
+        WHERE pip_id=? AND role='assistant' AND seq>? ORDER BY seq DESC LIMIT 60""", (pip_id, min(cursors.values(), default=0)))
+        if row[4] in cursors and row[5] > cursors[row[4]] and not quiet_reply(db, row[3], row[1])), None)
     latest_post = (db.execute("""SELECT run_id,post,posted_at FROM pip_run_posts
         WHERE pip_id=? AND rowid>? ORDER BY rowid DESC LIMIT 1""", (pip_id, post_rowid)).fetchone()
         if has_posts else None)
@@ -178,8 +212,9 @@ def list_unread(store, workspace_id: str) -> dict:
             'total': sum(item['count'] for item in items)}
 
 
-def mark_read(store, pip_id: str, message_id=None, post_id=None) -> dict:
-    """Advance only to IDs the visible chat received, never to current server HEAD."""
+def mark_read(store, pip_id: str, message_id=None, post_id=None, *, conversation_id=None) -> dict:
+    """Advance only to IDs the visible chat received, never to current server HEAD. A message moves its own
+    conversation's cursor; ``conversation_id``, when given, must be that one."""
     store._job(pip_id)
     if message_id is not None and (not isinstance(message_id, str) or len(message_id) > 128):
         raise RegistryError('invalid_cursor', 'Choose a message from this Pip.')
@@ -187,17 +222,24 @@ def mark_read(store, pip_id: str, message_id=None, post_id=None) -> dict:
         raise RegistryError('invalid_cursor', 'Choose a run post from this Pip.')
     with store.registry.transaction():
         db = store.db
-        message = db.execute("SELECT seq FROM pip_chat_messages WHERE pip_id=? AND id=? AND role='assistant'",
+        message = db.execute("SELECT seq,conversation_id FROM pip_chat_messages WHERE pip_id=? AND id=? AND role='assistant'",
                              (pip_id, message_id)).fetchone() if message_id else None
+        if message is not None and conversation_id is not None and message[1] != conversation_id:
+            raise RegistryError('invalid_cursor', 'That message is in another conversation.')
         from .pip_run_posts import _has_table
         post = db.execute("SELECT rowid FROM pip_run_posts WHERE pip_id=? AND run_id=?",
                           (pip_id, post_id)).fetchone() if post_id and _has_table(db) else None
         if message_id and message is None or post_id and post is None:
             raise RegistryError('invalid_cursor', 'That message or run post does not belong to this Pip.')
         db.execute('INSERT OR IGNORE INTO pip_read_state(pip_id) VALUES(?)', (pip_id,))
-        if message:
+        first = db.execute("SELECT first FROM pip_conversations WHERE id=?", (message[1],)).fetchone() if message else None
+        if message and (first is None or first[0]):
             db.execute('UPDATE pip_read_state SET message_seq=max(message_seq,?) WHERE pip_id=?',
                        (message[0], pip_id))
+        elif message:
+            db.execute("INSERT INTO pip_conversation_reads(conversation_id,pip_id,message_seq) VALUES(?,?,?) "
+                       "ON CONFLICT(conversation_id) DO UPDATE SET message_seq=max(message_seq,excluded.message_seq)",
+                       (message[1], pip_id, message[0]))
         if post:
             db.execute("UPDATE pip_read_state SET post_rowid=max(post_rowid,?) WHERE pip_id=?",
                        (post[0], pip_id))
