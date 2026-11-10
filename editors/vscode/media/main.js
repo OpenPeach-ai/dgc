@@ -6777,6 +6777,7 @@ function permissionChoices(ev) {
       (mark ? icon(mark) : "") + esc(msg));
     if (isErr) line.setAttribute("role", "alert");
     appendConversationContent(line);
+    return line;
   }
 
   // ---- memory that learns (dgc/memory_review.py, dgc/skill_learn.py) ------------------------------
@@ -8012,6 +8013,7 @@ function permissionChoices(ev) {
       case "history":
         if (ev.complete === true) prepareCompleteHistory(ev.items || []);
         renderHistory(ev.items || []);
+        if (heldSend && sessionReady) setTimeout(flushHeldSend, 0);
         railSnapshot(ev.items);
         if (Array.isArray(ev.todos)) renderTodos(ev.todos);
         if (!replaying) releaseHeldEvents(ev.complete === true ? ev.seq : -1);
@@ -9191,6 +9193,41 @@ function permissionChoices(ev) {
   // card-number:end
   let cardWarnedFor = null;
 
+  // Enter before this chat is ready (a brand-new tab whose backend is still starting, or one reconnecting): the
+  // message waits in the box and goes by itself once the chat is ready, and the line saying so goes with it. It used
+  // to say "reconnecting" even for a first start, send nothing until a second Enter, and stay in the chat for good
+  // (ui-04-new-session-send-early, found live 10 Nov). Sent after the chat's first history, so a replay never
+  // redraws the log over it; a backend that sends none still gets it after HELD_SEND_MS.
+  const HELD_SEND_MS = 1500;
+  let heldSend = null;                 // {delivery, line, timer}
+  function holdUntilReady(delivery) {
+    if (heldSend) { heldSend.delivery = delivery; return; }
+    const line = sysLine(hostSessionSeen
+      ? "DGC is reconnecting to this chat. Your message sends as soon as it's back."
+      : "Starting this chat. Your message sends as soon as it's ready.");
+    heldSend = { delivery, line, timer: null };
+  }
+  function armHeldSend() {
+    if (!heldSend || heldSend.timer) return;
+    heldSend.timer = setTimeout(flushHeldSend, HELD_SEND_MS);
+  }
+  function flushHeldSend() {
+    if (!heldSend) return;
+    if (!sessionReady) { heldSend.timer = null; return; }    // it went again: the next session_ready arms it anew
+    const { delivery, line, timer } = heldSend;
+    heldSend = null;
+    if (timer) clearTimeout(timer);
+    line?.remove();
+    if (composerText().trim() || attachments.length) submit(delivery);
+  }
+  // Another chat in this tab: what waited belongs to the one you left, so it never goes to the new one.
+  function dropHeldSend() {
+    if (!heldSend) return;
+    if (heldSend.timer) clearTimeout(heldSend.timer);
+    heldSend.line?.remove();
+    heldSend = null;
+  }
+
   function submit(delivery = nativeSteering ? "steer" : "queue") {
     if (composerLocked) return;
     // /agents opens the agent map, here in the panel: it needs no backend, so not even a reconnect waits.
@@ -9202,7 +9239,7 @@ function permissionChoices(ev) {
     if (!attachments.length && modsUi?.intercept(composerText().trim(), (name) => !modCommandName(name))) {
       clearComposer(); persistDraft(); return;
     }
-    if (!sessionReady) { sysLine("DGC is reconnecting to this chat. Your draft is saved."); persistDraft(); return; }
+    if (!sessionReady) { holdUntilReady(delivery); persistDraft(); return; }
     if (pendingImageFiles) { sysLine("Wait for the pasted images to finish loading before sending."); return; }
     // A folded paste is part of the message, not a side-channel: append it in chip order so the
     // model receives exactly what was pasted.
@@ -10404,6 +10441,7 @@ function permissionChoices(ev) {
   /** Switching chats: everything on screen belongs to the chat being left. The incoming chat's
    *  backend sends its own history snapshot right behind this, so nothing is reconstructed here. */
   function clearForChatSwitch() {
+    dropHeldSend();
     pipReferencesSupported=false;hidePop();
     discardTurn();
     log.innerHTML = "";
@@ -11775,6 +11813,7 @@ function permissionChoices(ev) {
       backendExitNotice = null;          // the reconnect has finished; the line is in the transcript
       reconnectPending = false; returnedPrompts.length = 0;
       selectDraftSession(msg.sessionId, msg.adoptDraftFrom || ""); sessionReady = true;
+      armHeldSend();
       backendLive = true; backendDown = false; armTodoClearTimer();
       if (pipAsks.length) setTimeout(flushPipAsks, 800);    // a new chat has no transcript to wait for
       renderUnconfirmedDrafts();
