@@ -16,6 +16,9 @@ import '../media/shared/filesheet.js';   // an artifact or a document in a chat:
 // The prompt box's shared pieces (pills, the picture island, the drop overlay, Stop), as in Work and ChatDGC.
 import '../media/shared/composer.css';
 import '../media/shared/composer.js';
+// The bar for what is going on above the prompt box, as in Work and ChatDGC (window.DgcTray).
+import '../media/shared/tray.css';
+import '../media/shared/tray.js';
 import './pips.css';
 import '../media/messagequeue.js';
 import '../media/messagequeue.css';
@@ -864,7 +867,7 @@ function chatMarkup(){
   const live=liveMarkup(markdown);
   // A hello that failed says so, above what a new chat says about itself: nothing else has been said.
   const quietChat=S.messages.every(m=>m.role==='user'&&m.intro===true&&m.status==='failed')&&!items.some(i=>!(i.message&&failedHidden(i.message)))&&!live&&!items.some(i=>i.note||(i.message&&routineFailed(i.message)));
-  return `<section class="pip-conversation${simple?' chat-style':''}" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${noProviderMarkup()}${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(postsShown()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`${messages}<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${quietChat?'':messages}${live}${simple?'':typing}${S.stream?.text&&!routineLive?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(replyParts(S.stream.text).join('\n\n'))}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${borrowCards()}${routineCards()}${settled.tail}${needsYouCard()}${cardRefusedCard()}${turnOpen?'</div>':''}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div><button type="button" id="pip-to-latest" class="pip-to-latest" data-dom-own="1" title="Jump to the newest message" aria-label="Jump to the newest message" hidden><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M4 9l4 4 4-4"/></svg><span data-latest-label>Latest</span></button>${simple?runnerOffMarkup():''}<div class="pip-composer-shell">${routinePopoverMarkup()}${computerWaitingCards()}<section id="chat-queue-box" class="chat-queue-box" aria-label="Queued messages"${chatQueue().length||S.chatWaiting.length?'':' hidden'}><p class="chat-queue-head"></p><ol id="chat-queue" class="chat-queue-list" data-dom-own="1"></ol></section>${chatBox?'<div id="chat-paste-note" data-dom-own="1" hidden></div>':''}<form id="chat-form" class="pip-composer"><div class="dgc-drop" data-dom-own hidden aria-hidden="true">Drop to attach</div>${canAttachImages()?imageStripMarkup():''}${chatBox?'<div id="chat-pop" class="pop pop-over" data-dom-own="1"></div>':''}<div class="composer-input">${chatBox?'<div id="chatText" class="mention-box" data-dom-own="1"></div>':`<label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="${CHAT_MAX_CHARS}"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea>`}</div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
+  return `<section class="pip-conversation${simple?' chat-style':''}" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${noProviderMarkup()}${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(postsShown()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`${messages}<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${quietChat?'':messages}${live}${simple?'':typing}${S.stream?.text&&!routineLive?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(replyParts(S.stream.text).join('\n\n'))}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${borrowCards()}${routineCards()}${settled.tail}${needsYouCard()}${cardRefusedCard()}${turnOpen?'</div>':''}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div><button type="button" id="pip-to-latest" class="pip-to-latest" data-dom-own="1" title="Jump to the newest message" aria-label="Jump to the newest message" hidden><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M4 9l4 4 4-4"/></svg><span data-latest-label>Latest</span></button>${simple?runnerOffMarkup():''}<div class="pip-composer-shell">${routinePopoverMarkup()}${computerWaitingCards()}${chatBox?'<div id="chat-paste-note" data-dom-own="1" hidden></div>':''}<div id="chat-tray" class="rail-line tray-only" data-dom-own="1"></div><form id="chat-form" class="pip-composer tray-box"><div class="dgc-drop" data-dom-own hidden aria-hidden="true">Drop to attach</div>${canAttachImages()?imageStripMarkup():''}${chatBox?'<div id="chat-pop" class="pop pop-over" data-dom-own="1"></div>':''}<div class="composer-input">${chatBox?'<div id="chatText" class="mention-box" data-dom-own="1"></div>':`<label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="${CHAT_MAX_CHARS}"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea>`}</div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
 }
 // ---- Its runs in its chat (Pips API 51) ----
 // Each finished run is a post from the Pip, read with list_pip_run_posts and drawn among the messages; History
@@ -1345,12 +1348,89 @@ function chatQueueSendText(text,marks){
  if(S.sending?.text===text){draft.chatText=saved;chatDrafts.set(S.selected,saved);rememberView();render();return true;}
  draft.chatText=saved;return false;
 }
+// ---- the bar for what is going on (the tray, media/shared/tray.js: the same bar as Work's and ChatDGC's). One line
+// on the box, in a soft shell round both: the messages queued for this Pip, a routine of its running, its computer
+// busy with another request, and a fix DGC is making for it are each a pill; a pill opens its detail just above.
+// Nothing going on: no bar. What its computer holds for your okay stays a card above the bar: it asks you something.
+const TRAY_ICONS={queue:'<path d="M2.5 4h1M2.5 8h1M2.5 12h1M6 4h7.5M6 8h7.5M6 12h7.5"/>',routine:'<circle cx="8" cy="8" r="6"/><path d="M6.7 5.6v4.8L10.6 8Z"/>',
+ computer:'<rect x="2" y="3" width="12" height="8" rx="1.2"/><path d="M6 13.5h4M8 11v2.5"/>',fix:'<path d="m9.5 2.5 4 4-7 7H2.5V9.5Z M8 4l4 4"/>',up:'<path d="m4 10 4-4 4 4"/>'};
+const trayIcon=name=>`<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${TRAY_ICONS[name]||''}</svg>`;
+const TRAY_TITLES={queue:'Queued messages',routine:'Routine running',computer:'Its computer',fix:'Fixes'};
+let chatTray=null,chatTrayParts=null,chatTrayHome=null,chatTrayNote=null,chatTraySig='',chatTrayPip='';
+function trayRoutine(){const live=S.live,run=S.chatActiveRun;return live?.routine&&live.pipId===S.selected&&run&&live.runId===run.id?{title:String(live.routine),run}:null;}
+// Its computer is busy with another request of yours: the run says so itself ("Waiting for its computer: it's finishing ...").
+function trayComputer(){const run=S.chatActiveRun,act=run&&S.stream?.runId===run.id?S.stream.activity:null,m=/^Waiting for its computer(?::\s*(.*))?$/.exec(String(act?.label||''));return m?{line:String(act.label),doing:m[1]||''}:null;}
+function trayFixes(){return fixesShown()&&S.fixesPip===S.selected?[...S.fixes.values()].filter(f=>FIX_ACTIVE.includes(f.state)):[];}
+function traySpec(kind){
+ const name=S.pip?.name||'This Pip';
+ if(kind==='queue'){const count=S.chatWaiting.length+chatQueue().length;
+  return {icon:'queue',num:String(count),after:'queued',detail:count===1?'message':'messages',label:`${count} ${count===1?'message':'messages'} queued for ${name}`,tip:`Queue · ${count} ${count===1?'message':'messages'} waiting`};}
+ if(kind==='routine'){const r=trayRoutine();if(!r)return null;
+  return {icon:'routine',num:r.title,after:'running',live:true,label:`${name}’s routine ${r.title} is running`,tip:`${r.title} · running`};}
+ if(kind==='computer'){const c=trayComputer();if(!c)return null;
+  return {icon:'computer',num:'Computer busy',detail:c.doing?c.doing.replace(/^it.s /,''):'',label:c.line,tip:c.line};}
+ if(kind==='fix'){const n=trayFixes().length;if(!n)return null;
+  return {icon:'fix',word:n===1?'':'Fixes',num:n===1?'Fixing':String(n),after:n===1?'':'running',live:true,detail:n===1?'DGC is fixing what this Pip found':'',label:n===1?'DGC is fixing what this Pip found':`DGC is making ${n} fixes for what this Pip found`,tip:n===1?'DGC is fixing what this Pip found':`${n} fixes running`};}
+ return null;
+}
+// A kind's detail: the queue's own rows, or what it is in words with the one thing to do about it.
+function trayDetail(kind){
+ if(kind==='queue')return chatTrayHome.querySelector('#chat-queue-box')||chatTrayParts.popBody.querySelector('#chat-queue-box');
+ const name=S.pip?.name||'This Pip',lines=[],acts=[];
+ if(kind==='routine'){const r=trayRoutine();if(!r)return null;
+  lines.push(`${name} is running its routine “${r.title}”.`,'Its post in the chat says what it is doing.');
+  if(usable())acts.push(['Stop','Stop this run',()=>{const id=S.chatActiveRun?.id;chatTray.close();if(id)void mutate({type:'cancel_pip_run',run_id:id},()=>loadMessages());}]);
+ }else if(kind==='computer'){const c=trayComputer();if(!c)return null;
+  lines.push(`${c.line}.`,'It carries on with this by itself as soon as its computer is free.');
+ }else if(kind==='fix'){const fixes=trayFixes();if(!fixes.length)return null;
+  lines.push(fixes.length===1?'DGC is fixing what this Pip found, in a Work chat of its own.':`DGC is making ${fixes.length} fixes for what this Pip found, each in a Work chat of its own.`,'Its post in the chat shows the result when it is done.');
+  if(typeof options.onOpenFix==='function'&&!remoteHost)for(const [i,f] of fixes.filter(f=>f.session_id).slice(0,3).entries())acts.push([fixes.length===1?'Open its Work chat':`Open Work chat ${i+1}`,'Watch or stop this fix in the Work chat it runs in',()=>{chatTray.close({restore:false});openFixChat(f.run_id);}]);
+ }else return null;
+ const doc=chatTrayNote.ownerDocument;chatTrayNote.replaceChildren(...lines.map((text,i)=>{const p=doc.createElement('p');if(i)p.className='tray-note-more';p.textContent=text;return p;}));
+ if(acts.length){const row=doc.createElement('div');row.className='tray-note-acts';for(const [text,title,run] of acts){const b=doc.createElement('button');b.type='button';b.className='tray-note-act';b.textContent=text;b.title=title;b.dataset.trayFocus='';b.addEventListener('click',run);row.append(b);}chatTrayNote.append(row);}
+ return chatTrayNote;
+}
+// The bar is this view's own node: a redraw of the page leaves it alone, and a page drawn afresh gets it back.
+function mountChatTray(){
+ const slot=$('chat-tray');if(!slot||!globalThis.DgcTray)return false;
+ if(!chatTray){
+  const doc=slot.ownerDocument;
+  chatTrayParts=globalThis.DgcTray.build('chat-tray',`Going on with this Pip`,doc);
+  chatTrayParts.line.dataset.domOwn='1';
+  chatTrayHome=doc.createElement('div');chatTrayHome.hidden=true;chatTrayParts.line.append(chatTrayHome);   // where a detail waits while its pill is closed
+  chatTrayHome.innerHTML='<section id="chat-queue-box" class="chat-queue-box" aria-label="Queued messages" hidden><p class="chat-queue-head"></p><ol id="chat-queue" class="chat-queue-list"></ol></section>';
+  chatTrayNote=doc.createElement('div');chatTrayNote.className='tray-note';
+  chatTray=globalThis.DgcTray.create({...chatTrayParts,moreId:'chat-tray-more',keep:['queue','computer','routine','fix'],spec:traySpec,detail:trayDetail,title:kind=>TRAY_TITLES[kind]||'',
+   icon:spec=>`<span class="codicon" aria-hidden="true">${trayIcon(spec.icon)}</span>`,caret:`<span class="chip-caret codicon" aria-hidden="true">${trayIcon('up')}</span>`,
+   popFocus:(kind,node)=>node.querySelector('[data-tray-focus], .dgc-queue-handle, button:not(:disabled)'),
+   input:()=>$('chatText'),popTop:()=>document.querySelector('.pip-topbar')?.getBoundingClientRect().bottom||0,over:'.dgc-menu, .dgc-queue-menu',
+   words:{more:'Show the rest of what is going on',list:'The rest of what is going on with this Pip'}});
+ }
+ if(slot!==chatTrayParts.line)slot.replaceWith(chatTrayParts.line);   // the page's markup holds only its place
+ return true;
+}
+function drawChatTray(){
+ if(!mountChatTray())return;
+ const kinds=[];
+ if(S.chatWaiting.length+chatQueue().length)kinds.push('queue');
+ if(trayRoutine())kinds.push('routine');
+ if(trayComputer())kinds.push('computer');
+ if(trayFixes().length)kinds.push('fix');
+ const sig=JSON.stringify([S.selected,kinds.map(kind=>[kind,traySpec(kind)])]);
+ if(sig===chatTraySig&&chatTray.kinds.join()===kinds.join())return;
+ if(chatTrayPip!==S.selected){chatTrayPip=S.selected;chatTray.close({restore:false});}   // another Pip's chat: its details are its own
+ chatTraySig=sig;
+ chatTray.render(kinds);
+ for(const kind of kinds)chatTray.paint(kind);
+ const open=chatTray.open;if(open&&open.kind!=='more'&&open.kind!=='queue')trayDetail(open.kind);   // its words follow what it is doing
+}
 function drawChatQueue(){
- const box=$('chat-queue');if(!box)return;
+ mountChatTray();
+ const box=$('chat-queue');if(!box){drawChatTray();return;}
  // What DGC is keeping for the Pip's next turns comes first and answers first; the rest this view sends itself.
  const list=chatQueue(),held=S.chatWaiting,count=held.length+list.length,sig=JSON.stringify([S.selected,held,list,!!S.chatActiveRun,S.apiVersion>=73]);
  const section=box.closest('#chat-queue-box');if(section){section.hidden=!count;const head=section.querySelector('.chat-queue-head');if(head)head.textContent=count===1?'1 queued message':`${count} queued messages`;}
- if(box.dataset.sig===sig&&box.children.length===count)return;
+ if(box.dataset.sig===sig&&box.children.length===count){drawChatTray();return;}
  box.dataset.sig=sig;
  window.DgcMessageQueue?.render(box,[...held.map(item=>({id:item.id,text:item.text.replace(/\s+/g,' ')||'',title:item.text,fixed:true})),...list.map(item=>({id:item.id,text:item.text.replace(/\s+/g,' ')||'',title:item.text}))],{
   reorder:list.length>1?order=>{const byId=new Map(chatQueue().map(item=>[item.id,item]));setChatQueue(order.map(id=>byId.get(id)).filter(Boolean));}:null,
@@ -1359,6 +1439,7 @@ function drawChatQueue(){
   remove:id=>{setChatQueue(chatQueue().filter(i=>i.id!==id));$('chatText')?.focus();},
   copy:(id,text)=>{const item=[...S.chatWaiting,...chatQueue()].find(i=>i.id===id);vscode.postMessage({type:'copy',text:item?.text||text});},
  });
+ drawChatTray();
 }
 function drainChatQueue(){
  const pip=S.selected,list=chatQueue(pip);

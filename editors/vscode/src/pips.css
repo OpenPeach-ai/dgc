@@ -808,6 +808,16 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 @media(prefers-reduced-motion:reduce){.simple-pips.chat-open .pip-conversation.chat-style .pip-message .ract:active,.simple-pips.chat-open .pip-conversation.chat-style .allow-card button:active{transform:none}}
 @media(prefers-contrast:more){.simple-pips.chat-open .pip-conversation.chat-style :is(.allow-card,.app-link[data-state=waiting],.app-link[data-state=needs],.pip-message.assistant .answer){border-color:var(--vscode-foreground)}}
 .chat-queue-box{display:grid;gap:2px;padding:6px 10px;margin:0 0 6px;border-radius:12px;background:color-mix(in srgb,var(--vscode-foreground) 5%,transparent)}.chat-queue-box[hidden]{display:none}.chat-queue-head{margin:0;font-size:11px;color:var(--vscode-descriptionForeground)}.chat-queue-list{list-style:none;margin:0;padding:0;max-height:132px;overflow-y:auto;overscroll-behavior:contain}
+/* The bar for what is going on (media/shared/tray.css, the same as Work's and ChatDGC's) on a Pip's box: it takes the
+   box's own gap above it and meets the box, and its shell goes round the box. The queue is its pill's detail: its rows
+   open in the popover above. */
+.pip-composer-shell .rail-line.has-chips{margin:8px calc(-1 * var(--shell-pad)) 0}
+.pip-composer-shell .rail-line.has-chips~.pip-composer{margin-top:0}
+.pip-conversation:not(.chat-style) .rail-line{--tray-r:16px}
+.pip-composer{--tray-lift:0 7px 24px rgba(0,0,0,.18)}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-composer{--tray-lift:var(--lift-box)}
+.rail-pop .chat-queue-box{margin:0;padding:0 8px 8px;border-radius:0;background:transparent}
+.rail-pop .chat-queue-head{display:none}
 /* A Pip's chat follows as Work's does (pipsFollow.js): Work's Latest pill (media/main.css #to-latest) and its pinned prompt (main.css "0.47 pinned prompt"). */
 .conversation-log{isolation:isolate}
 /* A plain block, so the messages' margins meet as they did before there were boxes. */

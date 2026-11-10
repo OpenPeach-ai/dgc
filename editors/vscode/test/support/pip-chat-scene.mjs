@@ -44,6 +44,7 @@ export const THEMES = {
 
 /** The stub host, run in the page before the client: answers each request after a tick, as the extension would.
     opts: project (a Project Pip's chat), hold (what its computer holds for your okay), running (a turn in flight),
+    doing (what the running turn says it is doing), fixing (DGC is fixing what a Project Pip's post found),
     empty (no messages yet), api. */
 const host = (opts) => `(${function (PIP, opts) {
   const W = "ws_" + "e".repeat(32), run = (c) => "run_" + c.repeat(32);
@@ -129,7 +130,7 @@ const host = (opts) => `(${function (PIP, opts) {
     list_pip_messages: () => ({ pip_id: PIP, workspace_id: W, messages, next_before_id: null, active_run: opts.running ? { id: run("9"), status: "running", started_at: new Date(Date.now() - 42000).toISOString() } : null,
       history_context_omitted_count: 0, chat_controls: controls }),
     list_pip_run_activity: (r) => ({ run_id: run("9"), pip_id: PIP, workspace_id: W, events: r.after ? [] : [{ seq: 1, run_id: run("9"), pip_id: PIP, workspace_id: W, event_type: "pip_run_progress",
-      payload: { kind: "progress", state: "waiting", message: "Waiting for the model" }, created_at: at(1) }], next_cursor: r.after || 1, has_more: false, history_may_be_truncated: false, retention_limit: 500, retention_scope: "workspace" }),
+      payload: { kind: "progress", state: "waiting", message: opts.doing || "Waiting for the model" }, created_at: at(1) }], next_cursor: r.after || 1, has_more: false, history_may_be_truncated: false, retention_limit: 500, retention_scope: "workspace" }),
     list_pip_run_posts: () => ({ pip_id: PIP, workspace_id: W, posts: project && !opts.empty ? [post] : [], next_before_id: null }),
     list_pip_reply_stats: (r) => ({ pip_id: PIP, stats: (r.run_ids || []).map((run_id) => ({ run_id, seconds: 21, input_tokens: 24000, output_tokens: 900, requests: 3, has_trace: true })) }),
     list_pip_apps: () => ({ apps: [] }), get_pips_limit: () => ({ max_pips: 100, default: 100, maximum: 100000 }),
@@ -158,7 +159,7 @@ const host = (opts) => `(${function (PIP, opts) {
       return { pip };
     },
     reject_pip_update: (r) => { pip.proposals = pip.proposals.filter((v) => v.id !== r.proposal_id); pip.pending_review_count = pip.proposals.length; return { pip }; },
-    list_pip_run_fixes: () => ({ pip_id: PIP, workspace_id: W, fixes: [] }),
+    list_pip_run_fixes: () => ({ pip_id: PIP, workspace_id: W, fixes: opts.fixing ? [{ fix_id: "fix_" + "f".repeat(32), run_id: run("7"), state: "running", session_id: "fix-session-1", created_at: Math.floor(Date.now() / 1000) - 30 }] : [] }),
     get_pip_computer: () => ({ computer: { pip_id: PIP, granted: !project, available: !project, reason: "", pending: opts.hold ? 1 : 0, actions: opts.hold ? [hold] : [] } }),
   };
   window.acquireVsCodeApi = () => ({ getState: () => undefined, setState() {}, postMessage(m) {

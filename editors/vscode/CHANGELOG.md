@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- ChatDGC and a Pip's chat have the same bar on the prompt box as Work: one line, in a soft shell round the bar and the box. In ChatDGC it shows the messages you queued, a file or a canvas being made, the chat being summarized, and its fallback model answering; in a Pip's chat, the messages queued for it, a routine of its running, its computer busy with another request, and a fix DGC is making for it. Wide, each is a pill with its words; narrow, an icon with its count; what does not fit goes behind "+N", which lists the rest. One thing alone is said in full on the same line ("2 queued messages"). Click a pill, or press Enter on it, and its detail opens just above: the queued messages to reorder, edit or remove, or what is happening and what you can do about it. Esc closes it and goes back to the pill. Nothing going on means no bar.
+- The queue no longer takes room inside ChatDGC's box or as a block above a Pip's box: the box stays the same size and in the same place however many messages wait.
+- Work: while a pill's detail was open, the bar's shading covered the top of the prompt box and hid what you were typing. The box now stays in front.
 - Agent Map: pointing at the Pip's face beside a helper says that Pip's name, and a screen reader hears it.
 - Attachments follow what the backend takes: Work's prompt up to 200 MB of images, ChatDGC up to 50 things a message, and a Pip's chat 20 MB photos, 50 files and 100 MB documents, 200 MB in all, from Pips API 79. An older backend keeps its own limits, so nothing is sent that it would refuse.
 - Reject on a new Pip's card turns it down at once, on Personal and in a project alike, with a few seconds of "Rejected. No Pip was created. Undo" in case it was a slip. Needs attention opens when something is in it; fold it and it stays folded, even after a reload, until something new comes in. A page's Download offers PDF (and Word) as well as HTML and zip, as DGC exports it.

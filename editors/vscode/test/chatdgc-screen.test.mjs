@@ -2821,6 +2821,10 @@ test("Codex's queue: what you send while it answers waits above the box and goes
     await box.fill("");
     await s.send({ type: "turn", state: "started", replyId: M(9) });
     for (const words of ["Keep me", "Drop me", "Change me"]) { await box.fill(words); await box.press("Enter"); }
+    // The queue is its pill on the bar above the box (prompt-tray-port.test.mjs): its rows open from the pill.
+    assert.equal(await queue.isVisible(), false, "folded into its pill");
+    await s.page.locator('#cd-tray .rail-chip[data-kind="queue"]').click();
+    assert.equal(await queue.isVisible(), true);
     // The same row as Work: drag or arrow keys move it, and the menu copies it or takes it to the top.
     await queue.locator(".dgc-queue-row").nth(0).locator(".dgc-queue-handle").focus();
     await s.page.keyboard.press("ArrowDown");

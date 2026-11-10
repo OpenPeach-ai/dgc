@@ -7418,30 +7418,17 @@ function permissionChoices(ev) {
   // events waiting for your next message, a blocked goal, a failed troupe, a Pips alert) turns its chip amber and says
   // why. The chips are one toolbar: a single Tab stop, the arrows move along it, Enter or Space opens a chip, focus goes
   // into its popover and back to the chip when it closes (Esc, a click elsewhere, × or the chip again).
-  var railChipsReady = false;                    // `var`: the rail syncs while the panel is still starting up
+  // The bar itself (its pills, how they fit one line, "+N", the popover and its keys) is the shared piece every chat
+  // uses (media/shared/tray.js, window.DgcTray); here is what Work's kinds are and say.
+  var rail = null;                               // `var`: the rail syncs while the panel is still starting up
   const railLine = $("rail-line"), railChips = $("rail-chips"), railPop = $("rail-pop");
-  const railPopBody = $("rail-pop-body"), railPopLinks = $("rail-pop-links");
+  const railPopBody = $("rail-pop-body");
   // Where each row lives in the rail, so a row a popover borrowed goes back to its own place.
   const RAIL_ROW_ORDER = ["queuebar", "pipsbar", "monitorsbar", "troupebar", "changesbar", "tasksbar", "goalbar", "pastebar"];
   const RAIL_POP_TITLES = { goal: "Goal", troupe: "Troupe", monitors: "Monitors", tasks: "Tasks",
     changes: "Changes in this chat", pips: "Pips", queue: "Queued messages", pipfixes: "Pip fixes", piprunning: "Pips running" };
-  // How a narrow bar says less: the words go, then the extras, then the number of a pill that needs you. A wide bar
-  // (RAIL_WIDE and up) keeps whole pills. Either way, what still does not fit goes behind "+N": never a second line.
-  const RAIL_FITS = ["full", "compact", "tight", "tighter"], RAIL_WIDE = 520;
   // Which kinds stay on the bar longest when it is short of room; a kind that needs you outstays them all.
   const RAIL_KEEP = ["queue", "changes", "tasks", "pipfixes", "troupe", "piprunning", "monitors", "goal", "pips"];
-  let railHidden = [];                           // the kinds behind "+N", in the bar's order
-  const railMore = el("button", "rail-more");
-  railMore.type = "button"; railMore.id = "rail-more"; railMore.dataset.kind = "more"; railMore.tabIndex = -1;
-  railMore.setAttribute("aria-haspopup", "dialog"); railMore.setAttribute("aria-expanded", "false");
-  railMore.setAttribute("aria-controls", "rail-pop");
-  railMore.addEventListener("click", () => { if (railOpen?.kind === "more") closeRailPop(); else openRailMore(); });
-  railMore.addEventListener("focus", () => { if (railStop !== "more") { railStop = "more"; railRove(); } });
-  // One kind alone has its everyday action at the end of its line (the queue's Steer all, the changes' Review).
-  const railSoloAct = el("button", "rail-text-action rail-solo-act");
-  railSoloAct.type = "button"; railSoloAct.id = "rail-solo-act";   // on the line only while it has something to do
-  const railChipNodes = new Map();               // kind -> its chip, kept across repaints so a focused chip keeps focus
-  let railKinds = [], railStop = "", railOpen = null, railFit = { width: -1, shape: "" }, railLinksSig = "";
   // A kind's real row; Pip fixes have no row (their cards are in the chat): their popover lists them.
   const railBar = (kind) => (kind === "pipfixes" ? paintPipFixesPanel() : kind === "piprunning" ? paintPipRunningPanel()
     : (RAIL_KINDS.find(([name]) => name === kind) || [])[1] || null);
@@ -7546,232 +7533,23 @@ function permissionChoices(ev) {
     }
     return null;
   }
-  function railChipFace(spec) {
-    const icon = spec.icon === "troupe"
-      ? `<span class="chip-mark" aria-hidden="true">${troupeMark("rail-chip-troupe")}</span>`
-      : `<span class="codicon codicon-${spec.icon}" aria-hidden="true"></span>`;
-    const part = (cls, text) => (text ? `<span class="${cls}">${esc(text)}</span>` : "");
-    const mini = typeof spec.share === "number"
-      ? `<span class="chip-mini troupe-bar" aria-hidden="true"><span style="width:${spec.share}%"></span></span>` : "";
-    const extra = (spec.extra || []).map(([text, cls]) => part(`chip-extra ${cls}`.trim(), text)).join("");
-    // What needs you is said in words and coloured as the rows were before the chip line (reported 19 Oct):
-    // blocked or failed in the error red, the icon with it; waiting or an alert in amber. No dot, no outline.
-    const need = spec.need ? part("chip-need", spec.needWord) : "";
-    // The detail and the caret show only where the kind has the whole line (one kind alone) or a row of the "+N" list.
-    return icon + part("chip-word", spec.word) + part("chip-num", spec.num) + part("chip-word", spec.after) + mini + extra + need
-      + part("chip-detail", spec.detail) + '<span class="chip-caret codicon codicon-chevron-up" aria-hidden="true"></span>';
-  }
-  function railChip(kind) {
-    const chip = el("button", "rail-chip");
-    chip.type = "button";
-    chip.dataset.kind = kind;
-    chip.tabIndex = -1;
-    chip.setAttribute("aria-haspopup", "dialog");
-    chip.setAttribute("aria-expanded", "false");
-    chip.setAttribute("aria-controls", "rail-pop");
-    chip.addEventListener("click", () => {
-      // One Pip running: its chip goes straight to that Pip's chat, at the run's live post.
-      if (kind === "piprunning" && pipRunningList().length === 1) { openRunningPip(pipRunningList()[0]); return; }
-      if (railOpen?.kind === kind) closeRailPop(); else openRailPop(kind);
-    });
-    chip.addEventListener("focus", () => { if (railStop !== kind) { railStop = kind; railRove(); } });
-    return chip;
-  }
-  function paintRailChip(kind) {
-    if (!railChipsReady) return;
-    const chip = railChipNodes.get(kind), spec = chip ? railChipSpec(kind) : null;
-    if (!spec) return;
-    const sig = JSON.stringify(spec);
-    if (chip._sig === sig) return;
-    chip._sig = sig;
-    chip.innerHTML = railChipFace(spec);
-    chip.toggleAttribute("data-live", !!spec.live);
-    if (kind === "piprunning" && pipRunningList().length === 1) chip.removeAttribute("aria-haspopup");
-    else chip.setAttribute("aria-haspopup", "dialog");
-    if (spec.need) chip.dataset.need = spec.tone === "error" ? "error" : "warn"; else delete chip.dataset.need;
-    chip.setAttribute("aria-label", spec.label + (spec.need ? `. Needs you${spec.needWord ? `: ${spec.needWord}` : ""}` : ""));
-    hoverTip.retitle(chip, spec.tip);
-    // Only a change of shape can change what fits: a ticking clock keeps its width.
-    const shape = sig.replace(/\d/g, "0");
-    if (chip._shape !== shape) { chip._shape = shape; fitRailChips(); }
-    if (railHidden.includes(kind)) { paintRailMoreButton(); if (railOpen?.kind === "more") paintRailMore(); }
-  }
-  function renderRailChips(present) {
-    if (!railChipsReady) return;
-    const focusWas = document.activeElement;
-    const hadFocus = railPop.contains(focusWas) || railChips.contains(focusWas);
-    railKinds = present;
-    railChips.hidden = !present.length;
-    railLine.classList.toggle("has-chips", present.length > 0);
-    // Its kind ended (a cleared checklist, a dismissed troupe), or it is the last one left and has its row back.
-    if (railOpen && railOpen.kind !== "more" && !present.includes(railOpen.kind)) closeRailPop({ restore: false });
-    for (const [kind, chip] of railChipNodes) {
-      if (!present.includes(kind)) { chip.remove(); railChipNodes.delete(kind); }
-    }
-    paintRailSolo();                             // before the pills are painted: each paint may fit the line
-    present.forEach((kind, index) => {
-      let chip = railChipNodes.get(kind);
-      if (!chip) { chip = railChip(kind); railChipNodes.set(kind, chip); }
-      if (railChips.children[index] !== chip) railChips.insertBefore(chip, railChips.children[index] || null);
-      paintRailChip(kind);
-    });
-    railRove();
-    if (railOpen) paintRailPopLinks(railOpen.kind);
-    fitRailChips();
-    // Focus that was on the line or in its popover and has nowhere left to be goes to the line, else the prompt.
-    if (hadFocus && !railShown(document.activeElement)) {
-      const stop = railChips.querySelector('[tabindex="0"]');
-      if (stop && !railChips.hidden) focusQuietly(stop); else input.focus({ preventScroll: true });
-    }
-  }
+  function railOpenNow() { return rail ? rail.open : null; }
+  function paintRailChip(kind) { if (rail) rail.paint(kind); }
+  function renderRailChips(present) { if (rail) rail.render(present); }
+  function railAnchor(kind) { return rail ? rail.anchor(kind) : null; }
+  function openRailPop(kind) { if (rail) rail.openKind(kind); }
+  // `restore`: put the focus back on the chip if it was inside the popover (Esc, ×, the chip again). A click
+  // elsewhere, or Tab out of it, leaves the focus where it went.
+  function closeRailPop(options) { if (rail) rail.close(options); }
   // Whether the focus is somewhere a reader can see: not on the page itself, not in a hidden row, not in a row
   // folded into its chip.
   function railShown(node) {
     return !!node && node !== document.body && node.isConnected && !node.closest("[hidden]")
       && !(composerRail.classList.contains("as-chips") && composerRail.contains(node) && !pasteBar.contains(node));
   }
-  // One Tab stop for the whole line: the chip last used, else the first.
-  const railStops = () => [...railChips.children].filter((chip) => !chip.hidden);
-  function railRove() {
-    const chips = railStops();
-    const keep = chips.find((chip) => chip.dataset.kind === railStop) || chips[0];
-    for (const chip of railChips.children) { const want = chip === keep ? 0 : -1; if (chip.tabIndex !== want) chip.tabIndex = want; }
-  }
-  // One kind alone: the line says it in full, with its everyday action at the end.
-  function paintRailSolo() {
-    const kind = railKinds.length === 1 ? railKinds[0] : "";
-    if (kind) railLine.dataset.solo = kind; else delete railLine.dataset.solo;
-    const act = kind === "queue" && !queueSteerAll.hidden
-      ? ["Steer all", "Send every queued message into this turn now", () => queueSteerAll.click()]
-      : kind === "changes" && changeState.total
-        ? ["Review", "Open the list of changed files", () => $("changes-review-button").click()] : null;
-    if (!act) { if (railSoloAct.isConnected) { const held = railSoloAct === document.activeElement; railSoloAct.remove(); if (held) focusQuietly(railAnchor(kind) || input); } return; }
-    if (!railSoloAct.isConnected) railChips.after(railSoloAct);
-    if (railSoloAct.textContent !== act[0]) railSoloAct.textContent = act[0];
-    railSoloAct.title = act[1]; railSoloAct.onclick = act[2];
-  }
-  // The bar is one line, always. It never wraps, scrolls sideways or clips a pill: a narrow bar drops the words, then
-  // the extras (the diff counts and the troupe's bar), then the number of a pill that needs you (its reason stays); a
-  // wide one keeps whole pills. What still does not fit goes behind "+N", the kinds that matter least first.
-  function fitRailChips(force = false) {
-    if (!railChipsReady) return;
-    if (!railKinds.length) {
-      delete railLine.dataset.fit; delete railLine.dataset.squeeze; railFit = { width: -1, shape: "" };
-      railMore.remove(); setRailHidden([]);
-      return;
-    }
-    if (railKinds.some((kind) => !railChipNodes.has(kind))) return;   // mid-repaint: the last pill's paint fits them all
-    const width = railLine.clientWidth;
-    const shape = railKinds.map((kind) => `${kind}:${railChipNodes.get(kind)?._shape || ""}`).join("|") + (railSoloAct.isConnected ? "|act" : "");
-    if (!force && width === railFit.width && shape === railFit.shape) return;
-    railFit = { width, shape };
-    const solo = railKinds.length === 1, hidden = [];
-    for (const chip of railChipNodes.values()) if (chip.hidden) chip.hidden = false;
-    railMore.remove();
-    delete railLine.dataset.squeeze;
-    const fits = () => railChips.scrollWidth <= railChips.clientWidth + 1;
-    // One kind alone keeps its words at any width; "solo" only folds Workspace changes to its icon on a narrow bar.
-    // A wide bar short of room first folds Workspace changes to its icon ("roomy"): the pills keep their words.
-    for (const fit of width >= RAIL_WIDE ? ["full", "roomy"] : solo ? ["solo"] : RAIL_FITS) {
-      railLine.dataset.fit = fit;
-      if (fits()) break;
-    }
-    if (!solo && !fits()) {
-      railChips.appendChild(railMore);
-      const rank = (kind) => (railChipNodes.get(kind)?.hasAttribute("data-need") ? 0 : 100) + RAIL_KEEP.indexOf(kind);
-      for (const kind of [...railKinds].sort((a, b) => rank(b) - rank(a))) {
-        if (hidden.length >= railKinds.length - 1) break;      // one pill always stays beside "+N"
-        railChipNodes.get(kind).hidden = true;
-        hidden.push(kind);
-        railMore.textContent = `+${hidden.length}`;
-        if (fits()) break;
-      }
-      if (!fits()) railLine.dataset.squeeze = "";
-    }
-    setRailHidden(railKinds.filter((kind) => hidden.includes(kind)));
-  }
-  function setRailHidden(kinds) {
-    const changed = kinds.join() !== railHidden.join();
-    railHidden = kinds;
-    paintRailMoreButton();
-    if (!changed) return;
-    railRove();
-    if (railOpen?.kind === "more") { if (kinds.length) paintRailMore(); else closeRailPop({ restore: false }); }
-    else if (railOpen) {
-      // The open kind's pill went behind "+N" or came back: its popover hangs off whichever stands for it now.
-      const anchor = railAnchor(railOpen.kind);
-      for (const chip of [...railChipNodes.values(), railMore]) chip.setAttribute("aria-expanded", String(chip === anchor));
-      railOpen.chip = anchor || railOpen.chip;
-    }
-  }
-  function paintRailMoreButton() {
-    const specs = railHidden.map((kind) => railChipSpec(kind)).filter(Boolean);
-    const need = specs.find((spec) => spec.need && spec.tone === "error") || specs.find((spec) => spec.need);
-    if (need) railMore.dataset.need = need.tone === "error" ? "error" : "warn"; else delete railMore.dataset.need;
-    const label = `${railHidden.length} more`;
-    if (railMore.textContent !== `+${railHidden.length}`) railMore.textContent = `+${railHidden.length}`;
-    railMore.setAttribute("aria-label", `${label}${need ? ", one needs you" : ""}. Show the rest of what is running`);
-    hoverTip.retitle(railMore, specs.map((spec) => spec.tip.split("\n")[0]).join("\n"));
-  }
-  // The pill that stands for a kind on the bar: its own, or "+N" while it is behind it.
-  function railAnchor(kind) {
-    if (kind === "more") return railMore.isConnected ? railMore : null;
-    const chip = railChipNodes.get(kind);
-    return chip && !chip.hidden ? chip : railMore.isConnected ? railMore : chip || null;
-  }
-  // "+N" opened: the rest as a list, each row opening its own detail (the same popover its pill would open).
-  function paintRailMore() {
-    const rows = [...railPopBody.querySelectorAll(".rail-more-row")];
-    const held = rows.find((row) => row === document.activeElement)?.dataset.kind || "";
-    const list = el("div", "rail-more-list");
-    list.setAttribute("role", "group");
-    list.setAttribute("aria-label", "The rest of what is running in this chat");
-    for (const kind of railHidden) {
-      const spec = railChipSpec(kind);
-      if (!spec) continue;
-      const row = el("button", "rail-more-row");
-      row.type = "button"; row.dataset.kind = kind;
-      row.innerHTML = railChipFace(spec) + '<span class="row-open" aria-hidden="true">Open</span>';
-      row.toggleAttribute("data-live", !!spec.live);
-      if (spec.need) row.dataset.need = spec.tone === "error" ? "error" : "warn";
-      row.setAttribute("aria-label", `${spec.label}${spec.need ? `. Needs you${spec.needWord ? `: ${spec.needWord}` : ""}` : ""}. Open`);
-      row.addEventListener("click", () => {
-        if (kind === "piprunning" && pipRunningList().length === 1) { closeRailPop({ restore: false }); openRunningPip(pipRunningList()[0]); return; }
-        openRailPop(kind);
-      });
-      list.appendChild(row);
-    }
-    railPopBody.replaceChildren(list);
-    $("rail-pop-title").textContent = `${railHidden.length} more`;
-    if (held) focusQuietly(list.querySelector(`.rail-more-row[data-kind="${held}"]`) || list.firstElementChild || railPop, { preventScroll: true });
-  }
-  function openRailMore() {
-    if (!railHidden.length || !railMore.isConnected) return;
-    if (railOpen) closeRailPop({ restore: false });
-    hoverTip.hide();
-    railOpen = { kind: "more", bar: null, chip: railMore, unfolded: [] };
-    paintRailMore();
-    railLinksSig = "";
-    paintRailPopLinks("more");
-    railPop.dataset.kind = "more";
-    railPop.hidden = false;
-    railLine.classList.add("pop-open");
-    sizeRailPop();
-    railMore.setAttribute("aria-expanded", "true");
-    railStop = "more"; railRove();
-    focusQuietly(railPopBody.querySelector(".rail-more-row") || railPop, { preventScroll: true });
-  }
-  if (typeof ResizeObserver === "function") new ResizeObserver(() => { fitRailChips(); sizeRailPop(); }).observe(railLine);
-  window.addEventListener("resize", () => sizeRailPop());
-  // The popover may use the height between the header and the chip line, and scrolls past that.
-  function sizeRailPop() {
-    if (!railOpen) return;
-    const room = Math.floor(railLine.getBoundingClientRect().top - ($("phead")?.getBoundingClientRect().bottom || 0) - 12);
-    railPop.style.maxHeight = room > 0 ? `${Math.max(160, room)}px` : "";
-  }
   // Ways further than the row goes, under it: the troupe's journal, and the agent map that lists troupes and
   // monitors under its background tasks.
-  function paintRailPopLinks(kind) {
+  function railLinks(kind) {
     const links = [];
     if (kind === "troupe") {
       const lead = railTroupeLead(), id = String(lead?.run_id || "");
@@ -7788,133 +7566,60 @@ function permissionChoices(ev) {
       const first = monitorItems.find((item) => item.state === "running" || item.state === "stopping");
       if (first) links.push(["Show in the agent map", "Open the agent map at the monitors", () => railShowInMap(`monitor:${first.id}`)]);
     }
-    const sig = links.map(([text, title]) => `${text}\n${title}`).join("\n") + (links.length ? kind + railTroupeLead()?.run_id : "");
-    if (sig === railLinksSig) return;
-    railLinksSig = sig;
-    railPopLinks.replaceChildren(...links.map(([text, title, run]) => {
-      const link = el("button", "link rail-pop-link");
-      link.type = "button"; link.textContent = text; link.title = title; link.onclick = run;
-      return link;
-    }));
-    railPopLinks.hidden = !links.length;
+    return links;
   }
   function railShowInMap(key) {
-    const chip = railOpen?.chip || null;
+    const chip = railOpenNow()?.chip || null;
     closeRailPop({ restore: false });
     openAgentMap({ from: chip });
     const row = amRevealRow(key);
     if (row) amFocusRow(row, { quiet: false });
   }
-  function openRailPop(kind) {
-    const chip = railAnchor(kind), bar = railBar(kind);
-    if (!chip || !bar || bar.hidden) return;
-    if (railOpen) closeRailPop({ restore: false });
-    hoverTip.hide();
-    railOpen = { kind, bar, chip, unfolded: [] };
-    railPopBody.replaceChildren(bar);          // the row itself moves: its ids, controls and live updates come with it
+  rail = window.DgcTray.create({
+    line: railLine, chips: railChips, pop: railPop, popBody: railPopBody, popTitle: $("rail-pop-title"),
+    popClose: $("rail-pop-close"), popLinks: $("rail-pop-links"), moreId: "rail-more", soloId: "rail-solo-act",
+    keep: RAIL_KEEP, spec: railChipSpec, detail: railBar, title: (kind) => RAIL_POP_TITLES[kind] || "",
+    icon: (spec) => (spec.icon === "troupe"
+      ? `<span class="chip-mark" aria-hidden="true">${troupeMark("rail-chip-troupe")}</span>`
+      : `<span class="codicon codicon-${spec.icon}" aria-hidden="true"></span>`),
+    // One Pip running: its chip goes straight to that Pip's chat, at the run's live post.
+    direct: (kind) => (kind === "piprunning" && pipRunningList().length === 1 ? () => openRunningPip(pipRunningList()[0]) : null),
     // The stages and the checklist are what the chip summed up, so they come open; closing folds them again.
-    if (kind === "troupe" && !troupesOpen) { toggleTroupes(); railOpen.unfolded.push(() => { if (troupesOpen) toggleTroupes(); }); }
-    if (kind === "tasks" && !tasksOpen()) { toggleTasks(); railOpen.unfolded.push(() => { if (tasksOpen()) toggleTasks(); }); }
-    $("rail-pop-title").textContent = RAIL_POP_TITLES[kind] || "";
-    railLinksSig = "";
-    paintRailPopLinks(kind);
-    railPop.dataset.kind = kind;
-    railPop.hidden = false;
-    railLine.classList.add("pop-open");
-    sizeRailPop();
-    chip.setAttribute("aria-expanded", "true");
-    railStop = chip.dataset.kind; railRove();
+    opened: (kind, open) => {
+      if (kind === "troupe" && !troupesOpen) { toggleTroupes(); open.unfolded.push(() => { if (troupesOpen) toggleTroupes(); }); }
+      if (kind === "tasks" && !tasksOpen()) { toggleTasks(); open.unfolded.push(() => { if (tasksOpen()) toggleTasks(); }); }
+    },
+    restore: (kind, bar) => {
+      if (bar === pipRunningPanel) bar.remove();        // the running Pips list is the popover's own
+      else if (bar === pipFixesPanel) {
+        // The panel is an inbox for this batch, not the whole fix archive. Dismissing it
+        // acknowledges only finished fixes; active work stays visible until its result arrives.
+        for (const fix of pipFixesForChip()) if (!pipFixActive(fix)) fix._seen = true;
+        bar.remove();                    // the Pip fixes list is the popover's own, never a rail row
+        setTimeout(syncComposerRail, 0); // the fixes it showed are seen now: an ended one leaves the chip
+      } else {
+        // Where each row lives in the rail, so a row a popover borrowed goes back to its own place.
+        const next = RAIL_ROW_ORDER.slice(RAIL_ROW_ORDER.indexOf(bar.id) + 1).map((id) => $(id))
+          .find((node) => node && node.parentElement === composerRail);
+        composerRail.insertBefore(bar, next || null);
+      }
+    },
     // Into the popover: the row's own main control (never a Stop), else the popover itself.
-    const main = [...bar.querySelectorAll(".rail-main")].find((node) => !node.disabled && !node.closest("[hidden]"));
-    focusQuietly(main || railPop, { preventScroll: true });
-  }
-  // `restore`: put the focus back on the chip if it was inside the popover (Esc, ×, the chip again). A click
-  // elsewhere, or Tab out of it, leaves the focus where it went.
-  function closeRailPop({ restore = true } = {}) {
-    if (!railChipsReady || !railOpen) return;
-    const { kind, bar, unfolded } = railOpen;
-    const chip = railAnchor(kind) || railOpen.chip;
-    const active = document.activeElement, inside = railPop.contains(active);
-    railOpen = null;
-    unfolded.forEach((fold) => fold());
-    if (!bar) railPopBody.replaceChildren();     // the "+N" list is the popover's own
-    else if (bar === pipRunningPanel) bar.remove();   // the running Pips list is the popover's own too
-    else if (bar === pipFixesPanel) {
-      // The panel is an inbox for this batch, not the whole fix archive. Dismissing it
-      // acknowledges only finished fixes; active work stays visible until its result arrives.
-      for (const fix of pipFixesForChip()) if (!pipFixActive(fix)) fix._seen = true;
-      bar.remove();                    // the Pip fixes list is the popover's own, never a rail row
-      setTimeout(syncComposerRail, 0); // the fixes it showed are seen now: an ended one leaves the chip
-    } else {
-      const next = RAIL_ROW_ORDER.slice(RAIL_ROW_ORDER.indexOf(bar.id) + 1).map((id) => $(id))
-        .find((node) => node && node.parentElement === composerRail);
-      composerRail.insertBefore(bar, next || null);
-    }
-    railPop.hidden = true;
-    railPop.style.maxHeight = "";
-    delete railPop.dataset.kind;
-    railPopLinks.replaceChildren(); railPopLinks.hidden = true; railLinksSig = "";
-    railLine.classList.remove("pop-open");
-    for (const node of [...railChipNodes.values(), railMore]) node.setAttribute("aria-expanded", "false");
-    if (!inside) return;
-    if (restore && chip.isConnected && !chip.hidden && !railChips.hidden) { focusQuietly(chip); return; }
-    if (!bar) return;
-    // Moving the row took the focus off it. Where the row is on screen again (the last kind left has its full row
-    // back), the focus goes back to the same control.
-    if (active?.isConnected && bar.contains(active) && railShown(active)) focusQuietly(active);
-  }
-  $("rail-pop-close").onclick = () => closeRailPop();
-  railPop.addEventListener("keydown", (event) => {
-    // The "+N" list: the arrows move along its rows.
-    if (railOpen?.kind === "more" && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
-      const rows = [...railPopBody.querySelectorAll(".rail-more-row")], at = rows.indexOf(document.activeElement);
-      if (!rows.length) return;
-      event.preventDefault();
-      const to = event.key === "Home" ? 0 : event.key === "End" ? rows.length - 1
-        : event.key === "ArrowDown" ? (at + 1) % rows.length : (at - 1 + rows.length) % rows.length;
-      rows[to].focus();
-      return;
-    }
-    if (event.key !== "Escape" || !railOpen) return;
-    event.preventDefault(); event.stopPropagation();    // Esc in the composer is Stop: this one must not reach it
-    closeRailPop();
+    popFocus: (kind, bar) => [...bar.querySelectorAll(".rail-main")].find((node) => !node.disabled && !node.closest("[hidden]")),
+    // One kind alone has its everyday action at the end of its line (the queue's Steer all, the changes' Review).
+    solo: (kind) => (kind === "queue" && !queueSteerAll.hidden
+      ? ["Steer all", "Send every queued message into this turn now", () => queueSteerAll.click()]
+      : kind === "changes" && changeState.total
+        ? ["Review", "Open the list of changed files", () => $("changes-review-button").click()] : null),
+    links: railLinks, linksKey: () => railTroupeLead()?.run_id,
+    focus: focusQuietly, tip: hoverTip, input, shown: railShown,
+    // The popover may use the height between the header and the chip line, and scrolls past that.
+    popTop: () => $("phead")?.getBoundingClientRect().bottom || 0,
+    // A dialog opened from the popover (the goal editor, the changes review) sits over it: working in it is not
+    // "elsewhere", and the popover is still there, with the focus coming back to it, when the dialog closes.
+    over: ".modal-layer, .panel-overlay, #hover-tip",
   });
-  // A control that went away under the focus (Stop, once its troupe has stopped) leaves the focus on the page itself:
-  // Esc there still closes the popover, and the focus goes back to its chip.
-  document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || !railOpen || event.defaultPrevented) return;
-    if (document.activeElement && document.activeElement !== document.body) return;
-    event.preventDefault();
-    const chip = railAnchor(railOpen.kind) || railOpen.chip;
-    closeRailPop();
-    if (chip.isConnected && !chip.hidden && !railChips.hidden) focusQuietly(chip);
-  });
-  railChips.addEventListener("keydown", (event) => {
-    const chips = railStops(), at = chips.indexOf(event.target);
-    if (at < 0) return;
-    if (event.key === "Escape") {
-      if (!railOpen) return;
-      event.preventDefault(); event.stopPropagation();
-      closeRailPop();
-      return;
-    }
-    const to = event.key === "ArrowRight" ? (at + 1) % chips.length : event.key === "ArrowLeft" ? (at - 1 + chips.length) % chips.length
-      : event.key === "Home" ? 0 : event.key === "End" ? chips.length - 1 : -1;
-    if (to < 0) return;
-    event.preventDefault();
-    railStop = chips[to].dataset.kind; railRove();
-    chips[to].focus();
-  });
-  // A dialog opened from the popover (the goal editor, the changes review) sits over it: working in it is not
-  // "elsewhere", and the popover is still there, with the focus coming back to it, when the dialog closes.
-  const railAway = (node) => node instanceof Element && !railPop.contains(node) && !railChips.contains(node)
-    && !node.closest(".modal-layer, .panel-overlay, #hover-tip");
-  document.addEventListener("pointerdown", (event) => { if (railOpen && railAway(event.target)) closeRailPop({ restore: false }); }, true);
-  railPop.addEventListener("focusout", (event) => {
-    // Focus that went nowhere (a repaint took the focused control away) leaves it open.
-    if (railOpen && event.relatedTarget && railAway(event.relatedTarget)) closeRailPop({ restore: false });
-  });
-  railChipsReady = true;
+  const railSoloAct = rail.soloAct;
   syncComposerRail();
 
   // ---- dedicated non-chat surfaces (skills, MCP, docs, permissions, memory, hooks) ----
@@ -11466,7 +11171,7 @@ function permissionChoices(ev) {
     syncPipFixTick();
     syncComposerRail();
     agentMapChanged();
-    if (railOpen?.kind === "pipfixes") paintPipFixesPanel();
+    if (railOpenNow()?.kind === "pipfixes") paintPipFixesPanel();
   }
   function pipFixPlural(n, word) { return `${n} ${word}${n === 1 ? "" : "s"}`; }
   function pipFixCounts(fix) {
@@ -11750,7 +11455,7 @@ function permissionChoices(ev) {
     if (!fix) return;
     for (const card of pipFixCards(fix.run_id)) paintPipFixCard(card, fix);
     syncComposerRail();
-    if (railOpen?.kind === "pipfixes") paintPipFixesPanel();
+    if (railOpenNow()?.kind === "pipfixes") paintPipFixesPanel();
   }
   function pipFixesReset(kind) {
     if (kind === "rewound") return;               // the same chat: its history brings each card's fix back
@@ -11791,17 +11496,17 @@ function permissionChoices(ev) {
       // The chip's clock: once a second, only its face (a shape change refits the line).
       pipRunningTick = setInterval(() => {
         paintRailChip("piprunning");
-        if (railOpen?.kind === "piprunning") paintPipRunningPanel();
+        if (railOpenNow()?.kind === "piprunning") paintPipRunningPanel();
       }, 1000);
       if (typeof pipRunningTick?.unref === "function") pipRunningTick.unref();
     }
     if (!pipRunning.size && pipRunningTick) { clearInterval(pipRunningTick); pipRunningTick = null; }
-    if (railOpen?.kind === "piprunning" && pipRunning.size < 2) closeRailPop({ restore: false });
+    if (railOpenNow()?.kind === "piprunning" && pipRunning.size < 2) closeRailPop({ restore: false });
     syncComposerRail();
-    if (railOpen?.kind === "piprunning") paintPipRunningPanel();
+    if (railOpenNow()?.kind === "piprunning") paintPipRunningPanel();
   }
   function openRunningPip(run) {
-    if (railOpen) closeRailPop({ restore: false });
+    if (railOpenNow()) closeRailPop({ restore: false });
     openPipsAt({ pip: run.pip_id, section: "chat", run: run.run_id });
   }
   let pipRunningPanel = null;

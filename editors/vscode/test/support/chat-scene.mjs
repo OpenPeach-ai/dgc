@@ -20,7 +20,7 @@ function documents() {
   const prepare = (doc) => doc.replace(/<link [^>]*>/g, "").replace(/<script [^>]*><\/script>/g, "").replace(/\$\{[^}]*\}/g, "")
     .replace("font-src ;", "font-src data:;");
   const scripts = (doc) => [...doc.matchAll(/asset\("media\/((?:shared\/)?[\w-]+\.js)"\)/g)].map((m) => m[1]).map((f) => read(`media/${f}`)).join("\n");
-  const css = readStylesheet(join(root, "media/main.css")) + read("media/mentions.css");
+  const css = readStylesheet(join(root, "media/main.css")) + read("media/mentions.css") + read("media/messagequeue.css");
   const own = read("media/chatdgc.css") + read("media/voicebar.css");
   const styled = (doc) => prepare(doc).replace("</head>", `<style>${codicon()}</style><style>${css}</style><style>${own}</style></head>`);
   const chat = docs.find((d) => d.includes('id="cd-input"'));

@@ -3035,6 +3035,7 @@
   const railChrome = () => promptRail?.refresh();
 
   function render() {
+    trayView();
     const nodes = state.messages.map(messageNode);
     const upto = state.conversation?.summary?.upto;
     const at = upto ? state.messages.findIndex((m) => m.id === upto) : -1;
@@ -3084,6 +3085,7 @@
   /** One message changed (a streamed part): redraw it alone, at most once a frame. */
   let redraw = new Set(), frame = 0;
   function update(id) {
+    trayView();
     redraw.add(id);
     if (frame) return;
     frame = requestAnimationFrame(() => {
@@ -3187,6 +3189,7 @@
 
   // ---- the composer
   function controls() {
+    trayView();
     if (!readOnly()) holdChanges(document, false);      // as they were, then worked out again below
     for (const button of document.querySelectorAll("[data-while-idle]")) {
       button.disabled = state.busy || state.compacting || readOnly() || button.dataset.never === "1";
@@ -3570,6 +3573,95 @@
       copy: (id) => vscode.postMessage({ type: "copy", text: byId.get(id)?.text || "" }),
     });
     box.replaceChildren(head, rows);
+    trayView();
+  }
+
+  // ---- the bar for what is going on (the tray, media/shared/tray.js: the same bar as Work's and a Pip's chat). One
+  // line on the box, in a soft shell round both: the messages you queued, a file or a canvas being made, the chat being
+  // summarized, and its fallback model answering are each a pill; a pill opens its detail just above. Nothing going
+  // on: no bar. Attachments stay in the box, and the folder it reads stays the box's own Folder button (it is how the
+  // chat is set, not something going on).
+  const TRAY_TITLES = { queue: "Queued messages", making: "Being made", summarizing: "Summarizing", fallback: "Fallback model" };
+  const trayNote = el("div", "tray-note");
+  const trayMaking = () => { const doing = state.busy && state.replyId ? state.searching[state.replyId] : null; return doing && (doing.kind === "making" || doing.kind === "canvas") ? doing : null; };
+  const trayFallback = () => (state.fallbackOn && state.fallbackOffered ? modelName(state.fallbackOn.model) : "");
+  function traySpec(kind) {
+    if (kind === "queue") {
+      const count = queued().length;
+      return { icon: "list-ordered", num: String(count), after: "queued", detail: count === 1 ? "message: it sends when the reply finishes" : "messages: each sends when the reply before it finishes",
+        label: `${count} ${count === 1 ? "message" : "messages"} queued for when the reply finishes`, tip: `Queue · ${count} ${count === 1 ? "message" : "messages"} waiting` };
+    }
+    if (kind === "making") {
+      const doing = trayMaking();
+      if (!doing) return null;
+      const canvas = doing.kind === "canvas", what = doing.text || (canvas ? "the canvas" : "the file");
+      return { icon: canvas ? "edit" : "new-file", word: canvas ? "Writing" : "Making", num: what, live: true,
+        label: canvas ? `Writing in the canvas ${what}` : `Making ${what}`, tip: canvas ? `Writing in the canvas ${what}` : `Making ${what}` };
+    }
+    if (kind === "summarizing") {
+      const brief = state.briefing || state.compactingBrief;
+      return { icon: "fold", num: brief ? "Writing the brief" : "Summarizing", live: true, detail: brief ? "of this chat for Work" : "earlier messages to fit the context window",
+        label: brief ? "Writing a brief of this chat for Work" : "Summarizing earlier messages to fit the context window",
+        tip: brief ? "Writing a brief of this chat for Work" : "Summarizing earlier messages to fit the context window" };
+    }
+    if (kind === "fallback") {
+      const on = trayFallback(), main = modelName(modelPick.value) || "Its model";
+      if (!on) return null;
+      return { icon: "arrow-swap", num: on, need: true, tone: "warn", needWord: "fallback", detail: `is answering: ${main} didn’t`,
+        label: `${on}, its fallback, is answering: ${main} didn’t answer`, tip: `${main} didn’t answer, so its fallback ${on} is answering` };
+    }
+    return null;
+  }
+  // A kind's detail: the queue's own rows, or what it is in words with the one thing to do about it.
+  function trayDetail(kind) {
+    if (kind === "queue") return $("cd-queue");
+    const lines = [], acts = [];
+    if (kind === "making") {
+      const spec = traySpec(kind);
+      if (!spec) return null;
+      lines.push(`${spec.label}. It is in the reply when it is done.`);
+      acts.push(["Stop", "Stop the reply where it is", () => { tray.close(); stopReply(); }]);
+    } else if (kind === "summarizing") {
+      lines.push(state.briefing || state.compactingBrief ? "Writing a brief of this chat for Work." : "Summarizing earlier messages so this chat fits the context window.",
+        "What you send meanwhile waits in the queue and goes when it is done.");
+    } else if (kind === "fallback") {
+      const on = trayFallback(), main = modelName(modelPick.value) || "Its model";
+      if (!on) return null;
+      lines.push(`${main} didn’t answer, so its fallback ${on} is answering.`, `It tries ${main} again with your next message.`);
+      acts.push(["Change model", "Choose this chat's model and its fallback", () => { tray.close({ restore: false }); $("cd-model-pill").click(); }]);
+    } else return null;
+    trayNote.replaceChildren(...lines.map((text, i) => el("p", i ? "tray-note-more" : "", text)));
+    if (acts.length) {
+      const row = el("div", "tray-note-acts");
+      for (const [text, title, run] of acts) { const b = el("button", "tray-note-act", text); b.type = "button"; b.title = title; b.dataset.trayFocus = ""; b.addEventListener("click", run); row.append(b); }
+      trayNote.append(row);
+    }
+    return trayNote;
+  }
+  const trayParts = window.DgcTray.build("cd-tray", "Going on in this chat");
+  $("cd-box").before(trayParts.line);
+  trayParts.popClose.innerHTML = '<span class="codicon codicon-close" aria-hidden="true"></span>';
+  // (`var`: the page asks the bar to follow while it is still starting up, before this line has run.)
+  var tray = window.DgcTray.create({ ...trayParts, moreId: "cd-tray-more",
+    keep: ["queue", "fallback", "summarizing", "making"], spec: traySpec, detail: trayDetail, title: (kind) => TRAY_TITLES[kind] || "",
+    popFocus: (kind, node) => node.querySelector("[data-tray-focus], .dgc-queue-handle, button:not(:disabled)"),
+    input, popTop: () => document.querySelector(".cd-head")?.getBoundingClientRect().bottom || 0,
+    over: ".dgc-menu, .dgc-queue-menu, dialog",
+    words: { more: "Show the rest of what is going on", list: "The rest of what is going on in this chat" } });
+  var traySig = "";
+  function trayView() {
+    if (!tray) return;
+    const kinds = [];
+    if (queued().length) kinds.push("queue");
+    if (trayMaking()) kinds.push("making");
+    if (state.compacting) kinds.push("summarizing");
+    if (trayFallback()) kinds.push("fallback");
+    const sig = JSON.stringify(kinds.map((kind) => [kind, traySpec(kind)]));
+    if (sig === traySig) return;
+    traySig = sig;
+    tray.render(kinds);
+    for (const kind of kinds) tray.paint(kind);
+    if (tray.open && tray.open.kind !== "more" && tray.open.kind !== "queue") trayDetail(tray.open.kind);   // its words follow what it is doing
   }
   const researchToggle = $("cd-research");
   /** Deep research for the next message: a plan first, then the reading. Off again once it's sent. */
@@ -3848,6 +3940,7 @@
     // D14: its model didn't answer and its fallback does: the pill names the fallback, in olive, with the word.
     const on = state.fallbackOn && state.fallbackOffered ? modelName(state.fallbackOn.model) : "";
     pill.classList.toggle("on-fallback", !!on);
+    trayView();
     let word = pill.querySelector(".cd-fallback-word");
     if (on) {
       $("cd-model-name").textContent = on;

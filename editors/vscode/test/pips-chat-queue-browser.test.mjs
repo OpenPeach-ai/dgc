@@ -92,10 +92,15 @@ test("Alt+Enter while a Pip answers queues above the box; the queue edits and dr
   assert.equal(await p.evaluate(() => document.getElementById("chatText").value), "", "the box is clear");
   assert.deepEqual(await p.evaluate(() => window.__sent), [], "nothing is sent while it waits");
   assert.match(await p.locator(".chat-queue-head").textContent(), /^3 queued messages$/);
-  // The queue sits above the box, not in the transcript.
+  // The queue is a pill on the bar that sits on the box (prompt-tray-port.test.mjs), not rows in the transcript; its
+  // rows open from the pill, just above.
   assert.equal(await p.locator(".conversation-log").getByText("second").count(), 0);
-  const above = await p.evaluate(() => document.querySelector("#chat-queue-box").getBoundingClientRect().bottom <= document.querySelector("#chat-form").getBoundingClientRect().top + 1);
+  const pill = '#chat-tray .rail-chip[data-kind="queue"]';
+  const above = await p.evaluate((sel) => document.querySelector(sel).getBoundingClientRect().bottom <= document.querySelector("#chat-form").getBoundingClientRect().top + 1, pill);
   assert.equal(above, true);
+  assert.equal(await p.locator("#chat-queue-box").isVisible(), false, "folded into its pill");
+  await p.click(pill);
+  assert.equal(await p.evaluate(() => document.querySelector("#chat-queue-box").getBoundingClientRect().bottom <= document.querySelector("#chat-tray").getBoundingClientRect().top + 1), true);
   // Reorder by keyboard, remove, and Move to top.
   await p.focus("#chat-queue .dgc-queue-row:nth-child(1) .dgc-queue-handle");
   await p.keyboard.press("ArrowDown");
@@ -126,6 +131,7 @@ test("Enter still steers a running reply, and Steer sends a queued message as a 
   await p.waitForFunction(() => window.__sent.length === 1);
   await p.waitForFunction(() => !document.querySelector("#chatText")?.disabled);
   await type(p, "later", "Alt+Enter");
+  await p.click('#chat-tray .rail-chip[data-kind="queue"]');      // the queue's rows open from its pill
   await p.waitForSelector("#chat-queue .dgc-queue-steer");
   await p.click("#chat-queue .dgc-queue-steer");
   await p.waitForFunction(() => window.__sent.length === 2);

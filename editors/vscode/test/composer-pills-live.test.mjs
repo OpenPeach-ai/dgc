@@ -33,7 +33,7 @@ before(async () => {
   const panelSrc = readFileSync(here + "/../src/panel.ts", "utf8");
   const css = readStylesheet(here + "/../media/main.css") + readFileSync(here + "/../media/mentions.css", "utf8");
   // The faces are real here (a page without them draws a stand-in icon, on another baseline).
-  const mainJs = readFileSync(here + "/../media/pips/plush.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/menu.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/composer.js", "utf8") + "\n" + readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
+  const mainJs = readFileSync(here + "/../media/pips/plush.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/menu.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/composer.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/tray.js", "utf8") + "\n" + readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
   const pasteCleanJs = readFileSync(here + "/../media/pasteclean.js", "utf8");
   const markdownJs = buildSync({ entryPoints: [here + "/../src/markdown.ts"], bundle: true,
     format: "iife", globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;

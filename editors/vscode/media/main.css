@@ -4,6 +4,7 @@
 @import url("./shared/card.css");
 @import url("./shared/doccard.css");
 @import url("./shared/filesheet.css");
+@import url("./shared/tray.css");
 @import url("./pips/wordmark.css");
 /* DGC panel — Codex's quiet editor hierarchy with a restrained DGC accent. */
 * { box-sizing: border-box; }
@@ -1388,128 +1389,28 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 #workspace-changes { flex: none; margin-left: auto; min-height: 20px; font-size: var(--t-xs); }
 #workspace-changes .codicon { display: none; }
 
-/* The bar for what is going on (the tray): one line of pills on the prompt box, in a soft shell around both. It is
-   one line at one height (--tray) whatever the width and however many kinds show: narrow, the pills are icons with
-   counts; what still does not fit goes behind "+N". One kind alone is the same line, said in full. A pill opens its
-   kind's real row in a popover just above, so the bar is all the height they take. Nothing going on: no shell, no
-   bar, only the quiet "Workspace changes" link as before. The box never moves: the bar takes its room from the
-   transcript. Under the composer's own menus (z-index 1 < #cbox's 2) except while its popover is open, when it also
-   has to sit over the "Latest" pill (3). */
-.rail-line { position: relative; z-index: 1; display: flex; align-items: center; gap: var(--sp-2); box-sizing: border-box;
-  min-width: 0; height: 20px; margin: 0 var(--sp-3); }
-.rail-line.pop-open { z-index: 4; }
-/* The shell is the bar's own ground plus a ring of the same colour around the box (and the paste notice between
-   them, when there is one). The footer's gap is taken back so the two meet. */
-.rail-line.has-chips { height: var(--tray); margin: 0 calc(-1 * var(--shell-pad)) calc(-1 * var(--sp-1));
-  padding: 0 var(--sp-3); background: var(--shell);
-  border-radius: calc(var(--r-box) + var(--shell-pad)) calc(var(--r-box) + var(--shell-pad)) 0 0; }
-.rail-line.has-chips ~ #cbox { box-shadow: var(--lift-box), 0 0 0 var(--shell-pad) var(--shell); }
+/* The bar for what is going on (the tray) is media/shared/tray.css, the same in ChatDGC and a Pip's chat. Here: what is
+   Work's own on it. */
 .rail-line.has-chips + #composer-rail { margin: 0 calc(-1 * var(--shell-pad)) calc(-1 * var(--sp-1));
   padding: 0 calc(var(--sp-3) + var(--shell-pad)); border-radius: 0; background: var(--shell); }
-/* Where the bar meets the box, the ring follows the box's round top corners and took a bite out of the shell on each
-   side (the user circled it, 11 Nov): the bar's ground runs on down behind the box's top corners (the box is drawn
-   over it), so each side of the shell is one straight line from the bar into the ring. The paste notice, when it is
-   between them, does the same. */
-.rail-line.has-chips::after, .rail-line.has-chips + #composer-rail::after { content: ""; position: absolute; z-index: -1;
+/* The paste notice between the bar and the box carries the shell on down as the bar does (shared/tray.css). */
+.rail-line.has-chips + #composer-rail::after { content: ""; position: absolute; z-index: -1;
   top: 100%; right: 0; left: 0; height: calc(var(--r-box) + 2 * var(--sp-1)); background: var(--shell); pointer-events: none; }
-@media (prefers-reduced-motion: no-preference) { .rail-line { transition: height .12s ease-out; } }
-.rail-chips { display: flex; flex: 0 1 auto; flex-wrap: nowrap; align-items: center; gap: var(--sp-1); min-width: 0; }
-.rail-chip, .rail-more { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; max-width: 100%; height: 24px; min-width: 0;
-  padding: 0 8px; border: 1px solid transparent; border-radius: var(--r-full); background: var(--shell-pill);
-  color: var(--muted); cursor: pointer; overflow: hidden; white-space: nowrap;
-  font: var(--w-reg) var(--t-xs)/1 var(--sans); font-variant-numeric: tabular-nums; }
-.rail-chip[hidden] { display: none; }
-:is(.rail-chip, .rail-more):hover, :is(.rail-chip, .rail-more)[aria-expanded="true"] { color: var(--text);
-  background: color-mix(in srgb, var(--text) 9%, transparent); }
-:is(.rail-chip, .rail-more):focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
-.rail-more { padding: 0 9px; color: var(--text); }
-.rail-more[data-need="error"] { color: var(--err-text); }
-.rail-more[data-need="warn"] { color: var(--need-text); }
-.rail-chip > .codicon { flex: none; font-size: 13px; color: var(--faint); }
-.rail-chip[data-live] > .codicon:first-child { color: var(--accent-text); }
-.rail-chip .chip-num { color: var(--text); }
-.rail-chip .chip-mark { flex: none; width: 14px; height: 14px; }
-.rail-chip .chip-mark svg { display: block; width: 100%; height: 100%; }
-:is(.rail-chip, .rail-more-row) .chip-mini { flex: none; width: 28px; }
-:is(.rail-chip, .rail-more-row):not([data-live]) .chip-mini > span { background: var(--faint); }
 .rail-chip[data-kind="troupe"][data-live] .chip-mark .tm-part { animation: troupe-tile 2.4s ease-in-out infinite; }
 .rail-chip[data-kind="troupe"][data-live] .chip-mark .tm-part:nth-of-type(2) { animation-delay: 0.6s; }
 .rail-chip[data-kind="troupe"][data-live] .chip-mark .tm-part:nth-of-type(3) { animation-delay: 1.2s; }
 .rail-chip[data-kind="troupe"][data-live] .chip-mark .tm-part:nth-of-type(4) { animation-delay: 1.8s; }
 /* A running Pip's name is the chip's number: a long one is cut, its whole name is on the chip's tooltip. */
 .rail-chip[data-kind="piprunning"] .chip-num { min-width: 0; max-width: 18em; overflow: hidden; text-overflow: ellipsis; }
-/* Needs you: the reason in words, in the colours the rows had before the chip line (reported 19 Oct): blocked
-   or failed in --err-text with the icon, waiting or an alert in --need-text (4.5:1). No dot, no outline. */
-.rail-chip[data-need] { color: var(--text); }
-:is(.rail-chip, .rail-more-row)[data-need="error"] > .codicon:first-child, :is(.rail-chip, .rail-more-row)[data-need="error"] .chip-need { color: var(--err-text); }
-:is(.rail-chip, .rail-more-row)[data-need="warn"] > .codicon:first-child, :is(.rail-chip, .rail-more-row)[data-need="warn"] .chip-need { color: var(--need-text); }
 .rail-line.has-chips #workspace-changes { min-height: 24px; }
 .rail-line[data-fit]:not([data-fit="full"]) #workspace-changes .workspace-changes-label { display: none; }
 .rail-line[data-fit]:not([data-fit="full"]) #workspace-changes .codicon { display: inline-block; }
-/* Narrow: icons with counts. The words go first, then the extras (the diff counts, the troupe's bar), then the
-   number of a pill that needs you, which gives its room to the reason ("☰ 1 blocked"). Never a second line. */
-.rail-line:is([data-fit="compact"], [data-fit="tight"], [data-fit="tighter"]) .rail-chips .chip-word { display: none; }
-.rail-line:is([data-fit="tight"], [data-fit="tighter"]) .rail-chips :is(.chip-extra, .chip-mini) { display: none; }
-.rail-line[data-fit="tighter"] .rail-chip:has(.chip-need) .chip-num { display: none; }
-.rail-line:is([data-fit="tight"], [data-fit="tighter"]) :is(.rail-chip, .rail-more) { padding: 0 6px; gap: 4px; }
-/* The last pill left beside "+N" on a very narrow bar gives way rather than push the line wider. */
-.rail-line[data-squeeze] .rail-chip { flex-shrink: 1; }
-/* One kind alone: the same line, said in full ("2 queued messages", "Goal 1:12:00 Ship the ..."), with its one
-   everyday action at the end. It opens its rows above like any pill. */
-.rail-chip :is(.chip-detail, .chip-caret) { display: none; }
-.rail-line[data-solo] .rail-chips { flex: 1 1 auto; }
-.rail-line[data-solo] .rail-chip { flex: 1 1 auto; gap: 6px; padding: 0 6px; background: transparent; color: var(--text);
-  font-size: var(--t-sm); }
-.rail-line[data-solo] .rail-chip:hover, .rail-line[data-solo] .rail-chip[aria-expanded="true"] { background: var(--field); }
-/* Said in full it is one phrase ("2 queued messages"), so its words sit a word apart, not a pill's gap apart. */
-.rail-line[data-solo] .rail-chip { gap: 0; }
-.rail-line[data-solo] .rail-chip > :is(.codicon, .chip-mark):first-child { margin-right: 6px; }
-.rail-line[data-solo] .rail-chip > :is(.chip-word, .chip-num, .chip-extra, .chip-need, .chip-detail)
-  + :is(.chip-word, .chip-num, .chip-extra, .chip-need, .chip-detail) { margin-left: .3em; }
-.rail-line[data-solo] .rail-chip .chip-detail { display: block; flex: 0 1 auto; min-width: 0; overflow: hidden;
-  text-overflow: ellipsis; line-height: 1.5; color: var(--muted); }
-.rail-line[data-solo] .rail-chip[aria-haspopup] .chip-caret { display: inline-block; margin-left: auto; font-size: var(--t-xs); }
 .rail-solo-act { min-height: 24px; white-space: nowrap; }
 /* The rows themselves never show above the box: each is its pill's detail. Only the invisible-characters notice
    stays a line of its own: it is about the message being typed. */
 #composer-rail > .rail-item:not(#pastebar) { display: none; }
-/* "+N": what did not fit, as a list; each row opens its own detail. */
-.rail-more-list { display: flex; flex-direction: column; min-width: 0; padding: 0 var(--sp-1) var(--sp-1); }
-.rail-more-row { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: var(--row); padding: 0 var(--sp-2);
-  border: 0; border-radius: var(--r-md); background: transparent; color: var(--text); cursor: pointer; text-align: left;
-  white-space: nowrap; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); font-variant-numeric: tabular-nums; }
-.rail-more-row:hover, .rail-more-row:focus-visible { background: var(--field); outline: none; }
-.rail-more-row:focus-visible { box-shadow: inset 0 0 0 1px var(--vscode-focusBorder, var(--accent)); }
-.rail-more-row > .codicon:first-child { flex: none; font-size: 13px; color: var(--faint); }
-.rail-more-row[data-live] > .codicon:first-child { color: var(--accent-text); }
-.rail-more-row .chip-mark { flex: none; width: 14px; height: 14px; }
-.rail-more-row .chip-mark svg { display: block; width: 100%; height: 100%; }
-.rail-more-row :is(.chip-word, .chip-extra:not(.change-add, .change-del), .chip-detail) { color: var(--muted); }
-.rail-more-row .chip-detail { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.rail-more-row .chip-caret { display: none; }
-:is(.rail-chip, .rail-more-row) .change-add { color: var(--add-text); }
-:is(.rail-chip, .rail-more-row) .change-del { color: var(--del-ink); }
-.rail-more-row .row-open { flex: none; margin-left: auto; padding-left: var(--sp-2); color: var(--muted); }
-.rail-pop { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); display: flex; flex-direction: column;
-  min-width: 0; max-height: min(70vh, 560px); overflow-y: auto; overscroll-behavior: contain;
-  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg);
-  box-shadow: 0 14px 40px -10px rgba(0,0,0,.75); }
-.rail-line.has-chips .rail-pop { left: var(--shell-pad); right: var(--shell-pad); }
-body.vscode-light .rail-pop { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
-.rail-pop:focus { outline: none; }
-.rail-pop:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
-@keyframes rail-pop-in { from { opacity: 0; transform: translateY(4px); } }
-@media (prefers-reduced-motion: no-preference) { .rail-pop:not([hidden]) { animation: rail-pop-in .14s ease-out; } }
-.rail-pop-head { display: flex; flex: none; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-1) 0 var(--sp-3); }
-.rail-pop-title { flex: 1; min-width: 0; color: var(--muted); font: var(--w-med) var(--t-xs)/1.45 var(--sans); }
-.rail-pop-body { display: flex; flex-direction: column; min-width: 0; }
 /* The real row, borrowed: the popover is its frame now. */
 .rail-pop-body > .rail-item { border: 0; border-radius: 0; background: transparent; }
-.rail-pop-links { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); padding: var(--sp-1) var(--sp-3) var(--sp-2);
-  border-top: 1px solid var(--border); }
-.rail-pop-links .rail-pop-link { padding: 0; border: 0; background: transparent; color: var(--link); cursor: pointer;
-  font: var(--w-reg) var(--t-xs)/1.6 var(--sans); }
-.rail-pop-links .rail-pop-link:hover { text-decoration: underline; }
 .change-add { color: var(--good); font-variant-numeric: tabular-nums; }
 .change-del { color: var(--del-text); font-variant-numeric: tabular-nums; }
 #goalbar[data-status="active"] .goal-icon { color: var(--accent-text); }
@@ -3270,12 +3171,6 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 @media (prefers-reduced-motion: reduce) { .troupe-mark .tm-part { animation: none !important; } .troupe-bar > span { transition: none; } }
 @media (prefers-reduced-motion: reduce) { .rail-chip .chip-mark .tm-part { animation: none !important; } }
 /* No hue in forced colours: a chip that needs you says so with a heavier border, its dot and its words. */
-@media (forced-colors: active) {
-  .rail-chip, .rail-more { border-color: CanvasText; }
-  .rail-line.has-chips { border: 1px solid CanvasText; border-bottom: 0; }
-  .rail-chip[data-need] { border-width: 2px; }
-  .rail-pop { border-color: CanvasText; }
-}
 @media (forced-colors: active) { .troupe-bar { border: 1px solid CanvasText; } .troupe-bar > span { background: Highlight; } }
 
 /* A Pip report in the chat: a finished run of a Pip that reports here, drawn where it arrived (after

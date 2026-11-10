@@ -1,0 +1,142 @@
+/* The bar for what is going on above a prompt box (the tray), the same in Work, ChatDGC and a Pip's chat
+   (media/shared/tray.js draws, fits and opens it). Each page gives it its place in its own stylesheet (the margins
+   that make it meet its box, the box's corner in --tray-r, the box's own shadow in --tray-lift) and marks its box
+   .tray-box, so the shell's ring goes round it. */
+.rail-line { --tray-r: var(--r-box); }
+/* The bar for what is going on (the tray): one line of pills on the prompt box, in a soft shell around both. It is
+   one line at one height (--tray) whatever the width and however many kinds show: narrow, the pills are icons with
+   counts; what still does not fit goes behind "+N". One kind alone is the same line, said in full. A pill opens its
+   kind's real row in a popover just above, so the bar is all the height they take. Nothing going on: no shell, no
+   bar, only the quiet "Workspace changes" link as before. The box never moves: the bar takes its room from the
+   transcript. Under the composer's own menus (z-index 1 < #cbox's 2) except while its popover is open, when it also
+   has to sit over the "Latest" pill (3). */
+.rail-line { position: relative; z-index: 1; display: flex; align-items: center; gap: var(--sp-2); box-sizing: border-box;
+  min-width: 0; height: 20px; margin: 0 var(--sp-3); }
+.rail-line.pop-open { z-index: 4; }
+/* The box is drawn over the bar's ground (which runs on down behind its top corners, below), and still is while the
+   popover is open and the line is raised: without this the shell's ground covered the top of the box, and what was
+   typed there, for as long as a popover was open. */
+.rail-line.has-chips ~ .tray-box { position: relative; z-index: 2; }
+.rail-line.pop-open ~ :is(#cbox, .tray-box) { z-index: 5; }
+/* The shell is the bar's own ground plus a ring of the same colour around the box (and the paste notice between
+   them, when there is one). The footer's gap is taken back so the two meet. */
+.rail-line.has-chips { height: var(--tray); margin: 0 calc(-1 * var(--shell-pad)) calc(-1 * var(--sp-1));
+  padding: 0 var(--sp-3); background: var(--shell);
+  border-radius: calc(var(--tray-r) + var(--shell-pad)) calc(var(--tray-r) + var(--shell-pad)) 0 0; }
+.rail-line.has-chips ~ :is(#cbox, .tray-box) { box-shadow: var(--tray-lift, var(--lift-box)), 0 0 0 var(--shell-pad) var(--shell); }
+/* Where the bar meets the box, the ring follows the box's round top corners and took a bite out of the shell on each
+   side (the user circled it, 11 Nov): the bar's ground runs on down behind the box's top corners (the box is drawn
+   over it), so each side of the shell is one straight line from the bar into the ring. The paste notice, when it is
+   between them, does the same. */
+.rail-line.has-chips::after { content: ""; position: absolute; z-index: -1;
+  top: 100%; right: 0; left: 0; height: calc(var(--tray-r) + 2 * var(--sp-1)); background: var(--shell); pointer-events: none; }
+@media (prefers-reduced-motion: no-preference) { .rail-line { transition: height .12s ease-out; } }
+.rail-chips { display: flex; flex: 0 1 auto; flex-wrap: nowrap; align-items: center; gap: var(--sp-1); min-width: 0; }
+.rail-chip, .rail-more { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; max-width: 100%; height: 24px; min-width: 0; min-height: 0;
+  padding: 0 8px; border: 1px solid transparent; border-radius: var(--r-full); background: var(--shell-pill);
+  color: var(--muted); cursor: pointer; overflow: hidden; white-space: nowrap;
+  font: var(--w-reg) var(--t-xs)/1 var(--sans); font-variant-numeric: tabular-nums; }
+.rail-chip[hidden] { display: none; }
+:is(.rail-chip, .rail-more):hover, :is(.rail-chip, .rail-more)[aria-expanded="true"] { color: var(--text);
+  background: color-mix(in srgb, var(--text) 9%, transparent); }
+:is(.rail-chip, .rail-more):focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+.rail-more { padding: 0 9px; color: var(--text); }
+.rail-more[data-need="error"] { color: var(--err-text); }
+.rail-more[data-need="warn"] { color: var(--need-text); }
+.rail-chip > .codicon { flex: none; font-size: 13px; color: var(--faint); }
+.rail-chip[data-live] > .codicon:first-child { color: var(--accent-text); }
+.rail-chip .chip-num { color: var(--text); }
+.rail-chip .chip-mark { flex: none; width: 14px; height: 14px; }
+.rail-chip .chip-mark svg { display: block; width: 100%; height: 100%; }
+:is(.rail-chip, .rail-more-row) .chip-mini { flex: none; width: 28px; }
+:is(.rail-chip, .rail-more-row):not([data-live]) .chip-mini > span { background: var(--faint); }
+/* Needs you: the reason in words, in the colours the rows had before the chip line (reported 19 Oct): blocked
+   or failed in --err-text with the icon, waiting or an alert in --need-text (4.5:1). No dot, no outline. */
+.rail-chip[data-need] { color: var(--text); }
+:is(.rail-chip, .rail-more-row)[data-need="error"] > .codicon:first-child, :is(.rail-chip, .rail-more-row)[data-need="error"] .chip-need { color: var(--err-text); }
+:is(.rail-chip, .rail-more-row)[data-need="warn"] > .codicon:first-child, :is(.rail-chip, .rail-more-row)[data-need="warn"] .chip-need { color: var(--need-text); }
+/* Narrow: icons with counts. The words go first, then the extras (the diff counts, the troupe's bar), then the
+   number of a pill that needs you, which gives its room to the reason ("☰ 1 blocked"). Never a second line. */
+.rail-line:is([data-fit="compact"], [data-fit="tight"], [data-fit="tighter"]) .rail-chips .chip-word { display: none; }
+.rail-line:is([data-fit="tight"], [data-fit="tighter"]) .rail-chips :is(.chip-extra, .chip-mini) { display: none; }
+.rail-line[data-fit="tighter"] .rail-chip:has(.chip-need) .chip-num { display: none; }
+.rail-line:is([data-fit="tight"], [data-fit="tighter"]) :is(.rail-chip, .rail-more) { padding: 0 6px; gap: 4px; }
+/* The last pill left beside "+N" on a very narrow bar gives way rather than push the line wider. */
+.rail-line[data-squeeze] .rail-chip { flex-shrink: 1; }
+/* One kind alone: the same line, said in full ("2 queued messages", "Goal 1:12:00 Ship the ..."), with its one
+   everyday action at the end. It opens its rows above like any pill. */
+.rail-chip :is(.chip-detail, .chip-caret) { display: none; }
+.rail-line[data-solo] .rail-chips { flex: 1 1 auto; }
+.rail-line[data-solo] .rail-chip { flex: 1 1 auto; gap: 6px; padding: 0 6px; background: transparent; color: var(--text);
+  font-size: var(--t-sm); }
+.rail-line[data-solo] .rail-chip:hover, .rail-line[data-solo] .rail-chip[aria-expanded="true"] { background: var(--field); }
+/* Said in full it is one phrase ("2 queued messages"), so its words sit a word apart, not a pill's gap apart. */
+.rail-line[data-solo] .rail-chip { gap: 0; }
+.rail-line[data-solo] .rail-chip > :is(.codicon, .chip-mark):first-child { margin-right: 6px; }
+.rail-line[data-solo] .rail-chip > :is(.chip-word, .chip-num, .chip-extra, .chip-need, .chip-detail)
+  + :is(.chip-word, .chip-num, .chip-extra, .chip-need, .chip-detail) { margin-left: .3em; }
+.rail-line[data-solo] .rail-chip .chip-detail { display: block; flex: 0 1 auto; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; line-height: 1.5; color: var(--muted); }
+.rail-line[data-solo] .rail-chip[aria-haspopup] .chip-caret { display: inline-block; margin-left: auto; font-size: var(--t-xs); }
+/* "+N": what did not fit, as a list; each row opens its own detail. */
+.rail-more-list { display: flex; flex-direction: column; min-width: 0; padding: 0 var(--sp-1) var(--sp-1); }
+.rail-more-row { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: var(--row); padding: 0 var(--sp-2);
+  border: 0; border-radius: var(--r-md); background: transparent; color: var(--text); cursor: pointer; text-align: left;
+  white-space: nowrap; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); font-variant-numeric: tabular-nums; }
+.rail-more-row:hover, .rail-more-row:focus-visible { background: var(--field); outline: none; }
+.rail-more-row:focus-visible { box-shadow: inset 0 0 0 1px var(--vscode-focusBorder, var(--accent)); }
+.rail-more-row > .codicon:first-child { flex: none; font-size: 13px; color: var(--faint); }
+.rail-more-row[data-live] > .codicon:first-child { color: var(--accent-text); }
+.rail-more-row .chip-mark { flex: none; width: 14px; height: 14px; }
+.rail-more-row .chip-mark svg { display: block; width: 100%; height: 100%; }
+.rail-more-row :is(.chip-word, .chip-extra:not(.change-add, .change-del), .chip-detail) { color: var(--muted); }
+.rail-more-row .chip-detail { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.rail-more-row .chip-caret { display: none; }
+:is(.rail-chip, .rail-more-row) .change-add { color: var(--add-text); }
+:is(.rail-chip, .rail-more-row) .change-del { color: var(--del-ink); }
+.rail-more-row .row-open { flex: none; margin-left: auto; padding-left: var(--sp-2); color: var(--muted); }
+.rail-pop { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); display: flex; flex-direction: column;
+  min-width: 0; max-height: min(70vh, 560px); overflow-y: auto; overscroll-behavior: contain;
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg);
+  box-shadow: 0 14px 40px -10px rgba(0,0,0,.75); }
+.rail-line.has-chips .rail-pop { left: var(--shell-pad); right: var(--shell-pad); }
+body.vscode-light .rail-pop { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
+.rail-pop:focus { outline: none; }
+.rail-pop:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+@keyframes rail-pop-in { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: no-preference) { .rail-pop:not([hidden]) { animation: rail-pop-in .14s ease-out; } }
+.rail-pop-head { display: flex; flex: none; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-1) 0 var(--sp-3); }
+.rail-pop-title { flex: 1; min-width: 0; color: var(--muted); font: var(--w-med) var(--t-xs)/1.45 var(--sans); }
+.rail-pop-body { display: flex; flex-direction: column; min-width: 0; }
+.rail-pop-links { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); padding: var(--sp-1) var(--sp-3) var(--sp-2);
+  border-top: 1px solid var(--border); }
+.rail-pop-links .rail-pop-link { padding: 0; border: 0; background: transparent; color: var(--link); cursor: pointer;
+  font: var(--w-reg) var(--t-xs)/1.6 var(--sans); }
+.rail-pop-links .rail-pop-link:hover { text-decoration: underline; }
+
+/* (A page without a rule of its own for [hidden].) */
+:is(.rail-pop, .rail-chips, .rail-pop-links)[hidden] { display: none; }
+/* A page whose line holds nothing but the bar: nothing going on, nothing there. */
+.rail-line.tray-only:not(.has-chips) { display: none; }
+/* The popover's own close, for a page with no icon font. */
+.rail-pop-x { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0;
+  border: 0; border-radius: var(--r-md); background: transparent; color: var(--muted); cursor: pointer; }
+.rail-pop-x:hover { background: var(--field); color: var(--text); }
+.rail-pop-x:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+/* An icon drawn as a picture (a page with no icon font) sits as the font's does. */
+:is(.rail-chip, .rail-more-row) > .codicon > svg, .rail-chip .chip-caret > svg { display: block; width: 13px; height: 13px; }
+/* A detail that is only words (what a kind is doing, and what to do about it). */
+.tray-note { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; padding: var(--sp-1) var(--sp-3) var(--sp-3); }
+.tray-note p { margin: 0; color: var(--text); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); overflow-wrap: anywhere; }
+.tray-note p.tray-note-more { color: var(--muted); }
+.tray-note-acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.tray-note-act { min-height: 24px; padding: 0 var(--sp-2); border: 1px solid var(--border-strong); border-radius: var(--r-md);
+  background: transparent; color: var(--text); cursor: pointer; font: var(--w-reg) var(--t-sm)/1 var(--sans); }
+.tray-note-act:hover { background: var(--field); }
+.tray-note-act:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+@media (forced-colors: active) {
+  .rail-chip, .rail-more { border-color: CanvasText; }
+  .rail-line.has-chips { border: 1px solid CanvasText; border-bottom: 0; }
+  .rail-chip[data-need] { border-width: 2px; }
+  .rail-pop { border-color: CanvasText; }
+}

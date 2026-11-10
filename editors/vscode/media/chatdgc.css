@@ -425,6 +425,10 @@ body.cd-blank .cd-fine { display: none; }
 /* While it answers, Send (now "queue") sits just before Stop, not halfway along the row. */
 #cd-send:not([hidden]) + #cd-stop { margin-left: var(--sp-1); }
 /* Messages waiting their turn (Codex's queue): above the box's text, one line each, in the order they'll go. */
+/* The bar for what is going on (media/shared/tray.css, the same as Work's and a Pip's chat) on ChatDGC's box: it
+   meets the box, and its shell goes round it. The queue is its pill's detail: its rows open in the popover above. */
+.cd-foot .rail-line.has-chips { margin: 0 calc(-1 * var(--shell-pad)); }
+.rail-pop .cd-queue { padding: 0 var(--sp-3) var(--sp-2); border-bottom: 0; }
 .cd-queue { display: grid; gap: 2px; padding-bottom: var(--sp-2); border-bottom: 1px solid var(--border); }
 .cd-queue-head { margin: 0; color: var(--muted); font: var(--w-med) var(--t-xs)/1.4 var(--sans); }
 .cd-queue-list { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; max-height: 132px; overflow-y: auto; }

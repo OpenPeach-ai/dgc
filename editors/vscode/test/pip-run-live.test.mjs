@@ -203,11 +203,18 @@ test('a Personal Pip’s routine runs as a live post, not the working row, and i
   assert.equal(text(card.querySelector('.run-post-started')),'From Shop event');
   assert.equal(text(card.querySelector('.run-post-clock')),'0:30');
   assert.equal(x.d.querySelector('.pip-working'),null,'no working row beside it');
+  // It is on the bar above the box too (prompt-tray-port.test.mjs): one pill, alone on the line.
+  const pill=x.d.querySelector('#chat-tray .rail-chip[data-kind="routine"]');
+  assert.ok(pill,'the routine running is a pill on the bar');
+  assert.match(pill.getAttribute('aria-label'),/routine New orders is running/);
+  assert.equal(x.d.querySelector('#chat-tray').dataset.solo,'routine');
   x.click(`[data-live-stop="${CHAT}"]`);await x.drain();
   assert.deepEqual(x.state.cancelled,[CHAT],'Stop stops the routine’s run');
   x.state.chatActive=null;x.state.messages=[hidden,{...hidden,id:'msg_a',role:'assistant',intro:undefined,text:'One new order: #1042, ₹2,400.',created_at:iso(NOW)}];
   await x.look();
   assert.equal(live(x.d),null);
+  assert.equal(x.d.querySelector('#chat-tray .rail-chip'),null,'the run ended: nothing on the bar');
+  assert.equal(x.d.querySelector('#chat-tray').classList.contains('has-chips'),false);
   const reply=x.d.querySelector('[data-message="msg_a"]');
   assert.ok(reply,'its reply, in its place');
   assert.equal(items(x.d).at(-1),reply);

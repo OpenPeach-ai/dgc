@@ -137,6 +137,7 @@ test("others waiting behind it sit above the box in order, not in the transcript
   const held = p.locator("#chat-queue .dgc-queue-row").first();
   assert.equal(await held.locator("[data-queue-role='steer'], [data-queue-role='remove'], [data-queue-role='handle']").count(), 0, "DGC holds this one");
   assert.equal(await p.locator("#chat-queue .dgc-queue-row").nth(2).locator("[data-queue-role='remove']").count(), 1, "the one queued here stays this view's");
+  await p.click('#chat-tray .rail-chip[data-kind="queue"]');      // the queue's rows open from its pill on the bar
   await p.locator("#chat-queue .dgc-queue-row").nth(1).locator(".dgc-queue-more").click();
   await p.getByRole("menuitem", { name: "Copy message" }).click();
   assert.equal(await p.evaluate(() => window.__copied), "Third\nthing", "its words as sent");
