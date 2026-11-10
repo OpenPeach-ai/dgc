@@ -99,7 +99,7 @@ export async function openPanel(browser, { width = 1100, height = 760, theme = "
     await send({ type: "init", id: one.view.id });
     await send({ type: "detail", artifact: one.view, content: one.content ?? null, state: one.state ?? null,
                  offer: { version: 1, types: ["page", "doc", "slides", "sheet", "dashboard"], outputs: ["auto", "document", "slides", "spreadsheet", "page", "dashboard"],
-                          exports: { doc: ["docx", "pdf", "md"], slides: ["pptx", "pdf", "html"], sheet: ["xlsx", "csv"], dashboard: ["html"], page: ["html", "zip"] } } });
+                          exports: { doc: ["docx", "pdf", "md"], slides: ["pptx", "pdf", "html"], sheet: ["xlsx", "csv"], dashboard: ["pdf", "html"], page: ["docx", "pdf", "html", "zip"] } } });
     if (one.html) await send({ type: "render", html: one.html, version: one.view.version });
     if (kind === "page" && frameUrl) await send({ type: "frame", url: frameUrl, version: one.view.version });
   }

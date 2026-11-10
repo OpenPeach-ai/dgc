@@ -23,7 +23,7 @@ before(async () => {
 after(async () => { await browser?.close(); cleanup(); });
 
 const OFFER = { version: 1, types: ["page", "doc", "slides", "sheet", "dashboard"], outputs: ["auto", "document", "slides", "spreadsheet", "page", "dashboard"],
-                       exports: { doc: ["docx", "pdf", "md"], slides: ["pptx", "pdf", "html"], sheet: ["xlsx", "csv"], dashboard: ["html"], page: ["html", "zip"] } };
+                       exports: { doc: ["docx", "pdf", "md"], slides: ["pptx", "pdf", "html"], sheet: ["xlsx", "csv"], dashboard: ["pdf", "html"], page: ["docx", "pdf", "html", "zip"] } };
 const DECK = { id: "ar_" + "d".repeat(16), type: "slides", label: "Slides", title: "Q3 plan", version: 1, exports: ["pptx", "pdf", "html"], origin: { surface: "work" } };
 
 async function openWork({ width = 520, theme = "dark-modern", capabilities = { artifacts: OFFER } } = {}) {
@@ -251,6 +251,12 @@ test("a Work artifact is the shared card: a sheet of its kind with its name on a
     for (const [i, [type]] of made.entries()) await s.send({ type: "artifact_changed", artifact: { ...DECK, id: "ar_" + String(i + 5).repeat(16), type, title: `A ${type}` }, op: "made", surface: "work" });
     const tabs = await s.page.locator(".artifact-card .dgc-sheet").evaluateAll((ns) => ns.slice(1).map((n) => [n.dataset.kind, n.querySelector(".dgc-sheet-tag").textContent, getComputedStyle(n.querySelector(".dgc-sheet-tag")).backgroundColor]));
     assert.deepEqual(tabs, made);
+    // A page downloads as a PDF too (his call, 11 Nov): the backend's own list for a page (artifact_service.EXPORTS).
+    const page = s.page.locator(".artifact-card").filter({ has: s.page.locator('.dgc-sheet[data-kind="page"]') }).first();
+    await page.locator(".dgc-doc-dl").click();
+    const offered = await page.locator(".amenu-item").allTextContents();
+    assert.ok(offered.includes("PDF"), `a page offers PDF: ${JSON.stringify(offered)}`);
+    await s.page.keyboard.press("Escape");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });

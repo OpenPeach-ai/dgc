@@ -47,7 +47,7 @@ const art = artifactsModule();
 after(() => { delete globalThis.__DGC_ART_VSCODE; });
 
 const OFFER = { version: 1, types: ["page", "doc", "slides", "sheet", "dashboard"], outputs: ["auto", "document", "slides", "spreadsheet", "page", "dashboard"],
-                exports: { doc: ["docx", "pdf", "md"], slides: ["pptx", "pdf", "html"], sheet: ["xlsx", "csv"], dashboard: ["html"], page: ["html", "zip"] },
+                exports: { doc: ["docx", "pdf", "md"], slides: ["pptx", "pdf", "html"], sheet: ["xlsx", "csv"], dashboard: ["pdf", "html"], page: ["docx", "pdf", "html", "zip"] },
                 present: false };
 const ID = "ar_" + "a".repeat(16);
 const VIEW = { id: ID, type: "slides", label: "Slides", title: "Q3 plan", version: 3, exports: ["pptx", "pdf", "html"], origin: { surface: "chat" },

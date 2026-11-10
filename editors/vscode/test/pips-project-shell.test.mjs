@@ -221,7 +221,6 @@ test('a Project Pip’s own change stays in its chat while other Pip setups stay
   await x.click('#simple-back');
   assert.ok(x.$('.simple-home'),'the overview holds pending setup reviews');
   assert.equal(x.$('.setup-inbox'),null,'only in Needs attention');
-  await x.click('.attention-toggle');
   assert.match(text(x.$(`[data-setup-card="${SETUP}"] .dgc-card-title`)),/Create the Pip “Nightly review”\?/);
   await x.click(`[data-setup="${SETUP}"]`);
   assert.equal(x.requests('get_pip_setup').at(-1).setup_id,SETUP);
@@ -235,7 +234,6 @@ test('Personal Pip setup reviews stay on the Personal overview, outside a Pip ch
   assert.equal(x.$('.pip-setup-strip'),null);
   await x.click('#simple-back');
   assert.equal(x.$('.setup-inbox'),null,'only in Needs attention');
-  await x.click('.attention-toggle');
   assert.match(text(x.$('.attention [data-setup-card]')),/Nightly review/);
 });
 

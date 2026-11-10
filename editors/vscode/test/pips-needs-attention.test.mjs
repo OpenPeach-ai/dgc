@@ -24,12 +24,13 @@ const page=(items,extra={})=>({as_of:new Date().toISOString(),total:items.length
 const link={id:LINK,pip_id:PIP,workspace_id:PW,toolkit:'gmail',app:'Gmail',reason:'To read your new mail.',status:'requested',label:null,error:null,created_at:ago(9),updated_at:new Date().toISOString()};
 async function flush(){for(let i=0;i<15;i++)await Promise.resolve();}
 
-function setup({found=page([]),apiVersion=44,links=[link],embedded=false,profiles={},proposal=null}={}){
+function setup({found=page([]),apiVersion=44,links=[link],embedded=false,profiles={},proposal=null,saved=undefined}={}){
+ let lastState=saved;
  // embedded: the side bar's Pips view (main.js mounts it in a shadow root and navigates it from the Sessions home).
  const dom=new JSDOM(embedded?'<!doctype html><html><body><div id="pips-host"></div></body></html>':viewModule.pipsDocument(),{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);
  const sent=[],answered=new Set();
  w.HTMLCanvasElement.prototype.getContext=()=>null;w.TextEncoder=TextEncoder;w.CSS={escape:s=>s};
- w.acquireVsCodeApi=()=>({postMessage:m=>sent.push(m),getState:()=>undefined,setState:()=>{}});
+ w.acquireVsCodeApi=()=>({postMessage:m=>sent.push(m),getState:()=>saved,setState:v=>{lastState=v;}});
  w.eval(client);
  let app=null,shadow=null;
  if(embedded){
@@ -55,7 +56,7 @@ function setup({found=page([]),apiVersion=44,links=[link],embedded=false,profile
  message({type:'pipsConnection',apiVersion,generation:1,connected:true,supported:true,enabled:true});
  const d=shadow||w.document;
  const click=s=>{const el=d.querySelector(s);assert.ok(el,'Missing '+s);el.click();};
- return {w,d,app,sent,answer,requests,drain,click};
+ return {w,d,app,sent,answer,requests,drain,click,state:()=>lastState};
 }
 
 // The Sessions home's "34 more need you · Show all" (reported 2026-10-18): from a Pip's chat or a search,
@@ -78,8 +79,8 @@ test('the home lists what every Pip waits on, newest first, above Your Pips; eac
  const section=x.d.querySelector('.attention');assert.ok(section,'Needs attention is on the home');
  assert.ok(section.compareDocumentPosition(x.d.querySelector('.simple-home'))&x.w.Node.DOCUMENT_POSITION_FOLLOWING,'above Your Pips');
  assert.match(section.querySelector('.attention-toggle').textContent,/Needs attention\s*3/);
- assert.equal(section.querySelectorAll('[data-attention]').length,0,'the list starts collapsed');
- x.click('[data-attention-more="1"]');
+ // Open when something is in it (his call, 11 Nov; it started folded).
+ assert.equal(section.querySelector('.attention-toggle').getAttribute('aria-expanded'),'true','the list starts open');
  const rows=[...x.d.querySelectorAll('.attention [data-attention]')].map(b=>b.textContent);
  assert.match(rows[0],/Connect Gmail\?To read your new mail\.Ava · App · 1 min ago/);
  assert.match(rows[1],/Send this email to sam@example\.test\?Lunch movedMax · Email · 30 min ago/);
@@ -92,7 +93,6 @@ test('the home lists what every Pip waits on, newest first, above Your Pips; eac
 test('Needs attention uses the current saved face without recolouring its accessories',async()=>{
  const found=page([item('app_link',LINK,PIP,'Connect Gmail?')]);
  const x=setup({found,profiles:{[PIP]:{title:'',body:'quill',color:'lens',notify:true}}});await x.drain();
- x.click('[data-attention-more="1"]');
  const face=x.d.querySelector(`[data-attention="app_link:${LINK}"] .avatar`);
  assert.equal(face?.dataset.character,'quill');
  assert.equal(face?.dataset.tint,undefined,'legacy colour data does not recolour the face or accessories');
@@ -102,10 +102,15 @@ test('dismissing a proposed Pip checks its fresh digest, rejects it, then remove
  const proposal={id:SETUP,digest:'a'.repeat(64),workspace_id:PW,project_root:'/private/pips',pip_id:null,name:'Blog writer',goal:'Draft a post for review.',pip_type:'scout',work_kind:'personal_task',source_ref:'HEAD',schedule:null,run_now:false,next_run_at:null,status:'pending',created_at:'2099-10-02T04:00:00Z',expires_at:'2099-10-02T06:00:00Z',receipt:null,reason:'Draft posts.',expected_version:null,expected_lifecycle_revision:null,permissions:'read_only',source_policy:'personal',runner_notice:'Runs only while Pips are on.',scope_notice:'Reads only what you share.',run_now_policy:null};
  const found=page([item('setup',SETUP,null,'Create the Pip “Blog writer”?')]);
  const x=setup({found,proposal});await x.drain();
- x.click('[data-attention-more="1"]');
  assert.equal(x.d.querySelector('.attention-toggle').getAttribute('aria-expanded'),'true');
  assert.equal(x.requests('reject_pip_setup').length,0);
+ // Reject is held a moment so it can be undone (his call, 11 Nov): the card goes at once, the reject is sent after.
+ const held=[],later=x.w.setTimeout.bind(x.w);x.w.setTimeout=(fn,ms,...a)=>ms===6000?(held.push(fn),900000+held.length):later(fn,ms,...a);
  x.click(`[data-attention-dismiss="setup:${SETUP}"]`);await x.drain();
+ assert.equal(x.requests('reject_pip_setup').length,0,'not sent yet');
+ assert.equal(x.d.querySelector(`[data-setup-card="${SETUP}"]`),null,'the card is gone at once');
+ assert.match(x.d.querySelector('.undo-reject')?.textContent||'',/Rejected\. No Pip was created\. Undo/);
+ held.splice(0).forEach(fn=>fn());await x.drain();
  assert.deepEqual(JSON.parse(JSON.stringify(x.requests('reject_pip_setup')[0].request)),{type:'reject_pip_setup',setup_id:SETUP,expected_digest:proposal.digest});
  assert.equal(x.d.querySelector('.attention'),null,'the rejected proposal no longer needs attention');
  assert.equal(x.requests('accept_pip_setup').length,0);
@@ -122,7 +127,6 @@ test('a new Pip waiting shows once, as a card in Needs attention, and a link to 
  assert.equal(x.d.querySelector('.setup-inbox,.setup-card,.setup-inbox-toggle'),null,'no section above the list');
  assert.doesNotMatch(x.d.querySelector('.pip-app-root').textContent,/new Pips? waiting for you/);
  assert.equal(x.d.querySelector('.attention-count').textContent,'8','counted once, with what else waits');
- assert.equal(x.d.querySelector('[data-setup-card]'),null,'the list is folded until you open it');
  x.click(`[data-job="${PIP}"]`);await x.drain();
  const navigating=x.app.navigate({setup:SETUP,workspace:PW});await x.drain();await navigating;
  const card=x.d.querySelector(`.attention [data-setup-card="${SETUP}"]`);
@@ -141,7 +145,6 @@ test('a new Pip waiting shows once, as a card in Needs attention, and a link to 
 test('a row opens its Pip at the card: the chat scrolls to the Connect card; a held submit opens its computer',async()=>{
  const found=page([item('app_link',LINK,PIP,'Connect Gmail?'),item('computer_action',HELD,PIP,'Send this on shop.example?')]);
  const x=setup({found});await x.drain();
- x.click('[data-attention-more="1"]');
  x.click(`[data-attention="app_link:${LINK}"]`);await x.drain();
  const card=x.d.querySelector(`[data-app-link="${LINK}"]`);assert.ok(card,'Ava’s chat is open with the card');
  assert.ok(card.classList.contains('attention-flash'),'the card is shown to you');
@@ -154,9 +157,7 @@ test('a row opens its Pip at the card: the chat scrolls to the Connect card; a h
 test('a long list shows six until you ask for all',async()=>{
  const many=Array.from({length:9},(_,i)=>item('email','maildraft_'+String(i).repeat(32).slice(0,32).replace(/[^a-f0-9]/g,'0'),PIP,`Email ${i+1}`,{created_at:ago(i+1)}));
  const x=setup({found:page(many)});await x.drain();
- assert.equal(x.d.querySelectorAll('[data-attention]').length,0);
- x.click('[data-attention-more="1"]');
- assert.equal(x.d.querySelectorAll('[data-attention]').length,6);
+ assert.equal(x.d.querySelectorAll('[data-attention]').length,6,'open, six at first');
  x.click('[data-attention-more="2"]');assert.equal(x.d.querySelectorAll('[data-attention]').length,9);
  x.click('.attention-more');assert.equal(x.d.querySelectorAll('[data-attention]').length,6);
  x.click('[data-attention-more="0"]');assert.equal(x.d.querySelectorAll('[data-attention]').length,0);
@@ -192,4 +193,34 @@ test('a Personal Pip’s waiting reviews come beside the cards: newest first, ea
  assert.equal(attention.attentionPage(value).listsReviews,false,'a DGC from before lists none');
  assert.throws(()=>attention.attentionPage(page([item('handoff',HANDOFF,PIP,'Hand this?')])),'a card kind stays one of the kinds');
  assert.throws(()=>attention.attentionPage({...value,total:2,reviews:[item('handoff','nope',PIP,'x')]}));
+});
+
+// Needs attention opens when something is in it; folded by you, it stays folded until something new arrives, and an
+// Undo takes a held Reject back (his calls, 11 Nov).
+test('folded by you, Needs attention stays folded until something new comes in',async()=>{
+ const one=item('app_link',LINK,PIP,'Connect Gmail?',{created_at:ago(5)}),two=item('email',DRAFT,MAX,'Send this email?',{created_at:ago(1)});
+ const x=setup({found:page([one])});await x.drain();
+ assert.equal(x.d.querySelector('.attention-toggle').getAttribute('aria-expanded'),'true','open when something is in it');
+ x.click('[data-attention-more="0"]');
+ assert.equal(x.d.querySelector('.attention-toggle').getAttribute('aria-expanded'),'false','you folded it');
+ assert.deepEqual(JSON.parse(JSON.stringify(x.state().attention_folded)),[`app_link:${LINK}`],'what was in it is kept with the view');
+ // Back later, the same things waiting: still folded.
+ const same=setup({found:page([one]),saved:x.state()});await same.drain();
+ assert.equal(same.d.querySelector('.attention-toggle').getAttribute('aria-expanded'),'false','the same things: still folded');
+ // Something new came in meanwhile: it opens again.
+ const more=setup({found:page([two,one]),saved:x.state()});await more.drain();
+ assert.equal(more.d.querySelector('.attention-toggle').getAttribute('aria-expanded'),'true','something new: open again');
+ assert.deepEqual(JSON.parse(JSON.stringify(more.state()?.attention_folded||[])),[],'and the fold is forgotten');
+});
+
+test('Undo on a held Reject keeps the new Pip and sends nothing',async()=>{
+ const proposal={id:SETUP,digest:'a'.repeat(64),workspace_id:PW,project_root:'/private/pips',pip_id:null,name:'Blog writer',goal:'Draft a post for review.',pip_type:'scout',work_kind:'personal_task',source_ref:'HEAD',schedule:null,status:'pending'};
+ const x=setup({found:page([item('setup',SETUP,null,'Create the Pip “Blog writer”?')]),proposal});await x.drain();
+ const held=[],later=x.w.setTimeout.bind(x.w),cleared=[];x.w.setTimeout=(fn,ms,...a)=>ms===6000?(held.push(fn),900000+held.length):later(fn,ms,...a);
+ const clear=x.w.clearTimeout.bind(x.w);x.w.clearTimeout=id=>{cleared.push(id);clear(id);};
+ x.click(`[data-attention-dismiss="setup:${SETUP}"]`);await x.drain();
+ x.click('[data-undo-reject]');await x.drain();
+ assert.ok(cleared.includes(900001),'the held reject is called off');
+ assert.ok(x.d.querySelector(`[data-setup-card="${SETUP}"]`),'its card is back');
+ assert.equal(x.requests('reject_pip_setup').length,0,'nothing was sent');
 });

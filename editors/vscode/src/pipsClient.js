@@ -309,10 +309,14 @@ S.fixes=new Map();S.fixesPip='';const askingFix=new Map();
 // Ask DGC to fix, once per run: kept with the view, as the Work chat keeps the prompt in its transcript (before Pips
 // API 65; from 65 the post says what the fix itself did).
 const askedRuns=new Set(Array.isArray(savedView?.asked)?savedView.asked.filter(r=>typeof r==='string'&&/^run_[0-9a-f]{32}$/.test(r)).slice(-100):[]);
+// Needs attention's fold (attentionOpen) and Reject's moment to undo (rejectSoon), kept with the view.
+const attentionFolded=new Set(Array.isArray(savedView?.attention_folded)?savedView.attention_folded.filter(k=>typeof k==='string').slice(-500):[]);
+let attentionUserFolded=attentionFolded.size>0;
+const heldRejects=new Map(),REJECT_HOLD_MS=6000;
 // Show all, opened on a run's result or a routine's reply (by run or message id): for this view only.
 const shownInFull=new Set();
 S.sidebarPinned=savedView?.sidebar_pinned===true;
-function rememberView(){savedView={workspace_id:S.workspace?.id,scope_tab:S.workspace?scopeTab():undefined,selected:S.selected,tab:S.tab,overview:S.overview,sidebar_pinned:S.sidebarPinned,drafts:Object.fromEntries([...chatDrafts].slice(-20)),draft_marks:Object.fromEntries([...chatMarks].slice(-20)),chat_queues:Object.fromEntries([...chatQueues].filter(([,list])=>list.length).slice(-20)),asked:[...askedRuns].slice(-100)};options.setState?.(savedView);}
+function rememberView(){savedView={workspace_id:S.workspace?.id,scope_tab:S.workspace?scopeTab():undefined,selected:S.selected,tab:S.tab,overview:S.overview,sidebar_pinned:S.sidebarPinned,drafts:Object.fromEntries([...chatDrafts].slice(-20)),draft_marks:Object.fromEntries([...chatMarks].slice(-20)),chat_queues:Object.fromEntries([...chatQueues].filter(([,list])=>list.length).slice(-20)),asked:[...askedRuns].slice(-100),attention_folded:[...attentionFolded].slice(-500)};options.setState?.(savedView);}
 const characterStyles=document.createElement('style');characterStyles.id='pips-plush-styles';characterStyles.textContent=window.PipConcepts.plush.styles;document.head.append(characterStyles);
 let outcomeSessions=[],outcomeSessionsCursor='',outcomeSessionsMore=false,outcomeSessionsLoaded=false,outcomeSessionsLoading=false,outcomeSessionsError='',outcomeHistory=[],outcomeCursor=null,outcomeLoaded=false,outcomeLoading=false,outcomeError='',outcomeInspection=null,outcomeInspecting=false,outcomeSessionSeq=0,outcomeSeq=0,outcomeInspectSeq=0,outcomeReviewSeq=0,outcomeRetry=null;
 let notifications=null,notificationItems=[],notificationLoading=false,notificationError='',notificationSeq=0,notificationMark='';
@@ -2586,7 +2590,7 @@ function setupCardFor({setup,item}){
 function setupsMarkup(){
  if(S.apiVersion<23)return '';
  if(!setupRows.length)return setupError?`<section class="attention" aria-label="Needs attention">${errorMarkup(setupError)}${button('refresh-setups',setupLoading?'Checking…':'Check again',setupLoading||S.busy||!usable())}</section>`:'';
- return attentionMarkup(null,{esc,face:()=>'',expanded:2,busy:!usable(),setups:setupRows,setupCard:setupCardFor,error:setupError,more:setupRows.length>=5?'Showing 5 new Pips. Answer one to see more.':''});
+ return attentionMarkup(null,{esc,face:()=>'',expanded:2,busy:!usable(),setups:setupRows.filter(r=>!heldRejects.has(r.id)),setupCard:setupCardFor,error:setupError,more:setupRows.length>=5?'Showing 5 new Pips. Answer one to see more.':''});
 }
 async function loadSetups(){
 
@@ -2605,7 +2609,7 @@ async function openSetup(id,reject=false){
  openReview({setup:JSON.parse(JSON.stringify(s)),title:reject?'Reject this setup?':s.pip_id?`Change ${s.name}?`:`Create ${s.name}?`,description:reject?'Nothing is created or changed.':'Check it does what you asked.',body,confirm:reject?'Reject setup':s.pip_id?(s.run_now?'Save and run once':'Save changes'):s.run_now?'Create and run once':'Create Pip',expiresAt:s.expires_at,request:{type:reject?'reject_pip_setup':'accept_pip_setup',setup_id:s.id,expected_digest:s.digest}});
  }catch(error){if(token===scope()&&sequence===setupDetailSeq)setError(error);}
 }
-async function dismissSetupFromAttention(item){
+async function dismissSetupFromAttention(item,{quiet=false}={}){
  if(item?.kind!=='setup'||S.busy||!usable())return;
  // The attention list can include a Personal setup while the Project tab is selected.
  if(item.workspace_id!==S.workspace?.id){
@@ -2623,7 +2627,7 @@ async function dismissSetupFromAttention(item){
   await send('reject_pip_setup',{setup_id:setup.id,expected_digest:setup.digest});
   if(token!==scope())return;
   setupRows=setupRows.filter(row=>row.id!==setup.id);
-  S.notice=setup.pip_id?'Dismissed. That Pip was not changed.':'Dismissed. No Pip was created.';
+  if(!quiet)S.notice=setup.pip_id?'Dismissed. That Pip was not changed.':'Dismissed. No Pip was created.';
  }catch(error){if(token===scope())setError(error);}
  finally{if(token===scope()){S.busy=false;render();void loadSetups();void loadAttention();}}
 }
@@ -2750,6 +2754,32 @@ function mergePage(first,value){
 }
 // Needs attention (#8): every card your Personal Pips wait on you for, across all of them, on the home.
 S.attention=null;let attentionSeq=0,attentionExpanded=false,attentionRead=false;
+// Needs attention opens when something is in it; folded by you, it stays folded until something new arrives (his call,
+// 11 Nov). What was in it when you folded it is kept, here and in the saved view.
+function attentionKeys(){return [...(projectHome()?[]:(S.attention?.items||[]).map(i=>i.id)),...setupRows.filter(r=>!heldRejects.has(r.id)).map(r=>'setup:'+r.id)];}
+function attentionOpen(){
+ const keys=attentionKeys();if(!keys.length)return attentionExpanded;
+ if(attentionUserFolded){if(!keys.some(k=>!attentionFolded.has(k)))return false;attentionUserFolded=false;attentionFolded.clear();rememberView();}
+ return attentionExpanded||1;
+}
+// Reject on a new Pip's card turns it down at once everywhere (his call, 11 Nov), held for a moment so a slip can be
+// undone: the card goes, "Rejected · Undo" shows, and the reject is sent when the moment passes. A window closed
+// meanwhile sends nothing, so the new Pip just waits again.
+function rejectSoon(id,fire){
+ if(heldRejects.has(id))return;
+ const timer=window.setTimeout(()=>{heldRejects.delete(id);if(S.undoReject===id)S.undoReject='';void fire().finally(()=>render());},REJECT_HOLD_MS);
+ heldRejects.set(id,timer);S.undoReject=id;S.notice='';render();
+}
+function undoReject(id){const timer=heldRejects.get(id);if(timer===undefined)return;window.clearTimeout(timer);heldRejects.delete(id);if(S.undoReject===id)S.undoReject='';render();}
+function undoRejectMarkup(){return S.undoReject&&heldRejects.has(S.undoReject)?`<p class="notice simple-note undo-reject" role="status">Rejected. No Pip was created. <button type="button" class="link" data-undo-reject="${esc(S.undoReject)}">Undo</button></p>`:'';}
+async function rejectSetupNow(id){
+ // Its digest is read again first, as the turn-down page did; the reject goes even if you moved on meanwhile.
+ try{const answer=await send('get_pip_setup',{setup_id:id});const setup=pipSetup(answer.setup,answer.setup?.workspace_id||S.workspace.id,id);
+  if(setup.status!=='pending')throw Error('This setup was already answered. Refresh Pips.');
+  await send('reject_pip_setup',{setup_id:setup.id,expected_digest:setup.digest});setupRows=setupRows.filter(row=>row.id!==setup.id);}
+ catch(error){setError(error);}
+ finally{void loadSetups();void loadAttention();}
+}
 async function loadAttention(){
  // Its list is Personal Pips' cards, and a project's home shows none of it, but both tabs say their number from this page.
  if(remoteHost||S.apiVersion<44||!simpleMode()||!usable()){attentionRead=true;return;}
@@ -2764,7 +2794,8 @@ function attentionHomeMarkup(){
   return pipAvatar(pip,'waiting_approval',`attn-${i.card}`,characterType(pip.pip_type));};
  // A project's home shows none of the Personal Pips' rows: only the new Pips waiting in this project.
  const more=setupRows.length>=5?'Showing 5 new Pips. Answer one to see more.':'';
- return attentionMarkup(projectHome()?null:S.attention,{esc,face,expanded:attentionExpanded,busy:!usable(),setups:S.apiVersion>=23?setupRows:[],setupCard:setupCardFor,error:setupRows.length?setupError:'',more});
+ const held=page=>page&&{...page,items:page.items.filter(i=>!(i.kind==='setup'&&heldRejects.has(i.card)))};
+ return attentionMarkup(projectHome()?null:held(S.attention),{esc,face,expanded:attentionOpen(),busy:!usable(),setups:S.apiVersion>=23?setupRows.filter(r=>!heldRejects.has(r.id)):[],setupCard:setupCardFor,error:setupRows.length?setupError:'',more});
 }
 // What it remembers (#6): its notes about you, on its page and under the reply that kept them.
 S.notes=null;S.notesPip='';S.notesError='';let notesSeq=0,notesBusy=false,noteConfirmAll=false;
@@ -3321,7 +3352,7 @@ function simplePipHeader(){
 }
 function simpleMarkup(){
  const bar=`<header class="simple-bar"><h1><span class="pips-wordmark">Pips</span></h1>${runnerMarkup()}</header>${scopeTabsMarkup()}`;
- const notes=`${S.error?`<div class="simple-note">${errorMarkup(S.error)}</div>`:''}${S.notice?`<p class="notice simple-note" role="status">${esc(S.notice)}</p>`:''}`;
+ const notes=`${S.error?`<div class="simple-note">${errorMarkup(S.error)}</div>`:''}${S.notice?`<p class="notice simple-note" role="status">${esc(S.notice)}</p>`:''}${undoRejectMarkup()}`;
  if(pipsSettings.view&&(!S.selected||S.overview)&&!S.create)return `${pipsSettingsMarkup()}${notes}`;
  if(S.projectEmpty&&scopeTabs())return `${bar}${notes}${projectEmptyMarkup()}`;
  const project=projectHome(),back=(id,label)=>`<button type="button" id="${id}" class="topbar-icon" aria-label="${esc(label)}" title="${esc(label)}">${simpleIcon('back')}</button>`;
@@ -3352,7 +3383,7 @@ function render() {
   shell.classList.toggle('chat-open',!intro&&!S.create&&!S.overview&&!!S.pip&&S.tab==='chat');
   shell.classList.toggle('simple-pips',!intro&&simpleMode());
   const header=(embedded?`<header class="embedded-header${!intro&&scopeTabs()?' scoped':''}"><span class="workspace-name" title="${esc(S.workspace?.name||'Current workspace')}">${esc(S.workspace?.name||'Pips')}</span>${runnerMarkup()}</header>`:`<header><div class="heading"><div>${options.close?button('return-main','Back to DGC',false,'back-control'):''}<h1><span class="pips-wordmark">Pips</span></h1><p class="muted">${esc(S.workspace?.kind==='personal'?'Personal':S.workspace?.name||'Current workspace')}</p></div></div>${runnerMarkup()}</header>`)+(intro?'':scopeTabsMarkup());
-  const markup=!intro&&simpleMode()?simpleMarkup():`${header}${S.error&&!chatView?`<div style="padding:0 20px">${errorMarkup(S.error)}</div>`:''}${S.notice&&!chatView?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${!intro&&S.overview&&!S.create&&!(S.projectEmpty&&scopeTabs())?setupsMarkup():''}${intro?`<div class="content">${intro}</div>`:S.projectEmpty&&scopeTabs()?projectEmptyMarkup():S.switching?`<div class="pips-tab-loading"${scopePanelAttrs()}></div>`:`<div class="layout ${S.overview&&!S.create?'overview':'selected'}"${scopePanelAttrs()}><aside aria-label="Workspace Pips"><div class="aside-heading">${!remoteHost?`<button type="button" id="pin-pips-sidebar" class="sidebar-toggle" aria-label="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" title="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" aria-pressed="${S.sidebarPinned}"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M6 2v12"/></svg></button>`:''}<h2>Your Pips</h2><button type="button" id="new-pip" aria-label="New Pip" title="New Pip"${S.busy||!usable()||!S.types.length?' disabled':''}><span aria-hidden="true" class="new-pip-mark">+</span><span class="new-pip-text">New</span></button></div>${S.overview&&!S.create?`<div class="pips-overview-intro${S.jobs.length?'':' welcome'}"><span class="pips-eyebrow">${S.workspace?.kind==='personal'?'A little help, day to day':'Your project, looked after'}</span><h2>A little team. A clear purpose.</h2><p>Give each Pip a job. Stay in the conversation, and review what comes back.</p></div>`:''}<div class="job-list">${S.jobs.filter(p=>S.showArchived||p.status!=='archived').map(jobMarkup).join('')||`<div class="pips-first-job"><div class="pips-welcome-cast">${S.types.filter(t=>['scout','rook','pulse'].includes(t.id)).map(t=>avatar('idle',t,`welcome-${t.id}`)).join('')}</div><h3>What should your first Pip look after?</h3><p>Describe the job to DGC. You’ll review the scope and schedule before it starts.</p>${button('create-first','Describe a job',!usable()||!S.types.length,'primary')}<small>No Pips yet · Nothing is running for this project</small></div>`}</div>${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived Pips':`Show archived Pips (${S.jobs.filter(p=>p.status==='archived').length})`):''}${button('workspace-context','Workspace context',!usable())}${S.apiVersion>=13?button('workspace-notifications','Notifications',!usable()):''}${!embedded&&!remoteHost?`<details><summary>Local controls</summary><p class="muted">Stop all pauses every Pip on this computer and stops what they’re doing. To undo it, resume Pips here, then resume each Pip.</p>${button('disable','Turn off Pips…',S.busy||!usable())}</details>`:''}</aside><div class="content" data-view="${esc(S.tab)}">${!S.create&&(S.selected||['context','notifications'].includes(S.tab))?button('back-pips','Back to Pips',false,'back-control'):''}${S.overview&&!S.create?'':setupsMarkup()}<nav class="tabs" aria-label="Pip sections"${S.create||!S.selected?' hidden':''}>${tabsMarkup()}</nav>${detailMarkup()}</div></div>`}`;
+  const markup=!intro&&simpleMode()?simpleMarkup():`${header}${S.error&&!chatView?`<div style="padding:0 20px">${errorMarkup(S.error)}</div>`:''}${S.notice&&!chatView?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${chatView?'':undoRejectMarkup()}${!intro&&S.overview&&!S.create&&!(S.projectEmpty&&scopeTabs())?setupsMarkup():''}${intro?`<div class="content">${intro}</div>`:S.projectEmpty&&scopeTabs()?projectEmptyMarkup():S.switching?`<div class="pips-tab-loading"${scopePanelAttrs()}></div>`:`<div class="layout ${S.overview&&!S.create?'overview':'selected'}"${scopePanelAttrs()}><aside aria-label="Workspace Pips"><div class="aside-heading">${!remoteHost?`<button type="button" id="pin-pips-sidebar" class="sidebar-toggle" aria-label="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" title="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" aria-pressed="${S.sidebarPinned}"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M6 2v12"/></svg></button>`:''}<h2>Your Pips</h2><button type="button" id="new-pip" aria-label="New Pip" title="New Pip"${S.busy||!usable()||!S.types.length?' disabled':''}><span aria-hidden="true" class="new-pip-mark">+</span><span class="new-pip-text">New</span></button></div>${S.overview&&!S.create?`<div class="pips-overview-intro${S.jobs.length?'':' welcome'}"><span class="pips-eyebrow">${S.workspace?.kind==='personal'?'A little help, day to day':'Your project, looked after'}</span><h2>A little team. A clear purpose.</h2><p>Give each Pip a job. Stay in the conversation, and review what comes back.</p></div>`:''}<div class="job-list">${S.jobs.filter(p=>S.showArchived||p.status!=='archived').map(jobMarkup).join('')||`<div class="pips-first-job"><div class="pips-welcome-cast">${S.types.filter(t=>['scout','rook','pulse'].includes(t.id)).map(t=>avatar('idle',t,`welcome-${t.id}`)).join('')}</div><h3>What should your first Pip look after?</h3><p>Describe the job to DGC. You’ll review the scope and schedule before it starts.</p>${button('create-first','Describe a job',!usable()||!S.types.length,'primary')}<small>No Pips yet · Nothing is running for this project</small></div>`}</div>${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived Pips':`Show archived Pips (${S.jobs.filter(p=>p.status==='archived').length})`):''}${button('workspace-context','Workspace context',!usable())}${S.apiVersion>=13?button('workspace-notifications','Notifications',!usable()):''}${!embedded&&!remoteHost?`<details><summary>Local controls</summary><p class="muted">Stop all pauses every Pip on this computer and stops what they’re doing. To undo it, resume Pips here, then resume each Pip.</p>${button('disable','Turn off Pips…',S.busy||!usable())}</details>`:''}</aside><div class="content" data-view="${esc(S.tab)}">${!S.create&&(S.selected||['context','notifications'].includes(S.tab))?button('back-pips','Back to Pips',false,'back-control'):''}${S.overview&&!S.create?'':setupsMarkup()}<nav class="tabs" aria-label="Pip sections"${S.create||!S.selected?' hidden':''}>${tabsMarkup()}</nav>${detailMarkup()}</div></div>`}`;
   if(markup===lastMarkup){syncChatBox();return;}
   lastMarkup=markup;
   const previousAvatars=new Map([...document.querySelectorAll('[data-avatar-key]')].map(node=>[node.dataset.avatarKey,node]));
@@ -4578,7 +4609,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.attention){const item=S.attention?.items.find(i=>i.id===target.dataset.attention);if(item)void navigateFromHost(attentionNavigation(item)).catch(setError);return;}
   if(target.dataset.attentionDismiss){
    const item=S.attention?.items.find(i=>i.id===target.dataset.attentionDismiss);
-   if(item?.kind==='setup')void dismissSetupFromAttention(item);
+   if(item?.kind==='setup')rejectSoon(item.card,()=>dismissSetupFromAttention(item,{quiet:true}));
    return;
   }
   if(target.dataset.eyesSwitch){const model=target.dataset.eyesSwitch,held=S.pip?.model_choice,choice=held?.mode==='provider'?{mode:'provider',provider:held.provider,model}:{mode:'model',model};void applyOwnChange({model_choice:choice},d=>JSON.stringify(d.model_choice)===JSON.stringify(choice),`${S.pip.name} now uses ${model}, which can see.`).then(ok=>{if(ok)void loadEyes();});return;}
@@ -4591,7 +4622,11 @@ document.addEventListener('click',event=>{
   if(target.dataset.sitesAll){sitesAll=true;render();return;}
   if(target.dataset.noteForget){const n=(S.notes||[]).find(x=>x.id===target.dataset.noteForget);void noteCall('forget_pip_note',{note_id:target.dataset.noteForget},()=>n?`Forgotten: ${n.text}`:'Forgotten.');return;}
   if(target.dataset.noteForgetAll){if(target.dataset.noteForgetAll==='ask'){noteConfirmAll=true;render();}else if(target.dataset.noteForgetAll==='no'){noteConfirmAll=false;render();}else void noteCall('forget_pip_note',{all:true},()=>{noteConfirmAll=false;return 'Forgotten. It remembers nothing about you now.';});return;}
-  if(target.dataset.attentionMore!==undefined){attentionExpanded=Number(target.dataset.attentionMore)||false;render();return;}
+  if(target.dataset.attentionMore!==undefined){attentionExpanded=Number(target.dataset.attentionMore)||false;
+   // Folded by you: kept folded until something new is in it. Opened: it follows the rule again.
+   if(attentionExpanded){attentionUserFolded=false;attentionFolded.clear();}else{attentionUserFolded=true;attentionFolded.clear();attentionKeys().forEach(k=>attentionFolded.add(k));}
+   rememberView();render();return;}
+  if(target.dataset.undoReject){undoReject(target.dataset.undoReject);return;}
   if(target.dataset.pluginUseRemove){void pipsSettingsCall('decline_pip_plugin',{pip_id:target.dataset.pluginUsePip,grant_id:target.dataset.pluginUseRemove},'Removed. That Pip no longer uses the plugin.');return;}
   if(target.dataset.openPlugins!==undefined){vscode.postMessage({type:'openSettings',section:'plugins'});return;}
   if(target.dataset.openModels!==undefined){vscode.postMessage({type:'openSettings',section:'models'});return;}
@@ -4639,7 +4674,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.chatModel){S.fallbackMenu='';reviewChatModel(target.dataset.chatModel);return;}
   if(target.dataset.chatModelCustom){S.modelCustom=target.dataset.chatModelCustom;render();$('chat-model-custom')?.focus();return;}
   if(target.dataset.setup){void openSetup(target.dataset.setup);return;}
-  if(target.dataset.rejectSetup){void openSetup(target.dataset.rejectSetup,true);return;}
+  if(target.dataset.rejectSetup){const id=target.dataset.rejectSetup;rejectSoon(id,()=>rejectSetupNow(id));return;}
   if(target.dataset.handoff){void openSavedHandoff(target.dataset.handoff);return;}
   if(target.dataset.rejectHandoff){void openSavedHandoff(target.dataset.rejectHandoff,true);return;}
   if(target.dataset.lineagePip){void openLineage(target.dataset.lineagePip,target.dataset.lineageRun);return;}
