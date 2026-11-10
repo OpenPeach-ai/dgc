@@ -1464,6 +1464,7 @@ body.vscode-light .rail-pop { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
 .cf-right > .picker { flex: 0 1 auto; min-width: 0; }
 /* Send and Stop are never allowed to shrink or leave: the model name truncates instead. */
 #send, #stop-run, #queue-send { flex: 0 0 auto; }
+#queue-send .queue-icon { display: none; }
 
 .cspacer { flex: 1; }
 .fbtn { height: var(--control); min-width: var(--control); border: none; background: transparent; color: var(--faint); border-radius: var(--r-md); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-1); padding: 0 var(--sp-2); font: var(--w-med) var(--t-sm)/1 var(--sans); transition: background .12s, color .12s; }
@@ -1676,6 +1677,9 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
 
 @media (max-width: 420px) {
   #btn-mode #modelabel { display: none; }
+  /* Icon only now, so its picker never shrinks under it: a footer short of room would otherwise paint the icon over
+     the next button. */
+  .cf-right > .picker:has(> .model-control) { flex: 0 0 auto; }
   .model-control { width: var(--control); max-width: var(--control) !important; padding: 0; }
   .model-control .model-copy, .model-control .model-chevron { display: none; }
   .model-control .model-icon { display: inline-block; }
@@ -1684,13 +1688,24 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
 @media (max-width: 360px) {
   footer { padding-right: var(--sp-2); padding-left: var(--sp-2); }
   #cfooter { gap: 2px; padding-right: var(--sp-1); padding-left: var(--sp-1); }
+  /* Queue gives way as the queue's own icon (the row above the box uses it), its name kept in the title and label: the
+     word left the model picker no room at about 300px, and its icon drew over "Queue" (found live 10 Nov). */
+  #queue-send .queue-word { display: none; }
+  #queue-send .queue-icon { display: inline-block; }
 }
 @media (max-width: 320px) {
   .context-picker { display: none; }
-  #cfooter .fbtn { min-width: 26px; }
+  /* 24px, as VS Code's own toolbar buttons: at 300px, with the Artifact button, the cache clock, the microphone,
+     Queue and Stop all showing, a 26px row was 8px wider than the box (measured live, 10 Nov). */
+  #cfooter .fbtn { min-width: 24px; }
   /* Leave a full pixel between the model icon and Queue even when a platform's
      font metrics round the footer's flex widths to a fractional pixel. */
   #cfooter .model-control { min-width: 24px; width: 24px; max-width: 24px !important; }
+}
+@media (max-width: 290px) {
+  /* Information gives way before a control, as the context meter does below 320px: its minutes are in the cache
+     dialog, and the clock comes back when there is room. */
+  .cache-picker { display: none; }
 }
 
 /* settings and feature-management overlays */

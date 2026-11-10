@@ -28,7 +28,10 @@ before(async () => {
   try { browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox"] }); } catch { browser = null; return; }
   const panelSrc = readFileSync(here + "/../src/panel.ts", "utf8");
   const css = readStylesheet(here + "/../media/main.css");
-  mainJs = readFileSync(here + "/../media/shared/menu.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/composer.js", "utf8") + "\n" + readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
+  mainJs = readFileSync(here + "/../media/shared/menu.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/composer.js", "utf8") + "\n" + readFileSync(here + "/../media/mentions.js", "utf8") + "\n"
+    // The voice bar too, as the panel loads it: with it the footer has its microphone, as in real VS Code (the row
+    // the live check measured 8px short at 300px had it; without it the test footer had room to spare).
+    + readFileSync(here + "/../media/voicebar.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
   markdownJs = buildSync({ entryPoints: [here + "/../src/markdown.ts"], bundle: true,
     format: "iife", globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
   const skeleton = [...panelSrc.matchAll(/<!doctype html>[\s\S]*?<\/body><\/html>/gi)].map((m) => m[0])
@@ -42,21 +45,21 @@ const LIGHT = `--vscode-sideBar-background:#F3F3F3; --vscode-editor-background:#
   --vscode-foreground:#3B3B3B; --vscode-descriptionForeground:#616161; --vscode-disabledForeground:#6E6E6E;`;
 
 // `agents`: how many task agents start; `tasks`: how many background monitors are running.
-async function panel(width, { light = false, state = "running", agents = 2, tasks = 0 } = {}) {
+async function panel(width, { light = false, state = "running", agents = 2, tasks = 0, artifacts = false } = {}) {
   const page = await browser.newPage({ viewport: { width, height: 700 } });
   await page.setContent(html, { waitUntil: "load" });
   if (light) {
     await page.addStyleTag({ content: `:root { ${LIGHT} }` });
     await page.evaluate(() => document.body.classList.add("vscode-light"));
   }
-  await page.evaluate(([mjs, mdjs, model, agentState, agentCount, taskCount]) => {
+  await page.evaluate(([mjs, mdjs, model, agentState, agentCount, taskCount, withArtifacts]) => {
     window.acquireVsCodeApi = () => ({ postMessage() {}, getState: () => undefined, setState() {} });
     eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
     eval(mjs);
     const post = (data) => window.dispatchEvent(new MessageEvent("message", { data }));
     const event = (data) => post({ type: "event", event: data });
     post({ type: "session_ready", sessionId: "s1" });
-    event({ type: "ready", version: "x", protocol_version: 14, capabilities: { live_steering: true, agents: true },
+    event({ type: "ready", version: "x", protocol_version: 14, capabilities: { live_steering: true, agents: true, ...(withArtifacts ? { artifacts: { version: 1 } } : {}) },
       model, mode: "default", think: "high", base_url: "http://127.0.0.1:11434/v1", workspace_trusted: true,
       commands: [], custom_commands: [], goal: { text: "", status: "none" }, context_size: 65536, session_id: "s1" });
     post({ type: "state", state: { model, mode: "default", think: "high" } });
@@ -80,7 +83,7 @@ async function panel(width, { light = false, state = "running", agents = 2, task
     const input = document.getElementById("input");
     input.value = "and then the docs";
     input.dispatchEvent(new Event("input", { bubbles: true }));
-  }, [mainJs, markdownJs, MODEL, state, agents, tasks]);
+  }, [mainJs, markdownJs, MODEL, state, agents, tasks, artifacts]);
   await page.waitForTimeout(120);
   return page;
 }
@@ -129,6 +132,37 @@ for (const width of [300, 360, 460]) {
       } else {
         assert.equal(g.pillText, "2 agents");
       }
+    } finally { await page.close(); }
+  });
+}
+
+// Found live 10 Nov (ui-04-queue-overlap-300): with the Artifact button on as well, Work's footer at about 300px
+// needed more room than the box had, the model picker shrank to nothing and its icon drew over the word Queue.
+for (const [width, light] of [[280, false], [290, true], [300, false], [320, true]]) {
+  test(`at ${width}px, with the Artifact button on, no two footer buttons overlap while a turn runs (${light ? "light" : "dark"})`, async (t) => {
+    if (skipOrFail(t)) return;
+    const page = await panel(width, { light, agents: 0, artifacts: true });
+    try {
+      const shown = await page.evaluate(() => [...document.querySelectorAll("#cfooter button")]
+        .filter((b) => b.getClientRects().length && getComputedStyle(b).visibility !== "hidden")
+        .map((b) => ({ id: b.id || b.className, ...b.getBoundingClientRect().toJSON() })));
+      const ids = shown.map((b) => b.id);
+      for (const id of ["btn-output", "btn-model", "queue-send", "stop-run", "btn-mic", "send"]) assert.ok(ids.includes(id), `${id} is on screen (${ids})`);
+      // The cache clock is always in Work's footer, and in real VS Code its row was 8px short at 300px (live, 10 Nov):
+      // information gives way before a control, as the context meter does below 320px.
+      assert.equal(ids.includes("cache-clock"), width > 290, `the cache clock ${width > 290 ? "stays" : "gives way"} (${ids})`);
+      for (let i = 0; i < shown.length; i += 1) {
+        for (let j = i + 1; j < shown.length; j += 1) {
+          assert.ok(!intersects(shown[i], shown[j]), `${shown[i].id} and ${shown[j].id} overlap: ${JSON.stringify([shown[i], shown[j]])}`);
+        }
+      }
+      const g = await geometry(page);
+      assert.ok(g.footerScroll <= g.footerClient, `the footer does not overflow (${g.footerScroll} > ${g.footerClient})`);
+      assert.ok(g.model.width >= 20, `the model button keeps its icon (${g.model.width}px)`);
+      assert.ok(g.send.right <= g.cbox.right + 0.5, "Send stays inside the prompt box");
+      const queue = await page.evaluate(() => { const q = document.getElementById("queue-send"); return { label: q.getAttribute("aria-label"), title: q.title }; });
+      assert.equal(queue.label, "Queue for next turn", "Queue keeps its name for a screen reader");
+      assert.match(queue.title, /Alt\+Enter/);
     } finally { await page.close(); }
   });
 }

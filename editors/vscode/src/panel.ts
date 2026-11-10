@@ -10043,7 +10043,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         <button type="button" id="btn-model" class="fbtn mode model-control" title="Model and reasoning — click to change" aria-label="Change model and reasoning" aria-haspopup="menu" aria-expanded="false"><span class="codicon codicon-zap model-icon" aria-hidden="true"></span><span class="model-copy"><span id="modelname">dgc</span><span id="effortname">off</span></span><span class="codicon codicon-chevron-up model-chevron" aria-hidden="true"></span></button>
         <div id="modelmenu" class="cmenu dgc-menu" role="menu" aria-label="Model" hidden></div>
       </div>
-      <button type="button" id="queue-send" class="fbtn" title="Queue for the next turn — Alt+Enter" aria-label="Queue for next turn" hidden>Queue</button>
+      <button type="button" id="queue-send" class="fbtn" title="Queue for the next turn — Alt+Enter" aria-label="Queue for next turn" hidden><span class="codicon codicon-list-ordered queue-icon" aria-hidden="true"></span><span class="queue-word">Queue</span></button>
       <button type="button" id="stop-run" class="fbtn" title="Stop generation" aria-label="Stop generation" hidden><span class="codicon codicon-debug-stop" aria-hidden="true"></span></button>
       <button type="button" id="btn-mic" class="fbtn mic-control" title="Dictate" aria-label="Dictate"><span class="codicon codicon-mic" aria-hidden="true"></span></button>
       <button type="button" id="send" class="csend" data-mode="default" title="Send" aria-label="Send message"><span class="codicon codicon-arrow-up" aria-hidden="true"></span></button>

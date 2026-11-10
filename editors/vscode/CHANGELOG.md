@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Work's box at about 300 px wide no longer draws one button over another while a turn runs: Queue becomes the queue's icon (its name stays in the tooltip and for screen readers), the footer's buttons are 24 px below 320 px, and below 290 px the cache clock gives way, as the context meter already does.
 - A schedule on any days is said in words: "Weekends at 10:00", "Mondays and Thursdays at 08:00", "Every day at 09:00", on a Pip's page, in its routines and on the line of a change it made (before, only weekdays and Mondays were, and the rest read as a cron line). In a Personal Pip's box the "/" list is as tall as its rows; the @ list keeps its one height.
 - A waiting approval sits just above the prompt box, as in Claude Code and Codex, never only somewhere up in the chat, and the box stays yours to type in. Several wait one at a time, the card saying "1 of 3", then "2 of 3"; answered, each leaves its one quiet line where its step is in the chat ("bash · Denied · note for the model: …"). Show in the image viewer goes to it, on Allow once. A Pip's chat does the same with what its computer holds for your okay (Send once · Always allow · Reject).
 - The approval card is one line: a quiet shield and what it asks ("Run bash"), and at the right Always allow, Deny and Allow once, only Allow once filled; the command sits in a small chip under it. The note for the model appears only after Deny, with Deny without a note and Send note. In a narrow panel the buttons go under the command, in the same order.
