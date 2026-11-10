@@ -155,11 +155,22 @@ export function renderFields(section, main, config, providers, ui) {
                     "A grey suggestion in the message box after a reply; Tab or → takes it.")
                 + field("Wake on monitors", "A monitor's output starts a short turn.", bool("monitor_wake", c.monitor_wake !== false),
                     "When a background monitor prints something, DGC starts a short turn to look at it."))
+            // The dock at the foot of DGC's side bar: the editor's own settings (dgc.dock.*), saved at once.
+            + group("Dock", field("Show the dock", "On every screen of the side bar.", sel("dock_show", [["always", "Always"], ["hover", "When I point at the bottom"], ["never", "Never"]], ["hover", "never"].includes(c.dock_show) ? c.dock_show : "always"),
+                    "Always: the dock has its own room at the foot of the side bar. When I point at the bottom: it rises over the page when the pointer reaches the bottom edge, and drops away about a second after it leaves. Never: no dock; what you pinned is kept. Saved at once, for this editor.")
+                + field("Most items", "8 fit a 300 px side bar. Up to 16.", inp("dock_most", c.dock_most ?? 8, "number"),
+                    "Past this, pinning one more asks which item to take off. Icons shrink as items are added, down to 24 px; if they still can't fit, the dock steps aside until the side bar is wider. Nothing is unpinned.")
+                + field("Icon size", "The largest the icons get, in px.", inp("dock_size", c.dock_size ?? 34, "number"),
+                    "From 24 to 48. The icons take this size while there is room, and grow a little under the pointer."),
+                "Pinned Pips, sessions and files at the foot of DGC's side bar.", "settings-dock")
             + advanced("general-advanced", field("Tool profile", "Which tools each turn is offered.", sel("tool_profile", [["standard", "Standard"], ["adaptive", "Adaptive"], ["full", "Full catalog"]], c.tool_profile || "standard"),
                 "Standard offers every DGC tool on every turn and lets the model choose. Adaptive offers the core coding tools and adds the rest only when you ask for them, which keeps a small local window clear. Full catalog offers every tool the permission mode allows."))
             + saveBar;
         const cap = main.querySelector("#turn_token_budget");
         if (cap) { cap.min = "0"; cap.step = "1000"; if (!c.budget_settable) cap.disabled = true; }
+        const most = main.querySelector("#dock_most"), size = main.querySelector("#dock_size");
+        if (most) { most.min = "1"; most.max = "16"; most.step = "1"; }
+        if (size) { size.min = "24"; size.max = "48"; size.step = "1"; }
         wire(main);
     }
     function renderModels(main) {

@@ -64,9 +64,11 @@ const PROJECT_CHATS = [{ id: "chat_3", title: "Packing list", updated_at: "2026-
 /** Opens the home. sessionsCollapsed: the Sessions section folded on this computer (the page's attribute). tab: "work" | "chat" (the Chat tab, with two projects, the first open). theme: "dark-modern" | "light-modern" | "hc"; collapsed: what the host kept (the page's attribute);
     tabs: Work | Chat and the search box (ChatDGC seen); library: Work's Library row; srcRoot: another tree's sources. */
 export async function openHome(browser, { state = homeState(), width = 300, height = 760, theme = "dark-modern", collapsed = false, tabs = true, library = true,
-  sessions = SESSIONS, tab = "work", api = 69, scale = 1, motion = "no-preference", sessionsCollapsed = false, srcRoot } = {}) {
+  sessions = SESSIONS, tab = "work", api = 69, scale = 1, motion = "no-preference", sessionsCollapsed = false, srcRoot, video } = {}) {
   const { html, mainJs, markdownJs, themes, pipsJs, pipsCss, sprite } = await sources(srcRoot);
-  const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale, reducedMotion: motion });
+  // video: a folder to record the page into (the pictures' short films), at the page's own size.
+  const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale, reducedMotion: motion,
+    ...(video ? { recordVideo: { dir: video, size: { width, height } } } : {}) });
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
@@ -107,6 +109,8 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
     window.acquireVsCodeApi = () => ({ getState: () => saved, setState() {}, postMessage(m) {
       window.__posted.push(JSON.parse(JSON.stringify(m)));
       if (m?.type === "pipsReady") { setTimeout(connect, 1); return; }
+      // A scene that opens the Pips view on this page answers its requests itself (dock-scene.mjs); the home's own keep theirs.
+      if (window.__pipsApp && m?.type === "pipsRequest" && !String(m.id).startsWith("home-pips-")) { window.__pipsApp(m); return; }
       const make = m?.type === "pipsRequest" && answers[m.request.type];
       if (make) setTimeout(() => window.dispatchEvent(new MessageEvent("message", { data: { type: "pipsReply", id: m.id, ok: true, result: make(m.request) } })), 2);
     } });

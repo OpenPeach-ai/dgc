@@ -727,6 +727,38 @@
           "scope": "application",
           "description": "Pictures and videos in DGC's replies (Work, ChatDGC and a Pip's chat): shown, or folded to one line. Folding or opening one reply's pictures yourself holds for that reply."
         },
+        "dgc.dock.show": {
+          "type": "string",
+          "enum": [
+            "always",
+            "hover",
+            "never"
+          ],
+          "enumDescriptions": [
+            "The dock is always at the foot of DGC's side bar.",
+            "The dock rises when the pointer reaches the bottom of the side bar, and drops away about a second after it leaves.",
+            "No dock. What you pinned is kept."
+          ],
+          "default": "always",
+          "scope": "application",
+          "description": "When DGC's side bar shows its dock: your pinned Pips, sessions and files, then \"+\"."
+        },
+        "dgc.dock.mostItems": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16,
+          "default": 8,
+          "scope": "application",
+          "description": "The most items the dock holds. Past it, pinning one more asks which item to take off. Eight fit a 300 px side bar."
+        },
+        "dgc.dock.iconSize": {
+          "type": "integer",
+          "minimum": 24,
+          "maximum": 48,
+          "default": 34,
+          "scope": "application",
+          "description": "The largest size, in px, the dock's icons take. They shrink as items are added, down to 24 px; if they still can't fit, the dock steps aside until the side bar is wider."
+        },
         "dgc.linkFavicons": {
           "type": "boolean",
           "default": true,

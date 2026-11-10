@@ -617,6 +617,7 @@
         },
       });
     }
+    tellPipsDock();
     if (sessionsOpen) hideSessions();
     pipsOpen = true;
     document.body.classList.add("pips-active");
@@ -784,7 +785,10 @@
     const remove = sessionButton("session-delete", "trash", () => vscode.postMessage({ type: "deleteSession", id: item.id, title }));
     remove.title = item.open ? "Close its tab to delete this session" : "Delete this session";
     remove.setAttribute("aria-label", `Delete session: ${title}`);
-    actions.append(open, remove);
+    // Pin it to the dock, and "..." for its colour, between Open in Editor and Delete.
+    const pinItem = { kind: "work", id: item.id, title };
+    if (window.DgcDock) actions.append(open, pinButton(pinItem), moreButton("work", item.id, title, open_, pinItem), remove);
+    else actions.append(open, remove);
     end.append(age, actions);
     row.append(main, end);
     // A click opens it, as a chat in the Chat tab opens: the second click of a double-click opens nothing more.
@@ -834,6 +838,7 @@
     sessionsFoldCount();
     all.textContent = `View all (${items.length}${sessionsMoreToLoad ? "+" : ""})`;
     if (allSessions) { if (all.hidden) closeAllSessions(); else fillAllSessions(); }
+    if (dock) paintDock();                 // a pinned session's name and what it is doing now
   }
   /** "View all (N)", under the three: made once, after the list. */
   function viewAllButton() {
@@ -896,6 +901,168 @@
     all?.setAttribute("aria-expanded", "false");
     if ((refocus || held) && all && !all.hidden) all.focus();
   }
+  // ---- the dock at the foot of the side bar (media/shared/dock.js), and each session's colour (media/shared/blob.js) ----
+  // The host keeps what is pinned and every session's chosen colour (src/dock.ts) and says so in one message, "dock".
+  // The home gives each pinned thing its picture and what it is doing now, from the lists it already has: this
+  // project's sessions, your chats, your Pips. Something pinned whose list isn't loaded shows with the name it was
+  // pinned under.
+  let dockState = { pins: [], colours: {}, show: "always", most: 8, size: 34 }, dock = null, dockFaces = null;
+  let dockPips = { pips: [], complete: false, scopes: [] }, answeringChats = new Set(), chatItems = [];
+  const dockKey = (kind, id) => `${kind}:${id}`;
+  const isDocked = (kind, id) => dockState.pins.some((pin) => pin.key === dockKey(kind, id));
+  const colourOf = (kind, id) => { const own = window.DgcBlob?.own(id) || 0, chosen = Number(dockState.colours[dockKey(kind, id)]) || own; return { chosen, own }; };
+  const PIN_PATH = "M10.2 1.8l4 4-2.2.9-2.4 2.4.3 3.1-1.1 1.1-2.6-2.6L2.8 14l-.8-.8 3.3-3.4-2.6-2.6 1.1-1.1 3.1.3 2.4-2.4z";
+  const pinSvg = (filled) => `<svg viewBox="0 0 16 16" fill="${filled ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="${PIN_PATH}"/></svg>`;
+  /** A row's pin: an outline until its thing is on the dock, then filled; a click pins or unpins. `item` is what the
+   *  host keeps: { kind, id, title, sub?, look?, ref?, scope? }. */
+  function pinButton(item) {
+    const button = el("button", "dgc-pin"); button.type = "button";
+    button.dataset.pin = dockKey(item.kind, item.id); button.dataset.pinTitle = item.title;
+    button.onclick = (e) => { e.stopPropagation(); vscode.postMessage({ type: "dockToggle", item }); };
+    button.ondblclick = (e) => e.stopPropagation();
+    paintPin(button);
+    return button;
+  }
+  function paintPin(button) {
+    const on = dockState.pins.some((pin) => pin.key === button.dataset.pin), title = button.dataset.pinTitle || "";
+    if (button.getAttribute("aria-pressed") === String(on) && button.firstChild) return;
+    button.setAttribute("aria-pressed", String(on));
+    button.title = on ? "Unpin from the dock" : "Pin to the dock";
+    button.setAttribute("aria-label", `${on ? "Unpin from the dock" : "Pin to the dock"}: ${title}`);
+    button.innerHTML = pinSvg(on);
+  }
+  /** A session's or a chat's "...": Open in editor, Pin to the dock, and its seven colours. */
+  function rowMenu(button, kind, id, title, open, item, keyboard) {
+    const pinned = isDocked(kind, id);
+    window.DgcBlob?.popup(button, { keyboard, label: title, place: "below",
+      rows: [{ id: "open", label: "Open in editor", icon: "open" }, { id: "pin", label: pinned ? "Unpin from the dock" : "Pin to the dock", icon: pinned ? "unpin" : "pin" }],
+      colour: { kind, ...colourOf(kind, id) },
+      onPick: (what) => { if (what === "open") open(); else vscode.postMessage({ type: "dockToggle", item }); },
+      onColour: (n) => vscode.postMessage({ type: "dockColour", key: dockKey(kind, id), colour: n }) });
+  }
+  function moreButton(kind, id, title, open, item) {
+    const button = el("button", "session-more"); button.type = "button";
+    button.innerHTML = window.DgcMenu?.DOTS || "…";
+    button.title = "More: pin it, or change its colour"; button.setAttribute("aria-label", `More for ${title}`);
+    button.setAttribute("aria-haspopup", "menu"); button.setAttribute("aria-expanded", "false");
+    button.onclick = (e) => { e.stopPropagation(); if (button.getAttribute("aria-expanded") === "true") window.DgcBlob?.close(true); else rowMenu(button, kind, id, title, open, item, e.detail === 0); };
+    button.ondblclick = (e) => e.stopPropagation();
+    return button;
+  }
+  const PIP_BODIES = ["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"];
+  /** What the dock shows for each pin: its picture, its name, what it is doing, its dot and its number. */
+  function dockItems() {
+    const B = window.DgcBlob, sheets = window.DgcFileSheet, plush = window.PipConcepts?.plush;
+    const renamed = [], gone = [];
+    const items = dockState.pins.map((pin) => {
+      const item = { key: pin.key, kind: pin.kind, title: pin.title, state: "", icon: "", dot: "", badge: 0 };
+      if (pin.kind === "work") {
+        const live = sessionItems.find((s) => s.id === pin.id), running = !!live && (live.running === true || !!live.windowless);
+        if (live) item.title = sessionTitle(live);
+        item.colour = colourOf("work", pin.id);
+        item.badge = live?.waiting === true ? 1 : 0;
+        item.dot = running ? "live" : live?.open ? "open" : "";
+        item.state = live?.waiting === true ? "Wants your okay" : live?.windowless ? "Running, no window" : running ? "Running" : live?.open ? "Open in a tab"
+          : `Work session${live ? ` · ${sessionAge(live.when)}` : ""}`;
+        item.icon = B ? B.html("work", { id: pin.id, pair: item.colour.chosen, running }) : "";
+      } else if (pin.kind === "chat") {
+        const live = chatItems.find((c) => c.id === pin.id), running = answeringChats.has(pin.id), open = openChats.has(pin.id);
+        if (live?.title) item.title = String(live.title);
+        item.colour = colourOf("chat", pin.id);
+        item.dot = running ? "live" : open ? "open" : "";
+        const when = live ? chatWhen(live.updated_at) : "";
+        item.state = running ? "Answering" : open ? "Open in a tab" : `ChatDGC chat${when ? ` · ${when}` : ""}`;
+        item.icon = B ? B.html("chat", { id: pin.id, pair: item.colour.chosen, running }) : "";
+      } else if (pin.kind === "pip") {
+        const live = dockPips.pips.find((p) => p.id === pin.id), body = live?.body || pin.look?.body || "core";
+        if (live) item.title = live.name;
+        else if (dockPips.complete && dockPips.scopes.includes(pin.look?.ws)) gone.push(pin.key);
+        item.badge = live?.waiting || 0;
+        item.state = live?.waiting ? `${live.waiting} waiting for you` : live?.line || (live ? "Nothing is waiting for you" : "Pip");
+        let face = "";
+        try { face = plush ? plush.markup({ index: Math.max(0, PIP_BODIES.indexOf(body)), name: item.title }, item.badge ? "waiting_approval" : "idle", `dock-${pin.id}`, { includeStyles: false }) : ""; } catch { face = ""; }
+        item.icon = `<span class="dgc-dock-face">${face}</span>`;
+      } else if (pin.kind === "widget") {
+        item.state = pin.sub || "Widget";
+        item.icon = B ? B.cube({ id: pin.id }) : "";
+      } else {
+        item.state = pin.sub || (pin.kind === "artifact" ? "Artifact" : "Library file");
+        const sheet = sheets ? (pin.kind === "artifact" ? sheets.html(pin.look?.type || "file") : sheets.forFile(pin.look?.type || "", pin.title)) : "";
+        item.icon = `<span class="dgc-dock-sheet">${sheet}</span>`;
+      }
+      if (item.title !== pin.title) renamed.push({ key: pin.key, title: item.title });
+      return item;
+    });
+    // A newer name is kept with the pin (so it reads right where its list isn't loaded); a Pip that is gone leaves the dock.
+    if (renamed.length) vscode.postMessage({ type: "dockSeen", items: renamed });
+    for (const key of gone) vscode.postMessage({ type: "dockUnpin", key });
+    return items;
+  }
+  /** The Pips view on this page shows a pin on each Pip's row: it is told what is pinned (once the host has said). */
+  let dockSaid = false;
+  function tellPipsDock() { if (dockSaid) for (const listener of pipsListeners) listener({ type: "dock", pinned: dockState.pins.map((pin) => pin.key) }); }
+  function paintDock(strip = true) {
+    for (const button of document.querySelectorAll(".dgc-pin[data-pin]")) paintPin(button);
+    if (strip) homePips?.repaint?.();     // (not when the strip itself is what just said its Pips)
+    tellPipsDock();
+    paintSessionBlob();
+    if (!dock) return;
+    dock.update({ items: dockItems(), show: dockState.show, size: dockState.size, offers: { chat: chatsAvailable, pip: !!window.DgcPips?.mount } });
+  }
+  function onDock(msg) {
+    dockSaid = true;
+    dockState = { pins: Array.isArray(msg.pins) ? msg.pins.filter((pin) => pin && typeof pin.key === "string") : [],
+      colours: msg.colours && typeof msg.colours === "object" ? msg.colours : {},
+      show: ["hover", "never"].includes(msg.show) ? msg.show : "always", most: Number(msg.most) || 8, size: Number(msg.size) || 34 };
+    paintDock();
+  }
+  /** The dock itself, made once on the side bar's page: the last thing on it, under every screen. */
+  function mountDock() {
+    if (chatPlace !== "home" || dock || !window.DgcDock) return;
+    const host = el("div"); host.id = "dgc-dock"; host.setAttribute("role", "region"); host.setAttribute("aria-label", "Dock");
+    document.body.append(host);
+    dock = window.DgcDock.create({ host,
+      onOpen: (key) => {
+        const pin = dockState.pins.find((p) => p.key === key);
+        if (!pin) return;
+        if (pin.kind === "pip") openPipsAt({ pip: pin.id }); else vscode.postMessage({ type: "dockOpen", key });
+      },
+      onUnpin: (key) => vscode.postMessage({ type: "dockUnpin", key }),
+      onMove: (key, by) => vscode.postMessage({ type: "dockMove", key, by }),
+      onColour: (key, colour) => vscode.postMessage({ type: "dockColour", key, colour }),
+      onNew: (what) => { if (what === "pip") openPipsAt({ create: "personal" }); else vscode.postMessage({ type: "dockNew", what }); },
+      // The Pips' faces blink and look about as they do everywhere else.
+      onDraw: (bar) => { try { dockFaces?.(); } catch {} dockFaces = window.PipConcepts?.plush?.mount?.(bar) || null; },
+    });
+    paintDock();
+  }
+  // ---- a session's own blob, in its tab's header: a click offers its seven colours ----
+  let sessionBlobId = "";
+  function paintSessionBlob(id = sessionBlobId) {
+    if (chatPlace !== "tab" || !window.DgcBlob) return;
+    sessionBlobId = String(id || "");
+    let button = $("session-blob");
+    if (!button) {
+      button = el("button", "dgc-blob-button"); button.id = "session-blob"; button.type = "button";
+      button.setAttribute("aria-haspopup", "menu"); button.setAttribute("aria-expanded", "false");
+      button.onclick = (e) => {
+        if (button.getAttribute("aria-expanded") === "true") { window.DgcBlob.close(true); return; }
+        window.DgcBlob.popup(button, { keyboard: e.detail === 0, place: "below", label: "This session's colour", colour: { kind: "work", ...colourOf("work", sessionBlobId) },
+          onColour: (n) => vscode.postMessage({ type: "dockColour", key: dockKey("work", sessionBlobId), colour: n }) });
+      };
+      $("thread-title").before(button);
+    }
+    button.hidden = !sessionBlobId;
+    if (!sessionBlobId) return;
+    const { chosen } = colourOf("work", sessionBlobId), name = window.DgcBlob.NAMES[chosen - 1] || "";
+    if (button.dataset.drawn !== `${sessionBlobId}:${chosen}`) {
+      button.dataset.drawn = `${sessionBlobId}:${chosen}`;
+      button.innerHTML = window.DgcBlob.html("work", { id: sessionBlobId, pair: chosen });
+      window.DgcBlob.watch(button);
+    }
+    button.title = "This session's colour. Click to change it.";
+    button.setAttribute("aria-label", `This session's colour: ${name}. Change it`);
+  }
   // ---- ChatDGC: your chats, the same in every folder, above this project's sessions (Work) ----
   // A chat opens in an editor tab of its own (src/chatdgc.ts). Titles and previews are the user's and
   // the model's words: text nodes only. The section stays hidden with a CLI that has no ChatDGC.
@@ -942,6 +1109,8 @@
     if (more) { more.hidden = msg.more !== true; more.disabled = false; more.textContent = "Show more"; }
     const focused = document.activeElement?.closest?.(".chat-row")?.dataset.id;
     openChats = open;
+    answeringChats = new Set(Array.isArray(msg.answering) ? msg.answering : []);
+    if (!query) chatItems = items;
     homeQuery = query;
     list.replaceChildren();
     for (const item of items) {
@@ -950,6 +1119,7 @@
       if (item.id === focused) row.focus();
     }
     renderProjects();
+    if (dock) paintDock();                 // a pinned chat's name and whether it is answering
   }
   /** One chat in the list: its name, when, where it's open, the words found (or its last message), Delete. A chat
    *  can be dragged onto a project to move it there, or back onto Chats to take it out. */
@@ -976,8 +1146,11 @@
     const remove = sessionButton("session-delete", "trash", () => vscode.postMessage({ type: "chatdgcDelete", id: item.id, title }));
     remove.title = "Delete this chat";
     remove.setAttribute("aria-label", `Delete chat: ${title}`);
-    row.append(main, remove);
     const openIt = () => vscode.postMessage({ type: "chatdgcOpen", id: item.id });
+    // Pin it to the dock, and "..." for its colour, beside Delete.
+    const pinItem = { kind: "chat", id: String(item.id || ""), title };
+    if (window.DgcDock) { const acts = el("span", "chat-acts"); acts.append(pinButton(pinItem), moreButton("chat", pinItem.id, title, openIt, pinItem), remove); row.append(main, acts); }
+    else row.append(main, remove);
     row.onclick = (e) => { if (e.detail < 2) openIt(); };
     row.onkeydown = (e) => {
       if (e.target !== row) return;
@@ -10539,15 +10712,19 @@ function permissionChoices(ev) {
         // The block folded under its heading: the host keeps that for this computer too, and says so on the page.
         collapsed: document.documentElement.dataset.pipHomeCollapsed === "1",
         onCollapsed: (collapsed) => vscode.postMessage({ type: "pipHomeCollapsed", collapsed }),
+        // The dock: each Pip's row has a pin, and the dock shows a pinned Pip's face and what waits on it.
+        dock: window.DgcDock ? { pinned: (id) => isDocked("pip", id), toggle: (item) => vscode.postMessage({ type: "dockToggle", item }), icon: pinSvg } : null,
+        onPips: (said) => { dockPips = said; if (dock) paintDock(false); },
       });
     }
+    mountDock();
     showSessions();
     // Sessions also start from the terminal: coming back to the side bar looks again.
     const refresh = () => { if (sessionsOpen && !document.hidden) { vscode.postMessage({ type: "sessionsList" }); homePips?.refresh(); } };
     document.addEventListener("visibilitychange", refresh);
     window.addEventListener("focus", refresh);
   }
-  if (chatPlace === "tab") rememberTab(document.documentElement.dataset.tabSession || "");
+  if (chatPlace === "tab") { rememberTab(document.documentElement.dataset.tabSession || ""); paintSessionBlob(document.documentElement.dataset.tabSession || ""); }
   $("btn-settings").onclick = () => vscode.postMessage({ type: "openSettings" });
 
   // ---- replay ----
@@ -11802,6 +11979,7 @@ function permissionChoices(ev) {
     if (msg.type === "pipsOpen") { openPipsAt(); return; }
     if (msg.type === "pipAskDgc") { queuePipAsk(msg.report); return; }
     if (msg.type === "pipShowFix") { if (/^run_[0-9a-f]{32}$/.test(String(msg.run_id || ""))) showPipFix(String(msg.run_id)); return; }
+    if (msg.type === "dock") { onDock(msg); return; }
     if (msg.type === "sessions_list") { if (chatPlace === "home") renderSessions(msg); return; }
     if (msg.type === "chatdgc_list") { if (chatPlace === "home") renderChats(msg); return; }
     if (msg.type === "chatdgc_projects") {
@@ -11835,7 +12013,7 @@ function permissionChoices(ev) {
       return;
     }
     if (msg.type === "artifactNews") { artifactNews(msg.artifact, msg.op); return; }
-    if (msg.type === "chat_tab") { rememberTab(msg.session); return; }
+    if (msg.type === "chat_tab") { rememberTab(msg.session); paintSessionBlob(msg.session); return; }
     // pipsModelsChanged: Settings or the Router changed, so the embedded Pips page reads its model list again.
     // pipsUnreadChanged: a Pip was marked read somewhere (its pill, its chat, a card acted on): it reads its counts again.
     if (["pipsPluginLogos", "pipsFiles", "pipsModelsChanged", "pipsUnreadChanged"].includes(msg.type)) { for (const listener of pipsListeners) listener(msg); return; }

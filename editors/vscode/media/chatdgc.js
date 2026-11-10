@@ -3077,6 +3077,7 @@
     if (!$("cd-empty").contains(empty)) $("cd-empty").replaceChildren(empty);      // the welcome stays put: no replayed drawing
     $("cd-title").textContent = page ? projectOf(state.conversation).name : state.conversation?.title || "New chat";
     crumb();
+    paintChatBlob();
     controls();
     widgetsChrome();
     follow();
@@ -4228,8 +4229,42 @@
   // A reply's pictures fold away (media/pictureFold.js): a choice goes to the host, which keeps it.
   window.DgcPictureFold?.setDefault(document.body.dataset.picturesFolded === "1");
   window.DgcPictureFold?.host((message) => vscode.postMessage(message));
+  // ---- this chat's blob, in its header: the same one its tab and the dock show; a click offers its seven colours ----
+  // The host keeps a chat's chosen colour (src/dock.ts) and says every one in "dock". A project's page and an Incognito
+  // chat (which is never listed) have none.
+  let chatColours = {};
+  function paintChatBlob() {
+    const B = window.DgcBlob, title = $("cd-title");
+    if (!B || !title) return;
+    let button = $("cd-blob");
+    const id = state.conversation?.id && !state.conversation.temporary && !(state.opened && !state.messages.length && !state.earlier && isProjectPage()) ? String(state.conversation.id) : "";
+    if (!button) {
+      if (!id) return;
+      button = el("button", "dgc-blob-button"); button.id = "cd-blob"; button.type = "button";
+      button.setAttribute("aria-haspopup", "menu"); button.setAttribute("aria-expanded", "false");
+      button.addEventListener("click", (e) => {
+        const now = String(state.conversation?.id || "");
+        if (button.getAttribute("aria-expanded") === "true") { B.close(true); return; }
+        const own = B.own(now), chosen = Number(chatColours[`chat:${now}`]) || own;
+        B.popup(button, { keyboard: e.detail === 0, place: "below", label: "This chat's colour", colour: { kind: "chat", chosen, own },
+          onColour: (n) => vscode.postMessage({ type: "dockColour", key: `chat:${now}`, colour: n }) });
+      });
+      title.before(button);
+    }
+    button.hidden = !id;
+    if (!id) return;
+    const chosen = Number(chatColours[`chat:${id}`]) || B.own(id);
+    if (button.dataset.drawn !== `${id}:${chosen}`) {
+      button.dataset.drawn = `${id}:${chosen}`;
+      button.innerHTML = B.html("chat", { id, pair: chosen });
+      B.watch(button);
+    }
+    button.title = "This chat's colour. Click to change it.";
+    button.setAttribute("aria-label", `This chat's colour: ${B.NAMES[chosen - 1] || ""}. Change it`);
+  }
   window.addEventListener("message", (event) => {
     const msg = event.data || {};
+    if (msg.type === "dock") { chatColours = msg.colours && typeof msg.colours === "object" ? msg.colours : {}; paintChatBlob(); return; }
     if (window.DgcVideo?.message(msg)) return;           // a video card's bytes, state or Stop (src/videoHost.ts)
     if (window.DgcPictureFold?.message(msg)) return;     // which pictures stay folded, and the setting
     if (window.DgcMcpApps?.host(msg)) return;            // a card's link, download, address or message, answered

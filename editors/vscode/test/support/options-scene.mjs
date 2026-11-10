@@ -1,7 +1,7 @@
 // The real panel in Chromium with a docked question card: the goal, tasks and monitors rails showing,
 // a running turn, and a propose_options request. Shared by options-card-layout.test.mjs (assertions)
 // and render-options.mjs (the capture matrix). setContent only; no port is opened.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
@@ -42,6 +42,8 @@ export const QUESTIONS = [
     { label: "Export button", description: "Download all settings as one JSON file.", recommended: false }] },
 ];
 
+// The blob and the dock (0.52): loaded before main.js as the panel loads them; a tree from before them has neither.
+const shared = (name) => (existsSync(`${here}/media/shared/${name}`) ? readFileSync(`${here}/media/shared/${name}`, "utf8") + "\n" : "");
 let cached;
 export function panelHtml() {
   if (cached) return cached;
@@ -52,7 +54,7 @@ export function panelHtml() {
   // The prompt rail (DgcPromptRail) is loaded before main.js, as the panel loads it.
   // So are the user's mods (DgcMods).
   const mainJs = readFileSync(here + "/media/promptrail.js", "utf8") + "\n" + readFileSync(here + "/media/mods.js", "utf8")
-    + "\n" + readFileSync(here + "/media/shared/menu.js", "utf8") + "\n" + readFileSync(here + "/media/shared/composer.js", "utf8") + "\n" + readFileSync(here + "/media/shared/tray.js", "utf8") + "\n" + readFileSync(here + "/media/shared/filesheet.js", "utf8") + "\n" + readFileSync(here + "/media/mentions.js", "utf8") + "\n" + readFileSync(here + "/media/main.js", "utf8");
+    + "\n" + readFileSync(here + "/media/shared/menu.js", "utf8") + "\n" + readFileSync(here + "/media/shared/composer.js", "utf8") + "\n" + readFileSync(here + "/media/shared/tray.js", "utf8") + "\n" + readFileSync(here + "/media/shared/filesheet.js", "utf8") + "\n" + shared("blob.js") + shared("dock.js") + readFileSync(here + "/media/mentions.js", "utf8") + "\n" + readFileSync(here + "/media/main.js", "utf8");
   const markdownJs = buildSync({ entryPoints: [here + "/src/markdown.ts"], bundle: true, format: "iife",
     globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
   const skeleton = [...panelSrc.matchAll(/<!doctype html>[\s\S]*?<\/body><\/html>/gi)].map((m) => m[0])

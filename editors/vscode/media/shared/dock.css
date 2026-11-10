@@ -1,0 +1,100 @@
+/* The dock at the foot of DGC's side bar (media/shared/dock.js draws and moves it): what you pinned, then "+". A raised
+   neutral bar, centred, on a 12.5 px corner with a hairline of light inside its top edge and layered soft shadows. Each
+   item is a square tile holding its picture: a Pip's face, a session's liquid blob, a file's small sheet, a widget's
+   cube. Pointed at, the tiles grow toward the pointer the way a macOS dock does (they rise out of the bar, which keeps
+   its height) and the one under the pointer is named just above. Under a tile: a quiet dot while it is open in an
+   editor, the accent's dot while it runs; on its corner, the number waiting for you. Tokens from tokens.css; the only
+   purple here is the running dot. */
+.dgc-dock {
+  --dock-s: 34px; --dock-gap: 6px; --dock-pad: 8px;
+  position: relative; z-index: 30; flex: none; box-sizing: border-box; display: flex; flex-direction: row; align-items: flex-end; justify-content: center;
+  width: 100%; padding: 4px 0 8px; pointer-events: none; -webkit-user-select: none; user-select: none;
+}
+.dgc-dock[hidden], .dgc-dock[data-state="aside"], .dgc-dock[data-show="never"] { display: none; }
+.dgc-dock-bar {
+  position: relative; flex: none; box-sizing: border-box; display: flex; align-items: flex-end; gap: var(--dock-gap);
+  height: calc(var(--dock-s) + 14px); padding: 5px var(--dock-pad) 9px; border-radius: var(--r-lg);
+  background: var(--dock-ground); box-shadow: var(--dock-lift); pointer-events: auto;
+}
+/* One item: a button the size of its tile (--s, which the pointer grows). */
+.dgc-dock-item {
+  --s: var(--dock-s); --k: 34;
+  position: relative; flex: none; width: var(--s); height: var(--s); margin: 0; padding: 0; border: 0; border-radius: 28%;
+  background: transparent; color: var(--text-2); cursor: pointer; outline: 0; -webkit-tap-highlight-color: transparent;
+  transition: translate var(--dur-hover) var(--ease-out);
+}
+.dgc-dock-item:active { translate: 0 -2px; }
+.dgc-dock-tile {
+  position: absolute; inset: 0; display: grid; place-items: center; border-radius: 28%;
+  background: var(--dock-tile); box-shadow: inset 0 0 0 .5px var(--hair);
+  transition: background-color var(--dur-hover) var(--ease-out);
+}
+.dgc-dock-item:hover .dgc-dock-tile, .dgc-dock-item[aria-expanded="true"] .dgc-dock-tile { background: var(--dock-tile-hover); }
+.dgc-dock-item:focus-visible .dgc-dock-tile { outline: 1.5px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1.5px; }
+/* What a tile holds, each about two thirds of it. */
+.dgc-dock-tile .dgc-blob, .dgc-dock-tile .dgc-cube { --blob-size: calc(var(--s) * .66); }
+.dgc-dock-tile .dgc-cube { --blob-size: calc(var(--s) * .72); }
+.dgc-dock-face { display: block; width: 84%; height: 84%; line-height: 0; }
+.dgc-dock-face > * { width: 100%; height: 100%; }
+/* A file's sheet, the output card's (filesheet.css, 44 by 56 px), drawn smaller: about a blob's height in the tile. */
+.dgc-dock-sheet { position: absolute; left: 50%; top: 50%; display: block; width: 44px; height: 56px; margin: -28px 0 0 -24px; scale: calc(var(--k) * .0125); }
+.dgc-dock-sheet .dgc-sheet-tag { font-size: 9px; right: -9px; bottom: 6px; }
+/* So small, on a tile, the sheet's page needs to be a clear step off its ground (a light theme's is white already). */
+.dgc-dock-sheet .dgc-sheet-page { background: color-mix(in srgb, var(--text) 20%, var(--surface)); }
+body.vscode-light .dgc-dock-sheet .dgc-sheet-page, body.vscode-high-contrast-light .dgc-dock-sheet .dgc-sheet-page { background: var(--surface); }
+.dgc-dock-plus { display: block; width: 46%; height: 46%; }
+/* The number waiting for you, on the tile's corner: the text colour, never the accent. */
+.dgc-dock-badge {
+  position: absolute; top: -4px; right: -4px; z-index: 1; box-sizing: border-box; min-width: 14px; height: 14px; padding: 0 3.5px; border-radius: 7px;
+  background: var(--text-strong); color: var(--bg); box-shadow: 0 0 0 1.5px var(--dock-ground);
+  font: var(--w-semi) 9.5px/14px var(--sans); font-variant-numeric: tabular-nums; text-align: center; pointer-events: none;
+}
+/* Under the tile: open in an editor (quiet), or running (the accent). */
+.dgc-dock-dot { position: absolute; left: 50%; bottom: -6.5px; width: 3px; height: 3px; margin-left: -1.5px; border-radius: 50%;
+  background: color-mix(in srgb, var(--text) 62%, transparent); pointer-events: none; }
+.dgc-dock-dot[data-dot="live"] { width: 4px; height: 4px; margin-left: -2px; bottom: -7px; background: var(--accent); }
+body.vscode-light .dgc-dock-dot[data-dot="live"], body.vscode-high-contrast-light .dgc-dock-dot[data-dot="live"] { background: var(--accent-fill); }
+.dgc-dock-sep { flex: none; align-self: flex-end; width: 1px; height: calc(var(--dock-s) * .58); margin: 0 1px calc(var(--dock-s) * .21); background: var(--hair-strong); }
+/* Nothing pinned yet: "+" and a few quiet words. */
+.dgc-dock-empty { align-self: center; padding: 0 4px 0 2px; color: var(--text-2); font: var(--w-reg) var(--t-xs)/1.2 var(--sans); white-space: nowrap; }
+/* The name of what is pointed at (or focused from the keyboard), just above it. */
+.dgc-dock-tip {
+  position: absolute; z-index: 2; box-sizing: border-box; max-width: min(240px, calc(100% - 12px)); padding: 5px 9px 6px; border: 1px solid var(--hair); border-radius: var(--r-md);
+  background: var(--surface2); box-shadow: var(--lift-1); pointer-events: none; text-align: left; -webkit-user-select: none; user-select: none;
+}
+.dgc-dock-tip[hidden] { display: none; }
+.dgc-dock-tip b { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere;
+  color: var(--text-strong); font: var(--w-semi) var(--t-xs)/1.35 var(--sans); }
+.dgc-dock-tip span { display: block; margin-top: 1px; color: var(--faint); font: var(--w-reg) var(--t-xs)/1.35 var(--sans); overflow-wrap: anywhere; }
+.dgc-dock-tip span:empty { display: none; }
+
+/* "When I point at the bottom": the dock lies over the page and is away until the pointer reaches the bottom edge (or
+   the keyboard reaches the dock); a short line marks where it is. The page has its full height. */
+.dgc-dock[data-show="hover"] { position: fixed; left: 0; right: 0; bottom: 0; }
+.dgc-dock[data-show="hover"] .dgc-dock-bar { transition: translate 240ms var(--ease-out), opacity 160ms var(--ease-out); }
+.dgc-dock[data-show="hover"]:not([data-up]) .dgc-dock-bar { translate: 0 calc(100% + 16px); opacity: 0; pointer-events: none; }
+.dgc-dock-hint { display: none; }
+.dgc-dock[data-show="hover"] .dgc-dock-hint { display: block; position: absolute; left: 50%; bottom: 3px; width: 36px; height: 3px; margin-left: -18px; border-radius: 2px;
+  background: color-mix(in srgb, var(--text) 60%, transparent); transition: opacity 160ms var(--ease-out); }
+.dgc-dock[data-show="hover"][data-up] .dgc-dock-hint { opacity: 0; }
+
+/* A pin on a row (a session, a chat, a Pip, a Library item): an outline until it is pinned, then filled, and it stays. */
+.dgc-pin { flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--control-sm); height: var(--control-sm); margin: 0; padding: 0;
+  border: 0; border-radius: var(--r-sm); background: transparent; color: var(--home-quiet); cursor: pointer;
+  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out); }
+.dgc-pin > svg { width: 14px; height: 14px; }
+.dgc-pin:hover { color: var(--text-strong); background: var(--wash); }
+.dgc-pin[aria-pressed="true"] { color: var(--text); }
+.dgc-pin:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dgc-dock-item, .dgc-dock[data-show="hover"] .dgc-dock-bar, .dgc-dock-hint { transition: none; }
+  .dgc-dock-item:active { translate: none; }
+}
+body.vscode-high-contrast .dgc-dock-bar, body.vscode-high-contrast-light .dgc-dock-bar { box-shadow: 0 0 0 1px var(--hair); }
+@media (forced-colors: active) {
+  .dgc-dock-bar { border: 1px solid CanvasText; box-shadow: none; }
+  .dgc-dock-dot, .dgc-dock-dot[data-dot="live"] { forced-color-adjust: none; background: CanvasText; }
+  .dgc-dock-dot[data-dot="live"] { background: Highlight; }
+  .dgc-dock-badge { forced-color-adjust: none; background: CanvasText; color: Canvas; }
+}

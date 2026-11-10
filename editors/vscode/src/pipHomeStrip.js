@@ -60,6 +60,7 @@ export function mountHomePips(options) {
  const pending = new Map(), setTimer = options.setInterval || setInterval, clearTimer = options.clearInterval || clearInterval;
  let generation = 0, epoch = 0, sequence = 0, ready = false, loading = false, timer = null, disposed = false;
  let collapsed = options.collapsed === true;
+ let listedAll = false, listedScopes = [];
  let pips = null, digest = null, attention = null, unread = [], unreadFailure = false, apiVersion = 0, cleanup = null, personal = null, current = null, partial = false, failure = '', refocus = null;
  // Dismissed here: pip id → the request number after which a digest already leaves its news out.
  const hidden = new Map();
@@ -86,7 +87,8 @@ export function mountHomePips(options) {
   // Routines it can't run (Pips package 2): the words its row in the Pips view says, so the home says it too.
   const blocked = p.routine_health && typeof p.routine_health === 'object' && p.routine_health.blocked && typeof p.routine_health.blocked.text === 'string'
    ? p.routine_health.blocked.text.slice(0, 120) : '';
-  return {id: p.id, name: p.name.trim(), type: p.pip_type, profile: profile(p.profile), reviews: pendingReviews(p), waiting: 0, blocked};
+  return {id: p.id, name: p.name.trim(), type: p.pip_type, profile: profile(p.profile), reviews: pendingReviews(p), waiting: 0, blocked,
+   workspace: typeof p.workspace_id === 'string' && WORKSPACE_ID.test(p.workspace_id) ? p.workspace_id : ''};
  }
  // What is new for a Pip since you last looked, from the digest: how urgent (1 an alert, 2 failed runs,
  // 3 new findings) and a few words.
@@ -118,6 +120,16 @@ export function mountHomePips(options) {
   const look = pip.profile || profile(null);
   try { if (plush) span.innerHTML = plush.markup({index: TYPES.indexOf(look.body || pip.type), name: pip.name}, pose, `home-${pip.id}`, {includeStyles: false}); } catch { span.replaceChildren(); }
   return span;
+ }
+ // What the dock keeps of a pinned Pip: its name, its body (for its face), and whether it is a project's.
+ const pinItem = pip => ({kind: 'pip', id: pip.id, title: pip.name, scope: pip.workspace && personal && pip.workspace !== personal ? 'project' : '',
+  look: {body: (pip.profile || profile(null)).body || pip.type, ws: pip.workspace || ''}});
+ // Every Pip here, for the dock: its name, its face's body, what waits on it and its news in a few words.
+ function tellDock() {
+  if (!options.onPips) return;
+  const list = (pips || []).map(pip => { const waiting = waitingOn(attention, pip.id, pip.reviews), fresh = waiting ? null : news(pip.id);
+   return {id: pip.id, name: pip.name, body: (pip.profile || profile(null)).body || pip.type, waiting, line: pip.blocked ? `Can't run: ${pip.blocked}` : fresh ? fresh.line : ''}; });
+  options.onPips({pips: list, complete: listedAll && !!pips, scopes: listedScopes});
  }
  // A Pip with cards waiting opens at the newest one (its chat, its computer), as Needs attention does.
  function open(pip) { const first = attention?.items.find(i => i.pip_id === pip.id); options.onOpen?.(first ? attentionNavigation(first) : {pip: pip.id}); }
@@ -199,7 +211,7 @@ export function mountHomePips(options) {
    pip: focused.closest('[data-pip-id]')?.dataset.pipId || ''} : null;
   cleanup?.(); cleanup = null;
   root.replaceChildren();
-  if (!ready || !pips || !pips.length) { root.hidden = true; options.onChange?.(); return; }
+  if (!ready || !pips || !pips.length) { root.hidden = true; options.onChange?.(); tellDock(); return; }
   root.hidden = false;
   const rows = needing(), dismissible = rows.filter(r => r.dismissible), fresh = shownUnread();
   const byUnread = new Map(fresh.map(item => [item.pip_id, item]));
@@ -297,6 +309,15 @@ export function mountHomePips(options) {
      x.onclick = () => { void dismiss([rows.find(r => r.pip.id === pip.id)], index); };
      item.append(x);
     }
+    // Pin this Pip to the dock (media/shared/dock.js): an outline until it is pinned, then filled, and it stays. After
+    // the row's own controls, so Tab reaches Read and Dismiss first, as before.
+    if (options.dock) {
+     const on = options.dock.pinned(pip.id), pin = node('button', 'dgc-pin home-pip-pin'); pin.type = 'button';
+     pin.setAttribute('aria-pressed', String(on)); pin.title = on ? 'Unpin from the dock' : 'Pin to the dock';
+     pin.setAttribute('aria-label', `${pin.title}: ${pip.name}`); pin.innerHTML = options.dock.icon(on);
+     pin.onclick = () => options.dock.toggle(pinItem(pip));
+     item.append(pin);
+    }
     list.append(item);
    }
    inner.append(list);
@@ -349,6 +370,7 @@ export function mountHomePips(options) {
   }
   cleanup = globalThis.PipConcepts?.plush?.mount?.(root) || null;
   options.onChange?.();
+  tellDock();
  }
  async function load() {
   if (disposed || !ready || loading) return;
@@ -357,7 +379,9 @@ export function mountHomePips(options) {
    const spaces = await request('list_workspaces');
    const workspaces = Array.isArray(spaces?.workspaces) ? spaces.workspaces : [];
    const wanted = workspaces.filter(w => w && (w.kind === 'personal' || w.id === spaces.current_workspace_id)).slice(0, 4);
-   const lists = await Promise.all(wanted.map(w => request('list_pips', {workspace_id: w.id}).catch(() => ({pips: []}))));
+   const lists = await Promise.all(wanted.map(w => request('list_pips', {workspace_id: w.id}).catch(() => null)));
+   // Every Pip of these projects was listed (none failed, none cut at a page): only then is a pinned Pip missing here gone.
+   const whole = lists.every(list => list && Array.isArray(list.pips) && (list.next_offset === null || list.next_offset === undefined));
    const found = [], seen = new Set();
    for (const list of lists) for (const raw of (Array.isArray(list?.pips) ? list.pips : [])) {
     const pip = checkedPip(raw);
@@ -381,6 +405,7 @@ export function mountHomePips(options) {
    }
    // Core first, then the rest as the Pips view orders them.
    pips = [...found.filter(p => p.type === 'core'), ...found.filter(p => p.type !== 'core')];
+   listedAll = whole; listedScopes = wanted.map(w => w.id);
    digest = value; attention = waiting; current = spaces.current_workspace_id;
    personal = workspaces.find(w => w?.kind === 'personal' && typeof w.id === 'string')?.id || null;
    // A digest asked for after a dismiss was kept already leaves that news out, or it is new news.
@@ -421,5 +446,5 @@ export function mountHomePips(options) {
   message.ok ? p.resolve(message.result) : p.reject(Error(message.error?.message || 'DGC could not read your Pips.'));
  }
  options.postMessage({type: 'pipsReady'});
- return {receive, refresh() { void load(); }, dispose() { disposed = true; if (timer !== null) clearTimer(timer); for (const p of pending.values()) clearTimeout(p.timer); pending.clear(); cleanup?.(); root.hidden = true; }};
+ return {receive, refresh() { void load(); }, repaint() { if (root.querySelector('.home-pip-pin')) paint(); }, dispose() { disposed = true; if (timer !== null) clearTimer(timer); for (const p of pending.values()) clearTimeout(p.timer); pending.clear(); cleanup?.(); root.hidden = true; }};
 }

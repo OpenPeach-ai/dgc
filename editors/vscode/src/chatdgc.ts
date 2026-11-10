@@ -12,6 +12,7 @@ import { mcpAppsHost } from "./mcpApps";
 import { ARTIFACT_ID, forwardedArtifactPage, outputChoice, type Artifacts } from "./artifacts";
 import { allowFromJobs, handleVideoMessage, VIDEO_MESSAGES } from "./videoHost";
 import { onPicturesSetting, pictureFoldsMessage, picturesFolded, rememberPictureFold } from "./pictureFolds";
+import { blobIcon, dockOf, type DockPin } from "./dock";
 import { promises as fs } from "fs";
 import { displayMentions, workspaceFiles } from "./mentionsHost";
 
@@ -120,6 +121,8 @@ function allowChatVideos(value: any, depth = 0): void {
 
 interface Tab {
   panel: vscode.WebviewPanel;
+  /** The icon its tab shows now (its blob, or ChatDGC's mark), so the same one is never set twice. */
+  iconSaid?: string;
   /** This tab's box, as dictation knows it. */
   mic: DictationOwner;
   conversation: string;
@@ -333,7 +336,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <div id="cd-announce" class="sr-only" aria-live="polite"></div>
 <dialog id="cd-keys" class="cd-keys" aria-labelledby="cd-keys-title"><h2 id="cd-keys-title">Keyboard shortcuts</h2><dl id="cd-keys-list"></dl>
 <button type="button" id="cd-keys-close" class="cd-edit-cancel">Close</button></dialog>
-<script src="${attr(asset("media/shared/menu.js"))}"></script><script src="${attr(asset("media/shared/composer.js"))}"></script><script src="${attr(asset("media/shared/tray.js"))}"></script><script src="${attr(asset("media/shared/card.js"))}"></script><script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/pasteclean.js"))}"></script><script src="${attr(asset("media/mentions.js"))}"></script><script src="${attr(asset("media/pips/plush.js"))}"></script><script src="${attr(asset("media/messagequeue.js"))}"></script><script src="${attr(asset("media/trace.js"))}"></script><script src="${attr(asset("media/mcpApps.js"))}"></script><script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/msgtime.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/pictureFold.js"))}"></script><script src="${attr(asset("media/pluginCalls.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/texthistory.js"))}"></script><script src="${attr(asset("media/numbered-list.js"))}"></script><script src="${attr(asset("media/promptrail.js"))}"></script><script src="${attr(asset("media/mods.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
+<script src="${attr(asset("media/shared/menu.js"))}"></script><script src="${attr(asset("media/shared/composer.js"))}"></script><script src="${attr(asset("media/shared/tray.js"))}"></script><script src="${attr(asset("media/shared/card.js"))}"></script><script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/pasteclean.js"))}"></script><script src="${attr(asset("media/mentions.js"))}"></script><script src="${attr(asset("media/pips/plush.js"))}"></script><script src="${attr(asset("media/messagequeue.js"))}"></script><script src="${attr(asset("media/trace.js"))}"></script><script src="${attr(asset("media/mcpApps.js"))}"></script><script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/msgtime.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/pictureFold.js"))}"></script><script src="${attr(asset("media/pluginCalls.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/texthistory.js"))}"></script><script src="${attr(asset("media/numbered-list.js"))}"></script><script src="${attr(asset("media/promptrail.js"))}"></script><script src="${attr(asset("media/mods.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
 }
 
 /** The Library (ChatGPT's): every file attached in ChatDGC, in its own tab. */
@@ -352,7 +355,7 @@ export function libraryDocument(asset: (name: string) => string, cspSource: stri
 <p id="lib-status" class="lib-status" role="status"></p>
 <ul id="lib-list" class="lib-list" aria-label="Your files" role="tabpanel"></ul>
 <button type="button" id="lib-more" class="cd-edit-cancel lib-more" hidden>Show more</button></main>
-<script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/library.js"))}"></script></body></html>`;
+<script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/library.js"))}"></script></body></html>`;
 }
 
 
@@ -664,6 +667,9 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     this.library = panel;
     panel.onDidDispose(() => { if (this.library === panel) this.library = undefined; });
     panel.webview.onDidReceiveMessage((message) => { void this.fromLibrary(panel, message); });
+    // What is pinned to the dock: each row's pin shows it, and follows a change made anywhere.
+    const docked = dockOf(this.context).onChange(() => { void panel.webview.postMessage(dockOf(this.context).state()); });
+    panel.onDidDispose(() => docked.dispose());
     const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, ...name.split("/"))).toString();
     panel.webview.html = libraryDocument(asset, panel.webview.cspSource);
   }
@@ -902,6 +908,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   }
 
   private async fromLibrary(panel: vscode.WebviewPanel, message: any): Promise<void> {
+    // A row's pin (src/dock.ts keeps what is pinned).
+    if (dockOf(this.context).handle(message, (state) => { void panel.webview.postMessage(state); })) return;
     const ref = this.libraryRef(message?.file);
     const widget = message?.widget && WIDGET_ID.test(String(message.widget.id || "")) && CONVERSATION_ID.test(String(message.widget.chat_id || ""))
       ? { id: String(message.widget.id), chat: String(message.widget.chat_id), title: widgetName(message.widget.title) } : undefined;
@@ -941,6 +949,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         if (artifact && this.artifacts) {
           // Asked first, in VS Code's own words: it goes to DGC's trash, so it can be recovered.
           if (await this.artifacts.remove({ id: String(artifact.id), title: String(artifact.title || "this artifact").slice(0, 120) })) {
+            void dockOf(this.context).forget("artifact", String(artifact.id));
             void panel.webview.postMessage({ type: "artifactRemoved", id: String(artifact.id) });
           }
         }
@@ -968,10 +977,12 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         const DELETE = "Delete";
         const choice = await vscode.window.showWarningMessage(
           `Delete the widget “${widget.title}”? Its card stays in the chat, marked as deleted. This can't be undone.`, { modal: true }, DELETE);
+        if (choice === DELETE) void dockOf(this.context).forget("widget", widget.id);
         if (choice === DELETE) this.libraryAsk(panel, "widgetRemove", { type: "chatdgc_widgets", op: "remove", conversation_id: widget.chat, widget_id: widget.id });
         return;
       }
       case "ready":
+        void panel.webview.postMessage(dockOf(this.context).state());     // what is pinned, for each row's pin
         void panel.webview.postMessage({ type: "widgetsOffered", on: this.widgetLibrary() });
         void panel.webview.postMessage({ type: "workImagesOffered", on: !!this.host?.imagesOffered?.() && !!this.host?.imagesLibrary });
         void panel.webview.postMessage({ type: "artifactsOffered", on: !!this.artifactsOffer() });
@@ -1032,6 +1043,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         const choice = await vscode.window.showWarningMessage(
           `Delete “${chatTitle(String(message.file?.name || "this file"))}” from your Library? The chat it's in keeps its name, marked as no longer available. This can't be undone.`,
           { modal: true }, DELETE);
+        if (choice === DELETE) void dockOf(this.context).forget("file", ref.attachment_id);
         if (choice === DELETE) this.libraryAsk(panel, "libraryChange", { type: "chatdgc_library_file", op: "remove", ...ref });
         return;
       }
@@ -1209,8 +1221,43 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     // Settings -> General -> Pictures in replies: this tab's pictures nobody folded or opened follow it at once.
     const pictures = onPicturesSetting((message) => this.post(tab, message));
     panel.onDidDispose(() => pictures.dispose());
+    // The dock and this chat's colour: its header's blob and its tab's icon follow a change at once.
+    this.paintIcon(tab);
+    const docked = dockOf(this.context).onChange(() => { this.paintIcon(tab); this.post(tab, dockOf(this.context).state()); });
+    panel.onDidDispose(() => docked.dispose());
     const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, ...name.split("/"))).toString();
     panel.webview.html = chatdgcDocument(asset, panel.webview.cspSource);
+  }
+
+  /** A chat's tab icon is its blob, still (a rounded square, in the chat's colour): the same blob the dock and its own
+   *  header show. A new chat with nothing sent yet, and a project's page, keep ChatDGC's plain mark. */
+  private paintIcon(tab: Tab): void {
+    const id = tab.conversation || "";
+    const blob = id ? blobIcon(this.context.extensionUri, "chat", id, dockOf(this.context).colour("chat", id)) : undefined;
+    const icon = blob ?? this.chatdgcIcon(), said = String((icon as any).light ?? icon);
+    if (tab.iconSaid === said) return;
+    tab.iconSaid = said;
+    try { tab.panel.iconPath = icon; } catch { /* a tab on its way out */ }
+  }
+
+  /** A click on something pinned to the dock: a chat in its tab; an artifact, a Library file or a widget where the
+   *  Library's own row opens it. */
+  async openFromDock(pin: DockPin): Promise<void> {
+    if (pin.kind === "chat") { this.open(pin.id); return; }
+    if (pin.kind === "artifact" && ARTIFACT_ID.test(pin.id)) {
+      this.artifacts?.open(pin.id, { type: String(pin.look.type || ""), title: pin.title, ...(pin.ref.file ? { file: pin.ref.file } : {}) });
+      return;
+    }
+    if (pin.kind === "file") {
+      if (PROJECT_ID.test(String(pin.ref.project_id || ""))) this.openProject(pin.ref.project_id);
+      else if (CONVERSATION_ID.test(String(pin.ref.chat_id || ""))) this.open(pin.ref.chat_id);
+      return;
+    }
+    if (pin.kind === "widget" && WIDGET_ID.test(pin.id) && CONVERSATION_ID.test(String(pin.ref.chat_id || ""))) {
+      const open = this.widgetPanels.get(pin.id);
+      if (open) open.reveal(undefined, false);
+      else this.ask({ kind: "widgetGet" }, { type: "chatdgc_widgets", op: "get", conversation_id: pin.ref.chat_id, widget_id: pin.id });
+    }
   }
 
   // -- the wire
@@ -1413,6 +1460,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           this.host?.postHome({ type: "chatdgc_list", available: true, query: this.homeQuery, total: Number(ev.total) || 0,
                                 more: ev.next_offset !== null && ev.next_offset !== undefined,
                                 open: [...this.tabs].map((tab) => tab.conversation).filter(Boolean),
+                                answering: [...this.answering],       // the chats writing a reply now (the dock's running dot)
                                 items: chats.filter((chat: any) => CONVERSATION_ID.test(String(chat?.id || ""))) });
         }
         return;
@@ -1456,6 +1504,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         const tab = asker.tab;
         if (tab.conversation !== String(ev.conversation?.id || "")) tab.folder = undefined;
         tab.conversation = String(ev.conversation?.id || "");
+        this.paintIcon(tab);
         tab.temporary = ev.conversation?.temporary === true;
         tab.summary = ev.conversation;
         tab.opened = true;
@@ -1587,6 +1636,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "chatdgc_turn":
         if (ev.state === "ended" && requestId) this.requests.delete(requestId);
         if (conversation) { if (ev.state === "started") this.answering.add(conversation); else this.answering.delete(conversation); }
+        this.homeChanged();                         // the side bar's dock shows which chats are answering
         for (const tab of showing(conversation)) this.post(tab, { type: "turn", state: ev.state, replyId: ev.reply_id });
         return;
       case "chatdgc_waiting":
@@ -1780,6 +1830,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     }
     // A reply's pictures folded or opened (media/pictureFold.js): kept, so it holds after a reload and a reopen.
     if (rememberPictureFold(this.context, message)) return;
+    // This chat's colour, picked from its header's blob (src/dock.ts keeps it).
+    if (dockOf(this.context).handle(message, (state) => this.post(tab, state))) return;
     if (VIDEO_MESSAGES.has(message.type)) {
       // A video card's player: its bytes, Open, Show in folder, Save to project… and Stop.
       await handleVideoMessage(message, (m) => this.post(tab, m as Record<string, unknown>),
@@ -1789,6 +1841,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     switch (message.type) {
       case "ready": {
         this.post(tab, pictureFoldsMessage(this.context));    // which pictures stay folded, and the setting
+        this.post(tab, dockOf(this.context).state());         // each chat's chosen colour, for this one's blob
         // The webview (re)loaded: it shows what this tab holds, or a new chat. A recording it started is gone with
         // the page that showed it.
         this.host?.dictation?.()?.release(tab.mic);
@@ -1910,6 +1963,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "reopenNew":                      // the chat it held is gone (a temporary one after a restart)
       case "newChat":
         tab.conversation = "";
+        this.paintIcon(tab);
         tab.folder = undefined;
         tab.summary = undefined;
         tab.temporary = message.temporary === true;
@@ -2505,6 +2559,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       tab.panel.dispose();
     } else if (choice.id === "delete") {
       if (await this.confirmDelete(String(tab.summary?.title || ""))) {
+        void dockOf(this.context).forget("chat", conversation);     // a deleted chat leaves the dock
         this.ask({ kind: "update" }, { type: "chatdgc_update", conversation_id: conversation, delete: true });
         tab.panel.dispose();
       }
@@ -2639,6 +2694,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         if (!CONVERSATION_ID.test(id)) return true;
         if (!(await this.confirmDelete(String(message.title || "")))) return true;
         for (const tab of [...this.tabs]) { if (tab.conversation === id) tab.panel.dispose(); }
+        void dockOf(this.context).forget("chat", id);     // a deleted chat leaves the dock
         this.ask({ kind: "update" }, { type: "chatdgc_update", conversation_id: id, delete: true });
         return true;
       }

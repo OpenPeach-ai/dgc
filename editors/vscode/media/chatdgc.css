@@ -761,6 +761,8 @@ button.cd-project-card:hover { border-color: var(--border-strong); background: v
 .lib-action:hover { background: var(--surface2); color: var(--text); }
 .lib-action:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
 .lib-action[aria-label^="Delete"]:hover { color: var(--err-text); }
+/* Pinned to the dock: the pin is filled, in the text colour. */
+.lib-pin[aria-pressed="true"] { color: var(--text); }
 .lib-more { align-self: center; }
 /* The Artifacts tab: a kind's mark, and Export's formats in a menu under its button. */
 .lib-artifact .lib-preview .codicon { color: var(--accent-text); }

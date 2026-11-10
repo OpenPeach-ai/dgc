@@ -1011,3 +1011,23 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
   .simple-pips.chat-open .pip-conversation.chat-style .msg-choice-key{border:1px solid ButtonText;background:transparent;color:ButtonText}
   .simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant :is(.answer:not(.split),.reply-part){border:1px solid CanvasText}
 }
+
+/* A Pip's pin to the dock, at its row's top corner (media/shared/dock.css has the same pin for a session's row). Seen
+   while the row is pointed at or holds the keyboard, and always once pinned. */
+.job-slot{position:relative;display:grid;grid-template-columns:minmax(0,1fr);min-width:0}
+.dgc-pin{flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;margin:0;padding:0;border:0;border-radius:var(--r-sm,7.5px);background:transparent;color:var(--home-quiet,var(--muted));cursor:pointer;min-width:0}
+.dgc-pin>svg{width:14px;height:14px}
+.dgc-pin:hover{color:var(--text-strong,var(--vscode-foreground));background:var(--wash)}
+.dgc-pin[aria-pressed="true"]{color:var(--text,var(--vscode-foreground))}
+.dgc-pin:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:-1px}
+.job-pin{position:absolute;top:5px;right:5px;z-index:1;opacity:0;transition:opacity var(--dur-hover,120ms) ease}
+.job-slot:is(:hover,:focus-within) .job-pin,.job-pin[aria-pressed="true"]{opacity:1}
+@media(hover:none){.job-pin{opacity:1}}
+@media(prefers-reduced-motion:reduce){.job-pin{transition:none}}
+/* The same pin beside a row of Your Pips: at the row's end, left of its number and its dot; a pinned row keeps room for it. */
+.pip-row-slot{position:relative;display:grid;grid-template-columns:minmax(0,1fr);min-width:0}
+.pip-row-slot>.job-pin{top:50%;right:8px;margin-top:-10px}
+.pip-row-slot:has(.pip-row-marked)>.job-pin{right:40px}
+.pip-row-slot:has(.pip-row-both)>.job-pin{right:66px}
+.pip-row-slot:is(:hover,:focus-within)>.job-pin{opacity:1}
+.pip-row-slot.is-pinned .pip-row-copy,.pip-row-slot:is(:hover,:focus-within) .pip-row-copy{padding-right:26px}

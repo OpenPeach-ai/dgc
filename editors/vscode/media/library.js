@@ -241,6 +241,8 @@
       ...(file.type === "image" ? [action("file-symlink-file", "Save to project… (the folder open in VS Code)",
                                          () => vscode.postMessage({ type: "saveToProject", file }))] : []),
       action("new-folder", "Add a copy to a project…", () => vscode.postMessage({ type: "toProject", file })),
+      pinAction({ kind: "file", id: String(file.id || ""), title: String(file.name || "file"), sub: [TYPE_NAME[file.type] || "File", where(file)].filter(Boolean).join(" · "),
+        look: { type: String(file.type || "") }, ref: file.source === "project" ? { project_id: String(file.project_id || "") } : { chat_id: String(file.chat_id || "") } }),
       action("trash", "Delete from your Library", () => vscode.postMessage({ type: "remove", file })));
     item.append(preview(file), main, actions);
     return item;
@@ -303,6 +305,7 @@
     actions.append(
       action("play", "Open it beside you", () => vscode.postMessage({ type: "widgetOpen", widget: w })),
       action("comment-discussion", "Open the chat it's in", () => vscode.postMessage({ type: "widgetChat", widget: w })),
+      pinAction({ kind: "widget", id: String(w.id || ""), title: String(w.title || "Interactive"), sub: `Widget · in “${w.chat_title || "a chat"}”`, ref: { chat_id: String(w.chat_id || "") } }),
       action("trash", "Delete the widget", () => vscode.postMessage({ type: "widgetRemove", widget: w })));
     const box = el("span", "lib-preview");
     box.append(icon("play-circle"));
@@ -422,6 +425,8 @@
       wrap.append(exp);
       actions.append(wrap);
     }
+    actions.append(pinAction({ kind: "artifact", id: String(a.id || ""), title: String(a.title || A_KIND[a.type] || "Artifact"),
+      sub: [A_KIND[a.type] || a.type, `version ${Number(a.version) || 1}`].filter(Boolean).join(" · "), look: { type: String(a.type || "") }, ...(typeof a.file === "string" ? { ref: { file: a.file } } : {}) }));
     actions.append(action("trash", "Remove: it goes to DGC's trash, where it can be recovered", () => vscode.postMessage({ type: "artifactRemove", artifact: a })));
     const box = sheetIn(el("span", "lib-preview"), a.type, "", A_ICON[a.type] || "file");
     item.append(box, main, actions);
@@ -455,9 +460,31 @@
   });
   $("lib-more").addEventListener("click", () => more());
   window.DgcVideo?.host((message) => vscode.postMessage(message));
+  // ---- pin to the dock (the dock at the foot of DGC's side bar; src/dock.ts keeps what is pinned) ----
+  // A file, an artifact and a widget each have a pin beside their other actions: an outline until it is on the dock,
+  // then filled, and it stays; a click pins or unpins.
+  let docked = new Set();
+  const PIN = (on) => `<svg viewBox="0 0 16 16" width="16" height="16" fill="${on ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="M10.2 1.8l4 4-2.2.9-2.4 2.4.3 3.1-1.1 1.1-2.6-2.6L2.8 14l-.8-.8 3.3-3.4-2.6-2.6 1.1-1.1 3.1.3 2.4-2.4z"/></svg>`;
+  function paintPin(button) {
+    const on = docked.has(button.dataset.pin), label = on ? "Unpin from the dock" : "Pin to the dock";
+    button.setAttribute("aria-pressed", String(on)); button.title = label; button.setAttribute("aria-label", `${label}: ${button.dataset.pinTitle || ""}`);
+    button.innerHTML = PIN(on);
+  }
+  function pinAction(item) {
+    const button = el("button", "lib-action lib-pin");
+    button.type = "button"; button.dataset.pin = `${item.kind}:${item.id}`; button.dataset.pinTitle = item.title;
+    button.addEventListener("click", () => vscode.postMessage({ type: "dockToggle", item }));
+    paintPin(button);
+    return button;
+  }
   window.addEventListener("message", (event) => {
     const msg = event.data;
     if (!msg || typeof msg !== "object") return;
+    if (msg.type === "dock") {
+      docked = new Set((Array.isArray(msg.pins) ? msg.pins : []).map((pin) => pin?.key).filter((key) => typeof key === "string"));
+      for (const button of document.querySelectorAll(".lib-pin[data-pin]")) paintPin(button);
+      return;
+    }
     if (window.DgcVideo?.message(msg)) return;
     if (msg.type === "videosOffered") {
       const was = state.videos.offered;

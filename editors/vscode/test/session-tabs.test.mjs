@@ -223,8 +223,9 @@ const drawn = (uri) => {
 };
 const svg = (name) => readFileSync(join(root, "media", name), "utf8");
 
-test("a tab's icon carries its own SVG, so a reload draws it before the tab is revived, and after an update", async () => {
-  const { tabs, made } = windowWith();
+test("a tab's icon carries its own picture, so a reload draws it before the tab is revived, and after an update: a new session DGC's mark, a saved one its blob", async () => {
+  const { tabs, made, ctx } = windowWith();
+  const kept = new Map(); ctx.globalState = { get: (key) => kept.get(key), async update(key, value) { kept.set(key, value); } };
   tabs.open("");
   const fresh = world.panels[0];
   assert.equal(drawn(fresh.iconPath.light), svg("dgc-tab-light.svg"), "the light mark itself, not a link to it");
@@ -234,9 +235,22 @@ test("a tab's icon carries its own SVG, so a reload draws it before the tab is r
   behind.visible = false; behind.active = false;
   await tabs.deserializeWebviewPanel(behind, { chatTab: { key: "0123456789abcdef", session: "20261006-101500-a1" } });
   assert.equal(made.at(-1).sessionId(), "20261006-101500-a1");
-  assert.equal(drawn(behind.iconPath.light), svg("dgc-tab-light.svg"));
-  assert.equal(drawn(behind.iconPath.dark), svg("dgc-tab-dark.svg"));
-  assert.notEqual(behind.iconPath, fresh.iconPath, "a pair of its own: VS Code sends an icon only when the object changes");
+  // A saved session's tab wears its blob (0.52, src/dock.ts): one still PNG, round, in the colour its id gets, inside
+  // the URI as the marks are, so nothing is fetched for it either.
+  const blob = String(behind.iconPath);
+  assert.match(blob, /^data:image\/png;base64,[A-Za-z0-9+/=]{200,}$/, "its blob, as a PNG inside the URI");
+  assert.equal(behind.iconPath.light, undefined, "one picture for both themes: a blob is its own colours");
+  assert.doesNotMatch(blob, /media|file:/, "nothing names the extension's folder");
+  assert.notEqual(behind.iconPath, fresh.iconPath);
+  assert.equal(drawn(fresh.iconPath.light), svg("dgc-tab-light.svg"), "a new session with nothing saved keeps DGC's mark");
+  // Its colour changed (from a list, the dock or its own header): the tab's icon follows, and goes back with it.
+  kept.set("dgc.sessionColours", { "work:20261006-101500-a1": 1 });
+  tabs.changed();
+  const picked = String(behind.iconPath);
+  assert.match(picked, /^data:image\/png;base64,/); assert.notEqual(picked, blob, "the chosen colour's blob");
+  kept.set("dgc.sessionColours", {});
+  tabs.changed();
+  assert.equal(String(behind.iconPath), blob, "Back to its own colour");
   // A second copy of the same session closes before it is given anything (setting a disposed panel's icon throws).
   const twin = fakePanel("dgc.chatEditor", "copy");
   await tabs.deserializeWebviewPanel(twin, { chatTab: { key: "fedcba9876543210", session: "20261006-101500-a1" } });

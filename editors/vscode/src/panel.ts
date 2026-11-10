@@ -33,6 +33,7 @@ import { PLUGIN_ID, pluginLogoData, pluginLogoSource, type PluginLogoItem } from
 import { pipsAttention, PipsAttentionState } from "./pipsAttention";
 import { settingsDocument } from "./settingsView";
 import { onPicturesSetting, pictureFoldsMessage, rememberPictureFold, setPicturesInReplies, picturesFolded } from "./pictureFolds";
+import { blobIcon, dockOf, dockSettings, setDockSetting } from "./dock";
 import { pipHomeCollapsedAttr, pipHomeDismissedAttr, rememberPipHomeCollapsed, rememberPipHomeDismissed, rememberSessionsHomeCollapsed, sessionsHomeCollapsedAttr } from "./pipHomeDismiss";
 import { addProfile, adoptWorkingRoute, defaultProfileId, firstTakesDefault, keepWorkingRoute, hasRunnableProfile, listProfiles, markDefaultProfile, profileCredential, removeProfile, startingModel } from "./providerProfiles.js";
 
@@ -536,6 +537,8 @@ export interface ChatPlaces {
   open(session: string, title?: string, options?: { cwd?: string }): DgcViewProvider;
   /** The sessions open in tabs. */
   openSessions(): Set<string>;
+  /** The sessions whose tab is running a turn now. */
+  workingSessions?(): Set<string>;
   /** A tab's session changed, or a tab opened or closed. */
   changed(): void;
 }
@@ -755,7 +758,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   // user action (the backend stops it and runs the action), so panel-side "wait for the turn"
   // guards let actions through, and it never raises a walk-away notification.
   private monitorTurnActive = false;
-  private confirmedTurnActive = false;
+  // A turn the backend confirmed is running. In a session's tab, a change is told to the side bar, whose dock marks a
+  // pinned session that is running (the list is asked for again, as it is when a tab opens or closes).
+  private turnConfirmed = false;
+  private get confirmedTurnActive(): boolean { return this.turnConfirmed; }
+  private set confirmedTurnActive(value: boolean) {
+    if (value === this.turnConfirmed) { return; }
+    this.turnConfirmed = value;
+    try { this.tab?.places.changed(); } catch { /* a tab on its way out */ }
+  }
+  /** Is this chat's turn running now? */
+  isWorking(): boolean { return this.turnConfirmed; }
   // The running turn as its turn_start (or handoff_started) described it, so a webview reloaded
   // mid-turn can be told a turn is running: its Stop, its clock and the turn a history snapshot
   // leaves open. Meaningful only while confirmedTurnActive.
@@ -918,6 +931,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.adoptQueuedPromptsFromPreviousHost();
     // Settings -> General -> Pictures in replies: this page's pictures nobody folded or opened follow it at once.
     this.context.subscriptions.push(onPicturesSetting((message) => this.post(message)));
+    // The dock and every session's colour: this page follows a pin, a move, a colour or a Dock setting at once.
+    this.context.subscriptions.push(dockOf(this.context).onChange(() => {
+      if (this.webviewReady) this.post(dockOf(this.context).state());
+      if (!this.tab) this.pipsTab?.dockChanged();
+    }));
     if (tab) { return; }
     mcpAppsHost(this.context.extensionUri).logoOf = (plugin) => this.replyPluginLogo(plugin);
     // The saved default is the whole profile's: another window may have changed it while this one was in the background.
@@ -1384,6 +1402,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       (this.liveSessionsTimer as any).unref?.();
     }
     const open = this.places?.openSessions() ?? new Set<string>();
+    const working = this.places?.workingSessions?.() ?? new Set<string>();
     const paging = this.lastReadyEvent?.capabilities?.session_paging === true;
     // One more than shown was asked for: its presence is what says there are more.
     const shown = paging ? this.sessionsShown : 500;
@@ -1392,6 +1411,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const id = path.basename(String(item?.path || "")).replace(/\.json$/i, "");
       return { id, path: String(item?.path || ""), name: String(item?.name || ""), preview: String(item?.preview || ""),
                when: String(item?.when || ""), count: Number(item?.count) || 0, open: open.has(id),
+               ...(working.has(id) ? { running: true } : {}),          // its tab is mid-turn: the dock's running dot
                ...(windowless.has(id) && !open.has(id) ? { windowless: windowless.get(id) || "working" } : {}),
                // TODO(0.52 home): `waiting: true` for a session whose tab has a card waiting for your okay. The home
                // already draws it ("wants your okay" where the age is, listed first), but no tab reports its open cards
@@ -1403,6 +1423,23 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private openSessionInEditor(id: string, title: string): void {
     if (!this.places || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) { return; }
     this.places.open(id, title);
+  }
+
+  /** A click on something pinned to the dock: a session or a chat in its tab, an artifact, a file or a widget where
+   *  the Library opens it. (A Pip opens in the page itself.) */
+  private openFromDock(key: string): void {
+    if (!this.home) { return; }
+    const pin = dockOf(this.context).pins().find((item) => item.key === key);
+    if (!pin) { return; }
+    if (pin.kind === "work") { this.openSessionInEditor(pin.id, pin.title); return; }
+    void this.chatdgc?.openFromDock(pin);
+  }
+  /** The dock's "+": each starts its new thing at once. */
+  private newFromDock(what: string): void {
+    if (!this.home) { return; }
+    if (what === "work") { this.places?.open(""); }
+    else if (what === "chat") { void this.chatdgc?.homeMessage({ type: "chatdgcNew" }); }
+    else if (what === "settings") { this.openSettings("general"); }
   }
 
   private async deleteSessionFromHome(id: string, title: string): Promise<void> {
@@ -1421,6 +1458,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if ((response as any).deleted === false) {
         void vscode.window.showWarningMessage("DGC could not delete that session. It may be running a turn in another DGC.");
       }
+      // A deleted session leaves the dock, and its colour goes with it.
+      else { void dockOf(this.context).forget("work", id); }
       this.sessionsRequest++;
       this.postSessionItems(Array.isArray(response.items) ? response.items : []);
     } catch (err: any) {
@@ -5290,6 +5329,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     // A reply's pictures folded or opened (media/pictureFold.js): kept, so it holds after a reload and a reopen.
     if (rememberPictureFold(this.context, msg)) return;
+    // The dock (src/dock.ts): a pin, an unpin, a move, a session's colour. Kept for this computer.
+    if (dockOf(this.context).handle(msg, (state) => this.post(state))) return;
+    if (msg?.type === "dockOpen") { this.openFromDock(String(msg.key || "")); return; }
+    if (msg?.type === "dockNew") { this.newFromDock(String(msg.what || "")); return; }
     // The home's Pips row: unread its Dismiss all cleared from there, kept so a reload holds it (src/pipHomeDismiss.ts).
     if (rememberPipHomeDismissed(this.context, msg)) return;
     // The home's Pips block folded or opened with its chevron: kept for this computer, so a reload holds it.
@@ -5365,6 +5408,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.cancelAutoModePrompt();
         this.webviewReady = true;
         this.post(pictureFoldsMessage(this.context));     // which pictures stay folded, and the setting
+        this.post(dockOf(this.context).state());          // what is pinned, each session's colour, and the Dock settings
         // The home's chats, asked for now its page can hear the answer (one that came before was dropped).
         if (this.home) this.chatdgc?.homeRefresh();
         // A reloaded page: a recording its boxes started went with the page that showed it.
@@ -8070,6 +8114,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.pipsTab.videoStop = (job) => this.videosStop(job);
       this.pipsTab.videoFollow = (job) => this.videosJobs(job);
       this.pipsTab.useFolds((message) => rememberPictureFold(this.context, message), () => pictureFoldsMessage(this.context));
+      this.pipsTab.useDock((message, reply) => dockOf(this.context).handle(message, reply), () => dockOf(this.context).state());
       this.context.subscriptions.push(onPicturesSetting((message) => this.pipsTab?.picturesSetting(message)));
       this.pipsTab.useNewsDismissed((pipIds, until) => {
         for (const tab of this.tabProviders) tab.post({ type: "pipReportsHidden", pipIds, until });
@@ -8335,6 +8380,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.settingsBrowse = undefined;
     // Settings -> General -> Pictures in replies: the editor's own setting, shown as it is now.
     this.settingsEditor?.webview.postMessage({ type: "picturesInReplies", value: picturesFolded() ? "folded" : "shown" });
+    // Settings -> General -> Dock: the editor's own three, shown as they are now.
+    this.settingsEditor?.webview.postMessage({ type: "dockSettings", ...dockSettings() });
     this.refreshEditorSettings();
   }
 
@@ -8548,6 +8595,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // Applies at once, in every window: each chat's pictures nobody folded or opened follow it (src/pictureFolds.ts).
       await setPicturesInReplies(msg.value);
       this.settingsEditor?.webview.postMessage({ type: "picturesInReplies", value: picturesFolded() ? "folded" : "shown" });
+    } else if (msg?.type === "dockSetting") {
+      // Applies at once, in every window: each side bar's dock follows it (src/dock.ts).
+      await setDockSetting(msg);
+      this.settingsEditor?.webview.postMessage({ type: "dockSettings", ...dockSettings() });
     } else if (msg?.type === "saveSettings") {
       await this.saveSettings(msg.values || {}, String(msg.section || ""));
     } else if (msg?.type === "addProviderProfile") {
@@ -9761,6 +9812,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const cardJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "card.js"));
     // The small sheet of its kind on an output card and a Library row (media/shared/filesheet.js, window.DgcFileSheet).
     const sheetJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "filesheet.js"));
+    // A session's liquid blob and its colours (media/shared/blob.js, window.DgcBlob), and the dock at the foot of the
+    // side bar (media/shared/dock.js, window.DgcDock).
+    const blobJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "blob.js"));
+    const dockJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "dock.js"));
     const queueJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "messagequeue.js"));
     const genuiCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "genui.css"));
     const js = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.js"));
@@ -10080,6 +10135,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${composerJs}"></script><script nonce="${nonce}" src="${trayJs}"></script>
 <script nonce="${nonce}" src="${cardJs}"></script>
 <script nonce="${nonce}" src="${sheetJs}"></script>
+<script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script>
 <script nonce="${nonce}" src="${mcpAppsJs}"></script>
 <script nonce="${nonce}" src="${markdown}"></script>
 <script nonce="${nonce}" src="${breakdownScript}"></script>

@@ -111,6 +111,7 @@ export function mountPips(options) {
     addEventListener(type,fn){const target=type==='visibilitychange'?nativeDocument:root;target.addEventListener(type,fn);disposers.push(()=>target.removeEventListener(type,fn));}
   };
 const vscode = {postMessage:options.postMessage};
+let dockPins=new Set(),dockKnown=false;   // what is pinned to the dock, once the host has said (a host with no dock never does)
 // A reply's pictures fold away (media/pictureFold.js, through pipsTranscript.js): drawn in this page's root (a shadow
 // root in the side bar), and a choice goes to the host, which keeps it.
 globalThis.DgcPictureFold?.root(root);
@@ -2110,7 +2111,16 @@ function jobSettingsMarkup(){
    +`<details class="advanced section" data-details="advanced"><summary>Advanced</summary><p class="muted">Most Pips never need these.</p>${notifyMarkup()}${adaptationMarkup()}${personalPip()?'':projectSourceMarkup()}${shareMarkup()}</details>`;
 }
 function chooseType(id){const type=S.types.find(t=>t.id===id);if(!S.create||!type?.available||S.busy||!usable())return;rememberCreationDraft();S.createType=id;Object.assign(draft,creationDrafts.get(id)||{name:type.default_name,goal:type.default_goal,source_ref:'HEAD',createModel:'default'});S.createStep='configure';S.error='';render();$('name')?.focus();}
-function jobMarkup(p) {
+// A Pip's pin, at its row's corner: an outline until it is on the dock, then filled, and it stays. (Beside its row, not
+// inside it: a row is a button, and a button can't hold a button.)
+const PIN_PATH='M10.2 1.8l4 4-2.2.9-2.4 2.4.3 3.1-1.1 1.1-2.6-2.6L2.8 14l-.8-.8 3.3-3.4-2.6-2.6 1.1-1.1 3.1.3 2.4-2.4z';
+function jobPin(p){
+  if(!dockKnown||remoteHost||p.status==='archived')return '';
+  const on=dockPins.has(`pip:${p.id}`),label=on?'Unpin from the dock':'Pin to the dock';
+  return `<button type="button" class="dgc-pin job-pin" data-pin-pip="${esc(p.id)}" aria-pressed="${on}" title="${label}" aria-label="${label}: ${esc(p.name)}"><svg viewBox="0 0 16 16" fill="${on?'currentColor':'none'}" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="${PIN_PATH}"/></svg></button>`;
+}
+function jobMarkup(p){return `<div class="job-slot">${jobRow(p)}${jobPin(p)}</div>`;}
+function jobRow(p) {
   const type=pipType(p,S.types),pose=presentation(p,[],usable(),S.runner),reviews=pendingReviews(p);
   return `<button type="button" class="job" data-character="${esc(type?.id||'core')}" data-state="${esc(pose.state)}" data-job="${esc(p.id)}" title="${esc(p.name)} · ${esc(pose.label)}" aria-label="${esc(p.name)} · ${esc(pose.label)}" aria-current="${S.selected===p.id&&!S.create}">${pipAvatar(p,pose.state,`row-${p.id}`,type)}<span class="job-copy"><strong>${esc(p.name)}</strong><span class="job-role">${type?`${esc(type.name)} · ${personalPip(p)?(p.pip_type==='core'?'Your Primary Pip, in the main chat’s character':'Personal helper'):livePip(p)&&S.apiVersion>=60?'Live data':esc(type.role)}`:'Unsupported Pip type'}</span><span class="job-goal">${esc(p.goal||type?.description||'')}</span><small class="job-status"><i aria-hidden="true"></i>${esc(pose.label)}</small>${p.routine_health?healthMarkup(p.routine_health,{row:true}):`<span class="job-schedule">${esc(scheduleLabel(p.schedule))}</span>`}${reviews?`<span class="review-count">${reviews} waiting for you</span>`:''}</span></button>`;
 }
@@ -3267,7 +3277,7 @@ function simpleHomeList(all,live){
   const label=`Mark ${p.name}'s ${unread.count} new message${unread.count===1?'':'s'} as read`,dot=pose.state==='working'||pose.state==='waiting_approval'&&!waiting;
   return `<div class="pip-row-item${dot?' pip-row-dot':''}">${button}<span class="pip-row-marks pip-row-marks-live${count?' pip-row-both':''}"><button type="button" class="pip-row-read" id="pip-read-${esc(p.id)}" data-pip-read="${esc(p.id)}" aria-label="${esc(label)}" title="Mark as read, without opening its chat"><span class="pip-new-dot" aria-hidden="true"></span><span class="pip-read-word">Read</span></button>${count}</span></div>`;};
  const project=projectHome();
- return `<section class="simple-home" aria-label="Your Pips"><div class="simple-home-head"><h2>Your Pips</h2><span class="simple-home-actions">${project?projectHomeMenu():S.apiVersion>=43&&!remoteHost?`<button type="button" id="pips-settings-open" class="topbar-icon" aria-label="Pips settings" title="Pips settings: computers, apps and plugins"${!usable()?' disabled':''}>${simpleIcon('gear')}</button>`:''}${button('simple-new','New Pip',S.busy||!usable(),'primary pill')}</span></div>${pipsPaged()?`<div class="pip-search"><label class="sr-only" for="pip-search">Search your Pips</label><input id="pip-search" type="search" placeholder="Search your Pips" autocomplete="off" value="${esc(draft.pipSearch||'')}" maxlength="120">${S.jobsTotal!==null&&(S.jobsTotal>S.jobs.length||S.pipSearch)?`<small class="pip-search-count">${S.pipSearch?`${S.jobsTotal.toLocaleString('en-US')} found`:`Showing ${S.jobs.length.toLocaleString('en-US')} of ${S.jobsTotal.toLocaleString('en-US')}`}</small>`:''}</div>`:''}${project?(S.jobs.length||S.pipSearch?'':projectFirstMarkup()):live.some(p=>p.pip_type==='core')||S.pipSearch?'':`<div class="core-offer">${avatar('idle',characterType('core'),'core-offer')}<p><strong>Meet Core</strong><span>Your Primary Pip, for everyday tasks.</span></p>${button('create-core','Create',S.busy||!usable(),'primary pill')}</div>`}<div class="pip-rows">${order.map(row).join('')}</div>${S.pipSearch&&!S.jobs.length?`<p class="muted">No Pip matches “${esc(S.pipSearch)}” in its name, instructions or chat.</p>`:''}${pipsPaged()&&S.jobsNext!==null?button('pips-more',jobsMoreBusy?'Loading…':'Load more',jobsMoreBusy||!usable(),'link'):''}${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived':'Show archived',false,'link'):''}</section>`;
+ return `<section class="simple-home" aria-label="Your Pips"><div class="simple-home-head"><h2>Your Pips</h2><span class="simple-home-actions">${project?projectHomeMenu():S.apiVersion>=43&&!remoteHost?`<button type="button" id="pips-settings-open" class="topbar-icon" aria-label="Pips settings" title="Pips settings: computers, apps and plugins"${!usable()?' disabled':''}>${simpleIcon('gear')}</button>`:''}${button('simple-new','New Pip',S.busy||!usable(),'primary pill')}</span></div>${pipsPaged()?`<div class="pip-search"><label class="sr-only" for="pip-search">Search your Pips</label><input id="pip-search" type="search" placeholder="Search your Pips" autocomplete="off" value="${esc(draft.pipSearch||'')}" maxlength="120">${S.jobsTotal!==null&&(S.jobsTotal>S.jobs.length||S.pipSearch)?`<small class="pip-search-count">${S.pipSearch?`${S.jobsTotal.toLocaleString('en-US')} found`:`Showing ${S.jobs.length.toLocaleString('en-US')} of ${S.jobsTotal.toLocaleString('en-US')}`}</small>`:''}</div>`:''}${project?(S.jobs.length||S.pipSearch?'':projectFirstMarkup()):live.some(p=>p.pip_type==='core')||S.pipSearch?'':`<div class="core-offer">${avatar('idle',characterType('core'),'core-offer')}<p><strong>Meet Core</strong><span>Your Primary Pip, for everyday tasks.</span></p>${button('create-core','Create',S.busy||!usable(),'primary pill')}</div>`}<div class="pip-rows">${order.map(p=>{const pin=jobPin(p);return pin?`<div class="pip-row-slot${dockPins.has(`pip:${p.id}`)?' is-pinned':''}">${row(p)}${pin}</div>`:row(p);}).join('')}</div>${S.pipSearch&&!S.jobs.length?`<p class="muted">No Pip matches “${esc(S.pipSearch)}” in its name, instructions or chat.</p>`:''}${pipsPaged()&&S.jobsNext!==null?button('pips-more',jobsMoreBusy?'Loading…':'Load more',jobsMoreBusy||!usable(),'link'):''}${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived':'Show archived',false,'link'):''}</section>`;
 }
 // A Personal Pip's character is only its face and its name (its job is what you tell it): its big face, and a list of
 // the names, each with its small face.
@@ -4279,6 +4289,14 @@ async function initialize() {
 async function navigateFromHost(value) {
   if(!record(value))return;
   if(value.overview===true){if(S.selected)chatDrafts.set(S.selected,draft.chatText);S.overview=true;S.tab='chat';rememberView();render();return;}
+  // The dock's "+" > New Personal Pip: Your Pips, with New Pip open on a name and a character.
+  if(value.create==='personal'){
+   const personal=personalSpace();
+   if(personal&&S.workspace?.id!==personal.id)await enterWorkspace(personal);
+   if(S.selected)chatDrafts.set(S.selected,draft.chatText);S.projectEmpty=false;S.overview=true;S.tab='chat';rememberView();render();
+   if(!projectHome())openNewPip();
+   return;
+  }
   S.projectEmpty=false;   // whatever it opens is shown under its own tab
   if(value.attention===true||typeof value.setup==='string'){await navigateAttention(value);return;}
   if(['context','notifications'].includes(value.section)&&!value.pip){clearSelection();S.selected='';S.tab=value.section;S.overview=false;rememberView();render();if(S.tab==='notifications'){await loadNotifications();return;}if(S.apiVersion>=12){void loadOutcomeSessions();void loadOutcomes();if(value.reviewKind==='session_outcome'&&typeof value.review==='string'&&value.review)await openOutcome(value.review);}return;}
@@ -4595,6 +4613,12 @@ document.addEventListener('pointerover',event=>{
  if(!event.target.closest?.('aside'))shell.classList.remove('sidebar-dismissed');
 });
 document.addEventListener('click',event=>{
+  const pinned=event.target.closest?.('[data-pin-pip]');
+  if(pinned){
+   const p=(S.jobs||[]).find(job=>job.id===pinned.dataset.pinPip);
+   if(p)vscode.postMessage({type:'dockToggle',item:{kind:'pip',id:p.id,title:p.name,scope:personalPip(p)?'':'project',look:{body:(personalPip(p)&&profile(p.profile).body)||p.pip_type,ws:p.workspace_id||''}}});
+   return;
+  }
   if(picker.click(event))return;
   if(DgcCard.click(event.target))return;   // a card's Details opens in place
   if(S.composerPanel&&!event.target.closest?.('.composer-model-menu,.pip-routines-popover,.composer-add-menu,.composer-level-menu,#chat-model,#chat-context-toggle,#chat-routines,#chat-attach,#chat-level')){S.composerPanel='';render();}
@@ -5165,6 +5189,12 @@ document.addEventListener('keydown',event=>{
 });
 const stopMessages=options.onMessage(message=>{
   if(disposed||!record(message))return;
+  // What is pinned to the dock (src/dock.ts): each Pip's row shows its pin filled or not.
+  if(message.type==='dock'){
+   const keys=Array.isArray(message.pinned)?message.pinned:Array.isArray(message.pins)?message.pins.map(pin=>pin?.key):[];
+   const next=new Set(keys.filter(key=>typeof key==='string')),same=next.size===dockPins.size&&[...next].every(key=>dockPins.has(key));
+   dockPins=next;dockKnown=true;if(!same&&S.overview&&!S.review)render();return;
+  }
   if(window.DgcVideo?.message(message))return;     // a reply video's bytes or state (src/videoHost.ts)
   if((message.type==='voiceReady'||message.type==='mic'||message.type==='micLevels')&&message.from==='pips'&&voiceMode?.receive(message))return;
   if(message.type==='micLevels'&&message.from==='pips'){voiceBar?.push(message.levels);return;}

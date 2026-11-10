@@ -186,12 +186,15 @@ test("opening an unread Pip from home keeps its composer at the bottom of the ed
       const composer = root.querySelector(".pip-composer");
       const log = root.querySelector(".conversation-log");
       const box = element => { const r = element.getBoundingClientRect(); return {top:r.top,bottom:r.bottom,height:r.height}; };
-      return {viewport:innerHeight,host:box(host),root:box(root),app:box(app),composer:box(composer),logScroll:log.scrollTop};
+      // The dock (0.52) has its own room at the foot of the side bar, under every screen: the page ends where it begins.
+      const dock = document.getElementById("dgc-dock"), foot = dock && dock.checkVisibility() && getComputedStyle(dock).position !== "fixed" ? dock.getBoundingClientRect().height : 0;
+      return {viewport:innerHeight,host:box(host),root:box(root),app:box(app),composer:box(composer),logScroll:log.scrollTop,foot};
     });
     assert.ok(geometry.logScroll > 0, `the notification should reveal the card inside the transcript: ${JSON.stringify(geometry)}`);
     assert.ok(geometry.host.top >= 0, `the Pip view must not scroll above DGC's header: ${JSON.stringify(geometry)}`);
     assert.ok(geometry.host.bottom - geometry.composer.bottom <= 28, JSON.stringify(geometry));
-    assert.ok(geometry.viewport - geometry.composer.bottom <= 28, `the composer must stay at the editor bottom: ${JSON.stringify(geometry)}`);
+    assert.ok(geometry.viewport - geometry.foot - geometry.composer.bottom <= 28, `the composer must stay at the editor bottom, just above the dock: ${JSON.stringify(geometry)}`);
+    assert.ok(Math.abs(geometry.viewport - geometry.foot - geometry.host.bottom) < 1, `the Pip view ends where the dock begins: ${JSON.stringify(geometry)}`);
     if (process.env.DGC_PIP_LAYOUT_SHOT) await x.page.screenshot({ path: process.env.DGC_PIP_LAYOUT_SHOT });
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }

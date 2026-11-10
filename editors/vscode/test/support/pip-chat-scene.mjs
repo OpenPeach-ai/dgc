@@ -46,7 +46,8 @@ export const THEMES = {
     opts: project (a Project Pip's chat), hold (what its computer holds for your okay), running (a turn in flight),
     doing (what the running turn says it is doing), fixing (DGC is fixing what a Project Pip's post found),
     empty (no messages yet), api. */
-const host = (opts) => `(${function (PIP, opts) {
+/** The stub host's script: it answers a Pip's page from `opts`. (dock-scene.mjs gives it to the side bar's real page too.) */
+export const host = (opts) => `(${function (PIP, opts) {
   const W = "ws_" + "e".repeat(32), run = (c) => "run_" + c.repeat(32);
   const types = ["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"].map((id, character_index) => ({ id, character_index, name: id[0].toUpperCase() + id.slice(1), role: id,
     description: "Reads the committed code and says what it finds.", available: true, unavailable_reason: null, default_name: id, default_goal: "Help",

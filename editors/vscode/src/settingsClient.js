@@ -447,6 +447,13 @@ function render() {
     // Pictures in replies is the editor's own setting (dgc.picturesInReplies): it applies at once, apart from Save all.
     const pictures = $('pictures_in_replies');
     if (pictures) pictures.onchange = () => { draft.pictures_in_replies = pictures.value; send({ type: 'picturesInReplies', value: pictures.value }); };
+    // The dock's three are the editor's own settings too (dgc.dock.*): each applies at once, in every window.
+    const dockShow = $('dock_show'), dockMost = $('dock_most'), dockSize = $('dock_size');
+    if (dockShow) dockShow.onchange = () => { draft.dock_show = dockShow.value; send({ type: 'dockSetting', name: 'show', value: dockShow.value }); };
+    const dockNumber = (input, name, low, high) => { if (input) input.onchange = () => {
+        const n = Math.max(low, Math.min(high, Math.round(Number(input.value)) || low));
+        input.value = String(n); draft[`dock_${name}`] = n; send({ type: 'dockSetting', name, value: n }); }; };
+    dockNumber(dockMost, 'most', 1, 16); dockNumber(dockSize, 'size', 24, 48);
     if (section === 'models') routerShownOn = router.on();
     if (draft.models_at) modelBoxes.bind(main);
     const save = $('save');
@@ -1376,6 +1383,14 @@ window.addEventListener('message', event => {
         draft.pictures_in_replies = msg.value === 'folded' ? 'folded' : 'shown';
         const select = $('pictures_in_replies');
         if (select && select.value !== draft.pictures_in_replies) select.value = draft.pictures_in_replies;
+    }
+    else if (msg.type === 'dockSettings') {
+        draft.dock_show = ['hover', 'never'].includes(msg.show) ? msg.show : 'always';
+        draft.dock_most = Number(msg.most) || 8; draft.dock_size = Number(msg.size) || 34;
+        for (const [id, value] of [['dock_show', draft.dock_show], ['dock_most', draft.dock_most], ['dock_size', draft.dock_size]]) {
+            const field = $(id);
+            if (field && field.value !== String(value) && document.activeElement !== field) field.value = String(value);
+        }
     }
     else if (msg.type === 'providers') {
         providers = msg.providers || [];

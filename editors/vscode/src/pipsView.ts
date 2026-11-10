@@ -107,6 +107,10 @@ export class PipsEditor implements vscode.Disposable {
    *  what was kept, with the setting, given to the page as it opens. */
   private folds?: { remember: (message: any) => boolean; initial: () => any };
   useFolds(remember: (message: any) => boolean, initial: () => any): void { this.folds = { remember, initial }; }
+  /** The dock (src/dock.ts): a Pip's pin on its row. The page is told what is pinned as it opens and whenever it changes. */
+  private dock?: { handle: (message: any, reply: (state: any) => void) => boolean; state: () => any };
+  useDock(handle: (message: any, reply: (state: any) => void) => boolean, state: () => any): void { this.dock = { handle, state }; }
+  dockChanged(): void { if (this.dock) this.post(this.dock.state()); }
   /** Settings changed Pictures in replies: the page follows it. */
   picturesSetting(message: any): void { this.post(message); }
   private newsDismissed?: (pipIds: string[], until: string) => void;
@@ -599,8 +603,10 @@ export class PipsEditor implements vscode.Disposable {
       return;
     }
     if (!computer && this.folds?.remember(message)) return;
+    if (!computer && this.dock?.handle(message, (state) => this.post(state))) return;
     if (message?.type === 'pipsReady') {
       if (!computer && this.folds) this.post(this.folds.initial());
+      if (!computer && this.dock) this.post(this.dock.state());
       if (computer) { this.post({ type: 'pipComputerInit', pip: computer.pip, desktop: this.desktopStream }, surface); this.post({ type: 'pipsConnection', generation: this.generation, apiVersion: this.apiVersion, backgroundSetup:this.backgroundSetup, ...this.state }, surface); }
       else {
         this.publish();

@@ -5,6 +5,8 @@
 @import url("./shared/doccard.css");
 @import url("./shared/filesheet.css");
 @import url("./shared/tray.css");
+@import url("./shared/blob.css");
+@import url("./shared/dock.css");
 @import url("./pips/wordmark.css");
 /* DGC panel — Codex's quiet editor hierarchy with a restrained DGC accent. */
 * { box-sizing: border-box; }
@@ -82,13 +84,15 @@ body {
 #phead .pips-back { display:inline-flex; align-items:center; gap:4px; border:0; background:transparent; color:var(--muted); padding:4px 6px 4px 0; font-size:var(--t-sm); cursor:pointer; }
 #phead .pips-back:hover { color:var(--text); }
 #pips-host { display:flex; flex:1 1 auto; min-height:0; min-width:0; overflow:hidden; width:100%; }
-body.pips-active > :not(#phead):not(#pips-host):not(#announcer):not(.dgc-trace-backdrop):not(script) { display:none !important; }
+/* Under the Pips view the dock stands on the Pips' own ground, so the two read as one page. */
+body.pips-active #dgc-dock[data-show="always"] { background:var(--surface); }
+body.pips-active > :not(#phead):not(#pips-host):not(#announcer):not(.dgc-trace-backdrop):not(#dgc-dock):not(.dgc-pop):not(script) { display:none !important; }
 body.pips-active #phead :is(.thread-title,.pd,.chat-add,.agent-back,.agent-mark) { display:none !important; }
 body.pips-active #phead .pm { display:inline-flex; flex:1; }
 /* ---- #3 Sessions home ------------------------------------------------------------------------- */
 /* The side bar opens on this project's sessions; each opens in an editor tab. Laid over the chat the
    way the Pips are: everything but the header, the list, the announcer and the hover label hides. */
-body.sessions-active > :not(#phead):not(#sessions-host):not(#announcer):not(#hover-tip):not(script) { display:none !important; }
+body.sessions-active > :not(#phead):not(#sessions-host):not(#announcer):not(#hover-tip):not(#dgc-dock):not(.dgc-pop):not(script) { display:none !important; }
 body.sessions-active #phead :is(.thread-title,.pd,.chat-add,.agent-back,.agent-mark) { display:none !important; }
 body.sessions-active #phead .pm { display:inline-flex; flex:1; }
 /* A session's own tab: its Pips stay in the side bar, and a chat in another folder is a side bar thing. */
@@ -154,18 +158,40 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 /* A session with a card waiting for you says so where its age was, in the tone of something that needs you. */
 #sessions-host .session-age.session-waiting { display:inline-flex; align-items:center; gap:4px; color:var(--need-text); }
 #sessions-host .session-age.session-waiting .codicon { font-size:12px; }
-#sessions-host .session-row:is(:hover, :focus-within) .session-age.session-waiting { display:none; }
+#sessions-host .session-row:is(:hover, :focus-within) .session-age.session-waiting { visibility:hidden; }
 #sessions-host .session-end { flex:none; display:inline-flex; align-items:center; gap:6px; }
 #sessions-host .session-age, #sessions-host .session-actions { flex:none; min-width:42px; justify-content:flex-end; }
 #sessions-host .session-age { display:inline-block; text-align:right; color:var(--muted); font:var(--w-reg) var(--t-xs)/1.4 var(--sans); font-variant-numeric:tabular-nums; white-space:nowrap; }
 #sessions-host .session-actions { display:none; align-items:center; gap:2px; }
-#sessions-host .session-row:is(:hover, :focus-within) .session-age { display:none; }
+/* The actions lie over the row's end (Open in Editor, the pin, "...", Delete: wider than an age), on the row's own ground
+   with a soft edge, so the title keeps its width and never moves. */
+#sessions-host .session-end { position:relative; }
+#sessions-host .session-row:is(:hover, :focus-within) .session-age { visibility:hidden; }
 #sessions-host .session-row:is(:hover, :focus-within) .session-actions { display:inline-flex; }
+#sessions-host .session-actions { position:absolute; right:0; top:50%; transform:translateY(-50%); padding-left:16px; background:var(--bg);
+  -webkit-mask-image:linear-gradient(to right, transparent, #000 14px); mask-image:linear-gradient(to right, transparent, #000 14px); }
+#sessions-host .session-row:hover .session-actions { background:linear-gradient(var(--row-hover), var(--row-hover)), var(--bg); }
+#sessions-host .sessions-popover .session-actions { background:var(--surface2); }
+#sessions-host .sessions-popover .session-row:hover .session-actions { background:linear-gradient(var(--row-hover), var(--row-hover)), var(--surface2); }
+/* Its "..." is open: the row keeps its actions while the menu has the pointer and the keyboard. */
+#sessions-host .session-row:has(.session-more[aria-expanded="true"]) .session-age { visibility:hidden; }
+#sessions-host .session-row:has(.session-more[aria-expanded="true"]) .session-actions { display:inline-flex; }
 #sessions-host .session-end .session-tab { display:inline-flex; align-items:center; }
 #sessions-host .session-end .session-tab::before { margin-right:0; }
 #sessions-host .session-tab-words { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 #sessions-host .session-open, #sessions-host .session-delete { flex:none; display:inline-flex; align-items:center; justify-content:center; width:var(--control-sm); height:var(--control-sm);
   padding:0; border:0; border-radius:var(--r-sm); background:transparent; color:var(--home-quiet); cursor:pointer; }
+/* "...": a session's or a chat's few more things (its pin, its colour). The same quiet square as Open and Delete. */
+#sessions-host .session-more { flex:none; display:inline-flex; align-items:center; justify-content:center; width:var(--control-sm); height:var(--control-sm);
+  padding:0; border:0; border-radius:var(--r-sm); background:transparent; color:var(--home-quiet); cursor:pointer; }
+#sessions-host .session-more:hover, #sessions-host .session-more[aria-expanded="true"] { color:var(--text-strong); background:var(--wash); }
+#sessions-host .session-more:focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:-1px; }
+/* A chat's row: its pin and "..." keep their room beside Delete and show while the row is pointed at or holds the
+   keyboard (a pinned chat's pin stays), so a row's words never move. */
+#sessions-host .chat-acts { flex:none; display:inline-flex; align-items:center; gap:2px; }
+#sessions-host .chat-acts :is(.dgc-pin, .session-more) { visibility:hidden; }
+#sessions-host .chat-row:is(:hover, :focus-within) .chat-acts :is(.dgc-pin, .session-more), #sessions-host .chat-acts .dgc-pin[aria-pressed="true"],
+#sessions-host .chat-acts .session-more[aria-expanded="true"] { visibility:visible; }
 #sessions-host .session-open:hover { color:var(--text-strong); background:var(--wash); }
 #sessions-host .session-delete:hover { color:var(--err-text); background:var(--wash); }
 #sessions-host :is(.session-open, .session-delete, .sessions-all):focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:-1px; }
@@ -332,6 +358,10 @@ body.vscode-light .project-icon[data-color="orange"] { color:#EA580C; }   /* #F9
    under it never shows through. */
 #sessions-host .home-pip-new-dot { display:block; width:8px; height:8px; border-radius:50%; background:var(--link, var(--accent-text)); }
 #sessions-host .home-pip-item .home-pip-dismiss { order:2; }
+/* A Pip's pin, with the row's other controls: seen while the row is pointed at or holds the keyboard, and always once pinned. */
+#sessions-host .home-pip-pin { order:2; width:22px; height:22px; opacity:0; transition:opacity var(--dur-hover) var(--ease-out), background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out); }
+#sessions-host .home-pip-item:is(:hover, :focus-within) .home-pip-pin, #sessions-host .home-pip-pin[aria-pressed="true"] { opacity:1; }
+@media (hover: none) { #sessions-host .home-pip-pin { opacity:1; } }
 #sessions-host .home-pip-read-word { display:none; position:absolute; z-index:1; top:50%; right:var(--sp-2); transform:translateY(-50%); box-sizing:border-box; width:36px; height:18px; padding:0; align-items:center; justify-content:center; border-radius:var(--r-full);
   background:linear-gradient(var(--accent-soft), var(--accent-soft)) var(--bg); color:var(--home-count-ink); font:var(--w-semi) var(--t-xs)/1 var(--sans); white-space:nowrap; }
 #sessions-host .home-pip-read:is(:hover, :focus-visible) .home-pip-new-dot { visibility:hidden; }

@@ -836,7 +836,7 @@ test("a reload brings each chat back in its tab, once", async () => {
   assert.equal(second.disposedCount, 1, "a second copy of the same chat closes");
 });
 
-test("a chat's tab revived after a reload gets the mark itself, even one behind another tab; a second copy gets nothing", async () => {
+test("a chat's tab revived after a reload gets its picture itself (its blob; a new chat ChatDGC's mark), even one behind another tab; a second copy gets nothing", async () => {
   const chat = installed();
   chat.register();
   const { serializer } = world.serializers.find((s) => s.viewType === CHATDGC_EDITOR);
@@ -844,8 +844,10 @@ test("a chat's tab revived after a reload gets the mark itself, even one behind 
   // that icon must need nothing fetched (a remote window's connection is not up yet; an update moved the folder).
   const behind = fakePanel(CHATDGC_EDITOR, "Trip");
   await serializer.deserializeWebviewPanel(behind, { conversation: ID(5) });
-  assert.deepEqual([drawn(behind.iconPath.light), drawn(behind.iconPath.dark)], [mark("light"), mark("dark")]);
-  assert.doesNotMatch(String(behind.iconPath.dark), /media|vibedgc|file:/, "nothing names the extension's folder");
+  // A chat's tab wears its blob (0.52, src/dock.ts): one still PNG, a rounded square, inside the URI as the mark is.
+  assert.match(String(behind.iconPath), /^data:image\/png;base64,[A-Za-z0-9+/=]{200,}$/, "its blob, as a PNG inside the URI");
+  assert.equal(behind.iconPath.light, undefined, "one picture for both themes");
+  assert.doesNotMatch(String(behind.iconPath), /media|vibedgc|file:/, "nothing names the extension's folder");
   const twin = fakePanel(CHATDGC_EDITOR, "Trip");
   await serializer.deserializeWebviewPanel(twin, { conversation: ID(5) });
   assert.equal(twin.disposedCount, 1, "one chat, one tab");
