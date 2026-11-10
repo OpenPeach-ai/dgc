@@ -154,8 +154,9 @@ def _instructions(about: str, style: str) -> str:
 
 def system_prompt(*, now: datetime | None = None, timezone_name: str = "", search: str = "off", about: str = "",
                   style: str = "", personality: str = "default", ask: bool = True, memory: str | None = None,
-                  study: bool = False, voice: bool = False, generative_ui: bool = False) -> str:
-    """``memory``: None when memory is off (or a temporary chat); otherwise what's remembered ("" for nothing yet)."""
+                  study: bool = False, voice: bool = False, generative_ui: bool = False, window: int = 0) -> str:
+    """``memory``: None when memory is off (or a temporary chat); otherwise what's remembered ("" for nothing yet).
+    ``window``: the context window this chat sends (window.window), said as its size only, never how full it is."""
     other = ("you don't see other chats; what you know about the user from them is your memory, below"
              if memory is not None else "remember other chats")
     moment = (now or datetime.now().astimezone())
@@ -191,5 +192,6 @@ def system_prompt(*, now: datetime | None = None, timezone_name: str = "", searc
         + (VOICE if voice else "")
         + _instructions(about, style)
         + (f"\n{memory}\n" if memory else "")
+        + (f"\nYour context window is {window:,} tokens (set in the chat's context meter)." if window else "")
         + f"\nIt is {when} for the user."
     )

@@ -3491,6 +3491,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             if chat_options is not None:
                 from .agent import THINK_INSTRUCTIONS
                 prompt += '\n' + THINK_INSTRUCTIONS[chat_options['thinking']]
+                # The window set in its prompt box, so "how much context do you have?" has a real answer; the size
+                # only, never how full it is (that would change every turn).
+                prompt += f"\nContext window: {int(chat_options['context_size']):,} tokens, set in your prompt box."
             if not self.client.tools_supported:
                 prompt += "\n\n" + self._text_protocol_section()
             return self._safe_text(prompt)

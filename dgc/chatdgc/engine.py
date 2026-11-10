@@ -1772,7 +1772,7 @@ class ChatEngine:
         now_local = datetime.now().astimezone()
         common = {"now": now_local, "timezone_name": str(config.get("timezone", "") or ""), "search": "off",
                   "ask": name not in self._toolless, "study": bool(chat.get("study")),
-                  "generative_ui": self.generative_ui_supported}
+                  "generative_ui": self.generative_ui_supported, "window": int(room or 0)}
         memory = self._remembered(chat)
         yours = system_prompt(**common, about=str(config.get("chatdgc_about", "") or ""), style=str(config.get("chatdgc_style", "") or ""),
                               personality=str(config.get("chatdgc_personality", "default") or "default"), memory=memory)
@@ -1828,7 +1828,7 @@ class ChatEngine:
             ask=str(chat.get("model") or getattr(config, "model", "") or "") not in self._toolless,
             memory=self._remembered(chat), study=bool(chat.get("study")),
             voice=bool((self._last_user(chat) or {}).get("voice")),
-            generative_ui=self.generative_ui_supported)
+            generative_ui=self.generative_ui_supported, window=int(room or 0))
         instructions += self._canvas_context(chat)
         instructions += self._card_context(chat)
         instructions += self._data_context(chat)

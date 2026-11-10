@@ -5085,6 +5085,9 @@ class Agent(GoalLifecycle):
             f"- Project root (cwd for all tools): {cfg.project_root}",
             *self._workspace_lines(),
             f"- Model: {cfg.model} @ {_prompt_endpoint(cfg.base_url)}",
+            # The window this chat sends, so "how much context do you have?" has a real answer. Only the size: it
+            # changes when the user changes it, while live usage would change every turn and break the cache.
+            f"- Context window: {self.context_size():,} tokens, set in your prompt box",
             "",
             "# How to work",
             "- Use tools to act. Never print code in chat as a substitute for writing it to a file.",
