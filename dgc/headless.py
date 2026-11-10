@@ -411,7 +411,10 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # API 77 (0.52, D6): in a turn the user started, a Personal Pip's own name, instructions, schedule and model change at
 # once and a routine it adds is on; a reply carries `changes` (each {id, kind, fields, after, status}), and
 # undo_pip_change {pip_id, change_id} -> {change, pip} puts one back, local only.
-PIPS_API_VERSION = 77
+# API 78 (0.52): a run's post may carry `artifact` {id, type ("doc" or "sheet"), title, version}: the review it kept as
+# the Pip's document or sheet, or the Quill draft that became its document, at the version that run made, so the Pip's
+# chat shows the document's card. No command is added; a client reads the field only from a runtime advertising 78.
+PIPS_API_VERSION = 78
 
 
 def _pips_platform_supported() -> bool:

@@ -196,6 +196,10 @@ def after_run(db, run: dict, *, status: str, result=None, workspace_root=None, c
             when = datetime.now().astimezone().strftime("%d %b %Y, %H:%M")
             done["report"] = keep_report(pip_id, named.get("name", ""), chosen["report_as"], when,
                                          result.get("findings") or [], workspace=str(run.get("workspace_id") or ""))
+            if done["report"] and run.get("id"):
+                # On the run's post too, so the Pip's chat shows the document's card (Pips API 78).
+                from .pip_run_posts import attach_artifact
+                attach_artifact(db, run["id"], done["report"])
         for aid in chosen["dashboards"]:
             try:
                 origin = (service.view(aid, versions=False).get("origin") or {})

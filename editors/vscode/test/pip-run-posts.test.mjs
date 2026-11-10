@@ -356,3 +356,31 @@ test('a Work chat asked from a Pip sends the card’s prompt once',()=>{
   assert.match(prompts[0].text,/Ask me before you change any live data or services\./);
   assert.deepEqual(s.errors,[]);
 });
+
+// ---- The document a run kept, as its card (Pips API 78, ui-04-pip-doc-card, asked 10 Nov) ----
+const DOC={id:'ar_'+'d'.repeat(16),type:'doc',title:'ERP daily audit: findings',version:3};
+test('a review kept as its document shows the card Work draws on its post, and the whole card opens it',async()=>{
+  const x=setup({apiVersion:78,postsValue:[{...FOUND,artifact:DOC},{...CLEAR,artifact:{...DOC,type:'sheet',id:'ar_'+'e'.repeat(16),title:'',version:1}}]});
+  await openChat(x);
+  const card=x.d.querySelector(`[data-run-post="${R1}"] .dgc-doc-card`);
+  assert.ok(card,'the card is on the post');
+  assert.equal(card.dataset.tone,'doc');
+  assert.equal(text(card.querySelector('.dgc-doc-name')),'ERP daily audit: findings');
+  assert.equal(text(card.querySelector('.dgc-doc-meta')),'Document · version 3');
+  assert.ok(card.compareDocumentPosition(x.d.querySelector(`[data-run-post="${R1}"] .run-post-attach`))&x.w.Node.DOCUMENT_POSITION_FOLLOWING,
+    'after the words, before the report and its chips');
+  const sheet=x.d.querySelector(`[data-run-post="${R3}"] .dgc-doc-card`);
+  assert.equal(text(sheet.querySelector('.dgc-doc-name')),'Sheet','a sheet with no name says what it is');
+  assert.equal(sheet.dataset.tone,'sheet');
+  card.querySelector('.dgc-doc-open').click();
+  assert.deepEqual(x.sent.filter(m=>m.type==='pipsOpenArtifact').map(m=>[m.id,m.artifactType]),[[DOC.id,'doc']]);
+});
+test('no card from a DGC before API 78, for a link that is not a document, or in a fold of all-clear runs',async()=>{
+  for(const [apiVersion,artifact] of [[77,DOC],[78,{...DOC,type:'dashboard'}],[78,{...DOC,id:'../../etc'}],[78,{...DOC,version:0}]]){
+    const x=setup({apiVersion,postsValue:[{...FOUND,artifact}]});
+    await openChat(x);
+    assert.equal(x.d.querySelectorAll('.run-post .dgc-doc-card').length,0,`${apiVersion} ${JSON.stringify(artifact)}`);
+  }
+  const html=posts.postMarkup({...CLEAR,artifact:DOC},{name:'ERP daily audit',now:NOW,docs:true,streak:[CLEAR,{...CLEAR,run_id:R2}]});
+  assert.doesNotMatch(html,/dgc-doc-card/,'a fold of all-clear runs is one line, not a card a run');
+});

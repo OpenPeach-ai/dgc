@@ -6,6 +6,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- A Pip's chat shows the document a run kept: when a review is kept as the Pip's document or sheet, or a Quill draft becomes its document, that run's post carries it (Pips API 78), and the chat draws the same document card as Work and ChatDGC; a click opens it.
 - A Pip's own schedule runs on any days. In /setup or in its chat, "every weekday at 9", "weekends at 10" or "Mondays and Thursdays at 8" becomes its schedule, not an extra routine, and its page, its routines and the line of the change say it in those words. In a Pip's box the "/" list is as tall as its rows.
 - A waiting approval sits just above the prompt box, in Work and in a Pip's chat, and your typing stays in the box. Several wait one at a time ("1 of 3"); answered, each leaves its one quiet line where the step is in the chat.
 - Approval cards are one line with the command under it, Allow once filled at the right end, and the note for the model only after Deny.

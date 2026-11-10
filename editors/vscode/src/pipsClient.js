@@ -960,6 +960,7 @@ function routineReply(m,title,type){
 }
 function postContext(){
   return {name:S.pip.name,type:pipType(S.pip,S.types)||characterType(S.pip.pip_type),personal:personalPip(),ask:canAskDgc(),canRun:canRunNow(),renderMarkdown:renderPipMarkdown,
+    docs:S.apiVersion>=78&&!remoteHost,
     openFix:typeof options.onOpenFix==='function'&&!remoteHost};
 }
 // ---- What Ask DGC to fix did, in the run's post (Pips API 65) ----

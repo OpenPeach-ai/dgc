@@ -311,3 +311,78 @@ class SDKGateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PostCarriesItsDocument(PostScene):
+    """A Pip's chat shows its document card (ui-04-pip-doc-card, asked 10 Nov): a review kept as the Pip's document or
+    sheet, or a Quill draft that became its document, is on that run's post (Pips API 78), so the chat draws the card
+    Work and ChatDGC draw. Real runs finished through PipStore.finish, with the artifact store in a temp home."""
+    def setUp(self):
+        super().setUp()
+        from pathlib import Path
+        self._home = os.environ.get("DGC_HOME")
+        os.environ["DGC_HOME"] = str(Path(self.registry.directory).parent / "dgc-home")
+
+    def tearDown(self):
+        if self._home is None:
+            os.environ.pop("DGC_HOME", None)
+        else:
+            os.environ["DGC_HOME"] = self._home
+        super().tearDown() if hasattr(super(), "tearDown") else None
+
+    def of(self, run, pip=None):
+        """The post of one run (every run here finishes at the same fixture time, so order can't tell them apart)."""
+        return next(p for p in self.page(pip)["posts"] if p["run_id"] == run)
+
+    def test_a_review_kept_as_its_document_is_on_its_post_each_run_its_own_version(self):
+        from dgc import artifact_pips
+        artifact_pips.set_settings(self.registry.db, self.pip["id"], report_as="doc")
+        one = self.ran(findings=[finding("Rounding drops paise", "medium", "erp/billing/notes.py", 41)])
+        first = self.of(one)["artifact"]
+        self.assertEqual((first["type"], first["version"]), ("doc", 1))
+        self.assertTrue(first["id"] and first["title"])
+        two = self.ran(findings=[])
+        self.assertEqual((self.of(one)["artifact"]["version"], self.of(two)["artifact"]["version"]), (1, 2),
+                         "each post keeps the version its review made")
+        self.assertEqual(self.of(two)["artifact"]["id"], first["id"], "one document, a version a review")
+        self.assertGreaterEqual(PIPS_API_VERSION, 78)
+
+    def test_a_sheet_too_and_a_review_kept_only_in_the_chat_has_none(self):
+        from dgc import artifact_pips
+        chat_only = self.ran(findings=[finding("Typo in log", "low")])
+        self.assertNotIn("artifact", self.of(chat_only), "kept in the chat only: no card")
+        artifact_pips.set_settings(self.registry.db, self.pip["id"], report_as="sheet")
+        sheet = self.ran(findings=[finding("Typo in log", "low")])
+        self.assertEqual(self.of(sheet)["artifact"]["type"], "sheet")
+        failed = self.ran(error={"code": "timeout", "message": "too slow"})
+        self.assertNotIn("artifact", self.of(failed), "a failed run kept nothing")
+
+    def test_a_quill_draft_that_became_its_document_is_on_its_post(self):
+        from dgc import artifact_pips
+        quill = self.store.create(self.workspace["id"], "Release notes", "Draft notes.", "fixture", pip_type="quill")
+        # The worker keeps the finished draft as the Pip's document before the run finishes (pips._execute_run).
+        aid = artifact_pips.keep_draft(quill["id"], "Release notes", "Notes for 0.52", "# Notes\n\nAll of it.\n")
+        from dgc import pip_drafts as drafts
+        # A real finished draft: its private Markdown published in its run directory, then PipStore.finish.
+        (self.root / "source.py").write_text("def hello():\n    return 'hello'\n")
+        binding = self.registry.binding(quill["workspace_id"])
+        run_id = identifier("run")
+        manifest = {"pip_id": quill["id"], "workspace_id": quill["workspace_id"], "job_version": quill["current_version"],
+                    "source_revision": "a" * 40, "model": "fixture-model", "run_kind": "draft", "trigger": "you",
+                    "workspace_context": ContextStore(self.registry).snapshot(quill["workspace_id"])}
+        self.registry.db.execute("""INSERT INTO pip_runs
+            (id,pip_id,workspace_id,binding_id,idempotency_key,requested_by,manifest,status,created_at,started_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?)""", (run_id, quill["id"], quill["workspace_id"], binding["id"], run_id,
+                                              "editor-user", json.dumps(manifest), "running", self.now, self.now))
+        directory = self.registry.directory / "runs" / run_id
+        directory.mkdir(mode=0o700, parents=True)
+        saved = drafts.publish({"title": "Notes for 0.52", "summary": "What changed", "verification": drafts.VERIFICATION,
+                                "tests_executed": False, "usage": {}, "tools_called": 1,
+                                "snapshot": {"sha256": "a" * 64, "files": 1, "bytes": 32},
+                                "draft": {"markdown": "# Notes\n\n`hello()` greets.\n",
+                                          "citations": [{"path": "source.py", "line": 1, "excerpt": "def hello():",
+                                                         "verification": "source_excerpt_only"}]}},
+                               self.root, directory)
+        self.store.finish(run_id, result=saved)
+        art = self.of(run_id, quill)["artifact"]
+        self.assertEqual((art["id"], art["type"], art["version"]), (aid, "doc", 1))

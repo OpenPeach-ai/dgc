@@ -158,6 +158,11 @@ def _build(registry, run_id: str) -> tuple[dict | None, str | None]:
                 return None, None
             post.update(outcome="draft", title=delivery._text(result["title"], 200),
                         summary=delivery._text(result.get("summary"), 400))
+            # The worker kept this draft as the newest version of the Pip's own document (artifact_pips.keep_draft).
+            from .artifact_pips import pip_doc
+            ref = artifact_ref(pip_doc(row["pip_id"]))
+            if ref is not None:
+                post["artifact"] = ref
         else:
             if not isinstance(result, dict) or not isinstance(result.get("text"), str) or not result["text"].strip():
                 return None, None
@@ -199,6 +204,47 @@ def post(registry, run_id: str) -> bool:
         return registry.db.execute("INSERT OR IGNORE INTO pip_run_posts VALUES(?,?,?,?,?)",
             (value["run_id"], value["pip_id"], workspace_id, value["finished_at"], encoded)).rowcount == 1
     except (RegistryError, ValueError, TypeError, KeyError, IndexError, RecursionError, sqlite3.Error):
+        return False
+
+
+ARTIFACT_TYPES = ("doc", "sheet")
+
+
+def artifact_ref(aid) -> dict | None:
+    """The document or sheet a post links (Pips API 78): its id, kind, name and version now, or None."""
+    if not isinstance(aid, str) or not aid:
+        return None
+    try:
+        from .artifact_store import store
+        art = store().get(aid)
+    except Exception:                                    # noqa: BLE001 -- a post without its card still stands
+        return None
+    if art.type not in ARTIFACT_TYPES or type(art.version) is not int or art.version < 1:
+        return None
+    return {"id": art.id, "type": art.type, "title": str(art.title or "")[:200], "version": art.version}
+
+
+def attach_artifact(db, run_id: str, aid: str) -> bool:
+    """After the run finished (artifact_pips.after_run): the review it kept as the Pip's document or sheet goes on its
+    post, at the version that review made, so the chat shows the card. Never fails anything: a post that is gone, or
+    would outgrow its bound, stays as it was."""
+    ref = artifact_ref(aid)
+    if ref is None or not _RUN.match(str(run_id or "")):
+        return False
+    try:
+        ensure(db)
+        row = db.execute("SELECT post FROM pip_run_posts WHERE run_id=?", (run_id,)).fetchone()
+        if row is None:
+            return False
+        value = json.loads(row[0])
+        if not isinstance(value, dict):
+            return False
+        value["artifact"] = ref
+        encoded = _fit(value)
+        if encoded is None:
+            return False
+        return db.execute("UPDATE pip_run_posts SET post=? WHERE run_id=?", (encoded, run_id)).rowcount == 1
+    except (ValueError, TypeError, RecursionError, sqlite3.Error):
         return False
 
 

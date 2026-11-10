@@ -241,7 +241,7 @@ const ROUTINE=/^This message is from DGC, not the user\. Your routine "([^"\n]{1
 export function routineTitle(text){const m=ROUTINE.exec(String(text||''));return m?m[1]:null;}
 
 // ---- Drawing it -----------------------------------------------------------------------------------------------
-const ICONS={check:'<path d="m3.5 8.5 3 3 6-7"/>',x:'<path d="m4.5 4.5 7 7M11.5 4.5l-7 7"/>',spin:'<path d="M8 2.5a5.5 5.5 0 1 1-5.5 5.5"/>',doc:'<path d="M4 1.8h5.2L12 4.6v9.6H4Z"/><path d="M9 1.8v3h3M6 8h4M6 10.5h4"/>',warn:'<path d="M8 2 1.8 13h12.4Z"/><path d="M8 6.5v3.2M8 11.4v.2"/>',
+const ICONS={sheet:'<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M2.5 6.2h11M2.5 9.8h11M6.5 2.5v11"/>',check:'<path d="m3.5 8.5 3 3 6-7"/>',x:'<path d="m4.5 4.5 7 7M11.5 4.5l-7 7"/>',spin:'<path d="M8 2.5a5.5 5.5 0 1 1-5.5 5.5"/>',doc:'<path d="M4 1.8h5.2L12 4.6v9.6H4Z"/><path d="M9 1.8v3h3M6 8h4M6 10.5h4"/>',warn:'<path d="M8 2 1.8 13h12.4Z"/><path d="M8 6.5v3.2M8 11.4v.2"/>',
   play:'<path d="M5 3.2v9.6L12.4 8Z"/>',fix:'<path d="M10.2 2.2a3.2 3.2 0 0 0-3.9 4.2L2.2 10.5l3.3 3.3 4.1-4.1a3.2 3.2 0 0 0 4.2-3.9l-2 2-2-.3-.3-2Z"/>',
   chev:'<path d="m6 3.5 4.5 4.5L6 12.5"/>',stop:'<rect x="4.5" y="4.5" width="7" height="7" rx="1.2"/>'};
 const icon=(name,cls='run-post-icon')=>`<svg class="${cls}" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
@@ -267,6 +267,22 @@ function reportMarkup(p){
     rows=labels.map(l=>`<li><span class="sev" data-sev="high">failed</span><span class="w">${esc(l)}</span></li>`);
   }
   return `<details class="run-post-report" data-details="report-${id}"><summary class="run-post-chip">${icon('doc')}<span>${esc(label)}</span>${chev}</summary><div class="run-post-report-body">${rows.length?`<ul class="run-post-findings">${rows.join('')}</ul>`:''}${more>0?`<p class="run-post-more">${more} more in the full report</p>`:''}<button type="button" class="link" data-post-open="${id}">${p.kind==='live'?'Open the full output':'Open full report'}</button></div></details>`;
+}
+// ---- The document a run kept (Pips API 78, ui-04-pip-doc-card, asked 10 Nov) ----
+// A review kept as the Pip's document or sheet, or a Quill draft that became its document, is on the run's post; the
+// chat draws the card Work and ChatDGC draw (media/shared/doccard.css): its tile, its name over "Document · version 3",
+// and the whole card opens it (data-artifact-open, the Pip page's own Open).
+const ART=/^ar_[0-9a-f]{16}$/;
+export function postArtifact(p){
+  const a=record(p)?p.artifact:null;
+  return record(a)&&ART.test(String(a.id||''))&&['doc','sheet'].includes(a.type)&&typeof a.title==='string'
+    &&Number.isInteger(a.version)&&a.version>0?a:null;
+}
+function docCardMarkup(a){
+  const kind=a.type==='sheet'?'Sheet':'Document',name=a.title.trim()||kind;
+  return `<div class="dgc-doc-card run-post-doc" data-tone="${a.type}"><span class="dgc-doc-tile" aria-hidden="true">${icon(a.type,'run-post-doc-icon')}</span>`
+    +`<span class="dgc-doc-words"><span class="dgc-doc-name">${esc(name)}</span><span class="dgc-doc-meta">${kind} · version ${a.version}</span></span>`
+    +`<button type="button" class="dgc-doc-open" data-artifact-open="${esc(a.id)}" data-artifact-type="${a.type}" aria-label="Open ${esc(name)}, ${kind.toLowerCase()} version ${a.version}">Open</button></div>`;
 }
 // Under a fold: "✓ Passed 12 times since Monday", which opens to every time it ran, by day; each opens that run.
 function sinceWords(time,now){
@@ -307,7 +323,7 @@ function fixMarkup(p,{ask,asked,asking,fix,openFix}){
  *  with a chat to send it to); `asked`: it was (before Pips API 65, kept with the view); `asking`: it was just now, and
  *  the fix hasn't been read yet; `fix`: its latest fix (Pips API 65), whose state the post says; `openFix`: a click on
  *  that goes to the Work chat it ran in; `canRun`: Run again now would start a run; `expanded`: Show all. */
-export function postMarkup(p,{name,face='',now=Date.now(),personal=false,ask=false,asked=false,asking=false,fix=null,openFix=false,canRun=false,previous=null,streak=null,expanded=false,traced=false,renderMarkdown=s=>`<p>${esc(s)}</p>`}){
+export function postMarkup(p,{name,face='',now=Date.now(),personal=false,ask=false,asked=false,asking=false,fix=null,openFix=false,canRun=false,previous=null,streak=null,expanded=false,traced=false,docs=false,renderMarkdown=s=>`<p>${esc(s)}</p>`}){
   const id=esc(p.run_id),runs=streak&&streak.length>1?streak:null,before=runs?runs.at(-2):previous;
   const time=globalThis.DgcTime?.markup(at(p))||'';
   let body,text;
@@ -328,7 +344,7 @@ export function postMarkup(p,{name,face='',now=Date.now(),personal=false,ask=fal
     :p.outcome==='failed'?chip(`data-post-open="${id}"`,`${icon('warn')}<span>See what happened</span>`)+(canRun?chip(`data-post-run="${id}"`,`${icon('play')}<span>Run again now</span>`):'')+fixChip
     :chip(`data-post-open="${id}"`,`<span>${p.outcome==='draft'?'Open draft':p.kind==='result'?'Open result':'Open run'}</span>${chev}`,'quiet');
   const head=`<div class="run-post-head">${face?`<span class="run-post-face" aria-hidden="true">${face}</span>`:''}<strong class="run-post-name">${esc(name)}</strong>${time}</div>`;
-  return `<article class="pip-message assistant dgc run-post${runs?' run-post-streak':''}" data-run-post="${id}" data-outcome="${esc(p.outcome)}"${runs?` data-runs="${runs.length}"`:''} tabindex="-1" aria-label="${esc(`${name}: ${text}${runs?` ${foldWords(runs,now)}.`:''}`)}">${head}<div class="answer"><div class="message-body text final run-post-body">${body}</div></div><div class="run-post-attach">${attach}${traced&&!runs?`<button type="button" class="ract ract-trace" data-post-trace="${id}" aria-label="Replay response trace" title="Replay response trace">Trace</button>`:''}</div></article>`;
+  return `<article class="pip-message assistant dgc run-post${runs?' run-post-streak':''}" data-run-post="${id}" data-outcome="${esc(p.outcome)}"${runs?` data-runs="${runs.length}"`:''} tabindex="-1" aria-label="${esc(`${name}: ${text}${runs?` ${foldWords(runs,now)}.`:''}`)}">${head}<div class="answer"><div class="message-body text final run-post-body">${body}</div></div>${docs&&!runs&&postArtifact(p)?docCardMarkup(postArtifact(p)):''}<div class="run-post-attach">${attach}${traced&&!runs?`<button type="button" class="ract ract-trace" data-post-trace="${id}" aria-label="Replay response trace" title="Replay response trace">Trace</button>`:''}</div></article>`;
 }
 
 // ---- A run while it runs (reported 24 Oct) ----------------------------------------------------------------------

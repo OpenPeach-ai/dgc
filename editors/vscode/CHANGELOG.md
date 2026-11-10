@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A Pip's chat shows the document a run kept as the same card Work and ChatDGC draw: a coloured tile, its name, "Document · version 3", and a click anywhere on it opens it. It shows on the run's post in the Pips side bar and in a Pip's own tab, from Pips API 78.
 - Enter in a new Work session before it is ready sends your message by itself once it is, with no second Enter. The line while it waits says "Starting this chat" (a real reconnect still says "reconnecting"), and it goes away once the chat is ready; before, it said "reconnecting" even for a first start and stayed in the chat for good. Switching to another chat first drops the waiting message rather than sending it there.
 - Work's box at about 300 px wide no longer draws one button over another while a turn runs: Queue becomes the queue's icon (its name stays in the tooltip and for screen readers), the footer's buttons are 24 px below 320 px, and below 290 px the cache clock gives way, as the context meter already does.
 - A schedule on any days is said in words: "Weekends at 10:00", "Mondays and Thursdays at 08:00", "Every day at 09:00", on a Pip's page, in its routines and on the line of a change it made (before, only weekdays and Mondays were, and the rest read as a cron line). In a Personal Pip's box the "/" list is as tall as its rows; the @ list keeps its one height.
