@@ -660,6 +660,7 @@
     homePips?.refresh();
   }
   function hideSessions() {
+    closeAllSessions();
     sessionsOpen = false;
     document.body.classList.remove("sessions-active");
     $("sessions-host").hidden = true;
@@ -688,71 +689,168 @@
     vscode.postMessage({ type: "sessionsMore" });
   });
   // Session names and previews are the user's own words: text nodes only, never markup.
+  // The home lists the three newest, each a plain row: its title at the left and its age at the right ("2h", "1w",
+  // "1mo"), then "View all (N)", which opens every session in a popover over the list with a search field (asked for
+  // 2026-11-10, the way Codex lists its chats). A search from the home's own box still lists everything it found.
+  const SESSIONS_SHOWN = 3;
+  let sessionItems = [], sessionsMoreToLoad = false, allSessions = null;
+  /** How long ago, in a few characters. `when` is the host's "YYYY-MM-DD HH:MM"; anything else is shown as it is. */
+  function sessionAge(when, now = Date.now()) {
+    const m = /^(\d{4})-(\d\d)-(\d\d)[ T](\d\d):(\d\d)/.exec(String(when || ""));
+    if (!m) return String(when || "").slice(0, 12);
+    const minutes = Math.floor((now - new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).getTime()) / 60000);
+    if (minutes < 1) return "now";
+    if (minutes < 60) return `${minutes}m`;
+    if (minutes < 1440) return `${Math.floor(minutes / 60)}h`;
+    const days = Math.floor(minutes / 1440);
+    if (days < 7) return `${days}d`;
+    if (days < 30) return `${Math.floor(days / 7)}w`;
+    if (days <= 365) return `${Math.floor(days / 30)}mo`;
+    return `${Math.floor(days / 365)}y`;
+  }
+  /** One session: its title, a mark when it is open or still running, its age, and (pointed at or focused) Open in
+   *  Editor and Delete in the age's place. `before` is each row's state at the last paint, for the state's small motion. */
+  function sessionRow(item, before, opened) {
+    const title = sessionTitle(item);
+    const row = el("li", "session-row");
+    row.tabIndex = 0; row.dataset.id = item.id;
+    row.dataset.motionState = item.windowless ? "working" : item.open ? "open" : "idle";
+    if (before?.has(item.id) && before.get(item.id) !== row.dataset.motionState) row.classList.add("motion-state-change");
+    const open_ = () => { openSession(item); opened?.(); };
+    const main = el("div", "session-main");
+    const name = el("span", "session-name"); name.textContent = title; name.title = title;
+    main.append(name);
+    if (typeof item.match === "string" && item.match) {
+      const found = el("span", "session-match"); found.textContent = item.match; main.append(found);
+    }
+    const end = el("span", "session-end");
+    // Open in a tab, or still running with no window (a reload, a closed window or tab; opening it picks it up where it
+    // is): a dot, with the words for a pointer and a screen reader.
+    if (item.open || item.windowless) {
+      const mark = el("span", item.open ? "session-tab" : "session-tab session-windowless"), words = el("span", "session-tab-words");
+      words.textContent = item.open ? "Open in a tab" : "Running, no window";
+      mark.title = item.open ? "Open in a tab" : `Running, no window: ${String(item.windowless).slice(0, 200)}. Open it to pick it up, or stop it in Settings › Running sessions.`;
+      mark.append(words); end.append(mark);
+    }
+    const count = Number(item.count) || 0;
+    const age = el("span", "session-age"); age.textContent = sessionAge(item.when);
+    age.title = [item.when, `${count} message${count === 1 ? "" : "s"}`].filter(Boolean).join(" · ");
+    const actions = el("span", "session-actions");
+    const open = sessionButton("session-open", "go-to-file", open_);
+    open.title = "Open in an editor tab";
+    open.setAttribute("aria-label", `Open in Editor: ${title}`);
+    const remove = sessionButton("session-delete", "trash", () => vscode.postMessage({ type: "deleteSession", id: item.id, title }));
+    remove.title = item.open ? "Close its tab to delete this session" : "Delete this session";
+    remove.setAttribute("aria-label", `Delete session: ${title}`);
+    actions.append(open, remove);
+    end.append(age, actions);
+    row.append(main, end);
+    // A click opens it, as a chat in the Chat tab opens: the second click of a double-click opens nothing more.
+    row.onclick = (e) => { if (e.detail < 2) open_(); };
+    row.onkeydown = (e) => {
+      if (e.target !== row) return;
+      if (e.key === "Enter") { e.preventDefault(); open_(); }
+      else if (e.key === "Delete") { e.preventDefault(); remove.click(); }
+      else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const next = e.key === "ArrowDown" ? row.nextElementSibling : row.previousElementSibling;
+        if (next) next.focus(); else if (e.key === "ArrowUp") row.closest(".sessions-popover")?.querySelector("input")?.focus();
+      }
+    };
+    return row;
+  }
+  function fillSessions(list, items) {
+    const focused = list.contains(document.activeElement) ? document.activeElement.closest(".session-row")?.dataset.id : undefined;
+    const before = new Map([...list.querySelectorAll(".session-row[data-id]")].map((row) => [row.dataset.id, row.dataset.motionState]));
+    list.replaceChildren();
+    for (const item of items) {
+      const row = sessionRow(item, before, list === allSessions?.list ? closeAllSessions : null);
+      list.append(row);
+      if (item.id === focused) row.focus();
+    }
+  }
   function renderSessions(msg) {
     const list = $("sessions-list"), status = $("sessions-status");
     const items = Array.isArray(msg.items) ? msg.items : [];
-    const focused = document.activeElement?.closest?.(".session-row")?.dataset.id;
-    const before = new Map([...list.querySelectorAll(".session-row[data-id]")]
-      .map((row) => [row.dataset.id, row.dataset.motionState]));
-    list.replaceChildren();
     // Thousands of sessions: a search over names, first messages and everything said, and Load more.
     const search = $("sessions-search"), more = $("sessions-more"), query = String(msg.query || "");
     sessionsSearchable = msg.searchable === true;
+    sessionItems = items; sessionsMoreToLoad = msg.more === true;
     if (search) { search.hidden = !sessionsSearchable && !chatsAvailable; if (document.activeElement !== search) search.value = query; }
-    if (more) { more.hidden = msg.more !== true; more.disabled = false; more.textContent = "Load more"; }
+    // Load more belongs to a search's finds here; with no search it is in the View all popover.
+    if (more) { more.hidden = !(sessionsMoreToLoad && query); more.disabled = false; more.textContent = "Load more"; }
     homeCount("work", query ? items.length : null, msg.more === true);
     status.textContent = msg.error ? String(msg.error)
       : items.length ? "" : query ? `No session mentions “${query}”.`
       : "No sessions in this project yet. Start one with New session: it opens in an editor tab.";
     if (msg.error) status.dataset.kind = "error"; else delete status.dataset.kind;
     status.hidden = !status.textContent;
-    for (const item of items) {
-      const title = sessionTitle(item);
-      const row = el("li", "session-row");
-      row.tabIndex = 0; row.dataset.id = item.id;
-      row.dataset.motionState = item.windowless ? "working" : item.open ? "open" : "idle";
-      if (before.has(item.id) && before.get(item.id) !== row.dataset.motionState) row.classList.add("motion-state-change");
-      const main = el("div", "session-main");
-      const name = el("span", "session-name"); name.textContent = title; name.title = title;
-      const meta = el("span", "session-meta");
-      const count = Number(item.count) || 0;
-      for (const part of [item.when, `${count} message${count === 1 ? "" : "s"}`]) {
-        if (part) { const span = el("span"); span.textContent = part; meta.append(span); }
-      }
-      if (item.open) { const open = el("span", "session-tab"); open.textContent = "Open in a tab"; meta.append(open); }
-      // Still running with no window (a reload, a closed window or tab): opening it picks it up where it is.
-      else if (item.windowless) {
-        const live = el("span", "session-tab session-windowless"); live.textContent = "Running, no window";
-        live.title = `${String(item.windowless).slice(0, 200)}. Open it to pick it up, or stop it in Settings › Running sessions.`;
-        meta.append(live);
-      }
-      main.append(name, meta);
-      if (typeof item.match === "string" && item.match) {
-        const found = el("span", "session-match"); found.textContent = item.match; main.append(found);
-      }
-      const open = sessionButton("session-open", "go-to-file", () => openSession(item));
-      const word = el("span", "session-open-label"); word.textContent = "Open in Editor"; open.append(word);
-      open.title = "Open in an editor tab";
-      open.setAttribute("aria-label", `Open in Editor: ${title}`);
-      const remove = sessionButton("session-delete", "trash", () => vscode.postMessage({ type: "deleteSession", id: item.id, title }));
-      remove.title = item.open ? "Close its tab to delete this session" : "Delete this session";
-      remove.setAttribute("aria-label", `Delete session: ${title}`);
-      row.append(main, open, remove);
-      // A click opens it, as a chat in the Chat tab opens: the second click of a double-click opens nothing more.
-      row.onclick = (e) => { if (e.detail < 2) openSession(item); };
-      row.onkeydown = (e) => {
-        if (e.target !== row) return;
-        if (e.key === "Enter") { e.preventDefault(); openSession(item); }
-        else if (e.key === "Delete") { e.preventDefault(); remove.click(); }
-        else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-          e.preventDefault();
-          const next = e.key === "ArrowDown" ? row.nextElementSibling : row.previousElementSibling;
-          if (next) next.focus();
-        }
-      };
-      list.append(row);
-      if (item.id === focused) row.focus();
-    }
+    fillSessions(list, query ? items : items.slice(0, SESSIONS_SHOWN));
+    const all = viewAllButton();
+    all.hidden = !!query || (items.length <= SESSIONS_SHOWN && !sessionsMoreToLoad);
+    all.textContent = `View all (${items.length}${sessionsMoreToLoad ? "+" : ""})`;
+    if (allSessions) { if (all.hidden) closeAllSessions(); else fillAllSessions(); }
+  }
+  /** "View all (N)", under the three: made once, after the list. */
+  function viewAllButton() {
+    let all = $("sessions-all");
+    if (all) return all;
+    all = el("button", "sessions-all"); all.id = "sessions-all"; all.type = "button"; all.hidden = true;
+    all.title = "Every session in this project, with a search";
+    all.setAttribute("aria-haspopup", "dialog"); all.setAttribute("aria-expanded", "false");
+    all.onclick = () => (allSessions ? closeAllSessions(true) : openAllSessions());
+    $("sessions-list").after(all);
+    return all;
+  }
+  /** Every session, over the list: a search field, then the same rows in a list that scrolls and narrows as you type. */
+  function openAllSessions() {
+    const home = $("work-home"), list = $("sessions-list"), host = $("sessions-host");
+    const pop = el("div", "sessions-popover dgc-menu"); pop.setAttribute("role", "dialog"); pop.setAttribute("aria-label", "All sessions");
+    const field = el("input", "sessions-search sessions-all-search"); field.type = "search"; field.placeholder = "Search recent chats";
+    field.setAttribute("aria-label", "Search recent chats"); field.autocomplete = "off"; field.maxLength = 200;
+    const rows = el("ul", "sessions-list sessions-all-list"); rows.setAttribute("aria-label", "Every session in this project");
+    const status = el("p", "sessions-status sessions-all-status"); status.setAttribute("role", "status"); status.hidden = true;
+    const more = el("button", "sessions-more sessions-all-more"); more.type = "button"; more.title = "Show 200 more sessions"; more.hidden = true;
+    more.onclick = () => { more.disabled = true; more.textContent = "Loading…"; vscode.postMessage({ type: "sessionsMore" }); };
+    pop.append(field, status, rows);
+    // Over the list, from its first row down to the side bar's end (never shorter than a few rows).
+    pop.style.top = `${list.offsetTop}px`;
+    const room = host.getBoundingClientRect().bottom - list.getBoundingClientRect().top - 12;
+    pop.style.maxHeight = `${Math.max(220, Math.min(440, Math.round(room)))}px`;
+    home.append(pop);
+    const outside = (e) => { if (!pop.contains(e.target) && !$("sessions-all").contains(e.target)) closeAllSessions(); };
+    document.addEventListener("pointerdown", outside, true);
+    pop.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeAllSessions(true); }
+      else if (e.key === "ArrowDown" && e.target === field) { e.preventDefault(); rows.querySelector(".session-row")?.focus(); }
+    });
+    field.addEventListener("input", fillAllSessions);
+    allSessions = { pop, field, list: rows, status, more, outside };
+    $("sessions-all").setAttribute("aria-expanded", "true");
+    fillAllSessions();
+    pop.scrollIntoView({ block: "nearest" });
+    field.focus();
+  }
+  function fillAllSessions() {
+    if (!allSessions) return;
+    const { field, list, status, more } = allSessions, query = field.value.trim(), wanted = query.toLowerCase();
+    const found = wanted ? sessionItems.filter((item) => sessionTitle(item).toLowerCase().includes(wanted)) : sessionItems;
+    more.remove();
+    fillSessions(list, found);
+    // More to load, and no search narrowing what is here: the rest are asked for 200 at a time.
+    more.hidden = !sessionsMoreToLoad || !!wanted; more.disabled = false; more.textContent = "Load more";
+    const last = el("li", "sessions-all-more-row"); last.hidden = more.hidden; last.append(more); list.append(last);
+    status.textContent = found.length ? "" : `No session matches “${query}”.`;
+    status.hidden = !!found.length;
+  }
+  function closeAllSessions(refocus = false) {
+    if (!allSessions) return;
+    document.removeEventListener("pointerdown", allSessions.outside, true);
+    const held = allSessions.pop.contains(document.activeElement);
+    allSessions.pop.remove(); allSessions = null;
+    const all = $("sessions-all");
+    all?.setAttribute("aria-expanded", "false");
+    if ((refocus || held) && all && !all.hidden) all.focus();
   }
   // ---- ChatDGC: your chats, the same in every folder, above this project's sessions (Work) ----
   // A chat opens in an editor tab of its own (src/chatdgc.ts). Titles and previews are the user's and
@@ -985,6 +1083,7 @@
   }
   function showHomeTab(name, focus = false) {
     homeTab = name === "work" ? "work" : "chat";
+    closeAllSessions();
     try { vscode.setState({ ...(vscode.getState() || {}), homeTab }); } catch {}
     homeTabs();
     if (focus) $(`home-tab-${homeTab}`)?.focus();
@@ -10526,6 +10625,9 @@ function permissionChoices(ev) {
         // Dismiss all's unread, kept by the host (src/pipHomeDismiss.ts) so a reload doesn't bring the old count back.
         dismissed,
         onDismissed: (change) => vscode.postMessage({ type: "pipHomeDismissed", set: change.set, drop: change.drop }),
+        // The block folded under its heading: the host keeps that for this computer too, and says so on the page.
+        collapsed: document.documentElement.dataset.pipHomeCollapsed === "1",
+        onCollapsed: (collapsed) => vscode.postMessage({ type: "pipHomeCollapsed", collapsed }),
       });
     }
     showSessions();

@@ -58,3 +58,20 @@ export function rememberPipHomeDismissed(context: vscode.ExtensionContext, messa
   void Promise.resolve(context.globalState.update(STORE, value)).catch(() => { /* kept for this window still */ });
   return true;
 }
+
+// The home's Pips block folded under its heading (the chevron, 0.52): one flag in the same global state, so it holds over
+// a reload and in every window and folder on this computer. It is not in the keys an editor syncs between computers.
+const COLLAPSED = "dgc.pipHomeCollapsed";
+
+/** The home page's attribute when the block is folded; nothing when it is open. */
+export function pipHomeCollapsedAttr(context: vscode.ExtensionContext): string {
+  return context?.globalState?.get?.<boolean>(COLLAPSED) === true ? ' data-pip-home-collapsed="1"' : "";
+}
+
+/** The home's {type: "pipHomeCollapsed", collapsed}: kept when true, forgotten otherwise. False when it isn't one. */
+export function rememberPipHomeCollapsed(context: vscode.ExtensionContext, message: any): boolean {
+  if (!message || message.type !== "pipHomeCollapsed") return false;
+  if (typeof context?.globalState?.update !== "function") return true;
+  void Promise.resolve(context.globalState.update(COLLAPSED, message.collapsed === true ? true : undefined)).catch(() => { /* kept for this window still */ });
+  return true;
+}

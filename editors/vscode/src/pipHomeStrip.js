@@ -13,6 +13,9 @@
 // (each feed's count and newest id; the host keeps it over a reload, src/pipHomeDismiss.ts) and counts only what came
 // after. A Pip's dot reads "Read" on hover or focus, and clears its new messages and finished-run
 // news together (mark_pip_read, then mark_pip_news_seen). What waits for you still needs an answer.
+// The block folds (0.52): its heading is a button with a chevron, and everything under the head folds away. The head
+// stays, with its count, Dismiss all and Open Pips, so a folded block still says what is new. The choice is kept on this
+// computer by the host (options.collapsed, options.onCollapsed; src/pipHomeDismiss.ts), never in the page.
 import {pipDigest, pendingReviews} from './pipsModel.js';
 import {attentionPage, attentionNavigation, waitingOn, needWords} from './pipAttention.js';
 import {profile} from './pipProfile.js';
@@ -54,6 +57,7 @@ export function mountHomePips(options) {
  if (!root) return quiet;
  const pending = new Map(), setTimer = options.setInterval || setInterval, clearTimer = options.clearInterval || clearInterval;
  let generation = 0, epoch = 0, sequence = 0, ready = false, loading = false, timer = null, disposed = false;
+ let collapsed = options.collapsed === true;
  let pips = null, digest = null, attention = null, unread = [], unreadFailure = false, apiVersion = 0, cleanup = null, personal = null, current = null, partial = false, failure = '', refocus = null;
  // Dismissed here: pip id → the request number after which a digest already leaves its news out.
  const hidden = new Map();
@@ -212,7 +216,21 @@ export function mountHomePips(options) {
   // Needs attention's number and this project's, as its two tabs say them. A DGC with no such list has no number here.
   const need = attention ? attention.total + (attention.projects[current]?.total || 0) : 0;
   const head = node('div', 'home-pips-head'), actions = node('span', 'home-pips-actions');
-  head.append(node('h2', '', 'Pips'));
+  // The heading is the fold's button (a button inside the heading, as a disclosure is built), over the body it folds.
+  const title = node('h2'), toggle = node('button', 'home-pips-toggle'), chevron = node('span', 'home-pips-chevron codicon codicon-chevron-down');
+  const body = node('div', 'home-pips-body'), inner = node('div', 'home-pips-body-in');
+  toggle.type = 'button'; chevron.setAttribute('aria-hidden', 'true');
+  body.id = `${root.id || 'home-pips'}-body`; toggle.setAttribute('aria-controls', body.id);
+  toggle.append(chevron, node('span', 'home-pips-title', need || unreadCount ? `Pips · ${needWords(need, unreadCount)}` : 'Pips'));
+  title.append(toggle); head.append(title); body.append(inner);
+  const fold = () => {
+   root.toggleAttribute('data-collapsed', collapsed); body.toggleAttribute('inert', collapsed);
+   toggle.setAttribute('aria-expanded', String(!collapsed));
+   toggle.title = collapsed ? 'Show your Pips here' : 'Hide your Pips here. The count stays.';
+  };
+  // No repaint: the same chevron turns and the same list folds, so both can move.
+  toggle.onclick = () => { collapsed = !collapsed; fold(); options.onCollapsed?.(collapsed); options.onChange?.(); };
+  fold();
   if (dismissible.length >= 2 || unreadCount) {
    const clear = node('button', 'home-pips-dismiss-all', 'Dismiss all'); clear.type = 'button';
    const unreadNote = 'Every message is marked read, here and in Pips.';
@@ -227,8 +245,7 @@ export function mountHomePips(options) {
   const all = node('button', 'home-pips-open', 'Open Pips'); all.type = 'button'; all.title = 'Open the Pips view';
   all.onclick = () => options.onOpen?.({overview: true});
   actions.append(all); head.append(actions);
-  if (need || unreadCount) head.querySelector('h2').textContent = `Pips · ${needWords(need, unreadCount)}`;
-  root.append(head);
+  root.append(head, body);
   if (displayed.length) {
    const list = node('ul', 'home-pips-list'); list.setAttribute('aria-label', 'Pips that need you');
    for (const [index, {pip, line, dismissible: canDismiss, unread: itemUnread}] of visible.entries()) {
@@ -271,7 +288,7 @@ export function mountHomePips(options) {
     }
     list.append(item);
    }
-   root.append(list);
+   inner.append(list);
   }
   // What the rows above don't show. "Need you" is the head's number, so the two add up; a failed run or a finding is news.
   const hidden = rows.filter(row => !visible.some(item => item.pip.id === row.pip.id));
@@ -284,12 +301,13 @@ export function mountHomePips(options) {
    const rest = node('button', 'home-pips-more', `${said} · Show all`); rest.type = 'button';
    rest.title = 'Open Needs attention in the Pips view';
    rest.onclick = openAll;
-   root.append(rest);
+   inner.append(rest);
   }
   if (fresh.some(item => !visible.some(row => row.pip.id === item.pip_id))) {
    const more = node('button', 'home-pips-more', `See all ${unreadCount} new ${unreadCount === 1 ? 'update' : 'updates'}`); more.type = 'button';
-   more.onclick = () => options.onOpen?.({overview: true}); root.append(more);
+   more.onclick = () => options.onOpen?.({overview: true}); inner.append(more);
   }
+  // What went wrong is said under the block, folded or not: a fold never hides that something didn't save or load.
   if (unreadFailure) {
    const retry = node('button', 'home-pips-open', 'Retry'); retry.type = 'button'; retry.onclick = () => { void load(); };
    const warning = node('p', 'home-pips-error', 'Couldn’t check for new Pip messages.');
@@ -304,11 +322,13 @@ export function mountHomePips(options) {
     b.append(face(pip, 'idle', 'small')); b.onclick = () => open(pip); faces.append(b);
    }
    row.append(faces, node('span', 'home-pips-quiet-text', 'All quiet. Nothing is waiting for you.'));
-   root.append(row);
+   inner.append(row);
   }
   if (failure) { const said = node('p', 'home-pips-error', failure); said.setAttribute('role', 'status'); root.append(said); }
-  // A dismissed (or read) row's place goes to the next one: the keyboard stays there, never on the page's top.
-  if (refocus !== null) {
+  // A dismissed (or read) row's place goes to the next one: the keyboard stays there, never on the page's top. Folded,
+  // there is no row to take it: it stays in the head.
+  if (refocus !== null && collapsed) { (root.querySelector('.home-pips-dismiss-all') || toggle).focus(); refocus = null; }
+  else if (refocus !== null) {
    const items = root.querySelectorAll('.home-pip-item'), item = items[Math.min(refocus, items.length - 1)];
    (item?.querySelector('.home-pip-dismiss, .home-pip-read') || item?.querySelector('.home-pip-row') || all).focus();
    refocus = null;

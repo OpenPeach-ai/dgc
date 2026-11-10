@@ -19,10 +19,10 @@ const digest=(pips,extra={})=>({schema_version:1,since:'2026-10-18T00:00:00.000Z
  headline:'Your Pips',pips,omitted_pips:0,failed_runs:0,pending_reviews:0,pending_setups:0,truncated:false,...extra});
 
 // A home with `list` Pips and a backend that answers from `state` (changed between polls by the test).
-function harness(t,state,{api=48}={}){
+function harness(t,state,{api=48,collapsed=false}={}){
  const dom=new JSDOM('<main><section id="sessions-pips" class="home-pips" hidden></section><button id="after">after</button></main>',{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;
  w.eval(bundle+';window.Strip=Strip;');
- const sent=[],opened=[],timers=[],held=[];
+ const sent=[],opened=[],timers=[],held=[],folds=[];
  const answers={list_workspaces:()=>({workspaces:[{id:P,name:'Your Pips',kind:'personal'},{id:Q,name:'demo',kind:'project'}],current_workspace_id:Q}),
   list_pips:r=>({pips:r.workspace_id===P?state.list:(state.projectList||[]),total:r.workspace_id===P?state.list.length:(state.projectList||[]).length,next_offset:null}),
   get_pip_digest:()=>({digest:state.digest}),
@@ -46,14 +46,14 @@ function harness(t,state,{api=48}={}){
    }
    if(m.request.type==='list_pip_unread'&&state.unreadFail){queueMicrotask(()=>reply(m,false,'Unread updates unavailable.'));return;}
    const make=answers[m.request.type];if(make)queueMicrotask(()=>reply(m,true,make(m.request)));},
-  onOpen:v=>opened.push(v),setInterval:fn=>{timers.push(fn);return timers.length;},clearInterval:()=>{}});
+  onOpen:v=>opened.push(v),collapsed,onCollapsed:v=>folds.push(v),setInterval:fn=>{timers.push(fn);return timers.length;},clearInterval:()=>{}});
  t.after(()=>{strip.dispose();w.close();});
  const d=w.document;
  const rows=()=>[...d.querySelectorAll('.home-pip-item')].map(li=>[li.querySelector('strong').textContent,li.querySelector('small').textContent,!!li.querySelector('.home-pip-dismiss')]);
  const requests=type=>sent.filter(m=>m.type==='pipsRequest'&&m.request.type===type);
  const connect=async()=>{strip.receive({type:'pipsConnection',generation:1,connected:true,supported:true,enabled:true,apiVersion:api});await flush();};
  const poll=async()=>{timers[0]();await flush();};
- return {w,d,strip,sent,opened,held,rows,requests,connect,poll,reply,more:()=>d.querySelector('.home-pips-more')?.textContent??null};
+ return {w,d,strip,sent,opened,held,folds,rows,requests,connect,poll,reply,more:()=>d.querySelector('.home-pips-more')?.textContent??null};
 }
 
 test('latest unread routine results appear with the existing row geometry, even with no findings',async t=>{
@@ -296,4 +296,55 @@ test('a Pip whose routines can\'t run gets its row, in the words its Pips row sa
  state.attention=undefined;
  state.list=[pip(1,'Daily check'),pip(2,'Morning',{routine_health:{...blocked,blocked:null}})];await x.poll();
  assert.deepEqual(x.rows(),[],'signed in again: the row goes');
+});
+
+// 0.52, the home side bar: the block is a plain list under "Pips · 2 new" with a chevron that collapses it. The choice is
+// kept on this computer by the host (onCollapsed; src/pipHomeDismiss.ts) and handed back when the page is built (collapsed).
+const fold=h=>{const root=h.d.getElementById('sessions-pips'),toggle=h.d.querySelector('.home-pips-toggle'),body=h.d.querySelector('.home-pips-body');
+ return {collapsed:root.hasAttribute('data-collapsed'),expanded:toggle?.getAttribute('aria-expanded')??null,inert:body?.hasAttribute('inert')??null,
+  controls:toggle?.getAttribute('aria-controls')===body?.id&&!!body?.id,rowsInBody:[...h.d.querySelectorAll('.home-pip-item')].every(li=>body.contains(li)),
+  head:h.d.querySelector('.home-pips-head h2').textContent};};
+const twoNew=()=>({list:[pip(0,'Core'),pip(1,'Gmail')],digest:digest([]),unread:[{pip_id:id(1),workspace_id:P,name:'Gmail',pip_type:'scout',count:2,messages:2,posts:0,
+ latest:'Two new mails.',latest_at:'2026-11-03T10:00:00Z',latest_message_id:'message_'+'1'.repeat(32),latest_post_id:null}]});
+
+test('the head\'s chevron collapses the block: its rows leave the page\'s reach, and the host is told once per click',async t=>{
+ const h=harness(t,twoNew(),{api:69});await h.connect();
+ assert.deepEqual(fold(h),{collapsed:false,expanded:'true',inert:false,controls:true,rowsInBody:true,head:'Pips · 2 new'},'open by default, the heading a button over the list it folds');
+ assert.equal(h.d.querySelector('.home-pips-toggle').closest('h2')?.parentElement.className,'home-pips-head','the button sits in the heading');
+ h.d.querySelector('.home-pips-toggle').click();
+ assert.deepEqual(fold(h),{collapsed:true,expanded:'false',inert:true,controls:true,rowsInBody:true,head:'Pips · 2 new'},'collapsed: the rows are inert, the heading stays');
+ assert.deepEqual(h.folds,[true]);
+ assert.ok(h.d.querySelector('.home-pips-dismiss-all')&&h.d.querySelector('.home-pips-open'),'Dismiss all and Open Pips stay in the head');
+ h.d.querySelector('.home-pips-toggle').click();
+ assert.equal(fold(h).collapsed,false);assert.deepEqual(h.folds,[true,false]);
+});
+
+test('collapsed survives a repaint, and the keyboard stays on the chevron',async t=>{
+ const h=harness(t,twoNew(),{api:69});await h.connect();
+ h.d.querySelector('.home-pips-toggle').focus();h.d.querySelector('.home-pips-toggle').click();
+ await h.poll();await h.poll();
+ assert.deepEqual([fold(h).collapsed,fold(h).expanded,fold(h).inert],[true,'false',true],'a poll paints it again, still collapsed');
+ assert.equal(h.d.activeElement.className,'home-pips-toggle','focus is on the new chevron, not lost to the page');
+ assert.deepEqual(h.folds,[true],'a repaint tells the host nothing');
+});
+
+test('the count still updates the heading while collapsed',async t=>{
+ const state=twoNew(),h=harness(t,state,{api:69});await h.connect();
+ h.d.querySelector('.home-pips-toggle').click();
+ state.unread=[{...state.unread[0],count:5,messages:5,latest_message_id:'message_'+'2'.repeat(32)}];
+ await h.poll();
+ assert.equal(fold(h).head,'Pips · 5 new');assert.equal(fold(h).collapsed,true);
+ state.unread=[];await h.poll();
+ assert.equal(fold(h).head,'Pips','read elsewhere: the number goes');assert.equal(fold(h).collapsed,true);
+});
+
+test('a home the host kept collapsed opens collapsed; Dismiss all there keeps the keyboard in the head',async t=>{
+ const h=harness(t,twoNew(),{api:69,collapsed:true});await h.connect();
+ assert.deepEqual([fold(h).collapsed,fold(h).expanded,fold(h).inert,fold(h).head],[true,'false',true,'Pips · 2 new']);
+ assert.deepEqual(h.folds,[],'nothing to tell the host: it said so');
+ h.d.querySelector('.home-pips-dismiss-all').focus();h.d.querySelector('.home-pips-dismiss-all').click();await flush();
+ assert.equal(fold(h).head,'Pips');
+ assert.ok(h.d.querySelector('.home-pips-head').contains(h.d.activeElement),'focus never lands on a row that is folded away');
+ h.d.querySelector('.home-pips-toggle').click();
+ assert.deepEqual([fold(h).collapsed,h.folds],[false,[false]]);
 });

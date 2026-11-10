@@ -33,7 +33,7 @@ import { PLUGIN_ID, pluginLogoData, pluginLogoSource, type PluginLogoItem } from
 import { pipsAttention, PipsAttentionState } from "./pipsAttention";
 import { settingsDocument } from "./settingsView";
 import { onPicturesSetting, pictureFoldsMessage, rememberPictureFold, setPicturesInReplies, picturesFolded } from "./pictureFolds";
-import { pipHomeDismissedAttr, rememberPipHomeDismissed } from "./pipHomeDismiss";
+import { pipHomeCollapsedAttr, pipHomeDismissedAttr, rememberPipHomeCollapsed, rememberPipHomeDismissed } from "./pipHomeDismiss";
 import { addProfile, adoptWorkingRoute, defaultProfileId, firstTakesDefault, keepWorkingRoute, hasRunnableProfile, listProfiles, markDefaultProfile, profileCredential, removeProfile, startingModel } from "./providerProfiles.js";
 
 function isSlashCommandText(text: string): boolean {
@@ -5289,6 +5289,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (rememberPictureFold(this.context, msg)) return;
     // The home's Pips row: unread its Dismiss all cleared from there, kept so a reload holds it (src/pipHomeDismiss.ts).
     if (rememberPipHomeDismissed(this.context, msg)) return;
+    // The home's Pips block folded or opened with its chevron: kept for this computer, so a reload holds it.
+    if (rememberPipHomeCollapsed(this.context, msg)) return;
     const be = this.ensureBackend();
     switch (msg.type) {
       case "mcpApp":
@@ -9791,11 +9793,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const chatdgcSeen = place === "home" && this.context.globalState.get<boolean>(CHATDGC_SEEN_KEY) === true ? ` data-chatdgc-seen="1"` : "";
     // What the home's Pips row dismissed (Dismiss all's unread), so a reload doesn't bring the old count back.
     const pipHomeDismissed = place === "home" ? pipHomeDismissedAttr(this.context) : "";
+    const pipHomeCollapsed = place === "home" ? pipHomeCollapsedAttr(this.context) : "";
     // A tab Continue in Work opened in another folder keeps that folder in its state too, so a reload brings it back there.
     const tabCwd = this.tab?.cwd && this.slots.some((slot) => slot.cwd === this.tab?.cwd)
       ? ` data-tab-cwd="${this.tab.cwd.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}"` : "";
     const tabAttrs = this.tab ? ` data-tab-key="${this.tab.key}" data-tab-session="${this.currentSessionSaved ? this.currentSessionId : this.tab.session}"${tabCwd}` : "";
-    return `<!doctype html><html lang="en" data-draft-scope="${draftScope}" data-pips-document-id="${this.pipsDocumentId}" data-chat-place="${place}"${tabAttrs}${chatdgcSeen}${pipHomeDismissed}><head>
+    return `<!doctype html><html lang="en" data-draft-scope="${draftScope}" data-pips-document-id="${this.pipsDocumentId}" data-chat-place="${place}"${tabAttrs}${chatdgcSeen}${pipHomeDismissed}${pipHomeCollapsed}><head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
