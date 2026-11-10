@@ -4,6 +4,7 @@
   window.DgcMcpApps?.setup({ post: (message) => vscode.postMessage(message), surface: "work" });
   const $ = (id) => document.getElementById(id);
   const log = $("log"), input = $("input"), send = $("send"), atts = $("attachments"), pop = $("pop");
+  const approvalDock = $("approval-dock");   // a waiting approval, just above the box (dockApproval, ui-04)
   const composerPlaceholder = input.dataset.placeholder;
   let composerLocked = false;
   // What the locked box says, and its Send: an agent's page ("Return to the chat…"), or a session open elsewhere.
@@ -4339,7 +4340,9 @@
     const verb = turn.act.querySelector(".verb"), meta = turn.act.querySelector(".meta");
     if (!verb || !meta) return;
     // A question on screen is a fact about THIS client and beats anything the backend is doing.
-    const waiting = !!turn.block.querySelector(".card[data-request-id]:not(.resolved)") || askCardDocked();
+    // A waiting approval docked above the box (ui-04) is still this turn's: its place in the chat is in the turn.
+    const waiting = !!turn.block.querySelector(".card[data-request-id]:not(.resolved)") || askCardDocked()
+      || (!!approvalDock && [...approvalDock.children].some((c) => !c.classList.contains("resolved") && turn.block.contains(c._dockAnchor)));
     turn.act.classList.toggle("waiting-input", waiting);
     const activity = turn.activity;
     // A tool step's detail is its argument (the command, the path), and that tool's card is already
@@ -6302,6 +6305,44 @@
       + `Pause, change or delete it any time in Pips.</div>`;
   }
   function requestCard(c, id) { c.dataset.requestId = String(id); c._requestEpoch = requestEpoch; renderTurnMeta(); return c; }
+  // ---- The approval dock (ui-04, asked 10 Nov): a waiting approval sits just above the prompt box, where Claude Code
+  // and Codex ask (Codex: one current request in its bottom pane, the rest queued), one at a time with "1 of 3".
+  // Its place in the chat is kept; answered (here, by a rule, or by its backend going away) it goes back there, where
+  // compactPermissionCard makes it the step's one quiet line.
+  let dockBatch = 0;                        // asked since the dock was last empty: "2 of 3" counts through them
+  function dockApproval(c) {
+    if (!approvalDock || !c.isConnected) return;
+    const anchor = document.createComment(`approval ${c.dataset.requestId || ""}`);
+    c.before(anchor);
+    c._dockAnchor = anchor;
+    approvalDock.appendChild(c);
+    dockBatch += 1;
+    refreshDock();
+    // Read-only here (open in another window): held as it docks, not a tick later when the page's watch catches up.
+    if (elsewhereLock) holdWork(true);
+  }
+  function refreshDock() {
+    if (!approvalDock) return;
+    for (const c of [...approvalDock.children]) {
+      const anchor = c._dockAnchor;
+      // Its chat was cleared: it goes with it.
+      if (!anchor?.isConnected) { c._dockAnchor = null; c.remove(); continue; }
+      // Answered, or asked by a backend that has since gone (it can't be answered): back to its step.
+      if (c.classList.contains("resolved") || c._requestEpoch !== requestEpoch) { c._dockAnchor = null; c.hidden = false; c.querySelector(".perm-count")?.remove(); anchor.replaceWith(c); }
+    }
+    const waiting = [...approvalDock.children];
+    if (!waiting.length) dockBatch = 0;
+    waiting.forEach((c, i) => {
+      c.hidden = i > 0;
+      let count = c.querySelector(".perm-count");
+      if (dockBatch > 1) {
+        if (!count) { count = el("span", "perm-count"); c.querySelector(".q")?.after(count); }   // beside its title, not in it
+        count.textContent = `${dockBatch - waiting.length + i + 1} of ${dockBatch}`;
+      } else count?.remove();
+    });
+    approvalDock.hidden = !waiting.length;
+  }
+  if (approvalDock) new MutationObserver(() => refreshDock()).observe(log, { childList: true });
   // The backend announces an open decision again after a history snapshot; one card per request.
   function requestShown(id) {
     return [...document.querySelectorAll(".card[data-request-id]")]
@@ -6329,6 +6370,7 @@
       c.appendChild(line);
     }
     renderTurnMeta();
+    if (c._dockAnchor) refreshDock();      // answered in the dock: back to its step in the chat
     return true;
   }
   function expireOpenRequests() {
@@ -7894,6 +7936,7 @@ function permissionChoices(ev) {
     switch (ev.type) {
       case "ready": {
         requestEpoch += 1;             // a backend (re)started: its request ids start again
+        refreshDock();
         modsUi?.ready(ev.capabilities);
         backendLive = true; backendDown = false; armTodoClearTimer();
         if (Array.isArray(ev.commands) && ev.commands.length
@@ -8434,6 +8477,7 @@ function permissionChoices(ev) {
           }
           answer(b);
         });
+        if (!fixAsk) dockApproval(c);
         break;
       }
       case "plan_proposal": {
@@ -11916,6 +11960,7 @@ function permissionChoices(ev) {
     else if (msg.type === "backend_exit") {
       releaseHeldEvents();
       requestEpoch += 1;
+      refreshDock();
       backendExitHooks(msg);
       sessionReady = !draftScope;
       // A Clear sent to a recovering backend is held for the next one, so it is not unanswered
@@ -15814,6 +15859,12 @@ function permissionChoices(ev) {
     };
     // A docked question takes focus on its highlighted row (the preselected recommendation).
     if (askCardDocked() && (focusAskCard() || focusFirst($("cbox").querySelector(".ask") || $("cbox")))) return;
+    // The approval waiting above the box comes first (ui-04): it is the one that asks now.
+    // On Allow once, its filled button, so Enter answers the safe way (not Always allow, which comes first).
+    const docked = approvalDock && [...approvalDock.children].find((c) => !c.hidden && !c.classList.contains("resolved"));
+    const safe = docked?.querySelector(".btns button.primary:not([disabled])");
+    if (safe && safe.getClientRects().length) { safe.focus(); return; }
+    if (docked && focusFirst(docked)) return;
     const cards = [...log.querySelectorAll(".card[data-request-id]:not(.resolved), .recovery-card")];
     if (focusFirst(cards.at(-1))) return;
     input.focus();

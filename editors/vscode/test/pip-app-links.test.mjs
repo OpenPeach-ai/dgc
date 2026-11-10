@@ -289,17 +289,22 @@ test('what its computer holds shows in the chat: a site to allow, and a payment 
  const pay={...site,id:id('b'),summary:{method:'POST',host:'pay.sunrisehospital.example',path:'/api/pay',page:'https://pay.sunrisehospital.example/pay',payment:true,fields:[{name:'billno',value:'SMH/OP/26/118734'},{name:'amount',value:'5350.00'},{name:'card_number',value:'•••'}],more_fields:0,body_bytes:120}};
  const computer={pip_id:PIP,granted:true,available:true,reason:'',pending:2,actions:[site,pay]};
  const x=setup({links:[],computer});await openChat(x);
- const cards=[...x.d.querySelectorAll('[data-computer-card]')];assert.equal(cards.length,2,'both wait under the reply');
+ // They wait just above the box, one at a time (ui-04): the site first, "1 of 2".
+ let cards=[...x.d.querySelectorAll('[data-computer-card]')];assert.equal(cards.length,1,'one at a time');
+ assert.ok(cards[0].closest('.pip-composer-shell .pip-approval-dock'),'just above the box');
+ assert.equal(cards[0].querySelector('.perm-count').textContent,'1 of 2');
  assert.match(cards[0].textContent,/Let Gmail visit sunrisehospital\.example\?.*Allow this site.*Not now/);
- assert.match(cards[1].textContent,/Pay on pay\.sunrisehospital\.example\?billno SMH\/OP\/26\/118734 · amount 5350\.00 It sends payment card details\. Nothing has been sent\..*Review….*Reject/);
- assert.doesNotMatch(cards[1].textContent,/card_number/);
- assert.equal(cards[1].querySelector('[data-approve="1"]'),null,'a payment is never sent from the chat in one tap: Review… shows it first');
  x.click(`[data-computer-decide="${id('a')}"][data-approve="1"]`);
  const allowed=x.requests('decide_pip_computer_action').at(-1);
  assert.deepEqual(JSON.parse(JSON.stringify(allowed.request)),{type:'decide_pip_computer_action',action_id:id('a'),expected_digest:'d'.repeat(64),approve:true});
  computer.actions=[{...site,status:'approved'},pay];x.answer(allowed,{action:{...site,status:'approved',resolved_at:'2026-10-20T10:01:00Z',resolved_by:'editor-user'}});await x.drain();
  assert.match(x.d.body.textContent,/Allowed\. It opens the site and carries on\./);
- assert.equal(x.d.querySelectorAll('[data-computer-card]').length,1,'the site card is gone');
+ cards=[...x.d.querySelectorAll('[data-computer-card]')];assert.equal(cards.length,1,'the site card is gone');
+ assert.equal(cards[0].dataset.computerCard,id('b'),'the payment takes its place');
+ assert.equal(cards[0].querySelector('.perm-count').textContent,'2 of 2');
+ assert.match(cards[0].textContent,/Pay on pay\.sunrisehospital\.example\?billno SMH\/OP\/26\/118734 · amount 5350\.00 It sends payment card details\. Nothing has been sent\..*Review….*Reject/);
+ assert.doesNotMatch(cards[0].textContent,/card_number/);
+ assert.equal(cards[0].querySelector('[data-approve="1"]'),null,'a payment is never sent from the chat in one tap: Review… shows it first');
  x.click(`[data-computer-decide="${id('b')}"][data-approve="0"]`);
  const rejected=x.requests('decide_pip_computer_action').at(-1);assert.equal(rejected.request.approve,false);assert.equal(rejected.request.action_id,id('b'));
 });

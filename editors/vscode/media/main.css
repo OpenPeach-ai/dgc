@@ -1107,6 +1107,12 @@ body.hide-reasoning .tool-group-label .tg-thought { display: none; }
 /* One line until you actually want to write in it — most approvals never need a note. */
 .card .feedback:focus { outline: none; min-height: 64px; border-color: var(--vscode-focusBorder, var(--accent)); }
 /* A card in plain words (a paid picture, a look on the network): its facts, the prompt as you wrote it, and Edit. */
+/* The approval dock (ui-04, asked 10 Nov): the waiting approval sits just above the prompt box, one at a time; a tall
+   one (an edit's diff) scrolls inside it rather than pushing the box off the panel. */
+.approval-dock { margin: 0 0 var(--sp-2); max-height: 45vh; overflow-y: auto; }
+.approval-dock > .card { margin: 0; box-shadow: 0 -8px 24px -16px rgba(0, 0, 0, .55); }
+body.vscode-light .approval-dock > .card { box-shadow: 0 -8px 20px -14px rgba(0, 0, 0, .18); }
+.card.perm-card > .perm-count { grid-column: 1; grid-row: 1; justify-self: end; color: var(--muted); font: var(--w-reg) var(--t-xs)/1 var(--sans); white-space: nowrap; }
 /* The approval card (ui-04, U4 and U5): one line, then what it does. A muted shield and its title at the left, Always
    allow, Deny and Allow once at the right (only the last filled, 26 px high), the command in a small chip under it, and
    the note for the model only after Deny. In a narrow panel the buttons go under the command, in the same order. */

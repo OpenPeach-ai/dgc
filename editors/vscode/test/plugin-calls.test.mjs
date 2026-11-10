@@ -143,7 +143,9 @@ test("Work's Allow card for a plugin's tool wears the plugin's logo where the sh
       assert.deepEqual(await card("req-c").locator(".perm-calls li").allTextContents(), ["Gmail · Fetch emails · 5 from Inbox · through Composio"]);
       assert.equal((await card("req-c").textContent()).includes("sess_1"), false, "no plumbing");
       assert.equal(await card("req-b").locator('.q [data-icon="shield"]').count(), 1, "any other step keeps the shield");
-      // Every action it covers, and what it sends in full one click away.
+      // Every action it covers, and what it sends in full one click away. Approvals wait one at a time above the box
+      // (ui-04), so the two before it are answered first.
+      for (const id of ["req-c", "req-b"]) await send({ type: "permission_resolved", id, decision: "once", message: "Allowed once" });
       await send({ type: "permission_request", id: "req-m", name: "mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL", args: MANY,
                    summary: "COMPOSIO_MULTI_EXECUTE_TOOL", suggested_rule: "mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL" });
       assert.equal(await card("req-m").locator(".perm-calls li").count(), 13);
@@ -242,6 +244,8 @@ test("Work's Allow card for a plugin's tool shows a change's every input in full
     assert.equal(await write.locator(".perm-inputs dd").nth(1).isVisible(), true, "in sight, with no click");
     assert.equal(await write.locator(".perm-brief").getAttribute("open"), null, "Inputs as sent stays closed");
     if (process.env.DGC_SHOTS) await write.screenshot({ path: `${process.env.DGC_SHOTS}/work-plugin-write-card.png` });
+    // Approvals wait one at a time above the box (ui-04): the next shows once this one is answered.
+    await send({ type: "permission_resolved", id: "req-w", decision: "once", message: "Allowed once" });
     const read = card("req-r");
     assert.equal((await read.locator(".q").innerText()).trim(), "Use Find notes from Notes (test)?");
     assert.equal(await read.locator(".perm-inputs").count(), 0, "a read's inputs are not drawn in sight");
@@ -250,6 +254,8 @@ test("Work's Allow card for a plugin's tool shows a change's every input in full
     await read.locator(".perm-brief > summary").click();
     assert.deepEqual(JSON.parse(await read.locator(".perm-brief pre").textContent()), { query: "seed", limit: 3 });
     if (process.env.DGC_SHOTS) await read.screenshot({ path: `${process.env.DGC_SHOTS}/work-plugin-read-card.png` });
+    await send({ type: "permission_resolved", id: "req-r", decision: "once", message: "Allowed once" });
+    assert.equal(await card("req-n").isVisible(), true, "then the last one");
     assert.equal((await card("req-n").locator(".perm-facts").innerText()).trim(), "No inputs.");
     assert.deepEqual(errors, []);
   } finally { await page.close(); }

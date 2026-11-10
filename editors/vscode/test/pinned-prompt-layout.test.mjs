@@ -632,8 +632,8 @@ test("a request card DGC focuses from the image viewer lands below the pinned pr
     });
     await s.page.evaluate(() => document.querySelector('.tool[data-call-id="c1"] .image-chip').click());
     await s.page.waitForSelector("#image-viewer");
-    await s.events([{ type: "permission_request", id: "p1", call_id: "c2", name: "bash", args: { command: "rm -rf build" }, command: "rm -rf build",
-      summary: "rm -rf build", suggested_rule: "Bash(rm -rf build)", choices: ["once", "always", "deny"] },
+    // A plan card, which lives in the chat (a waiting tool approval docks above the box instead, ui-04).
+    await s.events([{ type: "plan_proposal", id: "p1", plan: "1. Remove the build folder\n2. Rebuild", choices: ["acceptEdits", "auto", "default", "reject"] },
       { type: "text_delta", text: ` ${PROSE(2)}` }]);                 // the stream went on below the card
     await s.page.waitForSelector("#image-viewer .iv-notice:not([hidden])");
     // Under the viewer, the reader had left the card under the pinned prompt: the control Show will focus

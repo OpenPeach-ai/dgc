@@ -9914,6 +9914,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   <div id="elsewhere-bar" class="elsewhere-bar" role="status" hidden><span class="codicon codicon-multiple-windows" aria-hidden="true"></span><span id="elsewhere-text" class="elsewhere-text"></span><button type="button" id="elsewhere-open" class="act primary" title="Carry on with this session in this window; the other window shows it read-only">Open here</button></div>
   <!-- The user's mods (media/mods.js): each band, then one status line. Above the rail, which sits on the box. -->
   <div id="mod-strip" class="mod-strip" hidden></div>
+  <!-- A waiting approval, just above the box and its rail, one at a time (media/main.js dockApproval, ui-04). -->
+  <div id="approval-dock" class="approval-dock" role="region" aria-label="Waiting for your answer" hidden></div>
   <div id="composer-rail" aria-label="Current work" hidden>
     <section id="queuebar" class="rail-item" aria-label="Queued messages" hidden>
       <div class="queue-head"><span class="codicon codicon-list-ordered rail-icon" aria-hidden="true"></span><span id="queue-title">Queued messages</span><button type="button" id="queue-steer-all" class="rail-text-action" hidden>Steer all</button></div>

@@ -201,9 +201,11 @@ test("an approval inside a stretch stays outside the folded line, visible", () =
   event({ type: "permission_request", id: "p1", name: "bash", command: frames[5].summary, args: frames[5].args });
   const card = doc.querySelector(".card[data-request-id]");
   assert.equal(card.closest(".tool-group"), null, "never inside the group");
-  assert.equal(card.parentElement, turn());
-  assert.deepEqual(rows(turn()), ["text", "group", "live", "card", "act"]);
+  assert.equal(card.parentElement, doc.getElementById("approval-dock"), "while it waits, just above the box (ui-04)");
+  assert.deepEqual(rows(turn()), ["text", "group", "live", "act"]);
   card.querySelector('button[data-d="once"]').click();
+  assert.equal(card.parentElement, turn(), "answered, it comes back to its place in the turn");
+  assert.deepEqual(rows(turn()), ["text", "group", "live", "card", "act"]);
   for (const frame of frames.slice(6, 10)) event(frame);
   assert.equal(doc.querySelectorAll(".tool-group").length, 1, "the stretch carries on in its one line");
   assert.equal(doc.querySelectorAll(".tool-group > .tool").length, 2);

@@ -22,7 +22,7 @@ const skipOrFail = (t) => {
   return true;
 };
 
-async function scene(theme, capabilities = {}) {
+async function scene(theme, capabilities = {}, ids = ["once", "deny", "always", "backend"]) {
   const { html, mainJs, markdownJs } = panelHtml();
   const page = await browser.newPage({ viewport: { width: 420, height: 900 } });
   const errors = [];
@@ -42,7 +42,7 @@ async function scene(theme, capabilities = {}) {
     context_size: 65536, session_id: "s1" });
   await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { data: { type: "session_ready", sessionId: "s1" } })));
   await send({ type: "turn_start", turn_id: "t1", prompt: "Run the tests" });
-  for (const id of ["once", "deny", "always", "backend"]) {
+  for (const id of ids) {
     await send({ type: "permission_request", id: `req-${id}`, name: "bash", args: { command: `npm test -- ${id}` },
       command: `npm test -- ${id}`, summary: `npm test -- ${id}`, suggested_rule: "Bash(npm test:*)" });
   }
@@ -172,7 +172,7 @@ for (const theme of ["dark-modern", "light-modern"]) {
 // instead of "Run browser" and the tool's arguments; Allow once is that call, Always saves that site and nothing else.
 test("a signed-in Chrome card names the site and what it can do there", async (t) => {
   if (skipOrFail(t)) return;
-  const s = await scene("dark-modern");
+  const s = await scene("dark-modern", {}, []);
   try {
     await s.send({ type: "permission_request", id: "req-chrome", name: "browser",
       args: { operation: "open", url: "https://mail.google.com/mail/u/0/#inbox", signed_in: true },
@@ -203,7 +203,7 @@ test("a signed-in Chrome card names the site and what it can do there", async (t
 for (const theme of ["dark-modern", "light-modern"]) {
   test(`a paid picture's card says what it makes and what it costs, with Make it, Edit, Always allow and Don't (${theme})`, async (t) => {
     if (skipOrFail(t)) return;
-    const s = await scene(theme);
+    const s = await scene(theme, {}, []);
     try {
       const args = { prompt: "A small round sticker of a smiling tomato, flat colours", generator: "fal.ai FLUX Schnell", provider: "fal.ai",
         model: "fal-ai/flux/schnell", size: "512x512", count: 1, price: "about $0.003", this_month: "$0.003 so far" };
@@ -247,7 +247,7 @@ for (const theme of ["dark-modern", "light-modern"]) {
 for (const theme of ["dark-modern", "light-modern"]) {
   test(`a helpers batch and a plugin's tool ask in plain words, never raw names or JSON (${theme})`, async (t) => {
     if (skipOrFail(t)) return;
-    const s = await scene(theme);
+    const s = await scene(theme, {}, []);
     try {
       const tasks = [
         { description: "Describe plants.py", prompt: "Read plants.py and say in one line what it is for.", agent: "explorer", system: "Workstation", model: "glm-5.3:cloud" },
@@ -290,6 +290,8 @@ for (const theme of ["dark-modern", "light-modern"]) {
       assert.deepEqual(await two.locator(".perm-inputs dd").allInnerTexts(), ["16:30", "Europe/London", "Asia/Tokyo"]);
       assert.equal(await two.locator(".perm-brief pre").isVisible(), false, "the inputs as sent are one click away");
       if (process.env.DGC_SHOTS) await two.screenshot({ path: `${process.env.DGC_SHOTS}/plugin-tool-card-${theme}.png` });
+      // One at a time above the box (ui-04): the three before it are answered first, here by rules.
+      for (const id of ["batch", "one", "mcp"]) await s.send({ type: "permission_resolved", id: `req-${id}`, decision: "no", message: "Answered" });
       await two.locator('button[data-d="once"]').click();
       assert.match(await two.innerText(), /Convert time · Example · Allowed once/);
       assert.deepEqual(s.errors, []);
@@ -302,7 +304,7 @@ for (const theme of ["dark-modern", "light-modern"]) {
 // with the handshake (ready.capabilities.plugin_names), so both say the plugin's name, and so does the step's line.
 test("a plugin's tool's Allow card names the plugin as its card does", async (t) => {
   if (skipOrFail(t)) return;
-  const s = await scene("dark-modern", { plugin_names: { example: "MCP Apps example", "bad name": "x", notes: 7 } });
+  const s = await scene("dark-modern", { plugin_names: { example: "MCP Apps example", "bad name": "x", notes: 7 } }, []);
   try {
     await s.send({ type: "permission_request", id: "req-named", call_id: "n1", name: "mcp__example__get-time", args: {},
       summary: "", suggested_rule: "mcp__example__get-time", choices: ["once", "deny"] });

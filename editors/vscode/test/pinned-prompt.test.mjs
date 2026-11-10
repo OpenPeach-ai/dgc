@@ -630,7 +630,8 @@ test("keyboard focus is brought out from under a pinned prompt; mouse focus and 
   const p = panel();
   const view = scroller(p);
   p.events([turn("t1", "Deploy it, see https://vibedgc.com/docs")[0]]);
-  p.event({ type: "permission_request", id: "r1", name: "bash", command: "ls", args: {}, summary: "ls", choices: ["once", "always", "deny"] });
+  // A plan card lives in the chat (a waiting tool approval docks above the box instead, ui-04).
+  p.event({ type: "plan_proposal", id: "r1", plan: "1. List the files\n2. Deploy", choices: ["acceptEdits", "auto", "default", "reject"] });
   const head = p.heads()[0];
   pin(p, view, head);                                          // its foot at 180, its fade to 192
   const [button, other] = p.log.querySelectorAll('.card[data-request-id="r1"] button');
@@ -681,8 +682,8 @@ test("a request card DGC focuses, and the chip the image viewer gives focus back
   card.querySelector(".tool-toggle").click();
   const chip = card.querySelector(".image-chip");
   chip.click();
-  p.event({ type: "permission_request", id: "p1", name: "bash", command: "rm -rf build", args: {}, summary: "rm -rf build",
-    suggested_rule: "Bash", choices: ["once", "always", "deny"] });
+  // A plan card, which lives in the chat (a waiting tool approval docks above the box instead, ui-04).
+  p.event({ type: "plan_proposal", id: "p1", plan: "1. Remove the build folder\n2. Rebuild", choices: ["acceptEdits", "auto", "default", "reject"] });
   await new Promise((done) => p.win.setTimeout(done, 0));
   const head = p.heads()[0];
   pin(p, view, head);

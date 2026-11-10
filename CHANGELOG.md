@@ -6,6 +6,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- A waiting approval sits just above the prompt box, in Work and in a Pip's chat, and your typing stays in the box. Several wait one at a time ("1 of 3"); answered, each leaves its one quiet line where the step is in the chat.
 - Approval cards are one line with the command under it, Allow once filled at the right end, and the note for the model only after Deny.
 - Artifact, file and canvas cards in Work and ChatDGC share one look: a coloured square tile, the name and a quiet line, and the whole card opens it.
 - A Personal Pip changes itself at once, with Undo. Ask it to rename itself, change its instructions, schedule or model, or add a routine, and it does as its reply comes in; the chat shows one line per change after that reply ("Pitch updated its job: name, instructions · Undo · Details"), and Undo puts it back while nothing has changed it since. Only in a turn you started: a routine's run, or a follow-up after a page it read, still asks, and web reads, its computer, apps and its level always ask. `/setup` in a Pip's box ("/setup Write one-page sales sheets") asks up to three short questions and sets it up. Pips API 77 (`undo_pip_change`), registry schema 52.

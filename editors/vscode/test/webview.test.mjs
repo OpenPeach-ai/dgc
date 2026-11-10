@@ -101,7 +101,9 @@ test("the session checklist is a composer-rail row above the goal and updates in
   assert.deepEqual([...rail.children].map(node => node.id),
     ["queuebar", "pipsbar", "monitorsbar", "troupebar", "changesbar", "tasksbar", "goalbar", "pastebar"],
     "rail order: queue, Pips, monitors, troupes, changes, tasks, goal — the whole rail sits on the prompt box");
+  // The rail sits on the box; a waiting approval docks just above the rail (ui-04).
   assert.equal(rail.nextElementSibling.id, "cbox");
+  assert.equal(rail.previousElementSibling.id, "approval-dock");
   assert.equal(bar.classList.contains("rail-item"), true);
   assert.equal(bar.hidden, true, "an empty checklist takes no room");
   assert.equal(rail.hidden, true, "nor does the rail with nothing in it");
@@ -4224,7 +4226,8 @@ test("a reloaded webview keeps the running turn from its snapshot and draws a re
   assert.equal(live.querySelector('.tool[data-tool-name="bash"]').dataset.status, "running");
   assert.equal(doc.querySelectorAll('.card[data-request-id="r4"]').length, 1, "one card per request");
   assert.match(live.querySelector(".thinking .verb").textContent, /waiting for your input/);
-  live.querySelector('.card[data-request-id="r4"] button[data-d="once"]').click();
+  // While it waits it sits above the prompt box (ui-04); answered, it goes back into the running turn.
+  doc.querySelector('#approval-dock .card[data-request-id="r4"] button[data-d="once"]').click();
   assert.deepEqual(posted.filter((m) => m.type === "permission_response").map((m) => [m.id, m.decision]), [["r4", "once"]]);
   // An older backend's snapshot can still hold the approved step: its live tool_call is the same row.
   event({ type: "tool_call", call_id: "call_1", name: "bash", args: { command: "npm test" }, summary: "npm test" });
