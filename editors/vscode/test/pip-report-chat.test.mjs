@@ -115,7 +115,11 @@ test("a report reaches the open chat as a card, Ask DGC to fix fixes it in the b
     assert.ok(after.overflow <= 0 && after.logOverflow <= 0 && after.buttons.every(Boolean), JSON.stringify(after));
     assert.equal(fixed.fix.files[0].path, "app/gst.py");
 
-    // A reload draws the same card where it was, its fix with it.
+    // A reload draws the same card where it was, its fix with it. Compared at rest: while DGC's own tooltip is up it
+    // lifts the control's `title` (and puts it back on hide), so a pointer left over the card's place ("gst.py, line
+    // 2", whose title is the exact path) would make the live copy differ from the replay by that one attribute.
+    await s.page.mouse.move(0, 0);
+    await until(async () => s.page.evaluate(() => !document.querySelector(".pip-report-where:not([title])")), "the tooltip to put the title back", 5_000);
     const liveCards = await cards(s.page);
     await s.reloadWebview({ width: 360, height: 760 });
     await s.ready();

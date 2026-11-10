@@ -3124,7 +3124,7 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
    the turn that was running), never above the composer. Ask DGC to fix starts a background fix whose status is
    this card (.pip-fix below), or, with an older CLI, sends one prompt. A clean run is one quiet line. Narrow panels wrap the row, never clip the actions. */
 .pip-report { display: flex; align-items: flex-start; gap: var(--sp-3); min-width: 0; margin: var(--sp-3) 0;
-  padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); }
+  padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-card); background: var(--surface); }
 /* No thick accent bar down a card's left edge (reported 24 Oct): the card's border and its own words say what it is. */
 .pip-report.quiet { align-items: center; margin: var(--sp-2) 0; padding: var(--sp-1) var(--sp-3);
   border-color: transparent; background: transparent; box-shadow: none; }
@@ -3154,14 +3154,27 @@ body.vscode-high-contrast-light :is(.pip-report, .pip-report-group, .pips-digest
 .pip-report-findings { display: grid; gap: 2px; margin: var(--sp-2) 0 0; padding: 0; list-style: none; }
 .pip-report-findings li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); min-width: 0;
   font: var(--w-reg) var(--t-xs)/1.5 var(--sans); color: var(--text); }
-.pip-report-sev { flex: none; min-width: 4.5em; color: var(--muted); font-weight: var(--w-semi); text-transform: lowercase; }
+.pip-report-sev { flex: none; min-width: 4.5em; color: var(--muted); font-weight: var(--w-semi); }   /* "High": sentence case (ui-04) */
 .pip-report-sev[data-severity="critical"], .pip-report-sev[data-severity="high"],
 .pip-report-sev[data-severity="failed"] { color: var(--sev-high); }
 .pip-report-sev[data-severity="medium"] { color: var(--sev-medium); }
 .pip-report-title { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; }
-.pip-report-where { flex: 0 1 auto; min-width: 0; color: var(--muted); font-family: var(--mono); overflow-wrap: anywhere; }
+/* Where, in words ("gst.py, line 88") in the card's own font; the exact place is under Show the code. --muted, not
+   --faint: --faint is VS Code's disabled colour, too pale to read in the light themes. */
+.pip-report-where { flex: 0 1 auto; min-width: 0; color: var(--muted); font-family: var(--sans); overflow-wrap: anywhere; }
+/* The code and the technical words, one quiet click away: a failure's detail and the findings' exact places. */
+.pip-report-code { margin: var(--sp-1) 0 0; }
+.pip-report-code > summary { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); cursor: pointer; list-style: none; border-radius: var(--r-sm); }
+.pip-report-code > summary::-webkit-details-marker { display: none; }
+.pip-report-code > summary::before { content: ""; width: 0; height: 0; border-left: 4px solid currentColor; border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent; transition: transform .12s; }
+.pip-report-code[open] > summary::before { transform: rotate(90deg); }
+.pip-report-code > summary:hover { color: var(--text); }
+.pip-report-code > summary:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.pip-report-places { display: grid; gap: 2px; margin: var(--sp-1) 0 0; padding: 0; list-style: none; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--mono); overflow-wrap: anywhere; }
 .pip-report-more { margin: var(--sp-1) 0 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 .pip-report-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }
+.pip-report-actions button.act.pip-report-fix { border-color: transparent; background: transparent; color: var(--accent-text); font-weight: var(--w-semi); }
+.pip-report-actions button.act.pip-report-fix:hover { background: var(--surface2); }
 .pip-report.quiet .pip-report-actions { margin-top: 0; gap: var(--sp-1); }
 .pip-report.quiet .pip-report-actions button.act { min-height: 0; padding: 2px var(--sp-2); border-color: transparent;
   background: transparent; color: var(--link); font-size: var(--t-xs); }
@@ -3202,18 +3215,21 @@ body.vscode-light .pip-report-line-state[data-good] { color: #1D7A44; }   /* --g
 .pip-report-line-what { flex: 0 1 auto; min-width: 3em; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
 .pip-report-line2 .pip-report-where { flex: 0 10 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
 .pip-report-slim-actions { flex: none; display: inline-flex; align-items: center; gap: 2px; }
-.pip-report-slim-actions button { min-height: 0; height: 20px; padding: 0 6px; border: 1px solid transparent; border-radius: var(--r-sm);
-  background: transparent; color: var(--link); font: var(--w-semi) var(--t-xs)/1 var(--sans); cursor: pointer;
+/* Open and ✕ are 22 px outline chips; Fix is the one accent on the card, as text (ui-04, U10). */
+.pip-report-slim-actions button { min-height: 0; height: 22px; padding: 0 7px; border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: transparent; color: var(--text); font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer;
   display: inline-flex; align-items: center; }
+.pip-report-slim-actions :is(.pip-report-fix-slim, .pip-report-signin-slim) { border-color: transparent; color: var(--accent-text); font-weight: var(--w-semi); }
 .pip-report-slim-actions button:hover { border-color: var(--border-strong); background: var(--surface2); }
 .pip-report-slim-actions button:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
-.pip-report-slim-actions .pip-report-dismiss-slim { width: 20px; padding: 0; justify-content: center; color: var(--muted); }
+.pip-report-slim-actions .pip-report-dismiss-slim { width: 22px; padding: 0; justify-content: center; color: var(--muted); }
 .pip-report-slim-actions .pip-report-dismiss-slim .codicon { font-size: 12px; }
 .pip-report-slim-actions .asked { color: var(--muted); font-weight: var(--w-reg); cursor: default; }
 .pip-report-slim-actions .asked:hover { border-color: transparent; background: transparent; }
 /* Closed: the long parts stay out of sight. Open: line two goes, the whole card shows (its name and time are line one's). */
 .pip-report.slim[data-shown="closed"] .pip-report-head, .pip-report.slim[data-shown="closed"] .pip-report-findings,
 .pip-report.slim[data-shown="closed"] .pip-report-more, .pip-report.slim[data-shown="closed"] .pip-report-detail,
+.pip-report.slim[data-shown="closed"] .pip-report-code,
 .pip-report.slim[data-shown="closed"] > .pip-report-main > .pip-report-actions { display: none; }
 .pip-report.slim[data-shown="open"] .pip-report-line2,
 .pip-report.slim:not(.quiet)[data-shown="open"] .pip-report-line1 .pip-report-slim-actions { display: none; }

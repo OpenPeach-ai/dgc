@@ -182,7 +182,7 @@ test('the Work chat card says needs you with the summary and the command that di
   const card=s.doc.querySelector('#log .pip-report');assert.ok(card);
   assert.equal(card.querySelector('.pip-report-state').textContent,'needs you · 1 of 3 commands didn’t run');
   assert.equal(card.querySelector('.pip-report-summary').textContent,CARD.summary);
-  assert.deepEqual([...card.querySelectorAll('.pip-report-findings li')].map(li=>li.textContent),['failedcurl -s http://127.0.0.1:8765/health']);
+  assert.deepEqual([...card.querySelectorAll('.pip-report-findings li')].map(li=>li.textContent),['Failedcurl -s http://127.0.0.1:8765/health']);
   assert.equal(card.querySelector('.pip-report-line-what').textContent,CARD.summary);
   const before=s.posted.length;card.querySelector('.pip-report-fix').click();
   const [sent]=s.posted.slice(before).filter(m=>m.type==='prompt');

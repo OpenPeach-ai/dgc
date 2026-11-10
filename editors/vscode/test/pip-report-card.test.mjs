@@ -49,8 +49,8 @@ test("a report is a card in the transcript: the Pip, what it found, the worst fi
   assert.equal(card.querySelector(".pip-report-name").textContent, "ERP daily audit");
   assert.equal(card.querySelector(".pip-report-state").textContent, "finished · 5 findings (2 high, 2 medium, 1 low)");
   assert.deepEqual([...card.querySelectorAll(".pip-report-findings li")].map((li) => li.textContent),
-    ["highGST total skips cessapp/gst.py:88", "highInvoice push retries foreverapp/push.py:40",
-     "mediumRounding drops paiseapp/billing.py:12"]);
+    ["HighGST total skips cessgst.py, line 88", "HighInvoice push retries foreverpush.py, line 40",
+     "MediumRounding drops paisebilling.py, line 12"], "in words: severity in sentence case, the place as words (ui-04)");
   assert.equal(card.querySelector(".pip-report-more").textContent, "2 more in the report · 1 earlier run not shown");
   assert.deepEqual([...card.querySelectorAll(".pip-report-actions button")].map((b) => b.textContent),
     ["Ask DGC to fix", "Open report", "Dismiss"]);
@@ -142,9 +142,10 @@ test("a report is two lines until opened: what it found, then the worst finding 
   const line1 = card.querySelector(".pip-report-line1"), line2 = card.querySelector(".pip-report-line2");
   assert.equal(line1.querySelector(".pip-report-line-name").textContent, "ERP daily audit");
   assert.equal(line1.querySelector(".pip-report-line-state").textContent, "5 findings · 2 high");
-  assert.equal(line2.querySelector(".pip-report-sev").textContent, "high");
+  assert.equal(line2.querySelector(".pip-report-sev").textContent, "High");
   assert.equal(line2.querySelector(".pip-report-line-what").textContent, "GST total skips cess");
-  assert.equal(line2.querySelector(".pip-report-where").textContent, "app/gst.py:88");
+  assert.equal(line2.querySelector(".pip-report-where").textContent, "gst.py, line 88");
+  assert.equal(line2.querySelector(".pip-report-where").title, "app/gst.py:88", "the exact place in its title");
   assert.deepEqual([...line2.querySelectorAll("button")].map((b) => b.textContent || b.getAttribute("aria-label")), ["Fix", "Open", "Dismiss"]);
   line1.click();
   assert.equal(card.dataset.shown, "open", "a click opens the whole card");
@@ -164,7 +165,7 @@ test("a failed run's second line says why", () => {
   s.event({ type: "pip_report", report: FAILED });
   const [card] = cards(s);
   assert.equal(card.querySelector(".pip-report-line-state").textContent, "failed");
-  assert.equal(card.querySelector(".pip-report-line2 .pip-report-sev").textContent, "why");
+  assert.equal(card.querySelector(".pip-report-line2 .pip-report-sev").textContent, "Why");
   assert.equal(card.querySelector(".pip-report-line-what").textContent, FAILED.reason);
 });
 
@@ -295,5 +296,30 @@ test("a report whose model said which findings are new says \"1 new · 2 still t
   const line1 = card.querySelector(".pip-report-line1"), line2 = card.querySelector(".pip-report-line2");
   assert.equal(line1.querySelector(".pip-report-line-state").textContent, "1 new · 2 still there");
   assert.equal(line2.querySelector(".pip-report-line-what").textContent, "E-way valid-upto dropped on re-pull");
-  assert.equal(line2.querySelector(".pip-report-where").textContent, "app/eway.py:9");
+  assert.equal(line2.querySelector(".pip-report-where").textContent, "eway.py, line 9");
+});
+
+// The plan's Pip report card (ui-04, U10): it reads in words, the code is one quiet click away under "Show the code",
+// and Fix is the card's one accent, as text.
+test("opened, a report reads in words; the code is under Show the code; Fix is accent text, not a filled button", () => {
+  const s = panel();
+  s.event({ type: "pip_report", report: REPORT });
+  const [card] = cards(s);
+  const code = card.querySelector("details.pip-report-code");
+  assert.ok(code, "the code is in the card");
+  assert.equal(code.open, false, "closed until asked for");
+  assert.equal(code.querySelector("summary").textContent, "Show the code");
+  assert.deepEqual([...code.querySelectorAll(".pip-report-places li")].map((li) => li.textContent),
+    ["app/gst.py:88", "app/push.py:40", "app/billing.py:12"], "the exact places, in the order of the findings");
+  assert.equal(card.querySelector(".pip-report-findings").textContent.includes("app/"), false, "the findings themselves read as words");
+  code.querySelector("summary").click();
+  assert.equal(code.open, true, "the summary opens it");
+  assert.equal(card.dataset.shown, "closed", "opening the code never folds or opens the card");
+  const fix = card.querySelector(".pip-report-actions .pip-report-fix");
+  assert.equal(fix.classList.contains("primary"), false, "Ask DGC to fix is accent text");
+  const failed = panel();
+  failed.event({ type: "pip_report", report: FAILED });
+  const detail = cards(failed)[0].querySelector("details.pip-report-code .pip-report-detail");
+  assert.equal(detail?.textContent, FAILED.detail, "a failure's technical detail is under Show the code too");
+  assert.deepEqual([...s.errors, ...failed.errors], []);
 });

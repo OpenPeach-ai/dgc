@@ -10849,8 +10849,11 @@ function permissionChoices(ev) {
     const time = window.DgcTime?.node(Date.parse(String(r.finished_at || "")), "pip-report-when");
     if (time) head.append(time);
     main.append(head);
+    // The code and the technical words, one quiet click away (ui-04, U10): a failure's detail and the findings' exact
+    // places. The card itself reads in words.
+    const code = [];
     if (r.outcome === "failed" && r.detail) {
-      const detail = el("p", "pip-report-detail"); detail.textContent = String(r.detail).slice(0, 600); main.append(detail);
+      const detail = el("p", "pip-report-detail"); detail.textContent = String(r.detail).slice(0, 600); code.push(detail);
     }
     if ((r.outcome === "live_clear" || r.outcome === "live_attention") && r.summary) {
       const summary = el("p", "pip-report-detail pip-report-summary"); summary.textContent = String(r.summary).slice(0, 600); main.append(summary);
@@ -10864,17 +10867,29 @@ function permissionChoices(ev) {
       for (const f of rows) {
         const li = el("li"), sev = el("span", "pip-report-sev"), title = el("span", "pip-report-title");
         sev.dataset.severity = PIP_REPORT_SEVERITIES.includes(f.severity) ? f.severity : "failed";
-        sev.textContent = sev.dataset.severity;
+        sev.textContent = sev.dataset.severity === "failed" ? "Failed" : pipReportSevWord(sev.dataset.severity);
         title.textContent = String(f.title || "").slice(0, 200);
         li.append(sev, title);
         if (typeof f.path === "string" && f.path) {
           const where = el("span", "pip-report-where");
-          where.textContent = f.path.slice(0, 300) + (Number.isSafeInteger(f.line) && f.line > 0 ? `:${f.line}` : "");
+          where.textContent = pipReportPlace(f.path, f.line); where.title = pipReportExact(f.path, f.line);
           li.append(where);
         }
         list.append(li);
       }
       main.append(list);
+      const places = rows.filter((f) => typeof f.path === "string" && f.path);
+      if (places.length) {
+        const ul = el("ul", "pip-report-places");
+        for (const f of places) { const li = el("li"); li.textContent = pipReportExact(f.path, f.line); ul.append(li); }
+        code.push(ul);
+      }
+    }
+    if (code.length) {
+      const details = el("details", "pip-report-code"), summary = el("summary");
+      summary.textContent = "Show the code";
+      details.append(summary, ...code);
+      main.append(details);
     }
     const more = [];
     const total = Number.isSafeInteger(r.total) ? r.total : 0;
@@ -10910,7 +10925,7 @@ function permissionChoices(ev) {
       (next?.querySelector?.("button, [tabindex='0']") || input).focus({ preventScroll: true });
     };
     if (signIn) button("Check sign-in", "act primary pip-report-signin", signInTitle, checkSignIn);
-    else if (!quiet) button("Ask DGC to fix", "act primary pip-report-fix", fixTitle, fix);
+    else if (!quiet) button("Ask DGC to fix", "act pip-report-fix", fixTitle, fix);
     button("Open report", "act pip-report-open", `Open this run of ${r.name} in Pips`, openReport);
     button("Dismiss", "act pip-report-dismiss", "Remove this card from the chat. The report stays in Pips.", dismiss);
     main.append(actions);
@@ -10945,16 +10960,16 @@ function permissionChoices(ev) {
       card.dataset.shown = open ? "open" : "closed"; line1.setAttribute("aria-expanded", String(open));
     };
     line1.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); fold(); } });
-    card.addEventListener("click", (event) => { if (!event.target.closest("button, a, .pip-report-findings, .pip-report-detail, .pip-fix")) fold(); });
+    card.addEventListener("click", (event) => { if (!event.target.closest("button, a, .pip-report-findings, .pip-report-detail, .pip-report-code, .pip-fix")) fold(); });
     if (quiet) { line1.append(slimActs, chevron); main.prepend(line1); }
     else {
       line1.append(chevron);
       const line2 = el("div", "pip-report-line2");
       const sev = el("span", "pip-report-sev"), what = el("span", "pip-report-line-what");
-      sev.dataset.severity = short.sev; sev.textContent = short.sev === "failed" ? "why" : short.sev;
+      sev.dataset.severity = short.sev; sev.textContent = pipReportSevWord(short.sev);
       what.textContent = short.what;
       line2.append(sev, what);
-      if (short.where) { const where = el("span", "pip-report-where"); where.textContent = short.where; line2.append(where); }
+      if (short.where) { const where = el("span", "pip-report-where"); where.textContent = short.where; where.title = short.exact; line2.append(where); }
       line2.append(el("span", "pip-report-fill"), slimActs);
       main.prepend(line1, line2);
     }
@@ -10989,6 +11004,15 @@ function permissionChoices(ev) {
     return `Earlier: ${what}${when ? ` · ${when}` : ""}${older ? `, and ${pipReportPlural(older, "older card")}` : ""}`;
   }
   // The card's first two lines, from the report: "5 findings · 2 high" and the worst finding; "failed" and why.
+  // A finding's place as words ("gst.py, line 88"), the whole path in its title; the exact place is under Show the code.
+  function pipReportPlace(path, line) {
+    if (typeof path !== "string" || !path) return "";
+    const name = path.slice(0, 300).split("/").pop() || path.slice(0, 300);
+    return Number.isSafeInteger(line) && line > 0 ? `${name}, line ${line}` : name;
+  }
+  const pipReportExact = (path, line) => typeof path === "string" && path
+    ? path.slice(0, 300) + (Number.isSafeInteger(line) && line > 0 ? `:${line}` : "") : "";
+  const pipReportSevWord = (sev) => sev === "failed" ? "Why" : sev ? sev[0].toUpperCase() + sev.slice(1) : "";
   function pipReportShort(r) {
     const n = (v) => (Number.isSafeInteger(v) && v >= 0 ? v : 0);
     const top = Array.isArray(r.findings) ? r.findings[0] : null;
@@ -11008,11 +11032,11 @@ function permissionChoices(ev) {
       // "1 new · 3 still there", and the new one named (the report lists new ones first).
       return { text: `${n(r.new)} new · ${n(r.still)} still there`, bad: high > 0,
                sev: PIP_REPORT_SEVERITIES.includes(top?.severity) ? top.severity : "", what: String(top?.title || "").slice(0, 200),
-               where: typeof top?.path === "string" && top.path ? top.path.slice(0, 300) + (Number.isSafeInteger(top.line) && top.line > 0 ? `:${top.line}` : "") : "" };
+               where: pipReportPlace(top?.path, top?.line), exact: pipReportExact(top?.path, top?.line) };
     }
     return { text: `${pipReportPlural(n(r.total), "finding")}${high ? ` · ${high} high` : ""}`, bad: high > 0,
              sev: PIP_REPORT_SEVERITIES.includes(top?.severity) ? top.severity : "", what: String(top?.title || "").slice(0, 200),
-             where: typeof top?.path === "string" && top.path ? top.path.slice(0, 300) + (Number.isSafeInteger(top.line) && top.line > 0 ? `:${top.line}` : "") : "" };
+             where: pipReportPlace(top?.path, top?.line), exact: pipReportExact(top?.path, top?.line) };
   }
   // Two or more reports with nothing between them are one line until opened: "3 Pip reports · 1 failed · 5 findings"
   // (from two since reported 24 Oct: two still stacked as two cards).
