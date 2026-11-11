@@ -231,11 +231,17 @@ def view(db, conversation_id) -> dict:
 
 
 def listed(db, pip_id, *, archived=False) -> list[dict]:
-    """The Pip's conversations, the most recent first, each with its unread count; the first conversation is made when
-    it has none."""
+    """The Pip's conversations, the most recent first, each with its unread count and whether it is answering there
+    now; the first conversation is made when it has none."""
     first(db, pip_id)
     from .pip_unread import conversation_counts
     unread = conversation_counts(db, pip_id)
     rows = db.execute("SELECT id FROM pip_conversations WHERE pip_id=?" + ("" if archived else " AND archived_at IS NULL")
                       + " ORDER BY updated_at DESC, seq DESC", (pip_id,)).fetchall()
-    return [{**view(db, row[0]), "unread": unread.get(row[0], 0)} for row in rows]
+    # Where it is answering now (a message of that conversation whose reply is waiting or running): the editor's list
+    # marks it, so a reply going on in a conversation that isn't on screen is seen.
+    busy = {row[0] for row in db.execute(
+        "SELECT DISTINCT m.conversation_id FROM pip_chat_messages m JOIN pip_runs r ON r.id=m.run_id "
+        "WHERE m.pip_id=? AND m.role='user' AND r.status IN ('queued','running','cancelling')", (pip_id,)).fetchall()} \
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pip_chat_messages'").fetchone() else set()
+    return [{**view(db, row[0]), "unread": unread.get(row[0], 0), "replying": row[0] in busy} for row in rows]

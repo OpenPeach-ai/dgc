@@ -1201,7 +1201,8 @@ Pip's chat so far its **first** conversation, every message, checkpoint and stee
 one. A request that names no conversation is about the first, so an editor or SDK from before API 79 keeps working on it.
 
 - `list_pip_conversations {pip_id, archived?}` → `{pip_id, conversations: [{id, pip_id, title, first, created_at,
-  updated_at, archived, unread}]}`, newest message first; archived ones only with `archived: true`.
+  updated_at, archived, unread, replying}]}`, newest message first; archived ones only with `archived: true`.
+  `replying` is true while a message of that conversation has its reply waiting or running.
 - `create_pip_conversation {pip_id, title?}`, `rename_pip_conversation {pip_id, conversation_id, title}`,
   `archive_pip_conversation {pip_id, conversation_id, archived?}` → `{conversation}`. Titles are one line of at most
   120 characters (`""` until named). The first conversation can't be archived (`first_conversation`). An archived one

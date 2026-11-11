@@ -237,6 +237,49 @@ export const host = (opts) => `(${function (PIP, opts) {
       remove_pip_key: (r) => { keys = keys.filter((k) => k.id !== r.key_id); return { removed: true }; },
     });
   }
+  // opts.convs: several conversations with this Pip (pips-17, Pips API 79; pass api: 79 or more). Its first one, "Chat",
+  // holds the chat above, with something unread; "Trip to Goa" is the newest; it is answering in "Groceries"; "Tax
+  // papers" is long enough to scroll; two more are archived. Each keeps its own messages; what is sent, read, renamed,
+  // archived and started is noted in window.__convs, which answers the list the way DGC does (the newest first).
+  // opts.convs.computers / .limit: how many computers it has and may have (1 and 3).
+  if (opts.convs) {
+    const cid = (c) => "conv_" + c.repeat(32), want = opts.convs === true ? {} : opts.convs;
+    const conv = (c, title, ago, more = {}) => ({ id: cid(c), pip_id: PIP, title, first: false, created_at: new Date(Date.now() - (ago + 5) * MIN).toISOString(), updated_at: new Date(Date.now() - ago * MIN - 5000).toISOString(), archived: false, unread: 0, replying: false, ...more });
+    const tell = (c, n, role, text, ago, more = {}) => say(`${c}${n}`, role, text, c === "a" ? "a" : c, ago, { conversation_id: cid(c), ...more });
+    const state = window.__convs = { list: [conv("a", "Trip to Goa", 0), conv("f", "", 8, { first: true, unread: 1 }), conv("b", "Groceries", 60, { replying: true }), conv("c", "Tax papers", 3 * 1440),
+      conv("d", "Birthday ideas for Ma", 14 * 1440, { unread: 2 }), conv("1", "Old plans", 40 * 1440, { archived: true }), conv("2", "Spring cleaning", 50 * 1440, { archived: true })],
+      messages: { [cid("f")]: messages.map((m) => ({ ...m, conversation_id: cid("f") })),
+        [cid("a")]: [tell("a", 1, "user", "Find me a beach stay in Goa for March 14–17", 9), tell("a", 2, "assistant", "Here are three near Palolem, all under ₹9,000 a night for the 14th to the 17th: Ciaran's Beach Huts (₹7,200), Bhakti Kutir (₹8,400) and Palolem Garden Stay (₹6,900). Want me to hold one?", 8),
+          tell("a", 3, "user", "Hold Bhakti Kutir", 2), tell("a", 4, "assistant", "Bhakti Kutir is held until 6 pm today.", 1)],
+        [cid("b")]: [{ ...tell("b", 1, "user", "Milk, eggs and coffee for Saturday", 60), status: "running" }],
+        [cid("c")]: Array.from({ length: 30 }, (_, i) => tell("c", i + 1, i % 2 ? "assistant" : "user", i % 2 ? `Paper ${(i + 1) / 2} is filed. It was the one from the bank, with the interest for the year on its second page.` : `File tax paper ${i / 2 + 1}`, 3 * 1440 + 60 - i)),
+        [cid("d")]: [tell("d", 1, "user", "Ideas for Ma's birthday?", 14 * 1440 + 2), tell("d", 2, "assistant", "A day at the hill station she likes, or the pottery class she mentioned.", 14 * 1440)] },
+      sent: [], read: [], contexts: [], computers: want.computers || 1, limit: want.limit || 3, added: 0, next: 0, routines: [], fail: want.fail || "" };
+    const firstId = () => state.list.find((c) => c.first).id, find = (r) => { const c = state.list.find((v) => v.id === r.conversation_id); if (!c) throw Error("That conversation isn't this Pip's."); return c; };
+    const routines = [{ ...suggested, title: "Morning brief", status: "on", created_by: "user", trigger: { kind: "schedule", schedule: { type: "daily", time: "09:00", timezone: "Asia/Kolkata" } }, label: "every day at 09:00", next_due_at: "2036-11-07T03:30:00Z" }];
+    Object.assign(answers, {
+      list_pip_conversations: (r) => ({ pip_id: PIP, conversations: state.list.filter((c) => r.archived || !c.archived).sort((x, y) => Date.parse(y.updated_at) - Date.parse(x.updated_at)) }),
+      create_pip_conversation: (r) => { if (state.fail === "create") throw Error("A Pip keeps up to 500 conversations. Archive or delete one first."); const made = { ...conv("9", r.title || "", 0), id: "conv_" + String(++state.next).padStart(32, "0"), updated_at: new Date().toISOString() }; state.list.push(made); state.messages[made.id] = []; const { unread, replying, ...view } = made; return { conversation: view }; },
+      rename_pip_conversation: (r) => { const c = find(r); c.title = r.title; const { unread, replying, ...view } = c; return { conversation: view }; },
+      archive_pip_conversation: (r) => { const c = find(r); if (c.first && r.archived !== false) throw Error("A Pip's first conversation stays: its routines post there."); c.archived = r.archived !== false; const { unread, replying, ...view } = c; return { conversation: view }; },
+      list_pip_messages: (r) => { const id = r.conversation_id || firstId(), c = state.list.find((v) => v.id === id); if (!c) throw Error("That conversation isn't this Pip's.");
+        return { pip_id: PIP, workspace_id: W, conversation_id: id, messages: (state.messages[id] || []).slice(-50), next_before_id: null, active_run: c.replying ? { id: run(id.slice(-1)), status: "running", started_at: new Date(Date.now() - 42000).toISOString() } : null,
+          history_context_omitted_count: 0, chat_controls: controls }; },
+      send_pip_message: (r) => { const id = r.conversation_id || firstId(), c = state.list.find((v) => v.id === id); state.sent.push({ conversation: r.conversation_id || null, text: r.text, key: r.idempotency_key });
+        if (state.fail === "send") throw Error("The model didn't take that. Try again.");
+        const message = { ...say("s" + state.sent.length, "user", r.text, "5", 0), conversation_id: id, status: "queued", created_at: new Date().toISOString() }; state.messages[id].push(message); c.updated_at = message.created_at; c.replying = true;
+        return { message, run: { id: message.run_id, pip_id: PIP, status: "queued" } }; },
+      mark_pip_read: (r) => { state.read.push({ conversation: r.conversation_id || null, message: r.message_id || null }); const m = Object.values(state.messages).flat().find((v) => v.id === r.message_id); const c = state.list.find((v) => v.id === (m?.conversation_id || r.conversation_id || firstId())); if (c) c.unread = 0;
+        return { pip_id: PIP, count: 0, messages: 0, posts: 0, latest: "", latest_at: "", latest_message_id: null, latest_post_id: null }; },
+      list_pip_unread: () => { const count = state.list.reduce((n, c) => n + (c.archived ? 0 : c.unread), 0), newest = state.messages[cid("f")].filter((m) => m.role === "assistant").at(-1);
+        return { workspace_id: W, total: count, pips: count ? [{ pip_id: PIP, workspace_id: W, name, pip_type: pip.pip_type, count, messages: count, posts: 0, latest: "Something new.", latest_at: at(8), latest_message_id: state.list.find((c) => c.first).unread ? newest?.id || null : "elsewhere", latest_post_id: null }] : [] }; },
+      get_pip_chat_context: ((base) => (r) => { state.contexts.push(r.conversation_id || null); return base(r); })(answers.get_pip_chat_context),
+      get_pip_computer: () => ({ computer: { pip_id: PIP, granted: !project, available: !project, reason: "", pending: 0, actions: [], computers: state.computers, computers_limit: state.limit } }),
+      add_pip_computer: () => { if (state.computers >= state.limit) throw Error(`A Pip can have up to ${state.limit} computers. Dev Mode can raise this.`); state.computers++; state.added++; return { pip_id: PIP, computers: state.computers, limit: state.limit }; },
+      list_pip_routines: () => ({ pip_id: PIP, workspace_id: W, routines: project ? [] : routines }),
+      update_pip_routine: (r) => { const found = routines.find((v) => v.id === r.routine_id); state.routines.push(r.changes); if ("conversation_id" in r.changes) { if (r.changes.conversation_id) found.conversation_id = r.changes.conversation_id; else delete found.conversation_id; } return { routine: found }; },
+    });
+  }
   window.acquireVsCodeApi = () => ({ getState: () => undefined, setState() {}, postMessage(m) {
     if (m?.type !== "pipsRequest") return;
     const make = answers[m.request.type];

@@ -1145,3 +1145,85 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 .pip-row-slot:has(.pip-row-both)>.job-pin{right:66px}
 .pip-row-slot:is(:hover,:focus-within)>.job-pin{opacity:1}
 .pip-row-slot.is-pinned .pip-row-copy,.pip-row-slot:is(:hover,:focus-within) .pip-row-copy{padding-right:26px}
+/* ==== Several conversations per Pip (Pips API 79; src/pipConversations.js). The Pip's name in its chat's top bar is a
+   button that opens its conversations as the shared menu: New conversation, then each one, the newest first, with a
+   small accent dot for something unread, a hollow ring while it is answering there, and how long ago it was written
+   in; a row's "…" renames or archives; Archived, at the end, lists those with Restore. From 900 px the same list
+   stands beside the chat as a column, which can be folded away (then the name opens the menu again). The rows, the
+   keys, the corner and the greys are the shared menu's (media/shared/menu.css); the buttons are the shared button at its
+   dense size. The only accent here is the unread dot. ==== */
+.pip-topbar{position:relative}
+.pip-pill .pip-convs{display:inline-flex;align-items:center;gap:4px;min-width:0;max-width:100%;height:26px;min-height:0;margin:0 -4px 0 -6px;padding:0 6px;border:0;border-radius:var(--r-row,8px);background:transparent;color:inherit;font:inherit;font-weight:600;cursor:pointer;transition:background-color var(--dur-hover,120ms) ease}
+.pip-pill .pip-convs:hover,.pip-pill .pip-convs[aria-expanded="true"]{background:var(--wash)}
+.pip-pill .pip-convs:focus-visible{outline:1px solid var(--vscode-focusBorder,var(--accent));outline-offset:-1px}
+/* In a narrow side bar the Pip's name keeps its room: the conversation's name gives way first, then goes. */
+@container(max-width:340px){.pip-pill small.pip-conv-title{display:none}}
+.pip-convs-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pip-convs-chevron{flex:none;color:var(--muted);transition:transform var(--dur-hover,120ms) ease}
+.pip-convs[aria-expanded="true"] .pip-convs-chevron{transform:rotate(180deg)}
+.pip-pill small.pip-conv-title{min-width:0;flex:0 1000 auto;overflow:hidden;text-overflow:ellipsis;font-size:var(--t-sm,12px);line-height:26px}
+.pip-pill small.pip-conv-title::before{content:"· "}
+.conv-mark{flex:none;display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;color:var(--muted)}
+.conv-mark.unread::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.conv-mark.replying::before{content:"";box-sizing:border-box;width:8px;height:8px;border-radius:50%;border:1.5px solid var(--muted)}
+.pip-convs .conv-mark{width:8px;height:8px}
+@media(prefers-reduced-motion:no-preference){.conv-mark.replying::before{animation:conv-replying 1.6s ease-in-out infinite}}
+@keyframes conv-replying{50%{opacity:.35}}
+.conv-menu{position:absolute;z-index:6;top:calc(100% - 4px);left:0;right:0;margin-inline:auto;width:min(288px,calc(100% - 24px));max-height:min(70vh,460px);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;text-align:left;font-weight:400}
+@media(prefers-reduced-motion:no-preference){.conv-menu.dgc-menu:not([hidden]){transform-origin:top center}}
+.conv-list .dgc-menu-row{gap:8px;padding:0 8px}
+.conv-list .conv-row{min-height:32px}
+.conv-list .conv-row.dgc-menu-row-sub{align-items:center;padding-block:6px}
+.conv-list .conv-new{min-height:32px;color:var(--text-strong,var(--vscode-foreground));font-weight:600}
+.conv-list .conv-new .conv-mark{color:inherit}
+.conv-list .conv-age{flex:none;margin-left:auto;padding-left:4px;color:var(--faint);font-size:var(--t-sm,12px);font-variant-numeric:tabular-nums}
+.conv-list .dgc-menu-item:is(:hover,:focus-within)>.conv-row .conv-age,.conv-list .dgc-menu-item:has(>.dgc-menu-more[aria-expanded="true"])>.conv-row .conv-age{visibility:hidden}
+.conv-list .dgc-menu-item:is(:hover,:focus-within)>.conv-row,.conv-list .dgc-menu-item:has(>.dgc-menu-more[aria-expanded="true"])>.conv-row{padding-right:8px}
+.conv-list .conv-more{margin-left:27px}
+.conv-list .conv-archived{color:var(--muted)}
+.conv-list .conv-archived .conv-chevron{flex:none;margin-left:auto}
+.conv-archived-list{list-style:none;margin:0;padding:0}
+.conv-archived-row{display:flex;align-items:center;gap:8px;min-height:32px;padding:0 4px 0 8px;color:var(--muted)}
+.conv-archived-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* The shared button at its dense size (tokens.css: 76 by 22 px on a card and a row). */
+.conv-list button.conv-btn{width:var(--btn-w-sm);height:var(--btn-h-sm);padding:0 var(--btn-pad-sm);font-size:var(--t-xs,11px);line-height:calc(var(--btn-h-sm) - 2px)}
+.conv-rename{display:flex;align-items:center;gap:8px;min-height:32px;padding:2px 4px 2px 30px}
+.conv-rename-input{flex:1 1 auto;min-width:0;height:24px;padding:0 6px;border:1px solid var(--hair-strong,var(--hair));border-radius:var(--btn-r);background:var(--vscode-input-background,transparent);color:var(--vscode-input-foreground,var(--text));font:inherit}
+.conv-rename-input:focus-visible{outline:1px solid var(--vscode-focusBorder,var(--accent));outline-offset:-1px}
+.conv-error{margin:4px 8px;color:var(--err-text,var(--vscode-errorForeground));font-size:var(--t-sm,12px);line-height:1.4}
+.conv-new-step{display:flex;flex-direction:column;gap:2px;margin:0}
+.conv-new-step .dgc-menu-head{padding:6px 8px 4px}
+.conv-choices{display:flex;flex-direction:column}
+.conv-choice{display:flex;align-items:flex-start;gap:8px;margin:0;padding:6px 8px;border-radius:var(--r-row,8px);cursor:pointer}
+.conv-choice:hover:not(.off){background:var(--wash)}
+.conv-choice.off{cursor:default;opacity:.6}
+.conv-choice input[type=radio]{flex:none;width:14px;height:14px;min-height:0;margin:2px 0 0;padding:0;accent-color:var(--text,var(--vscode-foreground))}
+.conv-choice-words{display:flex;flex-direction:column;gap:2px;min-width:0}
+.conv-choice-words strong{font-weight:500;color:var(--text-strong,var(--vscode-foreground))}
+.conv-choice-words small,.conv-note{color:var(--muted);font-size:var(--t-sm,12px);line-height:1.35}
+.conv-note{margin:4px 8px 2px}
+.conv-actions{display:flex;gap:8px;padding:6px 8px 4px}
+/* The column beside a wide chat. Off until there is room; folded, it is one mark at the top bar's start. */
+.conv-column{display:none}
+@container(min-width:900px){
+ .simple-pips.chat-open #app:has(>.conv-column){position:relative}
+ .simple-pips.chat-open #app:has(>.conv-column:not(.collapsed)){padding-left:252px}
+ .simple-pips.chat-open #app>.conv-column.dgc-menu{display:flex;flex-direction:column;position:absolute;inset:0 auto 0 0;width:252px;padding:8px;border:0;border-right:1px solid var(--hair);border-radius:0;background:transparent;box-shadow:none;animation:none;overflow:hidden}
+ .conv-column-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:30px;padding:0 0 4px 8px}
+ .conv-column-head h2{margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:600 var(--t-xs,11px)/1.2 var(--sans,inherit);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+ .conv-column-list{flex:1 1 0;min-height:0;overflow-y:auto;scrollbar-width:thin;margin:0 -4px;padding:0 4px}
+ .conv-column .topbar-icon.conv-fold,.conv-column.collapsed .topbar-icon.conv-fold{width:28px;height:28px;min-height:28px;border:0;border-radius:var(--r-row,8px);color:var(--muted)}
+ .conv-column .topbar-icon.conv-fold:hover{background:var(--wash);color:var(--vscode-foreground)}
+ .simple-pips.chat-open #app>.conv-column.collapsed{display:flex;position:absolute;z-index:3;top:10px;left:12px;margin:0;padding:0}
+ .simple-pips.chat-open #app:has(>.conv-column.collapsed) .pip-topbar{padding-left:46px}
+ /* With the column on screen the name says who, and the list is beside it. */
+ .simple-pips.chat-open #app:has(>.conv-column:not(.collapsed)) .pip-convs{cursor:default;background:transparent}
+ .simple-pips.chat-open #app:has(>.conv-column:not(.collapsed)) :is(.pip-convs-chevron,.pip-convs .conv-mark){display:none}
+ .simple-pips.chat-open #app:has(>.conv-column:not(.collapsed)) .conv-menu{display:none}
+}
+/* A routine's row: which conversation it posts in. */
+.routine-row:has(>.routine-posts){flex-wrap:wrap}
+.routine-posts{flex:1 1 100%;display:flex;align-items:center;gap:8px;min-width:0;margin:-4px 0 10px;padding-left:54px;color:var(--muted);font-size:var(--t-sm,12px)}
+.routine-posts>span{flex:none}
+.routine-posts select{min-width:0;max-width:min(260px,100%);height:24px;padding:0 4px;border:1px solid var(--hair-strong,var(--hair));border-radius:var(--btn-r);background:var(--vscode-dropdown-background,var(--vscode-input-background,transparent));color:var(--vscode-dropdown-foreground,var(--text));font:inherit}
+@media(forced-colors:active){.conv-mark.unread::before{background:Highlight}.conv-mark.replying::before{border-color:CanvasText}}

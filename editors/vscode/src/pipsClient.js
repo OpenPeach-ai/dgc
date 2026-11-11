@@ -68,7 +68,8 @@ import {templatePage,templateMarkup} from './pipTemplates.js';
 import {borrowsPage,borrowResult,shownBorrows,borrowActive,borrowMarkup} from './pipBorrow.js';
 import {routinesPage,routineDraft,routineFromDraft,shownRoutineCards,routineCardMarkup,routinesMarkup,routineFormMarkup,shortDate} from './pipRoutines.js';
 import {pickerMarkup,createPicker} from './pipPicker.js';
-import {createChatFollow} from './pipsFollow.js';
+import {createChatFollow,AT_BOTTOM_PX} from './pipsFollow.js';
+import {conversationsPage,conversation,conversationTitle,conversationsMarkup,newConversationMarkup,routinePostsMarkup,computersWords,CONVERSATION_TITLE_MAX} from './pipConversations.js';
 import {profile,sharedPage,computersPage,appsPage,headMarkup,pageTabsMarkup,infoMarkup,instructionsMarkup,characterMarkup,linksMarkup,mediaMarkup,filesMarkup,computersMarkup,appsMarkup as appsSettingsMarkup,BODIES} from './pipProfile.js';
 import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipsPayments,pipBackup,fallbackOn,pipUsage,pipFeedback,actionGrants,actionGrant,pipComputer,pipComputerDesktop,pipComputerAction,pipComputerView,pipComputerFrame,pipComputerFrames,pipComputerFiles,pipComputerPointer,pipEyes} from './pipsModel.js';
 import '../media/pips/plush.js';
@@ -123,7 +124,7 @@ const broker = requestBroker(message => vscode.postMessage({...message,generatio
 const $ = id => document.getElementById(id);
 const S = {chatWaiting:[],posts:[],postsCursor:null,postsPip:'',postsLoaded:false,postsLoading:false,postsError:'',apiVersion:0,connected:false,supported:false,enabled:false,epoch:0,workspace:null,jobs:[],selected:'',pip:null,runs:[],run:null,runId:'',context:null,runner:null,tab:'chat',versions:[],cursor:null,historyLoaded:false,create:false,loading:false,refreshing:false,busy:false,error:'',notice:'',review:null,visible:true,generation:null,activity:null,activityLoading:false,activityError:'',approvals:[],approvalCursor:null,approvalsLoaded:false,approvalsLoading:false,approvalsError:'',scheduleDirty:false,scheduleDraftVersion:null};
 const unreadByPip=new Map(),unreadTotals=new Map(),readFingerprints=new Map();
-let lastUnreadAt=0,unreadLoading=false,markingRead=false;
+let lastUnreadAt=0,unreadLoading=false,markingRead=false;const convRead=new Map();
 async function loadUnread(force=false){
   if(remoteHost||S.apiVersion<69||!usable()||!S.workspaces?.length||unreadLoading||!force&&Date.now()-lastUnreadAt<15000)return;
   unreadLoading=true;const token=scope();
@@ -163,15 +164,19 @@ function maybeMarkRead(){
   if(markingRead||remoteHost||S.apiVersion<69||!S.selected||S.overview||S.tab!=='chat'||!S.visible||document.hidden||
       !S.messagesLoaded||postsShown()&&!S.postsLoaded||S.messagesLoading||S.postsLoading)return;
   const log=root.querySelector('.conversation-log');if(!log||log.scrollHeight-log.scrollTop-log.clientHeight>40)return;
-  const current=unreadByPip.get(S.selected);if(!current)return;
-  const message=S.messages.some(m=>m.role==='assistant'&&m.id===current.latest_message_id)?current.latest_message_id:null;
-  const post=S.posts.some(p=>p.run_id===current.latest_post_id)?current.latest_post_id:null;
+  const current=unreadByPip.get(S.selected);
+  // With several conversations, the one on screen is read up to its own newest reply, wherever the Pip's newest is.
+  const here=shownConversation(),key=convKey(S.selected,S.conv),newest=here?.unread?S.messages.findLast(m=>m.role==='assistant')?.id||null:null;
+  if(!current&&!newest)return;
+  const named=current&&S.messages.some(m=>m.role==='assistant'&&m.id===current.latest_message_id)?current.latest_message_id:null;
+  const post=current&&chatPosts()&&S.posts.some(p=>p.run_id===current.latest_post_id)?current.latest_post_id:null;
+  const viaPip=!!(named||post),message=named||newest;
   if(!message&&!post)return;
-  const pip=S.selected,token=scope(),fingerprint=`${message||''}|${post||''}`;
-  if(readFingerprints.get(pip)===fingerprint)return;
+  const pip=S.selected,token=scope(),fingerprint=`${named||''}|${post||''}`;
+  if(viaPip?readFingerprints.get(pip)===fingerprint:convRead.get(key)===message)return;
   markingRead=true;
-  void send('mark_pip_read',{pip_id:pip,...(message?{message_id:message}:{}),...(post?{post_id:post}:{})})
-    .then(()=>{if(token===scope()&&S.selected===pip){readFingerprints.set(pip,fingerprint);lastUnreadAt=0;void loadUnread(true);}})
+  void send('mark_pip_read',{pip_id:pip,...(message?{message_id:message}:{}),...(post?{post_id:post}:{}),...(message?convArg():{})})
+    .then(()=>{if(token===scope()&&S.selected===pip){if(viaPip)readFingerprints.set(pip,fingerprint);else convRead.set(key,message);lastUnreadAt=0;void loadUnread(true);if(here)void loadConversations();}})
     .catch(()=>{})
     .finally(()=>{markingRead=false;});
 }
@@ -328,7 +333,7 @@ const heldRejects=new Map(),REJECT_HOLD_MS=6000;
 // Show all, opened on a run's result or a routine's reply (by run or message id): for this view only.
 const shownInFull=new Set();
 S.sidebarPinned=savedView?.sidebar_pinned===true;
-function rememberView(){savedView={workspace_id:S.workspace?.id,scope_tab:S.workspace?scopeTab():undefined,selected:S.selected,tab:S.tab,overview:S.overview,sidebar_pinned:S.sidebarPinned,drafts:Object.fromEntries([...chatDrafts].slice(-20)),draft_marks:Object.fromEntries([...chatMarks].slice(-20)),chat_queues:Object.fromEntries([...chatQueues].filter(([,list])=>list.length).slice(-20)),asked:[...askedRuns].slice(-100),attention_folded:[...attentionFolded].slice(-500)};options.setState?.(savedView);}
+function rememberView(){savedView={workspace_id:S.workspace?.id,scope_tab:S.workspace?scopeTab():undefined,selected:S.selected,tab:S.tab,overview:S.overview,sidebar_pinned:S.sidebarPinned,conversations:Object.fromEntries([...convShown].slice(-20)),conversation_drafts:Object.fromEntries([...convDrafts].slice(-40)),conversations_hidden:convState.collapsed,drafts:Object.fromEntries([...chatDrafts].slice(-20)),draft_marks:Object.fromEntries([...chatMarks].slice(-20)),chat_queues:Object.fromEntries([...chatQueues].filter(([,list])=>list.length).slice(-20)),asked:[...askedRuns].slice(-100),attention_folded:[...attentionFolded].slice(-500)};options.setState?.(savedView);}
 const characterStyles=document.createElement('style');characterStyles.id='pips-plush-styles';characterStyles.textContent=window.PipConcepts.plush.styles;document.head.append(characterStyles);
 let outcomeSessions=[],outcomeSessionsCursor='',outcomeSessionsMore=false,outcomeSessionsLoaded=false,outcomeSessionsLoading=false,outcomeSessionsError='',outcomeHistory=[],outcomeCursor=null,outcomeLoaded=false,outcomeLoading=false,outcomeError='',outcomeInspection=null,outcomeInspecting=false,outcomeSessionSeq=0,outcomeSeq=0,outcomeInspectSeq=0,outcomeReviewSeq=0,outcomeRetry=null;
 let notifications=null,notificationItems=[],notificationLoading=false,notificationError='',notificationSeq=0,notificationMark='';
@@ -597,7 +602,7 @@ function composerNote(text){
 async function loadChatContext(){
  if(remoteHost||S.apiVersion<44||!personalPip()||!usable()||!S.chatControls)return;
  const token=scope(),pip=S.selected,sequence=++chatContextSeq,size=chosenChatOptions().context_size;
- try{const v=await send('get_pip_chat_context',{pip_id:pip,context_size:size});if(token!==scope()||S.selected!==pip||sequence!==chatContextSeq)return;
+ try{const v=await send('get_pip_chat_context',{pip_id:pip,context_size:size,...convArg()});if(token!==scope()||S.selected!==pip||sequence!==chatContextSeq)return;
   if(!record(v)||v.pip_id!==pip||v.context_size!==size||![v.used_tokens,v.recent_messages,v.summarized_messages].every(n=>Number.isSafeInteger(n)&&n>=0))throw Error('bad context');
   // Part by part (a DGC from before has none): drawn as text only, so a malformed one just isn't shown.
   const b=v.breakdown,parts=record(b)&&b.window===size&&Array.isArray(b.categories)&&b.categories.length<=32&&b.categories.every(c=>record(c)&&typeof c.id==='string'&&typeof c.label==='string'&&Number.isSafeInteger(c.tokens))?b:null;
@@ -836,7 +841,7 @@ const workingClock=window.setInterval(()=>{for(const el of document.querySelecto
 function chatMarkup(){
   const type=pipType(S.pip,S.types),busy=S.chatActiveRun,canSend=(S.apiVersion<24||!!S.chatControls)&&!archived()&&S.messagesLoaded&&usable()&&takesMessages()&&supportedSource()&&S.runner?.online&&!S.runner?.paused&&!S.busy&&(!busy||S.apiVersion>=73);
   const markdown=renderPipMarkdown;
-  const sending=S.sending&&S.sending.pip===S.selected&&!S.chatWaiting.some(m=>m.text===S.sending.text)&&!S.messages.some(m=>m.role==='user'&&m.text===S.sending.text&&Date.parse(m.created_at)>=Date.parse(S.sending.at)-60000)?S.sending:null;
+  const sending=S.sending&&S.sending.pip===S.selected&&(S.sending.conv||'')===S.conv&&!S.chatWaiting.some(m=>m.text===S.sending.text)&&!S.messages.some(m=>m.role==='user'&&m.text===S.sending.text&&Date.parse(m.created_at)>=Date.parse(S.sending.at)-60000)?S.sending:null;
   // A routine's failed run keeps its line where it fell, and the same line again is one line with a count (Pips package 2).
   const routineFailed=m=>failedRoutine(m,S.messages,S.posts,postRoutineTitle);
   const shown=[...foldRoutineLines(S.messages.filter(m=>!(m.role==='user'&&m.intro===true)||failedHidden(m)||routineFailed(m)),S.messages,postRoutineTitle),...(sending?[{id:'sending',pip_id:S.selected,workspace_id:S.workspace?.id,role:'user',text:sending.text,status:'sending',created_at:sending.at,...(sending.marks?.length?{display_mentions:sending.marks}:{})}]:[])];
@@ -859,9 +864,9 @@ function chatMarkup(){
   };
   // Its runs, each a message from the Pip where it falls among the messages, all-clear runs in a row as one (Pips API
   // 51, pipRunPosts.js).
-  const items=withNotes(postsShown()?timeline(shown,S.posts,{complete:!S.messageCursor}):shown.map(m=>({message:m})),S.routineNotes||[],
+  const items=withNotes(chatPosts()?timeline(shown,S.posts,{complete:!S.messageCursor}):shown.map(m=>({message:m})),S.routineNotes||[],
     {complete:!S.messageCursor,timeOf:i=>Date.parse(i.message?i.message.created_at:(i.streak?i.streak.at(-1):i.post)?.posted_at)||0});
-  const context=postsShown()?postContext():null;
+  const context=chatPosts()?postContext():null;
   const settled=settledLines(shown);
   const drawPost=i=>{const p=i.streak?i.streak.at(-1):i.post,first=i.streak?i.streak[0]:p;
     return timed({created_at:p.posted_at},false)+postMarkup(p,{...context,previous:i.previous,streak:i.streak||null,face:pipAvatar(S.pip,['failed','checks_failed'].includes(p.outcome)?'failure':'idle',`post-${first.run_id}`,context.type),...fixState(p.run_id),expanded:shownInFull.has(p.run_id),traced:replyStats.get(p.run_id)?.has_trace===true});};
@@ -881,7 +886,7 @@ function chatMarkup(){
   const live=liveMarkup(markdown);
   // A hello that failed says so, above what a new chat says about itself: nothing else has been said.
   const quietChat=S.messages.every(m=>m.role==='user'&&m.intro===true&&m.status==='failed')&&!items.some(i=>!(i.message&&failedHidden(i.message)))&&!live&&!items.some(i=>i.note||(i.message&&routineFailed(i.message)));
-  return `<section class="pip-conversation${simple?' chat-style':''}" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${noProviderMarkup()}${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(postsShown()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`${messages}<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${quietChat?'':messages}${live}${simple?'':typing}${S.stream?.text&&!routineLive?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(replyParts(S.stream.text).join('\n\n'))}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${pipKeyCards()}${borrowCards()}${routineCards()}${settled.tail}${needsYouCard()}${cardRefusedCard()}${turnOpen?'</div>':''}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div><button type="button" id="pip-to-latest" class="pip-to-latest" data-dom-own="1" title="Jump to the newest message" aria-label="Jump to the newest message" hidden><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M4 9l4 4 4-4"/></svg><span data-latest-label>Latest</span></button>${simple?runnerOffMarkup():''}<div class="pip-composer-shell">${routinePopoverMarkup()}${computerWaitingCards()}${chatBox?'<div id="chat-paste-note" data-dom-own="1" hidden></div>':''}<div id="chat-tray" class="rail-line tray-only" data-dom-own="1"></div><form id="chat-form" class="pip-composer tray-box"><div class="dgc-drop" data-dom-own hidden aria-hidden="true">Drop to attach</div>${canAttachImages()?imageStripMarkup():''}${chatBox?'<div id="chat-pop" class="pop pop-over" data-dom-own="1"></div>':''}<div class="composer-input">${chatBox?'<div id="chatText" class="mention-box" data-dom-own="1"></div>':`<label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="${CHAT_MAX_CHARS}"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea>`}</div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
+  return `<section class="pip-conversation${simple?' chat-style':''}" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${noProviderMarkup()}${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(chatPosts()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`${messages}<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${quietChat?'':messages}${live}${simple?'':typing}${S.stream?.text&&!routineLive?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(replyParts(S.stream.text).join('\n\n'))}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${pipKeyCards()}${borrowCards()}${routineCards()}${settled.tail}${needsYouCard()}${cardRefusedCard()}${turnOpen?'</div>':''}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div><button type="button" id="pip-to-latest" class="pip-to-latest" data-dom-own="1" title="Jump to the newest message" aria-label="Jump to the newest message" hidden><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M4 9l4 4 4-4"/></svg><span data-latest-label>Latest</span></button>${simple?runnerOffMarkup():''}<div class="pip-composer-shell">${routinePopoverMarkup()}${computerWaitingCards()}${chatBox?'<div id="chat-paste-note" data-dom-own="1" hidden></div>':''}<div id="chat-tray" class="rail-line tray-only" data-dom-own="1"></div><form id="chat-form" class="pip-composer tray-box"><div class="dgc-drop" data-dom-own hidden aria-hidden="true">Drop to attach</div>${canAttachImages()?imageStripMarkup():''}${chatBox?'<div id="chat-pop" class="pop pop-over" data-dom-own="1"></div>':''}<div class="composer-input">${chatBox?'<div id="chatText" class="mention-box" data-dom-own="1"></div>':`<label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="${CHAT_MAX_CHARS}"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea>`}</div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
 }
 // ---- Its runs in its chat (Pips API 51) ----
 // Each finished run is a post from the Pip, read with list_pip_run_posts and drawn among the messages; History
@@ -978,6 +983,7 @@ async function stopLive(runId){
 }
 function liveMarkup(markdown){
   const live=S.live;if(!live||live.pipId!==S.selected||!S.pip)return '';
+  if(!live.routine&&S.conv)return '';   // a run's live post stands where its post will: in its first conversation
   const type=pipType(S.pip,S.types)||characterType(S.pip.pip_type);
   if(live.routine){
     const run=S.chatActiveRun?.id===live.runId?S.chatActiveRun:live.run,act=S.stream?.runId===live.runId?S.stream.activity:null,text=S.stream?.runId===live.runId?S.stream.text:'';
@@ -1099,12 +1105,12 @@ async function introduceOnFirstOpen(id){
  }
 }
 async function loadMessages(more=false){
- if(!more){void loadEmailDrafts();void loadAppLinks();void loadPlugins();void loadBorrows();void loadRoutines();void loadLevel();void loadNotes();void loadWorkingNotes();void loadDailyLog();void refreshComputer();if(personalPip()&&!S.models.length&&!S.defaultModel)void loadModels();}
+ if(!more){void loadConversations();void loadEmailDrafts();void loadAppLinks();void loadPlugins();void loadBorrows();void loadRoutines();void loadLevel();void loadNotes();void loadWorkingNotes();void loadDailyLog();void refreshComputer();if(personalPip()&&!S.models.length&&!S.defaultModel)void loadModels();}
   if(!S.selected||!usable()||(more&&(!S.messageCursor||S.messagesLoading||S.messages.length>=200)))return;
   const token=scope(),id=S.selected,sequence=++messageSeq,before=more?S.messageCursor:null,optionsEpoch=chatOptionsEpoch;S.messagesLoading=true;
   if(!S.messagesLoaded)render();
   let back=null;
-  try{const page=messagesPage(await send('list_pip_messages',{pip_id:id,limit:20,...(before?{before_id:before}:{})}),id,S.workspace.id);if(token!==scope()||sequence!==messageSeq)return;if(S.apiVersion>=24){S.chatControls=null;S.chatControls=checkedChatControls(page.chat_controls);
+  try{const page=messagesPage(await send('list_pip_messages',{pip_id:id,limit:20,...(before?{before_id:before}:{}),...convArg()}),id,S.workspace.id);if(token!==scope()||sequence!==messageSeq)return;if(S.apiVersion>=24){S.chatControls=null;S.chatControls=checkedChatControls(page.chat_controls);
     // Since API 47 DGC keeps the Pip's own window and thinking, so what it says wins over what this view remembered:
     // the main chat may have changed them. Not while this view is saving its own choice, or when a save overlapped.
     const kept=S.apiVersion>=47&&!remoteHost&&!before&&optionsEpoch===chatOptionsEpoch&&!chatOptionsSaving.has(id);
@@ -1114,7 +1120,7 @@ async function loadMessages(more=false){
       // A mid-turn message the reply ended without reading wasn't sent, and comes back to an empty box, as in Work. Only as it happens, never on a reload.
       back=S.messages.find(m=>m.steer_status==='missed'&&held.has(m.id));}
     S.messagesLoaded=true;S.messagesError='';S.chatActiveRun=page.active_run;if(!more)lookAgainForWaitingTurn(page);if(back&&!draft.chatText.trim())giveBackToBox(id,back);queueMicrotask(()=>{if(!disposed)drainChatQueue();});S.omitted=page.history_context_omitted_count;S.continuity=chatContinuity(page.continuity,id,S.workspace.id);syncRoutineLive();
-    if(!more&&S.tab==='chat'&&!S.messages.length&&!page.active_run&&S.pip?.id===id&&S.pip.status==='active')void introduceOnFirstOpen(id);
+    if(!more&&S.tab==='chat'&&!S.conv&&!S.messages.length&&!page.active_run&&S.pip?.id===id&&S.pip.status==='active')void introduceOnFirstOpen(id);
     if(!more)voiceMode?.check(!!page.active_run);
     if(!page.active_run){streamSeq++;streamLoading=false;S.stream=null;}else if(!S.stream||S.stream.runId!==page.active_run.id){streamSeq++;streamLoading=false;S.stream={runId:page.active_run.id,cursor:0,text:'',limited:false,error:'',truncated:false};}
     if(page.active_run)void loadChatStream();
@@ -1482,12 +1488,16 @@ async function sendChat(sent={}){
   // A card number never leaves the box: not sent, not kept as a draft. The user types it on the Pip's screen.
   if(cardNumber(text)){refuseCard(S.selected);return;}{const tooLong=chatTooLong(text);if(tooLong){setError(tooLong+' Nothing was sent.');return;}}
   const boxText=!!chatBox&&messageWords(chatBox.el.value)===text,marks=S.displayMentions?(sent.marks||(boxText?chatBox.marks(text):[])):[],parts=sent.parts||(boxText?chatBox.parts():null);
-  const options=S.apiVersion>=24?chosenChatOptions():undefined,signature=JSON.stringify({text,...(options?{chat_options:options}:{}),...(images.length?{images:images.map(i=>i.length+':'+i.slice(-64))}:{}),...(files.length?{files:files.map(f=>f.name+':'+f.data.length+':'+f.data.slice(-64))}:{})});const token=scope(),id=S.selected,generation=selectionGeneration,epoch=S.epoch;let pending=chatRequests.get(id);if(!pending||pending.signature!==signature){pending={text,signature,options,images,files,marks,parts,key:`pip-chat-${globalThis.crypto.randomUUID()}`};chatRequests.set(id,pending);}S.busy=true;S.error='';
+  const options=S.apiVersion>=24?chosenChatOptions():undefined,signature=JSON.stringify({text,...(options?{chat_options:options}:{}),...(images.length?{images:images.map(i=>i.length+':'+i.slice(-64))}:{}),...(files.length?{files:files.map(f=>f.name+':'+f.data.length+':'+f.data.slice(-64))}:{})});const token=scope(),id=S.selected,conv=S.conv,generation=selectionGeneration,epoch=S.epoch;let pending=chatRequests.get(id);if(!pending||pending.signature!==signature){pending={text,signature,options,images,files,marks,parts,key:`pip-chat-${globalThis.crypto.randomUUID()}`};chatRequests.set(id,pending);}S.busy=true;S.error='';
   // Your message is in the chat at once, as in DGC's own chat: the box clears now, not when the reply
   // is queued (a Pip's first step lists its workflow connectors' tools, which can take seconds).
-  appLinkSettled.clear();S.sending={pip:id,text,key:pending.key,marks:pending.marks,at:new Date().toISOString()};chatFollow.sending();chatEdit(()=>{if(messageWords(draft.chatText)===text){draft.chatText='';if(boxText)chatMarks.delete(id);}render();});
-  try{const result=await send('send_pip_message',{pip_id:id,text,idempotency_key:pending.key,...(pending.options?{chat_options:pending.options}:{}),...(pending.images?.length?{images:pending.images}:{}),...(pending.files?.length?{files:pending.files}:{}),...(pending.marks?.length?{display_mentions:pending.marks}:{})});if(epoch!==S.epoch)return;if(!record(result.message)||result.message.pip_id!==id||!record(result.run)||result.run.pip_id!==id)throw new Error('The saved message response did not match this Pip. Refresh before retrying.');if(chatRequests.get(id)?.key===pending.key)chatRequests.delete(id);if(chatDrafts.get(id)?.trim()===text)chatDrafts.delete(id);if(pending.images?.length)chatImages.delete(id);if(pending.files?.length)chatFiles.delete(id);rememberView();if(token!==scope()||generation!==selectionGeneration)return;if(messageWords(draft.chatText)===text)draft.chatText='';await Promise.all([loadMessages(),refresh(false)]);}
-  catch(error){if(token===scope()&&generation===selectionGeneration){if(String(errorText(error)).startsWith(CARD_REFUSED)){refuseCard(id);return;}chatEdit(()=>{if(!draft.chatText.trim()){draft.chatText=text;if(pending.parts)chatMarks.set(id,{text,parts:pending.parts});}setError(error);render();});}}
+  appLinkSettled.clear();S.sending={pip:id,conv,text,key:pending.key,marks:pending.marks,at:new Date().toISOString()};chatFollow.sending();chatEdit(()=>{if(messageWords(draft.chatText)===text){draft.chatText='';if(boxText)chatMarks.delete(id);}render();});
+  try{const result=await send('send_pip_message',{pip_id:id,text,idempotency_key:pending.key,...(pending.options?{chat_options:pending.options}:{}),...(pending.images?.length?{images:pending.images}:{}),...(pending.files?.length?{files:pending.files}:{}),...(pending.marks?.length?{display_mentions:pending.marks}:{}),...(conv?{conversation_id:conv}:{})});if(epoch!==S.epoch)return;if(!record(result.message)||result.message.pip_id!==id||!record(result.run)||result.run.pip_id!==id)throw new Error('The saved message response did not match this Pip. Refresh before retrying.');nameFromFirstMessage(id,conv,text);
+    // Its conversation left the screen meanwhile: what it kept is settled there, and the one shown is left alone.
+    if(S.selected===id&&S.conv!==conv){settleStashedSend(id,conv,pending,text,false);void loadConversations();return;}
+    if(chatRequests.get(id)?.key===pending.key)chatRequests.delete(id);if(chatDrafts.get(id)?.trim()===text)chatDrafts.delete(id);if(pending.images?.length)chatImages.delete(id);if(pending.files?.length)chatFiles.delete(id);rememberView();if(token!==scope()||generation!==selectionGeneration)return;if(messageWords(draft.chatText)===text)draft.chatText='';await Promise.all([loadMessages(),refresh(false)]);}
+  catch(error){if(token===scope()&&generation===selectionGeneration&&S.conv!==conv){settleStashedSend(id,conv,pending,text,true);S.notice='That message didn’t go. It’s back in its conversation’s box.';render();}
+   else if(token===scope()&&generation===selectionGeneration){if(String(errorText(error)).startsWith(CARD_REFUSED)){refuseCard(id);return;}chatEdit(()=>{if(!draft.chatText.trim()){draft.chatText=text;if(pending.parts)chatMarks.set(id,{text,parts:pending.parts});}setError(error);render();});}}
   finally{if(S.sending?.key===pending.key)S.sending=null;if(token===scope()&&generation===selectionGeneration){S.busy=false;render();$('chatText')?.focus();}}
 }
 function hydrateAdaptation(pip){const p=adaptationPolicy(pip.adaptation_policy);draft.adaptationMode=p.mode;draft.adaptationName=p.allowed_fields.includes('name');draft.adaptationSource=p.allowed_fields.includes('source_ref');S.adaptationDraftVersion=pip.current_version;}
@@ -3018,10 +3028,18 @@ async function saveLearn(){
 }
 // Every new Personal Pip has its own computer (2026-10-09): its page says so and keeps the switch to remove it,
 // which lived only on the old Job tab. Its header's computer button opens it.
+// Several computers (Pips API 79): how many it has, and one more, up to its limit. Its conversations share them.
+function computersRowMarkup(off){
+ if(S.apiVersion<79||remoteHost)return '';
+ if(computerState.pip!==S.selected&&!computerState.loading)void loadComputer();
+ const have=pipComputers();if(!have)return '';
+ const full=have.have>=have.limit;
+ return `</div><div class="pip-page-row static" data-computers="${have.have}"><span class="row-words"><strong>Computers: ${have.have}</strong><small>${full?`${have.limit} is the most it can have. `:''}Its computers are shared by all its conversations.</small></span>${button('add-computer','Add another',off||full,'quiet')}`;
+}
 function computerRowMarkup(p,off){
  if(S.apiVersion<42||remoteHost||!personalPip()||archived())return '';
  return `<section class="pip-page-group" aria-label="Computer"><div class="pip-page-row static"><span class="row-words">${p.computer_plan
-  ?`<strong>Its own computer${infoTip('pipComputerSays','Its own computer',`A browser, a Terminal and files, separate from yours. It starts when ${esc(p.name)} needs it.`)}</strong></span>${button('remove-computer','Remove…',off,'quiet')}`
+  ?`<strong>Its own computer${infoTip('pipComputerSays','Its own computer',`A browser, a Terminal and files, separate from yours. It starts when ${esc(p.name)} needs it.`)}</strong></span>${button('remove-computer','Remove…',off,'quiet')}`+computersRowMarkup(off)
   :`<strong>Computer${infoTip('pipComputerSays','Computer',`Give ${esc(p.name)} its own computer, so it can look things up and fill in forms for you.`)}</strong></span>${button('give-computer','Give it a computer…',off,'quiet')}`}</div></section>`;
 }
 // What this Pip can do: the shield's dialog, now also the level menu's last row.
@@ -3499,6 +3517,218 @@ function pipSetupNotes(){
  const unknown=S.pip&&!pipType(S.pip,S.types)?'<p class="notice error simple-note">This editor doesn’t know this kind of Pip. You can still read its reports; update the DGC extension to use it.</p>':'';
  return unknown;
 }
+// ---- Several conversations per Pip (Pips API 79; src/pipConversations.js) ----
+// A Pip's chat shows one of its conversations. `convShown` says which for each Pip (none: its first, and then a request
+// names no conversation, exactly as before API 79). Everything this page keeps per Pip for its chat (the draft and its
+// marks, the queue, pictures and files waiting to go, a request to send again) is the shown conversation's; what the
+// others keep waits in `convStash`, with their messages and where they were scrolled to, and comes back on a switch.
+const convShown=new Map(),convStash=new Map(),convDrafts=new Map();
+Object.defineProperty(S,'conv',{get:()=>convShown.get(S.selected)||'',enumerable:false});
+const convState={pip:'',list:null,seq:0,ui:'',menu:false,more:'',renaming:'',renameText:'',archivedOpen:false,newStep:false,newChoice:'use',busy:false,error:'',collapsed:savedView?.conversations_hidden===true};
+let convScroll=null,convTitling=new Set();
+const convKey=(pip,conv)=>`${pip}#${conv||''}`;
+const convMaps=()=>[chatDrafts,chatMarks,chatQueues,chatImages,chatFiles,chatRequests];
+function convsOn(){return S.apiVersion>=79&&!remoteHost&&!!S.selected;}
+function convList(){return convsOn()&&convState.pip===S.selected&&Array.isArray(convState.list)?convState.list:null;}
+function convUi(){if(convState.ui!==S.selected){Object.assign(convState,{ui:S.selected,menu:false,more:'',renaming:'',renameText:'',archivedOpen:false,newStep:false,newChoice:'use',busy:false,error:''});}return convState;}
+function shownConversation(){const list=convList();return list?(S.conv?list.find(c=>c.id===S.conv):list.find(c=>c.first))||null:null;}
+const convArg=()=>convsOn()&&S.conv?{conversation_id:S.conv}:{};
+// Its runs post in its first conversation, so only that one draws them.
+function chatPosts(){return postsShown()&&!S.conv;}
+async function loadConversations(){
+ if(!convsOn()||!usable())return;
+ const pip=S.selected,token=scope(),sequence=++convState.seq;
+ try{const list=conversationsPage(await send('list_pip_conversations',{pip_id:pip,archived:true}),pip);
+  if(token!==scope()||sequence!==convState.seq||S.selected!==pip)return;
+  convState.pip=pip;convState.list=list;
+  // The one shown was archived or is gone (another window did it): the chat goes back to its first.
+  if(S.conv&&!list.some(c=>c.id===S.conv&&!c.archived)){showConversation('');return;}
+  render();maybeMarkRead();
+ }catch{if(token===scope()&&sequence===convState.seq&&convState.pip!==pip){convState.pip=pip;convState.list=null;render();}}
+}
+// The conversation leaving the screen keeps its draft, what waits to go, its messages and its place.
+function stashConversation(){
+ const pip=S.selected;if(!pip)return;
+ rememberMarks(pip);
+ const log=document.querySelector('.conversation-log');
+ const scroll=log&&S.messagesLoaded?{top:log.scrollTop,end:log.scrollHeight-log.scrollTop-log.clientHeight<AT_BOTTOM_PX}:null;
+ convStash.set(convKey(pip,S.conv),{draft:draft.chatText,kept:convMaps().map(map=>map.get(pip)),scroll,messages:S.messages,cursor:S.messageCursor,loaded:S.messagesLoaded,omitted:S.omitted,continuity:S.continuity});
+ if(draft.chatText)convDrafts.set(convKey(pip,S.conv),draft.chatText);else convDrafts.delete(convKey(pip,S.conv));
+}
+function restoreConversation(){
+ const pip=S.selected,key=convKey(pip,S.conv),kept=convStash.get(key);convStash.delete(key);
+ messageSeq++;streamSeq++;streamLoading=false;chatContextSeq++;window.clearTimeout(waitingLook);waitingLook=0;waitingLooks=0;
+ S.stream=null;S.chatActiveRun=null;S.chatWaiting=[];S.routineNotes=[];S.fallbackOn=null;S.messagesError='';S.messagesLoading=false;S.error='';S.chatContext=null;S.composerPanel='';
+ S.messages=kept?.messages||[];S.messageCursor=kept?.cursor||null;S.messagesLoaded=!!kept?.loaded;S.omitted=kept?.omitted||0;S.continuity=kept?.continuity||null;
+ convMaps().forEach((map,i)=>{const value=kept?.kept[i];if(value===undefined)map.delete(pip);else map.set(pip,value);});
+ draft.chatText=kept?kept.draft:convDrafts.get(key)||'';convDrafts.delete(key);
+ if(draft.chatText)chatDrafts.set(pip,draft.chatText);else chatDrafts.delete(pip);
+ chatHistory?.reset();boxPip='';
+ convScroll=kept?.scroll&&!kept.scroll.end?{pip,conv:S.conv,top:kept.scroll.top}:null;
+}
+/** Show one of its conversations ('' or its first one's id: the first). */
+function showConversation(id,{focus=false}={}){
+ const pip=S.selected,list=convList(),ui=convUi();if(!pip)return;
+ const next=!id||list?.find(c=>c.id===id)?.first?'':id;
+ Object.assign(ui,{menu:false,more:'',renaming:'',newStep:false,error:''});
+ if(next!==S.conv){
+  stashConversation();
+  if(next)convShown.set(pip,next);else convShown.delete(pip);
+  restoreConversation();rememberView();
+ }
+ render();void loadMessages();
+ if(focus)$('chatText')?.focus({preventScroll:true});
+}
+// A message that went (or didn't) after its conversation left the screen: its own kept things are settled, not the shown one's.
+function settleStashedSend(pip,conv,pending,text,failed){
+ const kept=convStash.get(convKey(pip,conv));if(!kept)return;
+ const [drafts,marks,,images,files,requests]=[0,1,2,3,4,5];
+ if(failed){if(!String(kept.draft||'').trim()){kept.draft=text;kept.kept[drafts]=text;if(pending.parts)kept.kept[marks]={text,parts:pending.parts};convDrafts.set(convKey(pip,conv),text);}return;}
+ if(kept.kept[requests]?.key===pending.key)kept.kept[requests]=undefined;
+ if(String(kept.draft||'').trim()===text){kept.draft='';kept.kept[drafts]=undefined;kept.kept[marks]=undefined;convDrafts.delete(convKey(pip,conv));}
+ if(pending.images?.length)kept.kept[images]=undefined;
+ if(pending.files?.length)kept.kept[files]=undefined;
+}
+// A conversation with no name yet takes its first message's opening words (the first one stays "Chat").
+function nameFromFirstMessage(pip,conv,text){
+ const row=convList()?.find(c=>c.id===conv);if(!conv||!row||row.first||row.title||convTitling.has(conv))return;
+ const line=String(text||'').split('\n').map(part=>part.replace(/\s+/g,' ').trim()).find(Boolean)||'';if(!line||line.startsWith('/'))return;
+ const title=line.length>48?line.slice(0,47).replace(/\s+\S*$/,'')+'…':line;
+ convTitling.add(conv);
+ void send('rename_pip_conversation',{pip_id:pip,conversation_id:conv,title}).then(()=>{if(S.selected===pip)void loadConversations();}).catch(()=>{convTitling.delete(conv);});
+}
+function pipComputers(){const value=computerState.pip===S.selected?computerState.value:null;return value?.granted&&Number.isSafeInteger(value.computers)?{have:value.computers,limit:Number.isSafeInteger(value.computers_limit)?value.computers_limit:3}:null;}
+function focusConv(selector){const place=convPlace();const node=document.querySelector(`#conv-${place} ${selector}`)||document.querySelector(`#conv-${place} .conv-row.is-selected`)||document.querySelector(`#conv-${place} .dgc-menu-row`);node?.focus({preventScroll:true});}
+// Where the list is right now: the column when it is on screen (a wide chat), else the menu under the name.
+function convPlace(){const column=$('conv-column');return column&&!convState.collapsed&&column.getClientRects().length?'column':'menu';}
+function openConvMenu(){
+ const ui=convUi();if(!convList())return;
+ if(convPlace()==='column'){focusConv('.conv-row.is-selected');return;}
+ ui.menu=!ui.menu;ui.more='';ui.renaming='';ui.newStep=false;ui.error='';render();
+ if(ui.menu){focusConv('.conv-row.is-selected');void loadConversations();}
+}
+function closeConvMenu(){const ui=convUi();if(!ui.menu&&!ui.more&&!ui.renaming&&!ui.newStep)return;Object.assign(ui,{menu:false,more:'',renaming:'',newStep:false,error:''});render();}
+// Whether it has a computer is read as its chat opens; a click before that answer waits for it (2 s at most).
+async function computerKnown(){
+ const pip=S.selected;if(S.apiVersion<42||!personalPip()||archived())return;
+ for(let i=0;i<40&&!disposed&&S.selected===pip&&!(computerState.pip===pip&&(computerState.value||computerState.error));i++){
+  if(computerState.pip!==pip||!computerState.loading)void loadComputer();
+  await new Promise(done=>window.setTimeout(done,50));}
+}
+async function beginNewConversation(){
+ const ui=convUi(),pip=S.selected;
+ await computerKnown();if(S.selected!==pip||ui!==convUi())return;
+ // With a computer of its own, it asks which the new conversation's work should use (the user's call, 10 Nov).
+ if(personalPip()&&!archived()&&pipComputers()){ui.newStep=true;ui.newChoice='use';ui.more='';ui.renaming='';ui.error='';render();focusConv('input[name=convComputer]:checked');return;}
+ void startConversation(false);
+}
+async function startConversation(add){
+ const ui=convUi(),pip=S.selected,token=scope();if(ui.busy||!usable())return;
+ ui.busy=true;ui.error='';render();
+ try{
+  if(add){const result=await send('add_pip_computer',{pip_id:pip});if(token!==scope())return;
+   if(computerState.pip===pip&&computerState.value&&Number.isSafeInteger(result?.computers))computerState.value={...computerState.value,computers:result.computers,...(Number.isSafeInteger(result.limit)?{computers_limit:result.limit}:{})};}
+  const made=conversation((await send('create_pip_conversation',{pip_id:pip})).conversation,pip);if(token!==scope())return;
+  if(convList())convState.list=[made,...convState.list.filter(c=>c.id!==made.id)];
+  ui.busy=false;showConversation(made.id,{focus:true});void loadConversations();
+ }catch(error){if(token===scope()){ui.error=errorText(error);}}
+ finally{if(token===scope()&&ui.busy){ui.busy=false;render();}}
+}
+async function convCall(command,args,after){
+ const ui=convUi(),pip=S.selected,token=scope();if(ui.busy||!usable())return;
+ ui.busy=true;ui.error='';render();
+ try{const made=conversation((await send(command,{pip_id:pip,...args})).conversation,pip);if(token!==scope())return;
+  if(convList())convState.list=convState.list.map(c=>c.id===made.id?{...c,...made,unread:c.unread,replying:c.replying}:c);
+  ui.busy=false;after?.(made);render();void loadConversations();
+ }catch(error){if(token===scope())ui.error=errorText(error);}
+ finally{if(token===scope()&&ui.busy){ui.busy=false;render();}}
+}
+function convListMarkup(place){
+ const ui=convUi(),list=convList();if(!list)return '';
+ const computers=pipComputers();
+ return conversationsMarkup({esc,conversations:list,shown:S.conv,place,more:ui.more,renaming:ui.renaming,renameText:ui.renameText,archivedOpen:ui.archivedOpen,busy:ui.busy||!usable(),error:ui.newStep?'':ui.error,
+  newStep:ui.newStep&&computers?newConversationMarkup({esc,computers:computers.have,limit:computers.limit,choice:ui.newChoice,busy:ui.busy,error:ui.error}):''});
+}
+// The Pip's name in its chat's top bar: with conversations, a button that opens them.
+function convNameMarkup(p){
+ const list=convList();if(!list)return `<span>${esc(p.name)}</span>`;
+ const ui=convUi(),shown=shownConversation(),several=list.filter(c=>!c.archived).length>1||!!S.conv;
+ const unread=list.some(c=>!c.archived&&c.unread&&c!==shown);
+ return `<button type="button" id="pip-convs" class="pip-convs" aria-haspopup="menu" aria-expanded="${ui.menu}" aria-controls="conv-menu" title="${esc(`Conversations with ${p.name}`)}"><span class="pip-convs-name">${esc(p.name)}</span>${unread?'<span class="conv-mark unread" title="Something new in another conversation" aria-hidden="true"></span>':''}<svg class="pip-convs-chevron" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>${unread?'<span class="sr-only">, something new in another conversation</span>':''}</button>${several&&shown?`<small class="pip-conv-title" title="${esc(conversationTitle(shown))}">${esc(conversationTitle(shown))}</small>`:''}`;
+}
+function convMenuMarkup(){
+ const ui=convUi();if(!ui.menu||!convList())return '';
+ return `<div id="conv-menu" class="conv-menu conv-list dgc-menu" role="menu" aria-label="${esc(`Conversations with ${S.pip.name}`)}">${convListMarkup('menu')}</div>`;
+}
+// Beside a wide chat: the same list as a column (shown by the stylesheet from 900 px; it can be folded away).
+function convColumnMarkup(){
+ if(!convList()||!S.pip||S.tab!=='chat')return '';
+ if(convState.collapsed)return `<nav id="conv-column" class="conv-column collapsed" aria-label="${esc(`Conversations with ${S.pip.name}`)}"><button type="button" id="conv-column-show" class="topbar-icon conv-fold" aria-label="Show conversations" title="Show conversations" aria-expanded="false">${CONV_FOLD}</button></nav>`;
+ return `<nav id="conv-column" class="conv-column conv-list dgc-menu" aria-label="${esc(`Conversations with ${S.pip.name}`)}"><div class="conv-column-head"><h2>${esc(S.pip.name)}</h2><button type="button" id="conv-column-hide" class="topbar-icon conv-fold" aria-label="Hide conversations" title="Hide conversations" aria-expanded="true">${CONV_FOLD}</button></div><div class="conv-column-list">${convListMarkup('column')}</div></nav>`;
+}
+const CONV_FOLD='<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="2"/><path d="M6 2.5v11"/></svg>';
+document.addEventListener('click',event=>{
+ const target=event.target;if(!target?.closest||!convsOn())return;
+ const ui=convUi(),inside=target.closest('#conv-menu,#conv-column,#pip-convs');
+ if(!inside){if(ui.menu||ui.more||ui.renaming||ui.newStep)closeConvMenu();return;}
+ if(target.closest('#pip-convs')){openConvMenu();return;}
+ if(target.closest('#conv-column-hide,#conv-column-show')){convState.collapsed=!convState.collapsed;Object.assign(ui,{menu:false,more:'',renaming:'',newStep:false});rememberView();render();(convState.collapsed?$('conv-column-show'):$('conv-column-hide'))?.focus({preventScroll:true});return;}
+ const place=target.closest('#conv-column')?'column':'menu',within=selector=>document.querySelector(`#conv-${place} ${selector}`);
+ if(target.closest('[data-conv-new]')){void beginNewConversation();return;}
+ if(target.closest('[data-conv-new-cancel]')){ui.newStep=false;ui.error='';render();within('[data-conv-new]')?.focus({preventScroll:true});return;}
+ const more=target.closest('[data-conv-more]')?.dataset.convMore;
+ if(more){ui.more=ui.more===more?'':more;ui.renaming='';render();if(ui.more)within('[data-conv-rename]')?.focus({preventScroll:true});return;}
+ const rename=target.closest('[data-conv-rename]')?.dataset.convRename;
+ if(rename){const row=convList()?.find(c=>c.id===rename);ui.renaming=rename;ui.renameText=row?.title||'';ui.more='';render();const box=within('[data-conv-rename-input]');box?.focus({preventScroll:true});box?.select?.();return;}
+ const archive=target.closest('[data-conv-archive]')?.dataset.convArchive;
+ if(archive){ui.more='';void convCall('archive_pip_conversation',{conversation_id:archive,archived:true},()=>{S.notice='Archived. It’s under Archived, with Restore.';if(S.conv===archive)showConversation('');else within('.conv-row.is-selected')?.focus({preventScroll:true});});return;}
+ const restore=target.closest('[data-conv-restore]')?.dataset.convRestore;
+ if(restore){void convCall('archive_pip_conversation',{conversation_id:restore,archived:false},()=>{if(!convList()?.some(c=>c.archived))ui.archivedOpen=false;queueMicrotask(()=>focusConv(`[data-conv="${restore}"]`));});return;}
+ if(target.closest('[data-conv-archived]')){ui.archivedOpen=!ui.archivedOpen;render();return;}
+ const chosen=target.closest('[data-conv]')?.dataset.conv;
+ if(chosen){showConversation(chosen,{focus:true});return;}
+});
+document.addEventListener('submit',event=>{
+ if(event.target?.dataset?.convNewForm!==undefined){event.preventDefault();const ui=convUi();void startConversation(ui.newChoice==='add');return;}
+ const id=event.target?.dataset?.convRenameForm;if(!id)return;event.preventDefault();
+ const ui=convUi(),title=String(event.target.querySelector('[data-conv-rename-input]')?.value||'').replace(/\s+/g,' ').trim().slice(0,CONVERSATION_TITLE_MAX);
+ const place=event.target.closest('#conv-column')?'column':'menu';
+ void convCall('rename_pip_conversation',{conversation_id:id,title},()=>{ui.renaming='';ui.renameText='';queueMicrotask(()=>document.querySelector(`#conv-${place} [data-conv="${id}"]`)?.focus({preventScroll:true}));});
+});
+document.addEventListener('input',event=>{if(event.target?.dataset?.convRenameInput!==undefined)convUi().renameText=event.target.value;});
+document.addEventListener('change',event=>{
+ if(event.target?.name==='convComputer'&&event.target.checked){convUi().newChoice=event.target.value==='add'?'add':'use';return;}
+ const routine=event.target?.dataset?.routineConv;
+ if(routine){const id=event.target.value,first=convList()?.find(c=>c.id===id)?.first;
+  void routineCall('update_pip_routine',{routine_id:routine,changes:{conversation_id:first?null:id}},routine,`It posts in ${conversationTitle(convList()?.find(c=>c.id===id))} now.`);}
+});
+// The keys the list answers (media/shared/menu.js): Down and Up between rows, Home and End, Right to a row's "…",
+// Escape one step back (a name being typed, a row's choices, the computer question), then out to the Pip's name.
+function convKeydown(event){
+ if(!convsOn())return false;
+ const target=event.target,ui=convUi();
+ if(target.id==='pip-convs'&&event.key==='ArrowDown'&&convPlace()==='menu'){event.preventDefault();if(ui.menu)focusConv('.conv-row.is-selected');else openConvMenu();return true;}
+ if(target.id==='pip-convs'&&event.key==='Escape'&&ui.menu){event.preventDefault();event.stopPropagation();closeConvMenu();return true;}
+ const holder=target.closest?.('#conv-menu,#conv-column');if(!holder)return false;
+ const menu=holder.id==='conv-menu';
+ if(event.key==='Escape'){
+  if(ui.renaming||ui.more||ui.newStep){event.preventDefault();event.stopPropagation();const back=ui.renaming||ui.more;Object.assign(ui,{renaming:'',more:'',newStep:false,error:''});render();
+   (back?holder.querySelector(`[data-conv="${back}"]`):holder.querySelector('[data-conv-new]'))?.focus({preventScroll:true});return true;}
+  if(!menu)return false;
+ }
+ if(target.matches?.('input,select,textarea')&&event.key!=='Escape'&&event.key!=='Tab')return false;
+ if(!menu&&!['ArrowDown','ArrowUp','ArrowLeft','ArrowRight','Home','End'].includes(event.key))return false;
+ return !!globalThis.DgcMenu?.handle(holder,event,{rows:'.dgc-menu-row',close:()=>{if(menu)closeConvMenu();},trigger:()=>$('pip-convs')});
+}
+async function addComputer(){
+ const pip=S.selected,token=scope();if(S.busy||!usable()||!pip)return;
+ S.busy=true;S.error='';render();
+ try{const result=await send('add_pip_computer',{pip_id:pip});if(token!==scope())return;
+  if(computerState.pip===pip&&computerState.value&&Number.isSafeInteger(result?.computers))computerState.value={...computerState.value,computers:result.computers,...(Number.isSafeInteger(result.limit)?{computers_limit:result.limit}:{})};
+  S.notice=`${S.pip?.name||'It'} has ${result?.computers} computers now. Its conversations share them.`;}
+ catch(error){if(token===scope())S.error=errorText(error);}
+ finally{if(token===scope()){S.busy=false;render();}}
+}
 function simplePipHeader(){
  const p=S.pip,type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,S.runs,usable(),S.runner),onChat=S.tab==='chat';
  // A Project Pip's menu is every section its old page had; a Personal Pip's, the ones it uses.
@@ -3513,7 +3743,7 @@ function simplePipHeader(){
   const sub=['instructions','character'].includes(S.pipPage),share=S.apiVersion>=41&&['scout','lens','rook','lock','quill'].includes(p.pip_type)&&!archived();
   return `<header class="pip-topbar"><button type="button" id="${sub?'pip-page-back':'simple-to-chat'}" class="topbar-icon" aria-label="${sub?'Back':'Back to the chat'}" title="${sub?'Back':'Back to the chat'}">${simpleIcon('back')}</button><div class="pip-pill">${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span>${esc(p.name)}</span><small>${sub?(S.pipPage==='character'?'Face':'Instructions'):'Settings'}</small></div><div class="topbar-actions">${share?`<button type="button" class="topbar-icon" data-pip-share aria-label="Share as template" title="Share as template"${S.busy||!usable()?' disabled':''}>${simpleIcon('share')}</button>`:''}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${pipPageMenu()}</div></details></div></header>`;
  }
- return `<header class="pip-topbar"><button type="button" id="${onChat?'simple-back':'simple-to-chat'}" class="topbar-icon" aria-label="${onChat?'Your Pips':'Back to the chat'}" title="${onChat?'Your Pips':'Back to the chat'}">${simpleIcon('back')}</button><div class="pip-pill"${project&&pipType(p,S.types)?` title="${esc(`${type.name} · ${type.role}`)}"`:''}>${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span>${esc(p.name)}</span>${onChat?(project?`<small class="pip-status">${lastRunLink(p,pose.label)}</small>`:''):`<small>${esc(project?(every.find(([key])=>key===S.tab)||[])[1]||'':sections.length&&{runs:historyName('Results'),job:'Settings',memory:'Memory',revisions:'Versions',notifications:'Notifications',schedule:'Schedule',handoffs:'Handoffs',context:'Context'}[S.tab]||'')}</small>`}</div><div class="topbar-actions">${project?runNowMarkup():''}${computer}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${sections.map(([key,label])=>`<button type="button" data-tab="${key}">${label}</button>`).join('')}</div></details></div></header>`;
+ return `<header class="pip-topbar"><button type="button" id="${onChat?'simple-back':'simple-to-chat'}" class="topbar-icon" aria-label="${onChat?'Your Pips':'Back to the chat'}" title="${onChat?'Your Pips':'Back to the chat'}">${simpleIcon('back')}</button><div class="pip-pill"${project&&pipType(p,S.types)?` title="${esc(`${type.name} · ${type.role}`)}"`:''}>${pipAvatar(p,pose.state,`pill-${p.id}`,type)}${onChat?convNameMarkup(p):`<span>${esc(p.name)}</span>`}${onChat?(project?`<small class="pip-status">${lastRunLink(p,pose.label)}</small>`:''):`<small>${esc(project?(every.find(([key])=>key===S.tab)||[])[1]||'':sections.length&&{runs:historyName('Results'),job:'Settings',memory:'Memory',revisions:'Versions',notifications:'Notifications',schedule:'Schedule',handoffs:'Handoffs',context:'Context'}[S.tab]||'')}</small>`}</div><div class="topbar-actions">${project?runNowMarkup():''}${computer}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${sections.map(([key,label])=>`<button type="button" data-tab="${key}">${label}</button>`).join('')}</div></details></div>${onChat?convMenuMarkup():''}</header>`;
 }
 function simpleMarkup(){
  const bar=`<header class="simple-bar"><h1><span class="pips-wordmark">Pips</span></h1>${runnerMarkup()}</header>${scopeTabsMarkup()}`;
@@ -3528,7 +3758,7 @@ function simpleMarkup(){
  if(project&&!S.selected&&!S.overview&&['context','notifications'].includes(S.tab))return `<header class="pip-topbar">${back('workspace-back','Your Pips')}<div class="pip-pill settings-pill"><span>${S.tab==='context'?'Workspace context':'Notifications'}</span></div><span></span></header><div class="simple-content" data-view="${esc(S.tab)}">${notes}${S.tab==='context'?contextMarkup():notificationsMarkup()}</div>`;
  if(!S.selected||S.overview||S.create)return `${bar}${notes}<div class="simple-content"${scopePanelAttrs()}>${S.switching?'':simpleHomeMarkup()}</div>`;
  if(!S.pip)return `${bar}${loadingMark()}`;
- return `${simplePipHeader()}${pipSetupNotes()}<div class="simple-content${S.tab==='chat'?' chat':''}" data-view="${esc(S.tab)}">${S.tab==='chat'?chatMarkup():`${notes}${waitingMarkup()}${simpleTabContent()}`}</div>`;
+ return `${convColumnMarkup()}${simplePipHeader()}${pipSetupNotes()}<div class="simple-content${S.tab==='chat'?' chat':''}" data-view="${esc(S.tab)}">${S.tab==='chat'?chatMarkup():`${notes}${waitingMarkup()}${simpleTabContent()}`}</div>`;
 }
 // A Pip's conversation is open, where its prompt box shows: the side bar gives it the room its dock and its tab bar
 // take (media/main.js, onPipChat). Said on every draw, so the page is never a draw behind.
@@ -3541,7 +3771,7 @@ function render() {
   noticeFades();syncNewPipModel();
   const focus=document.activeElement; const focusId=focus?.id; const focusActivity=focus?.dataset?.chatActivity; const focusData=focus?.getAttribute?.('data-run')||focus?.getAttribute?.('data-job')||focus?.getAttribute?.('data-pip-type'); const inBox=!!chatBox&&focus===chatBox.el;const selection=focus&&typeof focus.selectionStart==='number'&&!inBox?[focus.selectionStart,focus.selectionEnd]:null;const boxAt=inBox?Mentions.selectedOffsets(chatBox.el):null;
   const oldLog=document.querySelector('.conversation-log'),oldScroll=oldLog?.scrollTop||0,oldHeight=oldLog?.scrollHeight||0,oldFirst=oldLog?.querySelector('[data-message]')?.dataset.message;
-  const oldPipId=shell.dataset.motionPip||'',oldMessageRows=[...(oldLog?.querySelectorAll('[data-message]')||[])];
+  const oldPipId=shell.dataset.motionPip||'',oldConv=shell.dataset.motionConv||'',oldMessageRows=[...(oldLog?.querySelectorAll('[data-message]')||[])];
   const oldMessages=new Set(oldMessageRows.map(e=>e.dataset.message));
   const oldLatest=oldMessageRows.at(-1)?.dataset.message||'';
   const oldJobs=new Map([...document.querySelectorAll('[data-job][data-state]')].map(e=>[e.dataset.job,{state:e.dataset.state,waiting:Number(e.dataset.waiting)||0}]));
@@ -3568,13 +3798,13 @@ function render() {
   if(boxAt&&!S.review&&chatBox.el.isConnected&&owner.activeElement!==chatBox.el&&document.activeElement!==chatBox.el){chatBox.el.focus({preventScroll:true});chatBox.el.setSelectionRange(boxAt[0],boxAt[1]);}
   globalThis.DgcMcpApps?.fill($('app'),{sendMessage:sendCardMessage});
   drawChatQueue();
-  shell.dataset.motionPip=S.selected||'';
+  shell.dataset.motionPip=S.selected||'';shell.dataset.motionConv=S.conv;
   for(const row of document.querySelectorAll('[data-job][data-state]')){
     const previous=oldJobs.get(row.dataset.job);
     if(previous&&previous.state!==row.dataset.state)row.classList.add('pip-motion-state');
     if(previous&&Number(row.dataset.waiting)>previous.waiting)row.classList.add('pip-motion-news');
   }
-  if(oldPipId===S.selected&&S.messagesLoaded&&oldMessages.size){
+  if(oldPipId===S.selected&&oldConv===S.conv&&S.messagesLoaded&&oldMessages.size){
     const last=[...document.querySelectorAll('.conversation-log [data-message]')].at(-1);
     if(last&&!oldMessages.has(last.dataset.message)&&last.dataset.message!==oldLatest)last.classList.add('pip-motion-arrive');
   }
@@ -3586,7 +3816,9 @@ function render() {
   if(cardFlash.selector&&Date.now()<cardFlash.until)for(const el of document.querySelectorAll(cardFlash.selector))el.classList.add('attention-flash');
   for(const el of document.querySelectorAll('details[data-details]')) if(opened.has(el.dataset.details)) el.open=true;
   const newLog=document.querySelector('.conversation-log'),first=newLog?.querySelector('[data-message]')?.dataset.message;
-  chatFollow.drawn(newLog,newLog?$('pip-to-latest'):null,{opened:!!newLog&&(!oldLog||oldPipId!==S.selected),grew:newLog&&oldLog?newLog.scrollHeight-oldHeight:0,olderAbove:!!oldFirst&&first!==oldFirst,scroll:oldLog?oldScroll:null});
+  chatFollow.drawn(newLog,newLog?$('pip-to-latest'):null,{opened:!!newLog&&(!oldLog||oldPipId!==S.selected||oldConv!==S.conv),grew:newLog&&oldLog?newLog.scrollHeight-oldHeight:0,olderAbove:!!oldFirst&&first!==oldFirst,scroll:oldLog?oldScroll:null});
+  // A conversation that comes back is where it was left (unless it was at its end, where it follows on).
+  if(convScroll&&newLog&&S.messagesLoaded&&convScroll.pip===S.selected&&convScroll.conv===S.conv){chatFollow.restore(convScroll.top);convScroll=null;}
   if(focusId && !S.review) { const next=$(focusId);next?.focus({preventScroll:true});if(selection&&next?.setSelectionRange) next.setSelectionRange(...selection); }
   else if(focusActivity&&!S.review)[...document.querySelectorAll('[data-chat-activity]')].find(e=>e.dataset.chatActivity===focusActivity)?.focus({preventScroll:true});
   else if(focusData && !S.review) [...document.querySelectorAll('[data-job],[data-run],[data-pip-type]')].find(e=>e.dataset.job===focusData||e.dataset.run===focusData||e.dataset.pipType===focusData)?.focus({preventScroll:true});
@@ -3976,7 +4208,7 @@ function routinesSectionMarkup(short=false){   // short: on its page, where the 
  if(!S.routines)return '<p class="muted" role="status">Loading…</p>';
  const links=S.appLinks||[],busy=!!routineBusy||S.busy||!usable();
  const form=routineEditing?routineFormMarkup(draft,{esc,busy,error:routineError,isNew:routineEditing==='new',gmail:links.some(l=>l.status==='connected'&&l.toolkit==='gmail'),calendar:links.some(l=>l.status==='connected'&&l.toolkit==='googlecalendar'),apps:ownAppNames(),events:appEventNames.get(draft.routineApp)||[]}):'';
- return routinesMarkup(S.routines,{esc,busy,editing:routineEditing,form,formatDate:date,pipName:S.pip.name,short,schedule:S.pip.schedule?scheduleLabel(S.pip.schedule):'',gmail:links.some(l=>l.status==='connected'&&l.toolkit==='gmail'),calendar:links.some(l=>l.status==='connected'&&l.toolkit==='googlecalendar')})+(S.legacyOpen&&S.pip.schedule?`<div class="routine-legacy-edit">${quickScheduleMarkup()}</div>`:'');
+ return routinesMarkup(S.routines,{esc,busy,editing:routineEditing,form,formatDate:date,pipName:S.pip.name,short,posts:r=>convList()?routinePostsMarkup(r,convList(),{esc,busy}):'',schedule:S.pip.schedule?scheduleLabel(S.pip.schedule):'',gmail:links.some(l=>l.status==='connected'&&l.toolkit==='gmail'),calendar:links.some(l=>l.status==='connected'&&l.toolkit==='googlecalendar')})+(S.legacyOpen&&S.pip.schedule?`<div class="routine-legacy-edit">${quickScheduleMarkup()}</div>`:'');
 }
 function routinePopoverMarkup(){
  if(S.composerPanel!=='routines'||!personalPip()||S.apiVersion<43)return '';
@@ -4448,7 +4680,7 @@ async function refreshNow(includeContext=false) {
     if(includeContext){if(results[2].status==='fulfilled'){S.context=null;S.context=context(results[2].value.context,S.workspace.id);}else{S.context=null;S.error=errorText(results[2].reason);}}
     if(S.selected&&!S.jobs.some(p=>p.id===S.selected)&&paged&&S.pip?.id===S.selected)S.jobs=[...S.jobs,S.pip];
     if(S.selected&&!S.jobs.some(p=>p.id===S.selected)){clearSelection();S.selected='';}
-    if(restoreView&&!S.create){restoreView=false;if(savedView?.workspace_id===S.workspace.id&&record(savedView.drafts))for(const [id,text] of Object.entries(savedView.drafts).slice(-20))if(typeof text==='string'&&text.length<=65536)chatDrafts.set(id,text);if(savedView?.workspace_id===S.workspace.id&&record(savedView.draft_marks))for(const [id,kept] of Object.entries(savedView.draft_marks).slice(-20)){const fine=record(kept)&&typeof kept.text==='string'&&Array.isArray(kept.parts)&&kept.parts.length<=256&&kept.parts.every(p=>typeof p==='string'||record(p)&&['plugin','pip','file'].includes(p.kind)&&typeof p.label==='string'&&typeof p.wire==='string'&&typeof p.identity==='string'&&p.label.length<=4096&&p.wire.length<=4096&&p.identity.length<=128)&&kept.parts.map(p=>typeof p==='string'?p:p.wire).join('')===kept.text;if(fine)chatMarks.set(id,kept);}if(savedView?.workspace_id===S.workspace.id&&record(savedView.chat_queues))for(const [id,list] of Object.entries(savedView.chat_queues).slice(-20))if(Array.isArray(list))chatQueues.set(id,list.filter(item=>record(item)&&typeof item.id==='string'&&typeof item.text==='string'&&item.text.length<=4000).slice(0,MAX_CHAT_QUEUE));if(savedView?.workspace_id===S.workspace.id&&!savedView.overview&&!(navigationPending&&options.navigation?.overview===true)&&S.jobs.some(p=>p.id===savedView.selected))await select(savedView.selected);}if(S.selected)await loadSelected(false);
+    if(restoreView&&!S.create){restoreView=false;if(savedView?.workspace_id===S.workspace.id&&S.apiVersion>=79){if(record(savedView.conversations))for(const [id,conv] of Object.entries(savedView.conversations).slice(-20))if(/^conv_[0-9a-f]{32}$/.test(conv))convShown.set(id,conv);if(record(savedView.conversation_drafts))for(const [key,text] of Object.entries(savedView.conversation_drafts).slice(-40))if(typeof text==='string'&&text.length<=65536)convDrafts.set(key,text);}if(savedView?.workspace_id===S.workspace.id&&record(savedView.drafts))for(const [id,text] of Object.entries(savedView.drafts).slice(-20))if(typeof text==='string'&&text.length<=65536)chatDrafts.set(id,text);if(savedView?.workspace_id===S.workspace.id&&record(savedView.draft_marks))for(const [id,kept] of Object.entries(savedView.draft_marks).slice(-20)){const fine=record(kept)&&typeof kept.text==='string'&&Array.isArray(kept.parts)&&kept.parts.length<=256&&kept.parts.every(p=>typeof p==='string'||record(p)&&['plugin','pip','file'].includes(p.kind)&&typeof p.label==='string'&&typeof p.wire==='string'&&typeof p.identity==='string'&&p.label.length<=4096&&p.wire.length<=4096&&p.identity.length<=128)&&kept.parts.map(p=>typeof p==='string'?p:p.wire).join('')===kept.text;if(fine)chatMarks.set(id,kept);}if(savedView?.workspace_id===S.workspace.id&&record(savedView.chat_queues))for(const [id,list] of Object.entries(savedView.chat_queues).slice(-20))if(Array.isArray(list))chatQueues.set(id,list.filter(item=>record(item)&&typeof item.id==='string'&&typeof item.text==='string'&&item.text.length<=4000).slice(0,MAX_CHAT_QUEUE));if(savedView?.workspace_id===S.workspace.id&&!savedView.overview&&!(navigationPending&&options.navigation?.overview===true)&&S.jobs.some(p=>p.id===savedView.selected))await select(savedView.selected);}if(S.selected)await loadSelected(false);
   }catch(error){if(token===scope())S.error=errorText(error);}
   finally{if(epoch===S.epoch&&sequence===refreshSeq){S.refreshing=false;render();if(S.apiVersion>=72&&(!S.selected||S.overview)&&!S.create&&(!flowState.loaded||flowState.workspace!==S.workspace.id||Date.now()-flowState.loadedAt>15000))void loadFlows();}}
 }
@@ -5141,6 +5373,7 @@ document.addEventListener('click',event=>{
     case 'chat-permissions':S.composerPanel='';render();openWhatItCanDo();break;
     case 'older-messages':void loadMessages(true);void loadPosts(true);break;
     case 'refresh-models':void loadModels();break;
+    case 'add-computer':void addComputer();break;
     case 'chat-stop':if(S.chatActiveRun?.id)void mutate({type:'cancel_pip_run',run_id:S.chatActiveRun.id},()=>loadMessages());break;
     case 'refresh':S.error='';S.notice='';void refresh(true);break;
     case 'open-personal-result':case 'save-personal-result':
@@ -5352,6 +5585,7 @@ if(typeof document!=='undefined'){document.addEventListener('pointerdown',()=>ma
  root.addEventListener('wheel',onWheel,{passive:true});disposers.push(()=>root.removeEventListener('wheel',onWheel));}
 document.addEventListener('keydown',event=>{
   if(picker.keydown(event))return;
+  if(!S.review&&convKeydown(event))return;
   if(!S.review&&DgcCard.key(event)){event.preventDefault();return;}   // Esc closes a card's open detail
   // Needs attention's one card: with the keyboard anywhere in it, an arrow goes to the next card or back, Home and
   // End to the first and the last. Not from a box you type in.
@@ -5429,7 +5663,7 @@ const stopMessages=options.onMessage(message=>{
     if(message.generation !== undefined && message.generation === S.generation) return;
     S.generation=message.generation ?? null;S.displayMentions=message.displayMentions===true;
     S.connectFailed=message.connected!==true&&message.failed===true;S.jobsRead=false;
-    savedView=options.getState?.()||savedView;S.epoch++;broker.reset();clearSelection();S.selected='';S.overview=true;restoreView=true;chatDrafts.clear();chatMarks.clear();chatRequests.clear();chatPreferences.clear();draft.chatText='';chatHistory?.reset();S.workspace=null;S.projectEmpty=false;S.switching=false;S.currentWorkspaceId=null;S.folderOpen=message.folder!==false;S.jobs=[];S.jobsRead=false;setupSeq++;setupDetailSeq++;setupRows=[];setupLoading=false;setupError='';draft.setupTask='';S.types=[];S.models=[];S.defaultModel='';S.subscriptions=[];S.defaultEngine=null;S.router=null;S.modelsError='';S.modelsLoading=false;S.executionCapability=null;S.executionLoading=false;S.executionError='';draft.createModel='default';S.create=false;S.createStep='type';S.createType='';creationDrafts.clear();avatarIds.clear();S.runner=null;S.context=null;S.refreshing=false;S.busy=false;S.loading=false;S.error='';S.notice='';S.apiVersion=Number.isSafeInteger(message.apiVersion)?message.apiVersion:9;S.connected=message.connected===true;S.supported=message.supported===true;S.enabled=message.enabled===true;
+    savedView=options.getState?.()||savedView;S.epoch++;broker.reset();clearSelection();S.selected='';S.overview=true;restoreView=true;convShown.clear();convStash.clear();convDrafts.clear();convState.pip='';convState.list=null;chatDrafts.clear();chatMarks.clear();chatRequests.clear();chatPreferences.clear();draft.chatText='';chatHistory?.reset();S.workspace=null;S.projectEmpty=false;S.switching=false;S.currentWorkspaceId=null;S.folderOpen=message.folder!==false;S.jobs=[];S.jobsRead=false;setupSeq++;setupDetailSeq++;setupRows=[];setupLoading=false;setupError='';draft.setupTask='';S.types=[];S.models=[];S.defaultModel='';S.subscriptions=[];S.defaultEngine=null;S.router=null;S.modelsError='';S.modelsLoading=false;S.executionCapability=null;S.executionLoading=false;S.executionError='';draft.createModel='default';S.create=false;S.createStep='type';S.createType='';creationDrafts.clear();avatarIds.clear();S.runner=null;S.context=null;S.refreshing=false;S.busy=false;S.loading=false;S.error='';S.notice='';S.apiVersion=Number.isSafeInteger(message.apiVersion)?message.apiVersion:9;S.connected=message.connected===true;S.supported=message.supported===true;S.enabled=message.enabled===true;
     waitForConnection();render();if(usable())void initialize();
   }
 });

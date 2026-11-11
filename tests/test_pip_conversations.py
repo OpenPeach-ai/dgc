@@ -166,6 +166,20 @@ class UnreadAndApi(unittest.TestCase):
         self.assertEqual(self.control("mark_pip_read", pip_id=job["id"], message_id=first_reply["id"])["messages"], 0,
                          "an older client marks the first conversation read as before")
 
+    def test_the_list_says_where_it_is_answering_now(self):
+        """The editor marks a conversation the Pip is answering in while another one is on screen (pips-17 editor)."""
+        job = Conversations.job(self)
+        Conversations.say(self, job, "Plan my Monday", "k1", finish="Monday is planned.")
+        other = conversations.create(self.registry, job["id"], "Groceries")
+        sent = Conversations.say(self, job, "Milk and eggs", "k2", conversation_id=other["id"], finish=None)
+        replying = lambda: {c["title"] or "first": c["replying"] for c in
+                            self.control("list_pip_conversations", pip_id=job["id"])["conversations"]}
+        self.assertEqual(replying(), {"Groceries": True, "first": False}, "waiting to start counts: the reply is on its way")
+        self.assertEqual(self.store.claim_next()["id"], sent["run"]["id"])
+        self.assertEqual(replying(), {"Groceries": True, "first": False})
+        self.store.finish(sent["run"]["id"], result={"text": "On the list."})
+        self.assertEqual(replying(), {"Groceries": False, "first": False}, "its reply ended")
+
     def test_api_79_starts_renames_archives_and_restores_conversations(self):
         job = Conversations.job(self)
         made = self.control("create_pip_conversation", pip_id=job["id"], title="Trip to Goa")["conversation"]

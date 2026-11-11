@@ -1377,7 +1377,9 @@ export function pipComputerAction(value,pip){
 export function pipComputer(value,pip){
  // needs_you: a site asked a person to prove they are not a robot; the Pip stopped for the user.
  const needs=value?.needs_you;if(needs!==undefined&&(!record(needs)||Object.keys(needs).sort().join()!=='at,host'||typeof needs.host!=='string'||!needs.host||needs.host.length>255||typeof needs.at!=='string'))throw Error('This Pip\'s computer status is invalid. Refresh this Pip.');
- if(!record(value)||Object.keys(value).filter(k=>k!=='needs_you').sort().join()!=='actions,available,granted,pending,pip_id,reason'||value.pip_id!==pip
+ // Several computers per Pip (Pips API 79): how many it has and may have, each a whole number from 1 when it is there.
+ const count=n=>n===undefined||Number.isSafeInteger(n)&&n>=1;
+ if(!record(value)||Object.keys(value).filter(k=>!['needs_you','computers','computers_limit'].includes(k)).sort().join()!=='actions,available,granted,pending,pip_id,reason'||value.pip_id!==pip||!count(value.computers)||!count(value.computers_limit)
    ||typeof value.granted!=='boolean'||typeof value.available!=='boolean'||typeof value.reason!=='string'
    ||!Number.isSafeInteger(value.pending)||!Array.isArray(value.actions)||value.actions.length>5)
   throw Error('This Pip\'s computer status is invalid. Refresh this Pip.');

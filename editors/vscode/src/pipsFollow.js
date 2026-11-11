@@ -168,6 +168,8 @@ export function createChatFollow({opening=()=>false,focusBox=()=>{},win=globalTh
   sending(){following=true;holding=false;unread=false;},
   /** The page took you to something (a card you opened): the next line of a reply must not take you away from it. */
   reading(){if(!log)return;lastTop=log.scrollTop;if(!atBottom()){following=false;holding=false;}paint();},
+  /** Back where it was left (a conversation shown again): there it stays, and following starts again at the end. */
+  restore(top){if(!log)return;log.scrollTop=top;lastTop=log.scrollTop;holding=false;following=atEnd();unread=false;paint();},
   /** The Latest pill. */
   latest(){holding=false;toEnd();unread=false;paint();focusBox();},
   dispose(){unbind?.();contentSizes?.disconnect();logSize?.disconnect();pinFit?.disconnect();win.removeEventListener?.('resize',resize);win.clearTimeout(pinJump);log=null;pill=null;},

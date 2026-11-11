@@ -26,7 +26,9 @@ export function routine(value, pip) {
     || !record(value.trigger) || !['schedule', 'email', 'calendar', 'app'].includes(value.trigger.kind)
     || !(value.run_id === null || value.run_id === undefined || /^run_[A-Za-z0-9]{1,64}$/.test(value.run_id))
     || !(value.next_due_at === null || time(value.next_due_at)) || !(value.last_run_at === null || time(value.last_run_at))
-    || !(value.last_error === null || text(value.last_error, 600)) || !time(value.updated_at)) fail();
+    || !(value.last_error === null || text(value.last_error, 600)) || !time(value.updated_at)
+    // Moved out of its Pip's first conversation (Pips API 79): the one it posts in.
+    || !(value.conversation_id === undefined || value.conversation_id === null || /^conv_[0-9a-f]{32}$/.test(value.conversation_id))) fail();
   if (value.trigger.kind === 'schedule' && !record(value.trigger.schedule)) fail();
   if (value.trigger.kind === 'app' && !(typeof value.trigger.app === 'string' && APP.test(value.trigger.app)
     && typeof value.trigger.event === 'string' && EVENT.test(value.trigger.event))) fail();
@@ -169,7 +171,7 @@ export function routineCardMarkup(r, { esc, busy = false, formatDate }) {
 }
 
 /** Its routines in Settings: one row each with an on/off switch, then Add routine. */
-export function routinesMarkup(routines, { esc, busy = false, editing = '', form = '', formatDate, pipName = 'It', schedule = '', gmail = false, calendar = false, short = false }) {
+export function routinesMarkup(routines, { esc, busy = false, editing = '', form = '', formatDate, pipName = 'It', schedule = '', gmail = false, calendar = false, short = false, posts = () => '' }) {
   const off = busy ? ' disabled' : '';
   const shown = (routines || []).filter(r => r.status !== 'suggested');
   const rows = shown.map(r => editing === r.id ? form : `<li class="routine-row" data-state="${esc(r.status)}">`
@@ -178,7 +180,7 @@ export function routinesMarkup(routines, { esc, busy = false, editing = '', form
     + `${r.status === 'on' && !r.last_error && ((r.trigger.kind === 'email' && !gmail) || (r.trigger.kind === 'calendar' && !calendar)) ? `<small class="routine-error">Waiting for ${r.trigger.kind === 'email' ? 'Gmail' : 'Google Calendar'} to be linked to this Pip.</small>` : ''}`
     + `${r.troupe ? `<small class="routine-troupe">Troupe · ${esc([r.troupe.plan, r.troupe.project].filter(Boolean).join(' · '))}</small>` : ''}`
     + `${r.last_error ? `<small class="routine-error">${esc(r.last_error)}</small>` : ''}</span></button>`
-    + `<label class="switch" title="${r.status === 'on' ? 'On' : 'Off'}"><input type="checkbox" role="switch" data-routine-toggle="${esc(r.id)}"${r.status === 'on' ? ' checked' : ''}${off} aria-label="${esc(r.title)} ${r.status === 'on' ? 'on' : 'off'}"><span aria-hidden="true"></span></label></li>`).join('');
+    + `<label class="switch" title="${r.status === 'on' ? 'On' : 'Off'}"><input type="checkbox" role="switch" data-routine-toggle="${esc(r.id)}"${r.status === 'on' ? ' checked' : ''}${off} aria-label="${esc(r.title)} ${r.status === 'on' ? 'on' : 'off'}"><span aria-hidden="true"></span></label>${posts(r)}</li>`).join('');
   const legacy = schedule ? `<li class="routine-row legacy"><span class="routine-open static">${mark}<span class="routine-words"><strong>Its task</strong><small>${esc(schedule)}</small></span></span><button type="button" class="quiet" data-routine-legacy${off}>Change</button></li>` : '';
   const empty = !shown.length && !schedule && editing !== 'new' ? `<p class="routine-empty">No routines yet.${short ? '' : ` A routine is something ${esc(pipName)} does on its own: every morning, when an email arrives, or before a meeting.`}</p>` : '';
   return `<ul class="routine-list">${legacy}${rows}${editing === 'new' ? form : ''}</ul>${empty}`
