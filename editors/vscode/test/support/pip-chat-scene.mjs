@@ -47,7 +47,8 @@ export const THEMES = {
     doing (what the running turn says it is doing), fixing (DGC is fixing what a Project Pip's post found),
     empty (no messages yet), api, settings (its page's every section has something in it; level: the one it is at), keys (a plugin's key card: true, or "two"),
     boot (in a tab: what the page holds before its script runs, as src/pipsView.ts writes it),
-    ownKeys (the Pip's own API keys, Pips API 82: true one waiting card, "refused" one its site turned away, "list" one saved, one waiting, one Not now). */
+    ownKeys (the Pip's own API keys, Pips API 82: true one waiting card, "refused" one its site turned away, "list" one saved, one waiting, one Not now;
+    "generator" / "generator-refused" / "generator-list": a picture or video generator's key, kept in Settings). */
 /** The stub host's script: it answers a Pip's page from `opts`. (dock-scene.mjs gives it to the side bar's real page too.) */
 export const host = (opts) => `(${function (PIP, opts) {
   const W = "ws_" + "e".repeat(32), run = (c) => "run_" + c.repeat(32);
@@ -261,8 +262,14 @@ export const host = (opts) => `(${function (PIP, opts) {
   if (opts.ownKeys) {
     const key = (c, extra) => ({ id: "pipkey_" + c.repeat(32), pip_id: PIP, workspace_id: W, kind: "site", name: "Invoicely API key", why: "To read your unpaid invoices for the morning brief.",
       host: "api.invoicely.example", header: "Authorization: Bearer", status: "requested", saved: false, refused: false, created_at: at(3), saved_at: null, declined_at: null, ...extra });
+    const gen = (c, extra) => key(c, { kind: "generator", generator: "fal", name: "fal FLUX schnell key", why: "So it can make pictures with fal FLUX schnell.", host: "", header: "", ...extra });
     let keys = opts.ownKeys === "list" ? [key("a", { status: "saved", saved: true, saved_at: at(60) }), key("b", { name: "Weather key", host: "api.weather.example", why: "To check tomorrow's rain." }),
-      key("c", { name: "Flights key", host: "api.flights.example", status: "declined", declined_at: at(20) })] : [key("a", { refused: opts.ownKeys === "refused" })];
+      key("c", { name: "Flights key", host: "api.flights.example", status: "declined", declined_at: at(20) })]
+      // A picture generator's key (slice 2b): "generator" one waiting card, "generator-refused" one its generator turned
+      // away, "generator-list" one kept in Settings, a video generator's still waited for, and a site's key.
+      : opts.ownKeys === "generator-list" ? [gen("a", { status: "saved", saved: true, saved_at: at(60) }), gen("b", { generator: "fal-wan", name: "fal Wan 2.2 key", why: "So it can make videos with fal Wan 2.2." }),
+        key("c", { status: "saved", saved: true, saved_at: at(90) })]
+      : String(opts.ownKeys).startsWith("generator") ? [gen("a", { refused: opts.ownKeys === "generator-refused" })] : [key("a", { refused: opts.ownKeys === "refused" })];
     const put = (id, extra) => { keys = keys.map((k) => (k.id === id ? { ...k, ...extra } : k)); return { key: keys.find((k) => k.id === id) }; };
     Object.assign(answers, {
       list_pip_keys: () => ({ pip_id: PIP, keys }),

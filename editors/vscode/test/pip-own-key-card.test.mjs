@@ -228,3 +228,113 @@ test('a list that is not well formed is refused whole, and said',async()=>{
  assert.ok(cardOf(y),'a well-formed card still shows');
  assert.ok(!y.d.documentElement.outerHTML.includes(KEY),'and anything else an answer carried is never drawn');
 });
+
+// ---- pips-10, slice 2b: a picture or video generator's key (a row of kind "generator": its id, no site, no header).
+// The same card in the chat, with its own words: "<Pip> needs <generator>'s key", "Kept with <generator> in Settings,
+// for all of DGC. <Pip> never sees it."; saved, "<generator> has its key" · "Saved"; turned away, "<generator> turned
+// its key away. Paste a new one." On the Pip's page its row says "<generator> · Kept in Settings" and its button is
+// Remove card: the key stays in Settings, and the question says so (no danger button: nothing is lost).
+const GEN='fal FLUX schnell';
+const gen=(extra={})=>key({id:KEYID2,kind:'generator',generator:'fal',name:GEN+' key',why:'So it can make pictures with '+GEN+'.',host:'',header:'',...extra});
+
+test('a generator\'s key card shows beside a site\'s: the list is no longer refused whole for a row with no site',async()=>{
+ const x=setup({keys:[gen(),key()]});await openChat(x);
+ assert.doesNotMatch(x.d.body.textContent,/keys didn’t load/);
+ assert.ok(cardOf(x),'the site\'s card is still there');
+ const el=cardOf(x,KEYID2);assert.ok(el,'and the generator\'s card is in the chat');
+ assert.ok(el.classList.contains('dgc-card')&&el.classList.contains('key-card'),'the same shared card');
+ assert.deepEqual([el.dataset.state,el.dataset.pipKeyKind],['requested','generator']);
+ assert.equal(el.querySelector('strong').textContent,'Ava needs fal FLUX schnell’s key');
+ assert.equal(el.getAttribute('aria-label'),'Ava needs fal FLUX schnell’s key');
+ assert.equal(el.querySelector('.dgc-card-words small').textContent,'So it can make pictures with fal FLUX schnell.');
+ assert.equal(el.querySelector('.app-link-note').textContent,'Kept with fal FLUX schnell in Settings, for all of DGC. Ava never sees it.');
+ assert.doesNotMatch(el.textContent,/Only sent to/,'a generator\'s key has no site line');
+ const inputs=[...el.querySelectorAll('input')];assert.equal(inputs.length,1,'one box');
+ assert.deepEqual([inputs[0].type,inputs[0].getAttribute('autocomplete'),inputs[0].hasAttribute('value'),inputs[0].hasAttribute('data-draft')],['password','off',false,false],'masked, never a draft');
+ assert.equal(x.d.querySelector(`label[for="${inputs[0].id}"]`).textContent,'fal FLUX schnell key');
+ assert.deepEqual([...el.querySelectorAll('.dgc-card-actions button')].map(b=>[b.textContent,b.classList.contains('primary'),b.disabled]),[['Save',true,true],['Not now',false,false]]);
+ assert.equal(el.querySelector('[data-pip-key-refused]'),null);
+ assert.equal(cardOf(x).dataset.pipKeyKind,'site');
+ assert.match(cardOf(x).textContent,/Only sent to api\.invoicely\.example, by DGC\. Ava never sees it\./,'the site\'s card keeps its own words');
+});
+
+test('saving a generator\'s key sends the Pip, the card and the key once; then "<generator> has its key" · "Saved" and the key is nowhere',async()=>{
+ const x=setup({keys:[gen()]});await openChat(x);
+ const card=()=>cardOf(x,KEYID2);
+ type(x,box(x,KEYID2),KEY);
+ assert.equal(card().querySelector('button.primary').disabled,false);
+ card().querySelector('form').dispatchEvent(new x.w.Event('submit',{bubbles:true,cancelable:true}));await flush();
+ const sent=x.requests('save_pip_key');assert.equal(sent.length,1);
+ assert.deepEqual(clean(sent[0].request),{type:'save_pip_key',pip_id:PIP,key_id:KEYID2,value:KEY});
+ assert.equal(box(x,KEYID2).value,'','the box is emptied as it is sent');
+ const saved=gen({status:'saved',saved:true,saved_at:'2026-11-11T09:01:00Z'});
+ x.setKeys([saved]);x.answer(sent[0],{key:saved});await x.drain();
+ const done=card();
+ assert.deepEqual([done.dataset.state,done.dataset.pipKeyKind],['saved','generator']);
+ assert.equal(done.querySelector('strong').textContent,'fal FLUX schnell has its key');
+ assert.equal(done.querySelector('small').textContent,'Saved');
+ assert.equal(done.querySelector('input'),null);assert.equal(done.querySelector('button'),null);
+ assert.ok(!everywhere(x).includes(KEY),'the key is nowhere on the page after it was sent');
+ assert.equal(x.d.querySelectorAll('input[type="password"]').length,0);
+});
+
+test('a generator that turned its key away says so and asks for a new one; Not now leaves the quiet line',async()=>{
+ const x=setup({keys:[gen({refused:true})]});await openChat(x);
+ const el=cardOf(x,KEYID2);
+ assert.equal(el.querySelector('[data-pip-key-refused]').textContent,'fal FLUX schnell turned its key away. Paste a new one.');
+ type(x,box(x,KEYID2),KEY);
+ x.click(`[data-pip-key-decline="${KEYID2}"]`);await flush();
+ assert.deepEqual(clean(x.requests('decline_pip_key')[0].request),{type:'decline_pip_key',pip_id:PIP,key_id:KEYID2});
+ const declined=gen({status:'declined',declined_at:'2026-11-11T09:02:00Z'});
+ x.setKeys([declined]);x.answer(x.requests('decline_pip_key')[0],{key:declined});await x.drain();
+ const line=cardOf(x,KEYID2);
+ assert.deepEqual([line.dataset.state,line.tagName,line.textContent],['declined','P','Not now · fal FLUX schnell key']);
+ assert.ok(!(x.d.documentElement.outerHTML+JSON.stringify(x.sent)).includes(KEY),'what was typed went nowhere');
+});
+
+test('the Pip\'s page: a generator\'s row says "<generator> · Kept in Settings", and Remove card asks first and says the key stays',async()=>{
+ const x=setup({keys:[gen({status:'saved',saved:true}),gen({id:KEYID3,generator:'fal-wan',name:'fal Wan 2.2 key',why:'So it can make videos with fal Wan 2.2.'}),key({status:'saved',saved:true})]});await openPage(x);
+ const group=x.d.querySelector('section[aria-label="Keys"]');assert.ok(group,'a Keys group');
+ assert.deepEqual([...group.querySelectorAll('[data-pip-key]')].map(r=>[r.dataset.pipKeyKind,r.querySelector('.row-words span').textContent,r.querySelector('small').textContent,r.querySelector('button').textContent]),
+  [['generator','fal FLUX schnell key','fal FLUX schnell · Kept in Settings','Remove card'],['generator','fal Wan 2.2 key','fal Wan 2.2 · Waiting for you','Remove card'],['site','Invoicely API key','api.invoicely.example · Saved','Remove']]);
+ const tip=group.querySelector('h3 [data-pip-tip]');
+ assert.match(x.d.getElementById(tip.dataset.pipTip).textContent,/sends it only to that site\. Ava never sees it\. A picture or video generator’s key is kept in Settings, for all of DGC\./);
+ x.click(`[data-pip-key-ask-remove="${KEYID2}"]`);await flush();
+ const row=()=>x.d.querySelector(`[data-pip-key="${KEYID2}"]`);
+ assert.equal(row().querySelector('.pip-key-ask').textContent,'Remove this card? fal FLUX schnell’s key stays in Settings, for all of DGC.');
+ assert.deepEqual([...row().querySelectorAll('button')].map(b=>[b.textContent,b.classList.contains('danger'),b.classList.contains('primary')]),[['Remove card',false,true],['Keep it',false,false]],'nothing is lost, so no danger button');
+ assert.equal(x.requests('remove_pip_key').length,0,'nothing is removed by asking');
+ x.click('[data-pip-key-keep]');await flush();
+ assert.equal(row().querySelector('.pip-key-confirm'),null);assert.equal(x.requests('remove_pip_key').length,0);
+ x.click(`[data-pip-key-ask-remove="${KEYID2}"]`);await flush();
+ x.click(`[data-pip-key-remove="${KEYID2}"]`);await flush();
+ assert.deepEqual(x.requests('remove_pip_key').map(m=>clean(m.request)),[{type:'remove_pip_key',pip_id:PIP,key_id:KEYID2}]);
+ x.setKeys([key({status:'saved',saved:true})]);x.answer(x.requests('remove_pip_key')[0],{removed:true});await x.drain();
+ assert.equal(row(),null,'the row is gone');
+ assert.match(x.d.body.textContent,/Card removed\. fal FLUX schnell’s key is still in Settings\./);
+ assert.doesNotMatch(x.d.body.textContent,/can’t read/,'not the site key\'s words');
+});
+
+test('only a well-formed generator row is accepted: anything else still refuses the whole list',async()=>{
+ const bad=[gen({host:'api.fal.example'}),gen({generator:undefined}),gen({generator:''}),gen({generator:'Fal Flux'}),gen({generator:'x'.repeat(40)}),gen({generator:7}),gen({header:'Authorization: Bearer'}),
+  gen({name:' '}),gen({status:'kept'}),gen({kind:'other'}),gen({kind:7}),key({host:''}),key({kind:'site',host:'',generator:'fal'}),key({generator:'fal'}),gen({host:undefined})];
+ for(const row of bad){
+  const x=setup({keys:[row,key({id:KEYID3})]});await openChat(x);
+  assert.equal(x.d.querySelector('[data-pip-key-card]'),null,JSON.stringify(row));
+  assert.match(x.d.body.textContent,/This Pip’s keys didn’t load\. Refresh to try again\./,JSON.stringify(row));
+ }
+ // A row with no kind is a site's, as DGC 0.51 sent it.
+ const old=key();delete old.kind;
+ const y=setup({keys:[old]});await openChat(y);assert.equal(cardOf(y).dataset.pipKeyKind,'site');
+ // Whatever else a generator's row carries is never drawn.
+ const z=setup({keys:[gen({value:KEY})]});await openChat(z);
+ assert.ok(cardOf(z,KEYID2));assert.ok(!z.d.documentElement.outerHTML.includes(KEY));
+});
+
+test('an older DGC (Pips API 81) shows no generator card and no row',async()=>{
+ const x=setup({apiVersion:81,keys:[gen(),gen({id:KEYID3,status:'saved',saved:true})]});await openPage(x);
+ assert.equal(x.requests('list_pip_keys').length,0);
+ assert.equal(x.d.querySelector('section[aria-label="Keys"]'),null);
+ const chat=setup({apiVersion:81,keys:[gen()]});await openChat(chat);
+ assert.equal(chat.d.querySelector('[data-pip-key-card]'),null);assert.equal(chat.d.querySelector('input[type="password"]'),null);
+});

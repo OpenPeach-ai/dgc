@@ -48,7 +48,7 @@ let effortHeld=false,effortRedraw=false;   // the thinking slider is being dragg
 import {mountHomePips} from './pipHomeStrip.js';
 import {healthMarkup,failedRoutine,foldRoutineLines,failedRoutineMarkup,quietLineMarkup,noteMarkup,routineNotes,withNotes} from './pipRoutineHealth.js';
 import {appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup,appLinkSettledMarkup,allowCardMarkup,calendarCardMarkup} from './pipAppLinks.js';
-import {pipKeysPage,pipKeyResult,waitingKeys,pipKeyCardMarkup,pipKeysPageMarkup} from './pipKeys.js';
+import {pipKeysPage,pipKeyResult,waitingKeys,pipKeyCardMarkup,pipKeysPageMarkup,pipKeyRemovedNote} from './pipKeys.js';
 import {pluginsPage,pluginResult,keyRequests,keyCardMarkup,shownPluginCards,pluginForServer,installedForServer,pluginCardMarkup,pluginActionMarkup,pluginsPageMarkup,pluginUsesPage,pluginUsesMarkup,argumentValues,editedArguments,PLUGIN_LEVELS} from './pipPlugins.js';
 import {attentionPage,waitingOn,needWords,attentionMarkup,attentionCards,attentionSpot,setupCardMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
 import {notesPage,notesMarkup,keptMarkup} from './pipNotes.js';
@@ -4008,7 +4008,7 @@ async function pipKeyRemove(id){
  try{const answer=await send('remove_pip_key',{pip_id:pip,key_id:id});if(token!==scope()||S.selected!==pip)return;
   if(answer?.removed!==true)throw new Error('DGC didn’t say it was removed. Refresh the Pip.');
   pipKeysSeq++;S.pipKeys=(S.pipKeys||[]).filter(k=>k.id!==id);pipKeyDone.delete(id);pipKeyFilled.delete(id);pipKeyErrors.delete(id);pipKeyConfirm='';
-  S.notice=`Removed. ${pipName} can’t read ${key.host} until you save a key again.`;
+  S.notice=pipKeyRemovedNote(key,pipName);
  }catch(error){if(token===scope())S.pipKeysError=errorText(error);}
  finally{if(token===scope()){pipKeyBusy='';render();void loadPipKeys();}}
 }

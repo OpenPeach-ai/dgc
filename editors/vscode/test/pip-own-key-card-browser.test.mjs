@@ -140,3 +140,86 @@ for (const theme of ["dark", "light"]) for (const width of [300, 700]) {
     } finally { await x.close(); }
   });
 }
+
+// ---- Slice 2b: a picture or video generator's key (a row of kind "generator"). The same card, box for box, as the
+// site's key card, with its own words; saved, it says the generator has its key. On the Pip's page its row says where
+// the key is kept, and Remove card asks in the row with the one filled button (not the red one: the key stays).
+for (const theme of ["dark", "light"]) for (const width of [300, 700]) {
+  test(`${theme} ${width}px: a generator's key card is the site key card's box with its own words; typed, Save comes on; saved, it says so`, async (t) => {
+    if (skipOrFail(t)) return;
+    const model = await openChat(browser, { width, theme, api: 82, ownKeys: true });
+    let site;
+    try { await model.p.waitForSelector(CARD); site = await look(model.p, CARD); } finally { await model.close(); }
+    const x = await openChat(browser, { width, theme, api: 82, ownKeys: "generator" });
+    try {
+      await x.p.waitForSelector(CARD);
+      const v = await look(x.p, CARD);
+      assert.deepEqual([v.state, v.shared], ["requested", true]);
+      assert.match(v.text, /Mornings needs fal FLUX schnell’s key.*So it can make pictures with fal FLUX schnell\..*Kept with fal FLUX schnell in Settings, for all of DGC\. Mornings never sees it\./);
+      assert.deepEqual(v.box, site.box, "the site key card's own box: ground, edge, corner, padding");
+      assert.deepEqual(v.buttons.map((b) => [b.word, b.filled, b.outline, b.radius, b.off, b.width, b.height]), site.buttons.map((b) => [b.word, b.filled, b.outline, b.radius, b.off, b.width, b.height]), "the same two answers at the same size");
+      assert.equal(new Set(v.buttons.map((b) => b.top)).size, 1, "on one line");
+      assert.deepEqual(v.inputs.map((i) => [i.type, i.radius, i.height, i.label, i.inside]), [["password", "6px", site.inputs[0].height, "fal FLUX schnell key", true]], "one masked box, the same corner and height");
+      assert.ok(v.buttons.every((b) => b.inside && b.whole) && v.right <= v.vw && !v.sideways, "everything inside the card and the panel");
+      assert.ok(v.notes.length === 1 && v.notes.every((n) => n.inside && n.ratio >= 4.5) && v.small.every((n) => n.inside && n.ratio >= 4.5), "every line inside the card, at 4.5:1");
+      assert.ok(v.title >= 4.5 && v.inputs[0].labelRatio >= 4.5 && v.buttons[1].ratio >= 4.5, `words at 4.5:1 (${v.title}, ${v.inputs[0].labelRatio}, ${v.buttons[1].ratio})`);
+      assert.deepEqual(v.purples, [], "no purple on the card");
+      await x.p.locator(`${CARD} input`).fill(KEY);
+      const typed = await look(x.p, CARD);
+      assert.deepEqual([typed.buttons[0].off, typed.inputs[0].value === KEY], [false, true], "typed: Save is on");
+      assert.ok(!typed.html.includes(KEY), "the key is in its box only, never in the page's markup");
+      await x.p.locator(`${CARD} button.primary`).click();
+      await x.p.waitForSelector(`${CARD}[data-state="saved"]`);
+      const saved = await look(x.p, CARD);
+      assert.match(saved.text, /^fal FLUX schnell has its keySaved$/);
+      assert.deepEqual([saved.inputs.length, saved.buttons.length], [0, 0]);
+      assert.ok(saved.title >= 4.5 && saved.small.every((n) => n.ratio >= 4.5 && n.inside));
+      assert.ok(!saved.html.includes(KEY), "nowhere on the page once sent");
+      assert.deepEqual(await x.p.evaluate(() => window.__ownKeySent), { fields: ["key_id", "pip_id", "type", "value"], key_id: KEYID, chars: KEY.length });
+      assert.deepEqual(x.errors, []);
+    } finally { await x.close(); }
+  });
+
+  test(`${theme} ${width}px: a generator that turned its key away says so on the card, inside it`, async (t) => {
+    if (skipOrFail(t)) return;
+    const x = await openChat(browser, { width, theme, api: 82, ownKeys: "generator-refused" });
+    try {
+      await x.p.waitForSelector(CARD);
+      const v = await look(x.p, CARD);
+      assert.deepEqual(v.refused.map((n) => [n.text, n.inside, n.ratio >= 4.5]), [["fal FLUX schnell turned its key away. Paste a new one.", true, true]], JSON.stringify(v.refused));
+      assert.ok(v.buttons.every((b) => b.inside && b.whole) && v.right <= v.vw && !v.sideways);
+      assert.deepEqual(x.errors, []);
+    } finally { await x.close(); }
+  });
+
+  test(`${theme} ${width}px: Keys on the Pip's page: a generator's row says where its key is kept, and Remove card asks with the filled button, not the red one`, async (t) => {
+    if (skipOrFail(t)) return;
+    const x = await openChat(browser, { width, height: 900, theme, api: 82, settings: true, ownKeys: "generator-list" });
+    const GROUP = 'section[aria-label="Keys"]';
+    try {
+      await x.p.evaluate(() => (window.__pipsRoot || document).querySelector('[data-tab="job"]').click());
+      await x.p.waitForSelector(GROUP);
+      await x.p.locator(GROUP).scrollIntoViewIfNeeded();
+      const v = await look(x.p, GROUP);
+      assert.deepEqual(v.rows.map((r) => r.text), ["fal FLUX schnell keyfal FLUX schnell · Kept in SettingsRemove card", "fal Wan 2.2 keyfal Wan 2.2 · Waiting for youRemove card", "Invoicely API keyapi.invoicely.example · SavedRemove"]);
+      assert.ok(v.rows.every((r) => r.inside) && v.buttons.every((b) => b.inside && b.whole) && v.right <= v.vw && !v.sideways, "every row and button inside the panel, no word cut");
+      assert.deepEqual([...new Set(v.buttons.map((b) => [b.outline, b.radius, b.width, b.height].join()))].length, 1, "Remove and Remove card: the shared outline, at one size");
+      assert.ok(v.small.every((n) => n.ratio >= 4.5) && v.buttons.every((b) => b.ratio >= 4.5), "words at 4.5:1");
+      assert.deepEqual(v.purples, [], "no purple in Keys");
+      await x.p.locator(`[data-pip-key-ask-remove="${KEYID}"]`).click();
+      await x.p.waitForSelector(".pip-key-confirm");
+      const asked = await look(x.p, `[data-pip-key="${KEYID}"]`);
+      assert.deepEqual(asked.asks.map((n) => [n.text, n.inside, n.ratio >= 4.5]), [["Remove this card? fal FLUX schnell’s key stays in Settings, for all of DGC.", true, true]]);
+      assert.deepEqual(asked.buttons.map((b) => [b.word, b.filled, b.red, b.outline, b.radius]), [["Remove card", true, false, false, "6px"], ["Keep it", false, false, true, "6px"]], "the one filled button (never red: the key stays) beside an outline");
+      assert.ok(asked.buttons[0].ratio >= 4.5 && asked.buttons[1].ratio >= 4.5, `both read at 4.5:1 (${asked.buttons.map((b) => b.ratio)})`);
+      assert.deepEqual([new Set(asked.buttons.map((b) => b.width)).size, new Set(asked.buttons.map((b) => b.height)).size, new Set(asked.buttons.map((b) => b.top)).size], [1, 1, 1], "one size, one line");
+      assert.ok(asked.buttons.every((b) => b.inside && b.whole) && asked.right <= asked.vw && !asked.sideways, "inside the row and the panel");
+      assert.deepEqual(asked.purples, [], "no purple in the question");
+      assert.equal(await x.p.evaluate(() => (window.__pipsRoot || document).activeElement?.textContent), "Keep it", "the keyboard lands on Keep it");
+      await x.p.locator(`[data-pip-key-remove="${KEYID}"]`).click();
+      await x.p.waitForSelector(`[data-pip-key="${KEYID}"]`, { state: "detached" });
+      assert.equal((await look(x.p, GROUP)).rows.length, 2, "the removed card's row is gone");
+      assert.deepEqual(x.errors, []);
+    } finally { await x.close(); }
+  });
+}
