@@ -131,7 +131,8 @@ TOOL = "computer"
 # loading, tabs (a link that opens one moves the Pip there), status, a page's own confirm or prompt (dialog), forward
 # and reload, check and uncheck, and the mouse over or a drag between refs.
 TEXT_OPS = ("open", "read", "click", "type", "press", "choose", "back", "forward", "reload", "wait", "check", "uncheck",
-            "hover", "tabs", "close_browser", "status", "dialog", "files", "open_file", "run", "sign_in")
+            "hover", "tabs", "close_browser", "status", "dialog", "files", "open_file", "run", "jobs", "stop_job",
+            "sign_in")
 # Eyes and a cursor (pip_eyes): a screenshot the model sees, and the mouse by position. Only a Pip whose
 # model can see (or that has a vision model look for it) is offered the position ops. drag also works by ref (ref onto
 # to), so a Pip that can't see has it too.
@@ -143,7 +144,7 @@ from .pip_desktop_eyes import DESKTOP_OPS, DESKTOP_POINT_OPS  # noqa: E402
 OPS = TEXT_OPS + ("look",) + POINT_OPS + ("upload",) + DESKTOP_OPS
 APP_KEYS = ("images", "documents", "pdf", "files", "terminal", "browser")
 # Files and the Terminal: no browser, so they never wait on (or hold) the browser.
-DESK_OPS = ("files", "open_file", "run")
+DESK_OPS = ("files", "open_file", "run", "jobs", "stop_job")
 # A Pip answers in its conversations in parallel (pip_conversations), and its computer is one screen: the reply that has
 # it keeps it until it ends, and another reply's computer step waits its turn, with no cut-off (his call, 10 Nov). The
 # first look answers at once with what the computer is busy with (FIRST_LOOK), so the chat can say so; the worker then
@@ -217,7 +218,10 @@ def schema(eyes: str | None = None, convention: str = "pixels", desktop: bool = 
                         "file field or upload button (ref" + (", or x,y" if eyes in ("own", "relay") else "") + "). "
                         "Files (your own folder; browser downloads land in Downloads, photos and files the user sent "
                         "in From chat): files lists a folder (path), open_file reads a text file (path). Terminal: run "
-                        "runs one shell command in your Files folder, with no internet, for at most 60 seconds. Reading is free; anything "
+                        "runs one shell command in your Files folder, online to public websites only (through DGC), for "
+                        "at most 60 seconds; with background true it starts a long one (a download, an install, a "
+                        "build) and answers at once: it runs up to an hour, jobs lists them (running or finished, exit "
+                        "code, the end of their output) and stop_job stops one (job: its id). Reading is free; anything "
                         "that would submit, upload or change something on a website waits for the user's approval."),
         "parameters": {"type": "object", "additionalProperties": False, "required": ["op"],
                        "properties": {"op": {"type": "string", "enum": ops},
@@ -228,6 +232,8 @@ def schema(eyes: str | None = None, convention: str = "pixels", desktop: bool = 
                                       "value": {"type": "string", "maxLength": 500},
                                       "path": {"type": "string", "maxLength": 2048},
                                       "command": {"type": "string", "maxLength": 4000},
+                                      "background": {"type": "boolean"},
+                                      "job": {"type": "string", "maxLength": 16},
                                       "site": {"type": "string", "maxLength": 2048},
                                       "submit": {"type": "boolean"}, "to": {"type": "string", "maxLength": 16},
                                       "seconds": {"type": "number"}, "gone": {"type": "boolean"},
@@ -1410,6 +1416,21 @@ class Host:
                 return f"Files/{listing['path']}:\n" + ("\n".join(rows) if rows else "(empty)")
             if op == "open_file":
                 return desk.read_for_pip(files, args.get("path"))
+            if op == "jobs":
+                listed = desk.jobs(self.root)
+                if not listed:
+                    return "No background commands yet. Start one with run and background true."
+                from .tools import _UNTRUSTED_PAGE
+                rows = []
+                for job in listed:
+                    said = {"running": "running", "stopping": "stopping", "stopped": "stopped",
+                            "timed_out": "stopped: it ran out of time"}.get(job["state"], f"finished, exit {job['exit']}")
+                    rows.append(f"{job['id']} · {said} · $ {job['command'][:200]}"
+                                + (f"\n{job['output'][-2000:]}" if job.get("output") else ""))
+                return f"{_UNTRUSTED_PAGE}\n" + "\n\n".join(rows)
+            if op == "stop_job":
+                stopped = desk.stop_job(self.root, args.get("job"))
+                return f"{stopped['id']} is {stopped['state']}."
             if getattr(self, "run_id", None) is not None:
                 held = Host._floor(self, str(args.get("command") or ""))
                 if held:
@@ -1421,8 +1442,15 @@ class Host:
                 if carried:
                     return self._careful_hold("text", {"method": "RUN", "host": "Terminal", "path": "/",
                                                        "fields": [{"name": "command", "value": _preview(command)}]}, command, carried)
+            keys = terminal_keys(getattr(self, "state_directory", None), getattr(self, "pip_id", None))
+            if args.get("background") is True:
+                job = desk.start_background(self.root, args.get("command"), "pip",
+                                            policy=self._terminal_policy() if careful else None, env=keys)
+                seconds, _most = desk.background_limits()
+                return (f"Started in the background as {job['id']}: $ {job['command']}\nIt may run up to "
+                        f"{seconds // 60} minutes. Check it with jobs; stop it with stop_job (job: {job['id']}).")
             entry = desk.run_command(self.root, args.get("command"), "pip", policy=self._terminal_policy() if careful else None,
-                                     env=terminal_keys(getattr(self, "state_directory", None), getattr(self, "pip_id", None)))
+                                     env=keys)
             from .tools import _UNTRUSTED_PAGE
             status = "timed out" if entry["timed_out"] else f"exit {entry['exit']}"
             return f"{_UNTRUSTED_PAGE}\n$ {entry['command']}\n({status})\n{entry['output']}"
@@ -2906,7 +2934,7 @@ def _take_card_note(host) -> str | None:
 
 WAIT_SECONDS, MAX_WAIT_SECONDS = 10.0, 30.0
 # Steps a page's open confirm or prompt doesn't stop: answering it, saying where the browser is, the other tabs, Files.
-DIALOG_FREE_OPS = ("dialog", "status", "tabs", "files", "open_file", "run")
+DIALOG_FREE_OPS = ("dialog", "status", "tabs", "files", "open_file", "run", "jobs", "stop_job")
 
 
 def _untrusted() -> str:

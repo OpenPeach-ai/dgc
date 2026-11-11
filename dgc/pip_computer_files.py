@@ -39,6 +39,12 @@ MAX_FOLDER_BYTES = 1024 ** 3              # the Files folder, all in
 MAX_COMMAND_CHARS = 4000
 COMMAND_SECONDS = 60
 MAX_OUTPUT_BYTES = 64 * 1024
+# Long commands in the background (pc-background-commands, 0.52): a download, an install or a build starts and the Pip
+# carries on; it checks later (running or finished, exit code, the end of its output) and can stop it. They don't hold
+# the Terminal. How long one may run and how many at once are Dev Mode limits (dgc.dev_mode).
+BACKGROUND_SECONDS = 60 * 60
+MAX_JOBS = 3
+JOBS_KEPT = 20
 MAX_HISTORY = 200
 # The Terminal is online like Grok's bots, through the same way out as the browser: an in-box relay to
 # DGC's egress proxy, which reaches public websites (ports 80 and 443) and never this computer or the
@@ -525,8 +531,153 @@ def start_command(computer_root: Path, command, by: str = "you") -> dict:
     return {"running": {"by": by, "command": command, "at": int(time.time())}}
 
 
-def _execute(files: Path, command: str, computer_root: Path | None = None, *, policy=None, env: dict | None = None):
-    """Run it; returns (exit, output, timed out, {"reached": hosts, "blocked": hosts})."""
+def background_limits() -> tuple[int, int]:
+    """(seconds one background command may run, how many at once): today's, or yours in Dev Mode."""
+    from .dev_mode import chosen
+    minutes, jobs = chosen("pip_background_minutes"), chosen("pip_background_jobs")
+    return (BACKGROUND_SECONDS if minutes is None else minutes * 60), (MAX_JOBS if jobs is None else jobs)
+
+
+def _jobs_dir(computer_root: Path) -> Path:
+    path = Path(computer_root) / "jobs"
+    path.mkdir(mode=0o700, exist_ok=True)
+    return path
+
+
+def _job_write(computer_root: Path, job: dict) -> None:
+    path = _jobs_dir(computer_root) / f"{job['id']}.json"
+    staging = path.with_name(f".{job['id']}.{os.urandom(4).hex()}")
+    fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(job, handle, ensure_ascii=False)
+    os.replace(staging, path)
+
+
+def _alive(pgid) -> bool:
+    if type(pgid) is not int or pgid <= 1:
+        return False
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except (ProcessLookupError, PermissionError):
+        return False
+
+
+_JOB_THREADS: dict = {}               # job id -> its waiting thread, in this process
+
+
+def jobs(computer_root: Path) -> list[dict]:
+    """The background commands, newest first: running, finished (exit code), timed out or stopped, with the end of
+    their output. One left running by a DGC that has since stopped reads as stopped."""
+    out = []
+    try:
+        paths = sorted(_jobs_dir(computer_root).glob("job_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        return []
+    for path in paths[:JOBS_KEPT]:
+        try:
+            job = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(job, dict):
+            continue
+        thread = _JOB_THREADS.get(job.get("id"))
+        if job.get("state") == "running" and not (thread is not None and thread.is_alive()) and not _alive(job.get("pgid")):
+            job = {**job, "state": "stopped", "output": (job.get("output") or "") + "\nDGC stopped while it ran."}
+        out.append({k: job.get(k) for k in ("id", "by", "command", "state", "exit", "output", "started", "ended")})
+    for stale in paths[JOBS_KEPT:]:
+        try:
+            stale.unlink()
+        except OSError:
+            pass
+    return out
+
+
+def start_background(computer_root: Path, command, by: str, *, policy=None, env: dict | None = None) -> dict:
+    """Start one command in the background in the computer's Terminal box (the same box, network and keys as run),
+    for at most background_limits()'s seconds; it doesn't hold the Terminal. Returns the job."""
+    if sys.platform == "darwin":
+        raise RegistryError("unsupported", "Background commands aren't on a Mac yet: run it, up to 60 seconds.")
+    command = _check(command, by)
+    files = files_root(computer_root)
+    if folder_bytes(files) > MAX_FOLDER_BYTES:
+        raise RegistryError("computer_full", "This computer's Files are full (1 GB). Remove something first.")
+    seconds, most = background_limits()
+    if sum(1 for job in jobs(computer_root) if job["state"] == "running") >= most:
+        raise RegistryError("busy", f"{most} background commands are already running here. Stop one (stop_job) or "
+                                    "wait for one to finish.")
+    job = {"id": "job_" + os.urandom(4).hex(), "by": by, "command": command, "state": "running", "exit": None,
+           "output": "", "started": int(time.time()), "ended": None, "pgid": None}
+    _job_write(computer_root, job)
+
+    def started(proc):
+        job["pgid"] = proc.pid                     # its own session: the process group to stop
+        _job_write(computer_root, job)
+
+    def work():
+        try:
+            code, text, timed_out, reached = _execute(files, command, computer_root, policy=policy, env=env,
+                                                      seconds=seconds, on_start=started, tail=True)
+            if env:
+                from .redaction import redact_text
+                text = redact_text(text, [v for v in env.values() if isinstance(v, str) and v])
+            now = json.loads((_jobs_dir(computer_root) / f"{job['id']}.json").read_text(encoding="utf-8"))
+            state = "stopped" if now.get("state") == "stopping" else "timed_out" if timed_out else "finished"
+            job.update(state=state, exit=code, output=text, ended=int(time.time()), **reached)
+        except Exception as error:                 # noqa: BLE001 - recorded, never raised off-thread
+            job.update(state="finished", exit=None, output=f"It couldn't run: {str(error)[:300]}", ended=int(time.time()))
+        finally:
+            _JOB_THREADS.pop(job["id"], None)
+        _job_write(computer_root, job)
+        try:
+            _remember(computer_root, {"by": by, "command": command, "exit": job["exit"], "output": job["output"],
+                                      "timed_out": job["state"] == "timed_out", "background": True,
+                                      "seconds": (job["ended"] or job["started"]) - job["started"], "at": job["started"]})
+        except OSError:
+            pass
+
+    thread = threading.Thread(target=work, name=f"pip-computer-job-{job['id']}", daemon=True)
+    _JOB_THREADS[job["id"]] = thread
+    thread.start()
+    return {k: job[k] for k in ("id", "by", "command", "state", "started")}
+
+
+def stop_job(computer_root: Path, job_id) -> dict:
+    """Stop one background command (its whole process group); its record says stopped."""
+    if not isinstance(job_id, str) or not re.fullmatch(r"job_[0-9a-f]{8}", job_id):
+        raise RegistryError("invalid_request", "job is a background command's id, like job_1a2b3c4d (jobs lists them).")
+    path = _jobs_dir(computer_root) / f"{job_id}.json"
+    try:
+        job = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise RegistryError("not_found", "There is no background command by that id.") from None
+    if job.get("state") != "running":
+        return {"id": job_id, "state": job.get("state")}
+    _job_write(computer_root, {**job, "state": "stopping"})
+    pgid = job.get("pgid")
+    if _alive(pgid):
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except OSError:
+            pass
+        deadline = time.monotonic() + 3
+        while _alive(pgid) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        if _alive(pgid):
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except OSError:
+                pass
+    thread = _JOB_THREADS.get(job_id)
+    if thread is not None:
+        thread.join(timeout=5)
+    return {"id": job_id, "state": "stopped"}
+
+
+def _execute(files: Path, command: str, computer_root: Path | None = None, *, policy=None, env: dict | None = None,
+             seconds: int | None = None, on_start=None, tail: bool = False):
+    """Run it; returns (exit, output, timed out, {"reached": hosts, "blocked": hosts}). ``seconds``, ``on_start`` and
+    ``tail``: a background job's (_run_boxed)."""
     from .pip_computer_box import EgressProxy, FORWARDER
     from .pip_computer import socket_dir
     if sys.platform == "darwin" and computer_root is not None:
@@ -550,7 +701,8 @@ def _execute(files: Path, command: str, computer_root: Path | None = None, *, po
                 os.close(keys_w)
         code, text, timed_out = _run_boxed(terminal_argv(files, command, egress=proxy.path if proxy else None,
                                                          forwarder=forwarder, keys_fd=keys_r),
-                                           pass_fds=(keys_r,) if keys_r is not None else ())
+                                           pass_fds=(keys_r,) if keys_r is not None else (), seconds=seconds,
+                                           on_start=on_start, tail=tail)
     finally:
         if keys_r is not None:
             os.close(keys_r)
@@ -597,16 +749,22 @@ def _execute_in_vm(files: Path, command: str, computer_root: Path, *, policy=Non
     return code, text, timed_out, {k: v for k, v in hosts.items() if v}
 
 
-def _run_boxed(argv: list[str], *, limits: bool = True, pass_fds=()) -> tuple[int | None, str, bool]:
+def _run_boxed(argv: list[str], *, limits: bool = True, pass_fds=(), seconds: int | None = None, on_start=None,
+               tail: bool = False) -> tuple[int | None, str, bool]:
+    """Run the boxed command for at most ``seconds`` (COMMAND_SECONDS). ``on_start(proc)`` learns its process (a
+    background job's Stop); ``tail`` keeps the END of a long output (a background job's) rather than its start."""
+    seconds = COMMAND_SECONDS if seconds is None else seconds
     # On a Mac the VM is the limit (its memory and CPUs, and `timeout` inside); here, rlimits on the box.
     proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, start_new_session=True, preexec_fn=_limits(_user_tasks()) if limits else None,
                             env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")}, pass_fds=tuple(pass_fds))
-    output, timed_out = bytearray(), False
-    reader = threading.Thread(target=lambda: _drain(proc.stdout, output), daemon=True)
+    if on_start is not None:
+        on_start(proc)
+    output, timed_out = (_Tail() if tail else bytearray()), False
+    reader = threading.Thread(target=lambda: _drain(proc.stdout, output, tail=tail), daemon=True)
     reader.start()
     try:
-        code = proc.wait(timeout=COMMAND_SECONDS)
+        code = proc.wait(timeout=seconds)
     except subprocess.TimeoutExpired:
         timed_out = True
         try:
@@ -616,20 +774,38 @@ def _run_boxed(argv: list[str], *, limits: bool = True, pass_fds=()) -> tuple[in
         code = proc.wait()
     reader.join(timeout=5)
     proc.stdout.close()
-    text = bytes(output[:MAX_OUTPUT_BYTES]).decode("utf-8", "replace")
-    if len(output) > MAX_OUTPUT_BYTES:
-        text += f"\n… output cut at {MAX_OUTPUT_BYTES // 1024} KB."
+    if tail:
+        cut = len(output) > MAX_OUTPUT_BYTES or getattr(output, "cut", False)
+        text = ("… only the end of its output is kept.\n" if cut else "") + bytes(output[-MAX_OUTPUT_BYTES:]).decode("utf-8", "replace")
+    else:
+        text = bytes(output[:MAX_OUTPUT_BYTES]).decode("utf-8", "replace")
+        if len(output) > MAX_OUTPUT_BYTES:
+            text += f"\n… output cut at {MAX_OUTPUT_BYTES // 1024} KB."
     if timed_out:
-        text += f"\nStopped after {COMMAND_SECONDS} seconds."
+        text += f"\nStopped after {_duration(seconds)}."
     return code, text, timed_out
 
 
-def _drain(stream, into: bytearray) -> None:
+class _Tail(bytearray):
+    cut = False
+
+
+def _duration(seconds: int) -> str:
+    return f"{seconds} seconds" if seconds < 120 else f"{seconds // 60} minutes"
+
+
+def _drain(stream, into: bytearray, *, tail: bool = False) -> None:
     while True:
         chunk = stream.read(65536)
         if not chunk:
             break
-        if len(into) <= MAX_OUTPUT_BYTES:
+        if tail:
+            into.extend(chunk)
+            if len(into) > 2 * MAX_OUTPUT_BYTES:
+                del into[:len(into) - MAX_OUTPUT_BYTES]          # the end is what a long job's reader needs
+                if isinstance(into, _Tail):
+                    into.cut = True
+        elif len(into) <= MAX_OUTPUT_BYTES:
             into.extend(chunk)
 
 

@@ -45,6 +45,11 @@ LIMITS = (
           "Each is a process DGC watches; its output can wake the chat.", "monitors.MAX_MONITORS_PER_OWNER"),
     Limit("monitors_per_dgc", 16, 16, "Monitors per DGC",
           "Each is a process DGC watches, across every chat.", "monitors.MAX_MONITORS_PROCESS"),
+    Limit("pip_background_jobs", 3, 3, "Background commands at once on a Pip's computer",
+          "Each is a command running in the computer's box: memory, processor and network add up.",
+          "pip_computer_files.background_limits"),
+    Limit("pip_background_minutes", 60, 60, "Minutes one background command may run",
+          "A longer build or download holds its share of the machine for longer.", "pip_computer_files.background_limits"),
     Limit("pip_queue", 20, 20, "Pip runs waiting at once",
           "Each waiting run holds its inputs in the Pips registry until it starts.", "pips.max_queue"),
     # How much one turn holds

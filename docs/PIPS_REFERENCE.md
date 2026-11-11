@@ -966,6 +966,15 @@ entries may carry `reached` and `blocked` host lists (up to 12 each). A page rea
 later page past it or by `finish_pip_computer_check {pip_id}` (local only), which also queues the chat's
 next turn under the reserved key `check_`.
 
+**Background commands** (0.52). The computer tool's `run` with `background: true` starts a long command (a download,
+an install, a build) in the same Terminal box, network and keys and answers at once with its id (`job_` and 8 hex
+digits); it doesn't hold the Terminal. `jobs` lists them newest first (running, finished with its exit code, timed out
+or stopped, with the end of their output, masked of the Pip's Terminal keys); `stop_job {job}` stops one and its whole
+process group. At most 3 run at once, each up to 60 minutes (Dev Mode: `pip_background_jobs`,
+`pip_background_minutes`); one left running by a DGC that stopped reads as stopped. Kept under the computer's own
+folder (`jobs/`), outside Files; finished ones also show in the Terminal's history (`background: true`). Not on a Mac
+yet.
+
 **Choices** (API 43). A chat run offers `offer_choices {choices}` (2–4 distinct lines of up to 80
 characters); the reply keeps them in `pip_chat_choices` and `list_pip_messages` returns them as the
 assistant message's `choices`. The reply's text is everything the Pip said after the user's message,
