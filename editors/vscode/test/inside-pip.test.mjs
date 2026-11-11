@@ -42,6 +42,8 @@ const now = (page) => page.evaluate(() => {
   const backs = [...(root?.querySelectorAll(".pip-topbar > button.topbar-icon:first-child") || [])].filter(seen);
   const focused = inner || active;
   return { dock: seen(dock), dockRect: rect(dock), tabs: seen(tabs), tabsRect: rect(tabs), head: seen(head), headRect: rect(head), host: rect(host),
+    // (The Pips view's room for its own things: its height less what it keeps for the glass bars over it, dock-glass.test.mjs.)
+    room: (() => { const area = root?.querySelector(".pip-app-root"); if (!area) return 0; const cs = getComputedStyle(area); return area.getBoundingClientRect().height - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom); })(),
     view: root?.querySelector(".simple-content")?.dataset.view || "", under: root?.querySelector(".pip-pill small")?.textContent.trim() || "", title: root?.querySelector(".pip-pill span")?.textContent.trim() || "",
     list: !!root?.querySelector("[data-job]"), chat: !!root?.querySelector("#chat-form"),
     backs: backs.map((b) => ({ id: b.id, name: b.getAttribute("aria-label") || "", button: b.tagName === "BUTTON" && !b.disabled })),
@@ -89,8 +91,8 @@ function alone(s, list, what) {
   assert.ok(Math.abs(s.headRect.height - list.headRect.height) < 0.6 && Math.abs(s.headRect.top - list.headRect.top) < 0.6, `${what}: the header is where and as it was`);
   assert.ok(Math.abs(s.host.top - s.headRect.bottom) < 0.6, `${what}: the page begins under the header (${s.host.top} against ${s.headRect.bottom})`);
   assert.ok(Math.abs(s.host.bottom - s.height) < 0.6, `${what}: and reaches the foot of the side bar (${s.host.bottom} of ${s.height})`);
-  assert.ok(Math.abs(s.host.height - (list.host.height + list.dockRect.height + list.tabsRect.height)) < 0.6,
-    `${what}: it gains the dock's and the tab bar's height (${s.host.height} against ${list.host.height} + ${list.dockRect.height} + ${list.tabsRect.height})`);
+  assert.ok(Math.abs(s.room - (list.room + list.dockRect.height + list.tabsRect.height)) < 0.6,
+    `${what}: its room gains the dock's and the tab bar's height (${s.room} against ${list.room} + ${list.dockRect.height} + ${list.tabsRect.height})`);
   assert.equal(s.backs.length, 1, `${what}: one back arrow (${JSON.stringify(s.backs)})`);
   assert.ok(s.backs[0].button && s.backs[0].name, `${what}: a named button (${JSON.stringify(s.backs[0])})`);
   assert.equal(s.overflowX, false, `${what}: nothing scrolls sideways`);

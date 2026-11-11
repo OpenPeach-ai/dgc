@@ -1027,11 +1027,37 @@
     if (colours !== dockColours) { dockColours = colours; if (lastSessions && chatPlace === "home") { renderSessions(lastSessions); if (lastChats) renderChats(lastChats); } }
     paintDock();
   }
+  // Frosted glass (main.css, "Frosted glass"): the tab bar lies over the top of the page and the dock's strip over its
+  // foot, and the page scrolls under both. The room the page keeps is each bar's own height, measured here and handed to
+  // the styles as --glass-top and --glass-bottom (the Pips view's shadow root inherits them). A resize observer speaks
+  // after layout and before the frame is painted, so the room and the bar arrive in the same frame. Inside a Pip
+  // neither bar is drawn and the styles keep no room; what was measured is left as it is, so the way back needs nothing.
+  function glassRoom() {
+    if (chatPlace !== "home" || document.body.classList.contains("inside-pip")) return;
+    const tabs = $("side-tabs"), strip = $("dgc-dock"), tall = (n) => `${Math.round(n.getBoundingClientRect().height * 100) / 100}px`;
+    const top = tabs ? tall(tabs) : "0px", bottom = strip && strip.dataset.show === "always" ? tall(strip) : "0px", style = document.documentElement.style;
+    if (style.getPropertyValue("--glass-top") !== top) style.setProperty("--glass-top", top);
+    if (style.getPropertyValue("--glass-bottom") !== bottom) style.setProperty("--glass-bottom", bottom);
+  }
+  const glassSizes = chatPlace === "home" && typeof ResizeObserver === "function" ? new ResizeObserver(glassRoom) : null;
+  if ($("side-tabs")) glassSizes?.observe($("side-tabs"));
+  // The wheel over either bar scrolls the page that lies under it (the bars themselves take the pointer, so a click on
+  // the glass never reaches a row blurred beneath it). Ctrl+wheel is the editor's zoom, left alone.
+  function glassWheel(e) {
+    if (e.ctrlKey || !e.deltaY) return;
+    const page = pipsOpen ? $("pips-host")?.shadowRoot?.querySelector(".pip-app-root") : $("sessions-host");
+    if (page) page.scrollTop += e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? page.clientHeight : 1);
+  }
+  if (chatPlace === "home") $("side-tabs")?.addEventListener("wheel", glassWheel, { passive: true });
   /** The dock itself, made once on the side bar's page: the last thing on it, under every screen. */
   function mountDock() {
     if (chatPlace !== "home" || dock || !window.DgcDock) return;
     const host = el("div"); host.id = "dgc-dock"; host.setAttribute("role", "region"); host.setAttribute("aria-label", "Dock");
     document.body.append(host);
+    // Its height, and the Dock setting (Always keeps room at the foot; "When I point at the bottom" and Never keep none).
+    glassSizes?.observe(host);
+    host.addEventListener("wheel", glassWheel, { passive: true });
+    if (typeof MutationObserver === "function") new MutationObserver(glassRoom).observe(host, { attributes: true, attributeFilter: ["data-show", "data-state", "hidden"] });
     dock = window.DgcDock.create({ host,
       onOpen: (key) => {
         const pin = dockState.pins.find((p) => p.key === key);

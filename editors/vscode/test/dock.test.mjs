@@ -70,7 +70,8 @@ for (const width of [300, 700]) {
         assert.ok(Math.abs((d.bar.left + d.bar.right) / 2 - d.width / 2) < 0.6, `${said}: the bar is centred`);
         assert.ok(d.bar.left >= 7.5 && d.bar.right <= d.width - 7.5, `${said}: the bar keeps 8 px from each edge`);
         assert.ok(d.page, `${said}: a screen is showing above it`);
-        assert.ok(d.page.bottom <= d.host.top + 0.6, `${said}: the screen ends where the dock begins (${d.page.bottom} > ${d.host.top})`);
+        // (The screen itself runs under the dock's glass strip, dock-glass.test.mjs; the room for its own things ends at the dock.)
+        assert.ok(d.page.roomBottom <= d.host.top + 0.6, `${said}: the screen's room ends where the dock begins (${d.page.roomBottom} > ${d.host.top})`);
         assert.equal(d.overflowX, false, `${said}: nothing scrolls sideways`);
         assert.deepEqual(keys(d), [...PINS.map((p) => p.key), "+"], `${said}: the same six, then "+"`);
         return d;
@@ -456,7 +457,7 @@ test("Always: the dock has its own room. When I point at the bottom: it rises ov
   try {
     const always = await dockNow(x.page);
     assert.equal(always.show, "always");
-    assert.ok(always.page.bottom <= always.host.top + 0.6 && always.host.height > 40, "Always: the page ends above the dock");
+    assert.ok(always.page.roomBottom <= always.host.top + 0.6 && always.host.height > 40, "Always: the page's room ends above the dock");
 
     await x.setting({ show: "hover" }); await x.settle(); await x.page.waitForTimeout(300);
     let d = await dockNow(x.page);

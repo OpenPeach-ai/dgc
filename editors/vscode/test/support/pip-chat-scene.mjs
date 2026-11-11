@@ -358,7 +358,9 @@ export const host = (opts) => `(${function (PIP, opts) {
     const other = (c, pip_type, name, more = {}) => ({ ...pip, id: "pip_" + c.repeat(32), pip_type, name, proposals: [], pending_review_count: 0, ...more });
     const list = [other("1", "core", "Core"), pip, other("2", "scout", "Weekly competitor pricing and release notes digest for the sales team"),
       other("3", "quill", "Inbox", { profile: { title: "Chief of staff for everything that arrives before nine", body: null, color: null, notify: true } }),
-      other("4", "lock", "Supercalifragilisticexpialidocious-renewals-and-subscriptions-watcher"), other("5", "patch", "Receipts", { status: "paused" })];
+      other("4", "lock", "Supercalifragilisticexpialidocious-renewals-and-subscriptions-watcher"), other("5", "patch", "Receipts", { status: "paused" }),
+      // (opts.rows: that many more Pips after these, for a list longer than the side bar.)
+      ...Array.from({ length: Math.min(9, opts.rows || 0) }, (_, i) => other("abcdef678"[i], ["scout", "lens", "rook", "pulse"][i % 4], ["Travel", "Bills", "Weekly", "Reading list", "School notes", "Bank", "Garden", "Pitch", "Desk"][i]))];
     const waitsOn = list[2].id, newIn = list[3].id, both = list[4].id;
     Object.assign(answers, {
       list_pips: () => ({ pips: list, total: 43, next_offset: null }),

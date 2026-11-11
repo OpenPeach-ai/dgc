@@ -86,7 +86,9 @@ export async function openDock(browser, { pins = PINS, show = "always", most = 8
   return { ...x, setting, settle };
 }
 
-/** The dock as it is on screen: its bar, each item (size, where, name, dot, number), its name tip, and the page above. */
+/** The dock as it is on screen: its bar, each item (size, where, name, dot, number), its name tip, and the page above
+ *  (since the bars are glass the page runs under them: page.roomTop and page.roomBottom are where its own room for
+ *  its things begins and ends, inside the padding it keeps for the bars). */
 export const dockNow = (page) => page.evaluate(() => {
   const host = document.getElementById("dgc-dock"), rect = (n) => { const r = n.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height }; };
   if (!host) return null;
@@ -97,10 +99,12 @@ export const dockNow = (page) => page.evaluate(() => {
     holds: b.querySelector(".dgc-blob") ? "blob" : b.querySelector(".dgc-cube") ? "cube" : b.querySelector(".dgc-sheet") ? "sheet" : b.querySelector(".dgc-dock-face svg, .dgc-dock-face > *") ? "face" : b.querySelector(".dgc-dock-plus") ? "plus" : "" }));
   const page = [...document.body.children].find((n) => n.id === "sessions-host" && n.checkVisibility()) || [...document.body.children].find((n) => n.id === "pips-host" && n.checkVisibility());
   const active = document.activeElement;
+  const room = (n) => { const area = n.id === "pips-host" ? n.shadowRoot?.querySelector(".pip-app-root") || n : n, r = area.getBoundingClientRect(), cs = getComputedStyle(area);
+    return { roomTop: r.top + (parseFloat(cs.paddingTop) || 0), roomBottom: r.bottom - (parseFloat(cs.paddingBottom) || 0) }; };
   return { shown, show: host.dataset.show, state: host.dataset.state, up: host.hasAttribute("data-up"), host: rect(host), bar: rect(bar), items,
     barOpacity: Number(getComputedStyle(bar).opacity),
     tip: tip.hidden ? null : { title: tip.querySelector("b").textContent, state: tip.querySelector("span").textContent, ...rect(tip) },
-    page: page ? { id: page.id, ...rect(page) } : null, width: innerWidth, height: innerHeight,
+    page: page ? { id: page.id, ...rect(page), ...room(page) } : null, width: innerWidth, height: innerHeight,
     overflowX: document.documentElement.scrollWidth > innerWidth,
     focus: active?.dataset?.key || (active?.dataset?.add ? "+" : active?.dataset?.id || active?.dataset?.colour || active?.id || active?.className || ""),
     menu: [...document.querySelectorAll(".dgc-pop .dgc-menu-row")].map((r) => r.textContent.trim() + (r.disabled ? " (off)" : "")),

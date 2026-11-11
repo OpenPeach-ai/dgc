@@ -572,9 +572,10 @@ for (const width of [300, 700]) {
         assert.ok(Math.abs(d.host.bottom - d.height) < 0.6, `${id}: at the foot of the side bar`);
         assert.ok(Math.abs((d.bar.left + d.bar.right) / 2 - d.width / 2) < 0.6, `${id}: centred`);
         assert.ok(d.items.length >= 2, `${id}: with what is pinned`);
-        const page = await x.page.evaluate((p) => { const n = p === "pips-host" ? document.getElementById(p) : document.getElementById("sessions-host"), r = n.getBoundingClientRect(); return { top: r.top, bottom: r.bottom }; }, panel);
-        assert.ok(bar.bar.bottom <= page.top + 0.6, `${id}: the page starts under the tab bar (${bar.bar.bottom} > ${page.top})`);
-        assert.ok(page.bottom <= d.host.top + 0.6, `${id}: and ends where the dock begins (${page.bottom} > ${d.host.top})`);
+        // (The page itself runs under both bars, which are glass: dock-glass.test.mjs. Its room for its own things is between them.)
+        const page = { top: d.page.roomTop, bottom: d.page.roomBottom };
+        assert.ok(bar.bar.bottom <= page.top + 0.6, `${id}: the page's room starts under the tab bar (${bar.bar.bottom} > ${page.top})`);
+        assert.ok(page.bottom <= d.host.top + 0.6, `${id}: and it ends where the dock begins (${page.bottom} > ${d.host.top})`);
         assert.equal(bar.overflowX, false);
       };
       await under("home", "home-hub");

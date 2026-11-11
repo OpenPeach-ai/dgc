@@ -38,6 +38,8 @@ const now = (page) => page.evaluate(() => {
   const seen = (n) => !!n && n.checkVisibility({ visibilityProperty: true });
   return { dock: seen(dock), dockRect: rect(dock), tabs: seen(tabs), tabsRect: rect(tabs), head: seen(head), headRect: rect(head),
     hint: seen(dock?.querySelector(".dgc-dock-hint")),
+    // (The Pips view's room for its own things: its height less what it keeps for the glass bars over it, dock-glass.test.mjs.)
+    room: (() => { const area = root?.querySelector(".pip-app-root"); if (!area) return 0; const cs = getComputedStyle(area); return area.getBoundingClientRect().height - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom); })(),
     pips: seen(host), host: rect(host), form: rect(root?.querySelector("#chat-form")), log: rect(root?.querySelector(".conversation-log")),
     list: !!root?.querySelector("[data-job]"), back: !!root?.querySelector("#simple-back"),
     focusIn: active?.closest?.("#dgc-dock") ? "dock" : active?.closest?.("#side-tabs") ? "tabs" : active === host ? "pips" : active === document.body ? "body" : active?.id || active?.tagName || "",
@@ -91,8 +93,8 @@ for (const width of [300, 700]) {
       assert.ok(Math.abs(chat.headRect.height - list.headRect.height) < 0.6 && Math.abs(chat.headRect.top - list.headRect.top) < 0.6, "where and as it was");
       assert.ok(Math.abs(chat.host.top - chat.headRect.bottom) < 0.6, `the chat begins under the header (${chat.host.top} against ${chat.headRect.bottom})`);
       assert.ok(Math.abs(chat.host.bottom - chat.height) < 0.6, `and reaches the foot of the side bar (${chat.host.bottom} of ${chat.height})`);
-      assert.ok(Math.abs(chat.host.height - (list.host.height + list.dockRect.height + list.tabsRect.height)) < 0.6,
-        `the Pips view gains the dock's and the tab bar's height (${chat.host.height} against ${list.host.height} + ${list.dockRect.height} + ${list.tabsRect.height})`);
+      assert.ok(Math.abs(chat.room - (list.room + list.dockRect.height + list.tabsRect.height)) < 0.6,
+        `the Pips view's room gains the dock's and the tab bar's height (${chat.room} against ${list.room} + ${list.dockRect.height} + ${list.tabsRect.height})`);
       // The log is what grows: as tall as with the dock set to Never (which still has its tab bar), plus the tab bar.
       assert.ok(never.tabs === false || Math.abs(chat.log.height - (never.log.height + list.tabsRect.height)) < 0.6,
         `the log gains the tab bar's height over the dock-less chat (${chat.log.height} against ${never.log.height} + ${list.tabsRect.height})`);
@@ -139,7 +141,7 @@ test("the dock and the tab bar come back on the list, and on Home, Work and Chat
     await gone(x, "#chat-form"); await x.settle();
     const settings = await now(x.page);
     assert.deepEqual([...both(settings), settings.panel], [false, false, "pips-host"], "a Pip's Settings has neither (12 Nov: every page inside a Pip)");
-    assert.ok(Math.abs(settings.host.top - settings.headRect.bottom) < 0.6 && Math.abs(settings.host.bottom - settings.height) < 0.6 && settings.host.height > list.host.height + 60,
+    assert.ok(Math.abs(settings.host.top - settings.headRect.bottom) < 0.6 && Math.abs(settings.host.bottom - settings.height) < 0.6 && settings.room > list.room + 60,
       `and the room they took (${settings.host.top} to ${settings.host.bottom} against the list's ${list.host.top} to ${list.host.bottom})`);
     // Back to the chat from there, and away again.
     await x.page.locator("#pips-host #simple-to-chat").click(); await pipsRoot(x, "#chat-form"); await x.settle();

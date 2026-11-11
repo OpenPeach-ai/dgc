@@ -1298,3 +1298,8 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 .pip-page-row.static>.row-words:has(>strong):not(:has(small)){flex:1 0 96px}
 .pip-page-row.static>.row-words:has(>strong):not(:has(small))>strong{text-wrap:balance}
 @container(max-width:420px){.pip-page-row.static>button[data-eyes-switch]{margin-left:auto}}
+/* Frosted glass (0.52; media/main.css, "Frosted glass"): in the side bar the tab bar lies over the top of this page and
+   the dock's strip over its foot, and the page scrolls under both. The side bar says how tall each is (--glass-top,
+   --glass-bottom, inherited through the shadow root); the page keeps that room, and a row that takes focus under a bar
+   scrolls clear of it with room for its focus ring (--glass-clear-*). All are 0 inside a Pip, and in a Pips tab, which has neither bar. */
+.pip-app-root{padding-top:var(--glass-top,0px);padding-bottom:var(--glass-bottom,0px);scroll-padding-block:var(--glass-clear-top,0px) var(--glass-clear-bottom,0px)}
