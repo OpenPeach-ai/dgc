@@ -722,7 +722,7 @@
     // menu(input, {submit}) attaches to a <textarea>. It opens on a "/" at the start of the box, lists what matches
     // (↑↓ to move, Enter or Tab to choose, Esc to close), and puts the chosen command in the box.
     function menu(input, opts = {}) {
-      const list = el("div", "mod-slash");
+      const list = el("div", "mod-slash dgc-popover");
       list.setAttribute("role", "listbox");
       list.id = `mod-slash-${surface}`;
       list.setAttribute("aria-label", "Commands");

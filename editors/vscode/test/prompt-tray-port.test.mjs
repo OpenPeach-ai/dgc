@@ -206,6 +206,8 @@ test("ChatDGC: \"+N\" lists the rest and each row opens its own detail; by keybo
     assert.equal((await bar(x.page, x.ids)).focus, first, "the arrows wrap over what shows only");
     await x.page.keyboard.press("ArrowLeft");
     await x.page.keyboard.press("Enter");
+    // (ui-08: the popover arrives in 150 ms, growing its last 2%; its place is measured once it is at rest.)
+    await x.page.evaluate(() => Promise.all(document.querySelector("#cd-tray .rail-pop").getAnimations().map((a) => a.finished.catch(() => {}))));
     let s = await bar(x.page, x.ids);
     assert.deepEqual({ open: s.pop.open, kind: s.pop.kind, inside: s.pop.inside, title: s.pop.title, rows: s.pop.rows },
       { open: true, kind: "more", inside: true, title: `${g.hiddenKinds.length} more`, rows: g.hiddenKinds });

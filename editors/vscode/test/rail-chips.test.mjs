@@ -285,7 +285,7 @@ test("the last kind left keeps the bar's one line and its open detail, focus and
   assert.deepEqual(c.errors, []);
 });
 
-test("the goal's chip keeps the row's time; the paste notice and N queued never become chips", () => {
+test("the goal's chip keeps the row's time; the paste notice is a chip (ui-09) and its words wait in the rail; N queued is the queue's", () => {
   const c = chat();
   c.pile();
   c.event({ type: "goal_changed", goal: "Ship it", status: "active", elapsed_seconds: 59, running: true, details: {} });
@@ -302,9 +302,11 @@ test("the goal's chip keeps the row's time; the paste notice and N queued never 
   Object.defineProperty(paste, "clipboardData", { value: { items: [], getData: (type) => (type === "text/plain" ? "hello\u202Eworld" : "") } });
   input.dispatchEvent(paste);
   assert.equal(c.$("pastebar").hidden, false);
-  assert.equal(c.$("composer-rail").hidden, false, "the notice is about the message being typed: its own row");
-  assert.equal(c.$("pastebar").parentElement, c.$("composer-rail"));
-  assert.equal(c.chip("paste"), null);
+  // ui-09: it was a row of its own between the bar and the box; it is a chip, as every other kind.
+  assert.equal(c.$("composer-rail").hidden, true, "no row above the box");
+  assert.equal(c.$("pastebar").parentElement, c.$("composer-rail"), "its words wait in the rail until the chip opens them");
+  assert.equal(c.face("paste"), "Removed 1");
+  assert.equal(c.chip("paste").getAttribute("aria-label"), "Removed 1 invisible character from the pasted text");
   assert.deepEqual(c.errors, []);
 });
 

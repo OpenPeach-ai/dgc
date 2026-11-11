@@ -59,7 +59,7 @@ export function contextComboHTML({ id = "", value = "", max = 0, blank = "", lab
     + ` value="${esc(shown)}" placeholder="${esc(blank || "e.g. 24K")}" ${attrs}${disabled ? " disabled" : ""}>`
     + `<button type="button" class="ctx-combo-toggle" tabindex="-1" aria-label="Sizes" aria-controls="${esc(key)}-list"${disabled ? " disabled" : ""}>`
     + '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button></span>'
-    + `<ul class="ctx-combo-list" role="listbox" id="${esc(key)}-list" aria-label="${esc(label)}" hidden>`
+    + `<ul class="ctx-combo-list dgc-popover" role="listbox" id="${esc(key)}-list" aria-label="${esc(label)}" hidden>`
     + options.map(([v, words], i) => `<li role="option" id="${esc(key)}-o${i}" data-value="${esc(v)}" aria-selected="false">${esc(words)}</li>`).join("")
     + "</ul>"
     + `<span class="ctx-combo-said" aria-live="polite">${esc(contextSaid(tokens, blank))}</span>`

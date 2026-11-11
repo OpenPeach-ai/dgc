@@ -15,7 +15,7 @@ export function modelBoxMarkup(id, label, hint, value) {
         + `<span class="model-box"><input id="${id}" type="text" value="${escape(value)}" autocomplete="off" spellcheck="false" role="combobox"`
         + ` aria-autocomplete="list" aria-expanded="false" aria-controls="${id}-list" aria-describedby="${id}-hint ${id}-status">`
         + `<button type="button" class="model-box-open" tabindex="-1" data-model-open="${id}" aria-label="Show the models at this host" title="Show the models at this host">${CHEVRON}</button>`
-        + `<ul class="model-box-list" id="${id}-list" role="listbox" aria-label="Models at this host" hidden></ul></span></div>`;
+        + `<ul class="model-box-list dgc-popover" id="${id}-list" role="listbox" aria-label="Models at this host" hidden></ul></span></div>`;
 }
 
 /** A short, one-way fingerprint of a typed key, so the cache can tell keys apart without keeping one. */

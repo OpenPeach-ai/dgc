@@ -307,7 +307,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <footer class="cd-foot"><div class="cd-column">
 <div id="cd-elsewhere" class="elsewhere-bar" role="status" hidden><span class="codicon codicon-multiple-windows" aria-hidden="true"></span><span id="cd-elsewhere-text" class="elsewhere-text"></span><button type="button" id="cd-elsewhere-open" class="act primary" title="Carry on with this chat in this window; the other window shows it read-only">Open here</button></div>
 <p id="cd-notice" class="cd-notice" role="alert" hidden></p>
-<div id="cd-context-pop" class="cd-pop" role="dialog" aria-label="Context window" hidden></div>
+<div id="cd-context-pop" class="cd-pop dgc-popover" role="dialog" aria-label="Context window" hidden></div>
 <div id="cd-mod-strip" class="mod-strip" hidden></div>
 <div id="cd-tray-home" hidden><div id="cd-queue" class="cd-queue" role="region" aria-label="Queued messages" hidden></div></div>
 <form id="cd-box" class="cd-box tray-box"><ul id="cd-chips" class="cd-chips" aria-label="Attached" hidden></ul>
@@ -334,7 +334,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <p class="cd-fine">ChatDGC answers with your own model. Check what matters.</p>
 </div></footer>
 <div id="cd-announce" class="sr-only" aria-live="polite"></div>
-<dialog id="cd-keys" class="cd-keys" aria-labelledby="cd-keys-title"><h2 id="cd-keys-title">Keyboard shortcuts</h2><dl id="cd-keys-list"></dl>
+<dialog id="cd-keys" class="cd-keys dgc-dialog" aria-labelledby="cd-keys-title"><h2 id="cd-keys-title">Keyboard shortcuts</h2><dl id="cd-keys-list"></dl>
 <button type="button" id="cd-keys-close" class="cd-edit-cancel">Close</button></dialog>
 <script src="${attr(asset("media/shared/menu.js"))}"></script><script src="${attr(asset("media/shared/composer.js"))}"></script><script src="${attr(asset("media/shared/tray.js"))}"></script><script src="${attr(asset("media/shared/card.js"))}"></script><script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/pasteclean.js"))}"></script><script src="${attr(asset("media/mentions.js"))}"></script><script src="${attr(asset("media/pips/plush.js"))}"></script><script src="${attr(asset("media/messagequeue.js"))}"></script><script src="${attr(asset("media/trace.js"))}"></script><script src="${attr(asset("media/mcpApps.js"))}"></script><script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/msgtime.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/pictureFold.js"))}"></script><script src="${attr(asset("media/pluginCalls.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/texthistory.js"))}"></script><script src="${attr(asset("media/numbered-list.js"))}"></script><script src="${attr(asset("media/promptrail.js"))}"></script><script src="${attr(asset("media/mods.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
 }

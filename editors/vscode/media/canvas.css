@@ -1,4 +1,5 @@
 @import url("./shared/tokens.css");
+@import url("./shared/dialog.css");
 /* ChatDGC's formatted canvas (src/canvasEditor.ts): ChatGPT's canvas, a page of writing in the editor's own colours,
    with a quiet row of formatting buttons above it. Only VS Code's theme variables, so it reads in every theme. */
 :root {
@@ -90,8 +91,7 @@ body { margin: 0; background: var(--vscode-editor-background); color: var(--cv-t
 .cv-math-empty { padding: 0 6px; border: 1px dashed var(--cv-line); border-radius: 4px; color: var(--cv-muted); font-style: italic; }
 .cv-tex { position: fixed; z-index: 20; display: grid; gap: 6px; width: min(440px, calc(100vw - 16px)); padding: 8px;
   border: 1px solid var(--vscode-editorWidget-border, var(--cv-line)); border-radius: 8px;
-  background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); color: var(--cv-text);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, .35); box-sizing: border-box; }
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); color: var(--cv-text); box-sizing: border-box; }
 .cv-tex-field { box-sizing: border-box; width: 100%; padding: 5px 7px; border: 1px solid var(--vscode-input-border, var(--cv-line));
   border-radius: 4px; background: var(--vscode-input-background); color: var(--vscode-input-foreground);
   font: 13px/1.5 var(--vscode-editor-font-family, monospace); resize: vertical; }

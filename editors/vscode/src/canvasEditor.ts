@@ -71,7 +71,7 @@ function openTex(anchor: HTMLElement, tex: string, block: boolean, done: (tex: s
   texOpen?.close(true);
   loadKatex();
   const box = document.createElement("div");
-  box.className = "cv-tex";
+  box.className = "cv-tex dgc-popover";
   box.setAttribute("role", "dialog");
   box.setAttribute("aria-label", block ? "Edit the equation" : "Edit the formula");
   const field = document.createElement(block ? "textarea" : "input") as HTMLInputElement | HTMLTextAreaElement;

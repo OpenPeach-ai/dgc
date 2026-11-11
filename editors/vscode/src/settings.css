@@ -174,7 +174,7 @@ details.more[data-more="saved-providers"]>.rows{border-inline:0;border-bottom:0;
 .page-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.page-heading>.actions{padding-top:0}.page-heading .sub{margin-bottom:20px}
 .notice{padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);color:var(--text);font-size:12px}
 .add-wrap{position:relative}
-.add-menu{position:absolute;right:0;top:calc(100% + 6px);width:185px;z-index:4;border:1px solid var(--border-strong);border-radius:var(--r-md);background:var(--vscode-menu-background,var(--surface));color:var(--vscode-menu-foreground,var(--text));padding:4px;box-shadow:0 8px 24px var(--shadow)}
+.add-menu{position:absolute;right:0;top:calc(100% + 6px);width:185px;z-index:4;border:1px solid var(--border-strong);border-radius:var(--r-md);background:var(--vscode-menu-background,var(--surface));color:var(--vscode-menu-foreground,var(--text));padding:4px;}
 .add-menu button{display:block;padding:7px 10px;text-align:left;width:100%;border-radius:5px;background:none}
 .add-menu button:hover,.add-menu button:focus{background:var(--vscode-menu-selectionBackground,var(--hover));color:var(--vscode-menu-selectionForeground,var(--text))}
 .directory-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.directory-toolbar .search{max-width:none;flex:1}
@@ -192,8 +192,8 @@ details.more[data-more="saved-providers"]>.rows{border-inline:0;border-bottom:0;
 .plate-dark{background:#262626;padding:7px;border-radius:10px}.plate-light{background:#fff;padding:5px;border-radius:10px}
 
 /* ---- Dialogs: install review, marketplaces, connectors ---- */
-.plugin-dialog{padding:0;width:min(560px,calc(100vw - 32px));max-height:calc(100vh - 36px);border:1px solid var(--border-strong);border-radius:12px;background:var(--vscode-editorWidget-background,var(--surface));color:var(--text);box-shadow:0 16px 48px var(--shadow);font:12px/1.5 var(--sans)}
-.plugin-dialog::backdrop{background:rgba(0,0,0,.45)}
+.plugin-dialog{padding:0;width:min(560px,calc(100vw - 32px));max-height:calc(100vh - 36px);background:var(--vscode-editorWidget-background,var(--surface));color:var(--text);font:12px/1.5 var(--sans)}
+
 .dialog-heading,.dialog-footer{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;gap:12px}
 .dialog-heading h2{font-size:16px;font-weight:600}
 .dialog-body{padding:0 18px 14px;overflow:auto;max-height:calc(100vh - 185px)}
@@ -271,7 +271,7 @@ details.more[data-more="saved-providers"]>.rows{border-inline:0;border-bottom:0;
 .model-box input{width:100%;padding-right:30px}
 .model-box-open{position:absolute;right:3px;top:50%;transform:translateY(-50%);width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;padding:0;border-radius:5px;background:transparent;color:var(--muted)}
 .model-box-open:hover{background:var(--vscode-toolbar-hoverBackground,var(--hover));color:var(--text)}.model-box-open svg{width:14px;height:14px}
-.model-box-list{position:absolute;z-index:5;top:calc(100% + 4px);right:0;min-width:100%;width:max-content;max-width:min(360px,calc(100vw - 32px));max-height:260px;overflow:auto;margin:0;padding:4px;list-style:none;border:1px solid var(--vscode-widget-border,var(--border-strong));border-radius:var(--r-md);background:var(--vscode-editorWidget-background,var(--surface));box-shadow:0 6px 20px var(--shadow)}
+.model-box-list{position:absolute;z-index:5;top:calc(100% + 4px);right:0;min-width:100%;width:max-content;max-width:min(360px,calc(100vw - 32px));max-height:260px;overflow:auto;margin:0;padding:4px;list-style:none;border:1px solid var(--vscode-widget-border,var(--border-strong));border-radius:var(--r-md);background:var(--vscode-editorWidget-background,var(--surface));}
 .model-box-list [role=option]{padding:6px 8px;border-radius:5px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .model-box-list [role=option]:hover{background:var(--hover)}
 .model-box-list [role=option].active{background:var(--vscode-list-activeSelectionBackground,var(--sel));color:var(--vscode-list-activeSelectionForeground,var(--text))}
@@ -487,7 +487,7 @@ input[type=checkbox],input[type=radio]{height:auto;padding:0;accent-color:var(--
 .ctx-combo-input[aria-invalid="true"]{color:var(--vscode-inputValidation-errorForeground,var(--text))}
 .ctx-combo-toggle{flex:none;display:flex;align-items:center;justify-content:center;width:22px;height:26px;border:0;background:transparent;color:var(--muted);cursor:pointer;padding:0}
 .ctx-combo-toggle:hover{color:var(--text)}
-.ctx-combo-list{position:absolute;top:30px;left:0;min-width:100%;z-index:30;margin:0;padding:3px;list-style:none;background:var(--vscode-dropdown-background,var(--surface2));color:var(--vscode-dropdown-foreground,var(--text));border:1px solid var(--border-strong);border-radius:4px;max-height:232px;overflow:auto;box-shadow:0 4px 14px rgba(0,0,0,.28)}
+.ctx-combo-list{position:absolute;top:30px;left:0;min-width:100%;z-index:30;margin:0;padding:3px;list-style:none;background:var(--vscode-dropdown-background,var(--surface2));color:var(--vscode-dropdown-foreground,var(--text));border:1px solid var(--border-strong);border-radius:4px;max-height:232px;overflow:auto;}
 .ctx-combo-list[hidden]{display:none}
 .ctx-combo-list li{padding:3px 10px;border-radius:3px;cursor:pointer;white-space:nowrap;font-variant-numeric:tabular-nums}
 .ctx-combo-list li:hover{background:var(--vscode-list-hoverBackground,rgba(127,127,127,.14))}

@@ -56,7 +56,7 @@ export function wireInfoTips({root, shell, view}) {
     if (open !== id) {
       close();
       pop = doc.createElement('div');
-      pop.className = 'pip-tip-pop'; pop.setAttribute('aria-hidden', 'true'); pop.dataset.pipTipFor = id;
+      pop.className = 'pip-tip-pop dgc-popover'; pop.setAttribute('aria-hidden', 'true'); pop.dataset.pipTipFor = id;
       pop.innerHTML = text.innerHTML;
       shell.append(pop);
       open = id;

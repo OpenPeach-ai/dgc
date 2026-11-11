@@ -1,6 +1,7 @@
 import { APP_CONNECTORS, ownAppRedirect } from './appConnectors';
 // One set of tokens for every page, first, so each page's own stylesheet can lean on it (media/shared/tokens.css).
 import '../media/shared/tokens.css';
+import '../media/shared/dialog.css';   // every popover's and dialog's lift and arrival, as in Work, ChatDGC and Pips (ui-08)
 import './settings.css';
 import {watchButtons} from './buttonFit.js';
 import zapierLogo from '../media/plugin-logos/zapier.ico';
@@ -895,7 +896,7 @@ function renderMods(main) {
     bindChips(main); bindAddMenu(main);
 }
 function notice() { return pluginNotice ? `<p class="notice" role="status">${esc(pluginNotice)}${createdPath ? ' <button class="link" id="edit-created">Edit skill</button>' : ''}</p>` : ''; }
-function addMenu() { return `<div class="add-wrap"><button id="add-menu" class="secondary" aria-haspopup="menu" aria-expanded="false">Add <span aria-hidden="true">⌄</span></button><div id="add-options" class="add-menu" role="menu" hidden><button role="menuitem" data-add="create">Create plugin</button><button role="menuitem" data-add="marketplace">Add a marketplace</button><button role="menuitem" data-add="mcp">Add MCP server</button><button role="menuitem" data-add="link">Install from link</button></div></div>`; }
+function addMenu() { return `<div class="add-wrap"><button id="add-menu" class="secondary" aria-haspopup="menu" aria-expanded="false">Add <span aria-hidden="true">⌄</span></button><div id="add-options" class="add-menu dgc-popover" role="menu" hidden><button role="menuitem" data-add="create">Create plugin</button><button role="menuitem" data-add="marketplace">Add a marketplace</button><button role="menuitem" data-add="mcp">Add MCP server</button><button role="menuitem" data-add="link">Install from link</button></div></div>`; }
 function bindAddMenu(main) {
     const menu = $('add-options'), toggle = $('add-menu');
     if (toggle) toggle.onclick = () => { menu.hidden = !menu.hidden; toggle.setAttribute('aria-expanded', String(!menu.hidden)); if (!menu.hidden) menu.querySelector('button').focus(); };
@@ -927,7 +928,7 @@ function closeDialog() { modal?.remove(); modal = null; modalKind = ''; preview 
 // there is nothing left to cancel and its own button closes it.
 function dialog(kind, title, body, footer='', cancel='Cancel') {
     if (!modal) dialogReturn = document.activeElement;
-    modal?.remove(); modal = document.createElement('dialog'); modal.className = 'plugin-dialog'; modalKind = kind;
+    modal?.remove(); modal = document.createElement('dialog'); modal.className = 'plugin-dialog dgc-dialog'; modalKind = kind;
     modal.setAttribute('aria-labelledby','dialog-title');
     modal.innerHTML = `<div class="dialog-heading"><h2 id="dialog-title">${esc(title)}</h2><button class="icon-button" id="dialog-close" aria-label="Close">×</button></div><div class="dialog-body">${body}</div><div class="dialog-footer">${footer}${cancel ? `<button class="secondary" id="dialog-cancel">${esc(cancel)}</button>` : ''}</div>`;
     document.body.append(modal);

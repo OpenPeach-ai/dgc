@@ -121,7 +121,8 @@ body:is(.vscode-light, .vscode-high-contrast-light) {
    plus a composer rail simply squashed the 210px down to whatever was left -- one clipped row,
    which is worse than the collapsing it replaced. `max-height: min(210px, 40vh)` is the other half:
    refusing to shrink must not mean pushing the composer off a short panel. */
-.pop { display: none; margin: 0 var(--sp-1); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); flex: 0 0 auto; height: 210px; max-height: min(210px, 40vh); overflow-y: auto; box-shadow: 0 -12px 34px -10px rgba(0,0,0,.75); align-content: start; }
+/* (Its lift is the shared popover lift, media/shared/tokens.css. It is redrawn at every key, so it does not arrive.) */
+.pop { box-shadow: var(--lift-1); display: none; margin: 0 var(--sp-1); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); flex: 0 0 auto; height: 210px; max-height: min(210px, 40vh); overflow-y: auto; align-content: start; }
 /* A box's own commands (a Personal Pip's /setup, asked 10 Nov) are a few rows that never narrow into a stray line as you
    type: that list is as tall as its rows, up to the same cap. Work's "/" list is its own (main.js) and keeps 210px. */
 .pop[data-list="commands"] { height: auto; }
@@ -157,17 +158,3 @@ body:is(.vscode-light, .vscode-high-contrast-light) {
   .pop .pi.sel { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; box-shadow: none; }
   .pop .pi.sel * { color: inherit; }
 }
-
-/* The quiet row above ChatDGC's and a Pip's box (media/pasteclean.js): the look of Work's rail row and of a queued message's
-   row here, a barely-there surface and muted words, because it reports something already done. */
-.paste-note { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0 0 6px; padding: 4px 6px 4px 10px; border-radius: 12px;
-  background: color-mix(in srgb, var(--vscode-foreground, #cccccc) 5%, transparent);
-  color: color-mix(in srgb, var(--vscode-descriptionForeground, #9d9d9d) 85%, transparent); font-size: 12px; line-height: 1.35; }
-body.vscode-light .paste-note { color: color-mix(in srgb, var(--vscode-descriptionForeground, #3b3b3b) 72%, transparent); }
-:host-context(body.vscode-light) .paste-note { color: color-mix(in srgb, var(--vscode-descriptionForeground, #3b3b3b) 72%, transparent); }   /* a Pip's page in the side bar */
-.paste-note[hidden] { display: none; }
-.paste-note-icon { flex: none; opacity: .7; }
-.paste-note-words { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.paste-note-close { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0;
-  border: 0; border-radius: 999px; background: transparent; color: inherit; cursor: pointer; }
-.paste-note-close:hover { background: color-mix(in srgb, var(--vscode-foreground, #cccccc) 10%, transparent); color: var(--vscode-foreground, #cccccc); }

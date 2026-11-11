@@ -54,7 +54,7 @@
     const ticks = el("span", "prompt-rail-ticks");
     ticks.setAttribute("aria-hidden", "true");
     rail.append(ticks);
-    const card = el("div", "prompt-rail-card");
+    const card = el("div", "prompt-rail-card dgc-popover");
     card.id = `${o.id}-card`; card.hidden = true;
     card.setAttribute("role", "dialog"); card.setAttribute("aria-label", "Prompts in this chat");
     document.body.append(rail, card);

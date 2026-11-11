@@ -186,7 +186,7 @@
         button.type = "button"; button.setAttribute("aria-haspopup", "menu"); button.setAttribute("aria-expanded", "false");
         button.append(el("span", "", "Download"), icon("chevron-down", "art-caret"));
         button.setAttribute("aria-label", `Download version ${v.n}`);
-        const menu = el("div", "art-menu"); menu.setAttribute("role", "menu"); menu.hidden = true;
+        const menu = el("div", "art-menu dgc-popover"); menu.setAttribute("role", "menu"); menu.hidden = true;
         button.addEventListener("click", (e) => { e.stopPropagation(); showMenu(button, menu, exportItems(v.n === view.version ? 0 : v.n)); });
         wrap.append(button, menu);
         actions.append(wrap);
@@ -202,7 +202,7 @@
   function showComparison(data) {
     if (!data || data.id !== state.id) return;
     document.getElementById("art-compare")?.remove();
-    const dialog = el("dialog", "art-compare"); dialog.id = "art-compare";
+    const dialog = el("dialog", "art-compare dgc-dialog"); dialog.id = "art-compare";
     dialog.setAttribute("aria-labelledby", "art-compare-title");
     const title = el("h2", "", `Version ${data.before} → ${data.after}`); title.id = "art-compare-title";
     const close = el("button", "art-btn", "Close comparison"); close.type = "button";

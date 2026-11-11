@@ -167,7 +167,7 @@
         b.setAttribute("aria-label", `Column ${R.letters(c)}: insert, delete, sort, type`);
         b.append(el("span", "", R.letters(c)), icon("chevron-down", "art-caret"));
         b.disabled = locked;
-        const menu = el("div", "art-menu sh-menu"); menu.setAttribute("role", "menu"); menu.hidden = true;
+        const menu = el("div", "art-menu sh-menu dgc-popover"); menu.setAttribute("role", "menu"); menu.hidden = true;
         b.addEventListener("click", (e) => { e.stopPropagation(); u.showMenu(b, menu, columnMenu(c)); });
         th.append(b, menu);
         letters.append(th);
@@ -196,7 +196,7 @@
         b.setAttribute("aria-haspopup", "menu"); b.setAttribute("aria-expanded", "false");
         b.setAttribute("aria-label", `Row ${r + 2}: insert or delete`);
         b.disabled = locked;
-        const menu = el("div", "art-menu sh-menu"); menu.setAttribute("role", "menu"); menu.hidden = true;
+        const menu = el("div", "art-menu sh-menu dgc-popover"); menu.setAttribute("role", "menu"); menu.hidden = true;
         b.addEventListener("click", (e) => { e.stopPropagation(); u.showMenu(b, menu, rowMenu(r)); });
         rn.append(b, menu);
         tr.append(rn);
@@ -452,7 +452,7 @@
                       text: displayed.text, address: `${R.letters(c)}${r + 2}` });
       }
       document.getElementById("sh-chart")?.remove();
-      const dialog = el("dialog", "art-compare sh-chart"); dialog.id = "sh-chart";
+      const dialog = el("dialog", "art-compare sh-chart dgc-dialog"); dialog.id = "sh-chart";
       dialog.setAttribute("aria-labelledby", "sh-chart-title");
       const title = el("h2", "", `${sheet().name} · ${R.letters(c1)}${first + 2}:${R.letters(c2)}${last + 2}`);
       title.id = "sh-chart-title";
@@ -539,7 +539,7 @@
         const sortBtn = tool("list-ordered", "Sort", () => {}, "Sort the rows by the chosen cell's column");
         sortBtn.setAttribute("aria-haspopup", "menu"); sortBtn.setAttribute("aria-expanded", "false");
         sortBtn.append(icon("chevron-down", "art-caret"));
-        const sortMenu = el("div", "art-menu"); sortMenu.setAttribute("role", "menu"); sortMenu.hidden = true;
+        const sortMenu = el("div", "art-menu dgc-popover"); sortMenu.setAttribute("role", "menu"); sortMenu.hidden = true;
         sortBtn.addEventListener("click", (e) => {
           e.stopPropagation();
           const name = sheet().columns[cur.c]?.name || R.letters(cur.c);

@@ -32,9 +32,8 @@ body.vscode-light .art-mark, body.vscode-high-contrast-light .art-mark { color: 
 .art-icon:disabled { opacity: .4; cursor: default; }
 .art-menu-wrap { position: relative; display: inline-flex; }
 .art-menu { position: absolute; top: calc(100% + var(--sp-1)); right: 0; z-index: 30; min-width: 220px; padding: var(--sp-1);
-  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg);
-  box-shadow: 0 14px 40px -10px rgba(0,0,0,.6); }
-body.vscode-light .art-menu { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); }
+
 .art-menu-item { display: block; width: 100%; padding: var(--sp-2) var(--sp-2); border: 0; border-radius: var(--r-sm);
   background: transparent; color: var(--text); text-align: left; font: var(--w-reg) var(--t-sm)/1.2 var(--sans); cursor: pointer; white-space: nowrap; }
 .art-menu-item:hover, .art-menu-item:focus-visible { background: var(--sel); color: var(--text-strong); outline: none; }
@@ -42,8 +41,8 @@ body.vscode-light .art-menu { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
 /* versions: a list over the body, newest first */
 .art-versions { position: absolute; z-index: 25; top: 64px; right: var(--sp-4); width: min(420px, calc(100vw - 32px));
   max-height: calc(100vh - 88px); overflow-y: auto; padding: var(--sp-2); background: var(--surface);
-  border: 1px solid var(--border-strong); border-radius: var(--r-lg); box-shadow: 0 14px 40px -10px rgba(0,0,0,.6); }
-body.vscode-light .art-versions { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
+  border: 1px solid var(--border-strong); border-radius: var(--r-lg); }
+
 .art-versions-head { display: flex; align-items: center; justify-content: space-between; padding: var(--sp-1) var(--sp-2) var(--sp-2); }
 .art-versions-head h2 { margin: 0; font: var(--w-semi) var(--t-base)/1.2 var(--sans); color: var(--text-strong); }
 .art-version-list { list-style: none; margin: 0; padding: 0; }
@@ -231,8 +230,8 @@ body.vscode-light .art-now { color: var(--link); }
 
 /* Saved-version comparisons: inert background, selectable text, no artifact markup executed. */
 .art-compare { width:min(760px, calc(100vw - 32px)); max-height:calc(100vh - 40px); overflow:auto;
-  color:var(--text); background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:20px; }
-.art-compare::backdrop { background:rgba(0,0,0,.55); }
+  color:var(--text); background:var(--surface); padding:20px; }
+
 .art-compare h2 { font-size:16px; margin:0 0 12px; }
 .art-compare h3 { font-size:13px; margin:0 0 10px; }
 .art-compare p, .art-compare small { color:var(--muted); }

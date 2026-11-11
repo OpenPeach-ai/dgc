@@ -38,7 +38,7 @@
     const open = button.getAttribute("aria-expanded") === "true";
     closeMenus(root);
     if (open) return;
-    const menu = make("div", "dgc-queue-menu");
+    const menu = make("div", "dgc-queue-menu dgc-popover");
     menu.setAttribute("role", "menu");
     const entry = (label, act, disabled = false) => {
       const choice = make("button", "dgc-queue-choice", label);

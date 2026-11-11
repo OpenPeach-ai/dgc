@@ -62,6 +62,7 @@
     pillOptions: (part) => markLook(part),
     removed: () => dropUnmarkedFiles(),
     holdsPaste: () => state.pending.some((item) => item.pasted === true),
+    cleanedChanged: () => trayView(),
     // Pasted back, a mark this chat can still use is a mark again; any other is the words it was copied as.
     pasteBack: (part) => {
       if (part.kind === "plugin") return mentionData.plugins.some((row) => row.id === part.identity);
@@ -74,8 +75,9 @@
       return false;
     },
   });
-  // The quiet row saying a paste was cleaned, where notices above the box sit.
-  if (field.note) $("cd-box").before(field.note);
+  // What a paste was cleaned of is a pill on the bar above the box (ui-09: it was a row of its own there); its words
+  // wait here, out of sight, until the pill opens them.
+  if (field.note) $("cd-tray-home").append(field.note);
   document.addEventListener("click", (event) => {
     const button = event.target?.closest?.("button.genui-send");
     if (!button || !button.closest("#cd-log .cd-msg.cd-assistant")) return;
@@ -2041,7 +2043,7 @@
         button.setAttribute("aria-haspopup", "menu"); button.setAttribute("aria-expanded", "false");
         if (sheets) { button.className = "cd-artifact-export-button dgc-doc-dl"; button.title = "Download"; button.innerHTML = `<span class="dgc-doc-dl-word">Download</span>${sheets.DOWNLOAD}`; }
         else button.append(el("span", "", "Download"), icon("chevron-down"));
-        const menu = el("span", "cd-artifact-menu");
+        const menu = el("span", "cd-artifact-menu dgc-popover");
         menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", "Download as"); menu.hidden = true;
         for (const format of formats) {
           const item = el("button", "cd-artifact-menu-item", ARTIFACT_FORMAT[format] || format.toUpperCase());
@@ -2977,7 +2979,7 @@
   }
   function openWidgets() {
     if (widgetsPanel) return;
-    widgetsPanel = el("div", "cd-wpanel");
+    widgetsPanel = el("div", "cd-wpanel dgc-popover");
     widgetsPanel.id = "cd-widgets-panel";
     widgetsPanel.setAttribute("role", "dialog");
     widgetsPanel.tabIndex = -1;
@@ -3593,7 +3595,7 @@
   // summarized, and its fallback model answering are each a pill; a pill opens its detail just above. Nothing going
   // on: no bar. Attachments stay in the box, and the folder it reads stays the box's own Folder button (it is how the
   // chat is set, not something going on).
-  const TRAY_TITLES = { queue: "Queued messages", making: "Being made", summarizing: "Summarizing", fallback: "Fallback model", wakeups: "Wake-ups" };
+  const TRAY_TITLES = { queue: "Queued messages", making: "Being made", summarizing: "Summarizing", fallback: "Fallback model", wakeups: "Wake-ups", paste: "Pasted text" };
   // This chat's wake-ups, as Work has them (media/main.js): the host posts {type: "wakeups", items: [{id, at, why}]}
   // when the chat's row changes and when it opens; soonest first. Cancel asks the host to take one back.
   var wakeups = [];                              // (`var`: the bar follows while the page is still starting up)
@@ -3649,6 +3651,10 @@
         : { icon: "watch", num: String(wakeups.length), after: "wake-ups", detail: `next at ${wakeupClock(next.at)}`,
           label: `${wakeups.length} wake-ups waiting, the next at ${wakeupClock(next.at)}`, tip: `${wakeups.length} wake-ups · the next at ${wakeupClock(next.at)}` };
     }
+    if (kind === "paste") {
+      const said = window.DgcPasteClean?.pill(field.cleaned.n, field.cleaned.counts);
+      return said ? { icon: "eye-closed", ...said } : null;
+    }
     if (kind === "fallback") {
       const on = trayFallback(), main = modelName(modelPick.value) || "Its model";
       if (!on) return null;
@@ -3661,6 +3667,7 @@
   function trayDetail(kind) {
     if (kind === "queue") return $("cd-queue");
     if (kind === "wakeups") return wakeups.length ? paintWakeups() : null;
+    if (kind === "paste") return field.note;
     const lines = [], acts = [];
     if (kind === "making") {
       const spec = traySpec(kind);
@@ -3689,7 +3696,9 @@
   trayParts.popClose.innerHTML = '<span class="codicon codicon-close" aria-hidden="true"></span>';
   // (`var`: the page asks the bar to follow while it is still starting up, before this line has run.)
   var tray = window.DgcTray.create({ ...trayParts, moreId: "cd-tray-more",
-    keep: ["queue", "fallback", "summarizing", "making", "wakeups"], spec: traySpec, detail: trayDetail, title: (kind) => TRAY_TITLES[kind] || "",
+    keep: ["queue", "fallback", "summarizing", "making", "wakeups", "paste"], spec: traySpec, detail: trayDetail, title: (kind) => TRAY_TITLES[kind] || "",
+    // Alone on the bar, the paste pill has its one action at the end of the line.
+    solo: (kind) => (kind === "paste" ? ["Dismiss", "Stop showing this notice", () => field.note?.querySelector("button")?.click()] : null),
     popFocus: (kind, node) => node.querySelector("[data-tray-focus], .dgc-queue-handle, button:not(:disabled)"),
     input, popTop: () => document.querySelector(".cd-head")?.getBoundingClientRect().bottom || 0,
     over: ".dgc-menu, .dgc-queue-menu, dialog",
@@ -3703,12 +3712,13 @@
     if (state.compacting) kinds.push("summarizing");
     if (trayFallback()) kinds.push("fallback");
     if (wakeups.length) kinds.push("wakeups");
+    if (field?.cleaned.n) kinds.push("paste");
     const sig = JSON.stringify(kinds.map((kind) => [kind, traySpec(kind)]));
     if (sig === traySig) return;
     traySig = sig;
     tray.render(kinds);
     for (const kind of kinds) tray.paint(kind);
-    if (tray.open && tray.open.kind !== "more" && tray.open.kind !== "queue" && tray.open.kind !== "wakeups") trayDetail(tray.open.kind);   // its words follow what it is doing
+    if (tray.open && !["more", "queue", "wakeups", "paste"].includes(tray.open.kind)) trayDetail(tray.open.kind);   // its words follow what it is doing
   }
   const researchToggle = $("cd-research");
   /** Deep research for the next message: a plan first, then the reading. Off again once it's sent. */

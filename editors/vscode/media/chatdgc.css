@@ -40,8 +40,8 @@ body { --bg: var(--vscode-editor-background, var(--fallback-bg)); --cd-col: 760p
 /* Widgets in this chat: a panel under the button. Each row: the widget's mark, its name, when it was made and the prompt
    that asked; Open (lit on the row under the pointer), Show it in the chat, Delete (asked in the row). */
 .cd-wpanel { position: fixed; z-index: 50; max-height: min(70vh, 520px); display: flex; flex-direction: column; overflow: hidden;
-  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); box-shadow: 0 14px 40px -10px rgba(0, 0, 0, .75); }
-body.vscode-light .cd-wpanel { box-shadow: 0 10px 30px -10px rgba(0, 0, 0, .25); }
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); }
+
 .cd-wpanel:focus { outline: none; }
 .cd-whead { flex: none; display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); padding: 10px 12px 8px;
   border-bottom: 1px solid var(--border); }
@@ -449,9 +449,8 @@ body.cd-blank .cd-fine { display: none; }
 }
 
 /* Keyboard shortcuts. */
-.cd-keys { width: min(420px, calc(100vw - 32px)); padding: var(--sp-4) var(--sp-5); border: 1px solid var(--border-strong);
-  border-radius: var(--r-xl); background: var(--surface); color: var(--text); box-shadow: var(--shadow-2); }
-.cd-keys::backdrop { background: rgba(0, 0, 0, .45); }
+.cd-keys { width: min(420px, calc(100vw - 32px)); padding: var(--sp-4) var(--sp-5); background: var(--surface); color: var(--text); }
+
 .cd-keys h2 { margin: 0 0 var(--sp-3); color: var(--text-strong); font: var(--w-semi) var(--t-lg)/1.3 var(--sans); }
 .cd-keys dl { display: grid; grid-template-columns: auto 1fr; gap: var(--sp-2) var(--sp-4); margin: 0 0 var(--sp-4); align-items: center; }
 .cd-keys dt { white-space: nowrap; }
@@ -469,7 +468,7 @@ body.cd-blank .cd-fine { display: none; }
 .cd-meter .codicon { font-size: var(--t-lg); }
 /* Its details, laid out as main DGC's context window menu (its own classes: context-head, -track, -split, -action). */
 .cd-pop { margin: 0 0 var(--sp-2) auto; width: min(320px, 100%); max-height: calc(100vh - 170px); overflow-y: auto; padding: var(--sp-3); border: 1px solid var(--border-strong);
-  border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 14px 40px -10px rgba(0,0,0,.75); }
+  border-radius: var(--r-lg); background: var(--surface); }
 .cd-pop-pct { color: var(--accent-text); font: var(--w-bold) var(--t-xl)/1 var(--mono); font-variant-numeric: tabular-nums; }  /* main DGC's #ctx-pct */
 /* The context window floats over the chat as main DGC's does (.cmenu.context-menu), above the box: in the footer's
    flow it made the footer taller, and the footer's band beside it covered the chat (reported 28 Oct). */
@@ -769,8 +768,8 @@ button.cd-project-card:hover { border-color: var(--border-strong); background: v
 body.vscode-light .lib-artifact .lib-preview .codicon, body.vscode-high-contrast-light .lib-artifact .lib-preview .codicon { color: var(--link); }
 .lib-menu-wrap { position: relative; display: inline-flex; }
 .lib-menu { position: absolute; top: calc(100% + var(--sp-1)); right: 0; z-index: 15; min-width: 210px; padding: var(--sp-1);
-  border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 14px 40px -10px rgba(0,0,0,.6); }
-body.vscode-light .lib-menu { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
+  border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--surface); }
+
 .lib-menu-item { display: block; width: 100%; padding: var(--sp-2); border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text);
   text-align: left; white-space: nowrap; cursor: pointer; font: var(--w-reg) var(--t-sm)/1.2 var(--sans); }
 .lib-menu-item:hover, .lib-menu-item:focus-visible { background: var(--sel); color: var(--text-strong); outline: none; }
@@ -910,8 +909,8 @@ body.vscode-light .lib-menu { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
 .cd-artifact-export-button { display: inline-flex; align-items: center; gap: 2px; }
 .cd-artifact-export-button > .codicon { font-size: 12px; }
 .cd-artifact-menu { position: absolute; top: calc(100% + var(--sp-1)); right: 0; z-index: 15; min-width: 210px; padding: var(--sp-1);
-  border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 14px 40px -10px rgba(0,0,0,.6); }
-body.vscode-light .cd-artifact-menu { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
+  border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--surface); }
+
 .cd-artifact-menu-item { display: block; width: 100%; padding: var(--sp-2); border: 0; border-radius: var(--r-sm); background: transparent;
   color: var(--text); text-align: left; white-space: nowrap; cursor: pointer; font: var(--w-reg) var(--t-sm)/1.2 var(--sans); }
 .cd-artifact-menu-item:hover, .cd-artifact-menu-item:focus-visible { background: var(--sel); color: var(--text-strong); outline: none; }

@@ -507,9 +507,9 @@
   const queueBar = $("queuebar"), queueList = $("queue-list"), queueTitle = $("queue-title"), queueSteerAll = $("queue-steer-all");
   const monitorsBar = $("monitorsbar"), pasteBar = $("pastebar"), pipsBar = $("pipsbar"), troupeBar = $("troupebar");
   // The kinds of work the rail can hold, in the order their chips stand on the chip line (B2). The
-  // invisible-characters notice is not one of them: it is about the message being typed.
+  // invisible-characters notice is the last of them (ui-09): it was a row of its own between the bar and the box.
   const RAIL_KINDS = [["queue", queueBar], ["goal", goalBar], ["troupe", troupeBar], ["monitors", monitorsBar], ["tasks", tasksBar],
-    ["changes", changesBar], ["pips", pipsBar]].filter(([, bar]) => bar);
+    ["changes", changesBar], ["pips", pipsBar], ["paste", pasteBar]].filter(([, bar]) => bar);
   const announcer = $("announcer");
   const queuedEl = $("queued");
   // Pips has its own durable conversations. Hiding the main chat preserves its
@@ -1746,7 +1746,7 @@
     closeAutoModePrompt(false);
     if (typeof message.requestId !== "string" || !/^[a-f0-9]{32}$/.test(message.requestId)) return;
     const dialog = document.createElement("dialog");
-    dialog.className = "auto-mode-dialog";
+    dialog.className = "auto-mode-dialog dgc-dialog";
     dialog.setAttribute("aria-labelledby", "auto-mode-title");
     dialog.setAttribute("aria-describedby", "auto-mode-intro");
     dialog.innerHTML = `<div class="auto-mode-body">
@@ -5858,7 +5858,7 @@
       else button.innerHTML = `<span>Download</span>${icon("chevron-down", "xs")}`;
       button.setAttribute("aria-haspopup", "menu"); button.setAttribute("aria-expanded", "false");
       button.disabled = removed;
-      const menu = el("div", "amenu"); menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", "Download as"); menu.hidden = true;
+      const menu = el("div", "amenu dgc-popover"); menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", "Download as"); menu.hidden = true;
       for (const format of formats) {
         const item = el("button", "amenu-item"); item.type = "button"; item.setAttribute("role", "menuitem");
         item.textContent = ARTIFACT_FORMAT[format] || format.toUpperCase();
@@ -7491,8 +7491,9 @@ function permissionChoices(ev) {
   let workspaceChangeState = { ...changeState }, reviewScope = "chat";
   // ---- invisible characters in a paste -------------------------------------------------------
   // What counts as invisible, and the words for it, live in media/pasteclean.js (the mirror of
-  // dgc/textsafety.py). A paste is cleaned as it lands, and this row says so: it is information
-  // about something already done, so it asks for nothing and has only a way to close it.
+  // dgc/textsafety.py). A paste is cleaned as it lands, and a pill on the bar above the box says so
+  // ("Removed 5"; alone on the bar, the whole sentence). It opens what was taken, kind by kind: it is
+  // information about something already done, so it asks for nothing and has only Dismiss.
   const pasteClean = () => window.DgcPasteClean || null;
   const pasteFrom = (data) => M.pasteFrom(data);
   function notePasteRemoved(paste) {
@@ -7510,12 +7511,14 @@ function permissionChoices(ev) {
     pasteBar.hidden = !pasteRemoved.n;
     if (pasteRemoved.n) {
       const shared = pasteClean(), words = shared ? shared.notice(pasteRemoved.n) : "";
+      const more = shared ? shared.detail(pasteRemoved.counts) : "";
       $("paste-count").textContent = words;
-      $("paste-note").title = shared ? shared.detail(pasteRemoved.counts) : "";
+      $("paste-detail").textContent = more; $("paste-detail").hidden = !more;
     }
     syncComposerRail();
+    paintRailChip("paste");
   }
-  // Nothing left of what was cleaned: the pasted words went, so the row has nothing to be about.
+  // Nothing left of what was cleaned: the pasted words went, so the pill has nothing to be about.
   function pastedTextGone() {
     return composerText() === "" && !input.querySelector("[data-pill]") && !attachments.some((a) => a.pasted);
   }
@@ -7523,14 +7526,14 @@ function permissionChoices(ev) {
 
   // Every kind of work showing is one pill on the bar above the box (renderRailChips): the bar is one line at one
   // height, whatever shows. One kind alone is that same line, said in full; its row opens above like any pill's. The
-  // rail itself holds only the invisible-characters notice, if any. Pip fixes and running Pips count as kinds.
+  // rail itself is never seen: it is where each row waits while its pill is closed. Pip fixes and running Pips count as kinds.
   function syncComposerRail() {
     const present = RAIL_KINDS.filter(([, bar]) => !bar.hidden).map(([kind]) => kind);
     const fixes = pipFixesForChip().length ? ["pipfixes"] : [];
     if (pipRunning.size) fixes.push("piprunning");
     if (wakeups?.length) fixes.push("wakeups");
     composerRail.classList.add("as-chips");
-    composerRail.hidden = pasteBar.hidden;
+    composerRail.hidden = true;
     composerRail.classList.toggle("has-monitors", !monitorsBar.hidden);
     composerRail.classList.toggle("has-troupes", !troupeBar.hidden);
     composerRail.classList.toggle("has-changes", !changesBar.hidden);
@@ -7847,9 +7850,9 @@ function permissionChoices(ev) {
   const RAIL_ROW_ORDER = ["queuebar", "pipsbar", "monitorsbar", "troupebar", "changesbar", "tasksbar", "goalbar", "pastebar"];
   const RAIL_POP_TITLES = { goal: "Goal", troupe: "Troupe", monitors: "Monitors", tasks: "Tasks",
     changes: "Changes in this chat", pips: "Pips", queue: "Queued messages", pipfixes: "Pip fixes", piprunning: "Pips running",
-    wakeups: "Wake-ups" };
+    wakeups: "Wake-ups", paste: "Pasted text" };
   // Which kinds stay on the bar longest when it is short of room; a kind that needs you outstays them all.
-  const RAIL_KEEP = ["queue", "changes", "tasks", "pipfixes", "troupe", "piprunning", "wakeups", "monitors", "goal", "pips"];
+  const RAIL_KEEP = ["queue", "changes", "tasks", "pipfixes", "troupe", "piprunning", "wakeups", "monitors", "goal", "pips", "paste"];
   // A kind's real row; Pip fixes have no row (their cards are in the chat): their popover lists them.
   const railBar = (kind) => (kind === "pipfixes" ? paintPipFixesPanel() : kind === "piprunning" ? paintPipRunningPanel()
     : kind === "wakeups" ? paintWakeupsPanel()
@@ -7870,6 +7873,10 @@ function permissionChoices(ev) {
         ? { icon: "watch", word: "Wakes", num: wakeupClock(next.at), detail: next.why, label: `Wakes at ${wakeupClock(next.at)} to: ${next.why}` }
         : { icon: "watch", num: String(wakeups.length), after: "wake-ups", detail: `next at ${wakeupClock(next.at)}`,
           label: `${wakeups.length} wake-ups waiting, the next at ${wakeupClock(next.at)}` };
+    }
+    if (kind === "paste") {
+      const said = pasteClean()?.pill(pasteRemoved.n, pasteRemoved.counts);
+      return said ? { icon: "eye-closed", ...said } : null;
     }
     if (kind === "queue") {
       const count = Math.max(queuedCount, queuedPrompts.size);
@@ -7975,7 +7982,7 @@ function permissionChoices(ev) {
   // folded into its chip.
   function railShown(node) {
     return !!node && node !== document.body && node.isConnected && !node.closest("[hidden]")
-      && !(composerRail.classList.contains("as-chips") && composerRail.contains(node) && !pasteBar.contains(node));
+      && !(composerRail.classList.contains("as-chips") && composerRail.contains(node));
   }
   // Ways further than the row goes, under it: the troupe's journal, and the agent map that lists troupes and
   // monitors under its background tasks.
@@ -8035,12 +8042,13 @@ function permissionChoices(ev) {
       }
     },
     // Into the popover: the row's own main control (never a Stop), else the popover itself.
-    popFocus: (kind, bar) => [...bar.querySelectorAll(".rail-main")].find((node) => !node.disabled && !node.closest("[hidden]")),
+    popFocus: (kind, bar) => [...bar.querySelectorAll(".rail-main, [data-tray-focus]")].find((node) => !node.disabled && !node.closest("[hidden]")),
     // One kind alone has its everyday action at the end of its line (the queue's Steer all, the changes' Review).
     solo: (kind) => (kind === "queue" && !queueSteerAll.hidden
       ? ["Steer all", "Send every queued message into this turn now", () => queueSteerAll.click()]
       : kind === "changes" && changeState.total
-        ? ["Review", "Open the list of changed files", () => $("changes-review-button").click()] : null),
+        ? ["Review", "Open the list of changed files", () => $("changes-review-button").click()]
+        : kind === "paste" ? ["Dismiss", "Stop showing this notice", () => $("paste-close").click()] : null),
     links: railLinks, linksKey: () => railTroupeLead()?.run_id,
     focus: focusQuietly, tip: hoverTip, input, shown: railShown,
     // The popover may use the height between the header and the chip line, and scrolls past that.

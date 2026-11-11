@@ -11,8 +11,10 @@
   --muted: var(--dgc-muted, var(--vscode-descriptionForeground, #9d9d9d));
   --trace-accent: var(--accent);
 }
-.dgc-trace-backdrop { position: fixed; z-index: 10000; inset: 0; background: #000a; display: grid; place-items: center; padding: 24px; }
-.dgc-trace-dialog { --trace-name-width: 168px; --trace-meta-width: 150px; width: min(820px, 100%); max-height: min(760px, calc(100vh - 48px)); display: flex; flex-direction: column; overflow: hidden; color: var(--text-strong); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 16px 48px #0008; font: 11.5px/1.35 var(--vscode-editor-font-family, ui-monospace, monospace); }
+.dgc-trace-backdrop { position: fixed; z-index: 10000; inset: 0; display: grid; place-items: center; padding: 24px; }
+/* (Its scrim, lift, corner and arrival are the shared dialog's, media/shared/dialog.css; its edge stays its own.) */
+.dgc-trace-backdrop .dgc-trace-dialog { border-color: var(--border-strong); }
+.dgc-trace-dialog { --trace-name-width: 168px; --trace-meta-width: 150px; width: min(820px, 100%); max-height: min(760px, calc(100vh - 48px)); display: flex; flex-direction: column; overflow: hidden; color: var(--text-strong); background: var(--surface); font: 11.5px/1.35 var(--vscode-editor-font-family, ui-monospace, monospace); }
 .dgc-trace-head { min-height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--border); }
 .dgc-trace-head strong { font-size: 12px; font-weight: 600; }
 /* D14: a model change, said in one line under the header; it wraps in a narrow window rather than being cut. */
@@ -60,7 +62,7 @@
    line, the full width. The cursor, ruler and grid follow it through the two width tokens. */
 @media (max-width: 520px) {
   .dgc-trace-backdrop { padding: 8px; }
-  .dgc-trace-dialog { --trace-name-width: 12px; --trace-meta-width: 12px; border-radius: 12px; }
+  .dgc-trace-dialog { --trace-name-width: 12px; --trace-meta-width: 12px; }
   .dgc-trace-head { min-height: 34px; gap: 8px; padding: 0 6px 0 10px; }
   .dgc-trace-head strong { font-size: 11.5px; }
   .dgc-trace-model { display: none; }

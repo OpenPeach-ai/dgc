@@ -352,7 +352,7 @@
   function exportMenu(button, a) {
     if (menuOpen?.button === button) { closeMenu(true); return; }
     closeMenu(false);
-    const menu = el("div", "lib-menu");
+    const menu = el("div", "lib-menu dgc-popover");
     menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", `Download ${a.title || "it"} as`);
     for (const format of Array.isArray(a.exports) ? a.exports : []) {
       const item = el("button", "lib-menu-item", FORMATS[format] || format.toUpperCase());

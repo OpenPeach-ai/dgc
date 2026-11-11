@@ -29,7 +29,7 @@ export function pickerMarkup({ id, label, value, options, face, placeholder = 'C
     + `<div class="pip-picker-field"><span class="pip-picker-label" id="${escape(id)}-label">${escape(label)}</span><div class="pip-picker-anchor">`
     + `<button type="button" id="${escape(id)}" class="pip-picker-button" aria-haspopup="listbox" aria-expanded="false" aria-controls="${escape(id)}-list" aria-labelledby="${escape(id)}-label ${escape(id)}-value"${disabled ? ' disabled' : ''}>`
     + `<span class="pip-picker-value${chosen ? '' : ' placeholder'}" id="${escape(id)}-value">${escape(chosen ? chosen.label : placeholder)}</span>${chevron}</button>`
-    + `<div class="pip-picker-list" id="${escape(id)}-list" role="listbox" tabindex="-1" aria-labelledby="${escape(id)}-label" hidden>${options.map(row).join('')}</div>`
+    + `<div class="pip-picker-list dgc-popover" id="${escape(id)}-list" role="listbox" tabindex="-1" aria-labelledby="${escape(id)}-label" hidden>${options.map(row).join('')}</div>`
     + '</div></div></div>';
 }
 

@@ -702,6 +702,8 @@ test("the row closes, goes with the send and with the draft, and text typed stay
   if (skipReason()) return t.skip(skipReason());
   await vscodePaste({ plain: "a\u200Bb" });
   assert.equal(await notice(), "Removed 1 invisible character from the pasted text");
+  // ui-09: the notice is a pill on the bar; its words and Dismiss (#paste-close) are what the pill opens.
+  await page.click('.rail-chip[data-kind="paste"]');
   await page.click("#paste-close");
   assert.equal(await notice(), null, "the close control");
   assert.equal(await value(), "ab", "and closing it changes nothing in the box");
@@ -727,34 +729,32 @@ test("the row closes, goes with the send and with the draft, and text typed stay
   await page.evaluate(() => document.getElementById("input").replaceChildren());
 });
 
-test("the row is the rail's own quiet row: muted text, its whole sentence, a close control in reach", async (t) => {
+test("the notice is a pill on the bar, never a row of its own; opened, its whole sentence and one Dismiss in reach", async (t) => {
   if (skipReason()) return t.skip(skipReason());
   await vscodePaste({ plain: "a\u200Bb" });
+  // (It was the rail's own quiet row between the bar and the box, in a softer grey with a close control: ui-09 made it
+  // a pill, as every other kind above the box. test/paste-pill.test.mjs measures the pill itself.)
   const read = () => page.evaluate(() => {
     const count = document.getElementById("paste-count"), bar = document.getElementById("pastebar"), close = document.getElementById("paste-close");
-    const probe = document.createElement("span"); probe.style.color = "var(--muted)"; document.body.append(probe);
-    const muted = getComputedStyle(probe).color; probe.remove();
-    const hit = close.getBoundingClientRect();
-    return { color: getComputedStyle(count.parentElement).color, muted, fill: getComputedStyle(bar).backgroundColor,
-      surface: (() => { const p = document.createElement("span"); p.style.color = "var(--surface)"; document.body.append(p); const c = getComputedStyle(p).color; p.remove(); return c; })(),
-      icon: getComputedStyle(bar.querySelector(".paste-icon")).color, faint: (() => { const p = document.createElement("span"); p.style.color = "var(--faint)"; document.body.append(p); const c = getComputedStyle(p).color; p.remove(); return c; })(),
+    const hit = close.getBoundingClientRect(), pill = document.querySelector('.rail-chip[data-kind="paste"]');
+    return { pill: !!pill && pill.getClientRects().length > 0, row: bar.getClientRects().length > 0 && !bar.closest(".rail-pop"), inPopover: !!bar.closest(".rail-pop:not([hidden])"),
       clipped: count.scrollWidth > count.clientWidth || count.scrollHeight > count.clientHeight + 1, width: count.getBoundingClientRect().width,
       closes: close === document.elementFromPoint(hit.left + hit.width / 2, hit.top + hit.height / 2)
         || close.contains(document.elementFromPoint(hit.left + hit.width / 2, hit.top + hit.height / 2)),
-      inside: hit.right <= bar.getBoundingClientRect().right && hit.left >= count.getBoundingClientRect().right - 1,
       buttons: bar.querySelectorAll("button").length };
   });
   for (const width of [460, 280]) {
     await page.setViewportSize({ width, height: 800 });
-    const row = await read();
-    assert.notEqual(row.color, row.faint, `${width}px: not the disabled colour, too pale to read in a light theme`);
-    assert.match(row.color, /^color\(srgb .* \/ 0\.85\)$/, `${width}px: softer than the muted colour`);
-    assert.equal(row.fill, row.surface, "the rail's own surface, no fill of its own");
-    assert.equal(row.icon, row.faint, "and no warning colour");
+    let row = await read();
+    assert.equal(row.pill, true, `${width}px: the pill is on the bar`);
+    assert.equal(row.row, false, `${width}px: and there is no row of its own`);
+    await page.click('.rail-chip[data-kind="paste"]');
+    row = await read();
+    assert.equal(row.inPopover, true, `${width}px: the pill opens its words`);
     assert.equal(row.clipped, false, `${width}px: the whole sentence shows, in ${row.width}px`);
-    assert.equal(row.closes, true, `${width}px: the close control takes its click`);
-    assert.equal(row.inside, true, `${width}px: and stands in the row, after the words`);
+    assert.equal(row.closes, true, `${width}px: Dismiss takes its click`);
     assert.equal(row.buttons, 1, "there is nothing else to press");
+    await page.keyboard.press("Escape");
   }
   await page.setViewportSize({ width: 460, height: 800 });
 });

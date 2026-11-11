@@ -194,10 +194,10 @@ export function artifactDocument(asset: (name: string) => string, cspSource: str
 <div class="art-actions" id="art-actions" role="toolbar" aria-label="Artifact">
 <button type="button" class="art-btn" id="art-versions" aria-haspopup="dialog" aria-expanded="false" title="Every version: who made it, when, and what changed" disabled><span class="codicon codicon-history" aria-hidden="true"></span><span class="art-btn-label">Versions</span></button>
 <div class="art-menu-wrap"><button type="button" class="art-btn" id="art-export" aria-haspopup="menu" aria-expanded="false" title="Download a copy" disabled><span class="codicon codicon-desktop-download" aria-hidden="true"></span><span class="art-btn-label">Download</span><span class="codicon codicon-chevron-down art-caret" aria-hidden="true"></span></button>
-<div class="art-menu" id="art-export-menu" role="menu" aria-label="Download as" hidden></div></div>
+<div class="art-menu dgc-popover" id="art-export-menu" role="menu" aria-label="Download as" hidden></div></div>
 <button type="button" class="art-btn" id="art-browser" title="Open it in your browser, at an address of its own" disabled><span class="codicon codicon-link-external" aria-hidden="true"></span><span class="art-btn-label">Open in browser</span></button>
 </div></header>
-<section class="art-versions" id="art-versions-panel" role="dialog" aria-label="Versions" hidden><div class="art-versions-head"><h2>Versions</h2><button type="button" class="art-icon" id="art-versions-close" title="Close" aria-label="Close versions"><span class="codicon codicon-close" aria-hidden="true"></span></button></div><ol class="art-version-list" id="art-version-list"></ol></section>
+<section class="art-versions dgc-popover" id="art-versions-panel" role="dialog" aria-label="Versions" hidden><div class="art-versions-head"><h2>Versions</h2><button type="button" class="art-icon" id="art-versions-close" title="Close" aria-label="Close versions"><span class="codicon codicon-close" aria-hidden="true"></span></button></div><ol class="art-version-list" id="art-version-list"></ol></section>
 <div class="art-banner" id="art-banner" role="alert" hidden></div>
 <main class="art-main" id="art-main"><p class="art-empty" id="art-loading">Loading…</p></main>
 <div class="sr-only" id="art-announce" aria-live="polite"></div>

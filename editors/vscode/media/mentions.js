@@ -662,11 +662,12 @@
   function box(el, opts = {}) {
     const doc = el.ownerDocument, view = doc.defaultView || window;
     let editing = false, copied = null, disabled = false, readOnly = false, maxLength = opts.maxLength || 0;
-    // What pastes in this draft had cleaned out, and the quiet row that says so. It moves with the box's history: undoing
+    // What pastes in this draft had cleaned out, and the words that say so (the detail of the page's "paste" pill). It moves with the box's history: undoing
     // a paste back to the text as it came takes the row with it, and redo brings it back.
     let cleaned = { n: 0, counts: {} };
     const noteRow = pasteModule()?.noticeRow(doc, () => { forgetCleaned(); el.focus({ preventScroll: true }); }) || null;
-    const drawCleaned = () => { if (cleaned.n) noteRow?.show(cleaned.n, cleaned.counts); else noteRow?.hide(); };
+    // (opts.cleanedChanged: the page's bar above the box shows it as a pill, and follows.)
+    const drawCleaned = () => { if (cleaned.n) noteRow?.show(cleaned.n, cleaned.counts); else noteRow?.hide(); opts.cleanedChanged?.(cleaned); };
     function noteCleaned(paste) {
       if (!paste.removed) return;
       const counts = { ...cleaned.counts };
@@ -906,7 +907,7 @@
       marks: (sent, options) => displayMarks(parts(el), sent, options),
       capture: () => ({ ...capture(el), cleaned }),
       restore: (state) => { restore(el, state); markEmpty(); cleaned = state.cleaned || { n: 0, counts: {} }; drawCleaned(); },
-      note: noteRow?.el || null, noteCleaned, forgetCleaned, checkCleaned,
+      note: noteRow?.el || null, noteCleaned, forgetCleaned, checkCleaned, get cleaned() { return cleaned; },
       dispose: () => view.removeEventListener("paste", onPaste),
     };
   }

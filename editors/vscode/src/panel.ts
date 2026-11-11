@@ -10063,8 +10063,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   <div id="changes-review-summary" class="changes-review-summary"></div>
   <div id="changes-review-list" class="changes-review-list" tabindex="-1"></div>
 </div>
-<div id="goal-editor" class="modal-layer" role="dialog" aria-modal="true" aria-labelledby="goal-editor-title" hidden>
-  <div class="goal-dialog">
+<div id="goal-editor" class="modal-layer dgc-scrim" role="dialog" aria-modal="true" aria-labelledby="goal-editor-title" hidden>
+  <div class="goal-dialog dgc-dialog">
     <div class="goal-dialog-mark"><span class="codicon codicon-target" aria-hidden="true"></span></div>
     <button type="button" id="goal-editor-close" class="fbtn goal-dialog-close" title="Close" aria-label="Close goal editor"><span class="codicon codicon-close" aria-hidden="true"></span></button>
     <h2 id="goal-editor-title">Edit goal</h2>
@@ -10076,15 +10076,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <div class="goal-dialog-actions"><button type="button" id="goal-editor-cancel" class="act" title="Close without changing the objective">Cancel</button><button type="button" id="goal-editor-save" class="act primary" title="Save the objective and start pursuing it">Save</button></div>
   </div>
 </div>
-<div id="goal-review" class="modal-layer" role="dialog" aria-modal="true" aria-labelledby="goal-review-title" hidden>
-  <div class="goal-dialog">
+<div id="goal-review" class="modal-layer dgc-scrim" role="dialog" aria-modal="true" aria-labelledby="goal-review-title" hidden>
+  <div class="goal-dialog dgc-dialog">
     <button type="button" id="goal-review-close" class="fbtn goal-dialog-close" aria-label="Close goal review" title="Close"><span class="codicon codicon-close" aria-hidden="true"></span></button>
     <h2 id="goal-review-title">Review goal</h2>
     <div id="goal-review-body" class="surface-markdown" tabindex="0"></div>
   </div>
 </div>
-<div id="agent-map" class="modal-layer agent-map-layer" role="dialog" aria-modal="true" aria-labelledby="agent-map-title" aria-describedby="agent-map-subtitle" hidden>
-  <div id="agent-map-box" class="agent-map" data-layout="vertical" tabindex="-1">
+<div id="agent-map" class="modal-layer dgc-scrim agent-map-layer" role="dialog" aria-modal="true" aria-labelledby="agent-map-title" aria-describedby="agent-map-subtitle" hidden>
+  <div id="agent-map-box" class="agent-map dgc-dialog" data-layout="vertical" tabindex="-1">
     <div class="agent-map-head">
       <div class="agent-map-titles"><h2 id="agent-map-title">Agent map</h2><p id="agent-map-subtitle" class="agent-map-subtitle"></p></div>
       <button type="button" id="agent-map-close" class="fbtn agent-map-close" title="Close" aria-label="Close the agent map"><span class="codicon codicon-close" aria-hidden="true"></span></button>
@@ -10100,8 +10100,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     </div>
   </div>
 </div>
-<div id="agent-card" class="modal-layer agent-map-layer am-card-layer" role="dialog" aria-modal="true" aria-labelledby="agent-card-title" aria-describedby="agent-card-meta" hidden>
-  <div id="agent-card-box" class="agent-map am-window am-card-window" tabindex="-1">
+<div id="agent-card" class="modal-layer dgc-scrim agent-map-layer am-card-layer" role="dialog" aria-modal="true" aria-labelledby="agent-card-title" aria-describedby="agent-card-meta" hidden>
+  <div id="agent-card-box" class="agent-map dgc-dialog am-window am-card-window" tabindex="-1">
     <div class="agent-map-head">
       <button type="button" id="agent-card-back" class="fbtn agent-map-back" title="Back to the agent map" aria-label="Back to the agent map"><span class="codicon codicon-arrow-left" aria-hidden="true"></span></button>
       <span id="agent-card-dot" class="agent-dot agent-map-head-dot" aria-hidden="true"></span>
@@ -10110,8 +10110,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <div id="agent-card-body" class="agent-map-body am-card"></div>
   </div>
 </div>
-<div id="agent-transcript" class="modal-layer agent-map-layer am-transcript-layer" role="dialog" aria-modal="true" aria-labelledby="agent-transcript-title" aria-describedby="agent-transcript-meta" hidden>
-  <div id="agent-transcript-box" class="agent-map am-window am-transcript-window" tabindex="-1">
+<div id="agent-transcript" class="modal-layer dgc-scrim agent-map-layer am-transcript-layer" role="dialog" aria-modal="true" aria-labelledby="agent-transcript-title" aria-describedby="agent-transcript-meta" hidden>
+  <div id="agent-transcript-box" class="agent-map dgc-dialog am-window am-transcript-window" tabindex="-1">
     <div class="agent-map-head">
       <button type="button" id="agent-transcript-back" class="fbtn agent-map-back" title="Back" aria-label="Back"><span class="codicon codicon-arrow-left" aria-hidden="true"></span></button>
       <span id="agent-transcript-dot" class="agent-dot agent-map-head-dot" aria-hidden="true"></span>
@@ -10132,7 +10132,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <div id="rail-chips" class="rail-chips" role="toolbar" aria-label="Running in this chat" hidden></div>
     <div id="queued" role="status" aria-live="polite"></div>
     <button type="button" id="workspace-changes" class="rail-text-action" title="Review all workspace changes since the last Git commit"><span class="codicon codicon-diff" aria-hidden="true"></span><span class="workspace-changes-label">Workspace changes</span></button>
-    <div id="rail-pop" class="rail-pop" role="dialog" aria-modal="false" aria-labelledby="rail-pop-title" tabindex="-1" hidden>
+    <div id="rail-pop" class="rail-pop dgc-popover" role="dialog" aria-modal="false" aria-labelledby="rail-pop-title" tabindex="-1" hidden>
       <div class="rail-pop-head"><span id="rail-pop-title" class="rail-pop-title"></span><button type="button" id="rail-pop-close" class="rail-icon-button" title="Close" aria-label="Close"><span class="codicon codicon-close" aria-hidden="true"></span></button></div>
       <div id="rail-pop-body" class="rail-pop-body"></div>
       <div id="rail-pop-links" class="rail-pop-links" hidden></div>
@@ -10194,9 +10194,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       </div>
       <div id="goal-detail" class="goal-detail" role="region" aria-label="Goal detail" tabindex="0" hidden></div>
     </section>
-    <section id="pastebar" class="rail-item" role="status" aria-label="Pasted text" hidden>
-      <div id="paste-note" class="rail-main rail-note"><span class="paste-icon codicon codicon-eye-closed rail-icon" aria-hidden="true"></span><span id="paste-count"></span></div>
-      <button type="button" id="paste-close" class="rail-icon-button" title="Close" aria-label="Close this notice"><span class="codicon codicon-close" aria-hidden="true"></span></button>
+    <!-- What the "paste" pill opens: what a paste was cleaned of, and Dismiss (the same in ChatDGC and a Pip's chat, media/pasteclean.js). -->
+    <section id="pastebar" class="rail-item tray-note" role="status" aria-label="Pasted text" hidden>
+      <p id="paste-count" class="paste-note-words"></p>
+      <p id="paste-detail" class="tray-note-more"></p>
+      <div class="tray-note-acts"><button type="button" id="paste-close" class="tray-note-act" data-tray-focus title="Stop showing this notice">Dismiss</button></div>
     </section>
   </div>
   <div id="cbox" data-mode="default">

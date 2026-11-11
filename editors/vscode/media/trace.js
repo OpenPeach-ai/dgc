@@ -104,8 +104,8 @@
   function open(trace) {
     if (!trace?.rows?.length) return;
     document.querySelector(".dgc-trace-backdrop")?.remove();
-    const backdrop = document.createElement("div"); backdrop.className = "dgc-trace-backdrop";
-    const dialog = document.createElement("section"); dialog.className = "dgc-trace-dialog";
+    const backdrop = document.createElement("div"); backdrop.className = "dgc-trace-backdrop dgc-scrim";
+    const dialog = document.createElement("section"); dialog.className = "dgc-trace-dialog dgc-dialog";
     dialog.setAttribute("role", "dialog"); dialog.setAttribute("aria-modal", "true");
     dialog.setAttribute("aria-label", "Response trace");
     const header = document.createElement("header"); header.className = "dgc-trace-head";

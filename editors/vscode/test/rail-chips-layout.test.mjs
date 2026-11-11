@@ -279,7 +279,7 @@ for (const reducedMotion of [false, true]) {
       const g = await page.evaluate(() => ({
         pop: getComputedStyle(document.getElementById("rail-pop")).animationName,
         tile: getComputedStyle(document.querySelector('#rail-chips .rail-chip[data-kind="troupe"] .chip-mark .tm-part')).animationName }));
-      assert.deepEqual(g, reducedMotion ? { pop: "none", tile: "none" } : { pop: "rail-pop-in", tile: "troupe-tile" });
+      assert.deepEqual(g, reducedMotion ? { pop: "none", tile: "none" } : { pop: "dgc-popover-in", tile: "troupe-tile" });   // (ui-08: the shared popover's arrival; it was its own rail-pop-in)
       assert.deepEqual(errors, []);
     } finally { await page.close(); }
   });

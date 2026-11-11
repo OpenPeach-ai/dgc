@@ -23,7 +23,7 @@
     line.id = id; line.className = "rail-line tray-only";
     line.innerHTML = `<div id="${id}-chips" class="rail-chips" role="toolbar" aria-label="${esc(label)}" hidden></div>`
       // (A dialog only while it is open: closed, it is not one a page's "the dialog" should find.)
-      + `<div id="${id}-pop" class="rail-pop" data-tray-role="dialog" aria-modal="false" aria-labelledby="${id}-pop-title" tabindex="-1" hidden>`
+      + `<div id="${id}-pop" class="rail-pop dgc-popover" data-tray-role="dialog" aria-modal="false" aria-labelledby="${id}-pop-title" tabindex="-1" hidden>`
       + `<div class="rail-pop-head"><span id="${id}-pop-title" class="rail-pop-title"></span>`
       + `<button type="button" id="${id}-pop-close" class="rail-pop-x" title="Close" aria-label="Close">${CLOSE}</button></div>`
       + `<div id="${id}-pop-body" class="rail-pop-body"></div><div id="${id}-pop-links" class="rail-pop-links" hidden></div></div>`;
