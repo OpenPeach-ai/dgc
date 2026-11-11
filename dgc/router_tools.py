@@ -25,6 +25,7 @@ from . import router as router_mod
 from . import router_state
 from .config import (ROUTER_DEFAULT_CONTEXT, ROUTER_JOBS, ROUTER_WHEN_BUSY, router_base_url, router_slug,
                      validate_router)
+from .router_probe import KNOWN_PORTS
 from .tools import _fn
 
 ACTIONS = ("turn_on", "turn_off", "add_system", "edit_system", "remove_system", "enable_system", "disable_system",
@@ -91,7 +92,7 @@ SCHEMAS = [
                        "description": "set_when_busy: wait, or default (the usual sub-agent model)"}},
         ["action"]),
     _fn("router_find", "DGC Router: look for model servers on the user's own network (this computer's /24, the "
-        "known ports only: 11434, 8080, 1234, 8000, 30000, 8188). Asks the user first. Use it only when they ask "
+        "known ports only: " + ", ".join(map(str, KNOWN_PORTS)) + "). Asks the user first. Use it only when they ask "
         "to find or add their computers; then add what they choose with router_update.",
         {"subnet": {"type": "string", "description": "Leave out: DGC uses this computer's own network"}}, []),
 ]

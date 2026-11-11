@@ -198,7 +198,7 @@ class LookOnMyNetwork(unittest.TestCase):
         source = (ROOT / "editors/vscode/src/settingsRouter.js").read_text()
         ports = re.search(r"const ROUTER_PORTS = '([^']+)'", source).group(1)
         self.assertEqual(tuple(int(p) for p in re.findall(r"\d+", ports)), router_probe.KNOWN_PORTS)
-        self.assertIn("11434, 8080, 1234, 8000, 30000, 8188", T.SCHEMAS[3]["function"]["description"])
+        self.assertIn(", ".join(map(str, router_probe.KNOWN_PORTS)), T.SCHEMAS[3]["function"]["description"])
 
 
 class SuggestWords(Case):

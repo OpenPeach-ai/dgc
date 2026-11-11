@@ -33,10 +33,13 @@ import requests
 from .config import router_base_url
 
 # The ports model servers listen on by default: Ollama, llama.cpp, LM Studio, vLLM, SGLang (and TGI's docs use
-# 8080 too). 8188 is ComfyUI, found by router_find for image generation later; it is never a sub-agent system.
-KNOWN_PORTS = (11434, 8080, 1234, 8000, 30000, 8188)
-MODEL_PORTS = (11434, 8080, 1234, 8000, 30000)
-PORT_GUESS = {11434: "ollama", 8080: "llamacpp", 1234: "lmstudio", 8000: "vllm", 30000: "sglang"}
+# 8080 too), and (0.52) KoboldCpp 5001, Jan 1337, text-generation-webui or TabbyAPI 5000, Aphrodite 2242, each
+# OpenAI-compatible (LocalAI, llamafile and MLX's server use 8080). 8188 is ComfyUI, found by router_find for image
+# generation; it is never a sub-agent system.
+MODEL_PORTS = (11434, 8080, 1234, 8000, 30000, 5001, 1337, 5000, 2242)
+KNOWN_PORTS = MODEL_PORTS + (8188,)
+PORT_GUESS = {11434: "ollama", 8080: "llamacpp", 1234: "lmstudio", 8000: "vllm", 30000: "sglang",
+              5001: "openai_compatible", 1337: "openai_compatible", 5000: "openai_compatible", 2242: "openai_compatible"}
 CONNECT_TIMEOUT = 1.5
 READ_TIMEOUT = 3.0
 MAX_BODY = 4 * 1024 * 1024

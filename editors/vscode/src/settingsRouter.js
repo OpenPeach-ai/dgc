@@ -6,7 +6,7 @@
 import { bindContextCombos, contextComboHTML, parseContext } from './contextCombo.js';
 
 // The ports a look on the network checks: dgc/router_probe.py KNOWN_PORTS (8188 is ComfyUI, for image generation).
-const ROUTER_PORTS = '11434, 8080, 1234, 8000, 30000, 8188';
+const ROUTER_PORTS = '11434, 8080, 1234, 8000, 30000, 5001, 1337, 5000, 2242, 8188';
 const SERVER_NAMES = { ollama: 'Ollama', llamacpp: 'llama.cpp', vllm: 'vLLM', sglang: 'SGLang', tgi: 'TGI', lmstudio: 'LM Studio',
     openai_compatible: 'OpenAI-compatible', comfyui: 'ComfyUI' };
 const JOB_NAMES = { subagents: 'Sub-agents', pips: 'Pips' };

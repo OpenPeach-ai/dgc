@@ -281,3 +281,15 @@ class Find(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MoreLocalServers(unittest.TestCase):
+    """0.52 (asked 4 Nov): Find models also looks for KoboldCpp, Jan, text-generation-webui or TabbyAPI, and
+    Aphrodite on their default ports; each speaks the OpenAI-compatible API."""
+
+    def test_their_default_ports_are_looked_on_and_named(self):
+        for port in (5001, 1337, 5000, 2242):
+            self.assertIn(port, P.KNOWN_PORTS)
+            self.assertIn(port, P.MODEL_PORTS)
+            self.assertEqual(P.PORT_GUESS[port], "openai_compatible")
+        self.assertNotIn(8188, P.MODEL_PORTS, "ComfyUI is found for pictures, never a sub-agent system")
