@@ -592,6 +592,7 @@ class Host:
         with self.lock:
             self.label = " ".join(str(label or "").split())[:80]
             self._begin(run_id, frames_dir, **settings)
+        self._say_at_work(run_id)
 
     def _begin(self, run_id: str, frames_dir: Path, *, careful: bool = False, said: str = "", sites=(),
                level: str = "ask", unattended: bool = False, level_now=None, carry=None) -> None:
@@ -627,6 +628,22 @@ class Host:
                 return
             self.label = ""
             self._end()
+        self._say_at_work(None)
+
+    def _say_at_work(self, run_id) -> None:
+        """Which run has this computer now, for the editor's dots (API 86, computer_states): written as a run starts on
+        it and cleared as it ends. A record left by a supervisor that stopped is read as not working (its run ended)."""
+        from .workspace_registry import WorkspaceRegistry
+        key = f"{AT_WORK}{self.pip_id}:{self.number}"
+        try:
+            with WorkspaceRegistry(self.state_directory) as registry, registry.transaction():
+                if run_id:
+                    registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (key, json.dumps(
+                        {"run_id": run_id, "label": self.label, "since": _now(), "host_id": self.id})))
+                else:
+                    registry.db.execute("DELETE FROM metadata WHERE key=?", (key,))
+        except (OSError, RegistryError, sqlite3.Error):
+            pass
 
     def _end(self) -> None:
         with self.lock:
@@ -1679,6 +1696,7 @@ COMPUTER_NAMES = ("Juniper", "Maple", "Willow", "Cedar", "Fern", "Clover", "Basi
                   "Otter", "Badger", "Marble", "Quartz", "Cobalt", "Flint", "Ember", "Lumen", "Nimbus", "Zephyr",
                   "Ripple", "Harbor", "Dune", "Meadow", "Pebble", "Quill", "Tango", "Vesper", "Jasper", "Hazel")
 COMPUTER_NAMES_KEY = "pip_computer_names:"     # + pip id -> {"<number>": "<the user's name>"}
+AT_WORK = "computer_at_work:"                  # + pip id + ":" + number -> {run_id, label, since, host_id} (Host.begin)
 COMPUTER_NAME_MAX = 30
 _NAME_OK = re.compile(r"[\w][\w .'&()-]{0,29}", re.UNICODE)
 
@@ -1716,6 +1734,44 @@ def computer_names(db, pip_id) -> list[dict]:
             name = f"Computer {number}"
         taken.add(name.casefold())
         out.append({"number": number, "name": name, "named": False})
+    return out
+
+
+def computer_states(db, pip_id) -> list[dict]:
+    """Each computer's name with its state, for the dots beside it (his call, 12 Nov): "needs_you" (its run waits for
+    the user: an approval, or a check on its screen only a person can pass), "working" (a reply or a run has it),
+    "open" (its screen is open in an editor tab) or "closed". `doing`: what the run that has it is doing, in the
+    user's words, when it says."""
+    active = ("queued", "running", "cancelling")
+    pending = {(r[0], r[1]) for r in db.execute(
+        "SELECT run_id, host_id FROM pip_computer_actions WHERE pip_id=? AND status='pending'", (pip_id,))}
+    waiting = None
+    row = db.execute("SELECT value FROM metadata WHERE key=?", (NEEDS_YOU + pip_id,)).fetchone()
+    try:
+        waiting = json.loads(row[0]) if row else None
+    except (TypeError, ValueError):
+        waiting = None
+    out = []
+    for entry in computer_names(db, pip_id):
+        number, state, doing = entry["number"], "closed", ""
+        held = db.execute("SELECT value FROM metadata WHERE key=?", (f"{AT_WORK}{pip_id}:{number}",)).fetchone()
+        try:
+            held = json.loads(held[0]) if held else None
+        except (TypeError, ValueError):
+            held = None
+        run = held.get("run_id") if isinstance(held, dict) else None
+        live = run and db.execute(f"SELECT 1 FROM pip_runs WHERE id=? AND status IN ({','.join('?' * len(active))})",
+                                  (run, *active)).fetchone()
+        view_open = db.execute("SELECT 1 FROM metadata WHERE key=?", (_view_key(pip_id, number),)).fetchone() or (
+            number == 1 and db.execute("SELECT 1 FROM metadata WHERE key=?", (_view_key(pip_id, None),)).fetchone())
+        if live:
+            state, doing = "working", str(held.get("label") or "")[:80]
+            if (any(r == run or h == held.get("host_id") for r, h in pending)
+                    or (isinstance(waiting, dict) and waiting.get("run_id") == run)):
+                state = "needs_you"
+        elif view_open:
+            state = "open"
+        out.append({**entry, "state": state, **({"doing": doing} if doing else {})})
     return out
 
 
@@ -2348,7 +2404,7 @@ def status(registry, pip_id: str) -> dict:
             "actions": (waiting_rows + others)[:5],
             # Several computers per Pip (API 79): how many it has, and how many it may have; (API 86) each one's name.
             "computers": computers(registry.db, pip_id), "computers_limit": computers_limit(registry.db),
-            "names": computer_names(registry.db, pip_id),
+            "names": computer_states(registry.db, pip_id),
             **({"needs_you": {"host": waiting["host"], "at": waiting.get("at", "")}} if waiting else {})}
 
 

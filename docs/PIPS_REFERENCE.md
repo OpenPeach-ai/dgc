@@ -1214,7 +1214,9 @@ one. A request that names no conversation is about the first, so an editor or SD
   conversation's reply runs; two replies of one conversation never run together, and a second message in a running
   conversation joins its reply as before. Its other work (scheduled runs, reviews, tasks) still runs alone.
 - Each of its computers has a name (API 86): a friendly one of its own (Juniper, Wren...) until you rename it.
-  `get_pip_computer`'s `computer.names` lists `[{number, name, named}]`; `rename_pip_computer {pip_id, number, name}`
+  `get_pip_computer`'s `computer.names` lists `[{number, name, named, state, doing?}]`, `state` being `closed`,
+  `open` (its screen is open in a tab), `working` (a reply has it; `doing` says what) or `needs_you` (that reply waits
+  for you: an approval, or a check on its screen only a person can pass); `rename_pip_computer {pip_id, number, name}`
   (local only) sets yours, "" gives back its first name, and two of one Pip's computers never share a name.
   `open_pip_computer` and `use_pip_computer_view` take an optional `number` (1 for the first): that computer's own
   live view; without it, the one at work, else the first, as before.

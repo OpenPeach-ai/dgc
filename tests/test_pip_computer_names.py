@@ -23,7 +23,8 @@ class ComputerNames(Store):
         self.pip = self.personal(computer=True)
 
     def names(self):
-        return self.control("get_pip_computer", pip_id=self.pip["id"])["computer"]["names"]
+        return [{k: n[k] for k in ("number", "name", "named")}
+                for n in self.control("get_pip_computer", pip_id=self.pip["id"])["computer"]["names"]]
 
     def test_each_computer_has_a_friendly_name_that_stays(self):
         first = self.names()
@@ -73,6 +74,59 @@ class ComputerNames(Store):
         self.assertEqual(caught.exception.code, "local_only")
         self.control("rename_pip_computer", pip_id=self.pip["id"], number=1, name="Mom's laptop (2)")
         self.assertEqual(self.names()[0]["name"], "Mom's laptop (2)")
+
+
+class ComputerStates(Store):
+    """The dots beside each computer (asked 12 Nov): closed, open (its screen is open in a tab), working (a reply has
+    it, with what it is doing) or needs_you (that reply waits for the user: an approval, or a check on its screen)."""
+
+    def setUp(self):
+        super().setUp()
+        self.pip = self.personal(computer=True)
+        self.control("add_pip_computer", pip_id=self.pip["id"])
+
+    def states(self):
+        return {n["number"]: (n["state"], n.get("doing", "")) for n in
+                self.control("get_pip_computer", pip_id=self.pip["id"])["computer"]["names"]}
+
+    def take(self, number, run_id, label="Find a flat in Pune"):
+        class Host:
+            pass
+        host = Host()
+        host.state_directory, host.pip_id, host.number, host.label, host.id = (
+            self.registry.directory, self.pip["id"], number, label, f"host_{number}")
+        pip_computer.Host._say_at_work(host, run_id)
+        return host
+
+    def a_run(self):
+        run = self.control("send_pip_message", pip_id=self.pip["id"], text="Look at flats for me",
+                           idempotency_key="flats-" + str(len(self.registry.db.execute("SELECT id FROM pip_runs").fetchall())))["run"]["id"]
+        self.registry.db.execute("UPDATE pip_runs SET status='running' WHERE id=?", (run,))
+        return run
+
+    def test_closed_open_working_and_needs_you(self):
+        self.assertEqual(self.states(), {1: ("closed", ""), 2: ("closed", "")})
+        with self.registry.transaction():
+            self.registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
+                                     (pip_computer._view_key(self.pip["id"], 2), '{"socket": "/run/v", "token": "t"}'))
+        self.assertEqual(self.states()[2], ("open", ""))
+        run = self.a_run()
+        host = self.take(1, run)
+        self.assertEqual(self.states()[1], ("working", "Find a flat in Pune"))
+        with self.registry.transaction():
+            self.registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (pip_computer.NEEDS_YOU + self.pip["id"],
+                                     '{"host": "accounts.example", "at": "now", "run_id": "%s"}' % run))
+        self.assertEqual(self.states()[1][0], "needs_you", "a check on its screen only a person can pass")
+        self.assertEqual(self.states()[2][0], "open", "the other one is not the one waiting")
+        pip_computer.Host._say_at_work(host, None)
+        self.assertEqual(self.states()[1][0], "closed", "its run let it go")
+
+    def test_a_record_left_by_a_run_that_ended_reads_as_not_working(self):
+        run = self.a_run()
+        self.take(2, run)
+        self.assertEqual(self.states()[2][0], "working")
+        self.registry.db.execute("UPDATE pip_runs SET status='succeeded' WHERE id=?", (run,))
+        self.assertEqual(self.states()[2][0], "closed")
 
 
 class OpenWhichComputer(Store):
