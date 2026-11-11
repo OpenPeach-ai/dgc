@@ -551,6 +551,14 @@ test('finding handoff is saved before review, accepts only saved identity and do
  const jobs=[job(),job('b')],x=setup({jobs,runs:[run('r1','a',{checkpoint:checkpoint()})]});await x.drain();beginHandoff(x);assert.equal(x.requests('propose_pip_handoff').length,0);x.submit('#handoff-form');const request=x.requests('propose_pip_handoff')[0];assert.deepEqual(JSON.parse(JSON.stringify(request.request.action)),{kind:'read_only'});assert.equal(x.requests('accept_pip_handoff').length,0);assert.equal(x.requests('review_pip_finding').length,0);
  x.answer(request,{handoff:handoff()});await x.drain({list_pip_handoffs:()=>handoffPage([handoff()])});assert.match(x.d.querySelector('[role=dialog]').textContent,/one run of Recipient with exactly what’s below/);assert.match(x.d.querySelector('[role=dialog]').textContent,/model-a/);x.click('#review-confirm');assert.deepEqual(JSON.parse(JSON.stringify(x.requests('accept_pip_handoff')[0].request)),{type:'accept_pip_handoff',handoff_id:'handoff-1',expected_revision:0});assert.equal(x.requests('run_pip').length,0);
 });
+test('a handoff the target Pip\'s level took (Pips API 80) says it runs now, and asks for no review',async()=>{
+ const jobs=[job(),job('b')],x=setup({jobs,runs:[run('r1','a',{checkpoint:checkpoint()})]});await x.drain();beginHandoff(x);x.submit('#handoff-form');const request=x.requests('propose_pip_handoff')[0];
+ const taken={...handoff(),status:'accepted',revision:1,resolved_by:'pip-level:approve',resolved_at:'2026-11-11T07:00:00.000Z',run_id:'run-taken',run_status:'queued'};
+ x.answer(request,{handoff:taken,run:{id:'run-taken'}});await x.drain({list_pip_handoffs:()=>handoffPage([taken])});
+ assert.equal(x.d.querySelector('[role=dialog]'),null,'no review: its level took it');
+ assert.match(x.d.body.textContent,/Recipient’s level took it: it runs now, in its own copy\./);
+ assert.equal(x.requests('accept_pip_handoff').length,0);
+});
 test('unknown proposal outcome retries the same envelope key and changed task makes a new key',async()=>{
  const x=setup({jobs:[job(),job('b')],runs:[run('r1','a',{checkpoint:checkpoint()})]});await x.drain();beginHandoff(x);x.submit('#handoff-form');const first=x.requests('propose_pip_handoff')[0];x.answer(first,{message:'Outcome unknown'},false);await x.drain();assert.equal(x.d.querySelector('#handoffTask').value,'Investigate the boundary.');x.submit('#handoff-form');const second=x.requests('propose_pip_handoff')[1];assert.equal(second.request.idempotency_key,first.request.idempotency_key);x.answer(second,{message:'Outcome unknown'},false);await x.drain();x.input('#handoffTask','Investigate only the source excerpt.');x.submit('#handoff-form');assert.notEqual(x.requests('propose_pip_handoff')[2].request.idempotency_key,first.request.idempotency_key);
 });

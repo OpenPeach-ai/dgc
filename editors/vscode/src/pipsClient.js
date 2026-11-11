@@ -2430,7 +2430,7 @@ function handoffsMarkup(){
 }
 // Handoff rows name Pips and requesters the way people know them, never by stored ID.
 function pipName(id){return S.jobs.find(p=>p.id===id)?.name||'another Pip';}
-function requester(actor){const a=String(actor||'');return a==='editor-user'?'by you in the editor':a==='local-console'?'by you in the terminal':a.startsWith('main-')?'from the main chat':a.startsWith('core')?'by Core':'by another DGC surface';}
+function requester(actor){const a=String(actor||'');return a==='editor-user'?'by you in the editor':a==='local-console'?'by you in the terminal':a==='pip-level:approve'?'by its level (Approve for me)':a==='pip-level:full'?'by its level (Do it all)':a.startsWith('main-')?'from the main chat':a.startsWith('core')?'by Core':'by another DGC surface';}
 async function loadHandoffs(more=false){
   if(!usable()||!S.selected||S.handoffsLoading||(more&&(!S.handoffCursor||S.handoffs.length>=200)))return;
   const token=scope(),sequence=++handoffSeq,before=more?S.handoffCursor:null;S.handoffsLoading=true;S.handoffsError='';render();
@@ -4543,7 +4543,10 @@ document.addEventListener('submit',event=>{
     const handoffScope=scope(),task=draft.handoffTask.trim();if(!task||new TextEncoder().encode(task).length>4000){setError('Say what it should do, in a paragraph or two.');return;}
     const request={type:saved.artifact?'propose_pip_artifact_handoff':'propose_pip_handoff',source_run_id:saved.runId,...(saved.artifact?{}:{finding_index:saved.index}),target_pip_id:target.id,task,action},signature=JSON.stringify(request);
     if(saved.signature!==signature){saved.signature=signature;saved.key='editor-handoff-'+globalThis.crypto.randomUUID();}
-    void mutate({...request,idempotency_key:saved.key},async result=>{const h=handoffRecord(result.handoff,S.selected,S.workspace.id);if(h.source_run_id!==saved.runId||(saved.artifact?(h.payload.type!=='patch_artifact.v1'||h.payload.source.artifact.sha256!==saved.artifact.artifact.sha256||h.payload.source.result_digest!==saved.artifact.result_digest||h.payload.source.review_revision!==saved.artifact.review_revision):h.payload.source.finding_index!==saved.index)||h.target_pip_id!==target.id)throw new Error('The saved handoff doesn’t match what you chose. Refresh and try again.');S.handoffDraft=null;S.notice='Handoff saved. Nothing starts until you approve it.';if(h.payload.action.kind!=='read_only')await loadExecution();if(handoffScope!==scope())return;reviewHandoff(h);void loadHandoffs();});return;
+    void mutate({...request,idempotency_key:saved.key},async result=>{const h=handoffRecord(result.handoff,S.selected,S.workspace.id);if(h.source_run_id!==saved.runId||(saved.artifact?(h.payload.type!=='patch_artifact.v1'||h.payload.source.artifact.sha256!==saved.artifact.artifact.sha256||h.payload.source.result_digest!==saved.artifact.result_digest||h.payload.source.review_revision!==saved.artifact.review_revision):h.payload.source.finding_index!==saved.index)||h.target_pip_id!==target.id)throw new Error('The saved handoff doesn’t match what you chose. Refresh and try again.');S.handoffDraft=null;
+      // Taken by the target Pip's level (Pips API 80, pips-11): it runs now, in its own copy; nothing to review.
+      if(h.status==='accepted'&&String(h.resolved_by||'').startsWith('pip-level:')){S.notice=`${h.payload.target.name}’s level took it: it runs now, in its own copy.`;if(handoffScope!==scope())return;render();void loadHandoffs();return;}
+      S.notice='Handoff saved. Nothing starts until you approve it.';if(h.payload.action.kind!=='read_only')await loadExecution();if(handoffScope!==scope())return;reviewHandoff(h);void loadHandoffs();});return;
   }
   if(id==='web-reads-form'){
     if(S.apiVersion<40||!personalPip()){setError('Update DGC to add web reads.');return;}
