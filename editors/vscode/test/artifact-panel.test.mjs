@@ -374,7 +374,8 @@ test("the stylesheet holds in the browser: filled primaries, hidden menus, icons
         assert.equal(look.menu, "none", "a menu is hidden until opened");
         assert.equal(look.banner, "none");
         assert.ok(look.icons.length && look.icons.every(Boolean), `codicons draw (${look.icons})`);
-        if (look.primary) assert.deepEqual(look.primary, ["rgb(118, 84, 246)", "rgb(255, 255, 255)"], "DGC's one filled button: its purple, white words");
+        // (11 Nov: DGC's one button on every surface. The filled main action is the text's own colour; purple is Send's alone.)
+        if (look.primary) assert.deepEqual(look.primary, ["rgb(204, 204, 204)", "rgb(49, 49, 49)"], "DGC's one filled button: the text's colour, the ground's colour for its words");
         assert.equal(look.overflow, 0, `${kind} at ${width}: no sideways scroll`);
         assert.deepEqual(look.wide, [], `${kind} at ${width}: nothing in the header or toolbar runs off the edge`);
       } finally { await s.page.close(); }

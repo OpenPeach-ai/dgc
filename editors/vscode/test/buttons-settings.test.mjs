@@ -56,6 +56,7 @@ for (const theme of ["dark", "light"]) for (const width of [300, 700, 1000]) {
     const p = await open(theme, width);
     try {
       const found = await p.evaluate(probe, { root: "#sample", buttons: FAMILIES, cards: ".set" });
+      if (process.env.SHOTS && width !== 1000) await p.screenshot({ path: `${process.env.SHOTS}/settings-${theme}-${width}.png` });   // SHOTS=<folder> saves what was painted
       check(assert, found, { where: `${theme} ${width}`, min: 16, free: /\blink\b/ });
       const by = Object.fromEntries(found.buttons.map((b) => [b.word, b]));
       assert.deepEqual(["Save provider", "Cancel", "Remove", "Save all", "Undo", "Get a key"].map((w) => [by[w].kind, by[w].width, Math.round(by[w].height)]),

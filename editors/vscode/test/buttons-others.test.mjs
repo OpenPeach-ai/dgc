@@ -46,6 +46,8 @@ for (const theme of ["dark-modern", "light-modern"]) {
     const p = await open(theme);
     try {
       const found = await p.evaluate(probe, { root: "#sample", buttons: FAMILIES, cards: ".set" });
+      if (process.env.SHOTS) for (const width of [300, 700]) { await p.setViewportSize({ width, height: 420 }); await p.screenshot({ path: `${process.env.SHOTS}/others-${theme.replace("-modern", "")}-${width}.png` }); }   // SHOTS=<folder> saves what was painted
+      await p.setViewportSize({ width: 700, height: 500 });
       check(assert, found, { where: theme, min: 9, free: /art-btn/ });
       assert.deepEqual(found.buttons.map((b) => `${b.word}:${b.kind}:${Math.round(b.height)}`), ["Share:filled:28", "Download:outline:28", "History:link:28", "Allow:filled:22", "Not now:outline:22", "Create:filled:22", "Review:outline:22", "Reject:outline:22", "Change:outline:22"]);
       assert.deepEqual(found.buttons.slice(3).map((b) => b.width), [76, 76, 76, 76, 76, 76], "the small box, whatever the words");

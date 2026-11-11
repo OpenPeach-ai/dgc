@@ -3632,3 +3632,7 @@ button.link:disabled, .pip-report-slim-actions button:disabled, .pip-report.quie
 @container pip-report (max-width: 330px) { .pip-report-line2 { flex-wrap: wrap; row-gap: 3px; } .pip-report-line2 .pip-report-slim-actions { margin-left: auto; } }
 /* (Under an open question in a narrow panel, Skip and Send share what is left of the row, equally.) */
 .open-ask-send, .open-ask-skip { flex: 0 1 var(--btn-w); width: auto; }
+/* (Two places keep a width of their own: the agent map card's Open transcript fills the card, and a helper row's Run in
+   background sits inside its sentence, as tall as the line.) */
+button.act.am-wide { width: 100%; }
+.agent-line-move button.link { height: auto; line-height: calc(var(--t-sm) * 1.45 - 2px); }

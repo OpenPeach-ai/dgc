@@ -47,6 +47,7 @@ for (const theme of ["dark-modern", "light-modern", "hc"]) for (const width of [
     const x = await open({ theme, width });
     try {
       const found = await x.page.evaluate(probe, { root: "#cd-buttons", buttons: FAMILIES, cards: ".set" });
+      if (process.env.SHOTS && theme !== "hc" && width !== 1000) await x.page.screenshot({ path: `${process.env.SHOTS}/chatdgc-${theme.replace("-modern", "")}-${width}.png` });   // SHOTS=<folder> saves what was painted
       check(assert, found, { where: `${theme} ${width}`, min: 7 });
       assert.deepEqual(found.buttons.map((b) => `${b.word}:${b.kind}:${b.width}x${Math.round(b.height)}`),
         ["Allow:filled:104x28", "Always allow:outline:104x28", "Not now:outline:104x28", "Continue:filled:104x28", "Retry:outline:76x22", "Run now:outline:76x22", "Cancel:outline:76x22"]);

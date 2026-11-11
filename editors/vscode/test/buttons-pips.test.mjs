@@ -46,6 +46,7 @@ for (const theme of ["dark", "light"]) for (const width of [300, 700, 1000]) for
     const x = await openView(name, { width, theme });
     try {
       const found = await x.p.evaluate(probe, { root: "body", buttons: PIP_BUTTONS, cards: HOLDS, shadow: "#pips-host" });
+      if (process.env.SHOTS && width !== 1000) await x.p.screenshot({ path: `${process.env.SHOTS}/pips-${name.replace(/[^a-z]+/gi, "-").toLowerCase()}-${theme}-${width}.png`, fullPage: false });   // SHOTS=<folder> saves what was painted
       check(assert, found, { where: name, sizes: ["h", "hSm"], min: VIEWS[name][2], free: /\blink\b/ });
       assert.equal(await x.p.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, "nothing runs off the side");
       assert.deepEqual(x.errors, []);

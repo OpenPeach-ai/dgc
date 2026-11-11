@@ -38,7 +38,9 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
       const core = await look(x.p, "#create-core");
       assert.deepEqual([core.fill, core.words, core.lineWidth], ["rgba(0, 0, 0, 0)", token["--text"], "1px"], "Create: an outline");
       assert.equal(isPurple(core.line), false);
-      assert.equal((await look(x.p, "#flow-new")).words, token["--text-2"], "New workflow: quiet text");
+      // (11 Nov: DGC's one button. A second action is the hairline outline with the text's colour, no longer quiet text with no edge.)
+      const flow = await look(x.p, "#flow-new");
+      assert.deepEqual([flow.fill, flow.words, flow.lineWidth], ["rgba(0, 0, 0, 0)", token["--text"], "1px"], "New workflow: an outline");
       const search = await look(x.p, "#pip-search");
       assert.deepEqual([search.fill, search.corner], [token["--field"], "12.5px"], "the search box: a field's wash");
       assert.equal(search.line, "rgba(0, 0, 0, 0)", "and no line round it");
