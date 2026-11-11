@@ -16,7 +16,7 @@ from dgc.workspace_registry import RegistryError
 from tests import test_pip_plugins as base
 from tests import test_pips_local as local
 
-KEYED = {**base.AIRTABLE, "env_names": ["AIRTABLE_TOKEN"]}
+KEYED = {**base.AIRTABLE, "env_names": ["AIRTABLE_TOKEN"], "auth_env": "AIRTABLE_TOKEN"}   # as a remote plugin names its key (Brevo: BREVO_MCP_TOKEN)
 SECRET = "pat_test_0123456789abcdefSECRET"
 
 
@@ -107,3 +107,52 @@ class PluginKeyCard(base.PluginWorld, unittest.TestCase):
         self.assertNotIn(SECRET, json.dumps(answered), "never in the answer")
         self.assertEqual(self.saved, {"airtable": {"AIRTABLE_TOKEN": SECRET}})
         carry.assert_called_once()
+
+    def test_a_card_says_why_in_its_own_words_not_its_title_again(self):
+        self.use("plugin_tools", plugin="airtable")
+        card = self.card()
+        self.assertNotIn("needs its", card["reason"], "the title already says what it needs")
+        self.assertIn("Airtable", card["reason"])
+
+    def test_a_key_the_server_turns_away_is_said_and_asked_for_again(self):
+        """A saved key the vendor refuses (HTTP 401): the Pip is told so, not the vague "isn't signed in", and the card
+        comes back asking for a new one (its box though a key is saved), which Allow replaces."""
+        self.use("plugin_tools", plugin="airtable")
+        card = self.card()
+        pip_plugins.allow(self.registry, self.cfg, card["id"], self.pip["id"], "editor-user", keys={"AIRTABLE_TOKEN": SECRET})
+        refused = "Airtable didn't accept this token (HTTP 401). Check that you copied all of it and that it hasn't expired."
+
+        class Refusing(base.Vendor):
+            def connect_all(self, specs, **kw):
+                self.failures = {name: refused for name in specs}
+        with patch("dgc.mcp.MCPManager", Refusing):
+            session = pip_plugins.Session(self.registry.directory, self.cfg, self.pip["id"], self.pip["workspace_id"], self.RUN)
+            self.addCleanup(session.close)
+            try:
+                said = session.call(self.registry, "plugin_tools", {"plugin": "airtable"})
+            except RegistryError as exc:
+                said = str(exc)
+        self.assertIn("HTTP 401", said, "what the vendor said")
+        self.assertIn("card below your reply", said)
+        self.assertNotIn("isn’t signed in", said)
+        again = self.card()
+        self.assertEqual(again["status"], "requested")
+        self.assertEqual([k["name"] for k in again["needs_key"]], ["AIRTABLE_TOKEN"], "its box, though a key is saved")
+        self.assertIn("refused", again["reason"])
+        pip_plugins.allow(self.registry, self.cfg, again["id"], self.pip["id"], "editor-user", keys={"AIRTABLE_TOKEN": "pat_new_key"})
+        self.assertEqual(self.saved["airtable"]["AIRTABLE_TOKEN"], "pat_new_key", "the new key replaces the refused one")
+
+    def test_another_failure_is_passed_on_in_its_own_words(self):
+        class Down(base.Vendor):
+            def connect_all(self, specs, **kw):
+                self.failures = {name: "nothing answered at mcp.airtable.com (connection refused)" for name in specs}
+        self.saved["airtable"] = {"AIRTABLE_TOKEN": SECRET}
+        with patch("dgc.mcp.MCPManager", Down):
+            session = pip_plugins.Session(self.registry.directory, self.cfg, self.pip["id"], self.pip["workspace_id"], self.RUN)
+            self.addCleanup(session.close)
+            try:
+                said = session.call(self.registry, "plugin_tools", {"plugin": "airtable"})
+            except RegistryError as exc:
+                said = str(exc)
+        self.assertIn("nothing answered", said)
+
