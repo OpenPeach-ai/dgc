@@ -21,12 +21,12 @@
 /* Markdown's font icon cannot cross a ShadowRoot. A CSS mask supplies the same
    copy outline without depending on a font or fetching an asset. */
 .message-body button.copy .codicon{display:block;width:12px;height:12px;background:currentColor;mask:center/contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M5 5h8v9H5zM10 5V2H2v9h3' fill='none' stroke='black' stroke-width='1.2'/%3E%3C/svg%3E")}
-.message-body .hljs-keyword,.message-body .hljs-selector-tag,.message-body .hljs-literal{color:var(--vscode-symbolIcon-keywordForeground,#c792ea)}.message-body .hljs-string,.message-body .hljs-regexp,.message-body .hljs-addition{color:var(--vscode-debugTokenExpression-string,#a8c98e)}.message-body .hljs-number,.message-body .hljs-built_in,.message-body .hljs-type{color:var(--vscode-debugTokenExpression-number,#e4b682)}.message-body .hljs-title,.message-body .hljs-attr,.message-body .hljs-attribute,.message-body .hljs-selector-class{color:var(--vscode-symbolIcon-functionForeground,#d7b8f3)}.message-body .hljs-comment,.message-body .hljs-quote{color:var(--vscode-descriptionForeground,#93939b);font-style:italic}.message-body .hljs-deletion{color:var(--vscode-gitDecoration-deletedResourceForeground,#e58b91)}
+.message-body .hljs-keyword,.message-body .hljs-selector-tag,.message-body .hljs-literal{color:var(--vscode-symbolIcon-keywordForeground,#c792ea)}.message-body .hljs-string,.message-body .hljs-regexp,.message-body .hljs-addition{color:var(--vscode-debugTokenExpression-string,#a8c98e)}.message-body .hljs-number,.message-body .hljs-built_in,.message-body .hljs-type{color:var(--vscode-debugTokenExpression-number,#e4b682)}.message-body .hljs-title,.message-body .hljs-attr,.message-body .hljs-attribute,.message-body .hljs-selector-class{color:var(--vscode-symbolIcon-functionForeground,#d7b8f3)}.message-body .hljs-comment,.message-body .hljs-quote{color:var(--muted,#93939b);font-style:italic}.message-body .hljs-deletion{color:var(--vscode-gitDecoration-deletedResourceForeground,#e58b91)}
 .pip-message .response-actions{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-top:4px;opacity:.85;min-width:0}.pip-message.user .response-actions{margin-top:0;opacity:.62}
 .pip-message:hover .response-actions,.pip-message .response-actions:focus-within{opacity:1}
 /* A message's time (media/msgtime.js), at its own edge of the row: read, not pressed, so it stays when the buttons hide. */
 .pip-message .msg-time{font:400 11px/1.2 var(--vscode-font-family,system-ui,sans-serif);font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap;padding:0 4px}
-.pip-message .ract,.message-details>summary{display:inline-flex;align-items:center;justify-content:center;height:20px;min-height:20px;min-width:20px;padding:0 4px;border:0;border-radius:6px;background:transparent;color:var(--vscode-descriptionForeground,#96969b);cursor:pointer}
+.pip-message .ract,.message-details>summary{display:inline-flex;align-items:center;justify-content:center;height:20px;min-height:20px;min-width:20px;padding:0 4px;border:0;border-radius:6px;background:transparent;color:var(--muted,#96969b);cursor:pointer}
 .pip-message .ract-trace{width:auto;padding-inline:7px;font-size:11px;font-weight:500}
 .run-post-attach .ract-trace{align-self:stretch;height:auto;min-height:24px;font-size:12px;font-weight:400}
 .pip-message .ract:hover,.message-details>summary:hover{background:var(--vscode-input-background,#29292b);color:var(--vscode-foreground)}.pip-message .ract:disabled{opacity:.4;cursor:default}.pip-message .ract svg,.message-details>summary svg{width:12px;height:12px;flex:none}
@@ -70,7 +70,7 @@
 .message-body li.task-item{position:relative;list-style:none}
 .message-body li.task-item>input[type=checkbox]{position:absolute;left:-20px;top:3px;width:13px;height:13px;min-height:0;margin:0;padding:0;accent-color:var(--vscode-button-background,var(--accent))}
 /* "Used [logo] Aave": the plugins a reply took an answer from, quiet under it. */
-.msg-plugins{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;margin:6px 0 0;color:var(--vscode-descriptionForeground);font-size:11px;line-height:1.5}
+.msg-plugins{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;margin:6px 0 0;color:var(--muted);font-size:11px;line-height:1.5}
 .msg-plugin{display:inline-flex;align-items:center;gap:4px;min-width:0}
 .msg-plugin-mark{display:inline-flex;width:14px;height:14px;flex:none}
 .msg-plugin-mark img{width:14px;height:14px;border-radius:3px;object-fit:contain}
@@ -89,7 +89,7 @@
    all-clear runs ran. A routine's reply (pipsTranscript.js) wears the same head. */
 .run-post{--sev-high:var(--vscode-errorForeground,#f48771);--sev-med:var(--vscode-editorWarning-foreground,#cca700)}
 body.vscode-light .run-post{--sev-high:#c72e0f;--sev-med:#8a6100}
-.run-post-head{display:flex;align-items:center;gap:6px;min-width:0;color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.4}
+.run-post-head{display:flex;align-items:center;gap:6px;min-width:0;color:var(--muted);font-size:12px;line-height:1.4}
 .run-post-face{display:inline-flex;flex:none}
 .run-post-face .avatar{width:22px;height:21px}
 .run-post-name{color:var(--vscode-foreground);font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -107,7 +107,7 @@ body.vscode-light .run-post{--sev-high:#c72e0f;--sev-med:#8a6100}
 .run-post-chip>span{min-width:0;overflow-wrap:anywhere}
 .run-post-chip::-webkit-details-marker{display:none}
 .run-post-chip:hover{background:var(--pip-wash,var(--vscode-toolbar-hoverBackground))}
-.run-post-chip.quiet{border-color:transparent;padding:2px 4px;color:var(--vscode-descriptionForeground)}
+.run-post-chip.quiet{border-color:transparent;padding:2px 4px;color:var(--muted)}
 .run-post-chip.quiet:hover{color:var(--vscode-foreground)}
 .run-post-chip.asked,.run-post-chip:disabled{opacity:.7;cursor:default}
 .run-post-chip svg{flex:none}
@@ -128,28 +128,28 @@ details[open]>summary .run-post-chev{transform:rotate(90deg)}
 .run-post-report-body>button.link{padding:0;font-size:12px}
 .run-post-findings{list-style:none;margin:0 0 6px!important;padding:0!important;display:grid;gap:4px}
 .run-post-findings li{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 8px;min-width:0;margin:0!important;font-size:12px;line-height:1.45}
-.run-post-findings .sev{flex:none;min-width:4.4em;font-weight:600;color:var(--vscode-descriptionForeground)}
+.run-post-findings .sev{flex:none;min-width:4.4em;font-weight:600;color:var(--muted)}
 .run-post-findings .sev[data-sev=critical],.run-post-findings .sev[data-sev=high]{color:var(--sev-high)}
 .run-post-findings .sev[data-sev=medium]{color:var(--sev-med)}
 .run-post-findings .t{flex:1 1 14em;min-width:0;overflow-wrap:anywhere}
-.run-post-findings .w{flex:0 1 auto;min-width:0;color:var(--vscode-descriptionForeground);font-family:var(--vscode-editor-font-family,monospace);font-size:11.5px;overflow-wrap:anywhere}
-.run-post-more{margin:0 0 4px;color:var(--vscode-descriptionForeground);font-size:12px}
+.run-post-findings .w{flex:0 1 auto;min-width:0;color:var(--muted);font-family:var(--vscode-editor-font-family,monospace);font-size:11.5px;overflow-wrap:anywhere}
+.run-post-more{margin:0 0 4px;color:var(--muted);font-size:12px}
 .run-post-day{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;padding:2px 0}
-.run-post-day-name{flex:0 0 5.6em;color:var(--vscode-descriptionForeground)}
+.run-post-day-name{flex:0 0 5.6em;color:var(--muted)}
 .run-post-day-times{display:flex;flex-wrap:wrap;gap:2px 4px;min-width:0;flex:1 1 12em}
 .run-post-time{min-height:0;padding:1px 6px;border:0;border-radius:8px;background:transparent;color:var(--vscode-textLink-foreground);font-size:12px;font-variant-numeric:tabular-nums}
 .run-post-time:hover{background:var(--pip-wash,var(--vscode-toolbar-hoverBackground))}
 /* A run while it runs: the Pip at work, what it is doing now, its clock where its post's time will be, Stop, and how it
    started. Its own post takes its place when it ends (pipRunPosts.js livePostMarkup). */
-.run-post-clock{margin-left:auto;flex:none;font-variant-numeric:tabular-nums;color:var(--vscode-descriptionForeground)}
-.run-post-doing{display:flex;align-items:center;gap:7px;min-width:0;color:var(--vscode-descriptionForeground)}
+.run-post-clock{margin-left:auto;flex:none;font-variant-numeric:tabular-nums;color:var(--muted)}
+.run-post-doing{display:flex;align-items:center;gap:7px;min-width:0;color:var(--muted)}
 .run-post-doing>span:last-child{min-width:0;overflow-wrap:anywhere}
 .run-post-doing code{color:var(--vscode-foreground)}
 .run-post-spinner{flex:none;width:10px;height:10px;border:1.5px solid color-mix(in srgb,currentColor 30%,transparent);border-top-color:var(--vscode-progressBar-background,var(--vscode-focusBorder,#3794ff));border-radius:50%;animation:run-post-spin .9s linear infinite}
 .run-post-live[data-live=queued] .run-post-spinner{animation:none;border-top-color:color-mix(in srgb,currentColor 30%,transparent)}
 .run-post-reply{margin-top:6px;color:var(--vscode-foreground)}
-.run-post-stop>svg{color:var(--vscode-descriptionForeground)}
-.run-post-started{align-self:center;color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.35}
+.run-post-stop>svg{color:var(--muted)}
+.run-post-started{align-self:center;color:var(--muted);font-size:12px;line-height:1.35}
 @media(prefers-reduced-motion:reduce){.run-post-spinner{animation:none}}
 .run-post-flash{animation:run-post-flash 1.6s ease-out}
 @keyframes run-post-flash{0%{background:color-mix(in srgb,var(--vscode-focusBorder,var(--accent)) 22%,transparent)}100%{background:transparent}}
@@ -157,9 +157,9 @@ details[open]>summary .run-post-chev{transform:rotate(90deg)}
 @media(forced-colors:active){.run-post-chip{border:1px solid ButtonText}}
 .hist-row-out{font-weight:600}
 .hist-row-out[data-tone=bad]{color:var(--vscode-errorForeground,#f48771)}
-.hist-row-out[data-tone=clear]{font-weight:400;color:var(--vscode-descriptionForeground)}
+.hist-row-out[data-tone=clear]{font-weight:400;color:var(--muted)}
 /* A failed model request's own words, one click away. */
 .pip-message.user .message-failure{align-self:flex-start}
-.message-failure{margin:2px 0 0;color:var(--vscode-descriptionForeground);font-size:11px;line-height:1.45}
+.message-failure{margin:2px 0 0;color:var(--muted);font-size:11px;line-height:1.45}
 .message-failure summary{width:max-content;cursor:pointer;color:var(--vscode-textLink-foreground)}
 .message-failure span{display:block;margin-top:4px;overflow-wrap:anywhere;font-family:var(--vscode-editor-font-family,monospace)}

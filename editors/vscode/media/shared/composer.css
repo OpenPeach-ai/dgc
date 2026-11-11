@@ -72,3 +72,5 @@
   .dgc-att, .dgc-att-preview { border-color: CanvasText; box-shadow: none; }
   .dgc-drop { border-color: Highlight; background: Canvas; color: CanvasText; }
 }
+/* An attachment's chip is a raised ground: its quiet words take the firmer grey (tokens.css, --muted-firm). */
+.dgc-att { --muted: var(--muted-firm); }

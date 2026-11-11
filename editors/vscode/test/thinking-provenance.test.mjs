@@ -232,7 +232,7 @@ for (const theme of ["light-modern", "dark-modern"]) {
       assert.notEqual(facts.hint, facts.text, "nor is its hint");
       assert.ok(facts.noteContrast >= 4.5 && facts.hintContrast >= 4.5,
         `still readable: ${facts.noteContrast.toFixed(2)} / ${facts.hintContrast.toFixed(2)}`);
-      if (theme === "dark-modern") assert.equal(facts.note, "rgb(157, 157, 157)", "a theme with its own muted colour keeps it");
+      // (The muted tone is the text at 65% on the page's ground, in every theme: muted-grey.test.mjs.)
     } finally {
       await page.close();
     }

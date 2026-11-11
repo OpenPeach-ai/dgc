@@ -39,7 +39,7 @@ async function open(browser, which, { width, height, theme, state }) {
   page.on("pageerror", (error) => errors.push(String(error)));
   await page.setContent(html, { waitUntil: "load" });
   await page.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; --vscode-editor-font-family: ui-monospace, monospace; ${THEMES[theme]} }` });
-  await page.evaluate((t) => document.body.classList.add(t.startsWith("light") ? "vscode-light" : "vscode-dark"), theme);
+  await page.evaluate((t) => document.body.classList.add(t.startsWith("light") ? "vscode-light" : t === "hc" ? "vscode-high-contrast" : "vscode-dark"), theme);
   await page.evaluate(([code, md, saved]) => {
     window.__posted = []; window.__state = saved;
     window.acquireVsCodeApi = () => ({ postMessage: (m) => window.__posted.push(m), getState: () => window.__state, setState(s) { window.__state = s; } });

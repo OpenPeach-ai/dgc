@@ -171,7 +171,7 @@ for (const width of [300, 460, 900]) {
             .map((b) => ({ label: b.getAttribute("aria-label") || b.textContent, ...b.getBoundingClientRect().toJSON() }));
           const img = document.querySelector("#image-viewer .iv-stage img"), stage = img.parentElement;
           const bar = getComputedStyle(document.querySelector("#image-viewer .iv-bar"));
-          const rgb = (value) => value.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number);
+          const rgb = (value) => { const m = value.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number); return value.startsWith("color(srgb") ? m.map((v) => v * 255) : m; };
           return { controls, inner: [innerWidth, innerHeight], img: img.getBoundingClientRect().toJSON(),
             stage: stage.getBoundingClientRect().toJSON(), natural: [img.naturalWidth, img.naturalHeight],
             title: rgb(getComputedStyle(document.getElementById("iv-title")).color),

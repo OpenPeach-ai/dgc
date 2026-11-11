@@ -111,3 +111,5 @@
   .dgc-menu :is(.dgc-menu-row, .dgc-menu-rows > button):is(.is-selected, [aria-checked="true"], [aria-selected="true"], [aria-pressed="true"]) * { color: inherit; }
   .dgc-menu kbd, .dgc-menu .dgc-key { border-color: CanvasText; }
 }
+/* A menu is a raised ground: its quiet words take the firmer grey (tokens.css, --muted-firm). */
+.dgc-menu { --muted: var(--muted-firm); }

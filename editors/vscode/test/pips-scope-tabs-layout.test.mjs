@@ -98,7 +98,7 @@ function styles(page, which) {
     // The painted ground behind a node, across the shadow boundary.
     const ground = (n) => { for (let e = n; e; e = e.parentElement || e.getRootNode()?.host) { const bg = getComputedStyle(e).backgroundColor.replace(/\s/g, "");
       if (bg !== "rgba(0,0,0,0)" && bg !== "transparent") return bg; } return "rgb(255,255,255)"; };
-    const rgb = (v) => v.match(/[\d.]+/g).slice(0, 3).map(Number);
+    const rgb = (v) => { const m = v.match(/-?[\d.]+(?:e-?\d+)?/g).map(Number); return v.startsWith("color(srgb") ? m.slice(0, 3).map((x) => x * 255) : m.slice(0, 3); };
     const lum = (c) => { const v = c.map((p) => p / 255).map((x) => (x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4)); return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; };
     const ratio = (a, b) => { const [x, y] = [lum(rgb(a)), lum(rgb(b))].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
     // Words on one line, inside their tab.

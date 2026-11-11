@@ -2444,7 +2444,10 @@ test("the header's wordmark moves as Work's does: the slashes in the bubble brea
       assert.match(chat.bubble, /^none /, "the bubble holds still");
       assert.match(ours.cursor, /^blink 1\.1s steps\(1(, end)?\) infinite 0s$/);
       assert.equal(chat.cursor, ours.cursor, "the cursor blinks as Work's does");
-      assert.deepEqual(chat.words, { ...ours.words, text: "DGC" }, `${theme}: DGC, in Work's type and colour`);
+      assert.deepEqual({ ...chat.words, colour: "" }, { ...ours.words, colour: "", text: "DGC" }, `${theme}: DGC, in Work's type`);
+      // The same muted grey: the text at 65% (72% in a light theme) on each page's own ground, so a shade apart at most.
+      const grey = (c) => { const m = c.match(/-?[\d.]+(e-?\d+)?/g).map(Number); return c.startsWith("color(srgb") ? m[0] * 255 : m[0]; };
+      assert.ok(Math.abs(grey(chat.words.colour) - grey(ours.words.colour)) <= 3, `${theme}: and in Work's colour (${chat.words.colour} beside ${ours.words.colour})`);
       assert.equal(ours.words.text, "DGC");
       assert.deepEqual(chat.colours, { ...ours.colours, bubble: ours.colours.slashes[0] }, `${theme}: the bubble and its slashes in Work's mark colour`);
       assert.deepEqual(chat.caret, ours.caret, "a caret of Work's size, as far from the word");

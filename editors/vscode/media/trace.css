@@ -8,7 +8,7 @@
   --border-strong: var(--vscode-input-border, var(--vscode-widget-border, #ffffff30));
   --text: var(--vscode-foreground, #cccccc);
   --text-strong: var(--vscode-editor-foreground, var(--vscode-foreground, #e6e6e6));
-  --muted: var(--vscode-descriptionForeground, #9d9d9d);
+  --muted: var(--dgc-muted, var(--vscode-descriptionForeground, #9d9d9d));
   --trace-accent: var(--accent);
 }
 .dgc-trace-backdrop { position: fixed; z-index: 10000; inset: 0; background: #000a; display: grid; place-items: center; padding: 24px; }

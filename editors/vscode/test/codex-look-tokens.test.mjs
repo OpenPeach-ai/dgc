@@ -70,7 +70,9 @@ async function measure(theme) {
       const c = top.slice(0, 3).map((v, i) => v * top[3] + under[i] * (1 - top[3])), [x, y] = [lum(c), lum(under)].sort((p, q) => q - p);
       return Math.round(((x + 0.05) / (y + 0.05)) * 100) / 100; };
     const r = {};
-    for (const ink of ["--faint", "--muted", "--home-count-ink"]) for (const ground of ["--bg", "--surface", "--surface2"]) r[`${ink} on ${ground}`] = ratio(ink, ground);
+    for (const ink of ["--faint", "--muted-firm", "--home-count-ink"]) for (const ground of ["--bg", "--surface", "--surface2"]) r[`${ink} on ${ground}`] = ratio(ink, ground);
+    // (The muted grey is Codex's, for the page's own grounds; a raised ground takes --muted-firm: muted-grey.test.mjs.)
+    for (const ground of ["--bg", "--surface"]) r[`--muted on ${ground}`] = ratio("--muted", ground);
     for (const ink of ["--text-2", "--home-quiet"]) for (const ground of ["--bg", "--surface"]) r[`${ink} on ${ground}`] = ratio(ink, ground);
     r["--on-solid on --solid"] = ratio("--on-solid", "--solid");
     r["--on-solid on --solid-hover"] = ratio("--on-solid", "--solid-hover");

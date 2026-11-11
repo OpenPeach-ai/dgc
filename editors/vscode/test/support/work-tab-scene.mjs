@@ -15,14 +15,14 @@ export async function openWorkTab(browserIn, { width = 900, height = 760, theme 
   await page.setContent(html, { waitUntil: "load" });
   await page.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; --vscode-editor-font-family: ui-monospace, monospace; ${THEMES[theme]} }` });
   await page.evaluate(([mjs, mdjs, light, folder]) => {
-    document.body.classList.add(light ? "vscode-light" : "vscode-dark");
+    document.body.classList.add(light === "hc" ? "vscode-high-contrast" : light ? "vscode-light" : "vscode-dark");
     const root = document.documentElement.dataset;
     Object.assign(root, { chatPlace: "tab", tabKey: "0123456789abcdef", tabSession: "", draftScope: "a".repeat(64), ...(folder ? { tabCwd: folder } : {}) });
     window.__posted = []; window.__state = undefined;
     window.acquireVsCodeApi = () => ({ postMessage(m) { window.__posted.push(m); }, getState: () => window.__state, setState(s) { window.__state = s; } });
     eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
     eval(mjs);
-  }, [mainJs, markdownJs, theme.startsWith("light"), cwd]);
+  }, [mainJs, markdownJs, theme === "hc" ? "hc" : theme.startsWith("light"), cwd]);
   await page.waitForFunction(() => document.getElementById("input"));
   const send = (data) => page.evaluate((d) => window.postMessage(d, "*"), data).then(() => page.waitForTimeout(30));
   return { page, errors, send, posted: (type) => page.evaluate((t) => window.__posted.filter((m) => m.type === t), type),

@@ -3,6 +3,8 @@
    that make it meet its box, the box's corner in --tray-r, the box's own shadow in --tray-lift) and marks its box
    .tray-box, so the shell's ring goes round it. */
 .rail-line { --tray-r: var(--r-box); }
+/* (Its pills, its shell and its popover are washed or raised grounds: quiet words there take the firmer grey.) */
+.rail-line, .rail-pop { --muted: var(--muted-firm); }
 /* The bar for what is going on (the tray): one line of pills on the prompt box, in a soft shell around both. It is
    one line at one height (--tray) whatever the width and however many kinds show: narrow, the pills are icons with
    counts; what still does not fit goes behind "+N". One kind alone is the same line, said in full. A pill opens its

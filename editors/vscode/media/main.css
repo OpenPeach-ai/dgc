@@ -191,6 +191,8 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
   transform-origin:50% 0; animation:home-popover-open var(--dur-menu) var(--ease-out); }
 @keyframes home-popover-open { from { opacity:0; transform:translateY(4px) scale(.98); } }
 #sessions-host .sessions-popover .sessions-all-search { flex:none; margin:0; }
+/* (The popover is a raised ground: its quiet words take the firmer grey.) */
+#sessions-host .sessions-popover { --muted: var(--muted-firm); }
 #sessions-host .sessions-popover .sessions-all-list { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; }
 #sessions-host .sessions-popover .session-row { margin:0; }
 #sessions-host .sessions-popover .session-row:hover { background:color-mix(in srgb, var(--text) 10%, transparent); }
@@ -2972,7 +2974,7 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 /* A field's wash with no line round it; focused, the editor's own focus line. */
 .sessions-search { box-sizing: border-box; width: 100%; height: var(--row); margin: 0 0 var(--sp-2); border: 1px solid transparent; border-radius: var(--r-lg); background: var(--field); color: var(--text-strong); padding: 0 10px; font: inherit; font-size: var(--t-sm); }
 .sessions-search:focus { outline: none; border-color: var(--vscode-focusBorder, var(--text)); }
-.sessions-search::placeholder { color: var(--muted); opacity: 1; }
+.sessions-search::placeholder { color: var(--muted-firm); opacity: 1; }   /* (a field is a raised ground) */
 .sessions-search[hidden], .sessions-more[hidden] { display: none; }
 .session-match { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--muted); font-size: var(--t-xs); line-height: 1.45; }
 .sessions-more { margin: var(--sp-2) 0; padding: 0; border: 0; background: none; color: var(--link); font: inherit; font-size: var(--t-sm); cursor: pointer; }

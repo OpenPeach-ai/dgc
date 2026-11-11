@@ -168,6 +168,9 @@ export async function replayScene(panel) {
 // Layout and contrast facts, measured in the page.
 export function measureInPage() {
   const parse = (value) => {
+    // (A mixed colour computes to color(srgb r g b / a), each channel 0 to 1.)
+    const mixed = String(value).match(/color\(srgb ([^)]+)\)/);
+    if (mixed) { const p = mixed[1].split(/[\s,/]+/).filter(Boolean).map(Number); return { r: p[0] * 255, g: p[1] * 255, b: p[2] * 255, a: p.length > 3 ? p[3] : 1 }; }
     const m = String(value).match(/rgba?\(([^)]+)\)/);
     if (!m) return null;
     const parts = m[1].split(/[\s,/]+/).filter(Boolean).map(Number);

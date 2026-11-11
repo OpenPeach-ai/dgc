@@ -131,7 +131,7 @@ export function settle(page) {
 // Contrast of an element's text against the first opaque background behind it, in the page (the
 // way settings-contrast.test.mjs reads it).
 export const CONTRAST_SOURCE = `(node) => {
-  const rgba = (value) => { const m = value.match(/[\\d.]+/g).map(Number); return [m[0], m[1], m[2], m[3] ?? 1]; };
+  const rgba = (value) => { const m = value.match(/-?[\\d.]+(?:e-?\\d+)?/g).map(Number); return value.startsWith("color(srgb") ? [m[0] * 255, m[1] * 255, m[2] * 255, m[3] ?? 1] : [m[0], m[1], m[2], m[3] ?? 1]; };
   const lum = ([r, g, b]) => { const c = [r, g, b].map((v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
     return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
   let ground = [255, 255, 255, 1];

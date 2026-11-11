@@ -312,7 +312,7 @@ body:is(.vscode-high-contrast,.vscode-high-contrast-light){--dev-error:var(--vsc
 .dev-warning svg{margin-top:1px;color:var(--need-text)}
 .dev-warning-body{flex:1;min-width:0}
 .dev-warning-title{display:block;font-size:12px;font-weight:500;color:var(--text-strong)}
-.dev-warning-words{display:block;margin-top:2px;color:var(--muted);font-size:12px;line-height:1.55;max-width:640px}
+.dev-warning-words{display:block;margin-top:2px;color:var(--muted-firm,var(--muted));font-size:12px;line-height:1.55;max-width:640px}
 .dev-warning .secondary{flex:none;align-self:center}
 @media(max-width:620px){
   .dev-control{width:100%;justify-content:space-between}

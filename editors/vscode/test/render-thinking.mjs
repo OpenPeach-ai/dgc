@@ -169,7 +169,9 @@ export async function openThinkingPage(browser, { width = 460, height = 760, the
 
 // Contrast of an element's text against the first opaque background behind it, in the page.
 export const CONTRAST_SOURCE = `(node) => {
-  const parse = (value) => { const m = value.match(/rgba?\\(([^)]+)\\)/); if (!m) return null;
+  const parse = (value) => { const mixed = value.match(/color\\(srgb ([^)]+)\\)/);
+    if (mixed) { const p = mixed[1].split(/[\\s,/]+/).filter(Boolean).map(Number); return { r: p[0] * 255, g: p[1] * 255, b: p[2] * 255, a: p.length > 3 ? p[3] : 1 }; }
+    const m = value.match(/rgba?\\(([^)]+)\\)/); if (!m) return null;
     const [r, g, b, a = 1] = m[1].split(/[ ,\\/]+/).filter(Boolean).map(Number); return { r, g, b, a }; };
   const lum = ({ r, g, b }) => { const f = (c) => { c /= 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
     return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };

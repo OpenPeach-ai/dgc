@@ -29,7 +29,22 @@
   --border-strong: var(--hair-strong);
   --text:var(--vscode-foreground, var(--fallback-text));
   --text-strong:var(--vscode-editor-foreground, var(--vscode-foreground, var(--fallback-text-strong)));
-  --muted:var(--vscode-descriptionForeground, var(--fallback-muted));
+  /* Quiet text is a dull mid grey, as Codex's is. Codex's secondary text in an editor is its text at 65%
+     (color-mix(in srgb, var(--vscode-foreground) 65%, transparent)): #8d8d8d on Dark Modern's #181818. DGC's is that
+     grey, opaque (a stroked icon's crossings are painted once), and held whatever the theme's text is: no brighter
+     than #8d8d8d on a dark ground. It was the editor's description colour: #9d9d9d in Dark Modern, and in Light Modern
+     the text colour itself, so nothing there was quiet. A light ground takes #6c6c6c (below): Codex's 65% of the light
+     text is 3.9:1 there, and this is the lightest grey that reads at 4.5:1 on Light Modern's and Light+'s side bars.
+     High contrast keeps the theme's own (below). --muted-firm is for quiet words on a raised or washed ground (a
+     field, a pill, a menu), where that grey would read under 4.5:1: #9a9a9a at most on dark, #5e5e5e at least on light.
+     --dgc-muted hands the grey to the pages that name their own --muted (Trace); --dgc-quiet is the thinned text for
+     a Pip's chat. (The first pair is for an engine without relative colours.) */
+  --muted: color-mix(in srgb, var(--text) 65%, var(--bg));
+  --muted-firm: color-mix(in srgb, var(--text) 68%, transparent);
+  --muted: rgb(from var(--text) min(r, 141) min(g, 141) min(b, 141));
+  --muted-firm: rgb(from var(--text) min(r, 154) min(g, 154) min(b, 154));
+  --dgc-muted: var(--muted);
+  --dgc-quiet: color-mix(in srgb, var(--text) 65%, transparent);
   /* Quiet words are the text colour, thinned. Second-level words (a row's second line, a menu row at rest) at 65%:
      5.3:1 on the dark side bar. Faint ones (hints, ages, placeholders) at 68%, which also clears 4.5:1 on the raised
      grey of a menu. This was the editor's disabled grey (50%), 2.1:1 on a light side bar. A light ground takes both at
@@ -200,6 +215,9 @@ body.vscode-light {
 body.vscode-high-contrast-light { --link:#6D49E8; --accent-text:#6D49E8; }
 body.vscode-light, body.vscode-high-contrast-light {
   --text-2: color-mix(in srgb, var(--text) 72%, transparent); --faint: color-mix(in srgb, var(--text) 72%, transparent);
+  --muted: color-mix(in srgb, var(--text) 72%, var(--bg)); --muted-firm: color-mix(in srgb, var(--text) 80%, transparent);
+  --muted: rgb(from var(--text) max(r, 108) max(g, 108) max(b, 108)); --muted-firm: rgb(from var(--text) max(r, 94) max(g, 94) max(b, 94));
+  --dgc-muted: var(--muted); --dgc-quiet: color-mix(in srgb, var(--text) 72%, transparent);
   --solid-hover: color-mix(in srgb, var(--text) 86%, #000); --home-quiet: var(--text-2);
   --lift-2: 0 2px 6px rgba(0,0,0,.07), 0 24px 48px -16px rgba(0,0,0,.20);
   --scrim: rgba(0,0,0,.21);
@@ -218,6 +236,8 @@ body.vscode-light, body.vscode-high-contrast-light {
 body.vscode-high-contrast, body.vscode-high-contrast-light {
   --hair: var(--vscode-contrastBorder, var(--vscode-panel-border, var(--text)));
   --hair-strong: var(--hair); --hair-faint: var(--hair); --border: var(--hair); --border-strong: var(--hair);
+  /* Quiet text is the theme's own there, as it always was. */
+  --muted: var(--vscode-descriptionForeground, var(--text)); --muted-firm: var(--muted); --dgc-muted: var(--muted); --dgc-quiet: color-mix(in srgb, var(--text) 72%, transparent);
 }
 @media (prefers-reduced-motion: reduce) {
   :root { --dur-hover: 0ms; --dur-menu: 0ms; --dur-dialog: 0ms; --dur-flip: 0ms; }
