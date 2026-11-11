@@ -535,3 +535,10 @@ input[type=checkbox],input[type=radio]{height:auto;padding:0;accent-color:var(--
   .install, .secondary, .fbtn, .mod-item-actions .act { border-color: CanvasText; }
   .save, .mod-item-actions .act.primary { forced-color-adjust: none; border-color: ButtonText; background: ButtonText; color: ButtonFace; }
 }
+
+/* ---- The button's danger role (tokens.css) in Settings: Remove inside its own confirm (a system, an image generator, an
+   MCP server: its saved key or sign-in goes too) is the red button. The Remove that only opens the question stays an
+   outline with red words. */
+.router-confirm .secondary.danger, .router-confirm .secondary.danger:hover:not(:disabled), .banner.danger-confirm .secondary.danger, .banner.danger-confirm .secondary.danger:hover:not(:disabled) { border-color: transparent; background: var(--btn-danger); color: var(--btn-on-danger); }
+.router-confirm .secondary.danger:hover:not(:disabled), .banner.danger-confirm .secondary.danger:hover:not(:disabled) { background: var(--btn-danger-hover); }
+@media (forced-colors: active) { .router-confirm .secondary.danger, .banner.danger-confirm .secondary.danger { forced-color-adjust: none; border-color: ButtonText; } }

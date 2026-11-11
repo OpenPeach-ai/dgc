@@ -3636,3 +3636,12 @@ button.link:disabled, .pip-report-slim-actions button:disabled, .pip-report.quie
    background sits inside its sentence, as tall as the line.) */
 button.act.am-wide { width: 100%; }
 .agent-line-move button.link { height: auto; line-height: calc(var(--t-sm) * 1.45 - 2px); }
+
+/* ---- The button's danger role (tokens.css) in Work: turning on Auto mode can't be taken back for what it then does,
+   so the dialog's confirm is the red button again (it takes the normal fill's place: the dialog's one filled button). */
+.auto-mode-buttons .auto-mode-confirm, .auto-mode-buttons .auto-mode-confirm:hover:not(:disabled) { border-color: transparent; background: var(--btn-danger); color: var(--btn-on-danger); }
+.auto-mode-buttons .auto-mode-confirm:hover:not(:disabled) { background: var(--btn-danger-hover); }
+/* (A dialog's main action with a mark beside its words takes the one wide size, so "Enable Auto" reads whole.) */
+.auto-mode-buttons .auto-mode-confirm { width: var(--btn-w-wide); }
+.auto-mode-buttons .auto-mode-confirm .codicon { vertical-align: -2px; margin-right: 5px; font-size: 13px; }
+@media (forced-colors: active) { .auto-mode-buttons .auto-mode-confirm { forced-color-adjust: none; border-color: ButtonText; } }

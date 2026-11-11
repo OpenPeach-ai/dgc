@@ -956,6 +956,12 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
   button:is(:not([class]),[class=""]):not([data-tab]):not([data-run]):not(.dgc-menu *), button.quiet, button.danger, button.pill { border-color: CanvasText; }
   button.primary { forced-color-adjust: none; border-color: ButtonText; background: ButtonText; color: ButtonFace; }
 }
+/* ---- The button's danger role (tokens.css) on the Pips pages: deleting an archived Pip for good (the dialog that asks
+   for its name) is the red button, at the one wide size. Archive and the other confirms that can be taken back stay
+   outlines with red words. */
+.dialog:has(#deletePipName) #review-confirm.danger, .dialog:has(#deletePipName) #review-confirm.danger:hover:not(:disabled) { width: var(--btn-w-wide); border-color: transparent; background: var(--btn-danger); color: var(--btn-on-danger); }
+.dialog:has(#deletePipName) #review-confirm.danger:hover:not(:disabled) { background: var(--btn-danger-hover); }
+@media (forced-colors: active) { .dialog:has(#deletePipName) #review-confirm.danger { forced-color-adjust: none; border-color: ButtonText; } }
 /* ==== Pip chat design pass (0.52, asked 5 Nov): a Personal and a Project Pip's chat, calm, clear and physical. ====
    What it holds to, each measured in test/pip-chat-design-browser.test.mjs:
    - One column. Everything the Pip says starts at one left edge and is at most one measure wide (a reply, its choices);

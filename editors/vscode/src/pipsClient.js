@@ -61,6 +61,7 @@ import {cardNumber} from './pipCards.js';
 import {eyesMarkup,eyesNotice} from './pipEyes.js';
 import {levelPage,levelMarkup,levelNotice,levelMenuMarkup} from './pipLevels.js';
 import {infoTip,wireInfoTips} from './pipInfoTip.js';
+import {watchButtons} from './buttonFit.js';
 import {pipArtifacts,dashboardList,artifactsPageMarkup,artifactsSectionsMarkup,reportNotice} from './pipArtifacts.js';
 import {templatePage,templateMarkup} from './pipTemplates.js';
 import {borrowsPage,borrowResult,shownBorrows,borrowActive,borrowMarkup} from './pipBorrow.js';
@@ -177,6 +178,9 @@ const onConversationScroll=event=>{if(event.target?.classList?.contains('convers
 root.addEventListener('scroll',onConversationScroll,true);
 // The "i" beside a settings title: its sentence shows when pointed at, on focus and on a click (src/pipInfoTip.js).
 disposers.push(wireInfoTips({root,shell,view:window}));
+// A dialog's buttons are one box whatever their words; a main action whose words do not fit (Reject them and archive,
+// Prepare setup card) takes the one wide size, never an ellipsis (src/buttonFit.js).
+disposers.push(watchButtons(shell,'#review-root .dialog .actions button',window));
 disposers.push(()=>root.removeEventListener('scroll',onConversationScroll,true));
 S.connectorDrafts=[];S.connectorDraftError="";let connectorDraftSeq=0;
 // Dictation: 'idle' | 'starting' | 'recording' | 'writing'. The voice bar's controller keeps the waveform; it looks in

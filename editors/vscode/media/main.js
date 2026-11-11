@@ -1750,7 +1750,10 @@
       </div><div class="auto-mode-buttons"><button type="button" class="auto-mode-cancel">Cancel</button><button type="button" class="auto-mode-confirm"><span class="codicon codicon-warning" aria-hidden="true"></span><span>Enable Auto</span></button></div>`;
     if (message.needsTrust === true) {
       dialog.querySelector(".auto-mode-trust").hidden = false;
-      dialog.querySelector(".auto-mode-confirm span:last-child").textContent = "Trust and enable Auto";
+      // (Shorter words, so they read whole in the button's wide box beside its mark; its spoken name and title say all of it.)
+      dialog.querySelector(".auto-mode-confirm span:last-child").textContent = "Trust and enable";
+      dialog.querySelector(".auto-mode-confirm").setAttribute("aria-label", "Trust and enable Auto");
+      dialog.querySelector(".auto-mode-confirm").title = "Trust this workspace and enable Auto";
     }
     autoModeDialog = { dialog, id: message.requestId, focus: document.activeElement };
     dialog.querySelector(".auto-mode-cancel").onclick = () => closeAutoModePrompt(false);

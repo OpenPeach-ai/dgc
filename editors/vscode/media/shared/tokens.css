@@ -271,6 +271,12 @@ body.vscode-high-contrast, body.vscode-high-contrast-light {
    button (they stay its spoken name). A row narrower than its buttons shares its width between them, equally. Pointed at, it steps up 1 px (an outline gains a faint fill and a firmer line; 150 ms in, the
    shared 120 ms out); pressed, it sinks 1 px below rest (90 ms). A focus ring; dimmed when off; the user's own colours
    in high contrast (the tokens above); at rest under reduced motion.
+   A fourth role, danger, is for DGC's own confirms that can't easily be undone (turning on Auto mode, removing a
+   system or a server with its saved key, deleting an archived Pip for good): the same box, corner, step and ring, with
+   a red fill, the editor's own error red (its input-validation error border: #BE1100 in the Dark, Light and High
+   Contrast themes, where white words read at about 5.9:1; never DGC's olive --err). It takes the place of the normal
+   fill on its view: still one filled button there.
+   A dialog's main action that carries a mark, or whose words do not fit the box, takes the one wide size.
    Every stylesheet reads these tokens for its buttons; .dgc-btn below is the button itself, for anything new.
    (Written on the body too: a theme sets its own text and hairline there, and these are made from them.) */
 :root, body {
@@ -279,6 +285,7 @@ body.vscode-high-contrast, body.vscode-high-contrast-light {
   --btn-h-sm: 22px; --btn-w-sm: 76px; --btn-pad-sm: 6px;
   --btn-text: var(--text);
   --btn-fill: var(--solid); --btn-fill-hover: var(--solid-hover); --btn-on-fill: var(--on-solid);
+  --btn-danger: var(--vscode-inputValidation-errorBorder, #BE1100); --btn-danger-hover: color-mix(in srgb, var(--vscode-inputValidation-errorBorder, #BE1100) 84%, #000); --btn-on-danger: #fff;
   --btn-line: var(--hair-strong); --btn-line-hover: color-mix(in srgb, var(--text) 38%, transparent);
   --btn-wash: color-mix(in srgb, var(--text) 6%, transparent);
   --btn-in: 150ms; --btn-press: 90ms;
@@ -299,6 +306,8 @@ body.vscode-high-contrast, body.vscode-high-contrast-light {
 .dgc-btn:active:not(:disabled) { transform: var(--btn-down); transition-duration: var(--btn-press); }
 .dgc-btn.primary, .dgc-btn.primary:hover:not(:disabled) { border-color: transparent; background: var(--btn-fill); color: var(--btn-on-fill); }
 .dgc-btn.primary:hover:not(:disabled) { background: var(--btn-fill-hover); }
+.dgc-btn.danger, .dgc-btn.danger:hover:not(:disabled) { border-color: transparent; background: var(--btn-danger); color: var(--btn-on-danger); }
+.dgc-btn.danger:hover:not(:disabled) { background: var(--btn-danger-hover); }
 /* (No edge at all, not a clear one: forced colours draw every edge.) */
 .dgc-btn.text, .dgc-btn.text:is(:hover, :active):not(:disabled) { width: auto; padding: 0 5px; border: 0; background: transparent; transform: none; font-weight: var(--w-reg);
   text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--btn-line-hover); }
@@ -307,4 +316,9 @@ body.vscode-high-contrast, body.vscode-high-contrast-light {
 .dgc-btn.text:hover:not(:disabled) { text-decoration-color: currentColor; }
 .dgc-btn:focus-visible { outline: var(--btn-ring); outline-offset: 2px; }
 .dgc-btn:disabled { opacity: .55; cursor: default; }
-@media (forced-colors: active) { .dgc-btn { border-color: CanvasText; } }
+/* High contrast: the user's palette has no red of ours. A danger button is the system's filled button, as the main one is. */
+@media (forced-colors: active) {
+  :root, body { --btn-danger: ButtonText; --btn-danger-hover: ButtonText; --btn-on-danger: ButtonFace; }
+  .dgc-btn { border-color: CanvasText; }
+  .dgc-btn.danger { forced-color-adjust: none; border-color: ButtonText; }
+}
