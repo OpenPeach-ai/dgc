@@ -59,6 +59,7 @@ export async function openDock(browser, { pins = PINS, show = "always", most = 8
         }
       } else if (m.type === "dockUnpin") { if (at(m.key) >= 0) state.pins.splice(at(m.key), 1); }
       else if (m.type === "dockMove") { const a = at(m.key), b = a + (m.by < 0 ? -1 : 1); if (a >= 0 && b >= 0 && b < state.pins.length) [state.pins[a], state.pins[b]] = [state.pins[b], state.pins[a]]; }
+      else if (m.type === "dockPlace") { const a = at(m.key); if (a >= 0 && Number.isInteger(m.to)) { const [pin] = state.pins.splice(a, 1); state.pins.splice(Math.max(0, Math.min(state.pins.length, m.to)), 0, pin); } }
       else if (m.type === "dockColour") { if (Number.isInteger(m.colour)) state.colours[m.key] = m.colour; else delete state.colours[m.key]; }
       else if (m.type === "dockSeen") { for (const item of m.items || []) { const p = state.pins[at(item.key)]; if (p) p.title = item.title; } }
       say();

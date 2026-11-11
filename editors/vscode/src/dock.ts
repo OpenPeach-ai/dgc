@@ -158,6 +158,20 @@ export class Dock {
     [all[a], all[b]] = [all[b], all[a]];
     await this.keep(all);
   }
+  /** To place `to` among what this window shows (a drag's drop): the pins it passed each move one place, and what
+   *  another window shows keeps its own places. */
+  async place(key: string, to: number): Promise<void> {
+    const all = this.all(), shown = this.pins(), at = shown.findIndex((pin) => pin.key === key);
+    if (at < 0 || !Number.isInteger(to) || to < 0) return;
+    const next = [...shown];
+    next.splice(Math.min(next.length - 1, to), 0, next.splice(at, 1)[0]);
+    if (next.every((pin, i) => pin === shown[i])) return;
+    const place = (pin: DockPin) => all.findIndex((old) => old.key === pin.key && old.where === pin.where);
+    const slots = shown.map(place), entries = next.map((pin) => all[place(pin)]);
+    if (slots.some((slot) => slot < 0) || entries.some((entry) => !entry)) return;
+    [...slots].sort((a, b) => a - b).forEach((slot, i) => { all[slot] = entries[i]; });
+    await this.keep(all);
+  }
   /** A newer name or second line for something pinned (a session renamed, a file's new version). */
   async seen(items: unknown): Promise<void> {
     const all = this.all();
@@ -200,6 +214,7 @@ export class Dock {
         return true;
       }
       case "dockMove": void this.move(String(message.key || ""), Number(message.by) < 0 ? -1 : 1); return true;
+      case "dockPlace": void this.place(String(message.key || ""), message.to); return true;
       case "dockColour": void this.setColour(String(message.key || ""), message.colour); return true;
       case "dockSeen": void this.seen(message.items); return true;
       default: return false;

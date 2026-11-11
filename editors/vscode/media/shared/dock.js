@@ -4,6 +4,12 @@
 // session's colours. Tab reaches the dock as one stop: Left and Right move between its items, Home and End jump to the
 // first and the last, Enter opens.
 //
+// The pinned items are rearranged as on a Mac's dock: press one and drag it along the bar, and the others slide apart to
+// open a gap where it would land; letting go puts it there (onReorder says its new place, and the page keeps it). A press
+// that moves under 5 px is still a click. "+" is never moved and nothing is dropped past it. Escape puts the item back,
+// and so does letting go outside the dock: a drag never removes anything. Alt+Left and Alt+Right move the focused item
+// one place and say where it is now. Under reduced motion nothing slides: the gap is just there.
+//
 // Tiles are as large as Settings allows and shrink as items are added, down to 24 px. When even 24 px tiles would not
 // fit the side bar, the dock steps aside until the side bar is wider: nothing is unpinned.
 //
@@ -12,7 +18,7 @@
 // it, and drops away a second after the pointer leaves), or Never.
 //
 // A page gives it what to show; this piece draws, sizes, moves and opens it:
-//   const dock = DgcDock.create({ host, onOpen, onUnpin, onMove, onColour, onNew });
+//   const dock = DgcDock.create({ host, onOpen, onUnpin, onMove, onReorder, onColour, onNew });
 //   dock.update({ items: [{ key, kind, title, state, icon, dot, badge, colour }], show, size, offers });
 (function () {
   "use strict";
@@ -25,6 +31,8 @@
   const REACH = 2.6;                      // how far the pointer's pull reaches, in tiles
   const STIFFNESS = 320, DAMPING = 20, MASS = 0.1;   // the spring a tile's size rides: quick, and it never bounces
   const DROP_MS = 1000;                   // "When I point at the bottom": how long after the pointer leaves it drops away
+  const DRAG_PX = 5;                      // how far a press moves before it is a drag, not a click
+  const OUT_PX = 36;                      // how far above or below the bar the pointer is out of the dock
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const PLUS = '<svg class="dgc-dock-plus" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>';
 
@@ -47,8 +55,9 @@
     host.classList.add("dgc-dock");
     host.innerHTML = '<div class="dgc-dock-hint" aria-hidden="true"></div>'
       + '<div class="dgc-dock-bar" role="toolbar" aria-orientation="horizontal" aria-label="Dock: what you pinned, then New"></div>'
-      + '<div class="dgc-dock-tip" role="tooltip" hidden><b></b><span></span></div>';
-    const bar = host.querySelector(".dgc-dock-bar"), tip = host.querySelector(".dgc-dock-tip");
+      + '<div class="dgc-dock-tip" role="tooltip" hidden><b></b><span></span></div>'
+      + '<div class="dgc-dock-live" role="status" aria-live="polite"></div>';
+    const bar = host.querySelector(".dgc-dock-bar"), tip = host.querySelector(".dgc-dock-tip"), live = host.querySelector(".dgc-dock-live");
     tip.id = `${host.id || "dgc-dock"}-tip`;
 
     let items = [], show = "always", largest = 34, offers = { work: true, chat: true, pip: true, settings: true };
@@ -60,6 +69,8 @@
     let named = null;                      // the button whose name shows
     let cur = [], vel = [], frame = 0, last = 0;
     let up = false, dropTimer = 0, inBand = false;
+    let drag = null;                       // a press on a pinned item: { key, button, id, x0, y0, x, y, from, to, active, tx }
+    let swallow = false;                   // the click that follows a drag's release is not a click
 
     const keyOf = (button) => button?.dataset.key || "";
     const itemOf = (button) => items.find((item) => item.key === keyOf(button)) || null;
@@ -113,7 +124,74 @@
         button.style.setProperty("--s", `${s}px`); button.style.setProperty("--k", String(s));
       });
       placeTip();
+      if (drag?.active) placeDrag();
     }
+
+    // ---- rearranging: drag a pinned item along the bar, or Alt+Left / Alt+Right ---------------------------------------
+    /** The item to place `to` among the pinned ones, here at once and told to the page, which keeps it. */
+    function reorder(key, to) {
+      const from = items.findIndex((item) => item.key === key);
+      if (from < 0 || to === from || to < 0 || to >= items.length) return false;
+      const next = [...items]; next.splice(to, 0, next.splice(from, 1)[0]);
+      items = next; stop = key; draw(); layout();
+      o.onReorder?.(key, to, items.map((item) => item.key));
+      return true;
+    }
+    function say(text) { live.textContent = ""; live.textContent = text; }
+    /** While dragging: the dragged item under the pointer, and the others one place aside to open the gap. */
+    function placeDrag() {
+      const d = drag, n = items.length, gap = gapAt(size), wide = d.button.offsetWidth + gap;
+      const left = bar.getBoundingClientRect().left;
+      const centre = (b) => left + b.offsetLeft + b.offsetWidth / 2;          // where it lies, whatever it is moved by
+      const out = d.y < bar.getBoundingClientRect().top - OUT_PX || d.y > bar.getBoundingClientRect().bottom + OUT_PX;
+      // Its place: how many of the other pinned items lie left of the pointer. Out of the dock, it would go back.
+      d.to = out ? d.from : buttons.slice(0, n).filter((b, i) => i !== d.from && centre(b) < d.x).length;
+      buttons.slice(0, n).forEach((b, i) => {
+        if (i === d.from) return;
+        const shift = i > d.from && i <= d.to ? -wide : i < d.from && i >= d.to ? wide : 0;
+        b.style.transform = shift ? `translateX(${shift}px)` : "";
+      });
+      d.button.style.transform = `translateX(${Math.round((d.x - centre(d.button)) * 100) / 100}px)`;
+    }
+    function endDrag(drop) {
+      const d = drag; drag = null;
+      if (!d) return;
+      try { bar.releasePointerCapture(d.id); } catch { /* not held */ }
+      if (!d.active) return;
+      swallow = true; view.setTimeout(() => { swallow = false; }, 60);
+      d.button.removeAttribute("data-drag");
+      const moved = drop && d.to !== d.from;
+      // Dropped in a new place: drawn there at once. Otherwise every item goes back where it was (sliding, unless still).
+      if (moved) host.removeAttribute("data-dragging");
+      for (const b of buttons) b.style.transform = "";
+      if (moved) reorder(d.key, d.to);
+      else view.setTimeout(() => { if (!drag) host.removeAttribute("data-dragging"); }, 200);
+    }
+    bar.addEventListener("pointerdown", (e) => {
+      const button = e.target.closest?.(".dgc-dock-item");
+      if (drag || e.button !== 0 || !button || button.dataset.add || menuOpen()) return;
+      const from = buttons.indexOf(button);
+      drag = { key: keyOf(button), button, id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, from, to: from, active: false };
+    });
+    const onDragMove = (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      drag.x = e.clientX; drag.y = e.clientY;
+      if (!drag.active) {
+        if (Math.hypot(drag.x - drag.x0, drag.y - drag.y0) < DRAG_PX || !size) return;
+        drag.active = true;
+        host.setAttribute("data-dragging", ""); drag.button.setAttribute("data-drag", "");
+        name(null);
+        try { bar.setPointerCapture(drag.id); } catch { /* the pointer is gone */ }
+      }
+      // The tiles still grow toward the pointer while one is carried.
+      pointer = drag.x; kick();
+      placeDrag();
+    };
+    const onDragUp = (e) => { if (drag && e.pointerId === drag.id) endDrag(e.type === "pointerup"); };
+    const onDragKey = (e) => { if (drag?.active && e.key === "Escape") { e.preventDefault(); e.stopPropagation(); endDrag(false); } };
+    doc.addEventListener("pointermove", onDragMove);
+    doc.addEventListener("pointerup", onDragUp); doc.addEventListener("pointercancel", onDragUp);
+    doc.addEventListener("keydown", onDragKey, true);
 
     // ---- the magnify: every tile's size follows the pointer on a spring ------------------------------------------------
     /** Each tile's size with the pointer at `x`: full growth under it, falling away as a cosine over a few tiles, and never
@@ -210,11 +288,12 @@
     bar.addEventListener("pointermove", (e) => {
       if (e.pointerType === "touch") return;
       pointer = e.clientX; kick();
-      const over = e.target.closest?.(".dgc-dock-item");
+      const over = drag?.active ? null : e.target.closest?.(".dgc-dock-item");
       if (over) name(over);
     });
-    bar.addEventListener("pointerleave", () => { pointer = null; kick(); if (!named?.matches(":focus-visible")) name(null); });
+    bar.addEventListener("pointerleave", () => { if (drag?.active) return; pointer = null; kick(); if (!named?.matches(":focus-visible")) name(null); });
     bar.addEventListener("click", (e) => {
+      if (swallow) { swallow = false; e.preventDefault(); e.stopPropagation(); return; }    // a drag's release
       const button = e.target.closest(".dgc-dock-item");
       if (!button) return;
       if (button.dataset.add) { if (button.getAttribute("aria-expanded") === "true") root.DgcBlob?.close?.(true); else addMenu(button, e.detail === 0); }
@@ -230,7 +309,15 @@
       if (!button) return;
       const at = buttons.indexOf(button);
       const go = (i) => { e.preventDefault(); const next = buttons[(i + buttons.length) % buttons.length]; rove(next); next.focus(); };
-      if (e.key === "ArrowRight") go(at + 1);
+      if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        // Alt+Left / Alt+Right: the item itself moves one place, and where it is now is said.
+        e.preventDefault(); e.stopPropagation();
+        if (button.dataset.add) return;
+        const key = keyOf(button), n = items.length, to = at + (e.key === "ArrowLeft" ? -1 : 1);
+        if (reorder(key, to)) say(`Moved to place ${to + 1} of ${n}`);
+        else say(`Already ${to < 0 ? "first" : "last"} of ${n}`);
+      }
+      else if (e.key === "ArrowRight") go(at + 1);
       else if (e.key === "ArrowLeft") go(at - 1);
       else if (e.key === "Home") go(0);
       else if (e.key === "End") go(buttons.length - 1);
@@ -285,6 +372,8 @@
     }
     function dispose() {
       doc.removeEventListener("pointermove", onMove); doc.documentElement.removeEventListener("pointerleave", onLeave);
+      doc.removeEventListener("pointermove", onDragMove); doc.removeEventListener("pointerup", onDragUp); doc.removeEventListener("pointercancel", onDragUp);
+      doc.removeEventListener("keydown", onDragKey, true);
       resized?.disconnect(); if (frame) view.cancelAnimationFrame(frame); view.clearTimeout(dropTimer);
     }
     return { update, layout, settle, dispose, element: host, bar, get size() { return size; }, get up() { return show !== "hover" || up; } };

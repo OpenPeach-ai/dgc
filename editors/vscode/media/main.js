@@ -1025,6 +1025,12 @@
       },
       onUnpin: (key) => vscode.postMessage({ type: "dockUnpin", key }),
       onMove: (key, by) => vscode.postMessage({ type: "dockMove", key, by }),
+      // Dragged to a new place (or Alt+Left / Alt+Right): here at once, and the host keeps it with the pins.
+      onReorder: (key, to, order) => {
+        const place = (pin) => { const at = order.indexOf(pin.key); return at < 0 ? order.length : at; };
+        dockState = { ...dockState, pins: [...dockState.pins].sort((a, b) => place(a) - place(b)) };
+        vscode.postMessage({ type: "dockPlace", key, to });
+      },
       onColour: (key, colour) => vscode.postMessage({ type: "dockColour", key, colour }),
       onNew: (what) => { if (what === "pip") openPipsAt({ create: "personal" }); else vscode.postMessage({ type: "dockNew", what }); },
       // The Pips' faces blink and look about as they do everywhere else.

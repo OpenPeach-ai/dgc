@@ -232,3 +232,19 @@ test("one dock for the whole extension", () => {
   assert.equal(dockOf(context), dockOf(context));
   assert.notEqual(dockOf(context), dockOf(store()));
 });
+
+test("a drag's drop: dockPlace puts a pin at a place among what this window shows, and keeps the rest in order", async () => {
+  const context = store(), dock = new Dock(context);
+  for (const [kind, id, title] of [["work", S("1"), "One"], ["chat", CHAT("a"), "Two"], ["pip", PIP("b"), "Three"], ["work", S("2"), "Four"]]) { dock.handle({ type: "dockPin", item: { kind, id, title } }); await tick(); }
+  const order = () => new Dock(context).pins().map((p) => p.title);
+  assert.deepEqual(order(), ["One", "Two", "Three", "Four"]);
+  assert.equal(dock.handle({ type: "dockPlace", key: `work:${S("1")}`, to: 2 }), true); await tick();
+  assert.deepEqual(order(), ["Two", "Three", "One", "Four"], "the first, dropped third: the two it passed move up, kept on this computer");
+  dock.handle({ type: "dockPlace", key: `work:${S("2")}`, to: 0 }); await tick();
+  assert.deepEqual(order(), ["Four", "Two", "Three", "One"], "the last, dropped first");
+  dock.handle({ type: "dockPlace", key: `chat:${CHAT("a")}`, to: 99 }); await tick();
+  assert.deepEqual(order(), ["Four", "Three", "One", "Two"], "past the end is the end");
+  const before = order();
+  for (const bad of [{ key: "work:nope", to: 1 }, { key: `pip:${PIP("b")}`, to: "2" }, { key: `pip:${PIP("b")}`, to: -1.5 }, { key: `pip:${PIP("b")}` }]) { dock.handle({ type: "dockPlace", ...bad }); await tick(); }
+  assert.deepEqual(order(), before, "what is not a pin here, or not a place, moves nothing");
+});
