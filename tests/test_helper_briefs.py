@@ -29,20 +29,24 @@ class Briefs(unittest.TestCase):
         again = dict(item)
         subagents.compose_brief(again)
         self.assertEqual(again["prompt"], item["prompt"], "composing twice changes nothing")
+        self.assertFalse(set(subagents.BRIEF_FIELDS) & set(item))
 
-    def test_a_free_text_prompt_still_works_and_rides_along_as_notes(self):
+    def test_a_free_text_prompt_still_works_and_the_fields_add_to_it(self):
         plain = {"description": "x", "prompt": "Read README.md and summarize it."}
         subagents.compose_brief(plain)
         self.assertEqual(plain["prompt"], "Read README.md and summarize it.")
-        both = {"description": "x", "prompt": "Use the cached copy.", "goal": "g", "done_when": "d", "returns": "r"}
+        # Seen live (12 Nov): the model wrote its goal in the prompt and added done_when and returns; that is a brief.
+        both = {"description": "x", "prompt": "Find every HTTP call in lab/.", "done_when": "all checked", "returns": "a list"}
+        self.assertEqual(agent_mod._task_call_error(both), "")
         subagents.compose_brief(both)
-        self.assertTrue(both["prompt"].endswith("Notes: Use the cached copy."))
+        self.assertEqual(both["prompt"].splitlines(), ["Find every HTTP call in lab/.", "Done when: all checked", "Return: a list"])
+        self.assertNotIn("done_when", both, "folded into the prompt: the record holds one brief")
 
     def test_a_half_brief_is_refused_in_words(self):
         half = {"description": "x", "goal": "find the bug"}
         subagents.compose_brief(half)
         self.assertNotIn("prompt", half)
-        self.assertIn("done_when, returns", agent_mod._task_call_error(half))
+        self.assertIn("done_when, returns (or a prompt", agent_mod._task_call_error(half))
         batch = {"tasks": [{"description": "a", "prompt": "p"}, {"description": "b", "goal": "g", "returns": "r"}]}
         self.assertIn("tasks[2]: a brief needs done_when", agent_mod._task_call_error(batch))
         bad_files = {"description": "x", "goal": "g", "done_when": "d", "returns": "r", "files": [3]}
