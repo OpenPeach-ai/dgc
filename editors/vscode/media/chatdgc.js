@@ -1529,8 +1529,18 @@
     message.apps = [...(Array.isArray(message.apps) ? message.apps : []).filter((a) => a?.card_id !== card.card_id), kept];
     update(message.id);
   }
+  /** A user message that is a wake-up's turn: {wakeup: {id, why, at}}. */
+  const isWakeup = (message) => !!message?.wakeup && typeof message.wakeup === "object" && typeof message.wakeup.why === "string" && !!message.wakeup.why.trim();
   function messageNode(message) {
     const live = state.busy && (message.id === state.replyId || message.local === true);
+    // A wake-up's own turn (the chat woke itself, as it planned): a quiet note where a bubble would be. Its text was
+    // written for the model and is never shown, so it has nothing to copy or edit.
+    if (message.role === "user" && isWakeup(message)) {
+      const note = el("article", "cd-msg cd-wake");
+      note.dataset.id = message.id || "";
+      note.append(icon("history"), el("span", "cd-wake-words", `Woke up as planned · ${String(message.wakeup.why).slice(0, 200)}`));
+      return note;
+    }
     const node = el("article", `cd-msg cd-${message.role === "user" ? "user" : "assistant"}`);
     node.dataset.id = message.id || "";
     if (message.role === "user") {
@@ -2791,7 +2801,8 @@
   // says it for the pages loaded; for a long chat opened on its latest pages, the backend's outline (chatdgc_outline,
   // asked once the chat opens) says it for the rest. The Widgets list and the prompt rail both read it.
   const reduceMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
-  const promptWords = (m) => String(m.text || "").replace(/\s+/g, " ").trim()
+  // (A wake-up's turn is listed by its note's words: its text is the model's.)
+  const promptWords = (m) => (isWakeup(m) ? `Woke up as planned · ${m.wakeup.why}` : String(m.text || "")).replace(/\s+/g, " ").trim()
     || (Array.isArray(m.attachments) ? m.attachments.map((a) => a?.name || "attachment").join(", ") : "");
   const WIDGET_ID = /^wg_[a-f0-9]{16}$/;
   const removedWidgets = new Set();          // deleted from this chat's list (said by the host), its reply maybe not on screen
@@ -3582,7 +3593,32 @@
   // summarized, and its fallback model answering are each a pill; a pill opens its detail just above. Nothing going
   // on: no bar. Attachments stay in the box, and the folder it reads stays the box's own Folder button (it is how the
   // chat is set, not something going on).
-  const TRAY_TITLES = { queue: "Queued messages", making: "Being made", summarizing: "Summarizing", fallback: "Fallback model" };
+  const TRAY_TITLES = { queue: "Queued messages", making: "Being made", summarizing: "Summarizing", fallback: "Fallback model", wakeups: "Wake-ups" };
+  // This chat's wake-ups, as Work has them (media/main.js): the host posts {type: "wakeups", items: [{id, at, why}]}
+  // when the chat's row changes and when it opens; soonest first. Cancel asks the host to take one back.
+  var wakeups = [];                              // (`var`: the bar follows while the page is still starting up)
+  const wakeupClock = (iso) => { const d = new Date(String(iso || "")); return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }); };
+  const wakeupsPanel = el("div", "tray-note cd-wakes");
+  function setWakeups(items) {
+    wakeups = (Array.isArray(items) ? items : []).filter((w) => w && typeof w.id === "string" && typeof w.why === "string" && typeof w.at === "string" && wakeupClock(w.at))
+      .sort((a, b) => Date.parse(a.at) - Date.parse(b.at)).slice(0, 8);
+    trayView();
+    if (tray?.open?.kind === "wakeups") { if (wakeups.length) paintWakeups(); else tray.close(); }
+  }
+  function paintWakeups() {
+    const list = el("ul", "cd-wake-list");
+    for (const w of wakeups) {
+      const row = el("li", "cd-wake-row"), when = wakeupClock(w.at);
+      const cancel = el("button", "tray-note-act", "Cancel"); cancel.type = "button"; cancel.dataset.trayFocus = "";
+      cancel.title = `Cancel the wake-up at ${when}`; cancel.setAttribute("aria-label", `Cancel the wake-up at ${when}: ${w.why}`);
+      cancel.addEventListener("click", () => { cancel.disabled = true; vscode.postMessage({ type: "cancelWakeup", id: w.id }); });
+      const why = el("span", "cd-wake-why", w.why); why.title = w.why;
+      row.append(el("span", "cd-wake-when", when), why, cancel);
+      list.append(row);
+    }
+    wakeupsPanel.replaceChildren(list);
+    return wakeupsPanel;
+  }
   const trayNote = el("div", "tray-note");
   const trayMaking = () => { const doing = state.busy && state.replyId ? state.searching[state.replyId] : null; return doing && (doing.kind === "making" || doing.kind === "canvas") ? doing : null; };
   const trayFallback = () => (state.fallbackOn && state.fallbackOffered ? modelName(state.fallbackOn.model) : "");
@@ -3605,6 +3641,14 @@
         label: brief ? "Writing a brief of this chat for Work" : "Summarizing earlier messages to fit the context window",
         tip: brief ? "Writing a brief of this chat for Work" : "Summarizing earlier messages to fit the context window" };
     }
+    if (kind === "wakeups") {
+      const next = wakeups[0];
+      if (!next) return null;
+      return wakeups.length === 1
+        ? { icon: "watch", word: "Wakes", num: wakeupClock(next.at), detail: next.why, label: `Wakes at ${wakeupClock(next.at)} to: ${next.why}`, tip: `Wakes at ${wakeupClock(next.at)} · ${next.why}` }
+        : { icon: "watch", num: String(wakeups.length), after: "wake-ups", detail: `next at ${wakeupClock(next.at)}`,
+          label: `${wakeups.length} wake-ups waiting, the next at ${wakeupClock(next.at)}`, tip: `${wakeups.length} wake-ups · the next at ${wakeupClock(next.at)}` };
+    }
     if (kind === "fallback") {
       const on = trayFallback(), main = modelName(modelPick.value) || "Its model";
       if (!on) return null;
@@ -3616,6 +3660,7 @@
   // A kind's detail: the queue's own rows, or what it is in words with the one thing to do about it.
   function trayDetail(kind) {
     if (kind === "queue") return $("cd-queue");
+    if (kind === "wakeups") return wakeups.length ? paintWakeups() : null;
     const lines = [], acts = [];
     if (kind === "making") {
       const spec = traySpec(kind);
@@ -3644,7 +3689,7 @@
   trayParts.popClose.innerHTML = '<span class="codicon codicon-close" aria-hidden="true"></span>';
   // (`var`: the page asks the bar to follow while it is still starting up, before this line has run.)
   var tray = window.DgcTray.create({ ...trayParts, moreId: "cd-tray-more",
-    keep: ["queue", "fallback", "summarizing", "making"], spec: traySpec, detail: trayDetail, title: (kind) => TRAY_TITLES[kind] || "",
+    keep: ["queue", "fallback", "summarizing", "making", "wakeups"], spec: traySpec, detail: trayDetail, title: (kind) => TRAY_TITLES[kind] || "",
     popFocus: (kind, node) => node.querySelector("[data-tray-focus], .dgc-queue-handle, button:not(:disabled)"),
     input, popTop: () => document.querySelector(".cd-head")?.getBoundingClientRect().bottom || 0,
     over: ".dgc-menu, .dgc-queue-menu, dialog",
@@ -3657,12 +3702,13 @@
     if (trayMaking()) kinds.push("making");
     if (state.compacting) kinds.push("summarizing");
     if (trayFallback()) kinds.push("fallback");
+    if (wakeups.length) kinds.push("wakeups");
     const sig = JSON.stringify(kinds.map((kind) => [kind, traySpec(kind)]));
     if (sig === traySig) return;
     traySig = sig;
     tray.render(kinds);
     for (const kind of kinds) tray.paint(kind);
-    if (tray.open && tray.open.kind !== "more" && tray.open.kind !== "queue") trayDetail(tray.open.kind);   // its words follow what it is doing
+    if (tray.open && tray.open.kind !== "more" && tray.open.kind !== "queue" && tray.open.kind !== "wakeups") trayDetail(tray.open.kind);   // its words follow what it is doing
   }
   const researchToggle = $("cd-research");
   /** Deep research for the next message: a plan first, then the reading. Off again once it's sent. */
@@ -4797,6 +4843,9 @@
         state.unavailable = msg.message || "ChatDGC isn't available.";
         showNotice(state.unavailable, "info");
         controls();
+        return;
+      case "wakeups":
+        setWakeups(msg.items);
         return;
       case "models":
         state.models = Array.isArray(msg.ids) ? msg.ids.filter((id) => typeof id === "string").slice(0, 500) : [];

@@ -1021,3 +1021,15 @@ path.cd-chart-mark, rect.cd-chart-mark { stroke: none; }
   font: var(--w-semi) 10px/14px var(--sans); color: var(--err-text);
 }
 .cd-fallback-line { margin: var(--sp-1) 0 0; font: var(--w-reg) var(--t-sm)/1.35 var(--sans); color: var(--muted); overflow-wrap: anywhere; }
+
+/* A chat's wake-ups, as Work's (media/chatdgc.js): in the tray's popover, each with its time, its reason and Cancel; and a
+   wake-up's own turn in the chat, a quiet line where a bubble would be. */
+.cd-wakes { padding-top: var(--sp-1); }
+.cd-wake-list { display: grid; gap: var(--sp-1); margin: 0; padding: 0; list-style: none; }
+.cd-wake-row { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; min-height: 28px; }
+.cd-wake-when { flex: none; color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1.45 var(--sans); font-variant-numeric: tabular-nums; }
+.cd-wake-why { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; color: var(--muted); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
+.cd-wake-row .tray-note-act { flex: none; }
+.cd-msg.cd-wake { display: flex; flex-direction: row; align-items: flex-start; gap: var(--sp-2); color: var(--muted); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
+.cd-msg.cd-wake > .codicon { flex: none; margin-top: 2px; font-size: 14px; }
+.cd-wake-words { min-width: 0; overflow-wrap: anywhere; }
