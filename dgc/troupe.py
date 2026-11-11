@@ -35,6 +35,20 @@ MAX_ITEM_CHARS = 4000
 MAX_STAGES = 4
 MAX_VOTES = 5
 MAX_AGENTS = 400
+
+
+def max_agents() -> int:
+    """Agents one troupe may start: MAX_AGENTS, or yours in Dev Mode (dgc.dev_mode)."""
+    from .dev_mode import chosen
+    mine = chosen("troupe_agents")
+    return MAX_AGENTS if mine is None else mine
+
+
+def max_items() -> int:
+    """Items one troupe may take: MAX_ITEMS, or yours in Dev Mode (dgc.dev_mode)."""
+    from .dev_mode import chosen
+    mine = chosen("troupe_items")
+    return MAX_ITEMS if mine is None else mine
 MAX_PROMPT = 4000
 MAX_SKETCH_CHARS = 1500
 REPORT_CHARS = 12000             # what the woken chat is handed; the full results stay in the journal
@@ -276,7 +290,7 @@ class Plan:
         agents = f"{count} agent{'' if count == 1 else 's'}"
         if not tail:
             return f"about {agents}"
-        return f"{agents} to start, then " + ", then ".join(tail) + f"; at most {MAX_AGENTS} in all"
+        return f"{agents} to start, then " + ", then ".join(tail) + f"; at most {max_agents()} in all"
 
 
 TEMPLATES = ("review", "research", "change", "compare")
@@ -343,8 +357,8 @@ def plan_from_args(args: dict, agent_names=()) -> Plan:
     items = args.get("items")
     if not isinstance(items, list) or not items:
         raise PlanError("items must be a non-empty list: the files, questions, places or options to work through")
-    if len(items) > MAX_ITEMS:
-        raise PlanError(f"at most {MAX_ITEMS} items; split the job into several troupes")
+    if len(items) > max_items():
+        raise PlanError(f"at most {max_items()} items; split the job into several troupes")
     clean = []
     for index, item in enumerate(items):
         if not isinstance(item, str) or not item.strip():
@@ -375,8 +389,8 @@ def plan_from_args(args: dict, agent_names=()) -> Plan:
         if stage.over == "each" and "{item}" not in stage.prompt:
             raise PlanError(f"stage {stage.name!r}: its prompt needs {{item}}, where each item goes")
     plan = Plan(title, clean, stages, template or "")
-    if plan.agents_planned() > MAX_AGENTS and not any(s.split for s in stages):
-        raise PlanError(f"this work order would start {plan.agents_planned()} agents; at most {MAX_AGENTS}")
+    if plan.agents_planned() > max_agents() and not any(s.split for s in stages):
+        raise PlanError(f"this work order would start {plan.agents_planned()} agents; at most {max_agents()}")
     return plan
 
 
@@ -632,7 +646,7 @@ class Run:
         units = self._units(index, stage, inputs)
         record = self.stages[index]
         self.current = index
-        room = MAX_AGENTS - self.agents_started
+        room = max_agents() - self.agents_started
         if len(units) > room:
             # A split can multiply the work past what was planned: the cap holds at run time too, and says so.
             record["dropped"] = len(units) - max(0, room)
@@ -845,7 +859,7 @@ class Run:
                          + (f", {stage['failed']} failed" if stage["failed"] else "")
                          + f", {stage['kept']} kept"
                          + (f" ({self.unchecked[index]} of them unchecked)" if self.unchecked.get(index) else "")
-                         + (f"; {stage['dropped']} not started (a troupe starts at most {MAX_AGENTS} agents)"
+                         + (f"; {stage['dropped']} not started (a troupe starts at most {max_agents()} agents)"
                             if stage.get("dropped") else ""))
         if self.reused:
             lines.append(f"Reused from the earlier attempt: {self.reused} agents' results.")

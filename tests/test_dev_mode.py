@@ -224,3 +224,14 @@ class ToolOutputTests(unittest.TestCase):
             self.assertGreater(len(tools._fetched_text_for_model(page)), 19000)
         with self.settings(False):
             self.assertLess(len(tools._fetched_text_for_model(page)), 8100)
+
+
+class TroupeTests(unittest.TestCase):
+    settings = WiredTests.settings
+
+    def test_a_troupes_agents_and_items(self):
+        from dgc import troupe
+        with self.settings(False, troupe_agents=2000, troupe_items=1000):
+            self.assertEqual((troupe.max_agents(), troupe.max_items()), (400, 200))
+        with self.settings(True, troupe_agents=2000, troupe_items=1000):
+            self.assertEqual((troupe.max_agents(), troupe.max_items()), (2000, 1000))

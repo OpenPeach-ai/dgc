@@ -89,9 +89,9 @@ def validate(payload, agent_names=()) -> dict:
         source = {"kind": "matching", "pattern": pattern}
     else:
         items = source.get("items")
-        if (not isinstance(items, list) or not 1 <= len(items) <= troupe.MAX_ITEMS
+        if (not isinstance(items, list) or not 1 <= len(items) <= troupe.max_items()
                 or not all(isinstance(i, str) and i.strip() and len(i) <= troupe.MAX_ITEM_CHARS for i in items)):
-            raise RegistryError("invalid_routine", f"Give 1 to {troupe.MAX_ITEMS} items.")
+            raise RegistryError("invalid_routine", f"Give 1 to {troupe.max_items()} items.")
         source = {"kind": "these", "items": [i.strip() for i in items]}
     last = payload.get("last_commit")
     if last is not None and (not isinstance(last, str) or not re.fullmatch(r"[0-9a-f]{40}", last)):
@@ -177,7 +177,7 @@ def items_for(payload: dict, *, now: datetime | None = None) -> tuple[list[str],
                            "--pretty=format:").replace("\n", "\0").split("\0")
         alive = set(tracked)
         found = sorted({path for path in changed if path and path in alive})
-    return found[:troupe.MAX_ITEMS], head
+    return found[:troupe.max_items()], head
 
 
 def _check_snapshot_members(tar: tarfile.TarFile, dest: Path) -> None:
