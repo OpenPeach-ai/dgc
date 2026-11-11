@@ -1695,16 +1695,31 @@ def _repair_task_batches(calls) -> None:
             arguments["tasks"] = parsed
 
 
+def _compose_task_briefs(calls) -> None:
+    """A `task` brief given as fields (goal, known, files, done_when, returns) becomes the helper's prompt, in place,
+    before the call is recorded: the transcript, the replay and the run all read the same prompt."""
+    from .subagents import compose_brief
+    for call in calls or ():
+        arguments = getattr(call, "arguments", None)
+        if getattr(call, "name", "") != "task" or not isinstance(arguments, dict):
+            continue
+        compose_brief(arguments)
+        for item in arguments.get("tasks") if isinstance(arguments.get("tasks"), list) else ():
+            compose_brief(item)
+
+
 def _task_call_error(arguments) -> str:
     """Why this `task` call cannot run as written, or "" when it can. Said before anything asks.
 
     Two forms, never both: one helper (`description` + `prompt`) or several (`tasks`, each item
     with its own `description`, `prompt` and optional `agent`). `background` belongs to the call.
     """
-    from .subagents import TASK_BATCH_MIN, task_batch_max
+    from .subagents import TASK_BATCH_MIN, brief_problem, task_batch_max
     TASK_BATCH_MAX = task_batch_max()
     if not isinstance(arguments, dict):
         return "error: task arguments must be an object."
+    if brief_problem(arguments):
+        return f"error: {brief_problem(arguments)}."
     if "_unparsed" in arguments:
         return ("error: could not parse tool arguments as JSON: "
                 f"{str(arguments['_unparsed'])[:200]}")
@@ -1736,9 +1751,11 @@ def _task_call_error(arguments) -> str:
         if "background" in item:
             return ("error: background applies to the whole call: set it once beside tasks, not "
                     f"inside tasks[{place}].")
+        if brief_problem(item):
+            return f"error: tasks[{place}]: {brief_problem(item)}."
         missing = [key for key in ("description", "prompt") if not str(item.get(key) or "").strip()]
         if missing:
-            return f"error: tasks[{place}] needs {' and '.join(missing)}."
+            return f"error: tasks[{place}] needs {' and '.join(missing)} (or a brief: goal, done_when, returns)."
         if "agent" in item and not isinstance(item["agent"], str):
             return f"error: tasks[{place}].agent must be a string (an agent's name)."
     return ""
@@ -4090,8 +4107,10 @@ class Agent(GoalLifecycle):
             return lines + [
                 "Delegate when it clearly helps: a broad search across many files or areas "
                 "(explorer), independent chunks that can run in parallel (all of them in ONE `task` "
-                "call, listed in `tasks`), or an independent review (critic). Do small or tightly coupled work "
-                f"yourself. {background} "
+                "call, listed in `tasks`), an independent review (critic), or one big independent job (an "
+                "audit, a study across many files, a fix with its tests), even on its own. Do small or tightly "
+                "coupled work yourself; quick lookups stay here. Brief a helper as a peer: goal, what is known or "
+                f"ruled out, the files, done when, and what to return. {background} "
                 "After a researcher writes a design or plan file, spawn critic on that path before "
                 "implementing, unless the user asked you to skip review.",
             ]
@@ -9115,6 +9134,7 @@ class Agent(GoalLifecycle):
             # message, so a restored turn describes what DGC actually ran. Explicit false stays
             # foreground for work whose result the lead needs immediately.
             _repair_task_batches(result.tool_calls)
+            _compose_task_briefs(result.tool_calls)
             self._note_router_hints(result.tool_calls)
             self._normalize_ultra_task_batch(result.tool_calls)
             assistant: dict = {"role": "assistant",

@@ -709,17 +709,28 @@ TOOL_SCHEMAS = [
         "code, an independent chunk of work, or a review. A helper cannot see this conversation. In a "
         "Git project each works in a private checkout, then integrates only its conflict-free delta; "
         "conflicting or incomplete work is preserved without overwriting the caller. A helper starts "
-        "cold, so it saves time only beside other helpers: to run several helpers at once, pass them "
-        "all in ONE call as `tasks` (2-32, each with its own description, prompt and agent). They "
+        "cold: hand it a big independent job (an audit, a study across many files, a fix with its "
+        "tests), even alone, and keep quick lookups yourself. Brief it as a peer with goal, known, "
+        "files, done_when and returns; it keeps going until done_when holds. When you want "
+        "to run several helpers at once, pass them all in ONE call as `tasks` (2-32, each with its own "
+        "description, brief and agent). They "
         "start together (in a Git project, after any needed approval) and the call returns every result, in the "
-        "order you listed them. For one helper, pass description and prompt instead. Never put parts "
+        "order you listed them. For one helper, pass description and its brief instead. Never put parts "
         "that depend on each other or edit the same files in one batch. The user does not see the "
         "results: summarize them.",
         {"description": {"type": "string", "description": "One helper: a short label for its work. "
                          "Omit when you pass tasks"},
-         "prompt": {"type": "string", "description": "One helper: a self-contained brief: goal, "
-                    "project-relative paths, constraints, what is known, what to return. Omit when "
-                    "you pass tasks"},
+         "prompt": {"type": "string", "description": "One helper: a free-text brief, when you don't use "
+                    "the fields below (or notes beside them). Omit when you pass tasks"},
+         "goal": {"type": "string", "description": "One helper: what the job is for, in a sentence or two"},
+         "known": {"type": "string", "description": "One helper: what is known or already ruled out, so it "
+                   "doesn't redo your work"},
+         "files": {"type": "array", "items": {"type": "string"},
+                   "description": "One helper: the project-relative paths to start from"},
+         "done_when": {"type": "string", "description": "One helper: how it knows the job is done (a test passes, "
+                       "a question is answered); it keeps going until then"},
+         "returns": {"type": "string", "description": "One helper: what to hand back (a summary, a findings file, "
+                     "a diff with its checks)"},
          "agent": {"type": "string", "description": _TASK_AGENT_DESCRIPTION},
          "tasks": {"type": "array", "minItems": 2, "maxItems": 32,
                    "description": "Several helpers that start together, one item each: the way to "
@@ -729,7 +740,14 @@ TOOL_SCHEMAS = [
                                  "description": {"type": "string",
                                                  "description": "A short label for this helper's work"},
                                  "prompt": {"type": "string",
-                                            "description": "Its self-contained brief, as for one helper"},
+                                            "description": "Its free-text brief, as for one helper, when you "
+                                                           "don't use the fields"},
+                                 "goal": {"type": "string", "description": "As goal above"},
+                                 "known": {"type": "string", "description": "As known above"},
+                                 "files": {"type": "array", "items": {"type": "string"},
+                                           "description": "As files above"},
+                                 "done_when": {"type": "string", "description": "As done_when above"},
+                                 "returns": {"type": "string", "description": "As returns above"},
                                  "agent": {"type": "string",
                                            "description": "Which agent, as agent above; omit for worker"},
                                  "system": {"type": "string", "description": "DGC Router: as system above"},
@@ -738,7 +756,7 @@ TOOL_SCHEMAS = [
                                           "description": "DGC Router: as size above"},
                                  "effort": {"type": "string", "enum": ["off", "low", "medium", "high"],
                                             "description": "How hard this helper thinks, as effort above"}},
-                             "required": ["description", "prompt"]}},
+                             "required": ["description"]}},
          "system": {"type": "string", "description": TASK_SYSTEM_DESCRIPTION},
          "model": {"type": "string", "description": "DGC Router: the model to run the helper on (one a system "
                    "lists in router_status). Omit to let DGC pick"},

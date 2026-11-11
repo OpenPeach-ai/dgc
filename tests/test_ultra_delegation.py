@@ -180,7 +180,7 @@ class UltraDelegationTests(unittest.TestCase):
         text = json.dumps(task)
         self.assertNotIn("large, independent chunks", text)
         for needle in ("exploring code", "a review", "cannot see this conversation",
-                       "saves time only beside other helpers",
+                       "hand it a big independent job",
                        "to run several helpers at once, pass them all in ONE call as `tasks`",
                        "Never put parts that depend on each other or edit the same files in one batch",
                        "explorer", "researcher", "critic", "worker"):

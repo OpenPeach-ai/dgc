@@ -70,10 +70,12 @@ class TaskBatchSchemaTests(unittest.TestCase):
         tasks = params["properties"]["tasks"]
         self.assertEqual((tasks["type"], tasks["minItems"], tasks["maxItems"]), ("array", 2, 32),
                          "as many helpers as may run at once (config.MAX_PARALLEL_TASKS)")
-        self.assertEqual(tasks["items"]["required"], ["description", "prompt"])
+        # 0.52 (work-helper-briefs): an item's brief is its prompt or the fields (goal, done_when, returns...).
+        self.assertEqual(tasks["items"]["required"], ["description"])
         # system, model and size: where DGC Router runs each helper (0.51); effort: how hard it thinks.
         self.assertEqual(set(tasks["items"]["properties"]),
-                         {"description", "prompt", "agent", "system", "model", "size", "effort"})
+                         {"description", "prompt", "agent", "system", "model", "size", "effort",
+                          "goal", "known", "files", "done_when", "returns"})
         for one in ("description", "prompt", "agent", "background"):
             self.assertIn(one, params["properties"])
         self.assertIn("to run several helpers at once, pass them all in ONE call as `tasks`",

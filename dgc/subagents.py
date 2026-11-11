@@ -796,6 +796,47 @@ TASK_BATCH_MIN = 2
 TASK_BATCH_MAX = 32         # one `task` call's helpers: as many as may run at once (config.MAX_PARALLEL_TASKS)
 
 
+# A helper's brief as fields (work-helper-briefs, 0.52; agreed 9 Nov): a peer's brief, as Claude Code's are. goal,
+# done_when and returns are needed when any field is used; known and files are optional. They become the helper's
+# prompt (compose_brief) as the call arrives, so everything after reads one prompt.
+BRIEF_FIELDS = ("goal", "known", "files", "done_when", "returns")
+BRIEF_NEEDED = ("goal", "done_when", "returns")
+MAX_BRIEF_FILES = 64
+
+
+def brief_problem(item) -> str:
+    """Why a brief given as fields can't be used ("" when it can, or when no field is used)."""
+    if not isinstance(item, dict) or not any(key in item for key in BRIEF_FIELDS):
+        return ""
+    missing = [key for key in BRIEF_NEEDED if not str(item.get(key) or "").strip()]
+    if missing:
+        return "a brief needs " + ", ".join(missing) + " (and may add known and files)"
+    files = item.get("files")
+    if files is not None and not (isinstance(files, str) or (isinstance(files, list) and all(isinstance(f, str) for f in files))):
+        return "files is a list of project-relative paths"
+    return ""
+
+
+def compose_brief(item) -> None:
+    """A brief given as fields becomes the helper's prompt, in place: Goal, Known or ruled out, Files, Done when,
+    Return, then any prompt it also had (as notes). Left alone when it uses no field or can't be used (brief_problem)."""
+    if not isinstance(item, dict) or not any(key in item for key in BRIEF_FIELDS) or brief_problem(item):
+        return
+    text = lambda key: " ".join(str(item.get(key) or "").split()) if key != "known" else str(item.get(key) or "").strip()
+    files = item.get("files")
+    files = [f.strip() for f in ([files] if isinstance(files, str) else files or []) if f.strip()][:MAX_BRIEF_FILES]
+    lines = [f"Goal: {text('goal')}"]
+    if text("known"):
+        lines.append(f"Known or ruled out: {text('known')}")
+    if files:
+        lines.append("Files: " + ", ".join(files))
+    lines += [f"Done when: {text('done_when')}", f"Return: {text('returns')}"]
+    notes = str(item.get("prompt") or "").strip()
+    if notes and not notes.startswith("Goal: "):
+        lines.append(f"Notes: {notes}")
+    item["prompt"] = "\n".join(lines)
+
+
 def task_batch_max(config=None) -> int:
     """One `task` call's helpers at most: TASK_BATCH_MAX, or as many as Dev Mode lets run at once (dgc.dev_mode)."""
     from .dev_mode import helpers_ceiling
