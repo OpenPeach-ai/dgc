@@ -168,7 +168,9 @@ class Session:
         surface.approve = None             # a fallback to another paid generator is never automatic for a Pip
         outcome = image_tools.execute(self.config, plan, surface)
         if outcome.result is None:
-            return outcome.text
+            # A generator with no key, or whose key was turned away: a card in the Pip's chat asks the user for it
+            # (pip_keys, kind "generator"), instead of sending them to Settings.
+            return key_card(self, outcome.error, outcome.used or plan.generator, "pictures") or outcome.text
         for item in outcome.result.saved:
             self._keep(item)
         return outcome.text.replace("The user sees it in the chat.", "It shows with your reply in your chat.") \
@@ -193,6 +195,21 @@ class Session:
         record = self.directory / "runs" / self.run_id
         record.mkdir(parents=True, exist_ok=True)
         (record / "generated-images.json").write_text(json.dumps(self.made), encoding="utf-8")
+
+
+def key_card(session, error, generator, makes) -> str:
+    """What the Pip is told when its generator needs a key the user can paste on a card; "" to keep today's words."""
+    if error is None or getattr(error, "kind", "") != "bad_key" or not isinstance(generator, dict):
+        return ""
+    try:
+        from . import pip_keys
+        from .workspace_registry import WorkspaceRegistry
+        refused = bool(images_mod.key_for(session.config, generator))
+        with WorkspaceRegistry(session.directory) as registry:
+            return pip_keys.request_generator(registry, session.config, session.pip_id, session.workspace_id,
+                                              session.run_id, generator, makes=makes, refused=refused)
+    except Exception:                          # noqa: BLE001 -- never lose the Pip's answer over the card
+        return ""
 
 
 def attach(store, run, reply_id: str) -> int:

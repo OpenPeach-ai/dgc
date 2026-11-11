@@ -446,7 +446,9 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # ...}], and allow_pip_plugin takes `keys` {variable name: text}, kept where DGC keeps a plugin's key (the keychain, bound
 # to its server), never answered; the Pip carries on. Every key it lacks must be given, or nothing is saved.
 # API 82 (0.52, pips-10): a Personal Pip's own API keys (pip_keys). It asks with ask_for_key; list_pip_keys {pip_id} ->
-# {pip_id, keys: [{id, kind "site", name, why, host, header, status requested|saved|declined, saved, refused, ...}]} (never a value);
+# {pip_id, keys: [{id, kind "site" or "generator" (+ generator: its id), name, why, host, header, status
+# requested|saved|declined, saved, refused, ...}]} (never a value); a "generator" card is a picture or video generator's
+# own key, saved where Settings keeps it (for all of DGC) and left there when the card is removed;
 # save_pip_key {pip_id, key_id, value} keeps it in the keychain bound to that Pip and its one site, never answered, and
 # the Pip carries on; decline_pip_key {pip_id, key_id} (Not now: no new card for that site for a day); remove_pip_key
 # {pip_id, key_id} -> {removed}. All local only. DGC adds the key to the Pip's GETs on that site alone.

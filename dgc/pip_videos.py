@@ -160,7 +160,8 @@ class Session:
         started = video_tools.start(self.config, plan, surface,
                                     target={"pip": self.pip_id, "run": self.run_id, "workspace": self.workspace_id})
         if started.job is None:
-            return started.text
+            from .pip_images import key_card
+            return key_card(self, started.error, plan.generator, "videos") or started.text
         self.started.append(started.job["id"])
         record = self.directory / "runs" / self.run_id
         record.mkdir(parents=True, exist_ok=True)

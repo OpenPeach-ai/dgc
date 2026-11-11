@@ -3746,7 +3746,10 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 # Video generation: started by the controller (pip_videos); every video asks the user first, and a
                 # routine makes one only for a Pip the user allowed for that generator.
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
-                return pip_app_links.worker_call(apps_pin, call.name, arguments, timeout=180)
+                said = pip_app_links.worker_call(apps_pin, call.name, arguments, timeout=180)
+                if isinstance(said, str) and "card below your reply" in said and not said.startswith("error"):
+                    cards_shown.append(call.name)      # its generator's key card (pip_keys)
+                return said
             if personal and apps_pin is not None and call.name in pip_keys.TOOLS:
                 # Its own API keys (pip_keys): asked for on a card; DGC adds the saved key to a GET on its one site, in
                 # the controller, so the key never reaches this worker.
@@ -3759,7 +3762,10 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 # Image generation: made by the controller with the user's generators (pip_images); a paid one is
                 # made only after the user said yes in their own message.
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
-                return pip_app_links.worker_call(apps_pin, call.name, arguments, timeout=600)
+                said = pip_app_links.worker_call(apps_pin, call.name, arguments, timeout=600)
+                if isinstance(said, str) and "card below your reply" in said and not said.startswith("error"):
+                    cards_shown.append(call.name)      # its generator's key card (pip_keys)
+                return said
             if personal and apps_pin is not None and call.name in pip_app_links.TOOLS:
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
                 said = pip_app_links.worker_call(apps_pin, call.name, arguments)

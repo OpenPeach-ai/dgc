@@ -147,16 +147,27 @@ def _put(registry, value) -> None:
                         (_key(value["pip_id"], value["id"]), json.dumps(value, ensure_ascii=False, separators=(",", ":"))))
 
 
+def _kind(value) -> str:
+    return "generator" if value.get("kind") == "generator" else "site"
+
+
 def _for_host(registry, pip_id, host) -> dict | None:
-    return next((v for v in _rows(registry, pip_id) if v.get("host") == host), None)
+    return next((v for v in _rows(registry, pip_id) if _kind(v) == "site" and v.get("host") == host), None)
+
+
+def _for_generator(registry, pip_id, generator_id) -> dict | None:
+    return next((v for v in _rows(registry, pip_id) if _kind(v) == "generator" and v.get("generator") == generator_id), None)
 
 
 def projection(value) -> dict:
     """What the editor and the SDKs see of a key: never its value."""
+    generator = _kind(value) == "generator"
     return {"id": value["id"], "pip_id": value["pip_id"], "workspace_id": value["workspace_id"],
-            "kind": "site",                     # a key bound to one site; more kinds may come (a generator's key)
-            "name": value["name"], "why": value.get("why", ""), "host": value["host"],
-            "header": shown_header(value["header"]), "status": value["status"],
+            # "site": a key bound to one site (fetch_with_key); "generator": a picture or video generator's own key,
+            # kept with it in Settings for all of DGC (slice 2b).
+            "kind": _kind(value), **({"generator": value.get("generator", "")} if generator else {}),
+            "name": value["name"], "why": value.get("why", ""), "host": value.get("host", ""),
+            "header": "" if generator else shown_header(value["header"]), "status": value["status"],
             "saved": value["status"] == "saved", "refused": value.get("refused") is True,
             "created_at": value["created_at"], "saved_at": value.get("saved_at"),
             "declined_at": value.get("declined_at")}
@@ -210,6 +221,41 @@ def request(registry, config, pip_id, workspace_id, run_id, args) -> str:
         registry.event(workspace_id, "pip_key_requested", pip_id=pip_id, run_id=run_id,
                        payload={"key_id": value["id"], "name": name, "host": host})
     return ASKED.format(name=name, host=host)
+
+
+GEN_ASKED = ("{name} {why}, so DGC put a card below your reply asking the user for its key. DGC keeps it with {name} in "
+             "Settings, for all of DGC; you never see it. Tell the user in one sentence, and stop: you are told when it "
+             "is saved. Don't make it some other way.")
+GEN_ALREADY = "The card asking for {name}'s key is already below your reply. Don't ask again; wait for the user."
+
+
+def request_generator(registry, config, pip_id, workspace_id, run_id, generator, *, makes="pictures",
+                      refused=False) -> str:
+    """A picture or video generator that has no key, or whose key was turned away: one card for it in the Pip's chat.
+    Returns what the Pip is told (or "" when it must not be asked: the user said Not now within the day)."""
+    generator_id = str(generator.get("id") or "")
+    display = " ".join(str(generator.get("name") or generator_id).split())[:80] or "This generator"
+    if not generator_id:
+        return ""
+    now = utc_now()
+    with registry.transaction():
+        current = _for_generator(registry, pip_id, generator_id)
+        if current is not None:
+            if current.get("status") == "requested":
+                return GEN_ALREADY.format(name=display)
+            if current.get("status") == "declined" and _now() - float(current.get("declined_ts") or 0) < QUIET_SECONDS:
+                return ""
+            value = {**current, "status": "requested", "refused": bool(refused), "run_id": run_id, "created_at": now,
+                     "declined_at": None, "declined_ts": None}
+        else:
+            value = {"id": "pipkey_" + uuid.uuid4().hex, "pip_id": pip_id, "workspace_id": workspace_id, "run_id": run_id,
+                     "kind": "generator", "generator": generator_id, "name": f"{display} key",
+                     "why": f"So it can make {makes} with {display}.", "host": "", "header": "",
+                     "status": "requested", "refused": bool(refused), "created_at": now}
+        _put(registry, value)
+        registry.event(workspace_id, "pip_key_requested", pip_id=pip_id, run_id=run_id,
+                       payload={"key_id": value["id"], "name": value["name"], "generator": generator_id})
+    return GEN_ASKED.format(name=display, why="turned its key away" if refused else "has no key yet")
 
 
 # ------------------------------------------------------------------------------------------------ the value
@@ -295,23 +341,34 @@ def save(store, config, key_id, pip_id, actor, value) -> dict:
         raise RegistryError("invalid_key", "Paste the key to save it.")
     if len(text) > MAX_VALUE or re.search(r"[\x00-\x1f\x7f]", text):
         raise RegistryError("invalid_key", "That doesn't look like one key: paste it again, on one line.")
-    try:
-        where = credentials.save(_entry(key_id), {"version": VERSION, "binding": _binding(card), "value": text})
-    except (credentials.CredentialError, OSError) as exc:
-        raise RegistryError("key_not_saved", f"DGC couldn't keep the key securely: {exc}.") from None
-    _remember([text])
-    try:
-        _note(registry.directory, pip_id, key_id, kept=True)
-    except OSError as exc:
-        _forget(key_id)
-        raise RegistryError("key_not_saved", f"DGC couldn't keep the key securely: {exc}.") from None
+    if _kind(card) == "generator":
+        # Where Settings keeps that generator's key (secrets.json, bound to its address): the user's own setting, for
+        # all of DGC, not this Pip's alone.
+        try:
+            config.set_image_key(card["generator"], text)
+        except (ValueError, OSError) as exc:
+            raise RegistryError("key_not_saved", f"DGC couldn't keep the key: {exc}.") from None
+        where = "settings"
+        _remember([text])
+    else:
+        try:
+            where = credentials.save(_entry(key_id), {"version": VERSION, "binding": _binding(card), "value": text})
+        except (credentials.CredentialError, OSError) as exc:
+            raise RegistryError("key_not_saved", f"DGC couldn't keep the key securely: {exc}.") from None
+        _remember([text])
+        try:
+            _note(registry.directory, pip_id, key_id, kept=True)
+        except OSError as exc:
+            _forget(key_id)
+            raise RegistryError("key_not_saved", f"DGC couldn't keep the key securely: {exc}.") from None
     was_waiting = card.get("status") == "requested"
     with registry.transaction():
         card = {**_get(registry, key_id, pip_id), "status": "saved", "refused": False, "saved_at": utc_now(),
                 "stored": where}
         _put(registry, card)
         registry.event(card["workspace_id"], "pip_key_saved", pip_id=pip_id,
-                       payload={"key_id": key_id, "host": card["host"], "actor": actor})
+                       payload={"key_id": key_id, "host": card.get("host", ""), "actor": actor,
+                                **({"generator": card["generator"]} if _kind(card) == "generator" else {})})
     result = {"key": projection(card)}
     if was_waiting:
         from .pip_chat import continue_after_key
@@ -332,7 +389,7 @@ def decline(store, config, key_id, pip_id, actor) -> dict:
         card = {**_get(registry, key_id, pip_id), "status": "declined", "declined_at": utc_now(), "declined_ts": _now()}
         _put(registry, card)
         registry.event(card["workspace_id"], "pip_key_declined", pip_id=pip_id,
-                       payload={"key_id": key_id, "host": card["host"], "actor": actor})
+                       payload={"key_id": key_id, "host": card.get("host", ""), "actor": actor})
     result = {"key": projection(card)}
     from .pip_chat import continue_after_key_declined
     try:
@@ -362,11 +419,12 @@ def _forget(key_id, directory=None, pip_id=None) -> None:
 def remove(registry, key_id, pip_id, actor) -> dict:
     """remove_pip_key: forget the key and its card."""
     card = _owned(registry, key_id, pip_id, actor)
-    _forget(key_id, registry.directory, pip_id)
+    if _kind(card) == "site":
+        _forget(key_id, registry.directory, pip_id)       # a generator's key stays: it is the user's own setting
     with registry.transaction():
         registry.db.execute("DELETE FROM metadata WHERE key=?", (_key(pip_id, key_id),))
         registry.event(card["workspace_id"], "pip_key_removed", pip_id=pip_id,
-                       payload={"key_id": key_id, "host": card["host"], "actor": actor})
+                       payload={"key_id": key_id, "host": card.get("host", ""), "actor": actor})
     return {"removed": key_id}
 
 

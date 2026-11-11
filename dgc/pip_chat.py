@@ -714,6 +714,10 @@ FOLLOW_UP_KEYS = (COMPUTER_KEY, APPS_KEY, CHECK_KEY, PLUGINS_KEY, BORROW_KEY, KE
 KEY_SAVED = ("This message is from DGC, not the user. The user saved the {name} for {host}. Read the API with "
              "fetch_with_key now (DGC adds the key; you never see it), then carry on with what they asked in a short "
              "message.")
+KEY_SAVED_GENERATOR = ("This message is from DGC, not the user. The user saved {name}'s key. Make the picture or video "
+                       "they asked for again now, then carry on in a short message.")
+KEY_NOT_NOW_GENERATOR = ("This message is from DGC, not the user. The user said not now to the {name}. Don't ask for it "
+                         "again today. Carry on without it in a short message: say what you couldn't make without it.")
 KEY_NOT_NOW = ("This message is from DGC, not the user. The user said not now to the {name} for {host}. Don't ask for it "
                "again today. Carry on without it in a short message: say what you couldn't do without it.")
 CHECK_DONE = ("This message is from DGC, not the user. The user says they finished {host}'s check on your computer's "
@@ -990,8 +994,11 @@ def continue_after_plugin(store, pip_id, card, config):
 
 
 def continue_after_key(store, pip_id, card, config):
-    """The chat's next turn once the user has saved a key this Pip asked for (pip_keys)."""
+    """The chat's next turn once the user has saved a key this Pip asked for (pip_keys): a site's, or a generator's."""
     key = KEYS_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(card["id"]))[:100]
+    if card.get("kind") == "generator":
+        text = KEY_SAVED_GENERATOR.format(name=str(card["name"])[:80].removesuffix(" key"))
+        return _owed_turn(store, pip_id, text, key, "local-apps", config)
     text = KEY_SAVED.format(name=str(card["name"])[:80], host=str(card["host"])[:253])
     return _owed_turn(store, pip_id, text, key, "local-apps", config)
 
@@ -999,7 +1006,8 @@ def continue_after_key(store, pip_id, card, config):
 def continue_after_key_declined(store, pip_id, card, config):
     """The chat's next turn once the user said Not now to a key card: the Pip says what it couldn't do."""
     key = KEYS_KEY + "no_" + re.sub(r"[^A-Za-z0-9_-]", "", str(card["id"]))[:100]
-    text = KEY_NOT_NOW.format(name=str(card["name"])[:80], host=str(card["host"])[:253])
+    text = (KEY_NOT_NOW_GENERATOR.format(name=str(card["name"])[:80]) if card.get("kind") == "generator" else
+            KEY_NOT_NOW.format(name=str(card["name"])[:80], host=str(card["host"])[:253]))
     return send(store, pip_id, text, key, "local-apps", config, _intro=True)
 
 
