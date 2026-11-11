@@ -40,6 +40,12 @@
 .dgc-hub-card .dgc-card-icon.dgc-card-face > * { width: 30px; height: 30px; }
 .dgc-hub-card .dgc-card-icon.dgc-card-face :is(.dgc-plush, svg) { width: 100%; height: 100%; }
 .dgc-hub-card .dgc-card-icon.dgc-card-face > .dgc-blob { --blob-size: 24px; width: 24px; height: 24px; }
+/* A thing made (a page, a document, slides): the output card's sheet of its kind (filesheet.css) in the face's place,
+   at the face's size, its tab's word on the kind's colour. */
+.dgc-hub-card .dgc-card-icon.dgc-card-face:has(> .dgc-sheet) { place-items: start; height: 33px; border-radius: 0; }
+.dgc-hub-card .dgc-card-icon.dgc-card-face > .dgc-sheet { width: 26px; height: 33px; }
+.dgc-hub-card .dgc-sheet .dgc-sheet-page { gap: 1.5px; padding: 3px; border-radius: 4px; }
+.dgc-hub-card .dgc-sheet .dgc-sheet-tag { right: -4px; bottom: 2px; padding: 1px 2.5px; font-size: 6px; letter-spacing: .02em; }
 .dgc-hub-card .dgc-card-words { display: flex; flex-direction: column; }
 /* (The source line is quiet at four fifths of the text: the usual quiet tone is 4.48:1 on a card's own tint in a light theme.) */
 .dgc-hub-card .dgc-card-sub { order: -1; margin: 0 0 1px; color: color-mix(in srgb, var(--text) 80%, transparent); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
@@ -51,9 +57,18 @@
 .dgc-card.dgc-hub-card .dgc-card-actions { flex: none; flex-wrap: nowrap; justify-content: flex-end; gap: 6px; margin: auto 0 0 40px; padding-top: 8px; }
 .dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn { flex: 0 1 auto; min-width: 0; height: 26px; padding: 0 13px; overflow: hidden; text-overflow: ellipsis; }
 .dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn:not(.primary) { order: 2; }
+/* A card answered where it is: the one line it must show whole (a command in the code face) where the chips would be,
+   its two answers, and a quiet way to all of it at the left. Words take two lines at most; a command takes one, at the
+   card's whole width. A line that would be cut is never shown: that card opens
+   instead (hub.js measures it). After an answer the card says what was chosen, with Undo, for a moment. */
+.dgc-card.dgc-hub-card .dgc-card-note { flex: none; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; margin: 7px 0 0 40px; overflow: hidden; color: color-mix(in srgb, var(--text) 80%, transparent); font: var(--w-reg) var(--t-xs)/1.5 var(--sans); }
+.dgc-card.dgc-hub-card.dgc-hub-mono .dgc-card-note { display: block; margin: 8px 0 0; padding: 0 7px; white-space: nowrap; line-height: 22px; border-radius: var(--r-sm); background: var(--card-chip); color: var(--text); font-family: var(--mono); }
+.dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn.dgc-hub-open { order: -1; margin-right: auto; padding: 0 4px; border-color: transparent; background: transparent; color: color-mix(in srgb, var(--text) 80%, transparent); text-decoration: underline; text-underline-offset: 2px; }
+.dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn.dgc-hub-open:hover { color: var(--text-strong); }
 /* A very narrow side bar (under about 250 px): the chips and answers take the card's whole width, and the answers share it. */
 @container (max-width: 226px) {
-  .dgc-card.dgc-hub-card .dgc-card-chips, .dgc-card.dgc-hub-card .dgc-card-actions { margin-left: 0; }
+  .dgc-card.dgc-hub-card .dgc-card-chips, .dgc-card.dgc-hub-card .dgc-card-actions, .dgc-card.dgc-hub-card .dgc-card-note { margin-left: 0; }
+  .dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn.dgc-hub-open { flex: 0 0 auto; }
   .dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn { flex: 1 1 0; padding: 0 6px; }
 }
 .dgc-hub-note { margin: 0; color: var(--err-text); font: var(--w-reg) var(--t-sm)/1.4 var(--sans); }

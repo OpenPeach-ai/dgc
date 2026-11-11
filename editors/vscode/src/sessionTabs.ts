@@ -83,6 +83,20 @@ export class SessionTabs implements ChatPlaces, vscode.WebviewPanelSerializer, v
     return ids;
   }
 
+  waitingSessions(): Map<string, { count: number; ask?: { id: string; command: string } }> {
+    const found = new Map<string, { count: number; ask?: { id: string; command: string } }>();
+    for (const tab of this.tabs.values()) {
+      const id = tab.provider.sessionId(), waits = id ? tab.provider.waitingOnYou() : { count: 0 };
+      if (id && waits.count) found.set(id, waits);
+    }
+    return found;
+  }
+
+  answerSession(session: string, request: string, allow: boolean): boolean {
+    for (const tab of this.tabs.values()) if (tab.provider.sessionId() === session) return tab.provider.answerFromHome(request, allow);
+    return false;
+  }
+
   /** A saved session in a tab of its own, or the tab it is already in. "" opens a new session; with `cwd`, a new
    *  session in that folder (Continue in Work), not the window's. */
   open(session: string, title = "", options: { cwd?: string } = {}): DgcViewProvider {

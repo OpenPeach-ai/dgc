@@ -64,9 +64,9 @@ const PROJECT_CHATS = [{ id: "chat_3", title: "Packing list", updated_at: "2026-
 /** Opens the side bar. tab: "home" | "work" | "chat" | "pips", the tab the page's state was left on (Chat comes with two
     projects, the first open); homeShow: what the host kept of Home's Show filter (the page's attribute); saved: the page's
     whole kept state, in place of `tab`. theme: "dark-modern" | "light-modern" | "hc"; tabs: ChatDGC is here (seen before);
-    library: Work's Library row; srcRoot: another tree's sources. */
+    library: Work's Library row; srcRoot: another tree's sources; pages: the host's kept "made" cards, as its attribute's JSON. */
 export async function openHome(browser, { state = homeState(), width = 300, height = 760, theme = "dark-modern", homeShow = "", tabs = true, library = true,
-  sessions = SESSIONS, tab = "home", saved, api = 69, scale = 1, motion = "no-preference", srcRoot, video } = {}) {
+  sessions = SESSIONS, tab = "home", saved, api = 69, scale = 1, motion = "no-preference", srcRoot, video, pages = "" } = {}) {
   const { html, mainJs, markdownJs, themes, pipsJs, pipsCss, sprite } = await sources(srcRoot);
   // video: a folder to record the page into (the pictures' short films), at the page's own size.
   const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale, reducedMotion: motion,
@@ -86,7 +86,7 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
   await page.goto("https://home.test/webview/index.html");
   await page.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; --vscode-font-size: 13px; ${themes[theme]} }` });
   await page.evaluate((t) => document.body.classList.add(t.startsWith("light") ? "vscode-light" : t === "hc" ? "vscode-high-contrast" : "vscode-dark"), theme);
-  await page.evaluate(([mjs, mdjs, initial, kept, withTabs, apiVersion, ids, saved]) => {
+  await page.evaluate(([mjs, mdjs, initial, kept, withTabs, apiVersion, ids, saved, made]) => {
     const [P, Q] = ids;
     document.documentElement.dataset.chatPlace = "home";
     document.documentElement.dataset.pipsDocumentId = "doc1";
@@ -94,6 +94,8 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
     if (withTabs) document.documentElement.dataset.chatdgcSeen = "1";
     // What the host stamps on the page when Home's Show filter was left on one source (src/pipHomeDismiss.ts).
     if (kept) document.documentElement.dataset.homeShow = kept;
+    // What was made and is still on Home, as the host stamps it (src/pipHomeDismiss.ts): the attribute's own JSON.
+    if (made) document.documentElement.dataset.homePages = made;
     window.__state = initial; window.__posted = []; window.__saved = saved; window.__answered = []; window.__asking = 0;
     const S = () => window.__state;
     const answers = {
@@ -104,8 +106,26 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
       list_pip_attention: () => S().attention || ({ as_of: "2026-11-03T12:00:00.000Z", total: 0, items: [], truncated: false, counts: {}, by_pip: {}, projects: {} }),
       list_pip_unread: (r) => { const pips = S().unread[r.workspace_id] || []; return { workspace_id: r.workspace_id, pips, total: pips.reduce((n, p) => n + p.count, 0) }; },
       mark_pip_read: (r) => { for (const w of Object.keys(S().unread)) S().unread[w] = S().unread[w].filter((p) => p.pip_id !== r.pip_id); return { pip_id: r.pip_id, count: 0 }; },
+      // What a card answers by itself (a new Pip, a Pip's change, a visit to a new site): from the state's `setups`
+      // (by id), `computers` (by Pip) and the attention list, which loses what was answered. A state with none of
+      // them refuses, as a DGC would a thing that is not there.
+      get_pip_setup: (r) => (S().setups?.[r.setup_id] ? { setup: S().setups[r.setup_id] } : { __error: "That setup is not here." }),
+      accept_pip_setup: (r) => settleSetup(r, "accepted"), reject_pip_setup: (r) => settleSetup(r, "rejected"),
+      get_pip_computer: (r) => (S().computers?.[r.pip_id] ? { computer: S().computers[r.pip_id] } : { __error: "It has no computer." }),
+      decide_pip_computer_action: (r) => { const all = Object.values(S().computers || {}).flatMap((c) => c.actions), a = all.find((x) => x.id === r.action_id);
+        if (!a || a.digest !== r.expected_digest || a.status !== "pending") return { __error: "That changed. Refresh." };
+        a.status = r.approve ? "approved" : "rejected"; waitsNoMore(r.action_id); return { action: a }; },
+      accept_pip_update: (r) => { waitsNoMore(r.proposal_id); return { pip: { id: r.pip_id } }; },
+      reject_pip_update: (r) => { waitsNoMore(r.proposal_id); return { pip: { id: r.pip_id } }; },
       mark_pip_news_seen: (r) => { S().digest = (S().digest || []).filter((p) => !r.pip_ids.includes(p.pip_id)); return { seen: r.pip_ids.map((pip_id) => ({ pip_id, seen_until: r.until })) }; },
     };
+    function waitsNoMore(card) { const a = S().attention; if (!a) return;
+      for (const list of ["items", "reviews"]) { const at = (a[list] || []).findIndex((i) => i.card === card); if (at < 0) continue;
+        const [gone] = a[list].splice(at, 1); a.total--; if (gone.pip_id && a.by_pip[gone.pip_id]) { if (--a.by_pip[gone.pip_id] < 1) delete a.by_pip[gone.pip_id]; } } }
+    function settleSetup(r, status) { const s = S().setups?.[r.setup_id];
+      if (!s || s.digest !== r.expected_digest || s.status !== "pending") return { __error: "This was changed or answered somewhere else." };
+      s.status = status; waitsNoMore(s.id); return { setup: s }; }
+    window.__requests = [];
     const connect = () => window.dispatchEvent(new MessageEvent("message", { data: { type: "pipsConnection", generation: 1, apiVersion, connected: true, supported: true, enabled: true } }));
     window.acquireVsCodeApi = () => ({ getState: () => window.__saved, setState(next) { window.__saved = JSON.parse(JSON.stringify(next)); }, postMessage(m) {
       window.__posted.push(JSON.parse(JSON.stringify(m)));
@@ -113,13 +133,15 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
       // A scene that opens the Pips view on this page answers its requests itself (dock-scene.mjs); the home's own keep theirs.
       if (window.__pipsApp && m?.type === "pipsRequest" && !String(m.id).startsWith("home-pips-")) { window.__pipsApp(m); return; }
       const make = m?.type === "pipsRequest" && answers[m.request.type];
+      if (m?.type === "pipsRequest") window.__requests.push(JSON.parse(JSON.stringify(m.request)));
       // (What the home asked and has had answered is noted, so a test can wait for a whole poll.)
-      if (make) { window.__asking++; setTimeout(() => { window.dispatchEvent(new MessageEvent("message", { data: { type: "pipsReply", id: m.id, ok: true, result: make(m.request) } })); window.__answered.push(m.request.type); window.__asking--; }, 2); }
+      if (make) { window.__asking++; setTimeout(() => { const result = make(m.request), refused = result && result.__error;
+        window.dispatchEvent(new MessageEvent("message", { data: refused ? { type: "pipsReply", id: m.id, ok: false, error: { message: refused } } : { type: "pipsReply", id: m.id, ok: true, result } })); window.__answered.push(m.request.type); window.__asking--; }, 2); }
     } });
     eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
     eval(mjs);
     connect();
-  }, [mainJs, markdownJs, state, homeShow, tabs, api, [P, Q], saved || (tab === "chat" ? { sideTab: "chat", projectsOpen: [PROJECT] } : { sideTab: tab })]);
+  }, [mainJs, markdownJs, state, homeShow, tabs, api, [P, Q], saved || (tab === "chat" ? { sideTab: "chat", projectsOpen: [PROJECT] } : { sideTab: tab }), pages]);
   const send = (data) => page.evaluate((d) => window.dispatchEvent(new MessageEvent("message", { data: d })), data);
   if (sessions) await send({ type: "sessions_list", items: sessions, error: "" });
   if (tabs) {
@@ -132,6 +154,9 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
   /** Until the home's Pips have been asked for and answered, whole, and the page has drawn what came. */
   const polled = async (from = 0) => {
     await page.waitForFunction((n) => window.__answered.slice(n).includes("get_pip_digest") && window.__asking === 0, from, { timeout: Number(process.env.DGC_HOME_WAIT_MS) || 30000 });
+    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(done, 30)))));
+    // (What a card may answer by itself is read after the list is drawn: that too has been answered and drawn.)
+    await page.waitForFunction(() => window.__asking === 0, null, { timeout: 30000 });
     await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(done, 30)))));
   };
   await polled();
@@ -166,8 +191,10 @@ export const hubNow = (page) => page.evaluate(() => {
   if (!hub) return { shown: false, show: null, groups: [], cards: [], notes: [], empty: null, menu: [], focus: "" };
   const show = hub.querySelector(".dgc-hub-show");
   const card = (c) => ({ key: c.dataset.key, source: c.dataset.source, group: c.dataset.group, from: c.querySelector(".dgc-card-sub")?.textContent || "", title: c.querySelector(".dgc-card-title").textContent,
-    who: c.querySelector(".dgc-card-icon .dgc-blob") ? `blob:${c.querySelector(".dgc-card-icon .dgc-blob").dataset.shape}` : c.querySelector(".dgc-card-icon svg, .dgc-card-icon .dgc-plush") ? "face" : "",
+    who: c.querySelector(".dgc-card-icon .dgc-blob") ? `blob:${c.querySelector(".dgc-card-icon .dgc-blob").dataset.shape}` : c.querySelector(".dgc-card-icon .dgc-sheet") ? `sheet:${c.querySelector(".dgc-card-icon .dgc-sheet").dataset.kind}`
+      : c.querySelector(".dgc-card-icon svg, .dgc-card-icon .dgc-plush") ? "face" : "",
     chips: [...c.querySelectorAll(".dgc-chip:not([hidden])")].map((x) => x.textContent), actions: [...c.querySelectorAll(".dgc-card-btn")].map((b) => b.textContent + (b.classList.contains("primary") ? "*" : "")),
+    line: c.querySelector(".dgc-card-note")?.textContent ?? "", held: c.classList.contains("dgc-hub-held"),
     thin: c.classList.contains("dgc-card-thin"), shared: c.classList.contains("dgc-card"), radius: getComputedStyle(c).borderRadius, ground: getComputedStyle(c).backgroundColor, ...rect(c) });
   return { shown: hub.checkVisibility(), show: show ? { value: show.querySelector(".dgc-hub-show-v").textContent, expanded: show.getAttribute("aria-expanded"), label: show.getAttribute("aria-label"), ...rect(show) } : null,
     groups: [...hub.querySelectorAll(".dgc-hub-group")].map((g) => ({ id: g.dataset.group, name: g.querySelector("h2").firstChild.textContent, count: g.querySelector(".dgc-hub-n").textContent,

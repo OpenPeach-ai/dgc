@@ -35,7 +35,7 @@ import { settingsDocument } from "./settingsView";
 import { onPicturesSetting, pictureFoldsMessage, rememberPictureFold, setPicturesInReplies, picturesFolded } from "./pictureFolds";
 import { blobIcon, dockOf, dockSettings, setDockSetting } from "./dock";
 import { DEV_SAVED_KEY, DEV_WARNED_KEY, devLimitsTable, devLimitValues, devShown, type DevLimit } from "./devMode";
-import { homeShowAttr, pipHomeDismissedAttr, rememberHomeShow, rememberPipHomeDismissed } from "./pipHomeDismiss";
+import { homePages, homePagesAttr, homeShowAttr, noteHomePage, pipHomeDismissedAttr, rememberHomePagesDismissed, rememberHomeShow, rememberPipHomeDismissed } from "./pipHomeDismiss";
 import { addProfile, adoptWorkingRoute, defaultProfileId, firstTakesDefault, keepWorkingRoute, hasRunnableProfile, listProfiles, markDefaultProfile, profileCredential, removeProfile, startingModel } from "./providerProfiles.js";
 
 function isSlashCommandText(text: string): boolean {
@@ -547,6 +547,10 @@ export interface ChatPlaces {
   openSessions(): Set<string>;
   /** The sessions whose tab is running a turn now. */
   workingSessions?(): Set<string>;
+  /** The sessions whose tab waits on you, by id: how many decisions, and its one command when that is all it asks. */
+  waitingSessions?(): Map<string, { count: number; ask?: { id: string; command: string } }>;
+  /** Home's answer to a session's command (Allow once or Deny), sent to that session's own process. */
+  answerSession?(session: string, request: string, allow: boolean): boolean;
   /** A tab's session changed, or a tab opened or closed. */
   changed(): void;
 }
@@ -777,6 +781,38 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
   /** Is this chat's turn running now? */
   isWorking(): boolean { return this.turnConfirmed; }
+  // The commands this chat has asked to run and still waits on, by request id: what a card on Home can show whole and
+  // answer. Only a shell command with nothing else to read (no file change) and Allow once and Deny among its answers.
+  private pendingAsks = new Map<string, { id: string; command: string }>();
+  private noteAsk(ev: any): void {
+    const id = String(ev?.id ?? ""), command = typeof ev?.command === "string" ? ev.command : "";
+    const choices = Array.isArray(ev?.choices) ? ev.choices.map((c: any) => String(typeof c === "string" ? c : c?.id ?? c?.decision ?? "")) : [];
+    if (!id || ev?.name !== "bash" || !command.trim() || command.length > 400 || /[\r\n]/.test(command) || ev?.diff || !choices.includes("once") || !choices.includes("deny")) return;
+    this.pendingAsks.set(id, { id, command });
+    while (this.pendingAsks.size > 32) this.pendingAsks.delete(this.pendingAsks.keys().next().value as string);
+  }
+  /** A decision opened or closed in a session's tab: the side bar's Home shows what waits (its list is asked for again). */
+  private waitingChanged(): void {
+    try { this.tab?.places.changed(); } catch { /* a tab on its way out */ }
+  }
+  /** What this chat waits on you for while its turn runs: how many decisions, and its command when one command is all. */
+  waitingOnYou(): { count: number; ask?: { id: string; command: string } } {
+    if (!this.turnConfirmed || !this.openDecisions.size || this.sessionElsewhere) return { count: 0 };
+    for (const id of [...this.pendingAsks.keys()]) if (!this.openDecisions.has(id)) this.pendingAsks.delete(id);
+    const only = this.openDecisions.size === 1 ? this.pendingAsks.get([...this.openDecisions][0]) : undefined;
+    return { count: this.openDecisions.size, ...(only ? { ask: { ...only } } : {}) };
+  }
+  /** Home's answer to that command: Allow once or Deny, never a rule, sent to this chat's own process, which settles the
+   *  card in the tab too. False when the chat no longer waits on that request. */
+  answerFromHome(id: string, allow: boolean): boolean {
+    const ask = this.waitingOnYou().ask, be = this.backend;
+    if (!ask || ask.id !== id || !be) return false;
+    try { be.send({ type: "permission_response", id, decision: allow ? "once" : "deny" }); } catch { return false; }
+    this.openDecisions.delete(id); this.pendingAsks.delete(id);
+    this.postChatSlots();
+    this.waitingChanged();
+    return true;
+  }
   // The running turn as its turn_start (or handoff_started) described it, so a webview reloaded
   // mid-turn can be told a turn is running: its Stop, its clock and the turn a history snapshot
   // leaves open. Meaningful only while confirmedTurnActive.
@@ -1014,6 +1050,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const listening = hub.listen((message) => {
       // A card in this chat's transcript shows the artifact's title and version as they are now.
       if (message.type === "artifactChanged" && this.webviewReady) this.post({ type: "artifactNews", artifact: message.artifact, op: message.op });
+      // Home: what a session or a chat made arrives there as a card, kept so a reload still has it (src/pipHomeDismiss.ts).
+      if (message.type === "artifactChanged" && home) {
+        const pages = noteHomePage(this.context, message);
+        if (pages && this.home && this.webviewReady) this.post({ type: "homePages", pages });
+      }
     });
     this.context.subscriptions.push(listening);
   }
@@ -1411,6 +1452,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     const open = this.places?.openSessions() ?? new Set<string>();
     const working = this.places?.workingSessions?.() ?? new Set<string>();
+    const waiting = this.places?.waitingSessions?.() ?? new Map<string, { count: number; ask?: { id: string; command: string } }>();
     const paging = this.lastReadyEvent?.capabilities?.session_paging === true;
     // One more than shown was asked for: its presence is what says there are more.
     const shown = paging ? this.sessionsShown : 500;
@@ -1421,9 +1463,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                when: String(item?.when || ""), count: Number(item?.count) || 0, open: open.has(id),
                ...(working.has(id) ? { running: true } : {}),          // its tab is mid-turn: the dock's running dot
                ...(windowless.has(id) && !open.has(id) ? { windowless: windowless.get(id) || "working" } : {}),
-               // TODO(0.52 home): `waiting: true` for a session whose tab has a card waiting for your okay. The home
-               // already draws it ("wants your okay" where the age is, listed first), but no tab reports its open cards
-               // to the side bar yet: that needs each tab's panel to tell SessionPlaces when a card opens and settles.
+               // Its tab has a card waiting for your okay: the home lists it first, and Home shows its one command
+               // whole, to answer there (Allow once or Deny go back to that tab's own process: answerSession).
+               ...(waiting.get(id)?.count ? { waiting: true, ...(waiting.get(id)!.ask ? { ask: waiting.get(id)!.ask } : {}) } : {}),
                ...(typeof item?.match === "string" && item.match ? { match: item.match.slice(0, 300) } : {}) };
     }).filter((item) => /^[A-Za-z0-9_-]{1,128}$/.test(item.id)) });
   }
@@ -4562,6 +4604,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         {
           const id = DgcViewProvider.decisionId(ev);
           if (id) { this.openDecisions.add(id); }
+          if (ev.type === "permission_request") this.noteAsk(ev);
+          this.waitingChanged();
         }
         if (!this.view?.visible) { this.announceWaiting(this.activeSlot(), String(ev.type)); }
         break;
@@ -4569,9 +4613,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "options_resolved":
       case "ask_resolved":
         this.openDecisions.delete(DgcViewProvider.decisionId(ev));
+        this.waitingChanged();
         break;
       case "request_expired":
         this.openDecisions.delete(DgcViewProvider.decisionId(ev));
+        this.waitingChanged();
         this.mcpUrls.delete(String(ev.id));
         break;
       case "turn_end": {
@@ -4580,6 +4626,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         const monitorTurn = this.monitorTurnActive;
         this.turnActive = this.confirmedTurnActive = this.monitorTurnActive = false;
         this.openDecisions.clear();      // nothing can still be waiting once the turn is over
+        this.pendingAsks.clear();
         this.postChatSlots();
         // An error end is kept for thirty seconds: when the backend is shutting down under a turn
         // the turn ends "error" first and the process exits after, and that turn WAS interrupted.
@@ -5348,6 +5395,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (msg?.type === "dockNew") { this.newFromDock(String(msg.what || "")); return; }
     // The home's Pips row: unread its Dismiss all cleared from there, kept so a reload holds it (src/pipHomeDismiss.ts).
     if (rememberPipHomeDismissed(this.context, msg)) return;
+    // Home: a thing made was opened or dismissed there, so its card stays off.
+    if (rememberHomePagesDismissed(this.context, msg)) return;
     // The home's Pips block folded or opened with its chevron: kept for this computer, so a reload holds it.
     if (rememberHomeShow(this.context, msg)) return;
     const be = this.ensureBackend();
@@ -5421,6 +5470,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.webviewReady = true;
         this.post(pictureFoldsMessage(this.context));     // which pictures stay folded, and the setting
         this.post(dockOf(this.context).state());          // what is pinned, each session's colour, and the Dock settings
+        if (this.home) this.post({ type: "homePages", pages: homePages(this.context) });   // what was made while the page was being built
         // The home's chats, asked for now its page can hear the answer (one that came before was dropped).
         if (this.home) this.chatdgc?.homeRefresh();
         // A reloaded page: a recording its boxes started went with the page that showed it.
@@ -5459,6 +5509,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         return;
       case "openSessionInEditor":
         this.openSessionInEditor(String(msg.id ?? ""), String(msg.title ?? ""));
+        return;
+      case "homeSessionAnswer":
+        // Home's Allow once or Deny on a session's command: to that session's own process, then the list again.
+        if (this.home && typeof msg.session === "string" && typeof msg.id === "string" && (msg.decision === "once" || msg.decision === "deny")) {
+          this.places?.answerSession?.(msg.session, msg.id, msg.decision === "once");
+          this.sessionsChanged();
+        }
         return;
       case "newSessionInEditor":
         (this.tab?.places ?? this.places)?.open("");
@@ -9949,11 +10006,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const pipHomeDismissed = place === "home" ? pipHomeDismissedAttr(this.context) : "";
     // What Home's Show filter was left on, on this computer.
     const homeShow = place === "home" ? homeShowAttr(this.context) : "";
+    // What a session or a chat made and is still on Home, so its cards are there from the first paint after a reload.
+    const homePagesKept = place === "home" ? homePagesAttr(this.context) : "";
     // A tab Continue in Work opened in another folder keeps that folder in its state too, so a reload brings it back there.
     const tabCwd = this.tab?.cwd && this.slots.some((slot) => slot.cwd === this.tab?.cwd)
       ? ` data-tab-cwd="${this.tab.cwd.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}"` : "";
     const tabAttrs = this.tab ? ` data-tab-key="${this.tab.key}" data-tab-session="${this.currentSessionSaved ? this.currentSessionId : this.tab.session}"${tabCwd}` : "";
-    return `<!doctype html><html lang="en" data-draft-scope="${draftScope}" data-pips-document-id="${this.pipsDocumentId}" data-chat-place="${place}"${tabAttrs}${chatdgcSeen}${pipHomeDismissed}${homeShow}><head>
+    return `<!doctype html><html lang="en" data-draft-scope="${draftScope}" data-pips-document-id="${this.pipsDocumentId}" data-chat-place="${place}"${tabAttrs}${chatdgcSeen}${pipHomeDismissed}${homeShow}${homePagesKept}><head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1">

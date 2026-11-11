@@ -523,3 +523,65 @@ test("while the grant waits, the changes row is left alone instead of saying par
   await provider.refreshWorkspaceChanges();
   assert.deepEqual(provider.posted.filter((m) => /changes$/.test(String(m.type))), []);
 });
+
+// ---- Home answers a session's command (11 Nov): the host learns what each tab waits on, and routes the answer ----------
+const TWO = [
+  { path: "/p/20261006-101500-a1.json", when: "2026-10-06 10:15", preview: "run the tests", count: 4, name: "" },
+  { path: "/p/20261006-091200-b2.json", when: "2026-10-06 09:12", preview: "On Visits page", count: 12, name: "Visits" },
+];
+const ask = (id, more = {}) => ({ type: "permission_request", id, call_id: `call-${id}`, name: "bash", args: { command: "npm test -- --run" }, command: "npm test -- --run",
+  summary: "npm test -- --run", diff: null, suggested_rule: "bash(npm test:*)", choices: ["once", "always", "deny"], ...more });
+const listed = async (sidebar) => { await sidebar.onMessage({ type: "sessionsList" }); return sidebar.posted.filter((m) => m.type === "sessions_list").at(-1).items; };
+
+test("a session whose tab asks to run a command is listed as waiting, with that command and its request, for Home's card", async () => {
+  const { sidebar, tabs, made } = windowWith(TWO);
+  tabs.open("20261006-101500-a1"); tabs.open("20261006-091200-b2");
+  const [first, second] = made;
+  assert.deepEqual((await listed(sidebar)).map((item) => [item.id, item.waiting, item.ask]), [["20261006-101500-a1", undefined, undefined], ["20261006-091200-b2", undefined, undefined]], "nothing waits yet");
+  first.onEvent({ type: "turn_start", turn_id: "t1", kind: "prompt", prompt: "run the tests" });
+  first.onEvent(ask("perm-1"));
+  second.onEvent({ type: "turn_start", turn_id: "t2", kind: "prompt", prompt: "fix it" });
+  // A file change has more to read than a card shows: it waits, with nothing for the card to answer.
+  second.onEvent(ask("perm-2", { name: "edit", command: null, args: { path: "src/app.js" }, diff: "--- a/src/app.js\n+++ b/src/app.js\n@@\n-a\n+b\n" }));
+  const items = await listed(sidebar);
+  assert.deepEqual(items.map((item) => [item.id, item.waiting, item.ask]),
+    [["20261006-101500-a1", true, { id: "perm-1", command: "npm test -- --run" }], ["20261006-091200-b2", true, undefined]]);
+  // Two things waiting in one session, a command over several lines, and one with no Allow once: none is the card's to answer.
+  first.onEvent(ask("perm-3"));
+  assert.deepEqual((await listed(sidebar))[0].ask, undefined, "two decisions open: the session is where they are answered");
+  first.onEvent({ type: "permission_resolved", id: "perm-3", decision: "once" });
+  assert.deepEqual((await listed(sidebar))[0].ask, { id: "perm-1", command: "npm test -- --run" });
+  first.onEvent({ type: "permission_resolved", id: "perm-1", decision: "once" });
+  first.onEvent(ask("perm-4", { command: "npm test &&\nrm -rf build", args: { command: "npm test &&\nrm -rf build" } }));
+  assert.deepEqual([(await listed(sidebar))[0].waiting, (await listed(sidebar))[0].ask], [true, undefined], "a command over several lines opens");
+  first.onEvent({ type: "permission_resolved", id: "perm-4", decision: "deny" });
+  assert.equal((await listed(sidebar))[0].waiting, undefined, "answered in its tab: it waits no more");
+  first.onEvent(ask("perm-5"));
+  first.onEvent({ type: "turn_end", turn_id: "t1", reason: "cancelled" });
+  assert.equal((await listed(sidebar))[0].waiting, undefined, "its turn ended: nothing waits");
+});
+
+test("Home's Allow once and Deny reach that session's own process, once, and never as a rule", async () => {
+  const { sidebar, tabs, made } = windowWith(TWO);
+  tabs.open("20261006-101500-a1"); tabs.open("20261006-091200-b2");
+  const [first, second] = made;
+  for (const [tab, turn, id] of [[first, "t1", "perm-1"], [second, "t2", "perm-9"]]) { tab.onEvent({ type: "turn_start", turn_id: turn, kind: "prompt", prompt: "go" }); tab.onEvent(ask(id)); }
+  const answersOf = (tab) => tab.backend.sent.filter((c) => c.type === "permission_response");
+  // A request that is not that session's, a session that is not open, and an answer Home does not give: nothing is sent.
+  await sidebar.onMessage({ type: "homeSessionAnswer", session: "20261006-101500-a1", id: "perm-9", decision: "once" });
+  await sidebar.onMessage({ type: "homeSessionAnswer", session: "20261006-000000-zz", id: "perm-1", decision: "once" });
+  await sidebar.onMessage({ type: "homeSessionAnswer", session: "20261006-101500-a1", id: "perm-1", decision: "always" });
+  assert.deepEqual([answersOf(first), answersOf(second)], [[], []]);
+  await sidebar.onMessage({ type: "homeSessionAnswer", session: "20261006-101500-a1", id: "perm-1", decision: "once" });
+  assert.deepEqual(answersOf(first), [{ type: "permission_response", id: "perm-1", decision: "once" }], "Allow once, to the session that asked");
+  assert.deepEqual(answersOf(second), [], "and to no other");
+  assert.equal((await listed(sidebar))[0].waiting, undefined, "Home's list says it waits no more");
+  await sidebar.onMessage({ type: "homeSessionAnswer", session: "20261006-101500-a1", id: "perm-1", decision: "once" });
+  assert.equal(answersOf(first).length, 1, "a second answer to the same request sends nothing");
+  await sidebar.onMessage({ type: "homeSessionAnswer", session: "20261006-091200-b2", id: "perm-9", decision: "deny" });
+  assert.deepEqual(answersOf(second), [{ type: "permission_response", id: "perm-9", decision: "deny" }]);
+  // A tab is no Home: the same message from a session's own page answers nothing.
+  first.onEvent({ type: "turn_start", turn_id: "t3", kind: "prompt", prompt: "again" }); first.onEvent(ask("perm-7"));
+  await second.onMessage({ type: "homeSessionAnswer", session: "20261006-101500-a1", id: "perm-7", decision: "once" });
+  assert.equal(answersOf(first).length, 1);
+});

@@ -8,7 +8,12 @@
 // read is refused they stay hidden here all the same: the home keeps, per Pip, what was unread then (each feed's count
 // and newest id; the host keeps it over a reload, src/pipHomeDismiss.ts) and counts only what came after. A card's
 // Mark read clears that Pip's new messages and finished-run news together (mark_pip_read, then mark_pip_news_seen).
-import {pipDigest, pendingReviews} from './pipsModel.js';
+// Answered on the card (11 Nov): three things a card can show whole are answered there, with the commands the Pips page
+// uses: a new Pip (Create / Reject), a Pip's change to itself (Apply / Not now) and a Pip visiting a new site (Allow /
+// Not now). Each says what it needs seen in one line (`answer.full`); the hub offers the answers only where that line
+// shows whole. Never here, whatever they say: a payment or a pay, buy or order step, anything sent, a login, a step that
+// needs its screenshot, a new Pip that also gets apps, the web or a computer, and a Pip with more than one thing waiting.
+import {pipDigest, pendingReviews, pipSetup, pipComputer, scheduleLabel} from './pipsModel.js';
 import {attentionPage, attentionNavigation, waitingOn, kindLabel} from './pipAttention.js';
 import {profile} from './pipProfile.js';
 
@@ -43,11 +48,33 @@ function since(snapshot, item) {
  return {count: fresh >= now.m + now.p ? item.count : Math.min(item.count, fresh), next: next.m || next.mid || next.p || next.pid ? next : null};
 }
 
+const ANSWERED = 8;               // new Pips, and Pips with a held computer step, read for their cards at one time
+// A new Pip a card can say whole: what it does and when it runs. One that would also read your apps or the web, get a
+// computer, start on each commit or change a Pip that exists has more to check than a card shows: it opens instead.
+const plainSetup = s => s.status === 'pending' && s.pip_id === null && !s.app_plan && !s.web_plan && !s.computer && !s.event_trigger && !s.live_plan && !s.verification_plan
+ && [...s.goal].length <= 160;
+function runsWhen(s) {
+ let when = '';
+ try { when = s.schedule ? scheduleLabel(s.schedule) : ''; } catch { when = ''; }
+ return [when || 'Runs when you ask', s.run_now ? 'runs once now' : ''].filter(Boolean).join(', ');
+}
+// A held step of a Pip's computer that is only "may it open this site": careful mode's hold on a new site, with nothing
+// sent, typed, paid or signed in to. Its site and address, or null (a form, a payment, an order, a login, app data).
+function visit(action) {
+ const s = action?.summary;
+ if (action?.status !== 'pending' || s?.kind !== 'site' || s.payment === true || s.asks_because || (s.fields || []).length || s.more_fields) return null;
+ const site = String(s.site || s.host || '').slice(0, 120), address = `${s.host || ''}${s.path || ''}`.slice(0, 200);
+ return site && address ? {site, address} : null;
+}
+
 export function mountHomePips(options) {
  const doc = options.document;
  const pending = new Map(), setTimer = options.setInterval || setInterval, clearTimer = options.clearInterval || clearInterval;
  let generation = 0, epoch = 0, sequence = 0, ready = false, loading = false, timer = null, disposed = false;
  let listedAll = false, listedScopes = [];
+ // What can be answered on a card, read with the list: a new Pip's setup (its digest, and when it runs) by its id, and a
+ // held visit to a new site (its digest and address) by its action's id.
+ let setups = new Map(), visits = new Map();
  let pips = null, digest = null, attention = null, unread = [], unreadFailure = false, apiVersion = 0, personal = null, current = null, partial = false, failure = '';
  // Dismissed here: pip id → the request number after which a digest already leaves its news out.
  const hidden = new Map();
@@ -74,6 +101,7 @@ export function mountHomePips(options) {
   const blocked = p.routine_health && typeof p.routine_health === 'object' && p.routine_health.blocked && typeof p.routine_health.blocked.text === 'string'
    ? p.routine_health.blocked.text.slice(0, 120) : '';
   return {id: p.id, name: p.name.trim(), type: p.pip_type, profile: profile(p.profile), reviews: pendingReviews(p), waiting: 0, blocked,
+   version: Number.isSafeInteger(p.current_version) && p.current_version > 0 ? p.current_version : 0,
    workspace: typeof p.workspace_id === 'string' && WORKSPACE_ID.test(p.workspace_id) ? p.workspace_id : ''};
  }
  // What is new for a Pip since you last looked, from the digest: how urgent (1 an alert, 2 failed runs,
@@ -177,6 +205,46 @@ export function mountHomePips(options) {
    if (token === epoch) { failure = 'That didn’t mark it read. Try again.'; paint(); }
   }
  }
+ // What a card can answer by itself, or null (it opens instead). `token` names the one thing asked, so an answer given
+ // here is never taken for the next thing the same Pip asks.
+ function answerFor(item, pip) {
+  if (item.kind === 'setup' && !item.pip_id) {
+   const s = setups.get(item.card);
+   return s ? {kind: 'setup', token: item.id, yes: 'Create', no: 'Reject', full: [s.goal, s.when].filter(Boolean).join(' · '),
+    said: {yes: `Created ${s.name}.`, no: 'Rejected. No Pip was created.'}} : null;
+  }
+  if (!pip) return null;
+  if (item.kind === 'approval' && pip.version && item.detail && [...item.detail].length < 200) return {kind: 'change', token: item.id, yes: 'Apply', no: 'Not now', full: item.detail,
+   said: {yes: `Applied. ${pip.name} is changed.`, no: `Not now. ${pip.name} stays as it was.`}};
+  const v = item.kind === 'computer_action' ? visits.get(item.card) : null;
+  if (v) return {kind: 'site', token: item.id, yes: 'Allow', no: 'Not now', full: v.address,
+   said: {yes: `Allowed. ${pip.name} opens ${v.site}.`, no: `Not now. ${pip.name} won’t open ${v.site}.`}};
+  return null;
+ }
+ // The answer itself, when its moment to undo has passed: the same commands the Pips page sends, each on what the card
+ // showed (the digest or version read with it). Anything that changed since is refused, never answered blind.
+ async function answerCard(key, yes) {
+  const changed = () => Error('This changed since it was shown. Open it to answer.');
+  try {
+   if (key.startsWith('setup:')) {
+    const id = key.slice(6), seen = setups.get(id);
+    if (!seen) throw changed();
+    const raw = (await request('get_pip_setup', {setup_id: id})).setup, setup = pipSetup(raw, raw?.workspace_id, id);
+    if (setup.status !== 'pending' || setup.digest !== seen.digest) throw changed();
+    const done = (await request(yes ? 'accept_pip_setup' : 'reject_pip_setup', {setup_id: id, expected_digest: setup.digest})).setup;
+    if (done?.status !== (yes ? 'accepted' : 'rejected')) throw Error('The saved answer differs from your choice. Open Pips to see it.');
+    return;
+   }
+   const pip = pips?.find(p => p.id === key.slice(4)), waits = (attention?.items || []).filter(i => i.pip_id === pip?.id);
+   const item = waits.length === 1 ? waits[0] : null, answer = item && pip ? answerFor(item, pip) : null;
+   if (!answer) throw changed();
+   if (answer.kind === 'change') { await request(yes ? 'accept_pip_update' : 'reject_pip_update', {pip_id: pip.id, proposal_id: item.card, expected_version: pip.version}); return; }
+   const seen = visits.get(item.card), now = pipComputer((await request('get_pip_computer', {pip_id: pip.id})).computer, pip.id).actions.find(a => a.id === item.card);
+   if (!seen || !now || now.status !== 'pending' || now.digest !== seen.digest || !visit(now)) throw changed();
+   const done = (await request('decide_pip_computer_action', {action_id: now.id, expected_digest: now.digest, approve: yes})).action;
+   if (done?.id !== now.id || done.status !== (yes ? 'approved' : 'rejected')) throw Error('The saved answer differs from your choice. Open Pips to see it.');
+  } finally { void load(); }
+ }
  // What the hub draws: one card for each Pip that needs you or has news, the most urgent first, then each new Pip that
  // waits for you. `line` is the few words a row said ("2 waiting for you", "1 run failed"); `title` is the card's sentence.
  function cards() {
@@ -193,7 +261,8 @@ export function mountHomePips(options) {
    if (pip.blocked && pip.waiting) chips.push(`${pip.waiting} waiting for you`);
    if (unreadItem) chips.push(`${unreadItem.count} new`);
    const line = row ? row.line : unreadItem.latest;
-   out.push({key: `pip:${pip.id}`, pip: pip.id, name: pip.name, body: (pip.profile || profile(null)).body || pip.type, scope: scopeOf(pip.workspace),
+   const answer = one ? answerFor(one, pip) : null;
+   out.push({...(answer ? {answer} : {}), key: `pip:${pip.id}`, pip: pip.id, name: pip.name, body: (pip.profile || profile(null)).body || pip.type, scope: scopeOf(pip.workspace),
     group: needs ? 'needs' : 'new', kind: pip.blocked ? 'blocked' : pip.waiting ? 'waiting' : row ? 'news' : 'unread',
     line, title: one ? one.title : pip.waiting && !pip.blocked ? `${pip.waiting} ${pip.waiting === 1 ? 'thing is' : 'things are'} waiting for you` : line,
     latest: unreadItem ? unreadItem.latest : '', chips, waiting: pip.waiting || 0, unread: unreadItem ? unreadItem.count : 0,
@@ -203,7 +272,7 @@ export function mountHomePips(options) {
   for (const row of rows) card(row.pip, row, byUnread.get(row.pip.id) || null);
   for (const item of fresh) if (!rows.some(row => row.pip.id === item.pip_id)) { const pip = pips.find(p => p.id === item.pip_id); if (pip) card(pip, null, item); }
   // A new Pip that waits for you has no Pip yet: its own card, in the project it would live in.
-  for (const item of attention?.items || []) if (item.kind === 'setup' && !item.pip_id) out.push({key: `setup:${item.card}`, pip: null, name: item.pip_name || 'New Pip',
+  for (const item of attention?.items || []) if (item.kind === 'setup' && !item.pip_id) out.push({...(answerFor(item, null) ? {answer: answerFor(item, null)} : {}), key: `setup:${item.card}`, pip: null, name: item.pip_name || 'New Pip',
    body: TYPES.includes(item.pip_type) ? item.pip_type : 'core', scope: scopeOf(item.workspace_id), group: 'needs', kind: 'setup', line: item.title, title: item.title,
    latest: '', chips: item.detail ? [item.detail] : [], waiting: 1, unread: 0, canRead: false, canDismiss: false, at: item.created_at});
   return {rows, fresh, out};
@@ -238,6 +307,20 @@ export function mountHomePips(options) {
  function dismissCard(key) { const row = rowOf(key.slice(4)); if (row?.dismissible) void dismiss([row]); }
  // Clear: every failed run and new finding dismissed and every new message marked read. What waits for you stays.
  function clear() { const news = needing().filter(r => r.dismissible); if (shownUnread().length) dismissAll(news); else void dismiss(news); }
+ // What a card may answer by itself is read after the list is drawn, never before it: Home does not wait on these, and
+ // a card opens (as it always did) until its own answer is known.
+ async function readAnswered(waiting, token) {
+  const readSetups = new Map(), readVisits = new Map();
+  await Promise.all([
+   ...(waiting?.items || []).filter(i => i.kind === 'setup' && !i.pip_id).slice(0, ANSWERED).map(async i => {
+    try { const raw = (await request('get_pip_setup', {setup_id: i.card})).setup, s = pipSetup(raw, raw?.workspace_id, i.card); if (plainSetup(s)) readSetups.set(s.id, {digest: s.digest, name: s.name, goal: s.goal, when: runsWhen(s)}); } catch { /* it opens instead */ }
+   }),
+   ...[...new Set((waiting?.items || []).filter(i => i.kind === 'computer_action').map(i => i.pip_id))].slice(0, ANSWERED).map(async pip => {
+    try { for (const a of pipComputer((await request('get_pip_computer', {pip_id: pip})).computer, pip).actions) { const v = visit(a); if (v) readVisits.set(a.id, {digest: a.digest, ...v}); } } catch { /* it opens instead */ }
+   })]);
+  if (token !== epoch || attention !== waiting) return;
+  setups = readSetups; visits = readVisits; paint();
+ }
  async function load() {
   if (disposed || !ready || loading) return;
   const token = epoch; loading = true;
@@ -273,6 +356,7 @@ export function mountHomePips(options) {
    pips = [...found.filter(p => p.type === 'core'), ...found.filter(p => p.type !== 'core')];
    listedAll = whole; listedScopes = wanted.map(w => w.id);
    digest = value; attention = waiting; current = spaces.current_workspace_id;
+   void readAnswered(waiting, token);
    personal = workspaces.find(w => w?.kind === 'personal' && typeof w.id === 'string')?.id || null;
    // A digest asked for after a dismiss was kept already leaves that news out, or it is new news.
    if (value) for (const [id, after] of hidden) if (asked > after) hidden.delete(id);
@@ -312,7 +396,7 @@ export function mountHomePips(options) {
   message.ok ? p.resolve(message.result) : p.reject(Error(message.error?.message || 'DGC could not read your Pips.'));
  }
  options.postMessage({type: 'pipsReady'});
- return {receive, refresh() { void load(); }, model: () => last, open: openCard, read: readCard, dismiss: dismissCard, clear,
+ return {receive, refresh() { void load(); }, model: () => last, open: openCard, read: readCard, dismiss: dismissCard, clear, answer: answerCard,
   // Every one: the Pips view's Needs attention, open in full. The list: the Pips view's own first page.
   openAll, retry() { void load(); },
   dispose() { disposed = true; if (timer !== null) clearTimer(timer); for (const p of pending.values()) clearTimeout(p.timer); pending.clear(); }};

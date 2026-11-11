@@ -1360,19 +1360,77 @@
   const chatNews = (items) => noteNews("chat", items, items.filter((item) => answeringChats.has(item.id)).map((item) => String(item.id)), false);
   /** Opened or dismissed: no longer news. */
   function seenNews(kind, id) { if (hubNews[kind][id] === undefined) return; delete hubNews[kind][id]; keepHubNews(); paintHub(); }
+  // What was made (a page, a document, slides, a spreadsheet, a dashboard) by a session or a chat is news too: one card
+  // each, kept by the host (src/pipHomeDismiss.ts), which stamps them on the page and says when they change. A new
+  // version changes its card; opened, dismissed or removed, it goes.
+  const HOME_PAGES = 20;
+  const homePagesFrom = (list) => (Array.isArray(list) ? list : []).filter((p) => p && /^ar_[a-f0-9]{16}$/.test(String(p.id || "")) && ARTIFACT_KIND[p.type] && typeof p.title === "string").slice(0, HOME_PAGES);
+  let homePagesNow = [];
+  function homePagesGone(ids) {
+    const gone = ids.filter((id) => homePagesNow.some((p) => p.id === id));
+    if (!gone.length) return;
+    homePagesNow = homePagesNow.filter((p) => !gone.includes(p.id));
+    vscode.postMessage({ type: "homePagesDismissed", ids: gone });
+  }
   function hubFace(card) {
     let face = "";
     try { face = window.PipConcepts?.plush?.markup({ index: Math.max(0, PIP_BODIES.indexOf(card.body)), name: card.name }, card.group === "needs" ? "waiting_approval" : "success", `hub-${card.key.replace(/[^A-Za-z0-9_-]/g, "-")}`, { includeStyles: false }) || ""; } catch { face = ""; }
     return face;
   }
+  // Answered on the card: a card that shows everything needed to decide takes its answer there (a session's command to
+  // run, a new Pip, a Pip's change to itself, a Pip visiting a new site). The answer is held for a moment, as Reject on
+  // a new Pip is on the Pips page (src/pipsClient.js, rejectSoon): the card says what was chosen with Undo, and it is
+  // sent when the moment passes. A side bar closed meanwhile sends nothing, so the thing just waits again. The hub
+  // offers the answers only where the card shows that line whole; otherwise the card opens, as before.
+  const HUB_HOLD_MS = 6000, HUB_GONE_MS = 20000;
+  const hubHeld = new Map(), hubGone = new Map(), hubAnswers = new Map();
+  let hubSaid = "";
+  /** `card` with what answers it: `a` is { token, full, mono?, yes, no, said: { yes, no }, more, fire(yes) }. */
+  function answered(card, a) {
+    if (!a) return card;
+    if (hubGone.has(a.token)) { if (Date.now() - hubGone.get(a.token) < HUB_GONE_MS) return null; hubGone.delete(a.token); }
+    hubAnswers.set(card.key, a);
+    const held = hubHeld.get(a.token);
+    if (held) return { ...card, title: held.said, chips: [], held: true, actions: [{ id: "undo", label: "Undo", title: "Take that back. Nothing was sent yet.", say: `Undo: ${held.said}` }] };
+    return { ...card, full: a.full, mono: a.mono === true, fallback: card.actions, more: a.more,
+      actions: [{ id: "yes", label: a.yes, primary: true, title: a.yesTitle }, { id: "no", label: a.no, title: a.noTitle }] };
+  }
+  function answerSoon(a, yes) {
+    if (hubHeld.has(a.token)) return;
+    const timer = setTimeout(() => {
+      hubHeld.delete(a.token); hubGone.set(a.token, Date.now()); paintHub();
+      setTimeout(paintHub, HUB_GONE_MS + 50);        // one that DGC never took comes back
+      Promise.resolve().then(() => a.fire(yes)).catch((error) => { hubGone.delete(a.token); hubSay(String(error?.message || "That didn’t go through. Try again.")); });
+    }, HUB_HOLD_MS);
+    hubHeld.set(a.token, { timer, said: yes ? a.said.yes : a.said.no });
+    hubSaid = ""; paintHub();
+  }
+  /** What went wrong with an answer, said on Home for a while. */
+  let hubSaidTimer = 0;
+  function hubSay(text) { hubSaid = text; clearTimeout(hubSaidTimer); hubSaidTimer = setTimeout(() => { hubSaid = ""; paintHub(); }, 12000); paintHub(); }
+  function answerUndo(a) {
+    const held = hubHeld.get(a.token);
+    if (!held) return;
+    clearTimeout(held.timer); hubHeld.delete(a.token); paintHub();
+  }
   function hubCards() {
+    hubAnswers.clear();
+    for (const [token, at] of hubGone) if (Date.now() - at >= HUB_GONE_MS) hubGone.delete(token);
     const B = window.DgcBlob, blob = (kind, id, running) => (B ? B.html(kind, { id, pair: colourOf(kind, id).chosen, running }) : "");
     const open = { id: "open", label: "Open", primary: true, title: "Open it in its editor tab" }, dismiss = { id: "dismiss", label: "Dismiss", title: "Take this off Home" };
     const needs = [], fresh = [];
     for (const item of sessionItems) {
       const title = sessionTitle(item), running = item.running === true || !!item.windowless, count = plural(Number(item.count) || 0, "message");
       const card = { key: `work:${item.id}`, source: "work", who: { html: blob("work", item.id, running) }, from: `${title} · Work · ${sessionAge(item.when)}` };
-      if (item.waiting === true) needs.push({ ...card, group: "needs", title: "Wants your okay to go on", chips: [count], actions: [open] });
+      if (item.waiting === true) {
+        // Its one command, when that is all it asks: shown whole, and answered here. Always allow stays in the session.
+        const ask = item.ask && typeof item.ask.id === "string" && typeof item.ask.command === "string" && item.ask.command.trim() ? item.ask : null;
+        const made = answered({ ...card, group: "needs", title: ask ? "Wants to run this command" : "Wants your okay to go on", chips: [count], actions: [open] },
+          ask && { token: `work:${item.id}:${ask.id}`, full: ask.command, mono: true, yes: "Allow once", no: "Deny", yesTitle: "Run it this once", noTitle: "Don’t run it",
+            said: { yes: "Allowed once. It runs the command.", no: "Denied. The command won’t run." }, more: { ...open, primary: false },
+            fire: (yes) => { vscode.postMessage({ type: "homeSessionAnswer", session: item.id, id: ask.id, decision: yes ? "once" : "deny" }); } });
+        if (made) needs.push(made);
+      }
       else if (item.windowless) needs.push({ ...card, group: "needs", title: "Still running, with no window to watch it in", chips: [String(item.windowless).slice(0, 80), count].filter((c) => c && c !== "working"), actions: [open] });
       else if (hubNews.work[item.id] !== undefined) fresh.push({ ...card, group: "new", at: hubNews.work[item.id], from: `${title} · Work · ${chatAge(hubNews.work[item.id])}`, title: "Finished its work", chips: [count], actions: [open, dismiss] });
     }
@@ -1389,7 +1447,20 @@
         actions: [{ id: "open", label: review ? "Review" : "Open", primary: true, title: review ? "Open what waits for you, in Pips" : `Open ${c.name} in Pips` },
           c.canRead ? { id: "read", label: "Mark read", title: "Mark as read, without opening its chat" }
           : c.canDismiss ? { id: "dismiss", label: "Dismiss", title: `Dismiss: ${c.line}. It comes back if ${c.name} has something new.` } : null] };
-      (c.group === "needs" ? needs : fresh).push(card);
+      const made = answered(card, c.answer && { token: `${c.key}:${c.answer.token}`, full: c.answer.full, yes: c.answer.yes, no: c.answer.no, said: c.answer.said,
+        more: { id: "open", label: "Review", title: "See all of it, in Pips" }, fire: (yes) => homePips.answer(c.key, yes) });
+      if (made) (c.group === "needs" ? needs : fresh).push(made);
+    }
+    for (const p of homePagesNow) {
+      const kind = ARTIFACT_KIND[p.type], name = p.title || kind, version = Number(p.version) || 1, age = chatAge(p.at);
+      // Where it was made: the session's or the chat's name as it is now, when this side bar lists it.
+      const maker = p.surface === "work" ? sessionItems.find((s) => s.id === p.where) : p.surface === "chat" ? (chatsAvailable ? chatItems : []).find((c) => String(c.id) === p.where) : null;
+      const where = maker ? (p.surface === "work" ? sessionTitle(maker) : String(maker.title || "New chat")) : "";
+      const line = [`${kind} ${ARTIFACT_OP[p.op] || "made"}`, `version ${version}`, where].filter(Boolean).join(" · ");
+      fresh.push({ key: `page:${p.id}`, source: p.surface === "work" || p.surface === "chat" ? p.surface : "", group: "new", at: Number(p.at) || 0,
+        who: { html: window.DgcFileSheet ? window.DgcFileSheet.html(p.type) : "" }, from: line, title: name, label: `${name}: ${line}`,
+        chips: [p.surface === "work" ? "Work" : p.surface === "chat" ? "Chat" : "", age === "now" ? "Just now" : age ? `${age} ago` : ""].filter(Boolean),
+        actions: [{ ...open, title: p.type === "doc" ? "Open it in the editor, over its own file" : "Open it in a panel of its own" }, dismiss] });
     }
     // What needs you: sessions first (their work stands still), then Pips, the most urgent first. What is new: the newest first.
     fresh.sort((a, b) => (b.at || 0) - (a.at || 0));
@@ -1400,12 +1471,20 @@
     const notes = [];
     if (pipModel?.unreadFailure) notes.push({ text: "Couldn’t check for new Pip messages.", retry: true });
     if (pipModel?.failure) notes.push({ text: pipModel.failure });
+    if (hubSaid) notes.push({ text: hubSaid });
     hub.update({ cards: hubCards(), more: pipModel?.more || 0, partial: pipModel?.partial === true, notes });
   }
   function hubAct(key, act) {
     const [kind, id] = [key.slice(0, key.indexOf(":")), key.slice(key.indexOf(":") + 1)];
+    if (act === "yes" || act === "no" || act === "undo") { const a = hubAnswers.get(key); if (a) { if (act === "undo") answerUndo(a); else answerSoon(a, act === "yes"); } return; }
     if (kind === "work") { const item = sessionItems.find((s) => s.id === id); if (act === "open" && item) openSession(item); else seenNews("work", id); }
     else if (kind === "chat") { if (act === "open") vscode.postMessage({ type: "chatdgcOpen", id }); seenNews("chat", id); }
+    else if (kind === "page") {
+      // Open is the output card's own Open; opened or dismissed, it is no longer news.
+      const made = homePagesNow.find((p) => p.id === id);
+      if (act === "open" && made) vscode.postMessage({ type: "artifactOpen", id, artifactType: made.type, title: made.title || "" });
+      homePagesGone([id]); paintHub();
+    }
     else if (act === "read") homePips?.read(key);
     else if (act === "dismiss") homePips?.dismiss(key);
     else homePips?.open(key);
@@ -1414,6 +1493,7 @@
   function hubClear(keys) {
     for (const key of keys) { if (key.startsWith("work:")) delete hubNews.work[key.slice(5)]; else if (key.startsWith("chat:")) delete hubNews.chat[key.slice(5)]; }
     keepHubNews();
+    homePagesGone(keys.filter((key) => key.startsWith("page:")).map((key) => key.slice(5)));
     const mine = keys.filter((key) => key.startsWith("pip:")), every = (pipModel?.cards || []).filter((c) => c.group === "new");
     if (mine.length && mine.length === every.length) homePips?.clear();
     else for (const key of mine) { const c = every.find((x) => x.key === key); if (c?.canRead) homePips?.read(key); else if (c?.canDismiss) homePips?.dismiss(key); }
@@ -10823,6 +10903,7 @@ function permissionChoices(ev) {
     // The side bar: four tabs over everything, Home first. (Pips' own back, where a Pips screen offers one, returns to
     // the tab that was open before it.)
     $("sessions-new").onclick = () => vscode.postMessage({ type: "newSessionInEditor" });
+    try { homePagesNow = homePagesFrom(JSON.parse(document.documentElement.dataset.homePages || "[]")); } catch { homePagesNow = []; }
     mountHub();
     // Your Pips' part of Home: the ones that need you and the ones with news, as cards (src/pipHomeStrip.js).
     if (window.DgcPips?.mountHomePips && document.documentElement.dataset.pipsDocumentId) {
@@ -12166,6 +12247,7 @@ function permissionChoices(ev) {
       return;
     }
     if (msg.type === "artifactNews") { artifactNews(msg.artifact, msg.op); return; }
+    if (msg.type === "homePages") { homePagesNow = homePagesFrom(msg.pages); paintHub(); return; }
     if (msg.type === "chat_tab") { rememberTab(msg.session); paintSessionBlob(msg.session); return; }
     // pipsModelsChanged: Settings or the Router changed, so the embedded Pips page reads its model list again.
     // pipsUnreadChanged: a Pip was marked read somewhere (its pill, its chat, a card acted on): it reads its counts again.
