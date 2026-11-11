@@ -4778,10 +4778,15 @@ class Backend:
             pass
         self._arm_wakeup_timer()
 
-    def _emit_wakeups(self) -> None:
+    def _emit_wakeups(self, *, always: bool = True) -> None:
+        """The row of waiting wake-ups as it is now, and the timer for the next. always=False: said only when one waits
+        (after a resume's replay: a client that drains the replay until something new must not see an empty row)."""
         book = getattr(getattr(self, "agent", None), "wakeups", None)
         if book is not None:
-            self.em.emit("wakeups", items=book.snapshot())
+            items = book.snapshot()
+            if items or always:
+                self.em.emit("wakeups", items=items)
+            self._arm_wakeup_timer()
 
     def _wakeup_due_now(self) -> bool:
         book = getattr(getattr(self, "agent", None), "wakeups", None)
@@ -8900,8 +8905,8 @@ class Backend:
             self._emit_config()
             self._emit_goal()
             self._emit_monitors()
-            self._emit_wakeups()
             self._emit_agents()
+            self._emit_wakeups()
             self._forget_ended_shells()
             self._publish_cache_clock(current=True)      # a new chat: nothing cached yet
         elif t == "fork_session":
@@ -8946,8 +8951,8 @@ class Backend:
             self._emit_config()
             self._emit_goal()
             self._emit_monitors()
-            self._emit_wakeups()
             self._emit_agents()
+            self._emit_wakeups()
             self._forget_ended_shells()
             self._publish_cache_clock(current=True)      # an empty chat: nothing cached
         elif t == "resume_session":
@@ -8997,7 +9002,7 @@ class Backend:
                 if note:
                     self.em.emit("info", message=note)
                 self._emit_monitors()
-                self._emit_wakeups()
+                self._emit_wakeups(always=False)
                 # After the replay, not before it: published SDK 0.6.9 drains a resume's replay
                 # until the first event it does not know as one, and mode_changed is new to a
                 # resume -- sent first, the whole history landed in the app's first stream().
@@ -9035,8 +9040,9 @@ class Backend:
             # its meter read 0% through the rest of the reply (the first one after a reattach comes from here).
             self._publish_cache_clock(current=True)
             self._emit_known_context()
-            self._emit_wakeups()                    # a reloaded page draws the row of waiting wake-ups again
             self._emit_history(cmd["request_id"])
+            # After the history (a resume's replay ends with it), and only when one waits: a reloaded page draws the row.
+            self._emit_wakeups(always=False)
         elif t == "get_outline":
             self._emit_outline(cmd["request_id"])
         elif t == "watch_pip_reports":

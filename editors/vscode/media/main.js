@@ -11704,6 +11704,7 @@ function permissionChoices(ev) {
   }
   // A Work chat's wake-ups (0.52): the `wakeups` event's rows, soonest first; Cancel asks DGC to take one back.
   var wakeups = [];                              // `var`: the bar syncs while the panel is still starting up
+  var wakeupSession = null;
   const wakeupClock = (iso) => { const d = new Date(String(iso || "")); return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }); };
   function setWakeups(items) {
     wakeups = (Array.isArray(items) ? items : []).filter((w) => w && typeof w.id === "string" && typeof w.why === "string" && typeof w.at === "string")
@@ -12088,6 +12089,8 @@ function permissionChoices(ev) {
       hostSessionSeen = true;
       backendExitNotice = null;          // the reconnect has finished; the line is in the transcript
       reconnectPending = false; returnedPrompts.length = 0;
+      // Another chat: its wake-ups are its own (DGC sends them after its history when one waits).
+      if (wakeupSession !== msg.sessionId) { wakeupSession = msg.sessionId; setWakeups([]); }
       selectDraftSession(msg.sessionId, msg.adoptDraftFrom || ""); sessionReady = true;
       armHeldSend();
       backendLive = true; backendDown = false; armTodoClearTimer();

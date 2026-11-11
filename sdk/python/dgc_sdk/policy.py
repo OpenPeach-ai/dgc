@@ -28,7 +28,7 @@ _DISPLAY = {
     "write_file": "Write", "edit_file": "Edit",
     "multi_edit": "MultiEdit", "apply_patch": "ApplyPatch", "repo_map": "RepoMap",
     "code_intel": "CodeIntel", "git_diff": "GitDiff", "bash": "Bash", "bash_output": "BashOutput",
-    "bash_kill": "BashKill", "python": "Python", "monitor": "Monitor", "monitor_stop": "MonitorStop",
+    "bash_kill": "BashKill", "python": "Python", "monitor": "Monitor", "monitor_stop": "MonitorStop", "wake_later": "WakeLater", "wake_cancel": "WakeCancel",
     "glob": "Glob", "grep": "Grep", "web_fetch": "WebFetch", "web_search": "WebSearch",
     "browser": "Browser", "todo": "Todo", "notes": "Notes", "skill": "Skill",
     "add_skill": "AddSkill", "save_memory": "SaveMemory", "remember": "Remember", "forget": "Forget", "troupe": "Troupe", "use_pips": "UsePips", "pips_context": "PipsContext",

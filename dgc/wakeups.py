@@ -158,14 +158,15 @@ class Book:
             def mutate(records):
                 records[:] = [r for r in records if r["id"] not in ids] + items
             update(*target, mutate, suffix=SUFFIX, clean=_clean, limit=MAX_PER_CHAT * 4)
-        if callable(self.on_change):
+        if items and callable(self.on_change):         # nothing held: nothing to say (a resume's replay stays clean)
             try:
                 self.on_change([])
             except Exception:                   # noqa: BLE001
                 pass
 
     def adopt(self) -> None:
-        """The session was opened: take back its wake-ups whose owner has gone (a reload, a restart)."""
+        """The session was opened: take back its wake-ups whose owner has gone (a reload, a restart). Says nothing: the
+        frontend sends the row after the session's history (a resume's replay must end before anything new)."""
         target = self.target()
         if not target:
             return
@@ -179,9 +180,9 @@ class Book:
             for record in taken[:max(0, MAX_PER_CHAT - len(self._items))]:
                 self._items.append({**record, "owner": me})
         if taken:
-            self._save()
+            self._save(notify=False)
 
-    def _save(self) -> None:
+    def _save(self, *, notify: bool = True) -> None:
         target = self.target()
         if target:
             from .monitor_restart import update
@@ -195,7 +196,7 @@ class Book:
                 kept = [r for r in records if r["id"] not in ids and r.get("owner") != me and owner_alive(r.get("owner"))]
                 records[:] = kept + mine
             update(*target, mutate, suffix=SUFFIX, clean=_clean, limit=MAX_PER_CHAT * 4)
-        if callable(self.on_change):
+        if notify and callable(self.on_change):
             try:
                 self.on_change(self.snapshot())
             except Exception:                   # noqa: BLE001 - a row is never worth the book
