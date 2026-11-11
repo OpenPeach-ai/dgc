@@ -1033,3 +1033,32 @@ path.cd-chart-mark, rect.cd-chart-mark { stroke: none; }
 .cd-msg.cd-wake { display: flex; flex-direction: row; align-items: flex-start; gap: var(--sp-2); color: var(--muted); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
 .cd-msg.cd-wake > .codicon { flex: none; margin-top: 2px; font-size: 14px; }
 .cd-wake-words { min-width: 0; overflow-wrap: anywhere; }
+
+/* ---- DGC's one button, in ChatDGC (the definition: media/shared/tokens.css, "The button"). Its own buttons read it:
+   Continue, Save, Send and Open page (.cd-continue: the one filled button of a question, a form, a widget or a page
+   card; on a plugin's card it says a price too, so it is the wide one), a card's other answers (.cd-card-actions
+   button), and at the small size Retry under a message that did not send (.cd-retry) and a wake-up's own buttons
+   (.cd-wbtn). The cards ChatDGC shares with Work wear it from Work's stylesheet, which this page loads.
+   Left as they are: Send and the voice button in the prompt box, the sources chip under an answer, and a row's Open
+   that only shows when the row is pointed at. */
+.cd-card-actions button, .cd-continue { display: inline-block; flex: none; box-sizing: border-box; width: var(--btn-w); min-width: 0; max-width: 100%; height: var(--btn-h); min-height: 0; padding: 0 var(--btn-pad); border: 1px solid var(--btn-line); border-radius: var(--btn-r);
+  background: transparent; color: var(--btn-text); font-weight: var(--w-med, 500); line-height: calc(var(--btn-h) - 2px); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: none; transition: var(--btn-move); }
+.cd-card-actions .cd-continue { width: var(--btn-w-wide); }
+.cd-card-actions button:hover:not(:disabled), .cd-continue:hover:not(:disabled) { border-color: var(--btn-line-hover); background: var(--btn-wash); color: var(--btn-text); transform: var(--btn-up); transition-duration: var(--btn-in); }
+.cd-card-actions button:active:not(:disabled), .cd-continue:active:not(:disabled) { transform: var(--btn-down); transition-duration: var(--btn-press); }
+.cd-card-actions button:focus-visible, .cd-continue:focus-visible { outline: var(--btn-ring); outline-offset: 2px; }
+.cd-card-actions button:disabled, .cd-continue:disabled { opacity: .55; cursor: default; }
+.cd-card-actions button.primary, .cd-continue, .cd-card-actions button.primary:hover:not(:disabled), .cd-continue:hover:not(:disabled) { border-color: transparent; background: var(--btn-fill); color: var(--btn-on-fill); }
+.cd-card-actions button.primary:hover:not(:disabled), .cd-continue:hover:not(:disabled) { background: var(--btn-fill-hover); }
+.cd-wbtn, .cd-send-failed .cd-retry { display: inline-block; flex: none; box-sizing: border-box; width: var(--btn-w-sm); min-width: 0; max-width: 100%; height: var(--btn-h-sm); min-height: 0; padding: 0 var(--btn-pad-sm); border: 1px solid var(--btn-line); border-radius: var(--btn-r);
+  background: transparent; color: var(--btn-text); font-weight: var(--w-med, 500); line-height: calc(var(--btn-h-sm) - 2px); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: none; transition: var(--btn-move); }
+.cd-wbtn:hover:not(:disabled), .cd-send-failed .cd-retry:hover:not(:disabled) { border-color: var(--btn-line-hover); background: var(--btn-wash); color: var(--btn-text); transform: var(--btn-up); transition-duration: var(--btn-in); }
+.cd-wbtn:active:not(:disabled), .cd-send-failed .cd-retry:active:not(:disabled) { transform: var(--btn-down); transition-duration: var(--btn-press); }
+.cd-wbtn:focus-visible, .cd-send-failed .cd-retry:focus-visible { outline: var(--btn-ring); outline-offset: 2px; }
+.cd-wbtn:disabled, .cd-send-failed .cd-retry:disabled { opacity: .55; cursor: default; }
+.cd-research-actions .cd-continue { display: inline-block; }
+.cd-continue .codicon { vertical-align: -2px; margin-right: 3px; }
+@media (forced-colors: active) {
+  .cd-card-actions button, .cd-wbtn, .cd-send-failed .cd-retry { border-color: CanvasText; }
+  .cd-continue, .cd-card-actions button.primary { forced-color-adjust: none; border-color: ButtonText; background: ButtonText; color: ButtonFace; }
+}
