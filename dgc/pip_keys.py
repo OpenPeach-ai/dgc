@@ -323,6 +323,20 @@ def value_for(registry, pip_id, host) -> str:
     return kept["value"]
 
 
+def save_generator_key(config, generator_id, value) -> None:
+    """Keep a generator's key where Settings keeps it (secrets.json, bound to its address), and in this view of the
+    config. The editor hands Pips commands a view that never writes (Config.clone_for_root): saved there alone, the key
+    reached neither the runner that makes the picture nor any other DGC (live check, 11 Nov). So it is written through
+    a config that persists, which every persisting config reads back at once (Config.image_key)."""
+    config.set_image_key(generator_id, value, persist=False)
+    if getattr(config, "_persist", False):
+        config.save()
+        return
+    from .config import Config
+    root = getattr(config, "project_root", None)
+    Config(project_root=Path(root) if root else Path.cwd()).set_image_key(generator_id, value)
+
+
 def _owned(registry, key_id, pip_id, actor) -> dict:
     if actor not in LOCAL:
         raise RegistryError("local_only", "Only you give a Pip a key, on this computer.")
@@ -345,7 +359,7 @@ def save(store, config, key_id, pip_id, actor, value) -> dict:
         # Where Settings keeps that generator's key (secrets.json, bound to its address): the user's own setting, for
         # all of DGC, not this Pip's alone.
         try:
-            config.set_image_key(card["generator"], text)
+            save_generator_key(config, card["generator"], text)
         except (ValueError, OSError) as exc:
             raise RegistryError("key_not_saved", f"DGC couldn't keep the key: {exc}.") from None
         where = "settings"

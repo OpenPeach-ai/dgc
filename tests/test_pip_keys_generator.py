@@ -26,6 +26,19 @@ from tests import test_pips_local as fixtures  # noqa: E402
 KEY = "fal_live_0123456789abcdefKEYKEY"
 
 
+def user_home(case, generators):
+    """The user's own DGC files, in this test's temp home: a generator key saved from a card is written where Settings
+    keeps keys (secrets.json), and that must never be the real home's."""
+    from dgc import config as config_module
+    home = Path(case.base) / "user-dgc"
+    home.mkdir(exist_ok=True)
+    for name, value in (("USER_HOME", home), ("USER_CONFIG", home / "config.json"), ("USER_SECRETS", home / "secrets.json")):
+        patcher = mock.patch.object(config_module, name, value)
+        patcher.start()
+        case.addCleanup(patcher.stop)
+    config_module.Config(project_root=Path(case.root)).set_images({"generators": generators})
+
+
 class GeneratorKeyCard(unittest.TestCase):
     setUp_pips = fixtures.LocalPipsTests.setUp
     git = fixtures.LocalPipsTests.git
@@ -39,6 +52,7 @@ class GeneratorKeyCard(unittest.TestCase):
         fal = {"id": "fal", "name": "fal FLUX schnell", "provider": "fal", "base_url": self.fake.url,
                "model": "fal-ai/flux/schnell", "asks": False}
         self.cfg.set_images({"generators": [fal]}, persist=False)
+        user_home(self, [fal])
 
     def session(self, run_id="run_" + "a" * 32):
         session = pip_images.Session(self.registry.directory, self.cfg, self.pip["id"], self.pip["workspace_id"], run_id)
@@ -151,6 +165,7 @@ class VideoGeneratorKeyCard(unittest.TestCase):
         wan = {"id": "fal-wan", "name": "fal Wan 2.2", "provider": "fal", "base_url": self.fake.url,
                "model": "fal-ai/wan/v2.2-5b/text-to-video", "makes": "videos", "asks": False}
         self.cfg.set_images({"generators": [wan]}, persist=False)
+        user_home(self, [wan])
 
     def test_its_video_list_says_the_same(self):
         from dgc import pip_videos
@@ -177,3 +192,36 @@ class VideoGeneratorKeyCard(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GeneratorKeyReachesDisk(unittest.TestCase):
+    """Live check, 11 Nov: the editor hands Pips commands a non-persisting view of its config (clone_for_root), so a
+    generator key saved from a Pip's card stayed in that view only: not in secrets.json, so neither the runner that
+    makes the picture nor the next DGC saw it. It must be saved where Settings saves it."""
+
+    def setUp(self):
+        import tempfile
+        from dgc import config as config_module
+        self.home = Path(tempfile.mkdtemp(prefix="dgc-genkey-")).resolve()
+        (self.home / "dgc").mkdir()
+        for name, value in (("USER_HOME", self.home / "dgc"), ("USER_CONFIG", self.home / "dgc" / "config.json"),
+                            ("USER_SECRETS", self.home / "dgc" / "secrets.json")):
+            patcher = mock.patch.object(config_module, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.config_module = config_module
+        project = self.home / "project"
+        project.mkdir()
+        user = config_module.Config(project_root=project)
+        user.set_images({"generators": [{"id": "fal", "name": "fal FLUX schnell", "provider": "fal",
+                                         "base_url": "http://127.0.0.1:9", "model": "fal-ai/flux/schnell"}]})
+        self.view = config_module.Config(project_root=project).clone_for_root(project)   # what the editor hands Pips
+        self.project = project
+
+    def test_saved_from_a_non_persisting_view_it_is_on_disk_for_every_dgc(self):
+        self.assertFalse(self.view._persist)
+        pip_keys.save_generator_key(self.view, "fal", KEY)
+        self.assertEqual(self.view.image_key("fal"), KEY, "this view sees it now")
+        fresh = self.config_module.Config(project_root=self.project)
+        self.assertEqual(fresh.image_key("fal"), KEY, "and every other DGC, the runner included, from secrets.json")
+        self.assertEqual(json.loads(self.config_module.USER_SECRETS.read_text()).get("image_key_fal"), KEY)
