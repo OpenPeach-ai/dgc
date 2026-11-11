@@ -1,12 +1,12 @@
 // A Pip's chat in the side bar has the room to itself (asked 11 Nov): while a Pip's conversation is open, where its
 // prompt box shows, neither the dock at the foot (media/shared/dock.js) nor the tab bar (Home, Work, Chat, Pips) is
-// shown, and the chat takes their space. DGC's own header stays. Both come back on the list of Pips, on a Pip's
-// Settings and its other pages, and on the Home, Work and Chat tabs; the chat's own back arrow is the way back, by
-// mouse and by keyboard. Measured in real Chromium on the side bar's real page (support/dock-scene.mjs). Held here:
+// shown, and the chat takes their space. DGC's own header stays. Both come back on the list of Pips and on the Home,
+// Work and Chat tabs; the chat's own back arrow is the way back, by mouse and by keyboard. (Since 12 Nov a Pip's
+// Settings, History and its other pages have neither as well: inside-pip.test.mjs.) Measured in real Chromium on the side bar's real page (support/dock-scene.mjs). Held here:
 //   - no dock and no tab bar in a Pip's chat: not visible, and the keyboard never lands on either
 //   - the chat gains exactly their height: its log has the height it has with the dock set to Never, plus the tab bar's
 //   - the prompt box keeps its usual margin from the foot of the side bar
-//   - both come back on the list, on a Pip's Settings, and on Home, Work and Chat
+//   - both come back on the list, and on Home, Work and Chat; a Pip's Settings and History stay without them
 //   - the back arrow brings them back, by a click and by the keyboard, and focus is never left on a hidden thing
 //   - nothing flickers: no frame shows the chat with the dock or the tab bar, or the list without them
 //   - "When I point at the bottom" and a pinned Pip opened from the dock follow the same rule
@@ -128,7 +128,7 @@ test("a Pip's chat: the keyboard never lands on the hidden dock or the hidden ta
   } finally { await x.close(); }
 });
 
-test("the dock and the tab bar come back on the list, on a Pip's Settings, and on Home, Work and Chat", async (t) => {
+test("the dock and the tab bar come back on the list, and on Home, Work and Chat; not on a Pip's Settings or History", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openDock(browser, { width: 300, height: 700 });
   try {
@@ -138,14 +138,18 @@ test("the dock and the tab bar come back on the list, on a Pip's Settings, and o
     await menu(x, "job");
     await gone(x, "#chat-form"); await x.settle();
     const settings = await now(x.page);
-    assert.deepEqual([...both(settings), settings.panel], [true, true, "pips-host"], "a Pip's Settings has both");
-    assert.ok(Math.abs(settings.host.top - list.host.top) < 0.6 && Math.abs(settings.host.bottom - list.host.bottom) < 0.6, `and the room the list has (${settings.host.top} to ${settings.host.bottom} against ${list.host.top} to ${list.host.bottom})`);
+    assert.deepEqual([...both(settings), settings.panel], [false, false, "pips-host"], "a Pip's Settings has neither (12 Nov: every page inside a Pip)");
+    assert.ok(Math.abs(settings.host.top - settings.headRect.bottom) < 0.6 && Math.abs(settings.host.bottom - settings.height) < 0.6 && settings.host.height > list.host.height + 60,
+      `and the room they took (${settings.host.top} to ${settings.host.bottom} against the list's ${list.host.top} to ${list.host.bottom})`);
     // Back to the chat from there, and away again.
     await x.page.locator("#pips-host #simple-to-chat").click(); await pipsRoot(x, "#chat-form"); await x.settle();
     assert.deepEqual(both(await now(x.page)), [false, false], "back in the chat");
     await menu(x, "runs");
     await gone(x, "#chat-form"); await x.settle();
-    assert.deepEqual(both(await now(x.page)), [true, true], "a Pip's History has both");
+    assert.deepEqual(both(await now(x.page)), [false, false], "a Pip's History has neither");
+    // (The loop below starts from the Pips tab, which History no longer shows: back by the page's arrow, then the chat's.)
+    await x.page.locator("#pips-host #simple-to-chat").click(); await pipsRoot(x, "#chat-form"); await x.settle();
+    await x.page.locator("#pips-host #simple-back").click(); await pipsRoot(x, "[data-job]"); await x.settle();
     // Each other tab, reached the only way there is from a chat: back to the list, then the tab.
     for (const [tab, panel] of [["home", "home-hub"], ["work", "work-home"], ["chat", "chats-home"]]) {
       await toList(x); await toChat(x);

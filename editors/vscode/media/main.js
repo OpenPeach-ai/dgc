@@ -584,16 +584,17 @@
     }
     return pipDigestBar;
   }
-  // A Pip's conversation has the side bar to itself (asked 11 Nov): while one is open, where its prompt box shows, the
-  // dock and the tab bar are not shown (main.css, body.pip-chat-open) and the chat takes their room. Its own back arrow
-  // leads to the list of Pips, where both are again. The Pips view says so with each draw (src/pipsClient.js).
-  function onPipChat(open) {
+  // Inside one Pip the page has the side bar to itself (asked 11 Nov for its chat, 12 Nov for every page of it): while its
+  // chat, its Settings, History, Changes, Notifications or Memory is open, the dock and the tab bar are not shown
+  // (main.css, body.inside-pip) and the page takes their room. The page's own back arrow leads back, in the end to the
+  // list of Pips, where both are again. The Pips view says so with each draw (src/pipsClient.js).
+  function onInsidePip(inside) {
     if (chatPlace !== "home") return;
-    const was = document.body.classList.contains("pip-chat-open"), at = document.activeElement;
-    if (was === !!open) return;
-    document.body.classList.toggle("pip-chat-open", !!open);
-    // Opened from the dock or the tab bar by the keyboard: focus goes into the chat, never left on what is now hidden.
-    if (open && pipsOpen && at?.closest?.("#dgc-dock, #side-tabs")) pipsApp?.focusChat?.();
+    const was = document.body.classList.contains("inside-pip"), at = document.activeElement;
+    if (was === !!inside) return;
+    document.body.classList.toggle("inside-pip", !!inside);
+    // Opened from the dock or the tab bar by the keyboard: focus goes into the page, never left on what is now hidden.
+    if (inside && pipsOpen && at?.closest?.("#dgc-dock, #side-tabs")) pipsApp?.focusInside?.();
   }
   function showPips() {
     const host = $("pips-host");
@@ -613,7 +614,7 @@
         getState:() => { const state=vscode.getState(); return state?.pipsScope===document.documentElement.dataset.draftScope ? state.pips : undefined; },
         setState:state => vscode.setState({...vscode.getState(),pips:state,pipsScope:document.documentElement.dataset.draftScope}),
         close:closePips,
-        onChatOpen:onPipChat,
+        onInsidePip,
         // Ask DGC to fix, from a Pip's own chat (Pips API 51): the prompt the Work chat's card sends, sent once.
         onAskDgc:({report, session} = {}) => askDgcFromPips(report, session),
         // What the fix did, in the run's post (Pips API 65): a click goes to its card in the chat it ran in.
@@ -662,7 +663,7 @@
       return;
     }
     // The list is what is asked for: the tab bar and the dock are there from the first frame, whatever was open last.
-    if (navigation?.overview === true || navigation?.create) onPipChat(false);
+    if (navigation?.overview === true || navigation?.create) onInsidePip(false);
     showPips();
     if (navigation) pipsApp?.navigate?.(navigation);
   }
