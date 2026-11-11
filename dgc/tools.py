@@ -118,6 +118,14 @@ def max_read_lines() -> int:
 def max_fetch_chars() -> int:
     return _dev_limit("tool_fetch_chars", MAX_FETCH_CHARS)
 
+
+def max_grep_matches() -> int:
+    return _dev_limit("tool_grep_matches", MAX_GREP_MATCHES)
+
+
+def max_glob_results() -> int:
+    return _dev_limit("tool_glob_results", MAX_GLOB_RESULTS)
+
 # Read operations leave the page as they found it; the rest change remote state and are named
 # here so the permission layer and the transcript can tell them apart.
 _BROWSER_READ_OPS = frozenset({"open", "snapshot", "find", "console", "requests", "screenshot",
@@ -4037,7 +4045,7 @@ def _rg_exclusions() -> list[str]:
 def _glob_heap_add(heap: list[tuple[int, str]], path: Path, info: os.stat_result, ctx) -> None:
     item = (int(getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000))),
             _display_search_path(path, ctx))
-    if len(heap) < MAX_GLOB_RESULTS:
+    if len(heap) < max_glob_results():
         heapq.heappush(heap, item)
     elif item > heap[0]:
         heapq.heapreplace(heap, item)
@@ -4274,7 +4282,7 @@ def _grep_fallback_scan(pattern: str, target: Path, boundary: Path,
                 safe_line = _trunc_line(_safe_output(line.strip(), ctx))
                 matches.append(f"{relative}:{number}: {safe_line}")
                 files_hit.add(relative)
-                if len(matches) >= MAX_GREP_MATCHES:
+                if len(matches) >= max_grep_matches():
                     return matches, files_hit, "limit", ""
     reason = ("cancelled" if state["cancelled"] else "timeout" if state["timed_out"]
               else "scan" if state["truncated"] else "")
@@ -4344,9 +4352,10 @@ def _grep_fallback(pattern: str, target: Path, boundary: Path, file_glob: str, c
         files_hit = payload.get("files_hit")
         status = payload.get("status")
         worker_error = payload.get("error")
-        if (not isinstance(matches, list) or len(matches) > MAX_GREP_MATCHES
+        most = max_grep_matches()
+        if (not isinstance(matches, list) or len(matches) > most
                 or not all(isinstance(row, str) for row in matches)
-                or not isinstance(files_hit, list) or len(files_hit) > MAX_GREP_MATCHES
+                or not isinstance(files_hit, list) or len(files_hit) > most
                 or not all(isinstance(path, str) for path in files_hit)
                 or status not in ("", "limit", "scan", "timeout", "regex", "process")
                 or not isinstance(worker_error, str)):
@@ -4422,7 +4431,7 @@ def _grep_with_rg(executable: str, pattern: str, target: Path, boundary: Path,
             matches.append(
                 f"{relative}:{number}: {_trunc_line(_safe_output(safe_line.strip(), ctx))}")
             files_hit.add(relative)
-            if len(matches) >= MAX_GREP_MATCHES:
+            if len(matches) >= max_grep_matches():
                 return False
 
     code, reason, error = _run_search_process(argv, consume, ctx)

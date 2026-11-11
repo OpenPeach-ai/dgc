@@ -164,6 +164,40 @@ class HelpersTests(unittest.TestCase):
         self.assertEqual(agent.Agent.max_subagent_depth(stub), 12)
 
 
+class SearchAndResearchTests(unittest.TestCase):
+    """Search results (200 matches, 100 files) and deep research at once (4 pages, 4 searches): yours in Dev Mode."""
+
+    def settings(self, on, **limits):
+        from unittest.mock import patch
+        return patch.object(dev_mode, "_settings", return_value={"dev_mode": on, "dev_limits": limits})
+
+    def test_search_results(self):
+        from dgc import tools
+        with self.settings(False, tool_grep_matches=1000, tool_glob_results=500):
+            self.assertEqual((tools.max_grep_matches(), tools.max_glob_results()), (200, 100))
+        with self.settings(True, tool_grep_matches=1000, tool_glob_results=500):
+            self.assertEqual((tools.max_grep_matches(), tools.max_glob_results()), (1000, 500))
+
+    def test_a_glob_keeps_as_many_files_as_you_set(self):
+        from pathlib import Path
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from dgc import tools
+        for on, kept in ((False, 100), (True, 150)):
+            heap = []
+            with self.settings(on, tool_glob_results=150), patch.object(tools, "_display_search_path", lambda path, ctx: str(path)):
+                for n in range(170):
+                    tools._glob_heap_add(heap, Path(f"f{n}"), SimpleNamespace(st_mtime_ns=n, st_mtime=n), None)
+            self.assertEqual(len(heap), kept, f"Dev Mode {'on' if on else 'off'}")
+
+    def test_deep_research_at_once(self):
+        from dgc.chatdgc import research
+        with self.settings(False, research_fetchers=16, research_searches=12):
+            self.assertEqual((research.workers(), research.search_workers()), (4, 4))
+        with self.settings(True, research_fetchers=16, research_searches=12):
+            self.assertEqual((research.workers(), research.search_workers()), (16, 12))
+
+
 class SettingTests(unittest.TestCase):
     def test_settings_take_the_switch_and_the_limits_and_refuse_what_is_not_one(self):
         from dgc.config import DEFAULTS

@@ -73,6 +73,20 @@ MAX_STEER_CHARS, MAX_STEERS = 1000, 10
 MAX_ACTIVITY = 600
 WORKERS = 4                   # pages fetched and noted at once, and citation batches checked at once
 SEARCH_WORKERS = 4            # searches run at once
+
+
+def workers() -> int:
+    """Pages read at once: WORKERS, or yours in Dev Mode (dgc.dev_mode)."""
+    from ..dev_mode import chosen
+    mine = chosen("research_fetchers")
+    return WORKERS if mine is None else mine
+
+
+def search_workers() -> int:
+    """Searches at once: SEARCH_WORKERS, or yours in Dev Mode."""
+    from ..dev_mode import chosen
+    mine = chosen("research_searches")
+    return SEARCH_WORKERS if mine is None else mine
 SEARCH_RETRY_SECONDS = 2.0    # a failed search is asked again once, after this pause, when the round has time
 SEARCH_SECONDS = 20           # a round waits this long for its searches, at most,
 SEARCH_GRACE = 8              # and this long for the rest once one has answered
@@ -607,7 +621,7 @@ class Research:
         # search that keeps failing can take a minute a query (its own retries, then ours), and that was most of a
         # 26-minute run. What hasn't answered by then is left (its thread finishes on its own) and counted as failed.
         until = time.monotonic() + SEARCH_SECONDS
-        pool = ThreadPoolExecutor(max_workers=SEARCH_WORKERS, thread_name_prefix="dgc-research-search")
+        pool = ThreadPoolExecutor(max_workers=search_workers(), thread_name_prefix="dgc-research-search")
         futures = [pool.submit(self._search_one, query, until) for query in queries]
         done, pending, answered = set(), set(futures), None
         while pending and not self.stopped():
@@ -835,7 +849,7 @@ class Research:
                 if not queries:
                     break
                 continue
-            with ThreadPoolExecutor(max_workers=WORKERS, thread_name_prefix="dgc-research-read") as pool:
+            with ThreadPoolExecutor(max_workers=workers(), thread_name_prefix="dgc-research-read") as pool:
                 list(pool.map(self._read, pages))
             self.keep()
         self.tally()
@@ -1090,7 +1104,7 @@ class Research:
                 elif isinstance(verdict.get("supported"), bool):          # a verdict for the claim as a whole
                     claim[field] = list(claim["cites"]) if verdict["supported"] else []
         batches = [claims[i:i + CHECK_BATCH] for i in range(0, len(claims), CHECK_BATCH)]
-        with ThreadPoolExecutor(max_workers=WORKERS, thread_name_prefix="dgc-research-check") as pool:
+        with ThreadPoolExecutor(max_workers=workers(), thread_name_prefix="dgc-research-check") as pool:
             list(pool.map(run, batches))
 
     def _guard(self, claim: dict, field: str) -> None:
@@ -1304,7 +1318,7 @@ class Research:
                     continue
                 claim["repair"] = {"action": "correct", "text": text, "claim": UNCITE.sub("", text).strip(" |"),
                                    "cites": cites, "why": why}
-        with ThreadPoolExecutor(max_workers=WORKERS, thread_name_prefix="dgc-research-repair") as pool:
+        with ThreadPoolExecutor(max_workers=workers(), thread_name_prefix="dgc-research-repair") as pool:
             list(pool.map(run, groups))
 
     def _keep_check(self, claims: list[dict], notes: dict) -> None:
