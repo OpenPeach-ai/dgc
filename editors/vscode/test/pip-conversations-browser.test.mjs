@@ -362,7 +362,7 @@ test("New conversation asks about its computer: use the one it has, or add anoth
     // Using the ones it has adds nothing; and it now says it has two.
     await x.p.click("#pip-convs");
     await x.p.click("#conv-menu [data-conv-new]");
-    assert.deepEqual(await inPage(x.p, (root) => [...root.querySelectorAll("#conv-menu .conv-new-step .conv-choice")].map((l) => [l.querySelector("strong").textContent, l.querySelector("small").textContent])), [["Use its computers", "It has 2 computers."], ["Add another", "One more, so two things can go on at once. Up to 3."]]);
+    assert.deepEqual(await inPage(x.p, (root) => [...root.querySelectorAll("#conv-menu .conv-new-step .conv-choice")].map((l) => [l.querySelector("strong").textContent, l.querySelector("small").textContent])), [["Use its computers", "It has 2 computers."], ["Add another", "One more, so three things can go on at once. Up to 3."]]);
     await x.p.keyboard.press("Enter");
     await x.p.waitForFunction(() => window.__sent.filter((v) => v.type === "create_pip_conversation").length === 2);
     assert.equal((await state(x.p)).added, 1);

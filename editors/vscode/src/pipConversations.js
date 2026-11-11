@@ -58,6 +58,8 @@ const DOTS = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
 
 /** How many computers it has, in words. */
 export const computersWords = n => `It has ${n} computer${n === 1 ? '' : 's'}.`;
+// How many things go on at once with one more computer, in words: "two", "three" (Dev Mode may allow more: digits).
+const atOnce = n => ['two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'][n - 2] || String(n);
 
 /** "New conversation" when the Pip has a computer: use the ones it has, or add another (up to its limit). */
 export function newConversationMarkup({ esc, computers = 1, limit = 3, choice = 'use', busy = false, error = '' }) {
@@ -66,7 +68,7 @@ export function newConversationMarkup({ esc, computers = 1, limit = 3, choice = 
     + `<span class="conv-choice-words"><strong>${esc(title)}</strong><small>${esc(says)}</small></span></label>`;
   return `<form class="conv-new-step" data-conv-new-form aria-label="New conversation"><div class="dgc-menu-head" role="presentation"><span>New conversation</span></div>`
     + `<div class="conv-choices" role="radiogroup" aria-label="Its computer">${option('use', computers === 1 ? 'Use its computer' : 'Use its computers', computersWords(computers))}`
-    + option('add', 'Add another', full ? `${limit} is the most it can have.` : `One more, so two things can go on at once. Up to ${limit}.`, full) + '</div>'
+    + option('add', 'Add another', full ? `${limit} is the most it can have.` : `One more, so ${atOnce(computers + 1)} things can go on at once. Up to ${limit}.`, full) + '</div>'
     + '<p class="conv-note">Its computers are shared by all its conversations.</p>'
     + (error ? `<p class="conv-error" role="alert">${esc(error)}</p>` : '')
     + `<div class="conv-actions"><button type="submit" class="primary conv-btn"${off}>${busy ? 'Starting…' : 'Start'}</button><button type="button" class="quiet conv-btn" data-conv-new-cancel${off}>Cancel</button></div></form>`;
