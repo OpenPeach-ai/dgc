@@ -5980,10 +5980,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         void this.stopMonitor(String(msg.id || ""));
         break;
       case "cancelWakeup":
-        // A wake-up's Cancel on the bar (ready.capabilities.wakeups): DGC takes it back and sends the row again.
-        if ((this.lastReadyEvent?.capabilities as any)?.wakeups === true && typeof msg.id === "string" && /^wake\d{1,9}$/.test(msg.id)) {
-          be.send({ type: "cancel_wakeup", id: msg.id });
-        }
+        // A wake-up's Cancel on the bar: DGC takes it back and sends the row again.
+        this.cancelWakeup(String(msg.id || ""));
         break;
       case "pipReportsWatch":
         // The panel draws Pip reports (ready.capabilities.pip_reports): this chat's start arriving.
@@ -8197,6 +8195,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Does this chat's CLI make videos (ready.capabilities.videos, 0.51)? */
+  /** A chat's wake-ups (dgc/wakeups.py): only a CLI that says ready.capabilities.wakeups takes cancel_wakeup. */
+  wakeupsCapable(): boolean { return (this.lastReadyEvent?.capabilities as any)?.wakeups === true; }
+  cancelWakeup(id: string): void {
+    if (!this.wakeupsCapable() || !/^wake\d{1,9}$/.test(id)) return;
+    this.backend?.send({ type: "cancel_wakeup", id } as any);
+  }
   videosCapable(): boolean {
     const commands = (this.lastReadyEvent?.capabilities as any)?.videos?.commands;
     return Array.isArray(commands) && commands.includes("videos_jobs") && commands.includes("videos_stop");
