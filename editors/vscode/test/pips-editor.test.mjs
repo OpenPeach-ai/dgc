@@ -1741,7 +1741,7 @@ test("a Personal Pip's Job tab lists what it may do without asking, and Stop all
  assert.equal(revoke.request.pip_id,'a');assert.equal(revoke.request.grant_id,grantFixture.id);
  x.answer(revoke,{pip_id:'a',grants:[]});await x.drain({list_pip_action_grants:()=>({pip_id:'a',grants:[]})});
  assert.match(x.d.body.textContent,/This Pip will ask you again before: Send email with composio\./);
- assert.match(x.d.querySelector('[aria-label="Allowed without asking"]').textContent,/Nothing\. Every email, event or app action this Pip drafts waits for you\./);
+ assert.match(x.d.querySelector('[aria-label="Allowed without asking"]').textContent,/Every email, event or app action this Pip drafts waits for you\..*Nothing yet\./);   // (short and clean: the sentence is behind the “i”)
 });
 test('the Runs page says which chats get its reports as a card, or how to attach one',async()=>{
  const many=setup({jobs:[job('a',{report_chats:2})]});await many.drain();

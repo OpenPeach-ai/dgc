@@ -79,7 +79,7 @@ test("a Pip's page shows its working notes, which you can edit, and what it did 
   const notes = x.d.querySelector('[aria-label="Working notes"]');
   assert.ok(notes, "on its page");
   assert.match(notes.textContent, /The hospital portal asks for the UHID first.*Bills go to Arjun Mehta/);
-  assert.match(notes.textContent, /Ava keeps these about how it does its job, and starts every run with them\. 2 of 60 lines\./);
+  assert.match(notes.textContent, /Ava keeps these about how it does its job, .*and starts every run with them\..*2 of 60 lines\./);   // (short and clean: the sentence is behind the “i”; the count stays in sight)
   const log = x.d.querySelector('[aria-label="Daily log"]');
   assert.match(log.textContent, /Today · 1 run.*Pay the bill.*2026-10-20 · 3 runs/);
   assert.equal(log.querySelectorAll("details[open]").length, 1, "today open, other days a click away");

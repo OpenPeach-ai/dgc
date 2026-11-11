@@ -79,7 +79,7 @@ test('its page says it has its own computer and keeps the switch to remove it; o
 
 test('turning Careful mode off is yours alone, says what changes, and an older CLI or a Pip without a computer shows nothing',async()=>{
  const x=setup({row:computerPip()});await openPage(x);
- assert.match(x.d.querySelector('[aria-label="Careful mode"]').textContent,/None yet\. Sites you name in your chat, and ones you allow on its cards, show here\./);
+ assert.match(x.d.querySelector('[aria-label="Careful mode"]').textContent,/Sites you name in your chat, and ones you allow on its cards, show here\..*None yet\./);   // (short and clean: the sentence is behind the “i” beside Allowed sites)
  const box=x.d.querySelector('#pipCareful');box.checked=false;box.dispatchEvent(new x.w.Event('change',{bubbles:true}));await flush();
  const set=x.requests('set_pip_careful').at(-1);assert.deepEqual(JSON.parse(JSON.stringify(set.request)),{type:'set_pip_careful',pip_id:PIP,on:false});
  x.answer(set,{pip_id:PIP,careful:false,sites:[]});await x.drain();

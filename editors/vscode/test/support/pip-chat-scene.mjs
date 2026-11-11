@@ -45,7 +45,7 @@ export const THEMES = {
 /** The stub host, run in the page before the client: answers each request after a tick, as the extension would.
     opts: project (a Project Pip's chat), hold (what its computer holds for your okay), running (a turn in flight),
     doing (what the running turn says it is doing), fixing (DGC is fixing what a Project Pip's post found),
-    empty (no messages yet), api. */
+    empty (no messages yet), api, settings (its page's every section has something in it; level: the one it is at). */
 /** The stub host's script: it answers a Pip's page from `opts`. (dock-scene.mjs gives it to the side bar's real page too.) */
 export const host = (opts) => `(${function (PIP, opts) {
   const W = "ws_" + "e".repeat(32), run = (c) => "run_" + c.repeat(32);
@@ -163,6 +163,39 @@ export const host = (opts) => `(${function (PIP, opts) {
     list_pip_run_fixes: () => ({ pip_id: PIP, workspace_id: W, fixes: opts.fixing ? [{ fix_id: "fix_" + "f".repeat(32), run_id: run("7"), state: "running", session_id: "fix-session-1", created_at: Math.floor(Date.now() / 1000) - 30 }] : [] }),
     get_pip_computer: () => ({ computer: { pip_id: PIP, granted: !project, available: !project, reason: "", pending: opts.hold ? 1 : 0, actions: opts.hold ? [hold] : [] } }),
   };
+  // opts.settings: everything a Pip's settings read, each with something in it, so its page shows every section
+  // (a Personal Pip with its own computer at Do it all, or with opts.level another level; a Project Pip that reviews).
+  if (opts.settings) {
+    const level = opts.level || "full", day = new Date().toISOString().slice(0, 10), grant = "grant_" + "a".repeat(32);
+    if (!project) pip.computer_plan = { schema_version: 1 };
+    const says = project ? { ask: "Every handoff it is sent waits for you.", approve: "Takes a handoff to read or review by itself. Asks before one that changes files or runs commands.",
+      full: "Also writes a fix in its own copy by itself; the diff waits as a card for you. Never changes your files, commits or pushes." }
+      : { ask: "Asks before every new site, every submit and every send.", approve: "Opens new sites, searches, adds to carts and saves drafts by itself. Asks before it orders, pays, sends to someone new, posts, deletes or changes an account.",
+        full: "Does it all by itself, sends included. Still asks before any payment. A page or email it reads could talk it into sending something." };
+    const done = project ? [{ at: at(8), what: "Reviewed: Discount is accepted but never subtracted, so the customer is charged the full pre-discount subtotal", level: "approve", unattended: false, kind: "handoff" }]
+      : [{ at: at(8), what: "Added to cart on shop.example", level: "approve", unattended: false, kind: "computer" }, { at: at(90), what: "Opened news.example for the first time", level: "approve", unattended: true, kind: "site" }];
+    Object.assign(answers, {
+      get_pip_level: () => ({ pip_id: PIP, level, default: "ask", kind: project ? "project" : "personal", on_its_own: done, ...(project || level !== "full" ? {} : { paying: "ask" }),
+        levels: [["ask", "Ask me first"], ["approve", "Approve for me"], ["full", "Do it all"]].map(([l, n]) => ({ level: l, name: n, says: says[l] })) }),
+      set_pip_level: (r) => ({ ...answers.get_pip_level(), level: r.level }),
+      get_pips_payments: () => ({ payments: { limit: 3, default: 3, most: 20, paid: 0 } }),
+      get_pip_eyes: () => ({ eyes: { pip_id: PIP, model: "deepseek-v4.1-flash:cloud", sees: false, choice: "ask", vision_model: "glm-5.3:cloud" } }),
+      get_pip_backup: () => ({ backup: { pip_id: PIP, provider: "", model: "" } }), list_pip_templates: () => ({ templates: [] }),
+      get_pip_artifacts: () => ({ artifacts: { report_as: "chat", dashboards: ["ar_" + "1".repeat(16)], report_doc: "", report_sheet: "" } }),
+      list_artifact_dashboards: () => ({ dashboards: [{ id: "ar_" + "1".repeat(16), title: "Sales this week", version: 3 }, { id: "ar_" + "2".repeat(16), title: "Open bugs", version: 1 }] }),
+      list_pip_action_grants: () => ({ pip_id: PIP, grants: project ? [] : [{ id: grant, kind: "gmail_send", server: "gmail", account: "me@mail.example", tool: "send", label: "Send email to sam@mail.example",
+        created_at: at(600), created_by: "editor-user", connection_digest: "c".repeat(64), schema_digest: "d".repeat(64) }] }),
+      get_pip_usage: () => ({ usage: { pip_id: PIP, today: { day, runs: 2, tokens: 48200 }, last_30_days: { runs: 31, tokens: 912000 }, days: [{ day, runs: 2, tokens: 48200 }], daily_cap: null, capped_today: false } }),
+      get_pip_notify_settings: () => ({ settings: { pip_id: PIP, min_severity: "low", alert_severity: null, revision: 0, is_default: true } }),
+      get_pip_outcomes: () => ({ outcomes: { pip_id: PIP, name, pip_type: pip.pip_type, history_truncated: false, reported: 5, accepted: 2, dismissed: 1, still_reported: 3, gone_after_change: 2, gone_without_change: 0, checkpoints_examined: 4 } }),
+      list_pip_sites: () => ({ pip_id: PIP, careful: true, sites: [{ site: "news.example", at: at(90) }, { site: "shop.example", at: at(8) }] }),
+      list_pip_logins: () => ({ logins: [{ id: "login_" + "a".repeat(32), site: "news.example", hosts: ["news.example"], username: "me@mail.example", has_code: false, pips: [PIP], source: "card", created_at: at(900), last_used_at: null, usable: true }] }),
+      list_pip_notes: () => ({ pip_id: PIP, max: 60, notes: [{ id: "pipnote_" + "a".repeat(32), text: "Likes the brief short: five bullets.", source: "chat", run_id: null, created_at: at(300) }] }),
+      list_pip_app_links: () => ({ pip_id: PIP, composio: true, links: project ? [] : [{ ...link, status: "connected", label: "me@mail.example" }] }),
+      list_pip_routines: () => ({ pip_id: PIP, workspace_id: W, routines: project ? [] : [{ ...suggested, title: "Morning brief", status: "on", created_by: "user",
+        trigger: { kind: "schedule", schedule: { type: "daily", time: "09:00", timezone: "Asia/Kolkata" } }, label: "every day at 09:00", next_due_at: "2036-11-07T03:30:00Z" }] }),
+    });
+  }
   window.acquireVsCodeApi = () => ({ getState: () => undefined, setState() {}, postMessage(m) {
     if (m?.type !== "pipsRequest") return;
     const make = answers[m.request.type];

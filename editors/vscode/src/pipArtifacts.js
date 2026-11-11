@@ -5,6 +5,7 @@
 // choice with its one line, and a short list with Add and Remove. Two layouts: a reviewing Pip's Settings tab (its
 // sections, as "When it runs" and "Model" are) and a Personal Pip's page (its grouped rows, as "Seeing" is).
 
+import {infoTip} from './pipInfoTip.js';
 export const REPORT_AS = ['chat', 'doc', 'sheet'];
 export const MAX_DASHBOARDS = 8;
 const ARTIFACT = /^ar_[a-f0-9]{16}$/;
@@ -79,14 +80,15 @@ function parts(state, {esc, busy, pipName, dashboards, dashboardsError}) {
   let add = '', note = '';
   if (dashboardsError) note = dashboardsError;
   else if (!dashboards) note = 'Loading your dashboards…';
-  else if (state.dashboards.length >= MAX_DASHBOARDS) note = `That’s the most a Pip refreshes: ${MAX_DASHBOARDS}. Remove one to add another.`;
-  else if (!dashboards.length) note = 'You have no dashboards yet. Ask for one in a chat: choose Artifact, then Dashboard.';
+  else if (state.dashboards.length >= MAX_DASHBOARDS) note = `The most is ${MAX_DASHBOARDS}. Remove one first.`;
+  else if (!dashboards.length) note = 'No dashboards yet.';
   else if (!addable.length) note = 'It refreshes every dashboard you have.';
   else {
     add = `<select id="pipDashboardAdd" aria-label="Add a dashboard for ${esc(pipName)} to refresh"${off}><option value="" selected>Add a dashboard…</option>`
       + addable.map(d => `<option value="${esc(d.id)}">${esc(d.title)}</option>`).join('') + '</select>';
   }
-  const says = `${esc(pipName)} refreshes ${rows.length ? 'these' : 'the dashboards you add here'} after every run it finishes, so they stay current.`;
+  const says = `${esc(pipName)} refreshes ${rows.length ? 'these' : 'the dashboards you add here'} after every run it finishes, so they stay current.`
+    + (dashboards && !dashboards.length ? ' To make one, ask in a chat: choose Artifact, then Dashboard.' : '');
   return {report, rows, add, note, says, loading: !dashboards && !dashboardsError};
 }
 
@@ -96,8 +98,8 @@ export function artifactsPageMarkup(state, {esc, busy = false, error = '', pipNa
   if (!state) return `<section class="pip-page-group pip-artifacts" aria-label="${label}">${error ? `<p class="error" role="alert">${esc(error)}</p>` : '<p class="muted" role="status">Loading…</p>'}</section>`;
   const p = parts(state, {esc, busy, pipName, dashboards, dashboardsError});
   return `<section class="pip-page-group pip-artifacts" aria-label="${label}">`
-    + (reviews ? `<div class="pip-page-row static"><span class="row-words"><strong>Reports</strong><small id="pipReportSays">${esc(reportSays(state))}</small></span><span class="pip-artifacts-actions">${p.report}</span></div>` : '')
-    + `<h3 class="pip-page-label" id="pipDashboardsLabel">Dashboards it refreshes</h3><p class="muted pip-artifacts-says">${p.says}</p>`
+    + (reviews ? `<div class="pip-page-row static"><span class="row-words"><strong>Reports${infoTip('pipReportSays', 'Reports', esc(reportSays(state)))}</strong></span><span class="pip-artifacts-actions">${p.report}</span></div>` : '')
+    + `<h3 class="pip-page-label"><span id="pipDashboardsLabel">Dashboards</span>${infoTip('pipDashboardsSays', 'Dashboards', p.says)}</h3>`
     + (p.rows.length ? `<ul class="pip-page-list pip-dashboards" aria-labelledby="pipDashboardsLabel" data-dashboards>${p.rows.join('')}</ul>` : '')
     + (p.add ? `<div class="pip-page-row static pip-dashboard-add">${p.add}</div>` : '')
     + (p.note ? `<p class="muted pip-artifacts-says"${p.loading ? ' role="status"' : ''}>${esc(p.note)}</p>` : '')
@@ -106,13 +108,13 @@ export function artifactsPageMarkup(state, {esc, busy = false, error = '', pipNa
 
 /** A reviewing Pip's Settings tab (and any Pip whose settings are sections): Reports, then the dashboards it refreshes. */
 export function artifactsSectionsMarkup(state, {esc, busy = false, error = '', pipName = 'It', reviews = false, dashboards = null, dashboardsError = ''}) {
-  if (!state) return `<section class="section pip-artifacts-section" aria-label="${reviews ? 'Reports and dashboards' : 'Dashboards'}"><h2>${reviews ? 'Reports' : 'Dashboards it refreshes'}</h2>`
+  if (!state) return `<section class="section pip-artifacts-section" aria-label="${reviews ? 'Reports and dashboards' : 'Dashboards'}"><h2>${reviews ? 'Reports' : 'Dashboards'}</h2>`
     + (error ? `<p class="notice error" role="alert">${esc(error)}</p>` : '<p class="muted" role="status">Loading…</p>') + '</section>';
   const p = parts(state, {esc, busy, pipName, dashboards, dashboardsError});
   const failed = error ? `<p class="notice error" role="alert">${esc(error)}</p>` : '';
-  return (reviews ? `<section class="section pip-artifacts-section" aria-labelledby="pipReportsTitle"><h2 id="pipReportsTitle">Reports</h2>`
-      + `<p class="muted" id="pipReportSays">${esc(reportSays(state))}</p><div class="actions pip-artifacts-actions">${p.report}</div></section>` : '')
-    + `<section class="section pip-artifacts-section" aria-labelledby="pipDashboardsLabel"><h2 id="pipDashboardsLabel">Dashboards it refreshes</h2><p class="muted">${p.says}</p>`
+  return (reviews ? `<section class="section pip-artifacts-section" aria-labelledby="pipReportsTitle"><h2><span id="pipReportsTitle">Reports</span>${infoTip('pipReportSays', 'Reports', esc(reportSays(state)))}</h2>`
+      + `<div class="actions pip-artifacts-actions">${p.report}</div></section>` : '')
+    + `<section class="section pip-artifacts-section" aria-labelledby="pipDashboardsLabel"><h2><span id="pipDashboardsLabel">Dashboards</span>${infoTip('pipDashboardsSays', 'Dashboards', p.says)}</h2>`
     + (p.rows.length ? `<ul class="pip-dashboards" aria-labelledby="pipDashboardsLabel" data-dashboards>${p.rows.join('')}</ul>` : '')
     + (p.add ? `<div class="actions pip-dashboard-add">${p.add}</div>` : '')
     + (p.note ? `<p class="muted"${p.loading ? ' role="status"' : ''}>${esc(p.note)}</p>` : '')

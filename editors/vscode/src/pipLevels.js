@@ -1,9 +1,15 @@
 // How much a Personal Pip asks (pip_levels, Pips API 58): Ask me first, Approve for me or Do it all. In its prompt box, a
-// chip with the level's name and a menu of the three with a line each and "What it can do" last; on its page, the picker
-// with one plain line for the one chosen and a short "What it did on its own" list right under it. Both read one state,
+// chip with the level's name and a menu of the three with a line each and "What it can do" last; on its page, "Before it
+// acts": the picker, the chosen level's one plain line behind the "i" beside the title (and, at Do it all, its risk in a
+// few words in sight), and a short "On its own" list right under it. Both read one state,
 // so they always agree. The line is DGC's own (get_pip_level's `says`), shown once more as the notice when one is chosen.
 
+import {infoTip} from './pipInfoTip.js';
+
 const LEVELS = ['ask', 'approve', 'full'];
+// Do it all, on a Personal Pip: what can go wrong stays in sight beside the picker, in a few words. (DGC's whole line,
+// "A page or email it reads could talk it into sending something", is behind the "i".)
+export const FULL_RISK = 'Can be talked into sending things';
 const KINDS = ['site', 'computer', 'app', 'handoff'];          // handoff: a Project Pip's (Pips API 80)
 const SHOWN = 5;
 
@@ -34,11 +40,12 @@ export function levelMarkup(state, {esc, busy = false, error = '', pipName = 'It
   const chosen = state.levels.find(l => l.level === state.level) || state.levels[0];
   const name = level => (state.levels.find(l => l.level === level) || {}).name || level;
   const done = state.done.slice(0, SHOWN);
-  return `<section class="pip-page-group" aria-label="How much it asks"><div class="pip-page-row static"><span class="row-words"><strong>How much it asks</strong>`
-    + `<small id="pipLevelSays">${esc(chosen.says)}</small></span>`
-    + `<select id="pipLevel" aria-label="How much ${esc(pipName)} asks" aria-describedby="pipLevelSays"${off}>${state.levels.map(l => `<option value="${l.level}"${l.level === state.level ? ' selected' : ''}>${esc(l.name)}</option>`).join('')}</select></div>`
+  const risk = state.level === 'full' && state.kind !== 'project';
+  return `<section class="pip-page-group" aria-label="How much it asks"><div class="pip-page-row static"><span class="row-words"><strong>Before it acts${infoTip('pipLevelSays', 'Before it acts', esc(chosen.says))}</strong>`
+    + `${risk ? `<small class="pip-level-risk" id="pipLevelRisk">${FULL_RISK}</small>` : ''}</span>`
+    + `<select id="pipLevel" aria-label="How much ${esc(pipName)} asks" aria-describedby="pipLevelSays${risk ? ' pipLevelRisk' : ''}"${off}>${state.levels.map(l => `<option value="${l.level}"${l.level === state.level ? ' selected' : ''}>${esc(l.name)}</option>`).join('')}</select></div>`
     + payingMarkup(state, {esc, off, pipName, payLimit})
-    + (done.length ? `<h3 class="pip-page-label">What it did on its own</h3><ul class="pip-page-list" data-on-its-own>${done.map(d =>
+    + (done.length ? `<h3 class="pip-page-label">On its own${infoTip('pipOwnSays', 'On its own', `What ${esc(pipName)} did without asking, at the level it was at.`)}</h3><ul class="pip-page-list" data-on-its-own>${done.map(d =>
       `<li class="pip-page-row static sub"><span class="row-words"><span>${esc(d.what)}</span><small>${esc(when(d.at))} · ${esc(name(d.level))}${d.unattended ? ' · nobody at the keyboard' : ''}</small></span></li>`).join('')}</ul>`
       + (state.level === 'ask' ? '' : `<button type="button" class="link" data-level-ask${off}>Ask me again from now on</button>`) : '')
     + (error ? `<p class="error" role="alert">${esc(error)}</p>` : '') + '</section>';
@@ -50,7 +57,7 @@ function payingMarkup(state, {esc, off, pipName, payLimit}) {
   const says = state.paying === 'allow'
     ? `It pays by itself, ${payLimit ? `at most ${payLimit} times a day` : 'up to your count for the day'} across your Pips. It never types a card number.`
     : 'Every payment waits for you on a card.';
-  return `<div class="pip-page-row static"><span class="row-words"><strong>Payments</strong><small id="pipPayingSays">${esc(says)}</small></span>`
+  return `<div class="pip-page-row static"><span class="row-words"><strong>Payments${infoTip('pipPayingSays', 'Payments', esc(says))}</strong></span>`
     + `<select id="pipPaying" aria-label="Payments by ${esc(pipName)}" aria-describedby="pipPayingSays"${off}>`
     + [['ask', 'Ask me each time'], ['allow', 'Let it pay']].map(([value, label]) => `<option value="${value}"${value === state.paying ? ' selected' : ''}>${label}</option>`).join('')
     + '</select></div>';

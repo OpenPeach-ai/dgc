@@ -105,7 +105,7 @@ test("no dashboards yet says how to make one; all of them chosen, or the most, s
   const none = await openPipSettings(browser, { kind: "scout", dashboards: [] });
   try {
     await none.page.waitForSelector("#pipDashboardsLabel");
-    assert.match(await none.page.locator(".pip-artifacts-section").last().textContent(), /You have no dashboards yet\. Ask for one in a chat: choose Artifact, then Dashboard\./);
+    assert.match(await none.page.locator(".pip-artifacts-section").last().textContent(), /To make one, ask in a chat: choose Artifact, then Dashboard\..*No dashboards yet\./);   // (short and clean: how to make one is behind the “i” beside Dashboards; the line in sight is "No dashboards yet.")
     assert.equal(await none.page.locator("#pipDashboardAdd").count(), 0);
   } finally { await none.close(); }
   const eight = Array.from({ length: 9 }, (_, i) => ({ id: DASH(String(i)), title: `Board ${i}`, version: 1 }));
@@ -113,7 +113,7 @@ test("no dashboards yet says how to make one; all of them chosen, or the most, s
   try {
     await full.page.waitForSelector(".pip-dashboard");
     assert.equal((await names(full)).length, 8);
-    assert.match(await full.page.locator(".pip-artifacts-section").last().textContent(), /That’s the most a Pip refreshes: 8\. Remove one to add another\./);
+    assert.match(await full.page.locator(".pip-artifacts-section").last().textContent(), /The most is 8\. Remove one first\./);   // (short and clean: the same thing in six words)
     assert.equal(await full.page.locator("#pipDashboardAdd").count(), 0);
   } finally { await full.close(); }
   const failed = await openPipSettings(browser, { kind: "scout", dashboards: DASHBOARDS, artifacts: { dashboards: [DASH("a")] },

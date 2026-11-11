@@ -4,6 +4,7 @@
 // From Pips API 46 what it keeps goes in your one memory in DGC (mem_ ids), which ChatDGC and Work read too:
 // it shows here the same way, and Forget forgets it everywhere.
 
+import {infoTip} from './pipInfoTip.js';
 const NOTE = /^(?:pipnote_[a-f0-9]{32}|mem_[a-f0-9]{12})$/;
 const everywhere = n => n.id.startsWith('mem_');
 
@@ -26,8 +27,8 @@ export function notesMarkup(notes, {esc, busy = false, error = '', pipName = 'It
   const all = notes.length > 1 ? (confirmAll
     ? `<span class="note-confirm">Forget all ${notes.length}? <button type="button" class="quiet pill danger-text" data-note-forget-all="yes"${off}>Forget all</button><button type="button" class="quiet pill" data-note-forget-all="no"${off}>Keep them</button></span>`
     : `<button type="button" class="link" data-note-forget-all="ask"${off}>Forget all…</button>`) : '';
-  return `<section class="pip-page-group" aria-label="What it remembers"><h3 class="pip-page-label">What it remembers</h3>`
-    + (notes.length ? `<ul class="pip-page-list">${rows}</ul>` : `<p class="pip-page-empty">Nothing yet. As you chat, ${esc(pipName)} keeps short notes of what you tell it, like what you like or who people are. They show here, and you can forget any of them.</p>`)
+  return `<section class="pip-page-group" aria-label="What it remembers"><h3 class="pip-page-label">What it remembers${infoTip('pipNotesSays', 'What it remembers', `As you chat, ${esc(pipName)} keeps short notes of what you tell it, like what you like or who people are. They show here, and you can forget any of them.`)}</h3>`
+    + (notes.length ? `<ul class="pip-page-list">${rows}</ul>` : `<p class="pip-page-empty">Nothing yet.</p>`)
     + `<form id="note-add-form" class="pip-page-row static note-add"><label for="noteAdd" class="sr-only">Add something for ${esc(pipName)} to remember</label>`
     + `<input id="noteAdd" data-draft="noteAdd" maxlength="300" autocomplete="off" placeholder="Add something for ${esc(pipName)} to remember" value="${esc(adding)}"${off}>`
     + `<button type="submit" class="quiet pill"${busy || !adding.trim() ? ' disabled' : ''}>Add</button></form>`

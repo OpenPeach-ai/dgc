@@ -5,13 +5,14 @@
 // The form never keeps what you type: it is read from its boxes once, on Save, sent to DGC, and the boxes are emptied.
 // Nothing of it goes in the chat, its draft, the view's saved state or a request history.
 
+import {infoTip} from './pipInfoTip.js';
 const MAX_FIELD = 512;
 const BASE32 = /^[A-Z2-7]+=*$/;
 
 /** Its page: the logins it may use, each with who may use it and Remove; the ones saved for other Pips; Save a login…. */
 export function loginsMarkup(logins, {esc, busy = false, error = '', pipId = '', pipName = 'It', names = {}, confirm = ''}) {
   const off = busy ? ' disabled' : '';
-  const head = `<section class="pip-page-group" aria-label="Logins"><h3 class="pip-page-label">Logins</h3>`;
+  const head = `<section class="pip-page-group" aria-label="Logins"><h3 class="pip-page-label">Logins${infoTip('pipLoginsSays', 'Logins', `When ${esc(pipName)} meets a sign-in page, its chat offers to save that site’s login, so it can sign in by itself. DGC types it in; ${esc(pipName)} never sees it. Kept sealed on this computer only: never in a chat, an export or a shared Pip.`)}</h3>`;
   if (!logins) return `${head}${error ? `<p class="error" role="alert">${esc(error)}</p>` : '<p class="muted" role="status">Loading…</p>'}</section>`;
   const mine = logins.filter(l => l.usable), others = logins.filter(l => !l.usable);
   const named = id => id === pipId ? pipName : names[id] || 'another Pip';
@@ -30,9 +31,9 @@ export function loginsMarkup(logins, {esc, busy = false, error = '', pipId = '',
     + `<button type="button" class="quiet pill" data-login-share="${esc(l.id)}"${off}>Let ${esc(pipName)} use it</button></li>`;
   return head
     + (mine.length ? `<ul class="pip-page-list">${mine.map(row).join('')}</ul>`
-      : `<p class="pip-page-empty">None yet. When ${esc(pipName)} meets a sign-in page, its chat offers to save that site’s login, so it can sign in by itself. DGC types it in; ${esc(pipName)} never sees it.</p>`)
-    + (others.length ? `<h3 class="pip-page-label">Saved for your other Pips</h3><ul class="pip-page-list">${others.map(other).join('')}</ul>` : '')
-    + `<div class="pip-page-row static"><span class="row-words"><small>Kept sealed on this computer only: never in a chat, an export or a shared Pip.</small></span><button type="button" class="quiet pill" data-login-new="1"${off}>Save a login…</button></div>`
+      : `<p class="pip-page-empty">None yet.</p>`)
+    + (others.length ? `<h3 class="pip-page-label">Other Pips’ logins</h3><ul class="pip-page-list">${others.map(other).join('')}</ul>` : '')
+    + `<div class="pip-page-row static login-new"><button type="button" class="quiet pill" data-login-new="1" aria-describedby="pipLoginsSays"${off}>Save a login…</button></div>`
     + (error ? `<p class="error" role="alert">${esc(error)}</p>` : '') + '</section>';
 }
 

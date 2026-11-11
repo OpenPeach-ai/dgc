@@ -3,6 +3,7 @@
 // or Not now. What the Pip would then do in a plugin is an Allow card: Allow, Always allow (never for
 // a plugin that can move money: those ask every time) or Don't.
 
+import {infoTip} from './pipInfoTip.js';
 import { field, editButton, editError, askedAgainLine } from './pipAppLinks.js';
 import '../media/pluginCalls.js';   // globalThis.DgcPluginCalls: a plugin call in plain words, the same in all three chats
 
@@ -195,10 +196,9 @@ export function pluginsPageMarkup(cards, { esc, busy = false, pipName = 'This Pi
   const allowed = (cards || []).filter(c => c.status === 'allowed');
   if (!allowed.length) return '';
   const off = busy ? ' disabled' : '';
-  return `<section class="pip-page-group" aria-label="Plugins"><h3 class="pip-page-label">Plugins</h3><ul class="pip-page-list">${allowed.map(c =>
+  return `<section class="pip-page-group" aria-label="Plugins"><h3 class="pip-page-label">Plugins${infoTip('pipPluginsSays', 'Plugins', `${esc(pipName)} asks in its chat before it uses another plugin you added to DGC.`)}</h3><ul class="pip-page-list">${allowed.map(c =>
     `<li class="pip-page-row static"><span class="row-words"><span>${esc(c.name)}</span><small>${c.money ? 'Asks you before every action' : 'Asks before anything its maker doesn’t mark read-only'}</small></span>`
-    + `<button type="button" class="quiet pill" data-plugin-remove="${esc(c.id)}"${off}>Take back</button></li>`).join('')}</ul>`
-    + `<p class="muted">${esc(pipName)} asks in its chat before it uses another plugin you added to DGC.</p></section>`;
+    + `<button type="button" class="quiet pill" data-plugin-remove="${esc(c.id)}"${off}>Take back</button></li>`).join('')}</ul></section>`;
 }
 
 // Pips settings → Plugins (list_pip_plugin_uses): which Pips use each plugin, with Remove per Pip,

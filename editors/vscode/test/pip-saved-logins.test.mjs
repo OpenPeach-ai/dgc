@@ -130,7 +130,7 @@ test('its page lists the logins it may use with who may use them; All Pips, Remo
  const group=x.d.querySelector('[aria-label="Logins"]');assert.ok(group,'Logins on its page');
  const rows=[...group.querySelectorAll('[data-login]')];
  assert.match(rows[0].textContent,/northwind-bank\.example.*arjun\.mehta · Fills its code too · Only Banker/);
- assert.match(group.textContent,/Saved for your other Pips.*contoso-mail\.example.*arjun · saved for Mailer/);
+ assert.match(group.textContent,/Other Pips’ logins.*contoso-mail\.example.*arjun · saved for Mailer/);
  assert.equal(group.textContent.includes(PASSWORD),false);
  const all=group.querySelector(`[data-login-all="${LOGIN}"]`);all.checked=true;all.dispatchEvent(new x.w.Event('change',{bubbles:true}));await flush();
  assert.deepEqual(plain(x.requests('grant_pip_login')[0].request),{type:'grant_pip_login',login_id:LOGIN,pips:'all'});

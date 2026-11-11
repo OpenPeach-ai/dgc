@@ -169,7 +169,7 @@ export function routineCardMarkup(r, { esc, busy = false, formatDate }) {
 }
 
 /** Its routines in Settings: one row each with an on/off switch, then Add routine. */
-export function routinesMarkup(routines, { esc, busy = false, editing = '', form = '', formatDate, pipName = 'It', schedule = '', gmail = false, calendar = false }) {
+export function routinesMarkup(routines, { esc, busy = false, editing = '', form = '', formatDate, pipName = 'It', schedule = '', gmail = false, calendar = false, short = false }) {
   const off = busy ? ' disabled' : '';
   const shown = (routines || []).filter(r => r.status !== 'suggested');
   const rows = shown.map(r => editing === r.id ? form : `<li class="routine-row" data-state="${esc(r.status)}">`
@@ -180,7 +180,7 @@ export function routinesMarkup(routines, { esc, busy = false, editing = '', form
     + `${r.last_error ? `<small class="routine-error">${esc(r.last_error)}</small>` : ''}</span></button>`
     + `<label class="switch" title="${r.status === 'on' ? 'On' : 'Off'}"><input type="checkbox" role="switch" data-routine-toggle="${esc(r.id)}"${r.status === 'on' ? ' checked' : ''}${off} aria-label="${esc(r.title)} ${r.status === 'on' ? 'on' : 'off'}"><span aria-hidden="true"></span></label></li>`).join('');
   const legacy = schedule ? `<li class="routine-row legacy"><span class="routine-open static">${mark}<span class="routine-words"><strong>Its task</strong><small>${esc(schedule)}</small></span></span><button type="button" class="quiet" data-routine-legacy${off}>Change</button></li>` : '';
-  const empty = !shown.length && !schedule && editing !== 'new' ? `<p class="routine-empty">No routines yet. A routine is something ${esc(pipName)} does on its own: every morning, when an email arrives, or before a meeting.</p>` : '';
+  const empty = !shown.length && !schedule && editing !== 'new' ? `<p class="routine-empty">No routines yet.${short ? '' : ` A routine is something ${esc(pipName)} does on its own: every morning, when an email arrives, or before a meeting.`}</p>` : '';
   return `<ul class="routine-list">${legacy}${rows}${editing === 'new' ? form : ''}</ul>${empty}`
     + (editing === 'new' || shown.length >= 10 ? '' : `<button type="button" class="routine-add" data-routine-new${off}>+ Add routine</button>`);
 }

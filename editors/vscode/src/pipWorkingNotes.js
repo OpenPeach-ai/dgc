@@ -3,6 +3,7 @@
 // (pip_daily_log: written by DGC, never given to a run), and the /learn card in its chat (a skill drafted from the
 // chat, written only when you choose Save). Words are the user's and the Pip's: text only, escaped.
 
+import {infoTip} from './pipInfoTip.js';
 const PIP = /^pip_[0-9a-f]{32}$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -28,10 +29,9 @@ export function dailyLogPage(value, pip) {
 /** "Working notes": what it keeps about doing its job, a line each, with Edit; the budget in plain words. */
 export function workingNotesMarkup(notes, { esc, busy = false, error = '', pipName = 'It', editing = false, text = '' }) {
   const off = busy ? ' disabled' : '';
-  const head = `<h3 class="pip-page-label">Working notes</h3>`;
+  const head = `<h3 class="pip-page-label">Working notes${infoTip('pipWorkingSays', 'Working notes', `${esc(pipName)} keeps these about how it does its job, like what a site asks for first or who gets what, and starts every run with them. They show here, and you can change them.`)}</h3>`;
   if (!notes) return `<section class="pip-page-group working-notes" aria-label="Working notes">${head}${error ? `<p class="error" role="alert">${esc(error)}</p>` : '<p class="muted" role="status">Loading…</p>'}</section>`;
-  const about = `<p class="pip-page-empty">${esc(pipName)} keeps these about how it does its job, and starts every run with them. `
-    + `${notes.lines.length} of ${notes.max_lines} lines.</p>`;
+  const about = `<p class="pip-page-empty">${notes.lines.length} of ${notes.max_lines} lines.</p>`;
   if (editing) {
     return `<section class="pip-page-group working-notes" aria-label="Working notes">${head}${about}`
       + `<form id="working-notes-form" class="working-notes-edit"><label for="workingNotesText" class="sr-only">Working notes, one a line</label>`
@@ -41,16 +41,16 @@ export function workingNotesMarkup(notes, { esc, busy = false, error = '', pipNa
   }
   const rows = notes.lines.map(line => `<li class="pip-page-row static"><span class="row-words"><span>${esc(line)}</span></span></li>`).join('');
   return `<section class="pip-page-group working-notes" aria-label="Working notes">${head}`
-    + (notes.lines.length ? `<ul class="pip-page-list">${rows}</ul>${about}` : `<p class="pip-page-empty">Nothing yet. As ${esc(pipName)} works, it keeps short notes on how the job goes, like what a site asks for first or who gets what. They show here, and you can change them.</p>`)
+    + (notes.lines.length ? `<ul class="pip-page-list">${rows}</ul>${about}` : `<p class="pip-page-empty">Nothing yet.</p>`)
     + `<div class="note-all"><button type="button" class="link" data-working-notes="edit"${off}>Edit notes</button></div>`
     + (error ? `<p class="error" role="alert">${esc(error)}</p>` : '') + '</section>';
 }
 
 /** "Daily log": what it did each day, newest first; today open, the other days a click away. */
 export function dailyLogMarkup(log, { esc, error = '', pipName = 'It', today = '' }) {
-  const head = '<h3 class="pip-page-label">Daily log</h3>';
+  const head = `<h3 class="pip-page-label">Daily log${infoTip('pipDailySays', 'Daily log', `Each time ${esc(pipName)} replies or runs a routine, a line goes here, by day. It's for you to read; ${esc(pipName)} never reads it.`)}</h3>`;
   if (!log) return `<section class="pip-page-group daily-log" aria-label="Daily log">${head}${error ? `<p class="error" role="alert">${esc(error)}</p>` : '<p class="muted" role="status">Loading…</p>'}</section>`;
-  if (!log.days.length) return `<section class="pip-page-group daily-log" aria-label="Daily log">${head}<p class="pip-page-empty">Nothing yet. Each time ${esc(pipName)} replies or runs a routine, a line goes here, by day. It's for you to read; ${esc(pipName)} never reads it.</p></section>`;
+  if (!log.days.length) return `<section class="pip-page-group daily-log" aria-label="Daily log">${head}<p class="pip-page-empty">Nothing yet.</p></section>`;
   const days = log.days.map((d, i) => `<details class="daily-log-day"${i === 0 && d.day === today ? ' open' : ''}><summary>${esc(d.day === today ? 'Today' : d.day)} · ${d.lines.length + d.more} ${d.lines.length + d.more === 1 ? 'run' : 'runs'}</summary>`
     + `<ul class="pip-page-list">${d.lines.map(l => `<li class="pip-page-row static"><span class="row-words"><span>${esc(l)}</span></span></li>`).join('')}</ul>`
     + (d.more ? `<p class="muted">and ${d.more} more</p>` : '') + '</details>').join('');

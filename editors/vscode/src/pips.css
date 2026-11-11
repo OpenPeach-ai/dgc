@@ -895,6 +895,21 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .own-change-list dd{margin:0;color:var(--vscode-foreground);white-space:pre-wrap;overflow-wrap:anywhere}
 .own-change-error{margin:4px 0 0;color:var(--vscode-errorForeground);overflow-wrap:anywhere}
 
+/* A Pip's settings, short and clean: a short title and its control, and the sentence that explains it behind a small
+   "i" beside the title (src/pipInfoTip.js). The "i" is the quiet grey; its sentence floats inside the panel, one at a
+   time. The page's own facts (its next run, the source it reads now) stay in sight, small. */
+.pip-tip{display:inline-flex;vertical-align:-4px;margin-left:5px;font-weight:400;letter-spacing:0;text-transform:none}
+button.pip-tip-btn{display:inline-grid;place-items:center;flex:none;width:18px;height:18px;min-height:0;min-width:0;margin:0;padding:0;border:0;border-radius:50%;background:transparent;color:var(--muted);box-shadow:none;cursor:help;line-height:0}
+button.pip-tip-btn:hover,button.pip-tip-btn[aria-expanded=true]{background:transparent;color:var(--vscode-foreground)}
+button.pip-tip-btn:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:1px}
+button.pip-tip-btn svg{display:block;width:14px;height:14px}
+.pip-tip-text[hidden]{display:none}
+.pip-tip-pop{position:fixed;left:0;top:0;z-index:70;box-sizing:border-box;width:max-content;max-width:280px;margin:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--vscode-editorWidget-background,var(--surface));color:var(--vscode-foreground);font:400 12px/1.45 var(--vscode-font-family,system-ui);letter-spacing:0;text-transform:none;text-align:left;white-space:normal;overflow-wrap:anywhere;box-shadow:0 6px 20px rgba(0,0,0,.22);pointer-events:none}
+.settings-fact{margin:8px 0 0;color:var(--muted);font-size:12px}
+.row-words small.pip-level-risk{color:var(--vscode-foreground)}
+.section h2 .pip-tip,.section h3 .pip-tip,summary .pip-tip{vertical-align:-3px}
+.pip-page-row.login-new{justify-content:flex-end;min-height:44px}
+@media (forced-colors:active){.pip-tip-pop{border-color:CanvasText}}
 /* ==== Pip chat design pass (0.52, asked 5 Nov): a Personal and a Project Pip's chat, calm, clear and physical. ====
    What it holds to, each measured in test/pip-chat-design-browser.test.mjs:
    - One column. Everything the Pip says starts at one left edge and is at most one measure wide (a reply, its choices);

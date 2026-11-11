@@ -87,7 +87,7 @@ test('a reply that kept a note says so under it, with Forget right there; nothin
  x.click(`.memory-kept [data-note-forget="${N1}"]`);await flush();
  assert.equal(x.requests('forget_pip_note').at(-1).request.note_id,N1);
  const empty=setup();await openPage(empty);
- assert.match(empty.d.querySelector('[aria-label="What it remembers"]').textContent,/Nothing yet\. As you chat, Ava keeps short notes of what you tell it/);
+ assert.match(empty.d.querySelector('[aria-label="What it remembers"]').textContent,/As you chat, Ava keeps short notes of what you tell it.*Nothing yet\./);   // (short and clean: how it works is behind the “i”)
  const old=setup({apiVersion:43});await openPage(old);
  assert.equal(old.d.querySelector('[aria-label="What it remembers"]'),null);
  assert.equal(old.requests('list_pip_notes').length,0,'an older CLI is never asked');

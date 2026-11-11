@@ -3,6 +3,7 @@
 // computer, a higher level, a new Always allow, a routine on your app's event), the same section holds one card: what
 // it asks, in DGC's words, with Accept and Not now. Nothing of it applies until Accept; Not now isn't asked again.
 
+import {infoTip} from './pipInfoTip.js';
 const KEY = /^[a-z0-9-]{1,40}$/;
 const PIP = /^pip_[a-f0-9]{32}$/;
 const CHANGE = /^tmplchange_[a-f0-9]{32}$/;
@@ -33,8 +34,7 @@ export function templatePage(value, pip) {
 export function templateMarkup(state, {esc, busy = false, error = '', pipName = 'It'}) {
   if (!state) return error ? `<section class="pip-page-group" aria-label="From your code"><p class="error" role="alert">${esc(error)}</p></section>` : '';
   const off = busy ? ' disabled' : '';
-  const head = `<div class="pip-page-row static"><span class="row-words"><strong>From your code</strong>`
-    + `<small>Your app keeps ${esc(pipName)} from its template, ${esc(state.key)}. What you change here stays as you set it.</small></span></div>`;
+  const head = `<div class="pip-page-row static"><span class="row-words"><strong>From your code${infoTip('pipTemplateSays', 'From your code', `Your app keeps ${esc(pipName)} from its template, ${esc(state.key)}. What you change here stays as you set it.`)}</strong></span></div>`;
   const w = state.waiting;
   const card = w ? `<div class="pip-template-change" data-template-change="${esc(w.id)}" role="group" aria-label="Your code asks for more">`
     + `<h3 class="pip-page-label">Your code asks to let ${esc(pipName)} do more</h3>`

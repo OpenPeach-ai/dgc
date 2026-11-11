@@ -1,6 +1,7 @@
 // A Personal Pip's own page, as on Grok's bots: its face and name at the top, then Info (Instructions,
 // Routines, Notifications, Share as template), Links, Media and Files. The backend keeps the look,
 // title and notifications (pip_profile); nothing here grants or changes what the Pip can do.
+import {infoTip} from './pipInfoTip.js';
 import { pickerMarkup } from './pipPicker.js';
 
 export const BODIES = ['core', 'scout', 'lens', 'patch', 'rook', 'pulse', 'lock', 'quill'];
@@ -91,17 +92,19 @@ export function pageTabsMarkup(current) {
 export function infoMarkup({ esc, goal, routines, notify, busy = false, canShare = true, pipName }) {
   const off = busy ? ' disabled' : '';
   return `<section class="pip-page-group" aria-label="Instructions"><button type="button" class="pip-page-row" data-pip-page="instructions"${off}><span class="row-words"><strong>Instructions</strong><small class="row-preview">${esc(goal || `Tell ${pipName} what it is for.`)}</small></span>${chevron}</button></section>`
-    + `<section class="pip-page-group" aria-label="Routines"><h3 class="pip-page-label">Routines</h3>${routines}</section>`
-    + `<section class="pip-page-group"><div class="pip-page-row static"><span class="row-words"><strong>Notifications</strong><small>Get notified when ${esc(pipName)} finishes something on its own or needs you.</small></span>`
-    + `<label class="switch"><input type="checkbox" role="switch" id="pipNotify" aria-label="Notifications"${notify ? ' checked' : ''}${off}><span aria-hidden="true"></span></label></div>`
-    + (canShare ? `<button type="button" class="pip-page-row" data-pip-share${off}><span class="row-words"><strong>Share as template</strong><small>Save it as a file anyone can import: its name and instructions. Your accounts, chat, routines and files stay here.</small></span>${chevron}</button>` : '')
+    + `<section class="pip-page-group" aria-label="Routines"><h3 class="pip-page-label">Routines${infoTip('pipRoutinesSays', 'Routines', `A routine is something ${esc(pipName)} does on its own: every morning, when an email arrives, or before a meeting.`)}</h3>${routines}</section>`
+    + `<section class="pip-page-group"><div class="pip-page-row static"><span class="row-words"><strong>Notifications${infoTip('pipNotifySays', 'Notifications', `Get notified when ${esc(pipName)} finishes something on its own or needs you.`)}</strong></span>`
+    + `<label class="switch"><input type="checkbox" role="switch" id="pipNotify" aria-label="Notifications" aria-describedby="pipNotifySays"${notify ? ' checked' : ''}${off}><span aria-hidden="true"></span></label></div>`
+    // (A row that is one button can't hold the "i", a button: the row has its title and "i", and Share at its end.)
+    + (canShare ? `<div class="pip-page-row static"><span class="row-words"><strong>Share as template${infoTip('pipTemplateShareSays', 'Share as template', 'Save it as a file anyone can import: its name and instructions. Your accounts, chat, routines and files stay here.')}</strong></span>`
+      + `<button type="button" class="quiet pill" data-pip-share aria-describedby="pipTemplateShareSays"${off}>Share…</button></div>` : '')
     + `</section>`;
 }
 
 export function instructionsMarkup({ esc, goal, busy = false, error = '', pipName }) {
   const off = busy ? ' disabled' : '';
-  return `<form id="pip-instructions-form" class="pip-instructions"><h2>Instructions</h2><p class="muted">What ${esc(pipName)} is for and how it should work. It reads this before every reply.</p>`
-    + `<label for="pipInstructions" class="sr-only">Instructions</label><textarea id="pipInstructions" data-draft="pipInstructions" rows="12" maxlength="4000"${off}>${esc(goal)}</textarea>`
+  return `<form id="pip-instructions-form" class="pip-instructions"><h2>Instructions${infoTip('pipInstructionsSays', 'Instructions', `What ${esc(pipName)} is for and how it should work. It reads this before every reply.`)}</h2>`
+    + `<label for="pipInstructions" class="sr-only">Instructions</label><textarea id="pipInstructions" data-draft="pipInstructions" rows="12" maxlength="4000" aria-describedby="pipInstructionsSays"${off}>${esc(goal)}</textarea>`
     + (error ? `<p class="error" role="alert">${esc(error)}</p>` : '')
     + `<div class="actions"><button type="submit" class="primary pill"${off}>Save</button><button type="button" class="quiet pill" data-pip-page="info"${off}>Cancel</button><button type="button" class="link" data-setup-chat${off}>Change it in the chat instead</button></div></form>`;
 }
