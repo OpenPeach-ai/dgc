@@ -60,7 +60,7 @@
 .dgc-card.dgc-hub-card .dgc-card-chips { grid-column: 2; grid-row: 4; gap: 4px; margin: 3px 0 0; }
 .dgc-card.dgc-hub-card.dgc-hub-nochips .dgc-card-chips { display: none; }
 .dgc-card.dgc-hub-card .dgc-chip { height: 17px; padding: 0 6px; font-size: 10.5px; line-height: 17px; }
-/* The answers: at the right, one over the other, as wide as the wider one; small, and in the order they are read. */
+/* The answers: at the right, one over the other, small, and in the order they are read (their look: the end of this file). */
 .dgc-card.dgc-hub-card .dgc-card-actions { grid-column: 3; grid-row: 1 / -1; align-self: center; display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 4px; margin: 0; padding: 0; }
 .dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn { flex: none; min-width: 52px; height: 22px; padding: 0 9px; font-size: var(--t-xs); }
 /* A card answered where it is: under its sentence (one line here) the one line it must show whole, two lines of words at
@@ -107,3 +107,25 @@
 .dgc-hub-note .dgc-hub-link { display: inline; margin: 0 0 0 var(--sp-1); padding: 0 var(--sp-1); text-decoration: underline; text-underline-offset: 2px; }
 .dgc-hub-empty { margin: var(--sp-1) 0 0; color: var(--text-2); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
 @media (forced-colors: active) { .dgc-hub-show { border-color: CanvasText; } }
+
+/* ---- A card's answers on Home (the shared card's system, card.css, at Home's small size): one filled button for the
+   main answer, every other answer a hairline outline, and the way to all of it a text link; a 6 px corner, 22 px high,
+   one label size and side padding. In a card with the room (about 300 px inside) the answers' column is one width, so
+   they line up down the page; a narrower card keeps the words' room, and its answers take their own width. */
+.dgc-card.dgc-hub-card:not(.dgc-hub-mono) .dgc-card-actions { gap: 4px; }
+.dgc-card.dgc-hub-card.dgc-hub-answers:not(.dgc-hub-mono) .dgc-card-actions { position: relative; top: -2px; gap: 2px; }
+@container (min-width: 290px) { .dgc-card.dgc-hub-card:not(.dgc-hub-mono) .dgc-card-actions { width: 72px; } }
+.dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn { min-width: 0; height: 22px; padding: 0 9px; font: var(--w-med) var(--t-xs)/1 var(--sans); }
+.dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn:focus-visible { outline-offset: 1px; }
+/* The link: words, so it does not step; it is as easy to hit as a button (22 px tall where it is pressed: the gap over
+   it and the card's foot under it are its own). */
+.dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn.dgc-hub-open, .dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn.dgc-hub-open:is(:hover, :active):not(:disabled) {
+  position: relative; overflow: visible; border-color: transparent; background: transparent; transform: none; font-weight: var(--w-reg); text-decoration-color: var(--hair-strong); }
+.dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn.dgc-hub-open:hover:not(:disabled) { text-decoration-color: currentColor; }
+.dgc-card.dgc-hub-card:not(.dgc-hub-mono) .dgc-card-actions .dgc-card-btn.dgc-hub-open::after { content: ""; position: absolute; inset: -3px -1px -7px; }   /* (from inside its own 1 px edge) */
+@container (max-width: 179px) {
+  .dgc-card.dgc-hub-card.dgc-hub-answers:not(.dgc-hub-mono) .dgc-card-actions { top: 0; }
+  .dgc-card.dgc-hub-card:not(.dgc-hub-mono) .dgc-card-actions .dgc-card-btn.dgc-hub-open { height: 22px; }
+  .dgc-card.dgc-hub-card:not(.dgc-hub-mono) .dgc-card-actions .dgc-card-btn.dgc-hub-open::after { inset: -1px; }
+}
+@media (forced-colors: active) { .dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn.dgc-hub-open { border-color: transparent; } }

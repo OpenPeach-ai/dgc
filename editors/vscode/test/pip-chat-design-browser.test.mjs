@@ -97,12 +97,13 @@ for (const theme of ["dark", "light"]) for (const [where, width] of PLACES) {
       await p.waitForSelector(".pip-working");
       const f = await p.evaluate(facts), say = JSON.stringify;
       assert.ok(f.sideways <= 0 && f.pageSideways <= 0);
-      // The card its computer holds is the shared card (media/shared/card.css): its corner, and its answers as 28 px
-      // pills, one filled and the rest outlines.
+      // The card its computer holds is the shared card (media/shared/card.css): its corner, and its answers 28 px
+      // high, one filled and the rest outlines.
       assert.equal(f.card["border-top-left-radius"], "15px");
       assert.deepEqual(f.card.buttons.map((b) => b.text), ["Send once", "Always allow", "Reject"]);
       for (const b of f.card.buttons) {
-        assert.deepEqual([b.height, b["border-top-left-radius"]], [28, "9999px"], say(b));
+        // (11 Nov: every card's answers are "compact squares", a 6 px corner, in a Pip's chat as on Home: media/shared/card.css.)
+        assert.deepEqual([b.height, b["border-top-left-radius"]], [28, "6px"], say(b));
         assert.ok(b.ink.ratio >= 4.5, `${b.text} is ${b.ink.ratio}:1`);
       }
       // Purple is for the one main button: the two beside it are drawn in the text's own ink.
