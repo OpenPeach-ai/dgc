@@ -809,6 +809,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (!ask || ask.id !== id || !be) return false;
     try { be.send({ type: "permission_response", id, decision: allow ? "once" : "deny" }); } catch { return false; }
     this.openDecisions.delete(id); this.pendingAsks.delete(id);
+    // The backend says nothing of an answer it was given (its card's own click settles a card), so this tab's card
+    // would still ask: it settles, and says on itself where it was answered.
+    this.post({ type: "settleCard", id, label: allow ? "Allowed once, on Home" : "Denied, on Home" });
     this.postChatSlots();
     this.waitingChanged();
     return true;

@@ -12248,6 +12248,13 @@ function permissionChoices(ev) {
     }
     if (msg.type === "artifactNews") { artifactNews(msg.artifact, msg.op); return; }
     if (msg.type === "homePages") { homePagesNow = homePagesFrom(msg.pages); paintHub(); return; }
+    // A command answered on Home: this session's own card settles, saying so on the card (one line, not two).
+    if (msg.type === "settleCard") {
+      document.querySelectorAll(".card[data-request-id]").forEach((card) => {
+        if (card.dataset.requestId === String(msg.id)) resolveCard(card, String(msg.label || ""));
+      });
+      return;
+    }
     if (msg.type === "chat_tab") { rememberTab(msg.session); paintSessionBlob(msg.session); return; }
     // pipsModelsChanged: Settings or the Router changed, so the embedded Pips page reads its model list again.
     // pipsUnreadChanged: a Pip was marked read somewhere (its pill, its chat, a card acted on): it reads its counts again.

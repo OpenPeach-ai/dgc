@@ -576,10 +576,14 @@ test("Home's Allow once and Deny reach that session's own process, once, and nev
   assert.deepEqual(answersOf(first), [{ type: "permission_response", id: "perm-1", decision: "once" }], "Allow once, to the session that asked");
   assert.deepEqual(answersOf(second), [], "and to no other");
   assert.equal((await listed(sidebar))[0].waiting, undefined, "Home's list says it waits no more");
+  // The session's own tab settles its card too, and says where it was answered: the backend sends no word of an
+  // answer it was given, so the tab hears it from here.
+  assert.deepEqual(first.posted.filter((m) => m.type === "settleCard"), [{ type: "settleCard", id: "perm-1", label: "Allowed once, on Home" }]);
   await sidebar.onMessage({ type: "homeSessionAnswer", session: "20261006-101500-a1", id: "perm-1", decision: "once" });
   assert.equal(answersOf(first).length, 1, "a second answer to the same request sends nothing");
   await sidebar.onMessage({ type: "homeSessionAnswer", session: "20261006-091200-b2", id: "perm-9", decision: "deny" });
   assert.deepEqual(answersOf(second), [{ type: "permission_response", id: "perm-9", decision: "deny" }]);
+  assert.deepEqual(second.posted.filter((m) => m.type === "settleCard"), [{ type: "settleCard", id: "perm-9", label: "Denied, on Home" }]);
   // A tab is no Home: the same message from a session's own page answers nothing.
   first.onEvent({ type: "turn_start", turn_id: "t3", kind: "prompt", prompt: "again" }); first.onEvent(ask("perm-7"));
   await second.onMessage({ type: "homeSessionAnswer", session: "20261006-101500-a1", id: "perm-7", decision: "once" });
