@@ -6,6 +6,7 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
 import { JSDOM } from "jsdom";
+import { knownPorts } from "./support/router-ports.mjs";
 import { fileURLToPath } from "node:url";
 
 const src = fileURLToPath(new URL("../src/", import.meta.url));
@@ -157,7 +158,7 @@ test("Look on my network asks about exactly the ports it looks on", async () => 
   const x = setup();
   await x.settle();
   x.click("[data-router-find]");
-  assert.match(x.d.querySelector("[data-router-finding]").textContent, /\(11434, 8080, 1234, 8000, 30000, 8188\)/);
+  assert.ok(x.d.querySelector("[data-router-finding]").textContent.includes(`(${knownPorts()})`), "the backend's own list");
 });
 
 test("Apply says what it applied", async () => {

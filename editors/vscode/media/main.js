@@ -6978,7 +6978,7 @@ function permissionChoices(ev) {
   // A card in plain words for the steps a person decides on by what they do rather than by their arguments: a paid
   // picture (as ChatDGC's card: the generator, how many at what size, the price, the prompt) and a look on the network.
   // {name, title, detail, labels, edit}; null for every other tool, whose card shows its summary and arguments.
-  const ROUTER_FIND_PORTS = "11434, 8080, 1234, 8000, 30000, 8188";        // dgc/router_probe.py KNOWN_PORTS
+  const ROUTER_FIND_PORTS = "11434, 8080, 1234, 8000, 30000, 5001, 1337, 5000, 2242, 8188";   // dgc/router_probe.py KNOWN_PORTS
   /** Composio's multi-execute on a Work Allow card: each app call it makes, in plain words (media/pluginCalls.js),
    *  with the plugin DGC calls named; null for any other tool. */
   function pluginCalls(name, args) {

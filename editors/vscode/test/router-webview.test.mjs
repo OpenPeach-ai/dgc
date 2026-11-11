@@ -4,8 +4,8 @@
 // router_changed's leases, kept after the helper gives its worker back.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { openMapScene, sid } from "./support/agent-map-scene.mjs";
+import { knownPorts } from "./support/router-ports.mjs";
 
 let chromium, browser;
 try { ({ chromium } = await import("@playwright/test")); } catch { chromium = null; }
@@ -37,10 +37,9 @@ test("a Router change's card offers Allow once and Deny, never Always; an older 
     // In plain words: what it looks for and where, never "Run router_find {}".
     const look = await page.evaluate(() => document.querySelector('.card[data-request-id="r2"]').innerText);
     assert.match(look, /Look for model servers on your network\?/);
-    assert.match(look, /On this computer's network, on the ports 11434, 8080, 1234, 8000, 30000, 8188, once\./);
+    assert.match(look, /On this computer's network, on the ports 11434, 8080, 1234, 8000, 30000, 5001, 1337, 5000, 2242, 8188, once\./);
     assert.doesNotMatch(look, /router_find|\{\}/);
-    const ports = readFileSync(new URL("../../../dgc/router_probe.py", import.meta.url), "utf8").match(/KNOWN_PORTS = \(([^)]*)\)/)[1];
-    assert.match(look, new RegExp(ports.replace(/\s+/g, " ").trim().replace(/[()]/g, "")), "the backend's own list");
+    assert.match(look, new RegExp(`the ports ${knownPorts()}, once`), "the backend's own list");
     await send({ type: "permission_request", id: "r3", call_id: "c3", name: "bash", args: { command: "ls" }, command: "ls",
       suggested_rule: "Bash(ls)", choices: ["once", "always", "deny"] });
     assert.deepEqual(await buttons(page, "r3"), ["Always allow", "Deny", "Allow once"]);
