@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -871,3 +872,18 @@ class Comfy(VideoCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FreshJobsDrain(unittest.TestCase):
+    """fresh_jobs() ends with no poller of its own left running: a job still polling after its test would write its
+    record into the NEXT test's DGC home and count as that test's spend (test_pip_videos flaked so, 11 Nov)."""
+
+    def test_leaving_fresh_jobs_stops_and_joins_its_pollers(self):
+        with videos.fresh_jobs() as jobs:
+            cancel = threading.Event()
+            thread = threading.Thread(target=cancel.wait, args=(30,), daemon=True)
+            thread.start()
+            with jobs._lock:
+                jobs._running["vid_test"] = {"cancel": cancel, "fd": -1, "thread": thread}
+        self.assertTrue(cancel.is_set(), "its poller was told to stop")
+        self.assertFalse(thread.is_alive(), "and had stopped before the test's home went away")

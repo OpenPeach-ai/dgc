@@ -629,6 +629,20 @@ class Jobs:
             except OSError:
                 pass
 
+    def drain(self, timeout: float = 5.0) -> None:
+        """Stop polling every job here and wait for each poller to end (a test's own Jobs, at its end)."""
+        with self._lock:
+            entries = list(self._running.values())
+        for entry in entries:
+            entry["cancel"].set()
+        deadline = time.monotonic() + timeout
+        for entry in entries:
+            while entry.get("thread") is None and time.monotonic() < deadline:
+                time.sleep(0.01)
+            thread = entry.get("thread")
+            if thread is not None and thread is not threading.current_thread():
+                thread.join(max(0.0, deadline - time.monotonic()))
+
     def wait(self, job_id: str, timeout: float | None = None) -> dict | None:
         with self._lock:
             entry = self._running.get(job_id)
@@ -846,10 +860,14 @@ JOBS = Jobs()
 
 @contextlib.contextmanager
 def fresh_jobs():
-    """A Jobs of its own for a test (its listeners and threads apart from the process's)."""
+    """A Jobs of its own for a test (its listeners and threads apart from the process's). On the way out its pollers are
+    stopped and joined, while the test's own DGC home is still in place: a job still polling after its test would write
+    its record into the next test's home and count there as spend on its way."""
     global JOBS
     old, JOBS = JOBS, Jobs()
+    mine = JOBS
     try:
         yield JOBS
     finally:
         JOBS = old
+        mine.drain()
