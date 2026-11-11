@@ -535,7 +535,7 @@ class Host:
                                               egress=self.proxy.path, size=size)
             # The browser's window fills the screen above the dock's strip.
             shown = getattr(desktop, "size", (pip_screen.WIDTH, pip_screen.HEIGHT))
-            self.browser.window_size = (shown[0], shown[1] - pip_screen.BROWSER_STRIP)
+            self.browser.window_size = (shown[0], shown[1] - pip_screen.TOP_BAR - pip_screen.BROWSER_STRIP)
             desktop.on_launch = self._dock_launch
             desktop.start(self._launch)
             self.desktop = desktop

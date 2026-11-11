@@ -69,10 +69,12 @@ class TheScreenItself(unittest.TestCase):
         temp = Path(tempfile.mkdtemp(prefix="dgc-screen-"))
         chrome = temp / "chrome" / "chrome"
         plain = box.Box(temp, temp / "e.sock", chrome, display_dir=temp / "x11")
-        self.assertIn("--window-size=1280,724", " ".join(plain.argv(temp / "forward.py")), "as before when none is set")
+        shown = " ".join(plain.argv(temp / "forward.py"))
+        self.assertIn("--window-size=1280,694", shown, "between the top bar and the dock's strip")
+        self.assertIn("--window-position=0,30", shown, "below the top bar (pc-desktop)")
         sized = box.Box(temp, temp / "e.sock", chrome, display_dir=temp / "x11",
-                        window_size=(1920, 1080 - pip_screen.BROWSER_STRIP))
-        self.assertIn("--window-size=1920,1004", " ".join(sized.argv(temp / "forward.py")))
+                        window_size=(1920, 1080 - pip_screen.TOP_BAR - pip_screen.BROWSER_STRIP))
+        self.assertIn("--window-size=1920,974", " ".join(sized.argv(temp / "forward.py")))
         # And the browser hands the Box the size its Host gave it (pip_computer.Host.ensure_desktop).
         source = Path(box.__file__).read_text()
         self.assertIn('window_size=getattr(self, "window_size", None)', source)

@@ -32,6 +32,7 @@ WIDTH, HEIGHT = 1280, 800
 # wide editor tab with more of the desktop. Chosen per Pip (pip_computer.set_screen), it applies as its screen starts.
 SIZES = ((1280, 800), (1440, 900), (1920, 1080))
 BROWSER_STRIP = 76                   # the dock's strip at the foot, which the browser's window leaves free
+TOP_BAR = 30                         # the bar at the top (pc-desktop): Apps, the open windows, the tray, the clock
 
 
 def size_name(size) -> str:
@@ -167,6 +168,42 @@ def dock_icon(index: int, count: int, screen=(WIDTH, HEIGHT)) -> tuple[int, int]
     return left + index * (size + gap) + size // 2, screen[1] - 42
 
 
+def _xml(text: str) -> str:
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def _write_top_bar(conf: Path) -> None:
+    """The bar at the top of a Pip's desktop (pc-desktop): an Apps button (a window of every app), the open windows,
+    the tray and the clock. A second tint2, as the dock is."""
+    _write(conf / "topbar.rc", "\n".join([
+        # Background 1: the bar. 2: a window's button at rest. 3: the window in front. 4: the Apps button.
+        "rounded = 0", "border_width = 1", "border_sides = B",
+        "background_color = #14151b 88", "border_color = #ffffff 16",
+        "rounded = 6", "border_width = 0", "background_color = #ffffff 0", "border_color = #000000 0",
+        "background_color_hover = #ffffff 10", "border_color_hover = #000000 0",
+        "rounded = 6", "border_width = 0", "background_color = #ffffff 18", "border_color = #000000 0",
+        "background_color_hover = #ffffff 24", "border_color_hover = #000000 0",
+        "rounded = 6", "border_width = 0", "background_color = #ffffff 0", "border_color = #000000 0",
+        "background_color_hover = #ffffff 14", "border_color_hover = #000000 0",
+        "panel_items = PTSC", f"panel_size = 100% {TOP_BAR}", "panel_margin = 0 0", "panel_padding = 8 3 8",
+        "panel_position = top center horizontal", "panel_layer = top", "panel_monitor = all",
+        "panel_background_id = 1", "strut_policy = follow_size", "autohide = 0", "font_shadow = 0",
+        "button = new", "button_text = Apps", "button_font = Sans Bold 9", "button_font_color = #ffffff 94",
+        "button_padding = 10 4 6", "button_background_id = 4", "button_centered = 1",
+        "button_lclick_command = pcmanfm --new-win /run/dgc/conf/apps", "button_tooltip = Every app on this computer",
+        "taskbar_mode = single_desktop", "taskbar_padding = 6 0 6", "taskbar_background_id = 0",
+        "taskbar_active_background_id = 0", "taskbar_name = 0", "taskbar_hide_inactive_tasks = 0",
+        "task_icon = 1", "task_text = 1", "task_centered = 0", "task_maximum_size = 220 24", "task_padding = 8 2 6",
+        "task_font = Sans 9", "task_font_color = #ffffff 76", "task_active_font_color = #ffffff 100",
+        "task_background_id = 2", "task_active_background_id = 3", "task_tooltip = 1",
+        "mouse_left = toggle_iconify", "mouse_middle = close",
+        "systray_padding = 6 0 6", "systray_background_id = 0", "systray_icon_size = 18",
+        "time1_format = %a %d %b  %H:%M", "time1_font = Sans Bold 9", "clock_font_color = #ffffff 94",
+        "clock_padding = 8 0", "clock_background_id = 0", "clock_tooltip = %A, %d %B %Y",
+        "tooltip_show_timeout = 0.4", "tooltip_hide_timeout = 0.1",
+    ]) + "\n")
+
+
 def write_config(conf: Path, name: str, apps_shown=(), screen=(WIDTH, HEIGHT)) -> None:
     """The dock, its apps, the window manager's settings and the wallpaper. ``apps_shown``: the image editor,
     document editor and PDF viewer this computer has (pip_apps), each on the dock after the Terminal."""
@@ -176,17 +213,27 @@ def write_config(conf: Path, name: str, apps_shown=(), screen=(WIDTH, HEIGHT)) -
     for asset in ("browser.png", "files.png", "terminal.png", "wallpaper.jpg", "images.png", "documents.png", "pdf.png"):
         shutil.copyfile(ASSETS / asset, conf / asset)
     apps = {
-        "browser": ("Browser", "sh -c 'echo browser > /run/dgc/sock/control'", "browser.png"),
-        "files": ("Files", FILES_COMMAND, "files.png"),
-        "terminal": ("Terminal", TERMINAL_COMMAND, "terminal.png"),
+        "browser": ("Browser", "sh -c 'echo browser > /run/dgc/sock/control'", "browser.png", "Its web browser"),
+        "files": ("Files", FILES_COMMAND, "files.png", "Its Files folder"),
+        "terminal": ("Terminal", TERMINAL_COMMAND, "terminal.png", "A shell in its Files folder"),
     }
     for key in apps_shown:
         if key in pip_apps.APPS:
             app = pip_apps.APPS[key]
-            apps[key] = (f"{app['name']} ({app['program']})", f"sh -c 'echo {key} > /run/dgc/sock/control'", app["icon"])
-    for key, (label, command, icon) in apps.items():
+            # A short name under a desktop icon and in the menu; the program it is, beside it.
+            apps[key] = (app["name"], f"sh -c 'echo {key} > /run/dgc/sock/control'", app["icon"], app["program"])
+    for key, (label, command, icon, said) in apps.items():
         _write(conf / "apps" / f"{key}.desktop", "[Desktop Entry]\nType=Application\n"
-               f"Name={label}\nExec={command}\nIcon=/run/dgc/conf/{icon}\n")
+               f"Name={label}\nComment={said}\nExec={command}\nIcon=/run/dgc/conf/{icon}\n")
+    _write_top_bar(conf)
+    # Right-click on the desktop: the same apps as a menu (pcmanfm hands the click to openbox: show_wm_menu below).
+    items = "".join(f'  <item label="{_xml(label)}"><action name="Execute"><command>{_xml(command)}</command></action></item>\n'
+                    for label, command, _icon, _said in apps.values())
+    _write(conf / "menu.xml", '<?xml version="1.0" encoding="UTF-8"?>\n'
+           '<openbox_menu xmlns="http://openbox.org/3.4/menu">\n <menu id="root-menu" label="Apps">\n'
+           f'{items} </menu>\n</openbox_menu>\n')
+    # Apps open by one click, with no "run or open?" question (the Apps window and the desktop's icons).
+    _write(conf / "libfm.conf", "[config]\nquick_exec=1\nsingle_click=0\n[ui]\nbig_icon_size=48\n")
     _write(conf / "tint2rc", "\n".join([
         # Background 1: the dock's frosted, rounded bar.
         "rounded = 16", "border_width = 1", "border_sides = TBLR",
@@ -201,11 +248,14 @@ def write_config(conf: Path, name: str, apps_shown=(), screen=(WIDTH, HEIGHT)) -
     ]) + "\n")
     _write(conf / "openbox.xml", """<?xml version="1.0"?>
 <openbox_config xmlns="http://openbox.org/3.4/rc">
- <theme><name>Clearlooks</name><titleLayout>NLIMC</titleLayout><keepBorder>yes</keepBorder>
+ <theme><name>Onyx</name><titleLayout>NLIMC</titleLayout><keepBorder>yes</keepBorder>
   <font place="ActiveWindow"><name>Sans</name><size>10</size><weight>bold</weight></font>
-  <font place="InactiveWindow"><name>Sans</name><size>10</size></font></theme>
+  <font place="InactiveWindow"><name>Sans</name><size>10</size></font>
+  <font place="MenuItem"><name>Sans</name><size>10</size></font></theme>
  <desktops><number>1</number></desktops>
  <placement><policy>Smart</policy><center>yes</center></placement>
+ <menu><file>/run/dgc/conf/menu.xml</file></menu>
+ <mouse><context name="Root"><mousebind button="Right" action="Press"><action name="ShowMenu"><menu>root-menu</menu></action></mousebind></context></mouse>
  <applications><application class="*"><decor>yes</decor></application></applications>
 </openbox_config>
 """)
@@ -213,13 +263,16 @@ def write_config(conf: Path, name: str, apps_shown=(), screen=(WIDTH, HEIGHT)) -
     desktop.mkdir(parents=True, exist_ok=True)
     _write(desktop / "desktop-items-0.conf", "[*]\nwallpaper_mode=crop\nwallpaper_common=1\n"
            "wallpaper=/run/dgc/conf/wallpaper.jpg\ndesktop_bg=#171820\ndesktop_fg=#ffffff\n"
-           "desktop_shadow=#000000\nshow_wm_menu=0\nshow_documents=0\nshow_trash=0\nshow_mounts=0\n")
+           "desktop_shadow=#000000\nshow_wm_menu=1\nshow_documents=0\nshow_trash=0\nshow_mounts=0\n")
     _write(desktop / "pcmanfm.conf", "[config]\nbm_open_method=0\n[ui]\nalways_show_tabs=0\nshow_hidden=0\n")
     _write(conf / "desktop.sh", f"""
 export LD_LIBRARY_PATH="${{DESK_LIB:-}}" PATH="${{DESK_BIN:-}}:/usr/bin:/bin" HOME=/home/pip XDG_CONFIG_HOME=/tmp/config
 for loaders in /opt/desk/usr/lib/*/imlib2/loaders; do [ -d "$loaders" ] && export IMLIB2_LOADER_PATH="$loaders"; done
-mkdir -p /tmp/config/pcmanfm /tmp/config/openbox /home/pip/Desktop
+mkdir -p /tmp/config/pcmanfm /tmp/config/openbox /tmp/config/libfm /home/pip/Desktop
 cp -r /run/dgc/conf/pcmanfm/dgc /tmp/config/pcmanfm/dgc
+cp /run/dgc/conf/libfm.conf /tmp/config/libfm/libfm.conf
+# Each app as a labelled icon on the desktop (the home is the box's own, never the Pip's Files).
+for app in /run/dgc/conf/apps/*.desktop; do cp "$app" /home/pip/Desktop/ && chmod 755 "/home/pip/Desktop/${{app##*/}}"; done
 # The Terminal's way online: a relay to DGC's egress socket, when DGC bound one (public sites only).
 [ -S /run/dgc/egress.sock ] && python3 /run/dgc/forward.py > /run/dgc/log/forward.log 2>&1 &
 # A stale socket from an earlier desktop must not look like this start's screen.
@@ -233,6 +286,8 @@ export DISPLAY={DISPLAY}
 "$DESK_FILES" --desktop --profile dgc > /run/dgc/log/wallpaper.log 2>&1 &
 "$DESK_DOCK" -c /run/dgc/conf/tint2rc > /run/dgc/log/dock.log 2>&1 &
 dock=$!
+"$DESK_DOCK" -c /run/dgc/conf/topbar.rc > /run/dgc/log/topbar.log 2>&1 &
+topbar=$!
 # The Pip's launch_app for Files and the Terminal: DGC writes one word to this FIFO; nothing else is run.
 [ -p /run/dgc/sock/launch ] && ( while :; do
     while read -r app; do
@@ -243,7 +298,7 @@ dock=$!
     done < /run/dgc/sock/launch
   done ) &
 # The dock can draw before the wallpaper and window manager settle; a reload redraws it on top.
-sleep 2; kill -USR1 "$dock" 2>/dev/null
+sleep 2; kill -USR1 "$dock" "$topbar" 2>/dev/null
 wait
 """, 0o700)
 

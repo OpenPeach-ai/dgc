@@ -574,8 +574,10 @@ class ContainerBox:
         flags = [f for f in _CHROME_FLAGS if f != "--no-sandbox"]       # the VM allows Chrome's own sandbox
         flags = [f"--proxy-server=http://127.0.0.1:{BOX_PROXY_PORT}" if f.startswith("--proxy-server=") else f for f in flags]
         if self.on_screen:
-            flags = [f for f in flags if f != "--headless=new"] + ["--window-position=0,0", "--password-store=basic",
-                                                                  "--disable-session-crashed-bubble", "--window-size=1280,724",
+            from .pip_screen import BROWSER_STRIP, TOP_BAR
+            flags = [f for f in flags if f != "--headless=new"] + [f"--window-position=0,{TOP_BAR}", "--password-store=basic",
+                                                                  "--disable-session-crashed-bubble",
+                                                                  f"--window-size=1280,{800 - TOP_BAR - BROWSER_STRIP}",
                                                                   "--no-startup-window"]
         else:
             flags += [f"--window-size={self.viewport[0]},{self.viewport[1]}", "about:blank"]

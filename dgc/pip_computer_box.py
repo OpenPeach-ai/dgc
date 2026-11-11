@@ -623,15 +623,16 @@ class Box:
     window_size: tuple[int, int] | None = None   # on a desktop: its screen above the dock (pc-fills-tab); else 1280x724
 
     def argv(self, forwarder: Path) -> list[str]:
+        from .pip_screen import TOP_BAR              # the desktop's bar at the top: the window starts below it
         chrome_dir = self.chrome.parent
         flags = list(_CHROME_FLAGS)
         if self.display_dir is not None:
             # A window on the Pip's desktop, like Chrome on Grok's bots; still driven and gated here.
             # Sized to leave the dock's strip at the bottom of the screen free, whenever the dock appears.
-            flags = [f for f in flags if f != "--headless=new"] + ["--window-position=0,0", "--password-store=basic",
+            flags = [f for f in flags if f != "--headless=new"] + [f"--window-position=0,{TOP_BAR}", "--password-store=basic",
                                                                   "--disable-session-crashed-bubble"]
         # On a desktop the browser opens no window of its own: DGC's first page is its only tab.
-        window = getattr(self, "window_size", None) or (1280, 724)
+        window = getattr(self, "window_size", None) or (1280, 800 - TOP_BAR - 76)
         size = (f"--window-size={self.viewport[0]},{self.viewport[1]}" if self.display_dir is None
                 else f"--window-size={int(window[0])},{int(window[1])}")
         chrome = ["/opt/chrome/" + self.chrome.name, *flags, size,
