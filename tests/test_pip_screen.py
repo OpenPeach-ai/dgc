@@ -392,6 +392,24 @@ class StreamTests(unittest.TestCase):
             time.sleep(0.02)
         self.assertTrue(check())
 
+    def test_it_opens_the_computer_you_chose(self):
+        """Pips API 86: open's number (capability pips_desktop_numbers) is which of the Pip's computers it streams."""
+        pip = "pip_" + "b" * 32
+        asked = []
+        with patch("dgc.pip_screen_stream.WorkspaceRegistry"), \
+                patch.object(pip_computer, "request_open", side_effect=lambda registry, pip_id, actor, number=None: asked.append(("open", number))), \
+                patch.object(pip_computer, "view_endpoint", side_effect=lambda registry, pip_id, number=None: asked.append(("view", number)) or {"socket": str(self.path), "token": "t0k"}):
+            self.streams.handle({"pip_id": pip, "op": "open", "number": 2})
+            self.wait(lambda: any(k == "pip_desktop_data" for k, _ in self.events))
+        self.assertEqual(asked[:2], [("open", 2), ("view", 2)])
+        for bad in (0, "2", True, 5000):
+            self.events.clear()
+            self.streams.handle({"pip_id": pip, "op": "open", "number": bad})
+            self.assertIn(("pip_desktop_closed", {"pip_id": pip, "reason": "That Pip has no such computer."}), self.events, repr(bad))
+        from dgc import editor_protocol as ep
+        self.assertIsNone(ep.command_error({"type": "pip_desktop", "pip_id": pip, "op": "open", "number": 2}))
+        self.streams.handle({"pip_id": pip, "op": "close"})
+
     def test_the_viewer_and_the_screen_talk_through_serve_events(self):
         pip = "pip_" + "a" * 32
         with patch("dgc.pip_screen_stream.WorkspaceRegistry"), \

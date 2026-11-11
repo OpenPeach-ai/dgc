@@ -2912,6 +2912,8 @@ class Backend:
                           "undo_merge": 1,
                           # A Pip computer's full screen streams over pip_desktop / pip_desktop_data.
                           "pips_desktop": 1,
+                          # pip_desktop open takes `number`: which of the Pip's computers (Pips API 86).
+                          "pips_desktop_numbers": 1,
                           # Troupes (dgc/troupe.py): troupe_started/progress/finished, list_troupes, stop_troupe.
                           "troupe": 1,
                           # /learn (dgc/skill_learn.py): learn_skill drafts a skill (skill_draft), save_skill writes

@@ -40,6 +40,12 @@ class DesktopStreams:
         if not isinstance(pip_id, str) or not re.fullmatch(r"pip_[A-Za-z0-9]{1,64}", pip_id):
             return
         if op == "open":
+            # Which of its computers (capability pips_desktop_numbers; 1 for the first; none: the one at work, else
+            # the first). One stream a Pip: opening another of its computers moves that Pip's stream to it.
+            number = command.get("number")
+            if number is not None and (type(number) is not int or not 1 <= number <= 1000):
+                self._closed(pip_id, "That Pip has no such computer.")
+                return
             with self.lock:
                 if self._closed_all:
                     return
@@ -59,7 +65,7 @@ class DesktopStreams:
                 self._close_socket(old)
             def open_and_finish():
                 try:
-                    self._open(pip_id, generation)
+                    self._open(pip_id, generation, number)
                 finally:
                     with self.lock:
                         self._opening -= 1
@@ -92,18 +98,18 @@ class DesktopStreams:
         except OSError:
             pass
 
-    def _open(self, pip_id: str, generation: int) -> None:
+    def _open(self, pip_id: str, generation: int, number: int | None = None) -> None:
         from . import pip_computer
         stream = None
         try:
             with WorkspaceRegistry() as registry:
-                pip_computer.request_open(registry, pip_id, "editor-user")
+                pip_computer.request_open(registry, pip_id, "editor-user", number)
                 deadline = time.monotonic() + OPEN_SECONDS
                 endpoint = None
                 while time.monotonic() < deadline:
                     if not self._current(pip_id, generation):
                         return
-                    endpoint = pip_computer.view_endpoint(registry, pip_id)
+                    endpoint = pip_computer.view_endpoint(registry, pip_id, number)
                     if endpoint is not None:
                         break
                     time.sleep(0.25)

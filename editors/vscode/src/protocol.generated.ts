@@ -7513,6 +7513,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "string"
       ],
       "required": false
+    },
+    "number": {
+      "types": [
+        "integer"
+      ],
+      "required": false
     }
   },
   "get_chat_changes": {

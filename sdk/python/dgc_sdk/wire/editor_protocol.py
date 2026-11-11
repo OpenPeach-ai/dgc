@@ -705,8 +705,10 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "pip_report_dismiss": {"run_id": _S(), "request_id": _S(False)},
     "pips_runtime": {"action": _f("string", enum=("start", "resume")), "request_id": _S()},
     # A Pip computer's screen (capability pips_desktop): open a stream, send the viewer's bytes
-    # (base64), close it. The editor never gets a socket or a path.
-    "pip_desktop": {"pip_id": _S(), "op": _f("string", enum=("open", "send", "close")), "data": _S(False)},
+    # (base64), close it. The editor never gets a socket or a path. open's `number` (capability pips_desktop_numbers,
+    # 0.52): which of the Pip's computers, 1 for the first; one stream a Pip, so opening another moves it there.
+    "pip_desktop": {"pip_id": _S(), "op": _f("string", enum=("open", "send", "close")), "data": _S(False),
+                    "number": _I(False)},
     "get_chat_changes": {"request_id": _S()},
     "get_chat_change": {"root": _S(), "path": _S(), "session_id": _S(), "request_id": _S()},
     "get_workspace_changes": {"request_id": _S()},
