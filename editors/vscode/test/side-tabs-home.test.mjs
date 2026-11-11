@@ -587,15 +587,17 @@ for (const width of [300, 700]) {
           fresh: [...root.querySelectorAll("button")].some((b) => /New Pip/.test(b.textContent)) }; });
       assert.deepEqual(pips.scopes.slice(0, 2), ["Personal", "Project"], "its Personal and Project tabs");
       assert.ok(pips.rows >= 1 && pips.search && pips.fresh, "its Pips, its search and New Pip");
-      // In a Pip's chat the tab bar and the dock are still there, and Pips is still the tab that is lit.
+      // A Pip's chat has the side bar to itself (asked 11 Nov; dock-pip-chat.test.mjs): no tab bar and no dock there.
       await x.page.locator("#pips-host [data-job]").first().click();
       await x.page.waitForFunction(() => !!document.getElementById("pips-host").shadowRoot?.querySelector("#chat-form"));
       await x.settle();
+      assert.deepEqual([(await x.tabs()).shown, (await dockNow(x.page)).shown], [false, false]);
+      // Its own back arrow leads back to the list of Pips, with both and with Pips still the tab that is lit; another tab, to its page.
+      await x.page.locator("#pips-host #simple-back").click();
+      await x.page.waitForFunction(() => !document.getElementById("pips-host").shadowRoot?.querySelector("#chat-form"));
+      await x.settle();
       const bar = await x.tabs(), d = await dockNow(x.page);
       assert.deepEqual([bar.shown, chosen(bar), d.shown], [true, ["pips"], true]);
-      // The Pips tab again leads back to the list of Pips, and another tab back to its page.
-      await x.page.click("#side-tab-pips");
-      await x.page.waitForFunction(() => !document.getElementById("pips-host").shadowRoot?.querySelector("#chat-form"));
       await x.page.click("#side-tab-home"); await x.settle();
       assert.equal((await x.tabs()).panel, "home-hub");
       assert.deepEqual(x.errors, []);

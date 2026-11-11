@@ -1,8 +1,8 @@
 // The dock at the foot of DGC's side bar (media/shared/dock.js and dock.css) and a session's liquid blob
 // (media/shared/blob.js and blob.css), measured in real Chromium on the side bar's real page (support/dock-scene.mjs,
 // which answers the dock's messages the way src/dock.ts does). What is held here:
-//   - the dock is on every screen of the side bar (its Work tab here, the Pips view, a Pip's chat; side-tabs-home.test.mjs
-//     has it under each of the four tabs) and nothing hides behind it
+//   - the dock is on every screen of the side bar (its Work tab here, the Pips view; side-tabs-home.test.mjs has it under
+//     each of the four tabs) and nothing hides behind it. A Pip's chat alone has none (dock-pip-chat.test.mjs)
 //   - a pin on every session and chat row, and on every Pip's row in the Pips view, pins and unpins; the dock's own menu
 //     unpins and moves
 //   - "+" is always last and offers a new Work session, ChatDGC chat, Personal Pip, and Settings
@@ -58,7 +58,7 @@ const posted = (x, type) => x.posted(type);
 
 // ---- where it is ---------------------------------------------------------------------------------------------------
 for (const width of [300, 700]) {
-  test(`${width}px: the dock is at the foot of the home, the Pips view and a Pip's chat, and nothing hides behind it`, async (t) => {
+  test(`${width}px: the dock is at the foot of the home and the Pips view, nothing hides behind it, and a Pip's chat has the foot to itself`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openDock(browser, { width, height: 700 });
     try {
@@ -89,12 +89,15 @@ for (const width of [300, 700]) {
 
       await x.page.locator("#pips-host [data-job]").first().click();
       await x.page.waitForFunction(() => !!document.getElementById("pips-host").shadowRoot?.querySelector("#chat-form"));
-      const chat = await under("a Pip's chat");
+      // A Pip's chat has no dock (asked 11 Nov; dock-pip-chat.test.mjs holds the rest): its prompt box is at the foot.
+      await x.settle();
+      const chat = await dockNow(x.page);
+      assert.equal(chat.shown, false, "a Pip's chat: no dock");
       const box = await x.page.evaluate(() => { const form = document.getElementById("pips-host").shadowRoot.querySelector("#chat-form"), r = form.getBoundingClientRect();
         const at = document.elementFromPoint(r.left + r.width / 2, r.bottom - 6);
         return { bottom: r.bottom, top: r.top, covered: at?.id !== "pips-host" }; });
-      assert.ok(box.bottom <= chat.host.top + 0.6, `the prompt box is above the dock (${box.bottom} > ${chat.host.top})`);
-      assert.equal(box.covered, false, "and the dock does not cover it");
+      assert.ok(box.bottom <= chat.height && box.bottom > pips.host.top, `the prompt box is at the foot, in the room the dock had (${box.bottom} of ${chat.height}, the dock began at ${pips.host.top})`);
+      assert.equal(box.covered, false, "and nothing covers it");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   });

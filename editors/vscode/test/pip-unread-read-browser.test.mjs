@@ -332,6 +332,8 @@ test("opening a Pip's chat reads it as before, and clears a dismiss a refused re
     await x.page.waitForFunction(() => window.__posted.some((m) => m.type === "pipsRequest" && m.request.type === "mark_pip_read"));
     assert.deepEqual((await x.requests("mark_pip_read")).map(({ request_id, ...r }) => r), [{ type: "mark_pip_read", pip_id: MAIL, message_id: M2 }],
       "the chat marks what it showed read, as before");
+    // (A Pip's chat has no tab bar, asked 11 Nov: its back arrow leads to the list, and Home is a tab from there.)
+    await x.page.click("#pips-host #simple-back");
     await x.page.click("#side-tab-home");
     await x.page.waitForFunction(() => window.__posted.some((m) => m.type === "pipHomeDismissed" && m.drop?.length));
     assert.deepEqual((await kept(x)).flatMap((m) => m.drop), [MAIL], "read: its dismiss goes; Billing audit's stays");
