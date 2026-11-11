@@ -450,7 +450,12 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # save_pip_key {pip_id, key_id, value} keeps it in the keychain bound to that Pip and its one site, never answered, and
 # the Pip carries on; decline_pip_key {pip_id, key_id} (Not now: no new card for that site for a day); remove_pip_key
 # {pip_id, key_id} -> {removed}. All local only. DGC adds the key to the Pip's GETs on that site alone.
-PIPS_API_VERSION = 82
+# API 83 (0.52, pips-17c): messaging feel in a Pip's chat. send_pip_message takes `reply_to` (the id of one of that Pip's
+# own messages in that conversation): the user's message quotes it. Its row then carries `reply_to` {id, text} (the
+# quote, read from the store, up to 600 characters), in send's answer and in list_pip_messages; the model is given the
+# quote once, marked as a quote of its own earlier message. A reply's row in list_pip_messages carries `answers`, the
+# id of the user's message it answers (none for a turn DGC wrote). Both are optional fields on a message row.
+PIPS_API_VERSION = 83
 
 
 def attachment_limits() -> dict:

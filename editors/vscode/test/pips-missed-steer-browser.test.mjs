@@ -115,11 +115,13 @@ test("a message the reply never read moves below that reply as its own turn, wit
   await context.close();
 });
 
-test("once the model has read it, it says Steered before its time", async (t) => {
+test("once the model has read it, it has a tick beside its time (pips-17c: it said Steered before its time)", async (t) => {
   if (skipOrFail(t)) return;
   const { p, context } = await open();
+  assert.equal(await article(p, "s1").locator(".msg-read").getAttribute("data-read"), "waiting", "a quiet clock until then");
   await poll(p, (msg) => { window.__page.messages[1] = msg("s1", "user", "One more thing", "run_1", "running", { steered: true, steer_status: "applied" }); });
-  assert.match(await article(p, "s1").locator(".msg-time").innerText(), /^Steered · /);
+  assert.equal(await article(p, "s1").locator(".msg-read").getAttribute("title"), "Read by Planner");
+  assert.doesNotMatch(await article(p, "s1").innerText(), /Steered/);
   await context.close();
 });
 

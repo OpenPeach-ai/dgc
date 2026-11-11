@@ -407,6 +407,9 @@ MUTATION_COMMANDS |= API79_MUTATIONS
 API79_FIELDS = {command: frozenset({'conversation_id'})
                 for command in ('send_pip_message', 'list_pip_messages', 'mark_pip_read', 'get_pip_chat_context')}
 CONVERSATION_ID = re.compile(r"conv_[0-9a-f]{32}\Z")
+# API 83: Reply on a Pip's message. send_pip_message's reply_to is the id of one of that Pip's own messages in the same
+# conversation; the runtime reads the quote from its store and gives it to the model as a quote of its own words.
+MESSAGE_ID = re.compile(r"message_[0-9a-f]{32}\Z")
 # API 81 (pips-10): a plugin card that needs a key takes it on Allow: keys {variable name: text}, kept by DGC for the
 # plugin's server, never answered. Sent only to a runtime advertising 81.
 KEY_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")
@@ -646,7 +649,7 @@ COMMAND_FIELDS = {
     'review_pip_execution': frozenset(['expected_revision', 'reason', 'run_id', 'status']),
     'review_pip_finding': frozenset(['expected_revision', 'finding_index', 'reason', 'run_id', 'status']),
     'run_pip': frozenset(['idempotency_key', 'pip_id', 'expected_version', 'expected_lifecycle_revision', 'expected_plan_digest']),
-    'send_pip_message': frozenset(['chat_options', 'conversation_id', 'display_mentions', 'files', 'idempotency_key', 'images', 'pip_id', 'spooled_files', 'spooled_images', 'text']),
+    'send_pip_message': frozenset(['chat_options', 'conversation_id', 'display_mentions', 'files', 'idempotency_key', 'images', 'pip_id', 'reply_to', 'spooled_files', 'spooled_images', 'text']),
     'get_pip_message_image': frozenset(['as_file', 'index', 'message_id', 'pip_id']),
     'introduce_pip': frozenset(['pip_id']),
     'stop_pips': frozenset([]),
@@ -997,6 +1000,11 @@ class Pips:
             from .pips_app import wire_tools
             params = {**params, 'tools': wire_tools(params['tools'])}
         values = _detach(params)
+        if command == 'send_pip_message' and 'reply_to' in values:
+            if version < 83:
+                raise DGCUnsupportedError("Reply on a Pip's message (reply_to) requires a runtime advertising Pips API 83 or newer")
+            if not (isinstance(values['reply_to'], str) and MESSAGE_ID.match(values['reply_to'])):
+                raise DGCConfigError("reply_to names one of the Pip's own messages (message_ and 32 hex digits)")
         if API79_FIELDS.get(command, frozenset()) & set(values) or command in API79_READS | API79_MUTATIONS:
             if version < 79:
                 raise DGCUnsupportedError("A Pip's conversations (conversation_id) require a runtime advertising Pips API 79 or newer")

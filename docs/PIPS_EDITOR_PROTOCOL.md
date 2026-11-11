@@ -130,6 +130,15 @@ The reply is a `pips_result` event that carries the nested request ID:
   the text. They are display-only and no part of the retry key. Marks that don't spell the text are dropped and the
   message still goes. A listed user message, or a mid-turn update, carries them back. The Pips a message names in its
   own workspace reach the worker's turn as `named_pips` reference data.
+- From API 83, `send_pip_message` may carry `reply_to`: the id of one of that Pip's own messages in the same
+  conversation, which the user's message quotes (Reply). Any other id is refused (`invalid_request`) and nothing is
+  kept. The quote is read from the stored message, never from the client, and cut to 600 characters. The user's
+  message row then carries `reply_to: {id, text}`, in the command's answer and in `list_pip_messages`, for a turn of
+  its own or a mid-turn update alike. The worker is given the quote once, with that message, as `replying_to`
+  reference data marked as a quote of its own earlier message; the stored history is not changed. Not part of the
+  retry key. A reply's row in `list_pip_messages` carries `answers`, the id of the user's message it answers (none
+  for a turn DGC wrote): the chat draws a quote line only when that is not the user's message just above it. Both
+  are optional fields on a message row; a client that doesn't know them ignores them.
 - From API 52 the host sends a message's photos and files the main chat's way: it writes each into
   the backend's image spool (`ready.capabilities.image_spool_dir`, mode 0600, a fresh random name)
   and sends `spooled_images: [{name, media_type}]` and `spooled_files: [{name, spool}]` instead of

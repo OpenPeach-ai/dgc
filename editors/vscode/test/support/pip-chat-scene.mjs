@@ -121,7 +121,20 @@ export const host = (opts) => `(${function (PIP, opts) {
     say("u1", "user", "What can you help me with here?", "1", 30),
     say("a1", "assistant", "I'm a review Pip set up to look for billing bugs that could charge customers the wrong amount. I read the committed code only: I can't edit files or run commands.\n\nWhat would you like to start with?", "1", 29),
   ];
-  const messages = opts.empty ? [] : project ? projectChat : personal;
+  // opts.ticks: messaging feel (pips-17c, Pips API 83; pass api: 83 and convs: true). You asked for a train, and sent one
+  // more message while the Pip worked, which its model read (a tick); its reply answers the first of the two (a quote
+  // line); you chose Reply on that reply (your message quotes it), and its answer to that needs no quote. "working": a
+  // reply is running, with one message its model hasn't read yet (a clock).
+  const ticksChat = [
+    say("u1", "user", "Book the 9 am train to Pune for Friday", "1", 24),
+    say("m1", "user", "And a window seat if there is one", "1", 23, { steered: true, steer_status: "applied" }),
+    say("a1", "assistant", "Booked: the 9:05 Deccan Express on Friday, seat 14A by the window. The ticket is in your mail.\n\n---\n\nWant me to book the way back too?", "1", 22, { answers: "u1" }),
+    say("u2", "user", "Yes, Sunday evening", "2", 12, { reply_to: { id: "a1", text: "Booked: the 9:05 Deccan Express on Friday, seat 14A by the window. The ticket is in your mail.\n\nWant me to book the way back too?" } }),
+    say("a2", "assistant", "Sunday has a 5:40 pm and a 7:15 pm back to Mumbai. Which one?", "2", 11, { answers: "u2" }),
+    ...(opts.ticks === "working" ? [{ ...say("u3", "user", "Take the 7:15", "3", 2), status: "running" },
+      { ...say("m3", "user", "And add a meal", "3", 1, { steered: true, steer_status: "pending" }), status: "queued" }] : []),
+  ];
+  const messages = opts.empty ? [] : project ? projectChat : opts.ticks ? ticksChat : personal;
   if (opts.running && messages.length) messages.push({ ...say("u9", "user", "Check the wire service page now.", "9", 1), status: "running" });
   const post = { pip_id: PIP, name, pip_type: "rook", kind: "audit", trigger: "schedule", text: "x", run_id: run("7"), outcome: "findings", posted_at: at(5), finished_at: at(5),
     total: 5, counts: { critical: 0, high: 2, medium: 2, low: 1 }, findings: [
@@ -250,7 +263,7 @@ export const host = (opts) => `(${function (PIP, opts) {
     const cid = (c) => "conv_" + c.repeat(32), want = opts.convs === true ? {} : opts.convs;
     const conv = (c, title, ago, more = {}) => ({ id: cid(c), pip_id: PIP, title, first: false, created_at: new Date(Date.now() - (ago + 5) * MIN).toISOString(), updated_at: new Date(Date.now() - ago * MIN - 5000).toISOString(), archived: false, unread: 0, replying: false, ...more });
     const tell = (c, n, role, text, ago, more = {}) => say(`${c}${n}`, role, text, c === "a" ? "a" : c, ago, { conversation_id: cid(c), ...more });
-    const state = window.__convs = { list: [conv("a", "Trip to Goa", 0), conv("f", "", 8, { first: true, unread: 1 }), conv("b", "Groceries", 60, { replying: true }), conv("c", "Tax papers", 3 * 1440),
+    const state = window.__convs = { list: [conv("a", "Trip to Goa", 0), conv("f", "", 8, { first: true, unread: 1, ...(opts.ticks === "working" ? { replying: true } : {}) }), conv("b", "Groceries", 60, { replying: true }), conv("c", "Tax papers", 3 * 1440),
       conv("d", "Birthday ideas for Ma", 14 * 1440, { unread: 2 }), conv("1", "Old plans", 40 * 1440, { archived: true }), conv("2", "Spring cleaning", 50 * 1440, { archived: true })],
       messages: { [cid("f")]: messages.map((m) => ({ ...m, conversation_id: cid("f") })),
         [cid("a")]: [tell("a", 1, "user", "Find me a beach stay in Goa for March 14–17", 9), tell("a", 2, "assistant", "Here are three near Palolem, all under ₹9,000 a night for the 14th to the 17th: Ciaran's Beach Huts (₹7,200), Bhakti Kutir (₹8,400) and Palolem Garden Stay (₹6,900). Want me to hold one?", 8),
@@ -269,9 +282,11 @@ export const host = (opts) => `(${function (PIP, opts) {
       list_pip_messages: (r) => { const id = r.conversation_id || firstId(), c = state.list.find((v) => v.id === id); if (!c) throw Error("That conversation isn't this Pip's.");
         return { pip_id: PIP, workspace_id: W, conversation_id: id, messages: (state.messages[id] || []).slice(-50), next_before_id: null, active_run: c.replying ? { id: run(id.slice(-1)), status: "running", started_at: new Date(Date.now() - 42000).toISOString() } : null,
           history_context_omitted_count: 0, chat_controls: controls }; },
-      send_pip_message: (r) => { const id = r.conversation_id || firstId(), c = state.list.find((v) => v.id === id); state.sent.push({ conversation: r.conversation_id || null, text: r.text, key: r.idempotency_key });
+      send_pip_message: (r) => { const id = r.conversation_id || firstId(), c = state.list.find((v) => v.id === id); state.sent.push({ conversation: r.conversation_id || null, text: r.text, key: r.idempotency_key, ...("reply_to" in r ? { reply_to: r.reply_to } : {}) });
         if (state.fail === "send") throw Error("The model didn't take that. Try again.");
-        const message = { ...say("s" + state.sent.length, "user", r.text, "5", 0), conversation_id: id, status: "queued", created_at: new Date().toISOString() }; state.messages[id].push(message); c.updated_at = message.created_at; c.replying = true;
+        const quoted = "reply_to" in r ? state.messages[id].find((m) => m.id === r.reply_to && m.role === "assistant") : null;
+        if ("reply_to" in r && !quoted) throw Error("Reply to one of this Pip's messages in this conversation.");
+        const message = { ...say("s" + state.sent.length, "user", r.text, "5", 0), conversation_id: id, status: "queued", created_at: new Date().toISOString(), ...(quoted ? { reply_to: { id: quoted.id, text: quoted.text.slice(0, 600) } } : {}) }; state.messages[id].push(message); c.updated_at = message.created_at; c.replying = true;
         return { message, run: { id: message.run_id, pip_id: PIP, status: "queued" } }; },
       mark_pip_read: (r) => { state.read.push({ conversation: r.conversation_id || null, message: r.message_id || null }); const m = Object.values(state.messages).flat().find((v) => v.id === r.message_id); const c = state.list.find((v) => v.id === (m?.conversation_id || r.conversation_id || firstId())); if (c) c.unread = 0;
         return { pip_id: PIP, count: 0, messages: 0, posts: 0, latest: "", latest_at: "", latest_message_id: null, latest_post_id: null }; },
@@ -284,6 +299,9 @@ export const host = (opts) => `(${function (PIP, opts) {
       update_pip_routine: (r) => { const found = routines.find((v) => v.id === r.routine_id); state.routines.push(r.changes); if ("conversation_id" in r.changes) { if (r.changes.conversation_id) found.conversation_id = r.changes.conversation_id; else delete found.conversation_id; } return { routine: found }; },
     });
   }
+  // (opts.ticks: a runtime at API 83 is asked for its keys, and the reply running is the shown conversation's own.)
+  if (opts.ticks) Object.assign(answers, { list_pip_keys: () => ({ pip_id: PIP, keys: [] }),
+    list_pip_run_activity: ((base) => (r) => { const page = base(r); return { ...page, run_id: r.run_id, events: page.events.map((e) => ({ ...e, run_id: r.run_id })) }; })(answers.list_pip_run_activity) });
   window.acquireVsCodeApi = () => ({ getState: () => undefined, setState() {}, postMessage(m) {
     if (m?.type !== "pipsRequest") return;
     const make = answers[m.request.type];

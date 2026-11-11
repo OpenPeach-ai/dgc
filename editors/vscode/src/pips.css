@@ -1232,3 +1232,22 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 .routine-posts>span{flex:none}
 .routine-posts select{min-width:0;max-width:min(260px,100%);height:24px;padding:0 4px;border:1px solid var(--hair-strong,var(--hair));border-radius:var(--btn-r);background:var(--vscode-dropdown-background,var(--vscode-input-background,transparent));color:var(--vscode-dropdown-foreground,var(--text));font:inherit}
 @media(forced-colors:active){.conv-mark.unread::before{background:Highlight}.conv-mark.replying::before{border-color:CanvasText}}
+/* Messaging feel in a Pip's chat (pips-17c). All of it is the quiet ink, never the accent.
+   - .msg-read: beside the time of a message sent while the Pip worked: a clock until its model has read it, then a tick.
+   - .msg-quote: one line above a message, the start of the message it answers or replies to, cut with an ellipsis.
+   - .chat-reply: the quote in the prompt box after Reply, the shared pill (media/shared/composer.css) at the box's width. */
+.pip-message .msg-read{flex:none;display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;color:var(--pc-quiet,var(--muted))}
+.pip-message .msg-read svg{width:12px;height:12px}
+.pip-message .msg-read[data-read=waiting]{opacity:.7}
+.chat-style .pip-message:not(:hover):not(:focus-within) .response-actions>.msg-read{opacity:1}
+.chat-style .pip-message:not(:hover):not(:focus-within) .response-actions>.msg-read[data-read=waiting]{opacity:.7}
+.pip-message .msg-quote{display:flex;align-items:baseline;gap:5px;min-width:0;max-width:100%;margin:0 0 3px;font-size:12px;line-height:1.4;color:var(--pc-quiet,var(--muted))}
+.pip-message.user .msg-quote{max-width:min(calc(100% - 40px),600px);padding-right:4px}
+.msg-quote .msg-quote-mark{flex:none}
+.msg-quote .msg-quote-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chat-reply-row{display:flex;min-width:0;padding:8px 10px 0}
+.chat-reply-row .dgc-att.chat-reply{flex:0 1 auto;min-width:0;max-width:100%}
+.chat-reply-row .dgc-att.chat-reply .dgc-att-open{flex:1 1 auto;min-width:0}
+.chat-reply-row .dgc-att.chat-reply .dgc-att-thumb.chat-reply-mark{background:transparent;width:18px}
+.chat-reply-row .dgc-att.chat-reply .dgc-att-thumb.chat-reply-mark .dgc-att-ext{font-size:12px;font-weight:400}
+.chat-reply-row .dgc-att.chat-reply .dgc-att-name.chat-reply-text{max-width:none;flex:1 1 auto;color:var(--pc-quiet,var(--muted))}

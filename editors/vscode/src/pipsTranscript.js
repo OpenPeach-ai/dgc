@@ -10,7 +10,7 @@ const foldPictures=(key,inner,facts)=>globalThis.DgcPictureFold?globalThis.DgcPi
 // These controls mirror the main conversation's action row. They are SVG rather
 // than font glyphs so they also work inside the Pip client's isolated ShadowRoot.
 export function transcriptIcon(name) {
-  const paths={plug:'<path d="M6 2v3M10 2v3"/><path d="M4.5 5h7v2a3.5 3.5 0 0 1-7 0Z"/><path d="M8 10.5V14"/>',speaker:'<path d="M2.5 6h2.5l3.5-3v10L5 10H2.5Z"/><path d="M11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.8a6 6 0 0 1 0 8.4"/>',stop:'<rect x="4" y="4" width="8" height="8" rx="1"/>',copy:'<rect x="5" y="5" width="8" height="9" rx="1"/><path d="M10 5V2H2v9h3"/>',check:'<path d="m3 8 3 3 7-8"/>',edit:'<path d="m10 2 4 4-8 8H2v-4Z M8 4l4 4"/>',retry:'<path d="M13 6a5.5 5.5 0 1 0 .2 4M13 2v4H9"/>',info:'<circle cx="8" cy="8" r="6"/><path d="M8 7v4M8 4.5v.2"/>',tool:'<path d="M6 2 3 8l3 6M10 2l3 6-3 6"/>',files:'<path d="M3 1.5h6l4 4v9H3Z M9 1.5V6h4 M5.5 9h5M5.5 11.5h3"/>',chevron:'<path d="m6 3 5 5-5 5"/>'};
+  const paths={plug:'<path d="M6 2v3M10 2v3"/><path d="M4.5 5h7v2a3.5 3.5 0 0 1-7 0Z"/><path d="M8 10.5V14"/>',speaker:'<path d="M2.5 6h2.5l3.5-3v10L5 10H2.5Z"/><path d="M11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.8a6 6 0 0 1 0 8.4"/>',stop:'<rect x="4" y="4" width="8" height="8" rx="1"/>',copy:'<rect x="5" y="5" width="8" height="9" rx="1"/><path d="M10 5V2H2v9h3"/>',check:'<path d="m3 8 3 3 7-8"/>',edit:'<path d="m10 2 4 4-8 8H2v-4Z M8 4l4 4"/>',retry:'<path d="M13 6a5.5 5.5 0 1 0 .2 4M13 2v4H9"/>',info:'<circle cx="8" cy="8" r="6"/><path d="M8 7v4M8 4.5v.2"/>',tool:'<path d="M6 2 3 8l3 6M10 2l3 6-3 6"/>',files:'<path d="M3 1.5h6l4 4v9H3Z M9 1.5V6h4 M5.5 9h5M5.5 11.5h3"/>',chevron:'<path d="m6 3 5 5-5 5"/>',reply:'<path d="M6.5 4 2.5 8l4 4"/><path d="M2.5 8h7a4 4 0 0 1 4 4v.5"/>',clock:'<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>'};
   return `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]||''}</svg>`;
 }
 
@@ -91,9 +91,28 @@ export function ownChangesMarkup(m,{name,undo=false,open=new Set(),busy='',error
   }).join('');
 }
 
+// One quiet line above a message: the start of the message it answers or replies to ("↪ book the 9 am train"). Drawn
+// above a reply only when it answers something other than the message just above it, and above your own message when
+// you chose Reply on one of the Pip's (pips-17c). One line, cut with an ellipsis; all of it is the tooltip.
+export function quoteLine(text,{reply=false,who=''}={}){
+  const words=String(text||'').replace(/^\s*---\s*$/gm,' ').replace(/\s+/g,' ').trim();
+  if(!words)return '';
+  const shown=words.length>160?words.slice(0,159).trimEnd()+'\u2026':words,said=reply?`Replying to ${who||'its message'}: `:'Answering: ';
+  return `<p class="msg-quote" title="${esc(words.slice(0,600))}"><span class="msg-quote-mark" aria-hidden="true">\u21aa</span><span class="sr-only">${esc(said)}</span><span class="msg-quote-text">${esc(shown)}</span></p>`;
+}
+// Read receipts for a message sent while the Pip was working (pips-17c): a quiet clock until its model has read it,
+// then a small tick, "Read by <Pip>". A message that started a reply of its own needs neither.
+function readMark(m,name){
+  if(m.role!=='user'||m.steered!==true)return '';
+  const read=m.steer_status==='applied',waits=m.steer_status==='pending'&&(m.status==='queued'||m.status==='running');
+  if(!read&&!waits)return '';
+  const label=read?`Read by ${name}`:`${name} hasn\u2019t read this yet`;
+  return `<span class="msg-read" data-read="${read?'read':'waiting'}" role="img" aria-label="${esc(label)}" title="${esc(label)}">${transcriptIcon(read?'check':'clock')}</span>`;
+}
+
 // `head`: a line above a reply the Pip sent unasked (a routine's: its face, name, routine and time); `clip`: {text, open,
 // key}, a long one's start and its Show all.
-export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false,imageSrc=()=>'',pluginLogo=()=>'',choices=null,stats=null,head='',clip=null,undo=false,openChanges=new Set(),undoing='',undoErrors=new Map()}) {
+export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false,imageSrc=()=>'',pluginLogo=()=>'',choices=null,stats=null,head='',clip=null,quote='',canReply=false,undo=false,openChanges=new Set(),undoing='',undoErrors=new Map()}) {
   const m=message,user=m.role==='user',label=user?'You':name;
   // Every photo the message brought (no four-photo cap from Pips API 52); a click opens the original.
   // A Pip's reply shows the images it made (generate_image) the same way, below its words.
@@ -135,7 +154,11 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   const details=`<details class="message-details" data-details="message-${esc(m.id)}"><summary title="${user?'Message details':'Response details'}" aria-label="${user?'Message details':'Response details'}">${transcriptIcon('info')}<span class="sr-only">${user?'Message details':'Response details'}</span></summary><div class="message-provenance"><dl><dt>${user?'Sent':'Saved'}</dt><dd>${esc(formatDate(m.created_at))}</dd>${!user&&m.model?`<dt>Model</dt><dd>${esc(m.model)}</dd>`:''}<dt>Status</dt><dd>${unsent?'Not sent':esc(({queued:'Waiting',running:'Working',cancelling:'Stopping',succeeded:'Done',failed:'Failed',cancelled:'Stopped'})[m.status]||m.status)}</dd></dl><button type="button" data-chat-run="${esc(m.run_id)}">${m.status==='failed'&&!unsent?'View error':'Details'}</button></div></details>`;
   // When it was sent or written, at the message's own edge: after a prompt's buttons, before a reply's.
   const at=Date.parse(m.created_at),time=globalThis.DgcTime?.markup(at)||'';
-  const sentTime=user&&m.steer_status==='applied'?time.replace(/(<time[^>]*>)/,'$1Steered · '):time;
+  // A message sent while it worked: its time, then the clock or the tick (it said "Steered" before its time until 0.52).
+  const sentTime=time+readMark(m,name);
+  // Reply on a Pip's message: it becomes a quote in your prompt box (Pips API 83).
+  const replyAction=!user&&canReply&&m.text?action('reply','Reply',m.id):'';
+  const quoted=quote?quoteLine(quote,{reply:user,who:name}):'';
   // A reply whose run got stuck, or was cut off by a restart, and started again says so in one line (dgc/pip_run_watchdog.py).
   // The one line a reply carries before its time: "Got stuck, started again" (Pips package 1), or that its backup model
   // answered, the first reply of an outage only (Pips package 6).
@@ -143,7 +166,7 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   const startedAgain=line?esc(line.slice(0,120)):'';
   const replyTime=startedAgain&&time?time.replace(/(<time[^>]*>)/,`$1${startedAgain} · `):startedAgain?`<span class="msg-time">${startedAgain}</span>`:time;
   const activityRow=!user?`<button type="button" class="chat-activity-toggle" data-chat-activity="${esc(m.run_id)}" aria-expanded="${activity?.open===true}">${transcriptIcon('tool')}<span>${activity?.loading?'Loading…':'What it did'}</span><span class="activity-chevron">${transcriptIcon('chevron')}</span></button>${activity?.open?activityMarkup(activity,m.run_id):''}`:'';
-  return `<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}" data-message="${esc(m.id)}">${user?'':head}<span class="sr-only role">${esc(label)}</span>${activityRow}${shownCards}${body}${!user&&postArtifact(m)?docCardMarkup(postArtifact(m)):''}${used}${offered}${user?'':ownChangesMarkup(m,{name,undo,open:openChanges,busy:undoing,errors:undoErrors})}${status}<div class="response-actions">${user?'':head?(startedAgain?`<span class="msg-time">${startedAgain}</span>`:''):replyTime}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${options}${details}${trace}${!user&&stats?replyStats(stats):''}${user?sentTime:''}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
+  return `<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}" data-message="${esc(m.id)}">${user?'':head}<span class="sr-only role">${esc(label)}</span>${quoted}${activityRow}${shownCards}${body}${!user&&postArtifact(m)?docCardMarkup(postArtifact(m)):''}${used}${offered}${user?'':ownChangesMarkup(m,{name,undo,open:openChanges,busy:undoing,errors:undoErrors})}${status}<div class="response-actions">${user?'':head?(startedAgain?`<span class="msg-time">${startedAgain}</span>`:''):replyTime}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${replyAction}${options}${details}${trace}${!user&&stats?replyStats(stats):''}${user?sentTime:''}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
 }
 
 // What a reply took, beside its actions: its time and its tokens (in and out, all its model requests).

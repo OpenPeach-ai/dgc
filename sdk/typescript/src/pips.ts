@@ -245,7 +245,7 @@ export type PipMutationParams = {
   review_pip_finding: { expected_revision: number; finding_index: number; reason: string; run_id: string; status: string };
   run_pip: { idempotency_key: string; pip_id: string; expected_version?: number; expected_lifecycle_revision?: number; expected_plan_digest?: string };
   send_pip_message: { idempotency_key: string; pip_id: string; text: string; chat_options?: PipChatOptions; images?: string[]; files?: { name: string; data: string }[]; display_mentions?: unknown[];
-    spooled_images?: { name: string; media_type: string }[]; spooled_files?: { name: string; spool: string }[]; conversation_id?: string };
+    spooled_images?: { name: string; media_type: string }[]; spooled_files?: { name: string; spool: string }[]; conversation_id?: string; reply_to?: string };
   introduce_pip: { pip_id: string };
   stop_pips: { [key: string]: never };
 };
@@ -460,6 +460,7 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
     "idempotency_key",
     "images",
     "pip_id",
+    "reply_to",
     "spooled_files",
     "spooled_images",
     "text"
@@ -1204,6 +1205,15 @@ export class Pips {
       if (!entries || entries.length < 1 || entries.length > 8
         || entries.some(([k, v]) => !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(k) || typeof v !== "string" || v.length > 16384)) {
         throw new DGCConfigError("keys is {variable name: the key}, up to 8, each up to 16,384 characters");
+      }
+    }
+    // API 83: Reply on a Pip's message. reply_to is the id of one of that Pip's own messages in the same conversation.
+    if (command === "send_pip_message" && Object.hasOwn(values, "reply_to")) {
+      if ((this.caps.pips_api_version as number) < 83) {
+        throw new DGCUnsupportedError("Reply on a Pip's message (reply_to) requires a runtime advertising Pips API 83 or newer");
+      }
+      if (!(typeof values.reply_to === "string" && /^message_[0-9a-f]{32}$/.test(values.reply_to))) {
+        throw new DGCConfigError("reply_to names one of the Pip's own messages (message_ and 32 hex digits)");
       }
     }
     if (API79_FIELDS.has(command) && Object.hasOwn(values, "conversation_id")) {

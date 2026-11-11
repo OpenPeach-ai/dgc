@@ -88,6 +88,8 @@ def _insert(store, pip, run_id, req, actor):
                       store.registry.clock(), 'pending', conversation_of(store.db, run_id)))
     from .pip_chat import save_mentions
     save_mentions(store.db, pip['id'], message_id, req.get('display_mentions'))
+    from .pip_replies import save as save_reply
+    save_reply(store.db, pip['id'], message_id, req.get('reply_to'))
     return store.db.execute('SELECT * FROM pip_chat_steers WHERE id=?', (message_id,)).fetchone()
 
 
@@ -97,6 +99,10 @@ def _said(store, row, run_status):
     marks = message_mentions(store.db, row['id'])
     if marks:
         said['display_mentions'] = marks
+    from .pip_replies import of as quote_of
+    quote = quote_of(store.db, row['id'])
+    if quote:
+        said['reply_to'] = quote
     return said
 
 
@@ -146,7 +152,10 @@ def stage(db, run_id, folder: Path):
     """Publish the run's pending messages atomically; the worker sees only its own bounded inbox."""
     rows = db.execute("SELECT id,text FROM pip_chat_steers WHERE run_id=? AND status='pending' ORDER BY seq", (run_id,)).fetchall()
     path = folder / 'steering.json'
-    encoded = json.dumps([{'id': row['id'], 'text': row['text']} for row in rows], ensure_ascii=False).encode()
+    # One that quotes a message of the Pip's (Reply, pip_replies) is read with that quote, marked as one.
+    from .pip_replies import of as quote_of, quoted
+    encoded = json.dumps([{'id': row['id'], 'text': quoted(row['text'], quote_of(db, row['id']), MAX_TEXT_BYTES)} for row in rows],
+                         ensure_ascii=False).encode()
     if len(encoded) > MAX_INBOX_BYTES:
         raise RegistryError('steer_limit', 'The Pip steering inbox exceeded its size limit.')
     temporary = folder / 'steering.tmp'
@@ -272,6 +281,8 @@ def forget_resent(store, pip_id, req, actor):
             if store.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pip_chat_mentions'").fetchone():
                 store.db.execute("DELETE FROM pip_chat_mentions WHERE message_id IN "
                                  "(SELECT id FROM pip_chat_steers WHERE " + match + ")", values)
+            from .pip_replies import forget as forget_replies
+            forget_replies(store.db, match, values)
             store.db.execute("DELETE FROM pip_chat_steers WHERE " + match, values)
 
 

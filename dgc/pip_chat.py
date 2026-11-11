@@ -1321,6 +1321,9 @@ def prepare(store, pip, req, *, context_size=32768, secrets=()):
     named = _named_pips(store, pip, req)
     if named:
         context["named_pips"] = named
+    if req.get("reply_to"):
+        # Reply on one of its messages (pip_replies): a bounded quote of its own words, given with this turn only.
+        context["reply_to"] = req["reply_to"]
     if pip.get("pip_type") == "core" and not str(req.get("request_key") or "").startswith(DGC_KEYS):
         # A question another Pip has waited on for a day: Core says it once, in its next reply to the user.
         from datetime import datetime, timezone
@@ -1397,6 +1400,8 @@ def insert_user(store, pip, req, run_id, model, now, *, waiting=None):
                      "user", req["text"], model, now, req["request_key"], digest, conversation_id))
     touch(store.db, conversation_id, now)
     save_mentions(store.db, pip["id"], message_id, req.get("display_mentions"))
+    from .pip_replies import save as save_reply
+    save_reply(store.db, pip["id"], message_id, req.get("reply_to"))
     if req.get("images") or req.get("files"):
         widen_tables(store.db)
     for index, item in enumerate(req.get("images") or []):
@@ -1626,6 +1631,7 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
         before = cursor[0]
     rows = _bounded_rows(store.db, pip_id, before, limit + 1, conversation_id=conversation_id)
     from .pip_steering import in_run, waiting, message as steer_message
+    from .pip_replies import of as quote_of
     selected = []
     projected = 0
     for row in rows[:limit]:
@@ -1655,7 +1661,15 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             marks = message_mentions(store.db, row["id"])
             if marks:
                 message["display_mentions"] = marks
+            quote = quote_of(store.db, row["id"])
+            if quote:
+                message["reply_to"] = quote         # API 83: the message of the Pip's it quotes (Reply)
         else:
+            asked = store.db.execute("SELECT id,request_key FROM pip_chat_messages WHERE run_id=? AND role='user'",
+                                     (row["run_id"],)).fetchone()
+            if asked and not str(asked["request_key"] or "").startswith(DGC_KEYS):
+                # API 83: the user's message this reply answers. The chat quotes it only when it isn't the one just above.
+                message["answers"] = asked["id"]
             pictures = message_images(store.db, row["id"])   # images the Pip made for this reply (generate_image)
             if pictures:
                 message["images"] = pictures
@@ -1720,6 +1734,9 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
                 marks = message_mentions(store.db, said['id'])
                 if marks:
                     said['display_mentions'] = marks
+                quote = quote_of(store.db, said['id'])
+                if quote:
+                    said['reply_to'] = quote
                 expanded.append(said)
     from .pip_routine_care import notes as routine_notes
     noted = routine_notes(store.db, pip_id)
@@ -1737,13 +1754,21 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
 
 
 def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=None, files=None,
-         spooled_images=None, spooled_files=None, display_mentions=None, conversation_id=None, _intro=False):
+         spooled_images=None, spooled_files=None, display_mentions=None, conversation_id=None, reply_to=None,
+         _intro=False):
     """Queue a reply to a message, with what it brings: images and files inline (API 43) or handed
     over through the backend's spool (API 52, ``spooled_images`` and ``spooled_files``). ``conversation_id``: which of
-    the Pip's conversations (API 79, pip_conversations); none names the first one, as an older client means."""
+    the Pip's conversations (API 79, pip_conversations); none names the first one, as an older client means.
+    ``reply_to``: the id of one of the Pip's own messages in that conversation, which this message quotes (API 83,
+    pip_replies)."""
     from .pip_conversations import is_full, resolve as resolve_conversation, roll_over
     try:
         conversation_id = resolve_conversation(store.db, pip_id, conversation_id)
+        quoted = None
+        if reply_to is not None and not _intro:
+            # Refused before anything of the message is stored; the quote is the stored message's own words.
+            from .pip_replies import check as checked_reply
+            quoted = checked_reply(store.db, pip_id, reply_to, conversation_id)
         if is_full(store.db, conversation_id):
             conversation_id = roll_over(store.registry, pip_id, conversation_id)   # a full one: carry on in a fresh one
         # Validate the request identity before copying attachments into the kept store.
@@ -1785,6 +1810,8 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
         _drop_spooled(spooled_files if isinstance(spooled_files, list) else None, "spool")
     req = request(text, key, chat_options, images=images, files=files)
     req["conversation_id"] = conversation_id
+    if quoted is not None:
+        req["reply_to"] = quoted
     if display_mentions is not None and not _intro:
         from .prompt_display import checked_mentions
         marks = checked_mentions(display_mentions, req["text"])
@@ -1857,6 +1884,10 @@ def _deliver(store, pip_id, req, actor, config, _intro):
     marks = message_mentions(store.db, row["id"])
     if marks:
         message["display_mentions"] = marks
+    from .pip_replies import of as quote_of
+    quote = quote_of(store.db, row["id"])
+    if quote:
+        message["reply_to"] = quote
     return {"run": run, "message": message}
 
 
@@ -1874,6 +1905,10 @@ def answer_waiting(store, row, config):
     marks = message_mentions(store.db, row["id"])
     if marks:
         req["display_mentions"] = marks     # its bubble keeps them, and its turn is told which Pips it names
+    from .pip_replies import of as quote_of
+    quote = quote_of(store.db, row["id"])
+    if quote:
+        req["reply_to"] = quote             # the message of the Pip's it quotes: its turn is given it
     run = store.enqueue(row["pip_id"], "chat_" + hashlib.sha256(row["request_key"].encode()).hexdigest(), row["requested_by"],
                         config, conversation_request=req, _waiting_message=row)
     if decided is not None:
@@ -1924,7 +1959,7 @@ def _left_waiting(store, run, result) -> bool:
 
 def validate_context(value):
     if (not isinstance(value, dict) or set(value) - {"images", "files", "run_posts", "card_context", "cards_waiting", "named_pips",
-                                                    "long_waits", "conversation_id", "inputs_ref"} not in (
+                                                    "long_waits", "conversation_id", "inputs_ref", "reply_to"} not in (
             {"text", "history", "history_omitted_count", "last_report"},
             {"text", "history", "history_omitted_count", "last_report", "continuity"})):
         raise RegistryError("invalid_history", "Conversation context has an unsupported shape.")
@@ -1949,6 +1984,10 @@ def validate_context(value):
     if "named_pips" in value and (not isinstance(value["named_pips"], list) or len(value["named_pips"]) > 8
                                   or len(_json(value["named_pips"]).encode()) > 8192):
         raise RegistryError("invalid_history", "The named Pips exceed their bounded context contract.")
+    if "reply_to" in value:
+        from .pip_replies import valid as valid_reply
+        if not valid_reply(value["reply_to"]):
+            raise RegistryError("invalid_history", "The quoted message exceeds its bounded context contract.")
     if "long_waits" in value and (not isinstance(value["long_waits"], list) or not 0 < len(value["long_waits"]) <= 3 or any(
             not isinstance(item, dict) or set(item) != {"id", "pip", "what", "waited"}
             or not all(isinstance(item[key], str) and len(item[key]) <= 200 for key in item) for item in value["long_waits"])):
