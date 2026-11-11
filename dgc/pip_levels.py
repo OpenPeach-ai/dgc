@@ -50,8 +50,8 @@ SAYS = {
     APPROVE: ("Opens new sites, searches, adds to carts and saves drafts by itself. Asks before it orders, pays, "
               "sends to someone new, posts, deletes or changes an account."),
     # The risk, said plainly where the level is chosen: sending is what Do it all allows.
-    FULL: ("Does the whole job by itself, sends included. Stops only for a payment or a sign-in. A page or an email "
-           "it reads could talk it into sending something."),
+    FULL: ("Does the whole job, sends included. Stops for a sign-in, or a payment you haven't let it make. "
+           "A page or email it reads could talk it into sending something."),
 }
 NOBODY = "nobody at the keyboard"
 # The fuse: more than this many things a Pip did on its own (sent, submitted, ran) in an hour, and it asks again until
