@@ -4718,6 +4718,13 @@ loop. One provider is the default. With several, a checkbox on each picks the on
 Pips on Default start from. Each Work session, ChatDGC chat and Pip can choose another in its model button and keeps it
 after a reload, and changing the default leaves them where they are. A key is kept per address and goes only there. If a
 saved subscription's CLI has gone or signed out, Settings says so and how to fix it.
+
+**Ollama Cloud** runs Ollama's cloud models with no Ollama on this computer. Choose it, press **Get a key** (it opens
+ollama.com → Settings → API keys), create a key there and paste it. DGC checks the key before saving anything: one
+ollama.com doesn't take is said at once and nothing is kept. Its models are the ones ollama.com lists, named as
+ollama.com names them (a name with `:cloud`, as a local Ollama has it, works too). If Ollama's web search has no key of
+its own yet, it uses this one. With the Ollama app on this computer signed in, the local Ollama provider still reaches
+the same cloud models with no key.
 """.strip()),
 
     ("Reconnecting", "what DGC does when a model request fails, is refused as busy, or is cut off", """

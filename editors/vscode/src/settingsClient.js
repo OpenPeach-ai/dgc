@@ -408,7 +408,8 @@ function render() {
                 providerForm.name=chosen.label;
                 providerForm.base_url=chosen.url;
                 providerForm.model='';
-                providerForm.api_mode=id==='anthropic'?'anthropic':'auto';
+                // Ollama Cloud speaks Ollama's own API (its chat, its model list): never guessed.
+                providerForm.api_mode=id==='anthropic'?'anthropic':id==='ollamacloud'?'ollama':'auto';
                 providerForm.api_key='';
             }else if(id==='custom'){
                 providerForm.kind='native';providerForm.engine='';
@@ -420,6 +421,7 @@ function render() {
             main.querySelector('details[data-more="saved-providers"]').open=true;
             main.querySelector('#saved_provider_model')?.focus();
         });
+        main.querySelectorAll('[data-provider-keys]').forEach(button=>button.addEventListener('click',()=>send({type:'openProviderKeys',id:button.dataset.providerKeys})));
         main.querySelector('#saved-provider-add')?.addEventListener('click',()=>{
             const status=main.querySelector('#saved-provider-status');if(status)status.textContent='Saving provider…';
             if(!providerForm.preset){if(status)status.textContent='Choose a provider first.';return;}
@@ -1477,6 +1479,8 @@ window.addEventListener('message', event => {
         for(const id of Object.keys(providerModelLists))if(!savedProfiles.some(row=>row.id===id))delete providerModelLists[id];
         if(msg.saved){providerForm={preset:'',kind:'native',engine:'',name:'',base_url:'',model:'',api_mode:'auto',api_key:''};}
         if(config&&section==='models'){snapshot();render();}
+        // What else the save did (Ollama Cloud's key for its web search too), said where the save was asked for.
+        if(msg.saved&&typeof msg.note==='string'&&msg.note){const status=$('saved-provider-status');if(status)status.textContent=msg.note;}
     }
     else if(msg.type==='providerProfileError'){
         if(config&&section==='models'){snapshot();render();}      // a tick or a dropdown that was waiting goes back to what is so

@@ -6043,8 +6043,15 @@ class Backend:
     def _models_at_answer(self, request_id, role, url, key, mode, answer) -> None:
         from .llm import LLMClient
         secrets = [*secret_values(self.config), *([key] if key else [])]
+        from . import model_watch
+        if model_watch.is_hosted_ollama(url) and not key:
+            # ollama.com lists to anyone, but answers nothing without a key: said before anything is sent.
+            answer(error="it needs an API key (HTTP 401)")
+            return
         try:
             client = LLMClient(url, key, "", read_timeout=10, api_mode=mode)
+            if model_watch.is_hosted_ollama(url):
+                client.check_hosted_ollama_key()    # its list answers anyone: the key is checked on its own
             listed = client.list_models(redirects=False)
         except Exception as exc:                # noqa: BLE001 -- said in a few words, never the host's own
             answer(error=_models_at_reason(exc, bool(key)))

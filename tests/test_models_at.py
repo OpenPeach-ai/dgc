@@ -65,6 +65,8 @@ class StubHost:
         self.seen: list[tuple[str, dict]] = []
         self.redirect_to = ""
         self.status = 200
+        self.chat_status = 200          # POST /api/chat: ollama.com's answer to a key (200 "load", or 401)
+        self.posted: list[tuple[str, dict, dict]] = []
         self.hold: threading.Event | None = None
         owner = self
 
@@ -97,6 +99,25 @@ class StubHost:
                                                        {"id": "mxbai-embed-large", "type": "model"}]}
                 else:
                     status, body = 404, {"error": "not found"}
+                raw = json.dumps(body).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length") or 0)
+                try:
+                    sent = json.loads(self.rfile.read(length) or b"{}")
+                except ValueError:
+                    sent = {}
+                headers = {k.lower(): v for k, v in self.headers.items()}
+                owner.seen.append((self.path, headers))
+                owner.posted.append((self.path, headers, sent))
+                status = owner.chat_status
+                body = ({"model": sent.get("model", ""), "message": {"role": "assistant", "content": ""}, "done": True,
+                         "done_reason": "load"} if status == 200 else {"error": "Unauthorized"})
                 raw = json.dumps(body).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
@@ -300,6 +321,36 @@ class ListModelsAt(unittest.TestCase):
         self.assertEqual(frame["error"], "take the user name and password out of the host URL")
         for frame in self.frames("models_at"):
             self.assertNotIn("127.0.0.1", json.dumps(frame), "never the URL")
+        self.assertNoSavedKeyOnTheWire()
+
+    def test_ollama_cloud_checks_the_key_itself_since_anyone_can_list_its_models(self):
+        """ollama.com (0.52, Connect Ollama Cloud): its /api/tags answers anyone, so a list proves nothing about a key. A
+        chat with no model and no messages does, and costs nothing: a key it takes answers 200 ("load"), one it
+        doesn't 401 (both checked against ollama.com on 11 Nov 2026). A wrong key says so at once; none at all too."""
+        from dgc import model_watch
+        stub = self.other.url
+        hosted = lambda url: str(url or "").startswith(stub)          # the stub stands in for ollama.com
+        with patch.object(model_watch, "is_hosted_ollama", hosted):
+            host = self.host()
+            self.other.chat_status = 401
+            frame = self.ask(host, "oc1", "main", stub, "ollama", api_key="typed-wrong")
+            self.assertEqual(frame.get("error"), "it refused the API key (HTTP 401)", frame)
+            self.assertEqual(frame.get("ids") or [], [], "nothing listed for a key it refused")
+            self.assertEqual([(p, sent) for p, _h, sent in self.other.posted],
+                             [("/api/chat", {"model": "", "messages": [], "stream": False})],
+                             "one call that names no model and asks for nothing")
+            self.assertEqual(self.other.posted[0][1].get("authorization"), "Bearer typed-wrong")
+            frame = self.ask(host, "oc2", "main", stub, "ollama", api_key="")
+            self.assertEqual(frame.get("error"), "it needs an API key (HTTP 401)", "no key: said before anything is sent")
+            self.assertEqual(len(self.other.posted), 1)
+            self.other.chat_status = 200
+            frame = self.ask(host, "oc3", "main", stub, "ollama", api_key="typed-good")
+            self.assertNotIn("error", frame)
+            self.assertEqual(frame["ids"], ["glm-5.3:cloud", "qwen3:8b"])
+        # Any other host lists as before: no extra call.
+        before = len(self.main.posted)
+        self.ask(host, "oc4", "main", self.main.url + "/v1", "ollama")
+        self.assertEqual(len(self.main.posted), before)
         self.assertNoSavedKeyOnTheWire()
 
     def test_a_newer_request_for_the_same_box_replaces_one_still_waiting(self):

@@ -154,8 +154,10 @@ const THINK = [
   { id: "high", detail: "sustained reasoning on complex work" },
   { id: "xhigh", detail: "deepest available reasoning effort" },
 ];
-const PROVIDERS: Record<string, { url: string; needsKey: boolean; label: string; apiKey?: string }> = {
+const PROVIDERS: Record<string, { url: string; needsKey: boolean; label: string; apiKey?: string; keysPage?: string }> = {
   ollama: { url: "http://localhost:11434/v1", needsKey: false, label: "Ollama (local)", apiKey: "ollama" },
+  // Ollama's cloud models with no Ollama installed (0.52): its own API, one key from its keys page.
+  ollamacloud: { url: "https://ollama.com", needsKey: true, label: "Ollama Cloud", keysPage: "https://ollama.com/settings/keys" },
   llamacpp: { url: "http://localhost:8080/v1", needsKey: false, label: "llama.cpp (local)", apiKey: "sk-local" },
   lmstudio: { url: "http://localhost:1234/v1", needsKey: false, label: "LM Studio (local)", apiKey: "lm-studio" },
   vllm: { url: "http://localhost:8000/v1", needsKey: false, label: "vLLM (local)", apiKey: "sk-local" },
@@ -167,6 +169,11 @@ const PROVIDERS: Record<string, { url: string; needsKey: boolean; label: string;
   together: { url: "https://api.together.xyz/v1", needsKey: true, label: "Together AI" },
   mistral: { url: "https://api.mistral.ai/v1", needsKey: true, label: "Mistral" },
 };
+/** ollama.com itself (Ollama Cloud), as dgc/model_watch.py is_hosted_ollama says. */
+function isOllamaCloud(base: string): boolean {
+  try { const host = new URL(base).hostname.toLowerCase().replace(/\.$/, ""); return host === "ollama.com" || host.endsWith(".ollama.com"); }
+  catch { return false; }
+}
 // Slash commands of the terminal's that this editor has no command for: where the same thing is here, or that it's the
 // terminal's own. /pips, /usage and /todo work here and aren't in this list; dgc/commands.py is the terminal's list.
 const IN_TERMINAL = (name: string, what: string) => ({ say: `/${name} is for the terminal: ${what}. Run it with dgc in a terminal.` });
@@ -8409,6 +8416,35 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return this.searchKeysSaved;
   }
 
+  /** Ollama Cloud's key, checked before anything is saved. ollama.com lists its models to anyone, so the CLI checks the
+   *  key on its own (dgc/llm.py check_hosted_ollama_key) and says it was refused like any host's list does. */
+  private async checkOllamaCloudKey(profile: any): Promise<void> {
+    const key = String(profile?.api_key || "").trim();
+    if (!key) throw new Error("Paste your ollama.com API key first (ollama.com → Settings → API keys). Nothing was saved.");
+    let ev: any;
+    try { ev = await this.modelsAtProvider(String(profile.base_url), key, String(profile.api_mode || "ollama")); }
+    catch { throw new Error("DGC couldn't check the key with ollama.com (DGC didn't answer). Nothing was saved."); }
+    const why = typeof ev?.error === "string" ? ev.error : "";
+    if (/refused the API key|needs an API key/.test(why)) {
+      throw new Error("ollama.com didn't accept that API key. Check it, or create a new one at ollama.com → Settings → API keys. "
+        + "Nothing was saved.");
+    }
+    if (why) throw new Error(`DGC couldn't check the key with ollama.com (${why}). Nothing was saved.`);
+  }
+
+  /** The key just connected for Ollama Cloud, for Ollama's web search too, when that has no key of its own (one that has
+   *  keeps it). Only on a CLI that keeps a key per search provider. True when it was saved. */
+  private async shareOllamaSearchKey(key: string): Promise<boolean> {
+    const saved = this.searchKeyState();
+    if (!key || !saved?.has("ollama") || saved.get("ollama") === true) return false;
+    try {
+      await this.requestState(this.ensureBackend(), "search-key",
+                              { type: "set_config", values: { search_api_key_ollama: key } }, "config", 10000);
+      saved.set("ollama", true);
+      return true;
+    } catch { return false; }
+  }
+
   /** Settings -> Web search -> Remove: clear one provider's own key, at once and by its own name, on a CLI that keeps
    *  one per provider (the page offers Remove only then). The page hears how it went. */
   private async removeSearchKey(provider: string): Promise<void> {
@@ -8476,7 +8512,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  usage range reverts to 7 days the same way. Every other push below is already guarded by
    *  `!mcpEditing` on the client; `show` was the one that routed around that guard. */
   private refreshEditorSettings(): void {
-    const providers = Object.entries(PROVIDERS).map(([id, p]) => ({ id, label: p.label, url: p.url, needsKey: p.needsKey }));
+    const providers = Object.entries(PROVIDERS).map(([id, p]) => ({ id, label: p.label, url: p.url, needsKey: p.needsKey,
+                                                                      ...(p.keysPage ? { keys: true } : {}) }));
     this.settingsEditor?.webview.postMessage({ type: "providers", providers });
     // An upgrade's working model shows here as a saved provider from the first look (adoptWorkingRoute).
     void adoptWorkingRoute(this.context, this.lastReadyEvent, PROVIDERS).catch(() => null).then((adopted) => {
@@ -8619,9 +8656,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       await this.context.globalState.update(DEV_WARNED_KEY, true);
     } else if (msg?.type === "saveSettings") {
       await this.saveSettings(msg.values || {}, String(msg.section || ""));
+    } else if (msg?.type === "openProviderKeys") {
+      // A preset's own keys page (Ollama Cloud's), by its id: never a URL the page sends.
+      const page = PROVIDERS[String(msg.id || "")]?.keysPage;
+      if (page) await vscode.env.openExternal(vscode.Uri.parse(page));
     } else if (msg?.type === "addProviderProfile") {
       try {
         if (msg.profile?.kind === "subscription") await this.verifySubscription(String(msg.profile.engine || ""), be);
+        const ollamaCloud = msg.profile?.kind !== "subscription" && isOllamaCloud(String(msg.profile?.base_url || ""));
+        if (ollamaCloud) await this.checkOllamaCloudKey(msg.profile);
         await adoptWorkingRoute(this.context, this.lastReadyEvent, PROVIDERS);
         const first = firstTakesDefault(this.context, this.lastReadyEvent);
         const added = await addProfile(this.context, msg.profile);
@@ -8632,7 +8675,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           catch (error) { await removeProfile(this.context, added.id); throw error; }
           await this.firstProviderSaved(added.id);
         }
-        this.settingsEditor?.webview.postMessage(this.providerProfilesMessage({ saved: true, ...(choose ? { chooseDefault: added.id } : {}) }));
+        const shared = ollamaCloud && await this.shareOllamaSearchKey(String(msg.profile?.api_key || ""));
+        this.settingsEditor?.webview.postMessage(this.providerProfilesMessage({ saved: true, ...(choose ? { chooseDefault: added.id } : {}),
+          ...(shared ? { note: "Saved. Settings › Web search › Ollama uses this key too." } : {}) }));
         this.savedProvidersChanged();
       } catch (error: any) {
         this.settingsEditor?.webview.postMessage({ type: "providerProfileError", message: String(error?.message || "Could not save provider.") });

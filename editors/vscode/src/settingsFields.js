@@ -245,6 +245,7 @@ export function renderFields(section, main, config, providers, ui) {
             ...[["claude", "Claude Code"], ["codex", "Codex"]].filter(([id]) => !savedEngines.has(id)),
             ["custom", "Custom model host"]];
         const addingSubscription = providerDraft.kind === "subscription";
+        const keysPreset = providers.find(row => row.id === providerDraft.preset && row.keys && row.url);
         const addSaved = `<details class="more" data-more="saved-providers"><summary>+ Add provider</summary><div class="rows">`
             + field("Provider", "Choose the connection to add.", sel("saved_provider_preset", addChoices, providerDraft.preset || ""))
             + (addingSubscription ? field("Model", "Blank uses the signed-in CLI's default.", inp("saved_provider_model", providerDraft.model || ""))
@@ -252,7 +253,12 @@ export function renderFields(section, main, config, providers, ui) {
                 + field("Host", "Reachable from this computer.", inp("saved_provider_url", providerDraft.base_url || ""))
                 + model("saved_provider_model", "Model", "Each chat can choose, or name one.", providerDraft.model || "All models")
                 + field("Transport", "Auto works for most hosts.", sel("saved_provider_mode", TRANSPORTS, providerDraft.api_mode || "auto"))
-                + field("API key", "Saved in VS Code, never shown again.", inp("saved_provider_key", providerDraft.api_key || "", "password")))
+                + (keysPreset
+                    // A preset with a keys page of its own (Ollama Cloud): Get a key opens it; you create one there and paste it.
+                    ? field("API key", `Get a key opens ${escapeHtml(new URL(keysPreset.url).hostname)}: create one there and paste it here. Saved in VS Code.`,
+                        `<span class="host-control">${inp("saved_provider_key", providerDraft.api_key || "", "password")}`
+                        + `<button type="button" class="secondary" data-provider-keys="${escapeHtml(keysPreset.id)}">Get a key</button></span>`)
+                    : field("API key", "Saved in VS Code, never shown again.", inp("saved_provider_key", providerDraft.api_key || "", "password"))))
             + `<div class="field"><span class="words"><span class="hint" id="saved-provider-status" role="status"></span></span><span class="host-control"><button type="button" class="secondary" id="saved-provider-add">Save provider</button></span></div></div></details>`;
         const engine = String(c.subscription_engine || "");
         const subscription = (Array.isArray(c.subscription_engines) ? c.subscription_engines : [])

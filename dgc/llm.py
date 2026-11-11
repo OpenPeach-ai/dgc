@@ -2349,6 +2349,17 @@ class LLMClient:
             "Content-Type": "application/json",
         }
 
+    def check_hosted_ollama_key(self) -> None:
+        """ollama.com lists its models to anyone (/api/tags takes no key), so a list is no check of a key. A chat that
+        names no model and sends no messages is, and costs nothing: a key ollama.com takes answers 200 (done_reason
+        "load", nothing generated), one it doesn't 401 (both checked against ollama.com on 11 Nov 2026). Raises
+        LLMError("HTTP 401 ...") for a refused key; any other answer lets the list go ahead and say what it finds.
+        Never follows a redirect, so the key stays with this host."""
+        r = requests.post(f"{self._ollama_root}/api/chat", headers=self._headers(),
+                          json={"model": "", "messages": [], "stream": False}, timeout=(5, 10), allow_redirects=False)
+        if r.status_code in (401, 403):
+            raise LLMError(f"HTTP {r.status_code} from the model host: the API key was refused")
+
     def list_models(self, *, redirects: bool = False) -> list[str]:
         """The model ids this host lists. ``redirects=False`` asks only the host as given: a redirect is refused
         (ModelListRedirect) rather than followed, so a key sent with the request can't go on to another host --

@@ -1170,6 +1170,32 @@ test('provider setup keeps the form open and uses a saved route, not the old dir
   assert.match(x.d.querySelector('#saved-provider-status').textContent,/Sign in on this computer first/);
 });
 
+test('Ollama Cloud: its own API, Get a key beside the key box, and what the save did said where it was asked for',()=>{
+  const x=setup();
+  x.message({type:'providers',providers:[{id:'ollama',label:'Ollama',url:'http://127.0.0.1:11434/v1'},
+    {id:'ollamacloud',label:'Ollama Cloud',url:'https://ollama.com',needsKey:true,keys:true}]});
+  x.click('[data-nav=models]');
+  x.click('details[data-more=saved-providers] summary');
+  assert.equal(x.d.querySelector('[data-provider-keys]'),null,'no Get a key before a preset that has a keys page');
+  const preset=x.d.querySelector('#saved_provider_preset');
+  preset.value='ollamacloud';preset.dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  assert.equal(x.d.querySelector('#saved_provider_url').value,'https://ollama.com');
+  assert.equal(x.d.querySelector('#saved_provider_mode').value,'ollama','never guessed');
+  const keys=x.d.querySelector('[data-provider-keys]');
+  assert.equal(keys?.textContent,'Get a key');
+  assert.match(keys.closest('.field').textContent,/opens ollama\.com: create one there and paste it here/);
+  keys.click();
+  assert.deepEqual(JSON.parse(JSON.stringify(x.sent.at(-1))),{type:'openProviderKeys',id:'ollamacloud'});
+  x.input('#saved_provider_key','pasted-key');
+  x.click('#saved-provider-add');
+  const added=x.sent.at(-1);
+  assert.deepEqual([added.type,added.profile.base_url,added.profile.api_mode,added.profile.api_key,added.profile.preset],
+    ['addProviderProfile','https://ollama.com','ollama','pasted-key','ollamacloud']);
+  x.message({type:'providerProfiles',saved:true,profiles:[{id:'provider_'+'c'.repeat(32),kind:'native',name:'Ollama Cloud',base_url:'https://ollama.com',model:'',api_mode:'ollama'}],
+    defaultId:'',note:'Saved. Settings › Web search › Ollama uses this key too.'});
+  assert.match(x.d.querySelector('#saved-provider-status').textContent,/Web search › Ollama uses this key too/);
+});
+
 test('saved provider list hides already added presets and changes the default explicitly',()=>{
   const x=setup();
   x.message({type:'providers',providers:[{id:'ollama',label:'Ollama',url:'http://127.0.0.1:11434/v1'},

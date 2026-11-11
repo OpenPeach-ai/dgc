@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Ollama Cloud** is one of the providers in Settings › Models › + Add provider: Ollama's cloud models with no Ollama installed. **Get a key** opens ollama.com's API keys page; paste the key once and DGC checks it before saving (ollama.com lists its models to anyone, so the key is checked on its own, at no cost). A key it refuses is said at once in plain words and nothing is saved. If Ollama's web search has no key of its own, it uses this one.
 - A Work session's context meter shows no percentage until the model has answered once: on a model DGC can't reach it showed a number about nothing.
 - Settings has a **Dev Mode** page, last in its menu, for people experimenting on a big machine. Its one switch is off by default. On, DGC's capacity limits are yours to set: how many things run at once, and how many are kept. Safety limits never move: the sandbox, redaction, approvals and what a Pip may do stay as they are.
 - Turning Dev Mode on shows a plain warning once, saying what it does and that each raised limit costs memory, disk or model load. "Got it" puts it away for good in this editor.

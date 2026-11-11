@@ -3504,3 +3504,72 @@ test("A session on Claude Code's own default model is named Claude Code: its rea
   world.provider.syncActiveRouteState();
   assert.equal(world.provider.state.model, "Codex · gpt-5.6-sol", "a CLI that names its default keeps the name");
 });
+
+// ---- Connect Ollama Cloud (0.52): Settings → Models → + Add provider → Ollama Cloud. One key, pasted once: checked on
+// the spot (ollama.com lists its models to anyone, so DGC checks the key itself, dgc/llm.py check_hosted_ollama_key),
+// and Ollama's web search gets it too when it has no key of its own.
+const OLLAMA_CLOUD = { name: "Ollama Cloud", base_url: "https://ollama.com", model: "", api_mode: "ollama" };
+function ollamaCloudWorld(searchSaved = []) {
+  const world = allModelsWorld({ listed: ["deepseek-v4.1-flash", "glm-5.3", "gpt-oss:120b"] });
+  const posted = [];
+  world.provider.settingsEditor = { webview: { postMessage: (m) => posted.push(m) } };
+  world.provider.lastReadyEvent.capabilities.search_keys = { providers: ["brave", "tavily", "ollama"], saved: searchSaved };
+  return { ...world, posted, world };
+}
+
+test("Ollama Cloud is one of the providers to add: ollama.com, a key needed, its keys page one click away", async () => {
+  const x = ollamaCloudWorld();
+  x.provider.refreshEditorSettings();
+  const row = x.posted.find((m) => m.type === "providers").providers.find((p) => p.id === "ollamacloud");
+  assert.deepEqual(row, { id: "ollamacloud", label: "Ollama Cloud", url: "https://ollama.com", needsKey: true, keys: true });
+  const opened = [];
+  globalThis.__DGC_TEST_VSCODE.Uri.parse = (s) => ({ toString: () => s });
+  globalThis.__DGC_TEST_VSCODE.env.openExternal = async (uri) => { opened.push(uri.toString()); return true; };
+  await x.provider.onSettingsMessage({ type: "openProviderKeys", id: "ollamacloud" });
+  await x.provider.onSettingsMessage({ type: "openProviderKeys", id: "openai", url: "https://evil.invalid" });
+  assert.deepEqual(opened, ["https://ollama.com/settings/keys"], "only a preset's own keys page, never a URL from the page");
+});
+
+test("Ollama Cloud: a key ollama.com refuses says so at once, in plain words, and nothing is saved", async () => {
+  const x = ollamaCloudWorld();
+  x.world.fail = "it refused the API key (HTTP 401)";
+  await x.provider.onSettingsMessage({ type: "addProviderProfile", profile: { ...OLLAMA_CLOUD, preset: "ollamacloud", api_key: "wrong-key" } });
+  const error = x.posted.filter((m) => m.type === "providerProfileError").at(-1);
+  assert.match(error?.message || "", /^ollama\.com didn't accept that API key\./);
+  assert.match(error.message, /ollama\.com → Settings → API keys/);
+  assert.match(error.message, /Nothing was saved\.$/);
+  const { listProfiles } = await providerProfiles();
+  assert.deepEqual(listProfiles(x.provider.context), []);
+  const asked = x.seen.filter((c) => c.type === "list_models_at");
+  assert.deepEqual(asked.map((c) => [c.base_url, c.api_key, c.api_mode]), [["https://ollama.com", "wrong-key", "ollama"]]);
+  assert.equal(x.seen.filter((c) => c.type === "set_config").length, 0, "web search gets nothing either");
+  x.world.fail = "nothing answered at that address";
+  await x.provider.onSettingsMessage({ type: "addProviderProfile", profile: { ...OLLAMA_CLOUD, preset: "ollamacloud", api_key: "any" } });
+  assert.match(x.posted.filter((m) => m.type === "providerProfileError").at(-1).message,
+               /^DGC couldn't check the key with ollama\.com \(nothing answered at that address\)\. Nothing was saved\.$/);
+  assert.deepEqual(listProfiles(x.provider.context), []);
+});
+
+test("Ollama Cloud: a key it takes is saved, and Ollama's web search uses it when it has no key of its own", async () => {
+  const x = ollamaCloudWorld([]);
+  await x.provider.onSettingsMessage({ type: "addProviderProfile", profile: { ...OLLAMA_CLOUD, preset: "ollamacloud", api_key: "good-key" } });
+  assert.equal(x.posted.filter((m) => m.type === "providerProfileError").length, 0, JSON.stringify(x.posted.at(-1)));
+  const { listProfiles } = await providerProfiles();
+  assert.deepEqual(listProfiles(x.provider.context).map((r) => [r.name, r.base_url, r.api_mode]), [["Ollama Cloud", "https://ollama.com", "ollama"]]);
+  const sets = x.seen.filter((c) => c.type === "set_config");
+  assert.deepEqual(sets.map((c) => c.values), [{ search_api_key_ollama: "good-key" }]);
+  assert.match(x.posted.filter((m) => m.type === "providerProfiles").at(-1).note || "", /Web search › Ollama uses this key too/);
+  // Ollama's web search with a key of its own keeps it.
+  const y = ollamaCloudWorld(["ollama"]);
+  await y.provider.onSettingsMessage({ type: "addProviderProfile", profile: { ...OLLAMA_CLOUD, preset: "ollamacloud", api_key: "good-key" } });
+  assert.equal(y.seen.filter((c) => c.type === "set_config").length, 0);
+});
+
+test("another host is saved as before: no key check, nothing for web search", async () => {
+  const x = ollamaCloudWorld([]);
+  x.world.fail = "it refused the API key (HTTP 401)";
+  await x.provider.onSettingsMessage({ type: "addProviderProfile", profile: { name: "OpenAI", base_url: "https://api.example.test/v1", model: "gpt-a", api_mode: "auto", api_key: "key" } });
+  const { listProfiles } = await providerProfiles();
+  assert.equal(listProfiles(x.provider.context).length, 1);
+  assert.equal(x.seen.filter((c) => c.type === "set_config").length, 0);
+});
