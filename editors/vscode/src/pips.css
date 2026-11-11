@@ -950,6 +950,8 @@ button:is(:not([class]),[class=""]):not([data-tab]):not([data-run]):not(.dgc-men
 .pip-face-edit:disabled { opacity: .55; cursor: default; }
 .pip-face-edit svg { vertical-align: -2px; margin-right: 3px; }
 button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
+/* (The home's menu opens under its "…" and New beside it: with New at its fixed size, it hangs from New's right edge.) */
+.simple-home-actions .pip-menu .tabs-menu { right: calc(-1 * (var(--btn-w) + 8px)); }
 @media (forced-colors: active) {
   button:is(:not([class]),[class=""]):not([data-tab]):not([data-run]):not(.dgc-menu *), button.quiet, button.danger, button.pill { border-color: CanvasText; }
   button.primary { forced-color-adjust: none; border-color: ButtonText; background: ButtonText; color: ButtonFace; }

@@ -2,6 +2,7 @@ import { APP_CONNECTORS, ownAppRedirect } from './appConnectors';
 // One set of tokens for every page, first, so each page's own stylesheet can lean on it (media/shared/tokens.css).
 import '../media/shared/tokens.css';
 import './settings.css';
+import {watchButtons} from './buttonFit.js';
 import zapierLogo from '../media/plugin-logos/zapier.ico';
 import makeLogo from '../media/plugin-logos/make.ico';
 import n8nLogo from '../media/plugin-logos/n8n.ico';
@@ -1734,3 +1735,6 @@ render();
 send({ type: 'ready' });
 
 document.addEventListener('pointerdown', event => { if (!event.target.closest('.add-wrap')) { const menu=$('add-options'); if (menu) menu.hidden=true; $('add-menu')?.setAttribute('aria-expanded','false'); } });
+
+// Every button is one box whatever its words; a long action takes the one wide size (src/buttonFit.js).
+if (typeof document !== 'undefined' && document.body) watchButtons(document.body, '.save, .install, .secondary, .fbtn', window);

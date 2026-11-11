@@ -45,7 +45,7 @@ for (const theme of ["dark", "light"]) for (const width of [300, 500, 900, 1400]
       const group = await look(x.page, ".group .rows");
       assert.equal(group.corner, "20px", "a group's card");
       const save = await look(x.page, "#save");
-      assert.deepEqual([save.fill, save.words, save.corner], [token["--solid"], token["--on-solid"], "9999px"], "Save: the text colour, filled, a pill");
+      assert.deepEqual([save.fill, save.words, save.corner], [token["--solid"], token["--on-solid"], "6px"], "Save: the text colour, filled, DGC's one button (a 6 px corner since 11 Nov; it was a pill)");
       assert.equal((await look(x.page, ".switch.on")).fill, token["--accent-fill"], "a switch that is on stays purple");
       const sideways = await x.page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1 || document.querySelector("main").scrollWidth > document.querySelector("main").clientWidth + 1);
       assert.equal(sideways, false, "no sideways scroll");
