@@ -209,7 +209,7 @@ test("100 Pips, 17 waiting and 20 with news: eight cards of each and a line for 
     assert.equal(m.home, "37", "Home's number counts every one of them");
     // Before the cap a list of all 37 was two screens long before anything else: sixteen cards at most until you ask.
     assert.equal(m.all, 16);
-    assert.ok(m.tabsBottom <= 60, `the tabs stay at the top: ${m.tabsBottom}px`);
+    assert.ok(m.tabsBottom <= 84, `the tabs stay at the top, under the header row: ${m.tabsBottom}px`);
     await page.click('#home-hub .dgc-hub-group[data-group="needs"] .dgc-hub-rest');
     assert.equal(await page.evaluate(() => document.querySelectorAll('#home-hub .dgc-hub-group[data-group="needs"] .dgc-hub-card').length), 17, "Show 9 more: all seventeen");
     assert.equal(await page.evaluate(() => `${document.activeElement.closest(".dgc-hub-card")?.dataset.key}`), `pip:${longId(49)}`, "and the keyboard is on the first of the nine");

@@ -1,6 +1,6 @@
 // The side bar's tabs and Home, the hub (media/shared/tabs.css, media/shared/hub.js and hub.css, media/main.js), measured
 // in real Chromium on the side bar's real page (support/home-scene.mjs and dock-scene.mjs). What is held here:
-//   - one centred tab bar at the top: Home, Work, Chat, Pips, as names only; it replaces the header row and the Pips block
+//   - one centred tab bar at the top, under the header row: Home, Work, Chat, Pips, as names only; it replaces the header's Pips button and the Pips block
 //   - pointing at a tab lights it in the accent and turns its name over; the tab you are on is lit too; one colour for all
 //   - the keyboard: Left and Right move and choose (wrapping), Home and End jump, and the bar is one tab stop
 //   - the four names fit at 240 px; under 200 px Home's number is a dot, and they still fit at 170 px
@@ -79,8 +79,10 @@ for (const width of [300, 700]) {
       assert.deepEqual(chosen(bar), ["home"], "it opens on Home");
       assert.ok(Math.abs((bar.bar.left + bar.bar.right) / 2 - width / 2) < 0.6, `the bar is centred (${bar.bar.left} to ${bar.bar.right} of ${width})`);
       assert.ok(bar.bar.left >= 11.5 && bar.bar.right <= width - 11.5, "it keeps the side bar's 12 px gutter");
-      assert.ok(bar.nav.top < 1 && bar.bar.top <= 12, `it is the first thing in the side bar (${bar.bar.top})`);
-      assert.equal(bar.header, false, "the header row it replaces (the mark and the Pips button) is gone");
+      // (The header row with DGC's wordmark is above it again, alone: side-top-header.test.mjs.)
+      assert.ok(bar.nav.top <= 36 && bar.bar.top <= 40, `it is right under the header row (${bar.bar.top})`);
+      assert.equal(bar.header, true, "the header row is above it");
+      assert.deepEqual(await x.page.evaluate(() => [...document.querySelectorAll("#phead button")].filter((b) => b.checkVisibility()).map((b) => b.id)), [], "the Pips button it replaced is not in the header");
       const widths = bar.tabs.map((x) => Math.round(x.width));
       assert.ok(Math.max(...widths) - Math.min(...widths) <= 1, `the four tabs are one width (${widths})`);
       assert.ok(bar.tabs.every((x) => !x.clipped), "no name is cut");

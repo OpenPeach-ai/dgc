@@ -98,9 +98,13 @@ body.pips-active #phead .pm { display:inline-flex; flex:1; }
 body.sessions-active > :not(#phead):not(#side-tabs):not(#sessions-host):not(#announcer):not(#hover-tip):not(#dgc-dock):not(.dgc-pop):not(script) { display:none !important; }
 body.sessions-active #phead :is(.thread-title,.pd,.chat-add,.agent-back,.agent-mark) { display:none !important; }
 body.sessions-active #phead .pm { display:inline-flex; flex:1; }
-/* The side bar has its tabs for a top (media/shared/tabs.css): Home, Work, Chat, Pips. The header row they replace (the
-   mark, the Pips button, Pips' "back") is not drawn there; the view's own title above already says DGC. */
-html[data-chat-place="home"] #phead { display:none !important; }
+/* The side bar's top: the header row with DGC's wordmark (its slashes breathing), then the tabs (media/shared/tabs.css):
+   Home, Work, Chat, Pips. The header holds the wordmark alone there: the buttons it once had are the tab bar's (Pips is
+   a tab, and the tabs are Pips' way back), so nothing is offered twice. The tab bar sits close under it. */
+html[data-chat-place="home"] #phead { min-height: 34px; padding-bottom: 0; }
+html[data-chat-place="home"] #phead :is(button, .agent-mark) { display:none !important; }
+html[data-chat-place="home"] #phead .pm { display:inline-flex; flex:1; }
+html[data-chat-place="home"] #side-tabs { padding-top: 4px; }
 /* A session's own tab: its Pips stay in the side bar, and a chat in another folder is a side bar thing. */
 html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:none !important; }
 /* One 12px gutter (0.52): every block's words, boxes and icons start 12px in and end 12px from the other side. A row's
