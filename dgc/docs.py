@@ -2662,6 +2662,12 @@ three preferences, facts, decisions or outcomes, by the same rules. The chat sho
 **Remembered: … · Forget**. **Settings → Memory → History** lists every change, who made it and
 when, with **Undo**. Memory off means it never looks.
 
+**Lessons.** When you correct how a Work session works in a project ("run the tests from the root, imports break
+elsewhere"), it keeps one short lesson for that project, with the reason and how to apply it, in your words. Every
+later session in that project reads its lessons first, so a correction sticks. ChatDGC and Pips never read them. They
+are in **Settings → Memory** with the rest, to edit or delete; a lesson is kept only when it comes from what you said,
+never from a file or a page, and turning memory off turns lessons off.
+
 **/learn** (or `/learn what`) turns what was just done into a skill: DGC drafts a SKILL.md from
 the session and shows it with **Save**, **Edit** and **Cancel**. Nothing is written until you
 save; it goes to the project's `.dgc/skills` when the folder is trusted, otherwise to

@@ -36,7 +36,11 @@ MAX_PROJECTS = 12
 VERSION = 1
 FACT_ID = re.compile(r"^mem_[0-9a-f]{12}$")
 SURFACES = ("chat", "work", "pip", "settings")
-KINDS = ("preference", "fact", "decision", "outcome")
+KINDS = ("preference", "fact", "decision", "outcome", "lesson")
+# A lesson (0.52, work-lessons-memory): how to work in ONE project, from the user's correction, with why and how to apply
+# it. Kept with that project's folder; only a Work session there reads it (never ChatDGC's or a Pip's prompt).
+MAX_LESSON_CHARS = 500
+MAX_PROMPT_LESSONS_CHARS = 4000
 # Who made a change: you (Settings, Forget under a reply, a Pip's page), the review after a conversation
 # (memory_review.py), or a tool (remember and forget in a chat, Work or a Pip, ChatDGC's check before a reply).
 BY = ("you", "review", "tool")
@@ -102,13 +106,13 @@ def grounded(fact: str, said: str) -> bool:
     return supported(fact, said)
 
 
-def clean(text: str) -> str:
+def clean(text: str, most: int = MAX_FACT_CHARS) -> str:
     """A fact as kept: one line, trimmed, refused when it's a secret or too long."""
     text = " ".join(str(text or "").split()).strip(" -•*")
     if not text:
         raise NotRemembered("Say what to remember.")
-    if len(text) > MAX_FACT_CHARS:
-        raise NotRemembered(f"Keep a memory to one short fact (up to {MAX_FACT_CHARS} characters).")
+    if len(text) > most:
+        raise NotRemembered(f"Keep a memory to one short fact (up to {most} characters).")
     from .redaction import contains_secret
     if contains_secret(text) or _SECRET_WORDS.search(text) or _LONG_NUMBER.search(text):
         raise NotRemembered("That looks like a password, a key or an account number: DGC doesn't remember those.")
@@ -182,18 +186,25 @@ class SharedMemory:
         return self._read()["facts"]
 
     def live_facts(self, on: str | None = None) -> list[dict]:
-        """What a prompt reads: every fact but those whose day has passed."""
-        return live(self.facts(), on)
+        """What a prompt reads about the user: every fact but those whose day has passed, and never a project's
+        lessons (lessons() reads those, for a Work session in that project)."""
+        return [f for f in live(self.facts(), on) if f.get("kind") != "lesson"]
+
+    def lessons(self, project, on: str | None = None) -> list[dict]:
+        """The lessons kept for this project's folder, oldest first."""
+        folder = str(project or "")
+        return [f for f in live(self.facts(), on) if f.get("kind") == "lesson" and folder and f.get("project") == folder]
 
     def hidden_projects(self) -> set[str]:
         return set(self._read()["hidden_projects"])
 
     # -- writing
 
-    def _keep(self, text: str, source: dict, *, kind: str | None = None, until: str | None = None) -> dict:
+    def _keep(self, text: str, source: dict, *, kind: str | None = None, until: str | None = None,
+              project: str | None = None) -> dict:
         with self._locked():
             data = self._read()
-            same = next((f for f in data["facts"] if _same(f["text"], text)), None)
+            same = next((f for f in data["facts"] if _same(f["text"], text) and f.get("project") == project), None)
             if same is not None:
                 if expired(same):
                     # Said again after its day passed: true again, until the new day (or for good).
@@ -209,6 +220,8 @@ class SharedMemory:
                     "source": source}
             if kind in KINDS:
                 fact["kind"] = kind
+            if project:
+                fact["project"] = project
             until = until_date(until)
             if until:
                 fact["until"] = until
@@ -234,6 +247,19 @@ class SharedMemory:
             source["run"] = str(run)[:100]
         return self._keep(text, source, kind=kind, until=until)
 
+    def keep_lesson(self, text: str, *, said: str, project, where: str = "", by: str = "tool") -> dict:
+        """A lesson about working in one project (work-lessons-memory): kept only when it comes from what the user
+        said, as a fact is, so a page, a file or a tool's output can't plant one."""
+        text = clean(text, MAX_LESSON_CHARS)
+        folder = str(project or "")
+        if not folder:
+            raise NotRemembered("A lesson belongs to a project: open one first.")
+        if not grounded(text, said):
+            raise NotRemembered("Not kept: a lesson must come from what you said.")
+        source = {"surface": "work", "where": str(where)[:200], "said": " ".join(str(said).split())[-300:],
+                  "by": by if by in BY else "tool"}
+        return self._keep(text, source, kind="lesson", project=folder[:4096])
+
     def from_pip(self, pip_id: str) -> list[dict]:
         """The facts a Pip kept, newest first."""
         return [f for f in reversed(self.facts()) if isinstance(f.get("source"), dict) and f["source"].get("pip") == pip_id]
@@ -243,12 +269,12 @@ class SharedMemory:
         return self._keep(clean(text), {"surface": "settings", "where": "", "said": "", "by": by if by in BY else "you"})
 
     def edit(self, fact_id: str, text: str, *, by: str = "you") -> dict:
-        text = clean(text)
         with self._locked():
             data = self._read()
             fact = next((f for f in data["facts"] if f["id"] == fact_id), None)
             if fact is None:
                 raise NotRemembered("That memory is already gone.")
+            text = clean(text, MAX_LESSON_CHARS if fact.get("kind") == "lesson" else MAX_FACT_CHARS)
             before = fact["text"]
             if before == text:
                 return fact
@@ -473,6 +499,8 @@ def _shown(row: dict, undone: bool, facts: dict) -> dict:
         shown["before"] = str(row.get("before") or "")[:400]
     if fact.get("kind") in KINDS:
         shown["kind"] = fact["kind"]
+    if fact.get("project"):
+        shown["project"] = str(fact["project"])[:4096]      # a lesson's project folder
     if fact.get("until"):
         shown["until"] = str(fact["until"])[:10]
     if op == "learn":

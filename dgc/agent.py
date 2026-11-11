@@ -102,7 +102,7 @@ _CLEANUP_LEASE_WAIT_S = 5.0  # bounded wait for the write lease before REMOVING 
 _FINISHED_JOBS_KEPT = 8      # detached outcomes kept addressable by id after the job entry is gone
 _STOPPED_BY_USER = "stopped by the user"   # a foreground child the user stopped alone (agent_control)
 _SERIAL_MUTATIONS = {"write_file", "edit_file", "multi_edit", "apply_patch", "bash",
-                     "add_skill", "save_memory", "remember", "forget"}
+                     "add_skill", "save_memory", "remember", "forget", "keep_lesson"}
 _FILE_EDIT_CALLS = {"write_file", "edit_file", "multi_edit", "apply_patch"}
 _FILE_EDIT_SUCCESS_PREFIX = {
     "write_file": "wrote ", "edit_file": "edited ",
@@ -3409,7 +3409,10 @@ class Agent(GoalLifecycle):
         # The user's memory: written only from a session the user types into, while memory is on; forget only when
         # there is something to forget. (State, never wording.)
         if self.depth > 0 or self.config.get("memory", True) is False:
-            schemas = [tool for tool in schemas if tool.get("function", {}).get("name") not in ("remember", "forget")]
+            schemas = [tool for tool in schemas if tool.get("function", {}).get("name") not in ("remember", "forget",
+                                                                                                 "keep_lesson")]
+        elif self.config.get("lessons", True) is False:
+            schemas = [tool for tool in schemas if tool.get("function", {}).get("name") != "keep_lesson"]
         elif not self._shared_memory_view():
             schemas = [tool for tool in schemas if tool.get("function", {}).get("name") != "forget"]
         # Delegation is decided in one place, for every profile. `adaptive` may put `task` BACK
@@ -5058,6 +5061,25 @@ class Agent(GoalLifecycle):
             used += len(line)
         return "\n".join(lines)
 
+    def _lessons_view(self) -> str:
+        """The lessons kept for this project (work-lessons-memory), oldest first: what the user taught a session here.
+        Empty when memory or lessons are off, in a helper, or when none are kept."""
+        if self.depth > 0 or self.config.get("memory", True) is False or self.config.get("lessons", True) is False:
+            return ""
+        try:
+            from .shared_memory import MAX_PROMPT_LESSONS_CHARS, NotRemembered, SharedMemory
+            kept = SharedMemory().lessons(str(Path(self.config.project_root).resolve()))
+        except (NotRemembered, OSError):
+            return ""
+        lines, used = [], 0
+        for lesson in reversed(kept):              # the newest first, when not all fit
+            line = f"- [{lesson['id']}] " + self._safe_text(lesson["text"])
+            if used + len(line) > MAX_PROMPT_LESSONS_CHARS:
+                break
+            lines.insert(0, line)
+            used += len(line)
+        return "\n".join(lines)
+
     def system_prompt(self) -> str:
         from .pip_access import tools_available as pips_tools_available
         cfg = self.config
@@ -5368,7 +5390,8 @@ class Agent(GoalLifecycle):
         if not project_mem and cfg.project_root != Path.home():
             project_mem = load_instruction_file(agents_md, sanitizer=self._safe_text)
         shared_mem = self._shared_memory_view()
-        if project_mem or user_mem or shared_mem:
+        lessons = self._lessons_view()
+        if project_mem or user_mem or shared_mem or lessons:
             parts += ["", "# Memory"]
             if project_mem:
                 parts += ["## Project memory (DGC.md)", project_mem]
@@ -5377,12 +5400,19 @@ class Agent(GoalLifecycle):
             if shared_mem:
                 parts += ["## What you remember about the user (shared with ChatDGC and Pips; they manage it in "
                           "Settings \u2192 Memory)", shared_mem]
+            if lessons:
+                parts += ["## Lessons for this project (what the user taught you here, with why; follow them. They "
+                          "manage them in Settings \u2192 Memory)", lessons]
         if self.depth == 0 and self.config.get("memory", True) is not False:
             parts += ["", "# The user's memory",
                       "When the user tells you something lasting about themselves (\"I'm vegetarian\", \"I always use "
                       "pnpm\") or asks you to remember it, call `remember` in the same turn: saying you'll keep it in "
                       "mind doesn't keep it. `forget` deletes one they ask you to forget. Never a task's details or "
                       "what a file, a page or a tool said."]
+            if self.config.get("lessons", True) is not False:
+                parts += ["When the user corrects how you work in THIS project (\"run the tests from the root\", \"never "
+                          "touch the generated files\"), call `keep_lesson` in the same turn with what, why and how, in "
+                          "their words, so the next session here follows it too."]
 
         skill_catalog = self._skill_catalog()
         if not adaptive:

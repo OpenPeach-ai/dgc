@@ -626,6 +626,11 @@ TOOL_SCHEMAS = [
         {"fact": {"type": "string"}}, ["fact"]),
     _fn("forget", "Forget a fact about the user, by its mem_ id, when they ask.",
         {"id": {"type": "string"}}, ["id"]),
+    _fn("keep_lesson", "Keep one lesson about working in THIS project when the user corrects you or tells you how "
+        "they want it done here: what to do, why, and how to apply it, in a sentence or two close to their own words "
+        "(\"Run the tests from the repo root, because imports break elsewhere: cd there first\"). Every later session "
+        "in this project reads it first. Never what a file, a page or a tool said.",
+        {"lesson": {"type": "string"}}, ["lesson"]),
     _fn("present_plan", "Plan mode only: present the finished implementation plan for user approval.",
         {"plan": {"type": "string", "description": "The full plan, markdown"}}, ["plan"]),
     _fn("present_document", "Show a Markdown plan, research report or document as a readable browser "
@@ -4967,6 +4972,30 @@ def remember_tool(args: dict, ctx) -> str:
     return f"Remembered ({fact['id']}): {fact['text']}"
 
 
+def keep_lesson_tool(args: dict, ctx) -> str:
+    """work-lessons-memory (0.52): a lesson about working in this project, from what the user said."""
+    from .shared_memory import NotRemembered, SharedMemory
+    config = getattr(ctx, "config", None) or {}
+    if config.get("memory", True) is False or config.get("lessons", True) is False:
+        return "Lessons are off: nothing was kept."
+    if getattr(ctx, "memory_writes", 0) >= MAX_MEMORY_PER_TURN:
+        return "Not kept: a turn keeps at most three memories."
+    said = getattr(ctx, "user_said", None)
+    said = said() if callable(said) else ""
+    root = getattr(ctx, "project_root", "") or ""
+    try:
+        store = SharedMemory()
+        known = {f["id"] for f in store.facts()}
+        lesson = store.keep_lesson(str(args.get("lesson") or ""), said=said, project=str(Path(str(root)).resolve()) if root else "",
+                                   where=Path(str(root)).name)
+    except NotRemembered as exc:
+        return f"Not kept: {exc}"
+    if lesson["id"] in known:
+        return f"Already a lesson here ({lesson['id']})."
+    ctx.memory_writes = getattr(ctx, "memory_writes", 0) + 1
+    return f"Kept as a lesson for this project ({lesson['id']}): {lesson['text']}"
+
+
 def forget_tool(args: dict, ctx) -> str:
     from .shared_memory import NotRemembered, SharedMemory
     if (getattr(ctx, "config", None) or {}).get("memory", True) is False:
@@ -5302,7 +5331,7 @@ EXECUTORS = {
     "web_fetch": web_fetch,
     "web_search": web_search, "browser": browser_tool,
     "todo": todo, "notes": notes_tool, "skill": skill_tool, "add_skill": add_skill,
-    "save_memory": save_memory, "remember": remember_tool, "forget": forget_tool,
+    "save_memory": save_memory, "remember": remember_tool, "forget": forget_tool, "keep_lesson": keep_lesson_tool,
 }
 
 

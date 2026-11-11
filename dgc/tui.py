@@ -5145,7 +5145,7 @@ class TUI:
                   "code_intel": "Inspect code",
                   "grep": "Search", "glob": "Find", "web_search": "Search",
                   "web_fetch": "Fetch", "task": "Delegate", "todo": "Plan", "skill": "Load skill",
-                  "add_skill": "Install skill", "save_memory": "Save to DGC.md", "remember": "Remember", "forget": "Forget",
+                  "add_skill": "Install skill", "save_memory": "Save to DGC.md", "remember": "Remember", "forget": "Forget", "keep_lesson": "Keep lesson",
                   # The sub-agent supervision tools, in the editor card's own words.
                   "list_tasks": "Check sub-agents", "wait_tasks": "Wait for a sub-agent",
                   "message_task": "Message", "close_task": "Stop", "continue_task": "Continue"}
@@ -5158,7 +5158,7 @@ class TUI:
                  "repo_map": "Mapping repo", "code_intel": "Inspecting code",
                  "grep": "Searching", "glob": "Finding",
                  "web_search": "Searching", "web_fetch": "Fetching", "task": "Delegating", "todo": "Planning",
-                 "skill": "Loading skill", "add_skill": "Installing skill", "save_memory": "Saving to DGC.md", "remember": "Remembering", "forget": "Forgetting",
+                 "skill": "Loading skill", "add_skill": "Installing skill", "save_memory": "Saving to DGC.md", "remember": "Remembering", "keep_lesson": "Keeping a lesson", "forget": "Forgetting",
                  "view_image": "Viewing image",
                  "list_tasks": "Checking sub-agents", "wait_tasks": "Waiting for a sub-agent",
                  # The agent follows as the summary: "Sending message to Write the parser".
@@ -5170,7 +5170,7 @@ class TUI:
                 "code_intel": "Inspected code",
                 "grep": "Searched", "glob": "Found", "web_search": "Searched",
                 "web_fetch": "Fetched", "task": "Delegated", "todo": "Planned", "skill": "Loaded skill",
-                "add_skill": "Installed skill", "save_memory": "Saved to DGC.md", "remember": "Remembered", "forget": "Forgot",
+                "add_skill": "Installed skill", "save_memory": "Saved to DGC.md", "remember": "Remembered", "keep_lesson": "Kept a lesson", "forget": "Forgot",
                 "view_image": "Viewed image",
                 "list_tasks": "Checked sub-agents", "wait_tasks": "Waited for a sub-agent",
                 "message_task": "Sent message to", "close_task": "Stopped", "continue_task": "Continued"}
