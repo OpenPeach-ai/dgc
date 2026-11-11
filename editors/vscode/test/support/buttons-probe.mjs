@@ -25,7 +25,7 @@ export const probe = ({ root = "body", buttons = "button", cards = "", shadow = 
     const filled = fill[3] > 0.9, kind = filled && rgb(s.backgroundColor) === tokens.fill ? "filled" : fill[3] === 0 && parseFloat(s.borderTopWidth) === 1 && line[3] > 0 ? "outline" : fill[3] === 0 && (parseFloat(s.borderTopWidth) === 0 || line[3] === 0) ? "link" : "other";
     const card = cards ? b.closest(cards) : null;
     return { word: (b.textContent || b.getAttribute("aria-label") || "").trim().replace(/\s+/g, " ").slice(0, 40), cls: String(b.className).slice(0, 60), kind, off: b.disabled === true, height: Math.round(r.height * 10) / 10, radius: s.borderTopLeftRadius,
-      width: Math.round(r.width * 10) / 10, left: Math.round(r.left * 10) / 10, right: Math.round(r.right * 10) / 10, top: Math.round(r.top), cut: b.scrollWidth > b.clientWidth + 1, lines: Math.round(r.height) > Math.round(parseFloat(s.height)) + 1 || s.whiteSpace !== "nowrap" ? 2 : 1,
+      width: Math.round(r.width * 10) / 10, left: Math.round(r.left * 10) / 10, right: Math.round(r.right * 10) / 10, top: Math.round(r.top), cut: b.scrollWidth > b.clientWidth + 1, titled: !!b.title && b.title.includes((b.textContent || "").trim().slice(0, 12)), lines: Math.round(r.height) > Math.round(parseFloat(s.height)) + 1 || s.whiteSpace !== "nowrap" ? 2 : 1,
       padding: [s.paddingLeft, s.paddingRight], fill: s.backgroundColor, line: s.borderTopColor, ink: rgb(s.color), label: ratio(s.color, filled ? over(fill, under) : under), edge: kind === "outline" ? ratio(s.borderTopColor, under) : null,
       moves: s.transitionProperty.includes("transform") || s.transitionProperty === "all", card: card ? (card.id || card.dataset.key || card.getAttribute("aria-label") || String(card.className)).slice(0, 60) + "#" + [...(host || doc).querySelectorAll(cards)].indexOf(card) : "" }; });
   return { tokens, buttons: list };
@@ -64,7 +64,7 @@ export function check(assert, found, { where, sizes = ["h", "hSm"], oneFilled = 
   const shared = new Map(); for (const b of odd) shared.set(b.card + "@" + b.top, [...(shared.get(b.card + "@" + b.top) || []), b]);
   const uneven = [...shared.values()].filter((row) => row.length < 2 || new Set(row.map((b) => Math.round(b.width))).size > 1 || row.some((b) => b.width > (small(b) ? tokens.wSm : tokens.w))).flat();
   assert.deepEqual(uneven.map((b) => `${b.word} ${b.width}`), [], `${where}: every button is the one box of its size (${tokens.w} or ${tokens.wSm} px wide; ${tokens.wWide} wide), or shares a narrow row equally`);
-  assert.deepEqual(boxed.filter((b) => b.cut || b.lines > 1).map((b) => b.word), [], `${where}: no label is cut or wrapped`);
+  assert.deepEqual(boxed.filter((b) => (b.cut && !b.titled) || b.lines > 1).map((b) => b.word), [], `${where}: no label is cut (but a name too long for the box, which its title says whole) or wrapped`);
   // Columns line up on both edges: buttons one over another in a card share their left and right.
   const cols = new Map(); for (const b of fixed) cols.set(b.card, [...(cols.get(b.card) || []), b]);
   const crooked = [...cols.entries()].filter(([card, list]) => card && list.length > 1 && new Set(list.map((b) => b.top)).size === list.length && (new Set(list.map((b) => b.left)).size > 1 || new Set(list.map((b) => b.right)).size > 1)).map(([card]) => card);

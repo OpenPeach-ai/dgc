@@ -24,7 +24,7 @@ export function eyesMarkup(state, {esc, busy = false, error = '', pipName = 'It'
     }
   }
   const switchTo = state.sees !== true && vision && canSwitch
-    ? `<button type="button" class="quiet pill" data-eyes-switch="${esc(state.vision_model)}"${off}>Switch to ${vision}</button>` : '';
+    ? `<button type="button" class="quiet pill" data-eyes-switch="${esc(state.vision_model)}" title="Switch to ${esc(state.vision_model)}"${off}>Switch to ${vision}</button>` : '';
   return `<section class="pip-page-group" aria-label="Seeing"><div class="pip-page-row static"><span class="row-words"><strong>Seeing${infoTip('pipEyesSays', 'Seeing', words)}</strong>`
     + `<small class="row-fact">${now}</small></span>${control}${switchTo}</div>`
     + (error ? `<p class="error" role="alert">${esc(error)}</p>` : '') + '</section>';

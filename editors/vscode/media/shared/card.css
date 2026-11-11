@@ -87,7 +87,7 @@
 @container (max-width: 380px) {
   .dgc-card .dgc-card-chips, .dgc-card .dgc-card-actions, .dgc-card .dgc-card-details, .dgc-card .dgc-card-note, .dgc-card .dgc-card-error,
   .dgc-card:has(.dgc-card-face) :is(.dgc-card-chips, .dgc-card-actions, .dgc-card-details, .dgc-card-note, .dgc-card-error) { margin-left: 0; }
-  .dgc-card .dgc-card-actions .dgc-card-btn, .dgc-card .dgc-card-actions > button:not(.dgc-card-link) { flex: 1 1 0; min-width: 0; padding: 0 8px; overflow: hidden; text-overflow: ellipsis; }
+  .dgc-card .dgc-card-actions .dgc-card-btn, .dgc-card .dgc-card-actions > button:not(.dgc-card-link) { flex: 1 1 0; min-width: 0; max-width: var(--btn-w); padding: 0 4px; overflow: hidden; text-overflow: ellipsis; }   /* (a narrow row is shared equally, never past the button's own size) */
   .dgc-card .dgc-card-actions .dgc-card-toggle { flex: 1 0 100%; margin: 0; text-align: left; }
 }
 @media (forced-colors: active) {

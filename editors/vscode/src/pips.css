@@ -919,6 +919,41 @@ button.pip-tip-btn svg{display:block;width:14px;height:14px}
 .key-card-form>.app-link-note,.key-card-form>.dgc-card-error{margin:0}
 .dgc-card.key-card .key-card-form>.dgc-card-actions{margin:6px 0 0}
 @container(max-width:380px){.key-card-form{margin-left:0}}
+/* ---- DGC's one button, on the Pips pages (the definition: media/shared/tokens.css, "The button"). A Pip's pages draw
+   their buttons with a few words, and each is put on the shared button here: the main action of a form, a dialog or a
+   card (button.primary) is the one filled button; every other button (a plain one, button.quiet, button.danger) is
+   the hairline outline; button.link is the text link. One box whatever its words; the few long actions (Review GitHub
+   reads…, Give it a computer…, Switch to a model that sees) take the one wide size. A card's answers in a Pip's chat
+   are the shared card's (media/shared/card.css).
+   Left as they are: a row that is itself a button (a Pip in the list, a settings row, a routine, a run in History, a menu's row), the tabs, the top
+   bar's round marks, the prompt box's tools and Send, a reply's choices, and the "i" beside a title. */
+button:is(:not([class]),[class=""]):not([data-tab]):not([data-run]):not(.dgc-menu *), button.primary, button.quiet, button.danger, button.pill { display: inline-block; flex: none; box-sizing: border-box; width: var(--btn-w); min-width: 0; max-width: 100%; height: var(--btn-h); min-height: 0; padding: 0 var(--btn-pad); border: 1px solid var(--btn-line); border-radius: var(--btn-r);
+  background: transparent; color: var(--btn-text); font-weight: var(--w-med, 500); line-height: calc(var(--btn-h) - 2px); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: none; transition: var(--btn-move); }
+button.wide, #github-form button[type=submit], #notify-form button[type=submit], #remove-github-reads, #give-computer, button[data-eyes-switch], button[data-login-share], #setup-in-chat, #model-form button[type=submit] { width: var(--btn-w-wide); }
+button:is(:not([class]),[class=""]):not([data-tab]):not([data-run]):not(.dgc-menu *):hover:not(:disabled), button.primary:hover:not(:disabled), button.quiet:hover:not(:disabled), button.danger:hover:not(:disabled), button.pill:hover:not(:disabled) { border-color: var(--btn-line-hover); background: var(--btn-wash); color: var(--btn-text); transform: var(--btn-up); transition-duration: var(--btn-in); }
+button:is(:not([class]),[class=""]):not([data-tab]):not([data-run]):not(.dgc-menu *):active:not(:disabled), button.primary:active:not(:disabled), button.quiet:active:not(:disabled), button.danger:active:not(:disabled), button.pill:active:not(:disabled) { transform: var(--btn-down); transition-duration: var(--btn-press); }
+button:is(:not([class]),[class=""]):not([data-tab]):not([data-run]):not(.dgc-menu *):focus-visible, button.primary:focus-visible, button.quiet:focus-visible, button.danger:focus-visible, button.pill:focus-visible { outline: var(--btn-ring); outline-offset: 2px; }
+button:is(:not([class]),[class=""]):not([data-tab]):not([data-run]):not(.dgc-menu *):disabled, button.primary:disabled, button.quiet:disabled, button.danger:disabled, button.pill:disabled { opacity: .55; cursor: default; }
+button.primary, button.primary:hover:not(:disabled) { border-color: transparent; background: var(--btn-fill); color: var(--btn-on-fill); }
+button.primary:hover:not(:disabled) { background: var(--btn-fill-hover); }
+button.link, button.link:is(:hover, :active):not(:disabled) { display: inline-block; flex: none; box-sizing: border-box; width: auto; min-width: 0; height: var(--btn-h); min-height: 0; padding: 0 5px; line-height: var(--btn-h); white-space: nowrap; border: 0; border-radius: var(--btn-r); background: transparent; color: var(--btn-text); transform: none;
+  font-weight: var(--w-reg, 400); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--btn-line-hover); box-shadow: none; }
+button.link:hover:not(:disabled) { text-decoration-color: currentColor; }
+button.link:focus-visible { outline: var(--btn-ring); outline-offset: 2px; }
+button.link:disabled { opacity: .55; cursor: default; }
+button:is(:not([class]),[class=""]):not([data-tab]):not([data-run]):not(.dgc-menu *), button.primary, button.quiet, button.danger, button.pill { font-size: var(--t-sm, 12px); }
+.pip-face-edit { display: inline-block; flex: none; box-sizing: border-box; width: var(--btn-w-sm); min-width: 0; max-width: 100%; height: var(--btn-h-sm); min-height: 0; padding: 0 var(--btn-pad-sm); border: 1px solid var(--btn-line); border-radius: var(--btn-r);
+  background: transparent; color: var(--btn-text); font-weight: var(--w-med, 500); line-height: calc(var(--btn-h-sm) - 2px); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: none; transition: var(--btn-move); }
+.pip-face-edit:hover:not(:disabled) { border-color: var(--btn-line-hover); background: var(--btn-wash); color: var(--btn-text); transform: var(--btn-up); transition-duration: var(--btn-in); }
+.pip-face-edit:active:not(:disabled) { transform: var(--btn-down); transition-duration: var(--btn-press); }
+.pip-face-edit:focus-visible { outline: var(--btn-ring); outline-offset: 2px; }
+.pip-face-edit:disabled { opacity: .55; cursor: default; }
+.pip-face-edit svg { vertical-align: -2px; margin-right: 3px; }
+button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
+@media (forced-colors: active) {
+  button:is(:not([class]),[class=""]):not([data-tab]):not([data-run]):not(.dgc-menu *), button.quiet, button.danger, button.pill { border-color: CanvasText; }
+  button.primary { forced-color-adjust: none; border-color: ButtonText; background: ButtonText; color: ButtonFace; }
+}
 /* ==== Pip chat design pass (0.52, asked 5 Nov): a Personal and a Project Pip's chat, calm, clear and physical. ====
    What it holds to, each measured in test/pip-chat-design-browser.test.mjs:
    - One column. Everything the Pip says starts at one left edge and is at most one measure wide (a reply, its choices);
