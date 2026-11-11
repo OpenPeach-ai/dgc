@@ -37,6 +37,13 @@ LIMITS = (
           "Each is a process DGC watches, across every chat.", "monitors.MAX_MONITORS_PROCESS"),
     Limit("pip_queue", 20, 20, "Pip runs waiting at once",
           "Each waiting run holds its inputs in the Pips registry until it starts.", "pips.max_queue"),
+    # How much one turn holds
+    Limit("tool_shell_output", 30000, 30000, "Shell output the model sees (characters)",
+          "Every character goes into the model's context: more tokens each turn.", "tools.MAX_BASH_OUT"),
+    Limit("tool_read_lines", 2000, 2000, "Lines one file read shows",
+          "More lines a read: more tokens each turn.", "tools.MAX_READ_LINES"),
+    Limit("tool_fetch_chars", 8000, 8000, "Characters a web fetch shows",
+          "More of each page: more tokens each turn, and more a page can say to the model.", "tools.MAX_FETCH_CHARS"),
     # How many are kept
     Limit("pip_routines", 10, 10, "Routines per Pip",
           "Each routine can start a run on its schedule: more model calls.", "pip_routines.max_routines"),

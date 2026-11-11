@@ -204,3 +204,23 @@ class DefaultsTests(unittest.TestCase):
                     import importlib
                     self.assertEqual(getattr(importlib.import_module("dgc." + where[0]), where[-1]), limit.default,
                                      "the table's default is the module's own")
+
+
+class ToolOutputTests(unittest.TestCase):
+    """How much one turn holds: what a shell command, a file read and a web fetch show the model."""
+    settings = WiredTests.settings
+
+    def test_shell_output_file_reads_and_fetches(self):
+        from dgc import tools
+        with self.settings(False, tool_shell_output=200000, tool_read_lines=20000, tool_fetch_chars=64000):
+            self.assertEqual((tools.max_bash_out(), tools.max_read_lines(), tools.max_fetch_chars()), (30000, 2000, 8000))
+        with self.settings(True, tool_shell_output=200000, tool_read_lines=20000, tool_fetch_chars=64000):
+            self.assertEqual((tools.max_bash_out(), tools.max_read_lines(), tools.max_fetch_chars()), (200000, 20000, 64000))
+
+    def test_a_fetch_shows_up_to_its_limit(self):
+        from dgc import tools
+        page = "word " * 10000
+        with self.settings(True, tool_fetch_chars=20000):
+            self.assertGreater(len(tools._fetched_text_for_model(page)), 19000)
+        with self.settings(False):
+            self.assertLess(len(tools._fetched_text_for_model(page)), 8100)
