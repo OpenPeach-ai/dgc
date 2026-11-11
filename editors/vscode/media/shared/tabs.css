@@ -1,4 +1,4 @@
-/* The tabs at the top of DGC's side bar: Home, Work, Chat, Pips, as names only, in one centred bar. A rounded bar on a
+/* The tabs at the top of DGC's side bar: Home, Work, Chat, Pips, as names only (Pips with the Core Pip's small face), in one centred bar. A rounded bar on a
    soft gradient of the side bar's own grey, with a hairline and a low shadow. Pointing at a tab lights it in DGC's
    purple, and so does the tab you are on: its name takes the accent's text tone and a soft radial glow sits behind it.
    The name turns over on the way: the front tips away about its foot and the same name rises from below, on a spring.
@@ -40,6 +40,11 @@
 .dgc-tab[aria-selected="true"] .dgc-tab-flip > span { font-weight: var(--w-semi); }
 .dgc-tab:hover .dgc-tab-front { transform: rotateX(-88deg); opacity: 0; }
 .dgc-tab:hover .dgc-tab-back { transform: rotateX(0deg); opacity: 1; }
+/* The Pips tab wears the Core Pip's face before its name (media/main.js draws it with the plush renderer): the height of
+   the word's line, always there, so choosing a tab moves nothing. Empty (no renderer), it takes no room. */
+.dgc-tab-face { flex: none; display: block; width: 16px; height: 16px; line-height: 0; pointer-events: none; }
+.dgc-tab-face:empty { display: none; }
+.dgc-tab-face > * { width: 100%; height: 100%; }
 /* Home's number: everything that waits or is new. The text colour, never the accent (as the dock's number). */
 .dgc-tab-count {
   flex: none; box-sizing: border-box; min-width: 16px; height: 16px; padding: 0 4.5px; border-radius: 8px; background: var(--text-strong); color: var(--bg);
@@ -56,6 +61,7 @@
   .dgc-tabs-bar { width: calc(100% - 2 * var(--sp-2)); }
   .dgc-tab { gap: 4px; padding: 0 3px; font-size: var(--t-xs); letter-spacing: 0; }
   .dgc-tab-count { min-width: 6px; width: 6px; height: 6px; padding: 0; border-radius: 50%; font-size: 0; }
+  .dgc-tab-face { width: 13px; height: 13px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .dgc-tab-flip > span, .dgc-tab-glow { transition: none; }

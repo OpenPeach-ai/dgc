@@ -75,7 +75,7 @@ for (const width of [300, 700]) {
       assert.equal(bar.shown, true, "the side bar has a tab bar");
       assert.equal(bar.role, "tablist");
       assert.deepEqual(names(bar), ["Home", "Work", "Chat", "Pips"], "four tabs, in this order");
-      assert.deepEqual(bar.tabs.map((x) => x.icons), [0, 0, 0, 0], "names only: no icon in any tab");
+      assert.deepEqual(bar.tabs.map((x) => x.icons), [0, 0, 0, 1], "names only: no icon in any tab but the Core Pip's face on Pips (side-tab-pips-face.test.mjs)");
       assert.deepEqual(chosen(bar), ["home"], "it opens on Home");
       assert.ok(Math.abs((bar.bar.left + bar.bar.right) / 2 - width / 2) < 0.6, `the bar is centred (${bar.bar.left} to ${bar.bar.right} of ${width})`);
       assert.ok(bar.bar.left >= 11.5 && bar.bar.right <= width - 11.5, "it keeps the side bar's 12 px gutter");

@@ -10894,6 +10894,10 @@ function permissionChoices(ev) {
       }
       face.innerHTML = plush.markup({ index: 0, name: "Core" }, "idle", "pips-nav-core", { includeStyles: false });
       plush.mount(face);
+      // The side bar's Pips tab wears the same face beside its name (the other tabs are names only): decoration, so
+      // the tab is still named "Pips". It breathes and blinks, and keeps still under reduced motion (the renderer's own).
+      const tabFace = document.querySelector("#side-tab-pips .dgc-tab-face");
+      if (tabFace) { tabFace.innerHTML = plush.markup({ index: 0, name: "Core" }, "idle", "side-tab-pips-core", { includeStyles: false }); plush.mount(tabFace); }
       plush.mount(log);   // the Pips' faces in the chat (report cards) breathe, blink and look at the pointer too
       plush.mount($("agent-map")); // a Pip fixing through a specialist appears beside that agent in the map
     } catch { face.replaceChildren(); }
