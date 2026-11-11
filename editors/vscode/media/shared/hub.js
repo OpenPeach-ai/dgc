@@ -29,6 +29,7 @@
    *     A card answered where it is also has `full` (the one line it must show whole to be answered here; `mono` for a
    *     command), `more` (a quiet third answer, the way to all of it) and `fallback` (its answers when that line or its
    *     sentence does not fit: it opens instead, with its chips as before).
+   *     Chips show only for what the sentence and the source line do not say, and only on a line the sentence leaves free.
    *   more: how many more need you than the cards show; partial: more Pips may have news than DGC named; notes: [{ text, retry? }] lines that say what went wrong
    */
   function create({ host, show, onShow, onAct, onClear, onMore, onPips, onRetry, onCount, onDraw } = {}) {
@@ -43,10 +44,13 @@
     function cardHtml(c) {
       const here = c.full !== undefined && !cuts.has(c.key);        // answered on the card
       const answers = [...((c.full !== undefined && !here ? c.fallback : c.actions) || []).filter(Boolean).slice(0, 2), here && c.more ? { ...c.more, primary: false, cls: "dgc-hub-open" } : null].filter(Boolean);
+      // A chip is shown only for what the card's own words do not already say.
+      const said = `${c.title} · ${c.from}`.toLowerCase(), word = (chip) => String((chip && typeof chip === "object" ? chip.label : chip) ?? "").trim();
+      const chips = here ? [] : (c.chips || []).filter((chip) => word(chip) && !said.includes(word(chip).toLowerCase()));
       return Card.html({ id: `hub-${c.key}`, cls: `dgc-card-thin dgc-hub-card${here ? " dgc-hub-answers" : ""}${here && c.mono ? " dgc-hub-mono" : ""}${c.held ? " dgc-hub-held" : ""}`,
-        label: c.label || `${c.from}: ${c.title}${here ? `: ${c.full}` : ""}`,
+        label: `${c.label || `${c.from}: ${c.title}`}${here ? `: ${c.full}` : chips.length ? `. ${chips.map(word).join(", ")}` : ""}`,
         attrs: { "data-key": c.key, "data-source": c.source, "data-group": c.group },
-        icon: { html: c.who?.html || "", face: true }, title: c.title, sub: c.from, chips: here ? [] : c.chips, note: here ? c.full : undefined,
+        icon: { html: c.who?.html || "", face: true }, title: c.title, sub: c.from, chips, note: here ? c.full : undefined,
         actions: answers.map((a) => ({ label: a.label, primary: !!a.primary, title: a.title, cls: a.cls, attrs: { "data-hub-act": a.id, ...(a.say ? { "aria-label": a.say } : {}) } })) });
     }
     /** The cards answered here whose line, or sentence, is cut where it is drawn. */
@@ -59,6 +63,18 @@
         if (line.scrollWidth > line.clientWidth + 0.5 || line.scrollHeight > line.clientHeight + 1 || title.scrollHeight > title.clientHeight + 1 || foot > card.getBoundingClientRect().bottom - 1) found.push(card.dataset.key);
       }
       return found;
+    }
+
+    /** A slim card has one line to spare under a one-line sentence: its chips show there and nowhere else, so they never
+        add a row. Words that are cut where they are drawn say themselves whole when pointed at. */
+    function tidy() {
+      for (const card of host.querySelectorAll(".dgc-hub-card")) {
+        const title = card.querySelector(".dgc-card-title"), sub = card.querySelector(".dgc-card-sub");
+        if (!title || !title.clientWidth) continue;       // not laid out (another tab is shown)
+        if (card.querySelector(".dgc-card-chips")) card.classList.toggle("dgc-hub-nochips", title.scrollHeight > parseFloat(view.getComputedStyle(title).lineHeight) * 1.5);
+        for (const n of [title, sub]) { if (!n) continue; if (n.scrollHeight > n.clientHeight + 1 || n.scrollWidth > n.clientWidth + 1) n.title = n.textContent; else n.removeAttribute("title"); }
+      }
+      Card.fit(host);
     }
 
     function draw(force = false) {
@@ -100,7 +116,7 @@
       render();
       const cut = cutNow();
       if (cut.length) { cuts = new Set(cut); render(); }
-      Card.fit(host);
+      tidy();
       onDraw?.(host);
       if (held) {
         const cards = [...host.querySelectorAll(".dgc-hub-card")];
@@ -172,7 +188,7 @@
     // A wider or narrower side bar shows more or less of a line: what is answered here is measured again.
     let width = host.clientWidth, sized = null;
     if (view.ResizeObserver) {
-      sized = new view.ResizeObserver(() => { const w = host.clientWidth; if (w === width) return; width = w; if (state.cards.some((c) => c.full !== undefined)) draw(true); });
+      sized = new view.ResizeObserver(() => { const w = host.clientWidth; if (w === width) return; width = w; if (state.cards.some((c) => c.full !== undefined)) draw(true); else tidy(); });
       sized.observe(host);
     }
     draw(true);

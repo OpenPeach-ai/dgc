@@ -236,10 +236,11 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
         const solid = (n) => { for (; n; n = n.parentElement) { const c = parse(getComputedStyle(n).backgroundColor); if (c.length < 4 || c[3] === 1) { if (c.length) return c; } } return [255, 255, 255]; };
         return [...document.querySelectorAll('#home-hub .dgc-hub-card[data-key^="page:"]')].map((card) => {
           const sheet = card.querySelector(".dgc-sheet"), tag = sheet.querySelector(".dgc-sheet-tag"), words = card.querySelector(".dgc-card-words"), chips = card.querySelector(".dgc-card-chips"), acts = card.querySelector(".dgc-card-actions");
-          const s = sheet.getBoundingClientRect(), g = tag.getBoundingClientRect(), w = words.getBoundingClientRect(), c = card.getBoundingClientRect(), under = (chips && !chips.hidden ? chips : acts).getBoundingClientRect();
+          // (A slim card is one row: the words, the chips and the answers all stand beside the sheet, none under it. The words' box has no box of its own now: the title's is measured.)
+          const s = sheet.getBoundingClientRect(), g = tag.getBoundingClientRect(), w = card.querySelector(".dgc-card-title").getBoundingClientRect(), c = card.getBoundingClientRect(), beside = (chips && chips.checkVisibility() ? chips : acts).getBoundingClientRect();
           const [a, b] = [lum(parse(getComputedStyle(tag).backgroundColor)), lum(solid(card))].sort((p, q) => q - p);
           return { kind: sheet.dataset.kind, ratio: Math.round(((a + 0.05) / (b + 0.05)) * 100) / 100, w: Math.round(s.width), h: Math.round(s.height),
-            inCard: s.left >= c.left && g.left >= c.left && s.top >= c.top, clearOfWords: Math.max(s.right, g.right) <= w.left, clearBelow: Math.max(s.bottom, g.bottom) <= under.top + 0.5,
+            inCard: s.left >= c.left && g.left >= c.left && s.top >= c.top, clearOfWords: Math.max(s.right, g.right) <= w.left, clearBelow: Math.max(s.right, g.right) <= beside.left + 0.5 && Math.max(s.bottom, g.bottom) <= c.bottom - 3,
             titleLines: Math.round(card.querySelector(".dgc-card-title").getBoundingClientRect().height / parseFloat(getComputedStyle(card.querySelector(".dgc-card-title")).lineHeight)) };
         });
       });

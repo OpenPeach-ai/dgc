@@ -193,7 +193,8 @@ export const hubNow = (page) => page.evaluate(() => {
   const card = (c) => ({ key: c.dataset.key, source: c.dataset.source, group: c.dataset.group, from: c.querySelector(".dgc-card-sub")?.textContent || "", title: c.querySelector(".dgc-card-title").textContent,
     who: c.querySelector(".dgc-card-icon .dgc-blob") ? `blob:${c.querySelector(".dgc-card-icon .dgc-blob").dataset.shape}` : c.querySelector(".dgc-card-icon .dgc-sheet") ? `sheet:${c.querySelector(".dgc-card-icon .dgc-sheet").dataset.kind}`
       : c.querySelector(".dgc-card-icon svg, .dgc-card-icon .dgc-plush") ? "face" : "",
-    chips: [...c.querySelectorAll(".dgc-chip:not([hidden])")].map((x) => x.textContent), actions: [...c.querySelectorAll(".dgc-card-btn")].map((b) => b.textContent + (b.classList.contains("primary") ? "*" : "")),
+    // chips: what the card holds (the ones not folded into "+N"); shownChips: the ones on screen (a slim card shows them only on a free line)
+    chips: [...c.querySelectorAll(".dgc-chip:not([hidden])")].map((x) => x.textContent), shownChips: [...c.querySelectorAll(".dgc-chip:not([hidden])")].filter((x) => x.checkVisibility()).map((x) => x.textContent), actions: [...c.querySelectorAll(".dgc-card-btn")].map((b) => b.textContent + (b.classList.contains("primary") ? "*" : "")),
     line: c.querySelector(".dgc-card-note")?.textContent ?? "", held: c.classList.contains("dgc-hub-held"),
     thin: c.classList.contains("dgc-card-thin"), shared: c.classList.contains("dgc-card"), radius: getComputedStyle(c).borderRadius, ground: getComputedStyle(c).backgroundColor, ...rect(c) });
   return { shown: hub.checkVisibility(), show: show ? { value: show.querySelector(".dgc-hub-show-v").textContent, expanded: show.getAttribute("aria-expanded"), label: show.getAttribute("aria-label"), ...rect(show) } : null,

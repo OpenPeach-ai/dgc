@@ -103,8 +103,8 @@ for (const theme of THEMES) {
         assert.deepEqual(rest.purple, [], `${tab}: nothing on the page is filled purple`);
         if (tab === "home") {
           assert.deepEqual(rest.card, ["1px", "none"], "a card: a hairline, no shadow (the shared card)");
-          assert.deepEqual(rest.primary, [rest.tokens.solid, rest.tokens.onSolid, "26px"], "a card's one filled answer is the text's colour, never the accent");
-          assert.deepEqual(rest.other, ["rgba(0, 0, 0, 0)", "26px"], "its quiet answer is an outline");
+          assert.deepEqual(rest.primary, [rest.tokens.solid, rest.tokens.onSolid, "22px"], "a card's one filled answer is the text's colour, never the accent");
+          assert.deepEqual(rest.other, ["rgba(0, 0, 0, 0)", "22px"], "its quiet answer is an outline (a slim card's answers are 22 px)");
           assert.deepEqual(rest.clear, [rest.tokens.quiet, "none"], "Clear is quiet text");
           assert.ok(rest.faces.length >= 3 && rest.faces.every((f) => f[0] === 30 && f[1] === 30), `each card's face or blob has one 30px place: ${JSON.stringify(rest.faces)}`);
           assert.ok(rest.faces.filter((f) => f[2] === 1).length >= 3, "a Pip's face is its real face, with its rig");

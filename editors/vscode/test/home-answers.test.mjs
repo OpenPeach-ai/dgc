@@ -257,7 +257,10 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
       for (const key of [K.setup, K.visit, K.change, WORK.run]) {
         const c = hub.cards.find((card) => card.key === key);
         assert.ok(c, key);
-        assert.deepEqual([c.height, c.width], [plain.height, plain.width], `${key}: the same size as a card that opens`);
+        // (Slim cards: a command keeps its one line at the card's whole width, so in a card too narrow for its three
+        // answers beside its sentence they stand under the command, and that one kind is a little taller.)
+        if (key === WORK.run) { assert.equal(c.width, plain.width, `${key}: the same width`); assert.ok(c.height > plain.height && c.height <= 106, `${key}: a little taller than the others, for its command's line (${c.height})`); }
+        else assert.deepEqual([c.height, c.width], [plain.height, plain.width], `${key}: the same size as a card that opens`);
       }
       const low = (await homeContrast(x.page)).filter((m) => m.ratio < (m.kind === "words" ? 4.5 : 3));
       assert.deepEqual(low, []);

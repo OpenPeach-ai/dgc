@@ -178,7 +178,7 @@ test("a failed run's Dismiss is always in sight, sits clear of the name at 300px
     });
     assert.deepEqual([box.seen, box.word], [true, "Dismiss"], "in sight without pointing at anything, and in a word");
     assert.match(box.hint, /^Dismiss: 1 run failed\. It comes back if ERP daily audit/, "pointing at it says what it dismisses");
-    assert.ok(box.title.bottom <= box.x.top && box.from.bottom <= box.x.top, `Dismiss never covers the name or the sentence: ${JSON.stringify(box)}`);
+    assert.ok(box.title.right <= box.x.left && box.from.right <= box.x.left, `(a slim card: Dismiss is beside the words, at the right) Dismiss never covers the name or the sentence: ${JSON.stringify(box)}`);
     assert.ok(box.x.right <= box.card.right && box.card.right <= 300 && box.x.bottom <= box.card.bottom, "inside its card, inside the side bar");
     assert.equal(box.clipped, true, "a long name is cut with an ellipsis, on its one line");
     await page.focus('#home-hub .dgc-hub-card >> nth=0 >> [data-hub-act="open"]');
