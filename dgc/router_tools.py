@@ -54,7 +54,8 @@ SCHEMAS = [
     _fn("router_update", "DGC Router: change its settings on the user's ask. Every call shows the user an Allow "
         "card with the exact change; nothing changes until they allow it. turn_on/turn_off switch the Router; "
         "add_system adds a computer by its address (DGC detects the server and lists its models); edit_system, "
-        "remove_system, enable_system, disable_system; set_model (use, workers, context, note, thinking); set_jobs; "
+        "remove_system, enable_system, disable_system; set_model (use, workers, context, note, thinking, price_in, "
+        "price_out); set_jobs; "
         "set_when_busy (wait for a free worker, or use the usual sub-agent model); set_hardware reads what a "
         "computer's GPU and memory are doing from an exporter the user runs (node_exporter, NVIDIA DCGM, AMD's "
         "exporter, Glances, Netdata) or a dgc node, by its address (empty turns it off); apply_suggestion sets each "
@@ -88,6 +89,10 @@ SCHEMAS = [
          "hardware_url": {"type": "string", "description": "set_hardware: the exporter's or dgc node's address, e.g. "
                           "http://nas.local:9100/metrics, mac.local:61208 or gpu-box.local:8577; empty turns it off"},
          "note": {"type": "string", "description": "set_model: a short note on what it is good at"},
+         "price_in": {"type": "number", "description": "set_model: what the model costs there, US dollars per "
+                      "million input tokens (as the user says it; -1 removes it: the provider's own list, if any)"},
+         "price_out": {"type": "number", "description": "set_model: US dollars per million output tokens (-1 "
+                       "removes it)"},
          "thinking": {"type": "string", "enum": ["", "off", "low", "medium", "high"],
                       "description": "set_model: how hard a helper on this model thinks; empty is the helper's own "
                       "level. Only for a model that can think (router_status says which can't)"},
@@ -472,6 +477,13 @@ def plan_update(config, args: dict, *, detect=True, pick_later=False) -> UpdateP
             for key in ("use", "workers", "context", "note", "thinking"):
                 if key in args and args[key] is not None:
                     entry[key] = args[key]
+            for key in ("price_in", "price_out"):
+                if key in args and args[key] is not None:
+                    price = args[key]
+                    if isinstance(price, (int, float)) and not isinstance(price, bool) and price < 0:
+                        entry.pop(key, None)     # -1: not mine any more (the provider's own list, if it says)
+                    else:
+                        entry[key] = price
             if entry.get("use") is True:
                 entry.pop("use")
             if "thinking" in entry and not entry["thinking"]:
@@ -575,6 +587,8 @@ def status_text(status: dict, *, unused_names: bool = False) -> str:
                 facts.append("vision ✓")
             if model.get("tokens_per_s"):
                 facts.append(f"{model['tokens_per_s']:g} tok/s")
+            if model.get("price_in") is not None and model.get("price_out") is not None:
+                facts.append(price_words(model["price_in"], model["price_out"]))
             if model.get("parallel"):
                 facts.append(f"runs {model['parallel']} at once")
             if model.get("thinks") is False:
@@ -595,6 +609,19 @@ def status_text(status: dict, *, unused_names: bool = False) -> str:
             # What it is doing, in words ("count bolts", "Pip Inbox"); its id stays in the --json status alone.
             lines.append(f"  · busy: {lease['model']} for {router_mod.lease_label(lease)}")
     return "\n".join(lines)
+
+
+def price_words(price_in, price_out) -> str:
+    """"$0.59 in, $0.79 out per million tokens"; "free" when both are 0."""
+    if not price_in and not price_out:
+        return "free"
+    return f"{_dollars(price_in)} in, {_dollars(price_out)} out per million tokens"
+
+
+def _dollars(value) -> str:
+    """$0.59, $12.00, and a price under a cent with its own digits ($0.005)."""
+    amount = float(value)
+    return f"${amount:,.2f}" if amount >= 0.01 or amount == 0 else f"${amount:.4f}".rstrip("0")
 
 
 def thinking_words(level: str) -> str:

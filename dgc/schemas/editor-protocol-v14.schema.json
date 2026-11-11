@@ -13723,6 +13723,16 @@
             },
             "provider": {
               "type": "string"
+            },
+            "price_in": {
+              "type": "number",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "price_out": {
+              "type": "number",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
             }
           },
           "required": [

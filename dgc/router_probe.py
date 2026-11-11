@@ -638,8 +638,41 @@ def _discover_openai(base: str, key: str) -> dict:
                 model.update(params_b=params, size_class=size_class(params))
             if "embed" in str(row["id"]).lower():
                 model["kind"] = "embedding"
+            model.update(listed_price(row))
+            context = row.get("context_length")
+            if isinstance(context, int) and not isinstance(context, bool) and 0 < context <= 16_777_216:
+                model["context_max"] = context
             models.append(model)
     return {"server": "openai_compatible", "version": "", "models": models[:512]}
+
+
+def _usd(value) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) and number >= 0 else None
+
+
+def listed_price(row: dict) -> dict:
+    """What one model costs, when a provider's model list says (0.52, the Router's cloud providers), in US dollars per
+    million tokens: {"price_in", "price_out"}, or {} when it doesn't. OpenRouter lists dollars per token as text
+    ("pricing": {"prompt": "0.0000003", "completion": "0.0000012"}); Together lists dollars per million ("pricing":
+    {"input": 0.88, "output": 0.88}). A price that isn't a number, or is negative (OpenRouter's -1 for a router that
+    picks a model itself), is left out."""
+    pricing = row.get("pricing") if isinstance(row, dict) else None
+    if not isinstance(pricing, dict):
+        return {}
+    if "prompt" in pricing or "completion" in pricing:
+        per_token = (_usd(pricing.get("prompt")), _usd(pricing.get("completion")))
+        prices = tuple(None if value is None else value * 1_000_000 for value in per_token)
+    else:
+        prices = (_usd(pricing.get("input")), _usd(pricing.get("output")))
+    out = {}
+    for key, value in zip(("price_in", "price_out"), prices):
+        if value is not None and value <= 10_000:
+            out[key] = round(value, 4)
+    return out if len(out) == 2 else {}
 
 
 def _discover_image_server(server):

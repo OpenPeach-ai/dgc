@@ -2979,8 +2979,9 @@ class Backend:
         # thinking: each model row of a system carries `thinking` (its choice; absent: the helper's own level) and
         # `thinks` (whether its server says it can), each lease the level its helper uses, and router_thinking sets it.
         # providers: router_update add_system takes `provider` (a saved provider's id) and a system row carries it.
+        # prices: set_model takes price_in / price_out and model rows carry them (with price_from).
         return {"version": 1, "commands": list(self._ROUTER_COMMANDS), "enabled": bool(enabled), "pips_default": 1,
-                "status": 2, "thinking": 1, "providers": 1}
+                "status": 2, "thinking": 1, "providers": 1, "prices": 1}
 
     def _router_command(self, cmd: dict) -> None:
         """One router_* command, on a thread of its own (a probe or a look on the network takes seconds), answered by

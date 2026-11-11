@@ -2156,6 +2156,10 @@ OpenRouter, Groq, Together, Ollama Cloud...). Add it from the provider: its addr
 signs in with that provider's own saved key (never copied into the Router, and only while the provider keeps
 that address), and its workers say how many helpers may use it at once.
 
+What a model costs shows beside it, in US dollars per million tokens in and out, when the provider's model list says
+(OpenRouter and Together do) or when you type your own price on the model (yours wins; `/router` and the main model's
+`router_status` show it too). Checking a provider's health reads its model list, which costs nothing.
+
 ## How a helper is placed
 
 The main model sees one line listing the systems, their models and free workers, and the `task` tool takes

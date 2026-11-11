@@ -9967,6 +9967,18 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "string"
       ],
       "required": false
+    },
+    "price_in": {
+      "types": [
+        "number"
+      ],
+      "required": false
+    },
+    "price_out": {
+      "types": [
+        "number"
+      ],
+      "required": false
     }
   },
   "router_probe": {

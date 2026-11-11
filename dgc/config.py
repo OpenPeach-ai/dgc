@@ -759,7 +759,8 @@ _ROUTER_ID_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?\Z")
 _ROUTER_MODEL_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._:/@+\-]{0,255}\Z")
 _ROUTER_SYSTEM_KEYS = frozenset({"id", "name", "base_url", "server", "api_mode", "enabled", "jobs", "workers",
                                  "one_model_at_a_time", "memory_gb", "models", "hardware", "provider"})
-_ROUTER_MODEL_KEYS = frozenset({"name", "workers", "context", "note", "use", "params_b", "tools", "thinking"})
+_ROUTER_MODEL_KEYS = frozenset({"name", "workers", "context", "note", "use", "params_b", "tools", "thinking",
+                                "price_in", "price_out"})
 # How hard a helper thinks (Settings → Models → Sub-agents → Thinking): "" is the main chat's level.
 SUBAGENT_THINKING = ("", "off", "low", "medium", "high", "xhigh")
 # A DGC Router model's own choice: "" is the helper's level; a small model on a NAS usually runs best Off or Low.
@@ -899,6 +900,16 @@ def _router_model(raw, where: str, problems: list[str]) -> dict | None:
             problems.append(f"{where}.thinking must be off, low, medium or high (or empty: the helper's own level)")
         else:
             model["thinking"] = raw["thinking"]
+    # What it costs, as the person set it (0.52): US dollars per million tokens in and out. A provider's own list may
+    # also say (dgc/router_probe.py listed_price); a price set here wins.
+    for key in ("price_in", "price_out"):
+        if raw.get(key) is not None:
+            price = raw[key]
+            if isinstance(price, bool) or not isinstance(price, (int, float)) or not 0 <= float(price) <= 10_000 \
+                    or not math.isfinite(float(price)):
+                problems.append(f"{where}.{key} must be US dollars per million tokens (0 to 10000)")
+            else:
+                model[key] = round(float(price), 4)
     return model
 
 

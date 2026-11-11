@@ -201,7 +201,17 @@ def _model_facts(system: dict, model: dict) -> dict:
             "context_max": found.get("context_max"), "loaded_context": found.get("loaded_context"),
             "tokens_per_s": (speed or {}).get("tokens_per_s"), "ttft_ms": (speed or {}).get("ttft_ms"),
             "speed_at": (speed or {}).get("at"), "parallel": (parallel or {}).get("runs"),
-            "tools_test": tools_test}
+            "tools_test": tools_test, **_price(model, found)}
+
+
+def _price(model: dict, found: dict) -> dict:
+    """What a model costs in US dollars per million tokens (0.52): the person's own price (Settings, set_model) wins,
+    else what the provider's model list says; ``price_from`` says which ("you" or "provider"). {} when neither."""
+    if model.get("price_in") is not None or model.get("price_out") is not None:
+        mine = {key: model[key] for key in ("price_in", "price_out") if model.get(key) is not None}
+        return {**mine, "price_from": "you"}
+    listed = {key: found[key] for key in ("price_in", "price_out") if isinstance(found.get(key), (int, float))}
+    return {**listed, "price_from": "provider"} if listed else {}
 
 
 def _eligible(system: dict, model: dict, facts: dict, job: str) -> tuple[bool, str]:
@@ -648,6 +658,9 @@ def status(config, *, refresh: bool = False, router: Router | None = None) -> di
                                   "context_max", "tokens_per_s", "ttft_ms", "speed_at", "parallel")}}
             if facts.get("tools") is False:
                 row["tools"] = False
+            for key in ("price_in", "price_out", "price_from"):
+                if facts.get(key) is not None:
+                    row[key] = facts[key]          # 0 is a price too (a free model)
             if entry.get("use") is False:
                 row["use"] = False
             # Its thinking: the choice on this system ("" = the helper's level), and whether it can think at all.
@@ -720,7 +733,7 @@ def status(config, *, refresh: bool = False, router: Router | None = None) -> di
 
 
 _AVAILABLE_FACTS = ("params_b", "size_class", "quant", "context_max", "tools", "vision", "loaded", "loaded_context",
-                    "cloud", "kind")
+                    "cloud", "kind", "price_in", "price_out")
 MAX_AVAILABLE = 64
 
 
@@ -754,6 +767,8 @@ def _available(found: dict) -> list[dict]:
             value = model.get(key)
             if value is False and key == "tools":
                 row[key] = False
+            elif key.startswith("price_") and isinstance(value, (int, float)) and not isinstance(value, bool):
+                row[key] = value                  # 0 is a price too (a free model)
             elif value not in (None, "", False):
                 row[key] = value
         rows.append(row)
