@@ -369,6 +369,13 @@ def on_its_own(registry, pip_id, limit=MAX_LISTED) -> list[dict]:
                 (pip_id, limit)):
             payload = json.loads(row["payload"])
             what = app_words(payload) + (" (not confirmed)" if row["status"] == "unknown" else "")
+            from . import pip_second_look
+            kind = {"gmail_send": "email", "calendar_create": "calendar"}.get(payload.get("kind"), "connector")
+            content = (payload.get("message") if kind == "email" else payload.get("event") if kind == "calendar"
+                       else {"server": payload.get("server"), "call": payload.get("call")})
+            quote = pip_second_look.quote_for(registry, pip_id, pip_second_look.content_digest(kind, content))
+            if quote:
+                what = pip_second_look.line(what, quote)       # Approve for me's second look sent it: you asked for it
             rows.append({"at": row["resolved_at"], "what": what[:200], "level": row["resolved_by"].split(":", 1)[1],
                          "unattended": _unattended_run(registry, payload.get("source", {}).get("run_id")), "kind": "app"})
     except Exception:                       # noqa: BLE001 - a registry without app actions
@@ -917,7 +924,11 @@ def check(store, actor, payload) -> None:
     money = bool(_asks_every_time(payload))
     if decide_send(store.registry, pip_id, chosen, kind, content, money=money,
                    pay=money and may_pay(store.registry, pip_id)) is None:
-        raise RegistryError("local_only", "This Pip's level doesn't let that run without asking.")
+        # Approve for me's second look said the user asked for exactly this action (pip_second_look), and it still may.
+        from . import pip_second_look
+        if not (pip_second_look.case(chosen, kind, content, money=money) is not None
+                and pip_second_look.vouched(store.registry, pip_id, pip_second_look.content_digest(kind, content))):
+            raise RegistryError("local_only", "This Pip's level doesn't let that run without asking.")
 
 
 def _route(registry, config, pip_id, toolkit):
@@ -973,8 +984,15 @@ def dispatch_for_run(registry, config, run_id) -> list:
                 money = draft_kind == "connector" and bool(_asks_every_time({"kind": "connector_call", "server": content.get("server"),
                                                                              "call": content.get("call")}))
                 pay = bool(money) and may_pay(registry, row[0])
+                looked = None
                 if decide_send(registry, row[0], chosen, draft_kind, content, money=money, pay=pay) is None:
-                    continue
+                    # Approve for me would leave it waiting: one short call, did the user ask for exactly this?
+                    from . import pip_second_look
+                    looked = pip_second_look.look(registry, config, run_id, row[0], chosen, draft_kind, content, money=money)
+                    if looked is None:
+                        continue
+                    pip_second_look.vouch(registry, row[0], pip_second_look.content_digest(draft_kind, content), run_id,
+                                          looked["quote"])
                 if draft_kind == "connector":
                     from .pip_connector_drafts import prepare
                     prepared = prepare(store, draft_id, draft["digest"], None, actor, config)
@@ -984,9 +1002,11 @@ def dispatch_for_run(registry, config, run_id) -> list:
                     prepared = drafts.prepare(store, draft_id, draft["digest"], server, connection, account, schema,
                                               content, actor, config, kind=draft_kind)
                 done = actions.accept(store, prepared["id"], prepared["digest"], actor, config)
-                outcomes.append({"action_id": done["id"], "status": done["status"], "level": chosen})
+                outcomes.append({"action_id": done["id"], "status": done["status"], "level": chosen,
+                                 **({"second_look": True} if looked is not None else {})})
                 registry.event(row[1], "pip_level_approved", pip_id=row[0], run_id=run_id,
-                               payload={"action_id": done["id"], "level": chosen, "kind": draft_kind, **({"paid": True} if pay else {})})
+                               payload={"action_id": done["id"], "level": chosen, "kind": draft_kind, **({"paid": True} if pay else {}),
+                                        **({"you_asked": looked["quote"]} if looked is not None else {})})
                 from .pip_plugins import after_action
                 after_action(store, config, done)     # a plugin action: the Pip reads its answer and carries on
             except Exception as exc:        # noqa: BLE001 - it stays a draft for the user

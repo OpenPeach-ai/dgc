@@ -4009,6 +4009,13 @@ bubblewrap profile is missing; DGC does not fall back to an unsandboxed browser.
   change included, and says what it chose). A change while it works applies from its next step. After
   25 things on its own in an hour it asks again until the hour has passed. New Pips start at Ask me
   first; existing Pips keep their chosen level. Payments ask at every level.
+- **A second look at Approve for me.** Before Approve for me leaves an email, an invitation or a plugin's
+  change waiting for you, DGC asks the Pip's model one short, separate question: did you ask for exactly
+  this? It sees only your own messages for that turn and the action, never the page, the email the Pip
+  read or its reasoning. A yes sends it, and the Pip's page lists it with your words ("you asked: Send the
+  Tuesday plan to John"). A no, an unsure, or no answer in 20 seconds leaves the card for you as before.
+  It never decides a payment, an order, closing an account, a level, a plugin you set to Always ask, or a
+  routine's run, and a submit on the Pip's computer still asks.
 - **How much a Project Pip asks.** A Project Pip has the same chip, about the handoffs it is sent. **Ask me
   first**: every handoff waits for your review, as before. **Approve for me**: a review it is sent runs by
   itself, and so does a check whose exact commands you approved once for it. **Do it all**: a fix runs by itself
