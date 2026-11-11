@@ -1,8 +1,9 @@
-// #3 Sessions home, in real Chromium: the side bar opens on this project's sessions, each one opens in
-// an editor tab ("Open in Editor", a double-click or Enter), and a session's tab is the chat without the
-// side bar's Pips. Read from computed style, geometry and what the page posts to the extension.
-// Since 0.52 the home lists the three newest sessions as plain rows (title, age) and the rest are behind "View all (N)"
-// (test/sessions-view-all.test.mjs); a row's buttons show when it is pointed at or focused.
+// #3 Sessions in the side bar, in real Chromium: the side bar is never a chat; this project's sessions are on its Work
+// tab, each one opens in an editor tab ("Open in Editor", a click or Enter), and a session's tab is the chat without the
+// side bar's Pips or its tabs. Read from computed style, geometry and what the page posts to the extension.
+// Since 0.52 the Work tab lists the six newest sessions (blob, title, age) and the rest are behind "View all (N)"
+// (test/sessions-view-all.test.mjs); a row's buttons show when it is pointed at or focused. The side bar opens on
+// Home (test/side-tabs-home.test.mjs); most tests here open it on Work, as a side bar left there comes back.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { THEMES, panelHtml } from "./support/options-scene.mjs";
@@ -29,9 +30,14 @@ const ITEMS = [
   { id: "20261006-091200-b2", path: "/s/20261006-091200-b2.json", name: "Visits page alignment", preview: "On Visits page", when: "2026-10-06 09:12", count: 12, open: false },
   { id: "20261005-221000-c3", path: "/s/20261005-221000-c3.json", name: '<img src=x onerror="window.__owned=1">', preview: "", when: "2026-10-05 22:10", count: 1, open: false },
   { id: "20261004-180000-d4", path: "/s/20261004-180000-d4.json", name: "", preview: "", when: "", count: 0, open: false },
+  { id: "20261003-180000-e5", path: "/s/20261003-180000-e5.json", name: "Older one", preview: "", when: "2026-10-03 18:00", count: 3, open: false },
+  { id: "20261002-180000-f6", path: "/s/20261002-180000-f6.json", name: "Older two", preview: "", when: "2026-10-02 18:00", count: 3, open: false },
+  { id: "20261001-180000-g7", path: "/s/20261001-180000-g7.json", name: "Older three", preview: "", when: "2026-10-01 18:00", count: 3, open: false },
 ];
+// The side bar as it was left on its Work tab (the page's kept state).
+const ON_WORK = { sideTab: "work" };
 
-async function openPage({ place = "home", width = 380, height = 640, theme = "dark-modern", items = ITEMS, state } = {}) {
+async function openPage({ place = "home", width = 380, height = 640, theme = "dark-modern", items = ITEMS, state = place === "home" ? ON_WORK : undefined } = {}) {
   const { html, mainJs, markdownJs } = panelHtml();
   const page = await browser.newPage({ viewport: { width, height } });
   const errors = [];
@@ -59,23 +65,26 @@ async function openPage({ place = "home", width = 380, height = 640, theme = "da
 // Rendered at all: checkVisibility also sees an ancestor that is display:none.
 const shown = (page, selector) => page.evaluate((s) => { const n = document.querySelector(s); return !!n && n.checkVisibility(); }, selector);
 
-test("the side bar opens on the project's sessions, not on a chat", async (t) => {
+test("the side bar opens on Home, never on a chat, and this project's sessions are on its Work tab", async (t) => {
   if (skipOrFail(t)) return;
-  const s = await openPage();
+  const s = await openPage({ state: null });
   try {
-    assert.equal(await shown(s.page, "#sessions-host"), true, "the list is what the side bar shows");
-    for (const chat of ["#log", "#input", "#thread-title", "#pmodel"]) assert.equal(await shown(s.page, chat), false, `${chat} is not on the home`);
-    assert.equal(await shown(s.page, "#btn-pips"), true, "the Pips stay in the side bar");
+    assert.equal(await shown(s.page, "#sessions-host"), true, "the side bar's own page is what shows");
+    assert.equal(await shown(s.page, "#home-hub"), true, "on Home, the first time");
+    for (const chat of ["#log", "#input", "#thread-title", "#pmodel"]) assert.equal(await shown(s.page, chat), false, `${chat} is not in the side bar`);
+    assert.deepEqual([await shown(s.page, "#btn-pips"), await shown(s.page, "#side-tab-pips")], [false, true], "the Pips stay in the side bar: their tab, in the header button's place");
+    await s.page.click("#side-tab-work");
+    assert.equal(await shown(s.page, "#sessions-list"), true);
     const read = () => s.page.evaluate(() => [...document.querySelectorAll(".session-row")].map((row) => ({
       id: row.dataset.id, name: row.querySelector(".session-name").textContent, meta: row.querySelector(".session-age").title,
-      tab: row.querySelector(".session-tab")?.textContent || "", button: row.querySelector(".session-open").getAttribute("aria-label") })));
+      sub: row.querySelector(".session-sub")?.textContent || "", button: row.querySelector(".session-open").getAttribute("aria-label") })));
     const rows = await read();
     assert.deepEqual(rows.map((r) => r.name), ["ok, so my this directory runs my Company's ERP at app.ton", "Visits page alignment",
-      '<img src=x onerror="window.__owned=1">'], "the three newest: its name, else its first words");
-    assert.equal(await s.page.textContent("#sessions-all"), "View all (4)", "the fourth is behind View all");
+      '<img src=x onerror="window.__owned=1">', "Untitled session", "Older one", "Older two"], "the six newest: its name, else its first words; one with no name and no words is Untitled");
+    assert.equal(await s.page.textContent("#sessions-all"), "View all (7)", "the seventh is behind View all");
     await s.page.click("#sessions-all");
-    assert.deepEqual((await read()).slice(3).map((r) => r.name), ["ok, so my this directory runs my Company's ERP at app.ton", "Visits page alignment",
-      '<img src=x onerror="window.__owned=1">', "Untitled session"], "every session there; one with no name and no words is Untitled");
+    assert.deepEqual((await read()).slice(6).map((r) => r.name), ["ok, so my this directory runs my Company's ERP at app.ton", "Visits page alignment",
+      '<img src=x onerror="window.__owned=1">', "Untitled session", "Older one", "Older two", "Older three"], "every session there");
     assert.equal(await s.page.evaluate(() => document.querySelectorAll("#sessions-host img").length + (window.__owned || 0)), 0, "there too, a name is text");
     await s.page.keyboard.press("Escape");
     await s.page.mouse.move(2, 2);      // off View all: the page's own hover label holds a pointed-at button's title while it shows
@@ -84,10 +93,10 @@ test("the side bar opens on the project's sessions, not on a chat", async (t) =>
       "a session's name is text, never markup");
     assert.equal(rows[0].meta, "2026-10-06 10:15 · 84 messages", "its date and length, on its age");
     assert.equal(rows[2].meta, "2026-10-05 22:10 · 1 message");
-    assert.deepEqual(rows.map((r) => r.tab), ["Open in a tab", "", ""], "the session open in a tab says so");
+    assert.deepEqual(rows.slice(0, 3).map((r) => r.sub), ["Open in a tab · 84 messages", "12 messages", "1 message"], "the session open in a tab says so, under its name");
     assert.ok(rows.every((r) => r.button.startsWith("Open in Editor: ")), "every session has its Open in Editor button");
-    assert.deepEqual(await s.page.evaluate(() => [...document.querySelectorAll("#sessions-host button")].filter((b) => !b.title).map((b) => b.id || b.className)), [],
-      "every button on the home says what it does on hover");
+    assert.deepEqual(await s.page.evaluate(() => [...document.querySelectorAll("#sessions-host button, #side-tabs button")].filter((b) => !b.title).map((b) => b.id || b.className)), [],
+      "every button in the side bar says what it does on hover");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
@@ -158,21 +167,24 @@ test("with no sessions, or when listing fails, the home says so", async (t) => {
   } finally { await s.page.close(); }
 });
 
-test("the Pips open over the list, and their back button returns to it", async (t) => {
+test("the Pips open in the list's place with their tab lit, and the tab you were on returns to it", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openPage();
   try {
+    const lit = () => s.page.evaluate(() => [...document.querySelectorAll('#side-tabs [role="tab"]')].filter((t) => t.getAttribute("aria-selected") === "true").map((t) => t.dataset.tab));
     await s.send({ type: "pipsOpen" });
     assert.equal(await shown(s.page, "#sessions-host"), false);
     assert.equal(await shown(s.page, "#pips-host"), true);
-    assert.equal(await s.page.textContent("#btn-pips-back"), "Sessions", "back goes to Sessions, not to a chat");
-    await s.page.click("#btn-pips-back");
-    assert.equal(await shown(s.page, "#sessions-host"), true);
+    assert.deepEqual(await lit(), ["pips"], "the Pips tab is lit, however the Pips were opened");
+    assert.equal(await shown(s.page, "#btn-pips-back"), false, "no back button: the tabs are how you go back");
+    await s.page.click("#side-tab-work");
+    assert.equal(await shown(s.page, "#sessions-list"), true);
     assert.equal(await shown(s.page, "#pips-host"), false);
     await s.send({ type: "pipsOpen" });
     await s.send({ type: "sessions_show" });
-    assert.equal(await shown(s.page, "#sessions-host"), true, "DGC: Resume shows the list from the Pips too");
+    assert.equal(await shown(s.page, "#sessions-list"), true, "DGC: Resume shows the list from the Pips too, on the tab that was open before them");
     assert.equal(await shown(s.page, "#pips-host"), false);
+    assert.deepEqual(await lit(), ["work"]);
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
@@ -191,16 +203,16 @@ for (const [width, theme] of [[380, "dark-modern"], [260, "dark-modern"], [380, 
             .filter((n) => { const r = n.getBoundingClientRect(); return r.right > view.right + 0.5 || r.left < view.left - 0.5; }).length,
           clipped: [...document.querySelectorAll(".session-age")].filter((n) => n.scrollWidth > n.clientWidth + 1).length,
           nameLines: rows.map((row) => { const n = row.querySelector(".session-name"); return Math.round(n.getBoundingClientRect().height / parseFloat(getComputedStyle(n).lineHeight)); }),
-          // The Sessions heading (0.52) starts with its chevron, whose glyph, with 4px of air in its box, stands on the edge.
-          head: Math.round(document.querySelector("#sessions-fold .home-fold-chevron").getBoundingClientRect().left + 4),
-          text: Math.round(rows[0].querySelector(".session-name").getBoundingClientRect().left),
+          // The search box and each row's blob start on one edge.
+          head: Math.round(document.getElementById("sessions-search").getBoundingClientRect().left),
+          text: Math.round(rows[0].querySelector(".session-blob").getBoundingClientRect().left),
         };
       });
       assert.equal(m.sideways, false, "no sideways scroll");
       assert.equal(m.outside, 0, "every control inside the side bar");
       assert.equal(m.clipped, 0, "no age cut off");
-      assert.ok(m.nameLines.length === 3 && m.nameLines.every((n) => n === 1), `a name takes one line, cut with an ellipsis (${m.nameLines})`);
-      assert.ok(Math.abs(m.head - m.text) <= 1, `the heading's chevron and the rows' words start on one edge (${m.head} vs ${m.text})`);
+      assert.ok(m.nameLines.length === 6 && m.nameLines.every((n) => n === 1), `a name takes one line, cut with an ellipsis (${m.nameLines})`);
+      assert.ok(Math.abs(m.head - m.text) <= 1, `the search box and the rows' blobs start on one edge (${m.head} vs ${m.text})`);
       await s.page.hover(".session-row:nth-child(1)");
       const buttons = await s.page.evaluate(() => { const view = document.getElementById("sessions-host").getBoundingClientRect();
         return [...document.querySelectorAll(".session-row:nth-child(1) :is(.session-open, .session-delete)")].map((b) => { const r = b.getBoundingClientRect(); return b.checkVisibility() && r.left >= view.left && r.right <= view.right; }); });
@@ -234,7 +246,13 @@ test("thousands of sessions: a search over what was said, the words it found, an
   const s = await openPage({ items: null });
   try {
     await s.send({ type: "sessions_list", items: ITEMS.slice(0, 2), error: "" });
-    assert.equal(await shown(s.page, "#sessions-search"), false, "an older DGC CLI: no search box");
+    // An older DGC CLI cannot search what was said: the box narrows the sessions here by name, and asks nothing.
+    assert.equal(await shown(s.page, "#sessions-search"), true);
+    await s.page.fill("#sessions-search", "visits");
+    await s.page.waitForTimeout(350);
+    assert.deepEqual(await s.page.evaluate(() => [...document.querySelectorAll("#sessions-list .session-name")].map((n) => n.textContent)), ["Visits page alignment"]);
+    assert.deepEqual((await s.posted()).filter((m) => m.type === "sessionsSearch"), []);
+    await s.page.fill("#sessions-search", "");
     await s.send({ type: "sessions_list", items: ITEMS.slice(0, 2), error: "", searchable: true, more: true, query: "" });
     assert.equal(await shown(s.page, "#sessions-search"), true);
     assert.equal(await shown(s.page, "#sessions-more"), false, "with no search, Load more is in the View all popover");

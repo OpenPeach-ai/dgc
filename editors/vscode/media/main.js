@@ -620,6 +620,7 @@
     tellPipsDock();
     if (sessionsOpen) hideSessions();
     pipsOpen = true;
+    if (chatPlace === "home") { sideTab = "pips"; keepSideTab(); paintSideTabs(); }
     document.body.classList.add("pips-active");
     host.hidden = false;
     $("btn-pips-back").hidden = false;
@@ -635,7 +636,7 @@
     $("pips-host").hidden = true;
     $("btn-pips-back").hidden = true;
     $("btn-pips").setAttribute("aria-pressed","false");
-    if (chatPlace === "home") { if (back) showSessions(); }
+    if (chatPlace === "home") { if (back) showSideTab(lastListTab); }
     else input.focus();
   }
   // ---- #3 Sessions home ----
@@ -658,6 +659,8 @@
     sessionsOpen = true;
     document.body.classList.add("sessions-active");
     $("sessions-host").hidden = false;
+    if (sideTab === "pips") sideTab = lastListTab;
+    paintSideTabs();
     homePips?.refresh();
   }
   function hideSessions() {
@@ -667,7 +670,7 @@
     $("sessions-host").hidden = true;
   }
   const sessionTitle = (item) => item.name || item.preview || "Untitled session";
-  function openSession(item) { vscode.postMessage({ type: "openSessionInEditor", id: item.id, title: sessionTitle(item) }); }
+  function openSession(item) { vscode.postMessage({ type: "openSessionInEditor", id: item.id, title: sessionTitle(item) }); seenNews("work", item.id); }
   function sessionButton(cls, codicon, onClick) {
     const button = el("button", cls); button.type = "button";
     const glyph = el("span", `codicon codicon-${codicon}`); glyph.setAttribute("aria-hidden", "true");
@@ -676,46 +679,23 @@
     button.ondblclick = (e) => e.stopPropagation();
     return button;
   }
-  let sessionsSearchTimer = 0;
-  // One search over both lists: your chats and this project's sessions.
+  // Each list has its own search box: Work's looks through this project's sessions, Chat's through your chats. A DGC
+  // that cannot search sessions itself (no paging) narrows the ones already here by name.
+  let sessionsSearchTimer = 0, chatsSearchTimer = 0, sessionsFilter = "";
   $("sessions-search")?.addEventListener("input", (e) => {
     clearTimeout(sessionsSearchTimer);
-    sessionsSearchTimer = setTimeout(() => {
-      vscode.postMessage({ type: "sessionsSearch", query: e.target.value });
-      if (chatsAvailable) vscode.postMessage({ type: "chatdgcSearch", query: e.target.value });
-    }, 250);
+    const query = e.target.value;
+    if (!sessionsSearchable) { sessionsFilter = query.trim(); if (lastSessions) renderSessions(lastSessions); return; }
+    sessionsSearchTimer = setTimeout(() => vscode.postMessage({ type: "sessionsSearch", query }), 250);
+  });
+  $("chats-search")?.addEventListener("input", (e) => {
+    clearTimeout(chatsSearchTimer);
+    const query = e.target.value;
+    chatsSearchTimer = setTimeout(() => vscode.postMessage({ type: "chatdgcSearch", query }), 250);
   });
   $("sessions-more")?.addEventListener("click", (e) => {
     e.currentTarget.disabled = true; e.currentTarget.textContent = "Loading…";
     vscode.postMessage({ type: "sessionsMore" });
-  });
-  // The Sessions section folds under its heading, as the Pips block does (0.52): the chevron turns, everything under the
-  // heading folds away, and the heading then says how many there are, with a dot when one of them needs you. The "+"
-  // stays. The host keeps the choice for this computer (src/pipHomeDismiss.ts) and stamps it on the page.
-  let sessionsFolded = document.documentElement.dataset.sessionsHomeCollapsed === "1";
-  function sessionsFoldCount() {
-    const count = $("sessions-fold-count");
-    if (!count) return;
-    const chat = chatsAvailable && homeTab === "chat", items = chat ? null : sessionItems;
-    count.replaceChildren();
-    count.hidden = !sessionsFolded || !items || !items.length;
-    if (count.hidden) return;
-    if (items.some(sessionNeedsYou)) count.append(el("span", "home-fold-dot"));
-    count.append(`${items.length}${sessionsMoreToLoad ? "+" : ""}`);
-  }
-  function foldSessions() {
-    const toggle = $("sessions-fold"), body = $("sessions-body");
-    if (!toggle || !body) return;
-    $("sessions-host").toggleAttribute("data-sessions-collapsed", sessionsFolded);
-    body.toggleAttribute("inert", sessionsFolded);
-    toggle.setAttribute("aria-expanded", String(!sessionsFolded));
-    toggle.title = sessionsFolded ? "Show your sessions here" : "Hide your sessions here. The count stays.";
-    if (sessionsFolded) closeAllSessions();
-    sessionsFoldCount();
-  }
-  $("sessions-fold")?.addEventListener("click", () => {
-    sessionsFolded = !sessionsFolded; foldSessions();
-    vscode.postMessage({ type: "sessionsHomeCollapsed", collapsed: sessionsFolded });
   });
   /** A session that needs you: it runs with no window to watch it in, or it waits for your okay. */
   const sessionNeedsYou = (item) => !!item.windowless || item.waiting === true;
@@ -725,12 +705,12 @@
     return [...need, ...items.filter((item) => !sessionNeedsYou(item))].slice(0, Math.max(SESSIONS_SHOWN, need.length));
   }
   // Session names and previews are the user's own words: text nodes only, never markup.
-  // The home lists three, or every one that needs you (sessionsShown), each a plain row: its title at the left and its
-  // age at the right ("2h", "1w", "1mo"), then "View all (N)", which opens every session in a popover over the list with
-  // a search field (asked for 2026-11-10, the way Codex lists its chats). A search from the home's own box still lists
-  // everything it found.
-  const SESSIONS_SHOWN = 3;
-  let sessionItems = [], sessionsMoreToLoad = false, allSessions = null;
+  // The Work tab lists six, or every one that needs you (sessionsShown), each a row: its blob, its title over what it is
+  // doing, and its age at the right ("2h", "1w", "1mo"; a purple dot while it runs), then "View all (N)", which opens
+  // every session in a popover over the list with a search field (asked for 2026-11-10, the way Codex lists its chats).
+  // A search from the tab's own box still lists everything it found.
+  const SESSIONS_SHOWN = 6;
+  let sessionItems = [], sessionsMoreToLoad = false, allSessions = null, lastSessions = null;
   /** How long ago, in a few characters. `when` is the host's "YYYY-MM-DD HH:MM"; anything else is shown as it is. */
   function sessionAge(when, now = Date.now()) {
     const m = /^(\d{4})-(\d\d)-(\d\d)[ T](\d\d):(\d\d)/.exec(String(when || ""));
@@ -745,8 +725,21 @@
     if (days <= 365) return `${Math.floor(days / 30)}mo`;
     return `${Math.floor(days / 365)}y`;
   }
-  /** One session: its title, a mark when it is open or still running, its age, and (pointed at or focused) Open in
-   *  Editor and Delete in the age's place. `before` is each row's state at the last paint, for the state's small motion. */
+  /** One session: its blob, its title over what it is doing, its age (the purple dot while it runs), and (pointed at or
+   *  focused) Open in Editor, the pin, its colour and Delete in the age's place. `before` is each row's state at the last
+   *  paint, for the state's small motion. */
+  const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  function blobSpan(kind, id, running) {
+    const span = el("span", "session-blob"); span.setAttribute("aria-hidden", "true");
+    if (window.DgcBlob) span.innerHTML = window.DgcBlob.html(kind, { id, pair: colourOf(kind, id).chosen, running });
+    return span;
+  }
+  /** The purple dot at a running row's end, with its words for a screen reader. */
+  function liveDot(words) {
+    const dot = el("span", "session-live"), said = el("span", "session-tab-words");
+    said.textContent = words; dot.title = words; dot.append(said);
+    return dot;
+  }
   function sessionRow(item, before, opened) {
     const title = sessionTitle(item);
     const row = el("li", "session-row");
@@ -754,30 +747,26 @@
     row.dataset.motionState = item.windowless ? "working" : item.open ? "open" : "idle";
     if (before?.has(item.id) && before.get(item.id) !== row.dataset.motionState) row.classList.add("motion-state-change");
     const open_ = () => { openSession(item); opened?.(); };
+    const running = item.running === true || !!item.windowless;
     const main = el("div", "session-main");
     const name = el("span", "session-name"); name.textContent = title; name.title = title;
     main.append(name);
-    if (typeof item.match === "string" && item.match) {
-      const found = el("span", "session-match"); found.textContent = item.match; main.append(found);
-    }
-    const end = el("span", "session-end");
-    // Open in a tab, or still running with no window (a reload, a closed window or tab; opening it picks it up where it
-    // is): a dot, with the words for a pointer and a screen reader.
-    if (item.open || item.windowless) {
-      const mark = el("span", item.open ? "session-tab" : "session-tab session-windowless"), words = el("span", "session-tab-words");
-      words.textContent = item.open ? "Open in a tab" : "Running, no window";
-      mark.title = item.open ? "Open in a tab" : `Running, no window: ${String(item.windowless).slice(0, 200)}. Open it to pick it up, or stop it in Settings › Running sessions.`;
-      mark.append(words); end.append(mark);
-    }
     const count = Number(item.count) || 0;
-    const age = el("span", "session-age"); age.textContent = sessionAge(item.when);
-    age.title = [item.when, `${count} message${count === 1 ? "" : "s"}`].filter(Boolean).join(" · ");
-    // A session with a card waiting for you says so where its age was.
-    if (item.waiting === true) {
-      age.classList.add("session-waiting"); age.textContent = "";
-      const shield = el("span", "codicon codicon-shield"); shield.setAttribute("aria-hidden", "true");
-      age.append(shield, "wants your okay");
+    // Under the name: the words a search found, or what it is doing now. Running with no window (a reload, a closed
+    // window or tab) is picked up where it is by opening it.
+    const sub = el("span", "session-sub");
+    if (typeof item.match === "string" && item.match) { sub.classList.add("session-match"); sub.textContent = item.match; }
+    else if (item.waiting === true) { sub.classList.add("session-waiting"); sub.textContent = "Wants your okay"; }
+    else {
+      sub.textContent = [item.windowless ? "Running, no window" : running ? "Running" : item.open ? "Open in a tab" : "", plural(count, "message")].filter(Boolean).join(" · ");
+      if (item.windowless) sub.title = `Running, no window: ${String(item.windowless).slice(0, 200)}. Open it to pick it up, or stop it in Settings › Running sessions.`;
     }
+    main.append(sub);
+    const end = el("span", "session-end");
+    const age = el("span", "session-age"); age.textContent = sessionAge(item.when);
+    age.title = [item.when, plural(count, "message")].filter(Boolean).join(" · ");
+    // While it runs, the purple dot stands where its age was.
+    if (running) { age.hidden = true; end.append(liveDot(item.windowless ? "Running, no window" : "Running")); }
     const actions = el("span", "session-actions");
     const open = sessionButton("session-open", "go-to-file", open_);
     open.title = "Open in an editor tab";
@@ -790,7 +779,7 @@
     if (window.DgcDock) actions.append(open, pinButton(pinItem), moreButton("work", item.id, title, open_, pinItem), remove);
     else actions.append(open, remove);
     end.append(age, actions);
-    row.append(main, end);
+    row.append(blobSpan("work", item.id, running), main, end);
     // A click opens it, as a chat in the Chat tab opens: the second click of a double-click opens nothing more.
     row.onclick = (e) => { if (e.detail < 2) open_(); };
     row.onkeydown = (e) => {
@@ -814,31 +803,36 @@
       list.append(row);
       if (item.id === focused) row.focus();
     }
+    window.DgcBlob?.watch(list);
   }
   function renderSessions(msg) {
     const list = $("sessions-list"), status = $("sessions-status");
-    const items = Array.isArray(msg.items) ? msg.items : [];
+    lastSessions = msg;
+    const every = Array.isArray(msg.items) ? msg.items : [];
     // Thousands of sessions: a search over names, first messages and everything said, and Load more.
-    const search = $("sessions-search"), more = $("sessions-more"), query = String(msg.query || "");
+    const search = $("sessions-search"), more = $("sessions-more");
     sessionsSearchable = msg.searchable === true;
-    sessionItems = items; sessionsMoreToLoad = msg.more === true;
-    if (search) { search.hidden = !sessionsSearchable && !chatsAvailable; if (document.activeElement !== search) search.value = query; }
+    // A DGC that cannot search narrows what is here by name (sessionsFilter); one that can sends what it found.
+    const query = sessionsSearchable ? String(msg.query || "") : sessionsFilter, wanted = query.toLowerCase();
+    const items = sessionsSearchable || !wanted ? every : every.filter((item) => sessionTitle(item).toLowerCase().includes(wanted));
+    sessionItems = every; sessionsMoreToLoad = msg.more === true;
+    if (search && sessionsSearchable && document.activeElement !== search) search.value = query;
     // Load more belongs to a search's finds here; with no search it is in the View all popover.
     if (more) { more.hidden = !(sessionsMoreToLoad && query); more.disabled = false; more.textContent = "Load more"; }
-    homeCount("work", query ? items.length : null, msg.more === true);
+    if (!query) sessionNews(every);
     status.textContent = msg.error ? String(msg.error)
       : items.length ? "" : query ? `No session mentions “${query}”.`
-      : "No sessions in this project yet. Start one with + above: it opens in an editor tab.";
+      : "No sessions in this project yet. Start one with New: it opens in an editor tab.";
     if (msg.error) status.dataset.kind = "error"; else delete status.dataset.kind;
     status.hidden = !status.textContent;
     const shown = query ? items : sessionsShown(items);
     fillSessions(list, shown);
     const all = viewAllButton();
     all.hidden = !!query || (items.length <= shown.length && !sessionsMoreToLoad);
-    sessionsFoldCount();
     all.textContent = `View all (${items.length}${sessionsMoreToLoad ? "+" : ""})`;
     if (allSessions) { if (all.hidden) closeAllSessions(); else fillAllSessions(); }
     if (dock) paintDock();                 // a pinned session's name and what it is doing now
+    paintHub();
   }
   /** "View all (N)", under the three: made once, after the list. */
   function viewAllButton() {
@@ -907,7 +901,7 @@
   // project's sessions, your chats, your Pips. Something pinned whose list isn't loaded shows with the name it was
   // pinned under.
   let dockState = { pins: [], colours: {}, show: "always", most: 8, size: 34 }, dock = null, dockFaces = null;
-  let dockPips = { pips: [], complete: false, scopes: [] }, answeringChats = new Set(), chatItems = [];
+  let dockPips = { pips: [], complete: false, scopes: [] }, answeringChats = new Set(), chatItems = [], dockColours = "{}", lastChats = null;
   const dockKey = (kind, id) => `${kind}:${id}`;
   const isDocked = (kind, id) => dockState.pins.some((pin) => pin.key === dockKey(kind, id));
   const colourOf = (kind, id) => { const own = window.DgcBlob?.own(id) || 0, chosen = Number(dockState.colours[dockKey(kind, id)]) || own; return { chosen, own }; };
@@ -1001,9 +995,8 @@
   /** The Pips view on this page shows a pin on each Pip's row: it is told what is pinned (once the host has said). */
   let dockSaid = false;
   function tellPipsDock() { if (dockSaid) for (const listener of pipsListeners) listener({ type: "dock", pinned: dockState.pins.map((pin) => pin.key) }); }
-  function paintDock(strip = true) {
+  function paintDock() {
     for (const button of document.querySelectorAll(".dgc-pin[data-pin]")) paintPin(button);
-    if (strip) homePips?.repaint?.();     // (not when the strip itself is what just said its Pips)
     tellPipsDock();
     paintSessionBlob();
     if (!dock) return;
@@ -1014,6 +1007,9 @@
     dockState = { pins: Array.isArray(msg.pins) ? msg.pins.filter((pin) => pin && typeof pin.key === "string") : [],
       colours: msg.colours && typeof msg.colours === "object" ? msg.colours : {},
       show: ["hover", "never"].includes(msg.show) ? msg.show : "always", most: Number(msg.most) || 8, size: Number(msg.size) || 34 };
+    // A session's colour may have changed: its row's blob and its card's follow.
+    const colours = JSON.stringify(dockState.colours);
+    if (colours !== dockColours) { dockColours = colours; if (lastSessions && chatPlace === "home") { renderSessions(lastSessions); if (lastChats) renderChats(lastChats); } }
     paintDock();
   }
   /** The dock itself, made once on the side bar's page: the last thing on it, under every screen. */
@@ -1089,28 +1085,25 @@
     const section = $("chats-home"), list = $("chats-list"), status = $("chats-status"), more = $("chats-more");
     if (!section || !list) return;
     chatsAvailable = msg.available === true;
-    homeTabs();
-    $("sessions-title").textContent = chatsAvailable ? "Work" : "Sessions";
-    const search = $("sessions-search");
-    if (search) {
-      search.hidden = !sessionsSearchable && !chatsAvailable;
-      search.placeholder = chatsAvailable ? "Search chats and sessions" : "Search sessions";
-      search.setAttribute("aria-label", chatsAvailable ? "Search your chats and this project's sessions" : "Search sessions: names and everything said");
-    }
-    if (!chatsAvailable) return;
+    lastChats = msg;
+    // A DGC with no ChatDGC has no Chat tab.
+    if (!chatsAvailable && sideTab === "chat") sideTab = lastListTab = "home";
+    paintSideTabs();
+    if (!chatsAvailable) { paintHub(); return; }
     const items = Array.isArray(msg.items) ? msg.items : [];
     const open = new Set(Array.isArray(msg.open) ? msg.open : []);
     const query = String(msg.query || "");
-    homeCount("chat", query ? items.length : null, msg.more === true);
+    const search = $("chats-search");
+    if (search && document.activeElement !== search) search.value = query;
     status.textContent = msg.error ? String(msg.error) : items.length ? "" : query ? `No chat mentions “${query}”.`
-      : "No chats yet. Start one with + above: it's the same in every folder.";
+      : "No chats yet. Start one with New: it's the same in every folder.";
     if (msg.error) status.dataset.kind = "error"; else delete status.dataset.kind;
     status.hidden = !status.textContent;
     if (more) { more.hidden = msg.more !== true; more.disabled = false; more.textContent = "Show more"; }
     const focused = document.activeElement?.closest?.(".chat-row")?.dataset.id;
     openChats = open;
     answeringChats = new Set(Array.isArray(msg.answering) ? msg.answering : []);
-    if (!query) chatItems = items;
+    if (!query) { chatItems = items; chatNews(items); }
     homeQuery = query;
     list.replaceChildren();
     for (const item of items) {
@@ -1118,39 +1111,59 @@
       list.append(row);
       if (item.id === focused) row.focus();
     }
+    window.DgcBlob?.watch(list);
     renderProjects();
     if (dock) paintDock();                 // a pinned chat's name and whether it is answering
+    paintHub();
   }
-  /** One chat in the list: its name, when, where it's open, the words found (or its last message), Delete. A chat
-   *  can be dragged onto a project to move it there, or back onto Chats to take it out. */
+  /** One chat in the list: its blob, its name over the words found (or its last message, after "Pinned", its project
+   *  and where it's open), its age (the purple dot while it answers), and its pin, colour and Delete. A chat can be
+   *  dragged onto a project to move it there, or back onto Chats to take it out. */
+  function chatAge(stamp) {
+    const at = typeof stamp === "number" ? stamp : Date.parse(String(stamp || ""));
+    if (!Number.isFinite(at)) return "";
+    const minutes = Math.floor((Date.now() - at) / 60000);
+    if (minutes < 1) return "now";
+    if (minutes < 60) return `${minutes}m`;
+    if (minutes < 1440) return `${Math.floor(minutes / 60)}h`;
+    const days = Math.floor(minutes / 1440);
+    return days < 7 ? `${days}d` : days < 30 ? `${Math.floor(days / 7)}w` : days <= 365 ? `${Math.floor(days / 30)}mo` : `${Math.floor(days / 365)}y`;
+  }
   let openChats = new Set(), homeQuery = "";
   const CHAT_DRAG = "application/x-dgc-chat", CHAT_IN_PROJECT = "application/x-dgc-chat-in-project";
   function chatRow(item, nested = false) {
     const title = String(item.title || "New chat");
     const row = el("li", "session-row chat-row" + (nested ? " chat-row-nested" : ""));
     row.tabIndex = 0; row.dataset.id = String(item.id || "");
+    const answering = answeringChats.has(item.id);
     const main = el("div", "session-main");
     const name = el("span", "session-name"); name.textContent = title; name.title = title;
-    const meta = el("span", "session-meta");
-    if (item.pinned) { const pin = el("span", "chat-pinned"); pin.textContent = "Pinned"; meta.append(pin); }
-    // Found by a search, in a project: which one.
+    // Under the name, on one line: Pinned, its project (found by a search), where it's open, then the words found by
+    // something said in it, or its last message.
+    const sub = el("span", "session-sub");
+    const bit = (cls, text) => { const span = el("span", cls); span.textContent = text; sub.append(span); };
+    if (item.pinned) bit("chat-pinned", "Pinned");
     const home = !nested && item.project ? projects.find((x) => x.id === item.project) : null;
-    if (home) { const tag = el("span", "chat-project"); tag.textContent = home.name; meta.append(tag); }
-    const when = chatWhen(item.updated_at);
-    if (when) { const span = el("span"); span.textContent = when; meta.append(span); }
-    if (openChats.has(item.id)) { const tab = el("span", "session-tab"); tab.textContent = "Open in a tab"; meta.append(tab); }
-    main.append(name, meta);
-    // Found by something said in it: the words around that, rather than its last message.
+    if (home) bit("chat-project", home.name);
+    if (answering) bit("chat-state", "Answering"); else if (openChats.has(item.id)) bit("chat-state", "Open in a tab");
     const words = nested ? "" : plainPreview(typeof item.match === "string" && item.match ? item.match : item.preview);
-    if (words) { const preview = el("span", "session-match chat-preview"); preview.textContent = words; main.append(preview); }
+    if (words) bit("chat-preview", words);
+    main.append(name);
+    if (sub.childElementCount) main.append(sub);
+    const end = el("span", "session-end");
+    const age = el("span", "session-age"); age.textContent = chatAge(item.updated_at); age.title = chatWhen(item.updated_at);
+    if (answering) { age.hidden = true; end.append(liveDot("Answering")); }
+    end.append(age);
     const remove = sessionButton("session-delete", "trash", () => vscode.postMessage({ type: "chatdgcDelete", id: item.id, title }));
     remove.title = "Delete this chat";
     remove.setAttribute("aria-label", `Delete chat: ${title}`);
-    const openIt = () => vscode.postMessage({ type: "chatdgcOpen", id: item.id });
+    const openIt = () => { vscode.postMessage({ type: "chatdgcOpen", id: item.id }); seenNews("chat", String(item.id || "")); };
     // Pin it to the dock, and "..." for its colour, beside Delete.
     const pinItem = { kind: "chat", id: String(item.id || ""), title };
-    if (window.DgcDock) { const acts = el("span", "chat-acts"); acts.append(pinButton(pinItem), moreButton("chat", pinItem.id, title, openIt, pinItem), remove); row.append(main, acts); }
-    else row.append(main, remove);
+    const acts = el("span", "session-actions chat-acts");
+    if (window.DgcDock) acts.append(pinButton(pinItem), moreButton("chat", pinItem.id, title, openIt, pinItem), remove); else acts.append(remove);
+    end.append(acts);
+    if (nested) row.append(main, end); else row.append(blobSpan("chat", pinItem.id, answering), main, end);
     row.onclick = (e) => { if (e.detail < 2) openIt(); };
     row.onkeydown = (e) => {
       if (e.target !== row) return;
@@ -1269,69 +1282,159 @@
   $("projects-new")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcProjectNew" }));
   $("chats-library")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcLibrary" }));
   $("work-library")?.addEventListener("click", () => vscode.postMessage({ type: "workLibrary" }));
-  // Work | Chat: two tabs when ChatDGC is here, so each list has the whole height (stacked, a long list of chats
-  // pushed this project's sessions out of sight). The one search covers both, and while it's on, each tab says how
-  // much it found. Without ChatDGC (an older CLI) there are no tabs: the sessions, as before.
-  let homeTab = (() => { try { return vscode.getState()?.homeTab === "chat" ? "chat" : "work"; } catch { return "work"; } })();
-  function homeTabs() {
-    const bar = $("home-tabs"), panels = { chat: $("chats-home"), work: $("work-home") };
-    if (!bar || !panels.chat || !panels.work) return;
-    const tabbed = chatsAvailable;
-    bar.hidden = !tabbed;
-    $("sessions-host")?.classList.toggle("home-tabbed", tabbed);
-    // The "+" on the Sessions heading starts what the list under it holds: a chat on the Chat tab, a session otherwise.
-    const newChat = $("chats-new"), newSession = $("sessions-new"), onChat = tabbed && homeTab === "chat";
-    if (newChat) newChat.hidden = !onChat;
-    if (newSession) newSession.hidden = onChat;
-    sessionsFoldCount();
-    for (const name of ["chat", "work"]) {
-      const tab = $(`home-tab-${name}`), panel = panels[name], chosen = homeTab === name;
-      tab.setAttribute("aria-selected", String(tabbed && chosen));
-      tab.tabIndex = tabbed && chosen ? 0 : -1;
-      panel.hidden = tabbed ? !chosen : name === "chat";
-      if (tabbed) { panel.setAttribute("role", "tabpanel"); panel.setAttribute("aria-labelledby", `home-tab-${name}`); }
-      else { panel.removeAttribute("role"); panel.setAttribute("aria-labelledby", name === "chat" ? "chats-title" : "sessions-title"); }
+  // ---- the side bar's tabs: Home, Work, Chat, Pips (media/shared/tabs.css) ----------------------------------------------
+  // One bar at the top of the side bar, over every screen of it. Home is the hub (below); Work lists this project's
+  // sessions and Chat your ChatDGC chats, each with its own search and New; Pips is the Pips view, as it is. The tab is
+  // kept in the page's state, so a reload comes back to it. A DGC with no ChatDGC has no Chat tab, and one with no Pips
+  // no Pips tab. Left and Right move between the tabs and choose as they go; Home and End jump to the first and last.
+  const SIDE_TABS = ["home", "work", "chat", "pips"];
+  const pageState = () => { try { return vscode.getState() || {}; } catch { return {}; } };
+  let sideTab = SIDE_TABS.includes(pageState().sideTab) ? pageState().sideTab : "home";
+  // The tab Pips' own "back" returns to: the last one that was not Pips.
+  let lastListTab = sideTab !== "pips" ? sideTab : ["home", "work", "chat"].includes(pageState().sideList) ? pageState().sideList : "home";
+  const keepSideTab = () => { try { vscode.setState({ ...(vscode.getState() || {}), sideTab, sideList: lastListTab }); } catch {} };
+  const sideTabOffered = (name) => (name === "chat" ? chatsAvailable : name === "pips" ? !!window.DgcPips?.mount : true);
+  function paintSideTabs() {
+    const nav = $("side-tabs");
+    if (chatPlace !== "home" || !nav) return;
+    nav.hidden = false;
+    const panels = { home: $("home-hub"), work: $("work-home"), chat: $("chats-home") };
+    for (const name of SIDE_TABS) {
+      const tab = $(`side-tab-${name}`), chosen = sideTab === name;
+      if (!tab) continue;
+      tab.hidden = !sideTabOffered(name);
+      tab.setAttribute("aria-selected", String(chosen));
+      tab.tabIndex = chosen ? 0 : -1;
+      if (panels[name]) panels[name].hidden = !chosen;
     }
   }
-  // ChatDGC was here last time: Work | Chat show at once, rather than when this window's backend has started. Its
-  // answer still decides (renderChats): a CLI without ChatDGC takes the tabs away again.
+  function showSideTab(name, focus = false) {
+    if (chatPlace !== "home") return;
+    const next = SIDE_TABS.includes(name) && sideTabOffered(name) ? name : "home";
+    closeAllSessions(); hub?.closeMenu(); window.DgcBlob?.close();
+    // The Pips tab leads to the list of your Pips, never to the chat that was last open in it.
+    if (next === "pips") openPipsAt({ overview: true });
+    else { sideTab = lastListTab = next; showSessions(); }
+    keepSideTab(); paintSideTabs();
+    if (focus) $(`side-tab-${sideTab}`)?.focus();
+  }
+  $("side-tabs")?.addEventListener("click", (e) => { const tab = e.target.closest(".dgc-tab"); if (tab) showSideTab(tab.dataset.tab); });
+  $("side-tabs")?.addEventListener("keydown", (e) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key) || !e.target.closest(".dgc-tab")) return;
+    e.preventDefault();
+    const offered = SIDE_TABS.filter(sideTabOffered), at = Math.max(0, offered.indexOf(sideTab));
+    showSideTab(e.key === "Home" ? offered[0] : e.key === "End" ? offered.at(-1) : offered[(at + (e.key === "ArrowRight" ? 1 : -1) + offered.length) % offered.length], true);
+  });
+  // ChatDGC was here last time: the Chat tab shows at once, rather than when this window's backend has started. Its
+  // answer still decides (renderChats): a CLI without ChatDGC takes the tab away again.
   if (chatPlace === "home" && document.documentElement.dataset.chatdgcSeen === "1") {
     chatsAvailable = true;
-    homeTabs();
-    $("sessions-title").textContent = "Work";
-    const status = $("chats-status"), search = $("sessions-search");
+    const status = $("chats-status");
     if (status) { status.textContent = "Loading your chats…"; status.hidden = false; }
-    if (search) { search.hidden = false; search.placeholder = "Search chats and sessions"; search.setAttribute("aria-label", "Search your chats and this project's sessions"); }
   }
-  function showHomeTab(name, focus = false) {
-    homeTab = name === "work" ? "work" : "chat";
-    closeAllSessions();
-    try { vscode.setState({ ...(vscode.getState() || {}), homeTab }); } catch {}
-    homeTabs();
-    if (focus) $(`home-tab-${homeTab}`)?.focus();
+
+  // ---- Home, the hub (media/shared/hub.js): one card for everything that needs you or is new -----------------------------
+  // From a session: it wants your okay, or it still runs with no window (both need you); it has finished (new). From a
+  // chat: it has finished answering (new). From a Pip (src/pipHomeStrip.js keeps these): something waits for you, it
+  // cannot run, a new Pip wants a review (all need you); failed runs, new findings and new messages (new). A session's
+  // and a chat's news is noticed here, when one that was running is no longer, and kept in the page's state until it
+  // is opened, dismissed or runs again.
+  let hub = null, hubFaces = null, pipModel = null;
+  let hubShow = ["work", "chat", "personal", "project"].includes(document.documentElement.dataset.homeShow) ? document.documentElement.dataset.homeShow : "all";
+  const hubNews = (() => {
+    const kept = pageState().hubNews, ids = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === "string").slice(0, 60) : []);
+    const times = (v) => Object.fromEntries(Object.entries(v && typeof v === "object" ? v : {}).filter(([, t]) => Number.isFinite(t)).slice(-30));
+    return { work: times(kept?.work), chat: times(kept?.chat), ran: { work: ids(kept?.ran?.work), chat: ids(kept?.ran?.chat) } };
+  })();
+  const keepHubNews = () => { try { vscode.setState({ ...(vscode.getState() || {}), hubNews }); } catch {} };
+  /** What was running and is no longer is news; what runs again, or is gone, is not. `whole`: every item is listed. */
+  function noteNews(kind, items, running, whole) {
+    const before = JSON.stringify(hubNews), here = new Set(items.map((item) => String(item.id)));
+    for (const id of hubNews.ran[kind]) if (!running.includes(id) && here.has(id)) hubNews[kind][id] = Date.now();
+    for (const id of running) delete hubNews[kind][id];
+    if (whole) for (const id of Object.keys(hubNews[kind])) if (!here.has(id)) delete hubNews[kind][id];
+    hubNews.ran[kind] = running.slice(0, 60);
+    if (JSON.stringify(hubNews) !== before) keepHubNews();
   }
-  /** While a search is on: how many each list found ("12+": more to load). */
-  function homeCount(name, found, more) {
-    const badge = $(`home-tab-${name}-count`);
-    if (!badge) return;
-    const previous = badge.textContent;
-    badge.hidden = found === null;
-    badge.textContent = found === null ? "" : `${found}${more ? "+" : ""}`;
-    if (previous && previous !== badge.textContent && !badge.hidden) {
-      badge.classList.remove("motion-count-change");
-      void badge.offsetWidth;
-      badge.classList.add("motion-count-change");
+  const sessionNews = (items) => noteNews("work", items, items.filter((item) => item.running === true || !!item.windowless).map((item) => item.id), !sessionsMoreToLoad);
+  const chatNews = (items) => noteNews("chat", items, items.filter((item) => answeringChats.has(item.id)).map((item) => String(item.id)), false);
+  /** Opened or dismissed: no longer news. */
+  function seenNews(kind, id) { if (hubNews[kind][id] === undefined) return; delete hubNews[kind][id]; keepHubNews(); paintHub(); }
+  function hubFace(card) {
+    let face = "";
+    try { face = window.PipConcepts?.plush?.markup({ index: Math.max(0, PIP_BODIES.indexOf(card.body)), name: card.name }, card.group === "needs" ? "waiting_approval" : "success", `hub-${card.key.replace(/[^A-Za-z0-9_-]/g, "-")}`, { includeStyles: false }) || ""; } catch { face = ""; }
+    return face;
+  }
+  function hubCards() {
+    const B = window.DgcBlob, blob = (kind, id, running) => (B ? B.html(kind, { id, pair: colourOf(kind, id).chosen, running }) : "");
+    const open = { id: "open", label: "Open", primary: true, title: "Open it in its editor tab" }, dismiss = { id: "dismiss", label: "Dismiss", title: "Take this off Home" };
+    const needs = [], fresh = [];
+    for (const item of sessionItems) {
+      const title = sessionTitle(item), running = item.running === true || !!item.windowless, count = plural(Number(item.count) || 0, "message");
+      const card = { key: `work:${item.id}`, source: "work", who: { html: blob("work", item.id, running) }, from: `${title} · Work · ${sessionAge(item.when)}` };
+      if (item.waiting === true) needs.push({ ...card, group: "needs", title: "Wants your okay to go on", chips: [count], actions: [open] });
+      else if (item.windowless) needs.push({ ...card, group: "needs", title: "Still running, with no window to watch it in", chips: [String(item.windowless).slice(0, 80), count].filter((c) => c && c !== "working"), actions: [open] });
+      else if (hubNews.work[item.id] !== undefined) fresh.push({ ...card, group: "new", at: hubNews.work[item.id], from: `${title} · Work · ${chatAge(hubNews.work[item.id])}`, title: "Finished its work", chips: [count], actions: [open, dismiss] });
     }
-    $(`home-tab-${name}`)?.setAttribute("aria-label", found === null ? (name === "chat" ? "Chat" : "Work")
-      : `${name === "chat" ? "Chat" : "Work"}: ${found}${more ? " or more" : ""} found`);
+    for (const item of chatsAvailable ? chatItems : []) {
+      const id = String(item.id || "");
+      if (hubNews.chat[id] === undefined) continue;
+      fresh.push({ key: `chat:${id}`, source: "chat", group: "new", at: hubNews.chat[id], who: { html: blob("chat", id, false) }, from: `${String(item.title || "New chat")} · Chat · ${chatAge(hubNews.chat[id])}`,
+        title: plainPreview(item.preview) || "Has a new answer", chips: ["New answer"], actions: [open, dismiss] });
+    }
+    for (const c of pipModel?.cards || []) {
+      const age = chatAge(c.at), review = c.kind === "setup" || c.kind === "waiting";
+      const card = { key: c.key, source: c.scope, group: c.group, at: Date.parse(c.at) || 0, who: { html: hubFace(c) },
+        from: [c.kind === "setup" && c.name === "New Pip" ? "" : c.name, c.kind === "setup" ? "New Pip" : c.scope === "project" ? "Project Pip" : "Pip", age].filter(Boolean).join(" · "), title: c.title, chips: c.chips,
+        actions: [{ id: "open", label: review ? "Review" : "Open", primary: true, title: review ? "Open what waits for you, in Pips" : `Open ${c.name} in Pips` },
+          c.canRead ? { id: "read", label: "Mark read", title: "Mark as read, without opening its chat" }
+          : c.canDismiss ? { id: "dismiss", label: "Dismiss", title: `Dismiss: ${c.line}. It comes back if ${c.name} has something new.` } : null] };
+      (c.group === "needs" ? needs : fresh).push(card);
+    }
+    // What needs you: sessions first (their work stands still), then Pips, the most urgent first. What is new: the newest first.
+    fresh.sort((a, b) => (b.at || 0) - (a.at || 0));
+    return [...needs, ...fresh].map(({ at, ...card }) => card);
   }
-  for (const name of ["chat", "work"]) {
-    $(`home-tab-${name}`)?.addEventListener("click", () => showHomeTab(name));
-    $(`home-tab-${name}`)?.addEventListener("keydown", (e) => {
-      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
-      e.preventDefault();
-      showHomeTab(e.key === "Home" ? "work" : e.key === "End" ? "chat" : homeTab === "chat" ? "work" : "chat", true);
-    });
+  function paintHub() {
+    if (chatPlace !== "home" || !hub) return;
+    const notes = [];
+    if (pipModel?.unreadFailure) notes.push({ text: "Couldn’t check for new Pip messages.", retry: true });
+    if (pipModel?.failure) notes.push({ text: pipModel.failure });
+    hub.update({ cards: hubCards(), more: pipModel?.more || 0, partial: pipModel?.partial === true, notes });
+  }
+  function hubAct(key, act) {
+    const [kind, id] = [key.slice(0, key.indexOf(":")), key.slice(key.indexOf(":") + 1)];
+    if (kind === "work") { const item = sessionItems.find((s) => s.id === id); if (act === "open" && item) openSession(item); else seenNews("work", id); }
+    else if (kind === "chat") { if (act === "open") vscode.postMessage({ type: "chatdgcOpen", id }); seenNews("chat", id); }
+    else if (act === "read") homePips?.read(key);
+    else if (act === "dismiss") homePips?.dismiss(key);
+    else homePips?.open(key);
+  }
+  /** Clear, beside "New": every card it covers. All of the Pips' news goes in one go, as Dismiss all did. */
+  function hubClear(keys) {
+    for (const key of keys) { if (key.startsWith("work:")) delete hubNews.work[key.slice(5)]; else if (key.startsWith("chat:")) delete hubNews.chat[key.slice(5)]; }
+    keepHubNews();
+    const mine = keys.filter((key) => key.startsWith("pip:")), every = (pipModel?.cards || []).filter((c) => c.group === "new");
+    if (mine.length && mine.length === every.length) homePips?.clear();
+    else for (const key of mine) { const c = every.find((x) => x.key === key); if (c?.canRead) homePips?.read(key); else if (c?.canDismiss) homePips?.dismiss(key); }
+    paintHub();
+  }
+  /** Home's number: everything that waits or is new, whatever Show is on. */
+  function paintHomeCount(total) {
+    const badge = $("side-tab-home-count"), tab = $("side-tab-home");
+    if (!badge || !tab) return;
+    const text = total > 99 ? "99+" : String(total);
+    if (badge.textContent !== text || badge.hidden !== !total) { badge.textContent = text; badge.hidden = !total; }
+    tab.setAttribute("aria-label", total ? `Home: ${total} ${total === 1 ? "thing needs you or is new" : "things need you or are new"}` : "Home");
+  }
+  function mountHub() {
+    if (chatPlace !== "home" || hub || !window.DgcHub || !window.DgcCard || !$("home-hub")) return;
+    hub = window.DgcHub.create({ host: $("home-hub"), show: () => hubShow,
+      onShow: (value) => { hubShow = value; vscode.postMessage({ type: "homeShow", show: value }); },
+      onAct: hubAct, onClear: hubClear, onMore: () => homePips?.openAll(), onPips: () => showSideTab("pips"), onRetry: () => homePips?.retry(), onCount: paintHomeCount,
+      // The Pips' faces blink and look about as they do everywhere else; a blob off screen rests.
+      onDraw: (host) => { try { hubFaces?.(); } catch {} hubFaces = window.PipConcepts?.plush?.mount?.(host) || null; window.DgcBlob?.watch(host); } });
+    paintHub();
   }
   $("chats-new")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcNew" }));
   $("chats-more")?.addEventListener("click", (e) => {
@@ -10708,33 +10811,30 @@ function permissionChoices(ev) {
   })();
   $("btn-pips-back").onclick = () => closePips();
   if (chatPlace === "home") {
-    // The side bar is the Sessions home: it opens on the list, and Pips' back button returns to it.
-    const back = $("btn-pips-back");
-    back.lastChild.textContent = "Sessions";
-    back.title = "Back to Sessions"; back.setAttribute("aria-label", "Back to Sessions");
+    // The side bar: four tabs over everything, Home first. (Pips' own back, where a Pips screen offers one, returns to
+    // the tab that was open before it.)
     $("sessions-new").onclick = () => vscode.postMessage({ type: "newSessionInEditor" });
-    foldSessions();
-    // Your Pips, above your sessions: the ones that need you, or a quiet row of faces.
+    mountHub();
+    // Your Pips' part of Home: the ones that need you and the ones with news, as cards (src/pipHomeStrip.js).
     if (window.DgcPips?.mountHomePips && document.documentElement.dataset.pipsDocumentId) {
       let dismissed = {};
       try { dismissed = JSON.parse(document.documentElement.dataset.pipHomeDismissed || "{}"); } catch { dismissed = {}; }
       homePips = window.DgcPips.mountHomePips({
-        document, root: $("sessions-pips"),
+        document,
         postMessage: (message) => vscode.postMessage({ ...message, documentId: document.documentElement.dataset.pipsDocumentId }),
         onOpen: (navigation) => openPipsAt(navigation),
-        // Dismiss all's unread, kept by the host (src/pipHomeDismiss.ts) so a reload doesn't bring the old count back.
+        onModel: (model) => { pipModel = model; paintHub(); },
+        // Clear's unread, kept by the host (src/pipHomeDismiss.ts) so a reload doesn't bring the old count back.
         dismissed,
         onDismissed: (change) => vscode.postMessage({ type: "pipHomeDismissed", set: change.set, drop: change.drop }),
-        // The block folded under its heading: the host keeps that for this computer too, and says so on the page.
-        collapsed: document.documentElement.dataset.pipHomeCollapsed === "1",
-        onCollapsed: (collapsed) => vscode.postMessage({ type: "pipHomeCollapsed", collapsed }),
-        // The dock: each Pip's row has a pin, and the dock shows a pinned Pip's face and what waits on it.
-        dock: window.DgcDock ? { pinned: (id) => isDocked("pip", id), toggle: (item) => vscode.postMessage({ type: "dockToggle", item }), icon: pinSvg } : null,
-        onPips: (said) => { dockPips = said; if (dock) paintDock(false); },
+        // The dock shows a pinned Pip's face and what waits on it.
+        onPips: (said) => { dockPips = said; if (dock) paintDock(); },
       });
     }
     mountDock();
-    showSessions();
+    // The tab that was open, or Home. (Pips again only once its view can be made.)
+    if (sideTab === "pips" && sideTabOffered("pips")) { showPips(); if (!pipsOpen) { sideTab = lastListTab; showSessions(); } }
+    else { if (!sideTabOffered(sideTab)) sideTab = lastListTab = "home"; showSessions(); }
     // Sessions also start from the terminal: coming back to the side bar looks again.
     const refresh = () => { if (sessionsOpen && !document.hidden) { vscode.postMessage({ type: "sessionsList" }); homePips?.refresh(); } };
     document.addEventListener("visibilitychange", refresh);

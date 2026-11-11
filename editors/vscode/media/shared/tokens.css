@@ -140,7 +140,7 @@
   --r-chip: var(--r-sm); --r-row: var(--r-md); --r-card: var(--r-xl); --r-menu: var(--r-xl); --r-dialog: var(--r-2xl);
   --t-dialog: 15px;
   /* Motion: menus open in 150 ms from 98% and 4 px below, hover and colour in 120 ms, dialogs in 180 ms. Nothing
-     bounces. Reduced motion takes every duration to zero (below). */
+     bounces but the side bar's tab names (--ease-spring, below). Reduced motion takes every duration to zero (below). */
   --ease-out: cubic-bezier(.23,1,.32,1);
   --dur-hover: 120ms; --dur-menu: 150ms; --dur-dialog: 180ms;
   /* The sent bubble's soft light: none on the neutral bubble (it was a purple light on a purple tint). */
@@ -167,6 +167,15 @@
   --dock-tile: color-mix(in srgb, var(--text) 7%, transparent);
   --dock-tile-hover: color-mix(in srgb, var(--text) 12%, transparent);
   --dock-lift: inset 0 .5px 0 rgba(255,255,255,.09), 0 0 0 .5px var(--hair-strong), 0 1px 2px rgba(0,0,0,.20), 0 6px 14px -4px rgba(0,0,0,.30), 0 14px 28px -12px rgba(0,0,0,.34);
+  /* The tabs at the top of the side bar (media/shared/tabs.css): a rounded bar on a soft gradient of the side bar's own
+     grey, a hairline and a low shadow. The tab pointed at and the tab you are on are lit in the accent: the name in the
+     accent's text tone over a soft radial glow of the accent. The glow is a light, never a fill: at its heart it is a
+     fifth of the accent, and it is gone 40 px out. The name turns over on a spring, the one thing here that does. */
+  --tabs-ground: linear-gradient(to bottom, color-mix(in srgb, var(--text) 7%, var(--bg)), color-mix(in srgb, var(--text) 3.5%, var(--bg)));
+  --tabs-lift: inset 0 .5px 0 rgba(255,255,255,.07), 0 0 0 .5px var(--hair-strong), 0 1px 2px rgba(0,0,0,.18), 0 6px 14px -6px rgba(0,0,0,.28);
+  --tabs-glow: color-mix(in srgb, var(--accent) 22%, transparent); --tabs-glow-far: color-mix(in srgb, var(--accent) 7%, transparent);
+  --ease-spring: linear(0, .009, .035 2.1%, .141 4.4%, .723 12.9%, .938 16.7%, 1.017, 1.077, 1.121, 1.149 24.3%, 1.159, 1.163, 1.161, 1.154 29.9%, 1.129 32.8%, 1.051 39.6%, 1.017 43.1%, .991, .977 51%, .974 53.8%, .975 57.1%, .997 69.8%, 1.003 76.9%, 1.004 83.8%, 1);
+  --dur-flip: 520ms;
 }
 
 /* On a light ground the pale accent text collapses to 2.6:1, so links and accent marks take the brand's deeper step:
@@ -196,6 +205,10 @@ body.vscode-light, body.vscode-high-contrast-light {
   --scrim: rgba(0,0,0,.21);
   --lift-box: 0 0 0 1px rgba(0,0,0,.04), 0 2px 8px 0 rgba(0,0,0,.04), 0 4px 40px 8px rgba(0,0,0,.024);
   --dock-ground: color-mix(in srgb, var(--text) 2%, #fff);
+  --tabs-ground: linear-gradient(to bottom, #fff, color-mix(in srgb, var(--text) 3%, #fff));
+  --tabs-lift: inset 0 .5px 0 rgba(255,255,255,.9), 0 0 0 .5px var(--hair-strong), 0 1px 2px rgba(0,0,0,.05), 0 6px 14px -6px rgba(0,0,0,.10);
+  /* (On white the glow is fainter: at 16% the lit name read 4.4:1 on it. At 9% it is 4.8:1.) */
+  --tabs-glow: color-mix(in srgb, var(--accent) 9%, transparent); --tabs-glow-far: color-mix(in srgb, var(--accent) 3.5%, transparent);
   --dock-lift: inset 0 .5px 0 rgba(255,255,255,.9), 0 0 0 .5px var(--hair-strong), 0 1px 2px rgba(0,0,0,.06), 0 6px 14px -4px rgba(0,0,0,.10), 0 14px 28px -12px rgba(0,0,0,.14);
   --mark-word: #6242d8; --mark-word-shimmer: linear-gradient(105deg,#6242d8,#8a6df0,#4f30c4,#7657e6,#6242d8);
   --mark-plugin: #5d3cd2; --mark-icon: #6d49e8;
@@ -207,7 +220,7 @@ body.vscode-high-contrast, body.vscode-high-contrast-light {
   --hair-strong: var(--hair); --hair-faint: var(--hair); --border: var(--hair); --border-strong: var(--hair);
 }
 @media (prefers-reduced-motion: reduce) {
-  :root { --dur-hover: 0ms; --dur-menu: 0ms; --dur-dialog: 0ms; }
+  :root { --dur-hover: 0ms; --dur-menu: 0ms; --dur-dialog: 0ms; --dur-flip: 0ms; }
 }
 /* Windows High Contrast / forced colours: system colours keep the user's chosen palette. */
 @media (forced-colors: active) {

@@ -10,6 +10,8 @@ const ID = {email: /^maildraft_[a-f0-9]{32}$/, event: /^caldraft_[a-f0-9]{32}$/,
   app_action: /^appaction_[a-f0-9]{32}$/, app_link: /^applink_[a-f0-9]{32}$/, plugin: /^pipplugin_[a-f0-9]{32}$/,
   setup: /^setup_[a-f0-9]{32}$/, computer_action: /^compact_[a-f0-9]{32}$/, computer_check: /^pip_[a-f0-9]{32}$/,
   routine: /^routine_[a-f0-9]{32}$/, handoff: /^handoff_[a-f0-9]{32}$/, approval: /^[A-Za-z0-9_-]{1,128}$/};
+/** A kind of card in a word or two: "Email", "Its computer", "New Pip". */
+export const kindLabel = kind => LABELS[kind] || 'Card';
 const REVIEW_KINDS = ['job_update', 'schedule_update'];
 const SHOWN = 6;
 // Lengths in characters, as the CLI cuts them: an emoji is one, not two UTF-16 units.

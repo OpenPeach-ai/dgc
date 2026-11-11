@@ -1,9 +1,10 @@
-// Unread Pip messages, read and dismissed (reported 2026-11-03), in real Chromium with the real panel page, the real
-// Pips bundle and its CSS. The home's "Pips · 116 unread" row has Dismiss all: it marks every message read, so the Pips
-// page's numbers (the same unread) clear too; something new brings the row back with only the new count, and if a read is
-// refused the row stays dismissed over a reload (the host's store, src/pipHomeDismiss.ts). A Pip's
-// purple count, on the home and the Pips page (Personal and Project), reads "Read" on hover or focus and marks its whole
-// chat read. A project Pip's card in a Work chat, acted on (Dismiss, its ✕, Fix), reads its run.
+// Unread Pip messages, read and dismissed (reported 2026-11-03, "Pips · 116 unread"), in real Chromium with the real
+// panel page, the real Pips bundle and its CSS. On the side bar's Home each Pip with new messages is a card; Clear,
+// beside New, marks every message read, so the Pips page's numbers (the same unread) clear too; something new brings a
+// card back with only the new count, and if a read is refused the card stays cleared over a reload (the host's store,
+// src/pipHomeDismiss.ts). A card's Mark read, and a Pip's dot on the Pips page (Personal and Project, which reads "Read"
+// on hover or focus), mark its whole chat read. A project Pip's card in a Work chat, acted on (Dismiss, its ✕, Fix),
+// reads its run. (Before the tabs Home's part was a block of rows over the sessions, with Dismiss all in its head.)
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -141,18 +142,28 @@ async function openHome({ state = STATE(), dismissed = "", width = 380, height =
   }, [mainJs, markdownJs, state, dismissed, [P, Q]]);
   const posted = () => page.evaluate(() => window.__posted);
   const requests = async (type) => (await posted()).filter((m) => m.type === "pipsRequest" && m.request.type === type).map((m) => m.request);
-  const head = () => page.evaluate(() => document.querySelector("#sessions-pips .home-pips-head h2")?.textContent ?? null);
-  const unreadRows = () => page.evaluate(() => [...document.querySelectorAll("#sessions-pips .home-pip-item:has(.home-pip-read)")]
-    .map((li) => [li.querySelector("strong").textContent, li.querySelector(".home-pip-latest")?.textContent ?? li.querySelector("small").textContent, li.querySelector(".home-pip-read")?.innerText.trim() ?? null]));
+  // What Home says of your Pips, in the words its old heading used: how many need you (the Needs you group's number) and
+  // how many messages are new (the cards' "N new" chips, added up).
+  const head = () => page.evaluate(() => { const hub = document.getElementById("home-hub"), need = Number(hub.querySelector('.dgc-hub-group[data-group="needs"] .dgc-hub-n')?.textContent || 0);
+    const fresh = [...hub.querySelectorAll(".dgc-chip")].reduce((n, c) => n + (Number(/^(\d+) new$/.exec(c.textContent)?.[1]) || 0), 0);
+    return ["Pips", need ? `${need} ${need === 1 ? "needs" : "need"} you` : "", fresh ? `${fresh} new` : ""].filter(Boolean).join(" · "); });
+  // Each card that has messages to read: the Pip, and the sentence on its card.
+  const unreadRows = () => page.evaluate(() => [...document.querySelectorAll('#home-hub .dgc-hub-card:has([data-hub-act="read"])')]
+    .map((card) => [card.querySelector(".dgc-card-sub").textContent.split(" · ")[0], card.querySelector(".dgc-card-title").textContent]));
+  // Every card on Home: the Pip (or what it is), its group, its sentence, its chips.
+  const cards = () => page.evaluate(() => [...document.querySelectorAll("#home-hub .dgc-hub-card")].map((card) => [card.querySelector(".dgc-card-sub").textContent.split(" · ")[0], card.dataset.group,
+    card.querySelector(".dgc-card-title").textContent, [...card.querySelectorAll(".dgc-chip:not([hidden])")].map((c) => c.textContent)]));
   const refresh = () => page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { data: { type: "pipNewsRefresh" } })));
   const active = () => page.evaluate(() => { let e = document.activeElement; while (e?.shadowRoot?.activeElement) e = e.shadowRoot.activeElement;
     return e ? (e.getAttribute("aria-label") || e.textContent.trim()) : null; });
-  return { page, errors, posted, requests, head, unreadRows, refresh, active, close: () => context.close() };
+  // (The scene's sessions and chats never load: Home here is your Pips' cards alone.)
+  await page.waitForSelector("#home-hub .dgc-hub-show");
+  return { page, errors, posted, requests, head, unreadRows, cards, refresh, active, close: () => context.close() };
 }
 const kept = async (x) => (await x.posted()).filter((m) => m.type === "pipHomeDismissed");
-// The Pips page in the side bar: Open Pips, then a tab (Personal or Project) and its list.
+// The Pips page in the side bar: its tab, then a scope (Personal or Project) and its list.
 async function openPipsPage(x, tab) {
-  await x.page.click(".home-pips-open");
+  await x.page.click("#side-tab-pips");
   await x.page.waitForFunction(() => !document.getElementById("pips-host").hidden);
   await x.page.waitForSelector(".pips-tab[data-pips-tab=personal]");
   if (tab === "project") { await x.page.click(".pips-tab[data-pips-tab=project]"); await x.page.waitForSelector(`[data-job="${AUDIT}"]`); }
@@ -173,8 +184,8 @@ test("opening an unread Pip from home keeps its composer at the bottom of the ed
     label: null, error: null, updated_at: "2026-11-03T10:00:00Z" }];
   const x = await openHome({ state, width: 1266, height: 760 });
   try {
-    await x.page.waitForSelector(`#sessions-pips .home-pip-item[data-pip-id="${MAIL}"] .home-pip-row`);
-    await x.page.click(`#sessions-pips .home-pip-item[data-pip-id="${MAIL}"] .home-pip-row`);
+    await x.page.waitForSelector(`#home-hub .dgc-hub-card[data-key="pip:${MAIL}"] [data-hub-act="open"]`);
+    await x.page.click(`#home-hub .dgc-hub-card[data-key="pip:${MAIL}"] [data-hub-act="open"]`);
     await x.page.waitForFunction(() => !!document.getElementById("pips-host")?.shadowRoot?.querySelector(".pip-composer"));
     await x.page.waitForSelector(`#pips-host [data-app-link="${LINK}"]`);
     await x.page.setViewportSize({ width: 1266, height: 1590 });
@@ -191,7 +202,7 @@ test("opening an unread Pip from home keeps its composer at the bottom of the ed
       return {viewport:innerHeight,host:box(host),root:box(root),app:box(app),composer:box(composer),logScroll:log.scrollTop,foot};
     });
     assert.ok(geometry.logScroll > 0, `the notification should reveal the card inside the transcript: ${JSON.stringify(geometry)}`);
-    assert.ok(geometry.host.top >= 0, `the Pip view must not scroll above DGC's header: ${JSON.stringify(geometry)}`);
+    assert.ok(geometry.host.top >= 0, `the Pip view must not scroll above the side bar's top: ${JSON.stringify(geometry)}`);
     assert.ok(geometry.host.bottom - geometry.composer.bottom <= 28, JSON.stringify(geometry));
     assert.ok(geometry.viewport - geometry.foot - geometry.composer.bottom <= 28, `the composer must stay at the editor bottom, just above the dock: ${JSON.stringify(geometry)}`);
     assert.ok(Math.abs(geometry.viewport - geometry.foot - geometry.host.bottom) < 1, `the Pip view ends where the dock begins: ${JSON.stringify(geometry)}`);
@@ -200,23 +211,25 @@ test("opening an unread Pip from home keeps its composer at the bottom of the ed
   } finally { await x.close(); }
 });
 
-test("Dismiss all clears the home's unread count and rows and marks them read, so the Pips page's numbers clear too", async (t) => {
+test("Clear clears Home's new cards and marks their messages read, so the Pips page's numbers clear too", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openHome();
   try {
-    await x.page.waitForSelector("#sessions-pips .home-pip-read");
+    await x.page.waitForSelector('#home-hub [data-hub-act="read"]');
     assert.equal(await x.head(), "Pips · 3 new");
-    const button = x.page.locator(".home-pips-dismiss-all");
-    assert.equal(await button.textContent(), "Dismiss all", "the same control as the news rows' Dismiss all");
-    assert.equal(await button.getAttribute("aria-label"), "Dismiss all new Pip messages from the home page");
-    assert.match(await button.getAttribute("title"), /Every message is marked read, here and in Pips/);
+    assert.deepEqual(await x.cards(), [["Mail watch", "new", "Two new mails from OKX.", ["2 new"]], ["Billing audit", "new", "2 findings in billing.py", ["1 new"]]]);
+    assert.equal(await x.page.textContent("#side-tab-home-count"), "2", "the Home tab counts the cards");
+    const button = x.page.locator("#home-hub .dgc-hub-clear");
+    assert.equal(await button.textContent(), "Clear", "one control for everything that is new");
+    assert.match(await button.getAttribute("title"), /What needs you stays/);
     await button.focus();
     await x.page.keyboard.press("Enter");
-    await x.page.waitForFunction(() => !document.querySelector("#sessions-pips .home-pip-read"));
-    assert.equal(await x.head(), "Pips", "no count on the home");
-    assert.equal(await x.page.locator(".home-pips-dismiss-all").count(), 0, "nothing left to dismiss");
-    assert.equal(await x.active(), "Open Pips", "the keyboard lands on Open Pips beside it, never on the page's top");
-    assert.equal(await x.page.evaluate(() => document.querySelector(".home-pips-quiet-text")?.textContent), "All quiet. Nothing is waiting for you.");
+    await x.page.waitForFunction(() => !document.querySelector('#home-hub [data-hub-act="read"]'));
+    assert.equal(await x.head(), "Pips", "no count on Home");
+    assert.equal(await x.page.locator("#home-hub .dgc-hub-clear").count(), 0, "nothing left to clear");
+    assert.equal(await x.active(), "Show: All. Choose what Home shows", "the keyboard lands on Show, the first thing on Home, never on the page's top");
+    assert.equal(await x.page.evaluate(() => document.querySelector("#home-hub .dgc-hub-empty")?.textContent), "Nothing needs you. New things arrive here.");
+    assert.equal(await x.page.evaluate(() => document.getElementById("side-tab-home-count").hidden), true);
     // The number on the Pips page counts what list_pip_unread counts, the same as the home's: each Pip is read up to what was named.
     const read = (await x.requests("mark_pip_read")).map(({ request_id, ...r }) => r).sort((a, b) => a.pip_id.localeCompare(b.pip_id));
     assert.deepEqual(read, [{ type: "mark_pip_read", pip_id: MAIL, message_id: M2 }, { type: "mark_pip_read", pip_id: AUDIT, post_id: RUN }].sort((a, b) => a.pip_id.localeCompare(b.pip_id)));
@@ -234,35 +247,35 @@ test("Dismiss all clears the home's unread count and rows and marks them read, s
   } finally { await x.close(); }
 });
 
-test("something new brings the row back with only the new count", async (t) => {
+test("something new brings the card back with only the new count", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openHome();
   try {
-    await x.page.waitForSelector("#sessions-pips .home-pip-read");
-    await x.page.click(".home-pips-dismiss-all");
-    await x.page.waitForFunction(() => !document.querySelector("#sessions-pips .home-pip-read"));
+    await x.page.waitForSelector('#home-hub [data-hub-act="read"]');
+    await x.page.click("#home-hub .dgc-hub-clear");
+    await x.page.waitForFunction(() => !document.querySelector('#home-hub [data-hub-act="read"]'));
     await x.page.evaluate(([unread]) => { window.__state.unread["ws_" + "1".repeat(32)] = [unread]; }, [mailUnread(1, "A third mail, from your bank.", M3)]);
     await x.refresh();
-    await x.page.waitForSelector("#sessions-pips .home-pip-read");
+    await x.page.waitForSelector('#home-hub [data-hub-act="read"]');
     assert.equal(await x.head(), "Pips · 1 new", "only the one that came after the dismiss");
-    assert.deepEqual(await x.unreadRows(), [["Mail watch", "A third mail, from your bank.", ""]]);
-    assert.equal(await x.page.getAttribute(".home-pip-read", "aria-label"), "Mark Mail watch's 1 new message as read");
+    assert.deepEqual(await x.unreadRows(), [["Mail watch", "A third mail, from your bank."]]);
+    assert.deepEqual((await x.cards())[0][3], ["1 new"], "its card says 1 new");
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
 });
 
-test("a read DGC refuses leaves the row dismissed, also after a reload, and it comes back with only what came after", async (t) => {
+test("a read DGC refuses leaves the card cleared, also after a reload, and it comes back with only what came after", async (t) => {
   if (skipOrFail(t)) return;
   const state = STATE(); state.refuseRead = true;
   const x = await openHome({ state });
   let attr = "";
   try {
-    await x.page.waitForSelector("#sessions-pips .home-pip-read");
-    await x.page.click(".home-pips-dismiss-all");
-    await x.page.waitForFunction(() => !document.querySelector("#sessions-pips .home-pip-read"));
+    await x.page.waitForSelector('#home-hub [data-hub-act="read"]');
+    await x.page.click("#home-hub .dgc-hub-clear");
+    await x.page.waitForFunction(() => !document.querySelector('#home-hub [data-hub-act="read"]'));
     await x.page.waitForFunction(() => window.__posted.filter((m) => m.type === "pipsRequest" && m.request.type === "mark_pip_read").length === 2);
     await x.page.waitForTimeout(60);
-    assert.equal(await x.head(), "Pips", "still dismissed here");
+    assert.equal(await x.head(), "Pips", "still cleared here");
     const [saved] = await kept(x);
     assert.deepEqual(Object.keys(saved.set).sort(), [MAIL, AUDIT].sort(), "what was dismissed goes to the host, for a reload");
     assert.deepEqual(saved.set[MAIL], { w: P, m: 2, mid: M2, p: 0, pid: null });
@@ -271,7 +284,7 @@ test("a read DGC refuses leaves the row dismissed, also after a reload, and it c
     await x.page.evaluate(([m3]) => { const u = window.__state.unread["ws_" + "1".repeat(32)][0];
       Object.assign(u, { count: 3, messages: 3, latest: "A third mail, from your bank.", latest_message_id: m3 }); }, [M3]);
     await x.refresh();
-    await x.page.waitForSelector("#sessions-pips .home-pip-read");
+    await x.page.waitForSelector('#home-hub [data-hub-act="read"]');
     assert.equal(await x.head(), "Pips · 1 new", "only the one that came after the dismiss");
     const context = { globalState: { value: {}, get(key) { return this.value[key]; }, update(key, v) { this.value[key] = v; return Promise.resolve(); } } };
     for (const message of await kept(x)) assert.equal(store.rememberPipHomeDismissed(context, message), true);
@@ -281,7 +294,7 @@ test("a read DGC refuses leaves the row dismissed, also after a reload, and it c
   const again = STATE(); again.refuseRead = true;
   const reloaded = await openHome({ dismissed: attr, state: again });
   try {
-    await reloaded.page.waitForSelector("#sessions-pips .home-pips-head");
+    await reloaded.page.waitForSelector("#home-hub .dgc-hub-show");
     await reloaded.page.waitForTimeout(200);
     assert.equal(await reloaded.head(), "Pips", "after a reload the old count stays away");
     assert.deepEqual(reloaded.errors, []);
@@ -308,9 +321,9 @@ test("opening a Pip's chat reads it as before, and clears a dismiss a refused re
   const state = STATE(); state.refuseRead = true;
   const x = await openHome({ state });
   try {
-    await x.page.waitForSelector("#sessions-pips .home-pip-read");
-    await x.page.click(".home-pips-dismiss-all");
-    await x.page.waitForFunction(() => !document.querySelector("#sessions-pips .home-pip-read"));
+    await x.page.waitForSelector('#home-hub [data-hub-act="read"]');
+    await x.page.click("#home-hub .dgc-hub-clear");
+    await x.page.waitForFunction(() => !document.querySelector('#home-hub [data-hub-act="read"]'));
     await x.page.waitForFunction(() => window.__posted.filter((m) => m.type === "pipsRequest" && m.request.type === "mark_pip_read").length === 2);
     await x.page.waitForTimeout(40);
     await x.page.evaluate(() => { window.__state.refuseRead = false; window.__posted.length = 0; });
@@ -319,45 +332,40 @@ test("opening a Pip's chat reads it as before, and clears a dismiss a refused re
     await x.page.waitForFunction(() => window.__posted.some((m) => m.type === "pipsRequest" && m.request.type === "mark_pip_read"));
     assert.deepEqual((await x.requests("mark_pip_read")).map(({ request_id, ...r }) => r), [{ type: "mark_pip_read", pip_id: MAIL, message_id: M2 }],
       "the chat marks what it showed read, as before");
-    await x.page.click("#btn-pips-back");
+    await x.page.click("#side-tab-home");
     await x.page.waitForFunction(() => window.__posted.some((m) => m.type === "pipHomeDismissed" && m.drop?.length));
     assert.deepEqual((await kept(x)).flatMap((m) => m.drop), [MAIL], "read: its dismiss goes; Billing audit's stays");
     await x.page.evaluate(([unread]) => { window.__state.unread["ws_" + "1".repeat(32)] = [unread]; }, [mailUnread(1, "One more mail.", M3, "2026-11-03T11:00:00Z")]);
     await x.refresh();
-    await x.page.waitForSelector("#sessions-pips .home-pip-read");
+    await x.page.waitForSelector('#home-hub [data-hub-act="read"]');
     assert.equal(await x.head(), "Pips · 1 new", "all of it is new since the read; Billing audit stays dismissed");
-    assert.deepEqual(await x.unreadRows(), [["Mail watch", "One more mail.", ""]]);
-    assert.equal(await x.page.getAttribute(".home-pip-read", "aria-label"), "Mark Mail watch's 1 new message as read");
+    assert.deepEqual(await x.unreadRows(), [["Mail watch", "One more mail."]]);
+    assert.deepEqual((await x.cards())[0][3], ["1 new"]);
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
 });
 
-test("a Pip's dot on the home reads Read on hover and focus, and marks its whole chat read", async (t) => {
+test("a card's Mark read marks that Pip's whole chat read, by the pointer or the keyboard, without opening it", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openHome();
   try {
-    await x.page.waitForSelector("#sessions-pips .home-pip-read");
-    assert.deepEqual(await x.unreadRows(), [["Mail watch", "Two new mails from OKX.", ""], ["Billing audit", "2 findings in billing.py", ""]], "a dot, no number: nothing waits on them");
-    const labels = await x.page.evaluate(() => [...document.querySelectorAll(".home-pip-read")].map((b) => [b.tagName, b.type, b.getAttribute("aria-label"), !!b.closest(".home-pip-row")]));
-    assert.deepEqual(labels, [["BUTTON", "button", "Mark Mail watch's 2 new messages as read", false], ["BUTTON", "button", "Mark Billing audit's 1 new message as read", false]],
-      "its own button, never inside the row");
-    await x.page.hover(".home-pip-read >> nth=0");
-    assert.equal((await x.unreadRows())[0][2], "Read", "hover");
-    await x.page.mouse.move(5, 700);
-    assert.equal((await x.unreadRows())[0][2], "", "the dot again");
-    await x.page.focus(".home-pip-item:has(.home-pip-read) .home-pip-row >> nth=0");
+    await x.page.waitForSelector('#home-hub [data-hub-act="read"]');
+    assert.deepEqual(await x.unreadRows(), [["Mail watch", "Two new mails from OKX."], ["Billing audit", "2 findings in billing.py"]], "each Pip's newest words, on its card");
+    const labels = await x.page.evaluate(() => [...document.querySelectorAll('#home-hub [data-hub-act="read"]')].map((b) => [b.tagName, b.type, b.textContent, b.title, b.checkVisibility({ visibilityProperty: true, opacityProperty: true }), !!b.closest("button:not([data-hub-act])")]));
+    assert.deepEqual(labels, [["BUTTON", "button", "Mark read", "Mark as read, without opening its chat", true, false], ["BUTTON", "button", "Mark read", "Mark as read, without opening its chat", true, false]],
+      "its own button, in words and in sight: nothing to point at first");
+    await x.page.focus('#home-hub .dgc-hub-card >> nth=0 >> [data-hub-act="open"]');
     await x.page.keyboard.press("Tab");
-    assert.equal(await x.active(), "Mark Mail watch's 2 new messages as read", "Tab reaches it");
-    assert.equal((await x.unreadRows())[0][2], "Read", "keyboard focus");
+    assert.equal(await x.page.evaluate(() => `${document.activeElement.closest(".dgc-hub-card").dataset.key} ${document.activeElement.dataset.hubAct}`), `pip:${MAIL} read`, "Tab reaches it, after Open");
     await x.page.keyboard.press("Enter");
-    await x.page.waitForFunction(() => document.querySelectorAll("#sessions-pips .home-pip-item:has(.home-pip-read)").length === 1);
+    await x.page.waitForFunction(() => document.querySelectorAll('#home-hub .dgc-hub-card:has([data-hub-act="read"])').length === 1);
     assert.equal(await x.head(), "Pips · 1 new");
-    assert.equal(await x.active(), "Mark Billing audit's 1 new message as read", "the keyboard stays in the list, on the next one");
+    assert.equal(await x.page.evaluate(() => `${document.activeElement.closest(".dgc-hub-card")?.dataset.key} ${document.activeElement.dataset.hubAct}`), `pip:${AUDIT} read`, "the keyboard stays in the list, on the next card's Mark read");
     await x.page.keyboard.press("Space");
-    await x.page.waitForFunction(() => !document.querySelector("#sessions-pips .home-pip-read"));
+    await x.page.waitForFunction(() => !document.querySelector('#home-hub [data-hub-act="read"]'));
     assert.deepEqual((await x.requests("mark_pip_read")).map(({ request_id, ...r }) => r),
       [{ type: "mark_pip_read", pip_id: MAIL, message_id: M2 }, { type: "mark_pip_read", pip_id: AUDIT, post_id: RUN }], "up to the newest reply or run post");
-    assert.equal(await x.active(), "Open Pips");
+    assert.equal(await x.active(), "Show: All. Choose what Home shows");
     assert.equal(await x.head(), "Pips");
     assert.equal(await x.page.evaluate(() => window.__posted.some((m) => m.type === "pipsRequest" && m.request.type === "list_pip_messages")), false, "no chat opened");
     assert.deepEqual(x.errors, []);
@@ -368,7 +376,7 @@ test("the Pips page's dot reads Read on hover and focus, Personal and Project, a
   if (skipOrFail(t)) return;
   const x = await openHome({ width: 300 });
   try {
-    await x.page.waitForSelector("#sessions-pips .home-pip-read");
+    await x.page.waitForSelector('#home-hub [data-hub-act="read"]');
     await openPipsPage(x, "personal");
     const geometry = await x.page.evaluate((id) => {
       const root = document.getElementById("pips-host").shadowRoot, b = root.querySelector(`[data-pip-read="${id}"]`), row = root.querySelector(`[data-job="${id}"]`);
@@ -508,7 +516,7 @@ test("a Pip's chat leaves room for its scrollbar: your last bubble and its time 
       const state = STATE(); state.messages[MAIL] = conversation(); state.unread[P] = [];
       const x = await openHome({ state, width, height: 640, theme, using });
       try {
-        await x.page.waitForSelector("#sessions-pips .home-pips-head");
+        await x.page.waitForSelector("#home-hub .dgc-hub-show");
         await openPipsPage(x, "personal");
         await x.page.click(`[data-job="${MAIL}"]`);
         await x.page.waitForFunction(() => document.getElementById("pips-host").shadowRoot.querySelectorAll(".conversation-log .pip-message.user").length === 14);
@@ -641,24 +649,16 @@ const tabs = (x) => x.page.evaluate(() => { const root = document.getElementById
   return ["personal", "project"].map((key) => { const t = root.querySelector(`.pips-tab[data-pips-tab=${key}]`);
     return { count: t.querySelector(".pip-tab-count")?.textContent ?? null, dot: !!t.querySelector(".pip-tab-new"), label: t.getAttribute("aria-label"), title: t.title }; }); });
 const attentionCount = (x) => x.page.evaluate(() => document.getElementById("pips-host").shadowRoot.querySelector(".attention-count")?.textContent ?? null);
-const homeMarks = (x) => x.page.evaluate(() => [...document.querySelectorAll("#sessions-pips .home-pip-item")].map((li) => {
-  const r = (e) => e && e.getBoundingClientRect(), badge = li.querySelector(".home-pip-badge"), dot = li.querySelector(".home-pip-new-dot");
-  return { name: li.querySelector("strong").textContent, number: badge?.textContent ?? null, dot: !!dot,
-    numberRight: badge ? r(badge).right : null, numberMid: badge ? (r(badge).left + r(badge).right) / 2 : null, dotMid: dot ? (r(dot).left + r(dot).right) / 2 : null,
-    dotRight: dot ? r(dot).right : null, numberLeft: badge ? r(badge).left : null, filled: badge ? getComputedStyle(badge).backgroundColor : null, dotFill: dot ? getComputedStyle(dot).backgroundColor : null };
-}));
-
 test("a tab's number is Needs attention's on one data set, and a Pip's number is what waits on it; new is a dot", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openHome({ state: waits(STATE()) });
   try {
-    await x.page.waitForSelector("#sessions-pips .home-pip-badge");
+    await x.page.waitForSelector('#home-hub .dgc-hub-card[data-group="needs"]');
     assert.equal(await x.head(), "Pips · 3 need you · 4 new", "Needs attention's 2 and the project's 1; 2, 1 and 1 new messages");
-    const home = await homeMarks(x);
-    assert.deepEqual(home.map(({ name, number, dot }) => [name, number, dot]),
-      [["Mail watch", "1", true], ["Billing audit", "1", true], ["Garden notes", null, true]], "a number where something waits, a dot where something is new");
-    assert.equal(await x.page.evaluate(() => document.querySelector("#sessions-pips .home-pips-more")?.textContent), "1 more needs you · Show all",
-      "the setup card: the rows' 1 and 1 and this 1 are the head's 3");
+    assert.deepEqual(await x.cards(), [["Mail watch", "needs", "Hand this to Mail watch?", ["Handoff", "Sort the bills.", "2 new"]], ["Billing audit", "needs", "1 thing is waiting for you", ["1 new"]],
+      ["New Pip", "needs", "Create the Pip “Bills”?", ["Watch my bills."]], ["Garden notes", "new", "Water the tomatoes at dawn.", ["1 new"]]],
+      "a card in Needs you where something waits, in its own words when it is one thing DGC names (the new Pip has its own card: the three are the group's 3), and what is new said on each card");
+    assert.equal(await x.page.textContent("#side-tab-home-count"), "4", "the Home tab counts the cards");
     await openPipsPage(x, "personal");
     await x.page.waitForFunction(() => document.getElementById("pips-host").shadowRoot.querySelector(".pip-tab-count"));
     const [personal, project] = await tabs(x);
@@ -680,9 +680,9 @@ test("with something new and nothing waiting a tab has only a dot, with its coun
   for (const [state, why] of [[fresh, "nothing waits"], [{ ...fresh, noAttention: true }, "a DGC with no Needs attention"]]) {
     const x = await openHome({ state });
     try {
-      await x.page.waitForSelector("#sessions-pips .home-pip-read");
+      await x.page.waitForSelector('#home-hub [data-hub-act="read"]');
       assert.equal(await x.head(), "Pips · 4 new", why);
-      assert.equal(await x.page.locator("#sessions-pips .home-pip-badge").count(), 0, why);
+      assert.equal(await x.page.locator('#home-hub .dgc-hub-group[data-group="needs"]').count(), 0, why);
       await openPipsPage(x, "personal");
       await x.page.waitForFunction(() => document.getElementById("pips-host").shadowRoot.querySelector(".pip-tab-new"));
       const [personal, project] = await tabs(x);
@@ -694,28 +694,13 @@ test("with something new and nothing waiting a tab has only a dot, with its coun
   }
 });
 
-test("a dot sits where a number's centre sits, numbers share one edge, and both read in dark and light at 300px; Dismiss all leaves the numbers", async (t) => {
+test("on the Pips page a dot sits where a number's centre sits, in dark and light at 300px; Home's Clear leaves what needs you", async (t) => {
   if (skipOrFail(t)) return;
   for (const theme of ["dark-modern", "light-modern"]) {
     const x = await openHome({ state: waits(STATE()), width: 300, theme });
     try {
-      await x.page.waitForSelector("#sessions-pips .home-pip-badge");
-      const [mail_, audit_, notes_] = await homeMarks(x);
-      assert.ok(Math.abs(mail_.numberRight - audit_.numberRight) < 0.5, `numbers share their edge (${theme}): ${JSON.stringify([mail_, audit_])}`);
-      assert.ok(Math.abs(notes_.dotMid - mail_.numberMid) < 0.5, `a dot alone sits at a number's centre (${theme}): ${JSON.stringify([notes_, mail_])}`);
-      assert.ok(Math.abs(mail_.numberLeft - mail_.dotRight - 6) < 0.5, `beside a number, the dot keeps 6px clear of it (${theme}): ${JSON.stringify(mail_)}`);
-      const contrast = await x.page.evaluate(() => {
-        const rgb = (c) => { const m = c.match(/[\d.]+/g).map(Number); return c.startsWith("color(srgb") ? m.slice(0, 3).map((v) => v * 255) : m.slice(0, 3); };
-        const lum = (c) => { const [r, g, b] = rgb(c).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
-        const ground = (e) => { for (; e; e = e.parentElement) { const c = getComputedStyle(e).backgroundColor; if (!/rgba\(0, 0, 0, 0\)|transparent/.test(c)) return c; } return "rgb(255, 255, 255)"; };
-        const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
-        const dot = document.querySelector("#sessions-pips .home-pip-item:last-child .home-pip-new-dot");
-        const root = document.getElementById("pips-host").shadowRoot;
-        return { home: ratio(getComputedStyle(dot).backgroundColor, ground(dot.closest(".home-pip-item"))) };
-      });
-      assert.ok(contrast.home >= 3, `the dot reads on its ground (${theme}): ${JSON.stringify(contrast)}`);
-      assert.notEqual(notes_.dotFill, mail_.filled, "a dot is not the number's purple fill");
-      // The Pips page: the same column, though its dot is a button over the row's end and its number the row's own.
+      await x.page.waitForSelector('#home-hub .dgc-hub-card[data-group="needs"]');
+      // The Pips page: one column for both, though its dot is a button over the row's end and its number the row's own.
       await openPipsPage(x, "personal");
       await x.page.waitForSelector("#pips-host >> [data-pip-read]");
       const page_ = await x.page.evaluate(() => { const root = document.getElementById("pips-host").shadowRoot, b = (e) => e.getBoundingClientRect();
@@ -725,11 +710,11 @@ test("a dot sits where a number's centre sits, numbers share one edge, and both 
       assert.ok(Math.abs(page_.dotMid - page_.numberMid) < 0.5, `on the Pips page too (${theme}): ${JSON.stringify(page_)}`);
       assert.equal(page_.target, 24, "a dot's target is 24px wide");
       assert.ok(Math.abs(page_.numberLeft - page_.bothDotRight - 6) < 0.5, `beside a number, the dot keeps 6px clear of it on the Pips page too (${theme}): ${JSON.stringify(page_)}`);
-      await x.page.click("#btn-pips-back"); await x.page.waitForSelector("#sessions-pips .home-pips-dismiss-all", { state: "visible" });
-      await x.page.click(".home-pips-dismiss-all");
-      await x.page.waitForFunction(() => !document.querySelector("#sessions-pips .home-pip-read"));
+      await x.page.click("#side-tab-home"); await x.page.waitForSelector("#home-hub .dgc-hub-clear", { state: "visible" });
+      await x.page.click("#home-hub .dgc-hub-clear");
+      await x.page.waitForFunction(() => !document.querySelector('#home-hub [data-hub-act="read"]'));
       assert.equal(await x.head(), "Pips · 3 need you", `what waits stays; what's new clears (${theme})`);
-      assert.deepEqual((await homeMarks(x)).map(({ name, number }) => [name, number]), [["Mail watch", "1"], ["Billing audit", "1"]]);
+      assert.deepEqual((await x.cards()).map(([name, group, , chips]) => [name, group, chips]), [["Mail watch", "needs", ["Handoff", "Sort the bills."]], ["Billing audit", "needs", []], ["New Pip", "needs", ["Watch my bills."]]]);
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   }

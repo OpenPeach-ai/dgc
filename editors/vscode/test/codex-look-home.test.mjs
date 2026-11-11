@@ -1,8 +1,8 @@
-// The side bar's home in the 0.52 look, in real Chromium with the real panel page and Pips bundle
-// (test/support/home-scene.mjs): the search box on top, then two quiet headings that fold, "Pips" and "Sessions". Open,
-// a heading's end holds what it offers (Open Pips; "+" for a new session or chat); folded, its count. The Sessions list
-// shows three, or every session that needs you, those first, then "View all (N)". Rows are 29 px pills in 12 px words,
-// and nothing wider than a dot is purple. Dark and light, 300 and 700 px.
+// The side bar in the 0.52 look, in real Chromium with the real panel page and Pips bundle (test/support/home-scene.mjs).
+// Since the tabs (Home, Work, Chat, Pips) each list has its own page: Work opens with its search box and New, then the
+// Library and the sessions; Home holds what the Pips block and the headings' counts said (side-tabs-home.test.mjs). The
+// Work list shows six, or every session that needs you, those first, then "View all (N)". A row is its blob, its name in
+// 12 px words over a quiet line, and nothing wider than a dot is purple. Dark and light, 300 and 700 px.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { homeState, manySessions, openHome } from "./support/home-scene.mjs";
@@ -30,101 +30,81 @@ const purple = (c) => { const m = String(c).match(/-?[\d.]+(e-?\d+)?/g)?.map(Num
 const settle = (page) => page.waitForTimeout(260);
 
 for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 700]) {
-  test(`search on top, then Pips and Sessions under quiet headings; rows are 29px pills in 12px words (${theme}, ${width}px)`, async (t) => {
+  test(`Work: the search box and New on top, then the Library and the sessions; a row is a blob and 12px words (${theme}, ${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
-    const x = await openHome(browser, { theme, width, sessions: manySessions(20), motion: "reduce" });
+    const x = await openHome(browser, { theme, width, tab: "work", sessions: manySessions(20), motion: "reduce" });
     try {
-      await x.page.waitForSelector("#sessions-pips .home-pip-row");
-      const order = await tops(x.page, ["#sessions-search", "#sessions-pips", "#sessions-fold", "#home-tabs", "#sessions-list"]);
-      assert.deepEqual(order, [...order].sort((a, b) => a - b), `top to bottom: the search box, Pips, the Sessions heading, Work | Chat, the list: ${order}`);
+      await x.page.waitForSelector("#sessions-list .session-row");
+      const order = await tops(x.page, ["#side-tabs", "#sessions-search", "#work-library", "#sessions-list", "#sessions-all"]);
+      assert.deepEqual(order, [...order].sort((a, b) => a - b), `top to bottom: the tabs, the search box, the Library, the list, View all: ${order}`);
       const look = await x.page.evaluate(() => {
         const css = (s) => getComputedStyle(document.querySelector(s)), probe = document.createElement("i"); document.body.append(probe);
-        probe.style.color = "var(--muted)"; const muted = getComputedStyle(probe).color; probe.remove();
+        probe.style.color = "var(--text-2)"; const quiet = getComputedStyle(probe).color; probe.remove();
         const row = document.querySelector("#sessions-list .session-row"), r = row.getBoundingClientRect();
-        const big = [...document.querySelectorAll("#sessions-host *")].filter((n) => n.checkVisibility({ visibilityProperty: true }) && !n.closest(".home-pip-face, svg")).map((n) => { const b = n.getBoundingClientRect(); return { n: n.id || String(n.className), c: getComputedStyle(n).backgroundColor, w: b.width }; }).filter((m) => m.w > 10);
-        return { muted, heads: [".home-pips-head h2", ".home-fold-h"].map((s) => [css(s).fontSize, css(s).fontWeight, css(s).color, css(s).textTransform]),
-          titles: [document.querySelector(".home-pips-title").firstChild.textContent, document.querySelector(".home-fold-title").textContent],
-          row: [Math.round(r.height), css("#sessions-list .session-name").fontSize, parseFloat(css("#sessions-list .session-row").borderTopLeftRadius) >= r.height / 2],
-          search: [css("#sessions-search").borderTopColor, Math.round(document.querySelector("#sessions-search").getBoundingClientRect().height)], big };
+        const big = [...document.querySelectorAll("#sessions-host *")].filter((n) => n.checkVisibility({ visibilityProperty: true }) && !n.closest(".dgc-blob, svg")).map((n) => { const b = n.getBoundingClientRect(); return { n: n.id || String(n.className), c: getComputedStyle(n).backgroundColor, w: b.width }; }).filter((m) => m.w > 10);
+        const search = document.getElementById("sessions-search").getBoundingClientRect(), fresh = document.getElementById("sessions-new").getBoundingClientRect();
+        return { quiet, row: [Math.round(r.height), css("#sessions-list .session-name").fontSize, css("#sessions-list .session-sub").fontSize, css("#sessions-list .session-sub").color],
+          heights: [...new Set([...document.querySelectorAll("#sessions-list .session-row")].map((n) => Math.round(n.getBoundingClientRect().height)))],
+          search: [css("#sessions-search").borderTopColor, Math.round(search.height)], fresh: [Math.round(fresh.height), Math.abs((search.top + search.bottom) / 2 - (fresh.top + fresh.bottom) / 2) < 1, search.right <= fresh.left], big };
       });
-      assert.deepEqual(look.titles, ["Pips", "Sessions"]);
-      for (const head of look.heads) assert.deepEqual(head, ["12px", "500", look.muted, "none"], "a quiet heading: 12px medium, the quiet tone, sentence case");
-      assert.deepEqual(look.row, [29, "12px", true], "a session: a 29px pill in 12px words");
+      assert.deepEqual(look.row, [44, "12px", "11px", look.quiet], "a session: its name in 12px words over a quiet 11px line");
+      assert.deepEqual(look.heights, [44], "every row is one height");
       assert.deepEqual(look.search, ["rgba(0, 0, 0, 0)", 29], "the search box: a field with no line round it");
+      assert.deepEqual(look.fresh, [28, true, true], "New: a 28px pill on the search box's row, after it");
       assert.deepEqual(look.big.filter((m) => purple(m.c)).map((m) => m.n), [], "nothing wider than a dot is filled purple");
-      // Open: Open Pips at the Pips heading's end and no count; "+" at the Sessions heading's end.
-      assert.deepEqual([await shown(x.page, ".home-pips-open"), await shown(x.page, ".home-pips-count"), await shown(x.page, "#sessions-new"), await shown(x.page, "#sessions-fold-count")], [[true], [false], [true], [false]]);
-      assert.equal(await x.head(), "Pips · 2 need you · 6 new", "a screen reader still hears the count in the heading");
+      assert.deepEqual(await shown(x.page, "#sessions-new"), [true]);
+      assert.deepEqual(await shown(x.page, "#chats-new"), [false], "a new chat is on the Chat tab");
+      await x.page.click("#sessions-new");
+      assert.equal((await x.posted("newSessionInEditor")).length, 1, "New starts a session");
+      // The Tab key goes from the search box to New, then on into the list.
+      await x.page.focus("#sessions-search"); await x.page.keyboard.press("Tab");
+      assert.equal(await x.page.evaluate(() => document.activeElement.id), "sessions-new");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   });
 
-  test(`each heading folds its list and then says its count; the host keeps the Sessions fold (${theme}, ${width}px)`, async (t) => {
+  test(`Home says what the headings' counts said: how many need you and how many are new, and the Home tab's number (${theme}, ${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openHome(browser, { theme, width, sessions: manySessions(20) });
     try {
-      await x.page.waitForSelector("#sessions-pips .home-pip-row");
-      await x.page.click(".home-pips-toggle"); await settle(x.page);
-      assert.deepEqual([await shown(x.page, ".home-pips-open"), await shown(x.page, ".home-pips-count")], [[false], [true]], "folded, the count takes Open Pips' place");
-      assert.deepEqual(await x.page.evaluate(() => [...document.querySelectorAll(".home-pips-count > *")].map((n) => n.textContent)), ["2 need you", "6 new"]);
-      const before = (await tops(x.page, ["#sessions-fold"]))[0];
-      await x.page.click("#sessions-fold"); await settle(x.page);
-      assert.equal(await x.page.getAttribute("#sessions-fold", "aria-expanded"), "false");
-      assert.deepEqual(await shown(x.page, "#home-tabs, #sessions-list .session-row, #sessions-all, #work-library"), Array(6).fill(false), "folded: no tabs, no rows, no View all");
-      assert.deepEqual([await x.page.textContent("#sessions-fold-count"), await shown(x.page, "#sessions-fold-count"), await shown(x.page, "#sessions-new")], ["20", [true], [true]], "the heading says how many, and + stays");
-      assert.equal((await tops(x.page, ["#sessions-fold"]))[0], before, "the heading itself does not move");
-      assert.deepEqual(await x.posted("sessionsHomeCollapsed"), [{ type: "sessionsHomeCollapsed", collapsed: true }]);
-      // Folded, the keyboard goes from the heading to + and on out of the list.
-      await x.page.focus("#sessions-fold"); await x.page.keyboard.press("Tab");
-      assert.equal(await x.page.evaluate(() => document.activeElement.id), "sessions-new");
-      await x.page.click("#sessions-new");
-      assert.equal((await x.posted("newSessionInEditor")).length, 1, "+ starts a session, folded or not");
-      await x.page.click("#sessions-fold"); await settle(x.page);
-      assert.deepEqual(await shown(x.page, "#sessions-list .session-row"), [true, true, true]);
-      assert.deepEqual((await x.posted("sessionsHomeCollapsed")).map((m) => m.collapsed), [true, false]);
+      const hub = await x.hub(), bar = await x.tabs();
+      assert.deepEqual(hub.groups.map((g) => [g.name, g.count]), [["Needs you", "1"], ["New", "3"]], "Mail watch needs you; Morning brief, Garden notes and Billing review have news");
+      assert.equal(bar.tabs.find((b) => b.id === "home").count, "4");
+      const heads = await x.page.evaluate(() => { const probe = document.createElement("i"); document.body.append(probe); probe.style.color = "var(--text)"; const text = getComputedStyle(probe).color; probe.remove();
+        return { text, heads: [...document.querySelectorAll("#home-hub .dgc-hub-head h2")].map((h) => { const s = getComputedStyle(h); return [s.fontSize, s.fontWeight, s.color, s.textTransform]; }) }; });
+      for (const head of heads.heads) assert.deepEqual(head, ["12px", "500", heads.text, "none"], "a group's name: 12px medium, sentence case");
+      // The old folds are gone, and nothing is told to the host about them.
+      assert.deepEqual(await x.page.evaluate(() => ["#sessions-fold", ".home-pips-toggle", "#sessions-fold-count"].filter((sel) => document.querySelector(sel))), []);
+      assert.deepEqual([...(await x.posted("sessionsHomeCollapsed")), ...(await x.posted("pipHomeCollapsed"))], []);
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   });
 }
 
-test("a home whose Sessions were folded on this computer opens folded", async (t) => {
+test("six, or every session that needs you: those come first, and one waiting for you says so", async (t) => {
   if (skipOrFail(t)) return;
-  const x = await openHome(browser, { sessions: manySessions(20) });
-  try {
-    // What the host stamps on the page (src/pipHomeDismiss.ts) is there before the page's script runs.
-    const y = await openHome(browser, { sessions: manySessions(20), sessionsCollapsed: true });
-    try {
-      await y.page.waitForSelector("#sessions-pips .home-pips-head");
-      assert.equal(await y.page.getAttribute("#sessions-fold", "aria-expanded"), "false");
-      assert.deepEqual(await shown(y.page, "#sessions-list .session-row"), [false, false, false]);
-      assert.equal(await y.page.textContent("#sessions-fold-count"), "20");
-      assert.deepEqual(await y.posted("sessionsHomeCollapsed"), [], "nothing to keep: the host said so");
-    } finally { await y.close(); }
-  } finally { await x.close(); }
-});
-
-test("three, or every session that needs you: those come first, and one waiting for you says so", async (t) => {
-  if (skipOrFail(t)) return;
-  const sessions = manySessions(20).map((s, k) => ({ ...s, open: false, ...(k === 6 || k === 9 || k === 12 || k === 15 ? { windowless: "running the tests" } : {}), ...(k === 4 ? { waiting: true } : {}) }));
-  const x = await openHome(browser, { sessions, width: 300 });
+  const needy = [3, 5, 6, 9, 12, 15, 17], sessions = manySessions(20).map((s, k) => ({ ...s, open: false, ...(needy.includes(k) ? { windowless: "running the tests" } : {}), ...(k === 4 ? { waiting: true } : {}) }));
+  const x = await openHome(browser, { sessions, width: 300, tab: "work" });
   try {
     await x.page.waitForSelector("#sessions-list .session-row");
-    const rows = await x.page.evaluate(() => [...document.querySelectorAll("#sessions-list .session-row")].map((r) => [r.dataset.id, r.querySelector(".session-age").textContent, !!r.querySelector(".session-windowless")]));
-    assert.deepEqual(rows.map((r) => r[0]), ["2026-s04", "2026-s06", "2026-s09", "2026-s12", "2026-s15"], "five need you, so five are listed, in the list's own order");
-    assert.deepEqual(rows[0].slice(1), ["wants your okay", false], "where its age was");
-    assert.deepEqual(rows.slice(1).map((r) => r[2]), [true, true, true, true], "the others run with no window");
+    const rows = await x.page.evaluate(() => [...document.querySelectorAll("#sessions-list .session-row")].map((r) => [r.dataset.id, r.querySelector(".session-sub").textContent, !!r.querySelector(".session-live")]));
+    assert.deepEqual(rows.map((r) => r[0]), ["2026-s03", "2026-s04", "2026-s05", "2026-s06", "2026-s09", "2026-s12", "2026-s15", "2026-s17"], "eight need you, so eight are listed, in the list's own order");
+    assert.deepEqual(rows[1].slice(1), ["Wants your okay", false], "under its name, in words");
+    assert.equal(await x.page.evaluate(() => { const sub = document.querySelector('#sessions-list .session-row[data-id="2026-s04"] .session-sub'), probe = document.createElement("i"); document.body.append(probe); probe.style.color = "var(--need-text)";
+      const need = getComputedStyle(probe).color; probe.remove(); return getComputedStyle(sub).color === need; }), true, "in the tone of something that needs you");
+    assert.deepEqual(rows.filter((r) => r[0] !== "2026-s04").map((r) => [/^Running, no window · /.test(r[1]), r[2]]), Array(7).fill([true, true]), "the others run with no window: the words and the dot");
     assert.equal(await x.page.textContent("#sessions-all"), "View all (20)");
-    // One needs you: it comes first, and the list is still three.
+    // One needs you: it comes first, and the list is still six.
     await x.send({ type: "sessions_list", items: sessions.map((s) => ({ ...s, windowless: undefined, waiting: s.id === "2026-s04" })), error: "" });
-    assert.deepEqual(await x.page.evaluate(() => [...document.querySelectorAll("#sessions-list .session-row")].map((r) => r.dataset.id)), ["2026-s04", "2026-s00", "2026-s01"]);
-    // Folded, a dot beside the count says one of them needs you.
-    await x.page.click("#sessions-fold");
-    assert.equal(await x.page.evaluate(() => !!document.querySelector("#sessions-fold-count .home-fold-dot")), true);
+    assert.deepEqual(await x.page.evaluate(() => [...document.querySelectorAll("#sessions-list .session-row")].map((r) => r.dataset.id)), ["2026-s04", "2026-s00", "2026-s01", "2026-s02", "2026-s03", "2026-s05"]);
+    // And Home has its card, so it is seen without opening Work.
+    await x.page.click("#side-tab-home");
+    assert.ok((await x.hub()).cards.some((c) => c.key === "work:2026-s04" && c.group === "needs" && c.title === "Wants your okay to go on"));
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
 });
 
-test("on the Chat tab, + starts a chat", async (t) => {
+test("on the Chat tab, New starts a chat; on Work, a session", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openHome(browser, { tab: "chat" });
   try {
@@ -132,7 +112,7 @@ test("on the Chat tab, + starts a chat", async (t) => {
     assert.deepEqual([await shown(x.page, "#chats-new"), await shown(x.page, "#sessions-new")], [[true], [false]]);
     await x.page.click("#chats-new");
     assert.equal((await x.posted("chatdgcNew")).length, 1);
-    await x.page.click("#home-tab-work");
+    await x.page.click("#side-tab-work");
     assert.deepEqual([await shown(x.page, "#chats-new"), await shown(x.page, "#sessions-new")], [[false], [true]]);
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }

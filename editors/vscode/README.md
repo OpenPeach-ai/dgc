@@ -7,7 +7,7 @@ Run the **DGC** coding agent inside your editor — a docked chat panel, native 
 
 ## What it does
 
-- **Sessions in editor tabs** — the side bar has two tabs, **Work** and **Chat**, and opens on Work, your project's sessions. **Open in Editor**, a double-click or Enter opens one in an editor tab of its own, as in Claude Code, and **New session** starts one there. The Pips stay in the side bar.
+- **Sessions in editor tabs** — the side bar has four tabs, **Home**, **Work**, **Chat** and **Pips**, and opens on Home, where everything that needs you or is new arrives as a card. Work lists your project's sessions: a click, **Open in Editor** or Enter opens one in an editor tab of its own, as in Claude Code, and **New** starts one there. The Pips stay in the side bar, on their own tab.
 - **Where you want it** — the Sessions list is offered in the activity bar and in the secondary side bar; open it in either and it follows. The copy you leave behind says where it went.
 - **Several chats, several folders** — open another chat beside one that is working, or one in a different folder (**Open a chat in another folder**). Each has its own project, trust, MCP servers, permission rules and mode, all on one `dgc serve`, the way Codex runs its threads. While a turn runs you can switch chats, rename one, open a saved session beside it, or install a plugin.
 - **Chat panel** — CommonMark responses with headings, lists, quotes, tables, safe file/source links, syntax-highlighted code and exact-source copy. Reasoning and tool batches collapse into compact rows, with visible failures and a separate final response. Surfaces follow your Cursor/VS Code theme with DGC purple accents.

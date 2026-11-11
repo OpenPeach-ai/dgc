@@ -1,8 +1,8 @@
-// The side bar's home as the panel builds it (src/panel.ts, media/main.js, media/main.css) with the real Pips bundle and
-// faces, in real Chromium: the Pips block over the search box, Work | Chat, New session, Library and the sessions. A stub
+// The side bar as the panel builds it (src/panel.ts, media/main.js, media/main.css) with the real Pips bundle and
+// faces, in real Chromium: the four tabs (Home, Work, Chat, Pips), Home's cards, and Work's and Chat's lists. A stub
 // host answers the Pips control channel from window.__state, which a test may change before the next poll.
-// Shared by home-sidebar-design.test.mjs and the before/after pictures. Not a *.test.mjs file. No port is opened: the
-// page is routed.
+// Shared by the side bar's tests and the before/after pictures. Not a *.test.mjs file. No port is opened: the page is
+// routed.
 import { readFileSync } from "node:fs";
 import { build } from "esbuild";
 
@@ -61,10 +61,12 @@ export const PROJECTS = [{ id: PROJECT, name: "Goa trip", color: "teal", chats: 
   { id: "project_" + "b".repeat(32), name: "House hunt", color: "orange", chats: 5, files: [], memory: "shared" }];
 const PROJECT_CHATS = [{ id: "chat_3", title: "Packing list", updated_at: "2026-11-04T09:00:00Z" }, { id: "chat_4", title: "Flights and the ferry", updated_at: "2026-11-03T09:00:00Z" }];
 
-/** Opens the home. sessionsCollapsed: the Sessions section folded on this computer (the page's attribute). tab: "work" | "chat" (the Chat tab, with two projects, the first open). theme: "dark-modern" | "light-modern" | "hc"; collapsed: what the host kept (the page's attribute);
-    tabs: Work | Chat and the search box (ChatDGC seen); library: Work's Library row; srcRoot: another tree's sources. */
-export async function openHome(browser, { state = homeState(), width = 300, height = 760, theme = "dark-modern", collapsed = false, tabs = true, library = true,
-  sessions = SESSIONS, tab = "work", api = 69, scale = 1, motion = "no-preference", sessionsCollapsed = false, srcRoot, video } = {}) {
+/** Opens the side bar. tab: "home" | "work" | "chat" | "pips", the tab the page's state was left on (Chat comes with two
+    projects, the first open); homeShow: what the host kept of Home's Show filter (the page's attribute); saved: the page's
+    whole kept state, in place of `tab`. theme: "dark-modern" | "light-modern" | "hc"; tabs: ChatDGC is here (seen before);
+    library: Work's Library row; srcRoot: another tree's sources. */
+export async function openHome(browser, { state = homeState(), width = 300, height = 760, theme = "dark-modern", homeShow = "", tabs = true, library = true,
+  sessions = SESSIONS, tab = "home", saved, api = 69, scale = 1, motion = "no-preference", srcRoot, video } = {}) {
   const { html, mainJs, markdownJs, themes, pipsJs, pipsCss, sprite } = await sources(srcRoot);
   // video: a folder to record the page into (the pictures' short films), at the page's own size.
   const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale, reducedMotion: motion,
@@ -84,16 +86,15 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
   await page.goto("https://home.test/webview/index.html");
   await page.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; --vscode-font-size: 13px; ${themes[theme]} }` });
   await page.evaluate((t) => document.body.classList.add(t.startsWith("light") ? "vscode-light" : t === "hc" ? "vscode-high-contrast" : "vscode-dark"), theme);
-  await page.evaluate(([mjs, mdjs, initial, kept, withTabs, apiVersion, ids, saved, sessionsKept]) => {
+  await page.evaluate(([mjs, mdjs, initial, kept, withTabs, apiVersion, ids, saved]) => {
     const [P, Q] = ids;
     document.documentElement.dataset.chatPlace = "home";
     document.documentElement.dataset.pipsDocumentId = "doc1";
     document.getElementById("pips-host").dataset.styleUri = "/ext/dist/pips.css";
     if (withTabs) document.documentElement.dataset.chatdgcSeen = "1";
-    // What the host stamps on the page when the block was collapsed on this computer (src/pipHomeDismiss.ts).
-    if (kept) document.documentElement.dataset.pipHomeCollapsed = "1";
-    if (sessionsKept) document.documentElement.dataset.sessionsHomeCollapsed = "1";
-    window.__state = initial; window.__posted = [];
+    // What the host stamps on the page when Home's Show filter was left on one source (src/pipHomeDismiss.ts).
+    if (kept) document.documentElement.dataset.homeShow = kept;
+    window.__state = initial; window.__posted = []; window.__saved = saved; window.__answered = []; window.__asking = 0;
     const S = () => window.__state;
     const answers = {
       list_workspaces: () => ({ workspaces: [{ id: P, name: "Your Pips", kind: "personal" }, { id: Q, name: "shop", kind: "git" }], current_workspace_id: Q }),
@@ -106,18 +107,19 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
       mark_pip_news_seen: (r) => { S().digest = (S().digest || []).filter((p) => !r.pip_ids.includes(p.pip_id)); return { seen: r.pip_ids.map((pip_id) => ({ pip_id, seen_until: r.until })) }; },
     };
     const connect = () => window.dispatchEvent(new MessageEvent("message", { data: { type: "pipsConnection", generation: 1, apiVersion, connected: true, supported: true, enabled: true } }));
-    window.acquireVsCodeApi = () => ({ getState: () => saved, setState() {}, postMessage(m) {
+    window.acquireVsCodeApi = () => ({ getState: () => window.__saved, setState(next) { window.__saved = JSON.parse(JSON.stringify(next)); }, postMessage(m) {
       window.__posted.push(JSON.parse(JSON.stringify(m)));
       if (m?.type === "pipsReady") { setTimeout(connect, 1); return; }
       // A scene that opens the Pips view on this page answers its requests itself (dock-scene.mjs); the home's own keep theirs.
       if (window.__pipsApp && m?.type === "pipsRequest" && !String(m.id).startsWith("home-pips-")) { window.__pipsApp(m); return; }
       const make = m?.type === "pipsRequest" && answers[m.request.type];
-      if (make) setTimeout(() => window.dispatchEvent(new MessageEvent("message", { data: { type: "pipsReply", id: m.id, ok: true, result: make(m.request) } })), 2);
+      // (What the home asked and has had answered is noted, so a test can wait for a whole poll.)
+      if (make) { window.__asking++; setTimeout(() => { window.dispatchEvent(new MessageEvent("message", { data: { type: "pipsReply", id: m.id, ok: true, result: make(m.request) } })); window.__answered.push(m.request.type); window.__asking--; }, 2); }
     } });
     eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
     eval(mjs);
     connect();
-  }, [mainJs, markdownJs, state, collapsed, tabs, api, [P, Q], tab === "chat" ? { homeTab: "chat", projectsOpen: [PROJECT] } : undefined, sessionsCollapsed]);
+  }, [mainJs, markdownJs, state, homeShow, tabs, api, [P, Q], saved || (tab === "chat" ? { sideTab: "chat", projectsOpen: [PROJECT] } : { sideTab: tab })]);
   const send = (data) => page.evaluate((d) => window.dispatchEvent(new MessageEvent("message", { data: d })), data);
   if (sessions) await send({ type: "sessions_list", items: sessions, error: "" });
   if (tabs) {
@@ -127,17 +129,58 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
   }
   // Work's Library row shows once the backend offers outputs; the row itself is what the pictures and the edge need.
   if (library) await page.evaluate(() => { document.getElementById("work-library").hidden = false; });
-  await page.waitForSelector("#sessions-pips .home-pips-head");
-  const head = () => page.evaluate(() => document.querySelector("#sessions-pips .home-pips-head h2")?.textContent ?? null);
+  /** Until the home's Pips have been asked for and answered, whole, and the page has drawn what came. */
+  const polled = async (from = 0) => {
+    await page.waitForFunction((n) => window.__answered.slice(n).includes("get_pip_digest") && window.__asking === 0, from, { timeout: Number(process.env.DGC_HOME_WAIT_MS) || 30000 });
+    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(done, 30)))));
+  };
+  await polled();
   const posted = (type) => page.evaluate((t) => window.__posted.filter((m) => m.type === t), type);
-  /** The next poll, as the host's "something changed" nudge asks for it. */
-  const refresh = () => send({ type: "pipNewsRefresh" });
-  return { page, errors, send, head, posted, refresh, close: () => context.close() };
+  /** The next poll, as the host's "something changed" nudge asks for it; resolves when the page has drawn it. */
+  const refresh = async () => { const from = await page.evaluate(() => window.__answered.length); await send({ type: "pipNewsRefresh" }); await polled(from); };
+  /** The page's kept state (what a reload hands back), and the tab bar and Home as they are on screen. */
+  const kept = () => page.evaluate(() => window.__saved);
+  return { page, errors, send, posted, refresh, kept, tabs: () => tabsNow(page), hub: () => hubNow(page), close: () => context.close() };
 }
 
-/** Every word and mark on the home, measured where it is drawn: its colour against the grounds under it, laid over one
-    another the way the page paints them (a soft pill over a hover wash over the side bar). Returns
-    [{what, text, ratio, color, ground}], words first, then marks (icons, dots, the chevron). */
+/** The tab bar as it is on screen: each tab's name, whether it is chosen, in the tab order, shown, its box and colour. */
+export const tabsNow = (page) => page.evaluate(() => {
+  const nav = document.getElementById("side-tabs"), rect = (n) => { const r = n.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height }; };
+  // (A tree from before the tabs has none: an empty bar, so a test says what is missing in its own words.)
+  if (!nav) return { shown: false, role: "", tabs: [], panel: "", panelRole: "", panelLabelledBy: "", focus: "", header: !!document.getElementById("phead")?.checkVisibility(), width: innerWidth, overflowX: false, nav: null, bar: null };
+  const bar = nav.querySelector(".dgc-tabs-bar");
+  const tabs = [...nav.querySelectorAll('[role="tab"]')].map((t) => { const flip = t.querySelector(".dgc-tab-flip"), front = t.querySelector(".dgc-tab-front"), count = t.querySelector(".dgc-tab-count");
+    return { id: t.dataset.tab, name: front?.textContent || "", selected: t.getAttribute("aria-selected") === "true", tab: t.tabIndex, shown: t.checkVisibility(), label: t.getAttribute("aria-label") || "",
+      controls: t.getAttribute("aria-controls"), icons: t.querySelectorAll("svg, img, .codicon").length, color: getComputedStyle(t).color, weight: getComputedStyle(front || t).fontWeight,
+      glow: Number(getComputedStyle(t.querySelector(".dgc-tab-glow")).opacity), front: front ? getComputedStyle(front).transform : "", back: getComputedStyle(t.querySelector(".dgc-tab-back")).transform,
+      backOpacity: Number(getComputedStyle(t.querySelector(".dgc-tab-back")).opacity), frontOpacity: front ? Number(getComputedStyle(front).opacity) : 1,
+      count: count && !count.hidden ? count.textContent : "", countBox: count && !count.hidden ? rect(count) : null, clipped: rect(flip).left < rect(t).left - 0.5 || (count && !count.hidden ? rect(count) : rect(flip)).right > rect(t).right + 0.5, words: rect(flip), ...rect(t) }; });
+  const panel = ["home-hub", "work-home", "chats-home"].map((id) => document.getElementById(id)).find((n) => n?.checkVisibility()) || (document.getElementById("pips-host").checkVisibility() ? document.getElementById("pips-host") : null);
+  return { shown: nav.checkVisibility(), role: bar.getAttribute("role"), nav: rect(nav), bar: rect(bar), tabs, panel: panel?.id || "", panelRole: panel?.getAttribute("role") || "", panelLabelledBy: panel?.getAttribute("aria-labelledby") || "",
+    focus: document.activeElement?.dataset?.tab || document.activeElement?.id || "", header: !!document.getElementById("phead")?.checkVisibility(), width: innerWidth, overflowX: document.documentElement.scrollWidth > innerWidth };
+});
+
+/** Home as it is on screen: the Show button, each group with its cards (source, who it is from, words, chips, answers, box), the notes and the empty line. */
+export const hubNow = (page) => page.evaluate(() => {
+  const hub = document.getElementById("home-hub"), rect = (n) => { const r = n.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height }; };
+  if (!hub) return { shown: false, show: null, groups: [], cards: [], notes: [], empty: null, menu: [], focus: "" };
+  const show = hub.querySelector(".dgc-hub-show");
+  const card = (c) => ({ key: c.dataset.key, source: c.dataset.source, group: c.dataset.group, from: c.querySelector(".dgc-card-sub")?.textContent || "", title: c.querySelector(".dgc-card-title").textContent,
+    who: c.querySelector(".dgc-card-icon .dgc-blob") ? `blob:${c.querySelector(".dgc-card-icon .dgc-blob").dataset.shape}` : c.querySelector(".dgc-card-icon svg, .dgc-card-icon .dgc-plush") ? "face" : "",
+    chips: [...c.querySelectorAll(".dgc-chip:not([hidden])")].map((x) => x.textContent), actions: [...c.querySelectorAll(".dgc-card-btn")].map((b) => b.textContent + (b.classList.contains("primary") ? "*" : "")),
+    thin: c.classList.contains("dgc-card-thin"), shared: c.classList.contains("dgc-card"), radius: getComputedStyle(c).borderRadius, ground: getComputedStyle(c).backgroundColor, ...rect(c) });
+  return { shown: hub.checkVisibility(), show: show ? { value: show.querySelector(".dgc-hub-show-v").textContent, expanded: show.getAttribute("aria-expanded"), label: show.getAttribute("aria-label"), ...rect(show) } : null,
+    groups: [...hub.querySelectorAll(".dgc-hub-group")].map((g) => ({ id: g.dataset.group, name: g.querySelector("h2").firstChild.textContent, count: g.querySelector(".dgc-hub-n").textContent,
+      clear: !!g.querySelector(".dgc-hub-clear"), more: g.querySelector(".dgc-hub-more")?.textContent || "", rest: g.querySelector(".dgc-hub-rest")?.textContent || "", cards: [...g.querySelectorAll(".dgc-hub-card")].map(card) })),
+    cards: [...hub.querySelectorAll(".dgc-hub-card")].map(card), notes: [...hub.querySelectorAll(".dgc-hub-note")].map((n) => n.textContent), empty: hub.querySelector(".dgc-hub-empty")?.textContent ?? null,
+    menu: [...document.querySelectorAll(".dgc-hub-menu .dgc-menu-row")].map((r) => ({ name: r.querySelector(".dgc-menu-label").textContent, count: r.querySelector(".dgc-menu-hint")?.textContent || "", checked: r.getAttribute("aria-checked") === "true" })),
+    focus: document.activeElement?.dataset?.hubAct ? `${document.activeElement.closest(".dgc-hub-card").dataset.key}/${document.activeElement.dataset.hubAct}` : document.activeElement?.dataset?.show ? `menu:${document.activeElement.dataset.show}` : document.activeElement?.className || "" };
+});
+
+/** Every word and mark on the tab's page (Home, Work or Chat, whichever shows), measured where it is drawn: its colour
+    against the grounds under it, laid over one another the way the page paints them (a card's tint over the side bar, a
+    row's hover wash). Returns [{what, text, ratio, color, ground}], words first, then marks (icons, a running row's dot,
+    Show's chevron). (The tab bar's names stand on a gradient and a glow: the pictures' own tool measures those.) */
 export const homeContrast = (page) => page.evaluate(() => {
   const parse = (c) => { const m = c.match(/-?[\d.]+(e-?\d+)?/g)?.map(Number) || [0, 0, 0, 0];
     return c.startsWith("color(srgb") ? [m[0] * 255, m[1] * 255, m[2] * 255, m[3] ?? 1] : [m[0], m[1], m[2], m[3] ?? 1]; };
@@ -158,9 +201,9 @@ export const homeContrast = (page) => page.evaluate(() => {
     const style = getComputedStyle(e), fill = style.webkitTextFillColor;
     out.push({ what: name(e), text: t.textContent.trim().slice(0, 40), kind: "words", ...ratio(fill && fill !== style.color ? fill : style.color, e) });
   }
-  for (const e of host.querySelectorAll(".codicon, .home-pip-new-dot")) {
+  for (const e of host.querySelectorAll(".codicon, .session-live, .dgc-hub-chevron")) {
     if (!e.checkVisibility({ visibilityProperty: true, opacityProperty: true })) continue;
-    const dot = e.classList.contains("home-pip-new-dot"), style = getComputedStyle(e);
+    const dot = e.classList.contains("session-live"), style = getComputedStyle(e);
     out.push({ what: `${name(e.closest("button, li, h2, h3") || e)} ${name(e)}`, text: "", kind: "mark", ...ratio(dot ? style.backgroundColor : style.color, dot ? e.parentElement : e) });
   }
   const search = document.getElementById("sessions-search");

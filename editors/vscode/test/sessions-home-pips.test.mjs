@@ -1,6 +1,7 @@
-// Your Pips on the Sessions home, in real Chromium with the real Pips bundle and faces. A user:
+// Your Pips on the side bar's Home, in real Chromium with the real Pips bundle and faces. A user:
 // a Pips notice above a coding session's composer "has nothing to do with that session"; the side
-// bar's home shows the Pips that need you above your sessions instead, and session tabs show none.
+// bar's Home shows the Pips that need you and the ones with news, each as a card, and session tabs show none.
+// (Before the tabs these were rows in a block above the sessions; side-tabs-home.test.mjs holds the tabs and the hub.)
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -74,71 +75,68 @@ async function openHome({ pips, digestPips = [], place = "home", width = 380, he
   return { page, errors };
 }
 
-test("the Pips that need you sit above your sessions, each with its face, what is waiting and a count", async (t) => {
+/** Home's cards as they are on screen. */
+const cards = (page) => page.evaluate(() => [...document.querySelectorAll("#home-hub .dgc-hub-card")].map((c) => ({ key: c.dataset.key, group: c.dataset.group, from: c.querySelector(".dgc-card-sub").textContent,
+  title: c.querySelector(".dgc-card-title").textContent, chips: [...c.querySelectorAll(".dgc-chip:not([hidden])")].map((x) => x.textContent), answers: [...c.querySelectorAll(".dgc-card-btn")].map((b) => b.textContent),
+  character: c.querySelector(".dgc-plush")?.dataset.character || "", state: c.querySelector(".dgc-plush")?.dataset.state || "" })));
+const polled = (page) => page.waitForFunction(() => window.__posted.some((m) => m.type === "pipsRequest" && m.request.type === "get_pip_digest") && !!document.querySelector("#home-hub .dgc-hub-show"));
+
+test("the Pips that need you and the ones with news are cards on Home, each with its face and what it wants", async (t) => {
   if (skipOrFail(t)) return;
   const { page, errors } = await openHome({
     pips: [pip("b", "India Market Brief", "quill", 2), pip("a", "Core", "core"), pip("c", "Gmail", "scout"), pip("d", "Old", "lens", 3, "archived")],
     digestPips: [digestPip("a", "Core", "core", { new_total: 3 })] });
   try {
-    await page.waitForSelector("#sessions-pips .home-pip-row");
-    const m = await page.evaluate(() => {
-      const root = document.getElementById("sessions-pips"), head = document.getElementById("sessions-fold");   // the Sessions heading (0.52: each list's own heading is for screen readers only)
-      return { rows: [...root.querySelectorAll(".home-pip-row")].map((r) => [r.querySelector("strong").textContent, r.querySelector("small").textContent,
-        r.closest(".home-pip-item").querySelector(".home-pip-badge")?.textContent || "", r.querySelector(".dgc-plush")?.dataset.character || "", r.querySelector(".dgc-plush")?.dataset.state || ""]),
-        above: root.getBoundingClientRect().bottom <= head.getBoundingClientRect().top + 1,
-        faceLoaded: [...root.querySelectorAll(".dgc-plush-rig > image:first-child")].every((i) => new URL(i.getAttribute("href"), document.baseURI).pathname === "/ext/media/pips/plush-bodies.webp") };
-    });
-    assert.deepEqual(m.rows, [["India Market Brief", "2 waiting for you", "2", "quill", "waiting_approval"],
-      ["Core", "3 new findings", "", "core", "success"]],
-      "what waits for you first (reported 2026-10-18); only the Pips that need you; an archived Pip never; Gmail has nothing and is not listed");
-    assert.equal(m.above, true, "above the Sessions heading");
-    assert.equal(m.faceLoaded, true, "the real faces");
-    await page.click(".home-pip-row:has-text('India Market Brief')");
+    await page.waitForSelector("#home-hub .dgc-hub-card");
+    const m = await cards(page);
+    assert.deepEqual(m.map((c) => [c.from, c.title, c.group, c.character, c.state]), [["India Market Brief · Pip", "2 things are waiting for you", "needs", "quill", "waiting_approval"],
+      ["Core · Pip", "3 new findings", "new", "core", "success"]],
+      "what waits for you first (reported 2026-10-18); only the Pips that need you or have news; an archived Pip never; Gmail has nothing and has no card");
+    assert.deepEqual(m.map((c) => c.answers), [["Review"], ["Open"]], "an older DGC keeps no dismiss: one answer each");
+    const loaded = await page.evaluate(() => [...document.querySelectorAll("#home-hub .dgc-plush-rig > image:first-child")].every((i) => new URL(i.getAttribute("href"), document.baseURI).pathname === "/ext/media/pips/plush-bodies.webp"));
+    assert.equal(loaded, true, "the real faces");
+    assert.equal(await page.evaluate(() => document.getElementById("side-tab-home-count").textContent), "2", "Home's number");
+    await page.click('#home-hub .dgc-hub-card:has-text("India Market Brief") [data-hub-act="open"]');
     await page.waitForFunction(() => !document.getElementById("pips-host").hidden);
-    assert.equal(await page.evaluate(() => document.getElementById("sessions-host").hidden), true, "the Pips view opens over the home");
+    assert.equal(await page.evaluate(() => document.getElementById("sessions-host").hidden), true, "the Pips view opens in Home's place");
+    assert.equal(await page.evaluate(() => document.getElementById("side-tab-pips").getAttribute("aria-selected")), "true", "and the Pips tab is the one lit");
     assert.deepEqual(errors, []);
   } finally { await page.context().close(); }
 });
 
-test("when nothing is waiting, your Pips sit in a quiet row of faces; each opens its Pip", async (t) => {
+test("when nothing is waiting, Home says so in one line; your Pips are on their tab", async (t) => {
   if (skipOrFail(t)) return;
   const { page, errors } = await openHome({ pips: [pip("a", "Core", "core"), pip("c", "Gmail", "scout")] });
   try {
-    await page.waitForSelector("#sessions-pips .home-pips-quiet");
+    await polled(page);
+    await page.waitForSelector("#home-hub .dgc-hub-empty");
     assert.equal(await page.locator("#work-apps").count(), 0, "Apps stays out of Work while the experiment is on hold");
-    const m = await page.evaluate(() => ({
-      text: document.querySelector(".home-pips-quiet-text").textContent,
-      faces: [...document.querySelectorAll(".home-pip-face-button")].map((b) => b.getAttribute("aria-label")),
-      boxes: [...document.querySelectorAll(".home-pip-face-button")].map((b) => b.getBoundingClientRect()).map((r) => [r.left, r.right]),
-      rows: document.querySelectorAll(".home-pip-row").length }));
-    assert.equal(m.text, "All quiet. Nothing is waiting for you.");
-    assert.deepEqual(m.faces, ["Open Core", "Open Gmail"]);
-    // A user: "the 3 pips faces are too close together and looks weird". Each face has room.
-    assert.ok(m.boxes[1][0] - m.boxes[0][1] >= 4, `faces apart, not overlapping: ${JSON.stringify(m.boxes)}`);
-    assert.equal(m.rows, 0);
+    const m = await page.evaluate(() => ({ text: document.querySelector("#home-hub .dgc-hub-empty").textContent, cards: document.querySelectorAll("#home-hub .dgc-hub-card").length,
+      count: document.getElementById("side-tab-home-count").hidden, pips: document.getElementById("side-tab-pips").checkVisibility() }));
+    assert.deepEqual(m, { text: "Nothing needs you. New things arrive here.", cards: 0, count: true, pips: true });
     assert.deepEqual(errors, []);
   } finally { await page.context().close(); }
 });
 
-test("with no Pips the home shows no Pips section, and a session's tab never shows the Pips bell", async (t) => {
+test("with no Pips Home has no Pip's card, and a session's tab shows neither the Pips bell nor the side bar's tabs", async (t) => {
   if (skipOrFail(t)) return;
   const home = await openHome({ pips: [] });
   try {
-    await home.page.waitForTimeout(300);
-    assert.equal(await home.page.evaluate(() => document.getElementById("sessions-pips").hidden), true);
+    await polled(home.page);
+    assert.deepEqual(await cards(home.page), []);
   } finally { await home.page.context().close(); }
   const tab = await openHome({ pips: [pip("b", "India Market Brief", "quill", 2)], place: "tab", width: 900 });
   try {
     await tab.page.waitForTimeout(400);
-    const m = await tab.page.evaluate(() => ({ bar: !document.getElementById("pipsbar").hidden,
+    const m = await tab.page.evaluate(() => ({ bar: !document.getElementById("pipsbar").hidden, tabs: document.getElementById("side-tabs").checkVisibility(), hub: document.getElementById("home-hub").checkVisibility(),
       digest: window.__posted.some((x) => x.type === "pipsRequest" && x.request.type === "get_pip_digest") }));
-    assert.deepEqual(m, { bar: false, digest: false }, "no bell and no digest polling in a session's tab");
+    assert.deepEqual(m, { bar: false, tabs: false, hub: false, digest: false }, "no bell, no tab bar, no Home and no digest polling in a session's tab");
   } finally { await tab.page.context().close(); }
 });
 
-// Needs attention (#8): what a Pip's chat waits on (a Connect card, an email to Send) counts here too, so
-// "All quiet" means nothing waits; a row opens that Pip at its newest card.
-test("cards waiting in a Pip's chat count on the home, and its row opens the Pip at the newest card", async (t) => {
+// Needs attention (#8): what a Pip's chat waits on (a Connect card, an email to Send) is a card here too, so an
+// empty Home means nothing waits; Review opens that Pip at its newest card.
+test("a card waiting in a Pip's chat is a card on Home in its own words, and Review opens the Pip at it", async (t) => {
   if (skipOrFail(t)) return;
   const gmail = "pip_" + "c".repeat(32), card = "applink_" + "1".repeat(32);
   const item = { id: "app_link:" + card, kind: "app_link", card, pip_id: gmail, pip_name: "Gmail", pip_type: "scout", workspace_id: P,
@@ -146,17 +144,17 @@ test("cards waiting in a Pip's chat count on the home, and its row opens the Pip
   const { page, errors } = await openHome({ pips: [pip("a", "Core", "core"), pip("c", "Gmail", "scout")], api: 44,
     waiting: { as_of: new Date().toISOString(), total: 1, counts: { app_link: 1 }, by_pip: { [gmail]: 1 }, items: [item], truncated: false } });
   try {
-    await page.waitForSelector("#sessions-pips .home-pip-row");
-    const rows = await page.evaluate(() => [...document.querySelectorAll(".home-pip-row")].map((r) => [r.querySelector("strong").textContent, r.querySelector("small").textContent]));
-    assert.deepEqual(rows, [["Gmail", "1 waiting for you"]], "not All quiet: Gmail's chat has a card for you");
-    await page.click(".home-pip-row:has-text('Gmail')");
+    await page.waitForSelector("#home-hub .dgc-hub-card");
+    const m = await cards(page);
+    assert.deepEqual(m.map((c) => [c.from, c.title, c.chips, c.answers]), [["Gmail · Pip · now", "Connect Gmail?", ["App", "To read your new mail."], ["Review"]]], "not empty: Gmail's chat has a card for you");
+    await page.click('#home-hub [data-hub-act="open"]');
     await page.waitForFunction(() => !document.getElementById("pips-host").hidden);
     assert.deepEqual(errors, []);
   } finally { await page.context().close(); }
 });
 
 // Reported 2026-10-18: "my 3 Pips ran and failed ... there should be a dismiss option there too" and
-// "what if there were 100 Pips". News rows have a ✕ beside them; the home shows the 3 most urgent and a line.
+// "what if there were 100 Pips". A news card has Dismiss beside Open; Home shows eight of a group and a line for the rest.
 const longId = (n) => "pip_" + n.toString(16).padStart(32, "0");
 const listed = (n, name, waiting = 0) => ({ id: longId(n), name, pip_type: n === 0 ? "core" : "scout", workspace_id: P, status: "active", pending_review_count: waiting, version: 1 });
 const failedRun = (n, name) => ({ pip_id: longId(n), workspace_id: P, name, pip_type: n === 0 ? "core" : "scout", scope: "personal", status: "active",
@@ -166,60 +164,57 @@ const failedRun = (n, name) => ({ pip_id: longId(n), workspace_id: P, name, pip_
 const hundred = Array.from({ length: 100 }, (_, n) => listed(n, n === 0 ? "Core" : `Pip ${n}`, n % 6 === 1 ? 1 : 0));
 const HUNDRED = { pips: hundred, digestPips: hundred.filter((p, n) => n && !p.pending_review_count).slice(0, 20).map((p) => failedRun(parseInt(p.id.slice(4), 16), p.name)) };
 
-test("a failed run's ✕ shows on hover and on focus, sits beside the name at 300px, and dismisses", async (t) => {
+test("a failed run's Dismiss is always in sight, sits clear of the name at 300px, and dismisses from the keyboard", async (t) => {
   if (skipOrFail(t)) return;
   const name = "ERP daily audit — data & Tally integrity, every unit";
   const { page, errors } = await openHome({ pips: [listed(1, name), listed(2, "GST watchdog — e-invoice & e-way")], width: 300, api: 48,
     digestPips: [failedRun(1, name), failedRun(2, "GST watchdog — e-invoice & e-way")] });
   try {
-    await page.waitForSelector("#sessions-pips .home-pip-dismiss");
-    const opacity = () => page.evaluate(() => getComputedStyle(document.querySelector(".home-pip-dismiss")).opacity);
-    assert.equal(await opacity(), "0", "out of the way until you point at the row");
-    await page.hover(".home-pip-item >> nth=0");
-    assert.equal(await opacity(), "1", "shows on hover");
+    await page.waitForSelector('#home-hub [data-hub-act="dismiss"]');
     const box = await page.evaluate(() => {
-      const item = document.querySelector(".home-pip-item"), x = item.querySelector(".home-pip-dismiss"), strong = item.querySelector("strong");
+      const card = document.querySelector("#home-hub .dgc-hub-card"), x = card.querySelector('[data-hub-act="dismiss"]'), from = card.querySelector(".dgc-card-sub"), title = card.querySelector(".dgc-card-title");
       const r = (e) => { const b = e.getBoundingClientRect(); return { left: b.left, right: b.right, top: b.top, bottom: b.bottom }; };
-      return { x: r(x), name: r(strong), item: r(item), clipped: strong.scrollWidth > strong.clientWidth, icon: getComputedStyle(x.querySelector(".codicon"), "::before").content };
+      return { x: r(x), from: r(from), title: r(title), card: r(card), clipped: from.scrollWidth > from.clientWidth, seen: x.checkVisibility({ visibilityProperty: true, opacityProperty: true }), word: x.textContent, hint: x.title };
     });
-    assert.ok(box.name.right <= box.x.left, `the ✕ never covers the name: ${JSON.stringify(box)}`);
-    assert.ok(box.x.right <= box.item.right && box.x.right <= 300, "inside the row, inside the side bar");
-    assert.equal(box.clipped, true, "a long name is cut with an ellipsis before the ✕");
-    assert.notEqual(box.icon, "none", "the close icon is drawn");
-    await page.mouse.move(150, 600);
-    assert.equal(await opacity(), "0");
-    await page.focus(".home-pip-row >> nth=0");
+    assert.deepEqual([box.seen, box.word], [true, "Dismiss"], "in sight without pointing at anything, and in a word");
+    assert.match(box.hint, /^Dismiss: 1 run failed\. It comes back if ERP daily audit/, "pointing at it says what it dismisses");
+    assert.ok(box.title.bottom <= box.x.top && box.from.bottom <= box.x.top, `Dismiss never covers the name or the sentence: ${JSON.stringify(box)}`);
+    assert.ok(box.x.right <= box.card.right && box.card.right <= 300 && box.x.bottom <= box.card.bottom, "inside its card, inside the side bar");
+    assert.equal(box.clipped, true, "a long name is cut with an ellipsis, on its one line");
+    await page.focus('#home-hub .dgc-hub-card >> nth=0 >> [data-hub-act="open"]');
     await page.keyboard.press("Tab");
-    assert.equal(await page.evaluate(() => document.activeElement.getAttribute("aria-label")), `Dismiss: ${name} — 1 run failed`, "Tab reaches it");
-    assert.equal(await opacity(), "1", "shows on focus");
+    assert.equal(await page.evaluate(() => `${document.activeElement.closest(".dgc-hub-card").dataset.key} ${document.activeElement.dataset.hubAct}`), `pip:${longId(1)} dismiss`, "Tab reaches it");
     await page.keyboard.press("Enter");
-    await page.waitForFunction(() => document.querySelectorAll(".home-pip-item").length === 1);
+    await page.waitForFunction(() => document.querySelectorAll("#home-hub .dgc-hub-card").length === 1);
     const sent = await page.evaluate(() => window.__posted.filter((m) => m.type === "pipsRequest" && m.request.type === "mark_pip_news_seen").map((m) => m.request.pip_ids));
     assert.deepEqual(sent, [[longId(1)]]);
-    assert.equal(await page.evaluate(() => document.activeElement.getAttribute("aria-label")), "Dismiss: GST watchdog — e-invoice & e-way — 1 run failed", "focus moves to the next row's ✕");
+    assert.equal(await page.evaluate(() => `${document.activeElement.closest(".dgc-hub-card")?.dataset.key} ${document.activeElement.dataset.hubAct}`), `pip:${longId(2)} dismiss`, "focus moves to the next card's Dismiss");
     assert.deepEqual(errors, []);
   } finally { await page.context().close(); }
 });
 
-test("100 Pips, 17 waiting and 20 with news: 3 rows and one line, and Chat and Work stay in view at 460×700", async (t) => {
+test("100 Pips, 17 waiting and 20 with news: eight cards of each and a line for the rest, counted in full, at 460×700", async (t) => {
   if (skipOrFail(t)) return;
   const { page, errors } = await openHome({ ...HUNDRED, width: 460, height: 700, api: 48, chats: true });
   try {
-    await page.waitForSelector("#sessions-pips .home-pips-more");
+    await page.waitForSelector("#home-hub .dgc-hub-rest");
     const m = await page.evaluate(() => {
-      const strip = document.getElementById("sessions-pips").getBoundingClientRect(), tabs = document.getElementById("home-tabs");
-      return { rows: [...document.querySelectorAll(".home-pip-row small")].map((s) => s.textContent), more: document.querySelector(".home-pips-more").textContent,
-        strip: Math.round(strip.height), tabsBottom: Math.round(tabs.getBoundingClientRect().bottom), tabsShown: !tabs.hidden };
+      const group = (id) => { const g = document.querySelector(`#home-hub .dgc-hub-group[data-group="${id}"]`); return { count: g.querySelector(".dgc-hub-n").textContent, cards: g.querySelectorAll(".dgc-hub-card").length, rest: g.querySelector(".dgc-hub-rest")?.textContent || "",
+        titles: [...new Set([...g.querySelectorAll(".dgc-card-title")].map((x) => x.textContent))] }; };
+      const tabs = document.getElementById("side-tabs").getBoundingClientRect();
+      return { needs: group("needs"), fresh: group("new"), home: document.getElementById("side-tab-home-count").textContent, tabsBottom: Math.round(tabs.bottom), all: document.querySelectorAll("#home-hub .dgc-hub-card").length };
     });
-    assert.deepEqual(m.rows, ["1 waiting for you", "1 waiting for you", "1 waiting for you"], "what waits for you first");
-    assert.equal(m.more, "14 more need you · Show all", "what waits, so it adds up with the head's number; the 20 with news are on the Pips page");
-    // Today's strip listed all 37 rows: 1,600px, with Chat and Work at 1,659px, two screens down.
-    assert.ok(m.strip <= 240, `the strip stays small: ${m.strip}px`);
-    assert.equal(m.tabsShown, true);
-    assert.ok(m.tabsBottom <= 400, `Chat and Work in the top of a 700px side bar: ${m.tabsBottom}px`);
-    await page.click(".home-pips-more");
+    assert.deepEqual(m.needs, { count: "17", cards: 8, rest: "Show 9 more", titles: ["1 thing is waiting for you"] }, "what waits for you first: eight cards, and the rest a click away");
+    assert.deepEqual(m.fresh, { count: "20", cards: 8, rest: "Show 12 more", titles: ["1 run failed"] }, "then the 20 with news, the same way");
+    assert.equal(m.home, "37", "Home's number counts every one of them");
+    // Before the cap a list of all 37 was two screens long before anything else: sixteen cards at most until you ask.
+    assert.equal(m.all, 16);
+    assert.ok(m.tabsBottom <= 60, `the tabs stay at the top: ${m.tabsBottom}px`);
+    await page.click('#home-hub .dgc-hub-group[data-group="needs"] .dgc-hub-rest');
+    assert.equal(await page.evaluate(() => document.querySelectorAll('#home-hub .dgc-hub-group[data-group="needs"] .dgc-hub-card').length), 17, "Show 9 more: all seventeen");
+    assert.equal(await page.evaluate(() => `${document.activeElement.closest(".dgc-hub-card")?.dataset.key}`), `pip:${longId(49)}`, "and the keyboard is on the first of the nine");
+    await page.click("#side-tab-pips");
     await page.waitForFunction(() => !document.getElementById("pips-host").hidden);
     assert.deepEqual(errors, []);
   } finally { await page.context().close(); }
 });
-

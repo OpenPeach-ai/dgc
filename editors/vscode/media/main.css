@@ -7,6 +7,8 @@
 @import url("./shared/tray.css");
 @import url("./shared/blob.css");
 @import url("./shared/dock.css");
+@import url("./shared/tabs.css");
+@import url("./shared/hub.css");
 @import url("./pips/wordmark.css");
 /* DGC panel — Codex's quiet editor hierarchy with a restrained DGC accent. */
 * { box-sizing: border-box; }
@@ -86,98 +88,83 @@ body {
 #pips-host { display:flex; flex:1 1 auto; min-height:0; min-width:0; overflow:hidden; width:100%; }
 /* Under the Pips view the dock stands on the Pips' own ground, so the two read as one page. */
 body.pips-active #dgc-dock[data-show="always"] { background:var(--surface); }
-body.pips-active > :not(#phead):not(#pips-host):not(#announcer):not(.dgc-trace-backdrop):not(#dgc-dock):not(.dgc-pop):not(script) { display:none !important; }
+body.pips-active #side-tabs { background:var(--surface); }
+body.pips-active > :not(#phead):not(#side-tabs):not(#pips-host):not(#announcer):not(.dgc-trace-backdrop):not(#dgc-dock):not(.dgc-pop):not(script) { display:none !important; }
 body.pips-active #phead :is(.thread-title,.pd,.chat-add,.agent-back,.agent-mark) { display:none !important; }
 body.pips-active #phead .pm { display:inline-flex; flex:1; }
 /* ---- #3 Sessions home ------------------------------------------------------------------------- */
 /* The side bar opens on this project's sessions; each opens in an editor tab. Laid over the chat the
    way the Pips are: everything but the header, the list, the announcer and the hover label hides. */
-body.sessions-active > :not(#phead):not(#sessions-host):not(#announcer):not(#hover-tip):not(#dgc-dock):not(.dgc-pop):not(script) { display:none !important; }
+body.sessions-active > :not(#phead):not(#side-tabs):not(#sessions-host):not(#announcer):not(#hover-tip):not(#dgc-dock):not(.dgc-pop):not(script) { display:none !important; }
 body.sessions-active #phead :is(.thread-title,.pd,.chat-add,.agent-back,.agent-mark) { display:none !important; }
 body.sessions-active #phead .pm { display:inline-flex; flex:1; }
+/* The side bar has its tabs for a top (media/shared/tabs.css): Home, Work, Chat, Pips. The header row they replace (the
+   mark, the Pips button, Pips' "back") is not drawn there; the view's own title above already says DGC. */
+html[data-chat-place="home"] #phead { display:none !important; }
 /* A session's own tab: its Pips stay in the side bar, and a chat in another folder is a side bar thing. */
 html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:none !important; }
 /* One 12px gutter (0.52): every block's words, boxes and icons start 12px in and end 12px from the other side. A row's
    hover wash reaches 8px past its words on both sides (--home-bleed), so the words keep the edge and the wash has room. */
 #sessions-host { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; --home-bleed:var(--sp-2);
-  display:flex; flex-direction:column; gap:var(--sp-3); padding:var(--sp-2) var(--sp-3) var(--sp-5); }
+  display:flex; flex-direction:column; gap:var(--sp-3); padding:var(--sp-1) var(--sp-3) var(--sp-5); }
 /* A long home scrolls; nothing in it gives up its height (the search box was squeezed from 28px to 18px once the list ran
    past the side bar's end). */
 #sessions-host > * { flex:none; }
-/* The heading, the status line and each row's words start on one edge: the gutter. */
-/* Each list's own heading names it for a screen reader; the eye has the Sessions heading above the tabs. */
-#sessions-host .sessions-head { display:none; }
-/* Two quiet headings, each a button with a chevron that folds what is under it (0.52): "Pips", then "Sessions". 12px
-   medium in the quiet tone, sentence case. At a heading's end: what it offers while open (Open Pips; "+" for a new
-   session or chat), and its count while folded. The chevron's glyph, not its box, stands on the 12px edge. */
-#sessions-host .home-fold-head { display:flex; align-items:center; justify-content:space-between; gap:var(--sp-2); min-height:var(--control); }
-#sessions-host .home-fold-h { margin:0 0 0 calc(-1 * var(--sp-2)); min-width:0; font:var(--w-med) var(--t-sm)/1.3 var(--sans); color:var(--muted); }
-#sessions-host .home-fold-toggle { display:inline-flex; align-items:center; gap:2px; max-width:100%; min-height:var(--control-sm); margin:0; padding:2px var(--sp-2) 2px var(--sp-1);
-  border:0; border-radius:var(--r-sm); background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; transition:background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out); }
-#sessions-host .home-fold-toggle:hover { background:var(--wash); color:var(--text); }
-#sessions-host .home-fold-chevron { flex:none; font-size:16px; transition:transform var(--dur-hover) var(--ease-out); }
-#sessions-host[data-sessions-collapsed] .home-fold-chevron { transform:rotate(-90deg); }
-#sessions-host .home-fold-end { flex:none; display:inline-flex; align-items:center; gap:var(--sp-2); }
-#sessions-host .home-fold-count { display:inline-flex; align-items:center; gap:6px; color:var(--home-quiet); font:var(--w-reg) var(--t-sm)/1 var(--sans); font-variant-numeric:tabular-nums; }
-#sessions-host .home-fold-count[hidden] { display:none; }
-#sessions-host .home-fold-dot { width:6px; height:6px; border-radius:50%; background:var(--link, var(--accent-text)); }
-/* The +'s glyph, not its box, stands on the right edge: 16px of glyph in a 22px box, so the box reaches 3px past it. */
-#sessions-host .home-fold-add { display:inline-flex; margin-right:-3px; }
-#sessions-host .sessions-new { flex:none; display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; padding:0; border:0; border-radius:var(--r-sm);
-  background:transparent; color:var(--home-quiet); cursor:pointer; transition:background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out); }
-#sessions-host .sessions-new[hidden] { display:none; }
-#sessions-host .sessions-new:hover { background:var(--wash); color:var(--text); }
-#sessions-host :is(.home-fold-toggle, .sessions-new):focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:-1px; }
-/* Everything under the Sessions heading folds as the Pips block's does: a grid row from its height to none in 150ms. */
-#sessions-host .home-fold-body { display:grid; grid-template-rows:1fr; transition:grid-template-rows var(--dur-menu) var(--ease-out), visibility 0s; }
-#sessions-host .home-fold-body-in { min-height:0; overflow:hidden; display:flex; flex-direction:column; gap:var(--sp-3); margin:0 calc(-1 * var(--home-bleed)); padding:0 var(--home-bleed); }
-#sessions-host[data-sessions-collapsed] .home-fold-body { grid-template-rows:0fr; visibility:hidden; transition:grid-template-rows var(--dur-menu) var(--ease-out), visibility 0s var(--dur-menu); }
-@media (forced-colors: active) { #sessions-host .home-fold-dot { forced-color-adjust:none; background:Highlight; } }
+/* Work and Chat each open with one row: their search box, then New, the one filled pill here (neutral, never purple). */
+#sessions-host .home-bar { display:flex; align-items:center; gap:var(--sp-2); min-width:0; }
+#sessions-host .home-bar .sessions-search { flex:1 1 auto; min-width:0; margin:0; }
+#sessions-host .home-new { flex:none; display:inline-flex; align-items:center; gap:3px; box-sizing:border-box; height:var(--control); margin:0; padding:0 12px 0 8px; border:0; border-radius:var(--r-full);
+  background:var(--solid); color:var(--on-solid); font:var(--w-med) var(--t-sm)/1 var(--sans); white-space:nowrap; cursor:pointer; transition:background-color var(--dur-hover) var(--ease-out); }
+#sessions-host .home-new:hover { background:var(--solid-hover); }
+#sessions-host .home-new .codicon { font-size:14px; }
+#sessions-host .home-new:focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:2px; }
 #sessions-host .sessions-status { margin:0; padding:0; color:var(--muted); font:var(--w-reg) var(--t-sm)/1.5 var(--sans); }
 #sessions-host .sessions-status[data-kind="error"] { color:var(--err-text); }
-#sessions-host .sessions-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:var(--sp-1); }
-#sessions-host .session-row { display:flex; align-items:center; gap:var(--sp-2); min-width:0; margin:0 calc(-1 * var(--home-bleed)); padding:var(--sp-2) calc(var(--home-bleed) - 1px);
-  border:1px solid transparent; border-radius:var(--r-md); cursor:default; user-select:none; }
+#sessions-host .sessions-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px; }
+/* A session (Work) and a chat (Chat) are the same row: its blob, its name on one line over a quiet line that says what
+   it is doing (or the words a search found, or a chat's last message), and its age at the right. While it runs, the
+   accent's dot stands where the age was. Pointed at or focused, the age gives its place to the row's actions; that
+   place lies over the row's end, so the name never moves. */
+#sessions-host .session-row { box-sizing:border-box; display:flex; align-items:center; gap:10px; min-width:0; min-height:44px; margin:0 calc(-1 * var(--home-bleed)); padding:4px calc(var(--home-bleed) - 1px);
+  border:1px solid transparent; border-radius:var(--r-md); cursor:pointer; user-select:none; }
 #sessions-host .session-row:hover { background:var(--row-hover); }
 #sessions-host .session-row:focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:-1px; }
-#sessions-host .session-main { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:2px; }
-/* A session is known by its first words: two lines of them, not one. */
-#sessions-host .session-name { min-width:0; overflow:hidden; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2;
-  overflow-wrap:anywhere; color:var(--text); font:var(--w-med) var(--t-sm)/1.35 var(--sans); }
-#sessions-host .session-meta { display:flex; flex-wrap:wrap; align-items:center; column-gap:var(--sp-2); min-width:0; color:var(--muted);
-  font:var(--w-reg) var(--t-xs)/1.4 var(--sans); font-variant-numeric:tabular-nums; }
-#sessions-host .session-meta > * { white-space:nowrap; }
-#sessions-host .session-tab { color:var(--accent-text, var(--accent)); }
-#sessions-host .session-tab::before { content:""; display:inline-block; width:6px; height:6px; margin-right:5px; border-radius:50%; background:currentColor; vertical-align:1px; }
-/* A session (Work) is a plain row, the way Codex lists its chats: its title on one line at the left, its age at the
-   right. Pointed at or focused, the age gives its place to Open in Editor and Delete; that place keeps one width, so the
-   title never moves. A session open in a tab, or running with no window, has a dot before its age. */
-#sessions-host .home-work .sessions-list { gap:1px; }
-#sessions-host .home-work .session-row { box-sizing:border-box; min-height:var(--row); padding-top:0; padding-bottom:0; border-radius:var(--r-full); cursor:pointer; }
-#sessions-host .home-work .session-name { display:block; white-space:nowrap; text-overflow:ellipsis; font-weight:var(--w-reg); }
-/* A session with a card waiting for you says so where its age was, in the tone of something that needs you. */
-#sessions-host .session-age.session-waiting { display:inline-flex; align-items:center; gap:4px; color:var(--need-text); }
-#sessions-host .session-age.session-waiting .codicon { font-size:12px; }
-#sessions-host .session-row:is(:hover, :focus-within) .session-age.session-waiting { visibility:hidden; }
+#sessions-host .session-blob { flex:none; display:grid; place-items:center; width:24px; height:24px; line-height:0; }
+#sessions-host .session-blob .dgc-blob { --blob-size:20px; }
+#sessions-host .session-main { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:1px; }
+#sessions-host .session-name { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); font:var(--w-reg) var(--t-sm)/1.35 var(--sans); }
+#sessions-host .session-sub { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-2); font:var(--w-reg) var(--t-xs)/1.4 var(--sans); font-variant-numeric:tabular-nums; }
+/* On a row's hover wash, and on the View all popover's raised grey, the second line is a step firmer: the quiet tone
+   is 4.4:1 there. */
+#sessions-host .session-row:is(:hover, :focus-within) .session-sub, #sessions-host .sessions-popover .session-sub { color:color-mix(in srgb, var(--text) 80%, transparent); }
+/* A session with a card waiting for you says so in the tone of something that needs you. */
+#sessions-host .session-row .session-sub.session-waiting { color:var(--need-text); }
+/* A chat's line: Pinned, its project, where it is open, then its last words, parted by a middle dot. */
+#sessions-host .session-sub > span + span::before { content:"·"; margin:0 5px; color:var(--text-2); }
+/* Running: the accent's dot, a live mark. */
+#sessions-host .session-live { flex:none; display:inline-block; width:6px; height:6px; margin:0 4px 0 0; border-radius:50%; background:var(--link, var(--accent-text)); }
+@media (forced-colors: active) { #sessions-host .session-live { forced-color-adjust:none; background:Highlight; } }
 #sessions-host .session-end { flex:none; display:inline-flex; align-items:center; gap:6px; }
-#sessions-host .session-age, #sessions-host .session-actions { flex:none; min-width:42px; justify-content:flex-end; }
+#sessions-host .session-age, #sessions-host .session-actions { flex:none; min-width:26px; justify-content:flex-end; }
 #sessions-host .session-age { display:inline-block; text-align:right; color:var(--muted); font:var(--w-reg) var(--t-xs)/1.4 var(--sans); font-variant-numeric:tabular-nums; white-space:nowrap; }
 #sessions-host .session-actions { display:none; align-items:center; gap:2px; }
 /* The actions lie over the row's end (Open in Editor, the pin, "...", Delete: wider than an age), on the row's own ground
    with a soft edge, so the title keeps its width and never moves. */
 #sessions-host .session-end { position:relative; }
-#sessions-host .session-row:is(:hover, :focus-within) .session-age { visibility:hidden; }
+#sessions-host .session-row:is(:hover, :focus-within) :is(.session-age, .session-live) { visibility:hidden; }
 #sessions-host .session-row:is(:hover, :focus-within) .session-actions { display:inline-flex; }
+/* A pinned row keeps its pin in sight, alone, where its age ends (not while its "..." menu is open: the row keeps all
+   its actions then). */
+#sessions-host .session-row:not(:hover):not(:focus-within):not(:has(.session-more[aria-expanded="true"])):has(.dgc-pin[aria-pressed="true"]) .session-actions { display:inline-flex; position:static; transform:none; padding-left:0; background:none; -webkit-mask-image:none; mask-image:none; min-width:0; }
+#sessions-host .session-row:not(:hover):not(:focus-within):not(:has(.session-more[aria-expanded="true"])):has(.dgc-pin[aria-pressed="true"]) .session-actions > :not(.dgc-pin) { display:none; }
 #sessions-host .session-actions { position:absolute; right:0; top:50%; transform:translateY(-50%); padding-left:16px; background:var(--bg);
   -webkit-mask-image:linear-gradient(to right, transparent, #000 14px); mask-image:linear-gradient(to right, transparent, #000 14px); }
 #sessions-host .session-row:hover .session-actions { background:linear-gradient(var(--row-hover), var(--row-hover)), var(--bg); }
 #sessions-host .sessions-popover .session-actions { background:var(--surface2); }
 #sessions-host .sessions-popover .session-row:hover .session-actions { background:linear-gradient(var(--row-hover), var(--row-hover)), var(--surface2); }
 /* Its "..." is open: the row keeps its actions while the menu has the pointer and the keyboard. */
-#sessions-host .session-row:has(.session-more[aria-expanded="true"]) .session-age { visibility:hidden; }
+#sessions-host .session-row:has(.session-more[aria-expanded="true"]) :is(.session-age, .session-live) { visibility:hidden; }
 #sessions-host .session-row:has(.session-more[aria-expanded="true"]) .session-actions { display:inline-flex; }
-#sessions-host .session-end .session-tab { display:inline-flex; align-items:center; }
-#sessions-host .session-end .session-tab::before { margin-right:0; }
 #sessions-host .session-tab-words { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 #sessions-host .session-open, #sessions-host .session-delete { flex:none; display:inline-flex; align-items:center; justify-content:center; width:var(--control-sm); height:var(--control-sm);
   padding:0; border:0; border-radius:var(--r-sm); background:transparent; color:var(--home-quiet); cursor:pointer; }
@@ -186,16 +173,10 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
   padding:0; border:0; border-radius:var(--r-sm); background:transparent; color:var(--home-quiet); cursor:pointer; }
 #sessions-host .session-more:hover, #sessions-host .session-more[aria-expanded="true"] { color:var(--text-strong); background:var(--wash); }
 #sessions-host .session-more:focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:-1px; }
-/* A chat's row: its pin and "..." keep their room beside Delete and show while the row is pointed at or holds the
-   keyboard (a pinned chat's pin stays), so a row's words never move. */
-#sessions-host .chat-acts { flex:none; display:inline-flex; align-items:center; gap:2px; }
-#sessions-host .chat-acts :is(.dgc-pin, .session-more) { visibility:hidden; }
-#sessions-host .chat-row:is(:hover, :focus-within) .chat-acts :is(.dgc-pin, .session-more), #sessions-host .chat-acts .dgc-pin[aria-pressed="true"],
-#sessions-host .chat-acts .session-more[aria-expanded="true"] { visibility:visible; }
 #sessions-host .session-open:hover { color:var(--text-strong); background:var(--wash); }
 #sessions-host .session-delete:hover { color:var(--err-text); background:var(--wash); }
 #sessions-host :is(.session-open, .session-delete, .sessions-all):focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:-1px; }
-/* "View all (N)": quiet text under the three. It opens every session over the list: a search field, then the same rows
+/* "View all (N)": quiet text under the six. It opens every session over the list: a search field, then the same rows
    in a list that scrolls. A menu's surface and lift (media/shared/menu.css), opening in 150ms from just below. */
 #sessions-host .sessions-all { align-self:flex-start; margin:0 0 0 calc(-1 * var(--sp-1)); padding:var(--sp-1); border:0; border-radius:var(--r-sm); background:transparent; color:var(--muted);
   font:var(--w-reg) var(--t-sm)/1.3 var(--sans); cursor:pointer; transition:color var(--dur-hover) var(--ease-out), background-color var(--dur-hover) var(--ease-out); }
@@ -216,27 +197,8 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
    Open in Editor: opening one starts a backend in its folder), so its row says so with the pointer. */
 #sessions-host .home-chats, #sessions-host .home-work { display:flex; flex-direction:column; gap:var(--sp-2); }
 #sessions-host :is(.home-chats, .home-work)[hidden] { display:none; }
-/* Chat | Work: a segmented pair under the search; the chosen one lifts. Each tab's own heading is the tab, so the
-   list's heading is kept for screen readers only and its New button sits at the end of the row. */
-#sessions-host .home-tabs { display:flex; gap:2px; padding:2px; border:1px solid var(--border); border-radius:var(--r-md); background:var(--surface); }
-#sessions-host .home-tabs[hidden] { display:none; }
-#sessions-host .home-tab { flex:1 1 0; display:inline-flex; align-items:center; justify-content:center; gap:var(--sp-1); min-height:var(--control-sm);
-  padding:0 var(--sp-2); border:1px solid transparent; border-radius:var(--r-sm); background:transparent; color:var(--muted);
-  font:var(--w-semi) var(--t-sm)/1 var(--sans); cursor:pointer; }
-#sessions-host .home-tab:hover { color:var(--text); }
-#sessions-host .home-tab[aria-selected="true"] { border-color:var(--border-strong); background:var(--surface2); color:var(--text-strong); }
-#sessions-host .home-tab:focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:1px; }
-/* How many a search found: a soft pill in the shape of a Pip's number, and neutral, since it counts nothing unread. */
-#sessions-host .home-tab-count { box-sizing:border-box; min-width:18px; height:18px; padding:0 6px; border-radius:var(--r-full); display:inline-flex; align-items:center; justify-content:center;
-  background:var(--wash); color:var(--muted); font:var(--w-semi) var(--t-xs)/1 var(--sans); font-variant-numeric:tabular-nums; }
-#sessions-host .home-tab-count[hidden] { display:none; }
-#sessions-host.home-tabbed .sessions-head { justify-content:flex-end; }
-#sessions-host.home-tabbed .sessions-head h2 { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
-#sessions-host .chat-row { cursor:pointer; }
-#sessions-host .chat-preview { -webkit-line-clamp:1; }
-#sessions-host .chat-pinned { color:var(--accent-text, var(--accent)); }
-/* Projects (ChatGPT's): a small heading over the projects, then one over your chats; a project opens its page in a
-   tab, and its chevron lists its chats here, set in under it. A row a chat is dragged over says it takes it. */
+#sessions-host .chat-preview { min-width:0; }
+#sessions-host .chat-pinned, #sessions-host .chat-state { color:var(--text); }
 #sessions-host .home-projects { display:flex; flex-direction:column; gap:var(--sp-1); }
 #sessions-host .home-projects[hidden], #sessions-host .home-sub[hidden] { display:none; }
 #sessions-host .home-sub-head { display:flex; align-items:center; justify-content:space-between; gap:var(--sp-2); padding:0; }
@@ -252,7 +214,7 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
    line under the chevron's middle, their names under the project's name, and their rows keep the list's right edge. */
 #sessions-host .project-chats { margin:2px 0 var(--sp-1) var(--sp-1); padding-left:var(--sp-6); border-left:1px solid var(--hair); }
 #sessions-host .project-chats .session-row { margin-left:0; }
-#sessions-host .project-row { gap:var(--sp-1); padding:var(--sp-1) calc(var(--home-bleed) - 1px) var(--sp-1) 1px; cursor:pointer; }
+#sessions-host .project-row { min-height:var(--row); gap:var(--sp-1); padding:var(--sp-1) calc(var(--home-bleed) - 1px) var(--sp-1) 1px; cursor:pointer; }
 #sessions-host .project-toggle { flex:none; display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px;
   padding:0; border:0; border-radius:var(--r-sm); background:transparent; color:var(--muted); cursor:pointer; }
 #sessions-host .project-toggle:hover { background:var(--surface); color:var(--text); }
@@ -261,13 +223,12 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 #sessions-host .project-count { flex:none; min-width:18px; color:var(--muted); font:var(--w-reg) var(--t-xs)/1 var(--sans);
   font-variant-numeric:tabular-nums; text-align:right; }
 #sessions-host .project-empty { padding:var(--sp-1) var(--sp-2); color:var(--muted); font:var(--w-reg) var(--t-xs)/1.4 var(--sans); }
-#sessions-host .chat-row-nested { padding-top:var(--sp-1); padding-bottom:var(--sp-1); }
-#sessions-host .chat-row-nested .session-name { -webkit-line-clamp:1; font-weight:var(--w-reg); }
+#sessions-host .chat-row-nested { min-height:var(--row); padding-top:var(--sp-1); padding-bottom:var(--sp-1); }
 #sessions-host .project-start { display:flex; align-items:center; gap:var(--sp-2); width:100%; padding:var(--sp-1) var(--sp-2);
   border:1px dashed var(--border-strong); border-radius:var(--r-md); background:transparent; color:var(--muted);
   font:var(--w-med) var(--t-sm)/1.35 var(--sans); text-align:left; cursor:pointer; }
 #sessions-host .project-start:hover { border-color:var(--accent); color:var(--text); }
-#sessions-host .chat-project { padding:0 6px; border-radius:var(--r-full); background:var(--surface2); color:var(--text); }
+#sessions-host .chat-project { color:var(--text); }
 #sessions-host .drop-here { background:color-mix(in srgb, var(--accent) 16%, transparent); outline:1px dashed var(--accent); outline-offset:-1px; }
 #sessions-host .home-library { display:flex; align-items:center; gap:var(--sp-2); width:calc(100% + 2 * var(--home-bleed)); margin:0 calc(-1 * var(--home-bleed)); padding:var(--sp-1) var(--home-bleed);
   border:0; border-radius:var(--r-full); background:transparent; color:var(--text); font:var(--w-reg) var(--t-sm)/1.35 var(--sans); text-align:left; cursor:pointer; min-height:var(--row); }
@@ -284,97 +245,6 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 body.vscode-light .project-icon[data-color="yellow"] { color:#CA8A04; } body.vscode-light .project-icon[data-color="teal"] { color:#0D9488; }
 body.vscode-light .project-icon[data-color="green"] { color:#16A34A; } body.vscode-light .project-icon[data-color="gray"] { color:#6B7280; }
 body.vscode-light .project-icon[data-color="orange"] { color:#EA580C; }   /* #F97316 is 2.6:1 on a light side bar */
-/* Your Pips, above your sessions: the ones that need you, each with its face waiting, or a quiet row of faces. A plain
-   list on the side bar's own ground (0.52; it was a violet panel, five purple things before the first session), with a
-   hairline under it. Purple here is a mark only: a number's soft pill and the dot for something new. */
-#sessions-host .home-pips { display:flex; flex-direction:column; padding:0; }
-#sessions-host .home-pips[hidden] { display:none; }
-#sessions-host .home-pips-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:0 var(--sp-2); min-height:var(--control); }
-#sessions-host .home-pips-head h2 { margin:0 0 0 calc(-1 * var(--sp-2)); min-width:0; font:var(--w-med) var(--t-sm)/1.3 var(--sans); color:var(--muted); }
-/* The heading folds the block. Its chevron's glyph, not its box, stands on the 12px edge (the glyph has 4px of air in
-   its 16px box), and the words follow it; the button's wash reaches a little past both. */
-#sessions-host .home-pips-toggle { display:inline-flex; align-items:center; gap:2px; max-width:100%; min-height:var(--control-sm); margin:0; padding:2px var(--sp-2) 2px var(--sp-1);
-  border:0; border-radius:var(--r-sm); background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; transition:background-color var(--dur-hover) var(--ease-out); }
-#sessions-host .home-pips-toggle:hover { background:var(--wash); color:var(--text); }
-#sessions-host .home-pips-chevron { flex:none; font-size:16px; color:inherit; transition:transform var(--dur-hover) var(--ease-out); }
-#sessions-host .home-pips-toggle:hover .home-pips-chevron { color:var(--text); }
-#sessions-host .home-pips[data-collapsed] .home-pips-chevron { transform:rotate(-90deg); }
-#sessions-host .home-pips-title { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-/* The count: in the heading's own words for a screen reader, and at the head's end for the eye while the block is folded
-   ("2 need you", then what is new in a soft pill). Open, that end holds Dismiss all and Open Pips. */
-#sessions-host .home-pips-said { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
-#sessions-host .home-pips-count { display:none; flex:none; align-items:center; gap:var(--sp-2); margin-left:auto; color:var(--home-quiet); font:var(--w-reg) var(--t-sm)/1 var(--sans); font-variant-numeric:tabular-nums; white-space:nowrap; }
-#sessions-host .home-pips-count-new { display:inline-flex; align-items:center; height:18px; padding:0 7px; border-radius:var(--r-full); background:var(--accent-soft); color:var(--home-count-ink); font:var(--w-med) var(--t-xs)/1 var(--sans); }
-#sessions-host .home-pips[data-collapsed] .home-pips-count { display:inline-flex; }
-#sessions-host .home-pips[data-collapsed] .home-pips-actions { display:none; }
-/* Dismiss all and Open Pips: quiet text, one tone, firmer when pointed at. */
-#sessions-host .home-pips-actions { display:inline-flex; align-items:center; flex:none; margin:0 calc(-1 * var(--sp-1)) 0 auto; }
-#sessions-host :is(.home-pips-open, .home-pips-dismiss-all) { border:0; background:transparent; color:var(--muted); font:var(--w-reg) var(--t-sm)/1 var(--sans);
-  cursor:pointer; padding:var(--sp-1); border-radius:var(--r-sm); transition:color var(--dur-hover) var(--ease-out), background-color var(--dur-hover) var(--ease-out); }
-#sessions-host :is(.home-pips-open, .home-pips-dismiss-all):hover { color:var(--text-strong); background:var(--wash); }
-#sessions-host :is(.home-pips-toggle, .home-pips-open, .home-pips-dismiss-all, .home-pips-more, .home-pip-row, .home-pip-dismiss, .home-pip-face-button):focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:-1px; }
-/* Everything under the head folds in 150ms: a grid row from its height to none, hidden once it is shut so nothing in it
-   takes a click or the keyboard (the page marks it inert too). Reduced motion folds at once. */
-#sessions-host .home-pips-body { display:grid; grid-template-rows:1fr; transition:grid-template-rows var(--dur-menu) var(--ease-out), visibility 0s; }
-#sessions-host .home-pips-body-in { min-height:0; overflow:hidden; display:flex; flex-direction:column; gap:var(--sp-1); margin:0 calc(-1 * var(--home-bleed)); padding:0 var(--home-bleed); }
-#sessions-host .home-pips[data-collapsed] .home-pips-body { grid-template-rows:0fr; visibility:hidden; transition:grid-template-rows var(--dur-menu) var(--ease-out), visibility 0s var(--dur-menu); }
-#sessions-host .home-pips-list { list-style:none; margin:0; padding:var(--sp-1) 0 0; display:flex; flex-direction:column; gap:2px; }
-#sessions-host .home-pips-unread { margin-top:var(--sp-1); }
-#sessions-host .home-pips-unread .home-pip-row { min-height:36px; }
-#sessions-host .home-pips-unread .home-pip-copy small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-/* A row and, for news, its dismiss beside it (never over the name): the ✕ keeps its room and shows on
-   hover or focus; it is always in the tab order. The face stands on the edge and the row's wash reaches past it. */
-#sessions-host .home-pip-item { position:relative; display:flex; align-items:center; gap:2px; min-width:0; margin:0 calc(-1 * var(--home-bleed)); padding:0 var(--sp-1); border-radius:var(--r-lg);
-  transition:background-color var(--dur-hover) var(--ease-out); }
-#sessions-host .home-pip-item:hover { background:var(--row-hover); }
-#sessions-host .home-pip-row { flex:1 1 auto; min-width:0; display:flex; align-items:center; gap:var(--sp-2); padding:var(--sp-1); border:0; border-radius:var(--r-sm);
-  background:transparent; color:inherit; text-align:left; cursor:pointer; }
-#sessions-host .home-pip-dismiss { flex:none; width:24px; height:24px; margin-right:2px; display:inline-flex; align-items:center; justify-content:center;
-  padding:0; border:0; border-radius:var(--r-sm); background:transparent; color:var(--muted); cursor:pointer; opacity:0; }
-#sessions-host .home-pip-item:hover .home-pip-dismiss, #sessions-host .home-pip-item:focus-within .home-pip-dismiss { opacity:1; }
-#sessions-host .home-pip-dismiss:hover { color:var(--text-strong); background:var(--wash); }
-@media (hover: none) { #sessions-host .home-pip-dismiss { opacity:1; } }
-#sessions-host .home-pips-more { align-self:flex-start; max-width:100%; margin-left:calc(var(--home-bleed) - var(--sp-1)); border:0; background:transparent; color:var(--muted);
-  font:var(--w-reg) var(--t-sm)/1.3 var(--sans); text-align:left; cursor:pointer; padding:var(--sp-1); border-radius:var(--r-sm); transition:color var(--dur-hover) var(--ease-out), background-color var(--dur-hover) var(--ease-out); }
-#sessions-host .home-pips-more:hover { color:var(--text-strong); background:var(--wash); }
-#sessions-host .home-pips-error { margin:var(--sp-1) 0 0; padding:0; color:var(--err-text); font:var(--w-reg) var(--t-sm)/1.3 var(--sans); }
-#sessions-host .home-pip-face { flex:none; display:inline-flex; }
-#sessions-host .home-pip-face-row { width:32px; height:32px; }
-#sessions-host .home-pip-face-small { width:22px; height:22px; }
-#sessions-host .home-pip-face .dgc-plush, #sessions-host .home-pip-face svg { width:100%; height:100%; }
-#sessions-host .home-pip-copy { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:1px; }
-#sessions-host .home-pip-copy strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:var(--w-med) var(--t-sm)/1.3 var(--sans); color:var(--text); }
-#sessions-host .home-pip-copy small { color:var(--muted); font:var(--w-reg) var(--t-xs)/1.3 var(--sans); }
-#sessions-host .home-pip-copy :is(.home-pip-latest, .home-pip-unread-only small) { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); }
-/* A number means something needs you: a soft pill, the accent's wash under the accent's text, at the row's end. A click on it opens the row. */
-#sessions-host .home-pip-badge { order:4; flex:none; box-sizing:border-box; min-width:20px; height:18px; margin-right:var(--sp-1); padding:0 6px; border-radius:var(--r-full); display:inline-flex; align-items:center;
-  justify-content:center; background:var(--accent-soft); color:var(--home-count-ink); font:var(--w-semi) var(--t-xs)/1 var(--sans); font-variant-numeric:tabular-nums; cursor:pointer; }
-/* A dot means there's something new to read. Its 24px target stands 2px past a number's edge, so the dot sits at a number's
-   centre; it reads "Read" on hover or focus, over the row's end, and marks that Pip read. */
-#sessions-host .home-pip-read { order:3; position:static; flex:none; display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; margin:0 calc(var(--sp-1) - 2px) 0 6px; padding:0; border:0; border-radius:50%; background:transparent; cursor:pointer; }
-#sessions-host .home-pip-both .home-pip-read { margin-right:-4px; }
-/* "Read" ends where a number ends and starts where the row's words stop, so it never covers them; beside a number it
-   covers the dot and the number together. The same soft pill as a number, laid on the side bar's own ground so what is
-   under it never shows through. */
-#sessions-host .home-pip-new-dot { display:block; width:8px; height:8px; border-radius:50%; background:var(--link, var(--accent-text)); }
-#sessions-host .home-pip-item .home-pip-dismiss { order:2; }
-/* A Pip's pin, with the row's other controls: seen while the row is pointed at or holds the keyboard, and always once pinned. */
-#sessions-host .home-pip-pin { order:2; width:22px; height:22px; opacity:0; transition:opacity var(--dur-hover) var(--ease-out), background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out); }
-#sessions-host .home-pip-item:is(:hover, :focus-within) .home-pip-pin, #sessions-host .home-pip-pin[aria-pressed="true"] { opacity:1; }
-@media (hover: none) { #sessions-host .home-pip-pin { opacity:1; } }
-#sessions-host .home-pip-read-word { display:none; position:absolute; z-index:1; top:50%; right:var(--sp-2); transform:translateY(-50%); box-sizing:border-box; width:36px; height:18px; padding:0; align-items:center; justify-content:center; border-radius:var(--r-full);
-  background:linear-gradient(var(--accent-soft), var(--accent-soft)) var(--bg); color:var(--home-count-ink); font:var(--w-semi) var(--t-xs)/1 var(--sans); white-space:nowrap; }
-#sessions-host .home-pip-read:is(:hover, :focus-visible) .home-pip-new-dot { visibility:hidden; }
-#sessions-host .home-pip-read:is(:hover, :focus-visible) .home-pip-read-word { display:inline-flex; }
-#sessions-host .home-pip-read:focus-visible { outline:none; }
-#sessions-host .home-pip-read:focus-visible .home-pip-read-word { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:1px; }
-@media (forced-colors: active) { #sessions-host .home-pip-new-dot { forced-color-adjust:none; background:Highlight; } }
-#sessions-host .home-pips-quiet { display:flex; flex-wrap:wrap; align-items:center; gap:var(--sp-1) var(--sp-2); padding:var(--sp-1) 0 0; min-width:0; }
-#sessions-host .home-pips-faces { display:inline-flex; flex:none; gap:var(--sp-1); margin-left:-1px; }
-#sessions-host .home-pip-face-button { display:inline-flex; padding:1px; border:0; border-radius:50%; background:transparent; cursor:pointer; }
-#sessions-host .home-pip-face-button:hover { transform:translateY(-1px); }
-#sessions-host .home-pips-quiet-text { flex:1 1 140px; min-width:0; color:var(--muted); font:var(--w-reg) var(--t-sm)/1.3 var(--sans); }
-@media (prefers-reduced-motion: reduce) { #sessions-host .home-pip-face-button:hover { transform:none; } }
 /* ---- running chats -------------------------------------------------------------------------- */
 /* One live `dgc serve` per chat. The rail appears only once a second chat exists, so a single-chat
    panel carries no extra chrome; the header's + is the only permanent cost. */
@@ -3641,8 +3511,6 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .mod-bar-part { outl
   #log .msg.dgc.motion-arrive { animation:dgc-motion-arrive-turn .18s ease-out both; }
   #log .card.motion-resolved { animation:dgc-motion-resolved .65s ease-out both; }
   #sessions-host .session-row.motion-state-change { animation:dgc-motion-status .7s ease-out both; }
-  #sessions-host .motion-count-change { animation:dgc-motion-count .32s ease-out 1; }
-  #sessions-host .home-pip-item.motion-pip-news { animation:dgc-motion-news .8s ease-out both; }
   .am-row.motion-pip-handoff .am-pip-float::before { content:"";position:absolute;left:-8px;top:50%;width:4px;height:4px;border-radius:50%;background:var(--accent);animation:dgc-motion-handoff .55s ease-in-out 1; }
   .am-row.motion-pip-settle .am-pip-float { animation:dgc-motion-settle .35s ease-out 1; }
 }

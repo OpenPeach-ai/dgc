@@ -1,6 +1,6 @@
-// The home's sessions, the way Codex lists its chats (the user's note of 10 November), in real Chromium with the real
-// panel page (test/support/home-scene.mjs): only the three newest show, each a plain row with its title at the left and
-// its age at the right ("2h", "1w", "1mo"), then a quiet "View all (N)". That opens a popover over the list: a "Search
+// The Work tab's sessions, the way Codex lists its chats (the user's note of 10 November), in real Chromium with the real
+// panel page (test/support/home-scene.mjs): only the six newest show (three, before the tabs gave the list a page of its
+// own), each a row with its blob, its title and its age at the right ("2h", "1w", "1mo"), then a quiet "View all (N)". That opens a popover over the list: a "Search
 // recent chats" field, then every session in a list that scrolls and narrows as you type. Escape or a click outside
 // closes it. Read from the page's DOM, computed style, geometry and what it posts to the extension.
 import { after, before, test } from "node:test";
@@ -28,30 +28,32 @@ const rows = (x, list = "#sessions-list") => x.page.evaluate((s) => [...document
 const low = (marks) => marks.filter((m) => m.ratio < (m.kind === "words" ? 4.5 : 3));
 
 for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 700]) {
-  test(`the three newest sessions, title left and age right, then View all (N) (${theme}, ${width}px)`, async (t) => {
+  test(`the six newest sessions, blob and title left and age right, then View all (N) (${theme}, ${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
-    const x = await openHome(browser, { theme, width, sessions: manySessions(20), collapsed: true, motion: "reduce" });
+    const x = await openHome(browser, { theme, width, sessions: manySessions(20), tab: "work", motion: "reduce" });
     try {
       assert.deepEqual(await rows(x), [["Run the shell command `ls -la src` and tell me in one line what is there", "2h"], ["Visits page alignment", "1d"],
-        ["In one short sentence: what does nextWatering in src/app.js return?", "3d"]], "the three newest, each with its age");
+        ["In one short sentence: what does nextWatering in src/app.js return?", "3d"], ["Invoice totals round the wrong way", "1w"], ["Dark mode for the settings page", "2w"],
+        ["Why is the nightly export slow", "1mo"]], "the six newest, each with its age");
       const m = await x.page.evaluate(() => {
         const host = document.getElementById("sessions-host"), view = host.getBoundingClientRect(), inner = { left: view.left + host.clientLeft, right: view.left + host.clientLeft + host.clientWidth };
         const all = document.getElementById("sessions-all"), probe = document.createElement("i"); probe.style.color = "var(--muted)"; probe.style.backgroundColor = "var(--accent-fill)"; host.append(probe);
         const muted = getComputedStyle(probe).color, fill = getComputedStyle(probe).backgroundColor; probe.remove();
         const range = document.createRange(); range.selectNodeContents(all);
         return { rows: [...document.querySelectorAll("#sessions-list .session-row")].map((row) => { const name = row.querySelector(".session-name"), age = row.querySelector(".session-age"), n = name.getBoundingClientRect(), a = age.getBoundingClientRect();
-            return { nameLeft: Math.round(n.left - inner.left), ageRight: Math.round(inner.right - a.right), oneLine: Math.round(n.height / parseFloat(getComputedStyle(name).lineHeight)), ageAfterName: a.left >= n.right - 0.5,
-              sameLine: Math.abs((a.top + a.bottom) / 2 - (n.top + n.bottom) / 2) <= 1.5, said: age.title, actions: [...row.querySelectorAll(".session-open, .session-delete")].map((b) => b.checkVisibility({ visibilityProperty: true, opacityProperty: true })) }; }),
+            const blob = row.querySelector(".session-blob").getBoundingClientRect(), box = row.getBoundingClientRect();
+            return { nameLeft: Math.round(blob.left - inner.left), ageRight: Math.round(inner.right - a.right), oneLine: Math.round(n.height / parseFloat(getComputedStyle(name).lineHeight)), ageAfterName: a.left >= n.right - 0.5 && n.left >= blob.right + 8,
+              sameLine: Math.abs((a.top + a.bottom) / 2 - (box.top + box.bottom) / 2) <= 1.5 && Math.abs((blob.top + blob.bottom) / 2 - (box.top + box.bottom) / 2) <= 1.5, said: age.title, actions: [...row.querySelectorAll(".session-open, .session-delete")].map((b) => b.checkVisibility({ visibilityProperty: true, opacityProperty: true })) }; }),
           all: { text: all.textContent, tag: all.tagName, color: getComputedStyle(all).color === muted, filled: getComputedStyle(all).backgroundColor === fill, left: Math.round(range.getBoundingClientRect().left - inner.left),
             under: all.getBoundingClientRect().top >= document.querySelector("#sessions-list .session-row:last-child").getBoundingClientRect().bottom - 0.5 },
           more: document.getElementById("sessions-more").checkVisibility(), popover: !!document.querySelector(".sessions-popover:not([hidden])"), sideways: host.scrollWidth > host.clientWidth + 1 };
       });
       for (const row of m.rows) {
-        assert.deepEqual([row.nameLeft, row.ageRight, row.oneLine, row.ageAfterName, row.sameLine], [12, 12, 1, true, true], `title on the left edge, age on the right one, one line: ${JSON.stringify(row)}`);
+        assert.deepEqual([row.nameLeft, row.ageRight, row.oneLine, row.ageAfterName, row.sameLine], [12, 12, 1, true, true], `its blob on the left edge with its title after it, age on the right one, one line, blob and age at the row's middle: ${JSON.stringify(row)}`);
         assert.deepEqual(row.actions, [false, false], "a row at rest is its title and its age: no buttons");
       }
       assert.match(m.rows[0].said, /^\d{4}-\d\d-\d\d \d\d:\d\d · 3 messages$/, "pointing at the age says the date and how long it is");
-      assert.deepEqual(m.all, { text: "View all (20)", tag: "BUTTON", color: true, filled: false, left: 12, under: true }, "a quiet line under the three");
+      assert.deepEqual(m.all, { text: "View all (20)", tag: "BUTTON", color: true, filled: false, left: 12, under: true }, "a quiet line under the six");
       assert.deepEqual([m.more, m.popover, m.sideways], [false, false, false]);
       assert.deepEqual(low(await homeContrast(x.page)), []);
       // Pointed at, a row trades its age for what you can do with it; the title never moves.
@@ -74,7 +76,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
 
   test(`View all opens every session over the list, searched as you type, and Escape or a click outside closes it (${theme}, ${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
-    const x = await openHome(browser, { theme, width, sessions: manySessions(20), collapsed: true, motion: "reduce" });
+    const x = await openHome(browser, { theme, width, sessions: manySessions(20), tab: "work", motion: "reduce" });
     try {
       await x.page.click("#sessions-all");
       await x.page.waitForSelector(".sessions-popover:not([hidden])");
@@ -109,9 +111,9 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
       assert.deepEqual([await x.page.locator(".sessions-popover:not([hidden])").count(), await x.page.evaluate(() => document.activeElement.id), await x.page.getAttribute("#sessions-all", "aria-expanded")], [0, "sessions-all", "false"]);
       // A click outside: closed. (On View all itself: closed, not opened again.)
       await x.page.click("#sessions-all");
-      await x.page.click("#home-tabs", { position: { x: 4, y: 2 } });
+      await x.page.click("#side-tabs", { position: { x: 4, y: 2 } });
       assert.equal(await x.page.locator(".sessions-popover:not([hidden])").count(), 0, "a click outside");
-      assert.equal(await x.page.locator("#sessions-list .session-row").count(), 3, "the three are as they were");
+      assert.equal(await x.page.locator("#sessions-list .session-row").count(), 6, "the six are as they were");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   });
@@ -119,7 +121,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
 
 test("the popover keeps your search over a refreshed list, deletes from it, and loads more when there are more", async (t) => {
   if (skipOrFail(t)) return;
-  const sessions = manySessions(20), x = await openHome(browser, { width: 300, sessions, collapsed: true, motion: "reduce" });
+  const sessions = manySessions(20), x = await openHome(browser, { width: 300, sessions, tab: "work", motion: "reduce" });
   try {
     await x.page.click("#sessions-all");
     await x.page.fill(".sessions-popover input", "invoice");
@@ -141,14 +143,14 @@ test("the popover keeps your search over a refreshed list, deletes from it, and 
   } finally { await x.close(); }
 });
 
-test("three sessions or fewer need no View all; the home's own search still lists everything it found, with the words", async (t) => {
+test("six sessions or fewer need no View all; the tab's own search still lists everything it found, with the words", async (t) => {
   if (skipOrFail(t)) return;
-  const sessions = manySessions(20), x = await openHome(browser, { width: 300, sessions: sessions.slice(0, 3), collapsed: true, motion: "reduce" });
+  const sessions = manySessions(20), x = await openHome(browser, { width: 300, sessions: sessions.slice(0, 6), tab: "work", motion: "reduce" });
   try {
-    assert.equal((await rows(x)).length, 3);
+    assert.equal((await rows(x)).length, 6);
     assert.equal(await x.page.locator("#sessions-all").isHidden(), true, "nothing more to view");
-    await x.send({ type: "sessions_list", items: sessions.slice(0, 6).map((s) => ({ ...s, match: "…the sourdough starter needs feeding…" })), error: "", searchable: true, query: "sourdough", more: true });
-    assert.equal((await rows(x)).length, 6, "a search's finds are not cut to three");
+    await x.send({ type: "sessions_list", items: sessions.slice(0, 9).map((s) => ({ ...s, match: "…the sourdough starter needs feeding…" })), error: "", searchable: true, query: "sourdough", more: true });
+    assert.equal((await rows(x)).length, 9, "a search's finds are not cut to six");
     assert.equal(await x.page.locator("#sessions-list .session-match").first().textContent(), "…the sourdough starter needs feeding…");
     assert.deepEqual([await x.page.locator("#sessions-all").isHidden(), await x.page.locator("#sessions-more").isVisible()], [true, true], "Load more is the search's, as before");
     assert.deepEqual(x.errors, []);
@@ -164,7 +166,7 @@ test("an age is short and told from now: now, minutes, hours, days, weeks, month
     [31 * DAY, "1mo"], [364 * DAY, "12mo"], [366 * DAY, "1y"], [800 * DAY, "2y"]];
   const items = [...cases.map(([ago], k) => ({ id: `a${k}`, name: `Session ${k}`, preview: "", when: stamp(ago), count: 1, open: false })),
     { id: "odd", name: "Odd", preview: "", when: "today", count: 1, open: false }, { id: "none", name: "None", preview: "", when: "", count: 0, open: false }];
-  const x = await openHome(browser, { width: 300, sessions: items, collapsed: true, motion: "reduce" });
+  const x = await openHome(browser, { width: 300, sessions: items, tab: "work", motion: "reduce" });
   try {
     await x.page.click("#sessions-all");
     const ages = (await rows(x, ".sessions-popover")).map(([, age]) => age);

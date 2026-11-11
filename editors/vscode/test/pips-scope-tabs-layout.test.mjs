@@ -1,7 +1,9 @@
 // Personal | Project in real Chromium: the side bar's real page (panel.ts, main.css, main.js) with the real Pips view
-// in its shadow root, at narrow and wide editor widths, dark and light. The tabs are the Sessions home's Chat | Work over again (the
-// reported 2026-10-21: "tabs would look better"), so the two pages read as one: the same box, type and colours, read
-// from computed style; they fit; their words clear 4.5:1; and switching tabs never moves them.
+// in its shadow root, at narrow and wide editor widths, dark and light. The tabs are a segmented pair (reported
+// 2026-10-21: "tabs would look better"), made after the Work | Chat pair the side bar's list once had. That pair is gone
+// (the side bar's own tabs, Home, Work, Chat, Pips, took its place), so the Pips' pair is held to its own box, type and
+// colours here, read from computed style: a quiet second level under the side bar's tabs. They fit; their words clear
+// 4.5:1; and switching tabs never moves them.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
@@ -73,9 +75,11 @@ async function openPage({ width, theme, folder = true }) {
   }, [mainJs, markdownJs, pipsJs, pipsCss]);
   const send = (data) => page.evaluate((d) => window.dispatchEvent(new MessageEvent("message", { data: d })), data);
   await send({ type: "sessions_list", items: [], error: "" });
-  await page.waitForSelector("#home-tabs:not([hidden])");
-  const home = await styles(page, "home");
+  await page.waitForSelector("#side-tabs:not([hidden])");
   await send({ type: "pipsOpen" });
+  // The side bar's own tab bar, over the Pips view: where it ends, and which tab is lit.
+  const home = await page.evaluate(() => { const bar = document.querySelector("#side-tabs .dgc-tabs-bar").getBoundingClientRect();
+    return { bottom: bar.bottom, left: bar.left, right: bar.right, lit: [...document.querySelectorAll('#side-tabs [role="tab"][aria-selected="true"]')].map((t) => t.dataset.tab) }; });
   await send({ type: "pipsConnection", apiVersion: 58, generation: 1, connected: true, supported: true, enabled: true, folder });
   await page.waitForFunction(() => document.getElementById("pips-host").shadowRoot?.querySelector("#pips-tabpanel .pip-row"), undefined, { timeout: 10000 });
   return { page, home, errors, close: () => context.close() };
@@ -83,11 +87,11 @@ async function openPage({ width, theme, folder = true }) {
 
 const PROPS = ["display", "gap", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "borderTopWidth", "borderTopStyle", "borderTopColor",
   "borderTopLeftRadius", "backgroundColor", "color", "fontFamily", "fontSize", "fontWeight", "lineHeight", "minHeight", "height", "width", "justifyContent", "alignItems", "cursor"];
-// The tab bar, its chosen tab and the other one, wherever they are: the Sessions home's, or the Pips view's.
+// The Pips view's tab bar, its chosen tab and the other one.
 function styles(page, which) {
   return page.evaluate(([which, props]) => {
-    const root = which === "home" ? document : document.getElementById("pips-host").shadowRoot;
-    const bar = root.querySelector(which === "home" ? "#home-tabs" : ".pips-tabs");
+    const root = document.getElementById("pips-host").shadowRoot;
+    const bar = root.querySelector(".pips-tabs");
     const chosen = bar.querySelector('[role="tab"][aria-selected="true"]'), other = bar.querySelector('[role="tab"][aria-selected="false"]');
     const pick = (n) => { const c = getComputedStyle(n); return Object.fromEntries(props.map((p) => [p, c[p]])); };
     const box = (n) => { const r = n.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, right: r.right, bottom: r.bottom }; };
@@ -109,7 +113,7 @@ const pipsText = (page) => page.evaluate(() => document.getElementById("pips-hos
 
 for (const theme of ["dark-modern", "light-modern"]) {
   for (const width of [300, 460, 900, 1468]) {
-    test(`${theme} at ${width}px: Personal | Project are the Sessions home's tabs, they fit and read, and switching never moves them`, async (t) => {
+    test(`${theme} at ${width}px: Personal | Project are a quiet pair under the side bar's tabs, they fit and read, and switching never moves them`, async (t) => {
       if (skipOrFail(t)) return;
       const { page, home, errors, close } = await openPage({ width, theme });
       try {
@@ -118,15 +122,20 @@ for (const theme of ["dark-modern", "light-modern"]) {
           await page.screenshot({ path: `${process.env.DGC_SHOTS}/pips-tabs-wide.png` });
         }
         assert.deepEqual([personal.chosen.text, personal.other.text], ["Personal", "Project"]);
-        assert.deepEqual([home.chosen.text, home.other.text], ["Work", "Chat"], "measured against the home's own tabs");
-        // The same box, type and colours as the home's tabs, property by property.
-        for (const part of ["bar", "chosen", "other"]) {
-          const differs = PROPS.filter((p) => personal[part].style[p] !== home[part].style[p]);
-          assert.deepEqual(differs.map((p) => `${p}: ${personal[part].style[p]} vs ${home[part].style[p]}`), [], `${part} matches the home's`);
-        }
-        // Where they sit across the side bar: the home's gutters.
-        assert.equal(Math.round(personal.bar.box.x), Math.round(home.bar.box.x), "the same left edge");
-        assert.equal(Math.round(personal.bar.box.width), Math.round(home.bar.box.width), "and the same width");
+        // Under the side bar's own tabs, with Pips lit there.
+        assert.deepEqual(home.lit, ["pips"]);
+        assert.ok(personal.bar.box.y >= home.bottom, `under the side bar's tab bar (${personal.bar.box.y} < ${home.bottom})`);
+        // Its own box, type and colours: a bordered pair on a 10px corner, 12px semibold words, the chosen one lifted.
+        const tone = await page.evaluate(() => { const probe = document.createElement("i"); document.body.append(probe); const read = (name, p = "color") => { probe.style[p] = `var(${name})`; return getComputedStyle(probe)[p]; };
+          const out = { strong: read("--text-strong"), muted: read("--muted"), surface: read("--surface", "backgroundColor"), surface2: read("--surface2", "backgroundColor") }; probe.remove(); return out; });
+        assert.deepEqual([personal.bar.style.display, personal.bar.style.gap, personal.bar.style.paddingTop, personal.bar.style.borderTopWidth, personal.bar.style.borderTopLeftRadius, personal.bar.style.backgroundColor],
+          ["flex", "2px", "2px", "1px", "10px", tone.surface], "the bar");
+        assert.deepEqual([personal.chosen.style.fontSize, personal.chosen.style.fontWeight, personal.chosen.style.color, personal.chosen.style.backgroundColor, personal.chosen.style.minHeight],
+          ["12px", "600", tone.strong, tone.surface2, "20px"], "the chosen tab: lifted, in the strong text colour");
+        assert.deepEqual([personal.other.style.fontSize, personal.other.style.fontWeight, personal.other.style.color, personal.other.style.backgroundColor],
+          ["12px", "600", tone.muted, "rgba(0, 0, 0, 0)"], "the other tab: quiet, on the bar's own ground");
+        // Where they sit across the side bar: inside its gutters, the same on both sides.
+        assert.ok(personal.bar.box.x >= 8 && Math.abs(personal.bar.box.x - (width - personal.bar.box.right)) <= 1.5, `the same gutter on both sides (${personal.bar.box.x}, ${width - personal.bar.box.right})`);
         for (const tab of [personal.chosen, personal.other]) {
           assert.equal(tab.lines, 1, `"${tab.text}" stays on one line`);
           assert.equal(tab.clipped, false, `"${tab.text}" is not cut off`);
@@ -142,19 +151,19 @@ for (const theme of ["dark-modern", "light-modern"]) {
         assert.deepEqual([project.chosen.text, project.other.text], ["Project", "Personal"]);
         assert.deepEqual(project.bar.box, personal.bar.box, "the tabs do not move when the other is chosen");
         for (const part of ["chosen", "other"]) {
-          const differs = PROPS.filter((p) => project[part].style[p] !== home[part].style[p]);
-          assert.deepEqual(differs, [], `on Project, the ${part} tab still matches the home's`);
+          const differs = PROPS.filter((p) => !["width"].includes(p) && project[part].style[p] !== personal[part].style[p]);
+          assert.deepEqual(differs, [], `on Project, the ${part} tab looks as the ${part} tab did on Personal`);
           assert.ok(project[part].contrast >= 4.5, `${project[part].text}: ${project[part].contrast.toFixed(2)}:1`);
         }
         const text = await pipsText(page);
         assert.match(text, /ERP daily audit/);
         assert.doesNotMatch(text, /billing-app|Billing app watcher|India Market Brief/, "only this project's Pips");
-        // The keyboard focus ring is the home's.
+        // The keyboard focus ring.
         await page.evaluate(() => document.getElementById("pips-host").shadowRoot.getElementById("pips-tab-project").blur());
         await page.keyboard.press("Tab");   // focus-visible needs a key, as a person tabbing in has
         const ring = await page.evaluate(() => { const r = document.getElementById("pips-host").shadowRoot; r.getElementById("pips-tab-project").focus(); const c = getComputedStyle(r.getElementById("pips-tab-project"));
           return [c.outlineStyle, c.outlineWidth, c.outlineOffset]; });
-        assert.deepEqual(ring, ["solid", "1px", "1px"], "a 1px focus ring 1px out, as the home's");
+        assert.deepEqual(ring, ["solid", "1px", "1px"], "a 1px focus ring 1px out");
         assert.deepEqual(errors, []);
       } finally { await close(); }
     });

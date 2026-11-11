@@ -54,7 +54,7 @@ export function panelHtml() {
   // The prompt rail (DgcPromptRail) is loaded before main.js, as the panel loads it.
   // So are the user's mods (DgcMods).
   const mainJs = readFileSync(here + "/media/promptrail.js", "utf8") + "\n" + readFileSync(here + "/media/mods.js", "utf8")
-    + "\n" + readFileSync(here + "/media/shared/menu.js", "utf8") + "\n" + readFileSync(here + "/media/shared/composer.js", "utf8") + "\n" + readFileSync(here + "/media/shared/tray.js", "utf8") + "\n" + readFileSync(here + "/media/shared/filesheet.js", "utf8") + "\n" + shared("blob.js") + shared("dock.js") + readFileSync(here + "/media/mentions.js", "utf8") + "\n" + readFileSync(here + "/media/main.js", "utf8");
+    + "\n" + readFileSync(here + "/media/shared/menu.js", "utf8") + "\n" + readFileSync(here + "/media/shared/composer.js", "utf8") + "\n" + readFileSync(here + "/media/shared/tray.js", "utf8") + "\n" + readFileSync(here + "/media/shared/filesheet.js", "utf8") + "\n" + shared("card.js") + shared("blob.js") + shared("dock.js") + shared("hub.js") + readFileSync(here + "/media/mentions.js", "utf8") + "\n" + readFileSync(here + "/media/main.js", "utf8");
   const markdownJs = buildSync({ entryPoints: [here + "/src/markdown.ts"], bundle: true, format: "iife",
     globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
   const skeleton = [...panelSrc.matchAll(/<!doctype html>[\s\S]*?<\/body><\/html>/gi)].map((m) => m[0])

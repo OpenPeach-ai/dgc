@@ -1,8 +1,10 @@
 // The dock at the foot of DGC's side bar (media/shared/dock.js and dock.css) and a session's liquid blob
 // (media/shared/blob.js and blob.css), measured in real Chromium on the side bar's real page (support/dock-scene.mjs,
 // which answers the dock's messages the way src/dock.ts does). What is held here:
-//   - the dock is on every screen of the side bar (the home, the Pips view, a Pip's chat) and nothing hides behind it
-//   - a pin on every session, chat and Pip row pins and unpins; the dock's own menu unpins and moves
+//   - the dock is on every screen of the side bar (its Work tab here, the Pips view, a Pip's chat; side-tabs-home.test.mjs
+//     has it under each of the four tabs) and nothing hides behind it
+//   - a pin on every session and chat row, and on every Pip's row in the Pips view, pins and unpins; the dock's own menu
+//     unpins and moves
 //   - "+" is always last and offers a new Work session, ChatDGC chat, Personal Pip, and Settings
 //   - pointed at, the tiles grow toward the pointer and the one under it is named, with what it is doing
 //   - tiles shrink as items are added, down to 24 px; when 24 px tiles cannot fit, the dock steps aside and keeps its pins
@@ -80,7 +82,7 @@ for (const width of [300, 700]) {
         const all = [...host.querySelectorAll(".session-row, .sessions-all")].filter((n) => n.checkVisibility()); return all.at(-1).getBoundingClientRect().bottom; });
       assert.ok(last <= home.host.top + 0.6, `the home's last row is above the dock (${last} > ${home.host.top})`);
 
-      await x.page.click("#sessions-pips .home-pips-open");
+      await x.page.click("#side-tab-pips");
       await x.page.waitForFunction(() => !!document.getElementById("pips-host").shadowRoot?.querySelector("[data-job]"));
       const pips = await under("the Pips view");
       assert.equal(pips.page.id, "pips-host");
@@ -99,7 +101,7 @@ for (const width of [300, 700]) {
 }
 
 // ---- pin and unpin -------------------------------------------------------------------------------------------------
-test("a pin on every session, chat and Pip row: it pins, stays filled while pinned, and a click unpins", async (t) => {
+test("a pin on every session and chat row: it pins, stays filled while pinned, and a click unpins", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openDock(browser, { pins: [], width: 300, height: 760 });
   try {
@@ -125,7 +127,7 @@ test("a pin on every session, chat and Pip row: it pins, stays filled while pinn
     assert.match(pin.label, /^Unpin from the dock: /);
 
     // A chat's row (the Chat tab).
-    await x.page.click("#home-tab-chat");
+    await x.page.click("#side-tab-chat");
     const chat = `#chats-list .chat-row[data-id="${CHATS[1].id}"]`;
     await x.page.hover(chat);
     assert.equal((await pinOf(chat)).shown, true, "a chat's pin shows when its row is pointed at");
@@ -136,19 +138,10 @@ test("a pin on every session, chat and Pip row: it pins, stays filled while pinn
     await x.page.mouse.move(150, 20);
     assert.equal((await pinOf(chat)).shown, true, "a pinned chat's pin stays, filled, with the pointer away");
 
-    // A Pip's row on the home.
-    const pip = `#sessions-pips .home-pip-item[data-pip-id="${pipId("c")}"]`;
-    await x.page.hover(pip);
-    await x.page.click(`${pip} .dgc-pin`); await x.settle();
-    d = await dockNow(x.page);
-    assert.equal(d.items[2].key, `pip:${pipId("c")}`);
-    assert.equal(d.items[2].holds, "face", "a Pip is shown with its face");
-    assert.match(d.items[2].label, /^Morning brief\./);
-    assert.deepEqual([(await pinOf(pip)).pressed, (await pinOf(pip)).fill], ["true", "currentColor"]);
     assert.equal(d.items.at(-1).key, "+", '"+" stays last');
+    // (A Pip is pinned from its row in the Pips view, the next test: Home's cards answer what a Pip asks and have no pin.)
 
     // The same pins unpin.
-    await x.page.click(`${pip} .dgc-pin`); await x.settle();
     await x.page.click(`${chat} .dgc-pin`); await x.settle();
     d = await dockNow(x.page);
     assert.deepEqual(keys(d), [WORK_B, "+"], "a click on a filled pin unpins");
@@ -160,7 +153,7 @@ test("the Pips view: each Pip's row has the same pin", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openDock(browser, { pins: [], width: 300, height: 700 });
   try {
-    await x.page.click("#sessions-pips .home-pips-open");
+    await x.page.click("#side-tab-pips");
     const row = x.page.locator("#pips-host [data-job]").first();
     await row.waitFor();
     const id = await row.getAttribute("data-job");
@@ -525,7 +518,8 @@ test("the keyboard: Tab into the dock, arrows between items, Home and End, Enter
   try {
     // From the page's last control, Tab lands on the dock: one stop for all of it.
     await x.page.evaluate(() => { const host = document.getElementById("sessions-host"); const all = [...host.querySelectorAll("button, [tabindex='0'], input")].filter((n) => n.checkVisibility() && !n.disabled && n.tabIndex >= 0); all.at(-1).focus(); });
-    await x.page.keyboard.press("Tab");
+    // (The last row shows its own buttons once it holds the keyboard: Tab passes through them, then leaves the page.)
+    for (let i = 0; i < 8; i++) { await x.page.keyboard.press("Tab"); if (await x.page.evaluate(() => !document.getElementById("sessions-host").contains(document.activeElement))) break; }
     let d = await dockNow(x.page);
     assert.equal(d.focus, PIP_B, "Tab from the page reaches the dock's first item");
     assert.deepEqual(d.items.filter((i) => i.tab === 0).map((i) => i.key), [PIP_B], "the dock is one Tab stop");
@@ -588,7 +582,8 @@ test("When I point at the bottom: the keyboard brings the dock up too, and it dr
   try {
     assert.equal((await dockNow(x.page)).up, false);
     await x.page.evaluate(() => { const host = document.getElementById("sessions-host"); const all = [...host.querySelectorAll("button, [tabindex='0'], input")].filter((n) => n.checkVisibility() && !n.disabled && n.tabIndex >= 0); all.at(-1).focus(); });
-    await x.page.keyboard.press("Tab"); await x.page.waitForTimeout(400);
+    // (The last row shows its own buttons once it holds the keyboard: Tab passes through them, then leaves the page.)
+    for (let i = 0; i < 8; i++) { await x.page.keyboard.press("Tab"); if (await x.page.evaluate(() => !document.getElementById("sessions-host").contains(document.activeElement))) break; } await x.page.waitForTimeout(400);
     let d = await dockNow(x.page);
     assert.equal(d.focus, PIP_B); assert.equal(d.up, true, "Tab into the dock raises it");
     assert.ok(d.barOpacity > 0.95 && d.bar.bottom <= 700 - 7.5);

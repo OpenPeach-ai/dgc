@@ -822,10 +822,12 @@ test("the Sessions list marks a session running with no window", () => {
     { id: "20261022-quiet", name: "Quiet", when: "today", count: 1, open: false }] });
   const rows = [...x.doc.querySelectorAll(".session-row")];
   assert.equal(rows.length, 2);
-  const mark = rows[0].querySelector(".session-windowless");
+  // Its running dot (the accent's, where its age was) says so in words, and so does the line under its name.
+  const mark = rows[0].querySelector(".session-live");
   assert.ok(mark);
   assert.equal(mark.textContent, "Running, no window");
-  assert.match(mark.title, /a turn is running/);
-  assert.equal(rows[1].querySelector(".session-windowless"), null);
+  assert.equal(rows[0].querySelector(".session-sub").textContent, "Running, no window · 3 messages");
+  assert.match(rows[0].querySelector(".session-sub").title, /a turn is running/);
+  assert.equal(rows[1].querySelector(".session-live"), null);
   assert.deepEqual(x.errors, []);
 });

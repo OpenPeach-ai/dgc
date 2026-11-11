@@ -36,10 +36,11 @@ export function manyPins(n) {
   return [...PINS, ...more].slice(0, n);
 }
 
-/** Opens the home with a dock. pins: what is pinned; pip: what the Pips view's own Pip is (pip-chat-scene's options); show: "always" | "hover" | "never"; most, size: the Dock settings;
+/** Opens the side bar with a dock, on its Work tab (tab: another). pins: what is pinned; pip: what the Pips view's own Pip is (pip-chat-scene's options); show: "always" | "hover" | "never"; most, size: the Dock settings;
  *  colours: {"work:<id>": 1..7}. Everything else is home-scene's (width, height, theme, state, motion, srcRoot...). */
-export async function openDock(browser, { pins = PINS, show = "always", most = 8, size = 34, colours = {}, sessions = DOCK_SESSIONS, answering = [], dock = true, ...home } = {}) {
-  const x = await openHome(browser, { sessions, ...home });
+export async function openDock(browser, { pins = PINS, show = "always", most = 8, size = 34, colours = {}, sessions = DOCK_SESSIONS, answering = [], dock = true, tab = "work", ...home } = {}) {
+  // (On the Work tab unless a test says another: the rows with their pins are there.)
+  const x = await openHome(browser, { sessions, tab, ...home });
   await x.page.evaluate((initial) => {
     const state = window.__dock = { ...initial };
     window.__asked = [];

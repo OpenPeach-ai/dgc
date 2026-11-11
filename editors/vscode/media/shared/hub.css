@@ -1,0 +1,62 @@
+/* Home, the first tab of DGC's side bar (media/shared/hub.js draws it): a Show filter, then "Needs you" and "New", each
+   a column of cards of one size (two columns in a wide side bar). A card is the shared one (card.css), thin: who it is
+   from (a Pip's face or a session's blob), where it came from and when in a quiet line, what it wants in a sentence (two
+   lines at most), what exactly as chips on one line, and one filled answer with one quiet one at its foot. Every card
+   has the same height whatever it holds. Neutral greys only: nothing here is purple. */
+.dgc-hub { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; container-type: inline-size; }
+.dgc-hub[hidden] { display: none; }
+.dgc-hub-bar { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--control); }
+/* Show: a quiet pill that names what is shown; it opens the shared menu. */
+.dgc-hub-show {
+  display: inline-flex; align-items: center; gap: 6px; box-sizing: border-box; max-width: 100%; height: 26px; margin: 0; padding: 0 9px 0 11px;
+  border: 1px solid var(--hair-strong); border-radius: var(--r-full); background: transparent; color: var(--text-2);
+  font: var(--w-reg) var(--t-sm)/1 var(--sans); white-space: nowrap; cursor: pointer;
+  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out);
+}
+.dgc-hub-show:hover, .dgc-hub-show[aria-expanded="true"] { background: var(--wash); color: var(--text); }
+.dgc-hub-show-v { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-strong); font-weight: var(--w-med); }
+.dgc-hub-chevron { flex: none; margin-left: -1px; }
+.dgc-hub-show:focus-visible, .dgc-hub-link:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.dgc-hub-menu { min-width: 200px; }
+/* A count is words to read: the text colour (the faint one is 4.2:1 on the chosen row's wash). */
+.dgc-hub-menu .dgc-menu-hint { color: var(--text); font-variant-numeric: tabular-nums; }
+.dgc-hub-menu .dgc-menu-check { order: -1; margin: 0; }
+/* A group: its name and how many, then its cards. */
+.dgc-hub-group { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.dgc-hub-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: var(--control-sm); }
+.dgc-hub-head h2 { margin: 0; color: var(--text); font: var(--w-med) var(--t-sm)/1.3 var(--sans); }
+.dgc-hub-n { margin-left: 6px; color: var(--text-2); font-weight: var(--w-reg); font-variant-numeric: tabular-nums; }
+.dgc-hub-link {
+  flex: none; align-self: flex-start; margin: 0 calc(-1 * var(--sp-1)); padding: var(--sp-1); border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text-2);
+  font: var(--w-reg) var(--t-sm)/1.2 var(--sans); text-align: left; cursor: pointer; transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out);
+}
+.dgc-hub-link:hover { background: var(--wash); color: var(--text-strong); }
+.dgc-hub-head .dgc-hub-link { align-self: center; }
+.dgc-hub-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 264px), 1fr)); gap: var(--sp-2); min-width: 0; }
+/* One size for every card: the source line, two lines for the sentence, a line of chips, the answers at the foot. */
+.dgc-card.dgc-hub-card { display: flex; flex-direction: column; height: 138px; max-width: none; margin: 0; padding: 10px 11px; overflow: hidden; }
+.dgc-hub-card .dgc-card-head { gap: 10px; }
+.dgc-hub-card .dgc-card-icon.dgc-card-face { display: grid; place-items: center; width: 30px; height: 30px; margin-top: 1px; line-height: 0; }
+.dgc-hub-card .dgc-card-icon.dgc-card-face > * { width: 30px; height: 30px; }
+.dgc-hub-card .dgc-card-icon.dgc-card-face :is(.dgc-plush, svg) { width: 100%; height: 100%; }
+.dgc-hub-card .dgc-card-icon.dgc-card-face > .dgc-blob { --blob-size: 24px; width: 24px; height: 24px; }
+.dgc-hub-card .dgc-card-words { display: flex; flex-direction: column; }
+/* (The source line is quiet at four fifths of the text: the usual quiet tone is 4.48:1 on a card's own tint in a light theme.) */
+.dgc-hub-card .dgc-card-sub { order: -1; margin: 0 0 1px; color: color-mix(in srgb, var(--text) 80%, transparent); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
+.dgc-card.dgc-hub-card .dgc-card-words > .dgc-card-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font: var(--w-med) var(--t-sm)/1.4 var(--sans); }
+/* The chips and the answers stand under the words, in the words' own column, at any width; the answers keep their own
+   size at the card's right foot, the filled one first. */
+.dgc-card.dgc-hub-card .dgc-card-chips { flex: none; margin: 8px 0 0 40px; }
+.dgc-card.dgc-hub-card .dgc-chip { height: 22px; padding: 0 8px; font-size: var(--t-xs); line-height: 22px; }
+.dgc-card.dgc-hub-card .dgc-card-actions { flex: none; flex-wrap: nowrap; justify-content: flex-end; gap: 6px; margin: auto 0 0 40px; padding-top: 8px; }
+.dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn { flex: 0 1 auto; min-width: 0; height: 26px; padding: 0 13px; overflow: hidden; text-overflow: ellipsis; }
+.dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn:not(.primary) { order: 2; }
+/* A very narrow side bar (under about 250 px): the chips and answers take the card's whole width, and the answers share it. */
+@container (max-width: 226px) {
+  .dgc-card.dgc-hub-card .dgc-card-chips, .dgc-card.dgc-hub-card .dgc-card-actions { margin-left: 0; }
+  .dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn { flex: 1 1 0; padding: 0 6px; }
+}
+.dgc-hub-note { margin: 0; color: var(--err-text); font: var(--w-reg) var(--t-sm)/1.4 var(--sans); }
+.dgc-hub-note .dgc-hub-link { display: inline; margin: 0 0 0 var(--sp-1); padding: 0 var(--sp-1); text-decoration: underline; text-underline-offset: 2px; }
+.dgc-hub-empty { margin: var(--sp-1) 0 0; color: var(--text-2); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
+@media (forced-colors: active) { .dgc-hub-show { border-color: CanvasText; } }

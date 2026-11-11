@@ -59,35 +59,22 @@ export function rememberPipHomeDismissed(context: vscode.ExtensionContext, messa
   return true;
 }
 
-// The home's Pips block folded under its heading (the chevron, 0.52): one flag in the same global state, so it holds over
-// a reload and in every window and folder on this computer. It is not in the keys an editor syncs between computers.
-const COLLAPSED = "dgc.pipHomeCollapsed";
+// What Home shows (its Show filter: All, Work, Chat, Personal Pips, Project Pips): one word in the same global state, so
+// the choice holds over a reload and in every window and folder on this computer until it is changed. It is not in the
+// keys an editor syncs between computers. "all" is the default and is not kept.
+const SHOW = "dgc.homeShow";
+const SHOWS = ["work", "chat", "personal", "project"];
 
-/** The home page's attribute when the block is folded; nothing when it is open. */
-export function pipHomeCollapsedAttr(context: vscode.ExtensionContext): string {
-  return context?.globalState?.get?.<boolean>(COLLAPSED) === true ? ' data-pip-home-collapsed="1"' : "";
+/** The home page's attribute when Home shows one source; nothing when it shows all. */
+export function homeShowAttr(context: vscode.ExtensionContext): string {
+  const kept = context?.globalState?.get?.<string>(SHOW);
+  return typeof kept === "string" && SHOWS.includes(kept) ? ` data-home-show="${kept}"` : "";
 }
 
-// The home's Sessions section folded under its heading (0.52): the same kind of flag, kept the same way.
-const SESSIONS_COLLAPSED = "dgc.sessionsHomeCollapsed";
-
-/** The home page's attribute when Sessions is folded; nothing when it is open. */
-export function sessionsHomeCollapsedAttr(context: vscode.ExtensionContext): string {
-  return context?.globalState?.get?.<boolean>(SESSIONS_COLLAPSED) === true ? ' data-sessions-home-collapsed="1"' : "";
-}
-
-/** The home's {type: "sessionsHomeCollapsed", collapsed}: kept when true, forgotten otherwise. False when it isn't one. */
-export function rememberSessionsHomeCollapsed(context: vscode.ExtensionContext, message: any): boolean {
-  if (!message || message.type !== "sessionsHomeCollapsed") return false;
+/** The home's {type: "homeShow", show}: kept when it is one source, forgotten for "all". False when it isn't one. */
+export function rememberHomeShow(context: vscode.ExtensionContext, message: any): boolean {
+  if (!message || message.type !== "homeShow") return false;
   if (typeof context?.globalState?.update !== "function") return true;
-  void Promise.resolve(context.globalState.update(SESSIONS_COLLAPSED, message.collapsed === true ? true : undefined)).catch(() => { /* kept for this window still */ });
-  return true;
-}
-
-/** The home's {type: "pipHomeCollapsed", collapsed}: kept when true, forgotten otherwise. False when it isn't one. */
-export function rememberPipHomeCollapsed(context: vscode.ExtensionContext, message: any): boolean {
-  if (!message || message.type !== "pipHomeCollapsed") return false;
-  if (typeof context?.globalState?.update !== "function") return true;
-  void Promise.resolve(context.globalState.update(COLLAPSED, message.collapsed === true ? true : undefined)).catch(() => { /* kept for this window still */ });
+  void Promise.resolve(context.globalState.update(SHOW, SHOWS.includes(message.show) ? message.show : undefined)).catch(() => { /* kept for this window still */ });
   return true;
 }

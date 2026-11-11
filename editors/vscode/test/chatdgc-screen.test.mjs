@@ -1116,7 +1116,7 @@ test("it fits a narrow editor and a wide one, in both themes", async (t) => {
   }
 });
 
-test("the home shows Work | Chat at once when ChatDGC was here last time; a CLI without it takes them away", async (t) => {
+test("the side bar has its Chat tab at once when ChatDGC was here last time; a CLI without it takes the tab away", async (t) => {
   if (skipOrFail(t)) return;
   const { html, mainJs, markdownJs } = panelHtml();
   const page = await browser.newPage({ viewport: { width: 380, height: 760 } });
@@ -1125,7 +1125,7 @@ test("the home shows Work | Chat at once when ChatDGC was here last time; a CLI 
     await page.evaluate(([mjs, mdjs]) => {
       document.documentElement.dataset.chatPlace = "home";
       document.documentElement.dataset.chatdgcSeen = "1";
-      window.__posted = []; window.__state = undefined;
+      window.__posted = []; window.__state = { sideTab: "chat" };
       window.acquireVsCodeApi = () => ({ postMessage: (m) => window.__posted.push(m), getState: () => window.__state,
                                          setState(s) { window.__state = s; } });
       window.DgcPips = { mount: () => ({ setVisible() {}, navigate() {} }) };
@@ -1133,22 +1133,23 @@ test("the home shows Work | Chat at once when ChatDGC was here last time; a CLI 
       eval(mjs);
     }, [mainJs, markdownJs]);
     const send = (d) => page.evaluate((x) => window.dispatchEvent(new MessageEvent("message", { data: x })), d);
+    const tabs = () => page.evaluate(() => [...document.querySelectorAll('#side-tabs [role="tab"]')].filter((t) => t.checkVisibility()).map((t) => t.dataset.tab + (t.getAttribute("aria-selected") === "true" ? "*" : "")));
     await send({ type: "sessions_list", items: [{ id: "20261006-101500-a1", name: "Fix login", when: "2026-10-06 10:15", count: 4 }], searchable: true });
-    assert.deepEqual([await shown(page, "#home-tabs"), await shown(page, "#chats-home"), await shown(page, "#work-home")], [true, false, true],
-                     "the tabs, before the backend has said anything");
+    assert.deepEqual(await tabs(), ["home", "work", "chat*", "pips"], "the Chat tab, and the side bar back on it, before the backend has said anything");
+    assert.deepEqual([await shown(page, "#chats-home"), await shown(page, "#work-home")], [true, false]);
     assert.equal(await page.locator("#chats-status").textContent(), "Loading your chats…");
-    assert.equal(await page.locator("#sessions-title").textContent(), "Work");
-    assert.equal(await page.locator("#sessions-search").getAttribute("placeholder"), "Search chats and sessions");
+    assert.equal(await page.locator("#chats-search").getAttribute("placeholder"), "Search chats");
     await send({ type: "chatdgc_list", available: true, total: 0, items: [] });
     assert.match(await page.locator("#chats-status").textContent(), /^No chats yet/, "its answer replaces the wait");
     await send({ type: "chatdgc_list", available: false });
-    assert.deepEqual([await shown(page, "#home-tabs"), await shown(page, "#chats-home"), await shown(page, "#sessions-list")], [false, false, true],
-                     "a CLI with no ChatDGC: the sessions, as before");
-    assert.equal(await page.locator("#sessions-title").textContent(), "Sessions");
+    assert.deepEqual(await tabs(), ["home*", "work", "pips"], "a CLI with no ChatDGC: no Chat tab, and the side bar goes to Home");
+    assert.deepEqual([await shown(page, "#chats-home"), await shown(page, "#home-hub")], [false, true]);
+    await page.locator("#side-tab-work").click();
+    assert.equal(await shown(page, "#sessions-list"), true, "the sessions are on Work, as before");
   } finally { await page.close(); }
 });
 
-test("the home: Work and Chat as tabs (a long list never hides the other), one search over both", async (t) => {
+test("the side bar: Work and Chat are tabs (a long list never hides the other), each with a search of its own", async (t) => {
   if (skipOrFail(t)) return;
   const { html, mainJs, markdownJs } = panelHtml();
   const page = await browser.newPage({ viewport: { width: 380, height: 760 } });
@@ -1157,7 +1158,7 @@ test("the home: Work and Chat as tabs (a long list never hides the other), one s
     await page.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; ${THEMES["dark-modern"]} }` });
     await page.evaluate(([mjs, mdjs]) => {
       document.documentElement.dataset.chatPlace = "home";
-      window.__posted = []; window.__state = undefined;
+      window.__posted = []; window.__state = { sideTab: "work" };
       window.acquireVsCodeApi = () => ({ postMessage: (m) => window.__posted.push(m), getState: () => window.__state,
                                          setState(s) { window.__state = s; } });
       window.DgcPips = { mount: () => ({ setVisible() {}, navigate() {} }) };
@@ -1166,19 +1167,18 @@ test("the home: Work and Chat as tabs (a long list never hides the other), one s
     }, [mainJs, markdownJs]);
     const send = (d) => page.evaluate((x) => window.dispatchEvent(new MessageEvent("message", { data: x })), d);
     await send({ type: "sessions_list", items: [{ id: "20261006-101500-a1", name: "Fix login", when: "2026-10-06 10:15", count: 4 }], searchable: true });
-    assert.deepEqual([await shown(page, "#chats-home"), await shown(page, "#home-tabs"), await shown(page, "#sessions-list")], [false, false, true],
-                     "until the CLI says it has ChatDGC: the sessions, no tabs");
-    assert.equal(await page.locator("#sessions-title").textContent(), "Sessions");
+    const tab = (name) => page.locator(`#side-tab-${name}`);
+    assert.deepEqual([await shown(page, "#chats-home"), await shown(page, "#side-tab-chat"), await shown(page, "#sessions-list")], [false, false, true],
+                     "until the CLI says it has ChatDGC: the sessions, no Chat tab");
     const now = new Date().toISOString();
     await send({ type: "chatdgc_list", available: true, total: 2, more: true, open: [ID], items: [
       { id: ID, title: '<img src=x onerror="window.__owned=1">', updated_at: now, pinned: true, preview: "**Paris** is the capital. | Sight | Why go | | --- | --- | See [the docs](https://x.example)" },
       { id: `chat_${"b".repeat(32)}`, title: "Goa trip", updated_at: "2026-01-02T10:00:00.000Z", preview: "Enjoy.",
         match: "…then the **Dudhsagar** falls on day three." }] });
-    const tab = (name) => page.locator(`#home-tab-${name}`);
-    assert.deepEqual([await shown(page, "#home-tabs"), await tab("work").getAttribute("aria-selected"), await shown(page, "#chats-home"),
-                      await shown(page, "#work-home")], [true, "true", false, true], "Work starts selected");
-    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll("#home-tabs .home-tab")].map((tab) => tab.id)),
-                     ["home-tab-work", "home-tab-chat"], "Work is left of Chat");
+    assert.deepEqual([await shown(page, "#side-tab-chat"), await tab("work").getAttribute("aria-selected"), await shown(page, "#chats-home"),
+                      await shown(page, "#work-home")], [true, "true", false, true], "the Chat tab is there; the side bar stays on Work");
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll("#side-tabs .dgc-tab")].map((tab) => tab.id)),
+                     ["side-tab-home", "side-tab-work", "side-tab-chat", "side-tab-pips"], "Home, Work, Chat, Pips");
     await tab("chat").click();
     assert.equal(await page.locator("#chats-home").getAttribute("role"), "tabpanel");
     assert.equal(await page.locator("#chats-list .chat-preview").nth(1).textContent(), "…then the Dudhsagar falls on day three.",
@@ -1186,42 +1186,46 @@ test("the home: Work and Chat as tabs (a long list never hides the other), one s
     assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll("#chats-list .session-name")].map((n) => n.textContent)),
       ['<img src=x onerror="window.__owned=1">', "Goa trip"]);
     assert.equal(await page.evaluate(() => document.querySelectorAll("#chats-list img").length + (window.__owned || 0)), 0);
-    const meta = await page.locator("#chats-list .chat-row").first().locator(".session-meta").textContent();
-    assert.match(meta, /Pinned/); assert.match(meta, /Just now/); assert.match(meta, /Open in a tab/);
+    const first = page.locator("#chats-list .chat-row").first();
+    const meta = await first.locator(".session-sub").textContent();
+    assert.match(meta, /Pinned/); assert.match(meta, /Open in a tab/);
+    assert.deepEqual([await first.locator(".session-age").textContent(), await first.locator(".session-age").getAttribute("title")], ["now", "Just now"], "its age, short, and in words when pointed at");
     assert.equal(await page.locator("#chats-list .chat-preview").first().textContent(), "Paris is the capital. Sight Why go See the docs",
       "its words, not its Markdown");
     const box = (s) => page.locator(s).boundingBox();
-    assert.ok((await box("#sessions-search")).y < (await box("#home-tabs")).y, "the search sits over both tabs");
-    assert.ok((await box("#home-tabs")).y < (await box("#chats-list")).y);
+    assert.ok((await box("#side-tabs")).y < (await box("#chats-search")).y, "the tabs sit over the tab's own search");
+    assert.ok((await box("#chats-search")).y < (await box("#chats-list")).y);
     if (process.env.DGC_SHOTS) await page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-home.png") });
-    await page.locator("#chats-list .chat-row").nth(1).click();
+    await page.locator("#chats-list .chat-row").nth(1).locator(".session-name").click();
     await page.locator("#chats-new").click();
     await tab("work").click();
     assert.deepEqual([await shown(page, "#chats-home"), await shown(page, "#work-home"), await tab("work").getAttribute("aria-selected")],
                      [false, true, "true"]);
     assert.equal(await page.locator("#sessions-list .session-row").count(), 1);
-    assert.equal(await page.evaluate(() => window.__state?.homeTab), "work", "remembered");
-    await tab("work").press("ArrowLeft");
-    assert.equal(await page.evaluate(() => document.activeElement?.id), "home-tab-chat", "arrow keys move between the tabs");
+    assert.equal(await page.evaluate(() => window.__state?.sideTab), "work", "remembered");
+    await tab("work").press("ArrowRight");
+    assert.equal(await page.evaluate(() => document.activeElement?.id), "side-tab-chat", "arrow keys move between the tabs");
     assert.equal(await shown(page, "#chats-home"), true);
+    // Each list's search asks only for its own.
+    await page.locator("#chats-search").fill("goa");
+    await page.waitForTimeout(400);
+    await tab("work").click();
     await page.locator("#sessions-search").fill("goa");
     await page.waitForTimeout(400);
     const asked = await page.evaluate(() => window.__posted.filter((m) => /^(chatdgc|sessionsSearch)/.test(m.type)));
     assert.deepEqual(asked, [{ type: "chatdgcOpen", id: `chat_${"b".repeat(32)}` }, { type: "chatdgcNew" },
-                             { type: "sessionsSearch", query: "goa" }, { type: "chatdgcSearch", query: "goa" }]);
+                             { type: "chatdgcSearch", query: "goa" }, { type: "sessionsSearch", query: "goa" }]);
     await send({ type: "chatdgc_list", available: true, query: "goa", more: false, items: [{ id: `chat_${"b".repeat(32)}`, title: "Goa trip", updated_at: now }] });
     await send({ type: "sessions_list", query: "goa", searchable: true, more: true, items: [{ id: "20261006-101500-a1", name: "Goa beaches", when: "x", count: 2 }] });
-    assert.deepEqual([await page.locator("#home-tab-chat-count").textContent(), await page.locator("#home-tab-work-count").textContent()], ["1", "1+"],
-                     "searching: what each tab found, so nothing waits unseen in the other");
-    assert.equal(await tab("work").getAttribute("aria-label"), "Work: 1 or more found");
+    assert.deepEqual([await page.locator("#sessions-list .session-row").count(), await shown(page, "#sessions-more")], [1, true], "what Work's search found, and Load more for the rest");
+    await tab("chat").click();
+    assert.deepEqual([await page.locator("#chats-list > .chat-row").count(), await page.locator("#chats-search").inputValue()], [1, "goa"], "Chat's search kept what it found, and what you typed");
     await send({ type: "sessions_list", query: "", searchable: true, items: [] });
-    assert.equal(await page.locator("#home-tab-work-count").isHidden(), true);
-    assert.equal(await page.evaluate(() => [...document.querySelectorAll("#sessions-host button")].filter((b) => !b.title).length), 0,
-      "every button on the home says what it does on hover");
+    assert.equal(await page.evaluate(() => [...document.querySelectorAll("#sessions-host button, #side-tabs button")].filter((b) => !b.title).length), 0,
+      "every button in the side bar says what it does on hover");
     await send({ type: "chatdgc_list", available: false });
-    assert.deepEqual([await shown(page, "#chats-home"), await shown(page, "#home-tabs"), await shown(page, "#work-home")], [false, false, true],
-                     "an older CLI: the sessions, as before");
-    assert.equal(await page.locator("#sessions-title").textContent(), "Sessions");
+    assert.deepEqual([await shown(page, "#chats-home"), await shown(page, "#side-tab-chat"), await shown(page, "#home-hub")], [false, false, true],
+                     "an older CLI: no Chat tab, and the side bar goes to Home");
   } finally { await page.close(); }
 });
 
@@ -1542,7 +1546,7 @@ test("the home's projects: a New project, each project's chats under it, and a c
     const now = new Date().toISOString(), P = `proj_${"c".repeat(32)}`, C = `chat_${"b".repeat(32)}`;
     await send({ type: "chatdgc_list", available: true, total: 1, items: [{ id: C, title: "Beach ideas", updated_at: now, preview: "Baga." }] });
     await send({ type: "chatdgc_projects", projects: [] });
-    await page.locator("#home-tab-chat").click();
+    await page.locator("#side-tab-chat").click();
     assert.equal(await page.locator("#projects-home").isVisible(), true);
     assert.equal(await page.locator("#chats-sub").isHidden(), true, "no projects: no need to split your chats");
     await page.locator(".project-start").click();

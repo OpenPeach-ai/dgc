@@ -1,30 +1,20 @@
-// The Sessions home's Pips: which of your Pips need you, above your sessions (reported: a
-// Pips notice above a coding session's composer "has nothing to do with that session"). A Pip that
-// needs you is a row with its face waiting and what is waiting; when none does, your Pips sit in a
-// quiet row of faces. Each opens that Pip in the Pips view. Names are the user's words: text only.
-// The home is a doorway to Pips, not their list (reported 2026-10-18: "what if there were 100 Pips"):
-// the 3 most urgent rows, then one line to the Pips view's Needs attention. A row that is news (failed
-// runs, new findings) has a dismiss: its news is marked seen for good (mark_pip_news_seen, Pips API 48)
-// and the Pip comes back only when it does something new. A row waiting for you needs an answer: none.
-// A number means something needs you; a dot means there's something new to read (approved 2026-11-07: "Personal 5" sat
-// beside "Needs attention 2"). The head says both, "Pips · 2 need you · 3 new", and a row's number is what waits on that Pip.
-// New messages (reported 2026-11-03, "Pips · 116 unread"): Dismiss all marks them read, so the Pips page clears too. If
-// a read is refused they stay hidden here all the same: the home keeps, per Pip, what was unread then
-// (each feed's count and newest id; the host keeps it over a reload, src/pipHomeDismiss.ts) and counts only what came
-// after. A Pip's dot reads "Read" on hover or focus, and clears its new messages and finished-run
-// news together (mark_pip_read, then mark_pip_news_seen). What waits for you still needs an answer.
-// The block folds (0.52): its heading is a button with a chevron, and everything under the head folds away. Open, the
-// head is "Pips" with Dismiss all and Open Pips at its end; folded, their place is taken by the count ("2 need you",
-// and what is new in a soft pill), so a folded block still says what is new. A screen reader hears the count in the
-// heading either way. The choice is kept on this computer by the host (options.collapsed, options.onCollapsed;
-// src/pipHomeDismiss.ts), never in the page.
+// Your Pips on the side bar's Home: which of them need you and which have news, as a list of cards the hub draws
+// (media/shared/hub.js) beside the sessions' own. This file keeps what is true and what you did; it draws nothing.
+// One card for each Pip, the most urgent first: waiting for you (or it can't run), then alerts, failed runs, new
+// findings, then new messages to read. A new Pip that waits for you is a card too. Names are the user's words.
+// News (failed runs, new findings) can be dismissed: it is marked seen for good (mark_pip_news_seen, Pips API 48) and
+// the Pip comes back only when it does something new. What waits for you needs an answer: no dismiss.
+// New messages (reported 2026-11-03, "Pips · 116 unread"): Clear marks them read, so the Pips page clears too. If a
+// read is refused they stay hidden here all the same: the home keeps, per Pip, what was unread then (each feed's count
+// and newest id; the host keeps it over a reload, src/pipHomeDismiss.ts) and counts only what came after. A card's
+// Mark read clears that Pip's new messages and finished-run news together (mark_pip_read, then mark_pip_news_seen).
 import {pipDigest, pendingReviews} from './pipsModel.js';
-import {attentionPage, attentionNavigation, waitingOn, needWords} from './pipAttention.js';
+import {attentionPage, attentionNavigation, waitingOn, kindLabel} from './pipAttention.js';
 import {profile} from './pipProfile.js';
 
 const POLL_MS = 60000;
 const TYPES = ['core','scout','lens','patch','rook','pulse','lock','quill'];
-const SHOWN = 3, MAX_SEEN = 50, MAX_DISMISSED = 500;
+const MAX_SEEN = 50, MAX_DISMISSED = 500;
 const PIP_ID = /^pip_[a-f0-9]{32}$/, WORKSPACE_ID = /^ws_[a-f0-9]{32}$/, FEED_ID = /^[A-Za-z0-9_|-]{1,260}$/;
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 // A list_pip_unread item's two feeds: its chat's replies and its runs' posts, each a count and its newest id.
@@ -54,14 +44,11 @@ function since(snapshot, item) {
 }
 
 export function mountHomePips(options) {
- const doc = options.document, root = options.root;
- const quiet = {receive(){}, refresh(){}, dispose(){}};
- if (!root) return quiet;
+ const doc = options.document;
  const pending = new Map(), setTimer = options.setInterval || setInterval, clearTimer = options.clearInterval || clearInterval;
  let generation = 0, epoch = 0, sequence = 0, ready = false, loading = false, timer = null, disposed = false;
- let collapsed = options.collapsed === true;
  let listedAll = false, listedScopes = [];
- let pips = null, digest = null, attention = null, unread = [], unreadFailure = false, apiVersion = 0, cleanup = null, personal = null, current = null, partial = false, failure = '', refocus = null;
+ let pips = null, digest = null, attention = null, unread = [], unreadFailure = false, apiVersion = 0, personal = null, current = null, partial = false, failure = '';
  // Dismissed here: pip id → the request number after which a digest already leaves its news out.
  const hidden = new Map();
  // Unread dismissed here (Dismiss all): pip id → its snapshot. Read with its pill: pip id → the request number after which
@@ -72,7 +59,6 @@ export function mountHomePips(options) {
   if (snapshot) snapshots.set(id, snapshot);
  }
  const keep = (set, drop) => { if (Object.keys(set).length || drop.length) options.onDismissed?.({set, drop}); };
- const node = (tag, cls, value) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (value !== undefined) e.textContent = value; return e; };
  const request = (type, fields = {}) => new Promise((resolve, reject) => {
   const id = `home-pips-${epoch}-${++sequence}`;
   const t = setTimeout(() => { pending.delete(id); reject(Error('No reply from DGC.')); }, 20000);
@@ -114,16 +100,6 @@ export function mountHomePips(options) {
   }
   return rows.sort((a, b) => a.rank - b.rank);     // stable: Core first, then as the Pips view orders them
  }
- function face(pip, pose, size) {
-  const plush = globalThis.PipConcepts?.plush, span = node('span', `home-pip-face home-pip-face-${size}`);
-  span.setAttribute('aria-hidden', 'true');
-  const look = pip.profile || profile(null);
-  try { if (plush) span.innerHTML = plush.markup({index: TYPES.indexOf(look.body || pip.type), name: pip.name}, pose, `home-${pip.id}`, {includeStyles: false}); } catch { span.replaceChildren(); }
-  return span;
- }
- // What the dock keeps of a pinned Pip: its name, its body (for its face), and whether it is a project's.
- const pinItem = pip => ({kind: 'pip', id: pip.id, title: pip.name, scope: pip.workspace && personal && pip.workspace !== personal ? 'project' : '',
-  look: {body: (pip.profile || profile(null)).body || pip.type, ws: pip.workspace || ''}});
  // Every Pip here, for the dock: its name, its face's body, what waits on it and its news in a few words.
  function tellDock() {
   if (!options.onPips) return;
@@ -135,11 +111,11 @@ export function mountHomePips(options) {
  function open(pip) { const first = attention?.items.find(i => i.pip_id === pip.id); options.onOpen?.(first ? attentionNavigation(first) : {pip: pip.id}); }
  // Show all: the Pips view's home at Needs attention, open in full; your Pips are listed under it.
  function openAll() { options.onOpen?.(apiVersion >= 44 && personal ? {attention: true, all: true, workspace: personal} : {overview: true}); }
- async function dismiss(rows, index, seenUntil = digest?.until) {
+ async function dismiss(rows, seenUntil = digest?.until) {
   if (!digest || !rows.length) return;
   const until = seenUntil, ids = rows.map(r => r.pip.id), token = epoch;
   for (const id of ids) hidden.set(id, Infinity);
-  failure = ''; refocus = root.contains(doc.activeElement) ? index : null; paint();
+  failure = ''; paint();
   for (let i = 0; i < ids.length; i += MAX_SEEN) {
    const chunk = ids.slice(i, i + MAX_SEEN);
    try { await request('mark_pip_news_seen', {pip_ids: chunk, until}); for (const id of chunk) hidden.set(id, sequence); }
@@ -174,11 +150,11 @@ export function mountHomePips(options) {
    .then(() => { if (token !== epoch) { reads.delete(pip); return; } reads.set(pip, sequence); if (snapshots.delete(pip)) keep({}, [pip]); })
    .catch(() => { reads.delete(pip); }); }))
    .then(() => { if (reading.length && token === epoch) void load(); });
-  if (news.length) { void dismiss(news, 0); return; }
-  failure = ''; refocus = root.contains(doc.activeElement) ? 0 : null; paint();
+  if (news.length) { void dismiss(news); return; }
+  failure = ''; paint();
  }
  // A Pip's pill: its whole chat marked read, up to the newest reply and run post the home was told of.
- async function markRead(item, index) {
+ async function markRead(item) {
   const pip = item.pip_id, message = typeof item.latest_message_id === 'string' ? item.latest_message_id : null;
   const post = typeof item.latest_post_id === 'string' ? item.latest_post_id : null, token = epoch;
   if (!message && !post) return;
@@ -187,13 +163,13 @@ export function mountHomePips(options) {
   // Remove the whole completed-update row immediately. Restore it on a refused
   // read or news dismissal, so the home never claims an action was saved when it was not.
   if (newsRow) hidden.set(pip, Infinity);
-  reads.set(pip, Infinity); failure = ''; refocus = root.contains(doc.activeElement) ? index : null; paint();
+  reads.set(pip, Infinity); failure = ''; paint();
   try {
    await request('mark_pip_read', {pip_id: pip, ...(message ? {message_id: message} : {}), ...(post ? {post_id: post} : {})});
    if (token !== epoch) { reads.delete(pip); if (newsRow) hidden.delete(pip); return; } // a new connection: its list says
    reads.set(pip, sequence);
    if (snapshots.delete(pip)) keep({}, [pip]);
-   if (newsRow) await dismiss([newsRow], index, newsUntil);
+   if (newsRow) await dismiss([newsRow], newsUntil);
    void load();
   } catch {
    reads.delete(pip);
@@ -201,177 +177,67 @@ export function mountHomePips(options) {
    if (token === epoch) { failure = 'That didn’t mark it read. Try again.'; paint(); }
   }
  }
+ // What the hub draws: one card for each Pip that needs you or has news, the most urgent first, then each new Pip that
+ // waits for you. `line` is the few words a row said ("2 waiting for you", "1 run failed"); `title` is the card's sentence.
+ function cards() {
+  const rows = needing(), fresh = shownUnread(), byUnread = new Map(fresh.map(item => [item.pip_id, item]));
+  const scopeOf = space => space && personal && space !== personal ? 'project' : 'personal';
+  const out = [];
+  const card = (pip, row, unreadItem) => {
+   const waits = (attention?.items || []).filter(i => i.pip_id === pip.id), needs = !!row && (!!pip.waiting || !!pip.blocked);
+   const one = needs && !pip.blocked && pip.waiting === 1 && waits.length === 1 ? waits[0] : null;
+   const chips = [];
+   if (one) { chips.push(kindLabel(one.kind)); if (one.detail) chips.push(one.detail); }
+   else if (needs && waits.length) { const kinds = new Map(); for (const i of waits) kinds.set(i.kind, (kinds.get(i.kind) || 0) + 1);
+    for (const [kind, n] of kinds) chips.push(n > 1 ? `${kindLabel(kind)} · ${n}` : kindLabel(kind)); }
+   if (pip.blocked && pip.waiting) chips.push(`${pip.waiting} waiting for you`);
+   if (unreadItem) chips.push(`${unreadItem.count} new`);
+   const line = row ? row.line : unreadItem.latest;
+   out.push({key: `pip:${pip.id}`, pip: pip.id, name: pip.name, body: (pip.profile || profile(null)).body || pip.type, scope: scopeOf(pip.workspace),
+    group: needs ? 'needs' : 'new', kind: pip.blocked ? 'blocked' : pip.waiting ? 'waiting' : row ? 'news' : 'unread',
+    line, title: one ? one.title : pip.waiting && !pip.blocked ? `${pip.waiting} ${pip.waiting === 1 ? 'thing is' : 'things are'} waiting for you` : line,
+    latest: unreadItem ? unreadItem.latest : '', chips, waiting: pip.waiting || 0, unread: unreadItem ? unreadItem.count : 0,
+    canRead: !!unreadItem, canDismiss: !!row && row.dismissible && !unreadItem,
+    at: (needs ? waits[0]?.created_at : '') || unreadItem?.latest_at || ''});
+  };
+  for (const row of rows) card(row.pip, row, byUnread.get(row.pip.id) || null);
+  for (const item of fresh) if (!rows.some(row => row.pip.id === item.pip_id)) { const pip = pips.find(p => p.id === item.pip_id); if (pip) card(pip, null, item); }
+  // A new Pip that waits for you has no Pip yet: its own card, in the project it would live in.
+  for (const item of attention?.items || []) if (item.kind === 'setup' && !item.pip_id) out.push({key: `setup:${item.card}`, pip: null, name: item.pip_name || 'New Pip',
+   body: TYPES.includes(item.pip_type) ? item.pip_type : 'core', scope: scopeOf(item.workspace_id), group: 'needs', kind: 'setup', line: item.title, title: item.title,
+   latest: '', chips: item.detail ? [item.detail] : [], waiting: 1, unread: 0, canRead: false, canDismiss: false, at: item.created_at});
+  return {rows, fresh, out};
+ }
+ let last = null;
  function paint() {
   if (disposed) return;
-  const before = new Map([...root.querySelectorAll('.home-pip-item[data-pip-id]')]
-   .map(item => [item.dataset.pipId, item.dataset.news]));
-  // Focus on a control here survives a repaint (a list that reloaded after a read): the same control, or Open Pips.
-  const focused = refocus === null && root.contains(doc.activeElement) ? doc.activeElement : null;
-  const held = focused ? {name: [...focused.classList].find(c => c.startsWith('home-pip')) || '',
-   pip: focused.closest('[data-pip-id]')?.dataset.pipId || ''} : null;
-  cleanup?.(); cleanup = null;
-  root.replaceChildren();
-  if (!ready || !pips || !pips.length) { root.hidden = true; options.onChange?.(); tellDock(); return; }
-  root.hidden = false;
-  const rows = needing(), dismissible = rows.filter(r => r.dismissible), fresh = shownUnread();
-  const byUnread = new Map(fresh.map(item => [item.pip_id, item]));
-  const displayed = rows.map(row => ({...row, unread: byUnread.get(row.pip.id) || null}));
-  for (const item of fresh) if (!rows.some(row => row.pip.id === item.pip_id)) {
-   const pip = pips.find(p => p.id === item.pip_id);
-   if (pip) displayed.push({pip, line: item.latest, dismissible: false, unread: item});
-  }
-  const visible = displayed.slice(0, SHOWN);
-  for (const item of fresh) {
-   if (visible.length >= SHOWN + 2) break;
-   const extra = displayed.find(row => row.pip.id === item.pip_id);
-   if (extra && !visible.some(row => row.pip.id === item.pip_id)) visible.push(extra);
-  }
+  if (!ready || !pips) { last = {ready: false, pips: [], cards: [], need: 0, fresh: 0, more: 0, canClear: false, unreadFailure: false, failure: ''}; options.onModel?.(last); options.onChange?.(); tellDock(); return; }
+  const {rows, fresh, out} = cards();
   const unreadCount = fresh.reduce((n, item) => n + item.count, 0);
   // Needs attention's number and this project's, as its two tabs say them. A DGC with no such list has no number here.
-  const need = attention ? attention.total + (attention.projects[current]?.total || 0) : 0;
-  const head = node('div', 'home-pips-head'), actions = node('span', 'home-pips-actions');
-  // The heading is the fold's button (a button inside the heading, as a disclosure is built), over the body it folds.
-  const title = node('h2'), toggle = node('button', 'home-pips-toggle'), chevron = node('span', 'home-pips-chevron codicon codicon-chevron-down');
-  const body = node('div', 'home-pips-body'), inner = node('div', 'home-pips-body-in');
-  toggle.type = 'button'; chevron.setAttribute('aria-hidden', 'true');
-  body.id = `${root.id || 'home-pips'}-body`; toggle.setAttribute('aria-controls', body.id);
-  const words = node('span', 'home-pips-title', 'Pips');
-  // The heading's own words carry the count for a screen reader; the eye gets it at the head's end when folded.
-  if (need || unreadCount) words.append(node('span', 'home-pips-said', ` · ${needWords(need, unreadCount)}`));
-  toggle.append(chevron, words);
-  title.append(toggle); head.append(title); body.append(inner);
-  if (need || unreadCount) {
-   const count = node('span', 'home-pips-count'); count.setAttribute('aria-hidden', 'true');
-   if (need) count.append(node('span', 'home-pips-count-need', needWords(need, 0)));
-   if (unreadCount) count.append(node('span', 'home-pips-count-new', needWords(0, unreadCount)));
-   head.append(count);
-  }
-  const fold = () => {
-   root.toggleAttribute('data-collapsed', collapsed); body.toggleAttribute('inert', collapsed);
-   toggle.setAttribute('aria-expanded', String(!collapsed));
-   toggle.title = collapsed ? 'Show your Pips here' : 'Hide your Pips here. The count stays.';
-  };
-  // No repaint: the same chevron turns and the same list folds, so both can move.
-  toggle.onclick = () => { collapsed = !collapsed; fold(); options.onCollapsed?.(collapsed); options.onChange?.(); };
-  fold();
-  if (dismissible.length >= 2 || unreadCount) {
-   const clear = node('button', 'home-pips-dismiss-all', 'Dismiss all'); clear.type = 'button';
-   const unreadNote = 'Every message is marked read, here and in Pips.';
-   clear.title = !unreadCount ? 'Dismiss every failed run and new finding here. What is waiting for you stays.'
-    : dismissible.length ? `Dismiss every failed run and new finding here, and what’s new. What is waiting for you stays. ${unreadNote}`
-    : `Clear what’s new. What is waiting for you stays. ${unreadNote}`;
-   if (unreadCount) clear.setAttribute('aria-label', dismissible.length ? 'Dismiss all failed runs, new findings and new Pip messages from the home page'
-    : 'Dismiss all new Pip messages from the home page');
-   clear.onclick = () => { if (unreadCount) dismissAll(dismissible); else void dismiss(dismissible, 0); };
-   actions.append(clear);
-  }
-  const all = node('button', 'home-pips-open', 'Open Pips'); all.type = 'button'; all.title = 'Open the Pips view';
-  all.onclick = () => options.onOpen?.({overview: true});
-  actions.append(all); head.append(actions);
-  root.append(head, body);
-  if (displayed.length) {
-   const list = node('ul', 'home-pips-list'); list.setAttribute('aria-label', 'Pips that need you');
-   for (const [index, {pip, line, dismissible: canDismiss, unread: itemUnread}] of visible.entries()) {
-    const item = node('li', `home-pip-item${pip.waiting && itemUnread ? ' home-pip-both' : ''}`), row = node('button', 'home-pip-row'); row.type = 'button';
-    const needsAttention = rows.some(r => r.pip.id === pip.id);
-    item.dataset.pipId = pip.id;
-    item.dataset.news = line;
-    if (before.has(pip.id) && before.get(pip.id) !== line) item.classList.add('motion-pip-news');
-    row.title = `Open ${pip.name} in Pips`;
-    const copy = node('span', `home-pip-copy${itemUnread && !needsAttention ? ' home-pip-unread-only' : ''}`);
-    copy.append(node('strong', '', pip.name), node('small', '', line));
-    if (itemUnread && needsAttention) copy.append(node('small', 'home-pip-latest', itemUnread.latest));
-    row.append(face(pip, pip.waiting ? 'waiting_approval' : 'success', 'row'), copy);
-    row.onclick = () => itemUnread && !needsAttention ? options.onOpen?.({pip: pip.id}) : open(pip);
-    item.append(row);
-    if (itemUnread) {
-     const read = node('button', 'home-pip-read'); read.type = 'button';
-     read.setAttribute('aria-label', `Mark ${pip.name}'s ${plural(itemUnread.count, 'new message')} as read`);
-     read.title = 'Mark as read, without opening its chat';
-     const dot = node('span', 'home-pip-new-dot'); dot.setAttribute('aria-hidden', 'true');
-     read.append(dot, node('span', 'home-pip-read-word', 'Read'));
-     read.onclick = () => { void markRead(itemUnread, index); };
-     item.append(read);
-    }
-    // The number has its own place at the row's end, so a dot beside it never moves it. The row says it in words.
-    if (pip.waiting) {
-     const badge = node('span', 'home-pip-badge', String(pip.waiting)); badge.setAttribute('aria-hidden', 'true');
-     badge.onclick = () => row.click();
-     item.append(badge);
-    }
-    // A Pip with something new already has a Read control in this row. It clears the old
-    // run news too, so a second × beside its dot is redundant and shifts
-    // that dot away from the common right edge.
-    if (canDismiss && !itemUnread) {
-     const x = node('button', 'home-pip-dismiss'); x.type = 'button';
-     x.setAttribute('aria-label', `Dismiss: ${pip.name} — ${line}`); x.title = `Dismiss: ${line}. It comes back if ${pip.name} has something new.`;
-     const icon = node('span', 'codicon codicon-close'); icon.setAttribute('aria-hidden', 'true'); x.append(icon);
-     x.onclick = () => { void dismiss([rows.find(r => r.pip.id === pip.id)], index); };
-     item.append(x);
-    }
-    // Pin this Pip to the dock (media/shared/dock.js): an outline until it is pinned, then filled, and it stays. After
-    // the row's own controls, so Tab reaches Read and Dismiss first, as before.
-    if (options.dock) {
-     const on = options.dock.pinned(pip.id), pin = node('button', 'dgc-pin home-pip-pin'); pin.type = 'button';
-     pin.setAttribute('aria-pressed', String(on)); pin.title = on ? 'Unpin from the dock' : 'Pin to the dock';
-     pin.setAttribute('aria-label', `${pin.title}: ${pip.name}`); pin.innerHTML = options.dock.icon(on);
-     pin.onclick = () => options.dock.toggle(pinItem(pip));
-     item.append(pin);
-    }
-    list.append(item);
-   }
-   inner.append(list);
-  }
-  // What the rows above don't show. "Need you" is the head's number, so the two add up; a failed run or a finding is news.
-  const hidden = rows.filter(row => !visible.some(item => item.pip.id === row.pip.id));
-  const shownWaiting = visible.reduce((n, row) => n + row.pip.waiting, 0);
-  const moreNeed = attention ? Math.max(0, need - shownWaiting) : hidden.reduce((n, row) => n + row.pip.waiting, 0);
-  const moreNews = hidden.filter(row => !row.pip.waiting).length;
-  if (moreNeed || moreNews) {
-   const said = moreNeed ? `${moreNeed}${visible.length ? ' more' : ''} ${moreNeed === 1 ? 'needs' : 'need'} you`
-    : `${moreNews}${partial ? '+' : ''} more ${moreNews === 1 ? 'Pip' : 'Pips'} with news`;
-   const rest = node('button', 'home-pips-more', `${said} · Show all`); rest.type = 'button';
-   rest.title = 'Open Needs attention in the Pips view';
-   rest.onclick = openAll;
-   inner.append(rest);
-  }
-  if (fresh.some(item => !visible.some(row => row.pip.id === item.pip_id))) {
-   const more = node('button', 'home-pips-more', `See all ${unreadCount} new ${unreadCount === 1 ? 'update' : 'updates'}`); more.type = 'button';
-   more.onclick = () => options.onOpen?.({overview: true}); inner.append(more);
-  }
-  // What went wrong is said under the block, folded or not: a fold never hides that something didn't save or load.
-  if (unreadFailure) {
-   const retry = node('button', 'home-pips-open', 'Retry'); retry.type = 'button'; retry.onclick = () => { void load(); };
-   const warning = node('p', 'home-pips-error', 'Couldn’t check for new Pip messages.');
-   warning.setAttribute('role', 'status'); warning.append(' ', retry); root.append(warning);
-  }
-  if (!displayed.length && !unreadFailure && !need) {
-   const row = node('div', 'home-pips-quiet');
-   const faces = node('span', 'home-pips-faces');
-   for (const pip of pips.slice(0, 6)) {
-    const b = node('button', 'home-pip-face-button'); b.type = 'button'; b.title = `${pip.name}: open in Pips`;
-    b.setAttribute('aria-label', `Open ${pip.name}`);
-    b.append(face(pip, 'idle', 'small')); b.onclick = () => open(pip); faces.append(b);
-   }
-   row.append(faces, node('span', 'home-pips-quiet-text', 'All quiet. Nothing is waiting for you.'));
-   inner.append(row);
-  }
-  if (failure) { const said = node('p', 'home-pips-error', failure); said.setAttribute('role', 'status'); root.append(said); }
-  // A dismissed (or read) row's place goes to the next one: the keyboard stays there, never on the page's top. Folded,
-  // there is no row to take it: it stays in the head.
-  if (refocus !== null && collapsed) { toggle.focus(); refocus = null; }
-  else if (refocus !== null) {
-   const items = root.querySelectorAll('.home-pip-item'), item = items[Math.min(refocus, items.length - 1)];
-   (item?.querySelector('.home-pip-dismiss, .home-pip-read') || item?.querySelector('.home-pip-row') || all).focus();
-   refocus = null;
-  } else if (held) {
-   const same = held.name ? [...root.querySelectorAll(`.${held.name}`)].find(n => (n.closest('[data-pip-id]')?.dataset.pipId || '') === held.pip) : null;
-   (same || all).focus();
-  }
-  cleanup = globalThis.PipConcepts?.plush?.mount?.(root) || null;
+  const need = attention ? attention.total + (attention.projects[current]?.total || 0) : rows.reduce((n, row) => n + row.pip.waiting, 0);
+  // What waits that no card here shows (past the 100 the list names): the hub says how many, and leads to Needs attention.
+  const shownWaiting = out.reduce((n, c) => n + (c.group === 'needs' ? c.waiting : 0), 0);
+  last = {ready: true, pips: pips.map(pip => ({id: pip.id, name: pip.name, body: (pip.profile || profile(null)).body || pip.type})), cards: out, need, fresh: unreadCount,
+   more: attention ? Math.max(0, need - shownWaiting) : 0, partial,
+   canClear: rows.some(r => r.dismissible) || unreadCount > 0, unreadFailure, failure};
+  options.onModel?.(last);
   options.onChange?.();
   tellDock();
  }
+ // A card's answers, by the Pip it is about.
+ const rowOf = id => needing().find(row => row.pip.id === id);
+ function openCard(key) {
+  if (key.startsWith('setup:')) { const item = attention?.items.find(i => i.kind === 'setup' && i.card === key.slice(6)); if (item) options.onOpen?.(attentionNavigation(item)); return; }
+  const id = key.slice(4), pip = pips?.find(p => p.id === id);
+  if (!pip) return;
+  // News to read opens the Pip's chat; something waiting opens at its newest card.
+  if (!rowOf(id) && shownUnread().some(item => item.pip_id === id)) options.onOpen?.({pip: id}); else open(pip);
+ }
+ function readCard(key) { const item = shownUnread().find(u => u.pip_id === key.slice(4)); if (item) void markRead(item); }
+ function dismissCard(key) { const row = rowOf(key.slice(4)); if (row?.dismissible) void dismiss([row]); }
+ // Clear: every failed run and new finding dismissed and every new message marked read. What waits for you stays.
+ function clear() { const news = needing().filter(r => r.dismissible); if (shownUnread().length) dismissAll(news); else void dismiss(news); }
  async function load() {
   if (disposed || !ready || loading) return;
   const token = epoch; loading = true;
@@ -436,7 +302,7 @@ export function mountHomePips(options) {
    generation = message.generation;
    ready = message.connected === true && message.supported !== false && message.enabled === true && (message.apiVersion || 0) >= 41;
    apiVersion = message.apiVersion || 0;
-   if (ready) { if (timer === null) timer = setTimer(() => { if (!doc.hidden) void load(); }, POLL_MS); void load(); }
+   if (ready) { if (timer === null) timer = setTimer(() => { if (!doc?.hidden) void load(); }, POLL_MS); void load(); }
    else { pips = null; paint(); }
    return;
   }
@@ -446,5 +312,8 @@ export function mountHomePips(options) {
   message.ok ? p.resolve(message.result) : p.reject(Error(message.error?.message || 'DGC could not read your Pips.'));
  }
  options.postMessage({type: 'pipsReady'});
- return {receive, refresh() { void load(); }, repaint() { if (root.querySelector('.home-pip-pin')) paint(); }, dispose() { disposed = true; if (timer !== null) clearTimer(timer); for (const p of pending.values()) clearTimeout(p.timer); pending.clear(); cleanup?.(); root.hidden = true; }};
+ return {receive, refresh() { void load(); }, model: () => last, open: openCard, read: readCard, dismiss: dismissCard, clear,
+  // Every one: the Pips view's Needs attention, open in full. The list: the Pips view's own first page.
+  openAll, retry() { void load(); },
+  dispose() { disposed = true; if (timer !== null) clearTimer(timer); for (const p of pending.values()) clearTimeout(p.timer); pending.clear(); }};
 }

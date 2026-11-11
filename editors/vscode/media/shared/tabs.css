@@ -1,0 +1,70 @@
+/* The tabs at the top of DGC's side bar: Home, Work, Chat, Pips, as names only, in one centred bar. A rounded bar on a
+   soft gradient of the side bar's own grey, with a hairline and a low shadow. Pointing at a tab lights it in DGC's
+   purple, and so does the tab you are on: its name takes the accent's text tone and a soft radial glow sits behind it.
+   The name turns over on the way: the front tips away about its foot and the same name rises from below, on a spring.
+   Home shows how many things wait or are new. The four names fit a 240 px side bar; under 200 px the number becomes a
+   dot, and the names still fit at 170 px, the narrowest the editor makes a side bar. Reduced motion lights without
+   turning. Tokens from tokens.css (--tabs-*, --ease-spring); the page (media/main.js) answers clicks and keys. */
+.dgc-tabs { flex: none; container-type: inline-size; box-sizing: border-box; width: 100%; padding: 10px 0 6px; }
+.dgc-tabs[hidden] { display: none; }
+.dgc-tabs-bar {
+  position: relative; box-sizing: border-box; display: flex; align-items: stretch; gap: 2px; width: calc(100% - 2 * var(--sp-3)); max-width: 400px; margin: 0 auto; padding: 3px;
+  border-radius: var(--r-xl); background: var(--tabs-ground); box-shadow: var(--tabs-lift); overflow: hidden; isolation: isolate;
+}
+.dgc-tab {
+  position: relative; flex: 1 1 0; min-width: 0; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 30px; margin: 0; padding: 0 6px; border: 0; border-radius: var(--r-lg); background: transparent; color: var(--text-2);
+  font: var(--w-med) var(--t-sm)/1 var(--sans); letter-spacing: .01em; white-space: nowrap; cursor: pointer; outline: 0;
+  -webkit-tap-highlight-color: transparent; transition: color var(--dur-menu) var(--ease-out);
+}
+.dgc-tab[hidden] { display: none; }
+.dgc-tab:is(:hover, [aria-selected="true"]) { color: var(--accent-text); }
+.dgc-tab:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+/* The glow behind the tab you are on, and (softer) the one pointed at. */
+.dgc-tab-glow {
+  position: absolute; z-index: -1; left: 50%; top: 50%; width: min(100%, 84px); height: 46px; translate: -50% -50%; scale: .6; opacity: 0; border-radius: 50%;
+  background: radial-gradient(closest-side, var(--tabs-glow), var(--tabs-glow-far) 62%, transparent); pointer-events: none;
+  transition: opacity var(--dur-dialog) var(--ease-out), scale var(--dur-flip) var(--ease-spring);
+}
+.dgc-tab:hover .dgc-tab-glow { opacity: .62; scale: 1; }
+.dgc-tab[aria-selected="true"] .dgc-tab-glow { opacity: 1; scale: 1; }
+/* The name, twice in one place: the front, and the same name waiting below it. The bolder weight of the chosen tab is
+   measured for both (the unseen ::after), so choosing a tab never moves its neighbours. */
+.dgc-tab-flip { display: inline-grid; perspective: 260px; transform-style: preserve-3d; }
+.dgc-tab-flip > span, .dgc-tab-flip::after { grid-area: 1 / 1; }
+.dgc-tab-flip::after { content: attr(data-label); height: 0; overflow: hidden; visibility: hidden; font-weight: var(--w-semi); }
+.dgc-tab-flip > span { display: block; backface-visibility: hidden; padding: 4px 0;
+  transition: transform var(--dur-flip) var(--ease-spring), opacity calc(var(--dur-flip) * .45) ease-out; }
+.dgc-tab-front { transform-origin: 50% 100%; }
+.dgc-tab-back { transform-origin: 50% 0%; transform: rotateX(88deg); opacity: 0; }
+.dgc-tab[aria-selected="true"] .dgc-tab-flip > span { font-weight: var(--w-semi); }
+.dgc-tab:hover .dgc-tab-front { transform: rotateX(-88deg); opacity: 0; }
+.dgc-tab:hover .dgc-tab-back { transform: rotateX(0deg); opacity: 1; }
+/* Home's number: everything that waits or is new. The text colour, never the accent (as the dock's number). */
+.dgc-tab-count {
+  flex: none; box-sizing: border-box; min-width: 16px; height: 16px; padding: 0 4.5px; border-radius: 8px; background: var(--text-strong); color: var(--bg);
+  font: var(--w-semi) 10px/16px var(--sans); font-variant-numeric: tabular-nums; letter-spacing: 0; text-align: center;
+}
+.dgc-tab-count[hidden] { display: none; }
+/* A narrow side bar. Under 300 px each tab is as wide as its name needs and they share what is left; under 200 px the
+   number is a dot and the bar keeps 8 px from each edge. */
+@container (max-width: 299px) {
+  .dgc-tabs-bar { gap: 1px; }
+  .dgc-tab { flex: 1 1 auto; gap: 5px; padding: 0 5px; }
+}
+@container (max-width: 199px) {
+  .dgc-tabs-bar { width: calc(100% - 2 * var(--sp-2)); }
+  .dgc-tab { gap: 4px; padding: 0 3px; font-size: var(--t-xs); letter-spacing: 0; }
+  .dgc-tab-count { min-width: 6px; width: 6px; height: 6px; padding: 0; border-radius: 50%; font-size: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dgc-tab-flip > span, .dgc-tab-glow { transition: none; }
+  .dgc-tab:hover .dgc-tab-front { transform: none; opacity: 1; }
+  .dgc-tab-back { display: none; }
+}
+@media (forced-colors: active) {
+  .dgc-tabs-bar { border: 1px solid CanvasText; box-shadow: none; background: Canvas; }
+  .dgc-tab-glow { display: none; }
+  .dgc-tab[aria-selected="true"] { color: HighlightText; background: Highlight; forced-color-adjust: none; }
+  .dgc-tab-count { background: CanvasText; color: Canvas; }
+}
