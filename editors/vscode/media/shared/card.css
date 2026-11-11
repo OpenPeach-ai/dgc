@@ -1,10 +1,9 @@
 /* One card for everything that asks you something or reports to you, on every surface: Work, ChatDGC and a Pip's chat.
    An icon; what it wants, in a sentence; what exactly, as small chips on one line (the rest fold into "+N"); one filled
    answer and one quiet one; and the detail one click away, opening in place.
-   The answers are one small system (11 Nov, "compact squares"): exactly one filled button marks the main answer, in the
-   text's own colour; every other answer is one hairline outline; anything less is a text link. One 6 px corner, one
-   height and one label size on a card. A button steps up 1 px when pointed at (an outline gains a faint fill and a
-   firmer line) and sinks 1 px when pressed (150 ms in, the shared 120 ms out, 90 ms the press); under reduced motion it rests. media/shared/card.js draws it from data
+   The answers are DGC's one button (media/shared/tokens.css, "The button"): exactly one filled button marks the main
+   answer, in the text's own colour; every other answer is one hairline outline; anything less is a text link. Its
+   corner, height, colours, step and press are the shared tokens, never numbers of this file's own. media/shared/card.js draws it from data
    (window.DgcCard); a card with markup of its own takes the same look by adding these classes: .dgc-card on the box,
    .dgc-card-head (.dgc-card-icon, .dgc-card-words > .dgc-card-title + .dgc-card-sub), .dgc-card-chips > .dgc-chip,
    .dgc-card-actions > .dgc-card-btn (.primary for the one filled answer) and .dgc-card-details.
@@ -70,19 +69,18 @@
 
 .dgc-card .dgc-card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0 0 31px; }
 .dgc-card .dgc-card-btn, .dgc-card .dgc-card-actions > button:not(.dgc-card-link) {
-  flex: none; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; height: 28px; min-height: 0; margin: 0; padding: 0 14px;
-  border: 1px solid var(--hair-strong); border-radius: 6px; background: transparent; color: var(--text);
-  font: var(--w-med) var(--t-sm)/1 var(--sans); white-space: nowrap; cursor: pointer; box-shadow: none;
-  transition: transform var(--dur-hover) var(--ease-out), background-color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out);
+  flex: none; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; height: var(--btn-h); min-height: 0; margin: 0; padding: 0 var(--btn-pad);
+  border: 1px solid var(--btn-line); border-radius: var(--btn-r); background: transparent; color: var(--btn-text);
+  font: var(--w-med) var(--t-sm)/1 var(--sans); white-space: nowrap; cursor: pointer; box-shadow: none; transition: var(--btn-move);
 }
 .dgc-card .dgc-card-btn:hover:not(:disabled), .dgc-card .dgc-card-actions > button:not(.dgc-card-link):hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--text) 38%, transparent); background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--text); transform: translateY(-1px); transition-duration: 150ms; }
-.dgc-card .dgc-card-btn:active:not(:disabled), .dgc-card .dgc-card-actions > button:not(.dgc-card-link):active:not(:disabled) { transform: translateY(1px) scale(.985); transition-duration: 90ms; }
-.dgc-card .dgc-card-btn.primary, .dgc-card .dgc-card-actions > button:not(.dgc-card-link).primary { border-color: transparent; background: var(--solid); color: var(--on-solid); }
-.dgc-card .dgc-card-btn.primary:hover:not(:disabled), .dgc-card .dgc-card-actions > button:not(.dgc-card-link).primary:hover:not(:disabled) { border-color: transparent; background: var(--solid-hover); color: var(--on-solid); }
+  border-color: var(--btn-line-hover); background: var(--btn-wash); color: var(--btn-text); transform: var(--btn-up); transition-duration: var(--btn-in); }
+.dgc-card .dgc-card-btn:active:not(:disabled), .dgc-card .dgc-card-actions > button:not(.dgc-card-link):active:not(:disabled) { transform: var(--btn-down); transition-duration: var(--btn-press); }
+.dgc-card .dgc-card-btn.primary, .dgc-card .dgc-card-actions > button:not(.dgc-card-link).primary { border-color: transparent; background: var(--btn-fill); color: var(--btn-on-fill); }
+.dgc-card .dgc-card-btn.primary:hover:not(:disabled), .dgc-card .dgc-card-actions > button:not(.dgc-card-link).primary:hover:not(:disabled) { border-color: transparent; background: var(--btn-fill-hover); color: var(--btn-on-fill); }
 .dgc-card .dgc-card-btn:disabled, .dgc-card .dgc-card-actions > button:not(.dgc-card-link):disabled { opacity: .55; cursor: default; }
 .dgc-card .dgc-card-toggle { margin: 0 0 0 auto; }
-.dgc-card .dgc-card-btn:focus-visible, .dgc-card .dgc-card-actions > button:not(.dgc-card-link):focus-visible, .dgc-card .dgc-card-link:focus-visible { outline: 2px solid var(--vscode-focusBorder, var(--ring)); outline-offset: 2px; }
+.dgc-card .dgc-card-btn:focus-visible, .dgc-card .dgc-card-actions > button:not(.dgc-card-link):focus-visible, .dgc-card .dgc-card-link:focus-visible { outline: var(--btn-ring); outline-offset: 2px; }
 
 /* A narrow column (a side bar at 300 px): the chips and answers take the card's full width, the answers share a row,
    and Details drops under them. */
@@ -91,10 +89,6 @@
   .dgc-card:has(.dgc-card-face) :is(.dgc-card-chips, .dgc-card-actions, .dgc-card-details, .dgc-card-note, .dgc-card-error) { margin-left: 0; }
   .dgc-card .dgc-card-actions .dgc-card-btn, .dgc-card .dgc-card-actions > button:not(.dgc-card-link) { flex: 1 1 0; min-width: 0; padding: 0 8px; overflow: hidden; text-overflow: ellipsis; }
   .dgc-card .dgc-card-actions .dgc-card-toggle { flex: 1 0 100%; margin: 0; text-align: left; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .dgc-card .dgc-card-btn, .dgc-card .dgc-card-actions > button:not(.dgc-card-link) { transition: none; }
-  .dgc-card .dgc-card-btn:is(:hover, :active):not(:disabled), .dgc-card .dgc-card-actions > button:not(.dgc-card-link):is(:hover, :active):not(:disabled) { transform: none; }
 }
 @media (forced-colors: active) {
   .dgc-card, .dgc-card .dgc-chip, .dgc-card .dgc-card-btn { border: 1px solid CanvasText; }

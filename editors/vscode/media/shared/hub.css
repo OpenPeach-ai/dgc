@@ -108,14 +108,13 @@
 .dgc-hub-empty { margin: var(--sp-1) 0 0; color: var(--text-2); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
 @media (forced-colors: active) { .dgc-hub-show { border-color: CanvasText; } }
 
-/* ---- A card's answers on Home (the shared card's system, card.css, at Home's small size): one filled button for the
-   main answer, every other answer a hairline outline, and the way to all of it a text link; a 6 px corner, 22 px high,
-   one label size and side padding. In a card with the room (about 300 px inside) the answers' column is one width, so
+/* ---- A card's answers on Home (DGC's one button, tokens.css, at its small size): one filled button for the main
+   answer, every other answer a hairline outline, and the way to all of it a text link. In a card with the room (about 300 px inside) the answers' column is one width, so
    they line up down the page; a narrower card keeps the words' room, and its answers take their own width. */
 .dgc-card.dgc-hub-card:not(.dgc-hub-mono) .dgc-card-actions { gap: 4px; }
 .dgc-card.dgc-hub-card.dgc-hub-answers:not(.dgc-hub-mono) .dgc-card-actions { position: relative; top: -2px; gap: 2px; }
 @container (min-width: 290px) { .dgc-card.dgc-hub-card:not(.dgc-hub-mono) .dgc-card-actions { width: 72px; } }
-.dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn { min-width: 0; height: 22px; padding: 0 9px; font: var(--w-med) var(--t-xs)/1 var(--sans); }
+.dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn { min-width: 0; height: var(--btn-h-sm); padding: 0 var(--btn-pad-sm); font: var(--w-med) var(--t-xs)/1 var(--sans); }
 .dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn:focus-visible { outline-offset: 1px; }
 /* The link: words, so it does not step; it is as easy to hit as a button (22 px tall where it is pressed: the gap over
    it and the card's foot under it are its own). */
