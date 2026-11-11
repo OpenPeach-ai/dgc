@@ -4,7 +4,9 @@
 import {carefulWords,sendsWords,isPayment,asksEveryTime,asksWords,coversWords} from './pipCareful.js';
 // One set of tokens for every page, first, so each page's own stylesheet can lean on it (media/shared/tokens.css).
 import '../media/shared/tokens.css';
+import '../media/shared/menu.css';
 import './pipComputer.css';
+import '../media/shared/menu.js';
 import '../media/pips/plush.js';
 import RFB from '@novnc/novnc';
 import {esc,errorText,record,requestBroker,pipComputer,pipComputerView,pipComputerAction,pipComputerFiles,pipComputerFile,pipComputerTerminal,pipComputerTerminalEntry,pipComputerDesktop,pipComputerPointer,pipComputerApps} from './pipsModel.js';
@@ -37,6 +39,13 @@ function computerName(){
  if(Array.isArray(names))return names.length>1?names.find(n=>n.number===S.number)?.name||`Computer ${S.number}`:'Computer';
  return S.name||'Computer';
 }
+// How the screen is shown and what is open over it (pc-fills-tab, pc-fullscreen-viewer): Fit scales it to the tab and
+// 100% shows real pixels; the size its screen next starts at (Pips API 86); full screen ('screen' is the browser's own,
+// 'tab' fills this tab when the editor refuses that); the keyboard or clipboard panel; and the clipboard's two halves.
+// What was copied on the computer is kept here and drawn only while the clipboard panel is open.
+Object.assign(S,{fit:true,full:'',panel:'',sizeMenu:false,sizeBusy:false,sizePicked:false,restart:null,
+ clip:{draft:'',there:null,over:false,fresh:false,note:'',bad:false,typing:false}});
+const CLIP_BYTES=1000000,TYPE_CHARS=5000;
 const tabTitle=()=>`${S.pip?.name||'Pip'} · ${computerName()}`;
 const broker=requestBroker(message=>vscode.postMessage({...message,generation:S.generation}));
 const $=id=>document.getElementById(id);
@@ -138,27 +147,40 @@ class ScreenChannel{
  constructor(){this.binaryType='arraybuffer';this.protocol='';this.readyState='connecting';this.onopen=null;this.onmessage=null;this.onclose=null;this.onerror=null;}
  send(data){if(this.readyState!=='open')return;const bytes=ArrayBuffer.isView(data)?new Uint8Array(data.buffer,data.byteOffset,data.byteLength):new Uint8Array(data);vscode.postMessage({type:'pipDesktop',op:'send',data:toB64(bytes)});}
  close(){if(this.readyState==='closed')return;this.readyState='closed';vscode.postMessage({type:'pipDesktop',op:'close'});this.onclose?.({code:1000,reason:'',wasClean:true});}
- deliver(text){if(this.readyState==='closed')return;if(this.readyState==='connecting'){this.readyState='open';this.onopen?.();}const bytes=fromB64(text);this.onmessage?.({data:bytes.buffer});}
+ // The viewer attaches a moment after it is made. Bytes that arrive before it listens wait for it, in order: handed to
+ // no one, the server's first words were lost and the screen never opened.
+ deliver(text,held=false){
+  if(this.readyState==='closed')return;
+  if(!held&&(this.early||!this.onmessage)){(this.early||=[]).push(text);if(!this.earlyTimer)this.earlyTimer=setInterval(()=>this.flushEarly(),5);return;}
+  if(this.readyState==='connecting'){this.readyState='open';this.onopen?.();}const bytes=fromB64(text);this.onmessage?.({data:bytes.buffer});}
+ flushEarly(){
+  if(this.readyState!=='closed'&&!this.onmessage)return;
+  clearInterval(this.earlyTimer);this.earlyTimer=null;const early=this.early||[];this.early=null;
+  for(const text of early)this.deliver(text,true);}
  end(reason){if(this.readyState==='closed')return;this.readyState='closed';this.onclose?.({code:1000,reason,wasClean:false});}
 }
 let channel=null,viewer=null;
 function startScreen(explicit=false){
  // One stream per Pip: while another tab of this Pip shows its screen, this one takes it back only when asked (Show here).
- if(!screenMode()||S.screen.state==='opening'||S.screen.state==='live'||S.screen.state==='elsewhere'&&!explicit)return;
+ if(!screenMode()||S.screen.state==='opening'||S.screen.state==='live'||S.screen.state==='restarting'&&!explicit||S.screen.state==='elsewhere'&&!explicit)return;
  S.screen={state:'opening',reason:''};render();
  channel=new ScreenChannel();
  const Viewer=globalThis.__dgcTestRFB||RFB;
  try{
   viewer=new Viewer($('pc-vnc'),channel,{shared:true});
-  viewer.scaleViewport=true;viewer.resizeSession=false;viewer.focusOnClick=true;viewer.background='transparent';
-  viewer.addEventListener?.('connect',()=>{S.screen={state:'live',reason:''};render();});
-  viewer.addEventListener?.('disconnect',()=>{if(S.screen.state!=='closed'&&S.screen.state!=='elsewhere'){S.screen={state:'closed',reason:S.screen.reason||'The screen closed.'};render();}});
+  viewer.scaleViewport=S.fit;viewer.resizeSession=false;viewer.focusOnClick=true;viewer.background='transparent';
+  viewer.addEventListener?.('connect',()=>{S.screen={state:'live',reason:''};S.restart=null;S.sizePicked=false;render();});
+  viewer.addEventListener?.('disconnect',()=>{if(!['closed','elsewhere','restarting'].includes(S.screen.state)){S.screen={state:'closed',reason:S.screen.reason||'The screen closed.'};render();}});
+  // What was copied on the computer (ServerCutText): text only, at most 1 MB.
+  viewer.addEventListener?.('clipboard',event=>{const text=event?.detail?.text;if(typeof text!=='string')return;
+   const over=bytesOf(text)>CLIP_BYTES;S.clip={...S.clip,there:over?null:text,over,fresh:S.panel!=='clip'};render();});
  }catch(error){S.screen={state:'closed',reason:errorText(error)};render();return;}
  vscode.postMessage({type:'pipDesktop',op:'open',...(S.numbers?which():{})});
 }
 function overlayMarkup(){
  const name=esc(S.pip?.name||'The Pip');
  if(S.screen.state==='opening')return `<p class="pc-overlay-note">Opening ${name}'s screen…</p>`;
+ if(S.screen.state==='restarting')return `<p class="pc-overlay-note">Restarting ${name}'s computer…</p>`;
  if(S.screen.state==='elsewhere')return `<div class="pc-overlay-card"><p>${esc(`Showing ${S.screen.name||'its computer'} in another tab`)}</p><button type="button" id="pc-show-here">Show here</button></div>`;
  if(S.screen.state==='closed')return `<div class="pc-overlay-card"><p>${esc(S.screen.reason||'The screen closed.')}</p><button type="button" id="pc-reconnect">Open the screen again</button></div>`;
  return using()?`<p class="pc-overlay-badge">${name} is using its computer. You can watch; it is yours again when it stops.</p>`:'';
@@ -184,14 +206,159 @@ async function answerApps(choice){
  catch(error){S.error=errorText(error);}
  finally{S.appsBusy=false;render();}
 }
+// ---- The screen's own bar: how it is shown, its size, full screen, and the keyboard and clipboard panels.
+const ICON={
+ size:'<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="8.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 13.75h5M8 11.25v2.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
+ keys:'<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="1.25" y="3.75" width="13.5" height="8.5" rx="1.75" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M4 6.5h.01M6.65 6.5h.01M9.35 6.5h.01M12 6.5h.01M4 9.6h.01M12 9.6h.01M6.4 9.6h3.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+ clip:'<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="3.25" y="2.75" width="9.5" height="11.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6 2.75V2a.75.75 0 0 1 .75-.75h2.5A.75.75 0 0 1 10 2v.75M5.75 7h4.5M5.75 9.5h4.5M5.75 12h2.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
+ full:'<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+ leave:'<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 2.5V6H2.5M13.5 6H10V2.5M10 13.5V10h3.5M2.5 10H6v3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>'};
+const bytesOf=text=>new TextEncoder().encode(text).length;
+const sizeWords=size=>size.replace('x',' × ');
+// The sizes its screen may have (Pips API 86). One size (a Mac), or an older DGC: nothing to choose.
+function screenSizes(){const all=S.apiVersion>=86&&Array.isArray(S.computer?.screens)?S.computer.screens:[];return all.length>1&&all.includes(S.computer.screen)?all:[];}
+// The size the screen on show really is, from the viewer's own canvas.
+function liveSize(){const canvas=S.screen.state==='live'?$('pc-vnc')?.querySelector('canvas'):null;return canvas?.width&&canvas?.height?`${canvas.width}x${canvas.height}`:'';}
+// A size is taken as the screen next starts: until then the one on show is the old one.
+function needsRestart(){if(!screenSizes().length||S.screen.state!=='live')return false;const live=liveSize();return live?live!==S.computer.screen:S.sizePicked;}
+// The keys and the clipboard are the user's while the screen is on and no Pip run has the keyboard (DGC drops them then).
+function mayType(){return S.screen.state==='live'&&!using();}
+function toolsMarkup(){
+ const busy=using(),name=S.pip?.name||'The Pip',off=!mayType(),why=busy?`${name} is using it`:'';
+ const tool=(id,label,icon,o={})=>`<button type="button" id="${id}" class="dgc-btn small pc-tool" aria-label="${esc(label)}" title="${esc(o.off&&why?why:label)}"`
+  +`${o.expanded!==undefined?` aria-expanded="${o.expanded}"`:''}${o.popup?' aria-haspopup="menu"':''}${o.off?' disabled':''}>${icon}<span class="pc-tool-label">${esc(label)}</span>${o.dot?'<span class="pc-dot" aria-hidden="true"></span>':''}</button>`;
+ const sizes=screenSizes();
+ const menu=S.sizeMenu&&sizes.length?`<div id="pc-size-menu" class="dgc-menu pc-size-menu" role="menu" aria-label="Screen size"><div class="dgc-menu-head" role="presentation"><span>Screen size</span></div>`
+  +window.DgcMenu.html([{rows:sizes.map(size=>({id:size,label:sizeWords(size),checked:size===S.computer.screen,attrs:S.sizeBusy?'disabled':''}))}],{role:'menuitemradio',data:'size',check:true})+'</div>':'';
+ return `<span class="pc-seg" role="group" aria-label="Zoom"><button type="button" id="pc-fit" class="dgc-btn small pc-tool" aria-pressed="${S.fit}" title="Fit the screen to this tab">Fit</button>`
+  +`<button type="button" id="pc-actual" class="dgc-btn small pc-tool" aria-pressed="${!S.fit}" title="Real size: scroll to see the rest">100%</button></span>`
+  +(sizes.length?tool('pc-size','Screen size',ICON.size,{expanded:S.sizeMenu,popup:true}):'')
+  +tool('pc-keys','Keyboard',ICON.keys,{expanded:S.panel==='keys'&&!off,off})
+  +tool('pc-clip','Clipboard',ICON.clip,{expanded:S.panel==='clip'&&!off,off,dot:S.clip.fresh&&!off})
+  +(busy?`<span class="pc-using" id="pc-using" role="status">${esc(why)}</span>`:'')
+  +`<span class="pc-tools-end"></span>`+tool('pc-full',S.full?'Leave full screen':'Full screen',S.full?ICON.leave:ICON.full)+menu;
+}
+function stripMarkup(){
+ if(!needsRestart())return '';
+ return `<div class="pc-restart" id="pc-restart-note" role="status"><span>Its screen is set to ${esc(sizeWords(S.computer.screen))}. Restart its computer to use it.</span>`
+  +`<button type="button" id="pc-restart" class="dgc-btn small"${S.restart||using()?' disabled':''}${using()?` title="${esc(`${S.pip?.name||'The Pip'} is using it`)}"`:''}>Restart</button></div>`;
+}
+// Keys the editor would catch before the computer saw them, as X keysyms: each press goes down in order, then up in reverse.
+const XK={esc:0xff1b,tab:0xff09,enter:0xff0d,del:0xffff,ctrl:0xffe3,alt:0xffe9,super:0xffeb};
+const KEYBOARD=[['esc','Esc',[XK.esc]],['tab','Tab',[XK.tab]],['ctrl-alt-del','Ctrl+Alt+Del',[XK.ctrl,XK.alt,XK.del]],['ctrl-w','Ctrl+W',[XK.ctrl,0x77]],['ctrl-t','Ctrl+T',[XK.ctrl,0x74]],
+ ['ctrl-l','Ctrl+L',[XK.ctrl,0x6c]],['alt-tab','Alt+Tab',[XK.alt,XK.tab]],['super','Super',[XK.super]],...Array.from({length:12},(_,i)=>[`f${i+1}`,`F${i+1}`,[0xffbe+i]])];
+function panelMarkup(){
+ if(!mayType()||!S.panel)return '';
+ if(S.panel==='keys')return `<section class="pc-panel pc-keys-panel" id="pc-keys-panel" role="group" aria-label="Keyboard">`
+  +KEYBOARD.map(([id,label])=>`${id==='f1'?'<span class="pc-key-break" aria-hidden="true"></span>':''}<button type="button" class="dgc-btn small pc-key" data-key="${id}">${label}</button>`).join('')+'</section>';
+ const c=S.clip,there=c.there??'',shown=there.slice(0,2000);
+ return `<section class="pc-panel pc-clip-panel" id="pc-clip-panel" aria-label="Clipboard">`
+  +`<div class="pc-clip-half"><label class="pc-clip-head" for="pc-paste-text">Paste in</label><textarea id="pc-paste-text" rows="3" spellcheck="false" placeholder="Text for its clipboard"></textarea>`
+  +`<div class="pc-clip-row"><button type="button" id="pc-paste" class="dgc-btn small primary"${c.typing?' disabled':''}>Paste in</button><button type="button" id="pc-type" class="dgc-btn small"${c.typing?' disabled':''}>${c.typing?'Typing…':'Type it'}</button>`
+  +`<span class="pc-clip-note${c.bad?' pc-clip-bad':''}" id="pc-clip-note" role="${c.bad?'alert':'status'}">${esc(c.note)}</span></div></div>`
+  +`<div class="pc-clip-half"><span class="pc-clip-head" id="pc-there-head">Copied there</span>`
+  +(there?`<pre class="pc-there" id="pc-there" tabindex="0" aria-labelledby="pc-there-head">${esc(shown)}</pre>${there.length>shown.length?`<p class="pc-muted pc-clip-more">Showing the start. Copy takes all of it.</p>`:''}`
+   :`<p class="pc-muted pc-there-none" id="pc-there">${c.over?'It copied more than 1 MB: too much to bring here.':'Nothing copied there yet. Text only, up to 1 MB.'}</p>`)
+  +`<div class="pc-clip-row"><button type="button" id="pc-copy" class="dgc-btn small"${there?'':' disabled'}>Copy</button></div></div></section>`;
+}
+// A part of the stage is redrawn only when what it says changes, so a poll never takes a box you are typing in.
+const drawn=new Map();
+function put(id,html){const el=$(id);if(!el||drawn.get(id)===html&&(el.innerHTML!==''||html===''))return false;drawn.set(id,html);el.innerHTML=html;return true;}
+function applyFit(){if(viewer&&'scaleViewport' in viewer&&viewer.scaleViewport!==S.fit){viewer.clipViewport=false;viewer.scaleViewport=S.fit;}}
 function renderScreen(){
  const app=document.getElementById('app');
- if(!$('pc-live'))app.innerHTML=`<div id="pc-top"></div><div class="pc-desktop pc-live" id="pc-live"><div id="pc-vnc" class="pc-vnc" aria-label="${esc(S.pip?.name||'The Pip')}'s computer screen"></div><div id="pc-overlay" class="pc-overlay"></div>${cursorMarkup()}</div>`;
+ if(!$('pc-live')){drawn.clear();app.innerHTML=`<div id="pc-top"></div><div class="pc-stage" id="pc-stage"><div class="pc-tools" id="pc-tools" role="toolbar" aria-label="Screen"></div><div id="pc-strip"></div><div id="pc-panel"></div>`
+  +`<div class="pc-desktop pc-live" id="pc-live"><div id="pc-vnc" class="pc-vnc" aria-label="${esc(S.pip?.name||'The Pip')}'s computer screen"></div><div id="pc-overlay" class="pc-overlay"></div>${cursorMarkup()}</div></div>`;}
  cleanupFace?.();
  $('pc-top').innerHTML=`${headerMarkup()}${S.error?`<p class="pc-error" role="alert">${esc(S.error)}</p>`:''}${S.notice?`<p class="pc-notice" role="status">${esc(S.notice)}</p>`:''}${appsMarkup()}${waitingMarkup()}`;
  $('pc-overlay').innerHTML=overlayMarkup();
+ const focus=document.activeElement?.id;
+ if(put('pc-tools',toolsMarkup())){
+  const menu=$('pc-size-menu');
+  if(menu){window.DgcMenu.keys(menu,{close:()=>{S.sizeMenu=false;render();},trigger:()=>$('pc-size')});
+   // Under its button, and inside the tab however narrow it is.
+   const bar=$('pc-tools'),button=$('pc-size');menu.style.left=`${Math.max(8,Math.min(button.offsetLeft,bar.clientWidth-menu.offsetWidth-8))}px`;menu.style.top=`${button.offsetTop+button.offsetHeight+4}px`;}
+  if(focus&&$(focus)&&document.activeElement?.id!==focus)$(focus).focus();
+ }
+ put('pc-strip',stripMarkup());
+ const box=$('pc-paste-text'),caret=box&&document.activeElement===box?[box.selectionStart,box.selectionEnd]:null;
+ if(put('pc-panel',panelMarkup())){const now=$('pc-paste-text');if(now){now.value=S.clip.draft;if(caret){now.focus();try{now.setSelectionRange(...caret);}catch{}}}}
+ $('pc-live').classList.toggle('pc-actual',!S.fit);
+ document.body.classList.toggle('pc-fill',S.full==='tab');
+ applyFit();
  cleanupFace=window.PipConcepts?.plush?.mount?.($('pc-top'));
  placeCursor();
+}
+// Full screen: the screen with its bar. The browser's own when the editor allows it; else it fills this whole tab.
+async function enterFull(){
+ const stage=$('pc-stage');if(!stage||S.full)return;
+ try{if(!stage.requestFullscreen)throw Error('no full screen here');await stage.requestFullscreen();S.full='screen';}
+ catch{S.full='tab';}
+ render();$('pc-full')?.focus();
+}
+function leaveFull(){
+ if(!S.full)return;
+ if(document.fullscreenElement)void document.exitFullscreen?.().catch(()=>{});
+ S.full='';render();
+}
+document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&S.full==='screen'){S.full='';render();}});
+function pressKeys(id){
+ const key=KEYBOARD.find(k=>k[0]===id);if(!key||!mayType()||!viewer?.sendKey)return;
+ for(const sym of key[2])viewer.sendKey(sym,null,true);
+ for(const sym of [...key[2]].reverse())viewer.sendKey(sym,null,false);
+}
+function clipSay(note,bad=false){S.clip={...S.clip,note,bad};render();}
+function pasteIn(){
+ const text=S.clip.draft;if(!mayType()||!viewer?.clipboardPasteFrom)return;
+ if(!text){clipSay('Type or paste some text first.',true);return;}
+ if(bytesOf(text)>CLIP_BYTES){clipSay('That is over 1 MB. Send less.',true);return;}
+ viewer.clipboardPasteFrom(text);clipSay('On its clipboard. Press Ctrl+V there to paste it.');
+}
+// The text as keys, for a box that refuses a paste: a few at a time, and it stops when a Pip run takes the keyboard.
+function keysymOf(char){
+ const code=char.codePointAt(0);
+ if(char==='\n')return XK.enter;if(char==='\t')return XK.tab;
+ if(code<0x20||code>=0x7f&&code<0xa0)return 0;
+ return code<=0xff?code:0x01000000+code;
+}
+function typeIt(){
+ const text=S.clip.draft;if(!mayType()||!viewer?.sendKey||S.clip.typing)return;
+ if(!text){clipSay('Type or paste some text first.',true);return;}
+ const chars=[...text.replace(/\r\n?/g,'\n')];
+ if(chars.length>TYPE_CHARS){clipSay(`Type it takes up to ${TYPE_CHARS.toLocaleString('en-US')} characters. Use Paste in for more.`,true);return;}
+ S.clip={...S.clip,typing:true,note:'',bad:false};render();
+ const mine=viewer;let at=0;
+ const step=()=>{
+  if(viewer!==mine||!mayType()){S.clip={...S.clip,typing:false,note:'Stopped typing.',bad:true};render();return;}
+  for(const char of chars.slice(at,at+40)){const sym=keysymOf(char);if(sym){mine.sendKey(sym,null,true);mine.sendKey(sym,null,false);}}
+  at+=40;
+  if(at<chars.length)setTimeout(step,20);else{S.clip={...S.clip,typing:false,note:'Typed.',bad:false};render();}
+ };
+ step();
+}
+async function chooseSize(size){
+ if(S.sizeBusy||!screenSizes().includes(size))return;
+ if(size===S.computer.screen){S.sizeMenu=false;render();$('pc-size')?.focus();return;}
+ S.sizeBusy=true;render();
+ try{
+  const result=await send('set_pip_computer_screen',{pip_id:S.pip.id,size});
+  if(!record(result)||result.screen!==size)throw Error('The screen size was not saved. Try again.');
+  ++computerRefreshSerial;   // a look started before this must not put the old size back
+  S.computer={...S.computer,screen:size};S.sizePicked=S.screen.state==='live';S.error='';
+ }catch(error){S.error=errorText(error);}
+ finally{S.sizeBusy=false;S.sizeMenu=false;render();$('pc-size')?.focus();}
+}
+// Restart = stop its computer, then open it again: the screen comes back at the size chosen.
+let restartTimer=null;
+function reopenSoon(wait){clearTimeout(restartTimer);restartTimer=setTimeout(()=>{if(!S.restart)return;S.restart.tries++;S.screen={state:'restarting',reason:''};startScreen(true);},wait);}
+async function restartComputer(){
+ if(S.restart||using()||!S.pip)return;
+ S.restart={tries:0};S.error='';render();
+ try{await send('stop_pip_computer',{pip_id:S.pip.id});}
+ catch(error){S.restart=null;S.error=errorText(error);render();return;}
+ S.view=null;
+ if(S.screen.state==='live'||S.screen.state==='opening'){S.screen={state:'restarting',reason:''};render();reopenSoon(6000);}   // its close comes first, as a rule
+ else{S.screen={state:'restarting',reason:''};render();reopenSoon(600);}
 }
 // When DGC can download the desktop itself, show progress. An OS sandbox denial needs the
 // machine's own setup; keep its exact reason visible instead of showing a permanent spinner.
@@ -214,7 +381,11 @@ function installMarkup(){
 function render(){
  // The page's own title follows its computer's name, as the tab's does (src/pipsView.ts).
  if(S.pip&&document.title!==tabTitle())document.title=tabTitle();
+ // With its real screen the tab has no side gutter: the screen runs edge to edge (pipComputer.css).
+ document.body.classList.toggle('pc-screen-mode',screenMode());
  if(screenMode()){renderScreen();return;}
+ if(S.full){if(document.fullscreenElement)void document.exitFullscreen?.().catch(()=>{});S.full='';}
+ document.body.classList.remove('pc-fill');
  const app=document.getElementById('app');
  const pane=!S.computer?'':!S.computer.granted?`<section class="pc-window pc-note"><p>${esc(S.pip?.name||'This Pip')} has no computer yet. Give it one with the computer button at the top of its chat.</p></section>`:!S.computer.available?`<section class="pc-window pc-note"><p>This Pip’s computer cannot start on this machine yet. Follow the setup shown above, then reopen this tab.</p></section>`:!S.app?'':windowMarkup(S.app,S.app==='files'?filesMarkup():S.app==='terminal'?terminalMarkup():browserMarkup());
  const focus=document.activeElement?.id,caret=document.activeElement?.selectionStart;
@@ -327,15 +498,27 @@ function schedule(){
 function show(app,explicit=false){
  S.app=app;if(!S.open.includes(app))S.open=[...S.open,app];render();
  if(app==='browser')void frame(explicit?'reopen':'frame',{},true);if(app==='files')void loadFiles();if(app==='terminal')void loadTerminal();
- schedule();vscode.setState({app});
+ schedule();vscode.setState({app,fit:S.fit});
 }
 
 document.addEventListener('click',event=>{
+ // A press anywhere else closes the size menu.
+ if(S.sizeMenu&&!event.target.closest?.('#pc-size-menu,#pc-size')){S.sizeMenu=false;render();}
  const t=event.target.closest('button,[data-crumb],img');if(!t)return;
  if(t.dataset.apps)void answerApps(t.dataset.apps);
+ else if(t.id==='pc-fit'||t.id==='pc-actual'){S.fit=t.id==='pc-fit';render();vscode.setState({app:S.app,fit:S.fit});}
+ else if(t.id==='pc-size'){S.sizeMenu=!S.sizeMenu;render();if(S.sizeMenu)($('pc-size-menu')?.querySelector('[aria-checked="true"]')||$('pc-size-menu')?.querySelector('.dgc-menu-row'))?.focus();}
+ else if(t.dataset.size)void chooseSize(t.dataset.size);
+ else if(t.id==='pc-keys'||t.id==='pc-clip'){const panel=t.id==='pc-keys'?'keys':'clip';S.panel=S.panel===panel?'':panel;if(S.panel==='clip')S.clip={...S.clip,fresh:false};render();}
+ else if(t.id==='pc-full'){if(S.full)leaveFull();else void enterFull();}
+ else if(t.dataset.key)pressKeys(t.dataset.key);
+ else if(t.id==='pc-paste')pasteIn();
+ else if(t.id==='pc-type')typeIt();
+ else if(t.id==='pc-copy'){if(S.clip.there){vscode.postMessage({type:'pipComputerCopy',text:S.clip.there});}}
+ else if(t.id==='pc-restart')void restartComputer();
  else if(t.dataset.app)show(t.dataset.app,true);
- else if(t.dataset.minimize){S.app='';render();schedule();vscode.setState({app:''});}
- else if(t.dataset.close){S.open=S.open.filter(a=>a!==t.dataset.close);S.app='';render();schedule();vscode.setState({app:''});}
+ else if(t.dataset.minimize){S.app='';render();schedule();vscode.setState({app:'',fit:S.fit});}
+ else if(t.dataset.close){S.open=S.open.filter(a=>a!==t.dataset.close);S.app='';render();schedule();vscode.setState({app:'',fit:S.fit});}
  else if(t.id==='pc-reconnect'){S.screen={state:'off',reason:''};startScreen();}
  else if(t.id==='pc-show-here'){S.screen={state:'off',reason:''};startScreen(true);}
  else if(t.id==='pc-reopen-browser')void frame('reopen',{},true);
@@ -356,7 +539,11 @@ document.addEventListener('submit',event=>{
  if(event.target.id==='pc-go'){const url=$('pc-url').value.trim();S.address=null;if(url)void frame('go',{url:/^[a-z]+:\/\//i.test(url)?url:/\s/.test(url)||!url.includes('.')?'https://duckduckgo.com/?q='+encodeURIComponent(url):'https://'+url});}
  if(event.target.id==='pc-run')void runCommand($('pc-command').value);
 });
-document.addEventListener('input',event=>{if(event.target.id==='pc-command')S.terminal.draft=event.target.value;if(event.target.id==='pc-url')S.address=event.target.value;});
+document.addEventListener('input',event=>{if(event.target.id==='pc-command')S.terminal.draft=event.target.value;if(event.target.id==='pc-url')S.address=event.target.value;
+ if(event.target.id==='pc-paste-text'){S.clip.draft=event.target.value;if(S.clip.note)clipSay('');}});
+// Escape leaves full screen. Not while the screen itself has the keys: the viewer keeps those for the computer, and the
+// keyboard panel's Esc is a button. (The size menu closes on its own Escape first.)
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&S.full&&!event.defaultPrevented&&!event.target.closest?.('#pc-size-menu,#pc-vnc')){event.preventDefault();leaveFull();$('pc-full')?.focus();}});
 // Leaving the bar (or Escape in it) shows the page's own address again, as a browser does. A redraw
 // replaces the bar, which blurs it too: that is not leaving, so it waits for the redraw to finish.
 document.addEventListener('focusout',event=>{if(event.target.id==='pc-url')setTimeout(()=>{if(document.activeElement?.id!=='pc-url'&&S.address!==null){S.address=null;render();}},0);});
@@ -397,11 +584,14 @@ window.addEventListener('message',event=>{
  // Its screen is showing in another tab of this Pip (one stream per Pip): say so, and offer it here.
  else if(m.type==='pipDesktopElsewhere'){S.screen={state:'elsewhere',reason:'',name:typeof m.name==='string'?m.name.slice(0,60):''};const old=channel;channel=null;old?.end('');render();}
  else if(m.type==='pipDesktopData'&&typeof m.data==='string')channel?.deliver(m.data);
- else if(m.type==='pipDesktopClosed'){S.screen={state:'closed',reason:typeof m.reason==='string'&&m.reason?m.reason:'The screen closed.'};channel?.end(S.screen.reason);render();}
+ // Restarting: its screen closing is expected, and it is opened again (a few tries while the old one winds down).
+ else if(m.type==='pipDesktopClosed'&&S.restart&&S.restart.tries<5){const old=channel;channel=null;S.screen={state:'restarting',reason:''};old?.end('');render();reopenSoon(700+400*S.restart.tries);}
+ else if(m.type==='pipDesktopClosed'){S.restart=null;S.screen={state:'closed',reason:typeof m.reason==='string'&&m.reason?m.reason:'The screen closed.'};channel?.end(S.screen.reason);render();}
+ else if(m.type==='pipComputerCopied'){clipSay(m.ok===true?'Copied.':'Could not copy here.',m.ok!==true);}
  else if(m.type==='pipComputerSaved'){S.notice=m.ok?`Saved ${m.name}.`:m.error||'Not saved.';render();}
 });
 setInterval(()=>broker.expire(Date.now()),5000);
-S.app=['browser','files','terminal',''].includes(vscode.getState()?.app)?vscode.getState().app:'';S.open=S.app?[S.app]:[];
+S.app=['browser','files','terminal',''].includes(vscode.getState()?.app)?vscode.getState().app:'';S.open=S.app?[S.app]:[];S.fit=vscode.getState()?.fit!==false;
 const style=document.createElement('style');style.textContent=window.PipConcepts?.plush?.styles||'';document.head.append(style);
 render();
 vscode.postMessage({type:'pipsReady'});

@@ -68,8 +68,53 @@ input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-
 .pc-dock-app.active{background:rgba(255,255,255,.18)}
 @media(max-width:620px){.pc-split{grid-template-columns:minmax(0,1fr)}.pc-window{inset:8px 8px 66px}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}.pc-dock-app{transition:none}.pc-dock-app:hover{transform:none}}
-/* The full screen: the Pip's real desktop, scaled to fit, with a note over it when needed. */
-.pc-live{background:#3a3a3f}
+/* The full screen: the Pip's real desktop, scaled to fit its tab with its shape kept, with a note over it when needed.
+   The band a wider or taller tab leaves is the page's own ground (it was a grey, #3a3a3f), and the tab drops the
+   editor's side gutter so the screen runs edge to edge. At 100% the viewer shows real pixels and scrolls. */
+body.pc-screen-mode{padding:0}
+.pc-screen-mode #pc-top{padding:0 4px}
+.pc-stage{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;background:var(--vscode-editor-background)}
+.pc-stage:fullscreen{width:100vw;height:100vh}
+.pc-stage::backdrop{background:var(--vscode-editor-background)}
+/* The editor may refuse the browser's full screen: then the screen and its bar take the whole tab. */
+.pc-fill .pc-stage{position:fixed;inset:0;z-index:5}
+.pc-live{background:var(--vscode-editor-background)}
+/* The screen's bar: one row of the shared small button, words beside each mark; a narrow tab keeps the marks. */
+.pc-tools{position:relative;flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid var(--hair)}
+.dgc-btn.pc-tool{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:5px;width:auto;min-width:26px;padding:0 7px;overflow:visible}
+.pc-tool svg{flex:none;display:block}
+.pc-tool[aria-pressed="true"],.pc-tool[aria-expanded="true"]{background:var(--wash);border-color:var(--btn-line-hover);color:var(--text-strong)}
+.pc-seg{display:inline-flex}
+.pc-seg .pc-tool:first-child{border-radius:var(--btn-r) 0 0 var(--btn-r)}
+.pc-seg .pc-tool:last-child{border-radius:0 var(--btn-r) var(--btn-r) 0;margin-left:-1px}
+.pc-seg .pc-tool:hover:not(:disabled),.pc-seg .pc-tool:active:not(:disabled){transform:none}
+.pc-seg .pc-tool[aria-pressed="true"]{z-index:1}
+.pc-tools-end{flex:1 1 0;min-width:0}
+.pc-using{color:var(--muted);font-size:var(--t-sm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+/* Something new was copied there: one small live mark on Clipboard. */
+.pc-dot{position:absolute;top:-3px;right:-3px;width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.pc-size-menu{position:absolute;z-index:6;min-width:176px;max-width:calc(100% - 16px)}
+.pc-restart{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:6px 8px;border-bottom:1px solid var(--hair);font-size:var(--t-sm);color:var(--text)}
+.pc-restart span{flex:1 1 180px;min-width:0}
+/* A panel sits between the bar and the screen, which is fitted again to the room left; a tall panel scrolls in its own box. */
+#pc-panel{flex:none;max-height:46%;overflow:auto}
+.pc-panel{border-bottom:1px solid var(--hair);padding:8px}
+.pc-keys-panel{display:flex;flex-wrap:wrap;gap:5px}
+.pc-key-break{flex-basis:100%;height:0}
+.dgc-btn.pc-key{width:auto;min-width:34px;padding:0 7px;font-family:var(--mono);font-size:var(--t-xs)}
+.pc-clip-panel{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px}
+.pc-clip-half{display:flex;flex-direction:column;gap:6px;min-width:0}
+.pc-clip-head{font-size:var(--t-xs);font-weight:600;color:var(--faint)}
+.pc-clip-panel textarea,.pc-there{box-sizing:border-box;width:100%;height:58px;margin:0;padding:6px 8px;border:1px solid var(--hair-strong);border-radius:6px;resize:none;overflow:auto;
+ font:12px/1.45 var(--mono);color:var(--vscode-input-foreground,var(--text));background:var(--vscode-input-background,transparent);white-space:pre-wrap;overflow-wrap:anywhere}
+.pc-there{background:transparent}
+.pc-there-none{height:58px;font-size:var(--t-sm)}
+.pc-clip-more{font-size:var(--t-xs)}
+.pc-clip-panel textarea:focus-visible,.pc-there:focus-visible{outline:var(--btn-ring);outline-offset:1px}
+.pc-clip-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.pc-clip-note{flex:1 1 120px;min-width:0;font-size:var(--t-sm);color:var(--muted)}
+.pc-clip-bad{color:var(--vscode-errorForeground,#f14c4c)}
+@media(max-width:560px){.pc-tool-label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}.pc-clip-panel{grid-template-columns:minmax(0,1fr)}#pc-panel{max-height:56%}}
 .pc-vnc{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
 .pc-vnc>div{width:100%!important;height:100%!important;background:transparent!important}
 .pc-overlay{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
