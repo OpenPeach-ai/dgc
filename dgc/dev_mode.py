@@ -35,7 +35,11 @@ LIMITS = (
           "Each is a process DGC watches; its output can wake the chat.", "monitors.MAX_MONITORS_PER_OWNER"),
     Limit("monitors_per_dgc", 16, 16, "Monitors per DGC",
           "Each is a process DGC watches, across every chat.", "monitors.MAX_MONITORS_PROCESS"),
+    Limit("pip_queue", 20, 20, "Pip runs waiting at once",
+          "Each waiting run holds its inputs in the Pips registry until it starts.", "pips.max_queue"),
     # How many are kept
+    Limit("pip_routines", 10, 10, "Routines per Pip",
+          "Each routine can start a run on its schedule: more model calls.", "pip_routines.max_routines"),
     Limit("pip_conversations", 500, 500, "Conversations per Pip (archived included)",
           "Each keeps its messages in the Pips registry on disk.", "pip_conversations.MAX_CONVERSATIONS"),
     # Money: a safeguard you can change, never dropped

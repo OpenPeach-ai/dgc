@@ -138,3 +138,14 @@ class SettingTests(unittest.TestCase):
                           ({"dev_limits": []}, "dev_limits must be an object")):
             with self.subTest(bad=bad):
                 self.assertEqual(_validated_config_values(bad, ())[1], said)
+
+
+class MoreWiredTests(unittest.TestCase):
+    settings = WiredTests.settings
+
+    def test_queued_pip_runs_and_routines_per_pip(self):
+        from dgc import pip_routines, pips
+        with self.settings(False, pip_queue=200, pip_routines=50):
+            self.assertEqual((pips.max_queue(), pip_routines.max_routines()), (20, 10))
+        with self.settings(True, pip_queue=200, pip_routines=50):
+            self.assertEqual((pips.max_queue(), pip_routines.max_routines()), (200, 50))

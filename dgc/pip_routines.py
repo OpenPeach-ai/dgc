@@ -37,7 +37,12 @@ from .workspace_registry import RegistryError, WorkspaceRegistry
 
 ACTOR = "local-routine"
 KEY = "routine_"                  # the hidden chat turn's key prefix (pip_chat.DGC_KEYS)
-MAX_ROUTINES = 10                 # per Pip
+MAX_ROUTINES = 10                 # per Pip (Dev Mode: yours, max_routines)
+
+
+def max_routines() -> int:
+    from .dev_mode import value
+    return value("pip_routines")
 MAX_SUGGESTED = 3                 # waiting for the user's Add, per Pip
 MAX_ITEMS = 5                     # app items handed to one run
 FETCH = 10                        # app items read per check
@@ -275,8 +280,8 @@ def _insert(store, pip_id, title, prompt, trigger, *, status, created_by, run_id
     title, prompt = _text(title, 160, "its name"), _text(prompt, 4000, "what to do")
     count = registry.db.execute("SELECT count(*) FROM pip_routines WHERE pip_id=? AND status IN ('on','off','suggested')",
                                 (pip_id,)).fetchone()[0]
-    if count >= MAX_ROUTINES:
-        raise RegistryError("routine_limit", f"A Pip has at most {MAX_ROUTINES} routines. Remove one first.")
+    if count >= max_routines():
+        raise RegistryError("routine_limit", f"A Pip has at most {max_routines()} routines. Remove one first.")
     now = _now(registry)
     routine_id = "routine_" + secrets.token_hex(16)
     import contextlib
@@ -498,7 +503,7 @@ def commit(store, run, result) -> None:
                 # Its reply said it added one: say plainly that it couldn't, rather than lose the reply.
                 from .pip_chat_continuity import clipped
                 result["text"] = clipped(result.get("text") or "", 23000) + (
-                    f"\n\nI couldn't add \u201c{candidate['title']}\u201d: a Pip has at most {MAX_ROUTINES} routines. "
+                    f"\n\nI couldn't add \u201c{candidate['title']}\u201d: a Pip has at most {max_routines()} routines. "
                     "Remove one in my Settings and ask me again.")
                 continue
             own.record_routine(store, run, routine, registry.clock())

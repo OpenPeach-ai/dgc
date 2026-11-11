@@ -281,6 +281,12 @@ MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
 MAX_RUNS = 20000               # project runs
 MAX_PERSONAL_RUNS = 20000      # Personal tasks and replies
 MAX_QUEUE = 20
+
+
+def max_queue() -> int:
+    """Pip runs waiting at once: MAX_QUEUE, or yours in Dev Mode (dgc.dev_mode)."""
+    from .dev_mode import value
+    return value("pip_queue")
 MAX_WALL_SECONDS = 300
 # What the worker reads at start: room for a chat's history sized from a 1M-token window (pip_chat.MAX_CONTEXT_BYTES),
 # which the supervisor puts back into the manifest from pip_run_inputs. A stored run manifest itself stays small.
@@ -1607,7 +1613,7 @@ class PipStore:
                     raise RegistryError("limit", f"This profile keeps at most {MAX_PERSONAL_RUNS:,} Personal Pip runs and replies, and has reached it. No new work was queued.")
                 if not personal and kept >= MAX_RUNS:
                     raise RegistryError("limit", f"This profile keeps at most {MAX_RUNS:,} project Pip runs and has reached it. No new work was queued; removing old run records is not available yet.")
-                if self.db.execute("SELECT count(*) FROM pip_runs WHERE status IN ('queued','running','cancelling')").fetchone()[0] >= MAX_QUEUE:
+                if self.db.execute("SELECT count(*) FROM pip_runs WHERE status IN ('queued','running','cancelling')").fetchone()[0] >= max_queue():
                     raise RegistryError("limit", "The local run queue is full.")
                 from .workspace_context import ContextStore
                 if not standalone and run_kind != "live":
