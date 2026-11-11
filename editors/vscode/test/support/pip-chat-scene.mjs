@@ -48,7 +48,8 @@ export const THEMES = {
     empty (no messages yet), api, settings (its page's every section has something in it; level: the one it is at), keys (a plugin's key card: true, or "two"),
     boot (in a tab: what the page holds before its script runs, as src/pipsView.ts writes it),
     ownKeys (the Pip's own API keys, Pips API 82: true one waiting card, "refused" one its site turned away, "list" one saved, one waiting, one Not now;
-    "generator" / "generator-refused" / "generator-list": a picture or video generator's key, kept in Settings). */
+    "generator" / "generator-refused" / "generator-list": a picture or video generator's key, kept in Settings;
+    from api 85 a site's row carries terminal and terminal_name, and "list-terminal" is "list" with its saved key ticked for the Terminal). */
 /** The stub host's script: it answers a Pip's page from `opts`. (dock-scene.mjs gives it to the side bar's real page too.) */
 export const host = (opts) => `(${function (PIP, opts) {
   const W = "ws_" + "e".repeat(32), run = (c) => "run_" + c.repeat(32);
@@ -261,9 +262,11 @@ export const host = (opts) => `(${function (PIP, opts) {
   // only (window.__ownKeySent), never its text.
   if (opts.ownKeys) {
     const key = (c, extra) => ({ id: "pipkey_" + c.repeat(32), pip_id: PIP, workspace_id: W, kind: "site", name: "Invoicely API key", why: "To read your unpaid invoices for the morning brief.",
-      host: "api.invoicely.example", header: "Authorization: Bearer", status: "requested", saved: false, refused: false, created_at: at(3), saved_at: null, declined_at: null, ...extra });
+      host: "api.invoicely.example", header: "Authorization: Bearer", status: "requested", saved: false, refused: false, created_at: at(3), saved_at: null, declined_at: null,
+      // (Pips API 85: whether its Terminal may have it, and the variable it would be there.)
+      ...((opts.api || 0) >= 85 && (extra?.kind || "site") === "site" ? { terminal: false, terminal_name: (extra?.name || "Invoicely API key").replace(/[^A-Za-z0-9]+/g, "_").toUpperCase() } : {}), ...extra });
     const gen = (c, extra) => key(c, { kind: "generator", generator: "fal", name: "fal FLUX schnell key", why: "So it can make pictures with fal FLUX schnell.", host: "", header: "", ...extra });
-    let keys = opts.ownKeys === "list" ? [key("a", { status: "saved", saved: true, saved_at: at(60) }), key("b", { name: "Weather key", host: "api.weather.example", why: "To check tomorrow's rain." }),
+    let keys = opts.ownKeys === "list" || opts.ownKeys === "list-terminal" ? [key("a", { status: "saved", saved: true, saved_at: at(60), ...(opts.ownKeys === "list-terminal" ? { terminal: true } : {}) }), key("b", { name: "Weather key", host: "api.weather.example", why: "To check tomorrow's rain." }),
       key("c", { name: "Flights key", host: "api.flights.example", status: "declined", declined_at: at(20) })]
       // A picture generator's key (slice 2b): "generator" one waiting card, "generator-refused" one its generator turned
       // away, "generator-list" one kept in Settings, a video generator's still waited for, and a site's key.
@@ -273,7 +276,8 @@ export const host = (opts) => `(${function (PIP, opts) {
     const put = (id, extra) => { keys = keys.map((k) => (k.id === id ? { ...k, ...extra } : k)); return { key: keys.find((k) => k.id === id) }; };
     Object.assign(answers, {
       list_pip_keys: () => ({ pip_id: PIP, keys }),
-      save_pip_key: (r) => { window.__ownKeySent = { fields: Object.keys(r).sort(), key_id: r.key_id, chars: String(r.value || "").length }; return put(r.key_id, { status: "saved", saved: true, refused: false, saved_at: new Date().toISOString() }); },
+      save_pip_key: (r) => { window.__ownKeySent = { fields: Object.keys(r).sort(), key_id: r.key_id, chars: String(r.value || "").length, ...(r.terminal === undefined ? {} : { terminal: r.terminal }) };
+        return put(r.key_id, { status: "saved", saved: true, refused: false, saved_at: new Date().toISOString(), ...(r.terminal === true ? { terminal: true } : {}) }); },
       decline_pip_key: (r) => put(r.key_id, { status: "declined", declined_at: new Date().toISOString() }),
       remove_pip_key: (r) => { keys = keys.filter((k) => k.id !== r.key_id); return { removed: true }; },
     });

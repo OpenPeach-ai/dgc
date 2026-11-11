@@ -67,14 +67,19 @@ export function keysRefusal(request: any, apiVersion: number): string {
 /** pips-10 (Pips API 82): a Personal Pip's own API keys. list_pip_keys, save_pip_key {pip_id, key_id, value},
  *  decline_pip_key and remove_pip_key {pip_id, key_id}. Why a request is refused, or '' when it may go: an older DGC is
  *  never sent one, and a request carries exactly its own fields (a key only on save, as one line of text). The key goes
- *  to DGC's own store and nowhere else: never kept here, never logged, and never in what this says. */
+ *  to DGC's own store and nowhere else: never kept here, never logged, and never in what this says.
+ *  From Pips API 85 save_pip_key may also carry `terminal` (true or false: also let the Pip's Terminal use the key).
+ *  An older DGC is never sent it. */
 const PIP_KEY_COMMANDS: Record<string, string[]> = { list_pip_keys: ['pip_id'], save_pip_key: ['pip_id', 'key_id', 'value'],
   decline_pip_key: ['pip_id', 'key_id'], remove_pip_key: ['pip_id', 'key_id'] };
 export function pipKeyRefusal(request: any, apiVersion: number): string {
   const fields = typeof request?.type === 'string' && Object.prototype.hasOwnProperty.call(PIP_KEY_COMMANDS, request.type) ? PIP_KEY_COMMANDS[request.type] : null;
   if (!fields) return '';
   if (apiVersion < 82) return 'Update DGC to give a Pip its own keys.';
-  if (Object.keys(request).some(key => key !== 'type' && !fields.includes(key)) || typeof request.pip_id !== 'string' || !/^pip_[A-Za-z0-9]{1,64}$/.test(request.pip_id)
+  const terminal = request.type === 'save_pip_key' && Object.prototype.hasOwnProperty.call(request, 'terminal');
+  if (terminal && apiVersion < 85) return 'Update DGC to let a Pip’s Terminal use a key.';
+  if (terminal && typeof request.terminal !== 'boolean') return 'Choose a key on the Pip’s card or its page.';
+  if (Object.keys(request).some(key => key !== 'type' && !fields.includes(key) && !(terminal && key === 'terminal')) || typeof request.pip_id !== 'string' || !/^pip_[A-Za-z0-9]{1,64}$/.test(request.pip_id)
     || fields.includes('key_id') && (typeof request.key_id !== 'string' || !/^pipkey_[a-f0-9]{32}$/.test(request.key_id))) return 'Choose a key on the Pip’s card or its page.';
   if (request.type !== 'save_pip_key') return '';
   const value = request.value;

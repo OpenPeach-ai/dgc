@@ -6,6 +6,8 @@
 // own key: no site, kept where Settings keeps that generator's key, for all of DGC; removing its card leaves the key.
 // The pasted key is never in this module's markup or in anything it returns: the page reads it from its box when Save
 // is pressed, sends it once and empties the box (src/pipsClient.js).
+// Slice 2c (Pips API 85): at Do it all, a site's key card may offer "Also let its Terminal use it": ticked, the key is
+// also a variable in the Pip's computer Terminal (terminal_name: INVOICELY_API_KEY). A row says so with `terminal`.
 
 import {infoTip} from './pipInfoTip.js';
 
@@ -18,6 +20,22 @@ const STATUSES = ['requested', 'saved', 'declined'];
 const text = (v, max) => typeof v === 'string' && (v.length <= max || [...v].length <= max);
 /** The longest key DGC keeps (dgc/pip_keys.py MAX_VALUE). */
 export const KEY_MAX = 16384;
+// Names a Terminal already gives a meaning to (dgc/pip_keys.py _RESERVED): a key is never one of them.
+const RESERVED = new Set(['PATH', 'HOME', 'LANG', 'TERM', 'TMPDIR', 'SHELL', 'USER', 'PWD', 'OLDPWD', 'IFS', 'PS1', 'PS2', 'ENV', 'BASH_ENV',
+  'LD_PRELOAD', 'LD_LIBRARY_PATH', 'PYTHONPATH', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'TZ', 'LC_ALL']);
+// A variable's name as DGC makes one: at most "PIP_KEY_" and 60 characters.
+const TERMINAL_NAME = /^[A-Z_][A-Z0-9_]{0,67}$/;
+/**
+ * The variable a key is in its Pip's Terminal, as DGC names it (dgc/pip_keys.py terminal_name, the same rule line for
+ * line): the key's name in capitals, letters, digits and _ only ("Invoicely API key" is INVOICELY_API_KEY), never one a
+ * Terminal already uses. Only for a row DGC sent without its `terminal_name`.
+ */
+export function terminalName(name) {
+  let text = String(name || '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').toUpperCase().slice(0, 60);
+  if (!text) return 'PIP_KEY';
+  if (/^[0-9]/.test(text)) text = 'KEY_' + text;
+  return RESERVED.has(text) || text.endsWith('_PROXY') ? 'PIP_KEY_' + text : text;
+}
 
 export function pipKey(value, pip) {
   const fail = () => { throw new Error('This Pip’s keys didn’t load. Refresh to try again.'); };
@@ -27,7 +45,9 @@ export function pipKey(value, pip) {
   if (kind !== 'site' && kind !== 'generator') fail();
   if (!ID.test(value.id) || value.pip_id !== pip || !text(value.name, 60) || !value.name.trim() || !text(value.why ?? '', 200)
     || typeof value.host !== 'string' || !STATUSES.includes(value.status)
-    || (value.refused !== undefined && typeof value.refused !== 'boolean')) fail();
+    || (value.refused !== undefined && typeof value.refused !== 'boolean')
+    || (value.terminal !== undefined && typeof value.terminal !== 'boolean')
+    || (value.terminal_name !== undefined && (typeof value.terminal_name !== 'string' || !TERMINAL_NAME.test(value.terminal_name)))) fail();
   // A site's key names its one site and no generator; a generator's names its generator and no site or header.
   if (kind === 'site' ? value.host.length > 253 || !HOST.test(value.host) || value.generator !== undefined
     : value.host !== '' || (value.header ?? '') !== '' || typeof value.generator !== 'string' || !GENERATOR.test(value.generator)) fail();
@@ -35,7 +55,9 @@ export function pipKey(value, pip) {
   const name = value.name.trim();
   return { id: value.id, pip_id: value.pip_id, kind, name, why: (value.why || '').trim(), host: value.host,
     // The generator as the user named it: DGC names its key "<generator> key".
-    ...(kind === 'generator' ? { generator: value.generator, maker: name.replace(/\s+key$/i, '').trim() || name } : {}),
+    ...(kind === 'generator' ? { generator: value.generator, maker: name.replace(/\s+key$/i, '').trim() || name }
+      // A site's key: whether its Terminal may have it too, and the variable it is there (DGC's own word for it first).
+      : { terminal: value.terminal === true, terminalName: value.terminal_name || terminalName(value.name) }),
     status: value.status, refused: value.refused === true && value.status === 'requested' };
 }
 
@@ -72,8 +94,10 @@ function words(key, esc, who) {
       ask: `Remove this card? ${maker}’s key stays in Settings, for all of DGC.`, askLabel: `Remove the card for the ${name}?`, sure: 'primary' };
   }
   const host = esc(key.host);
+  // Ticked for its Terminal, the Pip could read it there: the card no longer says it never saw it.
+  const saved = key.terminal ? `Saved · In its Terminal as $${esc(key.terminalName)}` : 'Saved · it never saw the key';
   return { name, needs: `${who} needs the ${name}`, goes: `Only sent to ${host}, by DGC. ${who} never sees it.`,
-    refused: `${host} turned the saved key away. Paste a new one.`, has: `${who} has the ${name}`, saved: 'Saved · it never saw the key', savedLabel: `The ${name} is saved`,
+    refused: `${host} turned the saved key away. Paste a new one.`, has: `${who} has the ${name}`, saved, savedLabel: `The ${name} is saved`,
     place: host, kept: 'Saved', remove: 'Remove', removeLabel: `Remove the ${name}`,
     ask: `Remove the ${name}? ${who} can’t read ${host} until you save it again.`, askLabel: `Remove the ${name}?`, sure: 'danger' };
 }
@@ -88,8 +112,10 @@ export const pipKeyRemovedNote = (key, pipName = 'This Pip') => key.kind === 'ge
  * the box has text: `filled`) and Not now. The box never carries a value in the markup and is no draft.
  * `done`: "saved" (it was saved here: the card says so until the chat is left) or "declined" (a quiet "Not now" line).
  * A generator's key: "<Pip> needs <generator>'s key", and where it is kept (Settings, for all of DGC) in place of a site.
+ * `terminal`: the Pip is at Do it all and has a computer, so a site's key card offers one quiet tick under the box,
+ * "Also let its Terminal use it, as $NAME (it could read it there)", off unless `ticked`. Never for a generator's key.
  */
-export function pipKeyCardMarkup(key, { esc, busy = false, pipName = 'This Pip', filled = false, error = '', done = '' }) {
+export function pipKeyCardMarkup(key, { esc, busy = false, pipName = 'This Pip', filled = false, error = '', done = '', terminal = false, ticked = false }) {
   const id = esc(key.id), who = esc(pipName), off = busy ? ' disabled' : '', says = words(key, esc, who), name = says.name;
   const kind = key.kind === 'generator' ? 'generator' : 'site';
   if (done === 'declined') {
@@ -106,6 +132,8 @@ export function pipKeyCardMarkup(key, { esc, busy = false, pipName = 'This Pip',
     + `<label for="pip-own-key-${id}-box">${name}</label>`
     + `<input type="password" id="pip-own-key-${id}-box" data-pip-key-box="${id}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="${KEY_MAX}" placeholder="Paste it here" aria-describedby="pip-own-key-${id}-says"${off}>`
     + `<p class="app-link-note" id="pip-own-key-${id}-says">${says.goes}</p>`
+    + (terminal && kind === 'site' ? `<label class="check-field pip-key-terminal"><input type="checkbox" id="pip-own-key-${id}-terminal" data-pip-key-terminal="${id}"${ticked ? ' checked' : ''}${off}>`
+      + `<span>Also let its Terminal use it, as $${esc(key.terminalName)} (it could read it there)</span></label>` : '')
     + (error ? `<p class="dgc-card-error" role="alert">${esc(error)}</p>` : '')
     + `<div class="dgc-card-actions app-link-actions"><button type="submit" class="primary"${busy || !filled ? ' disabled' : ''}>${busy ? 'Saving…' : 'Save'}</button>`
     + `<button type="button" class="quiet" data-pip-key-decline="${id}"${off}>Not now</button></div></form></div>`;
@@ -117,14 +145,18 @@ const STATE = { saved: 'Saved', requested: 'Waiting for you', declined: 'Not now
  * key being asked about): the red button, for a key that has to be pasted again to come back. '' when it has none.
  * A generator's key: "<generator> · Kept in Settings" and Remove card, which asks with the filled button (not the red
  * one): only the card goes, the key stays in Settings.
+ * A saved site's key ticked for the Terminal also says "In its Terminal as $NAME"; when the Pip is below Do it all
+ * (`level` is known and not "full") its Terminal has none, so it says "In its Terminal at Do it all only".
  */
-export function pipKeysPageMarkup(keys, { esc, busy = false, pipName = 'This Pip', confirm = '', error = '' }) {
+export function pipKeysPageMarkup(keys, { esc, busy = false, pipName = 'This Pip', confirm = '', error = '', level = '' }) {
   if (!keys || !keys.length) return '';
   const off = busy ? ' disabled' : '', who = esc(pipName);
   const row = k => {
     const id = esc(k.id), says = words(k, esc, who), name = says.name;
     const asking = confirm === k.id;
-    return `<li class="pip-page-row static pip-key-row" data-pip-key="${id}" data-pip-key-kind="${k.kind === 'generator' ? 'generator' : 'site'}" data-state="${k.status}"${asking ? ' data-confirming' : ''}><span class="row-words"><span>${name}</span><small>${says.place} · ${k.status === 'saved' ? says.kept : STATE[k.status]}</small></span>`
+    const inTerminal = k.kind !== 'generator' && k.status === 'saved' && k.terminal
+      ? ` · In its Terminal ${level && level !== 'full' ? 'at Do it all only' : `as $${esc(k.terminalName)}`}` : '';
+    return `<li class="pip-page-row static pip-key-row" data-pip-key="${id}" data-pip-key-kind="${k.kind === 'generator' ? 'generator' : 'site'}" data-state="${k.status}"${asking ? ' data-confirming' : ''}><span class="row-words"><span>${name}</span><small>${says.place} · ${k.status === 'saved' ? says.kept : STATE[k.status]}${inTerminal}</small></span>`
       + (asking
         ? `<span class="note-confirm pip-key-confirm" role="group" aria-label="${says.askLabel}"><span class="pip-key-ask">${says.ask}</span>`
           + `<button type="button" class="${says.sure}" id="pip-key-remove-${id}" data-pip-key-remove="${id}"${off}>${says.remove}</button><button type="button" class="quiet" id="pip-key-keep-${id}" data-pip-key-keep="1"${off}>Keep it</button></span>`
@@ -132,6 +164,8 @@ export function pipKeysPageMarkup(keys, { esc, busy = false, pipName = 'This Pip
       + '</li>';
   };
   const kept = keys.some(k => k.kind === 'generator') ? ' A picture or video generator’s key is kept in Settings, for all of DGC.' : '';
-  return `<section class="pip-page-group pip-keys" aria-label="Keys"><h3 class="pip-page-label">Keys${infoTip('pipKeysSays', 'Keys', `A key ${who} asked for to read a site for you. DGC keeps it on this computer and sends it only to that site. ${who} never sees it.${kept}`)}</h3>`
+  // (Ticked for its Terminal, a key is no longer one the Pip could never read: said here too.)
+  const there = keys.some(k => k.kind !== 'generator' && k.status === 'saved' && k.terminal) ? ` A key you ticked for its Terminal is also there at Do it all, where ${who} could read it.` : '';
+  return `<section class="pip-page-group pip-keys" aria-label="Keys"><h3 class="pip-page-label">Keys${infoTip('pipKeysSays', 'Keys', `A key ${who} asked for to read a site for you. DGC keeps it on this computer and sends it only to that site. ${who} never sees it.${kept}${there}`)}</h3>`
     + `<ul class="pip-page-list">${keys.map(row).join('')}</ul>${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}</section>`;
 }
