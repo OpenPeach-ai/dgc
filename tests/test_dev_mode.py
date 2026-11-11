@@ -182,3 +182,25 @@ class ConfigEventTests(unittest.TestCase):
         backend.config = Settings(model="m", mode="default", dev_mode=True, dev_limits={"pip_computers": 8, "bogus": 2})
         backend._config_fields = frozenset({"dev_mode", "dev_limits"})
         self.assertEqual(headless.Backend._config_opt_in_dev(backend), {"dev_mode": True, "dev_limits": {"pip_computers": 8}})
+
+
+class DefaultsTests(unittest.TestCase):
+    def test_off_each_limit_is_its_modules_own_constant_read_when_asked(self):
+        # The full suite found it: tests (and anyone) patching pips.MAX_QUEUE saw no effect once the check read the
+        # table. Each wired limit's default is its module's constant, read at the moment it is asked.
+        from unittest.mock import patch
+        from dgc import monitors, pip_conversations, pip_routines, pips
+        with patch.object(dev_mode, "_settings", return_value={}):
+            for module, constant, read in ((pips, "MAX_QUEUE", pips.max_queue), (monitors, "MAX_MONITORS_PER_OWNER", monitors.max_per_owner),
+                                           (monitors, "MAX_MONITORS_PROCESS", monitors.max_process),
+                                           (pip_conversations, "MAX_CONVERSATIONS", pip_conversations.max_conversations),
+                                           (pip_routines, "MAX_ROUTINES", pip_routines.max_routines)):
+                with self.subTest(constant=constant), patch.object(module, constant, 2):
+                    self.assertEqual(read(), 2)
+        for limit in dev_mode.LIMITS:
+            with self.subTest(limit=limit.name):
+                where = limit.where.split(".")
+                if where[-1].isupper():
+                    import importlib
+                    self.assertEqual(getattr(importlib.import_module("dgc." + where[0]), where[-1]), limit.default,
+                                     "the table's default is the module's own")

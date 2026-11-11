@@ -62,14 +62,16 @@ MAX_MONITORS_PROCESS = 16
 
 def max_per_owner() -> int:
     """Monitors one chat may run: MAX_MONITORS_PER_OWNER, or yours in Dev Mode (dgc.dev_mode)."""
-    from .dev_mode import value
-    return value("monitors_per_chat")
+    from .dev_mode import chosen
+    mine = chosen("monitors_per_chat")
+    return MAX_MONITORS_PER_OWNER if mine is None else mine
 
 
 def max_process() -> int:
     """Monitors one DGC may run: MAX_MONITORS_PROCESS, or yours in Dev Mode (dgc.dev_mode)."""
-    from .dev_mode import value
-    return value("monitors_per_dgc")
+    from .dev_mode import chosen
+    mine = chosen("monitors_per_dgc")
+    return MAX_MONITORS_PROCESS if mine is None else mine
 BATCH_WINDOW_S = 0.2
 MAX_LINE_CHARS = 2000
 MAX_PARTIAL_BYTES = MAX_LINE_CHARS * 4          # an unterminated line is cut once it reaches this

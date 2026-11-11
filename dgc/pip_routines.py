@@ -41,8 +41,9 @@ MAX_ROUTINES = 10                 # per Pip (Dev Mode: yours, max_routines)
 
 
 def max_routines() -> int:
-    from .dev_mode import value
-    return value("pip_routines")
+    from .dev_mode import chosen
+    mine = chosen("pip_routines")
+    return MAX_ROUTINES if mine is None else mine
 MAX_SUGGESTED = 3                 # waiting for the user's Add, per Pip
 MAX_ITEMS = 5                     # app items handed to one run
 FETCH = 10                        # app items read per check

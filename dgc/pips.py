@@ -285,8 +285,9 @@ MAX_QUEUE = 20
 
 def max_queue() -> int:
     """Pip runs waiting at once: MAX_QUEUE, or yours in Dev Mode (dgc.dev_mode)."""
-    from .dev_mode import value
-    return value("pip_queue")
+    from .dev_mode import chosen
+    mine = chosen("pip_queue")
+    return MAX_QUEUE if mine is None else mine          # read at call time: one place for the default
 MAX_WALL_SECONDS = 300
 # What the worker reads at start: room for a chat's history sized from a 1M-token window (pip_chat.MAX_CONTEXT_BYTES),
 # which the supervisor puts back into the manifest from pip_run_inputs. A stored run manifest itself stays small.

@@ -1639,8 +1639,9 @@ def computers_limit(db) -> int:
         value = None
     if type(value) is int and value >= 1:
         return value                                  # this registry's own setting
-    from .dev_mode import value as limit
-    return limit("pip_computers")                     # COMPUTERS_DEFAULT_LIMIT, or yours in Dev Mode
+    from .dev_mode import chosen
+    mine = chosen("pip_computers")                    # yours in Dev Mode
+    return COMPUTERS_DEFAULT_LIMIT if mine is None else mine
 
 
 def add_computer(registry, pip_id) -> dict:

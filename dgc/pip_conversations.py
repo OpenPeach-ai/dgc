@@ -42,8 +42,9 @@ MAX_CONVERSATIONS = 500          # a Pip's, archived ones included (Dev Mode: yo
 
 
 def max_conversations() -> int:
-    from .dev_mode import value
-    return value("pip_conversations")
+    from .dev_mode import chosen
+    mine = chosen("pip_conversations")
+    return MAX_CONVERSATIONS if mine is None else mine
 MAX_TITLE = 120
 _ID = re.compile(r"conv_[0-9a-f]{32}")
 
