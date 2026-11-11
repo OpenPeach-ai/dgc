@@ -218,6 +218,17 @@ class GeneratorKeyReachesDisk(unittest.TestCase):
         self.view = config_module.Config(project_root=project).clone_for_root(project)   # what the editor hands Pips
         self.project = project
 
+    def test_a_runner_started_before_the_key_sees_it(self):
+        # The Pips supervisor works from a copy made when it starts (pip_daemon.serve: clone_for_root), which never
+        # read secrets.json again: a key saved afterwards, from a card or in Settings, wasn't seen until a restart.
+        runner = self.config_module.Config(project_root=self.project).clone_for_root(self.project)
+        self.assertEqual(runner.image_key("fal"), "")
+        pip_keys.save_generator_key(self.view, "fal", KEY)
+        self.assertEqual(runner.image_key("fal"), KEY)
+        user = self.config_module.Config(project_root=self.project)
+        user.set_image_key("fal", "")
+        self.assertEqual(runner.image_key("fal"), "", "and a key removed is gone for it too")
+
     def test_saved_from_a_non_persisting_view_it_is_on_disk_for_every_dgc(self):
         self.assertFalse(self.view._persist)
         pip_keys.save_generator_key(self.view, "fal", KEY)

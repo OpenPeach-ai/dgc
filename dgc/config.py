@@ -2482,6 +2482,10 @@ class Config:
         clone.project_root = Path(project_root).resolve(strict=False)
         clone.project_dir = clone.project_root / ".dgc"
         clone._persist = False
+        # A copy of a config that saves still reads what other DGCs saved since, as its parent does (image_key): the
+        # Pips supervisor works from such a copy for as long as it runs, and a generator key saved after it started (in
+        # Settings, or on a Pip's card) was not seen until it restarted.
+        clone._reads_disk_keys = bool(getattr(self, "_persist", False) or getattr(self, "_reads_disk_keys", False))
         clone.data = copy.deepcopy(self.data)
         clone._stored_secrets = dict(self._stored_secrets)
         clone._stored_provider_identity = dict(self._stored_provider_identity)
@@ -2799,7 +2803,7 @@ class Config:
         """The key saved for ``generator_id``, while it still has the address it was saved for; else ""."""
         generator_id = str(generator_id or "")
         pair = getattr(self, "_image_keys", {}).get(generator_id)
-        if getattr(self, "_persist", False):
+        if getattr(self, "_persist", False) or getattr(self, "_reads_disk_keys", False):
             # As the block: a key saved (or removed) by another DGC since this one started counts now.
             try:
                 disk = json.loads(USER_SECRETS.read_text())
