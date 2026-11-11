@@ -13720,6 +13720,9 @@
             },
             "key": {
               "type": "string"
+            },
+            "provider": {
+              "type": "string"
             }
           },
           "required": [

@@ -2151,6 +2151,11 @@ dgc router on
 Now when you ask for a review of six files, the main model can send the quick searches to `qwen3:8b` on the
 GPU box and the tricky part to `qwen3.8:32b`, and your Pips' routines run on the NAS.
 
+A system can also be one of the providers you saved for the main model (Settings → Models → + Add provider:
+OpenRouter, Groq, Together, Ollama Cloud...). Add it from the provider: its address and API come from it, it
+signs in with that provider's own saved key (never copied into the Router, and only while the provider keeps
+that address), and its workers say how many helpers may use it at once.
+
 ## How a helper is placed
 
 The main model sees one line listing the systems, their models and free workers, and the `task` tool takes

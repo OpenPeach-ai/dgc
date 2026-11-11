@@ -1229,6 +1229,9 @@ EVENT_FIELDS["server_window"] = {"request_id": _S(False), "model": _S(), "window
 #                                           prefer {system?, model?} saves nothing: the next turn's helpers run there
 #                                           (an SDK run's system=), and that turn's end clears it; it is answered before
 #                                           the next command is read. The answer carries `change`, the change in words.
+#                                           add_system {provider} (ready.capabilities.router.providers): one of the main
+#                                           model's saved providers (its id) becomes a system; its address and API come
+#                                           from it and its key stays there (a status row then carries `provider`).
 #   router_probe {request_id, system, model?, checks?}  tests one system (models, speed, parallel, tools): `probe`
 #                                           (it ends with `suggest`, as router_suggestion's `suggestion`).
 #   router_find {request_id}                model servers on this computer's own /24, known ports only: `found`.
@@ -1266,7 +1269,7 @@ COMMAND_FIELDS["router_update"] = {
     "request_id": _S(), "action": _S(), "system": _S(False), "name": _S(False), "base_url": _S(False),
     "jobs": _A(False), "models": _A(False), "workers": _I(False), "one_model_at_a_time": _B(False),
     "memory_gb": _N(False), "model": _S(False), "use": _B(False), "context": _I(False), "note": _S(False),
-    "when_busy": _S(False), "key": _S(False)}
+    "when_busy": _S(False), "key": _S(False), "provider": _S(False)}
 COMMAND_FIELDS["router_probe"] = {"request_id": _S(), "system": _S(), "model": _S(False), "checks": _A(False)}
 COMMAND_FIELDS["router_find"] = {"request_id": _S()}
 COMMAND_FIELDS["router_hardware"] = {"request_id": _S(), "system": _S(), "url": _S(False), "token": _S(False)}

@@ -67,6 +67,9 @@ SCHEMAS = [
          "name": {"type": "string", "description": "add_system / edit_system: the name the user calls it"},
          "base_url": {"type": "string", "description": "add_system / edit_system: its address, e.g. gpu-box.local, "
                       "nas.local:11434 or http://10.0.0.5:8080"},
+         "provider": {"type": "string", "description": "add_system: instead of base_url, one of the user's saved "
+                      "providers (Settings → Models → + Add provider), by its id: its address and API come from it "
+                      "and DGC signs in with what is saved there"},
          "jobs": {"type": "array", "items": {"type": "string", "enum": list(ROUTER_JOBS)},
                   "description": "add_system / set_jobs: what it may do: subagents, pips"},
          "models": {"type": "array", "items": {"type": "string"},
@@ -295,6 +298,17 @@ def plan_update(config, args: dict, *, detect=True, pick_later=False) -> UpdateP
         summary = ("When every worker is busy, wait for one" if value == "wait" else
                    "When every worker is busy, use the usual sub-agent model")
     elif action == "add_system":
+        provider_id = str(args.get("provider") or "").strip()
+        provider = None
+        if provider_id:
+            # One of the main model's saved providers (0.52): its address and API come from it; its key stays there.
+            reader = getattr(config, "saved_provider", None)
+            provider = reader(provider_id) if callable(reader) and re.fullmatch(r"provider_[0-9a-f]{32}", provider_id) else None
+            if not provider:
+                raise UpdateError("There is no saved provider by that id: add it in Settings → Models → + Add provider "
+                                  "first, then choose it here.")
+            args = {**args, "base_url": provider["base_url"], "name": args.get("name") or provider.get("name") or ""}
+            detect = False                     # a cloud provider: no server to detect; its key is the provider's
         address = str(args.get("base_url") or "").strip()
         if not address:
             raise UpdateError("add_system needs base_url: the computer's address, e.g. gpu-box.local:11434")
@@ -353,6 +367,13 @@ def plan_update(config, args: dict, *, detect=True, pick_later=False) -> UpdateP
                   "one_model_at_a_time": bool(args.get("one_model_at_a_time", False))}
         if args.get("memory_gb"):
             system["memory_gb"] = args["memory_gb"]
+        if provider is not None:
+            system["provider"] = provider_id
+            mode = str(provider.get("api_mode") or "")
+            if mode in ("ollama", "anthropic", "chat_completions", "responses"):
+                system["api_mode"] = mode
+                if mode == "ollama":
+                    system["server"] = "ollama"
         after["systems"].append(system)
         summary = (f"Add {system['name']} ({server} at {base}) for {router_mod.jobs_text(jobs)}"
                    + (f" with {', '.join(m['name'] for m in models)}" if models else ""))

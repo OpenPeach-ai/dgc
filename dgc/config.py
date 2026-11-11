@@ -758,7 +758,7 @@ ROUTER_KEY_PREFIX = "router_key_"
 _ROUTER_ID_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?\Z")
 _ROUTER_MODEL_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._:/@+\-]{0,255}\Z")
 _ROUTER_SYSTEM_KEYS = frozenset({"id", "name", "base_url", "server", "api_mode", "enabled", "jobs", "workers",
-                                 "one_model_at_a_time", "memory_gb", "models", "hardware"})
+                                 "one_model_at_a_time", "memory_gb", "models", "hardware", "provider"})
 _ROUTER_MODEL_KEYS = frozenset({"name", "workers", "context", "note", "use", "params_b", "tools", "thinking"})
 # How hard a helper thinks (Settings → Models → Sub-agents → Thinking): "" is the main chat's level.
 SUBAGENT_THINKING = ("", "off", "low", "medium", "high", "xhigh")
@@ -977,6 +977,13 @@ def _router_system(raw, place: int, problems: list[str]) -> dict | None:
     system = {"id": system_id, "name": " ".join(name.split()), "base_url": base_url, "server": server,
               "api_mode": api_mode, "enabled": enabled, "jobs": jobs, "workers": workers,
               "one_model_at_a_time": one, "models": models}
+    provider = raw.get("provider")
+    if provider not in (None, ""):
+        # One of the main model's saved providers (0.52): its key is read from it (router.provider_key), never kept here.
+        if isinstance(provider, str) and _SAVED_PROVIDER_ID.fullmatch(provider):
+            system["provider"] = provider
+        else:
+            problems.append(f"{where}.provider must be a saved provider's id (provider_ and 32 hex digits)")
     memory = raw.get("memory_gb")
     if memory not in (None, 0):
         if isinstance(memory, bool) or not isinstance(memory, (int, float)) or not 0 < float(memory) <= 65_536:

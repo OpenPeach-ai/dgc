@@ -110,7 +110,26 @@ def find_system(block: dict, name: str) -> dict | None:
     return None
 
 
+def provider_key(config, system: dict) -> str:
+    """The key of the saved provider a system is (0.52: the main model's providers in the Router), read from it each
+    time and only while it still has the address the system was added with; "" when it moved or was removed."""
+    reader = getattr(config, "saved_provider", None)
+    try:
+        record = reader(system["provider"]) if callable(reader) else None
+    except Exception:                         # noqa: BLE001
+        record = None
+    if not record or router_base_url(record.get("base_url"))[0] != system.get("base_url"):
+        return ""
+    return str(record.get("api_key") or "")
+
+
 def _key(config, system_id: str) -> str:
+    try:
+        system = find_system(settings(config), system_id)
+    except Exception:                         # noqa: BLE001 -- a stub config
+        system = None
+    if system is not None and system.get("provider"):
+        return provider_key(config, system)
     reader = getattr(config, "router_key", None)
     try:
         return str(reader(system_id) or "") if callable(reader) else ""
@@ -657,6 +676,8 @@ def status(config, *, refresh: bool = False, router: Router | None = None) -> di
             row["warning"] = warning
         if item.get("memory_gb"):
             row["memory_gb"] = item["memory_gb"]
+        if item.get("provider"):
+            row["provider"] = item["provider"]     # one of the main model's saved providers (its key stays there)
         found = router_state.discovery(item["id"])
         # What a context costs here, for Settings' "≈ 4.4 GB each · 2 workers ≈ 8.8 GB of 64 GB free" (Suggest's own
         # arithmetic, dgc/router_suggest.py): the memory it has and keeps free, and each model's weights and context
