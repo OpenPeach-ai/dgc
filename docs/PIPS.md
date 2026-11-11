@@ -1427,11 +1427,14 @@ Existing Pips keep the level you chose for them. A Project Pip has no chip: it a
   its Files, or a real question with no sensible default. A plugin set to **Always ask**, or one that can move money,
   still asks. The line under the level says the risk plainly: a page or an email it reads could talk it into sending
   something.
-- **Payments at Do it all.** Off by default: every payment asks, at every level. **Let Pips at Do it all pay** (in the
-  Pips view's Controls, or `dgc pips payments on`) lets a Pip at Do it all pay by itself, at most 3 times a day across
-  your Pips. Only you turn it on, on this computer. It never types a card number: a request carrying one still asks,
-  and your own Pay on its screen is still yours. Something that only might be a payment (one money word, such as a
-  billing page, with nothing certain) goes at Do it all, and still asks at Approve for me.
+- **Paying by itself.** Each Pip has its own rule for payments. **Ask me each time** is the default: every payment
+  asks, at every level. **Let it pay** (on its page, under its level, or `dgc pips payments --pip PIP allow`) is only
+  for a Pip at Do it all: it then pays by itself, at most **Payments a day** times across your Pips (3 unless you change
+  it in the Pips view's Controls, or `dgc pips payments 5`). Leaving Do it all puts its rule back to Ask. Only you
+  change these, on this computer. It never types a card number: a request carrying one still asks, and your own Pay
+  on its screen is still yours. A pay, buy or order step is never replayed: Always allow is never offered on one, and
+  no Always allow sends one. Something that only might be a payment (one money word, such as a billing page, with
+  nothing certain) goes at Do it all, and still asks at Approve for me.
 - **A fallback model.** In a Pip's model picker, the **⋯** beside a model offers **Use as main** and **Use as fallback**
   (or **Stop using as fallback**); once a fallback is set, the two rows say **Main** and **Fallback**. It is one model
   on your own connection or on one of your saved providers, so it is clear which provider it falls back to, or Claude

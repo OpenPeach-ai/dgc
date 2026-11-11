@@ -1,7 +1,7 @@
 // A Pip's computer in an editor tab: its Browser, Files and Terminal, like Grok's bots.
 // The tab talks to the extension host exactly as the Pips view does (pipsRequest/pipsReply), and
 // the host pins it to this one Pip and to the computer commands.
-import {carefulWords,sendsWords,isPayment,asksWords,coversWords} from './pipCareful.js';
+import {carefulWords,sendsWords,isPayment,asksEveryTime,asksWords,coversWords} from './pipCareful.js';
 // One set of tokens for every page, first, so each page's own stylesheet can lean on it (media/shared/tokens.css).
 import '../media/shared/tokens.css';
 import './pipComputer.css';
@@ -101,7 +101,7 @@ function waitingMarkup(){
    // A login to save (API 56) is saved from its chat's card or its page: the form is there, never in this tab.
    ?a.summary.kind==='login'?`<article class="pc-hold"><div><strong>${esc(words[0])}</strong><span>${esc(words[1])} Save it from the card in its chat.</span></div><div class="pc-actions"><button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Not now</button></div></article>`
    :`<article class="pc-hold"><div><strong>${esc(words[0])}</strong><span>${esc(words[1])}</span>${a.summary.kind==='text'&&typeof a.summary.text==='string'?`<pre class="pc-held-text">${esc(a.summary.text)}</pre>`:''}</div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">${esc(words[2])}</button><button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Not now</button></div></article>`
-   :`<article class="pc-hold"><div><strong>${isPayment(a.summary)?'Pay on':'Send a form to'} ${esc(a.summary.host)}</strong>${sendsMarkup(a.summary)}<span>${a.summary.payment===true?'Sends payment card details. ':''}${esc(asksWords(a.summary))}${asksWords(a.summary)?' ':''}Nothing has been sent.${isPayment(a.summary)?'':` ${esc(coversWords(a.summary))}.`}</span></div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">Send once</button>${isPayment(a.summary)?'':`<button type="button" class="pc-quiet" data-always="${esc(a.id)}">Always allow</button>`}<button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Reject</button></div></article>`;}).join('')}</section>`;
+   :`<article class="pc-hold"><div><strong>${isPayment(a.summary)?'Pay on':'Send a form to'} ${esc(a.summary.host)}</strong>${sendsMarkup(a.summary)}<span>${a.summary.payment===true?'Sends payment card details. ':''}${esc(asksWords(a.summary))}${asksWords(a.summary)?' ':''}Nothing has been sent.${asksEveryTime(a.summary)?'':` ${esc(coversWords(a.summary))}.`}</span></div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">Send once</button>${asksEveryTime(a.summary)?'':`<button type="button" class="pc-quiet" data-always="${esc(a.id)}">Always allow</button>`}<button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Reject</button></div></article>`;}).join('')}</section>`;
 }
 function browserMarkup(){
  const v=S.view;

@@ -219,7 +219,7 @@ job with `create_pip` and a reviewed update.
 | 72 | Local Pip workflow controls: `list_pip_flows {workspace_id}` and `get_pip_flow {flow_id}` (R); `create_pip_flow {name, pip_ids, tasks, mode}` and `set_pip_flow {flow_id, expected_revision, status}` (M). `list_pip_flows` also returns `core_suggestions`: ordered Pips created from one Core reply, for prefilling a separate human review; suggestions never authorize routing. Mode is `reviewed` or `unattended`; status is `on`, `paused` or `retired`. Exactly two to four distinct Pips of one workspace and kind, one bounded task per handoff, at most three starts per day. Personal workflows share the exact prior result. Project workflows hand the first source checked finding to a read only Pip on committed source. Unattended only accepts the route; each Pip keeps its own action approvals. |
 | 73 | A new text message can join one running Personal Pip conversation as a mid-turn update; it stays in that run's history and does not start a competing reply. |
 | 74 | A provider saved in the editor's Settings → Models: `model_choice` `{"mode": "provider", "provider": "provider_<32 hex>", "model": id}`. The Pip keeps only those; the key stays with the CLI. |
-| 75 | `get_pips_payments`, `set_pips_payments {enabled}`: whether a Pip at Do it all may pay by itself, at most three times a day (off by default; local only in DGC) |
+| 75 | Paying by itself (local only in DGC): `set_pip_paying {pip_id, rule}`, one Pip's rule, `ask` (the default) or `allow` (only at Do it all; `get_pip_level` says `paying`), and `get_pips_payments` / `set_pips_payments {limit}`: how many payments your Pips may make by themselves in a day, 1 to 20 (3 unless you change it) |
 | 76 | `get_pip_backup {pip_id}`, `set_pip_backup {pip_id, model, provider?, engine?, router?}`: a Pip's fallback model, one provider ("" DGC's own connection, or `provider_<32 hex>`) and one model ("" none), or Claude Code or Codex (`engine`) or DGC Router (`router: true`); `get_pips_backup`, `set_pips_backup {model, provider?, engine?, router?}`: the one new Pips start with (local only in DGC) |
 | 77 | `undo_pip_change {pip_id, change_id}`: Undo on a change a Personal Pip made about itself at once in a turn the user started (local only in DGC); a reply's `changes` lists them |
 | 78 | No new command. A run's post may carry `artifact` `{id, type, title, version}` (`type` `doc` or `sheet`): the review it kept as the Pip's document or sheet, or the Quill draft that became its document. Read it only from a runtime advertising 78 |
@@ -508,7 +508,8 @@ approves, rejects or starts nothing. Open the referenced record before acting.
 | `archive_pip_conversation` | M | `pip_id`, `conversation_id`, `archived?` (default true; false restores; never the first); from API 79 |
 | `add_pip_computer` | M | `pip_id`: one more computer for the Pip, shared by its conversations (up to 3 unless raised); from API 79 |
 | `get_pips_payments` | R | none; from API 75 |
-| `set_pips_payments` | M | `enabled` (bool): whether a Pip at Do it all may pay by itself, at most 3 times a day; from API 75 |
+| `set_pips_payments` | M | `limit` (whole number, 1 to 20): how many payments your Pips may make by themselves in a day; from API 75 |
+| `set_pip_paying` | M | `pip_id`, `rule` (`ask` or `allow`): one Pip's rule for a payment; `allow` only at Do it all; from API 75 |
 | `get_pip_usage` | R | `pip_id` |
 | `export_pip` | R | `pip_id`; returns a shareable `dgc-pip` file (no accounts, IDs, memory or history) |
 | `set_pip_daily_cap` | M | `pip_id`, `daily_tokens`: only null since 2026-10-14 (Pips have no daily limit; a number is refused) |

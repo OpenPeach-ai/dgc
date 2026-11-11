@@ -91,6 +91,7 @@ PipMutationCommand = Literal[
     "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow",
     "set_pip_artifacts",
     "set_pip_level",
+    "set_pips_payments", "set_pip_paying",
     "set_pip_working_notes",
     "save_pip_login", "remove_pip_login", "grant_pip_login",
     "set_pip_computer_apps",
@@ -380,9 +381,11 @@ API72_READS = frozenset({'list_pip_flows', 'get_pip_flow'})
 API72_MUTATIONS = frozenset({'create_pip_flow', 'set_pip_flow'})
 READ_COMMANDS |= API72_READS
 MUTATION_COMMANDS |= API72_MUTATIONS
-# API 75: whether a Pip at Do it all may pay by itself, at most three a day (off by default; local only in DGC).
+# API 75: paying by itself (local only in DGC): one Pip's rule, ask (the default) or allow (only at Do it all), and how
+# many payments your Pips may make by themselves in a day (3 unless you change it).
 API75_READS = frozenset({'get_pips_payments'})
-API75_MUTATIONS = frozenset({'set_pips_payments'})
+API75_MUTATIONS = frozenset({'set_pips_payments', 'set_pip_paying'})
+PAY_RULES = frozenset({'ask', 'allow'})
 READ_COMMANDS |= API75_READS
 MUTATION_COMMANDS |= API75_MUTATIONS
 # API 76: a Pip's fallback model (a provider and a model) and the one new Pips start with (local only in DGC).
@@ -517,7 +520,8 @@ COMMAND_FIELDS = {
     'archive_pip_conversation': frozenset({'pip_id', 'conversation_id', 'archived'}),
     'add_pip_computer': frozenset({'pip_id'}),
     'get_pips_payments': frozenset(),
-    'set_pips_payments': frozenset({'enabled'}),
+    'set_pips_payments': frozenset({'limit'}),
+    'set_pip_paying': frozenset({'pip_id', 'rule'}),
     'get_pips_desktop_notifications': frozenset(),
     'set_pips_desktop_notifications': frozenset({'enabled'}),
     'get_pips_keep_running': frozenset(),
@@ -1025,6 +1029,10 @@ class Pips:
             _check_login_save(values)
         if command == 'set_pip_level' and (type(values.get('level')) is not str or values['level'] not in PIP_LEVELS):
             raise DGCConfigError('level must be ask, approve or full')
+        if command == 'set_pip_paying' and (type(values.get('rule')) is not str or values['rule'] not in PAY_RULES):
+            raise DGCConfigError('rule must be ask or allow')
+        if command == 'set_pips_payments' and type(values.get('limit')) is not int:
+            raise DGCConfigError('limit must be a whole number')
         if command == 'set_pip_artifacts' and 'report_as' in values and (
                 type(values['report_as']) is not str or values['report_as'] not in PIP_REPORT_AS):
             raise DGCConfigError("report_as must be chat, doc or sheet")

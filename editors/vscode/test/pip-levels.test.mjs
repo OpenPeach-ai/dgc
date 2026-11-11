@@ -38,8 +38,9 @@ const SAYS = { ask: "Asks before every new site, every submit and every send.",
   approve: "Opens new sites, searches, adds to carts and saves drafts by itself. Asks before it orders, pays, sends to someone new, posts, deletes or changes an account.",
   full: "Does it all by itself, sends included. Still asks before any payment." };
 const NAMES = { ask: "Ask me first", approve: "Approve for me", full: "Do it all" };
-const level = (value, done = []) => ({ pip_id: PIP, level: value, default: "ask",
-  levels: ["ask", "approve", "full"].map((l) => ({ level: l, name: NAMES[l], says: SAYS[l] })), on_its_own: done });
+const level = (value, done = [], paying = undefined) => ({ pip_id: PIP, level: value, default: "ask",
+  levels: ["ask", "approve", "full"].map((l) => ({ level: l, name: NAMES[l], says: SAYS[l] })), on_its_own: done,
+  ...(paying ? { paying } : {}) });
 const DONE = [{ at: now, what: "Added to cart on shop.teeforge.pip-test.example", level: "approve", unattended: false, kind: "computer" },
   { at: now, what: "Opened pip-test.example for the first time", level: "approve", unattended: true, kind: "site" }];
 const floorHold = { id: "compact_" + "f".repeat(32), pip_id: PIP, workspace_id: PW, run_id: RUN, digest: "d".repeat(64), frame: null,
@@ -81,6 +82,7 @@ function pipsPage({ apiVersion = 58, state = level("approve", DONE), actions = [
     get_pip_working_notes: () => ({ pip_id: PIP, lines: [], text: "", max_lines: 60, max_bytes: 6000, bytes: 0, revision: "r0", updated_at: null }),
     list_pip_daily_log: () => ({ pip_id: PIP, days: [], next_before: null }),
     get_pip_level: () => (typeof state === "function" ? state() : state),
+    get_pips_payments: () => ({ payments: { limit: 3, default: 3, most: 20, paid: 0 } }),
     get_pip_backup: () => ({ backup: { pip_id: PIP, ...fallback } }),
     get_pips_backup: () => ({ backup: { provider: "", model: "" } }), get_pip_computers: () => null }[r.type]?.());
   async function drain() { for (let n = 0; n < 15; n++) { await flush(); for (const m of sent.filter((m) => m.type === "pipsRequest" && !answered.has(m.id))) { const result = defaults(m.request); if (result !== undefined) answer(m, result); } } }
@@ -117,6 +119,30 @@ test("choosing a level is one change, and its line is said once as the notice; A
   assert.equal(x.d.querySelector("#pipLevelSays").textContent, SAYS.full);
   x.click("[data-level-ask]"); await flush();
   assert.equal(x.requests("set_pip_level").at(-1).request.level, "ask");
+});
+
+test("at Do it all a Pip's page has its rule for payments: Ask by default, Let it pay, and the day's count (API 75)", async () => {
+  const x = pipsPage({ apiVersion: 79, state: level("full", [], "ask") }); await openInfo(x);
+  const select = x.d.querySelector("#pipPaying");
+  assert.ok(select, "under its level");
+  assert.deepEqual([...select.querySelectorAll("option")].map((o) => [o.value, o.textContent]), [["ask", "Ask me each time"], ["allow", "Let it pay"]]);
+  assert.equal(select.value, "ask");
+  assert.equal(select.getAttribute("aria-describedby"), "pipPayingSays");
+  assert.equal(x.d.querySelector("#pipPayingSays").textContent, "Every payment waits for you on a card.");
+  select.value = "allow"; select.dispatchEvent(new x.w.Event("change", { bubbles: true })); await flush();
+  const set = x.requests("set_pip_paying").at(-1);
+  assert.deepEqual(JSON.parse(JSON.stringify(set.request)), { type: "set_pip_paying", pip_id: PIP, rule: "allow" });
+  x.answer(set, level("full", [], "allow")); await x.drain();
+  assert.equal(x.d.querySelector("#pipPaying").value, "allow");
+  const says = "It pays by itself, at most 3 times a day across your Pips. It never types a card number.";
+  assert.equal(x.d.querySelector("#pipPayingSays").textContent, says, "the day's count, read from DGC");
+  assert.match(x.d.body.textContent, /Ava may now pay by itself, at most 3 times a day across your Pips\./, "said once as the notice");
+  for (const [api, state, why] of [[79, level("approve", [], "ask"), "below Do it all"], [74, level("full"), "an older DGC"]]) {
+    const y = pipsPage({ apiVersion: api, state }); await openInfo(y);
+    assert.ok(y.d.querySelector("#pipLevel"));
+    assert.equal(y.d.querySelector("#pipPaying"), null, why + ": no rule to choose");
+  }
+  assert.throws(() => levels.levelPage(level("full", [], "maybe"), PIP), /didn’t load/);
 });
 
 // ---- the level chip in a Pip's prompt box (0.52, Pips package 5 and UI step 6)
@@ -351,6 +377,22 @@ test("a card its level still asks for says why: a saved card's payment, at Do it
   assert.match(card.textContent, /It looks like a payment, so it asks at every level\. Nothing has been sent\..*consumer: 1100223344/);
   assert.deepEqual([...card.querySelectorAll(".dgc-chip:not(.dgc-chip-more)")].map((c) => c.textContent), ["consumer: 1100223344", "saved_card: tok_saved_visa_4242"], "what it pays, a chip for each field");
   assert.match(card.querySelector(".primary").textContent, /Review…/, "reviewed as any payment");
+});
+
+test("an order press asks every time like a payment: Send once, never Always allow (agreed 10 Nov)", async () => {
+  const hold = { ...floorHold, id: "compact_" + "8".repeat(32), summary: { method: "POST", host: "shop.teeforge.pip-test.example",
+    path: "/items/42", page: "", fields: [{ name: "item", value: "tee" }], more_fields: 0, body_bytes: 9,
+    asks_because: "maybe_payment", asks_word: "order", route: "/items/*" } };
+  const x = pipsPage({ state: level("approve"), actions: [hold] }); await x.drain(); x.click(`[data-job="${PIP}"]`); await x.drain();
+  const card = x.d.querySelector(`[data-computer-card="${hold.id}"]`);
+  assert.match(card.querySelector("strong").textContent, /^Send a form to shop\.teeforge\.pip-test\.example\?$/, "not a payment by its title");
+  assert.match(card.textContent, /It may place an order, so it asks every time\. Nothing has been sent\./);
+  assert.ok(card.querySelector("[data-computer-decide][data-approve='1']"), "Send once");
+  assert.equal(card.querySelector("[data-computer-always]"), null, "no Always allow");
+  assert.doesNotMatch(card.textContent, /Always allow/);
+  const billing = { ...hold.summary, asks_word: "billing" };
+  assert.equal(careful.asksEveryTime(hold.summary), true);
+  assert.equal(careful.asksEveryTime(billing), false, "one money word alone still offers Always allow");
 });
 
 test("a card the fuse holds says so: 25 things on its own in the last hour, and until when", async () => {

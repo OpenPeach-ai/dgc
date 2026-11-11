@@ -458,6 +458,31 @@ class PaymentsAskEveryTime(Gate):
         pip_computer.approve_always(self.registry, first["id"], first["digest"], "editor-user")
         self.assertEqual([a["summary"]["path"] for a in self.waiting(pip)], [f"/items/{HEX_B}"])
 
+    def test_an_order_press_is_never_always_allowed_nor_sent_by_one(self):
+        """A pay, buy or order step is never replayed (agreed 10 Nov, as OpenMausBot never saves one as a step): pay and
+        buy are payments already; an order may be one, so no Always allow is given on it and none sends it."""
+        pip, host = self.host()
+        self.assertEqual(len(self.hold(host, f"https://shop.example/items/{HEX_A}", target="Order")), 1)
+        [card] = self.waiting(pip)
+        self.assertEqual((card["summary"]["asks_because"], card["summary"]["asks_word"]), ("maybe_payment", "order"))
+        with self.assertRaises(RegistryError) as refused:
+            pip_computer.approve_always(self.registry, card["id"], card["digest"], "editor-user")
+        self.assertEqual(refused.exception.code, "asks_every_time")
+        self.assertIn("order", str(refused.exception))
+        self.assertEqual(grants.list_grants(self.registry, pip["id"]), [])
+        self.assertEqual(self.waiting(pip)[0]["status"], "pending", "not half decided")
+        pip_computer.decide(self.registry, card["id"], card["digest"], False, "editor-user")
+        # An Always allow on the address, given for a Save there, never sends an order pressed on it.
+        host.waiting = []
+        self.hold(host, f"https://shop.example/items/{HEX_A}", target="Save")
+        [save] = self.waiting(pip)
+        pip_computer.approve_always(self.registry, save["id"], save["digest"], "editor-user")
+        host.waiting, host.browser.released = [], []
+        self.assertEqual(len(self.hold(host, f"https://shop.example/items/{HEX_B}", target="Order")), 1)
+        self.assertEqual(host.browser.released, [], "an order press waits for you")
+        self.assertTrue(pip_computer.never_replayed(self.waiting(pip)[0]["summary"]))
+        self.assertFalse(pip_computer.never_replayed({"asks_because": "maybe_payment", "asks_word": "billing"}))
+
     def test_a_false_alarm_offers_always_allow_says_why_and_then_holds(self):
         pip, host = self.host("approve")      # (at Do it all a maybe goes, 0.52)
         self.assertEqual(len(self.hold(host, f"https://dash.example/accounts/{HEX_A}/billing/profile", fields=[("company", "x")])), 1)

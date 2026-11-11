@@ -181,7 +181,8 @@ export type PipMutationParams = {
   set_pip_feedback: { run_id: string; rating: "up" | "down" | null; note: string };
   set_pip_daily_cap: { pip_id: string; daily_tokens: number | null };
   set_pips_desktop_notifications: { enabled: boolean };
-  set_pips_payments: { enabled: boolean };
+  set_pips_payments: { limit: number };
+  set_pip_paying: { pip_id: string; rule: "ask" | "allow" };
   set_pips_backup: { model: string; provider?: string; engine?: "claude" | "codex"; router?: boolean };
   set_pip_backup: { pip_id: string; model: string | null; provider?: string; engine?: "claude" | "codex"; router?: boolean };
   undo_pip_change: { pip_id: string; change_id: string };
@@ -351,7 +352,8 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   get_pips_desktop_notifications: [],
   set_pips_desktop_notifications: ["enabled"],
   get_pips_payments: [],
-  set_pips_payments: ["enabled"],
+  set_pips_payments: ["limit"],
+  set_pip_paying: ["pip_id", "rule"],
   get_pips_backup: [],
   set_pips_backup: ["model", "provider", "engine", "router"],
   get_pip_backup: ["pip_id"],
@@ -851,7 +853,7 @@ for (const command of API72_READS) READS.add(command);
 for (const command of API72_MUTATIONS) MUTATIONS.add(command);
 // API 75: whether a Pip at Do it all may pay by itself, at most three a day (off by default; local only in DGC).
 const API75_READS = new Set(["get_pips_payments"]);
-const API75_MUTATIONS = new Set(["set_pips_payments"]);
+const API75_MUTATIONS = new Set(["set_pips_payments", "set_pip_paying"]);
 for (const command of API75_READS) READS.add(command);
 for (const command of API75_MUTATIONS) MUTATIONS.add(command);
 // API 76: a Pip's fallback model (a provider and a model) and the one new Pips start with (local only in DGC).
@@ -1240,6 +1242,8 @@ export class Pips {
     if (command === "set_pip_computer_apps" && !APPS_CHOICES.has(values.choice as string)) throw new DGCConfigError("choice must be download or not_now");
     if (command === "save_pip_login") checkLoginSave(values);
     if (command === "set_pip_level" && !PIP_LEVELS.has(values.level as string)) throw new DGCConfigError("level must be ask, approve or full");
+    if (command === "set_pip_paying" && !["ask", "allow"].includes(values.rule as string)) throw new DGCConfigError("rule must be ask or allow");
+    if (command === "set_pips_payments" && !Number.isInteger(values.limit)) throw new DGCConfigError("limit must be a whole number");
     if (command === "set_pip_artifacts" && values.report_as !== undefined && !["chat", "doc", "sheet"].includes(values.report_as as string)) throw new DGCConfigError("report_as must be chat, doc or sheet");
     if (API59_MUTATIONS.has(command) && !(typeof values.borrow_id === "string" && /^pipborrow_[a-f0-9]{32}$/.test(values.borrow_id))) {
       throw new DGCConfigError("borrow_id is the card's id, pipborrow_ and 32 hex digits");

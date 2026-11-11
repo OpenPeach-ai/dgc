@@ -193,28 +193,72 @@ class ClassifyTests(unittest.TestCase):
 
 
 class PaymentsTests(Store):
-    """Your P1 (0.52): a switch, off by default, that only you turn on, lets a Pip at Do it all pay, three a day."""
+    """Paying by itself (0.52, agreed 10 Nov, as OpenMausBot does it): each Pip has its own rule, Ask (the default) or
+    Allow, and Allow is only for a Pip at Do it all; the day's count is yours to change (3 unless you do)."""
 
-    def test_off_by_default_only_you_turn_it_on_and_only_do_it_all_may_pay(self):
-        self.assertEqual(self.control("get_pips_payments")["payments"], {"on": False, "limit": 3, "paid": 0})
-        for actor, fields, code in (("device_1", {"enabled": True}, "local_only"), ("editor-user", {"enabled": "yes"}, "invalid_request")):
-            with self.subTest(actor=actor), self.assertRaises(RegistryError) as raised:
+    def paid_once(self, pip):
+        with self.registry.transaction():
+            self.registry.event(pip["workspace_id"], "pip_level_approved", pip_id=pip["id"], payload={"kind": "plugin", "paid": True})
+
+    def test_each_pip_asks_by_default_and_only_a_pip_at_do_it_all_may_be_let_pay(self):
+        self.assertEqual(self.control("get_pips_payments")["payments"], {"limit": 3, "default": 3, "most": 20, "paid": 0})
+        pip, other = self.personal(), self.personal()
+        self.assertEqual(self.control("get_pip_level", pip_id=pip["id"])["paying"], "ask", "every Pip asks to start with")
+        for actor, fields, code in (("device_1", {"rule": "allow"}, "local_only"), ("editor-user", {"rule": "yes"}, "invalid_request"),
+                                    ("editor-user", {"rule": "allow"}, "not_do_it_all")):
+            with self.subTest(actor=actor, fields=fields), self.assertRaises(RegistryError) as raised:
+                self.control("set_pip_paying", actor=actor, pip_id=pip["id"], **fields)
+            self.assertEqual(raised.exception.code, code)
+        levels.set_level(self.registry, pip["id"], "full", "editor-user")
+        self.assertFalse(levels.may_pay(self.registry, pip["id"]), "Do it all alone never pays: its rule is Ask")
+        got = self.control("set_pip_paying", pip_id=pip["id"], rule="allow")
+        self.assertEqual(got["paying"], "allow")
+        self.assertTrue(levels.may_pay(self.registry, pip["id"]))
+        levels.set_level(self.registry, other["id"], "full", "editor-user")
+        self.assertFalse(levels.may_pay(self.registry, other["id"]), "one Pip's rule is its own")
+        changed = [json.loads(r["payload"]) for r in self.registry.db.execute(
+            "SELECT payload FROM workspace_events WHERE event_type='pip_paying_changed'")]
+        self.assertEqual(changed, [{"rule": "allow", "before": "ask", "actor": "editor-user"}])
+        levels.set_level(self.registry, pip["id"], "approve", "editor-user")
+        self.assertEqual(self.control("get_pip_level", pip_id=pip["id"])["paying"], "ask", "leaving Do it all puts it back to Ask")
+        levels.set_level(self.registry, pip["id"], "full", "editor-user")
+        self.assertFalse(levels.may_pay(self.registry, pip["id"]), "and back at Do it all it asks until you allow it again")
+        self.control("set_pip_paying", pip_id=pip["id"], rule="allow")
+        self.control("set_pip_paying", pip_id=pip["id"], rule="ask")
+        self.assertFalse(levels.may_pay(self.registry, pip["id"]))
+
+    def test_the_days_count_is_yours_to_change_and_counts_across_your_pips(self):
+        for actor, fields, code in (("device_1", {"limit": 5}, "local_only"), ("editor-user", {"limit": 0}, "invalid_request"),
+                                    ("editor-user", {"limit": 21}, "invalid_request"), ("editor-user", {"limit": True}, "invalid_request"),
+                                    ("editor-user", {"limit": "3"}, "invalid_request")):
+            with self.subTest(actor=actor, fields=fields), self.assertRaises(RegistryError) as raised:
                 self.control("set_pips_payments", actor=actor, **fields)
             self.assertEqual(raised.exception.code, code)
-        pip = self.personal()
-        self.assertEqual(self.control("set_pips_payments", enabled=True)["payments"]["on"], True)
-        self.assertFalse(levels.may_pay(self.registry, pip["id"]), "Ask me first never pays")
-        levels.set_level(self.registry, pip["id"], "approve", "editor-user")
-        self.assertFalse(levels.may_pay(self.registry, pip["id"]), "nor does Approve for me")
-        levels.set_level(self.registry, pip["id"], "full", "editor-user")
+        self.assertEqual(self.control("set_pips_payments", limit=1)["payments"]["limit"], 1)
+        pip, other = self.personal(), self.personal()
+        for each in (pip, other):
+            levels.set_level(self.registry, each["id"], "full", "editor-user")
+            self.control("set_pip_paying", pip_id=each["id"], rule="allow")
+        self.paid_once(other)
+        self.assertEqual(levels.payments(self.registry)["paid"], 1)
+        self.assertFalse(levels.may_pay(self.registry, pip["id"]), "today's one went, by another Pip")
+        self.control("set_pips_payments", limit=2)
         self.assertTrue(levels.may_pay(self.registry, pip["id"]))
-        self.control("set_pips_payments", enabled=False)
-        self.assertFalse(levels.may_pay(self.registry, pip["id"]), "off again: every payment asks")
-        # A money action's send by its level follows the same switch.
-        self.assertIsNone(levels.decide_send(self.registry, pip["id"], "full", "connector",
-                                             {"server": "x", "call": {"tool": "STRIPE_CREATE_CHARGE", "arguments": {}}}, money=True))
-        self.assertIsNotNone(levels.decide_send(self.registry, pip["id"], "full", "connector",
-                                                {"server": "x", "call": {"tool": "STRIPE_CREATE_CHARGE", "arguments": {}}}, money=True, pay=True))
+        self.assertEqual(self.control("get_pip_level", pip_id=pip["id"])["paying"], "allow")
+
+    def test_a_money_send_and_the_pips_words_follow_its_rule(self):
+        pip = self.personal()
+        levels.set_level(self.registry, pip["id"], "full", "editor-user")
+        charge = {"server": "x", "call": {"tool": "STRIPE_CREATE_CHARGE", "arguments": {}}}
+        self.assertIsNone(levels.decide_send(self.registry, pip["id"], "full", "connector", charge, money=True))
+        self.assertIsNotNone(levels.decide_send(self.registry, pip["id"], "full", "connector", charge, money=True, pay=True))
+        asks = levels.instructions("full")
+        self.assertIn("A payment still waits for the user", asks)
+        pays = levels.instructions("full", pays=True)
+        self.assertNotIn("A payment still waits", pays)
+        self.assertIn("The user lets you pay by yourself", pays)
+        self.assertIn("never type a card number", pays)
+        self.assertEqual(levels.instructions("approve", pays=True), levels.instructions("approve"), "only Do it all pays")
 
 
 class FloorTests(unittest.TestCase):
@@ -495,7 +539,7 @@ class SharedGateTests(Store):
         self.assertEqual(host._record_held(), [])
         self.assertIn("r26", host.browser.released)
 
-    def test_with_your_switch_on_do_it_all_pays_three_times_a_day_and_never_a_card_number(self):
+    def test_let_pay_at_do_it_all_it_pays_three_times_a_day_and_never_a_card_number(self):
         pip, host = self.host("full")
         levels.set_level(self.registry, pip["id"], "full", "editor-user")
         host._level_now = levels.follow(self.registry.directory, pip["id"])
@@ -504,10 +548,10 @@ class SharedGateTests(Store):
         host._queued.append(host.browser.hold("p-off", **pay))
         [made] = host._record_held()
         self.assertEqual(next(a for a in pip_computer.list_actions(self.registry, pip["id"]) if a["id"] == made)["summary"]["asks_because"],
-                         "payment", "off by default: a payment asks at Do it all")
-        levels.set_payments(self.registry, True, "editor-user")
+                         "payment", "its rule is Ask by default: a payment asks at Do it all")
+        levels.set_paying(self.registry, pip["id"], "allow", "editor-user")
         host._queued.append(host.browser.hold("p-card", payment=True, **pay))
-        self.assertEqual(len(host._record_held()), 1, "a card number in it asks, switch or not")
+        self.assertEqual(len(host._record_held()), 1, "a card number in it asks, allowed or not")
         for n in range(levels.PAY_LIMIT):
             host._queued.append(host.browser.hold(f"p{n}", **pay))
             self.assertEqual(host._record_held(), [], f"payment {n} goes")

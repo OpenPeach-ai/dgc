@@ -167,33 +167,74 @@ def effective(registry, pip_id) -> str:
     return chosen
 
 
-# --------------------------------------------------------------------------- payments at Do it all (your P1)
-# Off by default: every payment asks, at every level. On (only you, on this computer), a Pip at Do it all pays by itself,
-# at most PAY_LIMIT times in a day across all your Pips (payments counted, not money). It never types a card number: a
-# request carrying one still asks, and your own Pay on its screen is still your own.
-PAYMENTS_KEY = "pips_level_payments"       # metadata: JSON {on, at, by}
+# --------------------------------------------------------------------------- paying by itself (0.52, agreed 10 Nov)
+# As OpenMausBot does it: each Personal Pip has its own rule for a payment. Ask, the default: every payment waits for you
+# on a card, at every level. Allow, which only a Pip at Do it all can have: it pays by itself, at most the day's count
+# across all your Pips (payments counted, not money; PAY_LIMIT unless you change it, up to PAY_MOST). Leaving Do it all
+# puts its rule back to Ask. It never types a card number: a request carrying one still asks, and your own Pay on its
+# screen is still your own. And a pay, buy or order step is never replayed: no Always allow sends one
+# (pip_computer.never_replayed).
+ALLOW = "allow"
+PAY_RULES = (ASK, ALLOW)
+PAYING_KEY = "pip_paying:"                 # metadata: a Pip's rule, JSON {rule, at, by}
+PAYMENTS_KEY = "pips_level_payments"       # metadata: the day's count, JSON {limit, at, by}
 PAY_LIMIT = 3
+PAY_MOST = 20                              # Dev Mode (pips-24) lifts it
 PAY_SECONDS = 24 * 3600
 
 
-def payments(registry) -> dict:
-    """get_pips_payments: {on, limit, paid}: whether a Pip at Do it all may pay, and how many it paid in the last day."""
+def paying(registry, pip_id) -> str:
+    """A Pip's rule for a payment: ALLOW only while it is at Do it all and you allowed it; else ASK."""
+    try:
+        row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (PAYING_KEY + str(pip_id),)).fetchone()
+        rule = json.loads(row["value"]).get("rule") if row else ASK
+    except Exception:                       # noqa: BLE001 - unreadable means it asks
+        return ASK
+    return ALLOW if rule == ALLOW and level(registry, pip_id) == FULL else ASK
+
+
+def set_paying(registry, pip_id, rule, actor) -> dict:
+    """set_pip_paying: one Pip's rule, Ask or Allow (Allow only at Do it all). Only you, on this computer."""
+    if actor not in LOCAL:
+        raise RegistryError("local_only", "Only you let a Pip pay, on this computer.")
+    if rule not in PAY_RULES:
+        raise RegistryError("invalid_request", "Choose ask or allow.")
+    workspace = _personal(registry, pip_id)
+    if rule == ALLOW and level(registry, pip_id) != FULL:
+        raise RegistryError("not_do_it_all", "A Pip pays by itself only at Do it all. Choose Do it all first.")
+    with registry.transaction():
+        before = paying(registry, pip_id)
+        registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
+                            (PAYING_KEY + pip_id, json.dumps({"rule": rule, "at": utc_now(), "by": actor})))
+        if rule != before:
+            registry.event(workspace, "pip_paying_changed", pip_id=pip_id, payload={"rule": rule, "before": before, "actor": actor})
+    return listing(registry, pip_id)
+
+
+def pay_limit(registry) -> int:
+    """How many payments your Pips may make by themselves in a day: yours, else PAY_LIMIT."""
     try:
         row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (PAYMENTS_KEY,)).fetchone()
-        on = bool(row) and json.loads(row["value"]).get("on") is True
-    except Exception:                       # noqa: BLE001 - unreadable is off
-        on = False
-    return {"on": on, "limit": PAY_LIMIT, "paid": len(paid(registry))}
+        value = json.loads(row["value"]).get("limit") if row else None
+    except Exception:                       # noqa: BLE001 - unreadable is the default
+        value = None
+    return value if type(value) is int and 1 <= value <= PAY_MOST else PAY_LIMIT
+
+
+def payments(registry) -> dict:
+    """get_pips_payments: {limit, default, most, paid}: the day's count, and how many your Pips paid in the last day."""
+    return {"limit": pay_limit(registry), "default": PAY_LIMIT, "most": PAY_MOST, "paid": len(paid(registry))}
 
 
 def set_payments(registry, value, actor) -> dict:
+    """set_pips_payments {limit}: the day's count, a whole number from 1 to PAY_MOST. Only you, on this computer."""
     if actor not in LOCAL:
-        raise RegistryError("local_only", "Only you let Pips pay, on this computer.")
-    if not isinstance(value, bool):
-        raise RegistryError("invalid_request", "Say on or off.")
+        raise RegistryError("local_only", "Only you set how many times Pips may pay in a day, on this computer.")
+    if type(value) is not int or not 1 <= value <= PAY_MOST:
+        raise RegistryError("invalid_request", f"Choose a whole number from 1 to {PAY_MOST}.")
     with registry.transaction():
         registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
-                            (PAYMENTS_KEY, json.dumps({"on": value, "at": utc_now(), "by": actor})))
+                            (PAYMENTS_KEY, json.dumps({"limit": value, "at": utc_now(), "by": actor})))
     return payments(registry)
 
 
@@ -213,10 +254,11 @@ def paid(registry, seconds=PAY_SECONDS) -> list[str]:
 
 
 def may_pay(registry, pip_id) -> bool:
-    """Whether this Pip may pay by itself now: at Do it all (the fuse not holding), you let Pips pay, and fewer than
-    PAY_LIMIT payments went in the last day."""
+    """Whether this Pip may pay by itself now: you allowed it, it is at Do it all (the fuse not holding), and fewer than
+    the day's count went in the last day across your Pips."""
     try:
-        return payments(registry)["on"] and effective(registry, pip_id) == FULL and len(paid(registry)) < PAY_LIMIT
+        return (paying(registry, pip_id) == ALLOW and effective(registry, pip_id) == FULL
+                and len(paid(registry)) < pay_limit(registry))
     except Exception:                       # noqa: BLE001 - unreadable means it asks
         return False
 
@@ -253,12 +295,14 @@ def write_level(registry, pip_id, value, actor) -> None:
     registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
                         (KEY + pip_id, json.dumps({"level": value, "at": utc_now(), "by": actor})))
     registry.event(workspace, "pip_level_changed", pip_id=pip_id, payload={"level": value, "before": before, "actor": actor})
+    if value != FULL:
+        registry.db.execute("DELETE FROM metadata WHERE key=?", (PAYING_KEY + pip_id,))     # paying is only for Do it all
 
 
 def listing(registry, pip_id) -> dict:
     """get_pip_level: the level, the three with their lines, and the newest things it did on its own."""
     _personal(registry, pip_id)
-    return {"pip_id": pip_id, "level": level(registry, pip_id), "default": DEFAULT,
+    return {"pip_id": pip_id, "level": level(registry, pip_id), "default": DEFAULT, "paying": paying(registry, pip_id),
             "levels": [{"level": value, "name": NAMES[value], "says": SAYS[value]} for value in LEVELS],
             "on_its_own": on_its_own(registry, pip_id)}
 
@@ -704,8 +748,9 @@ def take_floor(registry, pip_id, digest) -> bool:
 
 # --------------------------------------------------------------------------- what the model is told
 
-def instructions(value, *, drafting=False, unattended=False) -> str:
-    """The Pip's line about its level, after its computer's notice and the draft notices."""
+def instructions(value, *, drafting=False, unattended=False, pays=False) -> str:
+    """The Pip's line about its level, after its computer's notice and the draft notices. `pays`: at Do it all, the user
+    let it pay by itself and today's count isn't used (may_pay, when its run started)."""
     if value == APPROVE:
         line = ("How much you ask: the user chose Approve for me. DGC approves routine steps itself (a new site's first "
                 "visit, a search, a filter, adding to a cart, saving a draft, an upload of a file they sent you) and the "
@@ -720,6 +765,11 @@ def instructions(value, *, drafting=False, unattended=False) -> str:
                 "choice has a sensible default, take it and say in one line what you chose. Ask the user only for what "
                 "only they can do: a payment, a sign-in or a key only they have, or a question with no sensible default. "
                 "A payment still waits for the user. Do only what they asked.")
+        if pays:
+            line = line.replace("a payment, a sign-in", "a sign-in").replace(
+                "A payment still waits for the user.",
+                "The user lets you pay by yourself: DGC lets a payment through too, up to their count for the day, and the "
+                "tool says when one waits for them instead. You never type a card number: a card field is theirs.")
         if drafting:
             line += " After your reply, DGC sends your drafts without asking (a payment excepted); never say one already went."
     else:

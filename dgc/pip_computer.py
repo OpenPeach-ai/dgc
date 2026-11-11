@@ -729,7 +729,7 @@ class Host:
                     # A page's own submit, with no run, on a route the user always allows: the supervisor sends it
                     # within seconds and the user is told after. A payment asks every time: no grant sends one.
                     from .pip_action_grants import computer_grant_for
-                    grant = (None if fused or summary.get("kind") in CAREFUL_KINDS or is_payment(summary)
+                    grant = (None if fused or summary.get("kind") in CAREFUL_KINDS or never_replayed(summary)
                              else computer_grant_for(registry, self.pip_id, summary))
                     if grant is not None:
                         registry.db.execute("UPDATE pip_computer_actions SET status='approved',resolved_at=?,resolved_by=? "
@@ -761,10 +761,11 @@ class Host:
             return ""
 
     def _grant_for(self, summary) -> dict | None:
-        """The Always allow that covers this held submit, or None. A payment asks every time: no grant sends one."""
+        """The Always allow that covers this held submit, or None. A pay, buy or order step asks every time: no grant
+        sends one (never_replayed)."""
         from .pip_action_grants import computer_grant_for
         from .workspace_registry import WorkspaceRegistry
-        if summary.get("kind") in CAREFUL_KINDS or is_payment(summary):
+        if summary.get("kind") in CAREFUL_KINDS or never_replayed(summary):
             return None
         try:
             with WorkspaceRegistry(self.state_directory) as registry:
@@ -1922,6 +1923,13 @@ def is_payment(summary) -> bool:
     return summary.get("payment") is True or summary.get("asks_because") == "payment"
 
 
+def never_replayed(summary) -> bool:
+    """A pay, buy or order step: no Always allow is given on one and none sends one (agreed 10 Nov; OpenMausBot never
+    saves a click on pay, buy or order as a step to replay). Pay and buy are payments (is_payment); an order may be one
+    (pip_levels: a maybe-payment by the word "order")."""
+    return is_payment(summary) or (summary.get("asks_because") == "maybe_payment" and summary.get("asks_word") == "order")
+
+
 def decide(registry, action_id: str, expected_digest: str, approve: bool, actor: str) -> dict:
     """The user's decision on one held write. The supervisor carries it out within seconds."""
     if actor not in ("editor-user", "local-console"):
@@ -1947,6 +1955,8 @@ def approve_always(registry, action_id: str, expected_digest: str, actor: str) -
         raise RegistryError("asks_every_time", "This sends payment card details, so it asks you every time. Choose Send once.")
     if is_payment(summary):
         raise RegistryError("asks_every_time", "This looks like a payment, so it asks you every time. Choose Send once.")
+    if never_replayed(summary):
+        raise RegistryError("asks_every_time", "This may place an order, so it asks you every time. Choose Send once.")
     if kind == "site":
         raise RegistryError("asks_once", "Allow adds this site for good: choose Allow.")
     if kind == LOGIN_KIND:
@@ -1965,7 +1975,7 @@ def approve_always(registry, action_id: str, expected_digest: str, actor: str) -
             if _now() >= sibling["expires_at"]:
                 continue
             other = json.loads(sibling["summary"])
-            if other.get("kind") in CAREFUL_KINDS or is_payment(other):
+            if other.get("kind") in CAREFUL_KINDS or never_replayed(other):
                 continue
             if computer_pins(sibling["pip_id"], other) != pins:
                 continue

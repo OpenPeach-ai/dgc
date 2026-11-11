@@ -66,7 +66,7 @@ CONTROL_COMMANDS = frozenset({
     "run_pip_computer_command", "list_pip_computer_terminal", "get_pip_computer_desktop",
     "get_pips_keep_running", "set_pips_keep_running",
     "get_pips_desktop_notifications", "set_pips_desktop_notifications",
-    "get_pips_payments", "set_pips_payments",
+    "get_pips_payments", "set_pips_payments", "set_pip_paying",
     "get_pips_backup", "set_pips_backup", "get_pip_backup", "set_pip_backup",
     "get_pip_usage", "set_pip_daily_cap", "export_pip", "set_pip_feedback", "list_pip_feedback",
     "list_pip_app_links", "start_pip_app_link", "check_pip_app_link", "decline_pip_app_link", "disconnect_pip_app_link",
@@ -210,7 +210,7 @@ _COMMAND_ARGS = {
     "get_pip_computer_desktop": {"pip_id"},
     "get_pips_keep_running": set(), "set_pips_keep_running": {"enabled"},
     "get_pips_desktop_notifications": set(), "set_pips_desktop_notifications": {"enabled"},
-    "get_pips_payments": set(), "set_pips_payments": {"enabled"},
+    "get_pips_payments": set(), "set_pips_payments": {"limit"}, "set_pip_paying": {"pip_id", "rule"},
     "get_pips_backup": set(), "set_pips_backup": {"model", "provider", "engine", "router"},
     "get_pip_backup": {"pip_id"}, "set_pip_backup": {"pip_id", "model", "provider", "engine", "router"},
     "get_pip_usage": {"pip_id"}, "set_pip_daily_cap": {"pip_id", "daily_tokens"}, "export_pip": {"pip_id"},
@@ -3510,7 +3510,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     # How much it asks (pip_levels): told so it doesn't stop at what DGC lets through itself.
                     from . import pip_levels
                     said_level = pip_levels.instructions(
-                        level_pin.get('level'), unattended=level_pin.get('unattended') is True,
+                        level_pin.get('level'), unattended=level_pin.get('unattended') is True, pays=level_pin.get('pays') is True,
                         drafting=bool(email_drafting or calendar_drafting or (connector_context is not None and connector_context.get('connections'))))
                     if said_level:
                         base_instructions += '\n' + said_level
@@ -4827,7 +4827,8 @@ def _execute_run(registry, row, config):
         from .pip_careful import UNATTENDED
         chosen = pip_levels.level(registry, row['pip_id'])
         if chosen != pip_levels.ASK:
-            manifest = {**manifest, 'approval_level': {'level': chosen, 'unattended': row['requested_by'] in UNATTENDED}}
+            manifest = {**manifest, 'approval_level': {'level': chosen, 'unattended': row['requested_by'] in UNATTENDED,
+                                                       'pays': pip_levels.may_pay(registry, row['pip_id'])}}
     conversation_pin = manifest.get('conversation')
     if personal and isinstance(conversation_pin, dict) and conversation_pin.get('images'):
         # Images never fit the worker's input: it gets their kept paths and re-checks each by digest.
@@ -6338,12 +6339,16 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     result = {"backup": pip_backup.set_own(registry, pip_id, request.get("model"), actor, request.get("provider"),
                                                           request.get("engine") or "", request.get("router") is True)}
             elif command in ("get_pips_payments", "set_pips_payments"):
-                # Pips API 75 (your P1): whether a Pip at Do it all may pay by itself, at most three a day. Off by default.
+                # Pips API 75: how many payments your Pips may make by themselves in a day (3 unless you change it).
                 from . import pip_levels
                 if actor not in ("editor-user", "local-console"):
-                    raise RegistryError("local_only", "Only you let Pips pay, on this computer.")
+                    raise RegistryError("local_only", "Only you set how many times Pips may pay in a day, on this computer.")
                 result = {"payments": pip_levels.payments(registry) if command == "get_pips_payments"
-                          else pip_levels.set_payments(registry, request.get("enabled"), actor)}
+                          else pip_levels.set_payments(registry, request.get("limit"), actor)}
+            elif command == "set_pip_paying":
+                # Pips API 75: one Pip's rule for a payment, ask (the default) or allow (only at Do it all).
+                from . import pip_levels
+                result = pip_levels.set_paying(registry, pip_id, request.get("rule"), actor)
             elif command in ("get_pips_keep_running", "set_pips_keep_running"):
                 from . import pip_keep_running
                 from .pip_daemon import runner_status

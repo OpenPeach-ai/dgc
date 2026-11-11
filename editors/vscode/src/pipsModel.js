@@ -1256,10 +1256,13 @@ export function pipsDesktopNotifications(value) {
 }
 
 // Pips API 75 (0.52, P1): whether a Pip at Do it all may pay by itself, at most `limit` times a day; `paid` in the last day.
+// Payments a day (Pips API 75, agreed 10 Nov): {limit, default, most, paid}. A Pip you let pay (its own rule, on its page,
+// only at Do it all) pays by itself at most `limit` times a day across your Pips; `paid` went in the last day.
 export function pipsPayments(value) {
-  if (!record(value) || Object.keys(value).sort().join() !== 'limit,on,paid' || typeof value.on !== 'boolean'
-    || !Number.isSafeInteger(value.limit) || value.limit < 0 || value.limit > 100 || !Number.isSafeInteger(value.paid) || value.paid < 0)
-    throw Error('Whether Pips may pay didn’t load. Refresh the Pips view.');
+  const count = (n, low) => Number.isSafeInteger(n) && n >= low && n <= 1000000;
+  if (!record(value) || Object.keys(value).sort().join() !== 'default,limit,most,paid' || !count(value.most, 1)
+    || !count(value.limit, 1) || value.limit > value.most || !count(value.default, 1) || !count(value.paid, 0))
+    throw Error('How often Pips may pay didn’t load. Refresh the Pips view.');
   return value;
 }
 

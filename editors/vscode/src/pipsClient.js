@@ -52,7 +52,7 @@ import {pluginsPage,pluginResult,shownPluginCards,pluginForServer,installedForSe
 import {attentionPage,waitingOn,needWords,attentionMarkup,setupCardMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
 import {notesPage,notesMarkup,keptMarkup} from './pipNotes.js';
 import {workingNotesPage,dailyLogPage,workingNotesMarkup,dailyLogMarkup,learnCardMarkup,learnRequest} from './pipWorkingNotes.js';
-import {carefulPage,carefulMarkup,carefulWords,settledWords,isPayment,asksWords,coversWords,coversDetail} from './pipCareful.js';
+import {carefulPage,carefulMarkup,carefulWords,settledWords,isPayment,asksEveryTime,asksWords,coversWords,coversDetail} from './pipCareful.js';
 import {loginsMarkup,loginFormMarkup,readLoginForm,loginFormProblem,clearLoginForm} from './pipLogins.js';
 import {pipLogins,pipLogin} from './pipsModel.js';
 import {mergeChatPage} from './pipsModel.js';
@@ -416,9 +416,10 @@ async function setDesktopNotifications(enabled){
  catch(error){if(token===scope()){desktopState.error=errorText(error);setError(error);}}
  finally{if(token===scope()){S.busy=false;render();}}
 }
-// Payments at Do it all (Pips API 75, your P1): off, every payment asks at every level; on, a Pip at Do it all pays by itself,
-// at most three times a day across your Pips, and never types a card number. Only you turn it on, on this computer.
-let paymentsState={value:null,loading:false,error:'',asked:false};
+// Payments a day (Pips API 75, agreed 10 Nov): a Pip you let pay (its own rule, on its page, only at Do it all) pays by
+// itself at most this many times a day across your Pips; every other payment asks you. 3 unless you change it, and only
+// you change it, on this computer. A Pip never types a card number.
+let paymentsState={value:null,loading:false,error:'',asked:false,invalid:''};
 async function loadPayments(){
  if(remoteHost||S.apiVersion<75||!usable()||paymentsState.loading)return;
  const token=S.epoch;paymentsState={...paymentsState,loading:true,asked:true};
@@ -426,10 +427,13 @@ async function loadPayments(){
  catch(error){if(token===S.epoch)paymentsState.error=errorText(error);}
  finally{paymentsState.loading=false;if(token!==S.epoch)paymentsState.asked=false;render();}
 }
-async function setPayments(enabled){
- if(S.busy||!usable())return;const token=scope();S.busy=true;render();
- try{const value=pipsPayments((await send('set_pips_payments',{enabled})).payments);if(token!==scope())return;paymentsState.value=value;paymentsState.error='';
-  S.notice=value.on?`A Pip at Do it all may now pay by itself, at most ${value.limit} times a day across your Pips. It never types a card number.`:'Every payment asks you again, at every level.';}
+async function setPayLimit(text){
+ if(S.busy||!usable()||!paymentsState.value)return;
+ const most=paymentsState.value.most,word=String(text??'').trim(),limit=Number(word);
+ if(!/^[0-9]+$/.test(word)||limit<1||limit>most){paymentsState.invalid=`Choose a whole number from 1 to ${most}.`;render();return;}
+ paymentsState.invalid='';const token=scope();S.busy=true;render();
+ try{const value=pipsPayments((await send('set_pips_payments',{limit})).payments);if(token!==scope())return;paymentsState.value=value;paymentsState.error='';
+  S.notice=`Pips you let pay may now pay by themselves at most ${value.limit} times a day across your Pips.`;}
  catch(error){if(token===scope()){paymentsState.error=errorText(error);setError(error);}}
  finally{if(token===scope()){S.busy=false;render();}}
 }
@@ -438,9 +442,10 @@ function paymentsMarkup(){
  if(!paymentsState.asked&&usable())void loadPayments();
  const p=paymentsState.value;
  if(!p)return paymentsState.error?`<p class="muted keep-running-note">${esc(paymentsState.error)}</p>`:'';
- const note=p.on?`A Pip at Do it all pays by itself, at most ${p.limit} times a day across your Pips (${p.paid} in the last day). It never types a card number.`
-  :'Off: every payment asks you, at every level.';
- return `<label class="keep-running"><input type="checkbox" id="pips-payments"${p.on?' checked':''}${S.busy||!usable()?' disabled':''}> Let Pips at Do it all pay</label><p class="muted keep-running-note">${esc(note)}</p>`;
+ const note=`A Pip you let pay (on its page, at Do it all) pays by itself at most ${p.limit} times a day across your Pips (${p.paid} in the last day). Every other payment asks you.`;
+ return `<div class="keep-running pay-limit"><label for="pips-pay-limit">Payments a day</label><input type="number" id="pips-pay-limit" min="1" max="${p.most}" step="1" inputmode="numeric" value="${p.limit}" aria-describedby="pips-pay-limit-note"${paymentsState.invalid?' aria-invalid="true"':''}${S.busy||!usable()?' disabled':''}></div>`
+  +(paymentsState.invalid?`<p class="error" role="alert">${esc(paymentsState.invalid)}</p>`:'')
+  +`<p class="muted keep-running-note" id="pips-pay-limit-note">${esc(note)}</p>`;
 }
 function desktopNotificationsMarkup(){
  if(remoteHost||S.apiVersion<41||!S.connected||!S.enabled)return '';
@@ -1844,18 +1849,18 @@ function waitingCard(a,count){
 // Always allow / Reject, and the rest under Details. A payment is never sent in one tap and never always allowed: Review…
 // shows it first.
 function computerSubmitCard(a,name,off,count=''){
- const s=a.summary,id=esc(a.id),pay=isPayment(s),title=pay?`Pay on ${s.host}?`:`Send a form to ${s.host}?`;
+ const s=a.summary,id=esc(a.id),pay=isPayment(s),every=asksEveryTime(s),title=pay?`Pay on ${s.host}?`:`Send a form to ${s.host}?`;
  // What it sends is chips, one a field ("amount: 5350.00"), hidden ones (a card number) left out; the line under the title says why DGC asks.
  const line=[s.payment===true?'It sends payment card details.':'',asksWords(s),'Nothing has been sent.'].filter(Boolean).join(' ');
  const sends=DgcCard.chips((Array.isArray(s.fields)?s.fields:[]).filter(f=>f&&typeof f.value==='string'&&f.value.trim()&&f.value!=='•••').map(f=>({label:`${f.name}: ${f.value.replace(/\s+/g,' ').trim()}`})),'What it sends');
  const rows=(Array.isArray(s.fields)?s.fields:[]).filter(f=>f.value!=='•••').map(f=>`<dt>${esc(f.name)}</dt><dd>${esc(f.value)}</dd>`).join('');
- const details=`<details class="allow-details"><summary><span class="allow-preview" title="${esc(pay?`${s.method} ${s.host}${s.path}`:coversWords(s))}">${esc(pay?`${s.method} ${s.host}${s.path}`:coversWords(s))}</span><span>Details</span></summary>`
+ const details=`<details class="allow-details"><summary><span class="allow-preview" title="${esc(every?`${s.method} ${s.host}${s.path}`:coversWords(s))}">${esc(every?`${s.method} ${s.host}${s.path}`:coversWords(s))}</span><span>Details</span></summary>`
   +`<dl class="allow-meta"><dt>Sends to</dt><dd>${esc(s.host)}${esc(s.path)}</dd>${s.page?`<dt>From page</dt><dd>${esc(s.page)}</dd>`:''}${rows}</dl>`
   +(s.more_fields?`<p class="app-link-note">And ${esc(String(s.more_fields))} more fields.</p>`:'')
-  +(pay?'':`<p class="app-link-note">${esc(coversDetail(s,name))}</p><button type="button" class="link allow-see" data-computer-action="${id}"${off}>See the page…</button>`)
+  +(every?'':`<p class="app-link-note">${esc(coversDetail(s,name))}</p>`)+(pay?'':`<button type="button" class="link allow-see" data-computer-action="${id}"${off}>See the page…</button>`)
   +'</details>';
  const actions=pay?`<button type="button" class="primary" data-computer-action="${id}"${off}>Review…</button>`
-  :`<button type="button" class="primary" data-computer-decide="${id}" data-approve="1"${off}>Send once</button><button type="button" class="quiet" data-computer-always="${id}"${off} title="${esc(coversDetail(s,name))}">Always allow</button>`;
+  :`<button type="button" class="primary" data-computer-decide="${id}" data-approve="1"${off}>Send once</button>${every?'':`<button type="button" class="quiet" data-computer-always="${id}"${off} title="${esc(coversDetail(s,name))}">Always allow</button>`}`;
  return `<div class="dgc-card allow-card" data-state="waiting" data-computer-card="${id}" role="group" aria-label="${esc(title)}"><div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">${pay?'!':'↗'}</span><div class="dgc-card-words app-link-words"><strong>${esc(title)}</strong><small>${esc(line)}</small></div>${count}</div>${sends}${details}<div class="dgc-card-actions app-link-actions">${actions}<button type="button" class="quiet" data-computer-decide="${id}" data-approve="0"${off}>Reject</button></div></div>`;
 }
 async function decideInChat(id,approve){
@@ -1948,7 +1953,7 @@ async function openComputerAction(id){
    request:{type:'decide_pip_computer_action',action_id:a.id,expected_digest:a.digest,approve:true}});
   return;
  }
- const pay=isPayment(s),name=S.pip?.name||'The Pip';
+ const pay=asksEveryTime(s),name=S.pip?.name||'The Pip';
  openReview({title:'Send this once?',description:`${name} wants to send a form to ${s.host}. Nothing has been sent.${pay?'':` ${coversDetail(s,name)}`}`,
   body:`${image?`<img class="computer-shot" alt="The page as the Pip left it" src="${image}">`:''}<dl class="meta"><dt>Sends to</dt><dd>${esc(s.host)}${esc(s.path)}</dd><dt>From page</dt><dd>${esc(s.page)}</dd>${rows}</dl>${s.more_fields?`<p class="muted">And ${s.more_fields} more fields.</p>`:''}${s.payment===true?'<p class="notice">This sends payment card details.</p>':pay?'<p class="notice">This looks like a payment, so it asks every time.</p>':''}<p class="muted">Sent exactly as shown, once. Values marked ••• are hidden here but will be sent.</p>`,secondary:{id:'reject-computer-action',label:'Reject'},
   confirm:'Send once',always:!pay,expiresAt:a.expires_at,computerAction:a.id,request:{type:'decide_pip_computer_action',action_id:a.id,expected_digest:a.digest,approve:true}});
@@ -2991,6 +2996,22 @@ async function setLevel(level,{refocus=''}={}){
  catch(error){if(token===scope())levelState.error=errorText(error);}
  finally{levelState.busy=false;if(token===scope()){render();if(refocus)keepFocus(refocus);}}
 }
+// Its rule for payments (Pips API 75, agreed 10 Nov): Ask (the default) or Let it pay, only at Do it all. The line under
+// it says the day's count, read from DGC once the rule is shown.
+function payLimitFor(state){
+ if(!state?.paying||state.level!=='full')return null;
+ if(!paymentsState.asked&&usable())void loadPayments();
+ return paymentsState.value?.limit??null;
+}
+async function setPaying(rule){
+ if(levelState.busy||!usable()||!levelShown())return;const token=scope(),pip=S.selected;levelState.busy=true;levelState.seq++;levelState.error='';render();
+ try{const value=levelPage(await send('set_pip_paying',{pip_id:pip,rule}),pip);if(token!==scope()||S.selected!==pip)return;levelState.pip=pip;levelState.value=value;
+  const name=S.pip?.name||'This Pip',limit=paymentsState.value?.limit;
+  S.notice=value.paying==='allow'?`${name} may now pay by itself, ${limit?`at most ${limit} times a day`:'up to your count for the day'} across your Pips.`
+   :`${name} asks before every payment again.`;}
+ catch(error){if(token===scope())levelState.error=errorText(error);}
+ finally{levelState.busy=false;if(token===scope()){render();keepFocus('pipPaying');}}
+}
 // Focus back on a control a re-render may have drawn anew, unless the user has moved on (typing, another control).
 function keepFocus(id){const el=$(id);if(!el)return;const active=el.getRootNode?.().activeElement;if(!active||active===el||!active.isConnected||active===document.body||active.id==='pips-host')el.focus();}
 // The chip's menu opens on the chosen level; reading the level again may redraw it, so focus is put back if it was lost.
@@ -3852,7 +3873,7 @@ function pipPageMarkup(){
  const body=tab==='links'?linksMarkup(items,{esc,formatDate:shortDate,loading,error})
   :tab==='media'?mediaMarkup(items,{esc,imageSrc:messageImageSrc,loading,error})
   :tab==='files'?filesMarkup(items,mine?shared.desk:null,{esc,formatDate:shortDate,loading,error,hasComputer:computerState.pip===S.selected&&!!computerState.value?.granted})
-  :(templateShown()?templateMarkup(templateState.pip===p.id?templateState.value:null,{esc,busy:off||templateState.busy,error:templateState.pip===p.id?templateState.error:'',pipName:p.name}):'')+infoMarkup({esc,goal:p.goal,routines:routinesSectionMarkup(),notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+linkedAppsMarkup(off)+computerRowMarkup(p,off)+(S.apiVersion>=53&&!remoteHost&&personalPip()?eyesMarkup(eyesState.pip===p.id?eyesState.value:null,{esc,busy:off||eyesState.busy,error:eyesState.error,pipName:p.name}):'')+(levelShown()?levelMarkup(levelState.pip===p.id?levelState.value:null,{esc,busy:off||levelState.busy,error:levelState.error,pipName:p.name,when:at=>shortDate(at)}):'')+artifactsSectionMarkup(p,off)+(S.apiVersion>=44&&!remoteHost&&p.computer_plan?carefulMarkup(carefulState.pip===p.id?carefulState.value:null,{esc,busy:off||carefulState.busy,error:carefulState.error,pipName:p.name,showAll:sitesAll}):'')+(S.apiVersion>=56&&!remoteHost&&p.computer_plan?loginsMarkup(loginsState.pip===p.id?loginsState.value:null,{esc,busy:off||loginsState.busy,error:loginsState.error,pipId:p.id,pipName:p.name,names:pipNames(),confirm:loginsState.confirm}):'')+(S.apiVersion>=44&&!remoteHost?notesMarkup(S.notesPip===p.id?S.notes:null,{esc,busy:off||notesBusy,error:S.notesError,pipName:p.name,adding:draft.noteAdd,confirmAll:noteConfirmAll}):'')+(workingNotesShown()?workingNotesMarkup(S.workingNotesPip===p.id?S.workingNotes:null,{esc,busy:off||workingNotesBusy,error:S.workingNotesError,pipName:p.name,editing:workingNotesEditing,text:draft.workingNotesText})+dailyLogMarkup(S.dailyLogPip===p.id?S.dailyLog:null,{esc,error:S.dailyLogError,pipName:p.name,today:localDay()}):'')+allowedMarkup()+(S.apiVersion>=44&&!remoteHost?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
+  :(templateShown()?templateMarkup(templateState.pip===p.id?templateState.value:null,{esc,busy:off||templateState.busy,error:templateState.pip===p.id?templateState.error:'',pipName:p.name}):'')+infoMarkup({esc,goal:p.goal,routines:routinesSectionMarkup(),notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+linkedAppsMarkup(off)+computerRowMarkup(p,off)+(S.apiVersion>=53&&!remoteHost&&personalPip()?eyesMarkup(eyesState.pip===p.id?eyesState.value:null,{esc,busy:off||eyesState.busy,error:eyesState.error,pipName:p.name}):'')+(levelShown()?levelMarkup(levelState.pip===p.id?levelState.value:null,{esc,busy:off||levelState.busy,error:levelState.error,pipName:p.name,payLimit:payLimitFor(levelState.pip===p.id?levelState.value:null),when:at=>shortDate(at)}):'')+artifactsSectionMarkup(p,off)+(S.apiVersion>=44&&!remoteHost&&p.computer_plan?carefulMarkup(carefulState.pip===p.id?carefulState.value:null,{esc,busy:off||carefulState.busy,error:carefulState.error,pipName:p.name,showAll:sitesAll}):'')+(S.apiVersion>=56&&!remoteHost&&p.computer_plan?loginsMarkup(loginsState.pip===p.id?loginsState.value:null,{esc,busy:off||loginsState.busy,error:loginsState.error,pipId:p.id,pipName:p.name,names:pipNames(),confirm:loginsState.confirm}):'')+(S.apiVersion>=44&&!remoteHost?notesMarkup(S.notesPip===p.id?S.notes:null,{esc,busy:off||notesBusy,error:S.notesError,pipName:p.name,adding:draft.noteAdd,confirmAll:noteConfirmAll}):'')+(workingNotesShown()?workingNotesMarkup(S.workingNotesPip===p.id?S.workingNotes:null,{esc,busy:off||workingNotesBusy,error:S.workingNotesError,pipName:p.name,editing:workingNotesEditing,text:draft.workingNotesText})+dailyLogMarkup(S.dailyLogPip===p.id?S.dailyLog:null,{esc,error:S.dailyLogError,pipName:p.name,today:localDay()}):'')+allowedMarkup()+(S.apiVersion>=44&&!remoteHost?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
  return `<div class="pip-page">${head}${healthMarkup(p.routine_health,{busy:off,canSignIn:!remoteHost})}${pageTabsMarkup(tab)}<div class="pip-page-body" data-page="${tab}">${body}</div></div>`;
 }
 // What it may do without asking (an Always allow you gave): only shown when there is one, and each
@@ -4491,7 +4512,7 @@ const dropOverlay=on=>{const o=document.querySelector('#chat-form > .dgc-drop');
 document.addEventListener('dragenter',event=>{if(!canAttachImages()||!event.target?.closest?.('#chat-form')||![...(event.dataTransfer?.types||[])].includes('Files'))return;dropDepth++;dropOverlay(true);});
 document.addEventListener('dragleave',event=>{if(!event.target?.closest?.('#chat-form'))return;dropDepth=Math.max(0,dropDepth-1);if(!dropDepth)dropOverlay(false);});
 document.addEventListener('drop',event=>{dropDepth=0;dropOverlay(false);if(!canAttachImages()||!event.target?.closest?.('#chat-form'))return;const files=[...(event.dataTransfer?.files||[])];if(!files.length)return;event.preventDefault();addImageFiles(files);});
-document.addEventListener('change',event=>{if(event.target.dataset?.pluginLevel){const t=event.target,level=t.value,label=(PLUGIN_LEVELS.find(l=>l[0]===level)||[])[1]||level;void pipsSettingsCall('set_plugin_permission',{plugin:t.dataset.pluginLevel,level},`Saved. ${t.dataset.pluginName||'This plugin'}: ${label.toLowerCase()}.`);return;}if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pips-payments'){void setPayments(event.target.checked);return;}if(event.target.id==='pipEyes'){void setEyes(event.target.value);return;}if(event.target.id==='pipLevel'){void setLevel(event.target.value);return;}if(event.target.id==='pipReportAs'){const v=event.target.value;void setArtifacts({report_as:v},value=>reportNotice(value,S.pip?.name||'It'));return;}if(event.target.id==='pipDashboardAdd'){const id=event.target.value;if(id&&artifactsState.value){const list=[...artifactsState.value.dashboards,id];void setArtifacts({dashboards:dashboardsToSave(list)},`${S.pip?.name||'It'} refreshes “${dashboardTitle(id)}” after every run it finishes.${goneNote(list)}`);}return;}if(event.target.dataset?.loginAll){const l=(loginsState.value||[]).find(x=>x.id===event.target.dataset.loginAll),all=event.target.checked;if(l)void loginCall('grant_pip_login',{login_id:l.id,pips:all?'all':[S.selected]},all?`All your Pips can use the login for ${l.site}.`:`Only ${S.pip?.name||'this Pip'} uses the login for ${l.site} now.`);return;}if(event.target.id==='pipCareful'){const on=event.target.checked;void carefulCall('set_pip_careful',{on},on?'Careful mode is on.':'Careful mode is off. Its submits still wait for you.');return;}if(event.target.id==='pipNotify'){const on=event.target.checked;void setProfile({notify:on},on?'It tells you when it finishes something on its own or needs you.':'It won’t notify you. Its chat still has everything.');return;}if(event.target.dataset?.routineToggle){const id=event.target.dataset.routineToggle,on=event.target.checked;void routineCall('update_pip_routine',{routine_id:id,changes:{status:on?'on':'off'}},id,on?'Routine on.':'Routine off. It won’t run until you turn it on.');return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
+document.addEventListener('change',event=>{if(event.target.dataset?.pluginLevel){const t=event.target,level=t.value,label=(PLUGIN_LEVELS.find(l=>l[0]===level)||[])[1]||level;void pipsSettingsCall('set_plugin_permission',{plugin:t.dataset.pluginLevel,level},`Saved. ${t.dataset.pluginName||'This plugin'}: ${label.toLowerCase()}.`);return;}if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pips-pay-limit'){void setPayLimit(event.target.value);return;}if(event.target.id==='pipEyes'){void setEyes(event.target.value);return;}if(event.target.id==='pipLevel'){void setLevel(event.target.value)}if(event.target.id==='pipPaying'){void setPaying(event.target.value);return;}if(event.target.id==='pipReportAs'){const v=event.target.value;void setArtifacts({report_as:v},value=>reportNotice(value,S.pip?.name||'It'));return;}if(event.target.id==='pipDashboardAdd'){const id=event.target.value;if(id&&artifactsState.value){const list=[...artifactsState.value.dashboards,id];void setArtifacts({dashboards:dashboardsToSave(list)},`${S.pip?.name||'It'} refreshes “${dashboardTitle(id)}” after every run it finishes.${goneNote(list)}`);}return;}if(event.target.dataset?.loginAll){const l=(loginsState.value||[]).find(x=>x.id===event.target.dataset.loginAll),all=event.target.checked;if(l)void loginCall('grant_pip_login',{login_id:l.id,pips:all?'all':[S.selected]},all?`All your Pips can use the login for ${l.site}.`:`Only ${S.pip?.name||'this Pip'} uses the login for ${l.site} now.`);return;}if(event.target.id==='pipCareful'){const on=event.target.checked;void carefulCall('set_pip_careful',{on},on?'Careful mode is on.':'Careful mode is off. Its submits still wait for you.');return;}if(event.target.id==='pipNotify'){const on=event.target.checked;void setProfile({notify:on},on?'It tells you when it finishes something on its own or needs you.':'It won’t notify you. Its chat still has everything.');return;}if(event.target.dataset?.routineToggle){const id=event.target.dataset.routineToggle,on=event.target.checked;void routineCall('update_pip_routine',{routine_id:id,changes:{status:on?'on':'off'}},id,on?'Routine on.':'Routine off. It won’t run until you turn it on.');return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
 document.addEventListener('submit',event=>{
   if(event.target.id==='pip-flow-form'){event.preventDefault();reviewFlow();return;}
   if(event.target.id==='login-form'){event.preventDefault();void saveLogin();return;}

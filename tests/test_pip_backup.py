@@ -201,8 +201,15 @@ class BackupTests(unittest.TestCase):
         self.assertEqual((code, json.loads(text)["backup"]["provider"]), (0, self.PROVIDER), err)
         self.assertEqual(cli("backup", "none", shell=True)[0], 2, "but only you change it")
         code, text, err = cli("payments", "--json")
-        self.assertEqual((code, json.loads(text)["payments"]["on"]), (0, False), err)
-        self.assertEqual(cli("payments", "on", shell=True)[0], 2, "a chat never lets Pips pay")
+        self.assertEqual((code, json.loads(text)["payments"]["limit"]), (0, 3), err)
+        self.assertEqual(cli("payments", "5", shell=True)[0], 2, "a chat never changes how often Pips pay")
+        self.assertEqual(cli("payments", "--pip", pip["id"], "allow", shell=True)[0], 2, "nor lets a Pip pay")
+        with patch.object(pips, "WorkspaceRegistry", lambda *a, **k: WorkspaceRegistry(self.registry.directory)):
+            code, text, err = cli("payments", "5", "--json")
+            self.assertEqual((code, json.loads(text)["payments"]["limit"]), (0, 5), err)
+            code, text, err = cli("payments", "--pip", pip["id"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("asks you before every payment", text)
 
     def test_the_cli_shows_and_sets_it(self):
         from dgc.pip_cli import _format, parser

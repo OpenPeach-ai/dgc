@@ -562,8 +562,10 @@ def parser():
                         help="Claude Code or Codex as the fallback (MODEL, if given, is its model; none: its default)")
     backup.add_argument("--router", dest="backup_router", action="store_true",
                         help="DGC Router as the fallback (MODEL, if given, is SYSTEM/MODEL; none: any Pip system)")
-    paying = command("payments", "whether a Pip at Do it all may pay by itself, at most 3 times a day (off by default): show, or turn on or off")
-    paying.add_argument("state", nargs="?", choices=("on", "off"))
+    paying = command("payments", "paying by itself: how many payments your Pips may make by themselves in a day (3 unless "
+                               "you change it), or with --pip one Pip's rule, ask (the default) or allow (only at Do it all)")
+    paying.add_argument("state", nargs="?", metavar="COUNT|ask|allow")
+    paying.add_argument("--pip", dest="payments_pip", help="one Pip's rule: ask or allow")
     stop = command("stop", "emergency stop: pause all jobs and cancel their work")
     stop.add_argument("--yes", action="store_true", help="confirm the global emergency stop without a prompt")
     command("resume", "locally clear emergency stop; jobs stay paused")
@@ -1000,10 +1002,15 @@ def _format(value):
                 + " Each Pip's own: dgc pips backup --pip PIP MODEL. This one: dgc pips backup MODEL (or none).")
     if set(value) == {"payments"} and isinstance(value["payments"], dict):
         item = value["payments"]
-        return ((f"Pips at Do it all may pay by themselves: at most {item['limit']} payments a day across your Pips "
-                 f"({item['paid']} in the last day). They never type a card number.") if item["on"] else
-                "Every payment asks you, at every level. Turn this on to let a Pip at Do it all pay by itself, "
-                f"at most {item['limit']} times a day: dgc pips payments on")
+        return (f"A Pip you let pay pays by itself at most {item['limit']} times a day across your Pips "
+                f"({item['paid']} in the last day); it never types a card number. Every other payment asks you. "
+                f"Change the count (1 to {item['most']}): dgc pips payments COUNT. Let one Pip at Do it all pay: "
+                "dgc pips payments --pip PIP allow")
+    if set(value) == {"paying"} and isinstance(value["paying"], dict):
+        item = value["paying"]
+        return ("This Pip pays by itself, up to the day's count across your Pips." if item["rule"] == "allow" else
+                "This Pip asks you before every payment." + ("" if item["level"] == "full" else
+                                                             " Only a Pip at Do it all can be let pay."))
     if set(value) == {"desktop_notifications"}:
         item = value["desktop_notifications"]
         return (f"Desktop notifications: {'on' if item['on'] else 'off'}."
@@ -1612,9 +1619,19 @@ def _digest_command(config, args):
     if args.command == "backup":
         return control(_backup_request(args))
     if args.command == "payments":
+        if args.payments_pip:
+            if args.state is None:
+                value = control({"type": "get_pip_level", "pip_id": args.payments_pip})
+            elif args.state in ("ask", "allow"):
+                value = control({"type": "set_pip_paying", "pip_id": args.payments_pip, "rule": args.state})
+            else:
+                raise RegistryError("invalid_request", "Say ask or allow for one Pip.")
+            return {"paying": {"pip_id": value["pip_id"], "rule": value["paying"], "level": value["level"]}}
         if args.state is None:
             return control({"type": "get_pips_payments"})
-        return control({"type": "set_pips_payments", "enabled": args.state == "on"})
+        if not args.state.isdigit():
+            raise RegistryError("invalid_request", "Give the day's count as a whole number, or one Pip's rule: --pip PIP ask|allow.")
+        return control({"type": "set_pips_payments", "limit": int(args.state)})
     if args.command == "desktop-notifications":
         if args.state is None:
             return control({"type": "get_pips_desktop_notifications"})

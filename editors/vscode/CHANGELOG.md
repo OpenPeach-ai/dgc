@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A Pip at Do it all has its own rule for payments on its page: Ask me each time, or Let it pay. Payments a day, in the Pips view's Controls, is how many a Pip you let pay may make by itself (3 unless you change it). An order press never offers Always allow.
 - A dock at the foot of DGC's side bar, on every screen of it (the home, the Pips view, a Pip's chat): what you pinned, then "+". Pin a Pip, a Work session, a ChatDGC chat, an artifact, a Library file or a widget with the new pin on its row; the pin stays filled while it is pinned, and a click unpins. A Pip shows its face, a session its blob, a file the small sheet of its kind, a widget a cube. Pointing at the dock makes the items grow toward the pointer and names the one under it: a session's full title and what it is doing, a Pip's name and what waits on it. A click opens it.
 - On a dock item: a quiet dot while it is open in an editor, a purple dot while it is running, and a number when it needs you. A right-click (or Shift+F10) offers Open, Unpin, Move left and Move right.
 - "+" is always the last item: New Work session, New ChatDGC chat, New Personal Pip, and Settings. Each starts at once.

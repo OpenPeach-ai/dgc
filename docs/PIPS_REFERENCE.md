@@ -1318,9 +1318,12 @@ Delivery is `notify-send` (with the session bus at `/run/user/UID/bus` when the 
 none) or `osascript` with the text as script arguments; failure is never an error and is
 recorded as `last.shown: false`. `get_pips_desktop_notifications` /
 `set_pips_desktop_notifications {enabled}` (local only) return `{on, available, platform,
-last}`. `get_pips_payments` / `set_pips_payments {enabled}` (Pips API 75, local only) return `{on, limit, paid}`: whether a
-Pip at Do it all may pay by itself (metadata `pips_level_payments`, off by default), at most `limit` (`pip_levels.PAY_LIMIT`,
-3) payments in 24 hours across all Pips, counted from `sent` computer actions with `summary.paid` and `pip_level_approved`
+last}`. `set_pip_paying {pip_id, rule}` (Pips API 75, local only) sets one Pip's rule for a payment (metadata
+`pip_paying:<pip_id>`): `ask`, the default, or `allow`, refused (`not_do_it_all`) unless the Pip is at Do it all; a
+level other than Do it all removes it, and `get_pip_level` says it as `paying`. `get_pips_payments` / `set_pips_payments
+{limit}` (local only) return `{limit, default, most, paid}`: a Pip allowed to pay, at Do it all with the fuse not holding
+(`pip_levels.may_pay`), pays by itself at most `limit` (metadata `pips_level_payments`, `pip_levels.PAY_LIMIT` 3 by
+default, 1 to `PAY_MOST` 20) payments in 24 hours across all Pips, counted from `sent` computer actions with `summary.paid` and `pip_level_approved`
 events with `payload.paid` (`pip_levels.paid`). The editor's own notice reads `get_pip_digest` from the extension host every minute
 (`pipsAttention.ts`, remembered in the host's global state) and is turned off by
 `dgc.notifyPips`.
@@ -2391,7 +2394,7 @@ Clients check it before using a newer control.
 | 72 | Reviewed local Personal and Project Pip workflow controls: list, get, create and set status. Two to four Pips of one workspace and kind can pass exact results or a committed-source finding through reviewed or unattended routing; each Pip keeps its own external-action permissions. |
 | 73 | A text message can join one running Personal Pip conversation as a mid-turn update. It stays in that run's history and does not start a second reply. One that reply never read becomes the next turn, or says it wasn't sent if the reply was stopped or failed; `list_pip_messages` lists those waiting for a turn in `waiting` (see PIPS_EDITOR_PROTOCOL.md). |
 | 74 | A Pip on a provider saved in the editor's Settings → Models: `model_choice` `{"mode": "provider", "provider", "model"}`. |
-| 75 | Payments at Do it all: `get_pips_payments` / `set_pips_payments {enabled}` (local only) → `{payments: {on, limit, paid}}`. Off by default; on, a Pip at Do it all may pay by itself, at most `limit` (3) times in 24 hours across all Pips, never a request carrying a card number. |
+| 75 | Paying by itself (local only): `set_pip_paying {pip_id, rule}` (`ask` or `allow`, only at Do it all; `get_pip_level`'s `paying`) and `get_pips_payments` / `set_pips_payments {limit}` → `{payments: {limit, default, most, paid}}`. A Pip allowed to pay pays by itself at most `limit` (3 unless changed, 1 to 20) times in 24 hours across all Pips, never a request carrying a card number. A pay, buy or order step is never always allowed (`pip_computer.never_replayed`). |
 | 76 | A Pip's fallback model: `get_pip_backup {pip_id}` / `set_pip_backup {pip_id, model, provider?, engine?, router?}` → `{backup: {pip_id, provider, model, engine?, router?, on?}}` (`provider` "" DGC's own connection or `provider_<32 hex>`, `model` "" or null none; `engine` `claude` or `codex` for Claude Code or Codex, `model` then its model or "" its default; `router: true` for DGC Router, `model` "" or `<system>/<model>`; `on` `{since, model}` while it answers) and the one new Pips start with, `get_pips_backup` / `set_pips_backup {model, provider?}` → `{backup: {provider, model}}`, all local only. When a run's own model doesn't answer, it carries on with the fallback; the first reply of an outage carries `backup`, its one line, and `list_pip_messages` carries `fallback_on {model, since}` while the fallback answers. |
 | 77 | A Personal Pip's own changes at once, with Undo: in a turn the user started, its `name`, `goal`, `schedule` and `model_choice` change when its reply is saved, and a routine it adds is `on`; the reply carries `changes` (`[{id, kind, fields, after, status}]`), and `undo_pip_change {pip_id, change_id}` (local only) → `{change, pip}` puts one back while nothing changed it since. `/setup` in a user message sets the Pip up after up to three questions. Registry schema 52. |
 | 78 | No new command. A run's post may carry `artifact` `{id, type ("doc" or "sheet"), title, version}`: the review it kept as the Pip's document or sheet, or the Quill draft that became its document; the editor draws the document card. Read it only from a runtime advertising 78 |

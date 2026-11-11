@@ -66,10 +66,16 @@ export function isPayment(summary) {
   return summary?.payment === true || summary?.asks_because === 'payment';
 }
 
+/** A pay, buy or order step (agreed 10 Nov): never offered Always allow, as a payment isn't (pip_computer.never_replayed). */
+export function asksEveryTime(summary) {
+  return isPayment(summary) || (summary?.asks_because === 'maybe_payment' && summary?.asks_word === 'order');
+}
+
 /** Why its level or DGC still asks, in a line (API 58). A maybe is about money only by one word, and says so plainly. */
 export function asksWords(summary) {
   const because = summary?.asks_because;
   if (because === 'payment') return 'It looks like a payment, so it asks at every level.';
+  if (because === 'maybe_payment' && summary.asks_word === 'order') return 'It may place an order, so it asks every time.';
   if (because === 'maybe_payment') return `It mentions “${summary.asks_word || 'money'}”, so DGC asks. Nothing shows it’s a payment.`;
   if (because === 'consequential') return 'Its level asks before this.';
   if (because === 'unsure') return 'DGC can’t tell what this does, so it asks.';

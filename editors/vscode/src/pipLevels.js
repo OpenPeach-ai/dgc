@@ -21,11 +21,13 @@ export function levelPage(value, pip) {
       || !['approve', 'full'].includes(d.level) || typeof d.unattended !== 'boolean' || !KINDS.includes(d.kind)) fail();
     return {what: d.what, at: d.at, level: d.level, unattended: d.unattended, kind: d.kind};
   });
-  return {level: value.level, default: value.default, levels, done};
+  // Its rule for payments (API 75): ask or allow; an older DGC sends none.
+  if ('paying' in value && !['ask', 'allow'].includes(value.paying)) fail();
+  return {level: value.level, default: value.default, levels, done, paying: value.paying || null};
 }
 
 /** The section: the picker with the chosen level's line, and what its level did by itself. */
-export function levelMarkup(state, {esc, busy = false, error = '', pipName = 'It', when = at => at}) {
+export function levelMarkup(state, {esc, busy = false, error = '', pipName = 'It', when = at => at, payLimit = null}) {
   if (!state) return `<section class="pip-page-group" aria-label="How much it asks">${error ? `<p class="error" role="alert">${esc(error)}</p>` : '<p class="muted" role="status">Loading…</p>'}</section>`;
   const off = busy ? ' disabled' : '';
   const chosen = state.levels.find(l => l.level === state.level) || state.levels[0];
@@ -34,10 +36,23 @@ export function levelMarkup(state, {esc, busy = false, error = '', pipName = 'It
   return `<section class="pip-page-group" aria-label="How much it asks"><div class="pip-page-row static"><span class="row-words"><strong>How much it asks</strong>`
     + `<small id="pipLevelSays">${esc(chosen.says)}</small></span>`
     + `<select id="pipLevel" aria-label="How much ${esc(pipName)} asks" aria-describedby="pipLevelSays"${off}>${state.levels.map(l => `<option value="${l.level}"${l.level === state.level ? ' selected' : ''}>${esc(l.name)}</option>`).join('')}</select></div>`
+    + payingMarkup(state, {esc, off, pipName, payLimit})
     + (done.length ? `<h3 class="pip-page-label">What it did on its own</h3><ul class="pip-page-list" data-on-its-own>${done.map(d =>
       `<li class="pip-page-row static sub"><span class="row-words"><span>${esc(d.what)}</span><small>${esc(when(d.at))} · ${esc(name(d.level))}${d.unattended ? ' · nobody at the keyboard' : ''}</small></span></li>`).join('')}</ul>`
       + (state.level === 'ask' ? '' : `<button type="button" class="link" data-level-ask${off}>Ask me again from now on</button>`) : '')
     + (error ? `<p class="error" role="alert">${esc(error)}</p>` : '') + '</section>';
+}
+
+/** Its rule for payments, only at Do it all (API 75): Ask me each time (the default) or Let it pay, with what that means. */
+function payingMarkup(state, {esc, off, pipName, payLimit}) {
+  if (!state.paying || state.level !== 'full') return '';
+  const says = state.paying === 'allow'
+    ? `It pays by itself, ${payLimit ? `at most ${payLimit} times a day` : 'up to your count for the day'} across your Pips. It never types a card number.`
+    : 'Every payment waits for you on a card.';
+  return `<div class="pip-page-row static"><span class="row-words"><strong>Payments</strong><small id="pipPayingSays">${esc(says)}</small></span>`
+    + `<select id="pipPaying" aria-label="Payments by ${esc(pipName)}" aria-describedby="pipPayingSays"${off}>`
+    + [['ask', 'Ask me each time'], ['allow', 'Let it pay']].map(([value, label]) => `<option value="${value}"${value === state.paying ? ' selected' : ''}>${label}</option>`).join('')
+    + '</select></div>';
 }
 
 /**
