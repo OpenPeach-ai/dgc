@@ -962,6 +962,15 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 .dialog:has(#deletePipName) #review-confirm.danger, .dialog:has(#deletePipName) #review-confirm.danger:hover:not(:disabled) { width: var(--btn-w-wide); border-color: transparent; background: var(--btn-danger); color: var(--btn-on-danger); }
 .dialog:has(#deletePipName) #review-confirm.danger:hover:not(:disabled) { background: var(--btn-danger-hover); }
 @media (forced-colors: active) { .dialog:has(#deletePipName) #review-confirm.danger { forced-color-adjust: none; border-color: ButtonText; } }
+/* ---- A Personal Pip's own API keys (src/pipKeys.js). The card in its chat is the plugin's key card (.key-card above);
+   answered Not now, it is one quiet line. On its page, Keys: a row a key, and Remove asks in the row: the sentence, then
+   the button's danger role (a saved key has to be pasted again to come back) beside Keep it. */
+.pip-key-line { margin: 8px 0 0; }
+.pip-key-row .pip-key-confirm { flex: 1 1 100%; flex-wrap: wrap; gap: 8px; }
+.pip-key-row .pip-key-ask { flex: 1 1 100%; color: var(--muted); line-height: 1.45; overflow-wrap: anywhere; }
+.pip-key-confirm button.danger, .pip-key-confirm button.danger:hover:not(:disabled) { border-color: transparent; background: var(--btn-danger); color: var(--btn-on-danger); }
+.pip-key-confirm button.danger:hover:not(:disabled) { background: var(--btn-danger-hover); }
+@media (forced-colors: active) { .pip-key-confirm button.danger { forced-color-adjust: none; border-color: ButtonText; } }
 /* ==== Pip chat design pass (0.52, asked 5 Nov): a Personal and a Project Pip's chat, calm, clear and physical. ====
    What it holds to, each measured in test/pip-chat-design-browser.test.mjs:
    - One column. Everything the Pip says starts at one left edge and is at most one measure wide (a reply, its choices);

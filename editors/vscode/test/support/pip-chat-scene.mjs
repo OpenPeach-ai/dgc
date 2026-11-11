@@ -45,7 +45,8 @@ export const THEMES = {
 /** The stub host, run in the page before the client: answers each request after a tick, as the extension would.
     opts: project (a Project Pip's chat), hold (what its computer holds for your okay), running (a turn in flight),
     doing (what the running turn says it is doing), fixing (DGC is fixing what a Project Pip's post found),
-    empty (no messages yet), api, settings (its page's every section has something in it; level: the one it is at), keys (a plugin's key card: true, or "two"). */
+    empty (no messages yet), api, settings (its page's every section has something in it; level: the one it is at), keys (a plugin's key card: true, or "two"),
+    ownKeys (the Pip's own API keys, Pips API 82: true one waiting card, "refused" one its site turned away, "list" one saved, one waiting, one Not now). */
 /** The stub host's script: it answers a Pip's page from `opts`. (dock-scene.mjs gives it to the side bar's real page too.) */
 export const host = (opts) => `(${function (PIP, opts) {
   const W = "ws_" + "e".repeat(32), run = (c) => "run_" + c.repeat(32);
@@ -206,6 +207,21 @@ export const host = (opts) => `(${function (PIP, opts) {
       list_pip_plugins: () => ({ pip_id: PIP, plugins: [], key_requests: waiting ? [asked] : [], installed: [{ plugin: "airtable", name: "Airtable", money: false, servers: ["airtable"] }] }),
       allow_pip_plugin: (r) => { window.__keysSent = Object.keys(r.keys || {}); waiting = false; return { plugin: { ...asked, status: "allowed", needs_key: [] } }; },
       decline_pip_plugin: () => { waiting = false; return { plugin: { ...asked, status: "declined" } }; },
+    });
+  }
+  // opts.ownKeys: this Pip's own API keys (pips-10, Pips API 82). What a save carried is noted by its fields and length
+  // only (window.__ownKeySent), never its text.
+  if (opts.ownKeys) {
+    const key = (c, extra) => ({ id: "pipkey_" + c.repeat(32), pip_id: PIP, workspace_id: W, kind: "site", name: "Invoicely API key", why: "To read your unpaid invoices for the morning brief.",
+      host: "api.invoicely.example", header: "Authorization: Bearer", status: "requested", saved: false, refused: false, created_at: at(3), saved_at: null, declined_at: null, ...extra });
+    let keys = opts.ownKeys === "list" ? [key("a", { status: "saved", saved: true, saved_at: at(60) }), key("b", { name: "Weather key", host: "api.weather.example", why: "To check tomorrow's rain." }),
+      key("c", { name: "Flights key", host: "api.flights.example", status: "declined", declined_at: at(20) })] : [key("a", { refused: opts.ownKeys === "refused" })];
+    const put = (id, extra) => { keys = keys.map((k) => (k.id === id ? { ...k, ...extra } : k)); return { key: keys.find((k) => k.id === id) }; };
+    Object.assign(answers, {
+      list_pip_keys: () => ({ pip_id: PIP, keys }),
+      save_pip_key: (r) => { window.__ownKeySent = { fields: Object.keys(r).sort(), key_id: r.key_id, chars: String(r.value || "").length }; return put(r.key_id, { status: "saved", saved: true, refused: false, saved_at: new Date().toISOString() }); },
+      decline_pip_key: (r) => put(r.key_id, { status: "declined", declined_at: new Date().toISOString() }),
+      remove_pip_key: (r) => { keys = keys.filter((k) => k.id !== r.key_id); return { removed: true }; },
     });
   }
   window.acquireVsCodeApi = () => ({ getState: () => undefined, setState() {}, postMessage(m) {
