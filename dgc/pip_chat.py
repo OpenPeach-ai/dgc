@@ -869,14 +869,55 @@ OWED_KEY = "pip_chat_owed_turn:"
 OWED_SECONDS = 24 * 3600
 
 
-def _owed_turn(store, pip_id, text, key, actor, config):
+def conversation_of_run(db, run_id):
+    """The conversation a run answered in (pips-17), or None: a card a run raised belongs there, and so does the turn
+    that carries on after it."""
+    if not isinstance(run_id, str) or not run_id:
+        return None
     try:
-        return send(store, pip_id, text, key, actor, config, _intro=True)
+        row = db.execute("SELECT conversation_id FROM pip_chat_messages WHERE run_id=? AND conversation_id IS NOT NULL "
+                         "ORDER BY seq LIMIT 1", (run_id,)).fetchone()
+    except Exception:                          # noqa: BLE001 -- an older registry: the first conversation, as before
+        return None
+    return row[0] if row else None
+
+
+def _card_run(store, table, column, ident):
+    """The run that raised one card (a held computer step, an app link, a plugin's ask), by its id."""
+    try:
+        row = store.db.execute(f"SELECT {column} FROM {table} WHERE id=?", (str(ident),)).fetchone()
+    except Exception:                          # noqa: BLE001
+        return None
+    return row[0] if row else None
+
+
+def _answered(value) -> str:
+    """A short mark of one answer to a card (when it was given), so a card asked again carries on again: a message's key
+    is its idempotency key, and the same key twice is taken for the first answer."""
+    stamp = re.sub(r"[^0-9]", "", str(value or ""))[-14:]
+    return "_" + stamp if stamp else ""
+
+
+def _send_in(store, pip_id, text, key, actor, config, conversation_id):
+    """send() into the card's conversation; into the first one when that one is archived or gone."""
+    try:
+        return send(store, pip_id, text, key, actor, config, conversation_id=conversation_id, _intro=True)
+    except RegistryError as exc:
+        if conversation_id and exc.code in ("archived", "not_found"):
+            return send(store, pip_id, text, key, actor, config, _intro=True)
+        raise
+
+
+def _owed_turn(store, pip_id, text, key, actor, config, conversation_id=None):
+    try:
+        return _send_in(store, pip_id, text, key, actor, config, conversation_id)
     except RegistryError as exc:
         if exc.code == "conversation_busy":
             with contextlib.nullcontext() if store.db.in_transaction else store.registry.transaction():
                 store.db.execute("INSERT OR IGNORE INTO metadata VALUES(?,?)",
-                                 (f"{OWED_KEY}{pip_id}:{key}", _json({"text": text, "actor": actor, "at": time.time()})))
+                                 (f"{OWED_KEY}{pip_id}:{key}", _json({"text": text, "actor": actor, "at": time.time(),
+                                                                       **({"conversation_id": conversation_id}
+                                                                          if conversation_id else {})})))
         raise
 
 
@@ -894,7 +935,8 @@ def send_owed_turns(registry, config) -> int:
             owed = json.loads(row["value"])
             run = None
             if time.time() - float(owed["at"]) <= OWED_SECONDS:
-                run = send(store, pip_id, owed["text"], key, owed["actor"], config, _intro=True)["run"]["id"]
+                run = _send_in(store, pip_id, owed["text"], key, owed["actor"], config,
+                               owed.get("conversation_id"))["run"]["id"]
         except RegistryError as exc:
             if exc.code == "conversation_busy":
                 continue
@@ -910,21 +952,26 @@ def send_owed_turns(registry, config) -> int:
     return sent
 
 
+def _computer_conversation(store, action_id):
+    return conversation_of_run(store.db, _card_run(store, "pip_computer_actions", "run_id", action_id))
+
+
 def continue_after_computer(store, pip_id, action_id, summary, config):
     """The chat's next turn once a submit its run held has been sent: the Pip looks and replies."""
     what = f"{summary.get('method', '')} to {summary.get('host', '')}{summary.get('path', '')}"[:300]
     key = COMPUTER_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(action_id))[:100]
+    where = _computer_conversation(store, action_id)
     if summary.get("kind") == "login":
         page = str(summary.get("sign_in_page") or summary.get("page") or "")
         where = (f"Its sign-in page is {page[:300]}: open it if it isn't open. " if page.startswith(("https://", "http://"))
                  else "Open its sign-in page if it isn't open. ")
         text = COMPUTER_LOGIN_SAVED.format(site=str(summary.get("site") or summary.get("host") or "the site")[:255], where=where)
-        return _owed_turn(store, pip_id, text, key, "local-computer", config)
+        return _owed_turn(store, pip_id, text, key, "local-computer", config, where)
     if summary.get("kind") == "floor":
         # The safety floor held a Terminal command (pip_levels.floor): the Pip runs exactly that, once.
         command = str((summary.get("fields") or [{}])[0].get("value", ""))[:300]
         return _owed_turn(store, pip_id, COMPUTER_ALLOWED.format(what=f"you to run that command in your Terminal once: {command}"),
-                          key, "local-computer", config)
+                          key, "local-computer", config, where)
     if summary.get("kind") in ("site", "text"):
         # Careful mode held it before anything happened: the Pip does it now, once.
         # The page it wanted, not just the site: told "visit pip-test.example", a Pip opened that bare name instead of
@@ -933,8 +980,8 @@ def continue_after_computer(store, pip_id, action_id, summary, config):
         again = f"open {page[:300]} again, the page you wanted" if page.startswith(("https://", "http://")) else "open it if it isn't open yet"
         allowed = (f"you to visit {summary.get('site') or summary.get('host', 'that site')} ({again})" if summary["kind"] == "site"
                    else f"you to put that on {summary.get('host') or 'the page'}: {(summary.get('fields') or [{}])[0].get('value', '')}")
-        return _owed_turn(store, pip_id, COMPUTER_ALLOWED.format(what=allowed[:400]), key, "local-computer", config)
-    return _owed_turn(store, pip_id, COMPUTER_DONE.format(what=what), key, "local-computer", config)
+        return _owed_turn(store, pip_id, COMPUTER_ALLOWED.format(what=allowed[:400]), key, "local-computer", config, where)
+    return _owed_turn(store, pip_id, COMPUTER_DONE.format(what=what), key, "local-computer", config, where)
 
 
 def continue_after_rejection(store, pip_id, action_id, summary, config):
@@ -943,16 +990,16 @@ def continue_after_rejection(store, pip_id, action_id, summary, config):
     key = COMPUTER_KEY + "no_" + re.sub(r"[^A-Za-z0-9_-]", "", str(action_id))[:100]
     if summary.get("kind") == "login":
         text = COMPUTER_LOGIN_NOT_NOW.format(site=str(summary.get("site") or summary.get("host") or "that site")[:255])
-        return send(store, pip_id, text, key, "local-computer", config, _intro=True)
+        return _send_in(store, pip_id, text, key, "local-computer", config, _computer_conversation(store, action_id))
     if summary.get("kind") in ("site", "text", "floor"):
         what = (f"you to visit {summary.get('site') or summary.get('host', 'that site')}" if summary["kind"] == "site"
                 else "you to run that command in your Terminal" if summary["kind"] == "floor"
                 else f"you to put that on {summary.get('host') or 'the page'}")
-        return send(store, pip_id, COMPUTER_NOT_ALLOWED.format(what=what[:400]), key, "local-computer", config, _intro=True)
+        return _send_in(store, pip_id, COMPUTER_NOT_ALLOWED.format(what=what[:400]), key, "local-computer", config, _computer_conversation(store, action_id))
     from .pip_computer import is_payment
     what = (("a payment: " if is_payment(summary) else "")
             + f"{summary.get('method', '')} to {summary.get('host', '')}{summary.get('path', '')}")[:300]
-    return send(store, pip_id, COMPUTER_REJECTED.format(what=what), key, "local-computer", config, _intro=True)
+    return _send_in(store, pip_id, COMPUTER_REJECTED.format(what=what), key, "local-computer", config, _computer_conversation(store, action_id))
 
 
 def continue_after_lost(store, pip_id, action_id, summary, config):
@@ -965,7 +1012,7 @@ def continue_after_lost(store, pip_id, action_id, summary, config):
     else:
         what = (("a payment: " if is_payment(summary) else "")
                 + f"{summary.get('method', '')} to {summary.get('host', '')}{summary.get('path', '')}")
-    return send(store, pip_id, COMPUTER_LOST.format(what=what[:300]), key, "local-computer", config, _intro=True)
+    return _send_in(store, pip_id, COMPUTER_LOST.format(what=what[:300]), key, "local-computer", config, _computer_conversation(store, action_id))
 
 
 def continue_after_user_paid(store, pip_id, action_id, summary, config):
@@ -977,38 +1024,41 @@ def continue_after_user_paid(store, pip_id, action_id, summary, config):
     sent = sends_words(summary, 240)
     what = (f"{summary.get('method', '')} to {summary.get('host', '')}{summary.get('path', '')}"[:300]
             + (f" ({sent})" if sent else ""))
-    return send(store, pip_id, COMPUTER_USER_PAID.format(what=what), key, "local-computer", config, _intro=True)
+    return _send_in(store, pip_id, COMPUTER_USER_PAID.format(what=what), key, "local-computer", config, _computer_conversation(store, action_id))
 
 
 def continue_after_app(store, pip_id, link, config):
     """The chat's next turn once the user has connected an app this Pip asked for."""
     key = APPS_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(link["id"]))[:100]
     text = APP_CONNECTED.format(app=str(link["app"])[:60], label=str(link.get("label") or "their account")[:160])
-    return _owed_turn(store, pip_id, text, key, "local-apps", config)
+    where = conversation_of_run(store.db, link.get("run_id") or _card_run(store, "pip_app_links", "run_id", link["id"]))
+    return _owed_turn(store, pip_id, text, key, "local-apps", config, where)
 
 
 def continue_after_plugin(store, pip_id, card, config):
     """The chat's next turn once the user has allowed a plugin this Pip asked for."""
-    key = PLUGINS_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(card["id"]))[:100]
-    return _owed_turn(store, pip_id, PLUGIN_ALLOWED.format(plugin=str(card["name"])[:80]), key, "local-apps", config)
+    key = PLUGINS_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(card["id"]))[:100] + _answered(card.get("updated_at"))
+    where = conversation_of_run(store.db, _card_run(store, "pip_plugin_grants", "run_id", card["id"]))
+    return _owed_turn(store, pip_id, PLUGIN_ALLOWED.format(plugin=str(card["name"])[:80]), key, "local-apps", config, where)
 
 
 def continue_after_key(store, pip_id, card, config):
     """The chat's next turn once the user has saved a key this Pip asked for (pip_keys): a site's, or a generator's."""
-    key = KEYS_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(card["id"]))[:100]
+    key = KEYS_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(card["id"]))[:100] + _answered(card.get("saved_at"))
+    where = conversation_of_run(store.db, card.get("run_id"))
     if card.get("kind") == "generator":
         text = KEY_SAVED_GENERATOR.format(name=str(card["name"])[:80].removesuffix(" key"))
-        return _owed_turn(store, pip_id, text, key, "local-apps", config)
+        return _owed_turn(store, pip_id, text, key, "local-apps", config, where)
     text = KEY_SAVED.format(name=str(card["name"])[:80], host=str(card["host"])[:253])
-    return _owed_turn(store, pip_id, text, key, "local-apps", config)
+    return _owed_turn(store, pip_id, text, key, "local-apps", config, where)
 
 
 def continue_after_key_declined(store, pip_id, card, config):
     """The chat's next turn once the user said Not now to a key card: the Pip says what it couldn't do."""
-    key = KEYS_KEY + "no_" + re.sub(r"[^A-Za-z0-9_-]", "", str(card["id"]))[:100]
+    key = KEYS_KEY + "no_" + re.sub(r"[^A-Za-z0-9_-]", "", str(card["id"]))[:100] + _answered(card.get("declined_at"))
     text = (KEY_NOT_NOW_GENERATOR.format(name=str(card["name"])[:80]) if card.get("kind") == "generator" else
             KEY_NOT_NOW.format(name=str(card["name"])[:80], host=str(card["host"])[:253]))
-    return send(store, pip_id, text, key, "local-apps", config, _intro=True)
+    return _send_in(store, pip_id, text, key, "local-apps", config, conversation_of_run(store.db, card.get("run_id")))
 
 
 def continue_after_plugin_action(store, pip_id, action_id, plugin, tool, config, *, confirmed, answered,
@@ -1021,7 +1071,8 @@ def continue_after_plugin_action(store, pip_id, action_id, plugin, tool, config,
     if answer_tool != "plugin_answer":
         outcome = outcome.replace("plugin_answer", answer_tool)
     text = PLUGIN_RAN.format(tool=tool, plugin=plugin, outcome=outcome)
-    return _owed_turn(store, pip_id, text, key, "local-apps", config)
+    where = conversation_of_run(store.db, _card_run(store, "pip_app_actions", "source_run_id", action_id))
+    return _owed_turn(store, pip_id, text, key, "local-apps", config, where)
 
 
 def continue_after_borrow(store, pip_id, card, config):
@@ -1031,7 +1082,7 @@ def continue_after_borrow(store, pip_id, card, config):
     key = BORROW_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(card["id"]))[:100]
     text = BORROW_ALLOWED.format(why=str(card.get("why") or "")[:200].replace('"', "'"),
                                  sites=", ".join(shown(o) for o in card.get("sites") or [])[:400])
-    return send(store, pip_id, text, key, "local-apps", config, _intro=True)
+    return _send_in(store, pip_id, text, key, "local-apps", config, conversation_of_run(store.db, card.get("run_id")))
 
 
 def continue_after_borrow_declined(store, pip_id, card, config):
@@ -1039,7 +1090,7 @@ def continue_after_borrow_declined(store, pip_id, card, config):
     from .pip_borrow import shown
     key = BORROW_NO_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(card["id"]))[:100]
     text = BORROW_NOT_NOW.format(sites=", ".join(shown(o) for o in card.get("sites") or [])[:400])
-    return send(store, pip_id, text, key, "local-apps", config, _intro=True)
+    return _send_in(store, pip_id, text, key, "local-apps", config, conversation_of_run(store.db, card.get("run_id")))
 
 
 def continue_after_check(store, pip_id, host, at, config):
