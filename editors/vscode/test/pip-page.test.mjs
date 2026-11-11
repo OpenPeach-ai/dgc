@@ -62,7 +62,9 @@ test('its page is Info, Links, Media and Files: Instructions, Routines, Notifica
  assert.ok(x.d.querySelector('[data-routine-new]'),'+ Add routine');
  for(const gone of ['Model this Pip uses','When it runs','Usage','Allowed without asking','Advanced'])assert.doesNotMatch(x.d.body.textContent,new RegExp(gone),gone+' is not on its page');
  assert.equal(x.d.querySelector('#pipPageName').value,'Ava');
- assert.equal(x.d.querySelector('#pipPageTitle').placeholder,'Title (optional)');
+ // (ui-07: with no title yet, a quiet "Add a title" link stands where the empty box was; a click gives the box.)
+ assert.equal(x.d.querySelector('#pipPageTitle'),null);assert.equal(x.d.querySelector('[data-pip-title-edit]').textContent,'Add a title');
+ x.click('[data-pip-title-edit]');assert.equal(x.d.querySelector('#pipPageTitle').placeholder,'Title (optional)');
  const menu=[...x.d.querySelectorAll('.pip-menu .tabs-menu button')].map(b=>b.textContent);
  assert.deepEqual(menu,['Results','Memory','Copy ID','Pause','Archive…']);
 });
@@ -189,7 +191,7 @@ test('notifications, name and title are saved from its page',async()=>{
  const sw=x.d.querySelector('#pipNotify');sw.checked=false;sw.dispatchEvent(new x.w.Event('change',{bubbles:true}));await flush();
  assert.deepEqual(JSON.parse(JSON.stringify(x.requests('set_pip_profile')[0].request.changes)),{notify:false});
  x.answer(x.requests('set_pip_profile')[0],{pip_id:PIP,profile:{title:'',body:null,color:null,notify:false}});await x.drain();
- x.type('#pipPageTitle','Inbox helper');x.type('#pipPageName','Avery');
+ x.click('[data-pip-title-edit]');x.type('#pipPageTitle','Inbox helper');x.type('#pipPageName','Avery');
  x.d.querySelector('#pip-name-form').dispatchEvent(new x.w.Event('submit',{bubbles:true,cancelable:true}));await flush();
  assert.deepEqual(JSON.parse(JSON.stringify(x.requests('set_pip_profile')[1].request.changes)),{title:'Inbox helper'});
  x.answer(x.requests('set_pip_profile')[1],{pip_id:PIP,profile:{title:'Inbox helper',body:null,color:null,notify:false}});await flush();

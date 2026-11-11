@@ -346,6 +346,29 @@ export const host = (opts) => `(${function (PIP, opts) {
       list_pip_keys: () => ({ pip_id: PIP, keys: [] }) });
   }
   // (opts.ticks: a runtime at API 83 is asked for its keys, and the reply running is the shown conversation's own.)
+  // opts.many: the Pips home with a full list (ui-07): your Primary Pip, long names, one with a title, one with something
+  // waiting for you, one with something new to read, one paused; and Pips settings with something on each of its pages.
+  // opts.title: the Pip's own title, as its page shows it under its name.
+  if (opts.title) pip.profile = { title: opts.title, body: null, color: null, notify: true };
+  if (opts.many && !project) {
+    const other = (c, pip_type, name, more = {}) => ({ ...pip, id: "pip_" + c.repeat(32), pip_type, name, proposals: [], pending_review_count: 0, ...more });
+    const list = [other("1", "core", "Core"), pip, other("2", "scout", "Weekly competitor pricing and release notes digest for the sales team"),
+      other("3", "quill", "Inbox", { profile: { title: "Chief of staff for everything that arrives before nine", body: null, color: null, notify: true } }),
+      other("4", "lock", "Supercalifragilisticexpialidocious-renewals-and-subscriptions-watcher"), other("5", "patch", "Receipts", { status: "paused" })];
+    const waitsOn = list[2].id, newIn = list[3].id, both = list[4].id;
+    Object.assign(answers, {
+      list_pips: () => ({ pips: list, total: 43, next_offset: null }),
+      list_pip_attention: () => ({ as_of: at(0), total: 0, counts: {}, by_pip: { [waitsOn]: 2, [both]: 3 }, items: [], truncated: false }),
+      list_pip_unread: () => ({ workspace_id: W, total: 14, pips: [[newIn, 2, "The three emails that need an answer today are from Priya, the bank and the school."], [both, 12, "Two renewals are due this week."]].map(([pip_id, count, latest]) =>
+        ({ pip_id, workspace_id: W, name: list.find((v) => v.id === pip_id).name, pip_type: "quill", count, messages: count, posts: 0, latest, latest_at: at(8), latest_message_id: "m_" + pip_id, latest_post_id: null })) }),
+      get_pip_computers: () => ({ available: true, setup: { state: "ready", chrome: "142.0", checked_at: at(600) }, programs_bytes: 734003200, free_bytes: 412316860416,
+        computers: [{ pip_id: PIP, name, bytes: 268435456, files_bytes: 1048576, using: false, resetting: false }, { pip_id: list[2].id, name: list[2].name, bytes: 536870912, files_bytes: 0, using: true, resetting: false }] }),
+      list_pip_apps: () => ({ apps: [{ app: "Gmail", label: "me@mail.example", pips: [{ name, pip_id: PIP, link_id: "applink_" + "a".repeat(32) }, { name: list[2].name, pip_id: list[2].id, link_id: "applink_" + "b".repeat(32) }] }] }),
+      get_pips_limit: () => ({ max_pips: 100, default: 100, maximum: 100000 }),
+      list_pip_plugin_uses: () => ({ levels: ["always_ask", "any_changes", "important", "never_ask"], installed: [],
+        plugins: [{ plugin: "stripe", name: "Stripe", money: true, permission: "any_changes" }, { plugin: "linear", name: "Linear", money: false, permission: "important" }] }),
+    });
+  }
   if (opts.ticks || opts.details === "working") Object.assign(answers, { list_pip_keys: () => ({ pip_id: PIP, keys: [] }),
     list_pip_run_activity: ((base) => (r) => { const page = base(r); return { ...page, run_id: r.run_id, events: page.events.map((e) => ({ ...e, run_id: r.run_id })) }; })(answers.list_pip_run_activity) });
   window.acquireVsCodeApi = () => ({ getState: () => undefined, setState() {}, postMessage(m) {

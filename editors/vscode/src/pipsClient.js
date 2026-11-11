@@ -483,14 +483,15 @@ function keepRunningMarkup(){
  const older=k.on&&k.outdated?`<p class="muted keep-running-note keep-running-older">${esc(working?'It still starts an older DGC. Refresh moves it to this one once no Pip is working.':'It still starts an older DGC. Refresh moves it to this one.')} ${button('keep-running-refresh','Refresh',S.busy||!usable()||working,'quiet')}</p>`:'';
  return `<label class="keep-running"><input type="checkbox" id="keep-running"${k.on?' checked':''}${S.busy||!usable()?' disabled':''}> Keep Pips running</label><p class="muted keep-running-note">${esc(note)}</p>${older}`;
 }
-function runnerMarkup() {
+// more: on the Pips home's bar, Controls is a "…" button (ui-07); its menu is the same.
+function runnerMarkup(more=false) {
   if(!remoteHost&&(S.loading||!S.connected&&!S.connectFailed))return '';   // only connecting or loading: the logo says so, and no row says "Not connected"
   const r=S.runner,paused=r?.paused;
   const state=`<span class="runner-status"><i class="status-dot${r?.online?' online':''}" aria-hidden="true"></i>${!S.connected?'Not connected to DGC':!S.enabled?'Pips are off':r?(paused?'Pips stopped':r.online?'Pips running':'Pips not running'):'Can’t tell if Pips are running'}</span>`;
   const start=remoteHost?'':`${r&&!r.online&&!paused?button('start-runner','Start Pips',S.busy||!usable()):''}${paused?button('resume-runner','Resume Pips…',S.busy||!usable()):''}`;
   const counts=r?`<span class="muted">${r.counts.queued} waiting to start · ${r.counts.running} working</span>`:'';
   const controls=`${button('refresh','Refresh',!usable())}${button('stop-all','Stop all Pips…',!usable()||S.busy,'danger')}`;
-  return `<div class="runner compact-runner">${state}${start}<details class="runner-controls" data-details="runner-controls"><summary id="runner-controls-toggle">Controls</summary><div class="runner-menu">${counts}${keepRunningMarkup()}${desktopNotificationsMarkup()}${paymentsMarkup()}<div class="actions">${controls}</div><p class="muted">Stop all pauses every Pip on this computer and stops what they’re doing. To undo it, resume Pips here, then resume each Pip.</p>${remoteHost?'<p class="muted">To start or resume Pips, run <code>dgc pips resume</code> and <code>dgc pips serve</code> on that computer. From here you can’t turn Pips on or change how they run.</p>':button('disable','Turn off Pips…',S.busy||!usable())}</div></details></div>${r?.error?errorMarkup(r.error.message):''}`;
+  return `<div class="runner compact-runner">${state}${start}<details class="runner-controls" data-details="runner-controls">${more?`<summary id="runner-controls-toggle" class="topbar-icon" aria-label="Controls" title="Controls: refresh, stop all Pips, turn Pips off">${simpleIcon('more')}</summary>`:'<summary id="runner-controls-toggle">Controls</summary>'}<div class="runner-menu">${counts}${keepRunningMarkup()}${desktopNotificationsMarkup()}${paymentsMarkup()}<div class="actions">${controls}</div><p class="muted">Stop all pauses every Pip on this computer and stops what they’re doing. To undo it, resume Pips here, then resume each Pip.</p>${remoteHost?'<p class="muted">To start or resume Pips, run <code>dgc pips resume</code> and <code>dgc pips serve</code> on that computer. From here you can’t turn Pips on or change how they run.</p>':button('disable','Turn off Pips…',S.busy||!usable())}</div></details></div>${r?.error?errorMarkup(r.error.message):''}`;
 }
 // Only connecting or loading: DGC's slash logo, breathing as the panel's own header does. The pulse is timed from the page's
 // clock, so a redraw between connecting and loading carries on where it was.
@@ -3387,7 +3388,7 @@ function simpleHomeList(all,live){
   const marks=readable?`<span class="pip-row-marks pip-row-room${both}" aria-hidden="true"><span class="pip-row-read-slot"></span>${count}</span>`
    :unread?`<span class="pip-row-marks${both}"><span class="pip-row-read-slot" role="img" aria-label="${unread.count} new"><span class="pip-new-dot"></span></span>${count}</span>`
    :count?`<span class="pip-row-marks">${count}</span>`:'';
-  const button=`<button type="button" class="pip-row${marks?' pip-row-marked':''}" data-job="${esc(p.id)}" data-state="${esc(pose.state)}" data-waiting="${waiting}">${pipAvatar(p,pose.state,`row-${p.id}`,type)}<span class="pip-row-copy"><strong>${esc(p.name)}${p.pip_type==='core'?'<span class="primary-badge" title="Your Primary Pip. It uses Core, the character of DGC’s main chat." aria-label="Primary Pip">★</span>':''}</strong><small>${S.pipSearch&&record(p.match)&&['chat','instructions'].includes(p.match.in)&&typeof p.match.text==='string'?`<span class="pip-match">${p.match.in==='chat'?'In its chat':'In its instructions'}: ${esc(p.match.text.slice(0,200))}</span>`:p.status==='archived'?'Archived':p.routine_health?.blocked?healthMarkup(p.routine_health,{row:true})+(waiting?` · ${waiting} waiting for you`:''):waiting?`${waiting} waiting for you${unread?' · '+latest:''}`:unread?latest:p.routine_health&&pose.state!=='working'?healthMarkup(p.routine_health,{row:true}):esc(pose.label)}</small></span>${marks}</button>`;
+  const button=`<button type="button" class="pip-row${marks?' pip-row-marked':''}" data-job="${esc(p.id)}" data-state="${esc(pose.state)}" data-waiting="${waiting}" title="${esc(p.name)}">${pipAvatar(p,pose.state,`row-${p.id}`,type)}<span class="pip-row-copy"><strong><span class="pip-row-name">${esc(p.name)}</span>${p.pip_type==='core'?'<span class="primary-badge" title="Your Primary Pip. It uses Core, the character of DGC’s main chat." aria-label="Primary Pip">★</span>':''}</strong><small>${S.pipSearch&&record(p.match)&&['chat','instructions'].includes(p.match.in)&&typeof p.match.text==='string'?`<span class="pip-match">${p.match.in==='chat'?'In its chat':'In its instructions'}: ${esc(p.match.text.slice(0,200))}</span>`:p.status==='archived'?'Archived':p.routine_health?.blocked?healthMarkup(p.routine_health,{row:true})+(waiting?` · ${waiting} waiting for you`:''):waiting?`${waiting} waiting for you${unread?' · '+latest:''}`:unread?latest:p.routine_health&&pose.state!=='working'?healthMarkup(p.routine_health,{row:true}):esc(pose.label)}</small></span>${marks}</button>`;
   // Its dot is its own button over the row's end (never inside the row): "Read" on hover or focus, and a click
   // marks its whole chat read without opening it.
   if(!readable)return button;
@@ -3778,7 +3779,7 @@ function simplePipHeader(){
  return `<header class="pip-topbar"><button type="button" id="${onChat?'simple-back':'simple-to-chat'}" class="topbar-icon" aria-label="${onChat?'Your Pips':'Back to the chat'}" title="${onChat?'Your Pips':'Back to the chat'}">${simpleIcon('back')}</button><div class="pip-pill"${project&&pipType(p,S.types)?` title="${esc(`${type.name} · ${type.role}`)}"`:''}>${pipAvatar(p,pose.state,`pill-${p.id}`,type)}${onChat?convNameMarkup(p):`<span>${esc(p.name)}</span>`}${onChat?(project?`<small class="pip-status">${lastRunLink(p,pose.label)}</small>`:''):`<small>${esc(project?(every.find(([key])=>key===S.tab)||[])[1]||'':sections.length&&{runs:historyName('Results'),job:'Settings',memory:'Memory',revisions:'Versions',notifications:'Notifications',schedule:'Schedule',handoffs:'Handoffs',context:'Context'}[S.tab]||'')}</small>`}</div><div class="topbar-actions">${project?runNowMarkup():''}${computer}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${sections.map(([key,label])=>`<button type="button" data-tab="${key}">${label}</button>`).join('')}</div></details></div>${onChat?convMenuMarkup():''}</header>`;
 }
 function simpleMarkup(){
- const bar=`<header class="simple-bar"><h1><span class="pips-wordmark">Pips</span></h1>${runnerMarkup()}</header>${scopeTabsMarkup()}`;
+ const bar=`<header class="simple-bar"><h1><span class="pips-wordmark">Pips</span></h1>${runnerMarkup(true)}</header>${scopeTabsMarkup()}`;
  const notes=`${S.error?`<div class="simple-note">${errorMarkup(S.error)}</div>`:''}${S.notice?`<p class="notice simple-note" role="status">${esc(S.notice)}</p>`:''}${undoRejectMarkup()}`;
  if(pipsSettings.view&&(!S.selected||S.overview)&&!S.create)return `${pipsSettingsMarkup()}${notes}`;
  if(S.projectEmpty&&scopeTabs())return `${bar}${notes}${projectEmptyMarkup()}`;
@@ -4179,7 +4180,7 @@ function pluginSkip(id){
 // ---- A Personal Pip's page, as on Grok's bots: face, name and title, then Info (Instructions,
 // Routines, Notifications, Share as template), Links, Media and Files. And its routines' cards.
 S.pipPage='info';S.routines=null;S.routinesError='';
-let routineSeq=0,routineEditing='',routineBusy='',routineError='',pageNameDirty=false,lookDirty=false,profileBusy=false;
+let routineSeq=0,routineEditing='',routineBusy='',routineError='',pageNameDirty=false,titleEditing=false,lookDirty=false,profileBusy=false;
 const shared={pip:'',kind:'',items:null,error:'',loading:false,seq:0,desk:null};
 const pipsSettings={view:'',computers:null,computersError:'',apps:null,appsError:'',plugins:null,pluginsError:'',confirmReset:'',seq:0,busy:false};
 Object.assign(draft,{pipPageName:'',pipPageTitle:'',pipInstructions:'',lookBody:''},routineDraft(null,defaultZone));
@@ -4249,7 +4250,7 @@ function routinePopoverMarkup(){
 }
 function openPipPage(view='info'){
  const p=S.pip;if(!p)return;
- S.pipPage=view;draft.pipPageName=p.name;draft.pipPageTitle=profile(p.profile).title;pageNameDirty=false;lookDirty=false;routineEditing='';routineError='';
+ S.pipPage=view;draft.pipPageName=p.name;draft.pipPageTitle=profile(p.profile).title;pageNameDirty=false;titleEditing=false;lookDirty=false;routineEditing='';routineError='';
  void loadRoutines();void loadAppLinks();void loadPlugins();void loadNotes();void loadCareful();void loadEyes();void loadLevel();void loadPipBackup();void loadTemplate();void loadLogins();void loadArtifacts();noteConfirmAll=false;sitesAll=false;loginsState.confirm='';pipKeyConfirm='';
 }
 function putProfile(pipId,value){
@@ -4268,7 +4269,7 @@ async function saveNameAndTitle(){
  if(title!==profile(p.profile).title&&!await setProfile({title}))return;
  if(name!==p.name&&!await applyOwnChange({name},d=>d.name===name,'Saved.'))return;
  if(name===p.name)S.notice='Saved.';
- pageNameDirty=false;draft.pipPageName=S.pip?.name||name;draft.pipPageTitle=profile(S.pip?.profile).title;render();
+ pageNameDirty=false;titleEditing=false;draft.pipPageName=S.pip?.name||name;draft.pipPageTitle=profile(S.pip?.profile).title;render();
 }
 async function loadShared(kind){
  if(remoteHost||S.apiVersion<43||!personalPip()||!usable())return;
@@ -4288,7 +4289,7 @@ function pipPageMarkup(){
   const own=SIMPLE_CHARACTERS.includes(p.pip_type)?p.pip_type:'core',body=draft.lookBody||own;
   return characterMarkup({esc,body,busy:off,changed:lookDirty,avatarFor:(id,key,state='idle')=>avatar(state,characterType(id||own),`${key}-${p.id}`)});
  }
- const head=headMarkup({esc,avatar:pipAvatar(p,'idle',`page-${p.id}`,pipType(p,S.types)||characterType(p.pip_type)),name:p.name,title:look.title,nameDraft:draft.pipPageName,titleDraft:draft.pipPageTitle,busy:off,dirty:pageNameDirty});
+ const head=headMarkup({esc,avatar:pipAvatar(p,'idle',`page-${p.id}`,pipType(p,S.types)||characterType(p.pip_type)),name:p.name,title:look.title,nameDraft:draft.pipPageName,titleDraft:draft.pipPageTitle,busy:off,dirty:pageNameDirty,titleEditing});
  const tab=['links','media','files'].includes(S.pipPage)?S.pipPage:'info';
  if(tab!=='info'&&(shared.pip!==S.selected||shared.kind!==tab)&&!shared.loading)void loadShared(tab);
  const mine=shared.pip===S.selected&&shared.kind===tab,items=mine?shared.items:null,error=mine?shared.error:'',loading=!mine||shared.loading;
@@ -5158,7 +5159,8 @@ document.addEventListener('click',event=>{
   if(target.dataset.pipShare!==undefined){document.querySelectorAll('details[data-details="pip-menu"]').forEach(d=>d.removeAttribute('open'));void exportPipFile();return;}
   if(target.dataset.pipCharacterReset!==undefined){draft.lookBody='';lookDirty=true;render();return;}
   if(target.dataset.pipCharacterSave!==undefined){const own=S.pip?.pip_type,body=draft.lookBody&&draft.lookBody!==own?draft.lookBody:null;void setProfile({body},'Saved. That’s its face now.').then(ok=>{if(ok){lookDirty=false;S.pipPage='info';render();}});return;}
-  if(target.dataset.pipNameCancel!==undefined){draft.pipPageName=S.pip?.name||'';draft.pipPageTitle=profile(S.pip?.profile).title;pageNameDirty=false;render();return;}
+  if(target.dataset.pipNameCancel!==undefined){draft.pipPageName=S.pip?.name||'';draft.pipPageTitle=profile(S.pip?.profile).title;pageNameDirty=false;titleEditing=false;render();return;}
+  if(target.dataset.pipTitleEdit!==undefined){titleEditing=true;render();const box=$('pipPageTitle');box?.focus();box?.select?.();return;}
   if(target.dataset.openLink){vscode.postMessage({type:'openExternal',url:target.dataset.openLink});return;}
   if(target.dataset.openComputerFiles!==undefined){if(computerState.pip===S.selected&&computerState.value?.granted)void openComputerView();return;}
   if(target.dataset.setupChat!==undefined){S.tab='chat';chatEdit(()=>{draft.chatText='Change your instructions: ';chatDrafts.set(S.selected,draft.chatText);rememberView();render();});void loadMessages();$('chatText')?.focus();return;}
@@ -5592,6 +5594,8 @@ async function enable(){
   catch(error){if(epoch===S.epoch)setError(error);}finally{if(epoch===S.epoch){S.busy=false;render();}}
 }
 document.addEventListener('focusout',event=>picker.focusout(event));
+// A Pip's title, left as it was saved: its box is the quiet link again (with a change typed, Save and Cancel decide).
+document.addEventListener('focusout',event=>{if(event.target?.id!=='pipPageTitle'||!titleEditing||pageNameDirty||disposed)return;titleEditing=false;render();});
 document.addEventListener('mousemove',event=>picker.hover(event));
 // The thinking slider's focus ring is for the keyboard, on the Pip's face. Dragging it draws nothing (reported 2026-11-07). A
 // redraw keeps which it was, since a choice redraws the composer under the slider.

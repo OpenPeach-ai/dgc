@@ -480,7 +480,8 @@ button.pill{border-radius:999px;padding:6px 16px}
 .pip-page-body{display:flex;flex-direction:column;gap:12px}
 .pip-page-group{display:flex;flex-direction:column;border:1px solid var(--pip-edge);border-radius:14px;overflow:hidden}
 .pip-page-group>p.muted,.pip-page-group>.pip-page-empty{margin:0;padding:10px 14px}
-.pip-page-label{margin:0;padding:10px 14px 2px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+/* (ui-07: a group's label is sentence case, as it is written.) */
+.pip-page-label{margin:0;padding:10px 14px 2px;font-size:12px;font-weight:600;color:var(--muted)}
 .pip-page-row{display:flex;align-items:center;gap:12px;width:100%;min-height:52px;padding:10px 14px;border:0;border-radius:0;background:transparent;color:var(--vscode-foreground);text-align:left}
 button.pip-page-row:hover{background:var(--pip-wash)}
 /* The page-wide input rule sets width:100%; in a row that would claim the whole row and crush the
@@ -732,7 +733,7 @@ button.attention-dot:hover{background:transparent;border:0}.attention-dot:hover 
 .pip-page-row.plugin-level{flex-wrap:wrap}
 .pip-page-row.plugin-level .row-words{flex:1 1 200px}
 .pip-page-row.plugin-level .row-words small{white-space:normal;overflow:visible}
-.pip-page-row.plugin-level select{flex:1 1 100%;max-width:100%;margin-left:42px}
+.pip-page-row.plugin-level select{flex:0 1 auto;max-width:100%;min-width:0}
 /* The Pip page's status names its latest run and opens it: words in the line, a link's look on hover and focus. */
 button.link.last-run{display:inline;min-height:0;padding:0;border:0;border-radius:3px;font:inherit;color:inherit;text-decoration:underline;text-decoration-color:color-mix(in srgb,currentColor 35%,transparent);text-underline-offset:2px;cursor:pointer}
 button.link.last-run:hover{background:transparent;color:var(--pip-ink);text-decoration-color:currentColor}
@@ -781,7 +782,7 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .pip-dashboard-name{font-weight:500;overflow-wrap:anywhere}
 .pip-artifacts-section>p.muted{margin-top:0}
 .pip-artifacts .pip-dashboards{margin:0;border:0;border-radius:0;border-top:1px solid var(--pip-edge)}
-.pip-artifacts .pip-dashboards>li{padding:6px 8px 6px 14px}
+.pip-artifacts .pip-dashboards>li{padding:6px 14px}
 .pip-artifacts>p.pip-artifacts-says{padding-top:0}
 .pip-artifacts>.pip-page-label+p.pip-artifacts-says{padding-top:2px}
 .pip-artifacts>.pip-dashboards+.pip-page-row,.pip-artifacts>.pip-dashboards+p{border-top:1px solid var(--pip-edge)}
@@ -1266,3 +1267,27 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 .pip-message.user .msg-images,.pip-message.user .msg-files{align-self:flex-end;max-width:100%}
 .pip-message.user .msg-image{max-width:100%}
 .pip-message.assistant .msg-images{justify-content:flex-start}
+
+/* ui-07: the Pips list, a Pip's page and Pips settings.
+   The list: Controls is a "…" button on the bar (its menu is the same), and a Pip's name is one line. */
+.simple-bar .runner-controls summary.topbar-icon{width:28px;height:28px;min-height:28px;padding:0;border:0;border-radius:var(--r-row,8px);color:var(--text-2,var(--muted));justify-content:center}
+.simple-bar .runner-controls summary.topbar-icon:hover,.simple-bar .runner-controls[open] summary.topbar-icon{background:var(--wash,var(--pip-wash));color:var(--vscode-foreground)}
+.simple-bar .runner-controls summary.topbar-icon:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:1px}
+.pip-row-copy strong{min-width:0}
+.pip-row-name{flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pip-row-copy .primary-badge{flex:none}
+/* A Pip's page. Its title is words until you change it: a quiet link while it has none, and a long one wraps. A name
+   too long for its box ends in an ellipsis. */
+.pip-name-form input{text-overflow:ellipsis;width:100%}
+.pip-title-link{max-width:min(100%,420px);min-height:26px;padding:4px 10px;border:0;border-radius:10px;background:transparent;color:var(--muted);font:inherit;font-size:12px;line-height:1.45;text-align:center;text-wrap:balance;overflow-wrap:anywhere;cursor:pointer}
+.pip-title-link:hover:not(:disabled){color:var(--vscode-foreground);text-decoration:underline;text-underline-offset:3px}
+.pip-title-link:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:1px}
+.pip-title-link:disabled{opacity:.55;cursor:default}
+/* One control per row, at the right. Beside the words while both fit; a row that says only its short title (a
+   setting's name) keeps its button or switch beside it down to the side bar's width, the title taking a second line
+   first. Under the words, a control still ends at the row's right edge. */
+.pip-page-row.static>.row-words+*,.pip-page-row.plugin-level select,.pip-dashboards>li>.pip-artifacts-actions{margin-left:auto}
+.pip-dashboards>li>.pip-artifacts-actions{justify-content:flex-end}
+.pip-page-row.static>.row-words:has(>strong):not(:has(small)){flex:1 0 96px}
+.pip-page-row.static>.row-words:has(>strong):not(:has(small))>strong{text-wrap:balance}
+@container(max-width:420px){.pip-page-row.static>button[data-eyes-switch]{margin-left:auto}}

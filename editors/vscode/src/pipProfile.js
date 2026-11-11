@@ -74,12 +74,15 @@ export function bytesLabel(n) {
 const chevron = '<svg class="row-chevron" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 3 5 5-5 5"/></svg>';
 const pencil = '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 2.5 13.5 5.5 6 13H3v-3z"/></svg>';
 
-/** The top of its page: its face (with Edit), its name and its title. */
-export function headMarkup({ esc, avatar, name, title, nameDraft, titleDraft, busy = false, dirty = false }) {
+/** The top of its page: its face (with Edit), its name and its title. The title is words until you change it: a quiet
+    "Add a title" link while it has none, the title itself (it wraps) once it has one; a click gives its box. */
+export function headMarkup({ esc, avatar, name, title, nameDraft, titleDraft, busy = false, dirty = false, titleEditing = false }) {
   const off = busy ? ' disabled' : '';
   return `<div class="pip-page-head">${avatar}<button type="button" class="pip-face-edit" data-pip-page="character" aria-label="Edit its face"${off}>${pencil}<span>Edit</span></button></div>`
     + `<form id="pip-name-form" class="pip-name-form"><label for="pipPageName" class="sr-only">Name</label><input id="pipPageName" data-draft="pipPageName" maxlength="60" autocomplete="off" value="${esc(nameDraft ?? name)}" aria-label="Name"${off}>`
-    + `<label for="pipPageTitle" class="sr-only">Title (optional)</label><input id="pipPageTitle" data-draft="pipPageTitle" maxlength="60" autocomplete="off" placeholder="Title (optional)" value="${esc(titleDraft ?? title)}" aria-label="Title (optional)"${off}>`
+    + (titleEditing || (titleDraft ?? title) !== title
+      ? `<label for="pipPageTitle" class="sr-only">Title (optional)</label><input id="pipPageTitle" data-draft="pipPageTitle" maxlength="60" autocomplete="off" placeholder="Title (optional)" value="${esc(titleDraft ?? title)}" aria-label="Title (optional)"${off}>`
+      : `<button type="button" class="pip-title-link${title ? '' : ' unset'}" data-pip-title-edit title="${title ? 'Change its title' : 'Add a title'}"${off}>${title ? esc(title) : 'Add a title'}</button>`)
     + (dirty ? `<div class="pip-name-actions"><button type="submit" class="primary pill"${off}>Save</button><button type="button" class="quiet pill" data-pip-name-cancel${off}>Cancel</button></div>` : '') + '</form>';
 }
 
