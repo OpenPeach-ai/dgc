@@ -2554,6 +2554,9 @@ test("the context window floats over the chat: the chat keeps its height and sho
     await s.page.locator("#cd-context").click();
     await s.frame();
     assert.equal(await chatHeight(), before, "the chat doesn't shrink while the card is open");
+    // Where the card rests: since every popover rises in on the shared lift (90564bdd), a frame after the click it may
+    // still be scaling up, a pixel short of its place.
+    await s.page.evaluate(() => Promise.all(document.querySelector("#cd-context-pop").getAnimations({ subtree: true }).map((a) => a.finished)));
     const place = await s.page.evaluate(() => {
       const card = document.querySelector("#cd-context-pop").getBoundingClientRect(), box = document.querySelector("#cd-box").getBoundingClientRect();
       const beside = document.elementFromPoint(card.left - 160, card.top + card.height / 2);
