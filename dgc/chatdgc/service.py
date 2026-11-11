@@ -19,6 +19,7 @@ import tempfile
 import threading
 import time
 import urllib.parse
+from datetime import datetime
 from pathlib import Path
 
 from ..editor_protocol import command_error
@@ -80,7 +81,7 @@ CHAT_ID_CHARS = 37
 WRITES = frozenset({"chatdgc_send", "chatdgc_continue", "chatdgc_edit", "chatdgc_regenerate", "chatdgc_version",
                     "chatdgc_answer", "chatdgc_research", "chatdgc_research_start", "chatdgc_compact", "chatdgc_summary",
                     "chatdgc_carry", "chatdgc_branch", "chatdgc_draft", "chatdgc_action", "chatdgc_set_folder",
-                    "chatdgc_update", "chatdgc_move"})
+                    "chatdgc_update", "chatdgc_move", "chatdgc_wake", "chatdgc_cancel_wakeup"})
 # What a window that took a chat mid-reply asks of the process writing the reply: what it has now (open), Stop, a
 # steer for research, what a widget shows. Anything else it reads from disk itself.
 THROUGH = frozenset({"chatdgc_open", "chatdgc_cancel", "chatdgc_research_steer", "chatdgc_widget_report"})
@@ -457,7 +458,8 @@ class _Live:
 
 
 class ChatService:
-    def __init__(self, emit, config, engine: ChatEngine | None = None, *, generative_ui_supported: bool = False):
+    def __init__(self, emit, config, engine: ChatEngine | None = None, *, generative_ui_supported: bool = False,
+                 wakeups: bool = False):
         # Every event goes through _out: a chat another window took mid-reply has its events sent down that window's
         # link instead of this wire (Open here).
         self._wire = emit
@@ -509,6 +511,16 @@ class ChatService:
         self._mod_lock = threading.Lock()
         if engine is None:                               # a test's own engine has no mods unless it starts them
             threading.Thread(target=self._mods, daemon=True, name="chatdgc-mods").start()
+        # A chat's wake-ups (wake_later, as Work's): one book per chat this process has opened, beside the chat. When one
+        # falls due on a free chat this window writes, the editor is told (chatdgc_wakeup_due) and sends chatdgc_wake,
+        # with the chat's route as any turn: a saved provider's key lives in the editor.
+        self._wake_books: dict[str, object] = {}
+        self._wake_lock = threading.Lock()
+        self._wake_timer = None
+        self._wake_clock = time.time
+        self._wake_said: dict[str, float] = {}          # wake-up id -> when the editor was last told it is due
+        if wakeups is True:
+            self.engine.wake_book = self._wake_book
         self._watch_videos()                             # last: a job's card can be written from here on
 
     def _mcp_app_shown(self, record: dict) -> None:
@@ -550,6 +562,7 @@ class ChatService:
              "chatdgc_context_breakdown": self._breakdown,
              "chatdgc_research_start": self._research_start, "chatdgc_research_steer": self._research_steer,
              "chatdgc_shown": self._shown_now, "chatdgc_open_here": self._open_here, "chatdgc_holder": self._holder,
+             "chatdgc_wake": self._wake, "chatdgc_cancel_wakeup": self._cancel_wakeup,
              "memory_list": self._memory, "memory_add": self._memory, "memory_edit": self._memory,
              "memory_forget": self._memory, "memory_clear": self._memory, "memory_project": self._memory,
              "memory_history": self._memory_history, "memory_undo": self._memory_undo,
@@ -584,7 +597,13 @@ class ChatService:
 
     def _opened(self, chat: dict, request_id: str) -> None:
         """The chat as a screen opens it. Mid-reply, with the reply so far in it (_Live): a window that reloaded
-        while the reply went on, or a tab opened on it again, shows every part of it once."""
+        while the reply went on, or a tab opened on it again, shows every part of it once. Then its wake-ups."""
+        try:
+            return self._opened_now(chat, request_id)
+        finally:
+            self._wakeups_opened(chat)
+
+    def _opened_now(self, chat: dict, request_id: str) -> None:
         for _ in range(3):
             with self._lock:
                 turn = self._turns.get(chat["id"])
@@ -2478,7 +2497,13 @@ class ChatService:
         return found
 
     def _turns_changed(self) -> None:
-        """A reply started or ended: the process's note says so (on_turns_changed is the Host's announce_peers)."""
+        """A reply started or ended: the process's note says so (on_turns_changed is the Host's announce_peers). A
+        wake-up that fell due while its chat answered is said once the chat is free."""
+        if self._wake_books:
+            try:
+                self._wake_check()
+            except Exception:                         # noqa: BLE001 -- a wake-up is never worth a reply's end
+                pass
         try:
             self._release_unwanted()                  # before the note: never named while its lock is let go
         except Exception:                             # noqa: BLE001 -- the kernel lets go of it at exit anyway
@@ -2490,6 +2515,128 @@ class ChatService:
             except Exception:                         # noqa: BLE001 -- a note is a courtesy
                 pass
 
+    # ---- wake-ups (wake_later) ------------------------------------------------------------------------------------
+    def _wake_book(self, conversation_id: str):
+        """This chat's book of wake-ups, made on first use; its journal beside the chat's file in ChatDGC's store."""
+        from .. import wakeups
+        with self._wake_lock:
+            book = self._wake_books.get(conversation_id)
+            if book is None:
+                store = self.engine.store
+                book = self._wake_books[conversation_id] = wakeups.Book(
+                    lambda: store._path(conversation_id), clock=lambda: self._wake_clock(),
+                    on_change=lambda items: self._wakeups_changed(conversation_id, items), journal=wakeups.FILE_JOURNAL)
+            return book
+
+    def _wakeups_changed(self, conversation_id: str, items: list) -> None:
+        """The chat's row (chatdgc_wakeups): when and why, soonest first; then the timer for the soonest."""
+        self.emit("chatdgc_wakeups", conversation_id=conversation_id, items=list(items)[:8])
+        self._arm_wake()
+
+    def _wakeups_opened(self, chat) -> None:
+        """A chat opened here: the wake-ups whose process has gone are this one's now, and its row is shown."""
+        if self.engine.wake_book is None or not isinstance(chat, dict) or not _chat_id(chat.get("id")) or chat.get("temporary"):
+            return
+        try:
+            book = self._wake_book(chat["id"])
+            book.adopt()
+            if book.items():
+                self.emit("chatdgc_wakeups", conversation_id=chat["id"], items=book.snapshot()[:8])
+            self._arm_wake()
+        except Exception:                             # noqa: BLE001 -- a wake-up is never worth the open
+            pass
+
+    def _arm_wake(self) -> None:
+        """One timer, for the soonest wake-up of the chats this process has opened (at most an hour ahead: it looks
+        again then). None waiting: no timer."""
+        with self._wake_lock:
+            books = list(self._wake_books.values())
+            if self._wake_timer is not None:
+                self._wake_timer.cancel()
+                self._wake_timer = None
+            soonest = min((at for at in (b.next_at() for b in books) if at is not None), default=None)
+            if soonest is None or self._closing:
+                return
+            delay = max(0.5, min(3600.0, soonest - self._wake_clock()))
+            timer = self._wake_timer = threading.Timer(delay, self._wake_check)
+            timer.daemon = True
+            timer.start()
+
+    def _wake_check(self) -> None:
+        """Say each wake-up that has come due on a free chat this window writes (chatdgc_wakeup_due): the editor sends
+        chatdgc_wake with the chat's route. Said again after a minute if no wake came (an editor away a moment). One
+        whose chat answers now waits for the reply to end (_turns_changed looks again)."""
+        now = self._wake_clock()
+        waiting = False
+        with self._wake_lock:
+            books = list(self._wake_books.items())
+        for conversation_id, book in books:
+            for item in book.items():
+                if item["at"] > now:
+                    continue
+                with self._lock:
+                    busy = conversation_id in self._turns
+                if busy or self._holder_state(conversation_id) is not None:
+                    waiting = True
+                    continue
+                said = self._wake_said.get(item["id"])
+                if said is not None and time.monotonic() - said < 60:
+                    waiting = True
+                    continue
+                self._wake_said[item["id"]] = time.monotonic()
+                fields = {"conversation_id": conversation_id, "id": item["id"]}
+                try:
+                    model = str((self.engine.store.get(conversation_id) or {}).get("model") or "")
+                except (ChatStoreError, OSError, ValueError):
+                    model = ""
+                model = model or str(getattr(self.engine.config, "model", "") or "")
+                if model:
+                    fields["model"] = model[:200]
+                self.emit("chatdgc_wakeup_due", **fields)
+                waiting = True
+        if waiting and not self._closing:
+            with self._wake_lock:
+                if self._wake_timer is not None:
+                    self._wake_timer.cancel()
+                timer = self._wake_timer = threading.Timer(60.0, self._wake_check)
+                timer.daemon = True
+                timer.start()
+        else:
+            self._arm_wake()
+
+    def _wake(self, cmd: dict) -> None:
+        """The editor's chatdgc_wake: that wake-up's turn, now, if it is due on this chat; its user message says it is
+        one (``wakeup``) and its text is what the chat said it would do. Refused (and kept) if it isn't due or has gone;
+        put back if the turn can't start."""
+        from .. import wakeups
+        conversation_id, request_id = cmd["conversation_id"], cmd["request_id"]
+        with self._wake_lock:
+            book = self._wake_books.get(conversation_id)
+        item = book.take(str(cmd.get("id") or "")) if book is not None else None
+        if item is None:
+            return self._error("That wake-up isn't due yet, or has gone.", request_id, conversation_id)
+        self._wake_said.pop(item["id"], None)
+        text = wakeups.turn_text(item, now=self._wake_clock())
+        mark = {"id": item["id"], "why": item["why"],
+                "at": datetime.fromtimestamp(item["at"]).astimezone().isoformat(timespec="seconds")}
+
+        def run(cancel, on_start, stream_for, activity):
+            return self.engine.send(conversation_id, text, model=cmd.get("model"), search="auto", wakeup=mark,
+                                    on_start=on_start, on_activity=activity, cancel=cancel, **stream_for())
+        try:
+            self._start(cmd, run)
+        except Exception:
+            book.put_back(item)
+            raise
+
+    def _cancel_wakeup(self, cmd: dict) -> None:
+        """The pill's Cancel: that wake-up goes; the row says what is left either way."""
+        conversation_id = cmd["conversation_id"]
+        book = self._wake_book(conversation_id)
+        book.adopt()
+        if not book.cancel(str(cmd.get("id") or "")):
+            self.emit("chatdgc_wakeups", conversation_id=conversation_id, items=book.snapshot()[:8])
+
     def close(self, grace_s: float = CLOSE_GRACE_S) -> None:
         """Stop every reply and wait (briefly) for each to save what it wrote."""
         host = getattr(self, "_mod_host", None)
@@ -2499,6 +2646,10 @@ class ChatService:
             self._closing = True
             turns = list(self._turns.values())
         self._review_cancel.set()
+        with self._wake_lock:
+            if self._wake_timer is not None:
+                self._wake_timer.cancel()             # its wake-ups stay in their journals for the next DGC
+                self._wake_timer = None
         self._reviews.close(min(grace_s, 2.0))
         for turn in turns:
             turn["cancel"].set()

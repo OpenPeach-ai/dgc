@@ -208,7 +208,7 @@ export function isChatdgcModsEvent(ev: { type?: unknown; surface?: unknown; requ
 /** The commands that run a chat's reply: they carry its provider's route, and its fallback (D14). */
 const CHAT_TURNS = ["chatdgc_send", "chatdgc_continue", "chatdgc_edit", "chatdgc_regenerate",
   "chatdgc_answer", "chatdgc_research", "chatdgc_research_start", "chatdgc_action",
-  "chatdgc_compact", "chatdgc_carry", "chatdgc_work_brief"];
+  "chatdgc_compact", "chatdgc_carry", "chatdgc_work_brief", "chatdgc_wake"];
 
 /** ChatDGC's context window presets, as main DGC's sizes run (a backend offers the ones it takes). */
 export const CHATDGC_WINDOWS = ["8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "max"];
@@ -435,6 +435,22 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   private fallbacks = new Map<string, string>();
   private fallbackOffered(): boolean {
     try { return Number(this.host?.chatdgcOffers?.()?.fallback) >= 1; } catch { return false; }
+  }
+
+  /** A chat's wake-ups (ready.capabilities.chatdgc.wakeups): the row each chat last said (chatdgc_wakeups), for a tab
+   *  that opens it later; the backend says when one is due and this sends its turn, with the chat's route. */
+  private wakeRows = new Map<string, Array<{ id: string; at: string; why: string }>>();
+  private wakesOffered(): boolean {
+    try { return Number(this.host?.chatdgcOffers?.()?.wakeups) >= 1; } catch { return false; }
+  }
+  private wakeDue(conversation: string, id: string, model: string): void {
+    if (!this.wakesOffered() || !CONVERSATION_ID.test(conversation) || !/^wake\d{1,9}$/.test(id)) return;
+    const tab = [...this.tabs].find((t) => t.conversation === conversation && !t.elsewhere);
+    this.ask({ tab, kind: "wake" }, { type: "chatdgc_wake", conversation_id: conversation, id, ...(model ? { model } : {}) });
+  }
+  private cancelWakeup(conversation: string, id: string): void {
+    if (!this.wakesOffered() || !CONVERSATION_ID.test(conversation) || !/^wake\d{1,9}$/.test(id)) return;
+    this.host?.chatdgcSend({ type: "chatdgc_cancel_wakeup", conversation_id: conversation, id });
   }
 
   /** Which folder a tab's chat reads: asked as it opens, since a chat's summary doesn't carry it. */
@@ -1633,6 +1649,16 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           this.post(asker.tab, { type: "outline", conversation, prompts: Array.isArray(ev.prompts) ? ev.prompts : [] });
         }
         return;
+      case "chatdgc_wakeups": {
+        const items = (Array.isArray(ev.items) ? ev.items : []).filter((i: any) => i && typeof i.id === "string" && typeof i.at === "string")
+          .slice(0, 8).map((i: any) => ({ id: String(i.id).slice(0, 32), at: String(i.at).slice(0, 40), why: String(i.why || "").slice(0, 200) }));
+        if (conversation) { if (items.length) this.wakeRows.set(conversation, items); else this.wakeRows.delete(conversation); }
+        for (const tab of showing(conversation)) this.post(tab, { type: "wakeups", items });
+        return;
+      }
+      case "chatdgc_wakeup_due":
+        this.wakeDue(conversation, String(ev.id || ""), String(ev.model || "").slice(0, 200));
+        return;
       case "chatdgc_turn":
         if (ev.state === "ended" && requestId) this.requests.delete(requestId);
         if (conversation) { if (ev.state === "started") this.answering.add(conversation); else this.answering.delete(conversation); }
@@ -1795,6 +1821,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         if (asker?.kind === "widgetRestore") { asker.widgetPanel?.dispose(); return; }       // deleted since: no tab
         if (asker?.kind === "breakdown") return;          // the details show the meter's own lines instead
         if (asker?.kind === "folderGet") return;          // its chip shows no folder
+        if (asker?.kind === "wake") return;               // a wake-up gone or not due: the backend says the row again
         if (asker?.kind === "folderSet") { if (asker.tab) this.post(asker.tab, { type: "folderError", message }); return; }
         if (asker?.kind === "workBrief") {
           // No brief (no folder any more, nothing sent yet, the model failed, or Stop): every tab stops showing it
@@ -2321,6 +2348,9 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       }
       case "stop":
         if (conversation) this.deliver({ tab, kind: "stop" }, { type: "chatdgc_cancel", conversation_id: conversation });
+        return;
+      case "cancelWakeup":
+        if (conversation) this.cancelWakeup(conversation, String(message.id || ""));
         return;
       case "earlier":
         if (!conversation || !MESSAGE_ID.test(String(message.before || ""))) return;

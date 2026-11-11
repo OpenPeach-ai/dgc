@@ -3399,10 +3399,12 @@ class Backend:
         # mentions: chatdgc_mentions is understood, and chatdgc_send takes display_mentions.
         # fallback: a chat's turn commands take `fallback` (and `fallback_provider`): its fallback model (D14).
         # attachments: how many things one message may carry (Limits for everyone, 10 Nov: 50; it was 10).
+        # wakeups: a chat's wake_later (chatdgc_wakeups, chatdgc_wakeup_due, chatdgc_wake, chatdgc_cancel_wakeup).
         from .chatdgc.attachments import MAX_ATTACHMENTS as chat_attachments
         return {"chatdgc": {"version": 1, "widget_report": 1, "widget_library": 1, "windows": list(CHATDGC_WINDOWS),
                             "context_breakdown": 1, "voice_replies": 1, "question_forms": 1, "outline": 1,
-                            "holder": 1, "folder": 1, "mentions": 1, "fallback": 1, "attachments": chat_attachments},
+                            "holder": 1, "folder": 1, "mentions": 1, "fallback": 1, "attachments": chat_attachments,
+                            "wakeups": 1},
                 # history: memory_history and memory_undo; learned: memory_watch, then memory_learned when a
                 # Work session's look back keeps something (dgc/memory_review.py).
                 "memory": {"version": 1, "history": 1, "learned": 1}, "voice": {"version": 1}}
@@ -11185,7 +11187,8 @@ class Host:
         with self._chats_lock:
             if self._chatdgc is None:
                 from .chatdgc.service import ChatService
-                self._chatdgc = ChatService(self.core.emit, self.default.config, generative_ui_supported=True)
+                self._chatdgc = ChatService(self.core.emit, self.default.config, generative_ui_supported=True,
+                                            wakeups=True)
                 # Plugins' cards in a reply (MCP Apps), once ChatDGC's screens say they draw them.
                 self._chatdgc.engine.mcp_apps_watched = lambda: self.mcp_apps_watched("chat")
                 # A reply starting or ending is news for the process's note: dgc ps and Settings -> Running

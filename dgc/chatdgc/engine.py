@@ -94,6 +94,14 @@ _OTHER = re.compile(r"(?i)(other|something else|none of (these|the above))(\s+\w
 # A model that says it can't take tools gets the reply without them, and isn't offered them again while DGC runs.
 _NO_TOOLS = NO_TOOLS
 # Memory (dgc/shared_memory.py): saving and forgetting don't wait either; the reply says what it kept.
+# Work's own wake_later and wake_cancel (dgc/tools.py), the same words and limits: a ChatDGC chat comes back by itself.
+def _work_tools(*names):
+    from ..tools import TOOL_SCHEMAS
+    return tuple(t for t in TOOL_SCHEMAS if t["function"]["name"] in names)
+
+
+WAKE_TOOLS = _work_tools("wake_later", "wake_cancel")
+
 REMEMBER_TOOL = {"type": "function", "function": {
     "name": "remember",
     "description": (
@@ -382,6 +390,9 @@ class ChatEngine:
         self._drafts: dict[str, dict] = {}         # new chats: written with their first message
         self._temporary_files: dict[tuple[str, str], tuple[bytes, str | None]] = {}   # a temporary chat's attachments
         self._toolless: set[str] = set()           # models that said they can't take tools
+        # A chat's wake-ups (wake_later / wake_cancel, as Work's): the service sets this to its book for a chat when the
+        # editor starts a wake-up's turn (service.py). None: not offered.
+        self.wake_book: Callable | None = None
         # Pictures shown while their reply streams, before it's saved: the screen asks for each one as soon as
         # it's announced, so they're served from here until the reply carries them.
         self._live_pictures: dict[tuple[str, str], dict] = {}
@@ -807,8 +818,11 @@ class ChatEngine:
              on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None, on_widget=None,
              cancel: threading.Event | None = None, answering: dict | None = None, study: bool | None = None,
              canvas_selection: dict | None = None, voice: bool = False, output: str | None = None,
-             display_mentions: list | None = None, named_pips: list | None = None) -> dict:
+             display_mentions: list | None = None, named_pips: list | None = None, wakeup: dict | None = None) -> dict:
         """Add the user's message and stream the reply. Returns the reply message (also saved).
+
+        ``wakeup``: this turn is a wake-up the chat set ({id, why, at}); the message keeps it, so a screen shows a note
+        ("Woke up as planned") instead of a bubble, and ``text`` is what the chat said it would do (wakeups.turn_text).
 
         ``on_start(user_message, reply_id)`` runs once the message is saved, before the model is asked:
         ``reply_id`` is the id the streamed parts and the finished reply will carry."""
@@ -859,6 +873,8 @@ class ChatEngine:
             mine["display_mentions"] = display_mentions     # where its marks go in the bubble: display-only
         if named_pips:
             mine["named_pips"] = named_pips  # the Pips it names, as this reply's model is told of them
+        if isinstance(wakeup, dict):
+            mine["wakeup"] = {k: wakeup[k] for k in ("id", "why", "at") if k in wakeup}   # a wake-up's turn: a note
         if prepared:
             mine["attachments"] = [item["meta"] for item in prepared]
         if answering:
@@ -1808,6 +1824,37 @@ class ChatEngine:
         reported = int(last.get("counted") or 0) if last.get("role") == "assistant" and not since else 0
         return {**breakdown.build(room, cats, compact_at=fit_window.COMPACT_AT, reported=reported),
                 "limit": limit, "preset": self._preset()}
+
+    def _wakes(self, chat: dict) -> bool:
+        """Does this chat get wake_later and wake_cancel? Where the editor starts a wake-up's turn (wake_book set), never
+        a temporary chat (nothing is kept), and not on Claude Code or Codex, whose CLI runs its own loop (as Work's)."""
+        if self.wake_book is None or chat.get("temporary"):
+            return False
+        model = str(chat.get("model") or "")
+        return not (model.startswith("subscription:")
+                    or (not model and str(self.config.get("subscription_engine", "") or "").strip()))
+
+    def _wake_call(self, chat: dict, call) -> str:
+        """wake_later or wake_cancel, in Work's words (dgc/tools.py), on this chat's book."""
+        from ..wakeups import clock_words
+        book = self.wake_book(chat["id"]) if self.wake_book is not None else None
+        args = call.arguments if isinstance(call.arguments, dict) else {}
+        if book is None:
+            return "error: wake-ups are not available in this chat"
+        if call.name == "wake_cancel":
+            wid = str(args.get("id", ""))[:64]
+            if book.cancel(wid):
+                return f"Cancelled {wid}."
+            waiting = ", ".join(f"{i['id']} ({i['why']})" for i in book.items())
+            return f"no wake-up '{' '.join(wid.split())[:64]}' (waiting: {waiting or 'none'})"
+        try:
+            item = book.add(args.get("minutes"), args.get("why"), args.get("prompt"))
+        except ValueError as exc:
+            return f"error: {exc}"
+        minutes = args.get("minutes")
+        shown = int(minutes) if float(minutes).is_integer() else minutes
+        return (f"Set {item['id']}: I wake at {clock_words(item['at'])} (in {shown} minutes) to: {item['why']}. "
+                "Tell the user when you will come back; end your reply now.")
 
     @staticmethod
     def _last_user(chat: dict) -> dict | None:
@@ -2891,6 +2938,8 @@ class ChatEngine:
                 out += [artifact_tools.MAKE_ARTIFACT] + ([artifact_tools.EDIT_ARTIFACT] if artifact_state["any"] else [])
             if self._memory_on(chat) and len(memory_ops) < MAX_MEMORY_PER_REPLY:
                 out += [REMEMBER_TOOL, FORGET_TOOL]
+            if self._wakes(chat):
+                out += list(WAKE_TOOLS)
             if plugins_now and plugins.calls < chat_plugins.MAX_CALLS:
                 out += chat_plugins.schemas(plugins_now)
             if folder_root is not None and folder_state["calls"] < chat_folder.MAX_CALLS:
@@ -3000,6 +3049,8 @@ class ChatEngine:
                                 on_question(question)
                     elif call.name in ("remember", "forget"):
                         told = self._memory_call(chat, call, memory_ops)
+                    elif call.name in ("wake_later", "wake_cancel") and self._wakes(chat):
+                        told = self._wake_call(chat, call)
                     elif call.name == "show_widget":
                         asked_for = next((str(m.get("text") or "") for m in reversed(chat["messages"]) if m["role"] == "user"), "")
                         told = self._widget(call, widgets, before + len("".join(streamed)), on_widget, widget_state,

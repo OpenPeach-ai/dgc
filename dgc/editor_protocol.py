@@ -1662,6 +1662,11 @@ COMMAND_FIELDS.update({
     # chat's chatdgc_opened; its conversation's `branched` says {from, title, at, created_at}).
     "chatdgc_branch": {"request_id": _S(), "conversation_id": _S(), "message_id": _S()},
     "chatdgc_cancel": {"conversation_id": _S(), "request_id": _S(False)},
+    # Wake-ups (capabilities.chatdgc.wakeups): the turn of a wake-up the chat set, sent by the editor when the backend
+    # says it is due (`chatdgc_wakeup_due`), with the chat's route as any turn. Refused (and kept) if it isn't due.
+    "chatdgc_wake": {"request_id": _S(), "conversation_id": _S(), "id": _S(), "model": _S(False)},
+    # The wake-up pill's Cancel. Answered by `chatdgc_wakeups`.
+    "chatdgc_cancel_wakeup": {"conversation_id": _S(), "id": _S(), "request_id": _S(False)},
     # An image the chat keeps, to show (answered by `chatdgc_file`: a data: URI, or why not).
     "chatdgc_file": {"request_id": _S(), "conversation_id": _S(), "attachment_id": _S()},
     # Rename, pin, archive or delete. Answered by `chatdgc_changed`.
@@ -1704,6 +1709,12 @@ EVENT_FIELDS.update({
     # The answer to chatdgc_outline: `prompts`, oldest first, each {id, text (its first words, or what it attached),
     # created_at, widgets?: [{id, message_id, title, created_at, removed?}]}, the widgets the replies to it made.
     "chatdgc_outline": {"request_id": _S(), "conversation_id": _S(), "prompts": _A()},
+    # A chat's wake-ups (capabilities.chatdgc.wakeups), soonest first: [{id, at (ISO time), why}]. Sent when one is set,
+    # cancelled or taken, and when a chat that has some is opened.
+    "chatdgc_wakeups": {"conversation_id": _S(), "items": _A()},
+    # A wake-up has come due on a free chat this window writes: send `chatdgc_wake` for it (with the chat's route).
+    # Said again a minute later while no wake comes. `model`: the chat's model, to find its route.
+    "chatdgc_wakeup_due": {"conversation_id": _S(), "id": _S(), "model": _S(False)},
     "chatdgc_turn": {"conversation_id": _S(), "state": _f("string", enum=("started", "ended")),
                      "reply_id": _S(), "request_id": _S(False)},
     "chatdgc_delta": {"conversation_id": _S(), "message_id": _S(), "text": _S(False), "thinking": _S(False)},
@@ -2022,7 +2033,7 @@ def event_error(value) -> str | None:
 for _chat_turn_command in (
     "chatdgc_send", "chatdgc_continue", "chatdgc_edit", "chatdgc_regenerate",
     "chatdgc_answer", "chatdgc_research", "chatdgc_research_start", "chatdgc_action",
-    "chatdgc_compact", "chatdgc_carry", "chatdgc_work_brief",
+    "chatdgc_compact", "chatdgc_carry", "chatdgc_work_brief", "chatdgc_wake",
 ):
     # A saved VS Code provider's route is supplied for this turn only; the API
     # key never enters the persisted conversation or a model-visible message.

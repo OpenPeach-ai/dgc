@@ -7896,6 +7896,71 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "chatdgc_wakeups"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "conversation_id": {
+              "type": "string"
+            },
+            "items": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "conversation_id",
+            "items"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "chatdgc_wakeup_due"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "conversation_id": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "conversation_id",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "chatdgc_turn"
             },
             "seq": {
@@ -16099,6 +16164,75 @@
           "required": [
             "type",
             "conversation_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "chatdgc_wake"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "conversation_id": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "object"
+            },
+            "fallback": {
+              "type": "string"
+            },
+            "fallback_provider": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "conversation_id",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "chatdgc_cancel_wakeup"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "conversation_id": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "conversation_id",
+            "id"
           ],
           "additionalProperties": false
         },

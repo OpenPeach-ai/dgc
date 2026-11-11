@@ -2040,3 +2040,40 @@ test("a chat's fallback model (D14) goes with every turn it sends, only to a pro
   assert.equal(turn.fallback_provider.base_url, "https://spare.example/v1", "its saved provider's route, for this turn only");
   assert.equal(panel.last("fallbackOffered")?.type, "fallbackOffered");
 });
+
+test("a chat's wake-ups (0.52): its row reaches its tab, a due one is sent as its turn with the chat's route, Cancel takes one back; never to a process that doesn't offer them", async () => {
+  chat.open("");
+  const [panel] = world.panels;
+  panel.say({ type: "ready" });
+  opened(panel, { id: ID(8), title: "New chat", temporary: false });
+  const row = [{ id: "wake3", at: "2026-11-11T14:30:00+05:30", why: "Check the build" }];
+  chat.onEvent({ type: "chatdgc_wakeups", conversation_id: ID(8), items: row });
+  assert.deepEqual(panel.last("wakeups"), { type: "wakeups", items: row }, "the pill's row, for the tab showing it");
+  const before = sent.length;
+  chat.onEvent({ type: "chatdgc_wakeup_due", conversation_id: ID(8), id: "wake3", model: "fixture" });
+  panel.say({ type: "cancelWakeup", id: "wake3" });
+  assert.equal(sent.length, before, "an older process: nothing sent");
+  host.offers = { version: 1, wakeups: 1 };
+  chat.onEvent({ type: "chatdgc_wakeup_due", conversation_id: ID(8), id: "wake3", model: "fixture" });
+  const wake = last("chatdgc_wake");
+  assert.deepEqual({ ...wake, request_id: "" }, { type: "chatdgc_wake", conversation_id: ID(8), id: "wake3", model: "fixture", request_id: "" });
+  assert.match(wake.request_id, /^cd-wake-\d+$/);
+  // A chat on a saved provider: its route goes with the wake-up's turn, as with any turn (the key lives here).
+  const saved = `provider_${"d".repeat(32)}`;
+  host.chatdgcProviderRoute = async (model) => ({ id: saved, base_url: "https://ollama.com", api_key: "k", api_mode: "ollama", asked: model });
+  chat.onEvent({ type: "chatdgc_wakeup_due", conversation_id: ID(8), id: "wake4", model: `provider:${saved}:glm-5.3` });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(last("chatdgc_wake").provider.base_url, "https://ollama.com");
+  panel.say({ type: "cancelWakeup", id: "wake3" });
+  assert.deepEqual(last("chatdgc_cancel_wakeup"), { type: "chatdgc_cancel_wakeup", conversation_id: ID(8), id: "wake3" });
+  const count = sent.length;
+  panel.say({ type: "cancelWakeup", id: "../../x" });
+  chat.onEvent({ type: "chatdgc_wakeup_due", conversation_id: "not-a-chat", id: "wake5" });
+  assert.equal(sent.length, count, "nothing but a chat's own wake-up id goes");
+  // A refused wake (gone, or not due) says nothing on the screen: the row is said again.
+  const errorsBefore = panel.webview.posted.filter((m) => m.type === "error").length;
+  chat.onEvent({ type: "chatdgc_error", request_id: wake.request_id, conversation_id: ID(8), message: "That wake-up isn't due yet, or has gone." });
+  assert.equal(panel.webview.posted.filter((m) => m.type === "error").length, errorsBefore);
+  chat.onEvent({ type: "chatdgc_wakeups", conversation_id: ID(8), items: [] });
+  assert.deepEqual(panel.last("wakeups"), { type: "wakeups", items: [] });
+});

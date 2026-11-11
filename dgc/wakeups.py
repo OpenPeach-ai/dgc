@@ -71,14 +71,84 @@ def _minutes(seconds: float) -> str:
     return f"{hours} hours" if hours < 48 else f"{round(hours / 24)} days"
 
 
-class Book:
-    """The wake-ups of one chat. ``target()`` names its journal ((session file, session root), or None for a chat with
-    no session yet); ``on_change()`` is told after every change, outside the lock."""
+class _SessionJournal:
+    """Beside a Work session: ``target()`` is (session file, session root), under the session family's lease."""
 
-    def __init__(self, target=None, *, clock=time.time, on_change=None):
+    def read(self, target, *, suffix, clean):
+        from .monitor_restart import read
+        return read(*target, suffix=suffix, clean=clean)
+
+    def update(self, target, mutate, *, suffix, clean, limit):
+        from .monitor_restart import update
+        return update(*target, mutate, suffix=suffix, clean=clean, limit=limit)
+
+
+class _FileJournal:
+    """Beside a file of its own (a ChatDGC chat lives in ChatDGC's store, not in a project's sessions): ``target()`` is
+    the chat's file, and the journal is that file with ``suffix``. One process writes a chat at a time (its hold), so
+    a lock in this process and a whole-file replace are enough. Best effort, never raises: a journal that can't be
+    written costs a restart its wake-ups, not the chat."""
+    _lock = threading.Lock()
+    SCHEMA = 1
+    MAX_BYTES = 256 * 1024
+
+    def _path(self, target, suffix):
+        from pathlib import Path
+        return Path(target).with_suffix(suffix)
+
+    def _records(self, path, clean) -> list:
+        import json
+        try:
+            if path.is_symlink() or not path.is_file() or path.stat().st_size > self.MAX_BYTES:
+                return []
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return []
+        if not isinstance(data, dict) or data.get("schema_version") != self.SCHEMA or not isinstance(data.get("records"), list):
+            return []
+        return [r for r in (clean(x) for x in data["records"]) if r is not None]
+
+    def read(self, target, *, suffix, clean):
+        with self._lock:
+            return self._records(self._path(target, suffix), clean)
+
+    def update(self, target, mutate, *, suffix, clean, limit):
+        import json
+        import os
+        path = self._path(target, suffix)
+        with self._lock:
+            try:
+                records = self._records(path, clean)
+                mutate(records)
+                records = records[-limit:]
+                if not records:
+                    if path.is_file() and not path.is_symlink():
+                        path.unlink()
+                    return True
+                path.parent.mkdir(parents=True, exist_ok=True)
+                temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+                temp.write_text(json.dumps({"schema_version": self.SCHEMA, "records": records}), encoding="utf-8")
+                os.chmod(temp, 0o600)
+                os.replace(temp, path)
+                return True
+            except (OSError, ValueError, TypeError):
+                return False
+
+
+SESSION_JOURNAL = _SessionJournal()
+FILE_JOURNAL = _FileJournal()
+
+
+class Book:
+    """The wake-ups of one chat. ``target()`` names its journal ((session file, session root) for a Work session, or
+    None for a chat with no session yet; with ``journal=FILE_JOURNAL``, the chat's own file); ``on_change()`` is told
+    after every change, outside the lock."""
+
+    def __init__(self, target=None, *, clock=time.time, on_change=None, journal=None):
         self.target = target or (lambda: None)
         self.clock = clock
         self.on_change = on_change
+        self.journal = journal or SESSION_JOURNAL
         self._lock = threading.Lock()
         self._items: list[dict] = []
 
@@ -135,6 +205,25 @@ class Book:
         self._save()
         return dict(due[0])
 
+    def take(self, wid) -> dict | None:
+        """That wake-up, taken out of the book if its time has come; None if it isn't here or isn't due yet."""
+        now = self.clock()
+        with self._lock:
+            found = next((i for i in self._items if i["id"] == wid and i["at"] <= now), None)
+            if found is None:
+                return None
+            self._items.remove(found)
+        self._save()
+        return dict(found)
+
+    def put_back(self, item: dict) -> None:
+        """A wake-up taken whose turn couldn't start: back as it was, to be said again."""
+        with self._lock:
+            if any(i["id"] == item.get("id") for i in self._items) or len(self._items) >= MAX_PER_CHAT:
+                return
+            self._items.append(dict(item))
+        self._save()
+
     def clear(self) -> None:
         """The chat was replaced (/new, /clear): its wake-ups go with it."""
         with self._lock:
@@ -152,12 +241,11 @@ class Book:
             items = [{**i, "owner": {}} for i in self._items]
             self._items.clear()
         if target and items:
-            from .monitor_restart import update
             ids = {i["id"] for i in items}
 
             def mutate(records):
                 records[:] = [r for r in records if r["id"] not in ids] + items
-            update(*target, mutate, suffix=SUFFIX, clean=_clean, limit=MAX_PER_CHAT * 4)
+            self.journal.update(target, mutate, suffix=SUFFIX, clean=_clean, limit=MAX_PER_CHAT * 4)
         if items and callable(self.on_change):         # nothing held: nothing to say (a resume's replay stays clean)
             try:
                 self.on_change([])
@@ -170,8 +258,7 @@ class Book:
         target = self.target()
         if not target:
             return
-        from .monitor_restart import read
-        records = read(*target, suffix=SUFFIX, clean=_clean)
+        records = self.journal.read(target, suffix=SUFFIX, clean=_clean)
         me = owner()
         with self._lock:
             known = {i["id"] for i in self._items}
@@ -185,7 +272,6 @@ class Book:
     def _save(self, *, notify: bool = True) -> None:
         target = self.target()
         if target:
-            from .monitor_restart import update
             me = owner()
             with self._lock:
                 mine = [dict(i) for i in self._items]
@@ -195,7 +281,7 @@ class Book:
                 # Others' (another window on this session) stay; this process's are replaced by what it holds now.
                 kept = [r for r in records if r["id"] not in ids and r.get("owner") != me and owner_alive(r.get("owner"))]
                 records[:] = kept + mine
-            update(*target, mutate, suffix=SUFFIX, clean=_clean, limit=MAX_PER_CHAT * 4)
+            self.journal.update(target, mutate, suffix=SUFFIX, clean=_clean, limit=MAX_PER_CHAT * 4)
         if notify and callable(self.on_change):
             try:
                 self.on_change(self.snapshot())
