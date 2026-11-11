@@ -513,7 +513,7 @@ _EDITOR_CONTEXT_LIMIT = 64_000
 _CONFIG_OPT_IN_FIELDS = frozenset({"subagent_context_size", "search_url", "search_api_key_set",
                                    "chatdgc_about", "chatdgc_style", "chatdgc_personality", "chatdgc_window",
                                    "memory", "chatdgc_web", "chatdgc_followups", "turn_token_budget",
-                                   "fallback_engine"})
+                                   "fallback_engine", "dev_mode", "dev_limits"})
 _CONFIG_BOOLEAN_KEYS = frozenset({
     "prompt_cache", "sandbox", "sandbox_network", "show_reasoning", "preserve_thinking",
     "code_action", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
@@ -6080,6 +6080,20 @@ class Backend:
                      between_words_s=int(round(bounded_seconds(c.get("model_idle_timeout_s", 300), 300.0))),
                      **_request_fields(request_id))
 
+    def _config_opt_in_dev(self) -> dict:
+        """Dev Mode's switch and limits for a client that asked (Settings → Dev Mode), as DGC holds them."""
+        out = {}
+        c = getattr(self, "config", None)
+        get = getattr(c, "get", None)
+        if not callable(get):
+            return out
+        if "dev_mode" in self._config_fields:
+            out["dev_mode"] = get("dev_mode", False) is True
+        if "dev_limits" in self._config_fields:
+            from .dev_mode import clean_limits
+            out["dev_limits"] = clean_limits(get("dev_limits", {}) or {})[0]
+        return out
+
     def _emit_config(self, request_id: str | None = None) -> None:
         c = self.config
         if getattr(self, "_cache_settings_wanted", False):
@@ -6119,6 +6133,7 @@ class Backend:
                 extra["turn_token_budget"] = max(0, int(c.get("turn_token_budget", 0) or 0))
             except (TypeError, ValueError):
                 extra["turn_token_budget"] = 0
+        extra.update(self._config_opt_in_dev())
         if "fallback_engine" in self._config_fields:
             engine = str(c.get("fallback_engine", "") or "")
             extra["fallback_engine"] = engine if engine in ("claude", "codex") else ""

@@ -1908,6 +1908,18 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       ],
       "required": false
     },
+    "dev_mode": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
+    "dev_limits": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    },
     "sandbox": {
       "types": [
         "boolean"

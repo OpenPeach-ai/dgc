@@ -94,6 +94,16 @@ def value(name: str, config=None) -> int:
     return chosen if _whole(chosen) else limit.default
 
 
+def chosen(name: str, config=None) -> int | None:
+    """The number you set for this limit in Dev Mode, or None (Dev Mode off, or left at its default)."""
+    _BY_NAME[name]
+    if not on(config):
+        return None
+    mine = _get(config, "dev_limits", {})
+    value = mine.get(name) if isinstance(mine, dict) else None
+    return value if _whole(value) else None
+
+
 def ceiling(name: str, config=None) -> int | None:
     """The most a setting may hold: today's ceiling, or none in Dev Mode."""
     return None if on(config) else _BY_NAME[name].ceiling

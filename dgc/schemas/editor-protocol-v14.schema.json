@@ -2441,6 +2441,12 @@
             "fallback_engine": {
               "type": "string"
             },
+            "dev_mode": {
+              "type": "boolean"
+            },
+            "dev_limits": {
+              "type": "object"
+            },
             "sandbox": {
               "type": "boolean"
             },

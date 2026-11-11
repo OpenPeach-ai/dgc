@@ -298,6 +298,27 @@ details.more[data-more="saved-providers"]>.rows{border-inline:0;border-bottom:0;
   .voice-model{flex-wrap:wrap}.voice-model .actions{width:100%;justify-content:flex-start}
   .voice-installing{grid-template-columns:1fr auto}.voice-installing .voice-said{grid-column:1/-1;grid-row:2}
 }
+/* ---- Dev Mode: a warning shown once, and a group of limits (each a name, its cost, today's default, a number box) ---- */
+.dev-control{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex:none}
+.dev-control input{width:112px}.dev-control input::placeholder{opacity:1}
+.dev-today{color:var(--muted);font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.dev-error{display:block;margin-top:4px;color:var(--dev-error);font-size:12px}.dev-error:empty{display:none}
+.dev-limit input[aria-invalid=true]{border-color:var(--dev-error)}
+.dev-reset{min-height:0}
+/* The theme's error red as words: 4.5:1 on either ground (VS Code's own #f85149 is 3.5:1 on white). */
+:root{--dev-error:#FF8A80}body.vscode-light{--dev-error:#B3261E}
+body:is(.vscode-high-contrast,.vscode-high-contrast-light){--dev-error:var(--vscode-errorForeground,currentColor)}
+.dev-warning{display:flex;align-items:flex-start;gap:12px;margin:0 0 22px;padding:12px 16px;border:1px solid color-mix(in srgb,var(--need) 45%,var(--border));border-radius:var(--r-2xl);background:color-mix(in srgb,var(--need) 7%,var(--bg))}
+.dev-warning svg{margin-top:1px;color:var(--need-text)}
+.dev-warning-body{flex:1;min-width:0}
+.dev-warning-title{display:block;font-size:12px;font-weight:500;color:var(--text-strong)}
+.dev-warning-words{display:block;margin-top:2px;color:var(--muted);font-size:12px;line-height:1.55;max-width:640px}
+.dev-warning .secondary{flex:none;align-self:center}
+@media(max-width:620px){
+  .dev-control{width:100%;justify-content:space-between}
+  .dev-warning{flex-wrap:wrap}.dev-warning-body{flex-basis:calc(100% - 30px)}.dev-warning .secondary{margin-left:30px}
+  .dev-reset{flex-wrap:wrap}
+}
 /* A very narrow tab: VS Code's own 20px webview gutter goes, and rows with buttons wrap them under their words. */
 @media(max-width:480px){
   body{padding:0}.card{padding-inline:10px}

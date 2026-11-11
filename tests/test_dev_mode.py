@@ -95,6 +95,9 @@ class WiredTests(unittest.TestCase):
         off = Settings(dev_mode=False, pips_parallel_runs=200)
         self.assertEqual(pips.parallel_runs(off), 32)
         self.assertEqual(pips.parallel_runs(on), 200)
+        # The number set on Settings → Dev Mode is the one in force (not only the old setting with its ceiling lifted).
+        self.assertEqual(pips.parallel_runs(Settings(dev_mode=True, pips_parallel_runs=4, dev_limits={"pips_parallel_runs": 64})), 64)
+        self.assertEqual(pips.parallel_runs(Settings(dev_mode=False, pips_parallel_runs=4, dev_limits={"pips_parallel_runs": 64})), 4)
 
     def test_monitors_per_chat_and_per_dgc(self):
         from dgc import monitors
@@ -161,3 +164,21 @@ class EditorTests(unittest.TestCase):
         rows = headless.dev_mode_limits()
         self.assertEqual([r["name"] for r in rows], [limit.name for limit in dev_mode.LIMITS])
         self.assertEqual(set(rows[0]), {"name", "label", "default", "ceiling", "cost"})
+
+
+class ConfigEventTests(unittest.TestCase):
+    def test_a_client_that_asks_is_told_the_switch_and_the_limits(self):
+        # Settings → Dev Mode shows what DGC holds (a change from the terminal or another window shows too): opt-in
+        # fields on the config event, sent only to a client that asks (get_config fields), like fallback_engine.
+        from dgc import editor_protocol as ep, headless
+        self.assertIn("dev_mode", headless._CONFIG_OPT_IN_FIELDS)
+        self.assertIn("dev_limits", headless._CONFIG_OPT_IN_FIELDS)
+        base = {"seq": 1, "type": "config", "model": "m", "mode": "default", "think": "off", "base_url": "u",
+                "project_root": "/p", "goal": {}}
+        self.assertIsNone(ep.event_error({**base, "dev_mode": True, "dev_limits": {"pip_computers": 8}}))
+        self.assertIsNotNone(ep.event_error({**base, "dev_mode": "yes"}))
+        sent = {}
+        backend = object.__new__(headless.Backend)
+        backend.config = Settings(model="m", mode="default", dev_mode=True, dev_limits={"pip_computers": 8, "bogus": 2})
+        backend._config_fields = frozenset({"dev_mode", "dev_limits"})
+        self.assertEqual(headless.Backend._config_opt_in_dev(backend), {"dev_mode": True, "dev_limits": {"pip_computers": 8}})

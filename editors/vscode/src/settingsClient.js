@@ -32,7 +32,7 @@ const signInProviders = {
 };
 // What a plugin's sign-in lets DGC do in one app (Google's, Microsoft's), in the catalog's plain words: "Read your email · …".
 const appPermissions = (row, app) => (row.sign_in_permissions || []).filter(p => p.app === app?.id);
-import { contextSizeHint, contextSizeMore, contextSizeShown, renderFields } from './settingsFields.js';
+import { contextSizeHint, contextSizeMore, contextSizeShown, devLimitId, devLimitProblems, devLimitRows, renderFields } from './settingsFields.js';
 import { bindContextCombos, parseContext } from './contextCombo.js';
 import { createUsage } from './settingsUsage.js';
 import { usageMarkup } from './settingsUsageMarkup.js';
@@ -45,11 +45,11 @@ import '../media/mods.js';
 const vscode = acquireVsCodeApi();
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const paths = { voice: 'M10 2a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z M5 10a5 5 0 0 0 10 0 M10 15v3 M7 18h6', web: 'M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15z M3 10.5h15 M10.5 3c-2.2 2.1-3.2 4.6-3.2 7.5s1 5.4 3.2 7.5 M10.5 3c2.2 2.1 3.2 4.6 3.2 7.5s-1 5.4-3.2 7.5', chatdgc: 'M5 4h11a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H9.5L6 17v-3H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z M7.6 11.4l1.3-4.3 M10 11.4l1.3-4.3 M12.4 11.4l1.3-4.3', memory: 'M6 3h9a1 1 0 0 1 1 1v14l-5.5-3.5L5 18V4a1 1 0 0 1 1-1z M8.5 8h4', general: 'M9 3h6l1 3 3 1v6l-3 1-1 3H9l-1-3-3-1V7l3-1z M13 10a2 2 0 1 1-4 0 2 2 0 0 1 4 0', models: 'M4 6h14M4 11h14M4 16h14M7 4v4M14 9v4M9 14v4', agents: 'M9 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0M3 17v-3a3 3 0 0 1 6 0v3M13 5h5M13 10h5M13 15h5', usage: 'M4 17V9M10 17V3M16 17v-6', security: 'M10 2l7 3v5c0 5-7 8-7 8S3 15 3 10V5z M7 10l2 2 4-4', plugins: 'M3 7h5V3h4v4h5v5h-4v5H8v-5H3z', mcp: 'M7 3v5M13 3v5M5 8h10v3a5 5 0 0 1-10 0z M10 16v3', panel: 'M3 3h15v15H3z M8 3v15', gear: 'M8 3h4l1 3 3 1v4l-3 1-1 3H8l-1-3-3-1V7l3-1z M12 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0', app: 'M4 3h13v14H4z M4 7h13', running: 'M3 5h9v8H3z M15 9h3v8H8v-2 M6 9l2 2 3-3' };
+const paths = { dev: 'M8 3h5 M9 3v5.5L4.6 16a1.4 1.4 0 0 0 1.2 2.1h9.4a1.4 1.4 0 0 0 1.2-2.1L12 8.5V3 M6.8 13h7.4', voice: 'M10 2a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z M5 10a5 5 0 0 0 10 0 M10 15v3 M7 18h6', web: 'M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15z M3 10.5h15 M10.5 3c-2.2 2.1-3.2 4.6-3.2 7.5s1 5.4 3.2 7.5 M10.5 3c2.2 2.1 3.2 4.6 3.2 7.5s-1 5.4-3.2 7.5', chatdgc: 'M5 4h11a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H9.5L6 17v-3H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z M7.6 11.4l1.3-4.3 M10 11.4l1.3-4.3 M12.4 11.4l1.3-4.3', memory: 'M6 3h9a1 1 0 0 1 1 1v14l-5.5-3.5L5 18V4a1 1 0 0 1 1-1z M8.5 8h4', general: 'M9 3h6l1 3 3 1v6l-3 1-1 3H9l-1-3-3-1V7l3-1z M13 10a2 2 0 1 1-4 0 2 2 0 0 1 4 0', models: 'M4 6h14M4 11h14M4 16h14M7 4v4M14 9v4M9 14v4', agents: 'M9 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0M3 17v-3a3 3 0 0 1 6 0v3M13 5h5M13 10h5M13 15h5', usage: 'M4 17V9M10 17V3M16 17v-6', security: 'M10 2l7 3v5c0 5-7 8-7 8S3 15 3 10V5z M7 10l2 2 4-4', plugins: 'M3 7h5V3h4v4h5v5h-4v5H8v-5H3z', mcp: 'M7 3v5M13 3v5M5 8h10v3a5 5 0 0 1-10 0z M10 16v3', panel: 'M3 3h15v15H3z M8 3v15', gear: 'M8 3h4l1 3 3 1v4l-3 1-1 3H8l-1-3-3-1V7l3-1z M12 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0', app: 'M4 3h13v14H4z M4 7h13', running: 'M3 5h9v8H3z M15 9h3v8H8v-2 M6 9l2 2 3-3' };
 const icon = name => `<svg viewBox="0 0 21 21" aria-hidden="true"><path d="${paths[name] || paths.plugins}"/></svg>`;
 // Agents was its own page until 0.51: its Sub-agents, Fallback and Pips are blocks of Models now (an old link to
 // "agents" opens Models at Sub-agents).
-const sections = [['general', 'General'], ['models', 'Models'], ['web', 'Web search'], ['chatdgc', 'ChatDGC'], ['memory', 'Memory'], ['voice', 'Voice'], ['running', 'Running sessions'], ['usage', 'Token usage'], ['security', 'Security'], ['plugins', 'Plugins'], ['mcp', 'MCP servers']];
+const sections = [['general', 'General'], ['models', 'Models'], ['web', 'Web search'], ['chatdgc', 'ChatDGC'], ['memory', 'Memory'], ['voice', 'Voice'], ['running', 'Running sessions'], ['usage', 'Token usage'], ['security', 'Security'], ['plugins', 'Plugins'], ['mcp', 'MCP servers'], ['dev', 'Dev Mode']];
 let section = 'general', lane = 'plugins', detail = '', query = '', items = [], servers = [], providers = [], savedProfiles = [], defaultProviderModel = '', choosingDefaultId = '', typingDefaultModel = '', providerModelLists = {}, directProvider = null, signin = null, config = null, draft = {}, dirty = new Set(), usage = null, range = '7d', saving = false, saveStatus = '', mcpEditing = null, mcpSubmitted = '';
 let providerForm = {preset:'',name:'',base_url:'',model:'',api_mode:'auto',api_key:''}, defaultProviderId = '';
 let mcpError = "";
@@ -161,6 +161,8 @@ ui.router = router;
 const images = createImages({ send, esc, switchHTML, ui, onPaint: () => keepPlace() });
 ui.images = images;
 const defaults = { base_url: '', api_key: '', model: '', api_mode: 'auto', provider_state: 'stateless', prompt_cache: true, capability_cache_ttl_s: 3600, subscription_engine: '', subscription_model: '', subscription_effort: '', subagent_model: '', subagent_base_url: '', subagent_api_mode: '', subagent_api_key: '', fallback_model: '', fallback_base_url: '', fallback_api_mode: '', fallback_api_key: '', mode: 'default', think: 'off', context_size: 32768, show_reasoning: true, thinking_inline: true, ultra_mode: false, suggest: true, monitor_wake: true, tool_profile: 'standard', max_parallel_tasks: 4, sandbox: false, sandbox_network: false, plan_artifact: true, artifact_autostart: true, artifact_in_plan: false, search_provider: 'duckduckgo', search_url: '', search_api_key: '', chatdgc_about: '', chatdgc_style: '', chatdgc_personality: 'default', chatdgc_window: '32k', chatdgc_web: true, chatdgc_followups: true, turn_token_budget: 0, prompt_cache_ttl: '5m', ollama_keep_alive: '30m', subagent_context_size: '', subagent_thinking: '', pips_model: '', wait_first_word: 'auto', wait_first_word_minutes: '', wait_between_words: '5' };
+// The pages one Save all covers, drawn by settingsFields.js: a config or a save's answer redraws the one that is open.
+const SAVED_PAGES = ['general', 'models', 'web', 'chatdgc', 'security', 'dev'];
 const PAGE_OF = {};
 for (const [page, keys] of Object.entries({
     general: ['mode', 'think', 'ultra_mode', 'turn_token_budget', 'context_size', 'show_reasoning', 'thinking_inline', 'suggest', 'monitor_wake', 'tool_profile'],
@@ -168,7 +170,8 @@ for (const [page, keys] of Object.entries({
         'subagent_model', 'subagent_base_url', 'subagent_api_mode', 'subagent_api_key', 'subagent_context_size', 'subagent_thinking', 'max_parallel_tasks', 'fallback_model', 'fallback_base_url', 'fallback_api_mode', 'fallback_api_key', 'pips_model'],
     web: ['search_provider', 'search_url', 'search_api_key'],
     chatdgc: ['chatdgc_about', 'chatdgc_style', 'chatdgc_personality', 'chatdgc_window', 'chatdgc_web', 'chatdgc_followups'],
-    security: ['sandbox', 'sandbox_network', 'plan_artifact', 'artifact_autostart', 'artifact_in_plan'] })) for (const key of keys) PAGE_OF[key] = page;
+    security: ['sandbox', 'sandbox_network', 'plan_artifact', 'artifact_autostart', 'artifact_in_plan'],
+    dev: ['dev_mode', 'dev_limits'] })) for (const key of keys) PAGE_OF[key] = page;
 /** "Unsaved changes on Models and Agents": Save covers every page, so its line names the pages it will save. */
 function unsavedLine() {
     const pages = sections.filter(([id]) => [...dirty].some(key => PAGE_OF[key] === id)).map(([, label]) => label);
@@ -225,10 +228,30 @@ function applyConfig(ev) {
     draft.images_capable = ev.images_capable === true;
     draft.videos_capable = ev.videos_capable === true;     // video models in + Add generator (ready.capabilities.videos)
     images.setCapability(draft);
-    if (['general', 'models', 'web', 'chatdgc', 'security'].includes(section) && !saving) {
+    // Dev Mode, from a DGC that has a table of capacity limits (ready.capabilities.dev_limits; the extension hands it
+    // over as dev_limits_table). Without one there is no Dev Mode page, and its two settings are never sent.
+    draft.dev_limits_table = devLimitRows(ev.dev_limits_table);
+    draft.dev_capable = draft.dev_limits_table.length > 0;
+    if (!draft.dev_capable) { delete draft.dev_mode; delete draft.dev_limits; dirty.delete('dev_mode'); dirty.delete('dev_limits'); }
+    else {
+        if (!dirty.has('dev_mode')) draft.dev_mode = ev.dev_mode === true;
+        if (!dirty.has('dev_limits')) draft.dev_limits = devLimitsOf(ev.dev_limits);
+        // The warning shows once in this editor: the host remembers, and says so with the config.
+        draft.dev_mode_warned = draft.dev_mode_warned === true || ev.dev_mode_warned === true;
+    }
+    if (!!document.querySelector('[data-nav="dev"]') !== draft.dev_capable) drawNav();
+    if (section === 'dev' && !draft.dev_capable) section = 'general';
+    if (SAVED_PAGES.includes(section) && !saving) {
         render();
         keepPlace();
     }
+}
+/** The limits that are set, as numbers by DGC's names: an empty one is not there (its default). */
+function devLimitsOf(values) {
+    const out = {};
+    for (const [name, value] of Object.entries(values && typeof values === 'object' && !Array.isArray(values) ? values : {}))
+        if (value !== '' && value !== null && value !== undefined && Number.isFinite(Number(value))) out[name] = Number(value);
+    return out;
 }
 function snapshot() {
     if (!config)
@@ -271,6 +294,7 @@ const MODEL_PLACES = { agents: 'models-subagents', subagents: 'models-subagents'
 function navTo(next, nextRange) { snapshot(); if (next === 'running') running.asked = false; directory = false;
     const place = MODEL_PLACES[next] || '';
     if (place) next = 'models';
+    if (next === 'dev' && !draft.dev_capable) next = 'general';     // an older DGC has no Dev Mode
     section = sections.some(([id]) => id === next) ? next : 'general'; detail = ''; mcpEditing = null; mcpConfirm = ''; mcpError = ''; if (nextRange)
     range = nextRange; render(); $('main').scrollTop = 0;
     placeWanted = place ? { id: place, asked: Date.now(), until: 0 } : null;
@@ -478,6 +502,7 @@ function render() {
     };
     main.querySelectorAll('input,select,textarea').forEach(el => el.addEventListener('input', () => { snapshot(); }));
     main.querySelectorAll('[data-setting]').forEach(b => b.onclick = () => { const on = b.getAttribute('aria-checked') !== 'true'; setDraft(b.dataset.setting, on); b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on)); });
+    wireDevMode(main);
     for (const [presetId, urlId] of [['provider', 'base_url'], ['subagent_provider', 'subagent_base_url']]) {
         const el = $(presetId);
         if (el)
@@ -493,6 +518,39 @@ function render() {
                 el.value = '';                       // a preset only fills the host: the menu never shows a stale one
             } };
     }
+}
+// Settings → Dev Mode: the switch shows or hides the Limits group (and, the first time, its warning); each box is a
+// whole number of 1 or more, or empty for the default; Reset empties them all. All of it waits for Save all.
+function wireDevMode(main) {
+    const dev = $('dev_mode');
+    if (!dev) return;
+    const toggle = dev.onclick;
+    dev.onclick = () => { toggle(); render(); $('dev_mode')?.focus(); };
+    const boxes = [...main.querySelectorAll('[data-dev-limit]')], reset = $('dev-limits-reset');
+    const forget = input => {             // typing in a box takes away what DGC said about it
+        const name = input.dataset.devLimit;
+        if (draft.dev_limit_errors) delete draft.dev_limit_errors[name];
+        const said = $(devLimitId(name) + '-error'); if (said) said.textContent = '';
+        input.removeAttribute('aria-invalid');
+    };
+    for (const input of boxes) input.addEventListener('input', () => {
+        const name = input.dataset.devLimit, next = { ...(draft.dev_limits || {}) }, text = input.value.trim(), n = Number(text);
+        forget(input);
+        input.setCustomValidity(text && !Number.isSafeInteger(n) ? 'A whole number, 1 or more.' : '');
+        if (!text && !input.validity.badInput) delete next[name];
+        else if (Number.isSafeInteger(n) && n >= 1) next[name] = n;
+        else return;                       // not a number to save: the box says so at Save, and the last good one is kept
+        setDraft('dev_limits', next);
+        if (reset) reset.disabled = !Object.keys(next).length;
+    });
+    if (reset) reset.onclick = () => {
+        for (const input of boxes) { input.value = ''; input.setCustomValidity(''); forget(input); }
+        setDraft('dev_limits', {});
+        boxes[0]?.focus();                 // before the button greys out and drops the keyboard's place
+        reset.disabled = true;
+    };
+    const ok = $('dev-warning-ok');
+    if (ok) ok.onclick = () => { draft.dev_mode_warned = true; send({ type: 'devModeWarned' }); render(); main.querySelector('[data-dev-limit]')?.focus(); };
 }
 function appLogo(row, app) { const mark = signInProviders[row.name]?.apps[app?.id]; return mark ? logo({name:app.id, display_name:app.name, logo:mark}) : logo(row); }
 // One-colour marks drawn for one background vanish on the other theme (Superpowers' black mark on dark,
@@ -1365,9 +1423,14 @@ function renderMcpForm(main, s) {
         danger(mcpConfirm);
     }
 }
-document.querySelector('nav').innerHTML = sections.map(([id, label]) => (id === 'usage' ? '<div class="nav-divider"></div>' : '') + `<button data-nav="${id}" title="${label}" aria-label="${label}">${icon(id)}<span class="nav-text">${label}</span></button>`).join('');
+// The side menu. Dev Mode is in it only with a DGC that has a table of limits, so it is drawn again when that is known.
+function drawNav() {
+document.querySelector('nav').innerHTML = sections.filter(([id]) => id !== 'dev' || draft.dev_capable).map(([id, label]) => (id === 'usage' ? '<div class="nav-divider"></div>' : '') + `<button data-nav="${id}" title="${label}" aria-label="${label}">${icon(id)}<span class="nav-text">${label}</span></button>`).join('');
 document.querySelectorAll('[data-nav]').forEach(b => b.onclick = () => { navTo(b.dataset.nav); if (b.dataset.nav === 'mcp')
     send({ type: 'listMcp' }); });
+    document.querySelectorAll('[data-nav]').forEach(b => { b.classList.toggle('active', b.dataset.nav === section); b.setAttribute('aria-current', b.dataset.nav === section ? 'page' : 'false'); });
+}
+drawNav();
 $('collapse-nav').innerHTML = icon('panel');
 $('collapse-nav').onclick = () => { const collapsed = document.querySelector('.shell').classList.toggle('collapsed'); $('collapse-nav').setAttribute('aria-expanded', String(!collapsed)); $('collapse-nav').setAttribute('aria-label', collapsed ? 'Expand navigation' : 'Collapse navigation'); $('collapse-nav').title = collapsed ? 'Expand navigation' : 'Collapse navigation'; };
 window.addEventListener('message', event => {
@@ -1521,18 +1584,25 @@ window.addEventListener('message', event => {
     else if (msg.type === 'settingsSaved') {
         saving = false;
         saveStatus = msg.ok ? 'Saved' : msg.message || 'Save did not finish. Review your changes.';
+        // What DGC refused about a Dev Mode limit goes beside that limit's box too.
+        draft.dev_limit_errors = msg.ok ? {} : devLimitProblems(msg.message, draft.dev_limits_table);
+        const [refused] = Object.entries(draft.dev_limit_errors);
+        if (refused) {                   // the Save line names the limit as the page does, not by DGC's own key for it
+            const label = draft.dev_limits_table.find(row => row.name === refused[0])?.label || refused[0];
+            saveStatus = `Not saved. Dev Mode, ${label}: ${refused[1][0].toLowerCase()}${refused[1].slice(1)}`;
+        }
         if (msg.ok) {
             dirty.clear();
             draft.api_key = draft.subagent_api_key = draft.fallback_api_key = draft.search_api_key = '';
         }
-        if (['general', 'models', 'web', 'chatdgc', 'security'].includes(section))
+        if (SAVED_PAGES.includes(section))
             render();
     }
     else if (msg.type === 'settingsSaveFinished') {
         if (saving) {
             saving = false;
             saveStatus = 'Save cancelled. Your edits are still here.';
-            if (['general', 'models', 'web', 'chatdgc', 'security'].includes(section))
+            if (SAVED_PAGES.includes(section))
                 render();
         }
     }

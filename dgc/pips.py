@@ -317,7 +317,10 @@ def parallel_runs(config) -> int:
         value = int(config.get("pips_parallel_runs", PARALLEL_DEFAULT))
     except (TypeError, ValueError):
         return PARALLEL_DEFAULT
-    from .dev_mode import ceiling
+    from .dev_mode import ceiling, chosen
+    mine = chosen("pips_parallel_runs", config)        # set on Settings → Dev Mode
+    if mine is not None:
+        return mine
     most = ceiling("pips_parallel_runs", config)       # Dev Mode: no ceiling
     return max(1, value) if most is None else min(most, max(1, value))
 _DRAIN_FAILURES: dict[str, dict[str, str]] = {}

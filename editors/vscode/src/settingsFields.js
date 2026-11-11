@@ -99,6 +99,27 @@ export function contextSizeShown(c) {
     return served && chosen > served ? served : (c?.context_size ?? "");
 }
 
+// Settings → Dev Mode → Limits: a limit's box, by DGC's own name for it.
+export const devLimitId = (name) => `dev_limit_${name}`;
+/** DGC's rows of limits as the page may draw them: a name, a label, today's default and a cost line. */
+export function devLimitRows(rows) {
+    return (Array.isArray(rows) ? rows : []).filter((row) => row && typeof row === "object" && /^[a-z][a-z0-9_]{0,63}$/.test(String(row.name || "")) && Number.isFinite(Number(row.default)))
+        .map((row) => ({ name: String(row.name), label: String(row.label || row.name), default: Number(row.default), cost: String(row.cost || "") }));
+}
+/** What DGC refused, by the limit it is about. It says "pip_computers: a whole number, 1 or more": the name is DGC's
+ *  own, so the words after it go beside that box ("A whole number, 1 or more."). A refusal about nothing on the page
+ *  gives none, and stays on the Save line. */
+export function devLimitProblems(message, rows) {
+    const out = {}, text = String(message || "");
+    for (const { name } of devLimitRows(rows)) {
+        const at = text.match(new RegExp(`(?:^|[^a-z0-9_])${name}: ([^\n]+)`));
+        if (!at) continue;
+        const words = at[1].trim().replace(/[.\s]+$/, "");
+        if (words) out[name] = words[0].toUpperCase() + words.slice(1) + ".";
+    }
+    return out;
+}
+
 // Settings -> Models -> Advanced: how long DGC waits for a model (model_first_token_timeout_s, model_idle_timeout_s).
 export const FIRST_WORD_CHOICES = [["auto", "Auto"], ["minutes", "Minutes"], ["never", "Never"]];
 const FIRST_WORD_MORE = "Auto: as long as a model on this computer or your network is working on your request (DGC asks "
@@ -482,8 +503,44 @@ export function renderFields(section, main, config, providers, ui) {
         if (!c.search_settable) { const web = main.querySelector("#chatdgc_web"); if (web) web.disabled = true; }
         wire(main);
     }
+    // Settings → Dev Mode: off by default, for people experimenting on a big machine. On, each capacity limit in
+    // DGC's own table (ready.capabilities.dev_limits, which the extension hands the page as dev_limits_table) is a
+    // number you may set: 1 or more, no ceiling. An empty box is that limit's default, and is left out of dev_limits.
+    function renderDev(main) {
+        const c = config;
+        const table = Array.isArray(c.dev_limits_table) ? c.dev_limits_table : [];
+        const on = c.dev_mode === true;
+        const mine = c.dev_limits && typeof c.dev_limits === "object" ? c.dev_limits : {};
+        const refused = c.dev_limit_errors && typeof c.dev_limit_errors === "object" ? c.dev_limit_errors : {};
+        // One limit: its name (the box's label), what raising it costs in one line, today's default and the box.
+        const line = (limit) => {
+            const id = devLimitId(limit.name), said = refused[limit.name] || "";
+            return `<div class="field dev-limit"><span class="words"><span class="name-line"><label class="name" for="${id}">${escapeHtml(limit.label)}</label></span>`
+                + `<span class="hint" id="${id}-cost">${escapeHtml(limit.cost)}</span>`
+                + `<span class="dev-error" id="${id}-error" role="alert">${escapeHtml(said)}</span></span>`
+                + `<span class="dev-control"><span class="dev-today" id="${id}-today">Today: ${escapeHtml(limit.default)}</span>`
+                + `<input id="${id}" type="number" inputmode="numeric" min="1" step="1" data-dev-limit="${escapeHtml(limit.name)}" value="${escapeHtml(mine[limit.name] ?? "")}" placeholder="Default"`
+                + ` aria-describedby="${id}-today ${id}-cost ${id}-error"${said ? ' aria-invalid="true"' : ""} autocomplete="off"></span></div>`;
+        };
+        const warning = '<section class="dev-warning" id="dev-warning" role="alert"><svg viewBox="0 0 21 21" aria-hidden="true"><path d="M10.5 3.5 18.5 17h-16z M10.5 8.5v4 M10.5 14.6v.2"/></svg>'
+            + '<div class="dev-warning-body"><strong class="dev-warning-title">Dev Mode lifts DGC\'s capacity limits</strong>'
+            + '<span class="dev-warning-words">It is for a big machine: more at once, and more kept. Each limit you raise costs memory, disk or model load, and its line says which. '
+            + 'Safety limits never move: the sandbox, redaction, approvals and what a Pip may do stay as they are. Nothing changes until you save.</span></div>'
+            + '<button type="button" class="secondary" id="dev-warning-ok">Got it</button></section>';
+        main.innerHTML = head("Dev Mode", "For experimenting on a big machine: it lifts DGC's capacity limits.",
+                "A capacity limit is how many things run at once, or how many are kept. Each one you raise costs memory, disk or model load. Safety limits never move: the sandbox, redaction, approvals and what a Pip may do.")
+            + `<section class="group"><div class="rows">${field("Dev Mode", on ? "On: each limit below is yours to set." : "Off: every limit is today's default.", bool("dev_mode", on))}</div></section>`
+            + (on && c.dev_mode_warned !== true ? warning : "")
+            + (on ? group("Limits", table.map(line).join("")
+                    + `<div class="field dev-reset"><span class="words"><span class="hint">Empties every box, so each limit is today's default again.</span></span>`
+                    + `<button type="button" class="secondary" id="dev-limits-reset"${table.some((l) => mine[l.name] !== undefined && mine[l.name] !== "") ? "" : " disabled"}>Reset to defaults</button></div>`,
+                "Any whole number, 1 or more. Leave a box empty to keep today's default.", "settings-dev-limits") : "")
+            + saveBar;
+        main.querySelector("#dev_mode")?.setAttribute("aria-label", "Dev Mode");
+        wire(main);
+    }
     const renderers = { general: renderGeneral, models: renderModels,
-        web: renderWeb, chatdgc: renderChatDGC, security: renderSecurity };
+        web: renderWeb, chatdgc: renderChatDGC, security: renderSecurity, dev: renderDev };
     if (!Object.hasOwn(renderers, section)) return;
     renderers[section](main);
 }

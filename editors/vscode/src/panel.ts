@@ -34,6 +34,7 @@ import { pipsAttention, PipsAttentionState } from "./pipsAttention";
 import { settingsDocument } from "./settingsView";
 import { onPicturesSetting, pictureFoldsMessage, rememberPictureFold, setPicturesInReplies, picturesFolded } from "./pictureFolds";
 import { blobIcon, dockOf, dockSettings, setDockSetting } from "./dock";
+import { DEV_SAVED_KEY, DEV_WARNED_KEY, devLimitsTable, devLimitValues, devShown, type DevLimit } from "./devMode";
 import { homeShowAttr, pipHomeDismissedAttr, rememberHomeShow, rememberPipHomeDismissed } from "./pipHomeDismiss";
 import { addProfile, adoptWorkingRoute, defaultProfileId, firstTakesDefault, keepWorkingRoute, hasRunnableProfile, listProfiles, markDefaultProfile, profileCredential, removeProfile, startingModel } from "./providerProfiles.js";
 
@@ -119,7 +120,7 @@ const WORK_READ_ONLY_REFUSES = new Set(["prompt", "slash", "slashText", "cancel"
 // Settings and Work's model menu ask for the same list. fallback_engine: Claude Code or Codex as a session's fallback.
 const CONFIG_EVENT_FIELDS = ["search_url", "search_api_key_set", "chatdgc_about", "chatdgc_style", "chatdgc_personality",
   "chatdgc_window", "memory", "chatdgc_web", "chatdgc_followups", "turn_token_budget", "subagent_context_size",
-  "fallback_engine"];
+  "fallback_engine", "dev_mode", "dev_limits"];
 const HOME_BACKEND_KEY = "dgc.homeBackend.v1";
 /** The folders Continue in Work opened Work sessions in (this workspace's): a reloaded tab comes back in one unasked. */
 const WORK_FOLDERS_KEY = "dgc.workFolders.v1";
@@ -4654,6 +4655,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                                    ...(Number((this.lastReadyEvent?.capabilities as any)?.subagent_thinking) >= 1 && this.subagentSettings ? { subagent_thinking: this.subagentSettings.thinking, subagent_thinking_settable: true } : {}),
                                    // Nor this: image generation's commands (ready.capabilities.images); without, no Images.
                                    images_capable: this.imagesCapable(),
+                                   // Nor these: Dev Mode's table of limits (ready.capabilities.dev_limits; without it, no Dev
+                                   // Mode page), its two settings, and whether its warning was already shown here.
+                                   ...(this.devLimits().length ? { dev_limits_table: this.devLimits(),
+                                                                   ...devShown(ev, this.context.globalState.get(DEV_SAVED_KEY)),
+                                                                   dev_mode_warned: this.context.globalState.get<boolean>(DEV_WARNED_KEY) === true } : {}),
                                    // Nor this: video generation's commands (ready.capabilities.videos); without, no video models.
                                    videos_capable: this.videosCapable(),
                                    // Nor these: the pips_settings event that came just before.
@@ -8608,6 +8614,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // Applies at once, in every window: each side bar's dock follows it (src/dock.ts).
       await setDockSetting(msg);
       this.settingsEditor?.webview.postMessage({ type: "dockSettings", ...dockSettings() });
+    } else if (msg?.type === "devModeWarned") {
+      // Settings → Dev Mode's warning shows once in this editor.
+      await this.context.globalState.update(DEV_WARNED_KEY, true);
     } else if (msg?.type === "saveSettings") {
       await this.saveSettings(msg.values || {}, String(msg.section || ""));
     } else if (msg?.type === "addProviderProfile") {
@@ -8987,6 +8996,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /** Dev Mode's capacity limits as this DGC lists them (ready.capabilities.dev_limits); none from an older one. */
+  private devLimits(): DevLimit[] {
+    return devLimitsTable(this.lastReadyEvent?.capabilities);
+  }
+
   async saveSettings(v: any, section = ""): Promise<void> {
     if (this.settingsSaveInFlight) {
       void vscode.window.showWarningMessage("DGC is already saving settings.");
@@ -9179,10 +9193,20 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         values.pips_model = pipsModel;
       }
 
+      // Dev Mode and its limits: only to a DGC that lists them (an older one refuses the whole save on a key it
+      // doesn't know). A limit left empty is its default, so it is not in dev_limits; DGC checks each number.
+      if (this.devLimits().length) {
+        values.dev_mode = v.dev_mode === true;
+        values.dev_limits = devLimitValues(v.dev_limits);
+      }
+
       const saveConfig = async (prefix: string, configValues: any): Promise<void> => {
         await this.requestState(
           be, prefix, { type: "set_config", values: configValues }, "config", 10000);
         appliedStages.push("configuration");
+        if ("dev_mode" in configValues) {
+          await this.context.globalState.update(DEV_SAVED_KEY, { dev_mode: configValues.dev_mode, dev_limits: configValues.dev_limits });
+        }
       };
       const saveNativeModel = async (): Promise<void> => {
         if (defaultProfileId(this.context)) { return; }
