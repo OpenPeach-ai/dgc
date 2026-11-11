@@ -36,6 +36,18 @@ const decodedBytes = (b64: string) => Math.floor(b64.length * 3 / 4) - (b64.ends
 const KEPT_PHOTO = /^[0-9a-f]{64}\.(png|jpg|gif|webp|bmp)$/;
 const KEPT_MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' };
 const attr = (s: string) => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
+/** pips-10: allow_pip_plugin may carry `keys` {variable name: text} from Pips API 81 on (a plugin's key, pasted on its
+ *  card). Why a request is refused, or '' when it may go: an older DGC is never sent a key, and a key is text. It goes
+ *  to DGC's own store for a plugin's key and nowhere else: never kept here, never logged. */
+export function keysRefusal(request: any, apiVersion: number): string {
+  if (request?.type !== 'allow_pip_plugin' || !Object.prototype.hasOwnProperty.call(request, 'keys')) return '';
+  if (apiVersion < 81) return 'Update DGC to give a Pip’s plugin its key.';
+  const keys = request.keys, names = keys && typeof keys === 'object' && !Array.isArray(keys) ? Object.keys(keys) : null;
+  if (!names || !names.length || names.length > 8 || names.some(name => !/^[A-Za-z0-9_.-]{1,128}$/.test(name)
+    || typeof keys[name] !== 'string' || !keys[name].trim() || keys[name].length > 4096)) return 'Paste the key first.';
+  return '';
+}
+
 export function pipsDocument(scriptUri = '', styleUri = '', cspSource = '', markdownUri = '', cardsUri = '', cardsStyleUri = '', videoUri = '', codiconUri = ''): string {
   // frame-src: only a plugin's card (MCP Apps), at the loopback address DGC's backend serves it from.
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};${codiconUri ? ` font-src ${attr(cspSource)};` : ''}${videoUri ? ' media-src blob:;' : ''}${cardsUri ? ' frame-src http://127.0.0.1:* http://localhost:*;' : ''}">${codiconUri ? `<link rel="stylesheet" href="${attr(codiconUri)}">` : ''}<link rel="stylesheet" href="${attr(styleUri)}">${cardsStyleUri ? `<link rel="stylesheet" href="${attr(cardsStyleUri)}">` : ''}<title>DGC Pips</title></head><body><main id="app"><p role="status">Connecting to local DGC…</p></main><div id="review-root"></div>${cardsUri ? `<script src="${attr(cardsUri)}"></script>` : ''}${videoUri ? `<script src="${attr(videoUri)}"></script>` : ''}${markdownUri ? `<script src="${attr(markdownUri)}"></script>` : ''}<script src="${attr(scriptUri)}"></script></body></html>`;
@@ -746,6 +758,7 @@ export class PipsEditor implements vscode.Disposable {
     if(['list_pip_routines','add_pip_routine','update_pip_routine','delete_pip_routine','decide_pip_routine'].includes(request.type) && this.apiVersion < 43) { fail('Update DGC for routines.'); return; }
     if(['set_pip_profile','list_pip_shared','get_pip_computers','update_pip_computers','reset_pip_computer','list_pip_apps'].includes(request.type) && this.apiVersion < 43) { fail('Update DGC to use this.'); return; }
     if(['list_pip_plugins','allow_pip_plugin','decline_pip_plugin','list_pip_plugin_uses','list_pip_attention','list_pip_notes','add_pip_note','forget_pip_note','list_pip_sites','set_pip_careful','forget_pip_site','get_pip_chat_context','list_pip_reply_stats','get_pips_limit','set_pips_limit'].includes(request.type) && this.apiVersion < 44) { fail('Update DGC to let a Pip use your plugins.'); return; }
+    { const refused = keysRefusal(request, this.apiVersion); if (refused) { fail(refused); return; } }
     if(request.type === 'set_plugin_permission' && this.apiVersion < 45) { fail('Update DGC to choose what a plugin may do without asking.'); return; }
     if(request.type === 'introduce_pip' && this.apiVersion < 43) { fail('Update DGC for Pips that say hello.'); return; }
     if(request.type === 'send_pip_message' && Object.prototype.hasOwnProperty.call(request, 'files') && this.apiVersion < 43) { fail('Update DGC to send files to a Pip.'); return; }

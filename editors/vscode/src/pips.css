@@ -910,6 +910,15 @@ button.pip-tip-btn svg{display:block;width:14px;height:14px}
 .section h2 .pip-tip,.section h3 .pip-tip,summary .pip-tip{vertical-align:-3px}
 .pip-page-row.login-new{justify-content:flex-end;min-height:44px}
 @media (forced-colors:active){.pip-tip-pop{border-color:CanvasText}}
+/* A plugin's key card (pips-10): the shared card with one masked box a key, in the cards' own look: a 6 px corner on the
+   box as on its buttons, the key in the code face, Allow the one filled answer. */
+.key-card-form{display:grid;gap:6px;margin:10px 0 0 31px;min-width:0}
+.key-card-form>label{margin:2px 0 0;color:var(--muted);font-size:12px;line-height:1.3}
+.key-card-form>input{box-sizing:border-box;width:100%;min-width:0;height:28px;padding:0 9px;border:1px solid var(--vscode-input-border,var(--line));border-radius:6px;background:var(--vscode-input-background);color:var(--vscode-input-foreground);font:12px/1 var(--vscode-editor-font-family,ui-monospace,monospace)}
+.key-card-form>input::placeholder{font-family:var(--vscode-font-family,system-ui);color:var(--muted)}
+.key-card-form>.app-link-note,.key-card-form>.dgc-card-error{margin:0}
+.dgc-card.key-card .key-card-form>.dgc-card-actions{margin:6px 0 0}
+@container(max-width:380px){.key-card-form{margin-left:0}}
 /* ==== Pip chat design pass (0.52, asked 5 Nov): a Personal and a Project Pip's chat, calm, clear and physical. ====
    What it holds to, each measured in test/pip-chat-design-browser.test.mjs:
    - One column. Everything the Pip says starts at one left edge and is at most one measure wide (a reply, its choices);

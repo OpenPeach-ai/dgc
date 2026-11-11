@@ -48,7 +48,7 @@ let effortHeld=false,effortRedraw=false;   // the thinking slider is being dragg
 import {mountHomePips} from './pipHomeStrip.js';
 import {healthMarkup,failedRoutine,foldRoutineLines,failedRoutineMarkup,quietLineMarkup,noteMarkup,routineNotes,withNotes} from './pipRoutineHealth.js';
 import {appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup,appLinkSettledMarkup,allowCardMarkup,calendarCardMarkup} from './pipAppLinks.js';
-import {pluginsPage,pluginResult,shownPluginCards,pluginForServer,installedForServer,pluginCardMarkup,pluginActionMarkup,pluginsPageMarkup,pluginUsesPage,pluginUsesMarkup,argumentValues,editedArguments,PLUGIN_LEVELS} from './pipPlugins.js';
+import {pluginsPage,pluginResult,keyRequests,keyCardMarkup,shownPluginCards,pluginForServer,installedForServer,pluginCardMarkup,pluginActionMarkup,pluginsPageMarkup,pluginUsesPage,pluginUsesMarkup,argumentValues,editedArguments,PLUGIN_LEVELS} from './pipPlugins.js';
 import {attentionPage,waitingOn,needWords,attentionMarkup,setupCardMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
 import {notesPage,notesMarkup,keptMarkup} from './pipNotes.js';
 import {workingNotesPage,dailyLogPage,workingNotesMarkup,dailyLogMarkup,learnCardMarkup,learnRequest} from './pipWorkingNotes.js';
@@ -3618,6 +3618,37 @@ function putAppLink(link){S.appLinks=[link,...(S.appLinks||[]).filter(l=>l.id!==
 // would then do in a plugin is an Allow card here: Allow, Always allow (never for a plugin that can
 // move money) or Don't. The same reviewed steps as the connector dialogs, without them.
 S.plugins=[];S.pluginsInstalled=[];S.pluginsError='';let pluginSeq=0,pluginBusy='';const pluginDrafts=new Map();
+// pips-10 (Pips API 81): a plugin that needs a key asks for it on a card. What is kept here is never the key: which
+// cards wait (S.keyRequests), whether every box of a card has text (keyFilled, so a redraw keeps Allow on), what DGC
+// said of a refused one (keyErrors), and which were saved in this chat (keySaved). The key is read from its box when
+// Allow is pressed, sent once, and the box emptied.
+S.keyRequests=[];const keyFilled=new Set(),keyErrors=new Map(),keySaved=new Map();
+const keyCards=()=>S.apiVersion>=81&&!remoteHost&&personalPip();
+const keyBoxes=id=>[...document.querySelectorAll('[data-key-card] input[data-key-name]')].filter(box=>box.closest('[data-key-card]').dataset.keyCard===id);
+function keyTyped(box){
+ const card=box.closest('[data-key-card]'),id=card?.dataset.keyCard;if(!id)return;
+ const full=keyBoxes(id).every(b=>b.value.trim());
+ if(full)keyFilled.add(id);else keyFilled.delete(id);
+ const allow=card.querySelector('button.primary');if(allow&&!pluginBusy)allow.disabled=!full;
+}
+async function keyAllow(id){
+ const card=(S.keyRequests||[]).find(c=>c.id===id);
+ if(!card||!keyCards()||!usable()||pluginBusy||archived()||S.busy)return;
+ const boxes=keyBoxes(id);let keys={};
+ for(const k of card.needs_key){const box=boxes.find(b=>b.dataset.keyName===k.name),value=(box?.value||'').trim();if(!value)return;keys[k.name]=value;}
+ for(const box of boxes)box.value='';
+ keyFilled.delete(id);keyErrors.delete(id);
+ const token=scope(),pip=S.selected,pipName=S.pip?.name||'This Pip';pluginBusy=id;
+ // (Handed to the channel and let go: nothing here holds the key while DGC answers.)
+ const pending=send('allow_pip_plugin',{pip_id:pip,grant_id:id,keys});keys=null;render();
+ try{const done=pluginResult(await pending,pip,id);if(token!==scope()||S.selected!==pip)return;
+  S.keyRequests=(S.keyRequests||[]).filter(c=>c.id!==id);keySaved.set(id,card);
+  S.notice=`${pipName} can use ${done.name} now.`;void loadMessages();void loadPluginDrafts();
+ }catch(error){if(token===scope())keyErrors.set(id,errorText(error));}
+ finally{if(token===scope()){pluginBusy='';render();}}
+}
+document.addEventListener('input',event=>{const box=event.target;if(box?.dataset?.keyName)keyTyped(box);});
+document.addEventListener('submit',event=>{const id=event.target?.dataset?.keyForm;if(!id)return;event.preventDefault();void keyAllow(id);});
 // Your own apps (Pips API 61): registered by your code; a change a Pip proposes in one is this same Allow card.
 S.ownApps=[];S.ownAppsError='';let ownAppsSeq=0;
 async function loadOwnApps(){
@@ -3636,8 +3667,10 @@ async function loadPlugins(){
  void loadOwnApps();
  if(remoteHost||S.apiVersion<44||!personalPip()||!usable())return;
  const token=scope(),sequence=++pluginSeq,pip=S.selected;
- try{const page=pluginsPage(await send('list_pip_plugins',{pip_id:pip}),pip);if(token!==scope()||sequence!==pluginSeq||S.selected!==pip)return;
-  S.plugins=page.plugins;S.pluginsInstalled=page.installed;S.pluginsError='';render();void loadPluginDrafts();}
+ try{const answer=await send('list_pip_plugins',{pip_id:pip}),page=pluginsPage(answer,pip),asking=keyCards()?keyRequests(answer,pip):[];if(token!==scope()||sequence!==pluginSeq||S.selected!==pip)return;
+  S.plugins=page.plugins;S.pluginsInstalled=page.installed;S.keyRequests=asking;S.pluginsError='';
+  for(const id of [...keyFilled,...keyErrors.keys()])if(!asking.some(c=>c.id===id)){keyFilled.delete(id);keyErrors.delete(id);}
+  render();void loadPluginDrafts();}
  catch(error){if(token===scope()&&sequence===pluginSeq){S.pluginsError=errorText(error);render();}}
 }
 // The draft list carries summaries; a plugin's Allow card shows the whole call, read once per version.
@@ -3682,7 +3715,10 @@ function pluginCards(){
   .map(({draft,plugin})=>pluginActionMarkup(draft,plugin,{esc,busy:pluginBusy===draft.id||off,pipName,edit:cardEdit(draft),logo:pluginLogoSrc,accountLabel:id=>(S.appLinks||[]).find(l=>l.account===id)?.label||''}));
  actions.push(ownAppDecidedCards(),pluginNotRun());
  const cards=shownPluginCards(S.plugins).map(c=>pluginCardMarkup(c,{esc,busy:pluginBusy===c.id||off,pipName}));
- return actions.join('')+cards.join('')+(S.pluginsError?`<p class="app-link-note" role="alert">${esc(S.pluginsError)}</p>`:'');
+ // A plugin that needs a key (API 81): its card with a box for the key; saved here, it says so.
+ const asking=keyCards()?(S.keyRequests||[]).map(c=>keyCardMarkup(c,{esc,busy:pluginBusy===c.id||off,pipName,filled:keyFilled.has(c.id),error:keyErrors.get(c.id)||'',logo:pluginLogoSrc})):[];
+ const kept=keyCards()?[...keySaved.values()].map(c=>keyCardMarkup(c,{esc,pipName,saved:true,logo:pluginLogoSrc})):[];
+ return actions.join('')+cards.join('')+asking.join('')+kept.join('')+(S.pluginsError?`<p class="app-link-note" role="alert">${esc(S.pluginsError)}</p>`:'');
 }
 // Don't on a plugin's Allow card says so where the card was, under the reply that offered it, while that reply is the
 // latest (and after a reload): "Not run." showed above the chat, out of sight, and the reply still said its card was
@@ -3725,8 +3761,10 @@ async function borrowAnswer(type,id){
 }
 async function pluginAnswer(type,id,takeBack=false){
  if(!usable()||!personalPip()||pluginBusy)return;
+ for(const box of keyBoxes(id))box.value='';keyFilled.delete(id);keyErrors.delete(id);   // a key card answered Not now: its boxes are emptied
  const token=scope(),pip=S.selected,pipName=S.pip?.name||'This Pip';pluginBusy=id;render();
  try{const card=pluginResult(await send(type,{pip_id:pip,grant_id:id}),pip,id);if(token!==scope()||S.selected!==pip)return;
+  S.keyRequests=(S.keyRequests||[]).filter(c=>c.id!==id);
   S.plugins=[card,...(S.plugins||[]).filter(c=>c.id!==id&&c.plugin!==card.plugin)];
   S.notice=card.status==='allowed'?`${pipName} can use ${card.name} now.`:takeBack?`${pipName} no longer uses ${card.name}. It stays in DGC.`:'Not now.';
   if(card.status==='allowed'){void loadMessages();void loadPluginDrafts();}
@@ -4254,7 +4292,7 @@ function renderReview() {
   $('review-title')?.focus({preventScroll:true});document.querySelector('[role=dialog]')?.scrollTo?.(0,0);
   picker.restore();
 }
-function clearSelection() { S.notes=null;S.notesPip='';S.notesError='';notesSeq++;noteConfirmAll=false;draft.noteAdd='';S.workingNotes=null;S.workingNotesPip='';S.workingNotesError='';workingNotesSeq++;workingNotesEditing=false;draft.workingNotesText='';S.dailyLog=null;S.dailyLogPip='';S.dailyLogError='';dailyLogSeq++;S.appLinks=[];S.appLinksError='';S.plugins=[];S.pluginsInstalled=[];S.pluginsError='';pluginSeq++;pluginBusy='';S.routines=null;S.routinesError='';routineSeq++;routineEditing='';routineError='';S.pipPage='info';S.legacyOpen=false;pageNameDirty=false;lookDirty=false;shared.pip='';shared.seq++;window.clearTimeout(appLinkTimer);appLinkBusy=''; S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);postsSeq++;S.posts=[];S.postsCursor=null;S.postsPip='';S.postsLoaded=false;S.fixes=new Map();S.fixesPip='';fixesSeq++;S.postsLoading=false;S.postsError='';messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.chatWaiting=[];S.routineNotes=[];S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; dropLive(); selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
+function clearSelection() { S.keyRequests=[];keyFilled.clear();keyErrors.clear();keySaved.clear();S.notes=null;S.notesPip='';S.notesError='';notesSeq++;noteConfirmAll=false;draft.noteAdd='';S.workingNotes=null;S.workingNotesPip='';S.workingNotesError='';workingNotesSeq++;workingNotesEditing=false;draft.workingNotesText='';S.dailyLog=null;S.dailyLogPip='';S.dailyLogError='';dailyLogSeq++;S.appLinks=[];S.appLinksError='';S.plugins=[];S.pluginsInstalled=[];S.pluginsError='';pluginSeq++;pluginBusy='';S.routines=null;S.routinesError='';routineSeq++;routineEditing='';routineError='';S.pipPage='info';S.legacyOpen=false;pageNameDirty=false;lookDirty=false;shared.pip='';shared.seq++;window.clearTimeout(appLinkTimer);appLinkBusy=''; S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);postsSeq++;S.posts=[];S.postsCursor=null;S.postsPip='';S.postsLoaded=false;S.fixes=new Map();S.fixesPip='';fixesSeq++;S.postsLoading=false;S.postsError='';messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.chatWaiting=[];S.routineNotes=[];S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; dropLive(); selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
 // "Report ready", "Last run failed": the Pip page's status names its latest run, so it opens that run (reported
 // 19 Oct: it read like a link and did nothing). A status that names no finished run stays words.
 // Since its runs post in its chat (API 51), the status says what the latest found and goes to that post.

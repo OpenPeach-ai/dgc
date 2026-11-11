@@ -38,6 +38,25 @@ export function pluginsPage(value, pip) {
   return { plugins: value.plugins.map(card => pluginCard(card, pip)), installed };
 }
 
+const KEY_NAME = /^[A-Za-z0-9_.-]{1,128}$/;
+/** pips-10 (Pips API 81): the plugins this Pip asked for that still need a key. list_pip_plugins answers them as
+ *  `key_requests`, each a card with `needs_key` [{name, label, server}]: the keys' names, never a value. */
+export function keyRequests(value, pip) {
+  const fail = () => { throw new Error('These cards didn’t load. Refresh to try again.'); };
+  const list = value?.key_requests;
+  if (list === undefined) return [];
+  if (!Array.isArray(list) || list.length > 8) fail();
+  return list.map(raw => {
+    let card;
+    try { card = pluginCard(raw, pip); } catch { fail(); }
+    const keys = raw.needs_key;
+    if (card.status !== 'requested' || !Array.isArray(keys) || !keys.length || keys.length > 8
+      || keys.some(k => !k || typeof k !== 'object' || !KEY_NAME.test(k.name) || !text(k.label, 120) || !k.label.trim() || !SERVER.test(k.server))
+      || new Set(keys.map(k => k.name)).size !== keys.length) fail();
+    return { ...card, needs_key: keys.map(k => ({ name: k.name, label: k.label.trim(), server: k.server })) };
+  });
+}
+
 export function pluginResult(value, pip, id) {
   const card = pluginCard(value?.plugin, pip);
   if (card.id !== id) throw new Error('DGC answered about another plugin card. Refresh the Pip.');
@@ -94,6 +113,31 @@ export function pluginCardMarkup(card, { esc, busy = false, pipName = 'This Pip'
   }
   const label = card.status === 'allowed' ? `${card.name} allowed` : `Use ${card.name}`;
   return `<div class="dgc-card app-link plugin-card" data-plugin-card="${id}" data-state="${esc(card.status)}" role="group" aria-label="${esc(label)}">${body}</div>`;
+}
+
+const listed = words => words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`;
+/**
+ * A plugin's key card (pips-10): "<Plugin> needs its <label>", why the Pip wants it, one masked box a key, Allow (the
+ * one filled answer, off until every box has text: `filled`) and Not now. The boxes never carry a value in the markup
+ * and are no draft: the page reads them when Allow is pressed, sends them once and empties them. `saved`: it was
+ * allowed here, and the card says so until the chat is left.
+ */
+export function keyCardMarkup(card, { esc, busy = false, pipName = 'This Pip', filled = false, error = '', saved = false, logo = null }) {
+  const id = esc(card.id), name = esc(card.name), off = busy ? ' disabled' : '';
+  if (saved) {
+    return `<div class="dgc-card app-link plugin-card key-card" id="pip-key-${id}" data-key-card="${id}" data-state="saved" role="status" aria-label="${name}’s key is saved">`
+      + head(esc, card.name, `${esc(pipName)} can use ${name}`, 'Saved · it never saw the key', card.plugin, logo) + '</div>';
+  }
+  const labels = card.needs_key.map(k => k.label), title = `${card.name} needs its ${listed(labels)}`;
+  const boxes = card.needs_key.map((k, i) => `<label for="pip-key-${id}-${i}">${esc(k.label)}</label>`
+    + `<input type="password" id="pip-key-${id}-${i}" data-key-name="${esc(k.name)}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="4096" placeholder="Paste it here"${off}>`).join('');
+  return `<div class="dgc-card app-link plugin-card key-card" id="pip-key-${id}" data-key-card="${id}" data-state="requested" role="group" aria-label="${esc(title)}">`
+    + head(esc, card.name, esc(title), esc(card.reason), card.plugin, logo)
+    + `<form class="key-card-form" data-key-form="${id}" autocomplete="off">${boxes}`
+    + `<p class="app-link-note" id="pip-key-${id}-says">Saved securely on this computer. ${esc(pipName)} never sees it.</p>`
+    + (error ? `<p class="dgc-card-error" role="alert">${esc(error)}</p>` : '')
+    + `<div class="dgc-card-actions app-link-actions"><button type="submit" class="primary" aria-describedby="pip-key-${id}-says"${busy || !filled ? ' disabled' : ''}>${busy ? 'Saving…' : 'Allow'}</button>`
+    + `<button type="button" class="quiet" data-plugin-decline="${id}"${off}>Not now</button></div></form></div>`;
 }
 
 // Every input of a call waiting for Allow, each in full: what it sends is in sight before Allow (an email's recipient,

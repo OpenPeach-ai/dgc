@@ -45,7 +45,7 @@ export const THEMES = {
 /** The stub host, run in the page before the client: answers each request after a tick, as the extension would.
     opts: project (a Project Pip's chat), hold (what its computer holds for your okay), running (a turn in flight),
     doing (what the running turn says it is doing), fixing (DGC is fixing what a Project Pip's post found),
-    empty (no messages yet), api, settings (its page's every section has something in it; level: the one it is at). */
+    empty (no messages yet), api, settings (its page's every section has something in it; level: the one it is at), keys (a plugin's key card: true, or "two"). */
 /** The stub host's script: it answers a Pip's page from `opts`. (dock-scene.mjs gives it to the side bar's real page too.) */
 export const host = (opts) => `(${function (PIP, opts) {
   const W = "ws_" + "e".repeat(32), run = (c) => "run_" + c.repeat(32);
@@ -194,6 +194,18 @@ export const host = (opts) => `(${function (PIP, opts) {
       list_pip_app_links: () => ({ pip_id: PIP, composio: true, links: project ? [] : [{ ...link, status: "connected", label: "me@mail.example" }] }),
       list_pip_routines: () => ({ pip_id: PIP, workspace_id: W, routines: project ? [] : [{ ...suggested, title: "Morning brief", status: "on", created_by: "user",
         trigger: { kind: "schedule", schedule: { type: "daily", time: "09:00", timezone: "Asia/Kolkata" } }, label: "every day at 09:00", next_due_at: "2036-11-07T03:30:00Z" }] }),
+    });
+  }
+  // opts.keys: a plugin this Pip asked for needs a key (pips-10, Pips API 81): one card, with one box (or, "two", two).
+  if (opts.keys) {
+    const KEYCARD = "pipplugin_" + "a".repeat(32), needs = [{ name: "AIRTABLE_TOKEN", label: "Airtable token", server: "airtable" }, ...(opts.keys === "two" ? [{ name: "AIRTABLE_BASE", label: "Base ID", server: "airtable" }] : [])];
+    const asked = { id: KEYCARD, pip_id: PIP, workspace_id: W, plugin: "airtable", name: "Airtable", reason: "To read your Plans table for the morning brief.", status: "requested", installed: true, money: false,
+      servers: ["airtable"], needs_key: needs, created_at: at(3), updated_at: at(3) };
+    let waiting = true;
+    Object.assign(answers, {
+      list_pip_plugins: () => ({ pip_id: PIP, plugins: [], key_requests: waiting ? [asked] : [], installed: [{ plugin: "airtable", name: "Airtable", money: false, servers: ["airtable"] }] }),
+      allow_pip_plugin: (r) => { window.__keysSent = Object.keys(r.keys || {}); waiting = false; return { plugin: { ...asked, status: "allowed", needs_key: [] } }; },
+      decline_pip_plugin: () => { waiting = false; return { plugin: { ...asked, status: "declined" } }; },
     });
   }
   window.acquireVsCodeApi = () => ({ getState: () => undefined, setState() {}, postMessage(m) {
