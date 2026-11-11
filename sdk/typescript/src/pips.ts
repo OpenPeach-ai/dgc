@@ -196,6 +196,7 @@ export type PipMutationParams = {
   archive_pip_conversation: { pip_id: string; conversation_id: string; archived?: boolean };
   add_pip_computer: { pip_id: string };
   rename_pip_computer: { pip_id: string; number: number; name: string };
+  set_pip_computer_screen: { pip_id: string; size: "1280x800" | "1440x900" | "1920x1080" };
   set_pips_keep_running: { enabled: boolean };
   mark_pip_digest_seen: { until: string };
   mark_pip_news_seen: { pip_ids: string[]; until: string };
@@ -374,6 +375,7 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   archive_pip_conversation: ["pip_id", "conversation_id", "archived"],
   add_pip_computer: ["pip_id"],
   rename_pip_computer: ["pip_id", "number", "name"],
+  set_pip_computer_screen: ["pip_id", "size"],
   get_pips_keep_running: [],
   set_pips_keep_running: ["enabled"],
   get_pip_digest: [],
@@ -891,7 +893,7 @@ for (const command of API82_READS) READS.add(command);
 for (const command of API82_MUTATIONS) MUTATIONS.add(command);
 // API 86 (pips-17d): each of a Pip's computers has a name (get_pip_computer's `names`); rename_pip_computer sets the
 // user's own, and open_pip_computer / use_pip_computer_view may name which computer (`number`, 1 for the first).
-const API86_MUTATIONS = new Set(["rename_pip_computer"]);
+const API86_MUTATIONS = new Set(["rename_pip_computer", "set_pip_computer_screen"]);
 for (const command of API86_MUTATIONS) MUTATIONS.add(command);
 const API86_FIELDS: Record<string, string[]> = { open_pip_computer: ["number"], use_pip_computer_view: ["number"] };
 const CONVERSATION_ID = /^conv_[0-9a-f]{32}$/;
@@ -1308,6 +1310,9 @@ export class Pips {
     }
     if ((command in API86_FIELDS && Object.hasOwn(values, "number")) || command === "rename_pip_computer") {
       if (!Number.isInteger(values.number) || (values.number as number) < 1 || (values.number as number) > 1000) throw new DGCConfigError("number is which of its computers: 1 for the first");
+    }
+    if (command === "set_pip_computer_screen" && !["1280x800", "1440x900", "1920x1080"].includes(values.size as string)) {
+      throw new DGCConfigError("size is 1280x800, 1440x900 or 1920x1080");
     }
     if (command === "rename_pip_computer" && !(typeof values.name === "string" && values.name.length <= 30)) {
       throw new DGCConfigError("name is the computer's name, up to 30 characters (empty gives back its first name)");

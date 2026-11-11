@@ -1229,6 +1229,9 @@ one. A request that names no conversation is about the first, so an editor or SD
   (local only) sets yours, "" gives back its first name, and two of one Pip's computers never share a name.
   `open_pip_computer` and `use_pip_computer_view` take an optional `number` (1 for the first): that computer's own
   live view; without it, the one at work, else the first, as before.
+- Its screen's size (pc-fills-tab): `get_pip_computer`'s `screen` ("1280x800") and `screens` (1280x800, 1440x900,
+  1920x1080; only 1280x800 on a Mac for now); `set_pip_computer_screen {pip_id, size}` (local only) chooses one for
+  all its computers, taken as each screen next starts. The browser's window fills the screen above the dock.
 - Its computers: one by default; `add_pip_computer {pip_id}` (local only) adds one, up to 3 (`pips_computers_max` in
   the registry's metadata raises it: Dev Mode). `get_pip_computer` says how many it has (`computers`) and may have
   (`computers_limit`). A reply takes a free one as it starts; when all are busy, its first computer step answers at

@@ -427,7 +427,7 @@ READ_COMMANDS |= API82_READS
 MUTATION_COMMANDS |= API82_MUTATIONS
 # API 86 (pips-17d): each of a Pip's computers has a name (get_pip_computer's `names`); rename_pip_computer sets the
 # user's own, and open_pip_computer / use_pip_computer_view may name which computer (`number`, 1 for the first).
-API86_MUTATIONS = frozenset({'rename_pip_computer'})
+API86_MUTATIONS = frozenset({'rename_pip_computer', 'set_pip_computer_screen'})
 MUTATION_COMMANDS |= API86_MUTATIONS
 API86_FIELDS = {'open_pip_computer': frozenset({'number'}), 'use_pip_computer_view': frozenset({'number'})}
 PIP_KEY_ID = re.compile(r"pipkey_[a-f0-9]{32}\Z")
@@ -550,6 +550,7 @@ COMMAND_FIELDS = {
     'archive_pip_conversation': frozenset({'pip_id', 'conversation_id', 'archived'}),
     'add_pip_computer': frozenset({'pip_id'}),
     'rename_pip_computer': frozenset({'pip_id', 'number', 'name'}),
+    'set_pip_computer_screen': frozenset({'pip_id', 'size'}),
     'get_pips_payments': frozenset(),
     'set_pips_payments': frozenset({'limit'}),
     'set_pip_paying': frozenset({'pip_id', 'rule'}),
@@ -1156,6 +1157,8 @@ class Pips:
         if (command in API86_FIELDS and 'number' in values) or command == 'rename_pip_computer':
             if type(values.get('number')) is not int or not 1 <= values['number'] <= 1000:
                 raise DGCConfigError("number is which of its computers: 1 for the first")
+        if command == 'set_pip_computer_screen' and values.get('size') not in ('1280x800', '1440x900', '1920x1080'):
+            raise DGCConfigError("size is 1280x800, 1440x900 or 1920x1080")
         if command == 'rename_pip_computer' and not (isinstance(values.get('name'), str) and len(values['name']) <= 30):
             raise DGCConfigError("name is the computer's name, up to 30 characters (empty gives back its first name)")
         if command == 'save_pip_key' and 'terminal' in values:

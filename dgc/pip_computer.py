@@ -504,6 +504,23 @@ class Host:
 
     # -- the desktop -------------------------------------------------------------------------
 
+    def _screen_size(self) -> tuple[int, int]:
+        """The screen size chosen for this Pip (set_screen), read as its screen starts; 1280x800 when none or unread."""
+        from . import pip_screen
+        from .workspace_registry import WorkspaceRegistry
+        if getattr(self, "state_directory", None) is None or getattr(self, "pip_id", None) is None:
+            return (pip_screen.WIDTH, pip_screen.HEIGHT)
+        try:
+            with WorkspaceRegistry(self.state_directory) as registry:
+                return computer_screen(registry.db, self.pip_id)
+        except (OSError, RegistryError, sqlite3.Error):
+            return (pip_screen.WIDTH, pip_screen.HEIGHT)
+
+    def screen(self) -> tuple[int, int]:
+        """The size of the screen it shows now."""
+        from . import pip_screen
+        return tuple(getattr(self.desktop, "size", None) or (pip_screen.WIDTH, pip_screen.HEIGHT))
+
     def ensure_desktop(self) -> bool:
         """Start this computer's full screen if the machine can show one; the browser moves onto it."""
         from . import pip_screen
@@ -513,8 +530,12 @@ class Host:
             if not pip_screen.availability()["available"]:
                 return False
             from .pip_computer_files import files_root
+            size = Host._screen_size(self)
             desktop = pip_screen.make_desktop(socket_dir() / f"{self.tag}-desk", self.files_dir, "Pip",
-                                              egress=self.proxy.path)
+                                              egress=self.proxy.path, size=size)
+            # The browser's window fills the screen above the dock's strip.
+            shown = getattr(desktop, "size", (pip_screen.WIDTH, pip_screen.HEIGHT))
+            self.browser.window_size = (shown[0], shown[1] - pip_screen.BROWSER_STRIP)
             desktop.on_launch = self._dock_launch
             desktop.start(self._launch)
             self.desktop = desktop
@@ -1262,7 +1283,7 @@ class Host:
         offset = self.browser.screen_offset()
         if offset is not None:
             shown.update(screen_x=round(offset[0] + pointer["x"], 1), screen_y=round(offset[1] + pointer["y"], 1),
-                         screen_width=pip_screen.WIDTH, screen_height=pip_screen.HEIGHT)
+                         screen_width=Host.screen(self)[0], screen_height=Host.screen(self)[1])
         self.pointer = shown
 
     def _upload(self, args: dict) -> str:
@@ -1483,7 +1504,6 @@ class Host:
         """One step on the whole desktop (pip_desktop_eyes): a look, the hands, the windows, an app."""
         from . import pip_desktop_eyes as eyes
         from . import pip_x11
-        from .pip_screen import HEIGHT, WIDTH
         if not eyes.supported():
             return {"text": "error: the whole desktop isn't available on this computer yet; use the browser's steps."}
         if self.desktop is None or not self.desktop.running():
@@ -1523,7 +1543,7 @@ class Host:
                 if not eyes.wait_for_window(self.desktop, before):
                     said += " Its window has not appeared yet; look again in a moment."
             else:
-                scale, screen = self.desk_shot or (1.0, (WIDTH, HEIGHT))
+                scale, screen = self.desk_shot or (1.0, Host.screen(self))
                 found = eyes.windows(self.desktop)
                 # A step on the browser's window is the Pip's action there: a submit or upload it causes waits for the
                 # user's Allow, as one from a browser step does. A step elsewhere leaves the page's own background
@@ -1724,6 +1744,7 @@ COMPUTER_NAMES = ("Juniper", "Maple", "Willow", "Cedar", "Fern", "Clover", "Basi
                   "Otter", "Badger", "Marble", "Quartz", "Cobalt", "Flint", "Ember", "Lumen", "Nimbus", "Zephyr",
                   "Ripple", "Harbor", "Dune", "Meadow", "Pebble", "Quill", "Tango", "Vesper", "Jasper", "Hazel")
 COMPUTER_NAMES_KEY = "pip_computer_names:"     # + pip id -> {"<number>": "<the user's name>"}
+COMPUTER_SCREEN_KEY = "pip_computer_screen:"   # + pip id -> "1440x900" (pip_screen.SIZES)
 AT_WORK = "computer_at_work:"                  # + pip id + ":" + number -> {run_id, label, since, host_id} (Host.begin)
 COMPUTER_NAME_MAX = 30
 _NAME_OK = re.compile(r"[\w][\w .'&()-]{0,29}", re.UNICODE)
@@ -1765,6 +1786,16 @@ def computer_names(db, pip_id) -> list[dict]:
     return out
 
 
+def pip_screen_name(db, pip_id) -> str:
+    from . import pip_screen
+    return pip_screen.size_name(computer_screen(db, pip_id))
+
+
+def screen_names() -> list[str]:
+    from . import pip_screen
+    return [pip_screen.size_name(s) for s in pip_screen.SIZES] if sys.platform != "darwin" else ["1280x800"]
+
+
 def computer_states(db, pip_id) -> list[dict]:
     """Each computer's name with its state, for the dots beside it (his call, 12 Nov): "needs_you" (its run waits for
     the user: an approval, or a check on its screen only a person can pass), "working" (a reply or a run has it),
@@ -1801,6 +1832,29 @@ def computer_states(db, pip_id) -> list[dict]:
             state = "open"
         out.append({**entry, "state": state, **({"doing": doing} if doing else {})})
     return out
+
+
+def computer_screen(db, pip_id) -> tuple[int, int]:
+    """The screen size chosen for this Pip's computers (pc-fills-tab), else 1280x800."""
+    from . import pip_screen
+    row = db.execute("SELECT value FROM metadata WHERE key=?", (COMPUTER_SCREEN_KEY + pip_id,)).fetchone()
+    return (pip_screen.parse_size(row[0]) if row else None) or (pip_screen.WIDTH, pip_screen.HEIGHT)
+
+
+def set_screen(registry, pip_id, size) -> dict:
+    """Its computers' screen size, one of pip_screen.SIZES ("1440x900"); a screen that is on now takes it as it next
+    starts (Stop, then open it again)."""
+    from . import pip_screen
+    chosen = pip_screen.parse_size(size)
+    if chosen is None:
+        raise RegistryError("invalid_request", "size is one of " + ", ".join(pip_screen.size_name(s) for s in pip_screen.SIZES) + ".")
+    if sys.platform == "darwin":
+        raise RegistryError("unsupported", "On a Mac a Pip's screen is 1280x800 for now.")
+    with registry.transaction():
+        if registry.db.execute("SELECT 1 FROM pips WHERE id=?", (pip_id,)).fetchone() is None:
+            raise RegistryError("not_found", "That Pip doesn't exist.")
+        registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (COMPUTER_SCREEN_KEY + pip_id, pip_screen.size_name(chosen)))
+    return {"pip_id": pip_id, "screen": pip_screen.size_name(chosen)}
 
 
 def computer_name(db, pip_id, number: int = 1) -> str:
@@ -2433,6 +2487,8 @@ def status(registry, pip_id: str) -> dict:
             # Several computers per Pip (API 79): how many it has, and how many it may have; (API 86) each one's name.
             "computers": computers(registry.db, pip_id), "computers_limit": computers_limit(registry.db),
             "names": computer_states(registry.db, pip_id),
+            # pc-fills-tab: its screen's size and the sizes it may have (set_pip_computer_screen).
+            "screen": pip_screen_name(registry.db, pip_id), "screens": screen_names(),
             **({"needs_you": {"host": waiting["host"], "at": waiting.get("at", "")}} if waiting else {})}
 
 

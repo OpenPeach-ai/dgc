@@ -620,6 +620,7 @@ class Box:
     write_fd: int = -1
     display_dir: Path | None = None       # a desktop's X socket directory: the browser draws there
     files_dir: Path | None = None         # a Pip's second computer: the first one's Files, shared (pip_computer.Pool)
+    window_size: tuple[int, int] | None = None   # on a desktop: its screen above the dock (pc-fills-tab); else 1280x724
 
     def argv(self, forwarder: Path) -> list[str]:
         chrome_dir = self.chrome.parent
@@ -630,7 +631,9 @@ class Box:
             flags = [f for f in flags if f != "--headless=new"] + ["--window-position=0,0", "--password-store=basic",
                                                                   "--disable-session-crashed-bubble"]
         # On a desktop the browser opens no window of its own: DGC's first page is its only tab.
-        size = f"--window-size={self.viewport[0]},{self.viewport[1]}" if self.display_dir is None else "--window-size=1280,724"
+        window = getattr(self, "window_size", None) or (1280, 724)
+        size = (f"--window-size={self.viewport[0]},{self.viewport[1]}" if self.display_dir is None
+                else f"--window-size={int(window[0])},{int(window[1])}")
         chrome = ["/opt/chrome/" + self.chrome.name, *flags, size,
                   *(["--no-startup-window"] if self.display_dir is not None else ["about:blank"])]
         display = ([] if self.display_dir is None else
@@ -950,7 +953,7 @@ class BoxedBrowser(BrowserSession):
             self._box = ContainerBox(self.home, self.egress_socket, self.viewport, on_screen=self.display_dir is not None)
         else:
             self._box = Box(self.home, self.egress_socket, self.binary, self.viewport, display_dir=self.display_dir,
-                            files_dir=self.files_dir)
+                            files_dir=self.files_dir, window_size=getattr(self, "window_size", None))
         self.launch(lambda: self._box.start(self.log_path))
         self._pipe = _Pipe(self._box.read_fd, self._box.write_fd)
         try:

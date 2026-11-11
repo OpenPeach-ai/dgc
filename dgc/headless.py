@@ -477,6 +477,8 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # one's `name` and `names`. rename_pip_computer {pip_id, number, name} sets the user's name ("" gives back the first);
 # open_pip_computer and use_pip_computer_view take an optional `number` (1 for the first): the live view of that computer,
 # each computer its own. Without `number` they act as before (the one at work, else the first). Local only, as before.
+# And its screen's size (pc-fills-tab): get_pip_computer's `screen` ("1280x800") and `screens` (the sizes it may have:
+# 1280x800, 1440x900, 1920x1080); set_pip_computer_screen {pip_id, size} chooses one, taken as its screen next starts.
 PIPS_API_VERSION = 86
 
 

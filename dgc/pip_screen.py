@@ -28,6 +28,19 @@ PROGRAMS = {"vnc": "Xtigervnc", "wm": "openbox", "dock": "tint2", "files": "pcma
             "keyboard": "xkbcomp"}
 INSTALL = "sudo apt install tigervnc-standalone-server openbox tint2 xterm pcmanfm x11-xkb-utils"
 WIDTH, HEIGHT = 1280, 800
+# The sizes a Pip's screen may have (pc-fills-tab, 0.52): the first is everyone's to begin with; a larger one fills a
+# wide editor tab with more of the desktop. Chosen per Pip (pip_computer.set_screen), it applies as its screen starts.
+SIZES = ((1280, 800), (1440, 900), (1920, 1080))
+BROWSER_STRIP = 76                   # the dock's strip at the foot, which the browser's window leaves free
+
+
+def size_name(size) -> str:
+    return f"{int(size[0])}x{int(size[1])}"
+
+
+def parse_size(text) -> tuple[int, int] | None:
+    """One of SIZES from its name ("1440x900"), else None."""
+    return next((size for size in SIZES if size_name(size) == text), None) if isinstance(text, str) else None
 DISPLAY = ":1"
 ASSETS = Path(__file__).with_name("desktop_assets")
 START_SECONDS = 15
@@ -145,16 +158,16 @@ TERMINAL_COMMAND = ("sh -c 'cd /home/pip/Files && exec xterm -fa Monospace -fs 1
 CONTROL_LINES = frozenset({"browser", "images", "documents", "pdf"})
 
 
-def dock_icon(index: int, count: int) -> tuple[int, int]:
-    """The centre of the dock's icon at ``index`` of ``count`` on the screen (tint2rc below: 44 px icons 12 apart, the
-    bar padded 12 + 2 at each end, centred at the bottom)."""
+def dock_icon(index: int, count: int, screen=(WIDTH, HEIGHT)) -> tuple[int, int]:
+    """The centre of the dock's icon at ``index`` of ``count`` on a ``screen`` (width, height) (tint2rc below: 44 px icons
+    12 apart, the bar padded 12 + 2 at each end, centred at the bottom)."""
     size, gap, pad = 44, 12, 12 + 2
     width = 2 * pad + count * size + (count - 1) * gap
-    left = (WIDTH - width) // 2 + pad
-    return left + index * (size + gap) + size // 2, HEIGHT - 42
+    left = (screen[0] - width) // 2 + pad
+    return left + index * (size + gap) + size // 2, screen[1] - 42
 
 
-def write_config(conf: Path, name: str, apps_shown=()) -> None:
+def write_config(conf: Path, name: str, apps_shown=(), screen=(WIDTH, HEIGHT)) -> None:
     """The dock, its apps, the window manager's settings and the wallpaper. ``apps_shown``: the image editor,
     document editor and PDF viewer this computer has (pip_apps), each on the dock after the Terminal."""
     from . import pip_apps
@@ -211,7 +224,7 @@ cp -r /run/dgc/conf/pcmanfm/dgc /tmp/config/pcmanfm/dgc
 [ -S /run/dgc/egress.sock ] && python3 /run/dgc/forward.py > /run/dgc/log/forward.log 2>&1 &
 # A stale socket from an earlier desktop must not look like this start's screen.
 rm -f /run/dgc/sock/vnc.sock
-"$DESK_VNC" {DISPLAY} -geometry {WIDTH}x{HEIGHT} -depth 24 -SecurityTypes None -AlwaysShared \\
+"$DESK_VNC" {DISPLAY} -geometry {int(screen[0])}x{int(screen[1])} -depth 24 -SecurityTypes None -AlwaysShared \\
   -rfbunixpath /run/dgc/sock/vnc.sock -rfbunixmode 0600 -rfbport -1 -nolisten tcp -extension GLX \\
   -desktop {shlex.quote(name[:60] + ' computer')} > /run/dgc/log/vnc.log 2>&1 &
 for i in $(seq 1 100); do [ -S /tmp/.X11-unix/X{DISPLAY[1:]} ] && break; sleep 0.1; done
@@ -282,19 +295,21 @@ def desktop_argv(runtime: Path, files: Path, name: str, egress: Path | None = No
     return argv + ["sh", "/run/dgc/conf/desktop.sh"]
 
 
-def make_desktop(runtime: Path, files: Path, name: str, egress: Path | None = None):
-    """This machine's kind of screen: a box here on Linux, the computer's VM on a Mac."""
+def make_desktop(runtime: Path, files: Path, name: str, egress: Path | None = None, size=(WIDTH, HEIGHT)):
+    """This machine's kind of screen: a box here on Linux, the computer's VM on a Mac (where the screen is 1280x800 for
+    now: its browser's window is sized for it)."""
     if sys.platform == "darwin":
         from .pip_container import ContainerDesktop
         return ContainerDesktop(runtime, files, name, egress)
-    return Desktop(runtime, files, name, egress)
+    return Desktop(runtime, files, name, egress, size=size)
 
 
 class Desktop:
     """One Pip computer's screen. Owned by its Host in the supervisor; started on first use."""
 
-    def __init__(self, runtime: Path, files: Path, name: str, egress: Path | None = None):
+    def __init__(self, runtime: Path, files: Path, name: str, egress: Path | None = None, size=(WIDTH, HEIGHT)):
         self.runtime, self.files, self.name = Path(runtime), Path(files), name
+        self.size = tuple(size) if tuple(size) in SIZES else (WIDTH, HEIGHT)
         self.egress = Path(egress) if egress is not None else None
         self.proc: subprocess.Popen | None = None
         self._started_at_ns: int | None = None
@@ -338,7 +353,8 @@ class Desktop:
             except OSError:
                 pass
         from . import pip_apps
-        write_config(self.runtime / "conf", self.name, [key for key in pip_apps.APPS if pip_apps.find(key) is not None])
+        write_config(self.runtime / "conf", self.name, [key for key in pip_apps.APPS if pip_apps.find(key) is not None],
+                     self.size)
         for fifo in ("control", "launch"):
             if not (self.runtime / "sock" / fifo).exists():
                 os.mkfifo(self.runtime / "sock" / fifo, 0o600)
