@@ -4,6 +4,7 @@
 import { after, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
 import { artifactsModule } from "./support/artifact-scene.mjs";
 
 const world = {};
@@ -32,7 +33,7 @@ globalThis.__DGC_ART_VSCODE = {
     showWarningMessage: async (message, options, ...items) => { world.warnings.push({ message, options, items }); return world.answer; },
     showInformationMessage: async (message) => { world.infos.push(message); return undefined; },
     showSaveDialog: async (options) => { world.saveAsked = options; return world.saveTo; },
-    showQuickPick: async (items) => { world.picks.push(items); return typeof world.pick === "function" ? world.pick(items) : undefined; },
+    showQuickPick: async (items, options) => { world.picks.push(items); world.pickOptions = options; return typeof world.pick === "function" ? world.pick(items) : undefined; },
     showTextDocument: async (u) => { world.shown.push(u.fsPath); },
     withProgress: async (_o, task) => task(),
   },
@@ -327,24 +328,72 @@ test("Download, in a remote window: no save dialog on the remote machine; the pe
   }
 });
 
-test("a link to DGC's artifact page, in a remote window: the artifact's own address, forwarded; locally, and for any other link, nothing changes", async () => {
-  const { createServer } = await import("node:http");
+// A model types a link to DGC's page list into its reply, in a remote window. The list frames each page from the page's own
+// port, which a remote window doesn't forward, so opening the list itself shows the list with an empty frame. Every such
+// link opens a page at its own forwarded address instead: the one it names; the only one; or the one picked from a short
+// list of their names. A dismissed list opens nothing.
+test("a typed link to DGC's page list, in a remote window: a page at its own forwarded address, never the list with an empty frame", async () => {
+  let pages = [{ id: "a1", name: "Other", path: "/index.html", port: 45011, uptime: "2m" }, { id: "a2", name: "Inbox", path: "/inbox.html", port: 45012, uptime: "1m" }];
   const server = createServer((req, res) => {
     if (req.url !== "/_list") { res.writeHead(404); res.end(); return; }
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ artifacts: [{ id: "a1", name: "Other", path: "/index.html", port: 45011 }, { id: "a2", name: "Inbox", path: "/inbox.html", port: 45012 }] }));
+    res.end(JSON.stringify({ artifacts: pages }));
   });
+  const other = createServer((req, res) => { res.writeHead(404); res.end(); });   // a loopback server that isn't DGC's
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const shell = `http://127.0.0.1:${server.address().port}`;
+  await new Promise((resolve) => other.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port, shell = `http://127.0.0.1:${port}`;
   const env = globalThis.__DGC_ART_VSCODE.env;
+  const opened = async (link) => { const u = await art.forwardedArtifactPage(link); return u === null ? null : u?.toString(); };
   try {
-    assert.equal(await art.forwardedArtifactPage(`${shell}/?a=a2`), undefined, "a local window keeps the page with its list");
+    for (const link of [`${shell}/?a=a2`, `${shell}/`, `${shell}/a/a2/`]) {
+      assert.equal(await opened(link), undefined, `a local window opens ${link} as it is: the list frames its pages there`);
+    }
+    assert.equal(world.picks.length, 0);
     env.remoteName = "ssh-remote";
-    assert.equal((await art.forwardedArtifactPage(`${shell}/?a=a2`)).toString(), "http://forwarded.example:45012/inbox.html");
-    assert.equal(await art.forwardedArtifactPage(`${shell}/?a=gone`), undefined);
-    assert.equal(await art.forwardedArtifactPage("https://example.com/?a=a2"), undefined, "never another site");
-    assert.equal(await art.forwardedArtifactPage(`${shell}/other?a=a2`), undefined);
-  } finally { delete env.remoteName; server.close(); }
+    // The page it names.
+    assert.equal(await opened(`${shell}/?a=a2`), "http://forwarded.example:45012/inbox.html");
+    assert.equal(await opened(`http://localhost:${port}/index.html?a=a1`), "http://forwarded.example:45011/index.html", "localhost is this computer too");
+    // An old /a/<id>/ link: the page's own address, with the rest of the link.
+    assert.equal(await opened(`${shell}/a/a2/`), "http://forwarded.example:45012/inbox.html");
+    assert.equal(await opened(`${shell}/a/a2/notes/b.html?x=1#top`), "http://forwarded.example:45012/notes/b.html?x=1#top");
+    assert.equal(world.picks.length, 0, "a link that names a page opens it without asking");
+    // The bare list: its pages by name, and the one picked opens.
+    world.pick = (items) => items.find((i) => i.label === "Inbox");
+    assert.equal(await opened(`${shell}/`), "http://forwarded.example:45012/inbox.html");
+    assert.deepEqual(world.picks.at(-1).map((i) => i.label), ["Other", "Inbox"]);
+    assert.match(world.pickOptions.placeHolder, /2 pages/);
+    // A link to a page that has stopped: the list too, saying so.
+    assert.equal(await opened(`${shell}/?a=gone`), "http://forwarded.example:45012/inbox.html");
+    assert.match(world.pickOptions.placeHolder, /isn't being served/);
+    // Dismissed: nothing opens (null), not the list with its empty frame.
+    world.pick = () => undefined;
+    assert.equal(await opened(`${shell}/`), null);
+    // One page: it opens, nothing to choose.
+    pages = [pages[1]];
+    const asked = world.picks.length;
+    assert.equal(await opened(`${shell}/`), "http://forwarded.example:45012/inbox.html");
+    assert.equal(world.picks.length, asked);
+    // No pages: the list as it is, which says so.
+    pages = [];
+    assert.equal(await opened(`${shell}/`), undefined);
+    // Never anything else.
+    assert.equal(await opened("https://example.com/?a=a2"), undefined, "never another site");
+    assert.equal(await opened(`http://example.com:${port}/?a=a2`), undefined, "never another host");
+    assert.equal(await opened(`${shell}/other?a=a2`), undefined);
+    assert.equal(await opened(`http://127.0.0.1:${other.address().port}/`), undefined, "a loopback server that isn't DGC's opens as it is");
+  } finally { delete env.remoteName; delete world.pick; server.close(); other.close(); }
+});
+
+test("a dismissed page list opens nothing: Work and ChatDGC stop at null instead of opening the link as typed", () => {
+  for (const [file, call] of [["src/panel.ts", "forwardedArtifactPage(parsed.toString())"], ["src/chatdgc.ts", "forwardedArtifactPage(target)"]]) {
+    const src = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+    const at = src.indexOf(call);
+    assert.ok(at > 0, `${file} asks forwardedArtifactPage`);
+    const near = src.slice(at - 200, at + 400);
+    assert.match(near, /=== null\) return/, `${file} opens nothing when the list was dismissed`);
+    assert.doesNotMatch(near, /forwardedArtifactPage\([^)]*\)\) \?\?/, `${file} must not treat a dismissed list as "open the link"`);
+  }
 });
 
 test("Open in browser goes through asExternalUri; Present shows the deck's one-file page in a tab of its own", async () => {

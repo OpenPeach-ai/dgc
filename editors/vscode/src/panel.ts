@@ -6434,8 +6434,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (parsed.username || parsed.password || !["http:", "https:"].includes(parsed.protocol)) {
         throw new Error("unsupported external URL");
       }
-      // A link to DGC's artifact page, in a remote window: the artifact's own forwarded address (src/artifacts.ts).
-      await vscode.env.openExternal(await forwardedArtifactPage(parsed.toString()) ?? vscode.Uri.parse(parsed.toString(), true));
+      // A link to DGC's artifact page, in a remote window: a page's own forwarded address (src/artifacts.ts); null when
+      // the person dismissed the pick of pages, so nothing opens.
+      const page = await forwardedArtifactPage(parsed.toString());
+      if (page === null) return;
+      await vscode.env.openExternal(page ?? vscode.Uri.parse(parsed.toString(), true));
     } catch {
       void vscode.window.showErrorMessage("DGC refused an invalid or unsafe external URL.");
     }

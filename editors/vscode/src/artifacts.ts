@@ -106,21 +106,41 @@ const attr = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "
 /** A link to DGC's artifact page (`http://127.0.0.1:45000/?a=<id>`, the list with a frame) in a remote window. That page
  *  frames each artifact from its own port, its own origin, so a script in one can't read the list, its stop token or another
  *  artifact; forwarding the list alone leaves the frame on a port the person's browser can't reach. So a remote window
- *  forwards the artifact's own address and opens that, as a card's Open in browser does. Separate origins stay. Undefined
- *  for a local window, or a link that isn't one to that page. */
-export async function forwardedArtifactPage(raw: string): Promise<vscode.Uri | undefined> {
+ *  forwards an artifact's own address and opens that, as a card's Open in browser does. Separate origins stay.
+ *  The page is the one the link names (`?a=<id>`, or an old `/a/<id>/<path>` link with the rest of it); the only one; or
+ *  the one picked from their names, as the list would have shown them. Null when that pick was dismissed: open nothing.
+ *  Undefined for a local window, a link that isn't one to that page, or a list with no pages (it opens as it is). */
+export async function forwardedArtifactPage(raw: string): Promise<vscode.Uri | null | undefined> {
   if (!vscode.env?.remoteName) return undefined;
   let link: URL;
   try { link = new URL(raw); } catch { return undefined; }
-  if (link.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(link.hostname) || !["/", "/index.html"].includes(link.pathname)) return undefined;
-  const wanted = link.searchParams.get("a");
-  if (!wanted) return undefined;
+  if (link.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(link.hostname) || !link.port) return undefined;
+  const old = /^\/a\/([^/]+)(?:\/(.*))?$/.exec(link.pathname);
+  if (!old && !["/", "/index.html"].includes(link.pathname)) return undefined;
+  let pages: { id: string; name: string; path: string; port: number; uptime?: string }[];
   try {
     const listed = JSON.parse(await fetchPage(`http://127.0.0.1:${link.port}/_list`, 1024 * 1024, 5000));
-    const row = (Array.isArray(listed?.artifacts) ? listed.artifacts : []).find((item: any) => item?.id === wanted);
-    if (!row || !Number.isSafeInteger(row.port) || typeof row.path !== "string" || !row.path.startsWith("/")) return undefined;
-    return await vscode.env.asExternalUri(vscode.Uri.parse(`http://127.0.0.1:${row.port}${row.path}`, true));
+    if (!Array.isArray(listed?.artifacts)) return undefined;
+    pages = listed.artifacts.filter((row: any) => typeof row?.id === "string" && Number.isSafeInteger(row.port)
+      && typeof row.path === "string" && row.path.startsWith("/"));
   } catch { return undefined; }
+  if (!pages.length) return undefined;
+  let wanted: string | null = null;
+  try { wanted = old ? decodeURIComponent(old[1]) : link.searchParams.get("a"); } catch { wanted = null; }
+  let page = wanted ? pages.find((row) => row.id === wanted) : undefined;
+  if (!page && !wanted && pages.length === 1) page = pages[0];
+  if (!page) {
+    const picked = await vscode.window.showQuickPick(
+      pages.map((row) => ({ label: String(row.name || row.id).slice(0, 200), description: row.uptime ? `up ${row.uptime}` : undefined, row })),
+      { title: "Open a page", placeHolder: wanted
+          ? "The page that link names isn't being served now. Pick one to open in your browser."
+          : `DGC is serving ${pages.length} pages. Pick one to open in your browser.` });
+    if (!picked) return null;
+    page = picked.row;
+  }
+  // An old link keeps the rest of its path, its query and its fragment (the list's own redirect keeps the path).
+  const rest = old && page.id === wanted && old[2] ? `/${old[2]}${link.search}${link.hash}` : page.path;
+  try { return await vscode.env.asExternalUri(vscode.Uri.parse(`http://127.0.0.1:${page.port}${rest}`, true)); } catch { return undefined; }
 }
 
 /** How long a download address answers with its file. */

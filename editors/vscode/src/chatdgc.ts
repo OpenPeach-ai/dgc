@@ -2451,8 +2451,11 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "openLink": {
         const target = typeof message.target === "string" ? message.target : "";
         if (/^https?:\/\/[^\s]+$/i.test(target) && target.length <= 8192) {
-          // A link to DGC's artifact page, in a remote window: the artifact's own forwarded address (src/artifacts.ts).
-          await vscode.env.openExternal(await forwardedArtifactPage(target) ?? vscode.Uri.parse(target, true));
+          // A link to DGC's artifact page, in a remote window: a page's own forwarded address (src/artifacts.ts); null
+          // when the person dismissed the pick of pages, so nothing opens.
+          const page = await forwardedArtifactPage(target);
+          if (page === null) return;
+          await vscode.env.openExternal(page ?? vscode.Uri.parse(target, true));
         } else if (message.kind === "file" && target && target.length <= 8192) {
           // A file the reply named: in the folder this chat reads, else the window's. Checked there as Work's are; one
           // that isn't in either says so.
