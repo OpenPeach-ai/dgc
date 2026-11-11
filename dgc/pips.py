@@ -131,7 +131,7 @@ _COMMAND_ARGS = {
     "undo_pip_change": {"pip_id", "change_id"},
     "set_pip_profile": {"pip_id", "changes"}, "list_pip_shared": {"pip_id", "kind"},
     "get_pip_computers": set(), "update_pip_computers": set(), "reset_pip_computer": {"pip_id"}, "list_pip_apps": set(),
-    "list_pip_plugins": {"pip_id"}, "allow_pip_plugin": {"pip_id", "grant_id"}, "decline_pip_plugin": {"pip_id", "grant_id"},
+    "list_pip_plugins": {"pip_id"}, "allow_pip_plugin": {"pip_id", "grant_id", "keys"}, "decline_pip_plugin": {"pip_id", "grant_id"},
     "list_pip_plugin_uses": set(), "list_pip_attention": {"limit"}, "list_pip_notes": {"pip_id", "shared"}, "add_pip_note": {"pip_id", "text", "shared"},
     "forget_pip_note": {"pip_id", "note_id", "all", "shared"}, "list_pip_sites": {"pip_id"}, "set_pip_careful": {"pip_id", "on"},
     # API 57: a Personal Pip's own working notes (pip_working_notes) and its daily log (pip_daily_log).
@@ -5750,7 +5750,9 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
         # password already saved, saved again) would keep "[REDACTED]" as the password. They go to the sealed store
         # only, and nothing answers with them.
         credentials = ({k: request[k] for k in ("username", "password", "totp") if k in request}
-                       if command == "save_pip_login" else {})
+                       if command == "save_pip_login" else
+                       # A plugin's key pasted on its card (pips-10): kept as typed for plugin_keys, never answered.
+                       {"keys": request["keys"]} if command == "allow_pip_plugin" and "keys" in request else {})
         request = redact_value(request, secret_values(config))
         request.update(credentials)
         choice = request.get("model_choice") if command == "create_pip" else (
@@ -5959,7 +5961,8 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     result = pip_plugins.listing(registry, pip_id, config)
                 elif command == 'allow_pip_plugin':
                     was = pip_plugins._row(registry, request.get('grant_id'))['status']
-                    result = pip_plugins.allow(registry, config, request.get('grant_id'), pip_id, actor)
+                    # A plugin that needs a key (pips-10): the card's key, saved securely and never echoed.
+                    result = pip_plugins.allow(registry, config, request.get('grant_id'), pip_id, actor, keys=request.get('keys'))
                     if was == 'requested':
                         # The Pip carries on with what the user asked, now that it may use the plugin.
                         from .pip_chat import continue_after_plugin

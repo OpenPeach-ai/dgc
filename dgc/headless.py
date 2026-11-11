@@ -441,7 +441,11 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # sent, and `on_its_own` may list kind "handoff". At Approve for me a read-only handoff, and a check whose exact
 # commands you approved once, run by themselves; at Do it all a fix too, in its own copy. A proposal its level took
 # answers with the accepted handoff and its `run`.
-PIPS_API_VERSION = 80
+# API 81 (0.52, pips-10): a Personal Pip's plugin that needs a key it doesn't have raises one card in its chat:
+# list_pip_plugins answers `key_requests` [{id, plugin, name, reason, status "requested", needs_key [{name, label, server}],
+# ...}], and allow_pip_plugin takes `keys` {variable name: text}, kept where DGC keeps a plugin's key (the keychain, bound
+# to its server), never answered; the Pip carries on. Every key it lacks must be given, or nothing is saved.
+PIPS_API_VERSION = 81
 
 
 def attachment_limits() -> dict:

@@ -4005,6 +4005,9 @@ bubblewrap profile is missing; DGC does not fall back to an unsandboxed browser.
   turn carries on with it; its prompt box says so in olive, and the first reply says so once.
 - **Always allow** lets one exact kind of action through from then on, for the same account, tool or
   site; its page lists them, with **Stop allowing**. A payment never offers it.
+- **A plugin's key, asked on a card.** When a Pip's plugin needs a key it doesn't have (an API key or token), its
+  chat shows one card for it; paste the key there and Allow, and DGC keeps it where it keeps a plugin's key (your
+  system keychain, bound to that plugin's server). The Pip never sees it, and it carries on by itself.
 - **Saved logins.** Save a site's login once, with its authenticator key if it has one, and DGC types
   it in, the one-time code too. The Pip never sees it.
 - **Borrowing your Chrome.** For one task that needs a site you're signed in to, a Pip can ask to use

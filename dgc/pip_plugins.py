@@ -59,6 +59,10 @@ SERVER = re.compile(r"[A-Za-z0-9_.-]{1,80}\Z")
 GRANT = re.compile(r"pipplugin_[a-f0-9]{32}\Z")
 LOCAL = ("editor-user", "local-console")
 TOOLS = ("plugin_tools", "call_plugin", "plugin_answer")
+# A plugin with no key yet (pips-10): the card is in the Pip's chat, and the Pip never sees the key.
+KEY_ASKED = ("{plugin} needs its key ({label}) before it can connect. DGC now shows the user a card below your reply to "
+             "paste it securely; you never see it. Stop now and tell them in one sentence that {plugin} needs its {label}, "
+             "saved on the card below; once they do, you are told and you carry on. Never ask for the key in the chat.")
 MAX_TEXT = 40000
 MAX_CALLS = 60                     # plugin calls in one run, reads and Allow cards together
 CALL_SECONDS = 45
@@ -236,12 +240,28 @@ def _plugin_name(value, available) -> str:
 
 # --------------------------------------------------------------------------- the Pip's cards
 
+def needs_key(info) -> list[dict]:
+    """The keys a plugin still lacks for its servers (pips-10): [{name, label, server}], none for a plugin that has them
+    all (given to it, saved on its page, or in the environment). Never a value."""
+    from . import plugin_keys, plugins as plugin_settings
+    out = []
+    for server, spec in sorted(((info or {}).get("servers") or {}).items()):
+        try:
+            missing = plugin_settings.missing_keys(server, spec)
+            entry = plugin_settings._key_entry(server)
+        except Exception:                   # noqa: BLE001 - a plugin that can't say needs nothing asked
+            continue
+        for name in missing[:4]:
+            out.append({"name": name, "label": plugin_keys.describe(entry, name)["label"], "server": server})
+    return out[:8]
+
+
 def projection(row, available=None) -> dict:
     info = (available or {}).get(row["plugin"])
     return {"id": row["id"], "pip_id": row["pip_id"], "workspace_id": row["workspace_id"], "plugin": row["plugin"],
             "name": info["display_name"] if info else row["plugin"], "reason": row["reason"], "status": row["status"],
             "installed": info is not None, "money": bool(info and info["money"]),
-            "servers": sorted(info["servers"]) if info else [],
+            "servers": sorted(info["servers"]) if info else [], "needs_key": needs_key(info) if info else [],
             "created_at": row["created_at"], "updated_at": row["updated_at"]}
 
 
@@ -281,7 +301,9 @@ def listing(registry, pip_id, config) -> dict:
     # Each with its servers: a plugin action's draft names only its server, and the chat finds the plugin (its name,
     # and whether it can move money) by it. Without them, after the cards went, its Allow card never showed.
     # ``asks``: the user set it to Always ask, so its Allow card offers Allow once and Don't only (no Always allow).
-    return {"pip_id": pip_id, "plugins": [],
+    # A plugin that needs a key this Pip asked for (pips-10): its card, with the key's name, until it is saved.
+    keyed = [projection(r, available) for r in _rows(registry, pip_id) if r["status"] == "requested"]
+    return {"pip_id": pip_id, "plugins": [], "key_requests": [c for c in keyed if c["needs_key"]][:8],
             "installed": [{"plugin": n, "name": i["display_name"], "money": i["money"], "servers": sorted(i["servers"])[:8],
                            **({"asks": True} if level(n, i) == "always_ask" else {})}
                           for n, i in sorted(available.items())][:40]}
@@ -370,12 +392,26 @@ def _owned(registry, grant_id, pip_id, actor):
     return row
 
 
-def allow(registry, config, grant_id, pip_id, actor) -> dict:
+def allow(registry, config, grant_id, pip_id, actor, keys=None) -> dict:
+    """Allow, and for a plugin that needs a key (pips-10) save the key pasted on its card where DGC keeps a plugin's key
+    (plugin_keys: the keychain, bound to its server). Every key it lacks must be pasted; nothing is saved otherwise."""
     row = _owned(registry, grant_id, pip_id, actor)
     available = installed(config)
     if row["plugin"] not in available:
         raise RegistryError("plugin_unavailable", f"{row['plugin']} isn’t added in Settings → Plugins, or it’s turned off there. "
                             "Add it first, then choose Allow.")
+    wanted = needs_key(available[row["plugin"]])
+    if wanted:
+        given = keys if isinstance(keys, dict) else {}
+        values = {k["name"]: str(given.get(k["name"]) or "").strip() for k in wanted}
+        empty = [k["label"] for k in wanted if not values[k["name"]]]
+        if empty:
+            raise RegistryError("key_required", f"Paste its {empty[0]} first; it is saved securely, and the Pip never sees it.")
+        from . import plugin_keys
+        for server, spec in sorted(available[row["plugin"]]["servers"].items()):
+            mine = {k["name"]: values[k["name"]] for k in wanted if k["server"] == server}
+            if mine:
+                plugin_keys.save(server, spec, mine)
     row = _set(registry, grant_id, status="allowed")
     registry.event(row["workspace_id"], "pip_plugin_allowed", pip_id=pip_id, payload={"plugin": row["plugin"], "actor": actor})
     return {"plugin": projection(row, available)}
@@ -892,7 +928,23 @@ class Session:
 
     # -- connections
 
-    def _manager(self, server, spec, info):
+    def _ask_for_key(self, plugin, info, missing) -> None:
+        """The plugin's server lacks a key (pips-10): one card in the Pip's chat for it (asking again refreshes it), and
+        the Pip is told to stop and say so. Never at a run nobody watches: that run is told to leave it for the user."""
+        from .workspace_registry import WorkspaceRegistry
+        name = info.get("display_name") or plugin
+        wanted = needs_key(info)
+        label = wanted[0]["label"] if wanted else "key"
+        with WorkspaceRegistry(self.directory) as registry:
+            row = next((r for r in _rows(registry, self.pip_id) if r["plugin"] == plugin), None)
+            reason = f"needs its {label} to connect"
+            if row is None:
+                request(registry, self.pip_id, self.workspace_id, plugin, reason, self.run_id)
+            else:
+                _set(registry, row["id"], reason=reason, run_id=self.run_id, status="requested")
+        raise RegistryError("plugin_needs_key", KEY_ASKED.format(plugin=name, label=label))
+
+    def _manager(self, server, spec, info, plugin=None):
         fingerprint = apps.digest(spec)
         held = self._managers.get(server)
         if held is not None and held[1] == fingerprint:
@@ -911,6 +963,13 @@ class Session:
             raise
         if server not in manager.servers:
             manager.stop_all()
+            from . import plugins as plugin_settings
+            try:
+                missing = plugin_settings.missing_keys(server, spec)
+            except Exception:                   # noqa: BLE001 - a plugin that can't say is "didn't answer"
+                missing = []
+            if missing and plugin:
+                self._ask_for_key(plugin, info, missing)
             raise RegistryError("plugin_unavailable", f"{info['display_name']} isn’t signed in, or it didn’t answer. Ask the user to "
                                 "open Settings → Plugins and connect it, then try again.")
         self._managers[server] = (manager, fingerprint)
@@ -921,7 +980,7 @@ class Session:
         from .pip_connector_actions import catalog
         found = {}
         for server, spec in sorted(info["servers"].items()):
-            manager = self._manager(server, spec, info)
+            manager = self._manager(server, spec, info, plugin)
             found_server = manager.servers.get(server)
             rows = {r.get("name"): r for r in (getattr(found_server, "tools", None) or []) if isinstance(r, dict)}
             for tool, entry in catalog(manager, server).items():

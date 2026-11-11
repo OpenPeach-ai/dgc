@@ -157,7 +157,7 @@ export type PipMutationParams = {
   decline_pip_app_link: { pip_id: string; link_id: string };
   disconnect_pip_app_link: { pip_id: string; link_id: string };
   finish_pip_computer_check: { pip_id: string };
-  allow_pip_plugin: { pip_id: string; grant_id: string };
+  allow_pip_plugin: { pip_id: string; grant_id: string; keys?: Record<string, string> };
   add_pip_note: { pip_id: string; text: string; shared?: true };
   forget_pip_note: { pip_id: string; note_id?: string; all?: true; shared?: true };
   set_pip_careful: { pip_id: string; on: boolean };
@@ -293,7 +293,7 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   get_pip_eyes: ["pip_id"],
   set_pip_eyes: ["choice", "pip_id"],
   list_pip_plugins: ["pip_id"],
-  allow_pip_plugin: ["pip_id", "grant_id"],
+  allow_pip_plugin: ["pip_id", "grant_id", "keys"],
   decline_pip_plugin: ["pip_id", "grant_id"],
   list_pip_plugin_uses: [],
   list_pip_attention: ["limit"],
@@ -1178,6 +1178,18 @@ export class Pips {
     if (["pause_pip", "resume_pip"].includes(command) && Object.hasOwn(values, "expected_lifecycle_revision")
       && (this.caps.pips_api_version as number) < 16) {
       throw new DGCUnsupportedError("Reviewed lifecycle revisions require a runtime advertising Pips API 16 or newer");
+    }
+    // API 81 (pips-10): a plugin card's key on Allow, {variable name: text}, kept by DGC for the plugin's server.
+    if (command === "allow_pip_plugin" && Object.hasOwn(values, "keys")) {
+      if ((this.caps.pips_api_version as number) < 81) {
+        throw new DGCUnsupportedError("A plugin's key on its card (keys) requires a runtime advertising Pips API 81 or newer");
+      }
+      const keys = values.keys as unknown;
+      const entries = keys && typeof keys === "object" && !Array.isArray(keys) ? Object.entries(keys as Record<string, unknown>) : null;
+      if (!entries || entries.length < 1 || entries.length > 8
+        || entries.some(([k, v]) => !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(k) || typeof v !== "string" || v.length > 16384)) {
+        throw new DGCConfigError("keys is {variable name: the key}, up to 8, each up to 16,384 characters");
+      }
     }
     if (API79_FIELDS.has(command) && Object.hasOwn(values, "conversation_id")) {
       if ((this.caps.pips_api_version as number) < 79) {

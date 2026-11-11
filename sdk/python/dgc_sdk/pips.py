@@ -405,6 +405,10 @@ MUTATION_COMMANDS |= API79_MUTATIONS
 API79_FIELDS = {command: frozenset({'conversation_id'})
                 for command in ('send_pip_message', 'list_pip_messages', 'mark_pip_read', 'get_pip_chat_context')}
 CONVERSATION_ID = re.compile(r"conv_[0-9a-f]{32}\Z")
+# API 81 (pips-10): a plugin card that needs a key takes it on Allow: keys {variable name: text}, kept by DGC for the
+# plugin's server, never answered. Sent only to a runtime advertising 81.
+KEY_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")
+MAX_PLUGIN_KEYS, MAX_PLUGIN_KEY = 8, 16_384
 PIP_REPORT_AS = frozenset({'chat', 'doc', 'sheet'})
 TEMPLATE_CHANGE_ID = re.compile(r"tmplchange_[a-f0-9]{32}\Z")
 COMMAND_FIELDS = {
@@ -452,7 +456,7 @@ COMMAND_FIELDS = {
     'check_pip_source': frozenset({'pip_id', 'source_policy'}),
     'get_pip_run_source': frozenset({'run_id'}),
     'list_pip_plugins': frozenset({'pip_id'}),
-    'allow_pip_plugin': frozenset({'pip_id', 'grant_id'}),
+    'allow_pip_plugin': frozenset({'pip_id', 'grant_id', 'keys'}),
     'decline_pip_plugin': frozenset({'pip_id', 'grant_id'}),
     'list_pip_plugin_uses': frozenset(),
     'list_pip_attention': frozenset({'limit'}),
@@ -983,6 +987,14 @@ class Pips:
             if 'conversation_id' in values and not (isinstance(values['conversation_id'], str)
                                                     and CONVERSATION_ID.match(values['conversation_id'])):
                 raise DGCConfigError("conversation_id names one of the Pip's conversations (conv_ and 32 hex digits)")
+        if command == 'allow_pip_plugin' and 'keys' in values:
+            if version < 81:
+                raise DGCUnsupportedError("A plugin's key on its card (keys) requires a runtime advertising Pips API 81 or newer")
+            keys = values['keys']
+            if (not isinstance(keys, Mapping) or not 1 <= len(keys) <= MAX_PLUGIN_KEYS
+                    or any(not isinstance(k, str) or not KEY_NAME.match(k) or not isinstance(v, str) or len(v) > MAX_PLUGIN_KEY
+                           for k, v in keys.items())):
+                raise DGCConfigError("keys is {variable name: the key}, up to 8, each up to 16,384 characters")
         if API52_FIELDS.get(command, frozenset()) & set(values):
             if version < 52:
                 raise DGCUnsupportedError('Photos and files through the spool, and as_file, require a runtime advertising Pips API 52 or newer')
