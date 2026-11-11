@@ -331,7 +331,12 @@ def _cleanup(registry, pip_id, run_ids):
                 raise RegistryError('unsafe_state', "DGC's memory file couldn't be read, so what this Pip kept "
                                     'there stays until it can be. Check it in Settings → Memory.') from exc
 
-    for part in (files, logins, outputs, memory):
+    def keys():
+        # Its own API keys (pip_keys): the keychain entries its ledger names, and the ledger.
+        from . import pip_keys
+        pip_keys.forget_pip(root, pip_id)
+
+    for part in (files, logins, keys, outputs, memory):
         try:
             part()
         except (RegistryError, OSError) as exc:

@@ -4008,6 +4008,11 @@ bubblewrap profile is missing; DGC does not fall back to an unsandboxed browser.
 - **A plugin's key, asked on a card.** When a Pip's plugin needs a key it doesn't have (an API key or token), its
   chat shows one card for it; paste the key there and Allow, and DGC keeps it where it keeps a plugin's key (your
   system keychain, bound to that plugin's server). The Pip never sees it, and it carries on by itself.
+- **A web API's key, asked on a card.** A Pip that needs an API's key (an invoicing service, a weather API) asks on a
+  card naming the key, why, and the one site it goes to. Paste it there and DGC keeps it in your keychain, bound to
+  that Pip and that site; DGC adds it when the Pip reads that site, never sends it anywhere else, and never follows a
+  redirect with it. The Pip never sees it. Not now keeps it from asking again for a day; a site that turns the key
+  away puts the card back.
 - **Saved logins.** Save a site's login once, with its authenticator key if it has one, and DGC types
   it in, the one-time code too. The Pip never sees it.
 - **Borrowing your Chrome.** For one task that needs a site you're signed in to, a Pip can ask to use

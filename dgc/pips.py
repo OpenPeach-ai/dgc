@@ -91,6 +91,7 @@ CONTROL_COMMANDS = frozenset({
     "get_pip_level", "set_pip_level",
     "list_pip_flows", "get_pip_flow", "create_pip_flow", "set_pip_flow",
     "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow",
+    "list_pip_keys", "save_pip_key", "decline_pip_key", "remove_pip_key",
     "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret",
     "list_app_approvals", "decide_app_approval",
     "trigger_app_event", "list_app_events",
@@ -157,6 +158,9 @@ _COMMAND_ARGS = {
     # Borrowing the user's own signed-in Chrome (pip_borrow, API 59): a card each time, Allow once, Not now, Stop.
     "list_pip_borrows": {"pip_id"}, "allow_pip_borrow": {"pip_id", "borrow_id"}, "decline_pip_borrow": {"pip_id", "borrow_id"},
     "stop_pip_borrow": {"pip_id", "borrow_id"},
+    # A Personal Pip's own API keys (pip_keys, API 82): its card, the key pasted on it, Not now, Remove.
+    "list_pip_keys": {"pip_id"}, "save_pip_key": {"pip_id", "key_id", "value"},
+    "decline_pip_key": {"pip_id", "key_id"}, "remove_pip_key": {"pip_id", "key_id"},
     # Your own apps' tools (pip_sdk_apps, API 61): registered by your code, a connection app:<name> for Personal Pips.
     "register_app": {"name", "url", "tools"}, "update_app": {"name", "url", "tools"},
     "accept_app_update": {"name", "expected_digest"}, "list_apps": set(), "remove_app": {"name"},
@@ -3021,7 +3025,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     from . import pip_connector_drafts
     connector_context = pip_connector_drafts.pin(manifest)
     connector_candidate = None
-    from . import pip_computer, pip_app_links, pip_plugins, pip_notes, pip_sdk_apps, pip_images, pip_videos
+    from . import pip_computer, pip_app_links, pip_plugins, pip_notes, pip_sdk_apps, pip_images, pip_videos, pip_keys
     # It keeps notes about the user only in a reply to the user's own message: never in a routine's run or
     # a turn DGC wrote, whose text can carry an email or a page (pip_notes).
     keeps_notes = (personal and conversation is not None and manifest.get('user_turn') is True
@@ -3352,7 +3356,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
 
         def _tool_schemas(self, *args, **kwargs):
             if personal:
-                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_core_setup.schema()] if selected_type.id == 'core' and pip_core_setup.pinned(manifest) else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)], direct=bool(chat_setup and chat_setup['direct']))] if personal and conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
+                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_core_setup.schema()] if selected_type.id == 'core' and pip_core_setup.pinned(manifest) else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_keys.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)], direct=bool(chat_setup and chat_setup['direct']))] if personal and conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
             schemas = super()._tool_schemas(*args, **kwargs)
             if specialist_pin is not None:
                 return [pip_specialists.schema(specialist_pin['grant'])
@@ -3688,6 +3692,14 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 # routine makes one only for a Pip the user allowed for that generator.
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
                 return pip_app_links.worker_call(apps_pin, call.name, arguments, timeout=180)
+            if personal and apps_pin is not None and call.name in pip_keys.TOOLS:
+                # Its own API keys (pip_keys): asked for on a card; DGC adds the saved key to a GET on its one site, in
+                # the controller, so the key never reaches this worker.
+                arguments = call.arguments if isinstance(call.arguments, dict) else {}
+                said = pip_app_links.worker_call(apps_pin, call.name, arguments, timeout=60)
+                if isinstance(said, str) and "below your reply" in said and not said.startswith("error"):
+                    cards_shown.append(call.name)
+                return said
             if personal and apps_pin is not None and call.name in pip_images.TOOLS:
                 # Image generation: made by the controller with the user's generators (pip_images); a paid one is
                 # made only after the user said yes in their own message.
@@ -5752,7 +5764,9 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
         credentials = ({k: request[k] for k in ("username", "password", "totp") if k in request}
                        if command == "save_pip_login" else
                        # A plugin's key pasted on its card (pips-10): kept as typed for plugin_keys, never answered.
-                       {"keys": request["keys"]} if command == "allow_pip_plugin" and "keys" in request else {})
+                       {"keys": request["keys"]} if command == "allow_pip_plugin" and "keys" in request else
+                       # A Pip's own API key pasted on its card (pip_keys): the same.
+                       {"value": request["value"]} if command == "save_pip_key" and "value" in request else {})
         request = redact_value(request, secret_values(config))
         request.update(credentials)
         choice = request.get("model_choice") if command == "create_pip" else (
@@ -5774,7 +5788,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 "get_workspace_session_outcome", "list_workspace_session_outcomes",
                 "accept_workspace_session_outcome", "reject_workspace_session_outcome", "get_workspace_context")
             receipt_command = command in ("list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context")
-            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("list_pip_flows", "get_pip_flow", "create_pip_flow", "set_pip_flow", "get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret", "list_app_approvals", "decide_app_approval", "trigger_app_event", "list_app_events", "ensure_pip_template", "prune_pip_templates", "list_pip_templates", "decide_pip_template_change", "export_pip", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "add_pip_computer", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "delete_archived_pip", "list_pip_attention") else registry.resolve(config.project_root)
+            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("list_pip_flows", "get_pip_flow", "create_pip_flow", "set_pip_flow", "get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "list_pip_keys", "save_pip_key", "decline_pip_key", "remove_pip_key", "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret", "list_app_approvals", "decide_app_approval", "trigger_app_event", "list_app_events", "ensure_pip_template", "prune_pip_templates", "list_pip_templates", "decide_pip_template_change", "export_pip", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "add_pip_computer", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "delete_archived_pip", "list_pip_attention") else registry.resolve(config.project_root)
             workspace_id = request.get("workspace_id", current["id"] if current else "")
             if actor not in ('editor-user','local-console'):
                 # Personal scope is deliberately local for this milestone. Existing
@@ -6086,6 +6100,23 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     result = pip_borrow.decline(store, config, request.get('borrow_id'), pip_id, actor)
                 else:
                     result = pip_borrow.stop(store, request.get('borrow_id'), pip_id, actor)
+            elif command in ('list_pip_keys', 'save_pip_key', 'decline_pip_key', 'remove_pip_key'):
+                # A Personal Pip's own API keys (pip_keys): it asks with a card; only the user, on this computer, saves
+                # one (kept in the keychain, never here), says Not now, or removes it.
+                from . import pip_keys
+                if actor not in ('editor-user', 'local-console'):
+                    raise RegistryError('local_only', 'Only you give a Pip a key, on this computer.')
+                pip = store._job(pip_id)
+                if pip['source_policy'] != {'mode': 'personal'}:
+                    raise RegistryError('invalid_request', 'Only a Personal Pip has keys of its own.')
+                if command == 'list_pip_keys':
+                    result = pip_keys.listing(registry, pip_id)
+                elif command == 'save_pip_key':
+                    result = pip_keys.save(store, config, request.get('key_id'), pip_id, actor, request.get('value'))
+                elif command == 'decline_pip_key':
+                    result = pip_keys.decline(store, config, request.get('key_id'), pip_id, actor)
+                else:
+                    result = pip_keys.remove(registry, request.get('key_id'), pip_id, actor)
             elif command in ('list_pip_sites', 'set_pip_careful', 'forget_pip_site'):
                 # Careful mode (pip_careful): its switch, and the sites the Pip may visit without asking.
                 from . import pip_careful

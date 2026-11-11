@@ -699,9 +699,16 @@ PLUGINS_KEY = "plugins_"
 # one that may not, under BORROW_NO_KEY. No message the user or an SDK sends can take either key.
 BORROW_KEY = "borrow_"
 BORROW_NO_KEY = BORROW_KEY + "no_"
-DGC_KEYS = (INTRO_KEY, COMPUTER_KEY, APPS_KEY, CHECK_KEY, ROUTINE_KEY, PLUGINS_KEY, BORROW_KEY)
+# After the user saves (or says Not now to) a key the Pip asked for with ask_for_key (pip_keys, Pips API 82).
+KEYS_KEY = "keys_"
+DGC_KEYS = (INTRO_KEY, COMPUTER_KEY, APPS_KEY, CHECK_KEY, ROUTINE_KEY, PLUGINS_KEY, BORROW_KEY, KEYS_KEY)
 # The turns DGC writes so the Pip carries on with what the user asked: they see the photos of that ask again.
-FOLLOW_UP_KEYS = (COMPUTER_KEY, APPS_KEY, CHECK_KEY, PLUGINS_KEY, BORROW_KEY)
+FOLLOW_UP_KEYS = (COMPUTER_KEY, APPS_KEY, CHECK_KEY, PLUGINS_KEY, BORROW_KEY, KEYS_KEY)
+KEY_SAVED = ("This message is from DGC, not the user. The user saved the {name} for {host}. Read the API with "
+             "fetch_with_key now (DGC adds the key; you never see it), then carry on with what they asked in a short "
+             "message.")
+KEY_NOT_NOW = ("This message is from DGC, not the user. The user said not now to the {name} for {host}. Don't ask for it "
+               "again today. Carry on without it in a short message: say what you couldn't do without it.")
 CHECK_DONE = ("This message is from DGC, not the user. The user says they finished {host}'s check on your computer's "
               "screen. Read the page again and carry on with what they asked. If the site still asks for a check, "
               "stop and tell them in one sentence.")
@@ -973,6 +980,20 @@ def continue_after_plugin(store, pip_id, card, config):
     """The chat's next turn once the user has allowed a plugin this Pip asked for."""
     key = PLUGINS_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(card["id"]))[:100]
     return _owed_turn(store, pip_id, PLUGIN_ALLOWED.format(plugin=str(card["name"])[:80]), key, "local-apps", config)
+
+
+def continue_after_key(store, pip_id, card, config):
+    """The chat's next turn once the user has saved a key this Pip asked for (pip_keys)."""
+    key = KEYS_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(card["id"]))[:100]
+    text = KEY_SAVED.format(name=str(card["name"])[:80], host=str(card["host"])[:253])
+    return _owed_turn(store, pip_id, text, key, "local-apps", config)
+
+
+def continue_after_key_declined(store, pip_id, card, config):
+    """The chat's next turn once the user said Not now to a key card: the Pip says what it couldn't do."""
+    key = KEYS_KEY + "no_" + re.sub(r"[^A-Za-z0-9_-]", "", str(card["id"]))[:100]
+    text = KEY_NOT_NOW.format(name=str(card["name"])[:80], host=str(card["host"])[:253])
+    return send(store, pip_id, text, key, "local-apps", config, _intro=True)
 
 
 def continue_after_plugin_action(store, pip_id, action_id, plugin, tool, config, *, confirmed, answered,

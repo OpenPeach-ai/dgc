@@ -556,6 +556,8 @@ class RunSocket:
         self.images = pip_images.Session(directory, config, pip_id, workspace_id, run_id, unattended=unattended)
         from . import pip_videos     # video generation, the same way (the job outlives the run)
         self.videos = pip_videos.Session(directory, config, pip_id, workspace_id, run_id, unattended=unattended)
+        from . import pip_keys       # its own API keys (Pips API 82): asked for on a card, added here, never sent to it
+        self.keys = pip_keys.Session(directory, config, pip_id, workspace_id, run_id)
         self._stopped = threading.Event()
         threading.Thread(target=self._serve, name="pip-apps-run", daemon=True).start()
 
@@ -593,6 +595,15 @@ class RunSocket:
         from .pip_borrow import TOOLS as BORROW_TOOLS
         from .pip_images import TOOLS as IMAGE_TOOLS
         from .pip_videos import TOOLS as VIDEO_TOOLS
+        from .pip_keys import TOOLS as KEY_TOOLS
+        if op in KEY_TOOLS:
+            try:
+                said = self.keys.call(op, args, taint=self.taint, said=self.said)
+            except Exception as exc:              # never hang the Pip: say so
+                return f"error: that did not work ({type(exc).__name__})."
+            if op == "fetch_with_key" and said.startswith("Untrusted data from "):
+                self._read(said)                  # careful mode: what an API answered is something it read
+            return said
         if op in IMAGE_TOOLS:
             try:
                 return self.images.call(op, args)
@@ -708,9 +719,10 @@ class RunSocket:
                         from .pip_borrow import TOOLS as BORROW_TOOLS
                         from .pip_images import TOOLS as IMAGE_TOOLS
                         from .pip_videos import TOOLS as VIDEO_TOOLS
+                        from .pip_keys import TOOLS as KEY_TOOLS
                         answer = ("error: invalid app arguments" if not isinstance(args, dict) else
                                   self.call(op, args) if op in TOOLS + PLUGIN_TOOLS + BORROW_TOOLS + SDK_APP_OPS
-                                  + IMAGE_TOOLS + VIDEO_TOOLS else "error: unknown app operation")
+                                  + IMAGE_TOOLS + VIDEO_TOOLS + KEY_TOOLS else "error: unknown app operation")
                         reply = answer if isinstance(answer, dict) else {"text": answer}
                     client.sendall(json.dumps(reply).encode("utf-8") + b"\n")
                 except (OSError, ValueError, TypeError):

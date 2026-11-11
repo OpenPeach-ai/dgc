@@ -26,6 +26,7 @@ PipReadCommand = Literal[
     "list_app_approvals",
     "list_apps",
     "list_pip_borrows",
+    "list_pip_keys",
     "get_pip_level",
     "get_pip_working_notes", "list_pip_daily_log",
     "list_pip_logins",
@@ -89,6 +90,7 @@ PipMutationCommand = Literal[
     "decide_app_approval",
     "register_app", "update_app", "accept_app_update", "remove_app", "rotate_app_secret",
     "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow",
+    "save_pip_key", "decline_pip_key", "remove_pip_key",
     "set_pip_artifacts",
     "set_pip_level",
     "set_pips_payments", "set_pip_paying",
@@ -409,6 +411,14 @@ CONVERSATION_ID = re.compile(r"conv_[0-9a-f]{32}\Z")
 # plugin's server, never answered. Sent only to a runtime advertising 81.
 KEY_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")
 MAX_PLUGIN_KEYS, MAX_PLUGIN_KEY = 8, 16_384
+# API 82 (pips-10): a Personal Pip's own API keys, each bound to one site. list_pip_keys reads its cards (never a value);
+# save_pip_key keeps the key pasted on one (DGC sends it to that site alone; never answered), decline_pip_key is Not now,
+# remove_pip_key forgets it. Local only in DGC.
+API82_READS = frozenset({'list_pip_keys'})
+API82_MUTATIONS = frozenset({'save_pip_key', 'decline_pip_key', 'remove_pip_key'})
+READ_COMMANDS |= API82_READS
+MUTATION_COMMANDS |= API82_MUTATIONS
+PIP_KEY_ID = re.compile(r"pipkey_[a-f0-9]{32}\Z")
 PIP_REPORT_AS = frozenset({'chat', 'doc', 'sheet'})
 TEMPLATE_CHANGE_ID = re.compile(r"tmplchange_[a-f0-9]{32}\Z")
 COMMAND_FIELDS = {
@@ -434,6 +444,10 @@ COMMAND_FIELDS = {
     'remove_app': frozenset({'name'}),
     'rotate_app_secret': frozenset({'name'}),
     'list_pip_borrows': frozenset({'pip_id'}),
+    'list_pip_keys': frozenset({'pip_id'}),
+    'save_pip_key': frozenset({'pip_id', 'key_id', 'value'}),
+    'decline_pip_key': frozenset({'pip_id', 'key_id'}),
+    'remove_pip_key': frozenset({'pip_id', 'key_id'}),
     'allow_pip_borrow': frozenset({'pip_id', 'borrow_id'}),
     'decline_pip_borrow': frozenset({'pip_id', 'borrow_id'}),
     'stop_pip_borrow': frozenset({'pip_id', 'borrow_id'}),
@@ -840,7 +854,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API79_READS | API79_MUTATIONS:
+        if command in API82_READS | API82_MUTATIONS:
+            minimum = 82
+        elif command in API79_READS | API79_MUTATIONS:
             minimum = 79
         elif command in API77_MUTATIONS:
             minimum = 77
@@ -1111,6 +1127,10 @@ class Pips:
             raise DGCConfigError("expected_digest is the pending update's digest, from update_app or list_apps")
         if command in API59_MUTATIONS and not (isinstance(values.get('borrow_id'), str) and BORROW_ID.fullmatch(values['borrow_id'])):
             raise DGCConfigError('borrow_id is the card\'s id, pipborrow_ and 32 hex digits')
+        if command in API82_MUTATIONS and not (isinstance(values.get('key_id'), str) and PIP_KEY_ID.fullmatch(values['key_id'])):
+            raise DGCConfigError("key_id is the key's id, pipkey_ and 32 hex digits")
+        if command == 'save_pip_key' and not (isinstance(values.get('value'), str) and len(values['value']) <= MAX_PLUGIN_KEY):
+            raise DGCConfigError('value is the key, up to 16,384 characters')
         if command == 'grant_pip_login' and not (values.get('pips') == 'all' or (
                 type(values.get('pips')) is list and len(values['pips']) <= 64 and all(type(p) is str for p in values['pips']))):
             raise DGCConfigError('pips is "all" or a list of Pip ids')

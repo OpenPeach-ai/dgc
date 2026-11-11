@@ -4659,10 +4659,21 @@ def _fetch_public_text(url: str, *, max_bytes: int = MAX_FETCH_BYTES,
     return final, data.decode(encoding, errors="replace")
 
 
+class RedirectNotFollowed(ValueError):
+    """A fetch that carries a key (pip_keys) never follows a redirect with it: where the answer pointed."""
+
+    def __init__(self, location: str):
+        super().__init__("the site answered with a redirect")
+        self.location = location
+
+
 def _fetch_public(url: str, *, max_bytes: int = MAX_FETCH_BYTES, https_only: bool = False,
-                  binary_types: frozenset[str] = frozenset()) -> tuple[str, str, bytes, str]:
+                  binary_types: frozenset[str] = frozenset(), headers: dict | None = None,
+                  follow_redirects: bool = True) -> tuple[str, str, bytes, str]:
     """A bounded public response: (final URL, content type, bytes, encoding). Text types always; a type in
-    ``binary_types`` (deep research reads PDFs) too. Every redirect is revalidated; proxy env state is ignored."""
+    ``binary_types`` (deep research reads PDFs) too. Every redirect is revalidated; proxy env state is ignored.
+    ``headers`` are sent too (never in place of Host); with ``follow_redirects`` off, a redirect raises
+    RedirectNotFollowed instead of being followed (a request carrying a key sends it to one site only)."""
     session = requests.Session()
     session.trust_env = False
     current = str(url).strip()
@@ -4682,7 +4693,7 @@ def _fetch_public(url: str, *, max_bytes: int = MAX_FETCH_BYTES, https_only: boo
                 pinned_url = parsed._replace(netloc=literal + (f":{parsed.port}" if parsed.port else "")).geturl()
                 try:
                     response = session.get(pinned_url, timeout=(10, 20),
-                                           headers={"User-Agent": "dgc/0.20", "Host": parsed.netloc},
+                                           headers={"User-Agent": "dgc/0.20", **(headers or {}), "Host": parsed.netloc},
                                            allow_redirects=False, stream=True)
                     break
                 except requests.ConnectionError:
@@ -4690,6 +4701,8 @@ def _fetch_public(url: str, *, max_bytes: int = MAX_FETCH_BYTES, https_only: boo
                         raise
             try:
                 if response.is_redirect or response.is_permanent_redirect:
+                    if not follow_redirects:
+                        raise RedirectNotFollowed(str(response.headers.get("Location") or ""))
                     if redirect_n >= MAX_FETCH_REDIRECTS:
                         raise ValueError("too many redirects")
                     location = response.headers.get("Location")
