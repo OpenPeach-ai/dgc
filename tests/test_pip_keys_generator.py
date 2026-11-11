@@ -112,6 +112,15 @@ class GeneratorKeyCard(unittest.TestCase):
         self.assertEqual(self.cards(), [])
         self.assertEqual(self.cfg.image_key("fal"), KEY, "the key stays: it is the user's own setting")
 
+    def test_its_list_says_a_card_asks_for_a_missing_key_not_settings(self):
+        # Live check, 11 Nov: told "no key yet (the user adds it in Settings...)" by list_image_generators, the Pip
+        # sent the user to Settings and never tried, so the card never came. The Pip's list says the card asks.
+        listed = self.session().call("list_image_generators", {})
+        self.assertIn("fal FLUX schnell", listed)
+        self.assertNotIn("Settings → Models → Images", listed)
+        self.assertIn("card", listed)
+        self.assertIn("generate_image", listed)
+
     def test_a_site_card_and_a_generator_card_never_mix(self):
         self.draw()
         site = pip_keys.request(self.registry, self.cfg, self.pip["id"], self.pip["workspace_id"], None,
@@ -142,6 +151,14 @@ class VideoGeneratorKeyCard(unittest.TestCase):
         wan = {"id": "fal-wan", "name": "fal Wan 2.2", "provider": "fal", "base_url": self.fake.url,
                "model": "fal-ai/wan/v2.2-5b/text-to-video", "makes": "videos", "asks": False}
         self.cfg.set_images({"generators": [wan]}, persist=False)
+
+    def test_its_video_list_says_the_same(self):
+        from dgc import pip_videos
+        session = pip_videos.Session(self.registry.directory, self.cfg, self.pip["id"], self.pip["workspace_id"], "run_" + "d" * 32)
+        listed = session.call("list_video_generators", {})
+        self.assertIn("fal Wan 2.2", listed)
+        self.assertNotIn("Settings → Models → Images", listed)
+        self.assertIn("generate_video", listed)
 
     def test_no_key_for_a_video_generator_raises_its_card(self):
         from dgc import pip_videos

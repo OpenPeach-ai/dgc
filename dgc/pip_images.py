@@ -18,6 +18,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -139,7 +140,7 @@ class Session:
     def call(self, op: str, args: dict) -> str:
         surface = self._surface()
         if op == "list_image_generators":
-            return image_tools.list_text(self.config, args, surface)
+            return card_asks(image_tools.list_text(self.config, args, surface), "generate_image")
         self.calls += 1
         if self.calls > MAX_PER_RUN:
             return "error: this run has made enough images. Finish your reply."
@@ -195,6 +196,16 @@ class Session:
         record = self.directory / "runs" / self.run_id
         record.mkdir(parents=True, exist_ok=True)
         (record / "generated-images.json").write_text(json.dumps(self.made), encoding="utf-8")
+
+
+_NO_KEY = re.compile(r"no key yet \([^)]*\)")
+
+
+def card_asks(listed: str, tool: str) -> str:
+    """A Pip's list of generators: a missing key is asked for on a card in its chat (key_card), not in Settings. Told
+    "the user adds it in Settings", a Pip sent the user there and never tried (live check, 11 Nov)."""
+    return _NO_KEY.sub(f"no key yet (call {tool} with it anyway: DGC shows the user a card to paste its key, and you "
+                       "carry on once it's saved)", str(listed or ""))
 
 
 def key_card(session, error, generator, makes) -> str:

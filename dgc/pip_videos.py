@@ -135,7 +135,8 @@ class Session:
     def call(self, op: str, args: dict) -> str:
         surface = self._surface()
         if op == "list_video_generators":
-            return video_tools.list_text(self.config, args, surface)
+            from .pip_images import card_asks
+            return card_asks(video_tools.list_text(self.config, args, surface), "generate_video")
         self.calls += 1
         if self.calls > MAX_PER_RUN:
             return "error: this run has started a video already. Finish your reply."
