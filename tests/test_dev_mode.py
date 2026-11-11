@@ -149,3 +149,15 @@ class MoreWiredTests(unittest.TestCase):
             self.assertEqual((pips.max_queue(), pip_routines.max_routines()), (20, 10))
         with self.settings(True, pip_queue=200, pip_routines=50):
             self.assertEqual((pips.max_queue(), pip_routines.max_routines()), (200, 50))
+
+
+class EditorTests(unittest.TestCase):
+    def test_the_editor_is_told_the_limits_in_ready_capabilities(self):
+        # Settings → Dev Mode draws its Limits group from DGC's own table: a new key in ready.capabilities (an open
+        # object), never a new field on the ready event.
+        import inspect
+        from dgc import headless
+        self.assertIn('"dev_limits": dev_mode_limits()', inspect.getsource(headless))
+        rows = headless.dev_mode_limits()
+        self.assertEqual([r["name"] for r in rows], [limit.name for limit in dev_mode.LIMITS])
+        self.assertEqual(set(rows[0]), {"name", "label", "default", "ceiling", "cost"})

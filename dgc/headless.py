@@ -108,6 +108,12 @@ def sanitize_event(event: dict, secrets) -> dict:
     return out
 
 
+def dev_mode_limits() -> list[dict]:
+    """Dev Mode's table as Settings shows it: each capacity limit's name, label, default, ceiling and cost line."""
+    from .dev_mode import LIMITS
+    return [{"name": l.name, "label": l.label, "default": l.default, "ceiling": l.ceiling, "cost": l.cost} for l in LIMITS]
+
+
 def _bounded_pips_command(cmd):
     """Bound and detach editor data before handing it to an asynchronous worker."""
     from .workspace_registry import RegistryError
@@ -2880,6 +2886,8 @@ class Backend:
                           # What one prompt may carry (Limits for everyone, 10 Nov), so the editor allows what this
                           # backend takes and an older one keeps its own.
                           "attachment_limits": attachment_limits(),
+                          # Dev Mode's capacity limits (dgc/dev_mode.py), for Settings → Dev Mode's Limits group.
+                          "dev_limits": dev_mode_limits(),
                           # A spooled `image/heic` or `image/heif` (an iPhone photo) is taken and sent on as
                           # a JPEG (photos.heic_to_jpeg), or refused with one sentence saying what to install.
                           "heic_images": True,
