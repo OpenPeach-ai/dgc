@@ -165,9 +165,11 @@ class SaveKey(Keys):
     def test_remove_forgets_the_key(self):
         self.ask()
         self.save()
-        self.control("remove_pip_key", pip_id=self.pip["id"], key_id=self.card()["id"])
+        key_id = self.card()["id"]
+        self.control("remove_pip_key", pip_id=self.pip["id"], key_id=key_id)
         self.assertIsNone(self.card())
         self.assertEqual(pip_keys.value_for(self.registry, self.pip["id"], HOST), "")
+        self.assertFalse(plugin_credentials.folder(pip_keys._entry(key_id)).exists(), "no empty folder left behind")
 
 
 class DeletedForGood(Keys):
@@ -186,6 +188,7 @@ class DeletedForGood(Keys):
         self.control("delete_archived_pip", pip_id=pip["id"], expected_name=pip["name"],
                      expected_version=pip["current_version"], expected_lifecycle_revision=pip["lifecycle_revision"])
         self.assertIsNone(plugin_credentials.load(pip_keys._entry(kept)), "gone from the keychain")
+        self.assertFalse(plugin_credentials.folder(pip_keys._entry(kept)).exists(), "and no empty folder")
         self.assertFalse(pip_keys._ledger(self.registry.directory, self.pip["id"]).exists())
 
 

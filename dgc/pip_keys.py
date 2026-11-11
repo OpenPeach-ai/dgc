@@ -342,10 +342,18 @@ def decline(store, config, key_id, pip_id, actor) -> dict:
     return result
 
 
+def _drop(key_id) -> None:
+    """Forget one key's value everywhere it might be, and its folder once that is empty."""
+    from . import plugin_credentials as credentials
+    credentials.delete(_entry(key_id))
+    with contextlib.suppress(OSError):
+        credentials.folder(_entry(key_id)).rmdir()        # only ever empty here: nothing else is kept in it
+
+
 def _forget(key_id, directory=None, pip_id=None) -> None:
     from . import plugin_credentials as credentials
     with contextlib.suppress(credentials.CredentialError, OSError):
-        credentials.delete(_entry(key_id))
+        _drop(key_id)
     if directory is not None:
         with contextlib.suppress(OSError):
             _note(directory, pip_id, key_id, kept=False)
@@ -368,7 +376,7 @@ def forget_pip(directory, pip_id) -> None:
     from . import plugin_credentials as credentials
     for key_id in _entries(directory, pip_id):
         try:
-            credentials.delete(_entry(key_id))
+            _drop(key_id)
         except credentials.CredentialError as exc:
             raise OSError(f"a key this Pip had couldn't be removed from the keychain: {exc}") from None
     path = _ledger(directory, pip_id)
