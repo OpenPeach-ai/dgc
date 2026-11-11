@@ -218,10 +218,8 @@ def schema(eyes: str | None = None, convention: str = "pixels", desktop: bool = 
                         "file field or upload button (ref" + (", or x,y" if eyes in ("own", "relay") else "") + "). "
                         "Files (your own folder; browser downloads land in Downloads, photos and files the user sent "
                         "in From chat): files lists a folder (path), open_file reads a text file (path). Terminal: run "
-                        "runs one shell command in your Files folder, online to public websites only (through DGC), for "
-                        "at most 60 seconds; with background true it starts a long one (a download, an install, a "
-                        "build) and answers at once: it runs up to an hour, jobs lists them (running or finished, exit "
-                        "code, the end of their output) and stop_job stops one (job: its id). Reading is free; anything "
+                        "runs a shell command in Files (public websites only), at most 60 s; background true starts a "
+                        "long one (up to an hour): jobs lists them, stop_job (job) stops one. Reading is free; anything "
                         "that would submit, upload or change something on a website waits for the user's approval."),
         "parameters": {"type": "object", "additionalProperties": False, "required": ["op"],
                        "properties": {"op": {"type": "string", "enum": ops},
@@ -232,8 +230,7 @@ def schema(eyes: str | None = None, convention: str = "pixels", desktop: bool = 
                                       "value": {"type": "string", "maxLength": 500},
                                       "path": {"type": "string", "maxLength": 2048},
                                       "command": {"type": "string", "maxLength": 4000},
-                                      "background": {"type": "boolean"},
-                                      "job": {"type": "string", "maxLength": 16},
+                                      "background": {"type": "boolean"}, "job": {"type": "string"},
                                       "site": {"type": "string", "maxLength": 2048},
                                       "submit": {"type": "boolean"}, "to": {"type": "string", "maxLength": 16},
                                       "seconds": {"type": "number"}, "gone": {"type": "boolean"},

@@ -187,9 +187,10 @@ class WordingTests(unittest.TestCase):
     def test_the_tool_and_its_notice_stay_small(self):
         # Every request of every Pip with a computer carries them: 2026-10-21 they grew from 3240 to 4596 characters
         # (text-only tool and notice; measured +335 prompt tokens a request, against 4 to 10 fewer requests an errand)
-        # for the new steps. Growing them further needs a reason.
+        # for the new steps. Growing them further needs a reason. 2026-11-12: +159 for background commands
+        # (pc-background-commands: run's background, jobs, stop_job; about 40 tokens a request), the wording cut to fit.
         size = len(json.dumps(pip_computer.schema(None))) + len(pip_computer.NOTICE)
-        self.assertLessEqual(size, 4600, size)
+        self.assertLessEqual(size, 4760, size)
 
 
 @unittest.skipUnless(REAL_CHROME and box.capability().get("available"), "needs Linux, bubblewrap and a Chromium build")
