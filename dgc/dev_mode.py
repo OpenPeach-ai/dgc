@@ -31,6 +31,12 @@ LIMITS = (
           "Each run is a model call and, with a computer, its sandbox: memory and model load add up.", "pips.parallel_runs"),
     Limit("pip_computers", 3, 3, "Computers per Pip",
           "Each running computer: about 0.5 to 1 GB of memory and a browser.", "pip_computer.computers_limit"),
+    Limit("work_helpers", 4, 32, "Work helpers at once",
+          "Each helper is its own checkout of the project and its own stream of model requests: disk and rate limits "
+          "add up.", "ultra.worker_limit"),
+    Limit("helper_depth", 1, 8, "How deep Work helpers may nest",
+          "Each level can start helpers of its own: the number of agents multiplies with each level.",
+          "agent.max_subagent_depth"),
     Limit("troupe_agents", 400, 400, "Agents one troupe may start",
           "Each agent is a model call, often with its own worktree: model load and disk add up.", "troupe.MAX_AGENTS"),
     Limit("troupe_items", 200, 200, "Items one troupe may take",
@@ -113,6 +119,14 @@ def chosen(name: str, config=None) -> int | None:
     mine = _get(config, "dev_limits", {})
     value = mine.get(name) if isinstance(mine, dict) else None
     return value if _whole(value) else None
+
+
+def helpers_ceiling(config=None) -> int:
+    """The most Work helpers one `task` call may start and that may run at once: config.MAX_PARALLEL_TASKS, or more
+    when Dev Mode sets more."""
+    from .config import MAX_PARALLEL_TASKS
+    mine = chosen("work_helpers", config)
+    return max(MAX_PARALLEL_TASKS, mine) if mine is not None else MAX_PARALLEL_TASKS
 
 
 def ceiling(name: str, config=None) -> int | None:

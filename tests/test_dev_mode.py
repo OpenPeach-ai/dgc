@@ -126,6 +126,44 @@ class WiredTests(unittest.TestCase):
             self.assertEqual(pip_levels.pay_most(), 1_000_000, "no real ceiling")
 
 
+class HelpersTests(unittest.TestCase):
+    """Work helpers at once (4, at most 32) and how deep they nest (1, at most 8): yours in Dev Mode, no ceiling."""
+
+    def settings(self, on, **limits):
+        from unittest.mock import patch
+        return patch.object(dev_mode, "_settings", return_value={"dev_mode": on, "dev_limits": limits})
+
+    def test_helpers_at_once_are_yours_past_32(self):
+        from dgc import ultra
+        off = Settings(dev_mode=False, max_parallel_tasks=200, dev_limits={"work_helpers": 64})
+        on = Settings(dev_mode=True, max_parallel_tasks=4, dev_limits={"work_helpers": 64})
+        self.assertEqual(ultra.worker_limit(off), 32)
+        self.assertEqual(ultra.worker_limit(on), 64)
+        self.assertIn("up to 64 parallel agents", ultra.summary(on))
+        self.assertNotIn("narrower width", ultra.summary(on), "the width you set: nothing widened it")
+
+    def test_one_call_may_start_as_many_as_may_run(self):
+        from dgc import agent, subagents
+        args = {"tasks": [{"description": f"part {n}", "prompt": f"Do part {n}."} for n in range(1, 41)]}
+        with self.settings(False, work_helpers=48):
+            self.assertIn("at most 32", agent._task_call_error(args))
+            self.assertEqual(len(subagents.task_batch_items(args)), 32)
+        with self.settings(True, work_helpers=48):
+            self.assertEqual(agent._task_call_error(args), "")
+            self.assertEqual(len(subagents.task_batch_items(args)), 40)
+            self.assertEqual(agent._task_batch_most(), 48)
+
+    def test_nesting_is_yours_past_8(self):
+        from dgc import agent
+        class Stub:
+            pass
+        stub = Stub()
+        stub.config = Settings(dev_mode=False, max_subagent_depth=20, dev_limits={"helper_depth": 12})
+        self.assertEqual(agent.Agent.max_subagent_depth(stub), 8)
+        stub.config = Settings(dev_mode=True, max_subagent_depth=1, dev_limits={"helper_depth": 12})
+        self.assertEqual(agent.Agent.max_subagent_depth(stub), 12)
+
+
 class SettingTests(unittest.TestCase):
     def test_settings_take_the_switch_and_the_limits_and_refuse_what_is_not_one(self):
         from dgc.config import DEFAULTS

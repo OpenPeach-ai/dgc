@@ -92,6 +92,12 @@ _MAX_TOOL_OUT = 30000   # hard ceiling on any tool result fed back (esp. chatty 
 # one lease. The width's own ceiling (config.MAX_PARALLEL_TASKS), so a max_parallel_tasks of 32 really runs 32 at
 # once; a larger batch than this still bounds the checkouts and runs one after another.
 from .config import MAX_PARALLEL_TASKS as _MAX_PARALLEL_TASK_BATCH
+
+
+def _task_batch_most(config=None) -> int:
+    """The most helpers one turn may start at once: _MAX_PARALLEL_TASK_BATCH, or more in Dev Mode (dgc.dev_mode)."""
+    from .dev_mode import helpers_ceiling
+    return max(_MAX_PARALLEL_TASK_BATCH, helpers_ceiling(config))
 _CLEANUP_LEASE_WAIT_S = 5.0  # bounded wait for the write lease before REMOVING a finished checkout
 _FINISHED_JOBS_KEPT = 8      # detached outcomes kept addressable by id after the job entry is gone
 _STOPPED_BY_USER = "stopped by the user"   # a foreground child the user stopped alone (agent_control)
@@ -1695,7 +1701,8 @@ def _task_call_error(arguments) -> str:
     Two forms, never both: one helper (`description` + `prompt`) or several (`tasks`, each item
     with its own `description`, `prompt` and optional `agent`). `background` belongs to the call.
     """
-    from .subagents import TASK_BATCH_MAX, TASK_BATCH_MIN
+    from .subagents import TASK_BATCH_MIN, task_batch_max
+    TASK_BATCH_MAX = task_batch_max()
     if not isinstance(arguments, dict):
         return "error: task arguments must be an object."
     if "_unparsed" in arguments:
@@ -3609,6 +3616,10 @@ class Agent(GoalLifecycle):
         depth of the agent that is running is a fact about
         the run, not something the agent can argue its way past.
         """
+        from .dev_mode import chosen
+        mine = chosen("helper_depth", self.config)       # Dev Mode: the depth you set, no ceiling
+        if mine is not None:
+            return mine
         try:
             return max(0, min(8, int(self.config.get("max_subagent_depth", 1))))
         except (TypeError, ValueError):
@@ -13635,8 +13646,9 @@ class Agent(GoalLifecycle):
         # was never recorded, and a divergent number there is a fan-out the gate did not authorise.
         if len(calls) < 2:
             return "there was only one"
-        if len(calls) > _MAX_PARALLEL_TASK_BATCH:
-            return f"more than {_MAX_PARALLEL_TASK_BATCH} were asked for at once"
+        most = _task_batch_most(self.config)
+        if len(calls) > most:
+            return f"more than {most} were asked for at once"
         if limit < 2:
             return "max_parallel_tasks is 1, which runs one sub-agent at a time"
         if self.depth >= self.max_subagent_depth():
@@ -13713,7 +13725,7 @@ class Agent(GoalLifecycle):
         tasks = [i for i, call in enumerate(calls) if call.name == "task"]
         deferred: set[int] = set()
         if (not batch and self.depth == 0 and not self.stopping
-                and len(tasks) <= _MAX_PARALLEL_TASK_BATCH):
+                and len(tasks) <= _task_batch_most(self.config)):
             wants = [i for i in tasks if _wants_background(calls[i].arguments)
                      and "_unparsed" not in calls[i].arguments]
             # Only as many as the detach gate will really take: it re-checks `len(jobs) < cap` per

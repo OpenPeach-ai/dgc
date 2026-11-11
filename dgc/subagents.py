@@ -796,6 +796,12 @@ TASK_BATCH_MIN = 2
 TASK_BATCH_MAX = 32         # one `task` call's helpers: as many as may run at once (config.MAX_PARALLEL_TASKS)
 
 
+def task_batch_max(config=None) -> int:
+    """One `task` call's helpers at most: TASK_BATCH_MAX, or as many as Dev Mode lets run at once (dgc.dev_mode)."""
+    from .dev_mode import helpers_ceiling
+    return max(TASK_BATCH_MAX, helpers_ceiling(config))
+
+
 def task_batch_child_id(call_id, place: int) -> str:
     """The call id the helper at ``place`` (1-based) of the batch call ``call_id`` is shown under."""
     return f"{call_id}#{int(place)}"
@@ -809,7 +815,7 @@ def task_batch_items(args) -> list[dict] | None:
     raw = args.get("tasks")
     if not isinstance(raw, list):
         return []
-    return [item if isinstance(item, dict) else {} for item in raw[:TASK_BATCH_MAX]]
+    return [item if isinstance(item, dict) else {} for item in raw[:task_batch_max()]]
 
 
 def task_batch_outputs(message) -> list[str] | None:
@@ -817,7 +823,7 @@ def task_batch_outputs(message) -> list[str] | None:
     raw = message.get("_dgc_task_batch") if isinstance(message, dict) else None
     if not isinstance(raw, list):
         return None
-    return [str(item) if isinstance(item, str) else "" for item in raw[:TASK_BATCH_MAX]]
+    return [str(item) if isinstance(item, str) else "" for item in raw[:task_batch_max()]]
 
 
 # ---- restore from a saved transcript ------------------------------------------------------------

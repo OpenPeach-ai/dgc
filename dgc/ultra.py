@@ -40,6 +40,10 @@ def worker_limit(config, *, on_error: int = 4) -> int:
     internal fallback would quietly turn an unreadable config into a 4-wide fan-out.
     """
     from .config import DEFAULTS, MAX_PARALLEL_TASKS
+    from .dev_mode import chosen
+    mine = chosen("work_helpers", config)          # Dev Mode: the width you set, no ceiling
+    if mine is not None:
+        return mine
     shipped = DEFAULTS.get("max_parallel_tasks", 4)
     raw = config.get("max_parallel_tasks", shipped)
     try:
@@ -115,15 +119,19 @@ def summary(config) -> str:
     """What `/ultra on` reports. `max_parallel_tasks` is a width; `max_subagent_depth` decides
     whether there is any delegation at all, so at 0 the old line promised "up to 4 parallel
     agents" for a run that cannot spawn one."""
+    from .dev_mode import chosen
     try:
         depth = max(0, min(8, int(config.get("max_subagent_depth", 1))))
     except (TypeError, ValueError):
         depth = 1
+    depth = chosen("helper_depth", config) or depth
     width = worker_limit(config)
     try:
-        # Derived, not restated: worker_limit differing from the plain clamp IS "Ultra widened it".
+        # Derived, not restated: worker_limit differing from the plain clamp IS "Ultra widened it". In Dev Mode the
+        # width is the one you set, so nothing widened it.
         from .config import MAX_PARALLEL_TASKS
-        widened = bool(depth) and width != max(1, min(MAX_PARALLEL_TASKS, int(config.get("max_parallel_tasks", 4))))
+        widened = (chosen("work_helpers", config) is None and bool(depth)
+                   and width != max(1, min(MAX_PARALLEL_TASKS, int(config.get("max_parallel_tasks", 4)))))
     except (TypeError, ValueError):
         widened = bool(depth)
     agents = (f"up to {width} parallel agents" if depth
