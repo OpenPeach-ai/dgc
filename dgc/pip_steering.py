@@ -40,8 +40,22 @@ CREATE TABLE IF NOT EXISTS pip_chat_steers (
 CREATE INDEX IF NOT EXISTS pip_chat_steers_run ON pip_chat_steers(run_id,seq);
 """
 MAX_PER_RUN = 8
+# The photos and files a message brought while a reply ran (Pips API 84): what they are (digest, type, size, a file's
+# name), beside the message, as its @ marks and its quote are. The bytes are kept where every message's are
+# (pip_chat.store_images, store_files), under the same limits and checks. When the message becomes a turn of its own
+# they move to that message's rows (pip_chat.insert_user). Made the first time a message brings any.
+ATTACHMENTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS pip_chat_steer_attachments (
+ message_id TEXT PRIMARY KEY,
+ pip_id TEXT NOT NULL REFERENCES pips(id),
+ images TEXT NOT NULL CHECK(length(CAST(images AS BLOB)) BETWEEN 2 AND 131072),
+ files TEXT NOT NULL CHECK(length(CAST(files AS BLOB)) BETWEEN 2 AND 131072)
+);
+"""
+# What one message's photos and files add to the inbox: their digests, names and kept paths, never their bytes.
+MAX_ATTACHMENT_NOTE_BYTES = 512 * 1024
 # The worker's inbox holds every update a reply has not read yet: eight at most, each escaped at worst six bytes a byte.
-MAX_INBOX_BYTES = MAX_PER_RUN * (6 * MAX_TEXT_BYTES + 256) + 2
+MAX_INBOX_BYTES = MAX_PER_RUN * (6 * MAX_TEXT_BYTES + 256 + MAX_ATTACHMENT_NOTE_BYTES) + 2
 # Messages waiting for a turn of their own: the reply they joined finished without reading them. Each conversation of a
 # Pip has its own queue (pip_conversations): a steer belongs to the conversation of the reply it joined.
 WAITING = ("SELECT s.* FROM pip_chat_steers s JOIN pip_runs r ON r.id=s.run_id "
@@ -55,10 +69,53 @@ def conversation_of(db, run_id):
     return row[0] if row else None
 
 
+def _kept_attachments(db) -> bool:
+    return db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pip_chat_steer_attachments'").fetchone() is not None
+
+
+def save_attachments(db, pip_id, message_id, images, files) -> None:
+    if images or files:
+        db.execute(ATTACHMENTS_SCHEMA)
+        db.execute("INSERT OR REPLACE INTO pip_chat_steer_attachments VALUES(?,?,?,?)",
+                   (message_id, pip_id, json.dumps(images or []), json.dumps(files or [], ensure_ascii=False)))
+
+
+def attachments(db, message_id):
+    """(images, files) a message sent while a reply ran brought, as pip_chat keeps them ({sha256, mime, bytes} and
+    {name, sha256, bytes}); two empty lists for none, for a row that doesn't read as that, or a registry from before."""
+    if not _kept_attachments(db):
+        return [], []
+    row = db.execute("SELECT images,files FROM pip_chat_steer_attachments WHERE message_id=?", (message_id,)).fetchone()
+    if row is None:
+        return [], []
+    from .pip_chat import validate_files, validate_images
+    try:
+        images, files = json.loads(row[0]), json.loads(row[1])
+        return (validate_images(images) if images else []), (validate_files(files) if files else [])
+    except (ValueError, RegistryError):
+        return [], []
+
+
+def drop_attachments(db, message_id) -> None:
+    if _kept_attachments(db):
+        db.execute("DELETE FROM pip_chat_steer_attachments WHERE message_id=?", (message_id,))
+
+
+def shown(db, message_id, item):
+    """``item`` (a message row for the chat) with what it brought, as a message of its own lists them: `images`
+    [{index, mime, bytes}] and `files` [{index, name, bytes}], each only when it has any."""
+    images, files = attachments(db, message_id)
+    if images:
+        item['images'] = [{'index': i, 'mime': image['mime'], 'bytes': image['bytes']} for i, image in enumerate(images)]
+    if files:
+        item['files'] = [{'index': i, 'name': file['name'], 'bytes': file['bytes']} for i, file in enumerate(files)]
+    return item
+
+
 def send(store, pip, run, req, actor):
-    """Save an interjection against the one active conversation, idempotently."""
-    if req.get('images') or req.get('files'):
-        raise RegistryError('steer_attachments', 'Send photos or files after this Pip finishes its reply. Mid-turn updates are text only.')
+    """Save an interjection against the one active conversation, idempotently. From API 84 it may bring photos and
+    files (already checked and kept by pip_chat.send): the reply reads them with it when its model can take them
+    there, and otherwise they are the Pip's next turn, as words it didn't read are."""
     if run['status'] == 'cancelling':
         raise RegistryError('conversation_busy', 'This Pip is stopping. Send after it stops.')
     with store.registry.transaction():
@@ -90,6 +147,7 @@ def _insert(store, pip, run_id, req, actor):
     save_mentions(store.db, pip['id'], message_id, req.get('display_mentions'))
     from .pip_replies import save as save_reply
     save_reply(store.db, pip['id'], message_id, req.get('reply_to'))
+    save_attachments(store.db, pip['id'], message_id, req.get('images'), req.get('files'))
     return store.db.execute('SELECT * FROM pip_chat_steers WHERE id=?', (message_id,)).fetchone()
 
 
@@ -103,15 +161,14 @@ def _said(store, row, run_status):
     quote = quote_of(store.db, row['id'])
     if quote:
         said['reply_to'] = quote
-    return said
+    return shown(store.db, row['id'], said)
 
 
 def wait_behind(store, pip, req, actor):
     """Send with no reply running yet while earlier messages wait for theirs (their run has just closed): this one goes
-    behind them, never ahead. None when nothing is waiting any more, or it brings photos or files, which only a turn of
-    its own can take."""
+    behind them, never ahead, with any photos and files it brings (API 84). None when nothing is waiting any more."""
     conversation_id = req.get('conversation_id')
-    if req.get('images') or req.get('files') or not waiting(store.db, pip['id'], conversation_id):
+    if not waiting(store.db, pip['id'], conversation_id):
         return None
     with store.registry.transaction():
         ahead = store.db.execute(WAITING + _IN_CONVERSATION + ' ORDER BY s.seq DESC LIMIT 1',
@@ -148,14 +205,36 @@ def applied_text(db, run_id):
     return [row['text'] for row in in_run(db, run_id) if row['status'] == 'applied']
 
 
-def stage(db, run_id, folder: Path):
-    """Publish the run's pending messages atomically; the worker sees only its own bounded inbox."""
-    rows = db.execute("SELECT id,text FROM pip_chat_steers WHERE run_id=? AND status='pending' ORDER BY seq", (run_id,)).fetchall()
+def stage(db, run_id, folder: Path, directory=None):
+    """Publish the run's pending messages atomically; the worker sees only its own bounded inbox.
+
+    A message that brought photos or files (API 84) names each by what it is and where it is kept (``directory``, the
+    registry's): the worker reads the kept file itself and checks it against its digest, as it does a turn's own. One
+    whose kept file is gone, or with no ``directory`` to find them in, is not published: it waits for a turn of its
+    own, which says what is missing."""
+    rows = db.execute("SELECT id,pip_id,text FROM pip_chat_steers WHERE run_id=? AND status='pending' ORDER BY seq", (run_id,)).fetchall()
     path = folder / 'steering.json'
     # One that quotes a message of the Pip's (Reply, pip_replies) is read with that quote, marked as one.
     from .pip_replies import of as quote_of, quoted
-    encoded = json.dumps([{'id': row['id'], 'text': quoted(row['text'], quote_of(db, row['id']), MAX_TEXT_BYTES)} for row in rows],
-                         ensure_ascii=False).encode()
+    items = []
+    for row in rows:
+        item = {'id': row['id'], 'text': quoted(row['text'], quote_of(db, row['id']), MAX_TEXT_BYTES)}
+        images, files = attachments(db, row['id'])
+        if images or files:
+            if directory is None:
+                continue
+            from .pip_chat import file_paths, image_paths
+            try:
+                if images:
+                    item['images'] = [{**image, 'path': str(kept)} for image, kept in zip(images, image_paths(directory, row['pip_id'], images))]
+                if files:
+                    item['files'] = [{**file, 'path': str(kept)} for file, kept in zip(files, file_paths(directory, row['pip_id'], files))]
+            except RegistryError:
+                continue
+            if len(json.dumps(item).encode()) - len(json.dumps(item['text']).encode()) > MAX_ATTACHMENT_NOTE_BYTES:
+                continue
+        items.append(item)
+    encoded = json.dumps(items, ensure_ascii=False).encode()
     if len(encoded) > MAX_INBOX_BYTES:
         raise RegistryError('steer_limit', 'The Pip steering inbox exceeded its size limit.')
     temporary = folder / 'steering.tmp'
@@ -178,10 +257,20 @@ def read_worker(folder: Path, seen: set[str]):
         return []
     if not isinstance(items, list) or len(items) > MAX_PER_RUN:
         return []
-    return [item for item in items if isinstance(item, dict) and set(item) == {'id', 'text'}
+    return [item for item in items if isinstance(item, dict) and {'id', 'text'} <= set(item) <= {'id', 'text', 'images', 'files'}
             and isinstance(item['id'], str) and item['id'].startswith('message_')
             and isinstance(item['text'], str) and len(item['text'].encode()) <= MAX_TEXT_BYTES
+            and _named(item.get('images'), {'sha256', 'mime', 'bytes', 'path'})
+            and _named(item.get('files'), {'name', 'sha256', 'bytes', 'path'})
             and item['id'] not in seen]
+
+
+def _named(value, fields) -> bool:
+    """A message's photos or files in the worker's inbox: none, or a short list of exactly these fields. What each
+    says is checked where it is read (pips: its digest, its size, where it is kept)."""
+    return value is None or (isinstance(value, list) and 1 <= len(value) <= 64 and all(
+        isinstance(item, dict) and set(item) == fields and isinstance(item['path'], str) and 0 < len(item['path']) <= 4096
+        for item in value))
 
 
 def applied(store, run_id, ids):
@@ -283,6 +372,9 @@ def forget_resent(store, pip_id, req, actor):
                                  "(SELECT id FROM pip_chat_steers WHERE " + match + ")", values)
             from .pip_replies import forget as forget_replies
             forget_replies(store.db, match, values)
+            if _kept_attachments(store.db):
+                store.db.execute("DELETE FROM pip_chat_steer_attachments WHERE message_id IN "
+                                 "(SELECT id FROM pip_chat_steers WHERE " + match + ")", values)
             store.db.execute("DELETE FROM pip_chat_steers WHERE " + match, values)
 
 

@@ -4,13 +4,14 @@ import {postArtifact,docCardMarkup} from './pipRunPosts.js';   // a long reply's
 import '../media/mentions.js';   // globalThis.DgcMentions: @ marks in the bubble, the same in all three chats
 import '../media/msgtime.js';   // globalThis.DgcTime: a message's time, the same in all three chats
 import '../media/pictureFold.js';   // globalThis.DgcPictureFold: a reply's pictures fold away, the same in all three chats
+import '../media/shared/filesheet.js';   // globalThis.DgcFileSheet: a made file's small sheet and its Download mark
 
 const foldPictures=(key,inner,facts)=>globalThis.DgcPictureFold?globalThis.DgcPictureFold.markup(key,inner,facts):inner;
 
 // These controls mirror the main conversation's action row. They are SVG rather
 // than font glyphs so they also work inside the Pip client's isolated ShadowRoot.
 export function transcriptIcon(name) {
-  const paths={plug:'<path d="M6 2v3M10 2v3"/><path d="M4.5 5h7v2a3.5 3.5 0 0 1-7 0Z"/><path d="M8 10.5V14"/>',speaker:'<path d="M2.5 6h2.5l3.5-3v10L5 10H2.5Z"/><path d="M11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.8a6 6 0 0 1 0 8.4"/>',stop:'<rect x="4" y="4" width="8" height="8" rx="1"/>',copy:'<rect x="5" y="5" width="8" height="9" rx="1"/><path d="M10 5V2H2v9h3"/>',check:'<path d="m3 8 3 3 7-8"/>',edit:'<path d="m10 2 4 4-8 8H2v-4Z M8 4l4 4"/>',retry:'<path d="M13 6a5.5 5.5 0 1 0 .2 4M13 2v4H9"/>',info:'<circle cx="8" cy="8" r="6"/><path d="M8 7v4M8 4.5v.2"/>',tool:'<path d="M6 2 3 8l3 6M10 2l3 6-3 6"/>',files:'<path d="M3 1.5h6l4 4v9H3Z M9 1.5V6h4 M5.5 9h5M5.5 11.5h3"/>',chevron:'<path d="m6 3 5 5-5 5"/>',reply:'<path d="M6.5 4 2.5 8l4 4"/><path d="M2.5 8h7a4 4 0 0 1 4 4v.5"/>',clock:'<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>'};
+  const paths={plug:'<path d="M6 2v3M10 2v3"/><path d="M4.5 5h7v2a3.5 3.5 0 0 1-7 0Z"/><path d="M8 10.5V14"/>',speaker:'<path d="M2.5 6h2.5l3.5-3v10L5 10H2.5Z"/><path d="M11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.8a6 6 0 0 1 0 8.4"/>',stop:'<rect x="4" y="4" width="8" height="8" rx="1"/>',copy:'<rect x="5" y="5" width="8" height="9" rx="1"/><path d="M10 5V2H2v9h3"/>',check:'<path d="m3 8 3 3 7-8"/>',edit:'<path d="m10 2 4 4-8 8H2v-4Z M8 4l4 4"/>',retry:'<path d="M13 6a5.5 5.5 0 1 0 .2 4M13 2v4H9"/>',info:'<circle cx="8" cy="8" r="6"/><path d="M8 7v4M8 4.5v.2"/>',tool:'<path d="M6 2 3 8l3 6M10 2l3 6-3 6"/>',files:'<path d="M3 1.5h6l4 4v9H3Z M9 1.5V6h4 M5.5 9h5M5.5 11.5h3"/>',chevron:'<path d="m6 3 5 5-5 5"/>',reply:'<path d="M6.5 4 2.5 8l4 4"/><path d="M2.5 8h7a4 4 0 0 1 4 4v.5"/>',clock:'<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',yes:'<path d="M5.2 7.2 7.6 2.4c.9 0 1.6.7 1.6 1.6v2h3a1.2 1.2 0 0 1 1.2 1.4l-.8 4.6a1.2 1.2 0 0 1-1.2 1H5.2Z"/><path d="M5.2 7.2H2.6V13h2.6"/>'};
   return `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]||''}</svg>`;
 }
 
@@ -110,21 +111,51 @@ function readMark(m,name){
   return `<span class="msg-read" data-read="${read?'read':'waiting'}" role="img" aria-label="${esc(label)}" title="${esc(label)}">${transcriptIcon(read?'check':'clock')}</span>`;
 }
 
+// A thumbs-up answers an open question (pips-08). The rule, kept narrow: only the Pip's latest reply, only while its
+// choices are still waiting, and only when they read as yes or no: one begins with a yes word and another with a no
+// word. The thumb then sends the first yes choice, in the Pip's own words ("Yes, send it"), exactly as a tap on that
+// choice does. Any other choices ("Tea" / "Coffee") get no thumb: a bare "Yes" would answer nothing.
+const YES_WORDS=/^(?:yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|please do|sounds good|approve|confirm|continue|proceed|allow)(?![\p{L}\p{N}])/iu;
+const NO_WORDS=/^(?:no|nope|not now|not yet|don[\u2019']t|do not|cancel|stop|skip|later|never|wait|decline|reject)(?![\p{L}\p{N}])/iu;
+export function yesChoice(choices){
+  const list=Array.isArray(choices)?choices.slice(0,4).filter(c=>typeof c==='string').map(c=>c.trim()).filter(Boolean):[];
+  const yes=list.find(c=>YES_WORDS.test(c));
+  return yes&&list.some(c=>NO_WORDS.test(c))?yes:'';
+}
+
+// A file DGC made for you in a reply, as a row (pips-08; the reference: a file icon, the name, "PDF · 2.4 MB" and
+// Download). In a Pip's chat that is each picture it made (generate_image): the row is the shared document card
+// (media/shared/doccard.css) with the small sheet of its kind (media/shared/filesheet.js).
+const fileBytes=n=>n<1024?`${n} B`:n<1048576?`${Math.round(n/1024)} KB`:`${(n/1048576).toFixed(1)} MB`;
+const PICTURE_ENDING={'image/png':'png','image/jpeg':'jpg','image/gif':'gif','image/webp':'webp','image/bmp':'bmp'};
+export function madeFilesMarkup(m){
+  const sheets=globalThis.DgcFileSheet,made=Array.isArray(m.images)?m.images.slice(0,64).filter(i=>i&&Number.isInteger(i.index)&&i.index>=0&&PICTURE_ENDING[i.mime]):[];
+  if(!sheets||!made.length)return '';
+  return `<div class="msg-made-files" role="group" aria-label="Files in this reply">${made.map(i=>{
+    const ending=PICTURE_ENDING[i.mime],name=`Picture ${i.index+1}.${ending}`,kind=sheets.of(ending,name),size=Number.isFinite(i.bytes)&&i.bytes>0?fileBytes(i.bytes):'';
+    return `<div class="dgc-doc-card msg-made-file" data-tone="img"><span class="dgc-doc-tile has-sheet" aria-hidden="true">${sheets.forFile(ending,name)}</span>`
+      +`<span class="dgc-doc-words"><span class="dgc-doc-name">${esc(name)}</span><span class="dgc-doc-meta">${esc(kind.tag)}${size?` \u00b7 ${esc(size)}`:''}</span></span>`
+      +`<span class="dgc-doc-acts"><button type="button" class="dgc-doc-dl" data-message-download="${esc(`${m.id}:${i.index}`)}" aria-label="Download ${esc(name)}" title="Download">${sheets.DOWNLOAD}</button></span></div>`;
+  }).join('')}</div>`;
+}
+
 // `head`: a line above a reply the Pip sent unasked (a routine's: its face, name, routine and time); `clip`: {text, open,
 // key}, a long one's start and its Show all.
-export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false,imageSrc=()=>'',pluginLogo=()=>'',choices=null,stats=null,head='',clip=null,quote='',canReply=false,undo=false,openChanges=new Set(),undoing='',undoErrors=new Map()}) {
+export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false,imageSrc=()=>'',pluginLogo=()=>'',choices=null,stats=null,head='',clip=null,quote='',canReply=false,canDownload=false,undo=false,openChanges=new Set(),undoing='',undoErrors=new Map()}) {
   const m=message,user=m.role==='user',label=user?'You':name;
   // Every photo the message brought (no four-photo cap from Pips API 52); a click opens the original.
   // A Pip's reply shows the images it made (generate_image) the same way, below its words.
   const pictures=Array.isArray(m.images)&&m.images.length?`<div class="msg-images">${m.images.slice(0,64).map(i=>{const key=`${m.id}:${Number(i.index)}`,src=imageSrc(m.id,Number(i.index));return `<img class="msg-image" data-message-image="${esc(key)}" data-pic-open alt="Image ${Number(i.index)+1}" title="Open the photo"${src?` src="${esc(src)}"`:''}>`;}).join('')}</div>`:'';
   const size=n=>n<1024?`${n} B`:n<1048576?`${Math.round(n/1024)} KB`:`${(n/1048576).toFixed(1)} MB`;
-  const files=user&&Array.isArray(m.files)&&m.files.length?`<div class="msg-files">${m.files.slice(0,16).map(f=>{const name=String(f.name||''),dot=name.lastIndexOf('.');return `<span class="msg-file" title="${esc(name)}"><span class="chat-file-ext" aria-hidden="true">${esc((dot>0?name.slice(dot+1):'txt').slice(0,4))}</span><span class="chat-file-name">${esc(name)}</span><span class="chat-file-size">${esc(size(Number(f.bytes)||0))}</span></span>`;}).join('')}</div>`:'';
+  const files=user&&Array.isArray(m.files)&&m.files.length?`<div class="msg-files">${m.files.slice(0,50).map(f=>{const name=String(f.name||''),dot=name.lastIndexOf('.');return `<span class="msg-file" title="${esc(name)}"><span class="chat-file-ext" aria-hidden="true">${esc((dot>0?name.slice(dot+1):'txt').slice(0,4))}</span><span class="chat-file-name">${esc(name)}</span><span class="chat-file-size">${esc(size(Number(f.bytes)||0))}</span></span>`;}).join('')}</div>`:'';
   // A message that is only images or files shows them, not DGC's stand-in text.
   const standIn=pictures&&m.text==='(sent an image)'||files&&m.text==='(sent a file)';
   const said=!user&&clip&&!clip.open?clip.text:m.text;
   const body=user?`${pictures}${files}${standIn?'':`<div class="bubble"><div class="prompt-text">${promptWithMarks(m,pluginLogo)||esc(m.text)}</div></div>`}`:(split?`<div class="answer split">${replyParts(said).map(part=>`<div class="message-body text final reply-part">${renderMarkdown(part)}</div>`).join('')}</div>`:`<div class="answer"><div class="message-body text final">${renderMarkdown(replyParts(said).join('\n\n'))}</div></div>`)
     // A reply's pictures and videos fold away under one header row each, as in Work and ChatDGC (media/pictureFold.js).
     +(!user&&pictures?foldPictures(`pip:${m.id}:images`,pictures,{pictures:Math.min(64,m.images.length)}):'')
+    // Each picture it made is a file too: a row with its kind, its size and Download (pips-08).
+    +(!user&&pictures&&canDownload?madeFilesMarkup(m):'')
     // API 71: the videos it started (generate_video), each its job's figure (media/videoPlayer.js), filled in by the
     // page after it draws: its progress, then its player.
     +(!user&&Array.isArray(m.videos)&&m.videos.length?foldPictures(`pip:${m.id}:videos`,`<div class="msg-videos made-pictures">${m.videos.slice(0,4).map(v=>`<div class="msg-video" data-message-video="${esc(String(v.id||''))}"></div>`).join('')}</div>`,{videos:Math.min(4,m.videos.length),label:m.videos.length===1?String(m.videos[0].prompt||''):''}):'')
@@ -158,6 +189,9 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   const sentTime=time+readMark(m,name);
   // Reply on a Pip's message: it becomes a quote in your prompt box (Pips API 83).
   const replyAction=!user&&canReply&&m.text?action('reply','Reply',m.id):'';
+  // A thumbs-up on an open yes-or-no question answers it with its yes choice (yesChoice, above); it stays in sight.
+  const yes=!user?yesChoice(choices):'',yesLabel=yes?`Answer \u201c${yes}\u201d`:'';
+  const yesAction=yes?`<button type="button" class="ract ract-yes" data-pip-choice="${esc(yes)}" data-pip-yes aria-label="${esc(yesLabel)}" title="${esc(yesLabel)}"${canSend?'':' disabled'}>${transcriptIcon('yes')}<span class="sr-only">${esc(yesLabel)}</span></button>`:'';
   const quoted=quote?quoteLine(quote,{reply:user,who:name}):'';
   // A reply whose run got stuck, or was cut off by a restart, and started again says so in one line (dgc/pip_run_watchdog.py).
   // The one line a reply carries before its time: "Got stuck, started again" (Pips package 1), or that its backup model
@@ -166,7 +200,7 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   const startedAgain=line?esc(line.slice(0,120)):'';
   const replyTime=startedAgain&&time?time.replace(/(<time[^>]*>)/,`$1${startedAgain} · `):startedAgain?`<span class="msg-time">${startedAgain}</span>`:time;
   const activityRow=!user?`<button type="button" class="chat-activity-toggle" data-chat-activity="${esc(m.run_id)}" aria-expanded="${activity?.open===true}">${transcriptIcon('tool')}<span>${activity?.loading?'Loading…':'What it did'}</span><span class="activity-chevron">${transcriptIcon('chevron')}</span></button>${activity?.open?activityMarkup(activity,m.run_id):''}`:'';
-  return `<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}" data-message="${esc(m.id)}">${user?'':head}<span class="sr-only role">${esc(label)}</span>${quoted}${activityRow}${shownCards}${body}${!user&&postArtifact(m)?docCardMarkup(postArtifact(m)):''}${used}${offered}${user?'':ownChangesMarkup(m,{name,undo,open:openChanges,busy:undoing,errors:undoErrors})}${status}<div class="response-actions">${user?'':head?(startedAgain?`<span class="msg-time">${startedAgain}</span>`:''):replyTime}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${replyAction}${options}${details}${trace}${!user&&stats?replyStats(stats):''}${user?sentTime:''}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
+  return `<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}" data-message="${esc(m.id)}">${user?'':head}<span class="sr-only role">${esc(label)}</span>${quoted}${activityRow}${shownCards}${body}${!user&&postArtifact(m)?docCardMarkup(postArtifact(m)):''}${used}${offered}${user?'':ownChangesMarkup(m,{name,undo,open:openChanges,busy:undoing,errors:undoErrors})}${status}<div class="response-actions">${user?'':head?(startedAgain?`<span class="msg-time">${startedAgain}</span>`:''):replyTime}${yesAction}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${replyAction}${options}${details}${trace}${!user&&stats?replyStats(stats):''}${user?sentTime:''}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
 }
 
 // What a reply took, beside its actions: its time and its tokens (in and out, all its model requests).

@@ -134,7 +134,24 @@ export const host = (opts) => `(${function (PIP, opts) {
     ...(opts.ticks === "working" ? [{ ...say("u3", "user", "Take the 7:15", "3", 2), status: "running" },
       { ...say("m3", "user", "And add a meal", "3", 1, { steered: true, steer_status: "pending" }), status: "queued" }] : []),
   ];
-  const messages = opts.empty ? [] : project ? projectChat : opts.ticks ? ticksChat : personal;
+  // opts.details: chat details and attachments (pips-08, Pips API 84; pass api: 84, and convs: true for a Personal Pip).
+  // You sent a picture and a file with a message (the picture stands above your bubble); the Pip made a picture, which
+  // comes back as a file's row (its kind, its size, Download); and its latest reply asks a yes-or-no question whose
+  // choices are still open ("ab": choices that aren't yes or no). "working": a reply is running, and a message you sent
+  // meanwhile brought a picture. A Project Pip (project: true) was sent a picture and a file as reference.
+  const detailsChat = [
+    say("u1", "user", "Here's the picture. Can you make it the cover? The brief is attached.", "1", 24, { images: [{ index: 0, mime: "image/jpeg", bytes: 1843200 }], files: [{ index: 0, name: "launch-brief.pdf", bytes: 2516582 }] }),
+    say("a1", "assistant", "Done. Here's the cover with your picture on it.", "1", 22, { images: [{ index: 0, mime: "image/png", bytes: 1258291 }] }),
+    say("u2", "user", "Looks good. Can you send it to Priya?", "2", 12),
+    say("a2", "assistant", "I can email the cover to Priya now. Shall I send it?", "2", 11, { choices: opts.details === "ab" ? ["Email it", "Share a link"] : ["Yes, send it", "Not yet"] }),
+    ...(opts.details === "working" ? [{ ...say("u3", "user", "Yes, and add a line about the launch date", "f", 2), status: "running" },
+      { ...say("m3", "user", "Use this logo on it", "f", 1, { steered: true, steer_status: "pending", images: [{ index: 0, mime: "image/png", bytes: 40960 }] }), status: "queued" }] : []),
+  ];
+  const detailsProject = [
+    say("u1", "user", "Does the invoice total in this screenshot match what billing.py works out? The rate card is attached.", "1", 30, { images: [{ index: 0, mime: "image/png", bytes: 734003 }], files: [{ index: 0, name: "rate-card.csv", bytes: 18432 }] }),
+    say("a1", "assistant", "It doesn't. The screenshot shows a total of 1,180.00, and `billing.py` rounds each line before it adds tax, which gives 1,179.96 for the same rate card. The rounding is on line 212.", "1", 29),
+  ];
+  const messages = opts.empty ? [] : opts.details ? (project ? detailsProject : detailsChat) : project ? projectChat : opts.ticks ? ticksChat : personal;
   if (opts.running && messages.length) messages.push({ ...say("u9", "user", "Check the wire service page now.", "9", 1), status: "running" });
   const post = { pip_id: PIP, name, pip_type: "rook", kind: "audit", trigger: "schedule", text: "x", run_id: run("7"), outcome: "findings", posted_at: at(5), finished_at: at(5),
     total: 5, counts: { critical: 0, high: 2, medium: 2, low: 1 }, findings: [
@@ -263,7 +280,7 @@ export const host = (opts) => `(${function (PIP, opts) {
     const cid = (c) => "conv_" + c.repeat(32), want = opts.convs === true ? {} : opts.convs;
     const conv = (c, title, ago, more = {}) => ({ id: cid(c), pip_id: PIP, title, first: false, created_at: new Date(Date.now() - (ago + 5) * MIN).toISOString(), updated_at: new Date(Date.now() - ago * MIN - 5000).toISOString(), archived: false, unread: 0, replying: false, ...more });
     const tell = (c, n, role, text, ago, more = {}) => say(`${c}${n}`, role, text, c === "a" ? "a" : c, ago, { conversation_id: cid(c), ...more });
-    const state = window.__convs = { list: [conv("a", "Trip to Goa", 0), conv("f", "", 8, { first: true, unread: 1, ...(opts.ticks === "working" ? { replying: true } : {}) }), conv("b", "Groceries", 60, { replying: true }), conv("c", "Tax papers", 3 * 1440),
+    const state = window.__convs = { list: [conv("a", "Trip to Goa", 0), conv("f", "", 8, { first: true, unread: 1, ...(opts.ticks === "working" || opts.details === "working" ? { replying: true } : {}) }), conv("b", "Groceries", 60, { replying: true }), conv("c", "Tax papers", 3 * 1440),
       conv("d", "Birthday ideas for Ma", 14 * 1440, { unread: 2 }), conv("1", "Old plans", 40 * 1440, { archived: true }), conv("2", "Spring cleaning", 50 * 1440, { archived: true })],
       messages: { [cid("f")]: messages.map((m) => ({ ...m, conversation_id: cid("f") })),
         [cid("a")]: [tell("a", 1, "user", "Find me a beach stay in Goa for March 14–17", 9), tell("a", 2, "assistant", "Here are three near Palolem, all under ₹9,000 a night for the 14th to the 17th: Ciaran's Beach Huts (₹7,200), Bhakti Kutir (₹8,400) and Palolem Garden Stay (₹6,900). Want me to hold one?", 8),
@@ -299,11 +316,34 @@ export const host = (opts) => `(${function (PIP, opts) {
       update_pip_routine: (r) => { const found = routines.find((v) => v.id === r.routine_id); state.routines.push(r.changes); if ("conversation_id" in r.changes) { if (r.changes.conversation_id) found.conversation_id = r.changes.conversation_id; else delete found.conversation_id; } return { routine: found }; },
     });
   }
+  // (opts.details: a picture of a message is a small drawn one; what a send brought is kept, by count, in
+  // window.__brought, and comes back on its message as DGC lists it.)
+  if (opts.details) {
+    const picture = (key) => { const c = document.createElement("canvas"); c.width = 480; c.height = 360; const g = c.getContext("2d");
+      const hue = [...key].reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) % 360, 7), sky = g.createLinearGradient(0, 0, 0, 360);
+      sky.addColorStop(0, `hsl(${hue} 55% 62%)`); sky.addColorStop(1, `hsl(${(hue + 40) % 360} 60% 82%)`); g.fillStyle = sky; g.fillRect(0, 0, 480, 360);
+      g.fillStyle = "rgba(255,255,255,.85)"; g.beginPath(); g.arc(370, 90, 34, 0, 7); g.fill();
+      g.fillStyle = `hsl(${(hue + 150) % 360} 30% 34%)`; g.beginPath(); g.moveTo(0, 360); g.lineTo(150, 170); g.lineTo(290, 300); g.lineTo(380, 220); g.lineTo(480, 320); g.lineTo(480, 360); g.fill();
+      return c.toDataURL("image/png"); };
+    const sendBase = answers.send_pip_message;
+    window.__brought = [];
+    Object.assign(answers, {
+      get_pip_message_image: (r) => ({ pip_id: PIP, message_id: r.message_id, index: r.index, image: picture(`${r.message_id}:${r.index}`) }),
+      send_pip_message: (r) => {
+        const images = (r.images || []).map((uri, index) => ({ index, mime: /^data:(image\/[a-z]+)/.exec(uri)?.[1] || "image/png", bytes: Math.max(1, Math.floor((uri.length - uri.indexOf(",") - 1) * 3 / 4)) }));
+        const files = (r.files || []).map((f, index) => ({ index, name: f.name, bytes: Math.max(1, Math.floor((f.data.length - f.data.indexOf(",") - 1) * 3 / 4)) }));
+        window.__brought.push({ text: r.text, images: images.length, files: files.length, conversation: r.conversation_id || null });
+        const made = sendBase ? sendBase(r) : (() => { const message = { ...say("s" + window.__brought.length, "user", r.text, "5", 0), status: "queued", created_at: new Date().toISOString() }; messages.push(message); return { message, run: { id: message.run_id, pip_id: PIP, status: "queued" } }; })();
+        Object.assign(made.message, images.length ? { images } : {}, files.length ? { files } : {}, opts.details === "working" ? { steered: true, steer_status: "pending" } : {});
+        return made; },
+      list_pip_keys: () => ({ pip_id: PIP, keys: [] }) });
+  }
   // (opts.ticks: a runtime at API 83 is asked for its keys, and the reply running is the shown conversation's own.)
-  if (opts.ticks) Object.assign(answers, { list_pip_keys: () => ({ pip_id: PIP, keys: [] }),
+  if (opts.ticks || opts.details === "working") Object.assign(answers, { list_pip_keys: () => ({ pip_id: PIP, keys: [] }),
     list_pip_run_activity: ((base) => (r) => { const page = base(r); return { ...page, run_id: r.run_id, events: page.events.map((e) => ({ ...e, run_id: r.run_id })) }; })(answers.list_pip_run_activity) });
   window.acquireVsCodeApi = () => ({ getState: () => undefined, setState() {}, postMessage(m) {
-    if (m?.type !== "pipsRequest") return;
+    // (What the page tells its host besides a request, such as a photo to open or a file to download: window.__posted.)
+    if (m?.type !== "pipsRequest") { (window.__posted ||= []).push(m); return; }
     const make = answers[m.request.type];
     if (!make) window.__unanswered.push(m.request.type);
     (window.__sent ||= []).push(m.request);

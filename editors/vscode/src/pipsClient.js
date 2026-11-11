@@ -697,7 +697,7 @@ function chatControlsMarkup(canSend,busy){
   :`<button type="button" id="chat-permissions" class="composer-chip" title="What ${esc(S.pip.name)} can do" aria-label="What this Pip can do">${composerIcon('shield')}<span class="sr-only">What it can do</span></button>`;
  const levelMenu=S.composerPanel==='level'&&levelShown()?`<div class="composer-level-menu dgc-menu" role="menu" aria-label="Before ${esc(S.pip.name)} acts">${levelMenuMarkup(lv,{esc,pipName:S.pip.name,busy:levelState.busy,error:levelState.error})}</div>`:'';
  // "+": the same menu as Work's and ChatDGC's (media/shared/menu.js), in place of the picture chip (U3, 7 Nov).
- const addMenu=S.composerPanel==='add'&&canAttachImages()?`<div class="composer-add-menu dgc-menu" role="menu" aria-label="Add">${globalThis.DgcMenu?.html([{name:'Add to the message',rows:[{id:'upload',label:'Pictures and files',hint:'From this computer'},{id:'mention',label:'A Pip or an app',hint:'@'}]}],{data:'pip-add'})||''}</div>`:'';
+ const addMenu=S.composerPanel==='add'&&canAttachImages()?`<div class="composer-add-menu dgc-menu" role="menu" aria-label="Add">${globalThis.DgcMenu?.html([{name:'Add to the message',rows:[{id:'upload',label:'Pictures and files',hint:'From this computer'},{id:'mention',label:personalPip()?'A Pip or an app':'A file in this project',hint:'@'}]}],{data:'pip-add'})||''}</div>`:'';
  return `${modelMenu}${contextMenu}${addMenu}${levelMenu}${providerRemoved()?'<p class="composer-unavailable" role="alert">The provider this Pip runs on was removed from Settings. Choose another model for it.</p>':''}<div class="composer-controls"><div class="composer-left">${canAttachImages()?`<button type="button" id="chat-attach" class="composer-chip" title="Add pictures, files and more" aria-label="Add pictures, files and more" aria-haspopup="menu" aria-expanded="${S.composerPanel==='add'}"${S.busy||archived()?' disabled':''}>${composerIcon('add')}</button><input type="file" id="chat-attach-input" accept="${[...PIP_IMAGE_TYPES,...(spoolsPhotos()?[...PIP_HEIC_TYPES,'.heic','.heif']:[]),...PIP_FILE_EXTENSIONS].join(',')}" multiple hidden>`:''}${S.noProvider?'':`<button type="button" id="chat-context-toggle" class="composer-chip${pct===null?'':' with-text'}" title="${cliName?`${esc(cliName)} manages its own context window`:`Context window${o?' · '+o.context_size.toLocaleString()+' tokens':''}${pct===null?'':' · '+pct+'% used'}`}" aria-label="Context window${cliName?`: ${esc(cliName)} manages its own`:pct===null?'':': '+pct+' percent used'}" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='context'}">${composerIcon('context')}${pct===null?'':`<span class="composer-ctx-pct">${pct}%</span>`}</button>`}${routineChip}${levelChip}</div><div class="composer-right"><button type="button" id="chat-model" class="model-control${onFallback?' on-fallback':''}" aria-label="Change model and thinking${onFallback?`. ${esc(onFallback.model)}, its fallback, is answering`:''}" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='model'}" title="${esc(onFallback?`${chip.text} didn’t answer, so its fallback ${onFallback.model} is answering. It tries ${chip.text} again with your next message.`:chip.title)}${o?' · '+esc(effortLabel):''} — change model and thinking"${locked?' disabled':''}><span class="model-copy"><span class="composer-model-name">${esc(onFallback?onFallback.model:shownModel)}</span>${onFallback?'<span class="composer-fallback-word">fallback</span>':''}${o?`<span class="composer-effort-name">${esc(effortLabel)}</span>`:''}</span><span class="composer-chevron">${composerIcon('chevron')}</span></button>${voiceBar?`<button type="button" id="chat-mic" class="composer-chip" title="Dictate" aria-label="Dictate"${!usable()||archived()||busy?' disabled':''}>${composerIcon('mic')}</button>`:''}${action}</div></div>`;
 }
 function fitChatInput(){const input=$('chatText');if(!input)return;const sendButton=document.querySelector('.chat-send');sendButton?.classList.toggle('ready',!sendButton.disabled&&!!draft.chatText.trim()||!sendButton.disabled&&canAttachImages()&&(pendingImages().length>0||pendingFiles().length>0));if(!input.isConnected||input.clientWidth<40||document.hidden)return;input.style.height='auto';const content=input.scrollHeight,capped=content>=160;input.style.overflowY=capped?'auto':'hidden';input.style.height=(capped?160:content+1)+'px';}
@@ -879,7 +879,7 @@ function chatMarkup(){
     if(failedHidden(m))return timed(m,false)+failedHiddenMarkup(m);
     const prompt=S.messages.find(p=>p.role==='user'&&p.run_id===m.run_id),routine=m.role==='assistant'&&prompt?.intro===true?postRoutineTitle(prompt.text):null;
     if(routine&&m.quiet===true)return timed(m,false)+quietLineMarkup(m,routine);
-    return timed(m,!routine)+messageMarkup(m,{imageSrc:messageImageSrc,pluginLogo:pluginLogoSrc,split:simple,name:S.pip?.name||type?.name||'Pip',formatDate:date,renderMarkdown:routine?markdown:renderPipReply,canSend,prompt,quote:quoteFor(m,shown),canReply:canReply(),activity:chatActivities.get(m.run_id),choices:m===answerable?m.choices:null,stats:m.role==='assistant'?replyStats.get(m.run_id):null,undo:canUndoOwn(),openChanges:ownDetailsOpen,undoing:ownUndoing,undoErrors:ownUndoErrors,...(routine?routineReply(m,routine,type):{})});
+    return timed(m,!routine)+messageMarkup(m,{imageSrc:messageImageSrc,pluginLogo:pluginLogoSrc,split:simple,name:S.pip?.name||type?.name||'Pip',formatDate:date,renderMarkdown:routine?markdown:renderPipReply,canSend,prompt,quote:quoteFor(m,shown),canReply:canReply(),canDownload:S.apiVersion>=43&&!remoteHost,activity:chatActivities.get(m.run_id),choices:m===answerable?m.choices:null,stats:m.role==='assistant'?replyStats.get(m.run_id):null,undo:canUndoOwn(),openChanges:ownDetailsOpen,undoing:ownUndoing,undoErrors:ownUndoErrors,...(routine?routineReply(m,routine,type):{})});
   };
   // Its runs, each a message from the Pip where it falls among the messages, all-clear runs in a row as one (Pips API
   // 51, pipRunPosts.js).
@@ -1228,7 +1228,10 @@ const chatFiles=new Map();
 function pendingFiles(){return chatFiles.get(S.selected)||[];}
 function fileExtension(name){const i=name.lastIndexOf('.');return i>0?name.slice(i).toLowerCase():'';}
 function fileSize(n){return n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(n<10240?1:0)} KB`:`${(n/1048576).toFixed(1)} MB`;}
-function canAttachImages(){return S.apiVersion>=43&&!remoteHost&&personalPip();}
+// Pictures and files go with a message to a Personal Pip (Pips API 43) and, from API 84, to a Project Pip too (as
+// reference beside the code it reads) and while a reply is running (pips-08).
+function canAttachImages(){return S.apiVersion>=43&&!remoteHost&&(personalPip()||S.apiVersion>=84);}
+function attachesMidReply(){return S.apiVersion>=84;}
 function spoolsPhotos(){return S.apiVersion>=52;}
 // What one message may carry: from Pips API 79 (Limits for everyone, 10 Nov) 20 MB a photo, 50 files, 100 MB a
 // document and 200 MB in all; an older runtime keeps API 52's.
@@ -1345,10 +1348,10 @@ function hydrateMessageImages(){
   }).catch(()=>{}).finally(()=>messageImageFlight.delete(key));
  }
 }
-function openMessageImage(key){
+function openMessageImage(key,save=false){
  const [messageId,index]=String(key||'').split(':');
  if(!S.selected||!messageId||!/^\d+$/.test(index||''))return;
- vscode.postMessage({type:'pipsOpenPhoto',pip_id:S.selected,message_id:messageId,index:Number(index)});
+ vscode.postMessage({type:'pipsOpenPhoto',pip_id:S.selected,message_id:messageId,index:Number(index),...(save?{save:true}:{})});
 }
 // A plugin's card asked to send a message as yours (MCP Apps ui/message, labelled with its plugin): sent as the box
 // sends one, when the box is empty and the Pip isn't answering.
@@ -1471,7 +1474,10 @@ function drawChatQueue(){
  const section=box.closest('#chat-queue-box');if(section){section.hidden=!count;const head=section.querySelector('.chat-queue-head');if(head)head.textContent=count===1?'1 queued message':`${count} queued messages`;}
  if(box.dataset.sig===sig&&box.children.length===count){drawChatTray();return;}
  box.dataset.sig=sig;
- window.DgcMessageQueue?.render(box,[...held.map(item=>({id:item.id,text:item.text.replace(/\s+/g,' ')||'',title:item.text,fixed:true})),...list.map(item=>({id:item.id,text:item.text.replace(/\s+/g,' ')||'',title:item.text}))],{
+ // One that brought pictures or files (Pips API 84) says so after its words; DGC's stand-in words for one with none aren't shown.
+ const brought=item=>{const n=Array.isArray(item.images)?item.images.length:0,f=Array.isArray(item.files)?item.files.length:0,what=[n?`${n} ${n===1?'picture':'pictures'}`:'',f?`${f} ${f===1?'file':'files'}`:''].filter(Boolean).join(', ');
+  const words=n&&item.text==='(sent an image)'||f&&item.text==='(sent a file)'?'':item.text.replace(/\s+/g,' ');return what?(words?`${words} \u00b7 ${what}`:what):words;};
+ window.DgcMessageQueue?.render(box,[...held.map(item=>({id:item.id,text:brought(item)||'',title:item.text,fixed:true})),...list.map(item=>({id:item.id,text:item.text.replace(/\s+/g,' ')||'',title:item.text}))],{
   reorder:list.length>1?order=>{const byId=new Map(chatQueue().map(item=>[item.id,item]));setChatQueue(order.map(id=>byId.get(id)).filter(Boolean));}:null,
   // Steer is a mid-turn update to the reply running now; with none running, the message simply goes.
   steer:S.chatActiveRun&&S.apiVersion>=73?id=>{const item=chatQueue().find(i=>i.id===id);if(item&&chatQueueSendText(item.text,item.marks))setChatQueue(chatQueue().filter(i=>i.id!==id));}:null,
@@ -1501,7 +1507,8 @@ async function sendChat(sent={}){
   const text=messageWords(draft.chatText),images=canAttachImages()?pendingImages().map(i=>i.data):[],files=canAttachImages()?pendingFiles().map(f=>({name:f.name,data:f.data})):[];if(!text&&!images.length&&!files.length){setError('Enter a message.');return;}
   // With no provider nothing is sent: it says so, with the way to fix it, and what you wrote stays in the box.
   if(S.noProvider&&!text.startsWith('/')){S.noProviderSaid=true;render();return;}
-  if(S.chatActiveRun&&(images.length||files.length)){setError('Send attached photos or files after this reply. Mid-turn updates are text only.');return;}
+  // Before Pips API 84 a message sent while the Pip works carries words only; from 84 its pictures and files go with it.
+  if(S.chatActiveRun&&(images.length||files.length)&&!attachesMidReply()){setError('Send attached photos or files after this reply. Mid-turn updates are text only.');return;}
   // /learn [what]: a skill drafted from this chat, shown here with Save, Edit and Cancel. It isn't a message to the Pip.
   const learning=personalPip()&&!images.length&&!files.length?learnRequest(text):null;if(learning){void startLearn(learning);return;}
   // A card number never leaves the box: not sent, not kept as a draft. The user types it on the Pip's screen.
@@ -5073,6 +5080,9 @@ document.addEventListener('click',event=>{
   const link=event.target.closest?.('.md-link');
   if(link){event.preventDefault();const target=window.DgcMarkdown?.linkOf?.(link.dataset);if(target?.kind==='external')vscode.postMessage({type:'openExternal',url:target.target});else if(target?.kind==='file')vscode.postMessage({type:'openFile',path:target.target,line:target.line,endLine:target.endLine});return;}
   const copy=event.target.closest?.('button.copy[data-c]');if(copy){event.preventDefault();try{vscode.postMessage({type:'copy',text:decodeURIComponent(copy.dataset.c)});copy.classList.add('done');copy.title='Copied';copy.setAttribute('aria-label','Copied');copy.innerHTML=transcriptIcon('check');}catch{/* malformed generated data is not copied */}return;}
+  // Download on a file's row in a reply (pips-08): the host asks where to save the kept file.
+  const download=event.target.closest?.('button[data-message-download]');
+  if(download&&S.apiVersion>=43&&!remoteHost){openMessageImage(download.dataset.messageDownload,true);return;}
   const photo=event.target.closest?.('img[data-message-image]');
   if(photo&&S.apiVersion>=43&&!remoteHost){openMessageImage(photo.dataset.messageImage);return;}
   const target=event.target.closest('button');if(!target||target.disabled)return;

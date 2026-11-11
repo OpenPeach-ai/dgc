@@ -548,6 +548,13 @@ def get_image(store, pip_id, message_id, index, as_file=False):
         raise RegistryError("invalid_request", "as_file is true or false.")
     row = store.db.execute("SELECT i.sha256,i.mime,i.bytes FROM pip_chat_images i JOIN pip_chat_messages m ON m.id=i.message_id "
                            "WHERE m.pip_id=? AND m.id=? AND i.idx=?", (pip_id, message_id, index)).fetchone()
+    if row is None and type(index) is int and isinstance(message_id, str) and store.db.execute(
+            "SELECT 1 FROM pip_chat_steers WHERE id=? AND pip_id=?", (message_id, pip_id)).fetchone():
+        # A photo a message brought while a reply ran (API 84, pip_steering): kept beside that message.
+        from .pip_steering import attachments
+        brought = attachments(store.db, message_id)[0]
+        if 0 <= index < len(brought):
+            row = (brought[index]["sha256"], brought[index]["mime"], brought[index]["bytes"])
     if row is None:
         raise RegistryError("not_found", "That image is not in this Pip's chat.")
     item = {"sha256": row[0], "mime": row[1], "bytes": row[2]}
@@ -1408,6 +1415,10 @@ def insert_user(store, pip, req, run_id, model, now, *, waiting=None):
         store.db.execute("INSERT INTO pip_chat_images VALUES(?,?,?,?,?)", (message_id, index, item["sha256"], item["mime"], item["bytes"]))
     for index, item in enumerate(req.get("files") or []):
         store.db.execute("INSERT INTO pip_chat_files VALUES(?,?,?,?,?)", (message_id, index, item["name"], item["sha256"], item["bytes"]))
+    if waiting is not None:
+        # What it brought while a reply ran is this message's own now, kept once.
+        from .pip_steering import drop_attachments
+        drop_attachments(store.db, message_id)
 
 
 PLUGIN_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,63}\Z")
@@ -1630,7 +1641,7 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             raise RegistryError("invalid_cursor", "That message cursor does not belong to this Pip.")
         before = cursor[0]
     rows = _bounded_rows(store.db, pip_id, before, limit + 1, conversation_id=conversation_id)
-    from .pip_steering import in_run, waiting, message as steer_message
+    from .pip_steering import in_run, waiting, message as steer_message, shown as steer_attachments
     from .pip_replies import of as quote_of
     selected = []
     projected = 0
@@ -1737,7 +1748,7 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
                 quote = quote_of(store.db, said['id'])
                 if quote:
                     said['reply_to'] = quote
-                expanded.append(said)
+                expanded.append(steer_attachments(store.db, said['id'], said))   # API 84: the photos and files it brought
     from .pip_routine_care import notes as routine_notes
     noted = routine_notes(store.db, pip_id)
     from .pip_backup import out as fallback_out
@@ -1748,7 +1759,8 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             # Its own model is out and its fallback answers (D14): the prompt box says so until its own model is back.
             **({"fallback_on": {"model": str(fallback_on.get("model") or "")[:256], "since": str(fallback_on.get("since") or "")}}
                if fallback_on else {}),
-            "waiting": [{key: row[key] for key in ("id", "text", "created_at")} for row in waiting(store.db, pip_id, conversation_id)[:8]],
+            "waiting": [steer_attachments(store.db, row["id"], {key: row[key] for key in ("id", "text", "created_at")})
+                        for row in waiting(store.db, pip_id, conversation_id)[:8]],
             "next_before_id": next_id, "active_run": {**dict(active), "run_kind": "conversation"} if active else None,
             "history_context_omitted_count": omitted, "continuity": continuity}
 
@@ -1782,16 +1794,8 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
             from .cards import card_number, refusal
             if card_number(text):
                 raise RegistryError("card_in_chat", refusal(store._job(pip_id)["name"]))
-        if images is not None or files is not None or spooled_images is not None or spooled_files is not None:
-            active_for_attachment = store.db.execute(
-                "SELECT 1 FROM pip_runs r JOIN pip_chat_messages m ON m.run_id=r.id "
-                "WHERE m.pip_id=? AND m.conversation_id=? AND m.role='user' AND r.status IN ('queued','running','cancelling') LIMIT 1",
-                (pip_id, conversation_id)).fetchone()
-            saved_retry = store.db.execute(
-                "SELECT 1 FROM pip_chat_messages WHERE pip_id=? AND request_key=? LIMIT 1",
-                (pip_id, key)).fetchone()
-            if active_for_attachment and not saved_retry:
-                raise RegistryError('steer_attachments', 'Send photos or files after this Pip finishes its reply. Mid-turn updates are text only.')
+        # From API 84 a message may bring photos and files while a reply runs (pip_steering): checked and kept here
+        # exactly as a turn's own are. Before 84 that was refused ("steer_attachments").
         if images is not None or spooled_images is not None:
             job = store._job(pip_id)
             given, spooled_images = spooled_images, None
@@ -1896,7 +1900,10 @@ def answer_waiting(store, row, config):
     with the Pip's own saved options, as the same message."""
     from .pip_eyes import answer, bind
     decided = answer(store, row["pip_id"], row["text"], row["requested_by"], config)
-    req = request(row["text"], row["request_key"])
+    # The photos and files it brought while the reply ran (API 84) come with its turn, as any message's do.
+    from .pip_steering import attachments
+    images, files = attachments(store.db, row["id"])
+    req = request(row["text"], row["request_key"], images=images or None, files=files or None)
     if "conversation_id" in row.keys() and row["conversation_id"]:
         req["conversation_id"] = row["conversation_id"]      # its own conversation's next turn
         from .pip_conversations import is_full, roll_over

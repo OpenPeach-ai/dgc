@@ -139,6 +139,17 @@ The reply is a `pips_result` event that carries the nested request ID:
   retry key. A reply's row in `list_pip_messages` carries `answers`, the id of the user's message it answers (none
   for a turn DGC wrote): the chat draws a quote line only when that is not the user's message just above it. Both
   are optional fields on a message row; a client that doesn't know them ignores them.
+- From API 84 a message may bring photos and files (`images`, `files`, `spooled_images`, `spooled_files`, under the
+  same limits and checks) while a reply is running, and to a Project Pip. Before 84 the first was refused
+  (`steer_attachments`) and a Project Pip's run failed on one, so a client gates both on 84. Sent while a reply runs,
+  the message joins that reply like any mid-turn update; its row carries `images` and `files` as a turn's own message
+  does (in the command's answer, in `list_pip_messages`, and on each row of `waiting`), and `get_pip_message_image`
+  reads its photos. The running reply reads what it brought with it when its model sees for itself and it fits a
+  message read half-way (the photos of one prompt, 64,000 characters of words and file text). Otherwise the message
+  is left unread and becomes the Pip's next turn with everything it brought, exactly as words a reply didn't read
+  do; a stopped or failed reply gives it back "Not sent". The worker is given each kept file by its path and checks
+  it against its digest, as for a turn's own. A Project Pip is handed them the same way, as reference beside the
+  code it reads: never instructions, never run. No command gained a field and no protocol event changed.
 - From API 52 the host sends a message's photos and files the main chat's way: it writes each into
   the backend's image spool (`ready.capabilities.image_spool_dir`, mode 0600, a fresh random name)
   and sends `spooled_images: [{name, media_type}]` and `spooled_files: [{name, spool}]` instead of

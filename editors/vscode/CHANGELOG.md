@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Chat details in a Pip's chat.** When a Pip's latest reply asks a yes-or-no question, a thumbs-up under it answers with its yes choice, in the Pip's own words ("Yes, send it"), exactly as a tap on that choice does. Other choices get no thumb.
+- Pictures and files go with a message you send while a Pip is working. It reads them with that message when it can; otherwise they are its next turn, and nothing is lost. A queued message (Alt+Enter) is still words only.
+- A Project Pip's box has the **+** too: pictures and files are reference beside the code it reads, with the same limits as a Personal Pip's.
+- A picture you sent stands above your bubble, at its right edge; a click opens the original. A picture a Pip made also comes back as a row with its kind, its size and **Download**, which asks where to save it.
 - Small things from the 0.51 checks, cleared together. On a Pip's report card in a Work chat, **Check sign-in** and **Open report** are never cut short, and an opened card says what happened once, in the sentence under the Pip's name. In a very narrow chat (190 px, with Settings open beside it) the card's buttons stay inside it: Open waits in the opened card, and the face gives its room to the words.
 - A Pip's page keeps the Pip's name whole in its header in a narrow side bar; the page's own word (History, Settings, Notifications) goes first, since the page says it in its heading. History says what it is in two lines where it took six, and how to get a first result is said where there are none. Pips opened from a report card shows the same header.
 - Opening Pips shows DGC's loading mark from the first frame until the list is there: no "Connecting to local DGC…" words first in a tab, and no empty project home for a moment before a project's Pips.

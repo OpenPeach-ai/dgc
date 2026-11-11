@@ -65,9 +65,14 @@ class PipChatImageTests(unittest.TestCase):
                 with self.assertRaises(RegistryError):
                     _bounded_pips_command({"type": "pips_control", "request": {**request, **changed}})
         with patch("dgc.pips.WorkspaceRegistry", return_value=self.registry), patch.object(self.registry, "close"):
-            for changed in ({"images": [PHOTO, PHOTO]}, {"text": "x" * 20000}):
+            # While its reply is still queued: from Pips API 84 a message may bring a photo then (it was refused, whatever
+            # its size), so what is refused here is what is over a limit of its own.
+            for changed in ({"images": [PHOTO, PHOTO]}, {"text": "x" * (pips.CHAT_REQUEST_BYTES + 1)}):
                 refused = pips.handle_control(self.cfg, {**request, "idempotency_key": "k2", **changed}, "editor-user", start_worker=False)
                 self.assertFalse(refused["ok"])
+            late = pips.handle_control(self.cfg, {**request, "idempotency_key": "k3", "text": "x" * 20000}, "editor-user", start_worker=False)
+            self.assertTrue(late["ok"], late.get("error"))
+            self.assertEqual(late["result"]["message"]["images"][0]["bytes"], len(PNG) + 1_400_000)
 
     def test_an_image_only_message_reads_as_one(self):
         pip = self.pip()

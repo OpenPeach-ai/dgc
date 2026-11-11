@@ -455,7 +455,16 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # quote, read from the store, up to 600 characters), in send's answer and in list_pip_messages; the model is given the
 # quote once, marked as a quote of its own earlier message. A reply's row in list_pip_messages carries `answers`, the
 # id of the user's message it answers (none for a turn DGC wrote). Both are optional fields on a message row.
-PIPS_API_VERSION = 83
+# API 84 (0.52, pips-08): chat details and attachments. No command gained a field. send_pip_message's photos and files
+# (images, files, spooled_images, spooled_files: the same limits and checks) are taken while a reply is running too (it
+# was refused, `steer_attachments`): the message joins that reply, which reads them with it when its model sees for
+# itself and they fit a message read half-way (the photos of one prompt, 64,000 characters); otherwise it waits and is
+# the Pip's next turn with all it brought, as words a reply didn't read are. And a Project Pip's turn is handed them
+# too (its run failed on one before), as reference beside the code it reads: never instructions, never run. Its row
+# then carries `images` and `files` as any message's does, in send's answer, in list_pip_messages (a mid-reply
+# message, and each row of `waiting`), and get_pip_message_image reads a mid-reply message's photo. All optional fields
+# inside answers; no protocol event changed. A client gates on 84 before sending either.
+PIPS_API_VERSION = 84
 
 
 def attachment_limits() -> dict:

@@ -410,6 +410,10 @@ CONVERSATION_ID = re.compile(r"conv_[0-9a-f]{32}\Z")
 # API 83: Reply on a Pip's message. send_pip_message's reply_to is the id of one of that Pip's own messages in the same
 # conversation; the runtime reads the quote from its store and gives it to the model as a quote of its own words.
 MESSAGE_ID = re.compile(r"message_[0-9a-f]{32}\Z")
+# API 84: send_pip_message's photos and files are also taken while a reply is running, and by a Project Pip (they are
+# reference for its model, never instructions). No field changed, and this client cannot know either case before it
+# sends: a runtime before 84 answers the first with the error code `steer_attachments`, and fails a Project Pip's turn
+# that brought one. A message row may carry `images` and `files` whether it started a turn or joined one.
 # API 81 (pips-10): a plugin card that needs a key takes it on Allow: keys {variable name: text}, kept by DGC for the
 # plugin's server, never answered. Sent only to a runtime advertising 81.
 KEY_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")

@@ -1251,3 +1251,18 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 .chat-reply-row .dgc-att.chat-reply .dgc-att-thumb.chat-reply-mark{background:transparent;width:18px}
 .chat-reply-row .dgc-att.chat-reply .dgc-att-thumb.chat-reply-mark .dgc-att-ext{font-size:12px;font-weight:400}
 .chat-reply-row .dgc-att.chat-reply .dgc-att-name.chat-reply-text{max-width:none;flex:1 1 auto;color:var(--pc-quiet,var(--muted))}
+/* Chat details and attachments (pips-08).
+   - .ract-yes: a thumbs-up on the Pip's latest reply while its yes-or-no question is open; it answers with the yes
+     choice. It stays in sight (the other buttons of a message show when it is pointed at), in the text's own grey.
+   - .msg-made-files: under a reply, a row for each file DGC made in it: the shared document card
+     (media/shared/doccard.css) with the sheet of its kind, its name, "PNG · 1.2 MB" and Download.
+   - A picture you sent stands above your bubble, in the bubble's column, at its right edge. */
+.pip-message .ract.ract-yes{color:var(--text,var(--vscode-foreground))}
+.chat-style .pip-message:not(:hover):not(:focus-within) .response-actions>.ract-yes{opacity:1}
+.pip-message .ract.ract-yes:disabled{opacity:.45}
+.msg-made-files{display:flex;flex-direction:column;gap:6px;min-width:0;max-width:min(100%,420px);margin:6px 0 0}
+.msg-made-files .dgc-doc-card.msg-made-file{flex-wrap:nowrap;width:100%;max-width:100%;margin:0}
+.msg-made-files .dgc-doc-card.msg-made-file .dgc-doc-words{flex:1 1 0}
+.pip-message.user .msg-images,.pip-message.user .msg-files{align-self:flex-end;max-width:100%}
+.pip-message.user .msg-image{max-width:100%}
+.pip-message.assistant .msg-images{justify-content:flex-start}

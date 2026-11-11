@@ -2864,7 +2864,12 @@ def _attached_files(config, manifest: dict, files, has_computer: bool) -> str:
     from .attachments import expand_attachments
     from .pip_chat import read_file, validate_files
     from .redaction import redact_text, secret_values
-    items, paths = validate_files(files), manifest.get('conversation_file_paths')
+    if isinstance(files, list) and files and all(isinstance(item, dict) and 'path' in item for item in files):
+        # A message sent while the reply ran (API 84) names each file with where it is kept (pip_steering.stage).
+        paths = [item['path'] for item in files]
+        items = validate_files([{key: item.get(key) for key in ('name', 'sha256', 'bytes')} for item in files])
+    else:
+        items, paths = validate_files(files), manifest.get('conversation_file_paths')
     if (not isinstance(paths, list) or len(paths) != len(items)
             or any(Path(path).name != item['sha256'] for path, item in zip(paths, items))):
         raise RegistryError('invalid_files', 'The files for this message were not handed over intact.')
@@ -3092,7 +3097,15 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 from .pip_steering import read_worker
                 seen = getattr(self, '_pip_steers_seen', set())
                 for item in read_worker(snapshot.parent, seen):
-                    if self.steer(item['text'], request_id=item['id']):
+                    text, images = item['text'], None
+                    if 'images' in item or 'files' in item:
+                        # API 84: it brought photos or files. Read with it only when this reply can take them here;
+                        # otherwise it is left unread and becomes the Pip's next turn, with all it brought.
+                        brought = self._steer_attachments(item)
+                        if brought is None:
+                            continue
+                        text, images = brought
+                    if self.steer(text, images=images, request_id=item['id']):
                         seen.add(item['id'])
                         received.append(item['id'])
                 self._pip_steers_seen = seen
@@ -3100,6 +3113,43 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             if applied and received:
                 emit({'kind': 'steer_applied', 'ids': received})
             return applied
+
+        def _steer_attachments(self, item):
+            """(text, images) for a message that brought photos or files while this reply ran, or None when it can't
+            be read here: its model doesn't see for itself (its own turn asks how it should see), a kept file is not
+            the one that was sent, or it is more than a message read half-way may carry (the photos of one prompt,
+            64,000 characters). Worked out once a message."""
+            ready = self.__dict__.setdefault('_pip_steer_attachments', {})
+            if item['id'] not in ready:
+                try:
+                    ready[item['id']] = self._read_steer_attachments(item)
+                except Exception:            # noqa: BLE001 -- never the reply's failure: the message gets its own turn
+                    ready[item['id']] = None
+            return ready[item['id']]
+
+        def _read_steer_attachments(self, item):
+            from .agent import _MAX_STEER_CHARS
+            from .attachments import MAX_EDITOR_IMAGE_TOTAL_BYTES, validate_image_data_uris
+            from .pip_chat import _IMAGE_EXT, read_image, validate_images
+            text, images = item['text'], []
+            if item.get('images'):
+                if self._pip_eyes() != 'own':
+                    return None
+                from .photos import for_model
+                kept = validate_images([{key: image.get(key) for key in ('sha256', 'mime', 'bytes')} for image in item['images']])
+                if any(Path(image['path']).name != f"{meta['sha256']}.{_IMAGE_EXT[meta['mime']]}"
+                       for image, meta in zip(item['images'], kept)):
+                    return None
+                share = MAX_EDITOR_IMAGE_TOTAL_BYTES // len(kept)
+                images = [for_model(read_image(image['path'], meta), max_bytes=share) for image, meta in zip(item['images'], kept)]
+                # What a message read half-way may carry (Agent.steer); a photo too heavy for that waits its turn.
+                validate_image_data_uris(images, maximum_file_bytes=MAX_EDITOR_IMAGE_TOTAL_BYTES,
+                                         maximum_total_bytes=MAX_EDITOR_IMAGE_TOTAL_BYTES)
+            if item.get('files'):
+                text += _attached_files(config, manifest, item['files'], computer_pin is not None)
+            if len(text) > _MAX_STEER_CHARS:
+                return None
+            return text, images
 
         @property
         def agent_defs(self):
@@ -4865,8 +4915,9 @@ def _execute_run(registry, row, config):
             manifest = {**manifest, 'approval_level': {'level': chosen, 'unattended': row['requested_by'] in UNATTENDED,
                                                        'pays': pip_levels.may_pay(registry, row['pip_id'])}}
     conversation_pin = manifest.get('conversation')
-    if personal and isinstance(conversation_pin, dict) and conversation_pin.get('images'):
-        # Images never fit the worker's input: it gets their kept paths and re-checks each by digest.
+    if isinstance(conversation_pin, dict) and conversation_pin.get('images'):
+        # Images never fit the worker's input: it gets their kept paths and re-checks each by digest. A Project Pip's
+        # too (API 84): reference for its model, beside the code it reads.
         from .pip_chat import image_paths
         manifest = {**manifest, 'conversation_image_paths': [
             str(path) for path in image_paths(registry.directory, row['pip_id'], conversation_pin['images'])]}
@@ -4876,7 +4927,7 @@ def _execute_run(registry, row, config):
                                       "WHERE m.run_id=? AND m.role='user'", (row['id'],)).fetchone()[0]
             if not own:
                 manifest = {**manifest, 'conversation_photos_again': True}
-    if personal and isinstance(conversation_pin, dict) and conversation_pin.get('files'):
+    if isinstance(conversation_pin, dict) and conversation_pin.get('files'):
         # Files likewise: the worker reads the kept files, re-checking each by digest.
         from .pip_chat import file_paths
         manifest = {**manifest, 'conversation_file_paths': [
@@ -4947,7 +4998,7 @@ def _execute_run(registry, row, config):
                 while not stop.wait(0.1):
                     if manifest.get('run_kind') == 'conversation':
                         from .pip_steering import stage
-                        stage(watcher.db, row['id'], run_dir)
+                        stage(watcher.db, row['id'], run_dir, watcher.directory)
                     if config.get("pips_enabled", False) is not True or is_runtime_paused(watcher):
                         PipStore(watcher).cancel(row["id"], "runner-stop")
                     status = watcher.db.execute("SELECT status FROM pip_runs WHERE id=?", (row["id"],)).fetchone()

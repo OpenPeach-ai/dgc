@@ -1207,6 +1207,11 @@ export class Pips {
         throw new DGCConfigError("keys is {variable name: the key}, up to 8, each up to 16,384 characters");
       }
     }
+    // API 84: send_pip_message's photos and files are also taken while a reply is running, and by a Project Pip (they
+    // are reference for its model, never instructions). No field changed, and this client cannot know either case
+    // before it sends: a runtime before 84 answers the first with the error code `steer_attachments`, and fails a
+    // Project Pip's turn that brought one. A message row may carry `images` and `files` whether it started a turn or
+    // joined one.
     // API 83: Reply on a Pip's message. reply_to is the id of one of that Pip's own messages in the same conversation.
     if (command === "send_pip_message" && Object.hasOwn(values, "reply_to")) {
       if ((this.caps.pips_api_version as number) < 83) {

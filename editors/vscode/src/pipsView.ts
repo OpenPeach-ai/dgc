@@ -563,7 +563,8 @@ export class PipsEditor implements vscode.Disposable {
       fail('DGC couldn’t send that. Refresh to see whether it worked before trying again.');
     }
   }
-  /** Open a photo from a Pip's chat, the original, in an editor tab (one click on its thumbnail). */
+  /** Open a photo from a Pip's chat, the original, in an editor tab (one click on its thumbnail). With `save` (Download
+   *  on a made file's row, pips-08) it asks where to save the original instead, under a name a person can read. */
   private async openPhoto(message: any): Promise<void> {
     const unavailable = () => void vscode.window.showInformationMessage('That photo is no longer available.');
     const pip = message?.pip_id, id = message?.message_id, index = message?.index;
@@ -585,6 +586,14 @@ export class PipsEditor implements vscode.Disposable {
       const uri = this.apiVersion >= 52 ? await this.keptImage(result, { pip, message: id, index, generation }) : result?.image;
       const match = typeof uri === 'string' ? /^data:image\/(png|jpeg|gif|webp|bmp);base64,([A-Za-z0-9+/=]+)$/.exec(uri) : null;
       if (!match) { unavailable(); return; }
+      if (message?.save === true) {
+        const name = `Picture ${index + 1}.${match[1] === 'jpeg' ? 'jpg' : match[1]}`;
+        const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir()), name), saveLabel: 'Download' });
+        if (!target) return;
+        await vscode.workspace.fs.writeFile(target, Buffer.from(match[2], 'base64'));
+        void vscode.window.showInformationMessage(`Saved ${target.path.split('/').pop()}.`);
+        return;
+      }
       const fs = await import('node:fs/promises');
       const os = await import('node:os');
       const nodePath = await import('node:path');
