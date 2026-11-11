@@ -293,7 +293,7 @@ class LocalPipsBridgeTests(unittest.TestCase):
         save.assert_called_once_with()
         self.assertTrue(self.config.get("pips_enabled"))
         self.assertEqual((event["type"], event["enabled"], event["restart_required"]), ("pips_status", True, False))
-        self.assertEqual(event["api_version"], 79)
+        self.assertEqual(event["api_version"], 80)
 
     def test_disable_persists_global_stop_before_save_and_reenable_keeps_it(self):
         self.config.data["pips_enabled"] = True
