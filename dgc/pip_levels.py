@@ -53,6 +53,13 @@ SAYS = {
     FULL: ("Does the whole job, sends included. Stops for a sign-in, or a payment you haven't let it make. "
            "A page or email it reads could talk it into sending something."),
 }
+# A Project Pip's levels (pips-11, D12): the same three, about its handoffs. Your files, commits and pushes never change.
+PROJECT_SAYS = {
+    ASK: "Waits for you before every handoff it is sent: a review, a check or a fix.",
+    APPROVE: ("Runs reviews it is sent, and checks you approved once, by itself. A fix or a new command waits for you."),
+    FULL: ("Also writes a fix in its own copy by itself; the diff waits as a card for you. Never changes your files, "
+           "commits or pushes."),
+}
 NOBODY = "nobody at the keyboard"
 # The fuse: more than this many things a Pip did on its own (sent, submitted, ran) in an hour, and it asks again until
 # the hour has passed, whatever its level. A runaway Pip, or one a page talked into a loop, stops at 25.
@@ -75,6 +82,28 @@ def _personal(registry, pip_id) -> str:
     if row is None:
         raise RegistryError("not_found", "How much a Pip asks is set for a Personal Pip.")
     return row["workspace_id"]
+
+
+def _scope(registry, pip_id) -> tuple[str, bool]:
+    """The Pip's workspace and whether it is a Personal Pip; not_found for a Pip that isn't here."""
+    row = registry.db.execute("SELECT p.workspace_id, w.kind FROM pips p JOIN workspaces w ON w.id=p.workspace_id "
+                              "WHERE p.id=?", (pip_id,)).fetchone() if isinstance(pip_id, str) else None
+    if row is None:
+        raise RegistryError("not_found", "That Pip isn't here.")
+    return row["workspace_id"], row["kind"] == "personal"
+
+
+def project_level(registry, pip_id) -> str:
+    """A Project Pip's level (pips-11): its own choice, else Ask. Read only for the handoffs it is sent
+    (pip_handoffs.by_level); everything a Personal Pip's level decides keeps reading level(), which is Ask here. A
+    registry that can't say is Ask, so nothing goes by itself on a guess."""
+    try:
+        row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (KEY + str(pip_id),)).fetchone()
+        value = json.loads(row["value"]).get("level") if row else None
+        _, personal = _scope(registry, pip_id)
+    except Exception:                       # noqa: BLE001 - unreadable means the safe default
+        return ASK
+    return value if value in LEVELS and not personal else ASK
 
 
 def level(registry, pip_id) -> str:
@@ -286,18 +315,18 @@ def set_level(registry, pip_id, value, actor) -> dict:
         raise RegistryError("local_only", "Only you change how much a Pip asks, on this computer.")
     if value not in LEVELS:
         raise RegistryError("invalid_request", "Choose Ask me first, Approve for me or Do it all.")
-    _personal(registry, pip_id)
+    _scope(registry, pip_id)                # a Personal Pip or, since 0.52, a Project Pip (its handoffs: project_level)
     with registry.transaction():
         write_level(registry, pip_id, value, actor)
     return listing(registry, pip_id)
 
 
 def write_level(registry, pip_id, value, actor) -> None:
-    """Save a Personal Pip's level, inside the caller's transaction (set_level, and a Pip template: pip_templates)."""
+    """Save a Pip's level, inside the caller's transaction (set_level, and a Pip template: pip_templates)."""
     if value not in LEVELS:
         raise RegistryError("invalid_request", "Choose Ask me first, Approve for me or Do it all.")
-    workspace = _personal(registry, pip_id)
-    before = level(registry, pip_id)
+    workspace, personal = _scope(registry, pip_id)
+    before = level(registry, pip_id) if personal else project_level(registry, pip_id)
     registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
                         (KEY + pip_id, json.dumps({"level": value, "at": utc_now(), "by": actor})))
     registry.event(workspace, "pip_level_changed", pip_id=pip_id, payload={"level": value, "before": before, "actor": actor})
@@ -306,9 +335,15 @@ def write_level(registry, pip_id, value, actor) -> None:
 
 
 def listing(registry, pip_id) -> dict:
-    """get_pip_level: the level, the three with their lines, and the newest things it did on its own."""
-    _personal(registry, pip_id)
-    return {"pip_id": pip_id, "level": level(registry, pip_id), "default": DEFAULT, "paying": paying(registry, pip_id),
+    """get_pip_level: the level, the three with their lines, and the newest things it did on its own. A Project Pip's
+    (`kind` "project") are about the handoffs it is sent, with no paying rule."""
+    _, personal = _scope(registry, pip_id)
+    if not personal:
+        return {"pip_id": pip_id, "kind": "project", "level": project_level(registry, pip_id), "default": DEFAULT,
+                "levels": [{"level": value, "name": NAMES[value], "says": PROJECT_SAYS[value]} for value in LEVELS],
+                "on_its_own": on_its_own(registry, pip_id)}
+    return {"pip_id": pip_id, "kind": "personal", "level": level(registry, pip_id), "default": DEFAULT,
+            "paying": paying(registry, pip_id),
             "levels": [{"level": value, "name": NAMES[value], "says": SAYS[value]} for value in LEVELS],
             "on_its_own": on_its_own(registry, pip_id)}
 
@@ -348,6 +383,21 @@ def on_its_own(registry, pip_id, limit=MAX_LISTED) -> list[dict]:
                          "level": payload.get("level") if payload.get("level") in (APPROVE, FULL) else FULL,
                          "unattended": payload.get("unattended") is True, "kind": "app"})
     except Exception:                       # noqa: BLE001 - a registry that can't say
+        pass
+    try:
+        # A Project Pip's handoff its level took (pips-11, pip_handoffs.by_level).
+        for row in registry.db.execute(
+                "SELECT resolved_at,resolved_by,payload FROM pip_handoffs WHERE target_pip_id=? AND status='accepted' "
+                "AND resolved_by LIKE 'pip-level:%' ORDER BY resolved_at DESC LIMIT ?", (pip_id, limit)):
+            payload = json.loads(row["payload"])
+            source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+            task_line = (str(payload.get("task") or "").splitlines() or [""])[0]
+            about = str(source.get("title") or task_line)
+            kind = (payload.get("action") or {}).get("kind")
+            verb = {"read_only": "Reviewed", "test": "Ran your approved check on", "patch": "Wrote a fix in its copy for"}.get(kind, "Took")
+            rows.append({"at": row["resolved_at"], "what": f"{verb}: {about}"[:200] if about else verb,
+                         "level": row["resolved_by"].split(":", 1)[1], "unattended": False, "kind": "handoff"})
+    except Exception:                       # noqa: BLE001 - a registry without handoffs
         pass
     rows.sort(key=lambda r: str(r["at"]), reverse=True)
     out, seen = [], set()

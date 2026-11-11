@@ -436,7 +436,12 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # send_pip_message, list_pip_messages, mark_pip_read and get_pip_chat_context take an optional conversation_id; a
 # request without one is about the Pip's first conversation, as before. A Pip answers in its conversations in
 # parallel, and its replies take turns on its computer.
-PIPS_API_VERSION = 79
+# API 80 (0.52, pips-11): a Project Pip has a level too. get_pip_level and set_pip_level take a Project Pip's id; the
+# answer carries `kind` ("personal" or "project"; a project one has no `paying`), its lines are about the handoffs it is
+# sent, and `on_its_own` may list kind "handoff". At Approve for me a read-only handoff, and a check whose exact
+# commands you approved once, run by themselves; at Do it all a fix too, in its own copy. A proposal its level took
+# answers with the accepted handoff and its `run`.
+PIPS_API_VERSION = 80
 
 
 def attachment_limits() -> dict:

@@ -98,7 +98,7 @@ class LocalPipsBridgeTests(unittest.TestCase):
         value = self.backend._ready_payload()
         self.assertIsNone(ep.event_error({"type": "ready", "seq": 0, **value}))
         self.assertTrue(value["capabilities"]["pips_supported"])
-        self.assertEqual(value["capabilities"]["pips_api_version"], 79)
+        self.assertEqual(value["capabilities"]["pips_api_version"], 80)
         self.assertFalse(value["capabilities"]["pips_enabled"])
         self.assertNotIn("pips_enabled", value)
         self.assertEqual(value["capabilities"]["workspace_identity"], {})

@@ -238,6 +238,25 @@ test("a Project Pip, an older DGC and a remote one keep the shield: no level chi
   assert.ok(older.d.querySelector("#chat-permissions"));
 });
 
+test("a Project Pip on Pips API 80 has the chip too: its lines are about handoffs, no payments, and what its level took is listed", async () => {
+  const PROJECT_SAYS = { ask: "Waits for you before every handoff it is sent: a review, a check or a fix.",
+    approve: "Runs reviews it is sent, and checks you approved once, by itself. A fix or a new command waits for you.",
+    full: "Also writes a fix in its own copy by itself; the diff waits as a card for you. Never changes your files, commits or pushes." };
+  const projectLevel = (value, done = []) => ({ pip_id: PIP, kind: "project", level: value, default: "ask",
+    levels: ["ask", "approve", "full"].map((l) => ({ level: l, name: NAMES[l], says: PROJECT_SAYS[l] })), on_its_own: done });
+  const took = [{ at: now, what: "Reviewed: Assess return value", level: "approve", unattended: false, kind: "handoff" }];
+  const patchProject = { source_policy: { mode: "committed" }, computer_plan: null };
+  const older = pipsPage({ apiVersion: 79, pipPatch: patchProject, state: projectLevel("approve", took) }); await openChat(older);
+  assert.equal(chip(older), null, "a runtime before API 80: a Project Pip keeps its shield");
+  const x = pipsPage({ apiVersion: 80, pipPatch: patchProject, state: projectLevel("full", took) }); await openChat(x);
+  assert.ok(chip(x), "the chip on a Project Pip");
+  assert.match(chip(x).textContent, /Do it all/);
+  const page = pipsPage({ apiVersion: 80, pipPatch: patchProject, state: projectLevel("full", took) }); await openInfo(page);
+  assert.match(page.d.getElementById("pipLevelSays")?.textContent || "", /Never changes your files, commits or pushes/);
+  assert.equal(page.d.getElementById("pipPaying"), null, "no payments rule on a Project Pip");
+  assert.match(page.d.querySelector("[data-on-its-own]")?.textContent || "", /Reviewed: Assess return value/);
+});
+
 // ---- a backup model for Pips (API 76, Pips package 6)
 test("a fallback model: the ⋯ beside a model in its picker, Main and Fallback pills, and the chip says so while it answers", async () => {
   // D14 (9 Nov): chosen where the main model is, one provider and one model; the old rows in Pips settings and on its page went.

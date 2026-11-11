@@ -2108,6 +2108,8 @@ function jobSettingsMarkup(){
   const what=S.editingGoal?`<form id="revision-form" class="form">${field('revisionGoal','What should it do?',true)}<div class="actions"><button type="submit" class="primary"${off?' disabled':''}>Save</button>${button('cancel-goal','Cancel',S.busy,'quiet')}</div></form>`:`<p class="goal">${esc(p.goal)}</p>`;
   return `<section class="section"><div class="section-head"><h2>What it does</h2><div class="actions">${S.editingGoal?'':button('edit-goal','Edit',off,'quiet')}${S.apiVersion>=23?button('setup-in-chat','Change in chat',off,'quiet'):''}</div></div>${what}</section>`
    +`<section class="section"><h2>When it runs</h2>${quickScheduleMarkup()}</section>`
+   // How much it asks, for a Project Pip (Pips API 80, pips-11): the same picker, about the handoffs it is sent.
+   +(levelShown()?levelMarkup(levelState.pip===p.id?levelState.value:null,{esc,busy:off||levelState.busy,error:levelState.error,pipName:p.name,when:at=>shortDate(at)}):'')
    +artifactsSectionMarkup(p,off,true)
    +sourceSettingsMarkup()+githubReadsMarkup()
    +`<form id="model-form" class="section form"><h2>Model</h2>${modelPicker('pipModel','Model this Pip uses',draft.pipModel,personalPip())}<div class="actions"><button type="submit" class="primary"${off||!S.modelDirty?' disabled':''}>Save model</button></div></form>`
@@ -2982,7 +2984,8 @@ function computerRowMarkup(p,off){
 function openWhatItCanDo(){if(!S.pip)return;openReview({title:`What ${S.pip.name} can do`,description:personalPip()?(S.pip.computer_plan?`${S.pip.name} has its own computer: ${S.apiVersion>=54?'a desktop with a browser, apps and a Terminal that reach public websites, and files':'a browser, a Terminal that reaches public websites, and files'}. It can also read the apps you connected. ${levelState.pip===S.pip.id&&levelState.value&&levelState.value.level!=='ask'?levelNotice(levelState.value):'Anything it would send, submit or change waits for your Allow, unless you chose Always allow.'}${S.apiVersion>=44?(carefulState.pip===S.pip.id&&carefulState.value?.careful===false?' Careful mode is off.':' Careful mode: it asks before it opens a new site, and before anything it read from your apps goes onto a website.'):''}`:`${S.pip.name} reads what you share here and the apps you connected. It can’t send, buy or change anything without your OK.`):`It reads ${currentTree()?'your current files':'the committed code'} of this project, and only reads. In chat it can’t run commands, open the running app, change files or permissions. Anything it runs or changes, you approve separately, in a handoff or its setup.`,readOnly:true,request:{}});}
 // How much it asks (Pips API 58): its level, the chosen level's one line, and what its level did by itself.
 const levelState={pip:'',value:null,error:'',busy:false,seq:0};
-const levelShown=()=>S.apiVersion>=58&&!remoteHost&&personalPip();
+// A Project Pip has one too from Pips API 80 (pips-11): its lines are about the handoffs it is sent.
+const levelShown=()=>S.apiVersion>=58&&!remoteHost&&(personalPip()||S.apiVersion>=80&&!!S.pip);
 async function loadLevel(){
  if(!levelShown()||!usable()||levelState.busy)return;   // a change being saved answers for itself
  const token=scope(),pip=S.selected,sequence=++levelState.seq;

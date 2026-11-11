@@ -102,9 +102,11 @@ class LevelSettingTests(Store):
         self.assertEqual(levels.level(self.registry, pip["id"]), "approve")
         changed = self.registry.db.execute("SELECT payload FROM workspace_events WHERE event_type='pip_level_changed'").fetchall()
         self.assertEqual(json.loads(changed[-1][0])["level"], "approve")
+        # A Project Pip has one too since 0.52 (pips-11), about the handoffs it is sent (tests/test_pip_project_levels.py);
+        # what a Personal Pip's level decides keeps reading Ask for it.
         project = self.store.create(self.workspace["id"], "Reviewer", "Review", "editor-user")
-        with self.assertRaises(RegistryError):
-            levels.set_level(self.registry, project["id"], "full", "editor-user")
+        self.assertEqual(levels.set_level(self.registry, project["id"], "full", "editor-user")["kind"], "project")
+        self.assertEqual(levels.level(self.registry, project["id"]), "ask")
         self.assertEqual(levels.level(self.registry, project["id"]), "ask", "a Project Pip always asks")
 
     def test_each_level_tells_the_pip_what_goes_through_and_ask_tells_it_nothing_new(self):

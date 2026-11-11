@@ -57,6 +57,19 @@ class HandoffToolTests(unittest.TestCase):
         self.assertNotIn('request_key', json.dumps(saved))
         self.assertLess(len(json.dumps(receipt).encode()), tool.MAX_RECEIPT_BYTES)
 
+    def test_a_project_pips_level_takes_a_read_only_handoff_and_the_receipt_says_so(self):
+        # pips-11: at Approve for me the target Pip runs a review by itself; the receipt says its level took it.
+        from dgc import pip_levels
+        pip_levels.set_level(self.registry, self.target['id'], pip_levels.APPROVE, 'editor-user')
+        with patch.object(pips, 'start_queued', return_value=None):
+            receipt = self.propose_tool(self.request(request_key='by-level'))
+        self.assertEqual(receipt['status'], 'accepted')
+        self.assertFalse(receipt['review_required'])
+        self.assertTrue(receipt['execution_started'])
+        self.assertEqual(receipt['run_status'], 'queued')
+        self.assertIn("level (approve) took this handoff", receipt['message'])
+        self.assertEqual(pip_handoffs.get(self.store, receipt['handoff_id'])['resolved_by'], 'pip-level:approve')
+
     def test_exact_retry_and_changed_payload_conflict(self):
         first = self.propose_tool()
         self.assertEqual(self.propose_tool(), first)

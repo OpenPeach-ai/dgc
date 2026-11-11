@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **A Project Pip has a level too**, on its chat's chip and its page, about the handoffs it is sent. Ask me first is as before. At Approve for me a review it is sent runs by itself, and so does a check whose commands you approved once. At Do it all a fix runs too, in its own copy, its diff waiting as a card. It never changes your files, commits, pushes or runs a command nobody reviewed. What its level took is listed under "What it did on its own". Needs a DGC with Pips API 80.
 - **Ollama Cloud** is one of the providers in Settings › Models › + Add provider: Ollama's cloud models with no Ollama installed. **Get a key** opens ollama.com's API keys page; paste the key once and DGC checks it before saving (ollama.com lists its models to anyone, so the key is checked on its own, at no cost). A key it refuses is said at once in plain words and nothing is saved. If Ollama's web search has no key of its own, it uses this one.
 - A Work session's context meter shows no percentage until the model has answered once: on a model DGC can't reach it showed a number about nothing.
 - **A page made arrives on Home.** When a Work session or a ChatDGC chat makes a page, a spreadsheet, a document, slides or a dashboard, it arrives on Home under New as a card of the same size and style as the others: the small sheet of its kind where a face or a blob would be, its title, and a line such as "Page made · version 1 · Fix the login redirect". Open opens it as its card in the chat does; Dismiss takes it off Home.

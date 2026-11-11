@@ -131,6 +131,11 @@ def propose(args, ctx):
             if (saved["workspace_id"], saved["source_pip_id"], saved["source_run_id"], saved["target_pip_id"], saved["requested_by"]) != (
                     data_workspace_id, source_pip_id, checked["source_run_id"], checked["target_pip_id"], actor):
                 raise RegistryError("handoff_mismatch", "The saved proposal does not match this chat's scoped request.")
+            if checked["source_kind"] != "personal_result":
+                # The target Project Pip's level may take it now (pips-11): the receipt then says so, with its run.
+                taken = pip_handoffs.by_level(store, saved, ctx.config)
+                if taken:
+                    saved = taken["handoff"]
             receipt = {"handoff_id": saved["id"], "workspace_id": saved["workspace_id"],
                        "source_pip_id": source_pip_id, "source_run_id": saved["source_run_id"],
                        "source_kind": checked["source_kind"], "target_pip_id": saved["target_pip_id"],
@@ -138,8 +143,11 @@ def propose(args, ctx):
                        "target_job_version": saved["payload"]["target"]["job_version"],
                        "status": saved["status"], "revision": saved["revision"], "expires_at": saved["expires_at"],
                        "payload_digest": saved["payload_digest"], "review_required": saved["status"] == "pending",
-                       "execution_started": False, "run_id": saved["run_id"], "run_status": saved["run_status"],
-                       "message": "This call only saved or recovered a handoff proposal. Review its exact task and action in Pips or the CLI. Any existing target run came from a separate human approval."}
+                       "execution_started": str(saved.get("resolved_by") or "").startswith("pip-level:"), "run_id": saved["run_id"], "run_status": saved["run_status"],
+                       "message": (f"The target Pip's level ({saved['resolved_by'].split(':', 1)[1]}) took this handoff: its run is "
+                                   "queued in its own copy; your project files are untouched."
+                                   if str(saved.get("resolved_by") or "").startswith("pip-level:") else
+                                   "This call only saved or recovered a handoff proposal. Review its exact task and action in Pips or the CLI. Any existing target run came from a separate human approval.")}
             raw = json.dumps(redact_value(receipt, secrets), ensure_ascii=False, separators=(",", ":"))
             if len(raw.encode()) > MAX_RECEIPT_BYTES:
                 raise RegistryError("response_limit", "The saved proposal receipt exceeds its output budget. Inspect handoff history before retrying.")

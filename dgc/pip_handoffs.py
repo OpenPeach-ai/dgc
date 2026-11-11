@@ -605,6 +605,58 @@ def accept(store, handoff_id, expected_revision, actor, config, *, _origin_check
     return result
 
 
+def _reviewed_actions(store, target_pip_id) -> list[dict]:
+    """The actions you approved yourself for this Pip (a handoff accepted by a person, never by a level)."""
+    out = []
+    for row in store.db.execute("SELECT payload FROM pip_handoffs WHERE target_pip_id=? AND status='accepted' "
+                                "AND resolved_by NOT LIKE 'pip-level:%'", (target_pip_id,)):
+        try:
+            action = json.loads(row["payload"]).get("action")
+        except (TypeError, ValueError):
+            continue
+        if isinstance(action, dict):
+            out.append(action)
+    return out
+
+
+def by_level(store, handoff, config):
+    """A Project Pip's level answering a handoff it was just sent (pips-11, D12), or None to leave it for you.
+
+    Approve for me: a read-only one (a review Pip looking at a finding), and a check whose exact commands you approved
+    yourself once for this Pip. Do it all: a fix (Patch) too, in its own copy, its diff waiting as a card; a fix with a
+    check nobody approved still waits. Never a workflow's handoff (its own review), never a personal one, and never at
+    Ask me first. Accepted as `pip-level:<level>` through accept(), so every check a person's approval has runs; one it
+    refuses (sandbox unavailable, a stale source) stays pending for you."""
+    from . import pip_levels
+    if not isinstance(handoff, dict) or handoff.get("status") != "pending" or handoff.get("revision") != 0:
+        return None
+    payload = handoff.get("payload") if isinstance(handoff.get("payload"), dict) else {}
+    if payload.get("type") == "personal_result.v1" or str(handoff.get("requested_by") or "").startswith("pip-flow:"):
+        return None
+    target = handoff.get("target_pip_id")
+    level = pip_levels.project_level(store.registry, target)
+    if level not in (pip_levels.APPROVE, pip_levels.FULL):
+        return None
+    action = payload.get("action") if isinstance(payload.get("action"), dict) else {}
+    kind = action.get("kind")
+    reviewed = _reviewed_actions(store, target)
+    reviewed_tests = [t for a in reviewed for t in (a.get("tests") or []) if isinstance(t, dict)]
+    if kind == "read_only":
+        allowed = True
+    elif kind == "test":
+        allowed = any(a == action for a in reviewed)            # the same commands, approved by you once
+    elif kind == "patch":
+        allowed = level == pip_levels.FULL and all(t in reviewed_tests for t in action.get("tests") or [])
+    else:
+        allowed = False
+    if not allowed:
+        return None
+    try:
+        return accept(store, handoff["id"], 0, f"pip-level:{level}", config)
+    except RegistryError:
+        return None
+
+
 def reject(store, handoff_id, expected_revision, actor, reason):
     _int(expected_revision, "Expected handoff revision", 0, 1)
     actor = _text(actor, "Reviewing actor")

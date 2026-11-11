@@ -3994,6 +3994,12 @@ bubblewrap profile is missing; DGC does not fall back to an unsandboxed browser.
   change included, and says what it chose). A change while it works applies from its next step. After
   25 things on its own in an hour it asks again until the hour has passed. New Pips start at Ask me
   first; existing Pips keep their chosen level. Payments ask at every level.
+- **How much a Project Pip asks.** A Project Pip has the same chip, about the handoffs it is sent. **Ask me
+  first**: every handoff waits for your review, as before. **Approve for me**: a review it is sent runs by
+  itself, and so does a check whose exact commands you approved once for it. **Do it all**: a fix runs by itself
+  too, in its own copy, and its diff waits as a card for you. At every level it never changes your project
+  files, commits, pushes, or runs a command nobody reviewed; a fix with a check you never approved waits. What
+  its level took is listed on its page.
 - **Fallback model.** The ⋯ beside a model in a Pip's model picker: Use as fallback. When a Pip's
   model doesn't answer (a usage limit, a host that is down, a signed-out Claude Code or Codex), its
   turn carries on with it; its prompt box says so in olive, and the first reply says so once.

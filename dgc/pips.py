@@ -6567,14 +6567,19 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 result = pip_checkpoints.history(store, pip_id, request.get("before_id"), request.get("limit", 20))
             elif command == "propose_pip_handoff":
                 from . import pip_handoffs
-                result = {"handoff": pip_handoffs.propose(store, request.get("source_run_id"), request.get("finding_index"),
+                handoff = pip_handoffs.propose(store, request.get("source_run_id"), request.get("finding_index"),
                     request.get("target_pip_id"), request.get("task"), request.get("action"),
-                    request.get("idempotency_key"), actor, config)}
+                    request.get("idempotency_key"), actor, config)
+                # The target Project Pip's level may take it now (pips-11): then the handoff as accepted, with its run.
+                taken = pip_handoffs.by_level(store, handoff, config)
+                result = {"handoff": taken["handoff"], "run": taken["run"]} if taken else {"handoff": handoff}
             elif command == "propose_pip_artifact_handoff":
                 from . import pip_handoffs
-                result = {"handoff": pip_handoffs.propose_artifact(store, request.get("source_run_id"),
+                handoff = pip_handoffs.propose_artifact(store, request.get("source_run_id"),
                     request.get("target_pip_id"), request.get("task"), request.get("action"),
-                    request.get("idempotency_key"), actor, config)}
+                    request.get("idempotency_key"), actor, config)
+                taken = pip_handoffs.by_level(store, handoff, config)
+                result = {"handoff": taken["handoff"], "run": taken["run"]} if taken else {"handoff": handoff}
             elif command == "propose_pip_personal_handoff":
                 from . import pip_handoffs
                 result = {"handoff": pip_handoffs.propose_personal(store, request.get("source_run_id"),
@@ -6752,8 +6757,9 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
         response.update(ok=True, result=redact_value(result, secret_values(config)))
         if len(_json(response).encode()) > RESPONSE_BYTES:
             raise RegistryError("output_limit", "This result is too large to return at once; inspect individual Pips or runs.")
-        if start_worker and command in ("run_pip", "resume_pip", "send_pip_message", "introduce_pip", "accept_pip_handoff"):
-            start_queued(config)
+        if start_worker and (command in ("run_pip", "resume_pip", "send_pip_message", "introduce_pip", "accept_pip_handoff")
+                             or (command in ("propose_pip_handoff", "propose_pip_artifact_handoff") and result.get("run"))):
+            start_queued(config)                   # a handoff its Pip's level took (pips-11) starts at once too
     except (RegistryError, ValueError, TypeError, OSError, sqlite3.Error) as exc:
         response.pop("result", None)
         from .redaction import redact_text, secret_values

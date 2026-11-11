@@ -4,7 +4,7 @@
 // so they always agree. The line is DGC's own (get_pip_level's `says`), shown once more as the notice when one is chosen.
 
 const LEVELS = ['ask', 'approve', 'full'];
-const KINDS = ['site', 'computer', 'app'];
+const KINDS = ['site', 'computer', 'app', 'handoff'];          // handoff: a Project Pip's (Pips API 80)
 const SHOWN = 5;
 
 export function levelPage(value, pip) {
@@ -23,7 +23,8 @@ export function levelPage(value, pip) {
   });
   // Its rule for payments (API 75): ask or allow; an older DGC sends none.
   if ('paying' in value && !['ask', 'allow'].includes(value.paying)) fail();
-  return {level: value.level, default: value.default, levels, done, paying: value.paying || null};
+  return {level: value.level, default: value.default, levels, done, paying: value.paying || null,
+          kind: value.kind === 'project' ? 'project' : 'personal'};
 }
 
 /** The section: the picker with the chosen level's line, and what its level did by itself. */
