@@ -516,6 +516,9 @@ DEFAULTS: dict = {
                                                 #   (Settings: Wait between words)
     "pips_enabled": True,                      # Pips: personal and project agents beside the chat
     "pips_parallel_runs": 4,                   # Pips running at once, one run per Pip (pips.parallel_runs)
+    # Dev Mode (dgc/dev_mode.py): off, every capacity limit is today's; on, each in dev_limits is yours, no ceiling.
+    "dev_mode": False,
+    "dev_limits": {},
     "pips_model": "",                          # the model every Pip on Default uses, on DGC's own connection;
                                                #   "" follows DGC (its model, or its subscription CLI)
     "model_stall_notice_s": 45,                 # say "no response from the model" after this long; 0 = never

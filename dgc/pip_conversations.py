@@ -38,7 +38,12 @@ CREATE TABLE IF NOT EXISTS pip_conversation_reads (
 # A routine gains it too, left empty: empty is the Pip's first conversation, where routines post until moved.
 SCOPED = ("pip_chat_messages", "pip_chat_checkpoints", "pip_chat_steers")
 BACKFILLED = ("pip_chat_messages", "pip_chat_steers")
-MAX_CONVERSATIONS = 500          # a Pip's, archived ones included
+MAX_CONVERSATIONS = 500          # a Pip's, archived ones included (Dev Mode: yours, max_conversations)
+
+
+def max_conversations() -> int:
+    from .dev_mode import value
+    return value("pip_conversations")
 MAX_TITLE = 120
 _ID = re.compile(r"conv_[0-9a-f]{32}")
 
@@ -132,8 +137,8 @@ def create(registry, pip_id, title="") -> dict:
     owner = db.execute("SELECT workspace_id FROM pips WHERE id=?", (pip_id,)).fetchone()
     if owner is None:
         raise RegistryError("not_found", "That Pip doesn't exist.")
-    if db.execute("SELECT count(*) FROM pip_conversations WHERE pip_id=?", (pip_id,)).fetchone()[0] >= MAX_CONVERSATIONS:
-        raise RegistryError("limit", f"A Pip keeps up to {MAX_CONVERSATIONS} conversations. Archive or delete one first.")
+    if db.execute("SELECT count(*) FROM pip_conversations WHERE pip_id=?", (pip_id,)).fetchone()[0] >= max_conversations():
+        raise RegistryError("limit", f"A Pip keeps up to {max_conversations()} conversations. Archive or delete one first.")
     name = _title(title)
     now = registry.clock()
     first(db, pip_id, workspace_id=owner[0], now=now)
@@ -188,8 +193,8 @@ def roll_over(registry, pip_id, conversation_id) -> str:
     db = registry.db
     with contextlib.nullcontext() if db.in_transaction else registry.transaction():
         full = _own(db, pip_id, conversation_id)
-        if db.execute("SELECT count(*) FROM pip_conversations WHERE pip_id=?", (pip_id,)).fetchone()[0] >= MAX_CONVERSATIONS:
-            raise RegistryError("limit", f"A Pip keeps up to {MAX_CONVERSATIONS} conversations. Archive or delete one first.")
+        if db.execute("SELECT count(*) FROM pip_conversations WHERE pip_id=?", (pip_id,)).fetchone()[0] >= max_conversations():
+            raise RegistryError("limit", f"A Pip keeps up to {max_conversations()} conversations. Archive or delete one first.")
         now = registry.clock()
         try:
             day = datetime.fromisoformat(now.replace("Z", "+00:00")).strftime("%-d %b %Y")

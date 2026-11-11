@@ -511,7 +511,7 @@ _CONFIG_OPT_IN_FIELDS = frozenset({"subagent_context_size", "search_url", "searc
 _CONFIG_BOOLEAN_KEYS = frozenset({
     "prompt_cache", "sandbox", "sandbox_network", "show_reasoning", "preserve_thinking",
     "code_action", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
-    "ultra_mode", "monitor_wake",
+    "ultra_mode", "monitor_wake", "dev_mode",
     "thinking_inline", "memory", "chatdgc_web", "chatdgc_followups",
 })
 _CONFIG_STRING_LIMITS = {
@@ -620,7 +620,7 @@ def _validated_config_values(raw_values, subscription_keys) -> tuple[dict | None
         return None, "settings values must be an object"
     allowed = {*_CONFIG_BOOLEAN_KEYS, *_CONFIG_STRING_LIMITS, *_CONFIG_ENUMS,
                *_CONFIG_INTEGER_RANGES, "provider_capabilities", "subscription_engine",
-               "ollama_keep_alive", "model_first_token_timeout_s"}
+               "ollama_keep_alive", "model_first_token_timeout_s", "dev_limits"}
     unknown = [key for key in raw_values if key not in allowed]
     if unknown:
         return None, f"unsupported settings key: {str(unknown[0])[:80]}"
@@ -676,6 +676,15 @@ def _validated_config_values(raw_values, subscription_keys) -> tuple[dict | None
     if "ollama_keep_alive" in values and not _keep_alive_ok(values["ollama_keep_alive"]):
         return None, ("ollama_keep_alive must be a duration Ollama takes (5m, 30m, 1h, 24h), "
                       "-1 to keep the model loaded until Ollama stops, or empty for Ollama's default")
+    if "dev_limits" in values:
+        # Dev Mode's limits (dgc/dev_mode.py): only capacity limits, each a whole number of 1 or more.
+        if not isinstance(values["dev_limits"], dict):
+            return None, "dev_limits must be an object"
+        from .dev_mode import clean_limits
+        kept, refused = clean_limits(values["dev_limits"])
+        if refused:
+            return None, refused[0]
+        values["dev_limits"] = kept
     if "provider_capabilities" in values:
         capabilities = values["provider_capabilities"]
         from .llm import ProviderCapabilities

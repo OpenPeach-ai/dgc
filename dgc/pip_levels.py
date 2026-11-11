@@ -179,7 +179,13 @@ PAY_RULES = (ASK, ALLOW)
 PAYING_KEY = "pip_paying:"                 # metadata: a Pip's rule, JSON {rule, at, by}
 PAYMENTS_KEY = "pips_level_payments"       # metadata: the day's count, JSON {limit, at, by}
 PAY_LIMIT = 3
-PAY_MOST = 20                              # Dev Mode (pips-24) lifts it
+PAY_MOST = 20                              # Dev Mode lifts it (pay_most)
+PAY_DEV_MOST = 1_000_000                   # in Dev Mode: no real ceiling, a safeguard you still set
+
+
+def pay_most() -> int:
+    from .dev_mode import on
+    return PAY_DEV_MOST if on() else PAY_MOST
 PAY_SECONDS = 24 * 3600
 
 
@@ -218,20 +224,20 @@ def pay_limit(registry) -> int:
         value = json.loads(row["value"]).get("limit") if row else None
     except Exception:                       # noqa: BLE001 - unreadable is the default
         value = None
-    return value if type(value) is int and 1 <= value <= PAY_MOST else PAY_LIMIT
+    return value if type(value) is int and 1 <= value <= pay_most() else PAY_LIMIT
 
 
 def payments(registry) -> dict:
     """get_pips_payments: {limit, default, most, paid}: the day's count, and how many your Pips paid in the last day."""
-    return {"limit": pay_limit(registry), "default": PAY_LIMIT, "most": PAY_MOST, "paid": len(paid(registry))}
+    return {"limit": pay_limit(registry), "default": PAY_LIMIT, "most": pay_most(), "paid": len(paid(registry))}
 
 
 def set_payments(registry, value, actor) -> dict:
     """set_pips_payments {limit}: the day's count, a whole number from 1 to PAY_MOST. Only you, on this computer."""
     if actor not in LOCAL:
         raise RegistryError("local_only", "Only you set how many times Pips may pay in a day, on this computer.")
-    if type(value) is not int or not 1 <= value <= PAY_MOST:
-        raise RegistryError("invalid_request", f"Choose a whole number from 1 to {PAY_MOST}.")
+    if type(value) is not int or not 1 <= value <= pay_most():
+        raise RegistryError("invalid_request", f"Choose a whole number from 1 to {pay_most()}.")
     with registry.transaction():
         registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
                             (PAYMENTS_KEY, json.dumps({"limit": value, "at": utc_now(), "by": actor})))

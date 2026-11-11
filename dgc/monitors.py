@@ -58,6 +58,18 @@ from dataclasses import dataclass, field
 
 MAX_MONITORS_PER_OWNER = 4
 MAX_MONITORS_PROCESS = 16
+
+
+def max_per_owner() -> int:
+    """Monitors one chat may run: MAX_MONITORS_PER_OWNER, or yours in Dev Mode (dgc.dev_mode)."""
+    from .dev_mode import value
+    return value("monitors_per_chat")
+
+
+def max_process() -> int:
+    """Monitors one DGC may run: MAX_MONITORS_PROCESS, or yours in Dev Mode (dgc.dev_mode)."""
+    from .dev_mode import value
+    return value("monitors_per_dgc")
 BATCH_WINDOW_S = 0.2
 MAX_LINE_CHARS = 2000
 MAX_PARTIAL_BYTES = MAX_LINE_CHARS * 4          # an unterminated line is cut once it reaches this
@@ -911,11 +923,11 @@ class MonitorHub:
         self.reap()
         with self._lock:
             running = [m for m in self._monitors.values() if m.state == "running"]
-        if len(running) >= MAX_MONITORS_PER_OWNER:
-            return (f"error: {MAX_MONITORS_PER_OWNER} monitors are already running "
+        if len(running) >= max_per_owner():
+            return (f"error: {max_per_owner()} monitors are already running "
                     f"({', '.join(m.id for m in running)}); stop one with monitor_stop first"), None
-        if process_running_count() >= MAX_MONITORS_PROCESS:
-            return f"error: DGC already runs {MAX_MONITORS_PROCESS} monitors; stop one first", None
+        if process_running_count() >= max_process():
+            return f"error: DGC already runs {max_process()} monitors; stop one first", None
         from . import sandbox
         from .scheduler import acquire_cancellable, workspace_mutation_lock
         root = getattr(ctx, "project_root", None) or self.project_root

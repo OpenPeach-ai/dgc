@@ -1634,10 +1634,13 @@ def computers(db, pip_id) -> int:
 def computers_limit(db) -> int:
     row = db.execute("SELECT value FROM metadata WHERE key=?", (COMPUTERS_LIMIT_KEY,)).fetchone()
     try:
-        value = json.loads(row[0]) if row else COMPUTERS_DEFAULT_LIMIT
+        value = json.loads(row[0]) if row else None
     except (TypeError, ValueError):
-        value = COMPUTERS_DEFAULT_LIMIT
-    return value if type(value) is int and value >= 1 else COMPUTERS_DEFAULT_LIMIT
+        value = None
+    if type(value) is int and value >= 1:
+        return value                                  # this registry's own setting
+    from .dev_mode import value as limit
+    return limit("pip_computers")                     # COMPUTERS_DEFAULT_LIMIT, or yours in Dev Mode
 
 
 def add_computer(registry, pip_id) -> dict:
