@@ -960,18 +960,18 @@ def continue_after_computer(store, pip_id, action_id, summary, config):
     """The chat's next turn once a submit its run held has been sent: the Pip looks and replies."""
     what = f"{summary.get('method', '')} to {summary.get('host', '')}{summary.get('path', '')}"[:300]
     key = COMPUTER_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(action_id))[:100]
-    where = _computer_conversation(store, action_id)
+    conversation = _computer_conversation(store, action_id)
     if summary.get("kind") == "login":
         page = str(summary.get("sign_in_page") or summary.get("page") or "")
         where = (f"Its sign-in page is {page[:300]}: open it if it isn't open. " if page.startswith(("https://", "http://"))
                  else "Open its sign-in page if it isn't open. ")
         text = COMPUTER_LOGIN_SAVED.format(site=str(summary.get("site") or summary.get("host") or "the site")[:255], where=where)
-        return _owed_turn(store, pip_id, text, key, "local-computer", config, where)
+        return _owed_turn(store, pip_id, text, key, "local-computer", config, conversation)
     if summary.get("kind") == "floor":
         # The safety floor held a Terminal command (pip_levels.floor): the Pip runs exactly that, once.
         command = str((summary.get("fields") or [{}])[0].get("value", ""))[:300]
         return _owed_turn(store, pip_id, COMPUTER_ALLOWED.format(what=f"you to run that command in your Terminal once: {command}"),
-                          key, "local-computer", config, where)
+                          key, "local-computer", config, conversation)
     if summary.get("kind") in ("site", "text"):
         # Careful mode held it before anything happened: the Pip does it now, once.
         # The page it wanted, not just the site: told "visit pip-test.example", a Pip opened that bare name instead of
@@ -980,8 +980,8 @@ def continue_after_computer(store, pip_id, action_id, summary, config):
         again = f"open {page[:300]} again, the page you wanted" if page.startswith(("https://", "http://")) else "open it if it isn't open yet"
         allowed = (f"you to visit {summary.get('site') or summary.get('host', 'that site')} ({again})" if summary["kind"] == "site"
                    else f"you to put that on {summary.get('host') or 'the page'}: {(summary.get('fields') or [{}])[0].get('value', '')}")
-        return _owed_turn(store, pip_id, COMPUTER_ALLOWED.format(what=allowed[:400]), key, "local-computer", config, where)
-    return _owed_turn(store, pip_id, COMPUTER_DONE.format(what=what), key, "local-computer", config, where)
+        return _owed_turn(store, pip_id, COMPUTER_ALLOWED.format(what=allowed[:400]), key, "local-computer", config, conversation)
+    return _owed_turn(store, pip_id, COMPUTER_DONE.format(what=what), key, "local-computer", config, conversation)
 
 
 def continue_after_rejection(store, pip_id, action_id, summary, config):
