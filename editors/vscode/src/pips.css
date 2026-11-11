@@ -679,7 +679,42 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .attention-detail{font-size:12px;color:var(--vscode-foreground);opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.attention-copy small{font-size:11px}.attention-mark{width:34px;height:34px;flex:none;display:grid;place-items:center;border-radius:50%;background:var(--surface);border:1px solid var(--line)}
 /* A new Pip waiting for you: a thin shared card in the list (media/shared/card.css), the width of its rows. */
 .attention-item.attention-card{display:block;margin:2px 0 6px}.attention-card .dgc-card{max-width:none}
-.attention-more{margin:4px 0 0 52px;font-size:12px}.attention-cut{font-size:11px;margin:4px 0 0 52px}
+.attention-cut{font-size:11px;margin:4px 0 0 52px}
+/* One card in view, whatever waits (asked 11 Nov: the list "gets too long"): an arrow each side, dots below, "2 of 8".
+   Where there is room the arrows stand beside the card; in a narrow view (the side bar) the card keeps the whole width
+   and the arrows stand at the two ends of the dots' row, so they never sit on the card's own buttons. A row that is not
+   a card of its own wears the card's hairline and ground here, so one thing in view reads as one card. The arrows are the
+   shared button's quiet look in a 28 px square; the dot of the card showing is the one purple mark. */
+.attention-carousel{display:grid;grid-template-columns:28px minmax(0,1fr) 28px;grid-template-areas:"prev stage next" ". foot .";column-gap:8px;row-gap:4px;align-items:center}
+.attention-carousel[hidden]{display:none}.attention-carousel.single{display:block}
+.attention-stage{grid-area:stage;min-width:0;touch-action:pan-y}.attention-stage.attention-moving{overflow:hidden}
+.attention-carousel .attention-item.attention-card{margin:0}
+.attention-carousel .attention-row{padding:9px 10px;border:1px solid var(--hair,var(--line));border-radius:var(--r-card,12px);background:color-mix(in srgb,var(--text,var(--vscode-foreground)) 4.5%,transparent)}
+.attention-carousel .attention-row:hover:not(:disabled){background:color-mix(in srgb,var(--text,var(--vscode-foreground)) 7%,transparent);border-color:var(--hair-strong,var(--line))}
+.attention-carousel .attention-row:focus-visible{outline:var(--btn-ring,2px solid var(--vscode-focusBorder));outline-offset:2px}
+button.attention-nav{grid-area:prev;display:grid;place-items:center;box-sizing:border-box;width:28px;height:28px;min-height:0;padding:0;border:1px solid transparent;border-radius:var(--btn-r,6px);background:transparent;color:var(--text-2,var(--vscode-foreground));box-shadow:none;transition:var(--btn-move)}
+button.attention-nav.attention-next{grid-area:next}
+button.attention-nav:hover:not(:disabled){border-color:var(--btn-line-hover);background:var(--btn-wash);color:var(--btn-text,var(--vscode-foreground));transform:var(--btn-up);transition-duration:var(--btn-in)}
+button.attention-nav:active:not(:disabled){transform:var(--btn-down);transition-duration:var(--btn-press)}
+button.attention-nav:focus-visible,button.attention-dot:focus-visible{outline:var(--btn-ring,2px solid var(--vscode-focusBorder));outline-offset:2px}
+button.attention-nav:disabled{opacity:.3;cursor:default;background:transparent}
+.attention-foot{grid-area:foot;display:flex;align-items:center;justify-content:center;gap:6px;min-width:0}
+.attention-dots{display:flex;flex-wrap:nowrap;align-items:center;justify-content:center;min-width:0}
+button.attention-dot{display:grid;place-items:center;flex:none;box-sizing:border-box;width:16px;height:24px;min-height:0;padding:0;border:0;border-radius:var(--btn-r,6px);background:transparent;box-shadow:none}
+.attention-dot i{display:block;width:7px;height:7px;border-radius:50%;background:color-mix(in srgb,var(--text,var(--vscode-foreground)) 28%,transparent);transition:background-color var(--dur-hover,120ms) var(--ease-out,ease-out)}
+.attention-dot.near i{width:5px;height:5px}.attention-dot.far i{width:3px;height:3px}
+button.attention-dot:hover{background:transparent;border:0}.attention-dot:hover i{background:color-mix(in srgb,var(--text,var(--vscode-foreground)) 60%,transparent)}
+.attention-dot[aria-current] i,.attention-dot[aria-current]:hover i{background:var(--pip-accent)}
+.attention-place{font-size:11px;line-height:16px;white-space:nowrap;font-variant-numeric:tabular-nums}
+@container(max-width:480px){.attention-carousel{grid-template-areas:"stage stage stage" "prev foot next";row-gap:6px;align-items:start}.attention-foot{flex-direction:column;gap:0}button.attention-nav{margin-top:-2px}}
+@media(prefers-reduced-motion:no-preference){
+ .attention-stage.attention-moving{transition:height 180ms var(--ease-out,ease-out)}
+ .attention-stage.attention-from-next>li{animation:attention-from-next 180ms var(--ease-out,ease-out) both}
+ .attention-stage.attention-from-prev>li{animation:attention-from-prev 180ms var(--ease-out,ease-out) both}
+}
+@keyframes attention-from-next{from{opacity:0;transform:translateX(28px)}to{opacity:1;transform:none}}
+@keyframes attention-from-prev{from{opacity:0;transform:translateX(-28px)}to{opacity:1;transform:none}}
+@media(forced-colors:active){.attention-dot i{forced-color-adjust:none;background:GrayText}.attention-dot[aria-current] i,.attention-dot[aria-current]:hover i{background:Highlight}button.attention-nav{border-color:ButtonText}.attention-carousel .attention-row{border-color:CanvasText}}
 .attention-flash{animation:attention-flash 2.4s ease-out 1}@keyframes attention-flash{0%,30%{box-shadow:0 0 0 2px var(--vscode-focusBorder)}100%{box-shadow:0 0 0 0 transparent}}@media(prefers-reduced-motion:reduce){.attention-flash{animation:none;outline:2px solid var(--vscode-focusBorder)}}
 /* What it remembers (#6): notes on its page, and "Remembered" under the reply that kept one. */
 .note-add{gap:8px}.note-add input{flex:1;min-width:0}.note-all{display:flex;justify-content:flex-end;padding:4px 2px 0}.note-confirm{display:flex;align-items:center;gap:6px;font-size:12px}

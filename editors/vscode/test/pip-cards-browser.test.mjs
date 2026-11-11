@@ -187,7 +187,7 @@ test("two changes for the same version: each card says allowing it sets the othe
 
 // ---- The Pips page: a new Pip waiting for you shows once, in Needs attention ---------------------------------------
 for (const theme of ["dark", "light"]) for (const [width, count] of [[300, 3], [700, 1]]) {
-  test(`${count} new ${count === 1 ? "Pip" : "Pips"} waiting: only in Needs attention, each a thin card (${width}px, ${theme})`, async (t) => {
+  test(`${count} new ${count === 1 ? "Pip" : "Pips"} waiting: only in Needs attention, each a thin card, one in view (${width}px, ${theme})`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openChat(browser, { width, theme, where: width > 400 ? "tab" : "side", home: true, setups: count });
     t.after(x.close);
@@ -208,8 +208,10 @@ for (const theme of ["dark", "light"]) for (const [width, count] of [[300, 3], [
     assert.equal(await open(), "true", "and opens it again");
     await x.p.waitForSelector(".attention [data-setup-card]");
     v = await page();
-    assert.equal(v.cards, count, "one card for each new Pip");
-    assert.equal(v.rows, 1, "beside the rows of what else waits");
+    // One card in view (asked 11 Nov: the list "gets too long"): the newest new Pip's; the rest are a dot or an arrow away.
+    assert.equal(v.cards, 1, "one card in view, the new Pip's");
+    assert.equal(v.rows, 0, "what else waits is not under it");
+    assert.equal(await x.p.evaluate(() => (window.__pipsRoot || document).querySelector(".attention-place")?.textContent), `1 of ${count + 1}`, "each new Pip and what else waits, one at a time");
     assert.equal(v.dismiss, 0, "its answers are on its card, not a second row");
     const card = ".attention [data-setup-card]";
     await x.p.waitForFunction(() => (window.__pipsRoot || document).querySelector(".attention [data-setup-card] .dgc-chip") !== null);

@@ -50,7 +50,7 @@ import {healthMarkup,failedRoutine,foldRoutineLines,failedRoutineMarkup,quietLin
 import {appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup,appLinkSettledMarkup,allowCardMarkup,calendarCardMarkup} from './pipAppLinks.js';
 import {pipKeysPage,pipKeyResult,waitingKeys,pipKeyCardMarkup,pipKeysPageMarkup} from './pipKeys.js';
 import {pluginsPage,pluginResult,keyRequests,keyCardMarkup,shownPluginCards,pluginForServer,installedForServer,pluginCardMarkup,pluginActionMarkup,pluginsPageMarkup,pluginUsesPage,pluginUsesMarkup,argumentValues,editedArguments,PLUGIN_LEVELS} from './pipPlugins.js';
-import {attentionPage,waitingOn,needWords,attentionMarkup,setupCardMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
+import {attentionPage,waitingOn,needWords,attentionMarkup,attentionCards,attentionSpot,setupCardMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
 import {notesPage,notesMarkup,keptMarkup} from './pipNotes.js';
 import {workingNotesPage,dailyLogPage,workingNotesMarkup,dailyLogMarkup,learnCardMarkup,learnRequest} from './pipWorkingNotes.js';
 import {carefulPage,carefulMarkup,carefulWords,settledWords,isPayment,asksEveryTime,asksWords,coversWords,coversDetail} from './pipCareful.js';
@@ -2708,7 +2708,8 @@ function setupCardFor({setup,item}){
 function setupsMarkup(){
  if(S.apiVersion<23)return '';
  if(!setupRows.length)return setupError?`<section class="attention" aria-label="Needs attention">${errorMarkup(setupError)}${button('refresh-setups',setupLoading?'Checking…':'Check again',setupLoading||S.busy||!usable())}</section>`:'';
- return attentionMarkup(null,{esc,face:()=>'',expanded:2,busy:!usable(),setups:setupRows.filter(r=>!heldRejects.has(r.id)),setupCard:setupCardFor,error:setupError,more:setupRows.length>=5?'Showing 5 new Pips. Answer one to see more.':''});
+ const setups=setupRows.filter(r=>!heldRejects.has(r.id));
+ return attentionMarkup(null,{esc,face:()=>'',expanded:2,busy:!usable(),setups,setupCard:setupCardFor,error:setupError,more:setupRows.length>=5?'Showing 5 new Pips. Answer one to see more.':'',at:attentionShowing(attentionCards(null,setups))});
 }
 async function loadSetups(){
 
@@ -2877,9 +2878,37 @@ S.attention=null;let attentionSeq=0,attentionExpanded=false,attentionRead=false;
 function attentionKeys(){return [...(projectHome()?[]:(S.attention?.items||[]).map(i=>i.id)),...setupRows.filter(r=>!heldRejects.has(r.id)).map(r=>'setup:'+r.id)];}
 function attentionOpen(){
  const keys=attentionKeys();if(!keys.length)return attentionExpanded;
- if(attentionUserFolded){if(!keys.some(k=>!attentionFolded.has(k)))return false;attentionUserFolded=false;attentionFolded.clear();rememberView();}
+ // What came in while it was folded is what it opens on.
+ if(attentionUserFolded){const fresh=keys.find(k=>!attentionFolded.has(k));if(!fresh)return false;attentionUserFolded=false;attentionFolded.clear();attentionPlace().key=fresh;rememberView();}
  return attentionExpanded||1;
 }
+// One card in view (asked 11 Nov: the list "gets too long"): the card you are on, kept by what it is, so a new card
+// arriving moves nothing, and an answered one gives its place to the next. Personal and Project each keep their own.
+const attentionPlaces={personal:{key:'',index:0},project:{key:'',index:0}};
+function attentionPlace(){return attentionPlaces[projectHome()?'project':'personal'];}
+function attentionShowing(cards){
+ const place=attentionPlace(),keys=cards.map(c=>c.key);if(!keys.length)return 0;
+ place.index=attentionSpot(keys,place.key,place.index);place.key=keys[place.index];return place.index;
+}
+const attentionStill=()=>!window.matchMedia||window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+let attentionSettle=0;
+// To another card: it slides in from the side you are going to, and the section's height follows it (about 180 ms;
+// neither under reduced motion). `focus` keeps the keyboard in the carousel when what held it is gone or off.
+function attentionGo(key,index,{focus=false}={}){
+ const old=document.querySelector('.attention-carousel'),from=Number(old?.dataset.at);if(!old||!key)return;
+ const place=attentionPlace();if(place.key===key)return;
+ const held=focus?document.activeElement?.id||'':'',was=old.querySelector('.attention-stage')?.getBoundingClientRect?.().height||0;
+ place.key=key;place.index=Number.isSafeInteger(index)?index:place.index;render();
+ const now=document.querySelector('.attention-carousel'),stage=now?.querySelector('.attention-stage');if(!stage)return;
+ if(focus&&!now.contains(document.activeElement))(held&&!$(held)?.disabled&&$(held)||now.querySelector('.attention-dot[aria-current]'))?.focus?.({preventScroll:true});
+ if(attentionStill())return;
+ const to=stage.getBoundingClientRect().height;window.clearTimeout(attentionSettle);
+ stage.classList.add('attention-moving',Number(now.dataset.at)<from?'attention-from-prev':'attention-from-next');
+ if(was&&Math.abs(to-was)>=1){stage.style.height=was+'px';void stage.offsetHeight;stage.style.height=to+'px';}
+ attentionSettle=window.setTimeout(()=>{stage.classList.remove('attention-moving','attention-from-prev','attention-from-next');stage.style.height='';},220);
+}
+// One card along, by a key or a swipe: way is -1 or 1. At an end, nothing.
+function attentionStep(way,how){const b=$(way<0?'attention-prev':'attention-next');if(b&&!b.disabled)attentionGo(b.dataset.attentionGo,Number(b.dataset.attentionIndex),how);}
 // Reject on a new Pip's card turns it down at once everywhere (his call, 11 Nov), held for a moment so a slip can be
 // undone: the card goes, "Rejected · Undo" shows, and the reject is sent when the moment passes. A window closed
 // meanwhile sends nothing, so the new Pip just waits again.
@@ -2912,8 +2941,10 @@ function attentionHomeMarkup(){
   return pipAvatar(pip,'waiting_approval',`attn-${i.card}`,characterType(pip.pip_type));};
  // A project's home shows none of the Personal Pips' rows: only the new Pips waiting in this project.
  const more=setupRows.length>=5?'Showing 5 new Pips. Answer one to see more.':'';
- const held=page=>page&&{...page,items:page.items.filter(i=>!(i.kind==='setup'&&heldRejects.has(i.card)))};
- return attentionMarkup(projectHome()?null:held(S.attention),{esc,face,expanded:attentionOpen(),busy:!usable(),setups:S.apiVersion>=23?setupRows.filter(r=>!heldRejects.has(r.id)):[],setupCard:setupCardFor,error:setupRows.length?setupError:'',more});
+ // A new Pip you just rejected (held a moment for Undo) is out of the cards, the dots and the count at once.
+ const held=page=>{if(!page)return page;const items=page.items.filter(i=>!(i.kind==='setup'&&heldRejects.has(i.card)));return {...page,items,total:Math.max(items.length,page.total-(page.items.length-items.length))};};
+ const page=projectHome()?null:held(S.attention),setups=S.apiVersion>=23?setupRows.filter(r=>!heldRejects.has(r.id)):[],expanded=attentionOpen();
+ return attentionMarkup(page,{esc,face,expanded,busy:!usable(),setups,setupCard:setupCardFor,error:setupRows.length?setupError:'',more,at:attentionShowing(attentionCards(page,setups))});
 }
 // What it remembers (#6): its notes about you, on its page and under the reply that kept them.
 S.notes=null;S.notesPip='';S.notesError='';let notesSeq=0,notesBusy=false,noteConfirmAll=false;
@@ -3188,11 +3219,10 @@ async function navigateAttention(value){
   (document.querySelector('.attention')||document.querySelector('.simple-home'))?.scrollIntoView?.({block:'start'});return;
  }
  if(typeof setup==='string'){
-  // A new Pip waiting: its card in Needs attention, opened if the list is folded (or cut short of it), and the keyboard on Review.
+  // A new Pip waiting: Needs attention at its card, opened if it is folded, and the keyboard on Review.
   clearSelection();S.selected='';S.create=false;S.overview=true;rememberView();render();await loadSetups();await loadAttention();
   const at=()=>[...document.querySelectorAll('[data-setup-card]')].find(e=>e.dataset.setupCard===setup);
-  attentionExpanded=attentionExpanded||1;render();
-  if(!at()){attentionExpanded=2;render();}
+  attentionExpanded=attentionExpanded||1;attentionUserFolded=false;attentionFolded.clear();attentionPlace().key='setup:'+setup;render();
   const el=at()||document.querySelector('.attention');el?.scrollIntoView?.({block:'start'});
   if(el?.dataset.setupCard){cardFlash.selector=`[data-setup-card="${setup}"]`;cardFlash.until=Date.now()+2400;el.classList.add('attention-flash');el.querySelector('button:not([disabled])')?.focus?.({preventScroll:true});}
   return;
@@ -4886,6 +4916,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.sitesAll){sitesAll=true;render();return;}
   if(target.dataset.noteForget){const n=(S.notes||[]).find(x=>x.id===target.dataset.noteForget);void noteCall('forget_pip_note',{note_id:target.dataset.noteForget},()=>n?`Forgotten: ${n.text}`:'Forgotten.');return;}
   if(target.dataset.noteForgetAll){if(target.dataset.noteForgetAll==='ask'){noteConfirmAll=true;render();}else if(target.dataset.noteForgetAll==='no'){noteConfirmAll=false;render();}else void noteCall('forget_pip_note',{all:true},()=>{noteConfirmAll=false;return 'Forgotten. It remembers nothing about you now.';});return;}
+  if(target.dataset.attentionGo){attentionGo(target.dataset.attentionGo,Number(target.dataset.attentionIndex),{focus:true});return;}
   if(target.dataset.attentionMore!==undefined){attentionExpanded=Number(target.dataset.attentionMore)||false;
    // Folded by you: kept folded until something new is in it. Opened: it follows the rule again.
    if(attentionExpanded){attentionUserFolded=false;attentionFolded.clear();}else{attentionUserFolded=true;attentionFolded.clear();attentionKeys().forEach(k=>attentionFolded.add(k));}
@@ -5306,9 +5337,30 @@ if(typeof document!=='undefined'){document.addEventListener('pointerdown',event=
  document.addEventListener('pointerup',releaseEffort,true);document.addEventListener('pointercancel',releaseEffort,true);
  document.addEventListener('input',event=>{const t=pathTarget(event);if(t?.id==='chat-thinking')followEffort(t);},true);}
 if(typeof document!=='undefined'){document.addEventListener('pointerdown',()=>markEffortInput(false),true);document.addEventListener('keydown',event=>{if(event.key==='Tab'||event.composedPath?.()[0]?.id==='chat-thinking')markEffortInput(true);},true);}
+// A sideways swipe on Needs attention's card goes one card along: a finger or a pen across it, or two fingers on a
+// trackpad (one card a swipe: the rest of its glide is let pass).
+{let from=null,glide=0,passed=0,moved=false;
+ document.addEventListener('pointerdown',event=>{from=event.pointerType!=='mouse'&&event.isPrimary!==false&&event.target.closest?.('.attention-stage')?{x:event.clientX,y:event.clientY,id:event.pointerId}:null;});
+ document.addEventListener('pointerup',event=>{const start=from;from=null;if(!start||start.id!==event.pointerId)return;
+  const dx=event.clientX-start.x,dy=event.clientY-start.y;if(Math.abs(dx)>=40&&Math.abs(dx)>Math.abs(dy)*1.5)attentionStep(dx<0?1:-1);});
+ document.addEventListener('pointercancel',()=>{from=null;});
+ const onWheel=event=>{
+  if(!event.target.closest?.('.attention-stage')||Math.abs(event.deltaX)<=Math.abs(event.deltaY))return;
+  const now=Date.now(),resting=now-passed>200;passed=now;if(resting){glide=0;moved=false;}
+  if(moved)return;glide+=event.deltaX;if(Math.abs(glide)>=60){moved=true;attentionStep(glide>0?1:-1);}
+ };
+ root.addEventListener('wheel',onWheel,{passive:true});disposers.push(()=>root.removeEventListener('wheel',onWheel));}
 document.addEventListener('keydown',event=>{
   if(picker.keydown(event))return;
   if(!S.review&&DgcCard.key(event)){event.preventDefault();return;}   // Esc closes a card's open detail
+  // Needs attention's one card: with the keyboard anywhere in it, an arrow goes to the next card or back, Home and
+  // End to the first and the last. Not from a box you type in.
+  if(!S.review&&['ArrowLeft','ArrowRight','Home','End'].includes(event.key)&&!event.altKey&&!event.ctrlKey&&!event.metaKey&&!event.target.matches?.('input,textarea,select,[contenteditable]')){
+   const carousel=event.target.closest?.('.attention-carousel');
+   if(carousel&&Number(carousel.dataset.count)>1){event.preventDefault();
+    if(event.key==='Home')attentionGo(carousel.dataset.first,0,{focus:true});else if(event.key==='End')attentionGo(carousel.dataset.last,Number(carousel.dataset.count)-1,{focus:true});
+    else attentionStep(event.key==='ArrowLeft'?-1:1,{focus:true});return;}
+  }
   // Personal | Project keys, as the Sessions home's tabs take them: an arrow goes to the other tab, Home and End to
   // the first and the last, and the tab chosen takes the focus.
   if(!S.review&&event.target.dataset?.pipsTab&&['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();chooseScopeTab(event.key==='Home'?'personal':event.key==='End'?'project':scopeTab()==='personal'?'project':'personal',true);return;}

@@ -83,6 +83,19 @@ export const host = (opts) => `(${function (PIP, opts) {
   const attentionItems = project ? [] : [...setups.map((v) => ({ id: `setup:${v.id}`, kind: "setup", card: v.id, pip_id: null, pip_name: "", pip_type: "", workspace_id: W, title: `Create the Pip “${v.name}”?`,
     detail: v.goal, created_at: v.created_at, expires_at: null })),
     ...(opts.setups ? [{ id: `email:${mailCard}`, kind: "email", card: mailCard, pip_id: PIP, pip_name: name, pip_type: "lens", workspace_id: W, title: "Send email to sam@mail.example?", detail: "Subject: Tuesday", created_at: new Date(Date.now() - 50 * 60000).toISOString(), expires_at: null }] : [])];
+  // opts.waiting: that many more cards this Pip waits on you for (an app to link, an email, its computer...), some with a
+  // second line and some without, so the cards differ in height. window.__attention adds and takes away cards as DGC
+  // would between two reads; the page reads again when it is told a setup changed.
+  const waitingKinds = [["app_link", "applink_", "Link Gmail?", "To read your new mail each morning."], ["computer_action", "compact_", "Send this on shop.example?", ""],
+    ["event", "caldraft_", "Add “Dentist” to your calendar?", "Thursday 4:00 PM, 30 minutes"], ["plugin", "pipplugin_", "Use the Airtable plugin?", ""],
+    ["routine", "routine_", "Start the routine “Bank alerts”?", "When an email arrives from alerts@bank.example"], ["action", "conndraft_", "Post this to the team channel?", "Standup notes for Tuesday"]];
+  const waitingOf = (i) => { const [kind, prefix, title, detail] = waitingKinds[i % waitingKinds.length], card = prefix + (i + 1).toString(16).padStart(2, "0").repeat(16);
+    return { id: `${kind}:${card}`, kind, card, pip_id: PIP, pip_name: name, pip_type: "lens", workspace_id: W, title: i < waitingKinds.length ? title : `${title.slice(0, -1)} (${i + 1})?`, detail,
+      created_at: new Date(Date.now() - (10 + i) * 60000).toISOString(), expires_at: null }; };
+  if (!project) for (let i = 0; i < (opts.waiting || 0); i++) attentionItems.push(waitingOf(i));
+  window.__attention = { ids: () => attentionItems.map((v) => v.id), add: (i = attentionItems.length + 20) => { const v = { ...waitingOf(i), created_at: new Date().toISOString() }; attentionItems.unshift(v); return v.id; },
+    remove: (id) => { const at = attentionItems.findIndex((v) => v.id === id); if (at >= 0) attentionItems.splice(at, 1); },
+    read: () => window.postMessage({ type: "pipSetupChanged" }, "*") };
   // A card asking to connect an app, and a routine the Pip suggested (opts.link, opts.routine).
   const link = { id: "applink_" + "a".repeat(32), pip_id: PIP, workspace_id: W, toolkit: "gmail", app: "Gmail", reason: "To read your new mail each morning.", status: "requested", label: null, error: null,
     created_at: "2026-10-07T09:00:00.000Z", updated_at: new Date().toISOString() };
@@ -124,7 +137,7 @@ export const host = (opts) => `(${function (PIP, opts) {
   window.__unanswered = [];
   const answers = {
     list_workspaces: () => ({ workspaces: [{ id: W, name: project ? "garden" : "Personal", kind: project ? "project" : "personal" }], current_workspace_id: W }),
-    list_pip_types: () => ({ types }), list_pip_setups: () => ({ setups }), get_pip_setup: (r) => ({ setup: setups.find((v) => v.id === r.setup_id) }), list_pip_starters: () => ({ starters: [] }),
+    list_pip_types: () => ({ types }), list_pip_setups: () => ({ setups: setups.filter((v) => v.status === "pending") }), reject_pip_setup: (r) => { const v = setups.find((s) => s.id === r.setup_id); v.status = "rejected"; window.__attention.remove(`setup:${v.id}`); return { setup: v }; }, get_pip_setup: (r) => ({ setup: setups.find((v) => v.id === r.setup_id) }), list_pip_starters: () => ({ starters: [] }),
     list_pips: () => ({ pips: [pip], total: 1, next_offset: null }),
     get_pip_runner: () => ({ runner: { runner_id: "r", status: "running", online: true, paused: false, counts: { queued: 0, running: opts.running ? 1 : 0, cancelling: 0 } } }),
     get_workspace_context: () => ({ context: { workspace_id: W, revision: 0, entries: [] } }),
@@ -139,7 +152,7 @@ export const host = (opts) => `(${function (PIP, opts) {
     get_pip: () => ({ pip }), list_pip_runs: () => ({ runs: [] }),
     get_pip_level: () => ({ pip_id: PIP, level: "ask", default: "ask", levels, on_its_own: [] }),
     // The rest of what an open chat reads, each empty: an unanswered one draws an error line in the chat.
-    list_pip_attention: () => ({ as_of: at(0), total: attentionItems.length, counts: {}, by_pip: opts.setups && !project ? { [PIP]: 1 } : {}, items: attentionItems, truncated: false }),
+    list_pip_attention: () => ({ as_of: at(0), total: attentionItems.length, counts: {}, by_pip: attentionItems.some((v) => v.pip_id) ? { [PIP]: attentionItems.filter((v) => v.pip_id).length } : {}, items: [...attentionItems], truncated: false }),
     list_pip_flows: () => ({ flows: [], core_suggestions: [] }),
     get_pip_computer_desktop: () => ({ desktop: { pip_id: PIP, available: false, reason: "No desktop here.", install: "", using: false, browser: "Chromium", chrome_install: "" } }),
     list_pip_connector_drafts: () => ({ drafts: [], next_cursor: null }), list_pip_calendar_drafts: () => ({ drafts: [], next_cursor: null }),

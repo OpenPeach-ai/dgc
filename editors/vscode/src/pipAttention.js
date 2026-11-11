@@ -13,7 +13,6 @@ const ID = {email: /^maildraft_[a-f0-9]{32}$/, event: /^caldraft_[a-f0-9]{32}$/,
 /** A kind of card in a word or two: "Email", "Its computer", "New Pip". */
 export const kindLabel = kind => LABELS[kind] || 'Card';
 const REVIEW_KINDS = ['job_update', 'schedule_update'];
-const SHOWN = 6;
 // Lengths in characters, as the CLI cuts them: an emoji is one, not two UTF-16 units.
 const text = (v, max) => typeof v === 'string' && (v.length <= max || [...v].length <= max);
 const PIP = /^pip_[a-f0-9]{32}$/, WORKSPACE = /^ws_[a-f0-9]{32}$/;
@@ -95,30 +94,66 @@ export function setupCardMarkup({setup = null, item = null, face = '', chips = [
     chips: setup ? chips : [{label: 'New Pip', icon: 'pip'}, ...(ago(item.created_at, now) ? [{label: ago(item.created_at, now), icon: 'clock'}] : [])], actions: answers});
 }
 
-/** The Pips home's list. `face(item)` draws the Pip's face (the home's own avatars). `setups` are the new Pips waiting in
- *  this place, each drawn as a card by `setupCard` ({setup} or {item}); the list is theirs alone when `page` is null (a
- *  project's home, which shows none of the Personal Pips' rows). */
-export function attentionMarkup(page, {esc, face, expanded = false, now = Date.now(), busy = false, setups = [], setupCard = null, error = '', more = ''}) {
+/** Every card in Needs attention, in the order it shows them, each with the key it is known by. A new Pip this view has
+ *  read but DGC's list doesn't name (a project's, or an older DGC's) comes first. */
+export function attentionCards(page, setups = [], setupCard = true) {
   const listed = page?.items || [], known = new Map(setups.map(s => [s.id, s]));
-  // A new Pip this view has read but DGC's list doesn't name (a project's, or an older DGC's): first, and counted.
   const extra = setupCard ? setups.filter(s => !listed.some(i => i.kind === 'setup' && i.card === s.id)) : [];
-  const total = (page?.total || 0) + extra.length;
+  return [...extra.map(s => ({key: `setup:${s.id}`, title: `Create the Pip “${s.name}”?`, setup: s})),
+    ...listed.map(i => (i.kind === 'setup' && setupCard ? {key: i.id, title: i.title, setup: known.get(i.card) || null, item: i} : {key: i.id, title: i.title, item: i}))];
+}
+
+/** Which card shows: the one you were on, wherever it is now (a new card arriving moves nothing). When it is gone
+ *  (answered), the one that took its place, which is the next; after the last, the one before. */
+export function attentionSpot(keys, key, index = 0) {
+  const at = keys.indexOf(key);
+  return at >= 0 ? at : Math.max(0, Math.min(Number.isSafeInteger(index) ? index : 0, keys.length - 1));
+}
+
+/** The dots under the card: one for each card up to `most`; past that, a window of `most` around the current one, its
+ *  end dots smaller where more cards lie beyond them ('near', then 'far' at the very end). One short row at any count. */
+export function attentionDots(count, at, most = 7) {
+  const start = count <= most ? 0 : Math.max(0, Math.min(at - Math.floor(most / 2), count - most)), end = Math.min(count, start + most);
+  return Array.from({length: end - start}, (_, n) => {
+    const index = start + n, before = start > 0 ? n : 2, after = end < count ? end - 1 - index : 2;
+    return {index, current: index === at, size: Math.min(before, after) === 0 ? 'far' : Math.min(before, after) === 1 ? 'near' : ''};
+  });
+}
+
+const ARROW = {prev: 'M10 3 5 8l5 5', next: 'M6 3l5 5-5 5'};
+
+/** The Pips home's Needs attention: one card in view, whatever waits (asked 11 Nov: the list "gets too long"), with an
+ *  arrow each side and dots below to go to the next or back. `at` is the card showing (attentionSpot). `face(item)`
+ *  draws the Pip's face (the home's own avatars). `setups` are the new Pips waiting in this place, each drawn as a card
+ *  by `setupCard` ({setup} or {item}); the cards are theirs alone when `page` is null (a project's home, which shows
+ *  none of the Personal Pips' rows). */
+export function attentionMarkup(page, {esc, face, expanded = false, now = Date.now(), busy = false, setups = [], setupCard = null, error = '', more = '', at = 0}) {
+  const all = attentionCards(page, setups, !!setupCard), listed = page?.items || [];
+  const total = (page?.total || 0) + all.length - listed.length;
   if (!total) return '';
-  const all = [...extra.map(s => ({setup: s})), ...listed.map(i => (i.kind === 'setup' && setupCard ? {setup: known.get(i.card) || null, item: i} : {item: i}))];
-  const shown = expanded === 2 ? all : expanded ? all.slice(0, SHOWN) : [];
-  const rows = shown.map(({setup, item: i}) => setup !== undefined
-    ? `<li class="attention-item attention-card">${setupCard({setup, item: i})}</li>`
-    : `<li class="attention-item"><button type="button" class="attention-row" data-attention="${esc(i.id)}"${busy ? ' disabled' : ''}>`
+  const count = all.length, index = Math.max(0, Math.min(at, count - 1)), shown = expanded ? all[index] : null, n = v => v.toLocaleString('en-US');
+  const card = shown && (({setup, item: i}) => setup !== undefined
+    ? `<li class="attention-item attention-card" data-attention-key="${esc(shown.key)}">${setupCard({setup, item: i})}</li>`
+    : `<li class="attention-item" data-attention-key="${esc(shown.key)}"><button type="button" class="attention-row" data-attention="${esc(i.id)}"${busy ? ' disabled' : ''}>`
     + `${face(i)}<span class="attention-copy"><strong>${esc(i.title)}</strong>${i.detail ? `<span class="attention-detail">${esc(i.detail)}</span>` : ''}`
     + `<small>${esc(i.pip_name || 'DGC')} · ${LABELS[i.kind]} · ${esc(ago(i.created_at, now))}</small></span></button>`
     + (i.kind === 'setup' ? `<button type="button" class="attention-dismiss" data-attention-dismiss="${esc(i.id)}" aria-label="Dismiss ${esc(i.title)}"${busy ? ' disabled' : ''}>Dismiss</button>` : '')
-    + '</li>').join('');
-  const toggle = expanded && all.length > SHOWN
-    ? `<button type="button" class="link attention-more" data-attention-more="${expanded === 2 ? 1 : 2}">${expanded === 2 ? 'Show fewer' : `Show all ${total.toLocaleString('en-US')}`}</button>` : '';
+    + '</li>')(shown);
+  // An arrow goes one card along and says which ("Next: Link Gmail?"); at an end it is off, never round to the other end.
+  const arrow = (way, to) => { const there = all[to], word = way === 'prev' ? 'Previous' : 'Next', label = there ? `${word}: ${there.title}` : word;
+    return `<button type="button" class="attention-nav attention-${way}" id="attention-${way}"${there ? ` data-attention-go="${esc(there.key)}" data-attention-index="${to}"` : ' disabled'} aria-label="${esc(label)}" title="${esc(label)}">`
+      + `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="${ARROW[way]}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`; };
+  const dots = attentionDots(count, index).map(d => `<button type="button" class="attention-dot${d.size ? ' ' + d.size : ''}" id="attention-dot-${d.index}" data-attention-go="${esc(all[d.index].key)}" data-attention-index="${d.index}"`
+    + ` aria-label="${esc(`Card ${n(d.index + 1)} of ${n(count)}: ${all[d.index].title}`)}"${d.current ? ' aria-current="true"' : ' tabindex="-1"'}><i></i></button>`).join('');
+  const many = shown && count > 1;
+  const foot = many ? `<div class="attention-foot"><div class="attention-dots">${dots}</div><span class="attention-place muted" role="status" aria-live="polite">${n(index + 1)} of ${n(count)}</span></div>` : '';
   const cut = page?.truncated && expanded ? `<p class="muted attention-cut">The newest ${listed.length} of ${page.total.toLocaleString('en-US')}. Each Pip’s chat has the rest.</p>` : '';
   const said = expanded ? (error ? `<p class="notice error" role="alert">${esc(error)}</p>` : '') + (more ? `<p class="muted attention-cut">${esc(more)}</p>` : '') : '';
-  return `<section class="attention" aria-label="Needs attention"><button type="button" class="attention-toggle" data-attention-more="${expanded ? '0' : '1'}" aria-expanded="${Boolean(expanded)}" aria-controls="attention-list">Needs attention <span class="attention-count">${total.toLocaleString('en-US')}</span><span class="codicon codicon-chevron-${expanded ? 'up' : 'down'}" aria-hidden="true"></span></button>`
-    + `<ul class="attention-list" id="attention-list"${expanded ? '' : ' hidden'}>${rows}</ul>${toggle}${cut}${said}</section>`;
+  return `<section class="attention" aria-label="Needs attention"><button type="button" class="attention-toggle" data-attention-more="${expanded ? '0' : '1'}" aria-expanded="${Boolean(expanded)}" aria-controls="attention-list">Needs attention <span class="attention-count">${n(total)}</span><span class="codicon codicon-chevron-${expanded ? 'up' : 'down'}" aria-hidden="true"></span></button>`
+    + `<div class="attention-carousel${many ? '' : ' single'}" id="attention-list" role="group" aria-label="What needs you, one card at a time"${shown ? '' : ' hidden'}`
+    + (shown ? ` data-at="${index}" data-count="${count}" data-first="${esc(all[0].key)}" data-last="${esc(all[count - 1].key)}"` : '') + '>'
+    + (many ? arrow('prev', index - 1) : '') + `<ul class="attention-list attention-stage">${card || ''}</ul>` + (many ? arrow('next', index + 1) : '') + foot
+    + `</div>${cut}${said}</section>`;
 }
 
 /** The chat card a row points at, for scrolling to it once the chat has drawn it. */

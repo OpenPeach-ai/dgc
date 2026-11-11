@@ -60,15 +60,19 @@ function setup({found=page([]),apiVersion=44,links=[link],embedded=false,profile
 }
 
 // The Sessions home's "34 more need you · Show all" (reported 2026-10-18): from a Pip's chat or a search,
-// the Pips home at Needs attention, open in full, with your Pips under it.
-test('Show all from the Sessions home opens the Pips home at Needs attention, all of it',async()=>{
+// the Pips home at Needs attention, open, with your Pips under it. One card in view there (asked 11 Nov: the list
+// "gets too long"), and every one of them a dot or an arrow away.
+test('Show all from the Sessions home opens the Pips home at Needs attention, open, one card in view',async()=>{
  const many=Array.from({length:9},(_,i)=>item('email','maildraft_'+String(i).repeat(32).slice(0,32).replace(/[^a-f0-9]/g,'0'),PIP,`Email ${i+1}`,{created_at:ago(i+1)}));
  const x=setup({found:page(many),embedded:true});await x.drain();
  x.click(`[data-job="${PIP}"]`);await x.drain();
  assert.equal(x.d.querySelector('.attention'),null,'a Pip\'s chat is open');
  const navigating=x.app.navigate({attention:true,all:true,workspace:PW});await x.drain();await navigating;
  assert.ok(x.d.querySelector('.simple-home'),'the Pips home, your Pips listed');
- assert.equal(x.d.querySelectorAll('.attention [data-attention]').length,9,'Needs attention open in full, not the first six');
+ assert.equal(x.d.querySelector('.attention-toggle').getAttribute('aria-expanded'),'true','Needs attention is open');
+ assert.equal(x.d.querySelectorAll('.attention [data-attention]').length,1,'one card in view');
+ assert.equal(x.d.querySelector('.attention-place').textContent,'1 of 9','and all nine are there to go to');
+ assert.equal(x.d.querySelector('.attention-count').textContent,'9');
  assert.ok(x.d.querySelector('[data-attention-more="0"]'),'the section can be folded');
 });
 
@@ -81,7 +85,9 @@ test('the home lists what every Pip waits on, newest first, above Your Pips; eac
  assert.match(section.querySelector('.attention-toggle').textContent,/Needs attention\s*3/);
  // Open when something is in it (his call, 11 Nov; it started folded).
  assert.equal(section.querySelector('.attention-toggle').getAttribute('aria-expanded'),'true','the list starts open');
- const rows=[...x.d.querySelectorAll('.attention [data-attention]')].map(b=>b.textContent);
+ // One card in view; Next shows the one after it, newest first.
+ const rows=[];for(let i=0;i<3;i++){const shown=x.d.querySelectorAll('.attention [data-attention]');assert.equal(shown.length,1,'one card in view');rows.push(shown[0].textContent);if(i<2)x.click('#attention-next');}
+ assert.equal(x.d.querySelector('#attention-next').disabled,true,'the last of three');
  assert.match(rows[0],/Connect Gmail\?To read your new mail\.Ava · App · 1 min ago/);
  assert.match(rows[1],/Send this email to sam@example\.test\?Lunch movedMax · Email · 30 min ago/);
  assert.match(rows[2],/Send this on shop\.example\?Ava · Its computer · 1 h ago/);
@@ -150,17 +156,67 @@ test('a row opens its Pip at the card: the chat scrolls to the Connect card; a h
  assert.ok(card.classList.contains('attention-flash'),'the card is shown to you');
  assert.equal(x.d.activeElement?.textContent,'Link Gmail','its first button takes focus');
  x.click('#simple-back');await x.drain();
+ x.click('#attention-next');
  x.click(`[data-attention="computer_action:${HELD}"]`);await x.drain();
  assert.ok(x.sent.some(m=>m.type==='pipsOpenComputer'&&m.pip.id===PIP),'its computer opens, where the held submit waits');
 });
 
-test('a long list shows six until you ask for all',async()=>{
+// Asked 11 Nov: "the need attention gets too long ... just one card, with dots below and arrows on left and right, so
+// user can switch them and go next or back, but it always remains 1 card in the view". It showed six, then "Show all 9".
+test('a long list is one card in view: arrows and dots go to the others, and there is no Show all',async()=>{
  const many=Array.from({length:9},(_,i)=>item('email','maildraft_'+String(i).repeat(32).slice(0,32).replace(/[^a-f0-9]/g,'0'),PIP,`Email ${i+1}`,{created_at:ago(i+1)}));
  const x=setup({found:page(many)});await x.drain();
- assert.equal(x.d.querySelectorAll('[data-attention]').length,6,'open, six at first');
- x.click('[data-attention-more="2"]');assert.equal(x.d.querySelectorAll('[data-attention]').length,9);
- x.click('.attention-more');assert.equal(x.d.querySelectorAll('[data-attention]').length,6);
- x.click('[data-attention-more="0"]');assert.equal(x.d.querySelectorAll('[data-attention]').length,0);
+ const shown=()=>[...x.d.querySelectorAll('[data-attention]')].map(b=>b.querySelector('strong').textContent),place=()=>x.d.querySelector('.attention-place').textContent;
+ assert.deepEqual(shown(),['Email 1'],'open, one card');assert.equal(place(),'1 of 9');
+ assert.equal(x.d.querySelector('.attention-more,[data-attention-more="2"]'),null,'no Show all');
+ assert.equal(x.d.querySelector('.attention-count').textContent,'9','the header still counts them all');
+ assert.equal(x.d.querySelector('#attention-prev').disabled,true,'nothing before the first');
+ assert.equal(x.d.querySelector('#attention-next').getAttribute('aria-label'),'Next: Email 2');
+ x.click('#attention-next');assert.deepEqual(shown(),['Email 2']);assert.equal(place(),'2 of 9');
+ assert.equal(x.d.querySelector('#attention-prev').getAttribute('aria-label'),'Previous: Email 1');
+ assert.equal(x.d.querySelectorAll('.attention-dot').length,7,'nine cards: a window of seven dots');
+ assert.equal(x.d.querySelector('.attention-dot[aria-current]').getAttribute('aria-label'),'Card 2 of 9: Email 2');
+ x.click('#attention-dot-5');assert.deepEqual(shown(),['Email 6']);assert.equal(place(),'6 of 9');
+ x.click('#attention-prev');assert.deepEqual(shown(),['Email 5']);
+ const key=k=>x.d.querySelector('#attention-next').dispatchEvent(new x.w.KeyboardEvent('keydown',{key:k,bubbles:true,cancelable:true}));
+ key('End');assert.deepEqual(shown(),['Email 9']);assert.equal(x.d.querySelector('#attention-next').disabled,true,'nothing after the last');
+ key('ArrowRight');assert.deepEqual(shown(),['Email 9'],'never round to the first');
+ x.d.querySelector('.attention-dot[aria-current]').dispatchEvent(new x.w.KeyboardEvent('keydown',{key:'Home',bubbles:true,cancelable:true}));assert.deepEqual(shown(),['Email 1']);
+ x.click('[data-attention-more="0"]');assert.equal(x.d.querySelectorAll('[data-attention]').length,0,'folded: no card');
+ assert.equal(x.d.querySelector('.attention-place,.attention-dot,.attention-nav'),null,'and no arrows or dots');
+});
+
+test('the card you are on stays as cards come and go: a new one moves nothing, an answered one gives its place to the next',async()=>{
+ const card=(n,min)=>item('email','maildraft_'+n.repeat(32),PIP,`Email ${n}`,{created_at:ago(min)});
+ const found=page([card('a',1),card('b',2),card('c',3)]);
+ const x=setup({found});await x.drain();
+ const shown=()=>[...x.d.querySelectorAll('[data-attention]')].map(b=>b.querySelector('strong').textContent),place=()=>x.d.querySelector('.attention-place')?.textContent;
+ const read=async items=>{found.items=items;found.total=items.length;x.w.dispatchEvent(new x.w.MessageEvent('message',{data:{type:'pipSetupChanged'}}));await x.drain();};
+ x.click('#attention-next');assert.deepEqual(shown(),['Email b']);
+ await read([card('d',0),card('a',1),card('b',2),card('c',3)]);
+ assert.deepEqual(shown(),['Email b'],'a new card came in: still on the card you were on');assert.equal(place(),'3 of 4');
+ assert.equal(x.d.querySelector('.attention-count').textContent,'4');
+ await read([card('d',0),card('a',1),card('c',3)]);
+ assert.deepEqual(shown(),['Email c'],'it was answered: the next card, in its place');assert.equal(place(),'3 of 3');
+ await read([card('d',0),card('a',1)]);
+ assert.deepEqual(shown(),['Email a'],'the last was answered: the one before it');assert.equal(place(),'2 of 2');
+ await read([card('d',0)]);
+ assert.deepEqual(shown(),['Email d']);assert.equal(place(),undefined,'one card: no arrows, dots or count');
+ assert.equal(x.d.querySelector('.attention-nav,.attention-dot'),null);
+ await read([]);assert.equal(x.d.querySelector('.attention'),null,'nothing waiting: no section');
+});
+
+test('the dots: one each up to seven, then a window of seven around the current one, smaller at an end with more beyond',()=>{
+ const dots=(n,at)=>attention.attentionDots(n,at).map(d=>`${d.index}${d.current?'*':''}${d.size?':'+d.size:''}`).join(' ');
+ assert.equal(dots(1,0),'0*');assert.equal(dots(3,1),'0 1* 2');assert.equal(dots(7,6),'0 1 2 3 4 5 6*');
+ assert.equal(dots(12,0),'0* 1 2 3 4 5:near 6:far');
+ assert.equal(dots(12,3),'0 1 2 3* 4 5:near 6:far');
+ assert.equal(dots(12,5),'2:far 3:near 4 5* 6 7:near 8:far');
+ assert.equal(dots(12,11),'5:far 6:near 7 8 9 10 11*');
+ assert.equal(dots(100,99).split(' ').length,7,'never more than seven');
+ // Which card shows: the one you were on; gone, the one in its place; past the end, the last.
+ assert.equal(attention.attentionSpot(['a','b','c'],'b',0),1);assert.equal(attention.attentionSpot(['a','c'],'b',1),1);
+ assert.equal(attention.attentionSpot(['a'],'b',1),0);assert.equal(attention.attentionSpot(['a','b'],'',0),0);
 });
 
 test('nothing waiting: no list; an older CLI is never asked',async()=>{
