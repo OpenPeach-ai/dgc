@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A Work session's context meter shows no percentage until the model has answered once: on a model DGC can't reach it showed a number about nothing.
 - Settings has a **Dev Mode** page, last in its menu, for people experimenting on a big machine. Its one switch is off by default. On, DGC's capacity limits are yours to set: how many things run at once, and how many are kept. Safety limits never move: the sandbox, redaction, approvals and what a Pip may do stay as they are.
 - Turning Dev Mode on shows a plain warning once, saying what it does and that each raised limit costs memory, disk or model load. "Got it" puts it away for good in this editor.
 - While Dev Mode is on the page has a **Limits** group, drawn from DGC's own list. Each line is a limit's name, what raising it costs in one line, today's default ("Today: 3") and a number box that takes any whole number, 1 or more, with no ceiling. An empty box keeps today's default. **Reset to defaults** empties every box. Like the rest of Settings, nothing changes until Save all.

@@ -1600,6 +1600,9 @@
   let serverWindow = null;
   let contextState = { used: 0, size: 0, input_tokens: 0, output_tokens: 0,
     cached_input_tokens: 0, reasoning_tokens: 0, requests: 0, compact_threshold: .85 };
+  // Whether DGC's last context event said how many requests the model has answered (every 0.52 one does; a test's or an
+  // older event may not). Only a count DGC gave hides the percentage before the first answer.
+  let contextRequestsSaid = false;
   let lastCompaction = null, compacting = false;
 
   // The chat's own name, without the "New chat" fallback: the agent map's root says "This chat" then.
@@ -1884,18 +1887,23 @@
       renderContextMenu();
       return;
     }
-    $("ctx").textContent = pct + "%";
+    // Before the model has answered once in this chat (DGC says requests: 0) there is no window in use to measure: on a
+    // model DGC can't reach the number was about nothing. No percentage until it answers; the details stay.
+    const unmeasured = contextRequestsSaid && contextState.requests === 0;
+    $("ctx").textContent = unmeasured ? "" : pct + "%";
     // No provider: no model anyone chose, so no window to measure against, and no number.
     $("btn-ctx").hidden = noProvider;
     if (noProvider && !$("ctxmenu").hidden) hideContextMenu();
-    $("btn-ctx").classList.toggle("warn", pct >= Math.round(threshold * 100));
+    $("btn-ctx").classList.toggle("warn", !unmeasured && pct >= Math.round(threshold * 100));
     $("btn-ctx").classList.toggle("busy", compacting);
     const capped = modelMaxLabel();
-    $("btn-ctx").title = `Context ${fmtTokens(used)} / ${fmtTokens(size)} estimated tokens${capped ? ` (${capped})` : ""} · ` +
+    $("btn-ctx").title = (unmeasured ? "Context: shown once the model answers · " : "") +
+      `Context ${fmtTokens(used)} / ${fmtTokens(size)} estimated tokens${capped ? ` (${capped})` : ""} · ` +
       `provider ${fmtTokens(contextState.input_tokens)} in / ${fmtTokens(contextState.output_tokens)} out · ` +
       `${fmtTokens(contextState.cached_input_tokens)} cached · ${fmtTokens(contextState.reasoning_tokens)} reasoning · ` +
       `${fmtTokens(contextState.requests)} requests · click for details`;
-    $("btn-ctx").setAttribute("aria-label", `Context used: ${pct} percent; open context details`);
+    $("btn-ctx").setAttribute("aria-label", unmeasured ? "Context: shown once the model answers; open context details"
+      : `Context used: ${pct} percent; open context details`);
     renderContextMenu();
   }
   // ---- the prompt cache's clock (0.48, Work only; dgc/cache_clock.py) ----------------------------------
@@ -8318,6 +8326,7 @@ function permissionChoices(ev) {
       case "server_window": onServerWindow(ev); break;
       case "context": {
         contextState = { ...contextState, ...ev };
+        contextRequestsSaid = typeof ev.requests === "number";
         renderContext();
         agentMapChanged();                       // the map's root says how much is in context
         if (!$("ctxmenu").hidden) vscode.postMessage({ type: "contextBreakdown" });     // the parts, as the window changes
