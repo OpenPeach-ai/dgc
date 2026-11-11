@@ -11,7 +11,7 @@ import { displayMentions, workspaceFiles } from './mentionsHost';
 type PipArtifactsHub = Pick<Artifacts, 'list' | 'open' | 'offers'>;
 const ARTIFACT_ID = /^ar_[a-f0-9]{16}$/;
 
-const commands = new Set(['list_pip_conversations','create_pip_conversation','rename_pip_conversation','archive_pip_conversation','add_pip_computer','list_pip_keys','save_pip_key','decline_pip_key','remove_pip_key','list_pip_flows','get_pip_flow','create_pip_flow','set_pip_flow','get_pip_artifacts','set_pip_artifacts','list_pip_run_fixes','list_pip_templates','decide_pip_template_change','list_app_events','list_apps','accept_app_update','list_pip_borrows','allow_pip_borrow','decline_pip_borrow','stop_pip_borrow','get_pip_level','set_pip_level','get_pip_working_notes','set_pip_working_notes','list_pip_daily_log','list_pip_logins','save_pip_login','remove_pip_login','grant_pip_login','get_pip_computer_apps','set_pip_computer_apps','get_pip_eyes','set_pip_eyes','list_pip_run_posts','list_pip_unread','mark_pip_read','check_pip_source','get_pip_run_source','mark_pip_news_seen','set_pip_chat_options','set_plugin_permission','list_pip_sites','set_pip_careful','forget_pip_site','list_pip_notes','add_pip_note','forget_pip_note','list_pip_attention','get_pips_limit','set_pips_limit','list_pip_reply_stats','get_pip_chat_context','list_pip_plugins','allow_pip_plugin','decline_pip_plugin','list_pip_plugin_uses','list_pip_routines','add_pip_routine','update_pip_routine','delete_pip_routine','decide_pip_routine','set_pip_profile','list_pip_shared','get_pip_computers','update_pip_computers','reset_pip_computer','list_pip_apps','finish_pip_computer_check','list_pip_app_links','start_pip_app_link','check_pip_app_link','decline_pip_app_link','disconnect_pip_app_link','get_pip_computer_desktop','list_pip_computer_files','read_pip_computer_file','add_pip_computer_file','remove_pip_computer_file','run_pip_computer_command','list_pip_computer_terminal','get_pip_message_image','introduce_pip','always_allow_pip_computer_action','get_pip_computer','list_pip_computer_actions','decide_pip_computer_action','get_pip_computer_frame','list_pip_computer_frames','stop_pip_computer','open_pip_computer','use_pip_computer_view','always_allow_pip_app_action','list_pip_action_grants','revoke_pip_action_grant','set_pip_feedback','list_pip_feedback','export_pip','get_pip_usage','get_pips_backup','set_pips_backup','get_pip_backup','set_pip_backup','undo_pip_change','get_pips_payments','set_pips_payments','set_pip_paying','get_pips_desktop_notifications','set_pips_desktop_notifications','get_pips_keep_running','set_pips_keep_running','list_pip_starters','propose_starter_pip','get_pip_digest','mark_pip_digest_seen','get_pip_notify_settings','set_pip_notify_settings','get_pip_outcomes','get_pip_connector_draft','list_pip_connector_drafts','prepare_pip_connector_draft','dismiss_pip_connector_draft','inspect_pip_connector_actions','propose_pip_connector_action','get_pip_calendar_draft','list_pip_calendar_drafts','prepare_pip_calendar_draft','dismiss_pip_calendar_draft','inspect_pip_calendar_connection','propose_pip_calendar_action','get_pip_message_draft','list_pip_message_drafts','prepare_pip_message_draft','dismiss_pip_message_draft','inspect_pip_send_connection', 'propose_pip_app_action', 'get_pip_app_action', 'list_pip_app_actions', 'accept_pip_app_action', 'reject_pip_app_action', 'propose_pip_personal_handoff', 'list_pip_accounts', 'list_pip_connections', 'inspect_pip_connection', 'notify_pip_setup', 'revise_pip_setup', 'list_pip_setups', 'get_pip_setup', 'accept_pip_setup', 'reject_pip_setup', 'get_pip_statement_anchor', 'record_pip_statement', 'revoke_pip_statement', 'list_pip_statements', 'list_workspace_execution_receipts', 'get_workspace_execution_receipt', 'record_workspace_execution_context', 'archive_pip', 'restore_pip', 'delete_archived_pip', 'get_pip_exception_source', 'record_pip_exception', 'revoke_pip_exception', 'list_pip_memories', 'list_pip_notifications', 'mark_pip_notification_read', 'list_workspace_sessions', 'inspect_workspace_session_outcome', 'propose_workspace_session_outcome', 'get_workspace_session_outcome', 'list_workspace_session_outcomes', 'accept_workspace_session_outcome', 'reject_workspace_session_outcome', 'list_pip_types', 'list_pip_models', 'list_pip_messages', 'send_pip_message', 'list_workspaces', 'list_pips', 'create_pip', 'get_pip', 'get_pip_proposal', 'list_pip_adaptations', 'run_pip', 'list_pip_runs', 'get_pip_run', 'list_pip_run_activity', 'pause_pip', 'resume_pip', 'cancel_pip_run', 'propose_pip_update', 'accept_pip_update', 'reject_pip_update', 'list_pip_versions', 'list_pip_approvals', 'list_pip_checkpoints', 'review_pip_finding', 'review_pip_execution', 'get_pip_execution', 'propose_pip_handoff', 'propose_pip_artifact_handoff', 'get_pip_handoff', 'list_pip_handoffs', 'accept_pip_handoff', 'reject_pip_handoff', 'get_pip_runner', 'stop_pips', 'get_workspace_context', 'record_workspace_context', 'archive_workspace_context', 'accept_pip_finding', 'accept_pip_execution_context']);
+const commands = new Set(['list_pip_conversations','create_pip_conversation','rename_pip_conversation','archive_pip_conversation','add_pip_computer','list_pip_keys','save_pip_key','decline_pip_key','remove_pip_key','list_pip_flows','get_pip_flow','create_pip_flow','set_pip_flow','get_pip_artifacts','set_pip_artifacts','list_pip_run_fixes','list_pip_templates','decide_pip_template_change','list_app_events','list_apps','accept_app_update','list_pip_borrows','allow_pip_borrow','decline_pip_borrow','stop_pip_borrow','get_pip_level','set_pip_level','get_pip_working_notes','set_pip_working_notes','list_pip_daily_log','list_pip_logins','save_pip_login','remove_pip_login','grant_pip_login','get_pip_computer_apps','set_pip_computer_apps','get_pip_eyes','set_pip_eyes','list_pip_run_posts','list_pip_unread','mark_pip_read','check_pip_source','get_pip_run_source','mark_pip_news_seen','set_pip_chat_options','set_plugin_permission','list_pip_sites','set_pip_careful','forget_pip_site','list_pip_notes','add_pip_note','forget_pip_note','list_pip_attention','get_pips_limit','set_pips_limit','list_pip_reply_stats','get_pip_chat_context','list_pip_plugins','allow_pip_plugin','decline_pip_plugin','list_pip_plugin_uses','list_pip_routines','add_pip_routine','update_pip_routine','delete_pip_routine','decide_pip_routine','set_pip_profile','list_pip_shared','get_pip_computers','update_pip_computers','reset_pip_computer','list_pip_apps','finish_pip_computer_check','list_pip_app_links','start_pip_app_link','check_pip_app_link','decline_pip_app_link','disconnect_pip_app_link','get_pip_computer_desktop','list_pip_computer_files','read_pip_computer_file','add_pip_computer_file','remove_pip_computer_file','run_pip_computer_command','list_pip_computer_terminal','get_pip_message_image','introduce_pip','always_allow_pip_computer_action','get_pip_computer','list_pip_computer_actions','decide_pip_computer_action','get_pip_computer_frame','list_pip_computer_frames','stop_pip_computer','open_pip_computer','use_pip_computer_view','always_allow_pip_app_action','list_pip_action_grants','revoke_pip_action_grant','set_pip_feedback','list_pip_feedback','export_pip','get_pip_usage','get_pips_backup','set_pips_backup','get_pip_backup','set_pip_backup','undo_pip_change','get_pips_payments','set_pips_payments','set_pip_paying','get_pips_desktop_notifications','set_pips_desktop_notifications','get_pips_keep_running','set_pips_keep_running','list_pip_starters','propose_starter_pip','get_pip_digest','mark_pip_digest_seen','get_pip_notify_settings','set_pip_notify_settings','get_pip_outcomes','get_pip_connector_draft','list_pip_connector_drafts','prepare_pip_connector_draft','dismiss_pip_connector_draft','inspect_pip_connector_actions','propose_pip_connector_action','get_pip_calendar_draft','list_pip_calendar_drafts','prepare_pip_calendar_draft','dismiss_pip_calendar_draft','inspect_pip_calendar_connection','propose_pip_calendar_action','get_pip_message_draft','list_pip_message_drafts','prepare_pip_message_draft','dismiss_pip_message_draft','inspect_pip_send_connection', 'propose_pip_app_action', 'get_pip_app_action', 'list_pip_app_actions', 'accept_pip_app_action', 'reject_pip_app_action', 'propose_pip_personal_handoff', 'list_pip_accounts', 'list_pip_connections', 'inspect_pip_connection', 'notify_pip_setup', 'revise_pip_setup', 'list_pip_setups', 'get_pip_setup', 'accept_pip_setup', 'reject_pip_setup', 'get_pip_statement_anchor', 'record_pip_statement', 'revoke_pip_statement', 'list_pip_statements', 'list_workspace_execution_receipts', 'get_workspace_execution_receipt', 'record_workspace_execution_context', 'archive_pip', 'restore_pip', 'delete_archived_pip', 'get_pip_exception_source', 'record_pip_exception', 'revoke_pip_exception', 'list_pip_memories', 'list_pip_notifications', 'mark_pip_notification_read', 'list_workspace_sessions', 'inspect_workspace_session_outcome', 'propose_workspace_session_outcome', 'get_workspace_session_outcome', 'list_workspace_session_outcomes', 'accept_workspace_session_outcome', 'reject_workspace_session_outcome', 'list_pip_types', 'list_pip_models', 'list_pip_messages', 'send_pip_message', 'list_workspaces', 'list_pips', 'create_pip', 'get_pip', 'get_pip_proposal', 'list_pip_adaptations', 'run_pip', 'list_pip_runs', 'get_pip_run', 'list_pip_run_activity', 'pause_pip', 'resume_pip', 'cancel_pip_run', 'propose_pip_update', 'accept_pip_update', 'reject_pip_update', 'list_pip_versions', 'list_pip_approvals', 'list_pip_checkpoints', 'review_pip_finding', 'review_pip_execution', 'get_pip_execution', 'propose_pip_handoff', 'propose_pip_artifact_handoff', 'get_pip_handoff', 'list_pip_handoffs', 'accept_pip_handoff', 'reject_pip_handoff', 'get_pip_runner', 'stop_pips', 'get_workspace_context', 'record_workspace_context', 'archive_workspace_context', 'accept_pip_finding', 'accept_pip_execution_context', 'rename_pip_computer']);
 /** Images sent with a Pip message, as data URIs: 2 MiB of image, base64, plus headers. */
 const MAX_IMAGE_URI_CHARS = 2_800_000;
 /** Pips API 52: photos and files go the Work chat's way. The host writes them into the backend's spool
@@ -51,6 +51,34 @@ export function conversationsRefusal(request: any, apiVersion: number): string {
   }
   if (request?.type === 'add_pip_computer' && apiVersion < 79) return 'Update DGC to give a Pip another computer.';
   return '';
+}
+/** pips-17d: each of a Pip's computers has a name (Pips API 86). rename_pip_computer {pip_id, number, name} names one ("" gives
+ *  back its first name), and open_pip_computer and use_pip_computer_view may say which computer by `number`. Why a request
+ *  is refused, or '' when it may go: an older DGC is never sent a number or a name; a number is a whole one from 1; a name
+ *  is what DGC itself takes (dgc/pip_computer.py), already tidied by the page. */
+const COMPUTER_NAME = /^[\p{L}\p{N}_][\p{L}\p{N}_ .'&()-]{0,29}$/u;
+export const computerNumber = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 1 && n <= 1000;
+export function computerNamesRefusal(request: any, apiVersion: number): string {
+  const numbered = Object.prototype.hasOwnProperty.call(request || {}, 'number');
+  if (request?.type === 'rename_pip_computer') {
+    if (apiVersion < 86) return 'Update DGC to name a Pip’s computers.';
+    if (!computerNumber(request.number)) return 'Choose one of this Pip’s computers.';
+    if (typeof request.name !== 'string' || request.name && !COMPUTER_NAME.test(request.name)) return 'A computer’s name is up to 30 letters, digits, spaces and . \' & ( ) -, starting with a letter or digit.';
+  } else if (numbered && ['open_pip_computer', 'use_pip_computer_view'].includes(request?.type)) {
+    if (apiVersion < 86) return 'Update DGC to choose which of a Pip’s computers to open.';
+    if (!computerNumber(request.number)) return 'Choose one of this Pip’s computers.';
+  }
+  return '';
+}
+/** The names in a DGC reply ([{number, name, ...}]), kept for a tab's title: null when it isn't a list of them. */
+function computerNameRows(value: unknown): { number: number; name: string }[] | null {
+  if (!Array.isArray(value) || !value.length || value.length > 1000) return null;
+  const rows: { number: number; name: string }[] = [];
+  for (const row of value) {
+    if (!row || typeof row !== 'object' || !computerNumber(row.number) || typeof row.name !== 'string' || !COMPUTER_NAME.test(row.name) && !/^Computer \d{1,4}$/.test(row.name)) return null;
+    rows.push({ number: row.number, name: row.name });
+  }
+  return rows;
 }
 /** pips-10: allow_pip_plugin may carry `keys` {variable name: text} from Pips API 81 on (a plugin's key, pasted on its
  *  card). Why a request is refused, or '' when it may go: an older DGC is never sent a key, and a key is text. It goes
@@ -124,9 +152,16 @@ export class PipsEditor implements vscode.Disposable {
   private panel?: vscode.WebviewPanel;
   private panelNavigation?: { pip: string; section?: 'chat' | 'runs'; run?: string } | { overview: true };
   private embeddedPost?: (message: any) => void;
-  private computers = new Map<string, { panel: vscode.WebviewPanel; pip: ComputerPip }>();
+  /** The open computer tabs, by Pip and (from Pips API 86, when the page says which) the computer's number: "pip_x:2". */
+  private computers = new Map<string, { panel: vscode.WebviewPanel; pip: ComputerPip; number?: number }>();
+  /** Each Pip's computers by name, as DGC last said them (get_pip_computer, rename_pip_computer, add_pip_computer). */
+  private computerNames = new Map<string, { number: number; name: string }[]>();
+  /** One screen stream per Pip: the tab (its key in `computers`) that opened it last. */
+  private desktopOwner = new Map<string, string>();
   /** The CLI streams a Pip computer's full screen (ready.capabilities.pips_desktop). */
   private desktopStream = false;
+  /** The CLI's screen stream takes which computer (ready.capabilities.pips_desktop_numbers). */
+  private desktopNumbers = false;
   /** /learn in a Pip's chat (ready.capabilities.learn): learn_skill drafts, save_skill writes a personal skill. */
   private learn = false;
   private pending = new Map<string, { client: string; command: string; at: number; surface?: string; document?: { run: string; save: boolean; generation: number }; exportFile?: { generation: number }; keptImage?: { pip: string; message: string; index: number; generation: number }; spooled?: string[]; newsDismiss?: { pipIds: string[]; until: string } }>();
@@ -207,24 +242,51 @@ export class PipsEditor implements vscode.Disposable {
   modelsChanged(): void { this.post({ type: 'pipsModelsChanged' }); }
   /** A Pip was marked read somewhere else: an open Pips page reads its unread counts again. */
   unreadChanged(): void { this.post({ type: 'pipsUnreadChanged' }); }
-  /** Open a Pip's computer as an editor tab ("Gmail · Computer"), or bring its tab forward. */
-  openComputer(pip: ComputerPip): void {
-    const open = this.computers.get(pip.id);
+  /** Open a Pip's computer as an editor tab, or bring its tab forward: "Gmail · Computer", and one tab for each computer
+   *  by its name ("Gmail · Juniper") when the page says which (Pips API 86). */
+  openComputer(pip: ComputerPip, number?: number): void {
+    const key = number ? `${pip.id}:${number}` : pip.id;
+    const open = this.computers.get(key);
     if (open) { open.panel.reveal(vscode.ViewColumn.Active); return; }
-    const title = `${pip.name} · Computer`;
+    const title = this.computerTitle(pip, number);
     const panel = vscode.window.createWebviewPanel('dgc.pipComputer', title, vscode.ViewColumn.Active, {
       enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [this.extensionUri],
     });
-    const surface = 'computer:' + pip.id;
-    this.computers.set(pip.id, { panel, pip });
+    const surface = 'computer:' + key;
+    this.computers.set(key, { panel, pip, ...(number ? { number } : {}) });
     panel.onDidDispose(() => {
-      this.computers.delete(pip.id);
+      this.computers.delete(key);
       for (const [id, item] of this.pending) if (item.surface === surface) this.pending.delete(id);
+      // One stream per Pip: only the tab that has it closes it.
+      const owner = this.desktopOwner.get(pip.id);
+      if (owner !== undefined && owner !== key) return;
+      this.desktopOwner.delete(pip.id);
       if (this.desktopStream && this.state.connected) this.send({ type: 'pip_desktop', pip_id: pip.id, op: 'close' }, this.backendIdentity);
     });
     panel.webview.onDidReceiveMessage(message => this.receive(message, surface));
     const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', name)).toString();
     panel.webview.html = computerDocument(asset('pipComputer.js'), asset('pipComputer.css'), panel.webview.cspSource, title);
+  }
+  /** A computer's own name, when its Pip has more than one and the tab is one of them. */
+  private computerName(pipId: string, number?: number): string {
+    const names = this.computerNames.get(pipId);
+    if (!number) return '';
+    return names && names.length > 1 ? names.find(n => n.number === number)?.name || `Computer ${number}` : names ? '' : `Computer ${number}`;
+  }
+  private computerTitle(pip: ComputerPip, number?: number): string { return `${pip.name} · ${this.computerName(pip.id, number) || 'Computer'}`; }
+  /** DGC said a Pip's computers' names (a look, a rename, one more): its open tabs take their titles from them. */
+  private computersNamed(pipId: unknown, value: unknown): void {
+    const names = computerNameRows(value);
+    if (typeof pipId !== 'string' || !names) return;
+    const before = JSON.stringify(this.computerNames.get(pipId) || null);
+    this.computerNames.set(pipId, names);
+    if (JSON.stringify(names) === before) return;
+    for (const [key, tab] of this.computers) {
+      if (tab.pip.id !== pipId) continue;
+      const title = this.computerTitle(tab.pip, tab.number);
+      if (tab.panel.title !== title) tab.panel.title = title;
+      this.post({ type: 'pipComputerNames', names }, 'computer:' + key);
+    }
   }
   /** Save a file from a Pip's computer where the user chooses. The bytes came from its own read. */
   private async saveComputerFile(surface: string, message: any): Promise<void> {
@@ -278,6 +340,8 @@ export class PipsEditor implements vscode.Disposable {
     this.apiVersion = Number.isSafeInteger(capabilities?.pips_api_version) ? capabilities.pips_api_version : 0;
     this.displayMentions = capabilities?.pip_display_mentions === 1;
     this.desktopStream = capabilities?.pips_desktop === 1;
+    this.desktopNumbers = this.desktopStream && capabilities?.pips_desktop_numbers === 1 && this.apiVersion >= 86;
+    this.desktopOwner.clear();
     this.learn = Number(capabilities?.learn?.version) >= 1;
     this.spoolDir = capabilities?.image_spool === true && typeof capabilities?.image_spool_dir === 'string' ? capabilities.image_spool_dir : '';
     this.generation++;
@@ -341,9 +405,11 @@ export class PipsEditor implements vscode.Disposable {
       return true;
     }
     if (event.type === 'pip_desktop_data' || event.type === 'pip_desktop_closed') {
-      // The screen goes only to the tab showing that Pip's computer.
-      const tab = typeof event.pip_id === 'string' ? this.computers.get(event.pip_id) : undefined;
-      if (tab) this.post(event.type === 'pip_desktop_data' ? { type: 'pipDesktopData', data: event.data } : { type: 'pipDesktopClosed', reason: String(event.reason || '') }, 'computer:' + event.pip_id);
+      // The screen goes only to the tab showing that Pip's computer: the one that opened its stream last.
+      const key = typeof event.pip_id === 'string' ? this.desktopOwner.get(event.pip_id) ?? event.pip_id : undefined;
+      const tab = key !== undefined ? this.computers.get(key) : undefined;
+      if (tab && tab.pip.id === event.pip_id) this.post(event.type === 'pip_desktop_data' ? { type: 'pipDesktopData', data: event.data } : { type: 'pipDesktopClosed', reason: String(event.reason || '') }, 'computer:' + key);
+      if (event.type === 'pip_desktop_closed' && typeof event.pip_id === 'string') this.desktopOwner.delete(event.pip_id);
       return true;
     }
     if (!['pips_result', 'pips_status'].includes(event.type) && !(event.type === 'command_rejected' && ['pips_control', 'pips_enable', 'pips_runtime'].includes(event.command))) return false;
@@ -380,6 +446,11 @@ export class PipsEditor implements vscode.Disposable {
     if (event.type === 'pips_status') this.state.enabled = event.enabled === true;
     if (owner.newsDismiss && event.type === 'pips_result' && event.ok === true) {
       this.newsDismissed?.(owner.newsDismiss.pipIds, owner.newsDismiss.until);
+    }
+    if (event.type === 'pips_result' && event.ok === true && this.apiVersion >= 86) {
+      // A Pip's computers by name: its open tabs are titled from what DGC says, never from what a page says.
+      if (owner.command === 'get_pip_computer') this.computersNamed(event.result?.computer?.pip_id, event.result?.computer?.names);
+      else if (owner.command === 'rename_pip_computer' || owner.command === 'add_pip_computer') this.computersNamed(event.result?.pip_id, event.result?.names);
     }
     if (owner.command === 'mark_pip_read' && event.type === 'pips_result' && event.ok === true) this.unreadRead?.();
     if (owner.command === 'set_pip_profile' && event.type === 'pips_result' && event.ok === true) this.profileChangeNotice?.();
@@ -633,7 +704,12 @@ export class PipsEditor implements vscode.Disposable {
     if (message?.type === 'pipsOpenComputer' && !computer) {
       const pip = message.pip;
       if (this.apiVersion >= 43 && pip && typeof pip.id === 'string' && /^pip_[A-Za-z0-9]{1,64}$/.test(pip.id) && typeof pip.name === 'string'
-        && pip.name.trim() && pip.name.length <= 120 && PIP_TYPES.includes(pip.pip_type)) this.openComputer({ id: pip.id, name: pip.name.trim(), pip_type: pip.pip_type });
+        && pip.name.trim() && pip.name.length <= 120 && PIP_TYPES.includes(pip.pip_type)) {
+        // Which of its computers (Pips API 86): a whole number from 1, or the message opens nothing. An older DGC has one tab a Pip.
+        const numbered = Object.prototype.hasOwnProperty.call(message, 'number') && this.apiVersion >= 86;
+        if (numbered && !computerNumber(message.number)) return;
+        this.openComputer({ id: pip.id, name: pip.name.trim(), pip_type: pip.pip_type }, numbered ? message.number : undefined);
+      }
       return;
     }
     if (MIC_MESSAGES.includes(message?.type) && !computer) { if (this.dictation) void this.dictation().handle(this.mic, message); return; }
@@ -665,7 +741,19 @@ export class PipsEditor implements vscode.Disposable {
       const op = message.op, data = message.data;
       if (!this.desktopStream || !this.state.connected || !['open', 'send', 'close'].includes(op)) return;
       if (op === 'send' && (typeof data !== 'string' || !data || data.length > 1_400_000 || !/^[A-Za-z0-9+/=]+$/.test(data))) return;
-      this.send({ type: 'pip_desktop', pip_id: computer.pip.id, op, ...(op === 'send' ? { data } : {}) }, this.backendIdentity);
+      // One stream per Pip. Opening it here moves it here, and the tab that had it is told where it went; a tab without
+      // it can neither type into it nor close it. A tab opens its own computer's screen and no other.
+      const key = surface.slice(9), pipId = computer.pip.id, owner = this.desktopOwner.get(pipId);
+      if (op === 'open') {
+        if (Object.prototype.hasOwnProperty.call(message, 'number') && message.number !== computer.number) return;
+        if (owner !== undefined && owner !== key && this.computers.has(owner)) this.post({ type: 'pipDesktopElsewhere', number: computer.number ?? 1, name: this.computerName(pipId, computer.number ?? 1) || 'its computer' }, 'computer:' + owner);
+        this.desktopOwner.set(pipId, key);
+        this.send({ type: 'pip_desktop', pip_id: pipId, op, ...(this.desktopNumbers && computer.number ? { number: computer.number } : {}) }, this.backendIdentity);
+        return;
+      }
+      if (owner !== undefined && owner !== key) return;
+      if (op === 'close') this.desktopOwner.delete(pipId);
+      this.send({ type: 'pip_desktop', pip_id: pipId, op, ...(op === 'send' ? { data } : {}) }, this.backendIdentity);
       return;
     }
     if (!computer && this.folds?.remember(message)) return;
@@ -673,7 +761,8 @@ export class PipsEditor implements vscode.Disposable {
     if (message?.type === 'pipsReady') {
       if (!computer && this.folds) this.post(this.folds.initial());
       if (!computer && this.dock) this.post(this.dock.state());
-      if (computer) { this.post({ type: 'pipComputerInit', pip: computer.pip, desktop: this.desktopStream }, surface); this.post({ type: 'pipsConnection', generation: this.generation, apiVersion: this.apiVersion, backgroundSetup:this.backgroundSetup, ...this.state }, surface); }
+      if (computer) { this.post({ type: 'pipComputerInit', pip: computer.pip, desktop: this.desktopStream,
+        ...(computer.number ? { number: computer.number, name: this.computerName(computer.pip.id, computer.number), numbers: this.desktopNumbers } : {}) }, surface); this.post({ type: 'pipsConnection', generation: this.generation, apiVersion: this.apiVersion, backgroundSetup:this.backgroundSetup, ...this.state }, surface); }
       else {
         this.publish();
         if (this.panelNavigation) this.post({ type: 'pipsNavigate', navigation: this.panelNavigation });
@@ -685,6 +774,8 @@ export class PipsEditor implements vscode.Disposable {
     const fail = (text: string) => this.post({ type: 'pipsReply', id: message.id, ok: false, error: { message: text } }, surface);
     // A computer tab is pinned to its own Pip and to the computer's commands.
     if (computer && (!COMPUTER_COMMANDS.has(message.request?.type) || (Object.prototype.hasOwnProperty.call(message.request, 'pip_id') && message.request.pip_id !== computer.pip.id))) { fail('This tab only uses this Pip\'s computer.'); return; }
+    // And to its own one of them: a tab says no other computer's number.
+    if (computer && Object.prototype.hasOwnProperty.call(message.request, 'number') && message.request.number !== computer.number) { fail('This tab only uses this computer.'); return; }
     if (this.requireGeneration && message.generation !== this.generation) { fail('This view is from an earlier connection. Refresh and try again.'); return; }
     if (!this.state.connected || !this.state.supported) { fail('Pips aren’t available. Update DGC, then reconnect.'); return; }
     for (const [id, item] of this.pending) if (Date.now() - item.at > 60000) this.pending.delete(id);
@@ -829,6 +920,7 @@ export class PipsEditor implements vscode.Disposable {
     if(request.type === 'list_pip_run_posts' && this.apiVersion < 51) { fail('Update DGC to see a Pip\'s runs in its chat.'); return; }
     if(['list_pip_flows','get_pip_flow','create_pip_flow','set_pip_flow'].includes(request.type) && this.apiVersion < 72) { fail('Update DGC for Pip workflows.'); return; }
     { const refused = conversationsRefusal(request, this.apiVersion); if (refused) { fail(refused); return; } }
+    { const refused = computerNamesRefusal(request, this.apiVersion); if (refused) { fail(refused); return; } }
     if(['list_pip_unread','mark_pip_read'].includes(request.type) && this.apiVersion < 69) { fail('Update DGC to track unread Pip messages.'); return; }
     if(request.type === 'list_pip_run_fixes' && this.apiVersion < 65) { fail('Update DGC to see what it fixed in a Pip\'s chat.'); return; }
     // API 53: a Pip's eyes and cursor (how a text-only Pip sees; where it clicked, in the timeline and the live view).

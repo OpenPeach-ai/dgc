@@ -27,6 +27,17 @@ const S={connected:false,apiVersion:0,generation:0,pip:null,app:'',open:[],compu
  pointer:null,pointerSeq:-1,pointerAt:0,pointerPulse:false,screenWatching:false,
  // Its image editor, document editor and PDF viewer (Pips API 54): the one offer to download the ones this computer lacks.
  apps:null,appsBusy:false};
+// Which of the Pip's computers this tab is (pips-17d, Pips API 86): its number, said with every open and view, and its
+// name for the header. S.number is 0 for a Pip's one tab, as before; `numbers`: the CLI's screen stream takes a number.
+Object.assign(S,{number:0,name:'',numbers:false});
+const which=()=>S.number&&S.apiVersion>=86?{number:S.number}:{};
+function computerName(){
+ if(!S.number||S.apiVersion<86)return 'Computer';
+ const names=S.computer?.names;
+ if(Array.isArray(names))return names.length>1?names.find(n=>n.number===S.number)?.name||`Computer ${S.number}`:'Computer';
+ return S.name||'Computer';
+}
+const tabTitle=()=>`${S.pip?.name||'Pip'} · ${computerName()}`;
 const broker=requestBroker(message=>vscode.postMessage({...message,generation:S.generation}));
 const $=id=>document.getElementById(id);
 const send=(type,fields={})=>broker.request({type,...fields});
@@ -60,7 +71,7 @@ function placeCursor(){
 }
 async function pollPointer(){
  if(pointerBusy||!S.pip||!screenMode()||S.apiVersion<53)return;pointerBusy=true;
- try{const v=(await send('use_pip_computer_view',{pip_id:S.pip.id,op:'pointer'})).view;if(record(v)&&v.ok===true){notePointer(v.pointer);S.screenWatching=v.watching===true;}}
+ try{const v=(await send('use_pip_computer_view',{pip_id:S.pip.id,op:'pointer',...which()})).view;if(record(v)&&v.ok===true){notePointer(v.pointer);S.screenWatching=v.watching===true;}}
  catch{}
  finally{pointerBusy=false;placeCursor();}
 }
@@ -74,7 +85,7 @@ function using(){return screenMode()?S.desktop?.using===true:S.view?.watching===
 function headerMarkup(){
  const waiting=(S.computer?.actions||[]).filter(a=>a.status==='pending').length;
  const status=!S.connected?'Connecting…':!S.computer?'Loading…':!S.computer.granted?'No computer yet':!S.computer.available?'Setup needed':using()?`${S.pip.name} is using its computer`:waiting?`${waiting} waiting for you`:'Idle';
- return `<header class="pc-header"><span class="pc-face" aria-hidden="true">${plushFace(using()?'working':waiting?'waiting_approval':'idle')}</span><div class="pc-title"><h1>${esc(S.pip?.name||'Pip')} · Computer</h1><p class="pc-status" role="status">${esc(status)}</p></div><button type="button" id="pc-stop" class="pc-quiet"${S.busy||!S.computer?.granted?' disabled':''}>Stop computer</button></header>`;
+ return `<header class="pc-header"><span class="pc-face" aria-hidden="true">${plushFace(using()?'working':waiting?'waiting_approval':'idle')}</span><div class="pc-title"><h1>${esc(tabTitle())}</h1><p class="pc-status" role="status">${esc(status)}</p></div><button type="button" id="pc-stop" class="pc-quiet"${S.busy||!S.computer?.granted?' disabled':''}>Stop computer</button></header>`;
 }
 // A desktop like Grok's bots' computers: a wallpaper, a dock with three apps, apps in windows.
 const APPS={browser:'Browser',files:'Files',terminal:'Terminal'};
@@ -131,8 +142,9 @@ class ScreenChannel{
  end(reason){if(this.readyState==='closed')return;this.readyState='closed';this.onclose?.({code:1000,reason,wasClean:false});}
 }
 let channel=null,viewer=null;
-function startScreen(){
- if(!screenMode()||S.screen.state==='opening'||S.screen.state==='live')return;
+function startScreen(explicit=false){
+ // One stream per Pip: while another tab of this Pip shows its screen, this one takes it back only when asked (Show here).
+ if(!screenMode()||S.screen.state==='opening'||S.screen.state==='live'||S.screen.state==='elsewhere'&&!explicit)return;
  S.screen={state:'opening',reason:''};render();
  channel=new ScreenChannel();
  const Viewer=globalThis.__dgcTestRFB||RFB;
@@ -140,13 +152,14 @@ function startScreen(){
   viewer=new Viewer($('pc-vnc'),channel,{shared:true});
   viewer.scaleViewport=true;viewer.resizeSession=false;viewer.focusOnClick=true;viewer.background='transparent';
   viewer.addEventListener?.('connect',()=>{S.screen={state:'live',reason:''};render();});
-  viewer.addEventListener?.('disconnect',()=>{if(S.screen.state!=='closed'){S.screen={state:'closed',reason:S.screen.reason||'The screen closed.'};render();}});
+  viewer.addEventListener?.('disconnect',()=>{if(S.screen.state!=='closed'&&S.screen.state!=='elsewhere'){S.screen={state:'closed',reason:S.screen.reason||'The screen closed.'};render();}});
  }catch(error){S.screen={state:'closed',reason:errorText(error)};render();return;}
- vscode.postMessage({type:'pipDesktop',op:'open'});
+ vscode.postMessage({type:'pipDesktop',op:'open',...(S.numbers?which():{})});
 }
 function overlayMarkup(){
  const name=esc(S.pip?.name||'The Pip');
  if(S.screen.state==='opening')return `<p class="pc-overlay-note">Opening ${name}'s screen…</p>`;
+ if(S.screen.state==='elsewhere')return `<div class="pc-overlay-card"><p>${esc(`Showing ${S.screen.name||'its computer'} in another tab`)}</p><button type="button" id="pc-show-here">Show here</button></div>`;
  if(S.screen.state==='closed')return `<div class="pc-overlay-card"><p>${esc(S.screen.reason||'The screen closed.')}</p><button type="button" id="pc-reconnect">Open the screen again</button></div>`;
  return using()?`<p class="pc-overlay-badge">${name} is using its computer. You can watch; it is yours again when it stops.</p>`:'';
 }
@@ -199,6 +212,8 @@ function installMarkup(){
  return `<p class="pc-notice pc-install" role="status">${esc(d.reason)}${d.install?` <code>${esc(d.install)}</code>`:''}</p>`;
 }
 function render(){
+ // The page's own title follows its computer's name, as the tab's does (src/pipsView.ts).
+ if(S.pip&&document.title!==tabTitle())document.title=tabTitle();
  if(screenMode()){renderScreen();return;}
  const app=document.getElementById('app');
  const pane=!S.computer?'':!S.computer.granted?`<section class="pc-window pc-note"><p>${esc(S.pip?.name||'This Pip')} has no computer yet. Give it one with the computer button at the top of its chat.</p></section>`:!S.computer.available?`<section class="pc-window pc-note"><p>This Pip’s computer cannot start on this machine yet. Follow the setup shown above, then reopen this tab.</p></section>`:!S.app?'':windowMarkup(S.app,S.app==='files'?filesMarkup():S.app==='terminal'?terminalMarkup():browserMarkup());
@@ -240,8 +255,8 @@ async function frame(op='frame',fields={},opening=false){
  if(!S.pip||!S.computer?.granted||frameBusy&&op==='frame')return;frameBusy=true;
  const was=using();
  try{
-  if(opening)await send('open_pip_computer',{pip_id:S.pip.id});
-  const reply=pipComputerView((await send('use_pip_computer_view',{pip_id:S.pip.id,op,...fields})).view);
+  if(opening)await send('open_pip_computer',{pip_id:S.pip.id,...which()});
+  const reply=pipComputerView((await send('use_pip_computer_view',{pip_id:S.pip.id,op,...fields,...which()})).view);
   if(reply.ok){S.view=reply;S.viewError='';notePointer(reply.pointer);}else{S.view=null;S.viewError=reply.error;}
  }catch(error){S.view=null;S.viewError=errorText(error);}
  finally{
@@ -322,6 +337,7 @@ document.addEventListener('click',event=>{
  else if(t.dataset.minimize){S.app='';render();schedule();vscode.setState({app:''});}
  else if(t.dataset.close){S.open=S.open.filter(a=>a!==t.dataset.close);S.app='';render();schedule();vscode.setState({app:''});}
  else if(t.id==='pc-reconnect'){S.screen={state:'off',reason:''};startScreen();}
+ else if(t.id==='pc-show-here'){S.screen={state:'off',reason:''};startScreen(true);}
  else if(t.id==='pc-reopen-browser')void frame('reopen',{},true);
  else if(t.id==='pc-stop')void send('stop_pip_computer',{pip_id:S.pip.id}).then(()=>{S.notice='Stopped. Its sign-ins are kept.';S.view=null;return loadComputer();},error=>{S.error=errorText(error);render();});
  else if(t.id==='pc-back')void frame('back');
@@ -373,7 +389,13 @@ window.addEventListener('message',event=>{
  if(m.type==='pipsReply')broker.receive(m);
  else if(m.type==='pipsConnection'){const was=S.connected;S.connected=m.connected&&m.supported&&m.enabled;S.apiVersion=m.apiVersion;S.generation=m.generation;if(!S.connected)broker.reset();render();
   if(S.connected&&!was)void loadComputer().then(loadDesktop).then(()=>{if(screenMode()){schedule();return;}if(S.app)show(S.app);else{void frame();schedule();}});}
- else if(m.type==='pipComputerInit'&&record(m.pip)){S.pip=m.pip;S.screenCapable=m.desktop===true;render();}
+ else if(m.type==='pipComputerInit'&&record(m.pip)){S.pip=m.pip;S.screenCapable=m.desktop===true;
+  S.number=Number.isSafeInteger(m.number)&&m.number>=1&&m.number<=1000?m.number:0;S.name=typeof m.name==='string'?m.name.slice(0,60):'';S.numbers=S.number>0&&m.numbers===true;render();}
+ // A rename, from wherever it was made: the header takes the new name at once (the tab's title is the host's).
+ else if(m.type==='pipComputerNames'&&Array.isArray(m.names)){const mine=m.names.find(n=>record(n)&&n.number===S.number);
+  if(mine&&typeof mine.name==='string'){S.name=mine.name.slice(0,60);if(Array.isArray(S.computer?.names))S.computer={...S.computer,names:S.computer.names.map(n=>{const now=m.names.find(v=>record(v)&&v.number===n.number);return now&&typeof now.name==='string'?{...n,name:now.name.slice(0,60)}:n;})};render();}}
+ // Its screen is showing in another tab of this Pip (one stream per Pip): say so, and offer it here.
+ else if(m.type==='pipDesktopElsewhere'){S.screen={state:'elsewhere',reason:'',name:typeof m.name==='string'?m.name.slice(0,60):''};const old=channel;channel=null;old?.end('');render();}
  else if(m.type==='pipDesktopData'&&typeof m.data==='string')channel?.deliver(m.data);
  else if(m.type==='pipDesktopClosed'){S.screen={state:'closed',reason:typeof m.reason==='string'&&m.reason?m.reason:'The screen closed.'};channel?.end(S.screen.reason);render();}
  else if(m.type==='pipComputerSaved'){S.notice=m.ok?`Saved ${m.name}.`:m.error||'Not saved.';render();}

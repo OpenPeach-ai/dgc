@@ -74,6 +74,7 @@ import {borrowsPage,borrowResult,shownBorrows,borrowActive,borrowMarkup} from '.
 import {routinesPage,routineDraft,routineFromDraft,shownRoutineCards,routineCardMarkup,routinesMarkup,routineFormMarkup,shortDate} from './pipRoutines.js';
 import {pickerMarkup,createPicker} from './pipPicker.js';
 import {createChatFollow,AT_BOTTOM_PX} from './pipsFollow.js';
+import {computerNames,computerNameProblem,cleanComputerName,urgentComputerState,computerIconWords,computersMenuMarkup,computerNamesMarkup} from './pipComputerNames.js';
 import {conversationsPage,conversation,conversationTitle,conversationsMarkup,newConversationMarkup,routinePostsMarkup,computersWords,CONVERSATION_TITLE_MAX} from './pipConversations.js';
 import {profile,sharedPage,computersPage,appsPage,headMarkup,pageTabsMarkup,infoMarkup,instructionsMarkup,characterMarkup,linksMarkup,mediaMarkup,filesMarkup,computersMarkup,appsMarkup as appsSettingsMarkup,BODIES} from './pipProfile.js';
 import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipsPayments,pipBackup,fallbackOn,pipUsage,pipFeedback,actionGrants,actionGrant,pipComputer,pipComputerDesktop,pipComputerAction,pipComputerView,pipComputerFrame,pipComputerFrames,pipComputerFiles,pipComputerPointer,pipEyes} from './pipsModel.js';
@@ -1823,7 +1824,8 @@ async function refreshComputer(){
  if(computerState.pip!==pip){void loadComputer();return;}
  if(!computerState.value?.granted)return;
  // What it needs from you: a robot check, and what its computer holds (shown under its reply).
- const needs=v=>JSON.stringify([v?.needs_you||null,(v?.actions||[]).filter(a=>a.status==='pending').map(a=>a.id)]);
+ // And each computer's name and state (Pips API 86): the dot on its icon, and the menu under it.
+ const needs=v=>JSON.stringify([v?.needs_you||null,(v?.actions||[]).filter(a=>a.status==='pending').map(a=>a.id),v?.names||null,v?.computers||null]);
  const token=scope(),before=needs(computerState.value);
  try{const value=pipComputer((await send('get_pip_computer',{pip_id:pip})).computer,pip);if(token!==scope()||S.selected!==pip||computerState.pip!==pip)return;
   computerState.value=value;if(needs(value)!==before)render();void loadComputerSettled(pip,token);}
@@ -2032,9 +2034,9 @@ async function computerCommand(type,notice){
  catch(error){if(token===scope())setError(error);}
  finally{if(token===scope()){S.busy=false;render();}}
 }
-function openComputerView(){
+function openComputerView(number=0){
  // API 43: the computer opens as an editor tab with its Browser, Files and Terminal.
- if(S.apiVersion>=43&&!remoteHost&&S.pip&&S.pip.id===S.selected){vscode.postMessage({type:'pipsOpenComputer',pip:{id:S.pip.id,name:S.pip.name,pip_type:S.pip.pip_type}});return;}
+ if(S.apiVersion>=43&&!remoteHost&&S.pip&&S.pip.id===S.selected){vscode.postMessage({type:'pipsOpenComputer',pip:{id:S.pip.id,name:S.pip.name,pip_type:S.pip.pip_type},...(number&&S.apiVersion>=86?{number}:{})});return;}
  if(!usable()||computerViewTimer)return;
  openReview({computerView:true,readOnly:true,title:`${S.pip?.name||'Pip'}'s browser`,description:'You are driving. What you submit here is sent; the Pip\'s own submits still wait for you.',
   body:`<form id="computer-go" class="computer-bar"><input id="computer-url" aria-label="Address" placeholder="https://" autocomplete="off"><button type="submit">Go</button>${button('computer-back','Back',false)}</form><div class="computer-screen"><img id="computer-screen" alt="The Pip's browser. Select a point to click there."></div><p id="computer-status" class="muted" role="status">Opening the browser…</p><form id="computer-type" class="computer-bar"><input id="computer-text" aria-label="Type into the page" autocomplete="off" placeholder="Select a field, then type here"><button type="submit">Type</button>${button('computer-enter','Enter',false)}${button('computer-tab','Next field',false)}${button('computer-backspace','Delete',false)}${button('computer-scroll-down','Scroll down',false)}${button('computer-scroll-up','Scroll up',false)}</form>`,
@@ -3110,7 +3112,13 @@ function computersRowMarkup(off){
  if(computerState.pip!==S.selected&&!computerState.loading)void loadComputer();
  const have=pipComputers();if(!have)return '';
  const full=have.have>=have.limit;
- return `</div><div class="pip-page-row static" data-computers="${have.have}"><span class="row-words"><strong>Computers: ${have.have}</strong><small>${full?`${have.limit} is the most it can have. `:''}Its computers are shared by all its conversations.</small></span>${button('add-computer','Add another',off||full,'quiet')}`;
+ return `</div><div class="pip-page-row static" data-computers="${have.have}"><span class="row-words"><strong>Computers: ${have.have}</strong><small>${full?`${have.limit} is the most it can have. `:''}Its computers are shared by all its conversations.</small></span>${button('add-computer','Add another',off||full,'quiet')}${computerNamesRow(off)}`;
+}
+// Under "Computers: N" (Pips API 86): each one's name, with Rename.
+function computerNamesRow(off){
+ const names=pipComputerNames(),ui=computerUi();if(!names)return '';
+ const page=ui.place==='page';
+ return computerNamesMarkup({esc,names,renaming:page?ui.renaming:0,renameText:ui.renameText,busy:!!off||ui.busy,error:page?ui.error:''});
 }
 function computerRowMarkup(p,off){
  if(S.apiVersion<42||remoteHost||!personalPip()||archived())return '';
@@ -3704,7 +3712,7 @@ async function startConversation(add){
  ui.busy=true;ui.error='';render();
  try{
   if(add){const result=await send('add_pip_computer',{pip_id:pip});if(token!==scope())return;
-   if(computerState.pip===pip&&computerState.value&&Number.isSafeInteger(result?.computers))computerState.value={...computerState.value,computers:result.computers,...(Number.isSafeInteger(result.limit)?{computers_limit:result.limit}:{})};}
+   computerAdded(pip,result);if(typeof result?.name==='string'&&result.name)S.notice=`Added ${result.name}.`;}
   const made=conversation((await send('create_pip_conversation',{pip_id:pip})).conversation,pip);if(token!==scope())return;
   if(convList())convState.list=[made,...convState.list.filter(c=>c.id!==made.id)];
   ui.busy=false;showConversation(made.id,{focus:true});void loadConversations();
@@ -3801,10 +3809,116 @@ async function addComputer(){
  const pip=S.selected,token=scope();if(S.busy||!usable()||!pip)return;
  S.busy=true;S.error='';render();
  try{const result=await send('add_pip_computer',{pip_id:pip});if(token!==scope())return;
-  if(computerState.pip===pip&&computerState.value&&Number.isSafeInteger(result?.computers))computerState.value={...computerState.value,computers:result.computers,...(Number.isSafeInteger(result.limit)?{computers_limit:result.limit}:{})};
-  S.notice=`${S.pip?.name||'It'} has ${result?.computers} computers now. Its conversations share them.`;}
+  computerAdded(pip,result);
+  // Which one was added, by its name (Pips API 86).
+  S.notice=`${typeof result?.name==='string'&&result.name?`Added ${result.name}. `:''}${S.pip?.name||'It'} has ${result?.computers} computers now. Its conversations share them.`;}
  catch(error){if(token===scope())S.error=errorText(error);}
  finally{if(token===scope()){S.busy=false;render();}}
+}
+// What add_pip_computer answered: how many it has now and, from Pips API 86, each one's name.
+function computerAdded(pip,result){
+ if(computerState.pip!==pip||!computerState.value||!Number.isSafeInteger(result?.computers))return;
+ computerState.value={...computerState.value,computers:result.computers,...(Number.isSafeInteger(result.limit)?{computers_limit:result.limit}:{})};
+ computerNamed(pip,result.names);
+}
+// Names from a rename or an add (no states with them): each keeps the state it was last seen in.
+function computerNamed(pip,names){
+ if(computerState.pip!==pip||!computerState.value||!computerNames(names))return;
+ const was=computerState.value.names||[];
+ computerState.value={...computerState.value,names:names.map(n=>{const old=was.find(o=>o.number===n.number);return {...n,state:old?.state||'closed',...(old?.doing?{doing:old.doing}:{})};})};
+}
+// Its computers by name (Pips API 86), the first first; null on an older DGC, or before it has a computer.
+function pipComputerNames(){
+ const value=computerState.pip===S.selected?computerState.value:null;
+ return S.apiVersion>=86&&!remoteHost&&value?.granted&&Array.isArray(value.names)&&value.names.length?value.names:null;
+}
+// With more than one, the computer icon opens a menu to choose which (the user's call, 12 Nov): each one's name, a dot
+// for its state, Rename in the row, and Add another. While it is open its states are read again every few seconds.
+const compUi={pip:'',menu:false,renaming:0,place:'',renameText:'',error:'',busy:false};
+let compPoll=null;
+function computerUi(){if(compUi.pip!==S.selected)Object.assign(compUi,{pip:S.selected,menu:false,renaming:0,place:'',renameText:'',error:'',busy:false});return compUi;}
+function severalComputers(){const names=pipComputerNames();return !!names&&names.length>1&&personalPip()&&!archived();}
+function computerPolling(){
+ const on=computerUi().menu&&!disposed;
+ if(on&&compPoll===null)compPoll=window.setInterval(()=>{if(!computerUi().menu||disposed||!$('computer-menu')){computerPolling();return;}if(!document.hidden)void refreshComputer();},3000);
+ if(!on&&compPoll!==null){window.clearInterval(compPoll);compPoll=null;}
+}
+function openComputerMenu(){
+ const ui=computerUi();if(!severalComputers())return;
+ Object.assign(ui,{menu:true,renaming:0,place:'',renameText:'',error:''});render();computerPolling();
+ ($('computer-menu')?.querySelector('.computer-row:not(:disabled)'))?.focus({preventScroll:true});
+ void refreshComputer();
+}
+function closeComputerMenu(){
+ const ui=computerUi();if(!ui.menu)return;
+ Object.assign(ui,{menu:false,...(ui.place==='menu'?{renaming:0,place:'',renameText:'',error:''}:{})});computerPolling();render();
+}
+function computerMenuMarkup(){
+ const ui=computerUi(),names=pipComputerNames();if(!ui.menu||!severalComputers())return '';
+ const menu=ui.place==='menu';
+ return `<div id="computer-menu" class="computer-menu conv-list dgc-menu" role="menu" aria-label="${esc(`${S.pip.name}'s computers`)}">${computersMenuMarkup({esc,names,limit:pipComputers()?.limit||names.length,
+  renaming:menu?ui.renaming:0,renameText:ui.renameText,busy:ui.busy||S.busy||!usable(),error:menu||!ui.renaming?ui.error:''})}</div>`;
+}
+// The icon itself: one small dot at its corner for the most urgent state among its computers (needs you, then working).
+function computerIconMarkup(){
+ const names=pipComputerNames(),several=severalComputers(),urgent=urgentComputerState(names),ui=computerUi();
+ const label=names?computerIconWords(names):'Computer';
+ return `<button type="button" id="pip-computer-open" class="topbar-icon computer-icon" aria-label="${esc(label)}" title="${several?'Its computers':computerState.pip===S.selected&&computerState.value?.granted?'Open its computer':'Its computer'}"`
+  +`${several?` aria-haspopup="menu" aria-expanded="${ui.menu}" aria-controls="computer-menu"`:''}${S.busy||!usable()||archived()?' disabled':''}>${simpleIcon('computer')}${urgent?`<span class="computer-corner" data-state="${urgent}" aria-hidden="true"></span>`:''}</button>`;
+}
+function beginComputerRename(number,place){
+ const ui=computerUi(),row=pipComputerNames()?.find(n=>n.number===number);if(!row||ui.busy)return;
+ Object.assign(ui,{renaming:number,place,renameText:row.name,error:''});render();
+ const box=$(place==='menu'?'computer-rename-input':'computer-name-input');box?.focus({preventScroll:true});box?.select?.();
+}
+function endComputerRename(){
+ const ui=computerUi(),{renaming,place}=ui;if(!renaming)return;
+ Object.assign(ui,{renaming:0,place:'',renameText:'',error:''});render();
+ $(place==='menu'?`computer-row-${renaming}`:`computer-name-rename-${renaming}`)?.focus({preventScroll:true});
+}
+async function saveComputerName(number,text){
+ const ui=computerUi(),pip=S.selected,token=scope();if(ui.busy||!usable()||!pip)return;
+ const name=cleanComputerName(text),problem=computerNameProblem(name);
+ if(problem){ui.error=problem;render();return;}
+ ui.busy=true;ui.error='';render();
+ try{
+  const result=await send('rename_pip_computer',{pip_id:pip,number,name});if(token!==scope())return;
+  computerNamed(pip,result?.names);ui.busy=false;endComputerRename();void refreshComputer();
+ }catch(error){if(token===scope()){ui.error=errorText(error);}}
+ finally{if(token===scope()&&ui.busy){ui.busy=false;render();const box=$(ui.place==='menu'?'computer-rename-input':'computer-name-input');box?.focus({preventScroll:true});}}
+}
+document.addEventListener('click',event=>{
+ const target=event.target;if(!target?.closest)return;
+ const ui=computerUi();
+ const page=target.closest('[data-computer-name-rename]')?.dataset.computerNameRename;
+ if(page){beginComputerRename(Number(page),'page');return;}
+ if(target.closest('[data-computer-name-cancel]')){endComputerRename();return;}
+ if(!target.closest('#computer-menu,#pip-computer-open')){if(ui.menu)closeComputerMenu();return;}
+ const menu=target.closest('#computer-menu');if(!menu)return;
+ const rename=target.closest('[data-computer-rename]')?.dataset.computerRename;
+ if(rename){beginComputerRename(Number(rename),'menu');return;}
+ if(target.closest('[data-computer-add]')){void addComputer().then(()=>{($('computer-add')||[...document.querySelectorAll('#computer-menu .computer-row')].at(-1))?.focus({preventScroll:true});});return;}
+ const chosen=target.closest('[data-computer]')?.dataset.computer;
+ if(chosen){closeComputerMenu();$('pip-computer-open')?.focus({preventScroll:true});void openComputerView(Number(chosen));}
+});
+document.addEventListener('submit',event=>{
+ const number=event.target?.dataset?.computerRenameForm;if(!number)return;event.preventDefault();
+ void saveComputerName(Number(number),event.target.querySelector('[data-computer-rename-input]')?.value||'');
+});
+document.addEventListener('input',event=>{if(event.target?.dataset?.computerRenameInput!==undefined)computerUi().renameText=event.target.value;});
+// The keys (media/shared/menu.js): Down on the icon opens it; Down and Up between rows, Right to a row's Rename, Enter
+// opens; Escape leaves a name being typed, then closes the menu and goes back to the icon.
+function computerKeydown(event){
+ const target=event.target,ui=computerUi();
+ if(target?.dataset?.computerRenameInput!==undefined&&event.key==='Escape'){event.preventDefault();event.stopPropagation();endComputerRename();return true;}
+ if(target?.id==='pip-computer-open'&&severalComputers()){
+  if(event.key==='ArrowDown'){event.preventDefault();if(ui.menu)$('computer-menu')?.querySelector('.computer-row')?.focus({preventScroll:true});else openComputerMenu();return true;}
+  if(event.key==='Escape'&&ui.menu){event.preventDefault();event.stopPropagation();closeComputerMenu();return true;}
+  return false;
+ }
+ const holder=target?.closest?.('#computer-menu');if(!holder)return false;
+ if(target.matches?.('input,select,textarea')&&event.key!=='Tab')return false;
+ return !!globalThis.DgcMenu?.handle(holder,event,{rows:'.dgc-menu-row',close:()=>closeComputerMenu(),trigger:()=>$('pip-computer-open')});
 }
 function simplePipHeader(){
  const p=S.pip,type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,S.runs,usable(),S.runner),onChat=S.tab==='chat';
@@ -3814,13 +3928,13 @@ function simplePipHeader(){
  if(S.apiVersion>=43&&!remoteHost&&personalPip()&&screenSetup.pip!==S.selected&&!screenSetup.loading)void loadDesktopStatus();
  const computer=!(S.apiVersion>=42&&personalPip())?'':settingUpComputer()
   ?`<span class="topbar-setup" role="status" title="Getting its computer ready. This happens once."><span class="topbar-spinner" aria-hidden="true"></span>Setting up your Pip…</span>`
-  :`<button type="button" id="pip-computer-open" class="topbar-icon" aria-label="Computer" title="${computerState.pip===S.selected&&computerState.value?.granted?'Open its computer':'Its computer'}"${S.busy||!usable()||archived()?' disabled':''}>${simpleIcon('computer')}</button>`;
+  :computerIconMarkup();
  if(pageView()){
   // Its page (Grok's bot settings): back, its name, then Share and a small menu.
   const sub=['instructions','character'].includes(S.pipPage),share=S.apiVersion>=41&&['scout','lens','rook','lock','quill'].includes(p.pip_type)&&!archived();
   return `<header class="pip-topbar"><button type="button" id="${sub?'pip-page-back':'simple-to-chat'}" class="topbar-icon" aria-label="${sub?'Back':'Back to the chat'}" title="${sub?'Back':'Back to the chat'}">${simpleIcon('back')}</button><div class="pip-pill">${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span>${esc(p.name)}</span><small>${sub?(S.pipPage==='character'?'Face':'Instructions'):'Settings'}</small></div><div class="topbar-actions">${share?`<button type="button" class="topbar-icon" data-pip-share aria-label="Share as template" title="Share as template"${S.busy||!usable()?' disabled':''}>${simpleIcon('share')}</button>`:''}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${pipPageMenu()}</div></details></div></header>`;
  }
- return `<header class="pip-topbar"><button type="button" id="${onChat?'simple-back':'simple-to-chat'}" class="topbar-icon" aria-label="${onChat?'Your Pips':'Back to the chat'}" title="${onChat?'Your Pips':'Back to the chat'}">${simpleIcon('back')}</button><div class="pip-pill"${project&&pipType(p,S.types)?` title="${esc(`${type.name} · ${type.role}`)}"`:''}>${pipAvatar(p,pose.state,`pill-${p.id}`,type)}${onChat?convNameMarkup(p):`<span>${esc(p.name)}</span>`}${onChat?(project?`<small class="pip-status">${lastRunLink(p,pose.label)}</small>`:''):`<small>${esc(project?(every.find(([key])=>key===S.tab)||[])[1]||'':sections.length&&{runs:historyName('Results'),job:'Settings',memory:'Memory',revisions:'Versions',notifications:'Notifications',schedule:'Schedule',handoffs:'Handoffs',context:'Context'}[S.tab]||'')}</small>`}</div><div class="topbar-actions">${project?runNowMarkup():''}${computer}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${sections.map(([key,label])=>`<button type="button" data-tab="${key}">${label}</button>`).join('')}</div></details></div>${onChat?convMenuMarkup():''}</header>`;
+ return `<header class="pip-topbar"><button type="button" id="${onChat?'simple-back':'simple-to-chat'}" class="topbar-icon" aria-label="${onChat?'Your Pips':'Back to the chat'}" title="${onChat?'Your Pips':'Back to the chat'}">${simpleIcon('back')}</button><div class="pip-pill"${project&&pipType(p,S.types)?` title="${esc(`${type.name} · ${type.role}`)}"`:''}>${pipAvatar(p,pose.state,`pill-${p.id}`,type)}${onChat?convNameMarkup(p):`<span>${esc(p.name)}</span>`}${onChat?(project?`<small class="pip-status">${lastRunLink(p,pose.label)}</small>`:''):`<small>${esc(project?(every.find(([key])=>key===S.tab)||[])[1]||'':sections.length&&{runs:historyName('Results'),job:'Settings',memory:'Memory',revisions:'Versions',notifications:'Notifications',schedule:'Schedule',handoffs:'Handoffs',context:'Context'}[S.tab]||'')}</small>`}</div><div class="topbar-actions">${project?runNowMarkup():''}${computer}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${sections.map(([key,label])=>`<button type="button" data-tab="${key}">${label}</button>`).join('')}</div></details></div>${onChat?convMenuMarkup():''}${computerMenuMarkup()}</header>`;
 }
 function simpleMarkup(){
  const bar=`<header class="simple-bar"><h1><span class="pips-wordmark">Pips</span></h1>${runnerMarkup(true)}</header>${scopeTabsMarkup()}`;
@@ -5557,7 +5671,9 @@ document.addEventListener('click',event=>{
     case 'pip-computer-open':{
       // The Pip's computer, one tap from its chat: open its screen, or offer it one.
       if(S.apiVersion<42||!personalPip()||archived())break;
-      const open=()=>{if(computerState.pip!==S.selected||!computerState.value)return;if(computerState.value.granted)void openComputerView();else grantComputer(true);};
+      // With more than one (Pips API 86), a menu under the icon asks which.
+      if(computerUi().menu){closeComputerMenu();break;}
+      const open=()=>{if(computerState.pip!==S.selected||!computerState.value)return;if(!computerState.value.granted)grantComputer(true);else if(severalComputers())openComputerMenu();else void openComputerView();};
       if(computerState.pip===S.selected&&computerState.value)open();else void loadComputer().then(open);
       break;}
     case 'edit-goal':S.editingGoal=true;draft.revisionGoal=S.pip?.goal||'';render();$('revisionGoal')?.focus();break;
@@ -5687,6 +5803,7 @@ if(typeof document!=='undefined'){document.addEventListener('pointerdown',()=>ma
 document.addEventListener('keydown',event=>{
   if(picker.keydown(event))return;
   if(!S.review&&convKeydown(event))return;
+  if(!S.review&&computerKeydown(event))return;
   if(!S.review&&DgcCard.key(event)){event.preventDefault();return;}   // Esc closes a card's open detail
   // Needs attention's one card: with the keyboard anywhere in it, an arrow goes to the next card or back, Home and
   // End to the first and the last. Not from a box you type in.

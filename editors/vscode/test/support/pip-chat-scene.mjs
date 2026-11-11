@@ -290,6 +290,10 @@ export const host = (opts) => `(${function (PIP, opts) {
   // papers" is long enough to scroll; two more are archived. Each keeps its own messages; what is sent, read, renamed,
   // archived and started is noted in window.__convs, which answers the list the way DGC does (the newest first).
   // opts.convs.computers / .limit: how many computers it has and may have (1 and 3).
+  // From api 86 each computer has a name and a state (window.__convs.names: [{number, name, named, state, doing?}], as
+  // get_pip_computer's `names`); opts.convs.states gives each one's state ("closed" when left out), a string or
+  // {state, doing}. rename_pip_computer answers as DGC does: "" gives back its first name, a bad name and a name
+  // another of them was given are refused. A test changes window.__convs.names to stand for a reply starting.
   if (opts.convs) {
     const cid = (c) => "conv_" + c.repeat(32), want = opts.convs === true ? {} : opts.convs;
     const conv = (c, title, ago, more = {}) => ({ id: cid(c), pip_id: PIP, title, first: false, created_at: new Date(Date.now() - (ago + 5) * MIN).toISOString(), updated_at: new Date(Date.now() - ago * MIN - 5000).toISOString(), archived: false, unread: 0, replying: false, ...more });
@@ -303,6 +307,12 @@ export const host = (opts) => `(${function (PIP, opts) {
         [cid("c")]: Array.from({ length: 30 }, (_, i) => tell("c", i + 1, i % 2 ? "assistant" : "user", i % 2 ? `Paper ${(i + 1) / 2} is filed. It was the one from the bank, with the interest for the year on its second page.` : `File tax paper ${i / 2 + 1}`, 3 * 1440 + 60 - i)),
         [cid("d")]: [tell("d", 1, "user", "Ideas for Ma's birthday?", 14 * 1440 + 2), tell("d", 2, "assistant", "A day at the hill station she likes, or the pottery class she mentioned.", 14 * 1440)] },
       sent: [], read: [], contexts: [], computers: want.computers || 1, limit: want.limit || 3, added: 0, next: 0, routines: [], fail: want.fail || "" };
+    const FIRST_NAMES = ["Juniper", "Wren", "Maple", "Cedar", "Fern", "Clover"];
+    const nameRow = (i) => { const st = (want.states || [])[i], kind = typeof st === "string" ? st : st?.state || "closed";
+      return { number: i + 1, name: FIRST_NAMES[i % FIRST_NAMES.length], named: false, state: kind, ...(st?.doing ? { doing: st.doing } : {}) }; };
+    state.names = Array.from({ length: state.computers }, (_, i) => nameRow(i));
+    const named = () => ((opts.api || 0) >= 86 ? { names: state.names.map((n) => ({ ...n })) } : {});
+    const bare = () => state.names.map(({ number, name, named: own }) => ({ number, name, named: own }));
     const firstId = () => state.list.find((c) => c.first).id, find = (r) => { const c = state.list.find((v) => v.id === r.conversation_id); if (!c) throw Error("That conversation isn't this Pip's."); return c; };
     const routines = [{ ...suggested, title: "Morning brief", status: "on", created_by: "user", trigger: { kind: "schedule", schedule: { type: "daily", time: "09:00", timezone: "Asia/Kolkata" } }, label: "every day at 09:00", next_due_at: "2036-11-07T03:30:00Z" }];
     Object.assign(answers, {
@@ -324,8 +334,16 @@ export const host = (opts) => `(${function (PIP, opts) {
       list_pip_unread: () => { const count = state.list.reduce((n, c) => n + (c.archived ? 0 : c.unread), 0), newest = state.messages[cid("f")].filter((m) => m.role === "assistant").at(-1);
         return { workspace_id: W, total: count, pips: count ? [{ pip_id: PIP, workspace_id: W, name, pip_type: pip.pip_type, count, messages: count, posts: 0, latest: "Something new.", latest_at: at(8), latest_message_id: state.list.find((c) => c.first).unread ? newest?.id || null : "elsewhere", latest_post_id: null }] : [] }; },
       get_pip_chat_context: ((base) => (r) => { state.contexts.push(r.conversation_id || null); return base(r); })(answers.get_pip_chat_context),
-      get_pip_computer: () => ({ computer: { pip_id: PIP, granted: !project, available: !project, reason: "", pending: 0, actions: [], computers: state.computers, computers_limit: state.limit } }),
-      add_pip_computer: () => { if (state.computers >= state.limit) throw Error(`A Pip can have up to ${state.limit} computers. Dev Mode can raise this.`); state.computers++; state.added++; return { pip_id: PIP, computers: state.computers, limit: state.limit }; },
+      get_pip_computer: () => ({ computer: { pip_id: PIP, granted: !project, available: !project, reason: "", pending: 0, actions: [], computers: state.computers, computers_limit: state.limit, ...named(),
+        ...((opts.api || 0) >= 86 ? { screen: "1280x800", screens: ["1280x800", "1440x900", "1920x1080"] } : {}) } }),
+      add_pip_computer: () => { if (state.computers >= state.limit) throw Error(`A Pip can have up to ${state.limit} computers. Dev Mode can raise this.`); state.computers++; state.added++; state.names.push(nameRow(state.computers - 1));
+        return { pip_id: PIP, computers: state.computers, limit: state.limit, ...((opts.api || 0) >= 86 ? { name: state.names.at(-1).name, names: bare() } : {}) }; },
+      rename_pip_computer: (r) => { const row = state.names.find((n) => n.number === r.number); if (!row) throw Error("That Pip has no such computer.");
+        const text = String(r.name).split(/\s+/).filter(Boolean).join(" ");
+        if (text && !/^[\p{L}\p{N}_][\p{L}\p{N}_ .'&()-]{0,29}$/u.test(text)) throw Error("A computer's name is up to 30 letters, digits, spaces and . ' & ( ) -, starting with a letter or digit.");
+        if (text && state.names.some((n) => n.named && n.number !== r.number && n.name.toLowerCase() === text.toLowerCase())) throw Error(`Another of its computers is called ${text}. Choose another name.`);
+        Object.assign(row, text ? { name: text, named: true } : { name: FIRST_NAMES[(r.number - 1) % FIRST_NAMES.length], named: false });
+        return { pip_id: PIP, number: r.number, name: row.name, names: bare() }; },
       list_pip_routines: () => ({ pip_id: PIP, workspace_id: W, routines: project ? [] : routines }),
       update_pip_routine: (r) => { const found = routines.find((v) => v.id === r.routine_id); state.routines.push(r.changes); if ("conversation_id" in r.changes) { if (r.changes.conversation_id) found.conversation_id = r.changes.conversation_id; else delete found.conversation_id; } return { routine: found }; },
     });
@@ -395,6 +413,8 @@ export const host = (opts) => `(${function (PIP, opts) {
   }
   if (opts.ticks || opts.details === "working") Object.assign(answers, { list_pip_keys: () => ({ pip_id: PIP, keys: [] }),
     list_pip_run_activity: ((base) => (r) => { const page = base(r); return { ...page, run_id: r.run_id, events: page.events.map((e) => ({ ...e, run_id: r.run_id })) }; })(answers.list_pip_run_activity) });
+  // A Pip with named computers (api 86) and no key cards asked for has no keys waiting, as most Pips have.
+  if (opts.convs && (opts.api || 0) >= 86 && !opts.ownKeys && !opts.keys) answers.list_pip_keys ||= () => ({ pip_id: PIP, keys: [] });
   window.acquireVsCodeApi = () => ({ getState: () => undefined, setState() {}, postMessage(m) {
     // (What the page tells its host besides a request, such as a photo to open or a file to download: window.__posted.)
     if (m?.type !== "pipsRequest") { (window.__posted ||= []).push(m); return; }

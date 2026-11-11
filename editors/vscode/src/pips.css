@@ -1214,6 +1214,36 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 .conv-rename-input{flex:1 1 auto;min-width:0;height:24px;padding:0 6px;border:1px solid var(--hair-strong,var(--hair));border-radius:var(--btn-r);background:var(--vscode-input-background,transparent);color:var(--vscode-input-foreground,var(--text));font:inherit}
 .conv-rename-input:focus-visible{outline:1px solid var(--vscode-focusBorder,var(--accent));outline-offset:-1px}
 .conv-error{margin:4px 8px;color:var(--err-text,var(--vscode-errorForeground));font-size:var(--t-sm,12px);line-height:1.4}
+/* A Pip's computers by name (pips-17d): the menu under the computer icon, a dot for each one's state, and the names on
+   its Settings page. Closed is a hollow ring, open a filled neutral dot (the dock's), working the accent (the dock's
+   running dot), needs you amber. The words beside each dot say the same. */
+.pip-topbar .computer-icon{position:relative}
+.computer-corner{position:absolute;top:2px;right:2px;box-sizing:border-box;width:7px;height:7px;border-radius:50%;box-shadow:0 0 0 1.5px var(--bg,var(--vscode-editor-background));pointer-events:none}
+.computer-corner[data-state="working"]{background:var(--accent)}
+.computer-corner[data-state="needs_you"]{background:var(--warn)}
+.computer-menu{position:absolute;z-index:6;top:calc(100% - 4px);right:8px;width:min(264px,calc(100% - 16px));max-height:min(70vh,460px);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;text-align:left;font-weight:400}
+@media(prefers-reduced-motion:no-preference){.computer-menu.dgc-menu:not([hidden]){transform-origin:top right}}
+.computer-menu .computer-row{min-height:32px}
+.computer-menu .computer-item>.computer-row{padding-right:34px}
+.computer-menu .dgc-menu-more.computer-pencil{opacity:1}
+.computer-menu .computer-add{min-height:32px}
+.computer-menu .computer-add .conv-mark{color:inherit}
+.computer-menu .computer-rename{padding-left:8px}
+.computer-state{flex:none;display:inline-flex;align-items:center;justify-content:center;width:14px;height:17px}
+.computer-state::before{content:"";box-sizing:border-box;width:7px;height:7px;border-radius:50%;background:transparent}
+.computer-state[data-state="closed"]::before{border:1.5px solid var(--muted)}
+.computer-state[data-state="open"]::before{background:color-mix(in srgb,var(--text,var(--vscode-foreground)) 62%,transparent)}
+.computer-state[data-state="working"]::before{background:var(--accent)}
+.computer-state[data-state="needs_you"]::before{background:var(--warn)}
+@media(prefers-reduced-motion:no-preference){.computer-state[data-state="working"]::before,.computer-corner[data-state="working"]{animation:conv-replying 1.6s ease-in-out infinite}}
+@media(forced-colors:active){.computer-state[data-state="closed"]::before{border-color:CanvasText}.computer-state:is([data-state="open"],[data-state="needs_you"])::before,.computer-corner{background:CanvasText}.computer-state[data-state="working"]::before,.computer-corner[data-state="working"]{background:Highlight}}
+.computer-names{flex:1 1 100%;min-width:0;list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.computer-names li{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;min-height:30px}
+.computer-names .computer-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.computer-names .computer-name-form{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;flex:1 1 auto;min-width:0;margin:0}
+.computer-names .computer-name-form .conv-rename-input{flex:1 1 200px}
+.computer-names .conv-error{flex:1 1 100%;margin:0 0 4px}
+.computer-names button.conv-btn{flex:none;width:var(--btn-w-sm);height:var(--btn-h-sm);padding:0 var(--btn-pad-sm);font-size:var(--t-xs,11px);line-height:calc(var(--btn-h-sm) - 2px)}
 .conv-new-step{display:flex;flex-direction:column;gap:2px;margin:0}
 .conv-new-step .dgc-menu-head{padding:6px 8px 4px}
 .conv-choices{display:flex;flex-direction:column}

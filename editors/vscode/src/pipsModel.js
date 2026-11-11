@@ -1,6 +1,7 @@
 import {extraReadTools,validateExtraRead} from './pipsAppPicker.js';
 import {validAccountId} from './pipAccountId.js';
 import {cronDays} from './pipRoutines.js';
+import {computerNames} from './pipComputerNames.js';
 // Pure presentation boundaries shared by the editor and deterministic tests.
 export const record = value => !!value && typeof value === 'object' && !Array.isArray(value);
 export const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1379,7 +1380,11 @@ export function pipComputer(value,pip){
  const needs=value?.needs_you;if(needs!==undefined&&(!record(needs)||Object.keys(needs).sort().join()!=='at,host'||typeof needs.host!=='string'||!needs.host||needs.host.length>255||typeof needs.at!=='string'))throw Error('This Pip\'s computer status is invalid. Refresh this Pip.');
  // Several computers per Pip (Pips API 79): how many it has and may have, each a whole number from 1 when it is there.
  const count=n=>n===undefined||Number.isSafeInteger(n)&&n>=1;
- if(!record(value)||Object.keys(value).filter(k=>!['needs_you','computers','computers_limit'].includes(k)).sort().join()!=='actions,available,granted,pending,pip_id,reason'||value.pip_id!==pip||!count(value.computers)||!count(value.computers_limit)
+ // Each computer's name and state (Pips API 86, src/pipComputerNames.js), and its screen's size with the sizes it may have.
+ const size=v=>typeof v==='string'&&/^\d{3,5}x\d{3,5}$/.test(v);
+ if(record(value)&&(value.names!==undefined&&!computerNames(value.names)||value.screen!==undefined&&!size(value.screen)
+   ||value.screens!==undefined&&!(Array.isArray(value.screens)&&value.screens.length<=20&&value.screens.every(size))))throw Error('This Pip\'s computer status is invalid. Refresh this Pip.');
+ if(!record(value)||Object.keys(value).filter(k=>!['needs_you','computers','computers_limit','names','screen','screens'].includes(k)).sort().join()!=='actions,available,granted,pending,pip_id,reason'||value.pip_id!==pip||!count(value.computers)||!count(value.computers_limit)
    ||typeof value.granted!=='boolean'||typeof value.available!=='boolean'||typeof value.reason!=='string'
    ||!Number.isSafeInteger(value.pending)||!Array.isArray(value.actions)||value.actions.length>5)
   throw Error('This Pip\'s computer status is invalid. Refresh this Pip.');
