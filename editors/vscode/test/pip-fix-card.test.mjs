@@ -181,7 +181,8 @@ test("finished: what changed, whether tests ran in the fix copy, Review and Undo
     undo: { state: "done", restored: ["app/gst.py", "app/cess.py"] } }) });
   assert.equal(line(s), "Undone");
   assert.match(area(s).textContent, /Put back 2 files\./);
-  assert.deepEqual(actions(s), ["Try again"]);
+  // (The card is a helper row now: what the Pip reported stands again after an undo, so its words are one click away.)
+  assert.deepEqual(actions(s), ["Try again", "Report"]);
   assert.deepEqual(s.errors, []);
 });
 

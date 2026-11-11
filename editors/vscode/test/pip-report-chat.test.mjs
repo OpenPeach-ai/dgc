@@ -129,7 +129,8 @@ test("a report reaches the open chat as a card, Ask DGC to fix fixes it in the b
     const plain = (html) => html.replace(/<span class="pip-fix-time">[^<]*<\/span>/, "");
     assert.deepEqual(replayed.map((c) => plain(c.html)), liveCards.map((c) => plain(c.html)), "replay draws what live drew");
 
-    await s.page.locator(".pip-report-dismiss-slim").click();
+    // (The card is the fix's helper row now: its Dismiss is the row's own, which is the card's.)
+    await s.page.locator(".pip-fix-dismiss").click();
     await sleep(800);
     await s.reloadWebview({ width: 360, height: 760 });
     await s.ready();

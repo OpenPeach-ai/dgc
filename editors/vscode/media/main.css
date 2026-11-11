@@ -3271,6 +3271,33 @@ body.vscode-light .pip-report-line-state[data-good] { color: #1D7A44; }   /* --g
 .pip-fix-tests.tone-ok { color: var(--good); }
 .pip-fix-tests.tone-bad { color: var(--del-text); }
 .pip-fix-tests.tone-muted { color: var(--muted); }
+/* Fix was pressed: the card goes, and the fix runs as a helper row in its place, the row a helper gets in the chat
+   (.agent-line): the helper's own mark, its name, what it is doing, and its answers at the end. The report's own words
+   are out of sight; on a fix that changed nothing they are one click away ("Report") and open under the row. */
+.pip-report.is-fix-row, .pip-report.slim.is-fix-row { display: block; margin: 0; padding: var(--sp-1) 0; border: 0; border-radius: 0;
+  background: transparent; box-shadow: none; cursor: default; }
+.pip-report.is-fix-row > .pip-report-face { display: none; }
+.pip-report.is-fix-row > .pip-report-main { display: flex; flex-direction: column; min-width: 0; }
+.pip-report.is-fix-row:not([data-report="shown"]) > .pip-report-main > :not(.pip-fix) { display: none; }
+.pip-report.is-fix-row > .pip-report-main > .pip-fix { order: -1; margin: 0; padding: 0; border: 0; color: var(--muted);
+  font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
+.pip-report.is-fix-row[data-report="shown"] > .pip-report-main > .pip-fix { margin-bottom: var(--sp-2); }
+.pip-report.is-fix-row[data-report="shown"] > .pip-report-main > :not(.pip-fix) { margin-left: 22px; }
+/* (The words wrap in their own column, never under the mark, as a helper row's do.) */
+.pip-report.is-fix-row .pip-fix-line { position: relative; gap: 2px 6px; padding-left: 22px; }
+.pip-fix-who { position: absolute; left: 0; top: 0; display: inline-flex; align-items: center; height: calc(var(--t-sm) * 1.45); }
+.pip-fix-who .agent-mark { width: 16px; height: 16px; }
+.pip-fix-name:disabled { cursor: default; }
+.pip-fix-dismiss { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; min-height: 0; padding: 0; border: 1px solid transparent;
+  border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; }
+.pip-fix-dismiss .codicon { font-size: 12px; }
+.pip-fix-dismiss:hover { border-color: var(--border-strong); background: var(--surface2); color: var(--text); }
+.pip-fix-dismiss:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.pip-report.is-fix-row .pip-fix-mark { display: none; }
+.pip-report.is-fix-row .pip-fix-text { color: var(--text); font-weight: var(--w-reg); }
+.pip-report.is-fix-row .pip-fix-files { padding-left: 22px; }
+.pip-report.is-fix-row :is(.pip-fix-held, .pip-fix-note, .pip-fix-tests, .pip-fix-summary) { margin-left: 22px; }
+.pip-report.is-fix-row .pip-fix-ask .card { margin-left: 22px; }
 .pip-fix-ask:empty { display: none; }
 .pip-fix-ask .card { margin: 6px 0 0; }
 .pip-report.slim[data-fix] { cursor: default; }

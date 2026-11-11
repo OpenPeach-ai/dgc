@@ -11532,6 +11532,11 @@ function permissionChoices(ev) {
   // report's card IS its status: what it is doing, Watch (the agent's page) and Stop; a permission it needs is asked
   // on the card; when it ends, what changed, whether tests ran in the fix copy, Review and Undo. Every state comes
   // from the backend as `pip_fix`; a replayed card carries its latest fix as `report.fix`, so a reload draws the same.
+  // Asked 11 Nov: pressing Fix takes the card away, and the fix runs as a helper row in its place, the kind a helper
+  // (a task's sub-agent) gets in the chat: the helper's own mark, its name (it opens the helper's page), what it is
+  // doing now, then what it changed with Review and Undo, or why it stopped. The row is the report's own node, drawn
+  // as a row (.is-fix-row, media/main.css): the card's words are out of sight, and one click away on a fix that
+  // changed nothing ("Report"). A refused start brings the card back with its button.
   let pipFixTick = null;
   function pipFixActive(fix) { return PIP_FIX_ACTIVE.includes(fix?.state); }
   const validPipFix = (fix) => !!fix && typeof fix === "object" && /^fix_[0-9a-f]{32}$/.test(String(fix.fix_id || ""))
@@ -11596,6 +11601,7 @@ function permissionChoices(ev) {
       case "stopped": return "Stopped";
       case "interrupted": return "Interrupted";
       case "undone": return "Undone";
+      case "starting": return "Starting";       // Fix was pressed; DGC has not said yet
       default: return "Fix";
     }
   }
@@ -11635,11 +11641,29 @@ function permissionChoices(ev) {
   // A finished fix is one line (reported 24 Oct): what it did, the totals, its time, Review / Undo / Watch. What it changed,
   // its tests and summary open under that line with a click on it, and stay as the user left them while the card repaints.
   const pipFixOpen = new Set();
+  // A fix that ended and changed nothing: what the Pip reported still stands, so its words are one click away.
+  const PIP_FIX_NO_CHANGE = ["unchanged", "not_applied", "failed", "stopped", "interrupted", "undone"];
+  function pipFixRowName(fix, card) {
+    const record = fix.agent_id ? agentRecords.get(fix.agent_id) : null;
+    return record ? agentDisplayName(record) : `Fix what ${String(fix.name || card?._report?.name || "the Pip").slice(0, 120)} found`;
+  }
+  // The card is a card again (a refused start): its own name, its own lines, its button.
+  function pipFixRowGone(card) {
+    card.classList.remove("is-fix-row");
+    delete card.dataset.fix; delete card.dataset.report;
+    if (card._label) card.setAttribute("aria-label", card._label);
+    card.querySelector(".pip-fix")?.remove();
+    for (const button of card.querySelectorAll(".pip-report-fix, .pip-report-fix-slim")) button.hidden = false;
+  }
   function paintPipFixCard(card, fix) {
     if (!card || !fix) return;
     const group = card.parentElement?.closest(".pip-report-group");
     if (group) { group.after(card); paintPipReportGroup(group); }
     card.dataset.fix = fix.state;
+    // The card goes: it is the fix's helper row now.
+    card.classList.add("is-fix-row");
+    if (!card._label) card._label = card.getAttribute("aria-label") || "";
+    card.setAttribute("aria-label", `Fixing what ${String(fix.name || card._report?.name || "the Pip").slice(0, 120)} reported: ${pipFixHeadline(fix)}`);
     // The fix's own line replaces Fix (and puts back what a click on it said while it started).
     for (const button of card.querySelectorAll(".pip-report-fix, .pip-report-fix-slim")) {
       button.hidden = true; button.disabled = false;
@@ -11699,7 +11723,24 @@ function permissionChoices(ev) {
       }
       if (canWatch && fix.state !== "undone") act("Watch", "pip-fix-watch", "See what the fix did, step by step", (b) => openAgentPage(fix.agent_id, { from: b }));
     }
+    if (!pipFixActive(fix) && PIP_FIX_NO_CHANGE.includes(fix.state) && validPipReport(card._report)) {
+      const shown = card.dataset.report === "shown";
+      const report = act("Report", "pip-fix-report", shown ? "Hide what the Pip reported" : "Show what the Pip reported", () => {
+        if (card.dataset.report === "shown") delete card.dataset.report; else card.dataset.report = "shown";
+        paintPipFixCard(card, pipFixes.get(fix.run_id) || fix);
+      });
+      report.setAttribute("aria-expanded", String(shown));
+    }
     line.append(acts);
+    // An ended fix's row can be taken off the chat, as its card could: the card's own Dismiss (saved with the chat).
+    const cardDismiss = card.querySelector(".pip-report-dismiss-slim, .pip-report-dismiss");
+    if (!pipFixActive(fix) && fix.state !== "starting" && cardDismiss) {
+      const gone = el("button", "pip-fix-dismiss"); gone.type = "button";
+      gone.title = "Dismiss: remove this from the chat. The report stays in Pips."; gone.setAttribute("aria-label", "Dismiss");
+      const x = el("span", "codicon codicon-close"); x.setAttribute("aria-hidden", "true"); gone.append(x);
+      gone.onclick = (event) => { event.stopPropagation(); cardDismiss.click(); };
+      line.append(gone);
+    }
     const body = [line];
     // Files: three, then how many more; each opens its diff.
     if ((fix.state === "applied" || fix.state === "partial") && files.length) {
@@ -11774,6 +11815,18 @@ function permissionChoices(ev) {
       body.length = 1;
       body.push(box);
     }
+    // The helper's own mark and name lead the row, as on a helper's row: the mark its page and the agent map wear
+    // (live while it works), and its name, which opens its page.
+    const who = el("span", "pip-fix-who"); who.setAttribute("aria-hidden", "true");
+    const face = el("span", "agent-mark");
+    paintAgentMark(face, fix.agent_id || fix.fix_id || fix.run_id, pipFixActive(fix) || fix.state === "starting");
+    who.append(face);
+    const name = el("button", "agent-name pip-fix-name"); name.type = "button";
+    name.textContent = pipFixRowName(fix, card);
+    name.title = canWatch ? `Open ${name.textContent}` : name.textContent;
+    name.disabled = !canWatch;
+    name.onclick = (event) => { event.stopPropagation(); fix._seen = true; openAgentPage(fix.agent_id, { from: name }); };
+    line.prepend(who, name);
     const keepFocus = area.contains(document.activeElement) && !ask.contains(document.activeElement)
       ? document.activeElement.className : "";
     // An answered request leaves the card (the line says what happens next); one still open when the fix ends goes too.
@@ -11790,6 +11843,8 @@ function permissionChoices(ev) {
     if (!sessionReady) { sysLine("DGC is reconnecting to this chat. Ask again in a moment."); return; }
     vscode.postMessage({ type: "startPipFix", run_id: r.run_id });
     for (const c of card ? [card] : pipFixCards(r.run_id)) {
+      // The card goes at once: the row says it is starting until DGC says more (or refuses, and the card is back).
+      if (!c.querySelector(".pip-fix")) paintPipFixCard(c, { state: "starting", run_id: r.run_id, name: r.name });
       for (const button of c.querySelectorAll(".pip-report-fix, .pip-report-fix-slim, .pip-fix-again")) {
         button.disabled = true; button.textContent = "Starting…";
       }
@@ -11806,6 +11861,7 @@ function permissionChoices(ev) {
   function pipFixRefused(ev) {
     const card = [...log.querySelectorAll(".pip-report")].find((c) => c.querySelector(".pip-report-fix[disabled], .pip-report-fix-slim[disabled], .pip-fix-again[disabled]"));
     for (const c of card ? [card] : []) {
+      if (c.dataset.fix === "starting") pipFixRowGone(c);       // nothing started: the card is back
       for (const button of c.querySelectorAll(".pip-report-fix, .pip-report-fix-slim, .pip-fix-again")) {
         button.disabled = false;
         button.textContent = button.classList.contains("pip-report-fix") ? "Ask DGC to fix"
