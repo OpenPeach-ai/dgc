@@ -159,7 +159,7 @@ _COMMAND_ARGS = {
     "list_pip_borrows": {"pip_id"}, "allow_pip_borrow": {"pip_id", "borrow_id"}, "decline_pip_borrow": {"pip_id", "borrow_id"},
     "stop_pip_borrow": {"pip_id", "borrow_id"},
     # A Personal Pip's own API keys (pip_keys, API 82): its card, the key pasted on it, Not now, Remove.
-    "list_pip_keys": {"pip_id"}, "save_pip_key": {"pip_id", "key_id", "value"},
+    "list_pip_keys": {"pip_id"}, "save_pip_key": {"pip_id", "key_id", "value", "terminal"},
     "decline_pip_key": {"pip_id", "key_id"}, "remove_pip_key": {"pip_id", "key_id"},
     # Your own apps' tools (pip_sdk_apps, API 61): registered by your code, a connection app:<name> for Personal Pips.
     "register_app": {"name", "url", "tools"}, "update_app": {"name", "url", "tools"},
@@ -3576,6 +3576,10 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     base_instructions += {'own': '\n' + pip_computer.EYES_NOTICE, 'relay': '\n' + pip_computer.RELAY_NOTICE}.get(self._pip_eyes(), '')
                     if computer_pin.get('desktop') is True and self._pip_eyes() in ('own', 'relay'):
                         base_instructions += '\n' + pip_computer.DESKTOP_NOTICE
+                    keys_pin = manifest.get('terminal_keys') if personal else None
+                    if isinstance(keys_pin, list) and keys_pin:
+                        from . import pip_keys
+                        base_instructions += '\n' + pip_keys.terminal_notice(keys_pin)
                 level_pin = manifest.get('approval_level') if personal else None
                 if isinstance(level_pin, dict):
                     # How much it asks (pip_levels): told so it doesn't stop at what DGC lets through itself.
@@ -4920,6 +4924,12 @@ def _execute_run(registry, row, config):
         if chosen != pip_levels.ASK:
             manifest = {**manifest, 'approval_level': {'level': chosen, 'unattended': row['requested_by'] in UNATTENDED,
                                                        'pays': pip_levels.may_pay(registry, row['pip_id'])}}
+        if chosen == 'full':
+            # Its own keys its Terminal has (pip_keys, slice 2c): names and sites only, never a value.
+            from . import pip_keys
+            names = pip_keys.terminal_names(registry, row['pip_id'])
+            if names:
+                manifest = {**manifest, 'terminal_keys': names[:20]}
     conversation_pin = manifest.get('conversation')
     if isinstance(conversation_pin, dict) and conversation_pin.get('images'):
         # Images never fit the worker's input: it gets their kept paths and re-checks each by digest. A Project Pip's
@@ -6180,7 +6190,8 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 if command == 'list_pip_keys':
                     result = pip_keys.listing(registry, pip_id)
                 elif command == 'save_pip_key':
-                    result = pip_keys.save(store, config, request.get('key_id'), pip_id, actor, request.get('value'))
+                    result = pip_keys.save(store, config, request.get('key_id'), pip_id, actor, request.get('value'),
+                                           terminal=request.get('terminal', False))
                 elif command == 'decline_pip_key':
                     result = pip_keys.decline(store, config, request.get('key_id'), pip_id, actor)
                 else:

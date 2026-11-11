@@ -377,6 +377,20 @@ def _safe_url(url: str) -> str:
 
 # --------------------------------------------------------------------------- the host
 
+def terminal_keys(state_directory, pip_id) -> dict:
+    """The Pip's own keys its Terminal may use for this command (pip_keys.terminal_env): the ones the user ticked, and
+    only while it is at Do it all, read again now. {} on any doubt: never a key by mistake."""
+    if not state_directory or not pip_id:
+        return {}
+    try:
+        from . import pip_keys
+        from .workspace_registry import WorkspaceRegistry
+        with WorkspaceRegistry(state_directory) as registry:
+            return pip_keys.terminal_env(registry, pip_id)
+    except Exception:                              # noqa: BLE001
+        return {}
+
+
 class Host:
     """One Pip's live computer, owned by the supervisor process."""
 
@@ -1390,7 +1404,8 @@ class Host:
                 if carried:
                     return self._careful_hold("text", {"method": "RUN", "host": "Terminal", "path": "/",
                                                        "fields": [{"name": "command", "value": _preview(command)}]}, command, carried)
-            entry = desk.run_command(self.root, args.get("command"), "pip", policy=self._terminal_policy() if careful else None)
+            entry = desk.run_command(self.root, args.get("command"), "pip", policy=self._terminal_policy() if careful else None,
+                                     env=terminal_keys(getattr(self, "state_directory", None), getattr(self, "pip_id", None)))
             from .tools import _UNTRUSTED_PAGE
             status = "timed out" if entry["timed_out"] else f"exit {entry['exit']}"
             return f"{_UNTRUSTED_PAGE}\n$ {entry['command']}\n({status})\n{entry['output']}"

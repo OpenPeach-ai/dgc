@@ -4012,7 +4012,8 @@ bubblewrap profile is missing; DGC does not fall back to an unsandboxed browser.
   card naming the key, why, and the one site it goes to. Paste it there and DGC keeps it in your keychain, bound to
   that Pip and that site; DGC adds it when the Pip reads that site, never sends it anywhere else, and never follows a
   redirect with it. The Pip never sees it. Not now keeps it from asking again for a day; a site that turns the key
-  away puts the card back.
+  away puts the card back. At Do it all the card can also let the Pip's computer Terminal use the key, as a variable
+  (INVOICELY_API_KEY), for its scripts: what the Terminal prints is masked of it, and below Do it all it isn't there.
 - **Saved logins.** Save a site's login once, with its authenticator key if it has one, and DGC types
   it in, the one-time code too. The Pip never sees it.
 - **Borrowing your Chrome.** For one task that needs a site you're signed in to, a Pip can ask to use

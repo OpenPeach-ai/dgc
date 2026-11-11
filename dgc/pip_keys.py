@@ -162,7 +162,10 @@ def _for_generator(registry, pip_id, generator_id) -> dict | None:
 def projection(value) -> dict:
     """What the editor and the SDKs see of a key: never its value."""
     generator = _kind(value) == "generator"
+    terminal = value.get("terminal") is True and not generator
     return {"id": value["id"], "pip_id": value["pip_id"], "workspace_id": value["workspace_id"],
+            # Its computer's Terminal may have it (slice 2c): only if the user ticked it, and only used at Do it all.
+            "terminal": terminal, **({"terminal_name": terminal_name(value["name"])} if not generator else {}),
             # "site": a key bound to one site (fetch_with_key); "generator": a picture or video generator's own key,
             # kept with it in Settings for all of DGC (slice 2b).
             "kind": _kind(value), **({"generator": value.get("generator", "")} if generator else {}),
@@ -343,11 +346,20 @@ def _owned(registry, key_id, pip_id, actor) -> dict:
     return _get(registry, key_id, pip_id)
 
 
-def save(store, config, key_id, pip_id, actor, value) -> dict:
-    """save_pip_key: keep the pasted key for the card's site, then owe the Pip its next turn."""
+def save(store, config, key_id, pip_id, actor, value, terminal=False) -> dict:
+    """save_pip_key: keep the pasted key for the card's site, then owe the Pip its next turn. ``terminal``: also let its
+    computer's Terminal use it (slice 2c), only at Do it all."""
     from . import plugin_credentials as credentials
     registry = store.registry
     card = _owned(registry, key_id, pip_id, actor)
+    if terminal is not False and terminal is not True:
+        raise RegistryError("invalid_request", "terminal is true or false.")
+    if terminal:
+        from .pip_levels import level
+        if _kind(card) != "site":
+            raise RegistryError("invalid_request", "Only a site's key can be used in a Terminal.")
+        if level(registry, pip_id) != "full":
+            raise RegistryError("key_terminal_level", "Its Terminal can use a key only at Do it all.")
     if card.get("status") == "declined":
         raise RegistryError("key_declined", "You said not now to this key. The Pip can ask again tomorrow.")
     text = value.strip() if isinstance(value, str) else ""
@@ -378,7 +390,7 @@ def save(store, config, key_id, pip_id, actor, value) -> dict:
     was_waiting = card.get("status") == "requested"
     with registry.transaction():
         card = {**_get(registry, key_id, pip_id), "status": "saved", "refused": False, "saved_at": utc_now(),
-                "stored": where}
+                "stored": where, "terminal": bool(terminal) and _kind(card) == "site"}
         _put(registry, card)
         registry.event(card["workspace_id"], "pip_key_saved", pip_id=pip_id,
                        payload={"key_id": key_id, "host": card.get("host", ""), "actor": actor,
@@ -464,6 +476,66 @@ def _refused(registry, card, status) -> None:
         _put(registry, current)
         registry.event(current["workspace_id"], "pip_key_refused", pip_id=current["pip_id"],
                        payload={"key_id": current["id"], "host": current["host"], "status": status})
+
+
+# ------------------------------------------------------------------------------------------------ the Terminal
+
+# Names a Terminal already gives a meaning to: a key is never one of them.
+_RESERVED = frozenset({"PATH", "HOME", "LANG", "TERM", "TMPDIR", "SHELL", "USER", "PWD", "OLDPWD", "IFS", "PS1", "PS2",
+                       "ENV", "BASH_ENV", "LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONPATH", "HTTP_PROXY", "HTTPS_PROXY",
+                       "ALL_PROXY", "NO_PROXY", "TZ", "LC_ALL"})
+
+
+def terminal_name(name) -> str:
+    """The variable a key is in its Pip's Terminal: its name in capitals, letters, digits and _ only ("Invoicely API key"
+    is INVOICELY_API_KEY), never one a Terminal already uses."""
+    text = re.sub(r"[^A-Za-z0-9]+", "_", str(name or "")).strip("_").upper()[:60]
+    if not text:
+        return "PIP_KEY"
+    if text[0].isdigit():
+        text = "KEY_" + text
+    return "PIP_KEY_" + text if text in _RESERVED or text.endswith("_PROXY") else text
+
+
+def terminal_env(registry, pip_id) -> dict:
+    """{variable: key} for this Pip's Terminal now: its saved site keys the user ticked, and only while it is at Do it
+    all (read again at each command). Never logged; the Terminal's output is masked of them (pip_computer_files)."""
+    import sys
+    from .pip_levels import level
+    if level(registry, pip_id) != "full" or sys.platform == "darwin":
+        # A Mac's VM would take it on a command line (pip_computer_files._execute_in_vm): not there yet.
+        return {}
+    env = {}
+    for card in _rows(registry, pip_id):
+        if _kind(card) != "site" or card.get("status") != "saved" or card.get("terminal") is not True:
+            continue
+        value = value_for(registry, pip_id, card["host"])
+        if not value:
+            continue
+        name, n = terminal_name(card["name"]), 2
+        while name in env:
+            name, n = f"{terminal_name(card['name'])}_{n}", n + 1
+        env[name] = value
+    return env
+
+
+def terminal_names(registry, pip_id) -> list[dict]:
+    """What a Pip is told its Terminal has (names and sites, never a value), at Do it all only."""
+    import sys
+    from .pip_levels import level
+    if level(registry, pip_id) != "full" or sys.platform == "darwin":
+        return []
+    return [{"name": terminal_name(c["name"]), "host": c["host"]} for c in _rows(registry, pip_id)
+            if _kind(c) == "site" and c.get("status") == "saved" and c.get("terminal") is True]
+
+
+def terminal_notice(names) -> str:
+    """What the Pip is told: which variables its Terminal has, for which sites. Never a value."""
+    shown = ", ".join(f"${n['name']} (for {n['host']})" for n in names if isinstance(n, dict)
+                      and re.fullmatch(r"[A-Z_][A-Z0-9_]{0,127}", str(n.get("name", ""))))[:600]
+    return ("Your Terminal has these keys the user gave you, as variables: " + shown + ". Use them in commands for "
+            "their own sites only (\"Authorization: Bearer $NAME\"); never print, save or send one anywhere else: what "
+            "the Terminal prints is masked of them.")
 
 
 # ------------------------------------------------------------------------------------------------ the read

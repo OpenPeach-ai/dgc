@@ -140,7 +140,7 @@ export type PipMutationParams = {
   allow_pip_borrow: { pip_id: string; borrow_id: string };
   decline_pip_borrow: { pip_id: string; borrow_id: string };
   stop_pip_borrow: { pip_id: string; borrow_id: string };
-  save_pip_key: { pip_id: string; key_id: string; value: string };
+  save_pip_key: { pip_id: string; key_id: string; value: string; terminal?: boolean };
   decline_pip_key: { pip_id: string; key_id: string };
   remove_pip_key: { pip_id: string; key_id: string };
   set_pip_working_notes: { pip_id: string; text: string; expected_revision: string };
@@ -278,7 +278,7 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   list_pip_borrows: ["pip_id"],
   allow_pip_borrow: ["pip_id", "borrow_id"],
   list_pip_keys: ["pip_id"],
-  save_pip_key: ["pip_id", "key_id", "value"],
+  save_pip_key: ["pip_id", "key_id", "value", "terminal"],
   decline_pip_key: ["pip_id", "key_id"],
   remove_pip_key: ["pip_id", "key_id"],
   decline_pip_borrow: ["pip_id", "borrow_id"],
@@ -1295,6 +1295,13 @@ export class Pips {
     }
     if (command === "save_pip_key" && !(typeof values.value === "string" && values.value.length <= 16384)) {
       throw new DGCConfigError("value is the key, up to 16,384 characters");
+    }
+    // API 85 (slice 2c): also let the Pip's Terminal use the key, at Do it all only.
+    if (command === "save_pip_key" && Object.hasOwn(values, "terminal")) {
+      if ((this.caps.pips_api_version as number) < 85) {
+        throw new DGCUnsupportedError("A key for a Pip's Terminal (terminal) requires a runtime advertising Pips API 85 or newer");
+      }
+      if (typeof values.terminal !== "boolean") throw new DGCConfigError("terminal is true or false");
     }
     if (command === "grant_pip_login" && !(values.pips === "all" || Array.isArray(values.pips) && values.pips.length <= 64 && values.pips.every((p) => typeof p === "string"))) {
       throw new DGCConfigError("pips is \"all\" or a list of Pip ids");

@@ -17,6 +17,7 @@ import base64
 import json
 import mimetypes
 import os
+import re
 import shutil
 import signal
 import stat
@@ -352,9 +353,27 @@ def proxy_args(egress: Path, forwarder: Path) -> list[str]:
             "--dir", "/run/dgc", "--bind", str(egress), "/run/dgc/egress.sock", "--ro-bind", str(forwarder), "/run/dgc/forward.py"]
 
 
-def terminal_argv(files: Path, command: str, *, egress: Path | None = None, forwarder: Path | None = None) -> list[str]:
+KEYS_FILE = "/run/pipkeys/env"     # inside the box only: a Pip's own keys for its Terminal (pip_keys, slice 2c)
+
+
+def keys_text(env: dict) -> bytes:
+    """The keys' file the box reads in before a command: NAME='value' lines, single-quoted for sh."""
+    lines = []
+    for name, value in env.items():
+        if not re.fullmatch(r"[A-Z_][A-Z0-9_]{0,127}", str(name)) or not isinstance(value, str) or "\x00" in value:
+            continue
+        lines.append(f"{name}='" + value.replace("'", "'\\''") + "'")
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def terminal_argv(files: Path, command: str, *, egress: Path | None = None, forwarder: Path | None = None,
+                  keys_fd: int | None = None) -> list[str]:
+    """``keys_fd``: a pipe holding the Pip's keys for this command (keys_text). They reach the box as a file only it
+    sees (bwrap --file), read in before the command: never on a command line, where the process list would show them."""
     from .pip_computer_box import timezone_args
     online = egress is not None and forwarder is not None
+    keys = ["--dir", "/run/pipkeys", "--file", str(keys_fd), KEYS_FILE] if keys_fd is not None else []
+    read_keys = f"set -a; . {KEYS_FILE}; set +a; " if keys_fd is not None else ""
     return ["bwrap", "--unshare-all", "--die-with-parent", "--new-session", "--cap-drop", "ALL",
             "--clearenv", "--setenv", "HOME", "/home/pip", "--setenv", "PATH", "/usr/local/bin:/usr/bin:/bin",
             "--setenv", "LANG", "C.UTF-8", "--setenv", "TERM", "dumb", "--setenv", "TMPDIR", "/tmp", *timezone_args(),
@@ -365,9 +384,10 @@ def terminal_argv(files: Path, command: str, *, egress: Path | None = None, forw
             "--ro-bind-try", "/etc/ld.so.cache", "/etc/ld.so.cache",
             "--ro-bind-try", "/etc/localtime", "/etc/localtime",
             "--dev", "/dev", "--proc", "/proc", "--size", str(256 * 1024 * 1024), "--tmpfs", "/tmp",
-            "--bind", str(files), "/home/pip", "--chdir", "/home/pip",
-            *(["/bin/sh", "-c", "python3 /run/dgc/forward.py >/dev/null 2>&1 & sleep 0.2; exec /bin/sh -c \"$0\"", command]
-              if online else ["/bin/sh", "-c", command])]
+            "--bind", str(files), "/home/pip", "--chdir", "/home/pip", *keys,
+            *(["/bin/sh", "-c", read_keys + "python3 /run/dgc/forward.py >/dev/null 2>&1 & sleep 0.2; exec /bin/sh -c \"$0\"", command]
+              if online else (["/bin/sh", "-c", read_keys + "exec /bin/sh -c \"$0\"", command] if keys_fd is not None
+                              else ["/bin/sh", "-c", command]))]
 
 
 def _user_tasks() -> int:
@@ -456,9 +476,10 @@ def running(computer_root: Path) -> dict | None:
     return {"by": value["by"], "command": value["command"][:MAX_COMMAND_CHARS], "at": value["at"]}
 
 
-def run_command(computer_root: Path, command, by: str, *, policy=None) -> dict:
+def run_command(computer_root: Path, command, by: str, *, policy=None, env: dict | None = None) -> dict:
     """Run one command in the computer's Terminal, wait for it, and keep it in the history. `policy`
-    (careful mode) narrows where its network may go."""
+    (careful mode) narrows where its network may go. `env`: the Pip's own keys this command may use (pip_keys
+    .terminal_env, at Do it all only); what it prints is masked of them before anyone sees or keeps it."""
     command = _check(command, by)
     files = files_root(computer_root)
     if folder_bytes(files) > MAX_FOLDER_BYTES:
@@ -468,7 +489,10 @@ def run_command(computer_root: Path, command, by: str, *, policy=None) -> dict:
         started, at = time.monotonic(), int(time.time())
         marker.write_text(json.dumps({"by": by, "command": command, "at": at}), encoding="utf-8")
         try:
-            code, text, timed_out, reached = _execute(files, command, computer_root, policy=policy)
+            code, text, timed_out, reached = _execute(files, command, computer_root, policy=policy, env=env)
+            if env:
+                from .redaction import redact_text
+                text = redact_text(text, [v for v in env.values() if isinstance(v, str) and v])
         finally:
             try:
                 marker.unlink()
@@ -501,11 +525,13 @@ def start_command(computer_root: Path, command, by: str = "you") -> dict:
     return {"running": {"by": by, "command": command, "at": int(time.time())}}
 
 
-def _execute(files: Path, command: str, computer_root: Path | None = None, *, policy=None):
+def _execute(files: Path, command: str, computer_root: Path | None = None, *, policy=None, env: dict | None = None):
     """Run it; returns (exit, output, timed out, {"reached": hosts, "blocked": hosts})."""
     from .pip_computer_box import EgressProxy, FORWARDER
     from .pip_computer import socket_dir
     if sys.platform == "darwin" and computer_root is not None:
+        # A Mac's VM takes its environment on `container exec`'s command line (-e NAME=value), where the process list
+        # would show a key: no keys there yet (pip_keys.terminal_env says none on a Mac).
         return _execute_in_vm(files, command, Path(computer_root), policy=policy)
     proxy = forwarder = None
     if computer_root is not None:
@@ -513,9 +539,21 @@ def _execute(files: Path, command: str, computer_root: Path | None = None, *, po
         forwarder.write_text(FORWARDER)
         proxy = EgressProxy(socket_dir() / f"{os.urandom(6).hex()}-term.sock", policy=policy)
         proxy.start()
+    keys_r = None
     try:
-        code, text, timed_out = _run_boxed(terminal_argv(files, command, egress=proxy.path if proxy else None, forwarder=forwarder))
+        if env:
+            # The keys go through a pipe into a file only the box sees: never a command line, never this disk.
+            keys_r, keys_w = os.pipe()
+            try:
+                os.write(keys_w, keys_text(env))
+            finally:
+                os.close(keys_w)
+        code, text, timed_out = _run_boxed(terminal_argv(files, command, egress=proxy.path if proxy else None,
+                                                         forwarder=forwarder, keys_fd=keys_r),
+                                           pass_fds=(keys_r,) if keys_r is not None else ())
     finally:
+        if keys_r is not None:
+            os.close(keys_r)
         if proxy is not None:
             proxy.stop()
     hosts = {"reached": [], "blocked": []}
@@ -559,11 +597,11 @@ def _execute_in_vm(files: Path, command: str, computer_root: Path, *, policy=Non
     return code, text, timed_out, {k: v for k, v in hosts.items() if v}
 
 
-def _run_boxed(argv: list[str], *, limits: bool = True) -> tuple[int | None, str, bool]:
+def _run_boxed(argv: list[str], *, limits: bool = True, pass_fds=()) -> tuple[int | None, str, bool]:
     # On a Mac the VM is the limit (its memory and CPUs, and `timeout` inside); here, rlimits on the box.
     proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, start_new_session=True, preexec_fn=_limits(_user_tasks()) if limits else None,
-                            env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")})
+                            env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")}, pass_fds=tuple(pass_fds))
     output, timed_out = bytearray(), False
     reader = threading.Thread(target=lambda: _drain(proc.stdout, output), daemon=True)
     reader.start()

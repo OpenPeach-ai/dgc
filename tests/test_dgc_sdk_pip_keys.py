@@ -34,3 +34,17 @@ class PipKeysSDKTests(unittest.TestCase):
                 current.pips.mutate("save_pip_key", {"pip_id": PIP, **bad}, approved=True)
         with self.assertRaises(DGCConfigError):
             current.pips.mutate("remove_pip_key", {"pip_id": PIP, "key_id": "nope"}, approved=True)
+
+
+class PipKeysTerminalSDKTests(unittest.TestCase):
+    def test_terminal_needs_api85_and_is_true_or_false(self):
+        wire = Wire(); old = session(wire, caps={**CAPS, "pips_api_version": 84})
+        with self.assertRaisesRegex(DGCUnsupportedError, "API 85"):
+            old.pips.mutate("save_pip_key", {"pip_id": PIP, "key_id": KEY, "value": "k", "terminal": True}, approved=True)
+        self.assertFalse(wire.calls)
+        wire = Wire(); current = session(wire, caps={**CAPS, "pips_api_version": 85})
+        sent = current.pips.mutate("save_pip_key", {"pip_id": PIP, "key_id": KEY, "value": "k", "terminal": True},
+                                   approved=True)["request"]
+        self.assertIs(sent["terminal"], True)
+        with self.assertRaises(DGCConfigError):
+            current.pips.mutate("save_pip_key", {"pip_id": PIP, "key_id": KEY, "value": "k", "terminal": "yes"}, approved=True)

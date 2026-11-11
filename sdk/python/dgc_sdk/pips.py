@@ -452,7 +452,7 @@ COMMAND_FIELDS = {
     'rotate_app_secret': frozenset({'name'}),
     'list_pip_borrows': frozenset({'pip_id'}),
     'list_pip_keys': frozenset({'pip_id'}),
-    'save_pip_key': frozenset({'pip_id', 'key_id', 'value'}),
+    'save_pip_key': frozenset({'pip_id', 'key_id', 'value', 'terminal'}),
     'decline_pip_key': frozenset({'pip_id', 'key_id'}),
     'remove_pip_key': frozenset({'pip_id', 'key_id'}),
     'allow_pip_borrow': frozenset({'pip_id', 'borrow_id'}),
@@ -1143,6 +1143,12 @@ class Pips:
             raise DGCConfigError("key_id is the key's id, pipkey_ and 32 hex digits")
         if command == 'save_pip_key' and not (isinstance(values.get('value'), str) and len(values['value']) <= MAX_PLUGIN_KEY):
             raise DGCConfigError('value is the key, up to 16,384 characters')
+        if command == 'save_pip_key' and 'terminal' in values:
+            # API 85 (slice 2c): also let the Pip's Terminal use the key, at Do it all only.
+            if version < 85:
+                raise DGCUnsupportedError("A key for a Pip's Terminal (terminal) requires a runtime advertising Pips API 85 or newer")
+            if not isinstance(values['terminal'], bool):
+                raise DGCConfigError('terminal is true or false')
         if command == 'grant_pip_login' and not (values.get('pips') == 'all' or (
                 type(values.get('pips')) is list and len(values['pips']) <= 64 and all(type(p) is str for p in values['pips']))):
             raise DGCConfigError('pips is "all" or a list of Pip ids')

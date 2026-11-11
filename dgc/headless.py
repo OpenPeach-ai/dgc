@@ -466,7 +466,11 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # then carries `images` and `files` as any message's does, in send's answer, in list_pip_messages (a mid-reply
 # message, and each row of `waiting`), and get_pip_message_image reads a mid-reply message's photo. All optional fields
 # inside answers; no protocol event changed. A client gates on 84 before sending either.
-PIPS_API_VERSION = 84
+# API 85 (0.52, pips-10 slice 2c): save_pip_key takes an optional `terminal` (true or false): also let the Pip's computer
+# Terminal use that site's key, as a variable (list_pip_keys rows say `terminal` and `terminal_name`). Refused below Do
+# it all; at each command the level is read again (below Do it all the Terminal has none). The key reaches the box
+# through a pipe into a file only it sees, never a command line; what the Terminal prints is masked of it.
+PIPS_API_VERSION = 85
 
 
 def attachment_limits() -> dict:

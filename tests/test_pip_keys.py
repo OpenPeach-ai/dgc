@@ -341,7 +341,8 @@ class PipsApi(unittest.TestCase):
         self.assertGreaterEqual(PIPS_API_VERSION, 82)
         for name in ("list_pip_keys", "save_pip_key", "decline_pip_key", "remove_pip_key"):
             self.assertIn(name, pips.CONTROL_COMMANDS)
-        self.assertEqual(pips._COMMAND_ARGS["save_pip_key"], {"pip_id", "key_id", "value"})
+        self.assertEqual(pips._COMMAND_ARGS["save_pip_key"], {"pip_id", "key_id", "value", "terminal"},
+                         "terminal from API 85 (slice 2c)")
 
 
 if __name__ == "__main__":
