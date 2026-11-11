@@ -2043,7 +2043,9 @@ def export_xlsx(sheet, *, values: bool = True) -> bytes:
                 else:
                     cells.append(made.XlsxCell(raw, fmt, shown=text))
             rows.append(cells)
-        out.append({"name": s["name"], "rows": rows, "header": True, "frozen": s["frozen"]})
+        # A column of numbers has its heading over them, to the right, as the sheet DGC shows does (render_html).
+        right = [c for c, col in enumerate(cols) if col["type"] in ("number", "currency", "percent", "date")]
+        out.append({"name": s["name"], "rows": rows, "header": True, "frozen": s["frozen"], "right": right})
     return made.xlsx(out)
 
 

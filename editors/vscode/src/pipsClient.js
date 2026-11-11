@@ -2320,9 +2320,11 @@ function rowWords(r,fallback){
   const post=postsShown()&&S.postsPip===S.selected?postFor(r.id):null;if(!post)return fallback;
   const w=postShort(post);return `<span class="hist-row-out" data-tone="${esc(w.tone)}">${esc(w.text)}</span>`;
 }
+// (History's first line was six lines in a 300 px side bar, 0.51 check: what the page is, in a sentence or two; how to
+// get a first result is said where there are none.)
 function runsMarkup() {
   const audits=S.runs.filter(r=>r.manifest?.run_kind!=='conversation');
-  if(S.pip?.source_policy?.mode==='personal')return `<section class="section"><div class="section-head"><h2>${historyName('Results')}</h2></div><p class="muted">${postsShown()?`Everything ${esc(S.pip.name)} did on its own, newest first. Each result is also in its chat, where you can ask about it. `:''}${S.pip.schedule||S.pip.event_trigger?`What ${esc(S.pip.name)} made on its schedule.`:`When ${esc(S.pip.name)} works on its own, on a schedule like “every morning, send me the news”, what it makes shows here. Ask for one in its chat.`}</p>${audits.map(r=>`<div class="run-row"><button type="button" data-run="${esc(r.id)}"><span>${rowWords(r,esc(personalStatusLabel(r.status)))}</span><small>${esc(date(r.created_at))}</small></button></div>`).join('')||'<p class="muted">No results yet.</p>'}</section>${reportMarkup()}`;
+  if(S.pip?.source_policy?.mode==='personal')return `<section class="section"><div class="section-head"><h2>${historyName('Results')}</h2></div><p class="muted">${postsShown()?`What ${esc(S.pip.name)} did on its own, newest first. Each result is also in its chat, where you can ask about it.`:S.pip.schedule||S.pip.event_trigger?`What ${esc(S.pip.name)} made on its schedule.`:`When ${esc(S.pip.name)} works on its own, on a schedule like “every morning, send me the news”, what it makes shows here. Ask for one in its chat.`}</p>${audits.map(r=>`<div class="run-row"><button type="button" data-run="${esc(r.id)}"><span>${rowWords(r,esc(personalStatusLabel(r.status)))}</span><small>${esc(date(r.created_at))}</small></button></div>`).join('')||`<p class="muted">No results yet.${postsShown()&&!(S.pip.schedule||S.pip.event_trigger)?' Ask for a schedule in its chat, like “every morning, send me the news”.':''}</p>`}</section>${reportMarkup()}`;
   if(livePip(S.pip))return reportChatsNote()+liveRunsMarkup(audits);
   if(pulsePip(S.pip))return reportChatsNote()+pulseRunsMarkup(audits);
   if(executionPip(S.pip))return `<section class="section"><h2>Runs</h2><p class="muted">It runs only when you approve a handoff to it, never on a schedule. Chatting with it never changes files.</p><button type="button" data-tab="handoffs">Open handoffs</button>${audits.map(r=>`<div class="run-row"><button type="button" data-run="${esc(r.id)}" aria-current="${S.runId===r.id}"><span>${esc(personalStatusLabel(r.status))}</span><small>${esc(date(r.created_at))}</small></button></div>`).join('')||'<p class="muted">No runs yet.</p>'}</section>${reportMarkup()}`;
@@ -3332,7 +3334,8 @@ function reviewFlow(){
 }
 function simpleHomeMarkup(){
  const all=S.jobs.filter(p=>S.showArchived||p.status!=='archived'),live=S.jobs.filter(p=>p.status!=='archived');
- if(projectHome())return (S.pipSearch?'':attentionHomeMarkup())+simpleHomeList(all,live)+(S.pipSearch?'':flowMarkup());
+ // (A project's home too, while its Pips are being read: its empty home, with New Pip, flashed before the list.)
+ if(projectHome())return !S.jobsRead&&!S.error&&!S.jobs.length&&!S.pipSearch?loadingMark():(S.pipSearch?'':attentionHomeMarkup())+simpleHomeList(all,live)+(S.pipSearch?'':flowMarkup());
  // Only once the list has come back empty: while it's being read a Pip's owner saw Meet Core's large face, and could press Create Core.
  if(!live.length&&!S.jobs.length&&!S.pipSearch)return S.jobsRead?attentionHomeMarkup()+meetCoreMarkup():loadingMark();   // a search that finds nothing is not an empty home
  return (S.pipSearch?'':attentionHomeMarkup())+simpleHomeList(all,live)+(S.pipSearch?'':flowMarkup());

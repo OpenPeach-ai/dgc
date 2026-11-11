@@ -550,7 +550,7 @@ def _page_file(title: str, fmt: str, files: dict, entry: str, config, browser) -
     tables = page_export.sheets(page)
     if not tables:
         raise ArtifactUseError("This page has no table to put in a workbook. Download it as Word or PDF instead.")
-    return made.xlsx(made._sheets({"sheets": tables}))
+    return made.xlsx(page_export.workbook(made._sheets({"sheets": tables})))
 
 
 def refresh(aid: str, *, project_root=None, call=None, is_read_only=None, store: Store | None = None) -> dict:

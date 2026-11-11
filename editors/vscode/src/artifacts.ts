@@ -123,32 +123,59 @@ export async function forwardedArtifactPage(raw: string): Promise<vscode.Uri | u
   } catch { return undefined; }
 }
 
+/** How long a download address answers with its file. */
+export const DOWNLOAD_MINUTES = 5;
+const downloads = new Map<string, { path: string; encoded: string; until: number }>();
+let downloadServer: Promise<number> | undefined;
+const goneWords = (name: string) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>This download link has ended</title></head><body style="font:15px/1.5 system-ui,sans-serif;max-width:34em;margin:15vh auto;padding:0 20px"><h1 style="font-size:20px">This download link has ended</h1><p>The link for \u201c${attr(name)}\u201d worked for ${DOWNLOAD_MINUTES} minutes. In DGC, choose Download again to get a new one.</p></body></html>`;
+/** The one listener every download address is on. It stays for as long as the window does, so an address that has ended
+ *  is answered in words: a forwarded port with nothing listening behind it leaves the browser waiting for ever. */
+function downloadPort(): Promise<number> {
+  return downloadServer ??= new Promise<number>((resolve, reject) => {
+    const server = http.createServer((req, res) => {
+      const now = Date.now();
+      // An address that has ended is remembered for a day, to say so; then, and past a few hundred, it is forgotten.
+      for (const [key, entry] of downloads) if (entry.until + 24 * 3_600_000 <= now || downloads.size > 400) downloads.delete(key); else break;
+      const parts = /^\/([a-f0-9]{48})\/([^/?#]+)$/.exec(req.url || "");
+      const plain = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer" };
+      if ((req.method !== "GET" && req.method !== "HEAD") || !parts) { res.writeHead(404, plain); res.end(); return; }
+      const entry = downloads.get(parts[1]);
+      if (!entry || entry.encoded !== parts[2]) { res.writeHead(404, plain); res.end(); return; }      // only with its token
+      let size = -1;
+      if (entry.until > now) { try { size = statSync(entry.path).size; } catch { size = -1; } }
+      if (size < 0) {
+        // Past its few minutes, or its file has gone: said in words, with what to do.
+        const page = goneWords(decodeURIComponent(entry.encoded).slice(0, 120));
+        res.writeHead(410, { ...plain, "Content-Type": "text/html; charset=utf-8", "Content-Length": String(Buffer.byteLength(page)) });
+        res.end(req.method === "HEAD" ? undefined : page);
+        return;
+      }
+      res.writeHead(200, { ...plain, "Content-Type": "application/octet-stream", "Content-Length": String(size),
+        "Content-Disposition": `attachment; filename*=UTF-8''${entry.encoded}` });
+      if (req.method === "HEAD") { res.end(); return; }
+      const stream = createReadStream(entry.path);
+      stream.on("error", () => res.destroy());
+      stream.pipe(res);
+    });
+    server.once("error", (error) => { downloadServer = undefined; reject(error); });
+    server.listen(0, "127.0.0.1", () => { server.unref(); resolve((server.address() as { port: number }).port); });
+  });
+}
+
 /** One file, to the browser on the person's own computer: a remote window's save dialog can only save on the remote
- *  machine. A one-time address on the machine that made it, forwarded like any other, answers with an attachment and
- *  then closes. It holds only this file, behind a token nobody else has, and it goes away after a few minutes unused. */
-export async function downloadThroughBrowser(path: string, name: string): Promise<boolean> {
+ *  machine. An address on the machine that made it, forwarded like any other, answers with an attachment. It holds only
+ *  this file, behind a token nobody else has, for a few minutes: a second click in that time downloads it again (a
+ *  browser may itself ask twice), and after it the address says in words that it has ended. It never just stops
+ *  answering. */
+export async function downloadThroughBrowser(path: string, name: string, now: () => number = Date.now): Promise<boolean> {
   const token = randomBytes(24).toString("hex");
   const encoded = encodeURIComponent(name);
-  const size = statSync(path).size;
-  const server = http.createServer((req, res) => {
-    if (req.method !== "GET" || req.url !== `/${token}/${encoded}`) { res.writeHead(404); res.end(); return; }
-    res.writeHead(200, {
-      "Content-Type": "application/octet-stream", "Content-Length": String(size), "Cache-Control": "no-store",
-      "Content-Disposition": `attachment; filename*=UTF-8''${encoded}`, "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
-    });
-    const stream = createReadStream(path);
-    stream.on("error", () => res.destroy());
-    res.on("close", () => { clearTimeout(unused); server.close(); });
-    stream.pipe(res);
-  });
-  const unused = setTimeout(() => server.close(), 5 * 60_000);
-  unused.unref?.();
-  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
-  server.unref();
-  const { port } = server.address() as { port: number };
+  statSync(path);                                    // a file that isn't there fails here, where the caller says so
+  const port = await downloadPort();
+  downloads.set(token, { path, encoded, until: now() + DOWNLOAD_MINUTES * 60_000 });
   const external = await vscode.env.asExternalUri(vscode.Uri.parse(`http://127.0.0.1:${port}/${token}/${encoded}`, true));
   const opened = await vscode.env.openExternal(external);
-  if (!opened) { clearTimeout(unused); server.close(); }
+  if (!opened) downloads.delete(token);
   return opened;
 }
 

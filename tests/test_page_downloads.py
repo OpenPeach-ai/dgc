@@ -118,6 +118,54 @@ class Downloads(unittest.TestCase):
         self.assertIn("Priya", sheet)
         self.assertIn("<v>3</v>", sheet, "a count is a number in the workbook")
 
+    def test_excel_keeps_every_number_column_to_the_right_money_and_percent_too_with_its_heading(self):
+        """0.51 check: an order's Qty column sat to the right (plain numbers) while Unit price and Amount sat to the
+        left, as text ("$1,200.00"), and every heading sat to the left, away from the numbers under it."""
+        html = """<h1>Order</h1><table><thead><tr><th>Item</th><th>Qty</th><th>Unit price</th><th>Amount</th><th>Tax</th><th>Code</th></tr></thead>
+<tbody><tr><td>Design work</td><td>2</td><td>$1,200.00</td><td>$2,400.00</td><td>18%</td><td>007</td></tr>
+<tr><td>Hosting</td><td>12</td><td>$20.00</td><td>$240.00</td><td>12.5%</td><td>A-14</td></tr>
+<tr><td>Licences</td><td>1,500</td><td>$1.50</td><td>-$2,250.00</td><td>0%</td><td>19</td></tr>
+<tr><td>Total</td><td></td><td>—</td><td>₹1,20,390.00</td><td></td><td></td></tr></tbody></table>"""
+        made = self.page(html, "Order")
+        raw = self.export(made["id"], "excel").read_bytes()
+        sheet, styles = text_of(raw, "xl/worksheets/sheet1.xml"), text_of(raw, "xl/styles.xml")
+        import re
+        cells = {ref: (attrs, v, t) for ref, attrs, v, t in re.findall(
+            r'<c r="([A-Z]+\d+)"([^>]*?)(?:/>|>(?:<v>([^<]*)</v>|<is><t[^>]*>([^<]*)</t></is>)</c>)', sheet)}
+        number = lambda ref: (self.assertNotIn("inlineStr", cells[ref][0], f"{ref} is a number, not text"), float(cells[ref][1]))[1]
+        # Qty, as before: numbers.
+        self.assertEqual([number("B2"), number("B3"), number("B4")], [2, 12, 1500])
+        # Unit price and Amount: numbers too, so they sit to the right as Qty does, and can be added up.
+        self.assertEqual([number("C2"), number("C3"), number("C4")], [1200, 20, 1.5])
+        self.assertEqual([number("D2"), number("D3"), number("D4"), number("D5")], [2400, 240, -2250, 120390])
+        self.assertEqual([number("E2"), number("E3"), number("E4")], [0.18, 0.125, 0])
+        # Each reads as the page wrote it: its sign, its places, its grouping.
+        xfs = re.findall(r"<xf [^>]*?(?:/>|>.*?</xf>)", styles.split("<cellXfs")[1])
+        codes = {int(i): code for i, code in re.findall(r'<numFmt numFmtId="(\d+)" formatCode="([^"]*)"', styles)}
+        fmt = lambda ref: __import__("html").unescape(codes[int(re.search(r'numFmtId="(\d+)"', xfs[int(re.search(r's="(\d+)"', cells[ref][0]).group(1))]).group(1))])
+        self.assertEqual(fmt("C2"), '"$"#,##0.00')
+        self.assertEqual(fmt("D4"), '"$"#,##0.00')
+        self.assertEqual(fmt("E2"), "0%")
+        self.assertEqual(fmt("E3"), "0.0%")
+        self.assertIn("₹", fmt("D5"))
+        self.assertIn("##\\,##\\,##0.00", fmt("D5"), "lakh grouping stays lakh grouping")
+        # What isn't a number stays what it was: a code with a leading zero, a dash, words.
+        self.assertEqual([cells["F2"][2], cells["F3"][2], cells["C5"][2], cells["A2"][2]], ["007", "A-14", "—", "Design work"])
+        # The heading of a column of numbers sits to the right, over them; of a column of words, to the left.
+        right = lambda ref: 'horizontal="right"' in xfs[int(re.search(r's="(\d+)"', cells[ref][0]).group(1))]
+        self.assertEqual({ref: right(ref) for ref in ("A1", "B1", "C1", "D1", "E1", "F1")},
+                         {"A1": False, "B1": True, "C1": True, "D1": True, "E1": True, "F1": False})
+        for ref in ("B1", "C1"):
+            self.assertIn('fontId="1"', xfs[int(re.search(r's="(\d+)"', cells[ref][0]).group(1))], "still a heading: bold, on its ground")
+
+    def test_a_table_of_words_downloads_as_before(self):
+        raw = self.export(self.made["id"], "excel").read_bytes()
+        styles = text_of(raw, "xl/styles.xml")
+        self.assertNotIn("numFmts", styles)
+        sheet = text_of(raw, "xl/worksheets/sheet1.xml")
+        self.assertIn('<c r="A1" t="inlineStr" s="1">', sheet)
+        self.assertRegex(sheet, r'<c r="C1" t="inlineStr" s="[^1]\d*">', "Count is a column of numbers: its heading is over them")
+
     def test_pdf_prints_the_page_with_its_own_files_beside_it(self):
         seen = {}
 

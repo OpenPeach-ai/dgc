@@ -374,6 +374,31 @@ class Files(unittest.TestCase):
         self.assertEqual(back["sheets"][0]["rows"][4][:4], ["Total", 64200, 66345.5, -2145.5],
                          "read back through ChatDGC's own reader, a formula comes in as what it computed")
 
+    def test_the_xlsx_heading_of_a_column_of_numbers_sits_over_them_as_on_the_sheet(self):
+        """0.51 check, the Excel download's Qty column: its numbers sat to the right and its heading to the left. The
+        sheet DGC shows has a number column's heading to the right (th.n); the file says the same."""
+        import re
+        book = S.normalize({"sheets": [{"name": "Order", "columns": [
+            {"name": "Item"}, {"name": "Qty", "type": "number"}, {"name": "Unit price", "type": "currency"},
+            {"name": "Share", "type": "percent"}, {"name": "Due", "type": "date"}, {"name": "Paid", "type": "bool"},
+            {"name": "Note"}], "rows": [["Widget", 2, 12.5, 0.4, "2026-11-20", True, "x"], ["Bolt", 12, 0.4, 0.6, None, False, "7"]]}]})
+        archive = zipfile.ZipFile(io.BytesIO(S.export_xlsx(book)))
+        sheet, styles = archive.read("xl/worksheets/sheet1.xml").decode(), archive.read("xl/styles.xml").decode()
+        minidom.parseString(styles)
+        xfs = re.findall(r"<xf [^>]*?(?:/>|>.*?</xf>)", styles.split("<cellXfs")[1])
+        self.assertEqual(len(xfs), int(re.search(r'<cellXfs count="(\d+)"', styles).group(1)))
+        head = {ref: xfs[int(style)] for ref, style in re.findall(r'<c r="([A-G]1)" t="inlineStr" s="(\d+)">', sheet)}
+        self.assertEqual({ref: 'horizontal="right"' in xf for ref, xf in head.items()},
+                         {"A1": False, "B1": True, "C1": True, "D1": True, "E1": True, "F1": False, "G1": False})
+        for xf in head.values():
+            self.assertIn('fontId="1" fillId="2"', xf, "every heading keeps the heading's look")
+        self.assertRegex(sheet, r'<c r="B2" s="\d+"><v>2</v></c>', "and Qty is a number under it")
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "order.xlsx"
+            path.write_bytes(S.export_xlsx(book))
+            back = S.from_table_file(path)
+        self.assertEqual([c["name"] for c in back["sheets"][0]["columns"]], ["Item", "Qty", "Unit price", "Share", "Due", "Paid", "Note"])
+
     def test_plain_workbooks_from_chatdgc_are_written_exactly_as_before(self):
         plain = [{"name": "Costs", "rows": [["Item", "Amount"], ["Flat", 450000], ["Fees", "12,500"],
                                             ["Total", "=SUM(B2:B3)"]], "header": True}]

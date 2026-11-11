@@ -277,12 +277,14 @@ body.vscode-high-contrast, body.vscode-high-contrast-light {
    Contrast themes, where white words read at about 5.9:1; never DGC's olive --err). It takes the place of the normal
    fill on its view: still one filled button there.
    A dialog's main action that carries a mark, or whose words do not fit the box, takes the one wide size.
+   A small button whose words do not fit its 76 px ("Check sign-in", "Open report" on a Pip's report card) takes the
+   roomy button's width at the small height (--btn-w-sm-wide), so it lines up with the buttons above it: never cut.
    Every stylesheet reads these tokens for its buttons; .dgc-btn below is the button itself, for anything new.
    (Written on the body too: a theme sets its own text and hairline there, and these are made from them.) */
 :root, body {
   --btn-r: 6px;
   --btn-h: 28px; --btn-w: 104px; --btn-w-wide: 152px; --btn-pad: 8px;
-  --btn-h-sm: 22px; --btn-w-sm: 76px; --btn-pad-sm: 6px;
+  --btn-h-sm: 22px; --btn-w-sm: 76px; --btn-w-sm-wide: var(--btn-w); --btn-pad-sm: 6px;
   --btn-text: var(--text);
   --btn-fill: var(--solid); --btn-fill-hover: var(--solid-hover); --btn-on-fill: var(--on-solid);
   --btn-danger: var(--vscode-inputValidation-errorBorder, #BE1100); --btn-danger-hover: color-mix(in srgb, var(--vscode-inputValidation-errorBorder, #BE1100) 84%, #000); --btn-on-danger: #fff;

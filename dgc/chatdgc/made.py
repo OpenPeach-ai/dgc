@@ -652,9 +652,27 @@ def _xlsx_cell(ref: str, value, style: int) -> str:
     return f'<c r="{ref}" t="inlineStr"{s}><is><t xml:space="preserve">{_x(text)}</t></is></c>'
 
 
+def xlsx_number(value) -> bool:
+    """Whether a plain cell is written as a number (the rule in ``_xlsx_cell``): a number, or text that reads as one,
+    thousands commas and all; never text that starts with a zero ("007" is a code), a formula or a bool."""
+    if isinstance(value, XlsxCell):
+        value = value.value
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return value == value and abs(value) != float("inf")
+    text = str(value)
+    if not text or text.startswith("="):
+        return False
+    plain = text.replace(",", "") if re.fullmatch(r"-?\d{1,3}(,\d{3})+(\.\d+)?", text) else text
+    return bool(_NUMBER.match(plain)) and not (len(plain) > 1 and plain.lstrip("-").startswith("0") and "." not in plain[:3])
+
+
 def xlsx(sheets: list[dict]) -> bytes:
     """A workbook: each sheet {"name", "rows", "header"}, and optionally "frozen" (how many top rows stay in view;
-    the header row when it isn't given). A cell in rows is a plain value or an XlsxCell."""
+    the header row when it isn't given) and "right" (the columns, counted from 0, whose heading sits to the right:
+    the columns of numbers, so a heading is over the numbers under it). A cell in rows is a plain value or an
+    XlsxCell."""
     main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
     rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
     parts: dict[str, str] = {}
@@ -664,6 +682,9 @@ def xlsx(sheets: list[dict]) -> bytes:
             for v in row:
                 if isinstance(v, XlsxCell) and v.fmt and v.fmt not in formats:
                     formats[v.fmt] = 3 + len(formats)
+    # A heading over numbers: the heading's own style, to the right. Its style comes after every other, and only a
+    # workbook that has such a column carries it.
+    head_right = 3 + len(formats) if any(sheet.get("header") and sheet.get("right") for sheet in sheets) else 0
     overrides = {"/xl/workbook.xml": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
                  "/xl/styles.xml": "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml", **_PROPS}
     for n, sheet in enumerate(sheets, 1):
@@ -676,10 +697,12 @@ def xlsx(sheets: list[dict]) -> bytes:
                               default=0)
                 widths[c] = min(60.0, max(widths[c], longest * 1.1 + 2))
         data = ""
+        right = set(sheet.get("right") or ()) if sheet["header"] else set()
         for r, row in enumerate(rows, 1):
             style = 1 if sheet["header"] and r == 1 else 0
             cells = "".join(_xlsx_typed(f"{_column(c)}{r}", v, formats.get(v.fmt, style)) if isinstance(v, XlsxCell)
-                            else _xlsx_cell(f"{_column(c)}{r}", v, style) for c, v in enumerate(row))
+                            else _xlsx_cell(f"{_column(c)}{r}", v, head_right if style and c in right else style)
+                            for c, v in enumerate(row))
             data += f'<row r="{r}">{cells}</row>'
         frozen = int(sheet.get("frozen", 1 if sheet["header"] else 0))
         freeze = (f'<sheetViews><sheetView workbookViewId="0"><pane ySplit="{frozen}" topLeftCell="A{frozen + 1}" '
@@ -716,11 +739,13 @@ def xlsx(sheets: list[dict]) -> bytes:
         '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>'
         '<border><left/><right/><top/><bottom style="thin"><color rgb="FFD1D5DB"/></bottom><diagonal/></border></borders>'
         '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-        f'<cellXfs count="{3 + len(formats)}"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+        f'<cellXfs count="{3 + len(formats) + bool(head_right)}"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
         '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>'
         '<xf numFmtId="3" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'
         + "".join(f'<xf numFmtId="{161 + i}" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'
                   for i in formats.values())
+        + ('<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" '
+           'applyAlignment="1"><alignment horizontal="right"/></xf>' if head_right else "")
         + '</cellXfs>'
         '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>')
     return _zip({"[Content_Types].xml": _types(_BASE_TYPES, overrides),

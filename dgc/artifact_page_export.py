@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from html.parser import HTMLParser
 
-from .chatdgc.made import MAX_SHEETS, MAX_TEXT, Block, Run
+from .chatdgc.made import MAX_SHEETS, MAX_TEXT, Block, Run, XlsxCell, xlsx_number
 
 _VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
 _LEFT_OUT = {"script", "style", "noscript", "template", "nav", "svg", "canvas", "iframe", "object", "embed", "audio",
@@ -290,3 +290,63 @@ def has_words(reader: _Reader) -> bool:
 
 def sheets(reader: _Reader) -> list[dict]:
     return reader.tables[:MAX_SHEETS]
+
+
+# Money and a percentage as a page writes them: "$1,200.00", "-€5", "₹1,20,390.00", "18%", "12.5%". A workbook keeps them
+# as numbers that read the same, so they sit to the right with the other numbers and can be added up.
+_MONEY = re.compile(r"(?P<neg>[-\u2212])?(?P<sym>[$\u20ac\u00a3\u20b9\u00a5])\s?(?P<neg2>[-\u2212])?"
+                    r"(?P<int>\d{1,3}(?:,\d{3})+|\d{1,2}(?:,\d{2})+,\d{3}|\d+)(?:\.(?P<dec>\d{1,6}))?\Z")
+_PERCENT = re.compile(r"(?P<neg>[-\u2212])?(?P<int>\d{1,12})(?:\.(?P<dec>\d{1,6}))?\s?%\Z")
+_LAKH = re.compile(r"\d{1,2}(?:,\d{2})+,\d{3}\Z")
+_NOTHING = {"", "-", "\u2013", "\u2014", "n/a", "N/A"}          # a cell that says "no number here"
+
+
+def _typed(text: str):
+    """A cell's text as the workbook holds it: money or a percentage as a number in its own format, anything else as
+    it is (``made.xlsx`` reads a plain number itself)."""
+    words = text.strip()
+    found = _MONEY.match(words)
+    if found:
+        places = len(found["dec"] or "")
+        value = float(found["int"].replace(",", "") + ("." + found["dec"] if places else ""))
+        if not places:
+            value = int(value)
+        digits = ("." + "0" * places) if places else ""
+        symbol = f'"{found["sym"]}"'
+        if _LAKH.match(found["int"]):                # 1,20,390: lakh and crore grouping, kept
+            fmt = (f"[>=10000000]{symbol}##\\,##\\,##\\,##0{digits};[>=100000]{symbol}##\\,##\\,##0{digits};"
+                   f"{symbol}##,##0{digits}")
+        else:
+            fmt = f"{symbol}#,##0{digits}"
+        negative = bool(found["neg"] or found["neg2"])
+        return XlsxCell(-value if negative else value, fmt, shown=words)
+    found = _PERCENT.match(words)
+    if found:
+        places = len(found["dec"] or "")
+        # 12.5% is 0.125, exactly as typed: the digits moved two places, never a float's division.
+        whole = found["int"] + (found["dec"] or "")
+        value = int(whole) / (10 ** (places + 2))
+        return XlsxCell(-value if found["neg"] else value, "0" + (("." + "0" * places) if places else "") + "%", shown=words)
+    return text
+
+
+def workbook(tables: list[dict]) -> list[dict]:
+    """The sheets ``made.xlsx`` writes from a page's tables (after ``made._sheets`` has named and cleaned them): money
+    and percentages as numbers, and "right": the columns of numbers, whose heading sits over them. A column is one of
+    numbers when every cell under its heading that says anything is a number."""
+    out = []
+    for sheet in tables:
+        rows = [list(row) for row in sheet["rows"]]
+        first = 1 if sheet.get("header") else 0
+        for row in rows[first:]:
+            for c, cell in enumerate(row):
+                if isinstance(cell, str):
+                    row[c] = _typed(cell)
+        right = []
+        for c in range(max((len(row) for row in rows), default=0)):
+            said = [row[c] for row in rows[first:] if c < len(row)
+                    and not (isinstance(row[c], str) and row[c].strip() in _NOTHING)]
+            if said and all(xlsx_number(cell) for cell in said):
+                right.append(c)
+        out.append({**sheet, "rows": rows, "right": right})
+    return out

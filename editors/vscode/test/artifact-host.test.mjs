@@ -248,7 +248,34 @@ test("a document opens in the canvas editor over its working file, and its saves
   assert.equal(hub.docAt("/home/u/.dgc/artifacts/ar_cccccccccccccccc/work/../../x.md"), undefined, "never a path that climbs out");
 });
 
-test("Download, in a remote window: no save dialog on the remote machine; the person's own browser gets the file, once, as an attachment", async () => {
+test("downloads in a remote window share one port that keeps listening: the editor never holds a forwarded port with nothing behind it", async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const folder = mkdtempSync(join(tmpdir(), "dgc-download-"));
+  const file = join(folder, "made.xlsx");
+  writeFileSync(file, "the workbook");
+  const env = globalThis.__DGC_ART_VSCODE.env, opened = env.openExternal, external = env.asExternalUri;
+  const forwarded = [], addresses = [];
+  env.asExternalUri = async (u) => { forwarded.push(new URL(u.toString()).port); return u; };
+  env.openExternal = async (u) => { addresses.push(u.toString()); return true; };
+  try {
+    for (const name of ["One.xlsx", "Two.xlsx", "Three.xlsx"]) {
+      assert.equal(await art.downloadThroughBrowser(file, name), true);
+      assert.equal(await (await fetch(addresses.at(-1), { signal: AbortSignal.timeout(5000) })).text(), "the workbook");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // What the editor counts as forwarded is what it was asked to forward: one port, for all three.
+    assert.equal(new Set(forwarded).size, 1, `one forwarded port, not one a download: ${forwarded.join(", ")}`);
+    // And each of them still has something behind it.
+    for (const address of addresses) assert.equal((await fetch(address, { signal: AbortSignal.timeout(5000) })).status, 200);
+  } finally {
+    env.openExternal = opened; env.asExternalUri = external;
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test("Download, in a remote window: no save dialog on the remote machine; the person's own browser gets the file as an attachment, a second click gets it again, and an ended link says so", async () => {
   const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
@@ -275,7 +302,25 @@ test("Download, in a remote window: no save dialog on the remote machine; the pe
     assert.equal(got.headers.get("content-disposition"), "attachment; filename*=UTF-8''Q3%20plan.pptx");
     assert.equal(await got.text(), "the deck");
     await new Promise((resolve) => setTimeout(resolve, 50));
-    await assert.rejects(fetch(address), "and then it has gone");
+    // A second click on a link already used: it answers. Through a forwarded port, an address with nothing listening
+    // behind it leaves the browser waiting for ever, so the address never just goes.
+    const again = await fetch(address, { signal: AbortSignal.timeout(5000) });
+    assert.equal(again.status, 200, "inside its few minutes the file downloads again");
+    assert.equal(await again.text(), "the deck");
+    // Past its few minutes, or with the file gone: words that say so, and how to get it again.
+    const first = address;
+    assert.equal(await art.downloadThroughBrowser(file, "Q3 plan.pptx", () => Date.now() - (art.DOWNLOAD_MINUTES + 1) * 60_000), true);
+    assert.notEqual(address, first);
+    const ended = await fetch(address, { signal: AbortSignal.timeout(5000) });
+    assert.equal(ended.status, 410);
+    assert.match(ended.headers.get("content-type"), /^text\/html/);
+    const words = await ended.text();
+    assert.match(words, /This download link has ended/);
+    assert.match(words, /choose Download again/);
+    assert.match(words, /Q3 plan\.pptx/);
+    assert.doesNotMatch(words, /<script|127\.0\.0\.1|\/tmp|dgc-download-/, "no script, no address, no path");
+    rmSync(file);
+    assert.equal(await art.downloadThroughBrowser(file, "Q3 plan.pptx").catch(() => "said"), "said", "a file that isn't there is said where Download was chosen");
   } finally {
     delete env.remoteName; env.openExternal = opened; env.asExternalUri = external;
     rmSync(folder, { recursive: true, force: true });

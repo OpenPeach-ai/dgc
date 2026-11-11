@@ -409,6 +409,34 @@ for (const embedded of [true, false]) {
     } finally { await p.close(); }
   });
 
+  for (const [scope, width] of [["personal", 640], ["project", 1280], ["personal", 300]]) test(`Tab chooses the highlighted row of a Pip's @ list ${where} (a ${scope} Pip, ${width} px), as Enter does: the list of Pips too`, async (t) => {
+    if (skipOrFail(t)) return;
+    const p = await openPip({ embedded, scope, width });
+    try {
+      await p.box().click();
+      // "@pip" and Tab: the Pip highlighted goes in as a mark, and the keyboard stays in the box.
+      await p.page.keyboard.type("Ask @pip");
+      await p.$("#chat-pop .pi").first().waitFor({ state: "visible" });
+      assert.deepEqual((await pipRows(p)).map((s) => s.trim()), ["Core"]);
+      await p.page.keyboard.press("Tab");
+      await p.page.keyboard.type(" now");
+      assert.equal(await pipValue(p.page), "Ask Core now");
+      assert.equal(await p.page.evaluate(() => window.__box().querySelectorAll(".pill-pip").length), 1, "a mark, not plain words");
+      // "@", Tab on "Reference a Pip…", then Tab on the Pip it lists.
+      await p.page.keyboard.type(" and @");
+      await p.$("#chat-pop .pi").first().waitFor({ state: "visible" });
+      assert.equal((await pipRows(p))[0].trim(), "Reference a Pip…");
+      await p.page.keyboard.press("Tab");
+      await p.page.waitForFunction(() => [...(window.__root || document).querySelectorAll("#chat-pop .pi .pi-label")].map((n) => n.textContent.trim()).join("|") === "Core");
+      await p.page.keyboard.press("Tab");
+      await p.page.keyboard.type(" too");
+      assert.equal(await pipValue(p.page), "Ask Core now and Core too");
+      assert.equal(await p.page.evaluate(() => window.__box().querySelectorAll(".pill-pip").length), 2);
+      assert.equal(await p.page.evaluate(() => { const box = window.__box(); return box.getRootNode().activeElement === box; }), true, "the keyboard never left the box");
+      assert.deepEqual(p.errors, []);
+    } finally { await p.close(); }
+  });
+
   test(`a click on a mark ${where} leaves a caret after it, even with none before`, async (t) => {
     if (skipOrFail(t)) return;
     const p = await openPip({ embedded });

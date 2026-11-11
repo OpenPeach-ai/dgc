@@ -3211,6 +3211,14 @@ body.vscode-light .pip-report-line-state[data-good] { color: #1D7A44; }   /* --g
   .pip-report.slim[data-shown="open"] .pip-report-main .pip-report-head .pip-report-when { display: inline; }
   .pip-report.slim.quiet[data-shown="open"] > .pip-report-main > .pip-report-actions { display: flex; }
 }
+/* Opened, a card says its state once (0.51 check: an opened clean card read "nothing found" and, under it, "finished ·
+   nothing found"): the first line keeps the Pip's name, and the sentence under it says what happened, whole. */
+.pip-report.slim[data-shown="open"] .pip-report-line1 .pip-report-line-state { display: none; }
+/* A narrower card still (a 190 px chat with Settings open beside it): Fix, Open and ✕ no longer fit one line, so Open
+   waits in the opened card (Open report), as a clean card's does above; and narrower than that the face gives its room
+   to the words and the buttons. */
+@container pip-report (max-width: 215px) { .pip-report.slim:not(.quiet) .pip-report-open-slim { display: none; } }
+@container pip-report (max-width: 165px) { .pip-report.slim > .pip-report-face { display: none; } }
 /* Three or more together: one line until opened. */
 .pip-report-group { display: flex; flex-direction: column; min-width: 0; margin: 0; border: 1px solid var(--border);
   border-radius: var(--r-md); background: var(--surface); }
@@ -3628,6 +3636,12 @@ button.link:disabled, .pip-report-slim-actions button:disabled, .pip-report.quie
 :is(.artifact, .card) .abtn:not(.dgc-doc-open):disabled { border-color: var(--btn-line); background: transparent; color: var(--btn-text); }
 .pip-fix-act { font-size: inherit; }
 .pip-report-slim-actions button.pip-report-dismiss-slim { width: var(--btn-h-sm); padding: 0; }   /* (its ✕: a mark, as wide as it is high) */
+/* ("Check sign-in" and a clean card's "Open report" do not fit the small box: the small size's wide, never an ellipsis;
+   Dismiss beside Open report takes it too, so the two stay one size. In a card too narrow even for that, Check sign-in
+   gives way before ✕ leaves the card.) */
+.pip-report-slim-actions button.pip-report-signin-slim, .pip-report.quiet .pip-report-actions button.act { width: var(--btn-w-sm-wide); }
+.pip-report-line2 .pip-report-slim-actions { max-width: 100%; }
+.pip-report-slim-actions button.pip-report-signin-slim { flex: 0 1 var(--btn-w-sm-wide); }
 #sessions-host .home-new .codicon { vertical-align: -2px; margin-right: 3px; }
 .auto-mode-buttons button { font: var(--w-med) var(--t-sm)/calc(var(--btn-h) - 2px) var(--sans); }
 .card .btns { gap: var(--sp-2); }

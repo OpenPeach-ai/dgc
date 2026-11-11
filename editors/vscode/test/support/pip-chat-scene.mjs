@@ -46,6 +46,7 @@ export const THEMES = {
     opts: project (a Project Pip's chat), hold (what its computer holds for your okay), running (a turn in flight),
     doing (what the running turn says it is doing), fixing (DGC is fixing what a Project Pip's post found),
     empty (no messages yet), api, settings (its page's every section has something in it; level: the one it is at), keys (a plugin's key card: true, or "two"),
+    boot (in a tab: what the page holds before its script runs, as src/pipsView.ts writes it),
     ownKeys (the Pip's own API keys, Pips API 82: true one waiting card, "refused" one its site turned away, "list" one saved, one waiting, one Not now). */
 /** The stub host's script: it answers a Pip's page from `opts`. (dock-scene.mjs gives it to the side bar's real page too.) */
 export const host = (opts) => `(${function (PIP, opts) {
@@ -135,6 +136,8 @@ export const host = (opts) => `(${function (PIP, opts) {
   const levels = [["ask", "Ask me first", "It asks before it sends, submits or changes anything."], ["approve", "Approve for me", "It does the everyday things and asks for the rest."],
     ["full", "Full access", "It does everything it can without asking."]].map(([level, n, says]) => ({ level, name: n, says }));
   window.__unanswered = [];
+  const ranRun = { id: run("a"), pip_id: PIP, workspace_id: W, status: "succeeded", created_at: new Date(Date.now() - 20 * 60000).toISOString(), finished_at: new Date(Date.now() - 19 * 60000).toISOString(),
+    manifest: { run_kind: project ? "audit" : "routine" }, findings: [], summary: "Nothing needs you." };
   const answers = {
     list_workspaces: () => ({ workspaces: [{ id: W, name: project ? "garden" : "Personal", kind: project ? "project" : "personal" }], current_workspace_id: W }),
     list_pip_types: () => ({ types }), list_pip_setups: () => ({ setups: setups.filter((v) => v.status === "pending") }), reject_pip_setup: (r) => { const v = setups.find((s) => s.id === r.setup_id); v.status = "rejected"; window.__attention.remove(`setup:${v.id}`); return { setup: v }; }, get_pip_setup: (r) => ({ setup: setups.find((v) => v.id === r.setup_id) }), list_pip_starters: () => ({ starters: [] }),
@@ -149,7 +152,8 @@ export const host = (opts) => `(${function (PIP, opts) {
     list_pip_run_posts: () => ({ pip_id: PIP, workspace_id: W, posts: project && !opts.empty ? [post] : [], next_before_id: null }),
     list_pip_reply_stats: (r) => ({ pip_id: PIP, stats: (r.run_ids || []).map((run_id) => ({ run_id, seconds: 21, input_tokens: 24000, output_tokens: 900, requests: 3, has_trace: true })) }),
     list_pip_apps: () => ({ apps: [] }), get_pips_limit: () => ({ max_pips: 100, default: 100, maximum: 100000 }),
-    get_pip: () => ({ pip }), list_pip_runs: () => ({ runs: [] }),
+    // (opts.ran: one finished run, the one a report card's Open asks for.)
+    get_pip: () => ({ pip }), list_pip_runs: () => ({ runs: opts.ran ? [ranRun] : [] }), get_pip_run: (r) => { if (!opts.ran || r.run_id !== ranRun.id) throw new Error("That run isn't here."); return { run: ranRun }; },
     get_pip_level: () => ({ pip_id: PIP, level: "ask", default: "ask", levels, on_its_own: [] }),
     // The rest of what an open chat reads, each empty: an unanswered one draws an error line in the chat.
     list_pip_attention: () => ({ as_of: at(0), total: attentionItems.length, counts: {}, by_pip: attentionItems.some((v) => v.pip_id) ? { [PIP]: attentionItems.filter((v) => v.pip_id).length } : {}, items: [...attentionItems], truncated: false }),
@@ -288,11 +292,33 @@ export const host = (opts) => `(${function (PIP, opts) {
     let reply;
     try { reply = make ? { type: "pipsReply", id: m.id, ok: true, result: make(m.request) } : { type: "pipsReply", id: m.id, ok: false, error: "not offered here" }; }
     catch (error) { reply = { type: "pipsReply", id: m.id, ok: false, error: error.message }; }
-    setTimeout(() => window.postMessage(reply, "*"), 1);
+    setTimeout(() => window.postMessage(reply, "*"), opts.answerAfter || 1);   // (opts.answerAfter: a backend that takes a while, in ms)
   } });
   // Called once the page has mounted the client (the side bar mounts it after its other scripts).
   window.__connect = () => window.postMessage({ type: "pipsConnection", apiVersion: opts.api || 78, generation: 1, connected: true, supported: true, enabled: true }, "*");
 }})(${JSON.stringify(PIP)}, ${JSON.stringify(opts)});`;
+
+/** Runs in the page before anything else: on every frame, what Pips shows, as one word (window.__frames, in order, a
+    run of the same word kept once with its count). "unmounted": the client has not drawn yet; "blank": it has, and
+    nothing is in sight; "loading": the DGC mark; "list": the Pips; "pip": a Pip's own page; anything else by its words. */
+export const FRAMES = `(${function () {
+  const frames = window.__frames = [];
+  const what = () => {
+    const root = window.__pipsRoot || (document.getElementById("app") ? document : null), app = root?.querySelector?.("#app") || (root === document ? document.getElementById("app") : null);
+    if (document.readyState === "loading") return "unmounted";   // still being read: nothing of it is painted yet
+    if (!app || !app.childElementCount) return root && app ? "blank" : "unmounted";
+    const seen = (n) => !!n && n.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && n.getBoundingClientRect().height > 0;
+    if (seen(app.querySelector("[data-job]"))) return "list";
+    if (seen(app.querySelector(".pips-loading"))) return "loading";
+    if (seen(app.querySelector(".pip-topbar"))) return "pip";
+    const empty = app.querySelector(".empty h2, .error, [role=alert]");
+    if (seen(empty)) return `says: ${empty.textContent.trim().slice(0, 60)}`;
+    const words = (app.innerText || "").replace(/\s+/g, " ").trim();
+    return words && words !== "Pips" ? `shows: ${words.slice(0, 60)}` : "blank";
+  };
+  const tick = () => { const now = what(), last = frames[frames.length - 1]; if (last && last[0] === now) last[1] += 1; else frames.push([now, 1]); requestAnimationFrame(tick); };
+  requestAnimationFrame(tick);
+}})();`;
 
 /** Open a Pip's chat. `where`: "side" (the side bar: a shadow root in Work's page) or "tab" (its own editor tab).
     Returns the page and `root`, a handle on the root the chat is drawn in (the shadow root, or the document). */
@@ -300,7 +326,7 @@ export async function openChat(browser, { width = 300, height = 800, theme = "da
   const { js, css, work, markdown, root: tree } = await client(srcRoot);
   const t = THEMES[theme], script = (code) => `<script>${code.replace(/<\/script/g, "<\\/script")}</script>`;
   const html = where === "tab"
-    ? `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${t.css}${css}</style></head><body class="${t.kind}"><main id="app"></main><div id="review-root"></div>${script(host(opts))}${script(markdown)}${script(js)}</body></html>`
+    ? `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${t.css}${css}</style></head><body class="${t.kind}"><main id="app">${opts.boot || ""}</main><div id="review-root"></div>${script(host(opts))}${script(markdown)}${script(js)}</body></html>`
     // Work's page: its tokens on :root and its ground on the body; Pips mounted into #pips-host's shadow root, with the
     // bundle's CSS inside it (media/main.js showPips).
     : `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${t.css}${work}
@@ -309,17 +335,20 @@ html,body{height:100%;margin:0}body{display:flex;flex-direction:column;backgroun
 ${script(host(opts))}${script(markdown)}${script(js)}${script(`(${function (text) {
       const api = acquireVsCodeApi(), hostEl = document.getElementById("pips-host"), root = hostEl.attachShadow({ mode: "open" });
       window.__pipsRoot = root;
-      window.DgcPips.mount({ root, stylesheetText: text, postMessage: (m) => api.postMessage(m), getState: () => undefined, setState() {},
+      window.__pipsApp = window.DgcPips.mount({ root, stylesheetText: text, postMessage: (m) => api.postMessage(m), getState: () => undefined, setState() {},
         onMessage: (listener) => { const handle = (e) => listener(e.data); window.addEventListener("message", handle); return () => window.removeEventListener("message", handle); } });
     }})(${JSON.stringify(css)});`)}</body></html>`;
   const context = await browser.newContext({ viewport: { width, height }, reducedMotion: motion, colorScheme: theme, deviceScaleFactor: opts.scale || 1 });
   const p = await context.newPage();
+  // (opts.frames: every frame painted from the first, as the page's own words for what it shows; see FRAMES below.)
+  if (opts.frames) await p.addInitScript(FRAMES);
   const errors = [];
   p.on("pageerror", (error) => errors.push(String(error)));
   await p.route("https://pips.test/**", (r) => r.fulfill({ body: html, contentType: "text/html" }));
   // The faces' own art, which the page asks for beside its script.
   await p.route("https://pips.test/media/pips/*", (r) => r.fulfill({ path: `${tree}/media/pips/${new URL(r.request().url()).pathname.split("/").pop()}` }));
   await p.goto("https://pips.test/view");
+  if (opts.connectAfter) await p.waitForTimeout(opts.connectAfter);   // (the backend comes up a little after the page)
   await p.evaluate(() => window.__connect());
   // Playwright's selectors pierce the open shadow root, so the same ones work in both places.
   await p.waitForSelector(`[data-job="${PIP}"]`);

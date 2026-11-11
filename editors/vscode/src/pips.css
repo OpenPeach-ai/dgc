@@ -297,8 +297,13 @@ button.pill{border-radius:999px;padding:6px 16px}
 .topbar-icon::-webkit-details-marker{display:none}
 .pip-pill{justify-self:center;display:inline-flex;align-items:center;gap:8px;padding:3px 14px 3px 5px;max-width:100%;min-width:0;font-weight:600}
 .pip-pill .avatar{width:28px;height:27px;flex:none}
-.pip-pill>span:not(.avatar){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pip-pill small{color:var(--muted);font-weight:400;white-space:nowrap}
+/* The Pip's name keeps its room (0.51 check: a 300 px header read "Morni…  History", "M…  Notifications"): the word
+   beside it (the page's, or what a Project Pip is doing) gives way first, and in a narrow bar the page's word goes, as
+   a conversation's name does below: the page says which it is in its own heading. (The word's share of the squeeze is
+   so large that the name loses not even part of a pixel, which would already draw its ellipsis.) */
+.pip-pill>span:not(.avatar){flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pip-pill small{flex:0 100000 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--muted);font-weight:400;white-space:nowrap}
+@container(max-width:340px){.pip-pill small:not(.pip-status){display:none}}
 .topbar-actions{display:flex;gap:6px;align-items:center}
 .pip-menu{position:relative;margin:0}
 .pip-menu .tabs-menu{right:0;left:auto}
