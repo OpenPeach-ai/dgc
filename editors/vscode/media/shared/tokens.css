@@ -263,16 +263,20 @@ body.vscode-high-contrast, body.vscode-high-contrast-light {
 
 /* ---- The button. DGC has one, on every surface (11 Nov: "make this button style standard on our DGC, on all
    surfaces"): the filled main action, in the text's own colour, one to a card or a view; the hairline-outline secondary;
-   and a text link for the least. One 6 px corner. 28 px high, and 22 px where a surface is dense (a card's answers, a
-   row's own buttons). Pointed at, it steps up 1 px (an outline gains a faint fill and a firmer line; 150 ms in, the
+   and a text link for the least. One 6 px corner. Two sizes, and each is one box whatever its words (11 Nov: "all
+   buttons sizes should be fixed ... same size and aligned"): 104 by 28 px, and 76 by 22 px where a surface is dense (a
+   card's answers, a row's own buttons), each wide enough for the longest label DGC uses at that size ("Always allow",
+   "Keep planning"; "Allow once", "Mark read"); and one wide size, 152 px, for a view's one long action ("Approve →
+   acceptEdits"). The words are centred; words that still do not fit end in an ellipsis and never widen or wrap the
+   button (they stay its spoken name). A row narrower than its buttons shares its width between them, equally. Pointed at, it steps up 1 px (an outline gains a faint fill and a firmer line; 150 ms in, the
    shared 120 ms out); pressed, it sinks 1 px below rest (90 ms). A focus ring; dimmed when off; the user's own colours
    in high contrast (the tokens above); at rest under reduced motion.
    Every stylesheet reads these tokens for its buttons; .dgc-btn below is the button itself, for anything new.
    (Written on the body too: a theme sets its own text and hairline there, and these are made from them.) */
 :root, body {
   --btn-r: 6px;
-  --btn-h: 28px; --btn-pad: 14px;
-  --btn-h-sm: 22px; --btn-pad-sm: 9px;
+  --btn-h: 28px; --btn-w: 104px; --btn-w-wide: 152px; --btn-pad: 8px;
+  --btn-h-sm: 22px; --btn-w-sm: 76px; --btn-pad-sm: 6px;
   --btn-text: var(--text);
   --btn-fill: var(--solid); --btn-fill-hover: var(--solid-hover); --btn-on-fill: var(--on-solid);
   --btn-line: var(--hair-strong); --btn-line-hover: color-mix(in srgb, var(--text) 38%, transparent);
@@ -284,18 +288,23 @@ body.vscode-high-contrast, body.vscode-high-contrast-light {
 }
 @media (prefers-reduced-motion: reduce) { :root, body { --btn-move: none; --btn-up: none; --btn-down: none; --btn-in: 0ms; --btn-press: 0ms; } }
 .dgc-btn {
-  display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; height: var(--btn-h); min-height: 0; margin: 0; padding: 0 var(--btn-pad);
+  display: inline-block; flex: none; box-sizing: border-box; width: var(--btn-w); max-width: 100%; height: var(--btn-h); min-height: 0; margin: 0; padding: 0 var(--btn-pad);
   border: 1px solid var(--btn-line); border-radius: var(--btn-r); background: transparent; color: var(--btn-text);
-  font: var(--w-med) var(--t-sm)/1 var(--sans); white-space: nowrap; text-decoration: none; cursor: pointer; box-shadow: none; transition: var(--btn-move);
+  font: var(--w-med) var(--t-sm)/calc(var(--btn-h) - 2px) var(--sans); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-decoration: none; cursor: pointer; box-shadow: none; transition: var(--btn-move);
 }
-.dgc-btn.small { height: var(--btn-h-sm); padding: 0 var(--btn-pad-sm); font-size: var(--t-xs); }
+.dgc-btn.small { width: var(--btn-w-sm); height: var(--btn-h-sm); padding: 0 var(--btn-pad-sm); font-size: var(--t-xs); line-height: calc(var(--btn-h-sm) - 2px); }
+.dgc-btn.wide { width: var(--btn-w-wide); }
 .dgc-btn:hover:not(:disabled) { border-color: var(--btn-line-hover); background: var(--btn-wash); transform: var(--btn-up); transition-duration: var(--btn-in); }
 .dgc-btn:active:not(:disabled) { transform: var(--btn-down); transition-duration: var(--btn-press); }
 .dgc-btn.primary, .dgc-btn.primary:hover:not(:disabled) { border-color: transparent; background: var(--btn-fill); color: var(--btn-on-fill); }
 .dgc-btn.primary:hover:not(:disabled) { background: var(--btn-fill-hover); }
-.dgc-btn.link, .dgc-btn.link:is(:hover, :active):not(:disabled) { padding: 0 4px; border-color: transparent; background: transparent; transform: none; font-weight: var(--w-reg);
+/* (No edge at all, not a clear one: forced colours draw every edge.) */
+.dgc-btn.text, .dgc-btn.text:is(:hover, :active):not(:disabled) { width: auto; padding: 0 5px; border: 0; background: transparent; transform: none; font-weight: var(--w-reg);
   text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--btn-line-hover); }
-.dgc-btn.link:hover:not(:disabled) { text-decoration-color: currentColor; }
+.dgc-btn.text { line-height: var(--btn-h); }
+.dgc-btn.small.text { line-height: var(--btn-h-sm); }
+.dgc-btn.text:hover:not(:disabled) { text-decoration-color: currentColor; }
 .dgc-btn:focus-visible { outline: var(--btn-ring); outline-offset: 2px; }
 .dgc-btn:disabled { opacity: .55; cursor: default; }
-@media (forced-colors: active) { .dgc-btn { border-color: CanvasText; } .dgc-btn.link { border-color: transparent; } }
+@media (forced-colors: active) { .dgc-btn { border-color: CanvasText; } }

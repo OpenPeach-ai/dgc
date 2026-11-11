@@ -101,7 +101,7 @@
   .dgc-card.dgc-hub-card:not(.dgc-hub-mono) .dgc-card-chips { display: none; }
   .dgc-card.dgc-hub-card:not(.dgc-hub-mono) .dgc-card-note { grid-column: 1 / -1; grid-row: 3; }
   .dgc-card.dgc-hub-card:not(.dgc-hub-mono) .dgc-card-actions { grid-column: 1 / -1; grid-row: 4; align-self: end; flex-direction: row; align-items: center; gap: 6px; }
-  .dgc-card.dgc-hub-card:not(.dgc-hub-mono) .dgc-card-actions .dgc-card-btn:not(.dgc-hub-open) { flex: 1 1 auto; min-width: 0; padding: 0 6px; }
+  .dgc-card.dgc-hub-card:not(.dgc-hub-mono) .dgc-card-actions .dgc-card-btn:not(.dgc-hub-open) { flex: 1 1 0; width: auto; min-width: 0; padding: 0 2px; }   /* (the row's width, shared equally) */
 }
 .dgc-hub-note { margin: 0; color: var(--err-text); font: var(--w-reg) var(--t-sm)/1.4 var(--sans); }
 .dgc-hub-note .dgc-hub-link { display: inline; margin: 0 0 0 var(--sp-1); padding: 0 var(--sp-1); text-decoration: underline; text-underline-offset: 2px; }
@@ -109,22 +109,22 @@
 @media (forced-colors: active) { .dgc-hub-show { border-color: CanvasText; } }
 
 /* ---- A card's answers on Home (DGC's one button, tokens.css, at its small size): one filled button for the main
-   answer, every other answer a hairline outline, and the way to all of it a text link. In a card with the room (about 300 px inside) the answers' column is one width, so
-   they line up down the page; a narrower card keeps the words' room, and its answers take their own width. */
+   answer, every other answer a hairline outline, and the way to all of it a text link. Every button is one box (76 by
+   22 px) whatever its words, so the answers' column is one width on every card and lines up down the page. */
 .dgc-card.dgc-hub-card:not(.dgc-hub-mono) .dgc-card-actions { gap: 4px; }
 .dgc-card.dgc-hub-card.dgc-hub-answers:not(.dgc-hub-mono) .dgc-card-actions { position: relative; top: -2px; gap: 2px; }
-@container (min-width: 290px) { .dgc-card.dgc-hub-card:not(.dgc-hub-mono) .dgc-card-actions { width: 72px; } }
-.dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn { min-width: 0; height: var(--btn-h-sm); padding: 0 var(--btn-pad-sm); font: var(--w-med) var(--t-xs)/1 var(--sans); }
+.dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn { flex: none; width: var(--btn-w-sm); min-width: 0; height: var(--btn-h-sm); padding: 0 var(--btn-pad-sm); font: var(--w-med) var(--t-xs)/calc(var(--btn-h-sm) - 2px) var(--sans); }
 .dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn:focus-visible { outline-offset: 1px; }
 /* The link: words, so it does not step; it is as easy to hit as a button (22 px tall where it is pressed: the gap over
    it and the card's foot under it are its own). */
 .dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn.dgc-hub-open, .dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn.dgc-hub-open:is(:hover, :active):not(:disabled) {
-  position: relative; overflow: visible; border-color: transparent; background: transparent; transform: none; font-weight: var(--w-reg); text-decoration-color: var(--hair-strong); }
+  position: relative; overflow: visible; width: auto; border: 0; background: transparent; transform: none; font-weight: var(--w-reg); line-height: 1; text-decoration-color: var(--hair-strong); }
 .dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn.dgc-hub-open:hover:not(:disabled) { text-decoration-color: currentColor; }
-.dgc-card.dgc-hub-card:not(.dgc-hub-mono) .dgc-card-actions .dgc-card-btn.dgc-hub-open::after { content: ""; position: absolute; inset: -3px -1px -7px; }   /* (from inside its own 1 px edge) */
+.dgc-card.dgc-hub-card:not(.dgc-hub-mono) .dgc-card-actions .dgc-card-btn.dgc-hub-open::after { content: ""; position: absolute; inset: -2px 0 -6px; }
 @container (max-width: 179px) {
   .dgc-card.dgc-hub-card.dgc-hub-answers:not(.dgc-hub-mono) .dgc-card-actions { top: 0; }
   .dgc-card.dgc-hub-card:not(.dgc-hub-mono) .dgc-card-actions .dgc-card-btn.dgc-hub-open { height: 22px; }
-  .dgc-card.dgc-hub-card:not(.dgc-hub-mono) .dgc-card-actions .dgc-card-btn.dgc-hub-open::after { inset: -1px; }
+  .dgc-card.dgc-hub-card:not(.dgc-hub-mono) .dgc-card-actions .dgc-card-btn.dgc-hub-open::after { inset: 0; }
 }
-@media (forced-colors: active) { .dgc-card.dgc-hub-card .dgc-card-actions .dgc-card-btn.dgc-hub-open { border-color: transparent; } }
+/* (A command card too narrow for its two buttons at their size, under about 235 px: they share the row equally.) */
+@container (max-width: 210px) { .dgc-card.dgc-hub-card.dgc-hub-mono .dgc-card-actions .dgc-card-btn:not(.dgc-hub-open) { flex: 1 1 0; width: auto; padding: 0 2px; } }

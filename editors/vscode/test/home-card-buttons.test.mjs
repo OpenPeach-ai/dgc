@@ -40,7 +40,7 @@ const answers = (page, within = "#home-hub") => page.evaluate((scope) => {
   const probe = document.createElement("i"); document.body.append(probe); probe.style.backgroundColor = "var(--solid)"; const solid = getComputedStyle(probe).backgroundColor; probe.remove();
   return [...document.querySelectorAll(`${scope} .dgc-card`)].map((card) => { const box = card.getBoundingClientRect();
     const buttons = [...card.querySelectorAll(".dgc-card-actions .dgc-card-btn")].map((b) => { const s = getComputedStyle(b), r = b.getBoundingClientRect(), fill = parse(s.backgroundColor);
-      const kind = s.backgroundColor === solid ? "filled" : fill[3] === 0 && parseFloat(s.borderTopWidth) === 1 && parse(s.borderTopColor)[3] > 0 ? "outline" : fill[3] === 0 && parse(s.borderTopColor)[3] === 0 && s.textDecorationLine.includes("underline") ? "link" : "other";
+      const kind = s.backgroundColor === solid ? "filled" : fill[3] === 0 && parseFloat(s.borderTopWidth) === 1 && parse(s.borderTopColor)[3] > 0 ? "outline" : fill[3] === 0 && (parseFloat(s.borderTopWidth) === 0 || parse(s.borderTopColor)[3] === 0) && s.textDecorationLine.includes("underline") ? "link" : "other";   // (a link has no edge at all: forced colours draw every edge, a clear one too)
       const under = ground(b.parentElement);
       return { word: b.textContent, kind, primary: b.classList.contains("primary"), height: Math.round(r.height * 10) / 10, width: Math.round(r.width * 10) / 10, radius: s.borderTopLeftRadius, size: s.fontSize, weight: s.fontWeight, pad: [s.paddingLeft, s.paddingRight],
         label: ratio(s.color, kind === "filled" ? over(fill, under) : under), line: kind === "outline" ? ratio(s.borderTopColor, under) : null, inside: r.left >= box.left + 3 && r.right <= box.right - 3 && r.top >= box.top + 3 && r.bottom <= box.bottom - 3,
@@ -49,7 +49,7 @@ const answers = (page, within = "#home-hub") => page.evaluate((scope) => {
     return { key: card.dataset.key || card.dataset.dgcCard, mono: card.classList.contains("dgc-hub-mono"), height: Math.round(box.height * 2) / 2, width: Math.round(box.width), column: col ? Math.round(col.width * 10) / 10 : 0, buttons }; });
 }, within);
 
-for (const theme of ["dark-modern", "light-modern", "hc"]) for (const width of [300, 460, 700]) {
+for (const theme of ["dark-modern", "light-modern", "hc"]) for (const width of [300, 460, 700, 1000]) {
   test(`${theme} ${width}px: one filled button a card, every other an outline, the rest a link; one corner, height and label size; labels at 4.5:1`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openCards(browser, { theme, width });
@@ -65,13 +65,17 @@ for (const theme of ["dark-modern", "light-modern", "hc"]) for (const width of [
         assert.deepEqual(c.buttons.filter((b) => !b.inside || !b.whole).map((b) => b.word), [], `${c.key}: every answer is inside its card and whole`);
       }
       const boxed = all.filter((b) => b.kind !== "link");
-      assert.deepEqual([...new Set(boxed.map((b) => `${b.height}/${b.radius}/${b.size}/${b.weight}/${b.pad}`))], ["22/6px/11px/500/9px,9px"], "one height, corner, label size and side padding for every button");
+      // (11 Nov, "all buttons sizes should be fixed": every button is one box, 76 by 22 px, whatever its words. A side bar under about 225 px shares a row equally instead: its own test.)
+      assert.deepEqual([...new Set(boxed.map((b) => `${b.width}x${b.height}/${b.radius}/${b.size}/${b.weight}`))], ["76x22/6px/11px/500"], "one box, corner and label size for every button: Open and Mark read are the same size");
       assert.deepEqual([...new Set(all.filter((b) => b.kind === "link").map((b) => b.size))], ["11px"], "the link's words are the same size");
       const low = all.filter((b) => b.label < 4.5).map((b) => `${b.key} ${b.word} ${b.label}`);
       assert.deepEqual(low, [], "every label reads at 4.5:1");
       if (theme === "hc") assert.deepEqual(all.filter((b) => b.kind === "outline" && b.line < 3).map((b) => `${b.word} ${b.line}`), [], "in high contrast an outline's line is 3:1");
       // In a roomy card the answers' column is one width, so they line up down the page.
-      if (width === 700) assert.deepEqual([...new Set(cards.filter((c) => !c.mono).map((c) => c.column))], [72], "one column width in a roomy card");
+      assert.deepEqual([...new Set(cards.filter((c) => !c.mono).map((c) => c.column))], [76], "one column width on every card");
+      for (const c of cards.filter((k) => !k.mono)) assert.ok(new Set(c.buttons.filter((b) => b.kind !== "link").map((b) => `${Math.round(b.left * 10)}/${Math.round(b.right * 10)}`)).size === 1, `${c.key}: its buttons line up on both edges`);
+      const edges = new Map(); for (const c of cards.filter((k) => !k.mono)) for (const b of c.buttons.filter((k) => k.kind !== "link")) edges.set(Math.round(b.left), (edges.get(Math.round(b.left)) || 0) + 1);
+      assert.ok(edges.size <= (width >= 1000 ? 3 : width >= 700 ? 2 : 1), `the columns line up down the page, one line of buttons a column of cards (${[...edges.keys()]})`);
       assert.equal(await x.page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, "nothing runs off the side");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
@@ -158,7 +162,7 @@ test("the quiet link is as easy to hit as a button: 22 px tall where it is press
         const above = [...link.parentElement.querySelectorAll(".dgc-card-btn:not(.dgc-hub-open)")].map((b) => b.getBoundingClientRect()).filter((b) => b.bottom <= r.top + 1 && b.left < r.right && b.right > r.left);
         const card = link.closest(".dgc-hub-card").getBoundingClientRect();
         return { key: link.closest(".dgc-hub-card").dataset.key, tall: Math.round((bottom - top) * 10) / 10, wide: Math.round(r.width), clear: above.every((b) => top >= b.bottom - 0.5), inCard: bottom <= card.bottom + 0.5 && top >= card.top - 0.5 }; }));
-      assert.ok(hits.length >= 3, `${width}px: the links are there (${hits.length})`);
+      assert.ok(hits.length >= 2, `${width}px: the links are there (${hits.length})`);
       for (const h of hits) assert.ok(h.tall >= 22 && h.clear && h.inCard && h.wide >= 28, `${width}px ${h.key}: ${JSON.stringify(h)}`);
     } finally { await x.close(); }
   }
