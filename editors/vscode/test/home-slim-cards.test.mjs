@@ -69,9 +69,9 @@ const SCENES = {
 /** Every card as it is drawn: its box, and what in it is cut, outside it, or over something else. */
 const measure = (page) => page.evaluate(() => [...document.querySelectorAll("#home-hub .dgc-hub-card")].map((card) => {
   const box = card.getBoundingClientRect(), r = (n) => n.getBoundingClientRect(), seen = (n) => n.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && r(n).width > 0;
-  const parts = [...card.querySelectorAll(".dgc-card-icon, .dgc-card-title, .dgc-card-sub, .dgc-card-note, .dgc-chip:not([hidden]), .dgc-card-btn")].filter(seen);
+  const parts = [...card.querySelectorAll(".dgc-card-icon, .dgc-card-title, .dgc-card-sub, .dgc-card-note, .dgc-chip:not([hidden]), .dgc-card-btn, .dgc-ia-btn")].filter(seen);   // (.dgc-ia-btn: a card's answers as icons, 12 Nov; .dgc-card-btn: a held answer's Undo)
   const outside = parts.filter((n) => r(n).left < box.left + 3 || r(n).right > box.right - 3 || r(n).top < box.top + 3 || r(n).bottom > box.bottom - 3).map((n) => `${n.className}: ${n.textContent.slice(0, 30)}`);
-  const buttons = [...card.querySelectorAll(".dgc-card-btn")], words = [...card.querySelectorAll(".dgc-card-title, .dgc-card-sub, .dgc-card-note, .dgc-chip:not([hidden])")].filter(seen);
+  const buttons = [...card.querySelectorAll(".dgc-card-btn, .dgc-ia-btn")], words = [...card.querySelectorAll(".dgc-card-title, .dgc-card-sub, .dgc-card-note, .dgc-chip:not([hidden])")].filter(seen);
   const cut = buttons.filter((b) => !seen(b) || b.scrollWidth > b.clientWidth + 1 || r(b).height < 14).map((b) => b.textContent);
   const hit = (a, b) => r(a).left < r(b).right - 0.5 && r(b).left < r(a).right - 0.5 && r(a).top < r(b).bottom - 0.5 && r(b).top < r(a).bottom - 0.5;
   const over = [];
@@ -127,7 +127,9 @@ for (const width of WIDTHS) {
         const got = [], rings = [];
         for (let i = 0; i < want.length + 12 && got.length < want.length; i++) {
           await x.page.keyboard.press("Tab");
-          const at = await x.page.evaluate(() => { const a = document.activeElement; if (!a?.dataset?.hubAct) return null; const r = a.getBoundingClientRect(), c = a.closest(".dgc-hub-card").getBoundingClientRect(), s = getComputedStyle(a);
+          // (An icon's ring is its pill's: the answer in full, shown over the row when Tab reaches it.)
+          const at = await x.page.evaluate(() => { const a = document.activeElement; if (!a?.dataset?.hubAct) return null; const shown = a.matches(".dgc-ia-btn") ? a.closest(".dgc-ia").querySelector(".dgc-ia-pill") : a;
+            const r = shown.getBoundingClientRect(), c = a.closest(".dgc-hub-card").getBoundingClientRect(), s = getComputedStyle(shown);
             return { id: `${a.closest(".dgc-hub-card").dataset.key}/${a.dataset.hubAct}`, ring: s.outlineStyle !== "none" && parseFloat(s.outlineWidth) >= 1, inside: r.top >= c.top && r.bottom <= c.bottom && r.left >= c.left && r.right <= c.right,
               named: (a.getAttribute("aria-label") || a.textContent).trim().length > 1 }; });
           if (at) { got.push(at.id); rings.push(at); }
@@ -204,16 +206,15 @@ for (const width of WIDTHS) {
       assert.deepEqual([m.text, m.whole, m.lines, m.mono], ["npm test -- --run", true, 1, true], "the command, whole, on one line, in the code face");
       assert.deepEqual([m.left, m.right], [0, 0], "from the card's one edge to the other");
       assert.deepEqual(run.outside.concat(run.cut, run.over), [], "nothing is cut, outside it or over anything");
-      // Where the three answers have room beside its sentence it is the others' height; where they have not, they
-      // stand under the command, and this one card is a little taller: still well under the old 138 px.
+      // Its three answers are icons beside its sentence at every width (12 Nov). Where the sentence takes one line the
+      // card is the others' height; where it takes two, this one card is a little taller: still well under the old 138 px.
       if (m.cardWidth >= 420) assert.equal(run.height, usual.height, `a card ${m.cardWidth} px wide: the others' height`);
-      // (Under about 230 px its sentence takes two lines, as any card's may.)
-      else assert.ok(run.height > usual.height && run.height <= (m.cardWidth < 230 ? 116 : 100), `a card ${m.cardWidth} px wide: a little taller (${run.height})`);
+      else assert.ok(run.height >= usual.height && run.height <= (m.cardWidth < 230 ? 116 : 100), `a card ${m.cardWidth} px wide: the others' height or a little taller (${run.height})`);
     } finally { await x.close(); }
   });
 }
 
-test("a side bar at its narrowest (170 px): the answers go under the words, every card one height, nothing cut", async (t) => {
+test("a side bar at its narrowest (170 px): the answers stay at the card's right over the sentence, every card one height, nothing cut", async (t) => {
   if (skipOrFail(t)) return;
   const x = await SCENES.news({ width: 170 });
   try {

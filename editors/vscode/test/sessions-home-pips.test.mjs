@@ -77,7 +77,7 @@ async function openHome({ pips, digestPips = [], place = "home", width = 380, he
 
 /** Home's cards as they are on screen. */
 const cards = (page) => page.evaluate(() => [...document.querySelectorAll("#home-hub .dgc-hub-card")].map((c) => ({ key: c.dataset.key, group: c.dataset.group, from: c.querySelector(".dgc-card-sub").textContent,
-  title: c.querySelector(".dgc-card-title").textContent, chips: [...c.querySelectorAll(".dgc-chip:not([hidden])")].map((x) => x.textContent), answers: [...c.querySelectorAll(".dgc-card-btn")].map((b) => b.textContent),
+  title: c.querySelector(".dgc-card-title").textContent, chips: [...c.querySelectorAll(".dgc-chip:not([hidden])")].map((x) => x.textContent), answers: [...c.querySelectorAll("[data-hub-act]")].map((b) => b.textContent),   // (icons since 12 Nov, each still named by its word)
   character: c.querySelector(".dgc-plush")?.dataset.character || "", state: c.querySelector(".dgc-plush")?.dataset.state || "" })));
 const polled = (page) => page.waitForFunction(() => window.__posted.some((m) => m.type === "pipsRequest" && m.request.type === "get_pip_digest") && !!document.querySelector("#home-hub .dgc-hub-show"));
 
@@ -174,10 +174,12 @@ test("a failed run's Dismiss is always in sight, sits clear of the name at 300px
     const box = await page.evaluate(() => {
       const card = document.querySelector("#home-hub .dgc-hub-card"), x = card.querySelector('[data-hub-act="dismiss"]'), from = card.querySelector(".dgc-card-sub"), title = card.querySelector(".dgc-card-title");
       const r = (e) => { const b = e.getBoundingClientRect(); return { left: b.left, right: b.right, top: b.top, bottom: b.bottom }; };
-      return { x: r(x), from: r(from), title: r(title), card: r(card), clipped: from.scrollWidth > from.clientWidth, seen: x.checkVisibility({ visibilityProperty: true, opacityProperty: true }), word: x.textContent, hint: x.title };
+      return { x: r(x), from: r(from), title: r(title), card: r(card), clipped: from.scrollWidth > from.clientWidth, seen: x.checkVisibility({ visibilityProperty: true, opacityProperty: true }), word: x.textContent, hint: document.getElementById(x.getAttribute("aria-describedby"))?.textContent || "", tip: x.title };
     });
-    assert.deepEqual([box.seen, box.word], [true, "Dismiss"], "in sight without pointing at anything, and in a word");
-    assert.match(box.hint, /^Dismiss: 1 run failed\. It comes back if ERP daily audit/, "pointing at it says what it dismisses");
+    assert.deepEqual([box.seen, box.word], [true, "Dismiss"], "in sight without pointing at anything, and named in a word");
+    // (An icon since 12 Nov: pointing at it shows the word as a pill; the longer line is its description, not a tooltip.)
+    assert.match(box.hint, /^Dismiss: 1 run failed\. It comes back if ERP daily audit/, "its description says what it dismisses");
+    assert.equal(box.tip, "", "no tooltip beside the pill");
     assert.ok(box.title.right <= box.x.left && box.from.right <= box.x.left, `(a slim card: Dismiss is beside the words, at the right) Dismiss never covers the name or the sentence: ${JSON.stringify(box)}`);
     assert.ok(box.x.right <= box.card.right && box.card.right <= 300 && box.x.bottom <= box.card.bottom, "inside its card, inside the side bar");
     assert.equal(box.clipped, true, "a long name is cut with an ellipsis, on its one line");

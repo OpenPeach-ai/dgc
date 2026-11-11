@@ -90,7 +90,7 @@ for (const theme of THEMES) {
           // Everything on the tab's page wider than a dot that is filled in the accent's hue. (A blob is a session's own colour.)
           const purple = [...document.querySelectorAll("#sessions-host *")].filter((n) => n.checkVisibility({ visibilityProperty: true }) && !n.closest(".dgc-blob, svg") && n.getBoundingClientRect().width > 10 && hue(getComputedStyle(n).backgroundColor))
             .map((n) => n.id || String(n.className));
-          const card = document.querySelector("#home-hub .dgc-hub-card"), primary = card?.querySelector(".dgc-card-btn.primary"), other = document.querySelector("#home-hub .dgc-card-btn:not(.primary)");
+          const card = document.querySelector("#home-hub .dgc-hub-card"), primary = card?.querySelector(".dgc-ia-btn.dgc-ia-main"), other = document.querySelector("#home-hub .dgc-ia-btn:not(.dgc-ia-main)");   // (a card's answers are icons that turn into the full button, 12 Nov: media/shared/iconactions.css)
           const fresh = [...document.querySelectorAll("#sessions-host .home-new")].find((n) => n.checkVisibility());
           return { tokens, purple, card: card ? [css(card).borderTopWidth, css(card).boxShadow] : null, cardGround: card ? css(card).backgroundColor : null,
             primary: primary ? [css(primary).backgroundColor, css(primary).color, css(primary).height] : null, other: other ? [css(other).backgroundColor, css(other).height] : null,
@@ -103,12 +103,12 @@ for (const theme of THEMES) {
         assert.deepEqual(rest.purple, [], `${tab}: nothing on the page is filled purple`);
         if (tab === "home") {
           assert.deepEqual(rest.card, ["1px", "none"], "a card: a hairline, no shadow (the shared card)");
-          assert.deepEqual(rest.primary, [rest.tokens.solid, rest.tokens.onSolid, "22px"], "a card's one filled answer is the text's colour, never the accent");
-          assert.deepEqual(rest.other, ["rgba(0, 0, 0, 0)", "22px"], "its quiet answer is an outline (a slim card's answers are 22 px)");
+          assert.deepEqual(rest.primary, [rest.tokens.solid, rest.tokens.onSolid, "24px"], "a card's one filled answer is the text's colour, never the accent");
+          assert.deepEqual(rest.other, ["rgba(0, 0, 0, 0)", "24px"], "its quiet answer is an outline (a slim card's answers are 24 px icons)");
           assert.deepEqual(rest.clear, [rest.tokens.quiet, "none"], "Clear is quiet text");
           assert.ok(rest.faces.length >= 3 && rest.faces.every((f) => f[0] === 30 && f[1] === 30), `each card's face or blob has one 30px place: ${JSON.stringify(rest.faces)}`);
           assert.ok(rest.faces.filter((f) => f[2] === 1).length >= 3, "a Pip's face is its real face, with its rig");
-          await x.page.hover("#home-hub .dgc-hub-card .dgc-card-btn.primary");
+          await x.page.hover("#home-hub .dgc-hub-card .dgc-ia-btn.dgc-ia-main");
           assert.deepEqual((await look()).purple, [], "home: pointed at, still nothing purple");
         } else {
           assert.deepEqual(rest.fresh, [rest.tokens.solid, rest.tokens.onSolid], "New is a neutral filled pill: the text's colour");
@@ -136,7 +136,7 @@ for (const theme of THEMES) {
         assert.ok(rest.length >= 8, `${tab}: the page's words were found (${rest.length})`);
         assert.deepEqual(low(rest), [], `${tab} tab`);
         if (tab === "home") {
-          for (const quiet of ["#home-hub .dgc-hub-show", "#home-hub .dgc-hub-clear", "#home-hub .dgc-card-btn.primary", "#home-hub .dgc-card-btn:not(.primary)"]) {
+          for (const quiet of ["#home-hub .dgc-hub-show", "#home-hub .dgc-hub-clear", "#home-hub .dgc-ia-btn.dgc-ia-main", "#home-hub .dgc-ia-btn:not(.dgc-ia-main)"]) {
             await x.page.hover(`${quiet} >> nth=0`);
             assert.deepEqual(low(await homeContrast(x.page)), [], `home tab, ${quiet} pointed at`);
           }
@@ -167,7 +167,7 @@ test("hover and colour move in 120 ms on the shared curve, and not at all under 
   if (skipOrFail(t)) return;
   const read = (x) => x.page.evaluate(() => { const css = (s) => getComputedStyle(document.querySelector(s)), ms = (v) => v.split(",").map((p) => Math.round(parseFloat(p) * (p.trim().endsWith("ms") ? 1 : 1000)));
     return { show: [ms(css("#home-hub .dgc-hub-show").transitionDuration), css("#home-hub .dgc-hub-show").transitionTimingFunction.split("),")[0].replace(/\)?$/, ")")], clear: ms(css("#home-hub .dgc-hub-clear").transitionDuration),
-      answer: ms(css("#home-hub .dgc-card-btn").transitionDuration), flip: ms(css("#side-tabs .dgc-tab-front").transitionDuration)[0],
+      answer: ms(css("#home-hub .dgc-ia-btn").transitionDuration), flip: ms(css("#side-tabs .dgc-tab-front").transitionDuration)[0],
       face: [document.querySelectorAll("#home-hub .dgc-plush-rig").length, document.querySelector('#home-hub .dgc-hub-card[data-group="needs"] .dgc-plush').dataset.state, document.querySelector('#home-hub .dgc-hub-card[data-group="new"] .dgc-plush').dataset.state] }; });
   const moving = await openHome(browser, { width: 300 });
   try {

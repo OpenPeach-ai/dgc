@@ -96,6 +96,8 @@ export const host = (opts) => `(${function (PIP, opts) {
     return { id: `${kind}:${card}`, kind, card, pip_id: PIP, pip_name: name, pip_type: "lens", workspace_id: W, title: i < waitingKinds.length ? title : `${title.slice(0, -1)} (${i + 1})?`, detail,
       created_at: new Date(Date.now() - (10 + i) * 60000).toISOString(), expires_at: null }; };
   if (!project) for (let i = 0; i < (opts.waiting || 0); i++) attentionItems.push(waitingOf(i));
+  const reviews = () => (opts.answers ? pip.proposals.filter((v) => v.approval_status === "pending").map((v) => ({ id: `approval:${v.id}`, kind: "approval", card: v.id, pip_id: PIP, pip_name: name, pip_type: "lens", workspace_id: W,
+    title: `Change ${name}?`, detail: "Run at 8:00 every day", created_at: new Date(Date.now() - 2 * 60000).toISOString(), expires_at: null, review: "schedule_update" })) : []);
   window.__attention = { ids: () => attentionItems.map((v) => v.id), add: (i = attentionItems.length + 20) => { const v = { ...waitingOf(i), created_at: new Date().toISOString() }; attentionItems.unshift(v); return v.id; },
     remove: (id) => { const at = attentionItems.findIndex((v) => v.id === id); if (at >= 0) attentionItems.splice(at, 1); },
     read: () => window.postMessage({ type: "pipSetupChanged" }, "*") };
@@ -188,7 +190,8 @@ export const host = (opts) => `(${function (PIP, opts) {
     get_pip: () => ({ pip }), list_pip_runs: () => ({ runs: opts.ran ? [ranRun] : [] }), get_pip_run: (r) => { if (!opts.ran || r.run_id !== ranRun.id) throw new Error("That run isn't here."); return { run: ranRun }; },
     get_pip_level: () => ({ pip_id: PIP, level: "ask", default: "ask", levels, on_its_own: [] }),
     // The rest of what an open chat reads, each empty: an unanswered one draws an error line in the chat.
-    list_pip_attention: () => ({ as_of: at(0), total: attentionItems.length, counts: {}, by_pip: attentionItems.some((v) => v.pip_id) ? { [PIP]: attentionItems.filter((v) => v.pip_id).length } : {}, items: [...attentionItems], truncated: false }),
+    list_pip_attention: () => ({ as_of: at(0), total: attentionItems.length + reviews().length, counts: {}, by_pip: attentionItems.some((v) => v.pip_id) || reviews().length ? { [PIP]: attentionItems.filter((v) => v.pip_id).length + reviews().length } : {}, items: [...attentionItems], truncated: false,
+      ...(opts.answers ? { reviews: reviews() } : {}) }),
     list_pip_flows: () => ({ flows: [], core_suggestions: [] }),
     get_pip_computer_desktop: () => ({ desktop: { pip_id: PIP, available: false, reason: "No desktop here.", install: "", using: false, browser: "Chromium", chrome_install: "" } }),
     list_pip_connector_drafts: () => ({ drafts: [], next_cursor: null }), list_pip_calendar_drafts: () => ({ drafts: [], next_cursor: null }),
@@ -375,6 +378,21 @@ export const host = (opts) => `(${function (PIP, opts) {
         plugins: [{ plugin: "stripe", name: "Stripe", money: true, permission: "any_changes" }, { plugin: "linear", name: "Linear", money: false, permission: "important" }] }),
     });
   }
+  // opts.answers: two things a Needs attention card answers by itself, as Home does: a change the Pip wants to itself
+  // (Apply / Not now) and a visit to a new site (Allow / Not now), beside whatever else waits (which only opens).
+  if (opts.answers) {
+    const visitId = "compact_" + "5".repeat(32);
+    const visitAction = { ...hold, id: visitId, summary: { method: "GET", host: "seeds.example", path: "/tomatoes", page: "", fields: [], more_fields: 0, body_bytes: 0, kind: "site", site: "seeds.example", shown: "seeds.example" } };
+    attentionItems.push({ id: `computer_action:${visitId}`, kind: "computer_action", card: visitId, pip_id: PIP, pip_name: name, pip_type: "lens", workspace_id: W, title: "Visit seeds.example?", detail: "https://seeds.example/tomatoes",
+      created_at: new Date(Date.now() - 4 * 60000).toISOString(), expires_at: null });
+    pip.proposals.push({ id: "proposal_a1a1a1a1", pip_id: PIP, approval_status: "pending", expected_version: 2, reason: "You asked for the brief at 8:00.", actor: "pip", expires_at: "2036-11-07T04:00:00Z", definition: { ...base, schedule: daily } });
+    pip.pending_review_count = pip.proposals.length;
+    Object.assign(answers, {
+      get_pip_computer: () => ({ computer: { pip_id: PIP, granted: true, available: true, reason: "", pending: visitAction.status === "pending" ? 1 : 0, actions: [visitAction] } }),
+      decide_pip_computer_action: (r) => { if (r.action_id !== visitId || r.expected_digest !== visitAction.digest || visitAction.status !== "pending") throw Error("That changed. Refresh.");
+        visitAction.status = r.approve ? "approved" : "rejected"; window.__attention.remove(`computer_action:${visitId}`); return { action: visitAction }; },
+    });
+  }
   if (opts.ticks || opts.details === "working") Object.assign(answers, { list_pip_keys: () => ({ pip_id: PIP, keys: [] }),
     list_pip_run_activity: ((base) => (r) => { const page = base(r); return { ...page, run_id: r.run_id, events: page.events.map((e) => ({ ...e, run_id: r.run_id })) }; })(answers.list_pip_run_activity) });
   window.acquireVsCodeApi = () => ({ getState: () => undefined, setState() {}, postMessage(m) {
@@ -432,7 +450,9 @@ ${script(host(opts))}${script(markdown)}${script(js)}${script(`(${function (text
       window.__pipsApp = window.DgcPips.mount({ root, stylesheetText: text, postMessage: (m) => api.postMessage(m), getState: () => undefined, setState() {},
         onMessage: (listener) => { const handle = (e) => listener(e.data); window.addEventListener("message", handle); return () => window.removeEventListener("message", handle); } });
     }})(${JSON.stringify(css)});`)}</body></html>`;
-  const context = await browser.newContext({ viewport: { width, height }, reducedMotion: motion, colorScheme: theme, deviceScaleFactor: opts.scale || 1 });
+  // (opts.forced: Windows High Contrast; opts.touch: a finger, no pointer; opts.video: a folder to record the page into.)
+  const context = await browser.newContext({ viewport: { width, height }, reducedMotion: motion, colorScheme: theme, deviceScaleFactor: opts.scale || 1, forcedColors: opts.forced ? "active" : "none", hasTouch: !!opts.touch,
+    ...(opts.video ? { recordVideo: { dir: opts.video, size: { width, height } } } : {}) });
   const p = await context.newPage();
   // (opts.frames: every frame painted from the first, as the page's own words for what it shows; see FRAMES below.)
   if (opts.frames) await p.addInitScript(FRAMES);

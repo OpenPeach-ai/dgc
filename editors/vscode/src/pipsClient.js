@@ -8,6 +8,9 @@ import '../media/shared/menu.js';
 // One card for everything that asks or reports, as in Work and ChatDGC (window.DgcCard).
 import '../media/shared/card.css';
 import '../media/shared/card.js';
+// A card's answers as icons that turn into the full button, on Needs attention as on Home (window.DgcIconActions).
+import '../media/shared/iconactions.css';
+import '../media/shared/iconactions.js';
 import {changeCard,scheduleWords} from './pipChangeCard.js';
 import '../media/shared/doccard.css';
 // The small sheet of its kind on a document's card (window.DgcFileSheet).
@@ -52,6 +55,7 @@ import {appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup,appLinkSettledMar
 import {pipKeysPage,pipKeyResult,waitingKeys,pipKeyCardMarkup,pipKeysPageMarkup,pipKeyRemovedNote} from './pipKeys.js';
 import {pluginsPage,pluginResult,keyRequests,keyCardMarkup,shownPluginCards,pluginForServer,installedForServer,pluginCardMarkup,pluginActionMarkup,pluginsPageMarkup,pluginUsesPage,pluginUsesMarkup,argumentValues,editedArguments,PLUGIN_LEVELS} from './pipPlugins.js';
 import {attentionPage,waitingOn,needWords,attentionMarkup,attentionCards,attentionSpot,setupCardMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
+import {answerFor,sendItemAnswer,readVisits} from './pipCardAnswers.js';
 import {notesPage,notesMarkup,keptMarkup} from './pipNotes.js';
 import {workingNotesPage,dailyLogPage,workingNotesMarkup,dailyLogMarkup,learnCardMarkup,learnRequest} from './pipWorkingNotes.js';
 import {carefulPage,carefulMarkup,carefulWords,settledWords,isPayment,asksEveryTime,asksWords,coversWords,coversDetail} from './pipCareful.js';
@@ -87,6 +91,7 @@ export function mountPips(options) {
   const nativeDocument=window.document,root=options.root||nativeDocument;
   const embedded=root!==nativeDocument,owner=root.ownerDocument||nativeDocument,disposers=[];
   if(typeof DgcCard!=='undefined')disposers.push(DgcCard.watch(embedded?root.host:nativeDocument.body,root));   // a card's chips stay on one line ("+N")
+  if(typeof DgcIconActions!=='undefined')disposers.push(DgcIconActions.watch(root));   // a card's icons turn into the full button when pointed at or reached by Tab
   if(typeof DgcMenu!=='undefined'&&DgcMenu.slide)DgcMenu.slide(root);   // a long model name slides while its row is pointed at (9 Nov)
   const remoteHost=options.host==='remote';
   let disposed=false,motionPaused=false;
@@ -2980,9 +2985,40 @@ async function loadAttention(){
  if(remoteHost||S.apiVersion<44||!simpleMode()||!usable()){attentionRead=true;return;}
  const token=scope(),sequence=++attentionSeq,first=!attentionRead;
  try{const page=attentionPage(await send('list_pip_attention',{limit:100}));if(token!==scope()||sequence!==attentionSeq)return;
-  const before=JSON.stringify(S.attention);S.attention=page;attentionRead=true;if(first||JSON.stringify(page)!==before)render();}
+  const before=JSON.stringify(S.attention),fresh=first||JSON.stringify(page)!==before;S.attention=page;attentionRead=true;if(fresh){render();void loadAttentionVisits(page,token);}}
  catch{/* the home still lists every Pip; the next refresh tries again */if(token===scope()&&!attentionRead){attentionRead=true;render();}}
 }
+// A card's own answers (asked 12 Nov), the ones Home offers for the same thing (src/pipCardAnswers.js): a Pip's change
+// to itself (Apply / Not now) and its visit to a new site (Allow / Not now). An answer is held for a moment, as Home
+// holds it and as Reject on a new Pip is: the card says what it will do with Undo, nothing is sent, and it goes when
+// the moment passes. A window closed meanwhile sends nothing, so the thing just waits again.
+const heldAnswers=new Map(),sentAnswers=new Set();let attentionVisits=new Map();
+// The held visits to a new site among what waits, read after the list is drawn: a card opens until its answer is known.
+async function loadAttentionVisits(page,token){
+ const pips=[...new Set(page.items.filter(i=>i.kind==='computer_action'&&i.pip_id).map(i=>i.pip_id))].slice(0,8);
+ const found=pips.length?await readVisits(send,pips):new Map();
+ if(token!==scope()||S.attention!==page)return;
+ const before=JSON.stringify([...attentionVisits]);attentionVisits=found;if(JSON.stringify([...found])!==before)render();
+}
+function attentionAnswer(item){
+ if(!item?.pip_id||remoteHost)return null;
+ const job=S.jobs.find(p=>p.id===item.pip_id),pip={id:item.pip_id,name:job?.name||item.pip_name||'It',version:job?.current_version||0};
+ const answer=answerFor(item,pip,{visits:attentionVisits});return answer?{answer,pip}:null;
+}
+function answerSoon(id,yes){
+ const item=S.attention?.items.find(i=>i.id===id),found=attentionAnswer(item);if(!found||heldAnswers.has(id)||sentAnswers.has(id)||!usable())return;
+ const seen=attentionVisits.get(item.card)||null;
+ const timer=window.setTimeout(()=>{
+  heldAnswers.delete(id);if(!usable()){render();return;}
+  sentAnswers.add(id);render();
+  // Sent once; the list is read again either way, and one DGC did not take comes back.
+  void sendItemAnswer(send,{answer:found.answer,item,pip:found.pip,seen},yes).catch(setError)
+   .finally(()=>{void Promise.resolve(loadAttention()).finally(()=>{sentAnswers.delete(id);render();});void refresh(false);});
+ },REJECT_HOLD_MS);
+ heldAnswers.set(id,{timer,said:yes?found.answer.said.yes:found.answer.said.no});S.notice='';render();
+ $('attention-undo')?.focus?.({preventScroll:true});
+}
+function undoAnswer(id){const held=heldAnswers.get(id);if(!held)return;window.clearTimeout(held.timer);heldAnswers.delete(id);render();($('attention-yes')||$('attention-open'))?.focus?.({preventScroll:true});}
 function attentionHomeMarkup(){
  const face=i=>{if(!i.pip_id)return '<span class="attention-mark" aria-hidden="true">+</span>';
   const current=S.jobs.find(p=>p.id===i.pip_id),pip=current||{id:i.pip_id,name:i.pip_name,pip_type:i.pip_type,workspace_id:i.workspace_id};
@@ -2990,9 +3026,11 @@ function attentionHomeMarkup(){
  // A project's home shows none of the Personal Pips' rows: only the new Pips waiting in this project.
  const more=setupRows.length>=5?'Showing 5 new Pips. Answer one to see more.':'';
  // A new Pip you just rejected (held a moment for Undo) is out of the cards, the dots and the count at once.
- const held=page=>{if(!page)return page;const items=page.items.filter(i=>!(i.kind==='setup'&&heldRejects.has(i.card)));return {...page,items,total:Math.max(items.length,page.total-(page.items.length-items.length))};};
+ // (So is a card whose answer was just sent, until the list read after it says what became of it.)
+ const held=page=>{if(!page)return page;const items=page.items.filter(i=>!(i.kind==='setup'&&heldRejects.has(i.card))&&!sentAnswers.has(i.id));return {...page,items,total:Math.max(items.length,page.total-(page.items.length-items.length))};};
  const page=projectHome()?null:held(S.attention),setups=S.apiVersion>=23?setupRows.filter(r=>!heldRejects.has(r.id)):[],expanded=attentionOpen();
- return attentionMarkup(page,{esc,face,expanded,busy:!usable(),setups,setupCard:setupCardFor,error:setupRows.length?setupError:'',more,at:attentionShowing(attentionCards(page,setups))});
+ return attentionMarkup(page,{esc,face,expanded,busy:!usable(),setups,setupCard:setupCardFor,error:setupRows.length?setupError:'',more,at:attentionShowing(attentionCards(page,setups)),
+  answers:i=>attentionAnswer(i)?.answer||null,held:i=>heldAnswers.get(i.id)?.said||''});
 }
 // What it remembers (#6): its notes about you, on its page and under the reply that kept them.
 S.notes=null;S.notesPip='';S.notesError='';let notesSeq=0,notesBusy=false,noteConfirmAll=false;
@@ -3854,6 +3892,7 @@ function render() {
   const parts=document.querySelector('.pip-ctx-breakdown');if(parts&&S.chatContext?.breakdown&&window.DgcBreakdown)parts.replaceChildren(window.DgcBreakdown.render(S.chatContext.breakdown));
   for(const node of document.querySelectorAll('[data-avatar-key]')){const old=previousAvatars.get(node.dataset.avatarKey);if(old&&old!==node&&old.dataset.character===node.dataset.character&&old.dataset.pose===node.dataset.pose)node.replaceWith(old);}
   observeAvatars();fitChatInput();hydrateMessageImages();hydrateMessageVideos();hydratePluginLogos();
+  if(typeof DgcIconActions!=='undefined')DgcIconActions.refresh(root);   // an answer the pointer or the keyboard is still on shows its pill again
   // A card Needs attention opened stays shown as the chat redraws while its drafts and apps load.
   if(cardFlash.selector&&Date.now()<cardFlash.until)for(const el of document.querySelectorAll(cardFlash.selector))el.classList.add('attention-flash');
   for(const el of document.querySelectorAll('details[data-details]')) if(opened.has(el.dataset.details)) el.open=true;
@@ -5189,7 +5228,10 @@ document.addEventListener('click',event=>{
   if(target.dataset.computerResetCancel!==undefined){pipsSettings.confirmReset='';render();return;}
   if(target.dataset.computerReset){void pipsSettingsCall('reset_pip_computer',{pip_id:target.dataset.computerReset},r=>r?.reset?'Its computer is fresh: signed out, no history. Its Files are still there.':'Resetting its computer: it is fresh the next time it opens. Its Files stay.');return;}
   if(target.dataset.appRemove){void pipsSettingsCall('disconnect_pip_app_link',{pip_id:target.dataset.appRemovePip,link_id:target.dataset.appRemove},'Removed. That Pip no longer uses the account.');return;}
-  if(target.dataset.attention){const item=S.attention?.items.find(i=>i.id===target.dataset.attention);if(item)void navigateFromHost(attentionNavigation(item)).catch(setError);return;}
+  // A card's icons: its answer (held a moment, with Undo), or Review, which opens it as the card itself does.
+  if(target.dataset.attentionAnswer){answerSoon(target.dataset.attentionItem,target.dataset.attentionAnswer==='yes');return;}
+  if(target.dataset.attentionUndo){undoAnswer(target.dataset.attentionUndo);return;}
+  if(target.dataset.attention||target.dataset.attentionOpen){const id=target.dataset.attention||target.dataset.attentionOpen,item=S.attention?.items.find(i=>i.id===id);if(item)void navigateFromHost(attentionNavigation(item)).catch(setError);return;}
   if(target.dataset.attentionDismiss){
    const item=S.attention?.items.find(i=>i.id===target.dataset.attentionDismiss);
    if(item?.kind==='setup')rejectSoon(item.card,()=>dismissSetupFromAttention(item,{quiet:true}));

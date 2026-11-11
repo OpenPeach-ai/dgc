@@ -686,6 +686,16 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 /* A new Pip waiting for you: a thin shared card in the list (media/shared/card.css), the width of its rows. */
 .attention-item.attention-card{display:block;margin:2px 0 6px}.attention-card .dgc-card{max-width:none}
 .attention-cut{font-size:11px;margin:4px 0 0 52px}
+/* A card's answers (asked 12 Nov): a row of icons at the card's right that turn into the full button
+   (media/shared/iconactions.css), the same answers Home offers for the thing. The card under them still opens it: the
+   row lies over its right end, and the card keeps that room clear of its words. After an answer the card says what it
+   will do, with Undo as a plain word button in the icons' place, for a moment. */
+:root{--attention-ground:var(--vscode-editor-background)}:host{--attention-ground:var(--vscode-sideBar-background,var(--vscode-editor-background))}
+.attention-item{position:relative;--ia-ground:color-mix(in srgb,var(--text,var(--vscode-foreground)) 4.5%,var(--attention-ground))}
+.attention-item>.dgc-ia{position:absolute;right:10px;top:50%;margin-top:-12px}
+.attention-item.attention-answers .attention-row{padding-right:calc(16px + var(--ia-n,1)*26px)}
+.attention-item>button.attention-undo{position:absolute;right:10px;top:50%;margin-top:-11px;white-space:nowrap}
+.attention-item.attention-held .attention-row{padding-right:calc(18px + var(--btn-w-sm,76px))}
 /* One card in view, whatever waits (asked 11 Nov: the list "gets too long"): an arrow each side, dots below, "2 of 8".
    Where there is room the arrows stand beside the card; in a narrow view (the side bar) the card keeps the whole width
    and the arrows stand at the two ends of the dots' row, so they never sit on the card's own buttons. A row that is not

@@ -233,7 +233,7 @@ test("a narrow side bar: the four names fit at 240 px; under 200 px Home's numbe
       assert.equal(bar.overflowX, false, `${width}px: nothing scrolls sideways`);
       // Home's cards still hold everything they have: no answer is pushed out of its card.
       const out = await x.page.evaluate(() => [...document.querySelectorAll("#home-hub .dgc-hub-card")].flatMap((c) => { const box = c.getBoundingClientRect();
-        return [...c.querySelectorAll(".dgc-card-btn, .dgc-card-title")].filter((b) => { const r = b.getBoundingClientRect(); return r.bottom > box.bottom - 4 || r.right > box.right - 4 || r.left < box.left + 4; }).map((b) => `${c.dataset.key}: ${b.textContent}`); }));
+        return [...c.querySelectorAll(".dgc-card-btn, .dgc-ia-btn, .dgc-card-title")].filter((b) => { const r = b.getBoundingClientRect(); return r.bottom > box.bottom - 4 || r.right > box.right - 4 || r.left < box.left + 4; }).map((b) => `${c.dataset.key}: ${b.textContent}`); }));
       assert.deepEqual(out, [], `${width}px: every card's sentence and answers are inside it`);
     } finally { await x.close(); }
   }

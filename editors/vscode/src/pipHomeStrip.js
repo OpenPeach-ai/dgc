@@ -13,7 +13,9 @@
 // Not now). Each says what it needs seen in one line (`answer.full`); the hub offers the answers only where that line
 // shows whole. Never here, whatever they say: a payment or a pay, buy or order step, anything sent, a login, a step that
 // needs its screenshot, a new Pip that also gets apps, the web or a computer, and a Pip with more than one thing waiting.
-import {pipDigest, pendingReviews, pipSetup, pipComputer, scheduleLabel} from './pipsModel.js';
+// (What can be answered and how it is sent is src/pipCardAnswers.js, shared with the Pips page's Needs attention.)
+import {pipDigest, pendingReviews, pipSetup} from './pipsModel.js';
+import {plainSetup, runsWhen, answerFor as cardAnswerFor, sendSetupAnswer, sendItemAnswer, readVisits} from './pipCardAnswers.js';
 import {attentionPage, attentionNavigation, waitingOn, kindLabel} from './pipAttention.js';
 import {profile} from './pipProfile.js';
 
@@ -49,23 +51,6 @@ function since(snapshot, item) {
 }
 
 const ANSWERED = 8;               // new Pips, and Pips with a held computer step, read for their cards at one time
-// A new Pip a card can say whole: what it does and when it runs. One that would also read your apps or the web, get a
-// computer, start on each commit or change a Pip that exists has more to check than a card shows: it opens instead.
-const plainSetup = s => s.status === 'pending' && s.pip_id === null && !s.app_plan && !s.web_plan && !s.computer && !s.event_trigger && !s.live_plan && !s.verification_plan
- && [...s.goal].length <= 160;
-function runsWhen(s) {
- let when = '';
- try { when = s.schedule ? scheduleLabel(s.schedule) : ''; } catch { when = ''; }
- return [when || 'Runs when you ask', s.run_now ? 'runs once now' : ''].filter(Boolean).join(', ');
-}
-// A held step of a Pip's computer that is only "may it open this site": careful mode's hold on a new site, with nothing
-// sent, typed, paid or signed in to. Its site and address, or null (a form, a payment, an order, a login, app data).
-function visit(action) {
- const s = action?.summary;
- if (action?.status !== 'pending' || s?.kind !== 'site' || s.payment === true || s.asks_because || (s.fields || []).length || s.more_fields) return null;
- const site = String(s.site || s.host || '').slice(0, 120), address = `${s.host || ''}${s.path || ''}`.slice(0, 200);
- return site && address ? {site, address} : null;
-}
 
 export function mountHomePips(options) {
  const doc = options.document;
@@ -207,42 +192,15 @@ export function mountHomePips(options) {
  }
  // What a card can answer by itself, or null (it opens instead). `token` names the one thing asked, so an answer given
  // here is never taken for the next thing the same Pip asks.
- function answerFor(item, pip) {
-  if (item.kind === 'setup' && !item.pip_id) {
-   const s = setups.get(item.card);
-   return s ? {kind: 'setup', token: item.id, yes: 'Create', no: 'Reject', full: [s.goal, s.when].filter(Boolean).join(' · '),
-    said: {yes: `Created ${s.name}.`, no: 'Rejected. No Pip was created.'}} : null;
-  }
-  if (!pip) return null;
-  if (item.kind === 'approval' && pip.version && item.detail && [...item.detail].length < 200) return {kind: 'change', token: item.id, yes: 'Apply', no: 'Not now', full: item.detail,
-   said: {yes: `Applied. ${pip.name} is changed.`, no: `Not now. ${pip.name} stays as it was.`}};
-  const v = item.kind === 'computer_action' ? visits.get(item.card) : null;
-  if (v) return {kind: 'site', token: item.id, yes: 'Allow', no: 'Not now', full: v.address,
-   said: {yes: `Allowed. ${pip.name} opens ${v.site}.`, no: `Not now. ${pip.name} won’t open ${v.site}.`}};
-  return null;
- }
+ const answerFor = (item, pip) => cardAnswerFor(item, pip, {setups, visits});
  // The answer itself, when its moment to undo has passed: the same commands the Pips page sends, each on what the card
  // showed (the digest or version read with it). Anything that changed since is refused, never answered blind.
  async function answerCard(key, yes) {
-  const changed = () => Error('This changed since it was shown. Open it to answer.');
   try {
-   if (key.startsWith('setup:')) {
-    const id = key.slice(6), seen = setups.get(id);
-    if (!seen) throw changed();
-    const raw = (await request('get_pip_setup', {setup_id: id})).setup, setup = pipSetup(raw, raw?.workspace_id, id);
-    if (setup.status !== 'pending' || setup.digest !== seen.digest) throw changed();
-    const done = (await request(yes ? 'accept_pip_setup' : 'reject_pip_setup', {setup_id: id, expected_digest: setup.digest})).setup;
-    if (done?.status !== (yes ? 'accepted' : 'rejected')) throw Error('The saved answer differs from your choice. Open Pips to see it.');
-    return;
-   }
+   if (key.startsWith('setup:')) { const id = key.slice(6); await sendSetupAnswer(request, id, setups.get(id), yes); return; }
    const pip = pips?.find(p => p.id === key.slice(4)), waits = (attention?.items || []).filter(i => i.pip_id === pip?.id);
    const item = waits.length === 1 ? waits[0] : null, answer = item && pip ? answerFor(item, pip) : null;
-   if (!answer) throw changed();
-   if (answer.kind === 'change') { await request(yes ? 'accept_pip_update' : 'reject_pip_update', {pip_id: pip.id, proposal_id: item.card, expected_version: pip.version}); return; }
-   const seen = visits.get(item.card), now = pipComputer((await request('get_pip_computer', {pip_id: pip.id})).computer, pip.id).actions.find(a => a.id === item.card);
-   if (!seen || !now || now.status !== 'pending' || now.digest !== seen.digest || !visit(now)) throw changed();
-   const done = (await request('decide_pip_computer_action', {action_id: now.id, expected_digest: now.digest, approve: yes})).action;
-   if (done?.id !== now.id || done.status !== (yes ? 'approved' : 'rejected')) throw Error('The saved answer differs from your choice. Open Pips to see it.');
+   await sendItemAnswer(request, {answer, item, pip, seen: item ? visits.get(item.card) : null}, yes);
   } finally { void load(); }
  }
  // What the hub draws: one card for each Pip that needs you or has news, the most urgent first, then each new Pip that
@@ -310,16 +268,14 @@ export function mountHomePips(options) {
  // What a card may answer by itself is read after the list is drawn, never before it: Home does not wait on these, and
  // a card opens (as it always did) until its own answer is known.
  async function readAnswered(waiting, token) {
-  const readSetups = new Map(), readVisits = new Map();
+  const readSetups = new Map(), readVisits_ = new Map();
   await Promise.all([
    ...(waiting?.items || []).filter(i => i.kind === 'setup' && !i.pip_id).slice(0, ANSWERED).map(async i => {
     try { const raw = (await request('get_pip_setup', {setup_id: i.card})).setup, s = pipSetup(raw, raw?.workspace_id, i.card); if (plainSetup(s)) readSetups.set(s.id, {digest: s.digest, name: s.name, goal: s.goal, when: runsWhen(s)}); } catch { /* it opens instead */ }
    }),
-   ...[...new Set((waiting?.items || []).filter(i => i.kind === 'computer_action').map(i => i.pip_id))].slice(0, ANSWERED).map(async pip => {
-    try { for (const a of pipComputer((await request('get_pip_computer', {pip_id: pip})).computer, pip).actions) { const v = visit(a); if (v) readVisits.set(a.id, {digest: a.digest, ...v}); } } catch { /* it opens instead */ }
-   })]);
+   readVisits(request, [...new Set((waiting?.items || []).filter(i => i.kind === 'computer_action').map(i => i.pip_id))].slice(0, ANSWERED), readVisits_)]);
   if (token !== epoch || attention !== waiting) return;
-  setups = readSetups; visits = readVisits; paint();
+  setups = readSetups; visits = readVisits_; paint();
  }
  async function load() {
   if (disposed || !ready || loading) return;

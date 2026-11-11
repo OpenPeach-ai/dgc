@@ -9948,6 +9948,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const trayJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "tray.js"));
     // One card for everything that asks or reports, the same in ChatDGC and a Pip's chat (media/shared/card.js, window.DgcCard).
     const cardJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "card.js"));
+    // A card's answers as icons that turn into the full button, on Home's cards (media/shared/iconactions.js, window.DgcIconActions).
+    const iconActionsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "iconactions.js"));
     // The small sheet of its kind on an output card and a Library row (media/shared/filesheet.js, window.DgcFileSheet).
     const sheetJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "filesheet.js"));
     // A session's liquid blob and its colours (media/shared/blob.js, window.DgcBlob), and the dock at the foot of the
@@ -10281,7 +10283,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${composerJs}"></script><script nonce="${nonce}" src="${trayJs}"></script>
 <script nonce="${nonce}" src="${cardJs}"></script>
 <script nonce="${nonce}" src="${sheetJs}"></script>
-<script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${hubJs}"></script>
+<script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script>
 <script nonce="${nonce}" src="${mcpAppsJs}"></script>
 <script nonce="${nonce}" src="${markdown}"></script>
 <script nonce="${nonce}" src="${breakdownScript}"></script>

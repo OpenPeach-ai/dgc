@@ -9,6 +9,8 @@
   "use strict";
   const root = typeof window !== "undefined" ? window : globalThis;
   if (root.DgcHub) return;
+  // A card's answers are a row of icons that turn into the full button (media/shared/iconactions.js, asked 12 Nov):
+  // loaded before this file. A held answer's one way back, Undo, is a plain word button.
 
   const SOURCES = [["all", "All"], ["work", "Work"], ["chat", "Chat"], ["personal", "Personal Pips"], ["project", "Project Pips"]];
   const NAME = Object.fromEntries(SOURCES);
@@ -33,7 +35,7 @@
    *   more: how many more need you than the cards show; partial: more Pips may have news than DGC named; notes: [{ text, retry? }] lines that say what went wrong
    */
   function create({ host, show, onShow, onAct, onClear, onMore, onPips, onRetry, onCount, onDraw } = {}) {
-    const doc = host.ownerDocument, view = doc.defaultView, Card = root.DgcCard, Menu = root.DgcMenu;
+    const doc = host.ownerDocument, view = doc.defaultView, Card = root.DgcCard, Menu = root.DgcMenu, Icons = root.DgcIconActions;
     const esc = Card.esc;
     let state = { cards: [], more: 0, partial: false, notes: [] }, drawn = "", menu = null, unwatch = null;
     const open = new Set();          // groups shown in full
@@ -43,7 +45,9 @@
 
     function cardHtml(c) {
       const here = c.full !== undefined && !cuts.has(c.key);        // answered on the card
-      const answers = [...((c.full !== undefined && !here ? c.fallback : c.actions) || []).filter(Boolean).slice(0, 2), here && c.more ? { ...c.more, primary: false, cls: "dgc-hub-open" } : null].filter(Boolean);
+      const answers = [...((c.full !== undefined && !here ? c.fallback : c.actions) || []).filter(Boolean).slice(0, 2), here && c.more ? { ...c.more, primary: false } : null].filter(Boolean);
+      // The answers as icons; a held answer's Undo, alone and against the clock, as a word.
+      const icons = !c.held && Icons ? Icons.html(answers.map((a) => ({ label: a.label, primary: !!a.primary, title: a.title, say: a.say, attrs: { "data-hub-act": a.id } })), { label: "Answers" }) : "";
       // A chip is shown only for what the card's own words do not already say.
       const said = `${c.title} · ${c.from}`.toLowerCase(), word = (chip) => String((chip && typeof chip === "object" ? chip.label : chip) ?? "").trim();
       const chips = here ? [] : (c.chips || []).filter((chip) => word(chip) && !said.includes(word(chip).toLowerCase()));
@@ -51,7 +55,8 @@
         label: `${c.label || `${c.from}: ${c.title}`}${here ? `: ${c.full}` : chips.length ? `. ${chips.map(word).join(", ")}` : ""}`,
         attrs: { "data-key": c.key, "data-source": c.source, "data-group": c.group },
         icon: { html: c.who?.html || "", face: true }, title: c.title, sub: c.from, chips, note: here ? c.full : undefined,
-        actions: answers.map((a) => ({ label: a.label, primary: !!a.primary, title: a.title, cls: a.cls, attrs: { "data-hub-act": a.id, ...(a.say ? { "aria-label": a.say } : {}) } })) });
+        actionsHtml: icons,
+        actions: icons ? [] : answers.map((a) => ({ label: a.label, primary: !!a.primary, title: a.title, attrs: { "data-hub-act": a.id, ...(a.say ? { "aria-label": a.say } : {}) } })) });
     }
     /** The cards answered here whose line, or sentence, is cut where it is drawn. */
     function cutNow() {
@@ -118,6 +123,7 @@
       if (cut.length) { cuts = new Set(cut); render(); }
       tidy();
       onDraw?.(host);
+      Icons?.refresh(host);        // an answer the pointer or the keyboard is still on shows its pill again
       if (held) {
         const cards = [...host.querySelectorAll(".dgc-hub-card")];
         const same = cards.find((c) => c.dataset.key === held.key);
@@ -185,6 +191,7 @@
       if (e.key === "ArrowDown" && e.target.closest?.(".dgc-hub-show")) { e.preventDefault(); openMenu(true); }
     });
     unwatch = Card.watch(host);
+    const unwatchIcons = Icons ? Icons.watch(host) : null;
     // A wider or narrower side bar shows more or less of a line: what is answered here is measured again.
     let width = host.clientWidth, sized = null;
     if (view.ResizeObserver) {
@@ -197,7 +204,7 @@
       update(next) { state = { cards: Array.isArray(next?.cards) ? next.cards : [], more: Number(next?.more) || 0, partial: next?.partial === true, notes: Array.isArray(next?.notes) ? next.notes : [] }; draw(); },
       redraw() { draw(true); },
       counts, shown: filter, closeMenu,
-      dispose() { closeMenu(); unwatch?.(); sized?.disconnect(); },
+      dispose() { closeMenu(); unwatch?.(); unwatchIcons?.(); sized?.disconnect(); },
     };
   }
 

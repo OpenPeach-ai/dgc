@@ -353,9 +353,10 @@ test("a card's Mark read marks that Pip's whole chat read, by the pointer or the
   try {
     await x.page.waitForSelector('#home-hub [data-hub-act="read"]');
     assert.deepEqual(await x.unreadRows(), [["Mail watch", "Two new mails from OKX."], ["Billing audit", "2 findings in billing.py"]], "each Pip's newest words, on its card");
-    const labels = await x.page.evaluate(() => [...document.querySelectorAll('#home-hub [data-hub-act="read"]')].map((b) => [b.tagName, b.type, b.textContent, b.title, b.checkVisibility({ visibilityProperty: true, opacityProperty: true }), !!b.closest("button:not([data-hub-act])")]));
-    assert.deepEqual(labels, [["BUTTON", "button", "Mark read", "Mark as read, without opening its chat", true, false], ["BUTTON", "button", "Mark read", "Mark as read, without opening its chat", true, false]],
-      "its own button, in words and in sight: nothing to point at first");
+    const labels = await x.page.evaluate(() => [...document.querySelectorAll('#home-hub [data-hub-act="read"]')].map((b) => [b.tagName, b.type, b.textContent, document.getElementById(b.getAttribute("aria-describedby"))?.textContent || "", b.title, b.checkVisibility({ visibilityProperty: true, opacityProperty: true }), !!b.closest("button:not([data-hub-act])")]));
+    // (12 Nov: a card's answers are icons that turn into the full button. Its name is still the words; the longer line is its description, not a tooltip: the pill says the word.)
+    assert.deepEqual(labels, [["BUTTON", "button", "Mark read", "Mark as read, without opening its chat", "", true, false], ["BUTTON", "button", "Mark read", "Mark as read, without opening its chat", "", true, false]],
+      "its own button, named in words and in sight: nothing to point at first");
     await x.page.focus('#home-hub .dgc-hub-card >> nth=0 >> [data-hub-act="open"]');
     await x.page.keyboard.press("Tab");
     assert.equal(await x.page.evaluate(() => `${document.activeElement.closest(".dgc-hub-card").dataset.key} ${document.activeElement.dataset.hubAct}`), `pip:${MAIL} read`, "Tab reaches it, after Open");

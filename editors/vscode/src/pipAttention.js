@@ -2,6 +2,9 @@
 // sidebar and Dots' activity view: each card a Pip is waiting on you for, newest first. A row opens that
 // Pip at the card (its chat, its computer). A new Pip waiting for you is a card in the list itself, and nowhere else
 // on the page: Review and Reject are on it. Words are the Pips' and the user's own: text only.
+// A row's answers (asked 12 Nov): the ones Home offers for the same thing (Apply / Not now, Allow / Not now), then Review,
+// as a row of icons at the card's right that turn into the full button (media/shared/iconactions.js). The card itself
+// still opens it. After an answer the card says what it will do, with Undo as a word, for a moment (src/pipsClient.js).
 
 export const KINDS = ['email', 'event', 'action', 'app_action', 'app_link', 'plugin', 'setup', 'computer_action', 'computer_check', 'routine'];
 const LABELS = {email: 'Email', event: 'Calendar', action: 'Action', app_action: 'Ready to send', app_link: 'App', plugin: 'Plugin',
@@ -126,19 +129,32 @@ const ARROW = {prev: 'M10 3 5 8l5 5', next: 'M6 3l5 5-5 5'};
  *  arrow each side and dots below to go to the next or back. `at` is the card showing (attentionSpot). `face(item)`
  *  draws the Pip's face (the home's own avatars). `setups` are the new Pips waiting in this place, each drawn as a card
  *  by `setupCard` ({setup} or {item}); the cards are theirs alone when `page` is null (a project's home, which shows
- *  none of the Personal Pips' rows). */
-export function attentionMarkup(page, {esc, face, expanded = false, now = Date.now(), busy = false, setups = [], setupCard = null, error = '', more = '', at = 0}) {
+ *  none of the Personal Pips' rows). `answers(item)` is what the card can answer by itself ({yes, no}, src/pipCardAnswers.js)
+ *  or null; `held(item)` is what an answer just given says ("Applied. …") while it can still be undone, or ''. */
+export function attentionMarkup(page, {esc, face, expanded = false, now = Date.now(), busy = false, setups = [], setupCard = null, error = '', more = '', at = 0, answers = null, held = null}) {
   const all = attentionCards(page, setups, !!setupCard), listed = page?.items || [];
   const total = (page?.total || 0) + all.length - listed.length;
   if (!total) return '';
   const count = all.length, index = Math.max(0, Math.min(at, count - 1)), shown = expanded ? all[index] : null, n = v => v.toLocaleString('en-US');
+  const icons = globalThis.DgcIconActions;
+  // A row's answers as icons: yes and no where it can be answered here, then Review (the way to all of it, the card's own click).
+  const iconRow = i => { const a = answers?.(i) || null, act = (way, label, primary, title) => ({label, primary, title, disabled: busy, attrs: {id: `attention-${way}`, [way === 'open' ? 'data-attention-open' : 'data-attention-answer']: way === 'open' ? i.id : way, 'data-attention-item': i.id}});
+   const list = [...(a ? [act('yes', a.yes, true), act('no', a.no, false)] : []), act('open', 'Review', !a, `See all of it${i.pip_name ? `, with ${i.pip_name}` : ''}`)];
+   return {n: list.length, html: icons.html(list, {label: `Answers: ${i.title}`})}; };
+  const small = i => `<small>${esc(i.pip_name || 'DGC')} · ${LABELS[i.kind]} · ${esc(ago(i.created_at, now))}</small>`;
+  const row = i => { const said = i.kind !== 'setup' && held?.(i) || '', answered = !said && icons && i.kind !== 'setup' ? iconRow(i) : null;
+   // Held: what the answer will do, and Undo as a plain word button (alone, and against the clock). Nothing is sent yet.
+   if (said) return `<li class="attention-item attention-held" data-attention-key="${esc(shown.key)}"><div class="attention-row">${face(i)}<span class="attention-copy"><strong role="status">${esc(said)}</strong>${small(i)}</span></div>`
+    + `<button type="button" class="dgc-btn small attention-undo" id="attention-undo" data-attention-undo="${esc(i.id)}" aria-label="${esc(`Undo: ${said}`)}" title="Take that back. Nothing was sent yet.">Undo</button></li>`;
+   return `<li class="attention-item${answered ? ' attention-answers' : ''}" data-attention-key="${esc(shown.key)}"${answered ? ` style="--ia-n:${answered.n}"` : ''}><button type="button" class="attention-row" data-attention="${esc(i.id)}"${busy ? ' disabled' : ''}>`
+    + `${face(i)}<span class="attention-copy"><strong>${esc(i.title)}</strong>${i.detail ? `<span class="attention-detail">${esc(i.detail)}</span>` : ''}`
+    + `${small(i)}</span></button>`
+    + (answered ? answered.html : '')
+    + (i.kind === 'setup' ? `<button type="button" class="attention-dismiss" data-attention-dismiss="${esc(i.id)}" aria-label="Dismiss ${esc(i.title)}"${busy ? ' disabled' : ''}>Dismiss</button>` : '')
+    + '</li>'; };
   const card = shown && (({setup, item: i}) => setup !== undefined
     ? `<li class="attention-item attention-card" data-attention-key="${esc(shown.key)}">${setupCard({setup, item: i})}</li>`
-    : `<li class="attention-item" data-attention-key="${esc(shown.key)}"><button type="button" class="attention-row" data-attention="${esc(i.id)}"${busy ? ' disabled' : ''}>`
-    + `${face(i)}<span class="attention-copy"><strong>${esc(i.title)}</strong>${i.detail ? `<span class="attention-detail">${esc(i.detail)}</span>` : ''}`
-    + `<small>${esc(i.pip_name || 'DGC')} · ${LABELS[i.kind]} · ${esc(ago(i.created_at, now))}</small></span></button>`
-    + (i.kind === 'setup' ? `<button type="button" class="attention-dismiss" data-attention-dismiss="${esc(i.id)}" aria-label="Dismiss ${esc(i.title)}"${busy ? ' disabled' : ''}>Dismiss</button>` : '')
-    + '</li>')(shown);
+    : row(i))(shown);
   // An arrow goes one card along and says which ("Next: Link Gmail?"); at an end it is off, never round to the other end.
   const arrow = (way, to) => { const there = all[to], word = way === 'prev' ? 'Previous' : 'Next', label = there ? `${word}: ${there.title}` : word;
     return `<button type="button" class="attention-nav attention-${way}" id="attention-${way}"${there ? ` data-attention-go="${esc(there.key)}" data-attention-index="${to}"` : ' disabled'} aria-label="${esc(label)}" title="${esc(label)}">`

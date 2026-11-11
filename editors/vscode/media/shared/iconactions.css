@@ -1,0 +1,51 @@
+/* A card's answers as a row of small icon buttons that turn into the full button (media/shared/iconactions.js draws
+   and moves it): on Home's cards and the Pips page's Needs attention. At rest each answer is a 24 px square with its
+   icon, 2 px apart, so three are 76 px: the width of the one small button they replace. The main answer is filled, in
+   the text's own colour; every other is one hairline outline (DGC's one button, tokens.css). The one pointed at, or
+   reached by Tab, shows as a pill with its icon and word over the row, held at the row's right edge; the focus ring is
+   the pill's. A button's box never moves (it is what the pointer finds): only the icon inside it does.
+   Neutral greys only: nothing here is purple. */
+.dgc-ia { --ia-size: 24px; --ia-gap: 2px; --ia-ground: color-mix(in srgb, var(--text) 4.5%, var(--bg));
+  position: relative; flex: none; display: flex; flex-direction: row; align-items: center; justify-content: flex-end; gap: var(--ia-gap); height: var(--ia-size); margin: 0; padding: 0; }
+button.dgc-ia-btn, button.dgc-ia-btn:hover, button.dgc-ia-btn:active {
+  position: relative; z-index: 2; flex: none; display: grid; place-items: center; box-sizing: border-box; width: var(--ia-size); min-width: 0; max-width: none; height: var(--ia-size); min-height: 0; margin: 0; padding: 0;
+  border: 1px solid var(--btn-line); border-radius: var(--btn-r); background: transparent; color: var(--btn-text); box-shadow: none; transform: none; cursor: pointer;
+  font: var(--w-med) var(--t-xs)/1 var(--sans); transition: background-color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out);
+}
+button.dgc-ia-btn.dgc-ia-main, button.dgc-ia-btn.dgc-ia-main:hover, button.dgc-ia-btn.dgc-ia-main:active { border-color: transparent; background: var(--btn-fill); color: var(--btn-on-fill); }
+button.dgc-ia-btn:disabled { opacity: .55; cursor: default; }
+button.dgc-ia-btn:focus-visible { outline: none; }                /* (the ring is the pill's) */
+.dgc-ia .dgc-ia-ico { display: block; flex: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.dgc-ia-btn .dgc-ia-ico { transition: opacity 160ms ease, transform 220ms cubic-bezier(.2,.8,.2,1); }
+/* The word is the button's name; it is seen in the pill. */
+.dgc-ia-word { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.dgc-ia-said[hidden] { display: none; }
+/* The pill: the answer in full. An outline's ground is the card's own, so words it grows over do not show through. */
+.dgc-ia-pill {
+  position: absolute; z-index: 1; top: 0; right: 0; box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 5px; height: var(--ia-size); padding: 0 10px 0 8px;
+  border: 1px solid var(--btn-line-hover); border-radius: var(--btn-r); background: linear-gradient(var(--btn-wash), var(--btn-wash)), var(--ia-ground); color: var(--btn-text);
+  font: var(--w-med) var(--t-xs)/1 var(--sans); white-space: nowrap; overflow: hidden; pointer-events: none; opacity: 0; transition: transform var(--btn-press) var(--ease-out);
+}
+.dgc-ia-pill.dgc-ia-main { border-color: transparent; background: var(--btn-fill-hover); color: var(--btn-on-fill); }
+.dgc-ia-pill .dgc-ia-ico { width: 13px; height: 13px; stroke-width: 1.7; }
+.dgc-ia-pill-word { flex: none; }
+/* One answer shown: every box stays where it is, clear; the icons go, the others sliding toward the one shown. */
+.dgc-ia.dgc-ia-on button.dgc-ia-btn, .dgc-ia.dgc-ia-on button.dgc-ia-btn:is(:hover, :active) { border-color: transparent; background: transparent; }
+.dgc-ia.dgc-ia-on .dgc-ia-btn .dgc-ia-ico { opacity: 0; }
+.dgc-ia.dgc-ia-on .dgc-ia-btn:not(.dgc-ia-hot) .dgc-ia-ico { transform: translateX(var(--ia-toward, 0px)) scale(.55); }
+.dgc-ia.dgc-ia-on .dgc-ia-pill { opacity: 1; }
+.dgc-ia.dgc-ia-on:has(.dgc-ia-btn:active) .dgc-ia-pill { transform: scale(.97); }
+.dgc-ia.dgc-ia-on.dgc-ia-kbd .dgc-ia-pill { outline: var(--btn-ring); outline-offset: 1px; }
+/* Reduced motion: an instant swap (the script moves nothing either). */
+@media (prefers-reduced-motion: reduce) {
+  button.dgc-ia-btn, .dgc-ia-btn .dgc-ia-ico, .dgc-ia-pill { transition: none; }
+  .dgc-ia.dgc-ia-on .dgc-ia-btn:not(.dgc-ia-hot) .dgc-ia-ico, .dgc-ia.dgc-ia-on:has(.dgc-ia-btn:active) .dgc-ia-pill { transform: none; }
+}
+@media (forced-colors: active) {
+  button.dgc-ia-btn, button.dgc-ia-btn:hover, button.dgc-ia-btn:active { border-color: ButtonText; background: ButtonFace; color: ButtonText; }
+  button.dgc-ia-btn.dgc-ia-main, button.dgc-ia-btn.dgc-ia-main:hover, button.dgc-ia-btn.dgc-ia-main:active { forced-color-adjust: none; border-color: ButtonText; background: ButtonText; color: ButtonFace; }
+  .dgc-ia.dgc-ia-on button.dgc-ia-btn, .dgc-ia.dgc-ia-on button.dgc-ia-btn:is(:hover, :active) { border-color: transparent; background: transparent; }
+  .dgc-ia-pill { forced-color-adjust: none; border-color: ButtonText; background: ButtonFace; color: ButtonText; }
+  .dgc-ia-pill.dgc-ia-main { border-color: ButtonText; background: ButtonText; color: ButtonFace; }
+  .dgc-ia.dgc-ia-on.dgc-ia-kbd .dgc-ia-pill { outline: 2px solid Highlight; }
+}

@@ -1,14 +1,15 @@
-// The answers on a card are one small system (media/shared/card.css for every card in the side bar, media/shared/hub.css
-// for Home's slim ones; the look picked on 11 Nov, "compact squares"): exactly one filled button marks a card's main
-// answer, in the text's own colour; every other answer is one hairline outline; the way to all of it is a text link.
-// One 6 px corner, one height, one label size and side padding. Each button answers the pointer (a 1 px step up, a
-// 1 px press), shows a focus ring, and rests under reduced motion. Measured in real Chromium on the side bar's real page:
-//   - Home at 300, 460 and 700 px, dark, light and high contrast: the sizes, one filled button a card, never a third style
-//   - labels at 4.5:1 or better, an outline's line at 3:1 in high contrast
-//   - hover, press, focus; reduced motion
-//   - the quiet link's hit area is 22 px tall, like a button's
-//   - the command card in one row (a card from about 420 px), and a side bar under 225 px
-//   - the same card anywhere else in the side bar wears the same corner, styles and steps
+// The answers on a card are one small system (media/shared/card.css for every card in the side bar; on Home's slim
+// cards media/shared/iconactions.css, asked 12 Nov: a card's answers rest as small icon buttons and the one pointed at
+// turns into the full button): exactly one filled answer marks a card's main answer, in the text's own colour; every
+// other answer is one hairline outline. One 6 px corner, one size (a 24 px square), 2 px apart. A square never moves
+// (it is what the pointer finds): pointed at, its pill shows; pressed, the pill gives a little; reduced motion rests.
+// Measured in real Chromium on the side bar's real page:
+//   - Home at 300, 460, 700 and 1000 px, dark, light and high contrast: the sizes, one filled answer a card, never a third style
+//   - icons at 4.5:1 or better, an outline's line at 3:1 in high contrast
+//   - hover, press, focus (the ring is the pill's); reduced motion
+//   - the way to all of it is an icon like the others, 24 px to hit
+//   - the command card's answers beside its sentence at every width, and a side bar under 225 px
+//   - the same card anywhere else in the side bar wears the same corner, styles and steps, as full buttons
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { openCards, K } from "./support/home-cards-scene.mjs";
@@ -39,10 +40,10 @@ const answers = (page, within = "#home-hub") => page.evaluate((scope) => {
   const ratio = (ink, g) => { const c = over(parse(ink), g), [x, y] = [lum(c), lum(g)].sort((p, q) => q - p); return Math.round(((x + 0.05) / (y + 0.05)) * 100) / 100; };
   const probe = document.createElement("i"); document.body.append(probe); probe.style.backgroundColor = "var(--solid)"; const solid = getComputedStyle(probe).backgroundColor; probe.remove();
   return [...document.querySelectorAll(`${scope} .dgc-card`)].map((card) => { const box = card.getBoundingClientRect();
-    const buttons = [...card.querySelectorAll(".dgc-card-actions .dgc-card-btn")].map((b) => { const s = getComputedStyle(b), r = b.getBoundingClientRect(), fill = parse(s.backgroundColor);
+    const buttons = [...card.querySelectorAll(".dgc-card-actions :is(.dgc-card-btn, .dgc-ia-btn)")].map((b) => { const s = getComputedStyle(b), r = b.getBoundingClientRect(), fill = parse(s.backgroundColor);
       const kind = s.backgroundColor === solid ? "filled" : fill[3] === 0 && parseFloat(s.borderTopWidth) === 1 && parse(s.borderTopColor)[3] > 0 ? "outline" : fill[3] === 0 && (parseFloat(s.borderTopWidth) === 0 || parse(s.borderTopColor)[3] === 0) && s.textDecorationLine.includes("underline") ? "link" : "other";   // (a link has no edge at all: forced colours draw every edge, a clear one too)
       const under = ground(b.parentElement);
-      return { word: b.textContent, kind, primary: b.classList.contains("primary"), height: Math.round(r.height * 10) / 10, width: Math.round(r.width * 10) / 10, radius: s.borderTopLeftRadius, size: s.fontSize, weight: s.fontWeight, pad: [s.paddingLeft, s.paddingRight],
+      return { word: b.textContent, kind, primary: b.matches(".primary, .dgc-ia-main"), height: Math.round(r.height * 10) / 10, width: Math.round(r.width * 10) / 10, radius: s.borderTopLeftRadius, size: s.fontSize, weight: s.fontWeight, pad: [s.paddingLeft, s.paddingRight],
         label: ratio(s.color, kind === "filled" ? over(fill, under) : under), line: kind === "outline" ? ratio(s.borderTopColor, under) : null, inside: r.left >= box.left + 3 && r.right <= box.right - 3 && r.top >= box.top + 3 && r.bottom <= box.bottom - 3,
         whole: b.scrollWidth <= b.clientWidth + 1, left: r.left, right: r.right, top: r.top, bottom: r.bottom }; });
     const col = card.querySelector(".dgc-card-actions")?.getBoundingClientRect();
@@ -50,79 +51,81 @@ const answers = (page, within = "#home-hub") => page.evaluate((scope) => {
 }, within);
 
 for (const theme of ["dark-modern", "light-modern", "hc"]) for (const width of [300, 460, 700, 1000]) {
-  test(`${theme} ${width}px: one filled button a card, every other an outline, the rest a link; one corner, height and label size; labels at 4.5:1`, async (t) => {
+  test(`${theme} ${width}px: one filled answer a card, every other an outline; one corner and size; icons at 4.5:1`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openCards(browser, { theme, width });
     try {
       const cards = await answers(x.page);
       assert.ok(cards.length >= 10, `every kind of card is on Home (${cards.length})`);
       const all = cards.flatMap((c) => c.buttons.map((b) => ({ ...b, key: c.key })));
-      assert.deepEqual([...new Set(all.map((b) => b.kind))].sort(), ["filled", "link", "outline"], "three kinds and never a fourth");
+      assert.deepEqual([...new Set(all.map((b) => b.kind))].sort(), ["filled", "outline"], "two kinds and never a third (the way to all of it is an icon like the others, no longer a text link)");
       for (const c of cards) {
-        assert.equal(c.buttons.filter((b) => b.kind === "filled").length, 1, `${c.key}: exactly one filled button (${c.buttons.map((b) => `${b.word}:${b.kind}`)})`);
+        assert.equal(c.buttons.filter((b) => b.kind === "filled").length, 1, `${c.key}: exactly one filled answer (${c.buttons.map((b) => `${b.word}:${b.kind}`)})`);
         assert.deepEqual(c.buttons.filter((b) => b.kind === "filled").map((b) => b.primary), [true], `${c.key}: and it is the main answer`);
-        assert.ok(c.buttons.filter((b) => b.kind === "link").length <= 1, `${c.key}: at most one link`);
+        assert.equal(c.buttons.filter((b) => b.kind === "link").length, 0, `${c.key}: no text link among its answers`);
         assert.deepEqual(c.buttons.filter((b) => !b.inside || !b.whole).map((b) => b.word), [], `${c.key}: every answer is inside its card and whole`);
       }
-      const boxed = all.filter((b) => b.kind !== "link");
-      // (11 Nov, "all buttons sizes should be fixed": every button is one box, 76 by 22 px, whatever its words. A side bar under about 225 px shares a row equally instead: its own test.)
-      assert.deepEqual([...new Set(boxed.map((b) => `${b.width}x${b.height}/${b.radius}/${b.size}/${b.weight}`))], ["76x22/6px/11px/500"], "one box, corner and label size for every button: Open and Mark read are the same size");
-      assert.deepEqual([...new Set(all.filter((b) => b.kind === "link").map((b) => b.size))], ["11px"], "the link's words are the same size");
+      // (12 Nov: every answer is one 24 px square, whatever its word; before, one 76 by 22 px box.)
+      assert.deepEqual([...new Set(all.map((b) => `${b.width}x${b.height}/${b.radius}/${b.size}/${b.weight}`))], ["24x24/6px/11px/500"], "one square, corner and label size for every answer: Open and Mark read are the same size");
       const low = all.filter((b) => b.label < 4.5).map((b) => `${b.key} ${b.word} ${b.label}`);
-      assert.deepEqual(low, [], "every label reads at 4.5:1");
+      assert.deepEqual(low, [], "every icon reads at 4.5:1");
       if (theme === "hc") assert.deepEqual(all.filter((b) => b.kind === "outline" && b.line < 3).map((b) => `${b.word} ${b.line}`), [], "in high contrast an outline's line is 3:1");
-      // In a roomy card the answers' column is one width, so they line up down the page.
-      assert.deepEqual([...new Set(cards.filter((c) => !c.mono).map((c) => c.column))], [76], "one column width on every card");
-      for (const c of cards.filter((k) => !k.mono)) assert.ok(new Set(c.buttons.filter((b) => b.kind !== "link").map((b) => `${Math.round(b.left * 10)}/${Math.round(b.right * 10)}`)).size === 1, `${c.key}: its buttons line up on both edges`);
-      const edges = new Map(); for (const c of cards.filter((k) => !k.mono)) for (const b of c.buttons.filter((k) => k.kind !== "link")) edges.set(Math.round(b.left), (edges.get(Math.round(b.left)) || 0) + 1);
-      assert.ok(edges.size <= (width >= 1000 ? 3 : width >= 700 ? 2 : 1), `the columns line up down the page, one line of buttons a column of cards (${[...edges.keys()]})`);
+      // The answers' row is one, two or three squares 2 px apart: never wider than the 76 px column it replaces.
+      assert.deepEqual([...new Set(cards.map((c) => c.column))].filter((w) => ![24, 50, 76].includes(w)), [], "a row is 24, 50 or 76 px wide");
+      for (const c of cards) {
+        assert.equal(new Set(c.buttons.map((b) => Math.round(b.top * 10))).size, 1, `${c.key}: its answers on one row`);
+        for (let i = 1; i < c.buttons.length; i++) assert.equal(Math.round((c.buttons[i].left - c.buttons[i - 1].right) * 10) / 10, 2, `${c.key}: 2 px apart, in the order they are read`);
+      }
+      // The rows end on one line down the page, one line a column of cards.
+      const edges = new Set(cards.map((c) => Math.round(c.buttons.at(-1).right)));
+      assert.ok(edges.size <= (width >= 1000 ? 3 : width >= 700 ? 2 : 1), `the rows line up at the cards' right down the page, one line a column of cards (${[...edges]})`);
       assert.equal(await x.page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, "nothing runs off the side");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   });
 }
 
-test("a button answers the pointer: 1 px up when pointed at (an outline gains a faint fill and a firmer line), 1 px down when pressed; a link stays put", async (t) => {
+test("an answer's square never moves: pointed at, its pill shows in its place; pressed, the pill gives a little", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openCards(browser, { width: 700 });
   try {
     const card = `.dgc-hub-card[data-key="${K.visit}"]`;
-    const now = (sel) => x.page.evaluate((s) => { const b = document.querySelector(s), c = getComputedStyle(b), m = new DOMMatrixReadOnly(c.transform === "none" ? "" : c.transform);
-      return { y: Math.round(m.f * 100) / 100, scale: Math.round(m.a * 1000) / 1000, fill: c.backgroundColor, line: c.borderTopColor, moves: c.transitionProperty.includes("transform"), ms: c.transitionDuration.split(",")[0].trim() }; }, sel);
-    for (const [name, sel] of [["the filled button", `${card} .dgc-card-btn.primary`], ["an outline", `${card} [data-hub-act="no"]`]]) {
+    const now = (sel) => x.page.evaluate(([c, s]) => { const b = document.querySelector(s), cs = getComputedStyle(b), r = b.getBoundingClientRect(), pill = document.querySelector(`${c} .dgc-ia-pill`), ps = getComputedStyle(pill);
+      return { at: [r.left, r.top, r.width, r.height], moved: cs.transform, fill: cs.backgroundColor, ms: cs.transitionDuration.split(",")[0].trim(), pill: Number(ps.opacity) === 1 ? pill.textContent.trim() : "", pillFill: ps.backgroundColor, pillLine: ps.borderTopColor,
+        pillScale: Math.round(new DOMMatrixReadOnly(ps.transform === "none" ? "" : ps.transform).a * 1000) / 1000 }; }, [card, sel]);
+    // (Before 12 Nov a button stepped up 1 px when pointed at and sank 1 px when pressed. An icon's box must stay put,
+    // or the pointer misses the next one: what answers the pointer is the pill.)
+    for (const [name, sel, word] of [["the filled answer", `${card} .dgc-ia-btn.dgc-ia-main`, "Allow"], ["an outline", `${card} [data-hub-act="no"]`, "Not now"]]) {
       const rest = await now(sel);
-      assert.deepEqual([rest.y, rest.scale, rest.moves, rest.ms], [0, 1, true, "0.12s"], `${name}: at rest (it settles back in the shared 120 ms)`);
-      await x.page.hover(sel); await settle(x.page);
+      assert.deepEqual([rest.moved, rest.pill, rest.ms], ["none", "", "0.12s"], `${name}: at rest (its colours settle in the shared 120 ms)`);
+      await x.page.hover(sel); await settle(x.page, 320);
       const pointed = await now(sel);
-      assert.deepEqual([pointed.y, pointed.scale, pointed.ms], [-1, 1, "0.15s"], `${name}: pointed at, it steps up 1 px, in 150 ms`);
-      assert.notEqual(pointed.fill, rest.fill, `${name}: and its fill changes`);
-      if (name === "an outline") assert.notEqual(pointed.line, rest.line, "an outline's line firms up");
+      assert.deepEqual([pointed.at, pointed.moved], [rest.at, "none"], `${name}: pointed at, its box is where it was`);
+      assert.deepEqual([pointed.pill, pointed.pillScale], [word, 1], `${name}: and its pill says its word`);
+      if (name === "an outline") assert.notEqual(pointed.pillLine, "rgba(0, 0, 0, 0)", "an outline's pill has its line");
+      else assert.notEqual(pointed.pillFill, "rgba(0, 0, 0, 0)", "the filled answer's pill is filled");
       await x.page.mouse.down(); await settle(x.page);
       const pressed = await now(sel);
-      assert.deepEqual([pressed.y, pressed.scale, pressed.ms], [1, 0.985, "0.09s"], `${name}: pressed, it sinks 1 px below rest, in 90 ms`);
+      assert.deepEqual([pressed.at, pressed.moved, pressed.pillScale], [rest.at, "none", 0.97], `${name}: pressed, the pill gives a little and the box stays`);
       // (Let go away from it, so nothing is answered.)
-      await x.page.mouse.move(2, 2); await x.page.mouse.up(); await settle(x.page);
-      assert.deepEqual([(await now(sel)).y, (await now(sel)).fill], [0, rest.fill], `${name}: and rests again`);
+      await x.page.mouse.move(2, 2); await x.page.mouse.up(); await settle(x.page, 320);
+      assert.deepEqual([(await now(sel)).pill, (await now(sel)).fill], ["", rest.fill], `${name}: and rests again`);
     }
-    const link = `${card} .dgc-hub-open`;
-    await x.page.hover(link); await settle(x.page);
-    assert.equal((await now(link)).y, 0, "the link does not step: it is words");
   } finally { await x.close(); }
 });
 
-test("reduced motion: nothing steps or sinks, and the colours still answer", async (t) => {
+test("reduced motion: nothing steps, slides or gives, and the pill still answers", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openCards(browser, { width: 700, motion: "reduce" });
   try {
-    const sel = `.dgc-hub-card[data-key="${K.visit}"] [data-hub-act="no"]`;
-    const now = () => x.page.evaluate((s) => { const c = getComputedStyle(document.querySelector(s)); return [c.transform, c.backgroundColor]; }, sel);
-    const rest = await now();
-    await x.page.hover(sel); await settle(x.page);
-    const pointed = await now();
-    assert.equal(pointed[0], "none", "no step");
-    assert.notEqual(pointed[1], rest[1], "the fill still answers");
+    const card = `.dgc-hub-card[data-key="${K.visit}"]`, sel = `${card} [data-hub-act="no"]`;
+    const now = () => x.page.evaluate(([c, s]) => { const pill = document.querySelector(`${c} .dgc-ia-pill`), ps = getComputedStyle(pill);
+      return [getComputedStyle(document.querySelector(s)).transform, ps.transform, Number(ps.opacity) === 1 ? pill.textContent.trim() : "", document.querySelector(`${c} .dgc-ia`).getAnimations({ subtree: true }).length]; }, [card, sel]);
+    assert.deepEqual(await now(), ["none", "none", "", 0]);
+    await x.page.hover(sel);
+    assert.deepEqual(await now(), ["none", "none", "Not now", 0], "the pill is there at once: no step, no slide");
     await x.page.mouse.down(); await settle(x.page);
-    assert.equal((await now())[0], "none", "no press move");
+    assert.deepEqual((await now()).slice(0, 2), ["none", "none"], "no press move");
     await x.page.mouse.move(2, 2); await x.page.mouse.up();
   } finally { await x.close(); }
 });
@@ -136,7 +139,8 @@ for (const theme of ["dark-modern", "light-modern", "hc"]) {
       const seen = [];
       for (let i = 0; i < 12; i++) {
         await x.page.keyboard.press("Tab");
-        const at = await x.page.evaluate(() => { const a = document.activeElement; if (!a?.dataset?.hubAct) return null; const s = getComputedStyle(a);
+        // (An icon's ring is its pill's: the answer in full, over the row.)
+        const at = await x.page.evaluate(() => { const a = document.activeElement; if (!a?.dataset?.hubAct) return null; const s = getComputedStyle(a.matches(".dgc-ia-btn") ? a.closest(".dgc-ia").querySelector(".dgc-ia-pill") : a);
           const parse = (c) => { const m = c.match(/-?[\d.]+(e-?\d+)?/g).map(Number); return c.startsWith("color(srgb") ? m.slice(0, 3).map((v) => v * 255) : m.slice(0, 3); };
           const lum = (c) => { const [r, g, b] = c.map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
           let ground = [255, 255, 255]; for (let n = a.closest(".dgc-card"); n; n = n.parentElement) { const c = getComputedStyle(n).backgroundColor; if (!/rgba\(.*, 0\)|transparent/.test(c) && !/\/ 0\)/.test(c)) { const m = c.match(/-?[\d.]+/g).map(Number); if ((m[3] ?? 1) >= 1) { ground = parse(c); break; } } }
@@ -150,55 +154,60 @@ for (const theme of ["dark-modern", "light-modern", "hc"]) {
   });
 }
 
-test("the quiet link is as easy to hit as a button: 22 px tall where it is pressed, and never over the answer above it", async (t) => {
+test("the way to all of it is an icon like the others: 24 px to hit, clear of the answer beside it", async (t) => {
   if (skipOrFail(t)) return;
+  // (Before 12 Nov it was a quiet text link under the two buttons, with a 22 px hit area of its own.)
   for (const width of [300, 700]) {
     const x = await openCards(browser, { width });
     try {
-      const hits = await x.page.evaluate(() => [...document.querySelectorAll("#home-hub .dgc-hub-card .dgc-hub-open")].map((link) => { const r = link.getBoundingClientRect(), cx = (r.left + r.right) / 2;
-        let top = r.top, bottom = r.bottom;
-        while (top > r.top - 30 && document.elementFromPoint(cx, top - 0.5) === link) top -= 0.5;
-        while (bottom < r.bottom + 30 && document.elementFromPoint(cx, bottom + 0.5) === link) bottom += 0.5;
-        const above = [...link.parentElement.querySelectorAll(".dgc-card-btn:not(.dgc-hub-open)")].map((b) => b.getBoundingClientRect()).filter((b) => b.bottom <= r.top + 1 && b.left < r.right && b.right > r.left);
-        const card = link.closest(".dgc-hub-card").getBoundingClientRect();
-        return { key: link.closest(".dgc-hub-card").dataset.key, tall: Math.round((bottom - top) * 10) / 10, wide: Math.round(r.width), clear: above.every((b) => top >= b.bottom - 0.5), inCard: bottom <= card.bottom + 0.5 && top >= card.top - 0.5 }; }));
-      assert.ok(hits.length >= 2, `${width}px: the links are there (${hits.length})`);
-      for (const h of hits) assert.ok(h.tall >= 22 && h.clear && h.inCard && h.wide >= 28, `${width}px ${h.key}: ${JSON.stringify(h)}`);
+      const hits = await x.page.evaluate(() => [...document.querySelectorAll("#home-hub .dgc-hub-answers [data-hub-act='open']")].map((b) => { const r = b.getBoundingClientRect(), cy = (r.top + r.bottom) / 2, cx = (r.left + r.right) / 2;
+        let top = cy, bottom = cy, left = cx, right = cx;
+        while (top > r.top - 30 && document.elementFromPoint(cx, top - 0.5)?.closest("button") === b) top -= 0.5;
+        while (bottom < r.bottom + 30 && document.elementFromPoint(cx, bottom + 0.5)?.closest("button") === b) bottom += 0.5;
+        while (left > r.left - 30 && document.elementFromPoint(left - 0.5, cy)?.closest("button") === b) left -= 0.5;
+        while (right < r.right + 30 && document.elementFromPoint(right + 0.5, cy)?.closest("button") === b) right += 0.5;
+        const before = b.previousElementSibling?.getBoundingClientRect(), card = b.closest(".dgc-hub-card").getBoundingClientRect();
+        return { key: b.closest(".dgc-hub-card").dataset.key, tall: Math.round((bottom - top) * 10) / 10, wide: Math.round((right - left) * 10) / 10, clear: !before || left >= before.right - 0.5, inCard: bottom <= card.bottom + 0.5 && top >= card.top - 0.5 && right <= card.right }; }));
+      assert.ok(hits.length >= 2, `${width}px: the answered cards are there (${hits.length})`);
+      for (const h of hits) assert.ok(h.tall >= 23 && h.wide >= 23 && h.clear && h.inCard, `${width}px ${h.key}: ${JSON.stringify(h)}`);
     } finally { await x.close(); }
   }
 });
 
-test("a command card about 420 px wide or more is one row: its three answers beside its sentence, the others' height", async (t) => {
+test("a command card's three answers stand beside its sentence at every width, over its command's line", async (t) => {
   if (skipOrFail(t)) return;
-  for (const theme of ["dark-modern", "light-modern", "hc"]) {
-    const x = await openCards(browser, { theme, width: 460 });
+  // (Before 12 Nov: beside the sentence only in a card about 420 px wide or more, under the command in a narrower one.)
+  for (const theme of ["dark-modern", "light-modern", "hc"]) for (const width of [300, 460]) {
+    const x = await openCards(browser, { theme, width });
     try {
       const cards = await answers(x.page), run = cards.find((c) => c.key === K.run), usual = cards.find((c) => c.key === K.mail);
-      assert.deepEqual(run.buttons.map((b) => `${b.word}:${b.kind}`), ["Allow once:filled", "Deny:outline", "Open:link"]);
-      assert.equal(run.height, usual.height, `${theme}: the others' height (${run.height})`);
-      const tops = run.buttons.filter((b) => b.kind !== "link").map((b) => Math.round(b.top));
-      assert.equal(new Set(tops).size, 1, "its two buttons on one line");
+      assert.deepEqual(run.buttons.map((b) => `${b.word}:${b.kind}`), ["Allow once:filled", "Deny:outline", "Open:outline"]);
+      if (width >= 460) assert.equal(run.height, usual.height, `${theme}: the others' height (${run.height})`);
+      else assert.ok(run.height >= usual.height && run.height <= 100, `${theme} ${width}px: a little taller where its sentence takes two lines (${run.height})`);
+      assert.equal(new Set(run.buttons.map((b) => Math.round(b.top))).size, 1, "its three answers on one line");
       const note = await x.page.evaluate((key) => { const n = document.querySelector(`.dgc-hub-card[data-key="${key}"] .dgc-card-note`); return { whole: n.scrollWidth <= n.clientWidth, top: n.getBoundingClientRect().top }; }, K.run);
-      assert.ok(note.whole && run.buttons.every((b) => b.bottom <= note.top + 0.5 && b.inside), `${theme}: the answers stand over the command's line, which is whole`);
-      // The order they are drawn in is the order Tab takes: Allow once, Deny, Open is read left to right as Open, Allow once, Deny only in a narrow card.
-      for (let i = 1; i < run.buttons.length; i++) for (let j = 0; j < i; j++) assert.ok(run.buttons[i].left >= run.buttons[j].right - 0.5 || run.buttons[j].left >= run.buttons[i].right - 0.5, "no answer over another");
+      assert.ok(note.whole && run.buttons.every((b) => b.bottom <= note.top + 0.5 && b.inside), `${theme} ${width}px: the answers stand over the command's line, which is whole`);
+      // The order they are drawn in is the order Tab takes and the order they are read: Allow once, Deny, Open.
+      for (let i = 1; i < run.buttons.length; i++) assert.ok(run.buttons[i].left >= run.buttons[i - 1].right - 0.5, "left to right, no answer over another");
     } finally { await x.close(); }
   }
 });
 
-test("a side bar under 225 px: the answers go under the words in one row, the same buttons, nothing cut", async (t) => {
+test("a side bar under 225 px: the answers stay at the card's right as icons, the same squares, nothing cut", async (t) => {
   if (skipOrFail(t)) return;
+  // (Before 12 Nov the answers went under the words in one row that shared the card's width, and every card was 94 px.)
   for (const theme of ["dark-modern", "light-modern", "hc"]) for (const width of [170, 220]) {
     const x = await openCards(browser, { theme, width });
     try {
       const cards = await answers(x.page), all = cards.flatMap((c) => c.buttons.map((b) => ({ ...b, key: c.key })));
       for (const c of cards) {
-        assert.equal(c.buttons.filter((b) => b.kind === "filled").length, 1, `${theme} ${width}px ${c.key}: one filled button`);
+        assert.equal(c.buttons.filter((b) => b.kind === "filled").length, 1, `${theme} ${width}px ${c.key}: one filled answer`);
         assert.deepEqual(c.buttons.filter((b) => !b.inside || !b.whole).map((b) => b.word), [], `${theme} ${width}px ${c.key}: every answer inside its card and whole`);
-        if (!c.mono) assert.equal(new Set(c.buttons.map((b) => Math.round((b.top + b.bottom) / 2))).size, 1, `${theme} ${width}px ${c.key}: its answers on one row`);
+        assert.equal(new Set(c.buttons.map((b) => Math.round((b.top + b.bottom) / 2))).size, 1, `${theme} ${width}px ${c.key}: its answers on one row`);
+        assert.ok(c.column <= 76, `${theme} ${width}px ${c.key}: a row no wider than 76 px`);
       }
-      assert.deepEqual([...new Set(all.filter((b) => b.kind !== "link").map((b) => `${b.height}/${b.radius}/${b.size}`))], ["22/6px/11px"], `${theme} ${width}px: the same buttons`);
-      assert.deepEqual(all.filter((b) => b.label < 4.5).map((b) => `${b.word} ${b.label}`), [], `${theme} ${width}px: labels at 4.5:1`);
+      assert.deepEqual([...new Set(all.map((b) => `${b.height}/${b.radius}/${b.size}`))], ["24/6px/11px"], `${theme} ${width}px: the same squares`);
+      assert.deepEqual(all.filter((b) => b.label < 4.5).map((b) => `${b.word} ${b.label}`), [], `${theme} ${width}px: icons at 4.5:1`);
       assert.equal(new Set(cards.filter((c) => !c.mono).map((c) => c.height)).size, 1, `${theme} ${width}px: every card one height`);
       assert.equal(await x.page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     } finally { await x.close(); }

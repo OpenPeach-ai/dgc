@@ -257,15 +257,16 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
       for (const key of [K.setup, K.visit, K.change, WORK.run]) {
         const c = hub.cards.find((card) => card.key === key);
         assert.ok(c, key);
-        // (Slim cards: a command keeps its one line at the card's whole width, so in a card too narrow for its three
-        // answers beside its sentence they stand under the command, and that one kind is a little taller.)
-        if (key === WORK.run) { assert.equal(c.width, plain.width, `${key}: the same width`); assert.ok(c.height > plain.height && c.height <= 106, `${key}: a little taller than the others, for its command's line (${c.height})`); }
+        // (Slim cards: a command keeps its one line at the card's whole width, under its words. Its three answers are
+        // icons beside its sentence at every width (12 Nov), so it is the others' height where the sentence takes one
+        // line, and a little taller where it takes two.)
+        if (key === WORK.run) { assert.equal(c.width, plain.width, `${key}: the same width`); assert.ok(c.height >= plain.height && c.height <= 106, `${key}: the others' height, or a little taller for its command's line (${c.height})`); }
         else assert.deepEqual([c.height, c.width], [plain.height, plain.width], `${key}: the same size as a card that opens`);
       }
       const low = (await homeContrast(x.page)).filter((m) => m.ratio < (m.kind === "words" ? 4.5 : 3));
       assert.deepEqual(low, []);
       const fit = await x.page.evaluate(() => [...document.querySelectorAll("#home-hub .dgc-hub-card")].map((card) => { const c = card.getBoundingClientRect();
-        return { key: card.dataset.key, inside: [...card.querySelectorAll(".dgc-card-btn, .dgc-card-note")].every((b) => { const r = b.getBoundingClientRect(); return r.left >= c.left && r.right <= c.right + 0.5 && r.bottom <= c.bottom + 0.5; }),
+        return { key: card.dataset.key, inside: [...card.querySelectorAll(".dgc-card-btn, .dgc-ia-btn, .dgc-card-note")].every((b) => { const r = b.getBoundingClientRect(); return r.left >= c.left && r.right <= c.right + 0.5 && r.bottom <= c.bottom + 0.5; }),
           cut: [...card.querySelectorAll(".dgc-card-btn")].filter((b) => b.scrollWidth > b.clientWidth + 1).map((b) => b.textContent) }; }).filter((c) => !c.inside || c.cut.length));
       assert.deepEqual(fit, [], "every answer and line is inside its card, and no answer's word is cut");
       assert.equal(await x.page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, "nothing runs off the side");

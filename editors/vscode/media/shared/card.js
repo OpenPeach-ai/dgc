@@ -48,8 +48,9 @@
    *   chips     what exactly: [{ label, icon?, title? } | "label"]; the ones that do not fit on a line fold into "+N"
    *   note      a quiet line (what else answering does); error: what went wrong, said in the card
    *   actions   [{ label, primary?, attrs?, disabled?, title? }]: one filled answer, the rest quiet
+   *   actionsHtml  the page's own row of answers in their place (Home's icon row, media/shared/iconactions.js)
    *   details   { rows: [[name, value]], html?, link?: { label, attrs } }: opens in place from "Details"
-   * Every string is escaped here; `details.html` and `icon.html` are the caller's own markup.
+   * Every string is escaped here; `details.html`, `icon.html` and `actionsHtml` are the caller's own markup.
    */
   function html(card) {
     const id = card.id === undefined || card.id === null ? `card-${++serial}` : String(card.id);
@@ -60,7 +61,7 @@
     const mark = own ? (card.icon.html ?? esc(card.icon.text)) : icon(card.icon);
     const chipsHtml = chips(card.chips, card.chipsLabel);
     const actions = (card.actions || []).filter(Boolean).map((a) => `<button type="button" class="dgc-card-btn${a.primary ? " primary" : ""}${a.cls ? ` ${esc(a.cls)}` : ""}"`
-      + `${attrsHtml(a.attrs)}${a.title ? ` title="${esc(a.title)}"` : ""}${a.disabled ? " disabled" : ""}>${esc(a.label)}</button>`).join("");
+      + `${attrsHtml(a.attrs)}${a.title ? ` title="${esc(a.title)}"` : ""}${a.disabled ? " disabled" : ""}>${esc(a.label)}</button>`).join("") + (card.actionsHtml || "");
     const toggle = hasDetails ? `<button type="button" class="dgc-card-link dgc-card-toggle" id="${domId}-toggle" data-dgc-card-toggle="${esc(id)}" aria-expanded="${open}" aria-controls="${domId}-details">${open ? "Hide details" : "Details"}</button>` : "";
     const detailsHtml = hasDetails ? `<div class="dgc-card-details" id="${domId}-details"${open ? "" : " hidden"}>`
       + (d.rows && d.rows.length ? `<dl class="dgc-card-rows">${d.rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>` : "")

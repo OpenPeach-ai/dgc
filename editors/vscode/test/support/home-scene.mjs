@@ -66,10 +66,10 @@ const PROJECT_CHATS = [{ id: "chat_3", title: "Packing list", updated_at: "2026-
     whole kept state, in place of `tab`. theme: "dark-modern" | "light-modern" | "hc"; tabs: ChatDGC is here (seen before);
     library: Work's Library row; srcRoot: another tree's sources; pages: the host's kept "made" cards, as its attribute's JSON. */
 export async function openHome(browser, { state = homeState(), width = 300, height = 760, theme = "dark-modern", homeShow = "", tabs = true, library = true,
-  sessions = SESSIONS, tab = "home", saved, api = 69, scale = 1, motion = "no-preference", srcRoot, video, pages = "" } = {}) {
+  sessions = SESSIONS, tab = "home", saved, api = 69, scale = 1, motion = "no-preference", srcRoot, video, pages = "", forced = false, touch = false } = {}) {
   const { html, mainJs, markdownJs, themes, pipsJs, pipsCss, sprite } = await sources(srcRoot);
   // video: a folder to record the page into (the pictures' short films), at the page's own size.
-  const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale, reducedMotion: motion,
+  const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale, reducedMotion: motion, forcedColors: forced ? "active" : "none", hasTouch: touch,   // (forced: Windows High Contrast; touch: a finger, no pointer)
     ...(video ? { recordVideo: { dir: video, size: { width, height } } } : {}) });
   const page = await context.newPage();
   const errors = [];
@@ -194,7 +194,7 @@ export const hubNow = (page) => page.evaluate(() => {
     who: c.querySelector(".dgc-card-icon .dgc-blob") ? `blob:${c.querySelector(".dgc-card-icon .dgc-blob").dataset.shape}` : c.querySelector(".dgc-card-icon .dgc-sheet") ? `sheet:${c.querySelector(".dgc-card-icon .dgc-sheet").dataset.kind}`
       : c.querySelector(".dgc-card-icon svg, .dgc-card-icon .dgc-plush") ? "face" : "",
     // chips: what the card holds (the ones not folded into "+N"); shownChips: the ones on screen (a slim card shows them only on a free line)
-    chips: [...c.querySelectorAll(".dgc-chip:not([hidden])")].map((x) => x.textContent), shownChips: [...c.querySelectorAll(".dgc-chip:not([hidden])")].filter((x) => x.checkVisibility()).map((x) => x.textContent), actions: [...c.querySelectorAll(".dgc-card-btn")].map((b) => b.textContent + (b.classList.contains("primary") ? "*" : "")),
+    chips: [...c.querySelectorAll(".dgc-chip:not([hidden])")].map((x) => x.textContent), shownChips: [...c.querySelectorAll(".dgc-chip:not([hidden])")].filter((x) => x.checkVisibility()).map((x) => x.textContent), actions: [...c.querySelectorAll("[data-hub-act]")].map((b) => b.textContent + (b.matches(".primary, .dgc-ia-main") ? "*" : "")),   // (an icon button says its word too, and its main answer is .dgc-ia-main: media/shared/iconactions.js)
     line: c.querySelector(".dgc-card-note")?.textContent ?? "", held: c.classList.contains("dgc-hub-held"),
     thin: c.classList.contains("dgc-card-thin"), shared: c.classList.contains("dgc-card"), radius: getComputedStyle(c).borderRadius, ground: getComputedStyle(c).backgroundColor, ...rect(c) });
   return { shown: hub.checkVisibility(), show: show ? { value: show.querySelector(".dgc-hub-show-v").textContent, expanded: show.getAttribute("aria-expanded"), label: show.getAttribute("aria-label"), ...rect(show) } : null,
