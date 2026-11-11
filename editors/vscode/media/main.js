@@ -6445,6 +6445,22 @@
     card._runBg = b;
     return b;
   }
+  // ---- a command's plain-words label ----
+  // A command may come with a few words on what it is for ("Run the upload tests"): DGC's bash and Claude Code's Bash
+  // both carry it in the call's own arguments (args.description). The row says the label, in the quiet grey, and the
+  // exact command is one click away, first in the row's detail. The words are the model's: one line of text, bounded,
+  // with nothing that could redraw the line (control and direction marks become spaces). A label never decides or
+  // describes an approval: the approval card is drawn from the command alone and does not come here.
+  const STEP_LABEL_MAX = 120, STEP_LABEL_TITLE_MAX = 500;
+  function stepLabel(ev) {
+    if (canonicalTool(ev?.name) !== "bash" || typeof ev.args?.description !== "string") return null;
+    const whole = ev.args.description.slice(0, 4000)
+      .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, " ").replace(/\s+/g, " ").trim();
+    // Words that only repeat the command say nothing the row does not.
+    if (!whole || whole === String(ev.summary || "").replace(/\s+/g, " ").trim()) return null;
+    const cut = (text, max) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
+    return { text: cut(whole, STEP_LABEL_MAX), title: cut(whole, STEP_LABEL_TITLE_MAX) };
+  }
   // The person moved it: its result is the words the model got, which begin this way.
   const MOVED_RESULT = /^The person moved [`'].*to the background/;
   // `detached`: a card drawn somewhere other than the live turn (an agent page rebuilt from the
@@ -6483,6 +6499,18 @@
       toggle.setAttribute("aria-expanded", String(open));
       if (open) imagesOnCardOpen(c);          // images: the chip row is drawn on first open
     };
+    // A labelled command: the row says the label, and its detail begins with the exact command.
+    const label = ev.summary ? stepLabel(ev) : null;
+    if (label) {
+      const arg = c.querySelector(".arg");
+      arg.classList.add("step-label");
+      arg.textContent = label.text;
+      arg.title = label.title;
+      c.dataset.stepLabel = label.text;
+      const chip = el("div", "step-command");
+      chip.appendChild(document.createElement("code")).textContent = `$ ${ev.summary}`;
+      c.querySelector(".body").prepend(chip);
+    }
     if (["read_file", "write_file", "edit_file", "apply_patch"].includes(ev.name) && ev.summary) head.appendChild(openFileBtn(ev.summary));
     // The command a card ran is the thing people most often want out of a transcript -- to paste
     // into a terminal, or into a bug report. Only for cards whose summary IS a command; a file
@@ -6551,7 +6579,9 @@
       };
       panel.appendChild(fix);
     }
-    card.querySelector(".body")?.prepend(panel);
+    // (A labelled command's detail begins with the command itself; the test summary follows it.)
+    const command = card.querySelector(".body > .step-command");
+    if (command) command.after(panel); else card.querySelector(".body")?.prepend(panel);
   }
   function renderDiff(diff) {
     const wrap = el("div", "diff open");

@@ -1044,6 +1044,10 @@ body.hide-reasoning .tool-group-label .tg-thought { display: none; }
 .tool.no-body { border-color: var(--border); background: var(--term);
   border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom: 0; }
 .tool.no-body + .diff { border-top-left-radius: 0; border-top-right-radius: 0; }
+/* A labelled command (its row says what it is for, in the quiet grey of .arg): the exact command is first in the
+   row's detail, in the chip an approval card shows a command in, wrapped inside the row however long it is. */
+.tool .step-command { margin: 0 0 var(--sp-1); padding: var(--sp-1) var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--code); min-width: 0; }
+.tool .step-command code { display: block; font: var(--w-reg) var(--t-xs)/1.6 var(--mono); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 130px; overflow: auto; background: none; padding: 0; border: 0; }
 .tool pre { margin: 0; font: var(--w-reg) var(--t-xs)/1.6 var(--mono); color: var(--muted); white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto; }
 
 /* diffs — native review colors, compact until the user opens detail */
