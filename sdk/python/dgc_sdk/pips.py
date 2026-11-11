@@ -425,6 +425,11 @@ API82_READS = frozenset({'list_pip_keys'})
 API82_MUTATIONS = frozenset({'save_pip_key', 'decline_pip_key', 'remove_pip_key'})
 READ_COMMANDS |= API82_READS
 MUTATION_COMMANDS |= API82_MUTATIONS
+# API 86 (pips-17d): each of a Pip's computers has a name (get_pip_computer's `names`); rename_pip_computer sets the
+# user's own, and open_pip_computer / use_pip_computer_view may name which computer (`number`, 1 for the first).
+API86_MUTATIONS = frozenset({'rename_pip_computer'})
+MUTATION_COMMANDS |= API86_MUTATIONS
+API86_FIELDS = {'open_pip_computer': frozenset({'number'}), 'use_pip_computer_view': frozenset({'number'})}
 PIP_KEY_ID = re.compile(r"pipkey_[a-f0-9]{32}\Z")
 PIP_REPORT_AS = frozenset({'chat', 'doc', 'sheet'})
 TEMPLATE_CHANGE_ID = re.compile(r"tmplchange_[a-f0-9]{32}\Z")
@@ -524,8 +529,8 @@ COMMAND_FIELDS = {
     'list_pip_computer_frames': frozenset({'run_id', 'pointers'}),
     'decide_pip_computer_action': frozenset({'action_id', 'expected_digest', 'approve'}),
     'stop_pip_computer': frozenset({'pip_id'}),
-    'open_pip_computer': frozenset({'pip_id'}),
-    'use_pip_computer_view': frozenset({'pip_id', 'op', 'x', 'y', 'text', 'key', 'dy', 'url'}),
+    'open_pip_computer': frozenset({'pip_id', 'number'}),
+    'use_pip_computer_view': frozenset({'pip_id', 'op', 'x', 'y', 'text', 'key', 'dy', 'url', 'number'}),
     'list_pip_action_grants': frozenset({'pip_id'}),
     'always_allow_pip_app_action': frozenset({'action_id', 'expected_digest'}),
     'revoke_pip_action_grant': frozenset({'pip_id', 'grant_id'}),
@@ -544,6 +549,7 @@ COMMAND_FIELDS = {
     'rename_pip_conversation': frozenset({'pip_id', 'conversation_id', 'title'}),
     'archive_pip_conversation': frozenset({'pip_id', 'conversation_id', 'archived'}),
     'add_pip_computer': frozenset({'pip_id'}),
+    'rename_pip_computer': frozenset({'pip_id', 'number', 'name'}),
     'get_pips_payments': frozenset(),
     'set_pips_payments': frozenset({'limit'}),
     'set_pip_paying': frozenset({'pip_id', 'rule'}),
@@ -861,7 +867,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API82_READS | API82_MUTATIONS:
+        if command in API86_MUTATIONS:
+            minimum = 86
+        elif command in API82_READS | API82_MUTATIONS:
             minimum = 82
         elif command in API79_READS | API79_MUTATIONS:
             minimum = 79
@@ -1143,6 +1151,13 @@ class Pips:
             raise DGCConfigError("key_id is the key's id, pipkey_ and 32 hex digits")
         if command == 'save_pip_key' and not (isinstance(values.get('value'), str) and len(values['value']) <= MAX_PLUGIN_KEY):
             raise DGCConfigError('value is the key, up to 16,384 characters')
+        if API86_FIELDS.get(command, frozenset()) & set(values) and version < 86:
+            raise DGCUnsupportedError("Naming which of a Pip's computers (number) requires a runtime advertising Pips API 86 or newer")
+        if (command in API86_FIELDS and 'number' in values) or command == 'rename_pip_computer':
+            if type(values.get('number')) is not int or not 1 <= values['number'] <= 1000:
+                raise DGCConfigError("number is which of its computers: 1 for the first")
+        if command == 'rename_pip_computer' and not (isinstance(values.get('name'), str) and len(values['name']) <= 30):
+            raise DGCConfigError("name is the computer's name, up to 30 characters (empty gives back its first name)")
         if command == 'save_pip_key' and 'terminal' in values:
             # API 85 (slice 2c): also let the Pip's Terminal use the key, at Do it all only.
             if version < 85:

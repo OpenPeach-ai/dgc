@@ -470,7 +470,12 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # Terminal use that site's key, as a variable (list_pip_keys rows say `terminal` and `terminal_name`). Refused below Do
 # it all; at each command the level is read again (below Do it all the Terminal has none). The key reaches the box
 # through a pipe into a file only it sees, never a command line; what the Terminal prints is masked of it.
-PIPS_API_VERSION = 85
+# API 86 (0.52, pips-17d): each of a Pip's computers has a name. get_pip_computer's `computer` carries `names`
+# ([{number, name, named}]: a friendly name of its own until the user renames it) and add_pip_computer's answer the new
+# one's `name` and `names`. rename_pip_computer {pip_id, number, name} sets the user's name ("" gives back the first);
+# open_pip_computer and use_pip_computer_view take an optional `number` (1 for the first): the live view of that computer,
+# each computer its own. Without `number` they act as before (the one at work, else the first). Local only, as before.
+PIPS_API_VERSION = 86
 
 
 def attachment_limits() -> dict:

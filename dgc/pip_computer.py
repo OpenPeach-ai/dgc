@@ -1668,7 +1668,89 @@ def add_computer(registry, pip_id) -> dict:
         if have >= limit:
             raise RegistryError("limit", f"A Pip can have up to {limit} computers. Dev Mode can raise this.")
         registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (COMPUTERS_KEY + pip_id, json.dumps(have + 1)))
-    return {"pip_id": pip_id, "computers": have + 1, "limit": limit}
+    names = computer_names(registry.db, pip_id)
+    return {"pip_id": pip_id, "computers": have + 1, "limit": limit, "name": names[-1]["name"], "names": names}
+
+
+# Each computer has a name (his call, 12 Nov): a random friendly one to begin with, the user's own once renamed, so the
+# computer icon in a Pip's chat can offer "which one". A name is one or two plain words; none is a product's.
+COMPUTER_NAMES = ("Juniper", "Maple", "Willow", "Cedar", "Fern", "Clover", "Basil", "Olive", "Pepper", "Saffron",
+                  "Thistle", "Bramble", "Acorn", "Moss", "Poppy", "Wren", "Sparrow", "Robin", "Finch", "Heron",
+                  "Otter", "Badger", "Marble", "Quartz", "Cobalt", "Flint", "Ember", "Lumen", "Nimbus", "Zephyr",
+                  "Ripple", "Harbor", "Dune", "Meadow", "Pebble", "Quill", "Tango", "Vesper", "Jasper", "Hazel")
+COMPUTER_NAMES_KEY = "pip_computer_names:"     # + pip id -> {"<number>": "<the user's name>"}
+COMPUTER_NAME_MAX = 30
+_NAME_OK = re.compile(r"[\w][\w .'&()-]{0,29}", re.UNICODE)
+
+
+def _own_names(db, pip_id) -> dict[int, str]:
+    row = db.execute("SELECT value FROM metadata WHERE key=?", (COMPUTER_NAMES_KEY + pip_id,)).fetchone()
+    try:
+        value = json.loads(row[0]) if row else {}
+    except (TypeError, ValueError):
+        value = {}
+    out = {}
+    for key, name in (value.items() if isinstance(value, dict) else ()):
+        if str(key).isdigit() and isinstance(name, str) and _NAME_OK.fullmatch(name):
+            out[int(key)] = name
+    return out
+
+
+def computer_names(db, pip_id) -> list[dict]:
+    """[{number, name, named}] for each of the Pip's computers, the first first. One the user hasn't named takes a name
+    from COMPUTER_NAMES, the same one every time for that Pip and number, never one another of its computers has."""
+    own = _own_names(db, pip_id)
+    taken = {name.casefold() for number, name in own.items()}
+    start = int(hashlib.sha256(str(pip_id).encode("utf-8")).hexdigest(), 16) % len(COMPUTER_NAMES)
+    out, step = [], 0
+    for number in range(1, computers(db, pip_id) + 1):
+        if number in own:
+            out.append({"number": number, "name": own[number], "named": True})
+            continue
+        while True:
+            name = COMPUTER_NAMES[(start + step * 7) % len(COMPUTER_NAMES)]
+            step += 1
+            if name.casefold() not in taken or step > len(COMPUTER_NAMES):
+                break
+        if name.casefold() in taken:
+            name = f"Computer {number}"
+        taken.add(name.casefold())
+        out.append({"number": number, "name": name, "named": False})
+    return out
+
+
+def computer_name(db, pip_id, number: int = 1) -> str:
+    return next((n["name"] for n in computer_names(db, pip_id) if n["number"] == number), f"Computer {number}")
+
+
+def rename_computer(registry, pip_id, number, name) -> dict:
+    """The user's own name for one of the Pip's computers; an empty name gives it back its first name."""
+    if type(number) is not int or number < 1:
+        raise RegistryError("invalid_request", "number is which of its computers: 1 for the first.")
+    if not isinstance(name, str):
+        raise RegistryError("invalid_request", "name is text.")
+    name = " ".join(name.split())
+    if name and not _NAME_OK.fullmatch(name):
+        raise RegistryError("invalid_request", f"A computer's name is up to {COMPUTER_NAME_MAX} letters, digits, spaces "
+                            "and . ' & ( ) -, starting with a letter or digit.")
+    with registry.transaction():
+        if registry.db.execute("SELECT 1 FROM pips WHERE id=?", (pip_id,)).fetchone() is None:
+            raise RegistryError("not_found", "That Pip doesn't exist.")
+        if number > computers(registry.db, pip_id):
+            raise RegistryError("not_found", "That Pip has no such computer.")
+        own = _own_names(registry.db, pip_id)
+        # Only a name the user gave another of them is taken: one that had a first name like it gets another first name.
+        if name and any(n["named"] and n["name"].casefold() == name.casefold() and n["number"] != number
+                        for n in computer_names(registry.db, pip_id)):
+            raise RegistryError("invalid_request", f"Another of its computers is called {name}. Choose another name.")
+        if name:
+            own[number] = name
+        else:
+            own.pop(number, None)
+        registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
+                            (COMPUTER_NAMES_KEY + pip_id, json.dumps({str(k): v for k, v in sorted(own.items())})))
+    return {"pip_id": pip_id, "number": number, "name": computer_name(registry.db, pip_id, number),
+            "names": computer_names(registry.db, pip_id)}
 
 
 _BROWSER_LOCKS = ("SingletonLock", "SingletonSocket", "SingletonCookie", "lockfile")
@@ -2264,8 +2346,9 @@ def status(registry, pip_id: str) -> dict:
     return {"pip_id": pip_id, "granted": job.get("computer_plan") is not None,
             "available": machine["available"], "reason": machine["reason"], "pending": pending,
             "actions": (waiting_rows + others)[:5],
-            # Several computers per Pip (API 79): how many it has, and how many it may have.
+            # Several computers per Pip (API 79): how many it has, and how many it may have; (API 86) each one's name.
             "computers": computers(registry.db, pip_id), "computers_limit": computers_limit(registry.db),
+            "names": computer_names(registry.db, pip_id),
             **({"needs_you": {"host": waiting["host"], "at": waiting.get("at", "")}} if waiting else {})}
 
 
@@ -3304,21 +3387,42 @@ def desk(registry, command: str, pip_id: str, request: dict, actor: str) -> dict
     return {"entries": files.history(root), "running": files.running(root)}
 
 
-def request_open(registry, pip_id: str, actor: str) -> dict:
-    """Ask the supervisor to open this Pip's browser for the user. Ready within a few seconds."""
+def _number(registry, pip_id: str, number) -> int | None:
+    """Which of its computers a request names (API 86), checked; None when it names none (the one at work, else the
+    first, as before)."""
+    if number is None:
+        return None
+    if type(number) is not int or not 1 <= number <= computers(registry.db, pip_id):
+        raise RegistryError("not_found", "That Pip has no such computer.")
+    return number
+
+
+def _view_key(pip_id: str, number: int | None) -> str:
+    # One live view per computer (API 86); an open that names none keeps the key it always had.
+    return "computer_view:" + pip_id if number is None else f"computer_view_n:{pip_id}:{number}"
+
+
+def request_open(registry, pip_id: str, actor: str, number=None) -> dict:
+    """Ask the supervisor to open this Pip's browser for the user, on the computer named by ``number`` (API 86; none:
+    the one at work, else its first). Ready within a few seconds."""
     if actor not in ("editor-user", "local-console"):
         raise RegistryError("local_only", "Open a Pip's computer on this computer.")
     from .pips import PipStore
     job = PipStore(registry)._job(pip_id)
     if job.get("computer_plan") is None:
         raise RegistryError("no_computer", "This Pip has no computer. Give it one first.")
+    number = _number(registry, pip_id, number)
+    key = "computer_open:" + pip_id if number is None else f"computer_open:{pip_id}:{number}"
     with registry.transaction():
-        registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", ("computer_open:" + pip_id, _now()))
-    return view_endpoint(registry, pip_id) or {"pip_id": pip_id, "ready": False}
+        registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (key, _now()))
+    view = view_endpoint(registry, pip_id, number) or {"pip_id": pip_id, "ready": False}
+    if number is not None:
+        view.update(number=number, name=computer_name(registry.db, pip_id, number))
+    return view
 
 
-def view_endpoint(registry, pip_id: str) -> dict | None:
-    row = registry.db.execute("SELECT value FROM metadata WHERE key=?", ("computer_view:" + pip_id,)).fetchone()
+def view_endpoint(registry, pip_id: str, number: int | None = None) -> dict | None:
+    row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (_view_key(pip_id, number),)).fetchone()
     if row is None:
         return None
     try:
@@ -3334,7 +3438,7 @@ def view_call(registry, pip_id: str, op: str, fields: dict, actor: str) -> dict:
         raise RegistryError("local_only", "Use a Pip's computer on this computer.")
     if op not in VIEW_OPS:
         raise RegistryError("invalid_request", "Unknown view action.")
-    endpoint = view_endpoint(registry, pip_id)
+    endpoint = view_endpoint(registry, pip_id, _number(registry, pip_id, (fields or {}).get("number")))
     if endpoint is None:
         return {"ok": False, "ready": False, "error": "The browser is opening. Try again in a moment."}
     allowed = {"x", "y", "text", "key", "dy", "url"}
@@ -3360,20 +3464,25 @@ def handle_opens(registry) -> int:
     """In the supervisor: start requested views; close idle ones."""
     opened = 0
     for (key,) in registry.db.execute("SELECT key FROM metadata WHERE key LIKE 'computer_open:%'").fetchall():
-        pip_id = key.split(":", 1)[1]
+        pip_id, _, named = key.split(":", 1)[1].partition(":")
+        number = int(named) if named.isdigit() and int(named) >= 1 else None
         workspace = registry.db.execute("SELECT workspace_id FROM pips WHERE id=?", (pip_id,)).fetchone()
         with registry.transaction():
             registry.db.execute("DELETE FROM metadata WHERE key=?", (key,))
         if workspace is None:
             continue
-        # The computer at work, when one of its computers is (a Pip may have several), else its first.
-        host = next((h for h in hosts_of(pip_id) if h.run_id), None) or host_for(registry.directory, pip_id, workspace[0])
+        if number is not None:
+            # The one the user chose (API 86).
+            host = host_for(registry.directory, pip_id, workspace[0], number)
+        else:
+            # The computer at work, when one of its computers is (a Pip may have several), else its first.
+            host = next((h for h in hosts_of(pip_id) if h.run_id), None) or host_for(registry.directory, pip_id, workspace[0])
         with host.lock:
             if getattr(host, "viewer", None) is None:
                 host.viewer = ViewServer(host)
         with registry.transaction():
             registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
-                                ("computer_view:" + pip_id, json.dumps(host.viewer.endpoint())))
+                                (_view_key(pip_id, number), json.dumps(host.viewer.endpoint())))
         opened += 1
     for _key, host in list(HOSTS.items()):
         viewer = getattr(host, "viewer", None)
@@ -3384,14 +3493,23 @@ def handle_opens(registry) -> int:
 
 def close_view(registry, host: "Host") -> None:
     viewer = getattr(host, "viewer", None)
+    endpoint = viewer.endpoint() if viewer is not None else None
     if viewer is not None:
         viewer.close()
         host.viewer = None
     with registry.transaction():
-        registry.db.execute("DELETE FROM metadata WHERE key=?", ("computer_view:" + host.pip_id,))
+        registry.db.execute("DELETE FROM metadata WHERE key=?", (_view_key(host.pip_id, getattr(host, "number", 1)),))
+        # The key an open that named no computer used: only when it is this computer's view.
+        row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (_view_key(host.pip_id, None),)).fetchone()
+        try:
+            same = row is not None and endpoint is not None and json.loads(row[0]).get("socket") == endpoint["socket"]
+        except (TypeError, ValueError, AttributeError):
+            same = False
+        if same:
+            registry.db.execute("DELETE FROM metadata WHERE key=?", (_view_key(host.pip_id, None),))
 
 
 def forget_views(registry) -> None:
     """Endpoints left by a previous supervisor point at closed sockets; remove them."""
     with registry.transaction():
-        registry.db.execute("DELETE FROM metadata WHERE key LIKE 'computer_view:%'")
+        registry.db.execute("DELETE FROM metadata WHERE key LIKE 'computer_view:%' OR key LIKE 'computer_view_n:%'")

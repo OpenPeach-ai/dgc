@@ -1213,6 +1213,11 @@ one. A request that names no conversation is about the first, so an editor or SD
 - A Pip answers in its conversations in parallel: a message in one conversation starts its own reply while another
   conversation's reply runs; two replies of one conversation never run together, and a second message in a running
   conversation joins its reply as before. Its other work (scheduled runs, reviews, tasks) still runs alone.
+- Each of its computers has a name (API 86): a friendly one of its own (Juniper, Wren...) until you rename it.
+  `get_pip_computer`'s `computer.names` lists `[{number, name, named}]`; `rename_pip_computer {pip_id, number, name}`
+  (local only) sets yours, "" gives back its first name, and two of one Pip's computers never share a name.
+  `open_pip_computer` and `use_pip_computer_view` take an optional `number` (1 for the first): that computer's own
+  live view; without it, the one at work, else the first, as before.
 - Its computers: one by default; `add_pip_computer {pip_id}` (local only) adds one, up to 3 (`pips_computers_max` in
   the registry's metadata raises it: Dev Mode). `get_pip_computer` says how many it has (`computers`) and may have
   (`computers_limit`). A reply takes a free one as it starts; when all are busy, its first computer step answers at
