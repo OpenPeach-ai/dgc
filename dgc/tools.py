@@ -478,6 +478,7 @@ TOOL_SCHEMAS = [
         "Set background:true for long-running commands (dev servers, watchers) — it returns "
         "immediately with a task id; read its output later with bash_output.",
         {"command": {"type": "string"},
+         "description": {"type": "string", "description": "What it does in 5-10 plain words, shown to the user: 'Run the tests'"},
          "timeout": {"type": "integer", "description": "Seconds (default from config)"},
          "background": {"type": "boolean", "default": False}}, ["command"]),
     _fn("bash_output", "Read a background bash task or retained long foreground result. Without "
