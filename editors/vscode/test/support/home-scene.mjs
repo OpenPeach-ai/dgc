@@ -176,7 +176,8 @@ export const tabsNow = (page) => page.evaluate(() => {
   const bar = nav.querySelector(".dgc-tabs-bar");
   const tabs = [...nav.querySelectorAll('[role="tab"]')].map((t) => { const flip = t.querySelector(".dgc-tab-flip"), front = t.querySelector(".dgc-tab-front"), count = t.querySelector(".dgc-tab-count");
     return { id: t.dataset.tab, name: front?.textContent || "", selected: t.getAttribute("aria-selected") === "true", tab: t.tabIndex, shown: t.checkVisibility(), label: t.getAttribute("aria-label") || "",
-      controls: t.getAttribute("aria-controls"), icons: t.querySelectorAll("svg, img, .codicon").length, color: getComputedStyle(t).color, weight: getComputedStyle(front || t).fontWeight,
+      controls: t.getAttribute("aria-controls"), icons: [...t.querySelectorAll("svg, img, .codicon")].filter((n) => n.checkVisibility({ opacityProperty: true })).length,   // (the ones seen: each tab holds its icon for a narrow side bar, and a copy that rises when pointed at)
+      color: getComputedStyle(t).color, weight: getComputedStyle(front || t).fontWeight,
       glow: Number(getComputedStyle(t.querySelector(".dgc-tab-glow")).opacity), front: front ? getComputedStyle(front).transform : "", back: getComputedStyle(t.querySelector(".dgc-tab-back")).transform,
       backOpacity: Number(getComputedStyle(t.querySelector(".dgc-tab-back")).opacity), frontOpacity: front ? Number(getComputedStyle(front).opacity) : 1,
       count: count && !count.hidden ? count.textContent : "", countBox: count && !count.hidden ? rect(count) : null, clipped: rect(flip).left < rect(t).left - 0.5 || (count && !count.hidden ? rect(count) : rect(flip)).right > rect(t).right + 0.5, words: rect(flip), ...rect(t) }; });

@@ -5,7 +5,7 @@
 //   - the face is small, beside the word and before it, about the height of the word's line, never cut
 //   - it is alive (it breathes and blinks) and keeps still under reduced motion
 //   - the tab's name for a screen reader is still "Pips"; choosing tabs moves nothing; the keys work as before
-//   - the four tabs still fit at 240 px and at 170 px
+//   - the four tabs still fit at 240 px; at 170 px (icons: side-tabs-icons.test.mjs) Pips is the face alone
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { openDock } from "./support/dock-scene.mjs";
@@ -30,11 +30,12 @@ const settle = (page, ms = 60) => page.evaluate((wait) => new Promise((done) => 
 /** Each tab as it is on screen: its box, its word, and its face when it has one. */
 const tabsNow = (page) => page.evaluate(() => [...document.querySelectorAll('#side-tabs [role="tab"]')].filter((t) => t.checkVisibility()).map((t) => {
   const rect = (n) => { const r = n.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height }; };
-  const face = t.querySelector(".dgc-tab-face"), plush = face?.querySelector(".dgc-plush"), word = t.querySelector(".dgc-tab-front"), flip = t.querySelector(".dgc-tab-flip");
+  const face = t.querySelector(".dgc-tab-face"), plush = face?.querySelector(".dgc-plush"), word = t.querySelector(".dgc-tab-front .dgc-tab-word") || t.querySelector(".dgc-tab-front"), flip = t.querySelector(".dgc-tab-flip");
   const moving = plush ? [plush, ...plush.querySelectorAll("*")].map((n) => getComputedStyle(n).animationName).filter((n) => n && n !== "none") : [];
   return { id: t.dataset.tab, selected: t.getAttribute("aria-selected") === "true", box: rect(t), word: rect(word), wordBox: rect(flip), line: parseFloat(getComputedStyle(word).fontSize),
     face: plush ? { ...rect(face), hidden: face.getAttribute("aria-hidden"), state: plush.dataset.state, moving: [...new Set(moving)].sort() } : null,
-    pictures: t.querySelectorAll("svg, img, .codicon, .dgc-plush").length,
+    pictures: [...t.querySelectorAll("svg, img, .codicon, .dgc-plush")].filter((n) => n.checkVisibility()).length,   // (drawn ones: the icons of a narrow side bar are in the page, unseen)
+
     // What a screen reader says: the tab's own label, else its words that are not hidden from it.
     name: t.getAttribute("aria-label") || [...t.querySelectorAll("*")].filter((n) => !n.children.length && !n.closest('[aria-hidden="true"]')).map((n) => n.textContent).join("").trim() };
 }));
@@ -95,14 +96,18 @@ test("under reduced motion the face keeps still", async (t) => {
   } finally { await x.close(); }
 });
 
-test("170px, the narrowest side bar: the four names and the face still fit", async (t) => {
+test("170px, the narrowest side bar: the tabs are icons, and Pips is the face alone, whole, in the middle of its tab", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openDock(browser, { tab: "home", width: 170, height: 600 });
   try {
+    // (Under 240 px the words are not drawn and each tab is an icon: side-tabs-icons.test.mjs.)
     const tabs = await tabsNow(x.page);
-    for (const tab of tabs) assert.ok(tab.wordBox.left >= tab.box.left - 0.5 && tab.wordBox.right <= tab.box.right + 0.5, `${tab.id}: its name fits`);
+    for (const tab of tabs) assert.ok(tab.word.width <= 1.5 && tab.word.height <= 1.5, `${tab.id}: its word is not drawn (${tab.word.width} x ${tab.word.height})`);
+    assert.deepEqual(tabs.map((tab) => [tab.id, tab.name.replace(/:.*/, "")]), [["home", "Home"], ["work", "Work"], ["chat", "Chat"], ["pips", "Pips"]], "each tab keeps its name");
     const pips = tabs.find((tab) => tab.id === "pips");
-    assert.ok(pips.face && pips.face.left >= pips.box.left - 0.5 && pips.face.right <= pips.word.left, "the face fits before the word");
+    assert.ok(pips.face && pips.face.left >= pips.box.left - 0.5 && pips.face.right <= pips.box.right + 0.5, "the face fits in its tab");
+    assert.ok(Math.abs((pips.face.left + pips.face.right) / 2 - (pips.box.left + pips.box.right) / 2) <= 1, "in the middle of it");
+    assert.ok(pips.face.moving.includes("dgc-plush-breathe"), "and is alive");
     assert.equal(await x.page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   } finally { await x.close(); }
 });

@@ -3,7 +3,7 @@
 //   - one centred tab bar at the top, under the header row: Home, Work, Chat, Pips, as names only; it replaces the header's Pips button and the Pips block
 //   - pointing at a tab lights it in the accent and turns its name over; the tab you are on is lit too; one colour for all
 //   - the keyboard: Left and Right move and choose (wrapping), Home and End jump, and the bar is one tab stop
-//   - the four names fit at 240 px; under 200 px Home's number is a dot, and they still fit at 170 px
+//   - the four names fit at 240 px; under 240 px the tabs are icons (side-tabs-icons.test.mjs), down to 170 px
 //   - Home: everything that needs you or is new is one card of one size and style, from a session (its blob) or a Pip
 //     (its face), in two groups, "Needs you" then "New"; each card's answers work; an empty Home says so in one line
 //   - Show: All, Work, Chat, Personal Pips, Project Pips, each with its count; kept until changed; Home's number counts all
@@ -215,21 +215,27 @@ test("the tab you were on is kept: a reload comes back to it", async (t) => {
   } finally { await again.close(); }
 });
 
-test("a narrow side bar: the four names fit at 240 px; under 200 px Home's number is a dot, and they still fit at 170 px", async (t) => {
+test("a narrow side bar: the four names fit at 240 px; under 240 px the tabs are icons, down to 170 px", async (t) => {
   if (skipOrFail(t)) return;
   for (const width of [240, 199, 170]) {
     const x = await openDock(browser, { tab: "home", width, height: 600 });
     try {
       const bar = await x.tabs();
       assert.deepEqual(names(bar), ["Home", "Work", "Chat", "Pips"], `${width}px: four names`);
-      assert.ok(bar.tabs.every((x) => !x.clipped), `${width}px: no name is cut`);
       assert.ok(bar.bar.left >= 0 && bar.bar.right <= width, `${width}px: the bar is inside the side bar (${bar.bar.left} to ${bar.bar.right})`);
-      for (let i = 1; i < bar.tabs.length; i++) assert.ok(bar.tabs[i].words.left >= bar.tabs[i - 1].words.right + 3, `${width}px: ${bar.tabs[i].name} does not touch ${bar.tabs[i - 1].name}`);
       assert.ok(tab(bar, "home").countBox, `${width}px: Home still says something waits`);
       const count = tab(bar, "home").countBox;
-      assert.ok(count.left >= tab(bar, "home").words.right + 2 && count.right <= tab(bar, "home").right, `${width}px: the number is beside Home's name, inside its tab`);
-      if (width >= 200) assert.ok(count.width >= 15, `${width}px: the number is read (${count.width})`);
-      else assert.ok(count.width <= 7 && count.height <= 7, `${width}px: the number is a dot (${count.width})`);
+      if (width >= 240) {
+        assert.deepEqual(bar.tabs.map((x) => x.icons), [0, 0, 0, 1], `${width}px: words, and no icon but the face on Pips`);
+        assert.ok(bar.tabs.every((x) => !x.clipped), `${width}px: no name is cut`);
+        for (let i = 1; i < bar.tabs.length; i++) assert.ok(bar.tabs[i].words.left >= bar.tabs[i - 1].words.right + 3, `${width}px: ${bar.tabs[i].name} does not touch ${bar.tabs[i - 1].name}`);
+        assert.ok(count.left >= tab(bar, "home").words.right + 2 && count.right <= tab(bar, "home").right, `${width}px: the number is beside Home's name, inside its tab`);
+        assert.ok(count.width >= 15, `${width}px: the number is read (${count.width})`);
+      } else {
+        // Icons, each alone in its tab, and Home's number still a number (all of it: side-tabs-icons.test.mjs).
+        assert.deepEqual(bar.tabs.map((x) => x.icons), [1, 1, 1, 1], `${width}px: one icon in each tab`);
+        assert.ok(count.width >= 12 && count.height >= 12 && tab(bar, "home").count, `${width}px: the number is read, not a dot (${count.width})`);
+      }
       assert.equal(bar.overflowX, false, `${width}px: nothing scrolls sideways`);
       // Home's cards still hold everything they have: no answer is pushed out of its card.
       const out = await x.page.evaluate(() => [...document.querySelectorAll("#home-hub .dgc-hub-card")].flatMap((c) => { const box = c.getBoundingClientRect();

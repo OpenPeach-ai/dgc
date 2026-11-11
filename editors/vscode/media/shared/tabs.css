@@ -2,9 +2,9 @@
    soft gradient of the side bar's own grey, with a hairline and a low shadow. Pointing at a tab lights it in DGC's
    purple, and so does the tab you are on: its name takes the accent's text tone and a soft radial glow sits behind it.
    The name turns over on the way: the front tips away about its foot and the same name rises from below, on a spring.
-   Home shows how many things wait or are new. The four names fit a 240 px side bar; under 200 px the number becomes a
-   dot, and the names still fit at 170 px, the narrowest the editor makes a side bar. Reduced motion lights without
-   turning. Tokens from tokens.css (--tabs-*, --ease-spring); the page (media/main.js) answers clicks and keys. */
+   Home shows how many things wait or are new. The four names fit a 240 px side bar. Under 240 px each tab is an icon
+   alone (a house, a briefcase, speech bubbles; Pips is the Core Pip's face), with Home's number on its icon's corner,
+   down to 170 px, the narrowest the editor makes a side bar. Reduced motion lights without turning. Tokens from tokens.css (--tabs-*, --ease-spring); the page (media/main.js) answers clicks and keys. */
 .dgc-tabs { flex: none; container-type: inline-size; box-sizing: border-box; width: 100%; padding: 10px 0 6px; }
 .dgc-tabs[hidden] { display: none; }
 .dgc-tabs-bar {
@@ -51,17 +51,30 @@
   font: var(--w-semi) 10px/16px var(--sans); font-variant-numeric: tabular-nums; letter-spacing: 0; text-align: center;
 }
 .dgc-tab-count[hidden] { display: none; }
-/* A narrow side bar. Under 300 px each tab is as wide as its name needs and they share what is left; under 200 px the
-   number is a dot and the bar keeps 8 px from each edge. */
+/* Each tab's icon (Home, Work, Chat) is in the page beside its word, in the front and in the copy that rises, and is
+   not drawn while the words fit. */
+.dgc-tab .dgc-tab-icon.codicon { display: none; }
+/* A narrow side bar. Under 300 px each tab is as wide as its name needs and they share what is left. */
 @container (max-width: 299px) {
   .dgc-tabs-bar { gap: 1px; }
   .dgc-tab { flex: 1 1 auto; gap: 5px; padding: 0 5px; }
 }
+/* Under 240 px the four words would soon be cut (they need about 240 px with a one digit number, 250 with "99+"), so
+   each tab is its icon alone, in four tabs of one width. The switch is on the tab bar's own width. The tab keeps its
+   30 px, so the bar is as tall as before and nothing moves. The word stays in the page for a screen reader, in a 1 px
+   box; the icon turns over as the word did. Home's number sits on its icon's upper right corner and grows to the
+   right: "99+" at 170 px reaches 6 px past Home's tab and still ends 5 px before Work's icon. */
+@container (max-width: 239px) {
+  .dgc-tab { flex: 1 1 0; gap: 0; padding: 0; }
+  .dgc-tab .dgc-tab-icon.codicon { display: block; font-size: 16px; }
+  .dgc-tab-flip::after { content: none; }
+  .dgc-tab-flip > span { padding: 0; }
+  .dgc-tab-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .dgc-tab-count { position: absolute; z-index: 1; top: 2px; left: calc(50% + 2px); min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; font-size: 9.5px; line-height: 14px; }
+}
+/* Under 200 px the bar keeps 8 px from each edge. */
 @container (max-width: 199px) {
   .dgc-tabs-bar { width: calc(100% - 2 * var(--sp-2)); }
-  .dgc-tab { gap: 4px; padding: 0 3px; font-size: var(--t-xs); letter-spacing: 0; }
-  .dgc-tab-count { min-width: 6px; width: 6px; height: 6px; padding: 0; border-radius: 50%; font-size: 0; }
-  .dgc-tab-face { width: 13px; height: 13px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .dgc-tab-flip > span, .dgc-tab-glow { transition: none; }
