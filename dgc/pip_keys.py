@@ -159,13 +159,15 @@ def _for_generator(registry, pip_id, generator_id) -> dict | None:
     return next((v for v in _rows(registry, pip_id) if _kind(v) == "generator" and v.get("generator") == generator_id), None)
 
 
-def projection(value) -> dict:
-    """What the editor and the SDKs see of a key: never its value."""
+def projection(value, variable: str | None = None) -> dict:
+    """What the editor and the SDKs see of a key: never its value. ``variable``: its name in the Terminal when another
+    ticked key took its plain name (terminal_variables)."""
     generator = _kind(value) == "generator"
     terminal = value.get("terminal") is True and not generator
     return {"id": value["id"], "pip_id": value["pip_id"], "workspace_id": value["workspace_id"],
             # Its computer's Terminal may have it (slice 2c): only if the user ticked it, and only used at Do it all.
-            "terminal": terminal, **({"terminal_name": terminal_name(value["name"])} if not generator else {}),
+            "terminal": terminal,
+            **({"terminal_name": variable or terminal_name(value["name"])} if not generator else {}),
             # "site": a key bound to one site (fetch_with_key); "generator": a picture or video generator's own key,
             # kept with it in Settings for all of DGC (slice 2b).
             "kind": _kind(value), **({"generator": value.get("generator", "")} if generator else {}),
@@ -178,7 +180,9 @@ def projection(value) -> dict:
 
 def listing(registry, pip_id) -> dict:
     """list_pip_keys: this Pip's keys and the cards asking for them, newest first. Never a value."""
-    return {"pip_id": pip_id, "keys": [projection(v) for v in _rows(registry, pip_id)[:MAX_KEYS]]}
+    rows = _rows(registry, pip_id)
+    names = terminal_variables(rows)
+    return {"pip_id": pip_id, "keys": [projection(v, names.get(v["id"])) for v in rows[:MAX_KEYS]]}
 
 
 def _line(text, config, *, what: str, most: int) -> str:
@@ -395,7 +399,7 @@ def save(store, config, key_id, pip_id, actor, value, terminal=False) -> dict:
         registry.event(card["workspace_id"], "pip_key_saved", pip_id=pip_id,
                        payload={"key_id": key_id, "host": card.get("host", ""), "actor": actor,
                                 **({"generator": card["generator"]} if _kind(card) == "generator" else {})})
-    result = {"key": projection(card)}
+    result = {"key": projection(card, terminal_variables(_rows(registry, pip_id)).get(card["id"]))}
     if was_waiting:
         from .pip_chat import continue_after_key
         try:
@@ -416,7 +420,7 @@ def decline(store, config, key_id, pip_id, actor) -> dict:
         _put(registry, card)
         registry.event(card["workspace_id"], "pip_key_declined", pip_id=pip_id,
                        payload={"key_id": key_id, "host": card.get("host", ""), "actor": actor})
-    result = {"key": projection(card)}
+    result = {"key": projection(card, terminal_variables(_rows(registry, pip_id)).get(card["id"]))}
     from .pip_chat import continue_after_key_declined
     try:
         continue_after_key_declined(store, pip_id, card, config)
@@ -505,18 +509,29 @@ def terminal_env(registry, pip_id) -> dict:
     if level(registry, pip_id) != "full" or sys.platform == "darwin":
         # A Mac's VM would take it on a command line (pip_computer_files._execute_in_vm): not there yet.
         return {}
+    rows = _rows(registry, pip_id)
     env = {}
-    for card in _rows(registry, pip_id):
-        if _kind(card) != "site" or card.get("status") != "saved" or card.get("terminal") is not True:
-            continue
+    for card_id, name in terminal_variables(rows).items():
+        card = next(c for c in rows if c["id"] == card_id)
         value = value_for(registry, pip_id, card["host"])
-        if not value:
-            continue
-        name, n = terminal_name(card["name"]), 2
-        while name in env:
-            name, n = f"{terminal_name(card['name'])}_{n}", n + 1
-        env[name] = value
+        if value:
+            env[name] = value
     return env
+
+
+def terminal_variables(rows) -> dict[str, str]:
+    """{key id: its variable} for the saved site keys ticked for the Terminal, oldest first: a second key with the same
+    name is NAME_2, then NAME_3. One naming for the Terminal, for what the Pip is told and for the key's card."""
+    ticked = sorted((c for c in rows if _kind(c) == "site" and c.get("status") == "saved" and c.get("terminal") is True),
+                    key=lambda c: (str(c.get("created_at") or ""), str(c["id"])))
+    names: dict[str, str] = {}
+    for card in ticked:
+        base = terminal_name(card["name"])
+        name, n = base, 2
+        while name in names.values():
+            name, n = f"{base}_{n}", n + 1
+        names[card["id"]] = name
+    return names
 
 
 def terminal_names(registry, pip_id) -> list[dict]:
@@ -525,8 +540,9 @@ def terminal_names(registry, pip_id) -> list[dict]:
     from .pip_levels import level
     if level(registry, pip_id) != "full" or sys.platform == "darwin":
         return []
-    return [{"name": terminal_name(c["name"]), "host": c["host"]} for c in _rows(registry, pip_id)
-            if _kind(c) == "site" and c.get("status") == "saved" and c.get("terminal") is True]
+    rows = _rows(registry, pip_id)
+    return [{"name": name, "host": next(c["host"] for c in rows if c["id"] == card_id)}
+            for card_id, name in terminal_variables(rows).items()]
 
 
 def terminal_notice(names) -> str:

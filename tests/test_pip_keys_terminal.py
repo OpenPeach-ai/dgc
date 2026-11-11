@@ -88,6 +88,22 @@ class TerminalKey(Store):
         self.level("approve")
         self.assertEqual(pip_keys.terminal_names(self.registry, self.pip["id"]), [], "below Do it all it is told none")
 
+    def test_two_keys_with_one_name_are_named_the_same_everywhere(self):
+        self.level("full")
+        self.save(terminal=True)
+        pip_keys.request(self.registry, self.cfg, self.pip["id"], self.pip["workspace_id"], None,
+                         {"name": "Invoicely API key", "why": "Read the other account", "host": "eu.invoicely.example"})
+        second = next(k for k in pip_keys.listing(self.registry, self.pip["id"])["keys"] if k["host"] == "eu.invoicely.example")
+        with mock.patch("dgc.pip_chat.continue_after_key"):
+            saved = self.control("save_pip_key", pip_id=self.pip["id"], key_id=second["id"], value=SECRET + "EU", terminal=True)
+        env = pip_keys.terminal_env(self.registry, self.pip["id"])
+        self.assertEqual(env, {"INVOICELY_API_KEY": SECRET, "INVOICELY_API_KEY_2": SECRET + "EU"})
+        told = {n["host"]: n["name"] for n in pip_keys.terminal_names(self.registry, self.pip["id"])}
+        cards = {k["host"]: k["terminal_name"] for k in pip_keys.listing(self.registry, self.pip["id"])["keys"]}
+        self.assertEqual(told, {HOST: "INVOICELY_API_KEY", "eu.invoicely.example": "INVOICELY_API_KEY_2"})
+        self.assertEqual(cards, told, "its card names the variable the Terminal really has")
+        self.assertEqual(saved["key"]["terminal_name"], "INVOICELY_API_KEY_2", "and so does the save's answer")
+
     @unittest.skipUnless(BOXES, "needs Linux and a working bubblewrap")
     def test_in_the_box_the_variable_is_there_and_its_value_is_masked(self):
         root = pip_computer.computer_root(self.registry.directory, self.pip["id"])
