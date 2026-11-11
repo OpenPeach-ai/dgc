@@ -259,3 +259,20 @@ body.vscode-light .art-now { color: var(--link); }
 .sh-chart-values { width:100%; font-size:12px; border-collapse:collapse; margin:12px 0; }
 .sh-chart-values td,.sh-chart-values th { text-align:left; padding:6px; border-bottom:1px solid var(--border); }
 .sh-chart details { margin-bottom:16px; }
+
+/* ---- DGC's one button (media/shared/tokens.css, "The button") on an artifact's panel. Its bar's buttons carry a mark
+   and a word, and in a narrow panel the mark alone, so each is as wide as what it shows; the corner, the height, the
+   colours, the step and the press are the shared ones. The main action (.art-btn-primary) is the one filled button,
+   in the text's colour; .art-btn-quiet is the link kind (no edge). */
+.art-btn { height: var(--btn-h); border: 1px solid var(--btn-line); border-radius: var(--btn-r); background: transparent; color: var(--btn-text); font-weight: var(--w-med); white-space: nowrap; transition: var(--btn-move); }
+.art-btn:hover:not(:disabled) { border-color: var(--btn-line-hover); background: var(--btn-wash); color: var(--btn-text); transform: var(--btn-up); transition-duration: var(--btn-in); }
+.art-btn:active:not(:disabled) { transform: var(--btn-down); transition-duration: var(--btn-press); }
+.art-btn:focus-visible { outline: var(--btn-ring); outline-offset: 2px; }
+.art-btn:disabled { opacity: .55; cursor: default; }
+.art-btn-primary, .art-btn-primary:hover:not(:disabled) { border-color: transparent; background: var(--btn-fill); color: var(--btn-on-fill); }
+.art-btn-primary:hover:not(:disabled) { background: var(--btn-fill-hover); }
+.art-btn-primary:disabled { border-color: transparent; background: var(--btn-fill); color: var(--btn-on-fill); opacity: .55; }
+.art-btn-quiet, .art-btn-quiet:is(:hover, :active):not(:disabled) { border: 0; background: transparent; transform: none; font-weight: var(--w-reg); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--btn-line-hover); }
+.art-btn-quiet:hover:not(:disabled) { text-decoration-color: currentColor; }
+.art-version-actions .art-btn { height: var(--btn-h-sm); }
+@media (forced-colors: active) { .art-btn { border-color: CanvasText; } .art-btn-primary, .art-source[data-allowed="false"] .art-btn { forced-color-adjust: none; border-color: ButtonText; background: ButtonText; color: ButtonFace; } }

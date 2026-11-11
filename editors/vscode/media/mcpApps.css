@@ -53,3 +53,15 @@
 .mcp-app[data-display="fullscreen"] .mcp-app-frame { flex: 1; min-height: 0; }
 .mcp-app[data-display="fullscreen"] .mcp-app-frame iframe { height: 100%; }
 .mcp-app-dup { display: none; }
+
+/* ---- DGC's one button (media/shared/tokens.css, "The button") on a plugin's ask: Allow is the one filled button, the
+   other an outline, each the small box. This stylesheet is also loaded by a card opened in its own tab, which has no
+   tokens: every value falls back to the number the token holds. */
+.mcp-app-ask-btn { display: inline-block; flex: none; box-sizing: border-box; width: var(--btn-w-sm, 76px); min-width: 0; max-width: 100%; height: var(--btn-h-sm, 22px); min-height: 0; padding: 0 var(--btn-pad-sm, 6px); border: 1px solid var(--btn-line, color-mix(in srgb, var(--vscode-foreground) 12%, transparent)); border-radius: var(--btn-r, 6px);
+  background: transparent; color: var(--btn-text, var(--vscode-foreground)); font-weight: 500; line-height: calc(var(--btn-h-sm, 22px) - 2px); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; filter: none; box-shadow: none; cursor: pointer; transition: var(--btn-move, transform 120ms ease-out, background-color 120ms ease-out, border-color 120ms ease-out); }
+.mcp-app-ask-btn:hover:not(:disabled) { border-color: var(--btn-line-hover, color-mix(in srgb, var(--vscode-foreground) 38%, transparent)); background: var(--btn-wash, color-mix(in srgb, var(--vscode-foreground) 6%, transparent)); color: var(--btn-text, var(--vscode-foreground)); filter: none; transform: var(--btn-up, translateY(-1px)); transition-duration: var(--btn-in, 150ms); }
+.mcp-app-ask-btn:active:not(:disabled) { transform: var(--btn-down, translateY(1px) scale(.985)); transition-duration: var(--btn-press, 90ms); }
+.mcp-app-ask-btn:focus-visible { outline: var(--btn-ring, 2px solid var(--vscode-focusBorder)); outline-offset: 2px; }
+.mcp-app-ask-btn:disabled { opacity: .55; cursor: default; }
+.mcp-app-ask-btn.primary, .mcp-app-ask-btn.primary:hover:not(:disabled) { border-color: transparent; background: var(--btn-fill, var(--vscode-foreground)); color: var(--btn-on-fill, var(--vscode-editor-background)); }
+.mcp-app-ask-btn.primary:hover:not(:disabled) { background: var(--btn-fill-hover, var(--vscode-foreground)); }

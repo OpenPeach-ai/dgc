@@ -103,3 +103,15 @@
 .pip-dock-foot .pip-dock-no{margin-right:auto}
 @media (max-width:340px){.pip-dock-foot{flex-wrap:wrap}.pip-dock-foot .pip-dock-create{flex:1 1 100%}}
 @media (forced-colors:active){.pip-dock-chip{border-color:CanvasText;color:CanvasText}}
+
+/* ---- DGC's one button (media/shared/tokens.css, "The button") on a new Pip's setup card: Create is the one filled
+   button (.pip-setup-primary), the others outlines (.pip-setup-line button, .pip-setup-body button, .pip-setup-details
+   > button), each the small box. (With fallbacks: a page without the tokens draws the same button.) */
+.pip-setup-line button, .pip-setup-body button, .pip-setup-details>button { display: inline-block; flex: none; box-sizing: border-box; width: var(--btn-w-sm, 76px); min-width: 0; max-width: 100%; height: var(--btn-h-sm, 22px); min-height: 0; padding: 0 var(--btn-pad-sm, 6px); border: 1px solid var(--btn-line, color-mix(in srgb, var(--vscode-foreground) 12%, transparent)); border-radius: var(--btn-r, 6px);
+  background: transparent; color: var(--btn-text, var(--vscode-foreground)); font-weight: 500; line-height: calc(var(--btn-h-sm, 22px) - 2px); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; filter: none; box-shadow: none; cursor: pointer; transition: var(--btn-move, transform 120ms ease-out, background-color 120ms ease-out, border-color 120ms ease-out); }
+.pip-setup-line button:hover:not(:disabled), .pip-setup-body button:hover:not(:disabled), .pip-setup-details>button:hover:not(:disabled) { border-color: var(--btn-line-hover, color-mix(in srgb, var(--vscode-foreground) 38%, transparent)); background: var(--btn-wash, color-mix(in srgb, var(--vscode-foreground) 6%, transparent)); color: var(--btn-text, var(--vscode-foreground)); filter: none; transform: var(--btn-up, translateY(-1px)); transition-duration: var(--btn-in, 150ms); }
+.pip-setup-line button:active:not(:disabled), .pip-setup-body button:active:not(:disabled), .pip-setup-details>button:active:not(:disabled) { transform: var(--btn-down, translateY(1px) scale(.985)); transition-duration: var(--btn-press, 90ms); }
+.pip-setup-line button:focus-visible, .pip-setup-body button:focus-visible, .pip-setup-details>button:focus-visible { outline: var(--btn-ring, 2px solid var(--vscode-focusBorder)); outline-offset: 2px; }
+.pip-setup-line button:disabled, .pip-setup-body button:disabled, .pip-setup-details>button:disabled { opacity: .55; cursor: default; }
+.pip-setup-line .pip-setup-primary, .pip-setup-line .pip-setup-primary:hover:not(:disabled) { border-color: transparent; background: var(--btn-fill, var(--vscode-foreground)); color: var(--btn-on-fill, var(--vscode-editor-background)); }
+.pip-setup-line .pip-setup-primary:hover:not(:disabled) { background: var(--btn-fill-hover, var(--vscode-foreground)); }
