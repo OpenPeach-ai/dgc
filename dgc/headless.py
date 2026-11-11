@@ -489,7 +489,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "list_mcp_servers", "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
     "list_mcp_context", "get_mcp_context", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command", "get_history", "get_outline",
     "list_permissions", "add_permission_rule", "remove_permission_rule",
-    "get_memory", "add_memory", "list_monitors", "stop_monitor", "restart_monitor", "rerun_task", "list_agents", "list_troupes", "stop_troupe",
+    "get_memory", "add_memory", "list_monitors", "stop_monitor", "restart_monitor", "cancel_wakeup", "rerun_task", "list_agents", "list_troupes", "stop_troupe",
     "list_background_shells", "stop_background_shell", "get_background_output",
     "composio_connection", "list_plugins", "install_plugin", "inspect_plugin", "uninstall_plugin", "list_plugin_marketplaces",
     "add_plugin_marketplace", "remove_plugin_marketplace", "refresh_plugin_marketplace", "create_plugin",
@@ -2448,7 +2448,8 @@ class Chat:
 
     __slots__ = ("agent", "ui", "_worker", "_foreground_worker", "_package_reader", "_turn_lock",
                  "_turn_n", "_queue", "_goal_auto_resumes", "_steer_payloads",
-                 "_running_turn_kind", "_live_turn", "_wake_yield", "_wake_timer", "_agent_wakes")
+                 "_running_turn_kind", "_live_turn", "_wake_yield", "_wake_timer", "_agent_wakes",
+                 "_wakeup_timer")
 
     # NO __init__, and that is the whole design of this step rather than an omission.
     #
@@ -2554,6 +2555,8 @@ class Backend:
     _goal_auto_resumes = _chat_field("_goal_auto_resumes")
     _agent_wakes = _chat_field("_agent_wakes")
     _wake_timer = _chat_field("_wake_timer")
+    # The timer for this chat's next wake-up (dgc/wakeups.py): it only ever asks THIS chat to wake.
+    _wakeup_timer = _chat_field("_wakeup_timer")
 
     def _chat(self) -> "Chat":
         """This backend's one chat, created on first use, exactly once.
@@ -2611,6 +2614,8 @@ class Backend:
         self.ui = HeadlessUI(self.em, self.pending,
                              float(config.get("approval_timeout_s", 300) or 300))
         self.ui.preview_root = config.project_root   # edit previews on approval cards
+        # The editor starts a wake-up's turn by itself (dgc/wakeups.py): the chat is offered wake_later.
+        self.ui.wakeups_supported = True
         self.agent = Agent(config, self.ui)
         if host is not None:
             # Chats on one `dgc serve` share a pid, and the peer registry skips its own process's
@@ -2653,6 +2658,8 @@ class Backend:
         self._monitors_timer: threading.Timer | None = None
         self._monitors_timer_lock = threading.Lock()
         self.agent.monitors.listener = self._on_monitor
+        self._wakeup_timer = None
+        self.agent.wakeups.on_change = self._on_wakeups
         self._agents_timer: threading.Timer | None = None
         self._agents_timer_lock = threading.Lock()
         self.agent.subagents.listener = self._on_subagent
@@ -2749,7 +2756,7 @@ class Backend:
                           # The client answers with set_workspace_roots.agent_faces when it draws
                           # the registry's face slots; only then do agent frames carry face_slot.
                           "agent_faces": True,
-                          "resume_turn": True, "monitors": True, "usage_ledger": True, "pip_usage_report": True,
+                          "resume_turn": True, "monitors": True, "wakeups": True, "usage_ledger": True, "pip_usage_report": True,
                           # get_usage / get_pip_usage_report take `system`, and each by_model row names the
                           # system it ran on (system, system_id, system_kind): Token usage by system.
                           "usage_by_system": True,
@@ -4242,6 +4249,7 @@ class Backend:
                     display_mentions = item[6] if len(item) > 6 else None
                     notification = None
                     agent_notice = None
+                    wakeup = None
                     if turn_kind == "monitor":
                         hub = self.agent.monitors
                         notification = (None if self._wake_blocked_locked()
@@ -4252,6 +4260,11 @@ class Backend:
                     elif turn_kind == "wake":
                         agent_notice = self._take_agent_wake_locked()
                         if agent_notice is None:
+                            continue
+                    elif turn_kind == "wakeup":
+                        book = getattr(self.agent, "wakeups", None)
+                        wakeup = None if self._wake_blocked_locked() or book is None else book.take_due()
+                        if wakeup is None:
                             continue
                     self._running_turn_kind = turn_kind
                     self._running_pip_setup_text = text if turn_kind == "pip_setup" else None
@@ -4286,7 +4299,7 @@ class Backend:
                 from .workflows import display_prompt
                 shown_prompt = display_prompt(text)
                 name_session = getattr(self.agent, "name_session", None)
-                if (turn_kind not in ("continue", "monitor", "wake", "pip_setup")
+                if (turn_kind not in ("continue", "monitor", "wake", "wakeup", "pip_setup")
                         and not getattr(self.agent, "session_name", None)
                         and callable(name_session)):
                     title = _prompt_thread_title(shown_prompt)
@@ -4310,19 +4323,23 @@ class Backend:
                 if agent_notice is not None:
                     wake_label = str(agent_notice.get("description") or agent_notice.get("id") or "agent")
                     shown_prompt = wake_label
+                if wakeup is not None:
+                    # Drawn as "Woke up as planned · <why>"; on the wire a wake turn the editor already knows.
+                    wake_label = shown_prompt = f"wake-up: {wakeup['why']}"
                 turn_prompt = (notification.label if notification is not None
-                               else (wake_label if agent_notice is not None else shown_prompt))
+                               else (wake_label if agent_notice is not None or wakeup is not None else shown_prompt))
+                wire_kind = "monitor" if turn_kind == "wakeup" else turn_kind
                 live_turn = self._live_turn
                 if isinstance(live_turn, dict) and live_turn.get("id") == tid:
                     # What a window that attaches mid-turn is told this turn is (session_live).
-                    live_turn.update(prompt=str(turn_prompt or "")[:4000], kind=turn_kind,
+                    live_turn.update(prompt=str(turn_prompt or "")[:4000], kind=wire_kind,
                                      started_at=time.time())
                 begin_trace = getattr(self.ui, "begin_turn_trace", None)
                 if callable(begin_trace):
                     begin_trace()
                 self.em.emit("turn_start", turn_id=tid,
                              prompt=turn_prompt,
-                             kind=turn_kind,
+                             kind=wire_kind,
                              **({"display_mentions": display_mentions}
                                 if display_mentions and turn_kind == "prompt" and turn_prompt == text else {}),
                              **({"request_id": turn_request} if turn_request else {}))
@@ -4350,6 +4367,12 @@ class Backend:
                     ).strip().lower()
                     if notification is not None:
                         outcome = self.agent.run_monitor_turn(notification, reset_cancel=False)
+                    elif wakeup is not None:
+                        from .session_turn_events import foreground_turn
+                        from .wakeups import turn_text
+                        with foreground_turn("monitor"):
+                            outcome = self.agent.run_turn(turn_text(wakeup, now=self.agent.wakeups.clock()),
+                                                          reset_cancel=False)
                     elif agent_notice is not None:
                         wake_prompt = _agent_wake_prompt(agent_notice)
                         from .session_turn_events import foreground_turn
@@ -4411,7 +4434,7 @@ class Backend:
                 # Decided BEFORE the worker can retire: enqueueing here means the idle check below
                 # keeps this worker alive, and turn_end is still published before the resume's
                 # turn_start. Doing it after would strand the follow-up with no worker to run it.
-                if turn_kind not in ("monitor", "wake"):
+                if turn_kind not in ("monitor", "wake", "wakeup"):
                     # A wake turn is not goal work: its success must not reset the retry budget and
                     # its failure must not queue a goal resume.
                     self._maybe_auto_resume_goal(failed, cancelled)
@@ -4746,6 +4769,56 @@ class Backend:
                      total_bytes=max(0, min(MAX_SAFE_INTEGER, int(found["total_bytes"]))),
                      truncated=bool(cut or found["dropped"]))
 
+    # ---- a chat's wake-ups (dgc/wakeups.py): its row, its timer, its turn ----------------------------
+    def _on_wakeups(self, items) -> None:
+        """The chat's wake-ups changed: its row (`wakeups`, a new event type) and the timer for the next one."""
+        try:
+            self.em.emit("wakeups", items=list(items or []))
+        except Exception:                                  # noqa: BLE001 - a row is never worth the book
+            pass
+        self._arm_wakeup_timer()
+
+    def _emit_wakeups(self) -> None:
+        book = getattr(getattr(self, "agent", None), "wakeups", None)
+        if book is not None:
+            self.em.emit("wakeups", items=book.snapshot())
+
+    def _wakeup_due_now(self) -> bool:
+        book = getattr(getattr(self, "agent", None), "wakeups", None)
+        at = book.next_at() if book is not None else None
+        return at is not None and at <= book.clock()
+
+    def _cancel_wakeup_timer(self) -> None:
+        timer, self._wakeup_timer = getattr(self, "_wakeup_timer", None), None
+        if timer is not None:
+            timer.cancel()
+
+    def _arm_wakeup_timer(self) -> None:
+        """A timer for the next wake-up, re-armed at least hourly so a changed clock or a sleeping machine is caught."""
+        book = getattr(getattr(self, "agent", None), "wakeups", None)
+        self._cancel_wakeup_timer()
+        at = book.next_at() if book is not None else None
+        if at is None:
+            return
+        timer = threading.Timer(min(max(0.0, at - book.clock()) + 0.05, 3600.0), self._wakeup_due)
+        timer.daemon = True
+        self._wakeup_timer = timer
+        timer.start()
+
+    def _wakeup_due(self) -> None:
+        """The timer fired: start the wake-up's turn if the chat is idle, else it starts when the turn ends."""
+        if self._wakeup_due_now():
+            self._maybe_wake()
+        self._arm_wakeup_timer()
+
+    def _handle_cancel_wakeup(self, cmd: dict) -> None:
+        """cancel_wakeup {id}: the row's Cancel. The row follows from the book (`wakeups`)."""
+        book = getattr(self.agent, "wakeups", None)
+        wid = str(cmd.get("id") or "")
+        if book is None or not book.cancel(wid):
+            self.em.emit("command_rejected", command="cancel_wakeup", reason="unknown_wakeup",
+                         request_id=cmd.get("request_id"), message="That wake-up is no longer waiting.")
+
     def _cancel_wake_timer_locked(self) -> None:
         timer, self._wake_timer = getattr(self, "_wake_timer", None), None
         if timer is not None:
@@ -4770,7 +4843,7 @@ class Backend:
         hub = getattr(self.agent, "monitors", None)
         has_monitor = bool(hub is not None and hub.pending_count())
         has_agent = bool(getattr(self, "_agent_wakes", None))
-        if not has_monitor and not has_agent:
+        if not has_monitor and not has_agent and not self._wakeup_due_now():
             return None
         if has_monitor:
             return hub.policy.ready_in(getattr(self, "config", getattr(self.agent, "config", None)))
@@ -4782,7 +4855,8 @@ class Backend:
         hub = getattr(agent, "monitors", None)
         if not hasattr(self, "_queue"):
             return
-        if (hub is None or not hub.pending_count()) and not getattr(self, "_agent_wakes", None):
+        if ((hub is None or not hub.pending_count()) and not getattr(self, "_agent_wakes", None)
+                and not self._wakeup_due_now()):
             return
         lock = self._turn_state_lock()
         paused_now = False
@@ -4797,7 +4871,8 @@ class Backend:
                 self._wake_timer = timer
                 timer.start()
             else:
-                kind = "monitor" if hub is not None and hub.pending_count() else "wake"
+                kind = ("monitor" if hub is not None and hub.pending_count()
+                        else "wake" if getattr(self, "_agent_wakes", None) else "wakeup")
                 if kind == "monitor":
                     hub.policy.begin_wake()
                 self._queue.append(("", None, None, kind, ""))
@@ -8825,6 +8900,7 @@ class Backend:
             self._emit_config()
             self._emit_goal()
             self._emit_monitors()
+            self._emit_wakeups()
             self._emit_agents()
             self._forget_ended_shells()
             self._publish_cache_clock(current=True)      # a new chat: nothing cached yet
@@ -8870,6 +8946,7 @@ class Backend:
             self._emit_config()
             self._emit_goal()
             self._emit_monitors()
+            self._emit_wakeups()
             self._emit_agents()
             self._forget_ended_shells()
             self._publish_cache_clock(current=True)      # an empty chat: nothing cached
@@ -8920,6 +8997,7 @@ class Backend:
                 if note:
                     self.em.emit("info", message=note)
                 self._emit_monitors()
+                self._emit_wakeups()
                 # After the replay, not before it: published SDK 0.6.9 drains a resume's replay
                 # until the first event it does not know as one, and mode_changed is new to a
                 # resume -- sent first, the whole history landed in the app's first stream().
@@ -8957,6 +9035,7 @@ class Backend:
             # its meter read 0% through the rest of the reply (the first one after a reattach comes from here).
             self._publish_cache_clock(current=True)
             self._emit_known_context()
+            self._emit_wakeups()                    # a reloaded page draws the row of waiting wake-ups again
             self._emit_history(cmd["request_id"])
         elif t == "get_outline":
             self._emit_outline(cmd["request_id"])
@@ -9277,6 +9356,8 @@ class Backend:
                 self.em.emit("command_rejected", command=t, reason="unknown_task",
                              message="that work is no longer waiting to be run again",
                              **_request_fields(request_id))
+        elif t == "cancel_wakeup":
+            self._handle_cancel_wakeup(cmd)
         elif t == "stop_monitor":
             # Never blocks the command loop: the group is signalled here and reaped by its reader,
             # which reports monitor_ended when it is gone.

@@ -2427,6 +2427,10 @@ class Agent(GoalLifecycle):
         # A top-level chat writes its monitors down beside its session, so reopening it brings back
         # the ones DGC's stopping ended (dgc/monitor_restart.py). Set by load_session, taken once.
         self.monitors.journal = self._monitor_journal_target
+        # A chat's wake-ups ("come back in 30 minutes", dgc/wakeups.py), kept beside its session like its monitors.
+        from .wakeups import Book as _WakeupBook
+        self.wakeups = _WakeupBook(self._monitor_journal_target)
+        self.ctx.wakeups = self.wakeups      # only a top-level chat is offered the tools (_wakeup_exposed)
         self._monitor_restart_due = False
         self._monitor_restart_awaited = None     # work whose previous DGC was still exiting at reopen
         self.subagents = SubagentRegistry()      # this chat's task sub-agents (children share it)
@@ -3563,6 +3567,12 @@ class Agent(GoalLifecycle):
         return (self.depth == 0 and getattr(self.ui, "monitor_wake_enabled", False) is True
                 and not str(self.config.get("subscription_engine", "") or "").strip())
 
+    def _wakeup_exposed(self) -> bool:
+        """Are `wake_later` and `wake_cancel` offered? Only where the frontend starts a wake-up's turn by itself (the editor
+        says so: ui.wakeups_supported), for a top-level chat outside plan mode, not on a subscription CLI."""
+        return (self.depth == 0 and getattr(self.ui, "wakeups_supported", False) is True and self.mode != "plan"
+                and not str(self.config.get("subscription_engine", "") or "").strip())
+
     def _monitor_exposed(self) -> bool:
         """Is the `monitor` tool offered on this request?
 
@@ -4124,12 +4134,15 @@ class Agent(GoalLifecycle):
         hub = getattr(self, "monitors", None)
         running = bool(hub is not None and hub.has_running())
         wake_turn = bool(getattr(self, "_monitor_turn", False))
+        wake_ok = self._wakeup_exposed()
         out = []
         for tool in schemas:
             name = tool.get("function", {}).get("name")
             if name == "monitor" and not exposed:
                 continue
             if name == "monitor_stop" and not running:
+                continue
+            if name in ("wake_later", "wake_cancel") and not wake_ok:
                 continue
             # Nobody is watching a turn DGC started on its own: no question, no goal verdict.
             if wake_turn and name in ("propose_options", "update_goal", "present_plan"):
@@ -4831,6 +4844,9 @@ class Agent(GoalLifecycle):
         monitors = getattr(self, "monitors", None)
         if monitors is not None:
             monitors.new_epoch("shutdown")
+        book = getattr(self, "wakeups", None)
+        if book is not None:
+            book.release()                       # its wake-ups stay beside the chat being left
         registry = getattr(self, "subagents", None)
         if registry is not None:
             registry.reset()                     # the agents list belongs to the chat being left
@@ -5063,6 +5079,11 @@ class Agent(GoalLifecycle):
             "background: true) and keep working or finish the turn. Never hold a turn open with "
             "sleep/poll loops, and never promise to check later without arranging a wake-up.",
         ]
+        if self._wakeup_exposed():
+            long_job_guidance.append(
+                "- To come back to this chat at a later time (\"check the tests in 30 minutes\"), set a wake-up with "
+                "`wake_later` and end the turn; a repeating check is one wake-up at a time. Never promise to look "
+                "later without one.")
         if self._monitor_exposed():
             long_job_guidance.append(
                 "- Use `monitor` for that watch: every stdout line it prints reaches you between "
@@ -7513,6 +7534,7 @@ class Agent(GoalLifecycle):
             # Monitors belong to the conversation being left; they never come back with a reopened
             # one either. Nothing is sent to the model about it; the frontend shows one line.
             self.monitors.new_epoch("shutdown")
+            self.wakeups.release()                  # the chat being left keeps its wake-ups beside its session
             self._last_turn_tool_intents, self._last_turn_mcp_tools = set(), set()
             self._last_turn_mcp_query = ""
             self._stale_monitor_note = (
@@ -7539,6 +7561,8 @@ class Agent(GoalLifecycle):
                 record["checkpoints"] = redact_checkpoint_state(record["checkpoints"], secrets)
             self.session_file = path
             self._associate_workspace()
+            if getattr(self.ui, "wakeups_supported", False) is True and self.depth == 0:
+                self.wakeups.adopt()             # its wake-ups whose owner has gone (a reload, a restart) are this DGC's
             self.session_name = self._safe_text(str(record.get("name") or "")).strip() or None
             self._session_revision = int(record.get("revision", 0))
             self._session_exists = True

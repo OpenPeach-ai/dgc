@@ -5979,6 +5979,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "stopMonitor":
         void this.stopMonitor(String(msg.id || ""));
         break;
+      case "cancelWakeup":
+        // A wake-up's Cancel on the bar (ready.capabilities.wakeups): DGC takes it back and sends the row again.
+        if ((this.lastReadyEvent?.capabilities as any)?.wakeups === true && typeof msg.id === "string" && /^wake\d{1,9}$/.test(msg.id)) {
+          be.send({ type: "cancel_wakeup", id: msg.id });
+        }
+        break;
       case "pipReportsWatch":
         // The panel draws Pip reports (ready.capabilities.pip_reports): this chat's start arriving.
         if (this.lastReadyEvent?.capabilities?.pip_reports === 1) { be.send({ type: "watch_pip_reports" }); }

@@ -50,6 +50,7 @@ DISPLAY = {
     "apply_patch": "ApplyPatch", "repo_map": "RepoMap", "code_intel": "CodeIntel", "git_diff": "GitDiff",
     "bash": "Bash", "bash_output": "BashOutput", "bash_kill": "BashKill", "python": "Python",
     "monitor": "Monitor", "monitor_stop": "MonitorStop",
+    "wake_later": "WakeLater", "wake_cancel": "WakeCancel",
     "glob": "Glob", "grep": "Grep", "web_fetch": "WebFetch", "web_search": "WebSearch",
     "browser": "Browser",
     "todo": "Todo", "notes": "Notes", "skill": "Skill", "add_skill": "AddSkill", "save_memory": "SaveMemory",
@@ -103,6 +104,8 @@ READ_ONLY_TOOLS = {"read_file", "view_image", "show_file", "glob", "grep", "repo
                    # An artifact is DGC's own, kept in ~/.dgc/artifacts with every version: like present_document,
                    # nothing in the project changes, so no card. A deny rule (MakeArtifact) still applies.
                    "make_artifact", "edit_artifact",
+                   # A wake-up (dgc/wakeups.py) only brings this chat back later; its turn asks for each thing as usual.
+                   "wake_later", "wake_cancel",
                    "list_tasks", "wait_tasks",
                    # `message_task` is not a read, and neither are propose_options, ask_user,
                    # present_document or update_goal above: this set is really "needs no

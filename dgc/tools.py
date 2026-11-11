@@ -490,6 +490,19 @@ TOOL_SCHEMAS = [
         ["command", "description"]),
     _fn("monitor_stop", "Stop a running monitor by id (an unknown id lists the running ones).",
         {"id": {"type": "string"}}, ["id"]),
+    # Offered where a wake-up can be delivered (Agent._wakeup_exposed): the editor starts its turn on an idle chat.
+    _fn("wake_later", "Come back to this chat by yourself later: set a wake-up, and at its time a new turn starts here "
+        "with what you said you would do. For \"check the tests in 30 minutes\" or \"look at the deploy tomorrow at 9\". "
+        "Never a short loop just to wait: a command you can watch is a monitor, which wakes you by itself when it prints; "
+        "a wake-up is for coming back at a time. A check that repeats (\"every 10 minutes until CI is green\") is one "
+        "wake-up at a time: when it wakes, check, and set the next only while the condition isn't met. Tell the user "
+        "when you will come back. Returns its id.",
+        {"minutes": {"type": "number", "description": "How long from now, 1 to 10080 (7 days)"},
+         "why": {"type": "string", "description": "A few words the chat shows while it waits, e.g. \"Check the tests\""},
+         "prompt": {"type": "string", "description": "What to do when it wakes, in full: the turn is told exactly this"}},
+        ["minutes", "why", "prompt"]),
+    _fn("wake_cancel", "Cancel a wake-up you set (an unknown id lists the waiting ones).",
+        {"id": {"type": "string"}}, ["id"]),
     _fn("python", "Run Python in a PERSISTENT interpreter tied to this session. Variables, imports, and "
         "function definitions PERSIST across calls, so you can load data into a variable ONCE and then run "
         "computations over it across many turns instead of re-reading the data into context each time "
@@ -4936,6 +4949,30 @@ def monitor_stop_tool(args: dict, ctx) -> str:
     return f"no running monitor '{shown}' (running: {running or 'none'})"
 
 
+def wake_later_tool(args: dict, ctx) -> str:
+    book = getattr(ctx, "wakeups", None)
+    if book is None:
+        return "error: wake-ups are not available in this session"
+    from .wakeups import clock_words
+    try:
+        item = book.add(args.get("minutes"), args.get("why"), args.get("prompt"))
+    except ValueError as e:
+        return f"error: {e}"
+    minutes = args.get("minutes")
+    shown = int(minutes) if float(minutes).is_integer() else minutes
+    return (f"Set {item['id']}: I wake at {clock_words(item['at'])} (in {shown} minutes) to: {item['why']}. "
+            "Tell the user when you will come back; end your turn now.")
+
+
+def wake_cancel_tool(args: dict, ctx) -> str:
+    book = getattr(ctx, "wakeups", None)
+    wid = str(args.get("id", ""))
+    if book is not None and book.cancel(wid):
+        return f"Cancelled {wid}."
+    waiting = ", ".join(f"{i['id']} ({i['why']})" for i in (book.items() if book is not None else []))
+    return f"no wake-up '{_prefix_without_split_marker(_safe_output(wid, ctx), 64)}' (waiting: {waiting or 'none'})"
+
+
 def view_image(args: dict, ctx) -> str:
     """Show the user (and, when it can see, the model) an image file from the workspace."""
     p = _resolve(str(args.get("path", "")), ctx.project_root, allow_external=_allow_external(args))
@@ -5212,6 +5249,7 @@ EXECUTORS = {
     "apply_patch": apply_patch_tool,
     "bash": bash, "bash_output": bash_output, "bash_kill": bash_kill, "python": python,
     "monitor": monitor_tool, "monitor_stop": monitor_stop_tool,
+    "wake_later": wake_later_tool, "wake_cancel": wake_cancel_tool,
     "glob": glob_tool, "grep": grep_tool, "repo_map": repo_map, "code_intel": code_intel,
     "git_diff": git_diff,
     "web_fetch": web_fetch,

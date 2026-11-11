@@ -4372,10 +4372,12 @@
       const note = el("div", replaying ? "resume-note monitor-note hist" : "resume-note monitor-note");
       // A video this chat started ended (dgc/videos.py): the backend's label is "video: NAME · ended".
       const clip = kind === "monitor" ? /^video: (.+?) · ended$/.exec(String(prompt || "")) : null;
-      const lead = kind === "wake" ? "Woke on agent" : clip ? "Woke as a video ended" : "Woke on monitor";
-      note.innerHTML = `<span class="note-icon" data-icon="${kind === "wake" ? "bot" : clip ? "play" : "activity"}">`
-        + `${icon(kind === "wake" ? "bot" : clip ? "play" : "activity")}</span>`
-        + `<span>${lead} · ${esc(String(clip ? clip[1] : prompt || "").slice(0, 200))}</span>`;
+      // A wake-up the chat set itself (dgc/wakeups.py): "wake-up: <why>".
+      const planned = kind === "monitor" ? /^wake-up: (.+)$/s.exec(String(prompt || "")) : null;
+      const lead = kind === "wake" ? "Woke on agent" : clip ? "Woke as a video ended" : planned ? "Woke up as planned" : "Woke on monitor";
+      const mark = kind === "wake" ? "bot" : clip ? "play" : planned ? "history" : "activity";
+      note.innerHTML = `<span class="note-icon" data-icon="${mark}">${icon(mark)}</span>`
+        + `<span>${lead} · ${esc(String(clip ? clip[1] : planned ? planned[1] : prompt || "").slice(0, 200))}</span>`;
       appendTarget.appendChild(note);
       wakeNote = note; head = note;
     } else if (!promptNode) {
@@ -7282,6 +7284,7 @@ function permissionChoices(ev) {
     const present = RAIL_KINDS.filter(([, bar]) => !bar.hidden).map(([kind]) => kind);
     const fixes = pipFixesForChip().length ? ["pipfixes"] : [];
     if (pipRunning.size) fixes.push("piprunning");
+    if (wakeups?.length) fixes.push("wakeups");
     composerRail.classList.add("as-chips");
     composerRail.hidden = pasteBar.hidden;
     composerRail.classList.toggle("has-monitors", !monitorsBar.hidden);
@@ -7599,11 +7602,13 @@ function permissionChoices(ev) {
   // Where each row lives in the rail, so a row a popover borrowed goes back to its own place.
   const RAIL_ROW_ORDER = ["queuebar", "pipsbar", "monitorsbar", "troupebar", "changesbar", "tasksbar", "goalbar", "pastebar"];
   const RAIL_POP_TITLES = { goal: "Goal", troupe: "Troupe", monitors: "Monitors", tasks: "Tasks",
-    changes: "Changes in this chat", pips: "Pips", queue: "Queued messages", pipfixes: "Pip fixes", piprunning: "Pips running" };
+    changes: "Changes in this chat", pips: "Pips", queue: "Queued messages", pipfixes: "Pip fixes", piprunning: "Pips running",
+    wakeups: "Wake-ups" };
   // Which kinds stay on the bar longest when it is short of room; a kind that needs you outstays them all.
-  const RAIL_KEEP = ["queue", "changes", "tasks", "pipfixes", "troupe", "piprunning", "monitors", "goal", "pips"];
+  const RAIL_KEEP = ["queue", "changes", "tasks", "pipfixes", "troupe", "piprunning", "wakeups", "monitors", "goal", "pips"];
   // A kind's real row; Pip fixes have no row (their cards are in the chat): their popover lists them.
   const railBar = (kind) => (kind === "pipfixes" ? paintPipFixesPanel() : kind === "piprunning" ? paintPipRunningPanel()
+    : kind === "wakeups" ? paintWakeupsPanel()
     : (RAIL_KINDS.find(([name]) => name === kind) || [])[1] || null);
   const railCount = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
   function railTroupeLead() {
@@ -7614,6 +7619,14 @@ function permissionChoices(ev) {
   // What a chip says: an icon, a word (the first thing a short line drops), the number, extras (dropped next) and,
   // when the kind needs you, an amber dot with the reason (the words go last; the amber and the label never do).
   function railChipSpec(kind) {
+    if (kind === "wakeups") {
+      // The chat's own wake-ups (dgc/wakeups.py): when the next is, and why, in its popover.
+      const next = wakeups[0];
+      return wakeups.length === 1
+        ? { icon: "watch", word: "Wakes", num: wakeupClock(next.at), detail: next.why, label: `Wakes at ${wakeupClock(next.at)} to: ${next.why}` }
+        : { icon: "watch", num: String(wakeups.length), after: "wake-ups", detail: `next at ${wakeupClock(next.at)}`,
+          label: `${wakeups.length} wake-ups waiting, the next at ${wakeupClock(next.at)}` };
+    }
     if (kind === "queue") {
       const count = Math.max(queuedCount, queuedPrompts.size);
       return { icon: "list-ordered", num: String(count), after: "queued", detail: count === 1 ? "message" : "messages",
@@ -8862,6 +8875,9 @@ function permissionChoices(ev) {
       case "monitor_ended":
         if (!knownMonitorIds.has(String(ev.id || ""))) break;   // a monitor of a chat that was left
         sysLine(`Monitor ${ev.id} · ${String(ev.message || ev.reason || "ended")}`, ev.reason === "flood" || ev.reason === "error");
+        break;
+      case "wakeups":
+        setWakeups(ev.items);
         break;
       case "monitors":
         renderMonitors(ev);
@@ -11685,6 +11701,33 @@ function permissionChoices(ev) {
   function openRunningPip(run) {
     if (railOpenNow()) closeRailPop({ restore: false });
     openPipsAt({ pip: run.pip_id, section: "chat", run: run.run_id });
+  }
+  // A Work chat's wake-ups (0.52): the `wakeups` event's rows, soonest first; Cancel asks DGC to take one back.
+  var wakeups = [];                              // `var`: the bar syncs while the panel is still starting up
+  const wakeupClock = (iso) => { const d = new Date(String(iso || "")); return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }); };
+  function setWakeups(items) {
+    wakeups = (Array.isArray(items) ? items : []).filter((w) => w && typeof w.id === "string" && typeof w.why === "string" && typeof w.at === "string")
+      .slice(0, 8);
+    syncComposerRail();
+    if (railOpenNow()?.kind === "wakeups") { if (wakeups.length) paintWakeupsPanel(); else closeRailPop(); }
+  }
+  let wakeupsPanel = null;
+  function paintWakeupsPanel() {
+    if (!wakeupsPanel) { wakeupsPanel = el("section", "wakeups-panel"); wakeupsPanel.setAttribute("aria-label", "Wake-ups"); }
+    const list = el("ul", "pip-fixes-list");
+    for (const w of wakeups) {
+      const li = el("li", "wakeup-row");
+      const when = el("span", "pip-fixes-name"); when.textContent = wakeupClock(w.at);
+      const why = el("span", "pip-fixes-state"); why.textContent = w.why;
+      const words = el("span", "wakeup-words"); words.append(when, why);
+      const cancel = el("button", "rail-main wakeup-cancel"); cancel.type = "button"; cancel.textContent = "Cancel";
+      cancel.title = `Cancel the wake-up at ${wakeupClock(w.at)}`; cancel.setAttribute("aria-label", cancel.title);
+      cancel.onclick = () => { cancel.disabled = true; vscode.postMessage({ type: "cancelWakeup", id: w.id }); };
+      li.append(words, cancel);
+      list.append(li);
+    }
+    wakeupsPanel.replaceChildren(list);
+    return wakeupsPanel;
   }
   let pipRunningPanel = null;
   function paintPipRunningPanel() {

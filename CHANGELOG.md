@@ -6,6 +6,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- A Work chat can come back by itself later. Ask "check the tests in 30 minutes" or "every 10 minutes until CI is green": the chat sets a wake-up (`wake_later`), and at its time a new turn starts in that chat and does what it said. A repeating check is one wake-up at a time, ending once its condition is met. A wake-up stays with its chat across a reload or an editor restart; one that came due while DGC was closed runs when the chat is opened again and says how late it is. Up to 4 per chat, 1 minute to 7 days.
+
 - A Pip's chat no longer gets stuck after you send it an update while it answers. When that reply also wrote the conversation's brief, every later message was refused ("The conversation archive disagrees with the saved brief"). A chat already stuck this way carries on again.
 
 - Limits for everyone, raised for every user, not only in Dev Mode. A message to a Pip can be up to 256 KB (it was 4,000 characters), while it replies too, and its reply up to 256 KB (it was 24 KB, and a longer answer failed the turn); a longer reply keeps its start in the chat and the whole of it as the Pip's document, with the document's card. What a Pip remembers of a chat is sized from its context window, about half of it (it was a flat 64 KB, so a 1M-token window never saw more). A full conversation (20,000 messages) carries on in a fresh one instead of stopping the Pip; 20,000 was once a limit for the whole machine. The image library lists 100,000 images (5,000), a project keeps 50,000 notes (5,000), a saved login can be shared with any number of chosen Pips (64), and a document holds about a megabyte (200,000 characters).
