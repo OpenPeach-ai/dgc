@@ -1,8 +1,8 @@
 // The Project Folder dropdown over the Work sessions (0.52, 12 Nov), in real Chromium with the real panel page
-// (test/support/home-scene.mjs): one dropdown above the list, "All projects" first, then the folders that have a session
+// (test/support/home-scene.mjs): one dropdown above the list (on the Library row: test/folder-row-browser.test.mjs), "All projects" first, then the folders that have a session
 // or a Project Pip, this window's marked and a gone one marked "Not found". On All projects each session says its folder
 // under its name: the home folder as ~, one line, cut in the middle so the folder's own name stays in sight, the whole
-// path in its tooltip. With one folder chosen the path shows once above the list. New opens a small dialog with the same
+// path in its tooltip. With one folder chosen its path is in the dropdown's tooltip. New opens a small dialog with the same
 // dropdown (this window's folder first, no All projects) and "Add a folder…" at its end. A DGC that lists no folders has
 // none of it. Read from the page's DOM, computed style, geometry and what it posts to the extension.
 import { after, before, test } from "node:test";
@@ -138,21 +138,22 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
     } finally { await x.close(); }
   });
 
-  test(`one folder chosen: its path once above the list, and no path on the rows (${theme}, ${width}px)`, async (t) => {
+  test(`one folder chosen: its path in the dropdown's tooltip, no line of its own, and no path on the rows (${theme}, ${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openHome(browser, { theme, width, sessions: null, tab: "work", motion: "reduce" });
     try {
       await x.send(listOf(LONG));
+      // (Asked 12 Nov night: the dropdown is on the Library row and no line names the folder's path; the tooltip has it.
+      // At 300 px the row has no room for "Project Folder" and this name: the word goes, the name stays whole.)
       const m = await x.page.evaluate(() => {
-        const once = document.getElementById("sessions-folder"), pick = document.getElementById("sessions-folder-pick"), list = document.getElementById("sessions-list"), host = document.getElementById("sessions-host");
-        const tail = once.querySelector(".dgc-path-tail"), head = once.querySelector(".dgc-path-head");
-        return { pick: pick.textContent.replace(/\s+/g, " ").trim(), valueCut: pick.querySelector(".dgc-folder-v").scrollWidth > pick.querySelector(".dgc-folder-v").clientWidth + 1,
-          once: once.checkVisibility(), path: (head?.textContent || "") + tail.textContent, title: once.title, lines: Math.round(once.getBoundingClientRect().height / parseFloat(getComputedStyle(once).lineHeight)),
-          between: once.getBoundingClientRect().top >= pick.getBoundingClientRect().bottom - 0.5 && once.getBoundingClientRect().bottom <= list.getBoundingClientRect().top + 0.5,
-          tailWhole: (() => { const r = document.createRange(); r.selectNodeContents(tail); return r.getBoundingClientRect().width <= tail.getBoundingClientRect().width + 0.01; })(), rows: list.querySelectorAll(".session-row").length, paths: list.querySelectorAll(".session-path").length, sideways: host.scrollWidth > host.clientWidth + 1 };
+        const pick = document.getElementById("sessions-folder-pick"), list = document.getElementById("sessions-list"), host = document.getElementById("sessions-host"), value = pick.querySelector(".dgc-folder-v");
+        const r = document.createRange(); r.selectNodeContents(value);
+        return { pick: pick.getAttribute("aria-label"), value: value.textContent, valueCut: r.getBoundingClientRect().width > value.getBoundingClientRect().width + 0.01, title: pick.title,
+          once: [...document.querySelectorAll("#sessions-folder, .sessions-folder, #sessions-folderbar")].filter((e) => e.checkVisibility()).length,
+          rows: list.querySelectorAll(".session-row").length, paths: list.querySelectorAll(".session-path").length, sideways: host.scrollWidth > host.clientWidth + 1 };
       });
-      assert.deepEqual(m, { pick: "Project Folder checkout-service", valueCut: false, once: true, path: "~/clients/northwind-traders/2026/storefront-redesign/packages/checkout-service",
-        title: "/home/me/clients/northwind-traders/2026/storefront-redesign/packages/checkout-service", lines: 1, between: true, tailWhole: true, rows: 1, paths: 0, sideways: false });
+      assert.deepEqual(m, { pick: "Project Folder: checkout-service", value: "checkout-service", valueCut: false,
+        title: "Project Folder: checkout-service\n/home/me/clients/northwind-traders/2026/storefront-redesign/packages/checkout-service", once: 0, rows: 1, paths: 0, sideways: false });
       assert.deepEqual(low(await homeContrast(x.page)), []);
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }

@@ -731,7 +731,8 @@
   // The Project Folder dropdown (0.52, media/shared/folderpick.js): "All projects" or one folder, one choice the host
   // keeps for every window (it also filters the Pips view's Project tab and Needs attention). The host says what is
   // chosen and the folders to choose from with each list; a DGC that lists none has no dropdown (projectFolders null).
-  // On All projects each session says its folder under its name; one folder's path shows once, above the list.
+  // It is on the Library row, at its right end (and in View all, on the search field's row): no row of its own.
+  // On All projects each session says its folder under its name; one folder's path is in the button's tooltip.
   // Another folder's session opens in a tab here that runs there, and offers only Open.
   let projectFolders = null, folderChoiceSeen = null;
   const chooseFolder = (folder) => { if (projectFolders && folder !== projectFolders.choice) vscode.postMessage({ type: "projectFolderChoose", folder }); };
@@ -741,9 +742,10 @@
     if (button.getAttribute("aria-expanded") === "true") { Pick.close(true); return; }
     Pick.open(button, { rows: projectFolders.rows, choice: projectFolders.choice, all: true, keyboard, onChoose: chooseFolder });
   }
-  /** A slot that holds the dropdown's button: a click, or Down, opens its menu. */
+  /** A slot that holds the dropdown's button: a click, or Down, opens its menu. A <dgc-folder-fit>: on the row it
+   *  shares it drops the button's "Project Folder" word when there is no room for it (media/shared/folderpick.js). */
   function folderSlot(cls) {
-    const slot = el("div", cls);
+    const slot = document.createElement("dgc-folder-fit"); slot.className = cls;
     slot.addEventListener("click", (e) => { const button = e.target.closest("[data-folder-pick]"); if (button) folderMenu(button, e.detail === 0); });
     slot.addEventListener("keydown", (e) => {
       const button = e.target.closest?.("[data-folder-pick]");
@@ -751,50 +753,32 @@
     });
     return slot;
   }
-  /** The button in a slot, drawn again only when what it says changed (the keyboard stays on it). */
+  /** The button in a slot, drawn again only when what it says changed (the keyboard stays on it). Its tooltip says the
+   *  choice and one folder's whole path. */
   function paintFolderSlot(slot, id) {
     const Pick = window.DgcFolderPick, drawn = JSON.stringify(projectFolders);
     if (!slot || !Pick || slot.dataset.drawn === drawn) return;
     const held = slot.contains(document.activeElement);
     slot.dataset.drawn = drawn;
-    slot.innerHTML = projectFolders ? Pick.buttonHtml({ id, cls: "sessions-folder-pick", rows: projectFolders.rows, choice: projectFolders.choice,
-      title: projectFolders.choice ? `Sessions in ${projectFolders.choice}. Choose another folder, or All projects.` : "Sessions from every project. Choose one folder to see only its sessions." }) : "";
+    slot.innerHTML = projectFolders ? Pick.buttonHtml({ id, cls: "sessions-folder-pick", rows: projectFolders.rows, choice: projectFolders.choice }) : "";
     if (held) slot.querySelector("button")?.focus({ preventScroll: true });
   }
   /** A folder on one line, cut in the middle when it doesn't fit: the folder's own name stays in sight, and the whole
    *  path is the tooltip. `shown` has the home folder as ~. */
   function pathLine(cls, shown, full) {
-    const line = el("span", `dgc-path ${cls}`), cut = String(shown || "").replace(/[\\/]+$/, "") || String(shown || "");
-    const at = Math.max(cut.lastIndexOf("/"), cut.lastIndexOf("\\"));
-    const head = el("span", "dgc-path-head"), tail = el("span", "dgc-path-tail");
-    head.textContent = at > 0 ? cut.slice(0, at) : ""; tail.textContent = at > 0 ? cut.slice(at) : cut;
-    if (head.textContent.length > 2) head.classList.add("dgc-path-long");
-    if (head.textContent) line.append(head);
-    line.append(tail);
-    line.title = String(full || shown || "");
+    const made = window.DgcFolderPick?.pathNode?.(document, shown, full || shown, cls);
+    if (made) return made;
+    const line = el("span", `dgc-path ${cls}`), tail = el("span", "dgc-path-tail");
+    tail.textContent = String(shown || ""); line.append(tail); line.title = String(full || shown || "");
     return line;
   }
-  /** Above the list: the dropdown, then (with one folder chosen) that folder's path, once. Made when a DGC first lists folders. */
-  function paintFolderBar(msg) {
-    let bar = $("sessions-folderbar");
-    if (!projectFolders || !window.DgcFolderPick) { if (bar) { bar.hidden = true; window.DgcFolderPick?.close(); } return; }
-    if (!bar) {
-      bar = el("div", "sessions-folderbar"); bar.id = "sessions-folderbar";
-      const once = el("p", "sessions-folder"); once.id = "sessions-folder"; once.hidden = true;
-      bar.append(folderSlot("sessions-folder-slot"), once);
-      $("sessions-status").before(bar);
-    }
-    bar.hidden = false;
-    paintFolderSlot(bar.firstChild, "sessions-folder-pick");
-    const once = $("sessions-folder"), shown = projectFolders.choice && typeof msg.folder === "string" ? msg.folder : "";
-    once.hidden = !shown;
-    if (once.dataset.shown !== shown) {
-      once.dataset.shown = shown;
-      const glyph = el("span", "codicon codicon-folder"); glyph.setAttribute("aria-hidden", "true");
-      const said = el("span", "session-tab-words"); said.textContent = "Folder: ";
-      once.replaceChildren(glyph, said, pathLine("sessions-folder-path", shown, msg.folderPath || shown));
-      once.title = String(msg.folderPath || shown);
-    }
+  /** The dropdown at the right end of the Library row (asked 12 Nov night: no row of its own). Made when a DGC first lists folders. */
+  function paintFolderBar() {
+    let slot = $("sessions-folder-slot");
+    if (!projectFolders || !window.DgcFolderPick) { if (slot) { slot.hidden = true; window.DgcFolderPick?.close(); } return; }
+    if (!slot) { slot = folderSlot("sessions-folder-slot"); slot.id = "sessions-folder-slot"; const row = $("work-library-row"); if (row) row.append(slot); else $("sessions-status").before(slot); }
+    slot.hidden = false;
+    paintFolderSlot(slot, "sessions-folder-pick");
   }
   // ---- New session (asked 12 Nov): a small dialog with the Project Folder dropdown, this window's folder chosen, no
   // "All projects", and "Add a folder…" at its end (the editor's own folder picker). The session opens in an editor tab
@@ -976,7 +960,7 @@
     projectFolders = offered ? { choice: typeof offered.choice === "string" ? offered.choice : "", rows: offered.rows.filter((r) => r && typeof r.folder === "string" && r.folder).slice(0, 200),
       window: offered.window && typeof offered.window.folder === "string" && offered.window.folder ? offered.window : null } : null;
     if (!projectFolders) closeNewSession(false);
-    paintFolderBar(msg);
+    paintFolderBar();
     // Home's Pip cards follow the choice: read again when it changes.
     const choiceNow = projectFolders ? projectFolders.choice : null;
     if (choiceNow !== folderChoiceSeen) { folderChoiceSeen = choiceNow; homePips?.refresh(); }
@@ -1035,9 +1019,10 @@
     const status = el("p", "sessions-status sessions-all-status"); status.setAttribute("role", "status"); status.hidden = true;
     const more = el("button", "sessions-more sessions-all-more"); more.type = "button"; more.title = "Show 200 more sessions"; more.hidden = true;
     more.onclick = () => { more.disabled = true; more.textContent = "Loading…"; vscode.postMessage({ type: "sessionsMore" }); };
-    // The Project Folder dropdown, in the page of them all too: the same choice.
-    const folder = folderSlot("sessions-all-folder");
-    pop.append(field, folder, status, rows);
+    // The Project Folder dropdown, in the page of them all too: the same choice, at the right end of the search field's row.
+    const folder = folderSlot("sessions-all-folder"), head = el("div", "sessions-all-head");
+    head.append(field, folder);
+    pop.append(head, status, rows);
     // Over the list, from its first row down to the side bar's end (never shorter than a few rows).
     pop.style.top = `${list.offsetTop}px`;
     const room = host.getBoundingClientRect().bottom - list.getBoundingClientRect().top - 12;

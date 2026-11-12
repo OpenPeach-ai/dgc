@@ -97,14 +97,17 @@ test('the Project tab has the Project Folder dropdown; All projects, the default
  assert.equal(x.d.querySelector('.dgc-folder-menu'),null,'the menu closes');
 });
 
-test('a folder chosen shows that folder\'s Pips, its path once above the list; a folder with none says so',async()=>{
+test('a folder chosen shows that folder\'s Pips, its path in the dropdown\'s tooltip (no line of its own); a folder with none says so',async()=>{
  const x=setup({choice:BILLING});await x.drain();await x.tab('project');
  assert.equal(x.$('#pips-folder-pick').textContent.replace(/\s+/g,' ').trim(),'Project Folder billing-app');
  assert.ok(x.$(`#pips-tabpanel [data-job="${OTHER}"]`),'the chosen folder\'s Pips, though it is not this window\'s');
  assert.equal(x.$(`[data-job="${AUDIT}"]`),null,'and no other folder\'s');
  assert.equal(x.requests('list_pips').some(r=>r.workspace_id===X),true,'read from that folder\'s workspace');
- assert.equal(x.$('.pips-folder-once')?.title,BILLING,'its path, once');
- assert.equal((x.$('.pips-folder-once .dgc-path-head')?.textContent||'')+x.$('.pips-folder-once .dgc-path-tail').textContent,'~/code/billing-app');
+ // (Asked 12 Nov night: the dropdown is on the Needs attention line, or on a line as tall when nothing waits, and no line names the path.)
+ assert.equal(x.$('.pips-folder-once, .pips-folder-bar'),null,'no line of its own for the path');
+ assert.equal(x.$('#pips-folder-pick').title,`Project Folder: billing-app\n${BILLING}`,'its path, in the tooltip');
+ assert.equal(x.$('#pips-folder-pick').getAttribute('aria-label'),'Project Folder: billing-app');
+ assert.ok(x.$('#pips-folder-pick').closest('dgc-folder-fit')?.closest('.attention-head'),'on the heading\'s line');
  // The host says another choice (made here, or over the Work sessions): the tab follows it.
  x.message({type:'pipsProjectFolder',folder:NOTES});await x.drain();
  assert.equal(x.chosen(),'pips-tab-project','the tab stays');

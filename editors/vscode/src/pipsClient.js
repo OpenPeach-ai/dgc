@@ -3227,9 +3227,18 @@ function settleProjectTab(){
   void loading.finally(()=>{if(epoch===S.epoch&&S.switching){S.switching=false;render();}});
  });
 }
-function folderBarMarkup(){
- const Pick=globalThis.DgcFolderPick,row=chosenFolder();if(!Pick)return '';
- return `<div class="pips-folder-bar">${Pick.buttonHtml({id:'pips-folder-pick',rows:folderRows(),choice:row?row.folder:'',title:row?`Project Pips in ${row.folder}. Choose another folder, or All projects.`:'Project Pips from every project. Choose one folder to see only its Pips.'})}${row?`<p class="pips-folder-once" title="${esc(row.folder)}">${Pick.pathHtml(row.shown,row.folder)}</p>`:''}</div>`;
+// The dropdown is at the right end of the Project tab's top line (asked 12 Nov night: no row of its own, and no line
+// naming one folder's path: the button's tooltip has it). That line is the Needs attention heading's when something
+// waits (attentionHomeMarkup), and a line as tall with nothing at its left when nothing does, so the dropdown is at one
+// place as cards come and go. Its element drops the "Project Folder" word when the line has no room for it.
+function folderPickHere(){return foldersOn()&&scopeTab()==='project'&&!!globalThis.DgcFolderPick;}
+function folderPickMarkup(){
+ const row=chosenFolder();
+ return `<dgc-folder-fit class="pips-folder-fit">${globalThis.DgcFolderPick.buttonHtml({id:'pips-folder-pick',rows:folderRows(),choice:row?row.folder:''})}</dgc-folder-fit>`;
+}
+function folderRowMarkup(){
+ if(!folderPickHere())return '';
+ return `<div class="attention attention-none"><div class="attention-head attention-head-end pips-folder-row"><button type="button" class="attention-toggle attention-toggle-none" disabled tabindex="-1" aria-hidden="true">&nbsp;</button><span class="attention-head-gap"></span>${folderPickMarkup()}</div></div>`;
 }
 // All projects: every project's Pips, each with its folder under its name. A row opens that Pip here.
 function projectsAllMarkup(){
@@ -3307,8 +3316,8 @@ function projectEmptyMarkup(){
  if(!foldersOn())return `<div class="pips-tab-empty"${scopePanelAttrs()}><p class="muted">Open a project folder to see its Pips.</p></div>`;
  const row=chosenFolder();
  // One folder with no Pips says so; All projects is every project's Pips, under what waits on them.
- if(row)return `<div class="simple-content pips-folder-page"${scopePanelAttrs()}>${folderBarMarkup()}<div class="pips-tab-empty"><p class="muted">No Project Pips in ${esc(row.name)} yet.</p></div></div>`;
- return `<div class="simple-content pips-folder-page"${scopePanelAttrs()}>${folderBarMarkup()}${attentionHomeMarkup()}${projectsAllMarkup()}</div>`;
+ if(row)return `<div class="simple-content pips-folder-page"${scopePanelAttrs()}>${folderRowMarkup()}<div class="pips-tab-empty"><p class="muted">No Project Pips in ${esc(row.name)} yet.</p></div></div>`;
+ return `<div class="simple-content pips-folder-page"${scopePanelAttrs()}>${attentionHomeMarkup()}${projectsAllMarkup()}</div>`;
 }
 /** Shows another workspace's Pips from the top: what the old dropdown did, and what opening a Pip elsewhere does. */
 // Its list starts at its first page: the pages read and the search typed were the other tab's (both tabs are paged now).
@@ -3469,8 +3478,9 @@ function attentionScene(all=false){
   answers:i=>attentionAnswer(i)?.answer||null,held:i=>heldAnswers.get(i.id)?.said||''}};
 }
 function attentionHomeMarkup(){
- const {page,setups,draw}=attentionScene(),expanded=attentionOpen();
- return attentionMarkup(page,{...draw,expanded,at:attentionShowing(attentionCards(page,setups)),viewAll:true});
+ const {page,setups,draw}=attentionScene(),expanded=attentionOpen(),pick=folderPickHere();
+ // The Project tab's dropdown is on this heading's line; with nothing waiting it keeps that place on a line of its own.
+ return attentionMarkup(page,{...draw,expanded,at:attentionShowing(attentionCards(page,setups)),viewAll:true,end:pick?folderPickMarkup():''})||folderRowMarkup();
 }
 // "View all" (asked 12 Nov): Needs attention on a page of its own, every card of this place (Personal or Project) one
 // under another, each with the answers its one card has. It scrolls as the view does. Back, or Escape, returns to the
@@ -3899,7 +3909,8 @@ function reviewFlow(){
 function simpleHomeMarkup(){
  const all=S.jobs.filter(p=>S.showArchived||p.status!=='archived'),live=S.jobs.filter(p=>p.status!=='archived');
  // (A project's home too, while its Pips are being read: its empty home, with New Pip, flashed before the list.)
- if(projectHome())return !S.jobsRead&&!S.error&&!S.jobs.length&&!S.pipSearch?loadingMark():(S.pipSearch?'':attentionHomeMarkup())+simpleHomeList(all,live)+(S.pipSearch?'':flowMarkup());
+ // (The Project Folder dropdown keeps its line while they are read and while a search hides Needs attention.)
+ if(projectHome())return !S.jobsRead&&!S.error&&!S.jobs.length&&!S.pipSearch?folderRowMarkup()+loadingMark():(S.pipSearch?folderRowMarkup():attentionHomeMarkup())+simpleHomeList(all,live)+(S.pipSearch?'':flowMarkup());
  // Only once the list has come back empty: while it's being read a Pip's owner saw Meet Core's large face, and could press Create Core.
  if(!live.length&&!S.jobs.length&&!S.pipSearch)return S.jobsRead?attentionHomeMarkup()+meetCoreMarkup():loadingMark();   // a search that finds nothing is not an empty home
  return (S.pipSearch?'':attentionHomeMarkup())+simpleHomeList(all,live)+(S.pipSearch?'':flowMarkup());
@@ -4463,7 +4474,7 @@ function simpleMarkup(){
  if(project&&S.create)return `<header class="pip-topbar">${back('create-back',setupEditing&&S.pip?`Back to ${S.pip.name}`:'Your Pips')}<div class="pip-pill settings-pill"><span>${setupEditing&&S.pip?`Change ${esc(S.pip.name)}`:'New Pip'}</span></div><span></span></header>${notes}<div class="simple-content" data-view="create">${createMarkup()}</div>`;
  // The project's context and notifications, opened from its home's menu (the old side bar's two buttons).
  if(project&&!S.selected&&!S.overview&&['context','notifications'].includes(S.tab))return `<header class="pip-topbar">${back('workspace-back','Your Pips')}<div class="pip-pill settings-pill"><span>${S.tab==='context'?'Workspace context':'Notifications'}</span></div><span></span></header><div class="simple-content" data-view="${esc(S.tab)}">${notes}${S.tab==='context'?contextMarkup():notificationsMarkup()}</div>`;
- if(!S.selected||S.overview||S.create)return `${bar}${notes}<div class="simple-content"${scopePanelAttrs()}>${project&&foldersOn()?folderBarMarkup():''}${S.switching?'':simpleHomeMarkup()}</div>`;
+ if(!S.selected||S.overview||S.create)return `${bar}${notes}<div class="simple-content"${scopePanelAttrs()}>${S.switching?(project?folderRowMarkup():''):simpleHomeMarkup()}</div>`;
  if(!S.pip)return `${bar}${loadingMark()}`;
  return `${convColumnMarkup()}${simplePipHeader()}${pipSetupNotes()}<div class="simple-content${S.tab==='chat'?' chat':''}" data-view="${esc(S.tab)}">${S.tab==='chat'?chatMarkup():`${notes}${waitingMarkup()}${simpleTabContent()}`}</div>`;
 }

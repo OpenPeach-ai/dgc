@@ -154,7 +154,7 @@ const ARROW = {prev: 'M10 3 5 8l5 5', next: 'M6 3l5 5-5 5'};
  *  by `setupCard` ({setup} or {item}); the cards are theirs alone when `page` is null (a project's home, which shows
  *  none of the Personal Pips' rows). `answers(item)` is what the card can answer by itself ({yes, no}, src/pipCardAnswers.js)
  *  or null; `held(item)` is what an answer just given says ("Applied. …") while it can still be undone, or ''. */
-export function attentionMarkup(page, {esc, face, expanded = false, now = Date.now(), busy = false, setups = [], setupCard = null, error = '', more = '', at = 0, answers = null, held = null, viewAll = false, place = null}) {
+export function attentionMarkup(page, {esc, face, expanded = false, now = Date.now(), busy = false, setups = [], setupCard = null, error = '', more = '', at = 0, answers = null, held = null, viewAll = false, place = null, end = ''}) {
   const all = attentionCards(page, setups, !!setupCard), listed = page?.items || [];
   const total = (page?.total || 0) + all.length - listed.length;
   if (!total) return '';
@@ -176,7 +176,10 @@ export function attentionMarkup(page, {esc, face, expanded = false, now = Date.n
   const toggle = `<button type="button" class="attention-toggle" data-attention-more="${expanded ? '0' : '1'}" aria-expanded="${Boolean(expanded)}" aria-controls="attention-list">Needs attention <span class="attention-count">${n(total)}</span><span class="codicon codicon-chevron-${expanded ? 'up' : 'down'}" aria-hidden="true"></span></button>`;
   // "View all" (asked 12 Nov): quiet words at the heading row's right end, when two or more wait and the section is open. It
   // opens the page that lists every one (attentionAllMarkup). Folded, or with one card, the heading is as it was.
-  const head = viewAll && many ? `<div class="attention-head">${toggle}<button type="button" class="attention-all-link" id="attention-view-all" data-attention-all="1" aria-label="${esc(`View all ${n(count)} that need you`)}">View all</button></div>` : toggle;
+  const link = viewAll && many ? `<button type="button" class="attention-all-link" id="attention-view-all" data-attention-all="1" aria-label="${esc(`View all ${n(count)} that need you`)}">View all</button>` : '';
+  // `end` (the caller's own markup): what the heading line holds at its right end, after View all (the Project tab's
+  // Project Folder dropdown). With it the heading, its count and its fold keep to the left, as wide as their words.
+  const head = end ? `<div class="attention-head attention-head-end">${toggle}<span class="attention-head-gap"></span>${link}${end}</div>` : link ? `<div class="attention-head">${toggle}${link}</div>` : toggle;
   return `<section class="attention" aria-label="Needs attention">${head}`
     + `<div class="attention-carousel${many ? '' : ' single'}" id="attention-list" role="group" aria-label="What needs you, one card at a time"${shown ? '' : ' hidden'}`
     + (shown ? ` data-at="${index}" data-count="${count}" data-first="${esc(all[0].key)}" data-last="${esc(all[count - 1].key)}"` : '') + '>'

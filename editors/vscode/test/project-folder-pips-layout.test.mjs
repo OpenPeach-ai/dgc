@@ -1,7 +1,8 @@
 // The Project Folder dropdown in the Pips view, in real Chromium (test/support/project-folder-pips-scene.mjs: the side
 // bar's real page with the real Pips view in its shadow root), at 700 and 300 px, dark and light: the dropdown above the
-// Project tab's list, every project's Pips each with its folder cut in the middle, a Project Pip's card in Needs
-// attention naming its project, one folder's path once, and the folder field in Create a Project Pip. Nothing is cut
+// Project tab's list (on the Needs attention line: test/folder-row-browser.test.mjs), every project's Pips each with its
+// folder cut in the middle, a Project Pip's card in Needs attention naming its project, one folder's path in the
+// dropdown's tooltip, and the folder field in Create a Project Pip. Nothing is cut
 // that should show whole, nothing overlaps or scrolls sideways, and words clear 4.5:1.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
@@ -31,9 +32,10 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
     try {
       const m = await x.inPips((root) => {
         const box = (e) => e.getBoundingClientRect(), panel = root.querySelector("#pips-tabpanel"), pick = root.querySelector("#pips-folder-pick"), shell = root.querySelector(".pip-app-root");
+        const word = pick.querySelector(".dgc-folder-k");
         const whole = (e) => { const r = document.createRange(); r.selectNodeContents(e); return r.getBoundingClientRect().width <= box(e).width + 0.01; };
         const rows = [...root.querySelectorAll("[data-project-pip]")];
-        return { pick: pick.textContent.replace(/\s+/g, " ").trim(), pickIn: box(pick).left >= box(panel).left - 0.5 && box(pick).right <= box(panel).right + 0.5, pickFirst: box(pick).bottom <= box(root.querySelector(".pips-projects-all")).top + 0.5,
+        return { pick: pick.textContent.replace(/\s+/g, " ").trim(), word: word.checkVisibility(), pickIn: box(pick).left >= box(panel).left - 0.5 && box(pick).right <= box(panel).right + 0.5, pickFirst: box(pick).bottom <= box(root.querySelector(".pips-projects-all")).top + 0.5,
           underTabs: box(pick).top >= box(root.querySelector(".pips-tabs")).bottom - 0.5,
           card: (root.querySelector(".attention small")?.textContent || "").replace(/\s+/g, " ").trim(), cardTitle: (root.querySelector(".attention strong")?.textContent || "").trim(),
           rows: rows.map((r) => { const name = r.querySelector(".pip-row-name"), path = r.querySelector(".dgc-path"), tail = path.querySelector(".dgc-path-tail"), head = path.querySelector(".dgc-path-head");
@@ -42,6 +44,8 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
           apart: rows.every((r, i) => !i || box(r).top >= box(rows[i - 1]).bottom - 0.5), sideways: shell.scrollWidth > shell.clientWidth + 1 };
       });
       assert.deepEqual([m.pick, m.pickIn, m.pickFirst, m.underTabs], ["Project Folder All projects", true, true, true], "the dropdown, above the list, under the tabs");
+      // (On the Needs attention line since 12 Nov night: at 300 px its \"Project Folder\" word gives way to the heading.)
+      assert.equal(m.word, width !== 300);
       assert.equal(m.cardTitle, "Email the planting plan to the allotment group?", "the Project Pip's card, and not the Personal Pip's");
       assert.match(m.card, /^Bed planner · garden · Email · /, "it names its project");
       assert.deepEqual(m.rows.map((r) => [r.name, r.path, r.title]), [["Checkout reviewer", "~/code/shop", HERE], ["Docs keeper", "~/code/shop", HERE], ["Bed planner", "~/code/garden", GARDEN],
@@ -65,16 +69,17 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
     } finally { await x.close(); }
   });
 
-  test(`one folder: its path once above its Pips; a folder with none says so; Create a Project Pip has the folder field (${theme}, ${width}px)`, async (t) => {
+  test(`one folder: its path in the dropdown's tooltip, no line of its own; a folder with none says so; Create a Project Pip has the folder field (${theme}, ${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openPips(browser, { theme, width, choice: LONG });
     try {
-      const m = await x.inPips((root) => { const box = (e) => e.getBoundingClientRect(), once = root.querySelector(".pips-folder-once"), tail = once.querySelector(".dgc-path-tail"), pick = root.querySelector("#pips-folder-pick"), panel = root.querySelector("#pips-tabpanel");
-        const r = document.createRange(); r.selectNodeContents(tail);
-        return { pick: pick.textContent.replace(/\s+/g, " ").trim(), title: once.title, tailWhole: r.getBoundingClientRect().width <= box(tail).width + 0.01, lines: Math.round(box(once).height / parseFloat(getComputedStyle(once).lineHeight)),
-          between: box(once).top >= box(pick).bottom - 0.5 && box(once).bottom <= box(root.querySelector("#pips-tabpanel .pip-row")).top + 0.5, inside: box(once).right <= box(panel).right + 0.5,
+      // (Asked 12 Nov night: no line names the folder's path any more; the button's tooltip has it.)
+      const m = await x.inPips((root) => { const box = (e) => e.getBoundingClientRect(), pick = root.querySelector("#pips-folder-pick"), panel = root.querySelector("#pips-tabpanel"), value = pick.querySelector(".dgc-folder-v");
+        const r = document.createRange(); r.selectNodeContents(value);
+        return { pick: pick.getAttribute("aria-label"), value: value.textContent, title: pick.title, valueWhole: r.getBoundingClientRect().width <= box(value).width + 0.01, once: root.querySelectorAll(".pips-folder-once, .pips-folder-bar").length,
+          aboveRows: box(pick).bottom <= box(root.querySelector("#pips-tabpanel .pip-row")).top + 0.5, inside: box(pick).right <= box(panel).right + 0.5 && box(pick).left >= box(panel).left - 0.5,
           rows: [...root.querySelectorAll("#pips-tabpanel [data-job] .pip-row-name")].map((n) => n.textContent) }; });
-      assert.deepEqual(m, { pick: "Project Folder checkout-service", title: LONG, tailWhole: true, lines: 1, between: true, inside: true, rows: ["Card form watcher for the long checkout service"] });
+      assert.deepEqual(m, { pick: "Project Folder: checkout-service", value: "checkout-service", title: `Project Folder: checkout-service\n${LONG}`, valueWhole: true, once: 0, aboveRows: true, inside: true, rows: ["Card form watcher for the long checkout service"] });
       assert.deepEqual(low(await pipsContrast(x.page)), []);
       // A folder with no Pips.
       await x.send({ type: "pipsProjectFolder", folder: NOTES });

@@ -36,6 +36,14 @@
 .dgc-folder-menu .dgc-menu-row:disabled { opacity: 1; }
 .dgc-folder-menu .dgc-menu-row:disabled :is(.dgc-menu-label, .dgc-menu-sub) { opacity: .55; }
 
+/* On a row it shares (Library's, the search field's, the Needs attention heading's) the button is in a <dgc-folder-fit>,
+   at the row's right end. It gives way before anything else on the row does, and never wraps: the element drops the
+   "Project Folder" word when the name would not show whole with it (data-compact, measured by folderpick.js), and only
+   then does a long name end in an ellipsis. */
+dgc-folder-fit { display: flex; flex: 0 1 auto; justify-content: flex-end; min-width: 0; margin-left: auto; }
+dgc-folder-fit[hidden] { display: none; }
+dgc-folder-fit[data-compact] .dgc-folder-k { display: none; }
+
 /* A folder's path on one line, cut in the middle when it doesn't fit: the part before the folder's own name gives way
    (its end becomes an ellipsis), so the name stays in sight. The name never shrinks while that part can (a shared
    shrink, however weighted, takes a fraction of a pixel off the name, and any overflow at all draws an ellipsis); only
@@ -44,4 +52,10 @@
 .dgc-path-head { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dgc-path-head.dgc-path-long { min-width: 1.4em; }
 .dgc-path-tail { flex: 0 0 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dgc-path-head.dgc-path-long + .dgc-path-tail { max-width: calc(100% - 1.4em); }
+.dgc-path-head.dgc-path-long ~ .dgc-path-tail { max-width: calc(100% - 1.4em); }
+/* Cut by its own element (<dgc-path>, folderpick.js): the part before the name is clipped exactly after a whole letter
+   and the ellipsis is this one, with the name straight after it (the stylesheet's own ellipsis leaves the rest of a
+   letter's width empty before the name's slash). */
+.dgc-path-dots { display: none; flex: none; }
+.dgc-path.is-cut > .dgc-path-dots { display: block; }
+.dgc-path.is-cut > .dgc-path-head { min-width: 0; text-overflow: clip; }

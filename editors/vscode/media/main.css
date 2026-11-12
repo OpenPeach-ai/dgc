@@ -228,17 +228,17 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 #sessions-host .sessions-all[hidden] { display:none; }
 #sessions-host .sessions-all:hover, #sessions-host .sessions-all[aria-expanded="true"] { color:var(--text-strong); background:var(--wash); }
 #sessions-host .home-work { position:relative; }
-/* The Project Folder dropdown over the Work sessions (media/shared/folderpick.css), then one folder's path, once, in the
-   quiet tone. On All projects each session says its folder under its name (.dgc-path: cut in the middle), in the second
-   line's tone; one whose folder is gone is dimmed and says so. */
-#sessions-host .sessions-folderbar { display:flex; flex-direction:column; align-items:flex-start; gap:var(--sp-1); min-width:0; }
-#sessions-host .sessions-folderbar[hidden], #sessions-host .sessions-all-folder[hidden] { display:none; }
-#sessions-host :is(.sessions-folder-slot, .sessions-all-folder) { display:flex; min-width:0; max-width:100%; }
-#sessions-host .sessions-all-folder { flex:none; padding:2px var(--sp-1); }
-#sessions-host .sessions-folder { display:flex; align-items:center; gap:6px; min-width:0; max-width:100%; margin:0; color:var(--muted); font:var(--w-reg) var(--t-xs)/1.4 var(--sans); }
-#sessions-host .sessions-folder[hidden] { display:none; }
-#sessions-host .sessions-folder .codicon { flex:none; font-size:12px; }
-#sessions-host .sessions-folder .dgc-path { flex:0 1 auto; }
+/* The Project Folder dropdown (media/shared/folderpick.css) is on the Library row, at its right end, on Library's line
+   (asked 12 Nov night): Library keeps its place and its size, and the dropdown takes what is left (its element drops the
+   "Project Folder" word, then cuts a long name, before the row would wrap). With no Library yet the dropdown has the
+   row; with neither there is no row. In View all it is on the search field's row, which keeps room to type in.
+   On All projects each session says its folder under its name (.dgc-path: cut in the middle), in the second line's
+   tone; one whose folder is gone is dimmed and says so. One folder's path is in the button's tooltip. */
+#sessions-host .home-library-row { display:flex; align-items:center; min-width:0; min-height:var(--row); }
+#sessions-host .home-library-row:not(:has(> :not([hidden]))) { display:none; }
+#sessions-host .home-library-row > .home-library { flex:none; width:auto; margin-right:0; }
+#sessions-host .sessions-all-head { flex:none; display:flex; align-items:center; gap:var(--sp-2); min-width:0; }
+#sessions-host .sessions-popover .sessions-all-head .sessions-all-search { flex:1 1 0; min-width:120px; }
 #sessions-host .session-path { color:var(--text-2); font:var(--w-reg) var(--t-xs)/1.4 var(--sans); }
 #sessions-host .session-row:is(:hover, :focus-within) .session-path, #sessions-host .sessions-popover .session-path { color:color-mix(in srgb, var(--text) 80%, transparent); }
 #sessions-host .session-path-note { flex:none; }

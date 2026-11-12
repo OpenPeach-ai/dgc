@@ -4,6 +4,10 @@
 // menu over the Work sessions, in New Session's dialog, on the Pips view's Project tab and in Create a Project Pip.
 // media/shared/folderpick.css is how it looks. A classic script: Work's page loads it before its own script and the Pips
 // bundle imports it, so both share window.DgcFolderPick. The page keeps the choice; this file draws and answers keys.
+// Two small elements do the fitting no stylesheet can (asked 12 Nov night): <dgc-folder-fit> holds the button on a row
+// it shares (Library's, the search field's, the Needs attention heading's) and drops its "Project Folder" word when the
+// row has no room for it; <dgc-path> cuts a long path before its folder's own name, exactly at a letter, so no space
+// shows before the name's slash.
 (function () {
   "use strict";
   const root = typeof window !== "undefined" ? window : globalThis;
@@ -18,13 +22,86 @@
 
   /** A folder on one line, cut in the middle when it doesn't fit: what comes before the folder's own name gives way
    *  first (its end becomes an ellipsis), so the name stays in sight. `shown` has the home folder as ~; the whole path
-   *  is the tooltip. */
+   *  is the tooltip. A <dgc-path>: it fits itself (below). */
   function pathHtml(shown, full, cls = "") {
     const cut = String(shown || "").replace(/[\\/]+$/, "") || String(shown || "");
     const at = Math.max(cut.lastIndexOf("/"), cut.lastIndexOf("\\"));
     const head = at > 0 ? cut.slice(0, at) : "", tail = at > 0 ? cut.slice(at) : cut;
-    return `<span class="dgc-path${cls ? ` ${esc(cls)}` : ""}" title="${esc(full || shown)}">`
-      + (head ? `<span class="dgc-path-head${head.length > 2 ? " dgc-path-long" : ""}">${esc(head)}</span>` : "") + `<span class="dgc-path-tail">${esc(tail)}</span></span>`;
+    return `<dgc-path class="dgc-path${cls ? ` ${esc(cls)}` : ""}" title="${esc(full || shown)}">`
+      + (head ? `<span class="dgc-path-head${head.length > 2 ? " dgc-path-long" : ""}">${esc(head)}</span>` : "") + `<span class="dgc-path-tail">${esc(tail)}</span></dgc-path>`;
+  }
+  /** The same as an element, for a page that builds its rows from nodes. */
+  function pathNode(doc, shown, full, cls = "") {
+    const holder = doc.createElement("div");
+    holder.innerHTML = pathHtml(shown, full, cls);
+    return holder.firstChild;
+  }
+
+  // ---- the two elements that fit themselves ----
+  // Both are measured, never guessed, and neither changes its own box by fitting, so a fit can't ask for another.
+  const text = (node) => { const r = node.ownerDocument.createRange(); r.selectNodeContents(node); return r.getBoundingClientRect().width; };
+  /** A path: when what comes before the name doesn't fit, it is clipped exactly after its last whole letter, and an
+   *  ellipsis of its own is drawn there with the name straight after it. (A stylesheet's ellipsis leaves whatever is
+   *  left of a letter's width empty before the name: a space that isn't in the path.) The words stay whole in the page
+   *  for a reader and a copy; without this element's script the stylesheet's ellipsis still shows. */
+  function fitPath(path) {
+    const head = path.querySelector(":scope > .dgc-path-head"), tail = path.querySelector(":scope > .dgc-path-tail");
+    let dots = path.querySelector(":scope > .dgc-path-dots");
+    path.classList.remove("is-cut");
+    if (head) head.style.clipPath = "";
+    if (tail) tail.style.transform = "";
+    if (dots) dots.style.transform = "";
+    const words = head && head.firstChild;
+    if (!head || !tail || !words || words.nodeType !== 3 || text(head) <= head.getBoundingClientRect().width + 0.01) return;
+    if (!dots) { dots = path.ownerDocument.createElement("span"); dots.className = "dgc-path-dots"; dots.setAttribute("aria-hidden", "true"); dots.textContent = "…"; head.after(dots); }
+    path.classList.add("is-cut");                                        // the ellipsis takes its room; the head has the rest
+    const room = head.getBoundingClientRect().width, range = path.ownerDocument.createRange(), said = words.data;
+    const upTo = (n) => { range.setStart(words, 0); range.setEnd(words, n); return range.getBoundingClientRect().width; };
+    let low = 0, high = said.length;
+    while (low < high) { const mid = (low + high + 1) >> 1; if (upTo(mid) <= room + 0.01) low = mid; else high = mid - 1; }
+    if (low > 0 && low < said.length && /[\uD800-\uDBFF]/.test(said[low - 1])) low--;      // never half of a letter
+    const over = Math.max(0, room - upTo(low));
+    head.style.clipPath = `inset(0 ${over}px 0 0)`;
+    dots.style.transform = tail.style.transform = over ? `translateX(${-over}px)` : "";
+  }
+  /** The button on a row it shares: with its "Project Folder" word it must show the folder's name whole; when the row
+   *  has no room for that the word goes (the button's label and tooltip still say it), and only then may a long name
+   *  end in an ellipsis. */
+  function fitButton(slot) {
+    const value = slot.querySelector(".dgc-folder .dgc-folder-v");
+    slot.removeAttribute("data-compact");
+    if (value && text(value) > value.getBoundingClientRect().width + 0.01) slot.setAttribute("data-compact", "1");
+  }
+  const Element_ = root.HTMLElement, registry = root.customElements;
+  if (Element_ && registry && typeof root.ResizeObserver === "function") {
+    const living = new Set();
+    const watcher = new root.ResizeObserver((entries) => { for (const e of entries) { if (living.has(e.target)) e.target.fit(); else for (const item of living) if (item.rowWatched === e.target) item.fit(); } });
+    const refit = () => { for (const item of living) item.fit(); };
+    try { root.document?.fonts?.addEventListener?.("loadingdone", refit); } catch { /* an older page: the next resize fits */ }
+    const define = (name, fit, { row = false } = {}) => {
+      if (registry.get(name)) return;
+      registry.define(name, class extends Element_ {
+        // (The first fit comes with the watcher's first look, before the page is painted: nothing is measured while a
+        // long list is still being built.)
+        connectedCallback() {
+          living.add(this);
+          if (row) {
+            // The row it is on decides its room; what it holds may be drawn again (another choice).
+            this.rowWatched = this.parentElement; if (this.rowWatched) watcher.observe(this.rowWatched);
+            this.changes = new root.MutationObserver(() => this.fit()); this.changes.observe(this, { childList: true, subtree: true, characterData: true });
+          } else watcher.observe(this);
+        }
+        disconnectedCallback() {
+          living.delete(this);
+          if (!row) watcher.unobserve(this);
+          else if (this.rowWatched && ![...living].some((item) => item.rowWatched === this.rowWatched)) watcher.unobserve(this.rowWatched);
+          this.rowWatched = null; this.changes?.disconnect(); this.changes = null;
+        }
+        fit() { if (this.isConnected) try { fit(this); } catch { /* the stylesheet's own cut shows */ } }
+      });
+    };
+    define("dgc-path", fitPath);
+    define("dgc-folder-fit", fitButton, { row: true });
   }
 
   /** What the button says for a choice: "All projects", or the folder's own name. */
@@ -35,11 +112,12 @@
   }
 
   /** The button: "Project Folder", what is chosen, a chevron. `id`, `cls` and `attrs` are the page's own; `empty` is
-   *  what it says with nothing chosen where All projects is not a choice ("Choose a folder"). */
+   *  what it says with nothing chosen where All projects is not a choice ("Choose a folder"). Its tooltip says the
+   *  choice and, for one folder, its whole path (no line of its own names it), unless the page gives another. */
   function buttonHtml({ id = "", cls = "", rows = [], choice = "", label = "Project Folder", title = "", disabled = false, attrs = "", empty = ALL } = {}) {
     const value = valueOf(rows, choice, empty), row = rowsOf(rows).find((r) => r.folder === choice);
     return `<button type="button"${id ? ` id="${esc(id)}"` : ""} class="dgc-folder${cls ? ` ${esc(cls)}` : ""}" data-folder-pick="1" aria-haspopup="menu" aria-expanded="false"`
-      + ` aria-label="${esc(`${label}: ${value}`)}" title="${esc(title || (row ? row.folder : "Choose which project folder to show"))}"${disabled ? " disabled" : ""}${attrs ? ` ${attrs}` : ""}>`
+      + ` aria-label="${esc(`${label}: ${value}`)}" title="${esc(title || `${label}: ${value}${row ? `\n${row.folder}` : ""}`)}"${disabled ? " disabled" : ""}${attrs ? ` ${attrs}` : ""}>`
       + `<span class="dgc-folder-k">${esc(label)}</span> <span class="dgc-folder-v">${esc(value)}</span>${CHEVRON}</button>`;
   }
 
@@ -116,5 +194,5 @@
   /** The open menu's box, or null: a page that draws again leaves it where it is. */
   const opened = () => (shown ? shown.box : null);
 
-  root.DgcFolderPick = Object.freeze({ buttonHtml, pathHtml, valueOf, open, close, opened, ALL });
+  root.DgcFolderPick = Object.freeze({ buttonHtml, pathHtml, pathNode, valueOf, open, close, opened, ALL });
 })();

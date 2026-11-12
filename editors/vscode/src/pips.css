@@ -1556,11 +1556,20 @@ button.pip-owner-choice:hover:not(:disabled){background:var(--pip-wash)}
    last run is in History, in the menu. (Last in the file: the chat's own top bar rules above are as specific.) */
 @container(max-width:340px){.simple-pips .pip-topbar:has(.pip-switch){gap:4px;padding-right:8px}.simple-pips .pip-topbar:has(.pip-switch) .topbar-actions{gap:2px}.simple-pips .pip-topbar:has(.pip-switch) .pip-pill{gap:6px;padding-right:2px}.simple-pips .pip-topbar:has(.pip-switch) .pip-pill small.pip-status{display:none}}
 
-/* The Project Folder dropdown on the Project tab (media/shared/folderpick.css): the button, then one folder's path, once,
-   in the quiet tone. On All projects each Pip says its folder under its name (.dgc-path: cut in the middle). In Create a
-   Project Pip the same button is the form's folder field, its path under it. */
-.pips-folder-bar { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); min-width: 0; margin: 0 0 var(--sp-3); }
-.pips-folder-once, .new-pip-folder-path { display: flex; min-width: 0; max-width: 100%; margin: 0; color: var(--dgc-quiet, var(--text-2)); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+/* The Project Folder dropdown on the Project tab (media/shared/folderpick.css) is at the right end of the Needs attention
+   heading's line (asked 12 Nov night), after View all: the heading, its count and its fold keep to the left, as wide as
+   their words, and the dropdown takes what is left (its element drops the "Project Folder" word, then cuts a long name,
+   and the line never wraps). With nothing waiting the same line is drawn with an unseen heading in it, so it is as tall
+   and the dropdown is at the same place. One folder's path is in the button's tooltip. On All projects each Pip says its
+   folder under its name (.dgc-path: cut in the middle). In Create a Project Pip the same button is the form's folder
+   field, its path under it. */
+.attention-head.attention-head-end>.attention-toggle{flex:none;width:auto}
+.attention-head.attention-head-end>.attention-toggle .codicon{margin-left:0}
+.attention-head-gap{flex:1 1 0;min-width:0}
+.attention-head.attention-head-end>dgc-folder-fit{margin:0 0 8px}
+.attention-toggle.attention-toggle-none{visibility:hidden;width:0;min-width:0;overflow:hidden}
+.attention.attention-none{margin-bottom:10px}
+.new-pip-folder-path { display: flex; min-width: 0; max-width: 100%; margin: 0; color: var(--dgc-quiet, var(--text-2)); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
 .pips-folder-page .pips-tab-empty { padding-inline: 0; }
 .pip-row .pip-row-folder { display: flex; min-width: 0; max-width: 100%; }
 .pip-row .pip-row-folder .dgc-path { flex: 0 1 auto; }
