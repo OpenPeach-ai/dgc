@@ -38,6 +38,13 @@ export function sessionWords(id,titles){
 }
 /** The row. `owner`: pipOwner's value, or null while it loads. `picker`: null (closed), or {sessions: [ids, newest
  *  first] | null while they load, error}. */
+/** The sessions the picker offers: those the Work list has, with something in them, and the current owner whatever it is.
+ *  (Live, 12 Nov: DGC links a project with sessions never saved, or since deleted, and with empty ones.) With no Work
+ *  list to go by (a remote view), every one. */
+function offered(ids,owner,titles){
+  const known=(titles?.size||0)+(titles?.empty?.size||0)>0;
+  return ids.filter(id=>id===(owner.session||'')||(known?titles.has?.(id)&&!titles.empty?.has?.(id):true));
+}
 export function ownerMarkup(owner,{esc,titles,picker=null,busy=false,error='',pipName='This Pip'}){
   const name=esc(pipName),off=busy?' disabled':'';
   const head=`<section class="section pip-owner" aria-label="Reports to"><div class="section-head"><h2>Reports to${infoTip('pipOwnerSays','Reports to',
@@ -48,7 +55,7 @@ export function ownerMarkup(owner,{esc,titles,picker=null,busy=false,error='',pi
   if(!picker)return `${head}<div class="actions"><button type="button" id="pip-owner-change" class="quiet"${off}>Change</button></div></div>${now}${said}</section>`;
   const choice=(id,title,sub)=>`<li><button type="button" class="pip-owner-choice" role="radio" aria-checked="${(owner.session||'')===id}" data-owner-session="${esc(id)}"${off}>`
     +`<span class="pip-owner-mark" aria-hidden="true"></span><span class="pip-owner-words"><span class="pip-owner-title">${esc(title)}</span>${sub?`<small>${esc(sub)}</small>`:''}</span></button></li>`;
-  const list=picker.sessions?`<ul class="pip-owner-list" role="radiogroup" aria-label="The session ${name} reports to">${picker.sessions.filter(id=>id===(owner.session||'')||!titles?.empty?.has?.(id)).map(id=>choice(id,sessionWords(id,titles),'')).join('')}${choice('','No session','Its reports wait in the Pips view')}</ul>`
+  const list=picker.sessions?`<ul class="pip-owner-list" role="radiogroup" aria-label="The session ${name} reports to">${offered(picker.sessions,owner,titles).map(id=>choice(id,sessionWords(id,titles),'')).join('')}${choice('','No session','Its reports wait in the Pips view')}</ul>`
     :picker.error?'':'<p class="muted" role="status">Loading this project’s sessions…</p>';
   return `${head}</div>${now}${list}${picker.error?`<p class="error" role="alert">${esc(picker.error)}</p>`:''}${said}<div class="actions"><button type="button" id="pip-owner-cancel" class="quiet"${off}>Cancel</button></div></section>`;
 }

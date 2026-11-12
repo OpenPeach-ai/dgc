@@ -93,8 +93,10 @@ test('Change opens a picker of this project’s Work sessions, newest first, plu
   await x.click('#pip-owner-change');
   assert.deepEqual(x.requests('list_workspace_sessions').map(r=>r.workspace_id),[W],'the sessions of the Pip’s own project');
   assert.equal(x.requests('list_work_session_titles').length,2,'and the titles the editor shows, read afresh for the picker');
-  assert.deepEqual(choices(x),[[S1,'Run the shell command and say what is there','false'],[S2,'Visits page alignment','true'],[S3,'Session from 5 Nov, 22:10','false'],['','No session','false']],
-    'each by its title, the owner marked; one the editor has no title for says when it is from');
+  // (Live, 12 Nov: the project's sessions as DGC links them include ones never saved or since deleted. Only those the
+  // Work list has are offered; S3 isn't in it.)
+  assert.deepEqual(choices(x),[[S1,'Run the shell command and say what is there','false'],[S2,'Visits page alignment','true'],['','No session','false']],
+    'each by its title, the owner marked; one the Work list doesn\'t have is not offered');
   assert.match(text(x.$('.pip-owner [data-owner-session=""]')),/Its reports wait in the Pips view/);
   x.hold.add('set_pip_owner');
   await x.click(`.pip-owner [data-owner-session="${S1}"]`);
@@ -117,8 +119,14 @@ test('a session with nothing in it is never offered, and never called “(empty)
   const S4='20261104-080000-d4';
   const x=setup({sessions:[S4,S3,S2,S1],owner:{session_id:S2,chosen:false},titles:[...TITLES,{id:S4,title:'',empty:true}]});
   await x.settings(AUDIT);await x.click('#pip-owner-change');
-  assert.deepEqual(choices(x).map(c=>c[0]),[S1,S2,S3,''],'the empty session is left out');
+  assert.deepEqual(choices(x).map(c=>c[0]),[S1,S2,''],'the empty session is left out, and S3, which the Work list doesn\'t have');
   assert.ok(choices(x).every(c=>c[1]!=='(empty)'));
+});
+test('the owner is shown even when the Work list doesn\'t have it, and with no Work list every session is offered',async()=>{
+  const x=setup({owner:{session_id:S3,chosen:true}});await x.settings(AUDIT);await x.click('#pip-owner-change');
+  assert.deepEqual(choices(x).map(c=>c[0]),[S1,S2,S3,''],'the current owner stays, said by when it is from');
+  const y=setup({titles:[]});await y.settings(AUDIT);await y.click('#pip-owner-change');
+  assert.deepEqual(choices(y).map(c=>c[0]),[S1,S2,S3,''],'no Work list (a remote view): every session, by when it is from');
 });
 test('the picker closes with Cancel and changes nothing; choosing the owner it has asks nothing',async()=>{
   const x=setup();await x.settings(AUDIT);
