@@ -206,7 +206,8 @@ test('careful mode: a new site waits as "Let Shopper visit…" with Allow this s
  const x=setup({status:computer({pending:1,actions:[site]})});await x.drain();
  const card=x.d.querySelector('.pc-waiting');
  assert.match(card.textContent,/Let Shopper visit shop\.example\?It hasn’t opened shop\.example for you before/);
- assert.deepEqual([...card.querySelectorAll('button')].map(b=>b.textContent),['Allow this site','Not now']);
+ // (Its answers: from 0.52 the card's title is a button too, which opens its detail.)
+ assert.deepEqual([...card.querySelectorAll('.pc-card-actions button')].map(b=>b.textContent),['Allow this site','Not now']);
  x.click(`[data-send="${actionId}"]`);await x.drain();
  assert.equal(x.requests('decide_pip_computer_action')[0].request.approve,true);
  assert.match(x.d.body.textContent,/Allowed\. It opens the site and carries on\./);

@@ -6,6 +6,8 @@
 // Now: one slim bar (the Pip, the screen's tools, Full screen, Stop computer, and "…" for what a narrow tab cannot show),
 // and everything else floats over the screen. The check here is the screen's own box: its top and height are the same
 // with nothing open, with each panel open, with submits waiting, with their cards open, and after one is answered.
+// (From the notification drawer, 12 Nov: what waits is a bell in the bar and cards in a drawer over the screen, where
+// the "waiting" chip and its floating panel were; test/pip-computer-drawer*.test.mjs has the drawer itself.)
 // Real Chromium, the real client and CSS, the real noVNC viewer on a fake RFB server (support/pip-computer-scene.mjs).
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
@@ -50,8 +52,8 @@ const room = (p) => p.evaluate(() => {
     stage: box(document.getElementById("pc-stage")), above: [...document.getElementById("app").children].map((e) => e.id || e.className),
     parts: [...bar.querySelectorAll("button, h1, .pc-status, .pc-face, #pc-using")].filter(seen).filter((e) => e.getBoundingClientRect().width > 1.5 && !e.closest(".dgc-menu"))
       .map((e) => ({ id: e.id || e.className || e.tagName, ...box(e), ground: getComputedStyle(e).backgroundColor })),
-    panel: box(document.querySelector("#pc-panel .pc-panel") ? document.getElementById("pc-panel") : null), wait: seen(document.getElementById("pc-wait-float")) ? box(document.getElementById("pc-wait-float")) : null,
-    chip: seen(document.getElementById("pc-chip")) ? document.getElementById("pc-chip").textContent : null, notes: box(document.querySelector("#pc-notes .pc-note")),
+    panel: box(document.querySelector("#pc-panel .pc-panel") ? document.getElementById("pc-panel") : null), wait: seen(document.getElementById("pc-drawer")) ? box(document.getElementById("pc-drawer")) : null,
+    bell: seen(document.getElementById("pc-bell")) ? document.querySelector("#pc-bell .pc-bell-count").textContent : null, notes: box(document.querySelector("#pc-notes .pc-note")),
     scrolls: document.documentElement.scrollWidth > innerWidth + 1 || document.documentElement.scrollHeight > innerHeight + 1 };
 });
 const same = (now, was, what) => {
@@ -96,142 +98,119 @@ for (const [width, height] of SIZES) {
         await x.p.click('#pc-panel [data-shut="panel"]'); await x.p.waitForFunction(() => !document.querySelector("#pc-panel .pc-panel"));
         same(await room(x.p), idle, `with ${id.slice(3)} closed again`);
       }
-      // Two submits arrive: a chip in the bar, and the screen does not move.
+      // Two submits arrive: a bell in the bar, their cards in the drawer over the screen, and the screen does not move.
       await x.scene({ actions: [FORM, PAY] });
-      await x.p.waitForSelector("#pc-chip", { timeout: 15000 }); await settled(x.p);
-      const waiting = await room(x.p);
-      same(waiting, idle, "with two submits waiting");
-      assert.match(waiting.chip, /^2 waiting/);
-      assert.equal(waiting.wait, null, "their cards are shut until the chip is pressed");
-      for (const part of waiting.parts) inside(part, waiting.bar, `${part.id} is inside the bar`);
-      apart(waiting.parts, `the bar with the chip at ${width}px`);
-      // The chip opens the cards, over the screen.
-      await x.p.click("#pc-chip"); await x.p.waitForSelector("#pc-wait-float:not([hidden])"); await settled(x.p);
+      await x.p.waitForSelector("#pc-bell", { timeout: 15000 }); await x.p.waitForSelector("#pc-drawer.pc-fan"); await settled(x.p);
       const cards = await room(x.p);
-      same(cards, idle, "with the cards open");
+      same(cards, idle, "with two submits waiting, their cards open");
+      assert.equal(cards.bell, "2");
+      for (const part of cards.parts) inside(part, cards.bar, `${part.id} is inside the bar`);
+      apart(cards.parts, `the bar with the bell at ${width}px`);
       inside(cards.wait, cards.live, "the cards are over the screen, inside its room");
-      assert.equal(await x.p.locator("#pc-wait-float .pc-hold").count(), 2);
+      assert.equal(await x.p.locator("#pc-drawer .pc-hold").count(), 2);
+      // The bell puts them away and brings them back.
+      await x.p.click("#pc-bell"); await x.p.waitForSelector("#pc-drawer", { state: "hidden" }); await settled(x.p);
+      const waiting = await room(x.p);
+      same(waiting, idle, "with the cards collapsed into the bell"); assert.equal(waiting.wait, null); assert.equal(waiting.bell, "2");
+      await x.p.click("#pc-bell"); await x.p.waitForSelector("#pc-drawer.pc-fan"); await settled(x.p);
       // One is answered: what the tab says floats too.
-      await x.p.click(`#pc-wait-float [data-send="${FORM.id}"]`);
-      await x.p.waitForFunction(() => /Approved/.test(document.querySelector(".pc-notice")?.textContent || "")); await x.p.waitForFunction(() => document.querySelectorAll("#pc-wait-float .pc-hold").length === 1); await settled(x.p);
+      await x.p.click(`#pc-drawer [data-send="${FORM.id}"]`);
+      await x.p.waitForFunction(() => /Approved/.test(document.querySelector(".pc-notice")?.textContent || "")); await x.p.waitForFunction(() => document.querySelectorAll('#pc-drawer .pc-hold[data-state="waiting"]').length === 1); await settled(x.p);
       const answered = await room(x.p);
       same(answered, idle, "after one is answered");
       inside(answered.notes, answered.live, "what the tab says is over the screen");
-      assert.match(answered.chip, /^1 waiting/);
+      assert.equal(answered.bell, "1");
       await x.p.click('#pc-notes [data-dismiss="notice"]'); await x.p.waitForFunction(() => !document.querySelector(".pc-notice"));
-      await x.p.click(`#pc-wait-float [data-reject="${PAY.id}"]`);
-      await x.p.waitForFunction(() => !document.getElementById("pc-chip") && !document.getElementById("pc-wait-float")); await settled(x.p);
+      await x.p.click(`#pc-drawer [data-reject="${PAY.id}"]`);
+      await x.p.waitForFunction(() => !document.getElementById("pc-bell") && !document.getElementById("pc-drawer"), null, { timeout: 8000 }); await settled(x.p);
       same(await room(x.p), idle, "with nothing waiting again");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   });
 }
 
-test("the chip says how many wait and the first one's name; its cards answer as the old ones did: Send once, Always allow, Reject, and a payment without Always allow", async (t) => {
+test("the bell says how many wait and the first one's name; the drawer's cards answer as the old ones did: Send once, Always allow, Reject, and a payment without Always allow", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openComputer(browser, { width: 1600, height: 1000, actions: [FORM, PAY] });
+  const cardsNow = () => x.p.evaluate(() => [...document.querySelectorAll("#pc-drawer .pc-hold")].map((c) => ({ title: c.querySelector(".pc-card-open").textContent, text: c.textContent, held: c.querySelector(".pc-held-text")?.textContent ?? null, buttons: [...c.querySelectorAll(".pc-card-actions button")].map((b) => b.textContent) })));
   try {
-    await x.p.waitForSelector("#pc-chip");
-    assert.equal(await x.p.textContent("#pc-chip"), "2 waiting · Send a form to shop.example");
-    assert.equal(await x.p.getAttribute("#pc-chip", "aria-expanded"), "false");
-    assert.equal(await x.p.getAttribute("#pc-chip", "aria-label"), "2 waiting for you: Send a form to shop.example");
+    await x.p.waitForSelector("#pc-bell");
+    assert.equal(await x.p.textContent("#pc-bell .pc-bell-count"), "2");
+    assert.equal(await x.p.getAttribute("#pc-bell", "aria-expanded"), "true", "the cards that arrived opened the drawer");
+    assert.equal(await x.p.getAttribute("#pc-bell", "aria-label"), "2 waiting for you: Send a form to shop.example");
     assert.equal(await x.p.textContent(".pc-status"), "2 waiting for you", "the state still says it, for a screen reader");
-    assert.ok((await x.p.evaluate(() => document.querySelector(".pc-status").getBoundingClientRect().width)) <= 1.5, "but the chip is the one in sight");
-    const chip = await x.p.evaluate(() => { const c = document.getElementById("pc-chip"), s = getComputedStyle(c); return { shared: c.classList.contains("dgc-btn"), ground: s.backgroundColor, ink: s.color, height: c.getBoundingClientRect().height }; });
-    assert.ok(chip.shared && !PURPLE.test(chip.ground) && !PURPLE.test(chip.ink), `the chip is the shared button, not purple: ${JSON.stringify(chip)}`);
-    assert.ok(await x.p.isHidden("#pc-wait-float"), "the cards are shut");
-    await x.p.click("#pc-chip");
-    assert.equal(await x.p.getAttribute("#pc-chip", "aria-expanded"), "true");
-    const cards = await x.p.evaluate(() => [...document.querySelectorAll("#pc-wait-float .pc-hold")].map((c) => ({ title: c.querySelector("strong").textContent, text: c.textContent, buttons: [...c.querySelectorAll("button")].map((b) => b.textContent) })));
+    assert.ok((await x.p.evaluate(() => document.querySelector(".pc-status").getBoundingClientRect().width)) <= 1.5, "but the bell is the one in sight");
+    const bell = await x.p.evaluate(() => { const c = document.getElementById("pc-bell"), s = getComputedStyle(c); return { shared: c.classList.contains("dgc-btn"), ground: s.backgroundColor, ink: s.color, height: c.getBoundingClientRect().height }; });
+    assert.ok(bell.shared && !PURPLE.test(bell.ground) && !PURPLE.test(bell.ink), `the bell is the shared button, not purple: ${JSON.stringify(bell)}`);
+    assert.ok(await x.p.isVisible("#pc-drawer"));
+    const cards = await cardsNow();
     assert.deepEqual(cards.map((c) => [c.title, c.buttons]), [["Send a form to shop.example", ["Send once", "Always allow", "Reject"]], ["Pay on pay.example", ["Send once", "Reject"]]]);
     assert.match(cards[0].text, /Nothing has been sent\. Always allow covers POST \/order\./);
     assert.match(cards[1].text, /amount 53\.50/); assert.match(cards[1].text, /Sends payment card details\./);
-    assert.equal(await x.p.textContent("#pc-wait-float .pc-float-head strong"), "Waiting for you");
+    assert.equal(await x.p.textContent("#pc-drawer .pc-drawer-head h2"), "Waiting for you");
     // Always allow: the same command and digest as before.
     await x.p.click(`[data-always="${FORM.id}"]`);
     await x.p.waitForFunction(() => /Sent, and allowed from now on/.test(document.querySelector(".pc-notice")?.textContent || ""));
     assert.deepEqual(await sent(x.p, "always_allow_pip_computer_action"), [{ type: "always_allow_pip_computer_action", action_id: FORM.id, expected_digest: FORM.digest }]);
-    await x.p.waitForFunction(() => document.getElementById("pc-chip")?.textContent === "1 waiting · Pay on pay.example");
-    assert.ok(await x.p.isVisible("#pc-wait-float"), "the cards stay open for the one that is left");
+    await x.p.waitForFunction(() => document.querySelector("#pc-bell .pc-bell-count")?.textContent === "1");
+    assert.equal(await x.p.getAttribute("#pc-bell", "aria-label"), "1 waiting for you: Pay on pay.example");
+    assert.ok(await x.p.isVisible("#pc-drawer"), "the drawer stays open for the one that is left");
     // Send once on the payment.
     await x.p.click(`[data-send="${PAY.id}"]`);
     await x.p.waitForFunction(() => /Approved\. It is sent within a few seconds, exactly as shown\./.test(document.querySelector(".pc-notice")?.textContent || ""));
     assert.deepEqual(await sent(x.p, "decide_pip_computer_action"), [{ type: "decide_pip_computer_action", action_id: PAY.id, expected_digest: PAY.digest, approve: true }]);
-    await x.p.waitForFunction(() => !document.getElementById("pc-chip") && !document.getElementById("pc-wait-float"));
+    await x.p.waitForFunction(() => !document.getElementById("pc-bell") && !document.getElementById("pc-drawer"), null, { timeout: 8000 });
     assert.equal(await x.p.textContent(".pc-status"), "Idle");
-    // Reject, on a new one.
+    // Reject, on a new one: it opens the drawer by itself (it was the chip that had to be pressed).
     await x.scene({ actions: [FORM] });
-    await x.p.waitForSelector("#pc-chip", { timeout: 15000 });
-    assert.ok(await x.p.isHidden("#pc-wait-float"), "a new one never opens the cards by itself");
-    await x.p.click("#pc-chip"); await x.p.click(`[data-reject="${FORM.id}"]`);
+    await x.p.waitForSelector("#pc-bell", { timeout: 15000 });
+    assert.ok(await x.p.isVisible("#pc-drawer.pc-fan"), "a new one opens the drawer");
+    await x.p.click(`[data-reject="${FORM.id}"]`);
     await x.p.waitForFunction(() => /Rejected\. Nothing was sent\./.test(document.querySelector(".pc-notice")?.textContent || ""));
     assert.deepEqual((await sent(x.p, "decide_pip_computer_action")).at(-1), { type: "decide_pip_computer_action", action_id: FORM.id, expected_digest: FORM.digest, approve: false });
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
 });
 
-test("careful mode and a login to save float the same way: Allow this site, Allow once with the text, and a login's Not now only", async (t) => {
+test("careful mode and a login to save are cards in the drawer too: Allow this site, Allow once with the text, and a login's Not now only", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openComputer(browser, { width: 900, height: 700, actions: [SITE, TEXT, LOGIN] });
   try {
-    await x.p.waitForSelector("#pc-chip");
-    assert.equal(await x.p.textContent("#pc-chip"), "3 waiting · Let Mornings visit news.example?");
-    await x.p.click("#pc-chip");
-    const cards = await x.p.evaluate(() => [...document.querySelectorAll("#pc-wait-float .pc-hold")].map((c) => ({ title: c.querySelector("strong").textContent, text: c.textContent, held: c.querySelector(".pc-held-text")?.textContent ?? null, buttons: [...c.querySelectorAll("button")].map((b) => b.textContent) })));
+    await x.p.waitForSelector("#pc-bell");
+    assert.equal(await x.p.textContent("#pc-bell .pc-bell-count"), "3");
+    assert.equal(await x.p.getAttribute("#pc-bell", "aria-label"), "3 waiting for you: Let Mornings visit news.example?");
+    const cards = await x.p.evaluate(() => [...document.querySelectorAll("#pc-drawer .pc-hold")].map((c) => ({ title: c.querySelector(".pc-card-open").textContent, text: c.textContent, held: c.querySelector(".pc-held-text")?.textContent ?? null, buttons: [...c.querySelectorAll(".pc-card-actions button")].map((b) => b.textContent) })));
     assert.deepEqual(cards.map((c) => [c.title, c.buttons]), [["Let Mornings visit news.example?", ["Allow this site", "Not now"]], ["Let Mornings put this on forum.example?", ["Allow once", "Not now"]],
       ["Save a login for bank.example so Mornings can sign in itself?", ["Not now"]]]);
-    assert.equal(cards[1].held, "Dear team,\nthe figures are attached.", "the whole text it would put on the page");
+    assert.equal(cards[1].held, "Dear team,\nthe figures are attached.", "the whole text it would put on the page (in the card's detail)");
     assert.match(cards[2].text, /Save it from the card in its chat\./);
-    const box = await x.p.evaluate(() => { const f = document.getElementById("pc-wait-float").getBoundingClientRect(), l = document.getElementById("pc-live").getBoundingClientRect();
-      return { in: f.top >= l.top - 0.5 && f.bottom <= l.bottom + 0.5 && f.left >= l.left - 0.5 && f.right <= l.right + 0.5, buttons: [...document.querySelectorAll("#pc-wait-float button")].every((b) => { const r = b.getBoundingClientRect(); return r.left >= f.left - 0.5 && r.right <= f.right + 0.5; }) }; });
-    assert.ok(box.in && box.buttons, "three cards stay inside the screen's room, and their buttons inside the panel");
+    const box = await x.p.evaluate(() => { const f = document.getElementById("pc-drawer").getBoundingClientRect(), l = document.getElementById("pc-live").getBoundingClientRect();
+      return { in: f.top >= l.top - 0.5 && f.bottom <= l.bottom + 0.5 && f.left >= l.left - 0.5 && f.right <= l.right + 0.5, buttons: [...document.querySelectorAll("#pc-drawer button")].every((b) => { const r = b.getBoundingClientRect(); return r.left >= f.left - 0.5 && r.right <= f.right + 0.5; }) }; });
+    assert.ok(box.in && box.buttons, "three cards stay inside the screen's room, and their buttons inside the drawer");
+    const waiting = (n) => x.p.waitForFunction((count) => document.querySelectorAll('#pc-drawer .pc-hold[data-state="waiting"]').length === count, n);
     await x.p.click(`[data-send="${SITE.id}"]`);
     await x.p.waitForFunction(() => /Allowed\. It opens the site and carries on\./.test(document.querySelector(".pc-notice")?.textContent || ""));
     assert.deepEqual(await sent(x.p, "decide_pip_computer_action"), [{ type: "decide_pip_computer_action", action_id: SITE.id, expected_digest: SITE.digest, approve: true }]);
-    await x.p.waitForFunction(() => document.querySelectorAll("#pc-wait-float .pc-hold").length === 2);
+    await waiting(2);
     await x.p.click(`[data-reject="${TEXT.id}"]`);
     await x.p.waitForFunction(() => /Not now\. It won’t do that\./.test(document.querySelector(".pc-notice")?.textContent || ""));
-    await x.p.waitForFunction(() => document.querySelectorAll("#pc-wait-float .pc-hold").length === 1);
+    await waiting(1);
     await x.p.click(`[data-reject="${LOGIN.id}"]`);
-    await x.p.waitForFunction(() => !document.getElementById("pc-chip"));
+    await x.p.waitForFunction(() => !document.getElementById("pc-bell"));
     assert.deepEqual((await sent(x.p, "decide_pip_computer_action")).map((r) => [r.action_id, r.approve]), [[SITE.id, true], [TEXT.id, false], [LOGIN.id, false]]);
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
 });
 
-test("a new submit pulses the chip once, and never under reduced motion", async (t) => {
-  if (skipOrFail(t)) return;
-  const pulses = (p) => p.evaluate(() => document.getElementById("pc-chip").getAnimations().filter((a) => a.animationName === "pc-chip-new").map((a) => a.effect.getTiming().iterations));
-  const moving = await openComputer(browser, { width: 900, height: 700, motion: "no-preference" });
-  try {
-    await moving.scene({ actions: [FORM] });
-    await moving.p.waitForSelector("#pc-chip.pc-chip-new", { timeout: 15000 });
-    assert.deepEqual(await pulses(moving.p), [1], "one pulse, once");
-    // The same one, seen again at the next look: no second pulse.
-    await moving.p.waitForFunction(() => document.getElementById("pc-chip").getAnimations().length === 0, null, { timeout: 5000 });
-    await moving.p.waitForFunction(() => window.__sent.filter((r) => r.type === "get_pip_computer").length >= 4, null, { timeout: 20000 });
-    assert.deepEqual(await pulses(moving.p), [], "it does not pulse again for the one already there");
-    // Another arrives: it pulses again.
-    await moving.scene({ actions: [FORM, PAY] });
-    await moving.p.waitForFunction(() => /^2 waiting/.test(document.getElementById("pc-chip")?.textContent || ""), null, { timeout: 15000 });
-    assert.deepEqual(await pulses(moving.p), [1]);
-    assert.deepEqual(moving.errors, []);
-  } finally { await moving.close(); }
-  const still = await openComputer(browser, { width: 900, height: 700, motion: "reduce" });
-  try {
-    await still.scene({ actions: [FORM] });
-    await still.p.waitForSelector("#pc-chip", { timeout: 15000 });
-    assert.deepEqual(await pulses(still.p), [], "no motion when the user asked for less");
-    assert.deepEqual(still.errors, []);
-  } finally { await still.close(); }
-});
+// (A new submit pulsed the chip once, and never under reduced motion: the bell's wiggle and the card's spring are in
+// test/pip-computer-drawer-browser.test.mjs, "the motion".)
 
 test("a panel is a sheet from the bar, or sits at the right when the tab is wide; its close button and Escape put it away and give focus back", async (t) => {
   if (skipOrFail(t)) return;
   for (const [width, height] of SIZES) {
     const x = await openComputer(browser, { width, height, api: 87, files: FILES, actions: [FORM] });
     try {
-      await x.p.waitForSelector("#pc-chip");
+      await x.p.waitForSelector("#pc-bell");
       await press(x.p, "pc-files"); await x.p.waitForSelector("#pc-files-panel .pc-name");
       const r = await room(x.p);
       if (width >= 900) { assert.ok(r.panel.right >= r.live.right - 12 && r.panel.left > r.live.width / 2 && r.panel.top > r.live.top, `at ${width}px it sits at the right: ${JSON.stringify(r.panel)}`); assert.ok(r.panel.width <= 400); }
@@ -243,18 +222,19 @@ test("a panel is a sheet from the bar, or sits at the right when the tab is wide
       await x.p.keyboard.press("Escape");
       await x.p.waitForFunction(() => !document.querySelector("#pc-panel .pc-panel"));
       assert.equal(await x.p.evaluate(() => document.activeElement?.id), (await x.p.isVisible("#pc-files")) ? "pc-files" : "pc-more");
-      // One thing floats at a time: the cards put a panel away, and a panel the cards.
+      // One thing has that corner at a time: the bell's drawer puts a panel away, and a panel the drawer (into the bell).
       await press(x.p, "pc-files"); await x.p.waitForSelector("#pc-files-panel");
-      await x.p.click("#pc-chip");
-      assert.ok(await x.p.isVisible("#pc-wait-float")); assert.equal(await x.p.$("#pc-panel .pc-panel"), null);
+      assert.ok(await x.p.isHidden("#pc-drawer")); assert.equal(await x.p.getAttribute("#pc-bell", "aria-expanded"), "false");
+      await x.p.click("#pc-bell");
+      assert.ok(await x.p.isVisible("#pc-drawer")); assert.equal(await x.p.$("#pc-panel .pc-panel"), null);
       await press(x.p, "pc-files"); await x.p.waitForSelector("#pc-files-panel");
-      assert.ok(await x.p.isHidden("#pc-wait-float"));
-      await x.p.click("#pc-chip");
-      // Escape shuts the cards too, and its close button.
+      assert.ok(await x.p.isHidden("#pc-drawer"));
+      await x.p.click("#pc-bell");
+      // Escape closes the drawer too, and so does Collapse.
       await x.p.keyboard.press("Escape");
-      assert.ok(await x.p.isHidden("#pc-wait-float")); assert.equal(await x.p.evaluate(() => document.activeElement?.id), "pc-chip");
-      await x.p.click("#pc-chip"); await x.p.click('#pc-wait-float [data-shut="wait"]');
-      assert.ok(await x.p.isHidden("#pc-wait-float"));
+      assert.ok(await x.p.isHidden("#pc-drawer")); assert.equal(await x.p.evaluate(() => document.activeElement?.id), "pc-bell");
+      await x.p.click("#pc-bell"); await x.p.click("#pc-drawer-collapse");
+      assert.ok(await x.p.isHidden("#pc-drawer"));
       assert.equal((await sent(x.p, "decide_pip_computer_action")).length, 0, "closing answers nothing");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
@@ -356,26 +336,28 @@ test("a computer with no live screen has the same slim bar, and its desktop keep
   for (const width of [900, 300]) {
     const x = await openFiles(browser, { width, height: 640, actions: [FORM, PAY] });
     try {
-      await x.p.waitForSelector("#pc-chip");
+      await x.p.waitForSelector("#pc-bell");
       const look = () => x.p.evaluate(() => { const box = (e) => { const r = e.getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; };
-        const float = document.getElementById("pc-wait-float");
-        return { bar: box(document.getElementById("pc-bar")), desk: box(document.querySelector(".pc-desktop")), float: float.hidden ? null : box(float), chip: document.getElementById("pc-chip").textContent,
+        const float = document.getElementById("pc-drawer");
+        return { bar: box(document.getElementById("pc-bar")), desk: box(document.querySelector(".pc-desktop")), float: float ? box(float) : null, bell: document.querySelector("#pc-bell .pc-bell-count").textContent,
           parts: [...document.querySelectorAll("#pc-bar button, #pc-bar h1")].filter((e) => e.getBoundingClientRect().width > 1.5).map((e) => ({ id: e.id || e.tagName, ...box(e) })),
           scrolls: document.documentElement.scrollWidth > innerWidth + 1 || document.documentElement.scrollHeight > innerHeight + 1 }; });
+      // The cards that wait opened the drawer; the bell puts it away.
+      const open = await look();
+      inside(open.float, open.desk, "the cards are over the desktop"); assert.equal(open.scrolls, false);
+      await x.p.click("#pc-bell");
       const shut = await look();
       assert.ok(shut.bar.height <= 40 && Math.abs(shut.desk.top - shut.bar.bottom) < 0.5, `one slim bar, the desktop right under it: ${JSON.stringify([shut.bar, shut.desk.top])}`);
-      assert.match(shut.chip, /^2 waiting/); assert.equal(shut.float, null);
+      assert.equal(shut.bell, "2"); assert.equal(shut.float, null);
       for (const part of shut.parts) inside(part, shut.bar, `${part.id} is inside the bar`);
       apart(shut.parts, `the bar at ${width}px`);
-      await x.p.click("#pc-chip");
-      const open = await look();
       assert.deepEqual([open.desk.top, open.desk.height], [shut.desk.top, shut.desk.height], "the desktop does not move");
-      inside(open.float, open.desk, "the cards are over the desktop"); assert.equal(open.scrolls, false);
+      await x.p.click("#pc-bell");
       await x.p.click(`[data-reject="${FORM.id}"]`);
-      await x.p.waitForFunction(() => document.querySelectorAll("#pc-wait-float .pc-hold").length === 1);
+      await x.p.waitForFunction(() => document.querySelectorAll('#pc-drawer .pc-hold[data-state="waiting"]').length === 1);
       assert.deepEqual(await x.sent("decide_pip_computer_action"), [{ type: "decide_pip_computer_action", action_id: FORM.id, expected_digest: FORM.digest, approve: false }]);
-      await x.p.keyboard.press("Escape");
-      assert.ok(await x.p.isHidden("#pc-wait-float"), "Escape shuts the cards");
+      await x.p.focus(`[data-card-open="${PAY.id}"]`); await x.p.keyboard.press("Escape");
+      assert.ok(await x.p.isHidden("#pc-drawer"), "Escape closes the drawer");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   }

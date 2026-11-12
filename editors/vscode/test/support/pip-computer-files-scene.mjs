@@ -18,7 +18,9 @@ function host(PIP, scene) {
     get_pip_computer: () => ({ computer: { pip_id: PIP.id, granted: true, available: true, reason: "", pending: (scene.actions || []).length, actions: scene.actions || [] } }),
     // Its held submits (scene.actions): an answer settles one, and it is gone from the next look.
     decide_pip_computer_action: (r) => { const a = scene.actions.find((x) => x.id === r.action_id); scene.actions = scene.actions.filter((x) => x !== a); return { action: { ...a, status: r.approve ? "approved" : "rejected" } }; },
-    use_pip_computer_view: () => ({ view: { ok: false, error: "" } }),
+    // (scene.view: the picture of its browser, for a test that opens the Browser window.)
+    use_pip_computer_view: () => ({ view: scene.view || { ok: false, error: "" } }),
+    open_pip_computer: () => ({ view: { pip_id: PIP.id, ready: true } }),
     list_pip_computer_files: (r) => ({ path: r.path, entries: r.path ? [] : scene.files, more: false, total_bytes: scene.files.reduce((n, f) => n + (f.bytes || 0), 0) }),
     read_pip_computer_file: (r) => { const f = scene.files.find((x) => x.name === r.path) || { bytes: 12 }; const big = f.bytes > 2 * 1024 * 1024;
       return { path: r.path, name: r.path.split("/").at(-1), mime: big ? "application/octet-stream" : "text/plain", bytes: f.bytes, ...(big ? { too_large: true } : { text: "buy milk\n", truncated: false }) }; },

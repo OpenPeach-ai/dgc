@@ -183,5 +183,6 @@ test('the computer tab shows a login card with Not now only: the form is in its 
   get_pip_computer_apps:{apps:{apps:[],missing:[],state:'ready',line:'',bytes:null}}}[r.type];if(result){answered.add(m.id);message({type:'pipsReply',id:m.id,ok:true,result});}}}
  const hold=w.document.querySelector('.pc-hold');assert.ok(hold);
  assert.match(hold.textContent,/Save a login for northwind-bank\.example so Banker can sign in itself\?.*Save it from the card in its chat\./);
- assert.deepEqual([...hold.querySelectorAll('button')].map(b=>b.textContent),['Not now']);
+ // (Its answers: from 0.52 the card's title is a button too, which opens its detail.)
+ assert.deepEqual([...hold.querySelectorAll('.pc-card-actions button')].map(b=>b.textContent),['Not now']);
 });

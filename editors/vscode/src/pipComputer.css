@@ -11,9 +11,9 @@ button:focus-visible,input:focus-visible,.pc-screen:focus-visible{outline:2px so
 .pc-quiet{color:var(--vscode-foreground);background:transparent;border:1px solid var(--line)}
 input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,var(--line));border-radius:6px;padding:6px 9px;min-width:0}
 /* One slim bar, so the screen gets the room (0.52): the Pip's small face, "Pip · Computer" and its state in one line,
-   the chip for what waits, the screen's tools, then Full screen, Stop computer and "…". One row, 36 px, at any width:
+   the screen's tools, the bell for what waits, then Full screen, Stop computer and "…". One row, 36 px, at any width:
    what a narrow tab has no room for goes into "…" by tiers (data-tier, set by fitBar in pipComputerClient.js):
-   1 the tools keep their marks and lose their words; 2 the state's words go, and the chip keeps its count;
+   1 the tools keep their marks and lose their words; 2 the state's words go;
    3 Stop computer goes into "…"; 4 Fit and 100% too, and the title may be cut short (the Pip's name goes first, then
    the computer's name is cut; its Portal stays); 5 the title and the other tools too. */
 .pc-topbar{position:relative;z-index:7;flex:none;display:flex;align-items:center;gap:6px;height:36px;padding:0 8px;border-bottom:1px solid var(--hair);white-space:nowrap}
@@ -39,7 +39,7 @@ input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-
 .pc-overlay-card .pc-portal{margin:0 5px}
 @media(forced-colors:active){.pc-portal [data-mark],.pc-portal [data-mark] *{forced-color-adjust:none}}
 .pc-status{flex:0 1 auto;min-width:0;margin:0;color:var(--muted);font-size:var(--t-sm);overflow:hidden;text-overflow:ellipsis}
-/* The chip, or "X is using it", says the state: its own words stay for a screen reader. */
+/* The bell, or "X is using it", says the state: its own words stay for a screen reader. */
 .pc-said .pc-status,.pc-topbar:not([data-tier="0"],[data-tier="1"]) :is(.pc-status,.pc-using){position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 .pc-end{flex:none;display:flex;align-items:center;gap:6px}
 .dgc-btn.small.pc-stop{width:auto}
@@ -54,17 +54,14 @@ input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-
 .pc-measure>*,.pc-measure .pc-ident>*,.pc-measure .pc-title>*,.pc-measure .pc-using{flex:none}
 .pc-measure[data-tier="4"] .pc-title h1{max-width:56px}
 .pc-more-menu{position:absolute;z-index:8;top:calc(100% + 2px);right:8px;min-width:176px;max-width:calc(100% - 16px)}
-/* What waits for you, in the bar: a small mark, how many, and the first one's name. Pressed, its cards open over the
-   screen. A new one pulses it once. */
-.dgc-btn.small.pc-chip{flex:none;width:auto;max-width:300px;display:inline-flex;align-items:center;gap:6px;background:var(--wash);color:var(--text-strong)}
-.pc-chip-dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--accent)}
-.pc-chip-count{flex:none}
-.pc-chip-what{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:var(--w-reg);color:var(--text)}
-.pc-topbar:not([data-tier="0"],[data-tier="1"]) .pc-chip-what{display:none}
-.pc-chip[aria-expanded="true"]{border-color:var(--btn-line-hover)}
-.pc-chip-new{animation:pc-chip-new .9s ease-out 1}
-@keyframes pc-chip-new{from{box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 60%,transparent)}to{box-shadow:0 0 0 9px transparent}}
-@media (prefers-reduced-motion:reduce){.pc-chip-new{animation:none}}
+/* What waits for you, in the bar: a bell with how many (nothing at none), right before Full screen. It hides the
+   notification drawer and brings it back. A new card wiggles it once (pipComputerClient.js: never under reduced motion).
+   The count is the text's own colour, never purple. */
+.pc-bell-slot{flex:none;display:flex}.pc-bell-slot:empty{display:none}
+.dgc-btn.small.pc-tool.pc-bell{flex:none;gap:4px;padding:0 6px}
+.pc-bell-mark{display:grid;transform-origin:50% 12%}
+.pc-bell-mark svg{width:14px;height:14px}
+.pc-bell-count{flex:none;min-width:15px;height:15px;padding:0 4px;border-radius:var(--r-full);background:var(--solid);color:var(--on-solid);font-size:10px;font-weight:var(--w-semi);line-height:15px;text-align:center;font-variant-numeric:tabular-nums}
 /* A small close button, on a panel's head and on a note. */
 .pc-x{flex:none;display:grid;place-items:center;width:22px;height:22px;padding:0;border-radius:6px;background:transparent;color:var(--muted)}
 .pc-x:hover{background:var(--wash);color:var(--text)}
@@ -91,10 +88,6 @@ input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-
 .pc-muted{color:var(--muted);margin:0}.pc-hint{font-size:12px}
 .pc-error{margin:8px 16px 0;color:var(--vscode-errorForeground,#f14c4c)}.pc-pane .pc-error{margin:0}
 .pc-notice{margin:8px 16px 0;color:var(--muted)}
-.pc-waiting{display:grid;gap:10px;padding:4px 10px 10px}
-.pc-hold+.pc-hold{padding-top:10px;border-top:1px solid var(--hair)}
-.pc-hold{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.pc-hold div:first-child{display:grid;gap:2px;min-width:0}.pc-hold span{color:var(--muted);font-size:12px}.pc-hold .pc-sends{color:inherit;overflow-wrap:anywhere}
-.pc-actions{display:flex;gap:6px;flex-wrap:wrap}
 .pc-crumbs{display:flex;align-items:center;gap:4px;flex:1;min-width:0;overflow:hidden}.pc-crumb{color:var(--vscode-foreground);background:transparent;padding:3px 5px}
 .pc-add{cursor:pointer;border:1px solid var(--line);border-radius:6px;padding:6px 12px}
 /* Big files (Pips API 87): Add file… and Save to this computer… are the shared button, as wide as their words; a copy
@@ -233,3 +226,79 @@ body.pc-screen-mode{padding:0}
 
 /* The panel's error line sits with the rest of the panel, not indented by .pc-error's own side margin. */
 .pc-files-panel .pc-error{margin:0}
+
+/* A desktop with no live screen: what the tab says and the desktop's window and dock are drawn inside these, which have
+   no box of their own (the notification drawer beside them keeps its place while they are redrawn). */
+.pc-flat{display:contents}
+
+/* ---- The notification drawer (0.52; src/pipComputerDrawer.js, pipComputerClient.js). What waits for you, as
+   notification cards over the picture of the computer's screen, at its top right, the way a desktop shows them. It
+   floats: the screen under it never moves or shrinks. Up to 360 px wide (the tab's width less 16 px when narrower), as
+   tall as its cards up to the screen's height less 48 px, then its list scrolls and fades out at the foot.
+   Folded (the stack): the newest card in front, up to two peeking behind it, each 10 px lower and 5% smaller, only the
+   front one readable. Pointed at, pressed or reached by the keyboard it fans out into the drawer (.pc-fan): a rounded
+   28 px panel on a frosted grey of the editor's own ground, a header (a bell, "Waiting for you", how many, Collapse)
+   and the cards in a list. Leaving it folds it back. A banner (.pc-drawer-banner) is one card alone, under the bell.
+   Every colour is the editor's own, through the shared tokens; the one purple is a waiting card's small live dot. */
+.pc-drawer{--pc-spring:cubic-bezier(0.2,0.9,0.25,1.12);--pc-card:var(--vscode-editorWidget-background,var(--vscode-editor-background));
+ position:absolute;z-index:5;top:8px;right:8px;width:min(360px,calc(100% - 16px));max-height:calc(100% - 48px);display:flex;flex-direction:column;padding:7px;
+ border:1px solid transparent;border-radius:28px;color:var(--text);font-size:var(--t-base);background:transparent;
+ transition:background-color .2s ease,border-color .2s ease,box-shadow .2s ease}
+.pc-drawer.pc-fan{border-color:var(--hair-strong);background:color-mix(in srgb,color-mix(in srgb,var(--text) 7%,var(--vscode-editor-background)) 82%,transparent);
+ -webkit-backdrop-filter:var(--glass-filter);backdrop-filter:var(--glass-filter);box-shadow:0 18px 40px -14px rgba(0,0,0,.5)}
+.pc-drawer button{font:inherit;color:var(--text);background:transparent;border:0;border-radius:var(--r-full);padding:0;cursor:pointer}
+.pc-drawer button:focus-visible{outline:var(--btn-ring);outline-offset:2px}
+.pc-drawer-head{flex:none;display:flex;align-items:center;gap:8px;height:0;padding:0 6px 0 12px;overflow:hidden;opacity:0;visibility:hidden;white-space:nowrap;
+ transition:height .42s var(--pc-spring),opacity .2s ease,visibility 0s .2s}
+.pc-fan .pc-drawer-head{height:40px;opacity:1;visibility:visible;transition:height .42s var(--pc-spring),opacity .2s ease,visibility 0s}
+.pc-drawer-bell{flex:none;display:grid;transform-origin:50% 12%}
+.pc-drawer-head h2{flex:0 1 auto;min-width:0;margin:0;overflow:hidden;text-overflow:ellipsis;font-size:var(--t-base);font-weight:var(--w-semi);letter-spacing:-.01em;color:var(--text-strong)}
+.pc-drawer-count{flex:none;min-width:20px;height:20px;padding:0 6px;border-radius:var(--r-full);background:var(--solid);color:var(--on-solid);font-size:var(--t-xs);font-weight:var(--w-semi);line-height:20px;text-align:center;font-variant-numeric:tabular-nums}
+.pc-drawer .pc-drawer-quiet{flex:none;margin-left:auto;padding:4px 10px;font-size:var(--t-sm);font-weight:var(--w-med);color:var(--muted-firm);transition:background-color var(--dur-hover) var(--ease-out),color var(--dur-hover) var(--ease-out)}
+.pc-drawer .pc-drawer-quiet:hover{background:var(--vscode-editor-background);color:var(--text)}
+/* The list. Its cards are laid out one under another always; folded, each is moved up behind the front one (--fold-y,
+   --n and the two heights are measured by layoutDrawer), so the same cards travel when it fans out. */
+.pc-drawer-list{position:relative;flex:none;display:flex;flex-direction:column;gap:8px;min-height:0;height:var(--fold-h,auto);clip-path:inset(0 -40px -60px -40px);transition:height .42s var(--pc-spring)}
+.pc-fan .pc-drawer-list{height:var(--fan-h,auto);padding-bottom:24px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;clip-path:none;
+ -webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 28px),transparent)}
+.pc-drawer-banner .pc-drawer-list{height:auto;clip-path:none}
+/* A card: a tile for its kind, the site and its age, what it wants in bold, one muted line, and its answers as pills. */
+.pc-card{position:relative;flex:none;display:flex;gap:12px;padding:12px;border:1px solid var(--hair-strong);border-radius:16px;background:var(--pc-card);box-shadow:0 6px 18px -6px rgba(0,0,0,.34);
+ transform-origin:50% 100%;transition:transform .42s var(--pc-spring),opacity .2s ease,box-shadow .2s ease}
+.pc-fan .pc-card{box-shadow:0 1px 2px rgba(0,0,0,.14)}
+.pc-card>*{transition:opacity .2s ease}
+.pc-drawer:not(.pc-fan,.pc-drawer-banner) .pc-card:not(:first-child){transform:translateY(var(--fold-y,0px)) scale(calc(1 - var(--n,1)*.05));pointer-events:none}
+.pc-drawer:not(.pc-fan,.pc-drawer-banner) .pc-card:not(:first-child)>*{opacity:0}
+.pc-drawer:not(.pc-fan,.pc-drawer-banner) .pc-card-under{opacity:0}
+.pc-card-tile{flex:none;display:grid;place-items:center;width:36px;height:36px;border-radius:12px;background:color-mix(in srgb,var(--text) 11%,transparent);color:var(--text)}
+.pc-card-body{flex:1;min-width:0}
+.pc-card-top{display:flex;align-items:center;gap:6px;margin:0;padding-right:20px;font-size:var(--t-sm);color:var(--muted-firm);white-space:nowrap}
+.pc-card-source{min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:var(--w-med)}
+.pc-card-age{flex:none;font-variant-numeric:tabular-nums}
+/* The title is the card's button: it opens the card's detail, and its hit area is the whole card. */
+.pc-drawer .pc-card-open{display:block;width:100%;margin-top:2px;border-radius:0;text-align:left;font-size:var(--t-base);font-weight:var(--w-semi);line-height:1.35;color:var(--text-strong);overflow-wrap:anywhere}
+.pc-card-open::after{content:"";position:absolute;inset:0;border-radius:16px}
+.pc-drawer .pc-card-open:focus-visible{outline:none}
+.pc-card-open:focus-visible::after{outline:var(--btn-ring);outline-offset:-2px}
+.pc-card-line{margin:2px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--t-sm);line-height:1.4;color:var(--muted-firm)}
+.pc-card-detail{display:grid;gap:4px;margin-top:2px;font-size:var(--t-sm);line-height:1.45;color:var(--muted-firm);overflow-wrap:anywhere}
+.pc-card-detail[hidden],.pc-card-line[hidden]{display:none}
+.pc-card-detail .pc-sends{color:var(--text)}
+.pc-card-actions{position:relative;z-index:1;display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px}
+/* The answers: pills. The one that lets it through is solid, in the text's own colour; the others are outlined. */
+.pc-drawer .pc-pill{flex:none;max-width:100%;height:26px;padding:0 12px;border:1px solid var(--hair-strong);background:var(--pc-card);color:var(--text);font-size:var(--t-sm);font-weight:var(--w-med);line-height:24px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+ transition:background-color var(--dur-hover) var(--ease-out),border-color var(--dur-hover) var(--ease-out)}
+.pc-drawer .pc-pill:hover{background:color-mix(in srgb,var(--text) 6%,var(--pc-card));border-color:var(--btn-line-hover)}
+.pc-drawer .pc-pill.solid{border-color:transparent;background:var(--solid);color:var(--on-solid)}
+.pc-drawer .pc-pill.solid:hover{background:var(--solid-hover)}
+/* Answered: the quiet word where the buttons were, for a moment; then the card leaves. It can be cleared, or swiped away. */
+.pc-card-done{display:inline-flex;align-items:center;gap:6px;height:26px;margin-top:10px;padding:0 10px 0 8px;border-radius:var(--r-full);background:var(--wash);font-size:var(--t-sm);font-weight:var(--w-med);color:var(--text)}
+.pc-card-done svg{width:14px;height:14px}
+.pc-card[data-state="answered"]{touch-action:pan-y;cursor:grab}
+.pc-drawer .pc-card-clear{position:absolute;z-index:2;top:8px;right:8px;display:grid;place-items:center;width:24px;height:24px;color:var(--muted-firm)}
+.pc-drawer .pc-card-clear:hover{background:var(--wash);color:var(--text)}
+.pc-card-clear svg{width:14px;height:14px}
+/* A card that still waits: one small live dot. */
+.pc-card-live{position:absolute;top:14px;right:14px;width:8px;height:8px;border-radius:50%;background:var(--accent)}
+@media (prefers-reduced-motion:reduce){.pc-drawer,.pc-drawer *{transition:none!important}}
+@media (forced-colors:active){.pc-drawer.pc-fan,.pc-card{border-color:CanvasText}.pc-drawer.pc-fan{background:Canvas}}

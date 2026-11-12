@@ -1,7 +1,7 @@
 // A Pip's computer in an editor tab: its Browser, Files and Terminal, like Grok's bots.
 // The tab talks to the extension host exactly as the Pips view does (pipsRequest/pipsReply), and
 // the host pins it to this one Pip and to the computer commands.
-import {carefulWords,sendsWords,isPayment,asksEveryTime,asksWords,coversWords} from './pipCareful.js';
+import {DRAWER,cardWords,cardTitle,drawerMarkup,bellMarkup} from './pipComputerDrawer.js';
 import {computerPortal} from './pipComputerNames.js';
 // One set of tokens for every page, first, so each page's own stylesheet can lean on it (media/shared/tokens.css).
 import '../media/shared/tokens.css';
@@ -54,12 +54,18 @@ function computerName(){
 // What was copied on the computer is kept here and drawn only while the clipboard panel is open.
 Object.assign(S,{fit:true,full:'',panel:'',sizeMenu:false,sizeBusy:false,sizePicked:false,restart:null,
  clip:{draft:'',there:null,over:false,fresh:false,note:'',bad:false,typing:false}});
-// The screen gets the room (0.52): one slim bar, and everything else floats over the screen, which never moves. `waitOpen`:
-// the held submits' cards are on show (the bar's chip opens them); `more`: the "…" menu; `tier`: how tight the bar is
-// (0 all words ... 5 marks only), measured in fitBar().
-Object.assign(S,{waitOpen:false,more:false,tier:0});
-let seenWaiting=new Set();
-const pending=()=>(S.computer?.actions||[]).filter(a=>a.status==='pending');
+// The screen gets the room (0.52): one slim bar, and everything else floats over the screen, which never moves. `more`:
+// the "…" menu; `tier`: how tight the bar is (0 all words ... 5 marks only), measured in fitBar().
+Object.assign(S,{more:false,tier:0});
+// What waits for you is a notification drawer over the screen (0.52, src/pipComputerDrawer.js): a bell in the bar with
+// how many wait, and the cards at the screen's top right, folded as a stack or fanned out as the drawer. `drawer`:
+// 'shown', or 'collapsed' into the bell (the user's own doing: the bell, Collapse or Escape); `fan`: fanned out;
+// `banner`: the card that arrived while it was collapsed, on show alone for a moment; `settled`: the answered cards
+// having their moment ({a, done}); `detail`: the cards whose detail is open.
+Object.assign(S,{drawer:'shown',fan:false,banner:'',settled:[],detail:new Set()});
+let seenWaiting=new Set(),cardOrder=[],bannerTimer=null,foldTimer=null,swipe=null,swipedCard=null;
+const settledCard=id=>S.settled.find(c=>c.a.id===id);
+const pending=()=>(S.computer?.actions||[]).filter(a=>a.status==='pending'&&!settledCard(a.id));
 const CLIP_BYTES=1000000,TYPE_CHARS=5000;
 const tabTitle=()=>`${S.pip?.name||'Pip'} · ${computerName()}`;
 const broker=requestBroker(message=>vscode.postMessage({...message,generation:S.generation}));
@@ -106,20 +112,16 @@ function plushFace(state){
 }
 function screenMode(){return S.screenCapable&&S.apiVersion>=43&&S.desktop?.available===true&&S.computer?.granted===true;}
 function using(){return screenMode()?S.desktop?.using===true:S.view?.watching===true;}
-// The bar's first part: the Pip's small face, "Pip · Computer" and its state in one line, then the chip for what waits.
-// While a chip or "X is using it" says the state, the state's own words are kept for a screen reader only (pipComputer.css).
-function holdTitle(a){const words=carefulWords(a.summary,S.pip?.name||'The Pip');return words?words[0]:`${isPayment(a.summary)?'Pay on':'Send a form to'} ${a.summary.host}`;}
-function chipMarkup(){
- const waiting=pending();if(!waiting.length)return '';
- const count=`${waiting.length} waiting`,what=holdTitle(waiting[0]),all=`${count} for you: ${what}`;
- return `<button type="button" id="pc-chip" class="dgc-btn small pc-chip" aria-expanded="${S.waitOpen}" aria-controls="pc-wait-float" aria-label="${esc(all)}" title="${esc(all)}"><span class="pc-chip-dot" aria-hidden="true"></span><span class="pc-chip-count">${count}</span> <span class="pc-chip-what">· ${esc(what)}</span></button>`;
-}
+// The bar's first part: the Pip's small face, "Pip · Computer" and its state in one line.
+// While the bell or "X is using it" says the state, the state's own words are kept for a screen reader only (pipComputer.css).
+// The bell, in the bar before Full screen: how many wait (nothing at none). It hides the drawer and brings it back.
+function bellHtml(){const waiting=pending();return bellMarkup({waiting:waiting.length,first:waiting.length?cardTitle(waiting[0],S.pip?.name||'The Pip'):'',expanded:!tucked()});}
 function headerMarkup(){
  const waiting=pending().length;
  const status=!S.connected?'Connecting…':!S.computer?'Loading…':!S.computer.granted?'No computer yet':!S.computer.available?'Setup needed':using()?`${S.pip.name} is using its computer`:waiting?`${waiting} waiting for you`:'Idle';
  // The face says which Pip; then the Pip's name, this computer's Portal (in its number's palette) and the computer's name.
  // (The " · " between the names stays in the words, for the tab's name and a screen reader; the Portal stands where it was.)
- return `<header class="pc-header${waiting||screenMode()&&using()?' pc-said':''}"><span class="pc-face" aria-hidden="true">${plushFace(using()?'working':waiting?'waiting_approval':'idle')}</span><div class="pc-title"><h1 title="${esc(tabTitle())}"><span class="pc-pip-name">${esc(S.pip?.name||'Pip')}</span><span class="pc-sep"> · </span><span class="pc-portal" aria-hidden="true">${computerPortal(S.number||1,18)}</span><span class="pc-computer-name">${esc(computerName())}</span></h1><p class="pc-status" role="status">${esc(status)}</p></div></header>${chipMarkup()}`;
+ return `<header class="pc-header${waiting||screenMode()&&using()?' pc-said':''}"><span class="pc-face" aria-hidden="true">${plushFace(using()?'working':waiting?'waiting_approval':'idle')}</span><div class="pc-title"><h1 title="${esc(tabTitle())}"><span class="pc-pip-name">${esc(S.pip?.name||'Pip')}</span><span class="pc-sep"> · </span><span class="pc-portal" aria-hidden="true">${computerPortal(S.number||1,18)}</span><span class="pc-computer-name">${esc(computerName())}</span></h1><p class="pc-status" role="status">${esc(status)}</p></div></header>`;
 }
 // The bar's end: Stop computer, and "…" for what a narrow tab has no room to show (the shared menu).
 const DOTS='<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="3.5" cy="8" r="1.25" fill="currentColor"/><circle cx="8" cy="8" r="1.25" fill="currentColor"/><circle cx="12.5" cy="8" r="1.25" fill="currentColor"/></svg>';
@@ -154,9 +156,99 @@ function fitBar(force=false){
  S.tight=!!title&&tier===4&&[title,...title.children].some(n=>n.scrollWidth>n.clientWidth);
  if(S.tight)bar.dataset.title='computer';
 }
-// A held submit that was not here a moment ago: the chip pulses once (pipComputer.css: never under reduced motion).
-function noteWaiting(){const ids=pending().map(a=>a.id),fresh=ids.some(id=>!seenWaiting.has(id));seenWaiting=new Set(ids);if(!ids.length)S.waitOpen=false;return fresh;}
-function pulseChip(){const chip=$('pc-chip');if(!chip)return;chip.classList.remove('pc-chip-new');void chip.offsetWidth;chip.classList.add('pc-chip-new');}
+// ---- The notification drawer (the words and markup are src/pipComputerDrawer.js).
+// In the bell: collapsed by the user, or put away while a panel (Files, Keyboard, Clipboard) has the same corner.
+const panelShown=()=>screenMode()&&(S.panel==='files'||!!S.panel&&mayType());
+const tucked=()=>S.drawer==='collapsed'||panelShown();
+const cardEl=id=>[...($('pc-drawer')?.querySelectorAll('.pc-card')||[])].find(c=>c.dataset.card===id)||null;
+// Nothing moves when the user asked for less motion (or where the page cannot animate).
+const calm=()=>!!globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+const move=(el,frames,timing)=>!el?.animate||calm()?null:el.animate(frames,timing);
+// The cards that arrived since the last look. One opens the drawer with it at the top; collapsed, it shows alone as a
+// banner under the bell for 6 seconds, then goes back into the bell.
+function noteWaiting(){
+ const ids=pending().map(a=>a.id),fresh=ids.filter(id=>!seenWaiting.has(id));seenWaiting=new Set(ids);
+ if(fresh.length){if(tucked()){S.banner=fresh[0];armBanner();}else S.fan=true;}
+ if(S.banner&&!ids.includes(S.banner)&&!settledCard(S.banner)){S.banner='';clearTimeout(bannerTimer);}
+ if(!ids.length&&!S.settled.length)S.fan=false;
+ for(const id of [...S.detail])if(!ids.includes(id)&&!settledCard(id))S.detail.delete(id);
+ return fresh;
+}
+function armBanner(ms=DRAWER.banner){clearTimeout(bannerTimer);bannerTimer=setTimeout(endBanner,ms);}
+function endBanner(){
+ if(!S.banner||settledCard(S.banner))return;   // an answered one leaves in its own time
+ const drawer=$('pc-drawer');
+ // Pointed at, or with the keyboard on it, it waits.
+ if(drawer&&(drawer.matches(':hover')||drawer.contains(document.activeElement))){armBanner(1500);return;}
+ leaveThen(drawer?.querySelector('.pc-card'),'up',()=>{S.banner='';render();ringBell();});
+}
+// What is on show, top to bottom: what waits, newest first as DGC lists it, with each answered card where it was.
+function drawerCards(){
+ const list=pending().map(a=>({a}));
+ for(const card of [...S.settled].sort((a,b)=>cardOrder.indexOf(a.a.id)-cardOrder.indexOf(b.a.id))){const at=cardOrder.indexOf(card.a.id);list.splice(at<0?list.length:Math.min(at,list.length),0,card);}
+ return tucked()?list.filter(card=>card.a.id===S.banner):list;
+}
+const WIGGLE=[0,16,-12,7,-3,0].map(deg=>({transform:`rotate(${deg}deg)`}));
+function ringBell(){
+ move($('pc-bell')?.querySelector('.pc-bell-mark'),WIGGLE,{id:'pc-bell-ring',duration:DRAWER.ring,easing:'ease-out'});
+ move($('pc-drawer')?.querySelector('.pc-drawer-bell'),WIGGLE,{id:'pc-drawer-bell-ring',duration:DRAWER.ring,easing:'ease-out'});
+}
+// A card leaves: sliding right (answered) or up into the bell (a banner), its room closing behind it; then `done`.
+function leaveThen(el,how,done){
+ const ms=!el?.animate||calm()?0:DRAWER.leave;
+ if(ms){el.style.overflow='hidden';const box=getComputedStyle(el);
+  el.animate([{opacity:1,transform:'none',height:`${el.offsetHeight}px`,paddingTop:box.paddingTop,paddingBottom:box.paddingBottom,marginBottom:'0px'},
+   {opacity:0,transform:how==='up'?'translateY(-12px) scale(0.96)':'translateX(18%) scale(0.98)',height:'0px',paddingTop:'0px',paddingBottom:'0px',marginBottom:'-10px'}],
+   {id:'pc-card-out',duration:ms,easing:DRAWER.exit,fill:'forwards'});}
+ setTimeout(done,ms);
+}
+// An answered card: the quiet word in place of its buttons for a moment, then it leaves. It can be cleared at once.
+function settle(a,done){S.settled=[...S.settled,{a,done}];setTimeout(()=>dismiss(a.id),DRAWER.stay);}
+function dismiss(id,now=false){
+ const card=settledCard(id);if(!card||card.leaving&&!now)return;card.leaving=true;
+ const gone=()=>{
+  if(!S.settled.includes(card))return;
+  const had=!!cardEl(id)?.contains(document.activeElement);
+  S.settled=S.settled.filter(c=>c!==card);if(S.banner===id)S.banner='';render();
+  if(had)($('pc-drawer')?.querySelector('.pc-card-open')||$('pc-bell'))?.focus();
+ };
+ if(now)gone();else leaveThen(cardEl(id),'right',gone);
+}
+// Folded, the cards are a stack: the newest in front, up to two peeking behind it, each 10 px lower and 5% smaller. The
+// cards stay where the list lays them out and are moved there (so they travel when it fans out): how far each moves up
+// and the list's two heights are measured here, after every change. Fanned out, the drawer stops 48 px short of the
+// screen's height and its list scrolls.
+const DRAWER_HEAD=40,DRAWER_EDGE=16,DRAWER_FOOT=24;
+function layoutDrawer(){
+ const drawer=$('pc-drawer'),list=drawer?.querySelector('.pc-drawer-list'),cards=list?[...list.children]:[],front=cards[0];if(!front)return;
+ cards.forEach((card,i)=>{const n=Math.min(i,2);
+  card.style.setProperty('--n',String(n));card.style.setProperty('--fold-y',`${front.offsetTop+front.offsetHeight+n*10-card.offsetTop-card.offsetHeight}px`);
+  card.style.zIndex=String(cards.length-i);card.classList.toggle('pc-card-under',i>2);});
+ const last=cards.at(-1),room=(drawer.offsetParent||drawer.parentElement)?.clientHeight||0;
+ list.style.setProperty('--fold-h',`${front.offsetTop+front.offsetHeight+Math.min(cards.length-1,2)*10+6}px`);
+ list.style.setProperty('--fan-h',`${Math.min(last.offsetTop+last.offsetHeight+DRAWER_FOOT,Math.max(80,room-48-DRAWER_EDGE-DRAWER_HEAD))}px`);
+}
+function applyDrawer(){
+ const drawer=$('pc-drawer');if(!drawer)return;
+ const fan=S.fan&&!drawer.classList.contains('pc-drawer-banner');
+ if(!fan){const list=drawer.querySelector('.pc-drawer-list');if(list)list.scrollTop=0;}
+ drawer.classList.toggle('pc-fan',fan);layoutDrawer();
+}
+function setFan(on){if(S.fan===on)return;S.fan=on;applyDrawer();}
+function foldSoon(){clearTimeout(foldTimer);foldTimer=setTimeout(()=>{const drawer=$('pc-drawer');if(drawer&&(drawer.matches(':hover')||drawer.contains(document.activeElement)))return;setFan(false);},160);}
+function collapseDrawer(focus=true){S.drawer='collapsed';S.fan=false;S.banner='';clearTimeout(bannerTimer);render();if(focus)$('pc-bell')?.focus();}
+// The drawer is redrawn only when what it says changes (put), so its cards keep their place while they move. `fresh`:
+// the cards that just arrived: each springs in from above, and the bell wiggles.
+function drawDrawer(fresh){
+ const cards=drawerCards();if(!tucked())cardOrder=cards.map(card=>card.a.id);
+ const top=$('pc-drawer')?.querySelector('.pc-drawer-list')?.scrollTop||0;
+ const changed=put('pc-wait',drawerMarkup({cards,waiting:pending().length,banner:tucked(),pipName:S.pip?.name||'The Pip',now:Date.now(),open:S.detail}));
+ applyDrawer();
+ if(changed&&top&&S.fan){const list=$('pc-drawer')?.querySelector('.pc-drawer-list');if(list)list.scrollTop=top;}
+ if(!fresh.length)return;
+ fresh.forEach((id,i)=>move(cardEl(id),[{opacity:0,transform:'translateY(-16px) scale(0.96)'},{opacity:1,transform:'none'}],{id:'pc-card-in',duration:DRAWER.enter,delay:i*90,easing:DRAWER.spring,fill:'backwards'}));
+ ringBell();
+}
 function moreKeys(){const menu=$('pc-more-menu');if(menu)window.DgcMenu.keys(menu,{close:()=>{S.more=false;render();},trigger:()=>$('pc-more')});}
 // A desktop like Grok's bots' computers: a wallpaper, a dock with three apps, apps in windows.
 const APPS={browser:'Browser',files:'Files',terminal:'Terminal'};
@@ -172,19 +264,6 @@ function dockMarkup(){
 function windowMarkup(app,body){
  const sub=app==='browser'?(S.view?.ok?S.view.url:''):app==='files'?(S.files.path?['Files',...S.files.path.split('/')].join(' / '):''):'Online · public websites only · works in its Files';
  return `<section class="pc-window" aria-label="${APPS[app]}"><div class="pc-titlebar"><span class="pc-win-icon">${appIcon(app,16)}</span><strong>${APPS[app]}</strong><span class="pc-win-sub">${esc(sub)}</span><span class="pc-win-buttons"><button type="button" class="pc-win-button" data-minimize="${app}" aria-label="Minimise ${APPS[app]}" title="Minimise">–</button><button type="button" class="pc-win-button" data-close="${app}" aria-label="Close ${APPS[app]}" title="Close">×</button></span></div><div class="pc-window-body">${body}</div></section>`;
-}
-// What a held form sends, on the card itself: a payment's bill number and amount, an order's sizes (never a hidden field).
-function sendsMarkup(summary){const line=sendsWords(summary);return line?`<span class="pc-sends">${esc(line)}</span>`:'';}
-// The held submits' cards float over the screen and never push it: shut until the bar's chip opens them.
-function waitingMarkup(){
- const waiting=pending();
- if(!waiting.length)return '';
- return `<div class="pc-float pc-wait-float" id="pc-wait-float"${S.waitOpen?'':' hidden'}><div class="pc-float-head"><strong>Waiting for you</strong>${crossButton('data-shut="wait"','Close')}</div><section class="pc-waiting" aria-label="Waiting for you">${waiting.map(a=>{const words=carefulWords(a.summary,S.pip?.name||'The Pip');return words
-   // Careful mode: a new site, or something it read from your apps; no Always allow for these.
-   // A login to save (API 56) is saved from its chat's card or its page: the form is there, never in this tab.
-   ?a.summary.kind==='login'?`<article class="pc-hold"><div><strong>${esc(words[0])}</strong><span>${esc(words[1])} Save it from the card in its chat.</span></div><div class="pc-actions"><button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Not now</button></div></article>`
-   :`<article class="pc-hold"><div><strong>${esc(words[0])}</strong><span>${esc(words[1])}</span>${a.summary.kind==='text'&&typeof a.summary.text==='string'?`<pre class="pc-held-text">${esc(a.summary.text)}</pre>`:''}</div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">${esc(words[2])}</button><button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Not now</button></div></article>`
-   :`<article class="pc-hold"><div><strong>${isPayment(a.summary)?'Pay on':'Send a form to'} ${esc(a.summary.host)}</strong>${sendsMarkup(a.summary)}<span>${a.summary.payment===true?'Sends payment card details. ':''}${esc(asksWords(a.summary))}${asksWords(a.summary)?' ':''}Nothing has been sent.${asksEveryTime(a.summary)?'':` ${esc(coversWords(a.summary))}.`}</span></div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">Send once</button>${asksEveryTime(a.summary)?'':`<button type="button" class="pc-quiet" data-always="${esc(a.id)}">Always allow</button>`}<button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Reject</button></div></article>`;}).join('')}</section></div>`;
 }
 function browserMarkup(){
  const v=S.view;
@@ -308,7 +387,7 @@ function toolsMarkup(){
   // Its Files (the folder DGC keeps for this computer): open whenever the computer is, also while a Pip run uses it.
   +tool('pc-files','Files',ICON.files,{expanded:S.panel==='files'})
   +(busy?`<span class="pc-using" id="pc-using" role="status">${esc(why)}</span>`:'')
-  +`<span class="pc-tools-end"></span>`+tool('pc-full',S.full?'Leave full screen':'Full screen',S.full?ICON.leave:ICON.full)+menu;
+  +`<span class="pc-tools-end"></span>`+bellHtml()+tool('pc-full',S.full?'Leave full screen':'Full screen',S.full?ICON.leave:ICON.full)+menu;
 }
 function stripMarkup(){
  if(!needsRestart())return '';
@@ -346,7 +425,7 @@ function saysMarkup(){
 const PANELS={files:'Files',keys:'Keyboard',clip:'Clipboard'};
 function renderScreen(fresh){
  const app=document.getElementById('app');
- // One bar (the Pip, the screen's tools, Full screen, Stop computer), then the screen. Panels, the held submits' cards and
+ // One bar (the Pip, the screen's tools, Full screen, Stop computer), then the screen. Panels, the notification drawer and
  // what the tab says all sit inside the screen's own box, over it: nothing but the bar is ever above the screen.
  if(!$('pc-live')){drawn.clear();app.innerHTML=`<div class="pc-stage" id="pc-stage"><div class="pc-topbar" id="pc-bar" data-tier="${S.tier}"${S.tight?' data-title="computer"':''}><div class="pc-ident" id="pc-ident"></div><div class="pc-tools" id="pc-tools" role="toolbar" aria-label="Screen"></div><div class="pc-end" id="pc-end"></div></div>`
   +`<div class="pc-desktop pc-live" id="pc-live"><div id="pc-vnc" class="pc-vnc" aria-label="${esc(S.pip?.name||'The Pip')}'s computer screen"></div><div id="pc-overlay" class="pc-overlay"></div>${cursorMarkup()}`
@@ -364,16 +443,15 @@ function renderScreen(fresh){
  }
  if(put('pc-end',endMarkup()))moreKeys();
  put('pc-says',saysMarkup());
- put('pc-wait',waitingMarkup());
  put('pc-strip',stripMarkup());
  const box=$('pc-paste-text'),caret=box&&document.activeElement===box?[box.selectionStart,box.selectionEnd]:null;
  const panel=panelMarkup();
  if(put('pc-panel',panel?`<div class="pc-float-head"><strong>${PANELS[S.panel]}</strong>${crossButton('data-shut="panel"','Close')}</div>${panel}`:'')){const now=$('pc-paste-text');if(now){now.value=S.clip.draft;if(caret){now.focus();try{now.setSelectionRange(...caret);}catch{}}}}
+ drawDrawer(fresh);
  if(focus&&$(focus)&&document.activeElement?.id!==focus)$(focus).focus();
  $('pc-live').classList.toggle('pc-actual',!S.fit);
  document.body.classList.toggle('pc-fill',S.full==='tab');
  fitBar();
- if(fresh)pulseChip();
  applyFit();
  cleanupFace=window.PipConcepts?.plush?.mount?.($('pc-bar'));
  placeCursor();
@@ -482,12 +560,19 @@ function render(){
  const app=document.getElementById('app');
  const pane=!S.computer?'':!S.computer.granted?`<section class="pc-window pc-note"><p>${esc(S.pip?.name||'This Pip')} has no computer yet. Give it one with the computer button at the top of its chat.</p></section>`:!S.computer.available?`<section class="pc-window pc-note"><p>This Pip’s computer cannot start on this machine yet. Follow the setup shown above, then reopen this tab.</p></section>`:!S.app?'':windowMarkup(S.app,S.app==='files'?filesMarkup():S.app==='terminal'?terminalMarkup():browserMarkup());
  const focus=document.activeElement?.id,caret=document.activeElement?.selectionStart;
+ // The same slim bar (no screen tools here; the bell before its end), what the tab says, then the desktop. The bar's
+ // parts and the notification drawer over the desktop are redrawn only when what they say changes (put), so a look at
+ // the screen every second never cuts a card's motion short; the window and the dock are drawn each time, as before.
+ if(!$('pc-desk')){drawn.clear();app.innerHTML=`<div class="pc-topbar" id="pc-bar" data-tier="${S.tier}"${S.tight?' data-title="computer"':''}><div class="pc-ident" id="pc-ident"></div><span class="pc-tools-end"></span><div class="pc-bell-slot" id="pc-bell-slot"></div><div class="pc-end" id="pc-end"></div></div>`
+  +`<div class="pc-flat" id="pc-top"></div><div class="pc-desktop" id="pc-desk"><div class="pc-flat" id="pc-desk-body"></div><div id="pc-wait"></div></div>`;}
  cleanupFace?.();
- // The same slim bar (no screen tools here), and the held submits' cards float over the desktop.
- app.innerHTML=`<div class="pc-topbar" id="pc-bar" data-tier="${S.tier}"${S.tight?' data-title="computer"':''}><div class="pc-ident" id="pc-ident">${headerMarkup()}</div><span class="pc-tools-end"></span><div class="pc-end" id="pc-end">${endMarkup()}</div></div>`
-  +`${S.error?`<p class="pc-error" role="alert">${esc(S.error)}</p>`:''}${S.notice?`<p class="pc-notice" role="status">${esc(S.notice)}</p>`:''}${installMarkup()}${appsMarkup()}<div class="pc-desktop">${pane}${S.computer?.granted&&S.computer.available?dockMarkup():''}${waitingMarkup()}</div>`;
+ put('pc-ident',headerMarkup());put('pc-bell-slot',bellHtml());
+ if(put('pc-end',endMarkup()))moreKeys();
+ $('pc-top').innerHTML=`${S.error?`<p class="pc-error" role="alert">${esc(S.error)}</p>`:''}${S.notice?`<p class="pc-notice" role="status">${esc(S.notice)}</p>`:''}${installMarkup()}${appsMarkup()}`;
+ $('pc-desk-body').innerHTML=`${pane}${S.computer?.granted&&S.computer.available?dockMarkup():''}`;
+ drawDrawer(fresh);
  cleanupFace=window.PipConcepts?.plush?.mount?.(app);
- moreKeys();fitBar();if(fresh)pulseChip();
+ fitBar();
  if(focus&&$(focus)){$(focus).focus();if(caret!=null&&$(focus).setSelectionRange)try{$(focus).setSelectionRange(caret,caret);}catch{}}
  const log=$('pc-log');if(log)log.scrollTop=log.scrollHeight;
  const img=$('pc-screen');if(img)img.addEventListener('load',placeCursor,{once:true});
@@ -556,7 +641,8 @@ async function runCommand(command){
  finally{S.terminal.running=false;render();$('pc-command')?.focus();}
 }
 async function decide(id,how){
- const a=(S.computer?.actions||[]).find(x=>x.id===id);if(!a||S.busy)return;
+ const a=(S.computer?.actions||[]).find(x=>x.id===id);if(!a||S.busy||settledCard(id))return;
+ const within=!!cardEl(id)?.contains(document.activeElement);
  ++computerRefreshSerial; // A poll started before this decision must not restore its old card.
  S.busy=true;S.error='';S.actionError=false;S.notice='';render();
  try{
@@ -570,9 +656,11 @@ async function decide(id,how){
    if(d.id!==a.id||d.status!==(how==='send'?'approved':'rejected'))throw Error('The saved decision differs from your choice. Refresh and try again.');
    S.notice=a.summary?.kind==='site'?(d.status==='approved'?'Allowed. It opens the site and carries on.':'Not now. It won’t open it.'):a.summary?.kind==='text'?(d.status==='approved'?'Allowed once. It carries on.':'Not now. It won’t do that.'):d.status==='approved'?'Approved. It is sent within a few seconds, exactly as shown.':'Rejected. Nothing was sent.';
   }
+  // Its card says so in place of its buttons for a moment, then leaves (the drawer).
+  settle(a,cardWords(a,S.pip?.name||'The Pip').answers.find(b=>b.how===how)?.done||'Done');
   S.computer={...S.computer,actions:S.computer.actions.filter(item=>item.id!==a.id)};
  }catch(error){S.error=errorText(error);S.actionError=true;}
- finally{S.busy=false;await loadComputer();}
+ finally{S.busy=false;await loadComputer();if(within&&settledCard(id))$(`pc-open-${id}`)?.focus();}
 }
 function screenPoint(event){
  const img=$('pc-screen');if(!img)return null;const box=img.getBoundingClientRect();
@@ -597,29 +685,38 @@ function show(app,explicit=false){
  schedule();vscode.setState({app,fit:S.fit});
 }
 
-// Put away what floats over the screen (its close button, or Escape), and give focus back to the button that opened it.
-function shut(which){
- if(which==='wait'){S.waitOpen=false;render();$('pc-chip')?.focus();return;}
+// Put away a panel that floats over the screen (its close button, or Escape), and give focus back to the button that opened it.
+function shut(){
  const from={keys:'pc-keys',clip:'pc-clip',files:'pc-files'}[S.panel];S.panel='';render();const back=$(from);(back?.offsetWidth?back:$('pc-more')||back)?.focus();
 }
 document.addEventListener('click',event=>{
  // A press anywhere else closes the size menu, and "…".
  const wasSize=S.sizeMenu&&!event.target.closest?.('#pc-size-menu,#pc-size,#pc-more-menu'),wasMore=S.more&&!event.target.closest?.('#pc-more-menu,#pc-more');
  if(wasSize)S.sizeMenu=false;if(wasMore)S.more=false;if(wasSize||wasMore)render();
+ // A press on the drawer is the drawer's alone: it is DGC's page over the screen, and never a press on the computer.
+ if(event.target.closest?.('#pc-drawer')){drawerClick(event);return;}
+ // A press anywhere else folds the drawer back to its stack.
+ if(S.fan&&!event.target.closest?.('#pc-bell'))setFan(false);
  const t=event.target.closest('button,[data-crumb],img');if(!t)return;
  // A row in "…" is the bar's own button under another roof: the same press.
  let id=t.id;
  if(t.dataset.more){id=`pc-${t.dataset.more}`;S.more=false;render();}
  if(t.dataset.apps)void answerApps(t.dataset.apps);
  else if(id==='pc-more'){S.more=!S.more;S.sizeMenu=false;render();if(S.more)$('pc-more-menu')?.querySelector('.dgc-menu-row:not(:disabled)')?.focus();}
- else if(id==='pc-chip'){S.waitOpen=!S.waitOpen;if(S.waitOpen)S.panel='';render();}
- else if(t.dataset.shut)shut(t.dataset.shut);
+ // The bell brings the drawer back (and puts away a panel that has its corner), or hides it. From the keyboard, focus
+ // goes to its first card.
+ else if(id==='pc-bell'){
+  if(!tucked()){collapseDrawer(false);return;}
+  S.drawer='shown';S.panel='';S.banner='';clearTimeout(bannerTimer);S.fan=true;render();
+  if(event.detail===0)$('pc-drawer')?.querySelector('.pc-card-open')?.focus();
+ }
+ else if(t.dataset.shut)shut();
  else if(t.dataset.dismiss){if(t.dataset.dismiss==='error'){S.error='';S.actionError=false;}else S.notice='';render();}
  else if(id==='pc-fit'||id==='pc-actual'){S.fit=id==='pc-fit';render();vscode.setState({app:S.app,fit:S.fit});}
  else if(id==='pc-size'){S.sizeMenu=!S.sizeMenu;render();if(S.sizeMenu)($('pc-size-menu')?.querySelector('[aria-checked="true"]')||$('pc-size-menu')?.querySelector('.dgc-menu-row'))?.focus();}
  else if(t.dataset.size)void chooseSize(t.dataset.size);
- else if(id==='pc-keys'||id==='pc-clip'){if(!mayType())return;const panel=id==='pc-keys'?'keys':'clip';S.panel=S.panel===panel?'':panel;if(S.panel){S.waitOpen=false;if(S.panel==='clip')S.clip={...S.clip,fresh:false};}render();}
- else if(id==='pc-files'){S.panel=S.panel==='files'?'':'files';if(S.panel)S.waitOpen=false;render();if(S.panel==='files')void loadFiles();}
+ else if(id==='pc-keys'||id==='pc-clip'){if(!mayType())return;const panel=id==='pc-keys'?'keys':'clip';S.panel=S.panel===panel?'':panel;if(S.panel){S.fan=false;if(S.panel==='clip')S.clip={...S.clip,fresh:false};}render();}
+ else if(id==='pc-files'){S.panel=S.panel==='files'?'':'files';if(S.panel)S.fan=false;render();if(S.panel==='files')void loadFiles();}
  else if(t.id==='pc-full'){if(S.full)leaveFull();else void enterFull();}
  else if(t.dataset.key)pressKeys(t.dataset.key);
  else if(t.id==='pc-paste')pasteIn();
@@ -642,9 +739,43 @@ document.addEventListener('click',event=>{
  else if(t.id==='pc-save-as'&&bigFiles()&&S.files.preview&&!S.files.adding&&!S.files.saving){S.files.saving=S.files.preview.path;S.files.error='';S.notice='';render();vscode.postMessage({type:'pipComputerSaveAs',path:S.files.preview.path});}
  else if(t.id==='pc-save'&&S.files.preview)vscode.postMessage({type:'pipComputerSave',name:S.files.preview.name,data:S.files.preview.data||null,text:S.files.preview.data?null:S.files.preview.text});
  else if(t.id==='pc-remove'&&S.files.preview&&!filesHeld()){const path=S.files.preview.path;void send('remove_pip_computer_file',{pip_id:S.pip.id,path}).then(()=>{S.files.selected=null;S.files.preview=null;return loadFiles();},error=>{S.files.error=errorText(error);render();});}
+});
+// What a press on the drawer does: a card's answer, its detail (the card opens it), Clear on an answered one, Collapse.
+// Anywhere else on it, the stack fans out.
+function drawerClick(event){
+ if(swipedCard){const card=swipedCard;swipedCard=null;if(card.contains(event.target))return;}   // the end of a swipe is not a press
+ const t=event.target.closest('button');
+ if(!t){if(!tucked())setFan(true);return;}
+ if(t.id==='pc-drawer-collapse')collapseDrawer();
+ else if(t.dataset.cardOpen){const id=t.dataset.cardOpen;if(S.detail.has(id))S.detail.delete(id);else S.detail.add(id);if(!tucked())S.fan=true;render();}
+ else if(t.dataset.cardClear)dismiss(t.dataset.cardClear,true);
  else if(t.dataset.send)void decide(t.dataset.send,'send');
  else if(t.dataset.always)void decide(t.dataset.always,'always');
  else if(t.dataset.reject)void decide(t.dataset.reject,'reject');
+}
+// Pointing at the stack, or the keyboard reaching it, fans it out into the drawer; leaving it folds it back.
+document.addEventListener('pointerover',event=>{if(!event.target.closest?.('#pc-drawer'))return;clearTimeout(foldTimer);if(!tucked())setFan(true);});
+document.addEventListener('pointerout',event=>{const drawer=event.target.closest?.('#pc-drawer');if(drawer&&!(event.relatedTarget&&drawer.contains(event.relatedTarget)))foldSoon();});
+document.addEventListener('focusin',event=>{if(event.target.closest?.('#pc-drawer')&&!tucked())setFan(true);});
+document.addEventListener('focusout',event=>{if(event.target.closest?.('#pc-drawer'))foldSoon();});
+// An answered card can be swiped away: it follows the drag, and past 90 px it is gone. A card that still waits does not move.
+document.addEventListener('pointerdown',event=>{
+ const card=event.target.closest?.('.pc-card[data-state="answered"]');if(!card||event.button||event.target.closest('.pc-card-clear'))return;
+ swipe={card,id:card.dataset.card,x:event.clientX,dx:0,on:false};
+});
+document.addEventListener('pointermove',event=>{
+ if(!swipe)return;swipe.dx=event.clientX-swipe.x;if(!swipe.on&&Math.abs(swipe.dx)<4)return;swipe.on=true;
+ swipe.card.style.transition='none';swipe.card.style.transform=`translateX(${swipe.dx}px)`;swipe.card.style.opacity=String(Math.max(0,1-Math.abs(swipe.dx)/240));
+});
+function endSwipe(){
+ const s=swipe;swipe=null;if(!s?.on)return;swipedCard=s.card;
+ if(Math.abs(s.dx)>DRAWER.swipe)dismiss(s.id,true);else for(const name of ['transition','transform','opacity'])s.card.style[name]='';
+}
+document.addEventListener('pointerup',endSwipe);document.addEventListener('pointercancel',endSwipe);
+// Delete or Backspace on an answered card clears it; on one that waits, nothing.
+document.addEventListener('keydown',event=>{
+ const id=event.target.closest?.('[data-card-open]')?.dataset.cardOpen;
+ if(id&&(event.key==='Delete'||event.key==='Backspace')&&settledCard(id)){event.preventDefault();dismiss(id,true);}
 });
 document.addEventListener('submit',event=>{
  event.preventDefault();
@@ -655,14 +786,16 @@ document.addEventListener('input',event=>{if(event.target.id==='pc-command')S.te
  if(event.target.id==='pc-paste-text'){S.clip.draft=event.target.value;if(S.clip.note)clipSay('');}});
 // Escape leaves full screen. Not while the screen itself has the keys: the viewer keeps those for the computer, and the
 // keyboard panel's Esc is a button. (The size menu closes on its own Escape first.)
-// First it puts away what floats over the screen (a panel, or the held submits' cards); with nothing open, it leaves full screen.
+// First it closes the drawer into the bell (fanned out, or with the keyboard on it); then it puts away a panel; with
+// nothing open, it leaves full screen.
 document.addEventListener('keydown',event=>{
  if(event.key!=='Escape'||event.defaultPrevented||event.target.closest?.('#pc-size-menu,#pc-more-menu,#pc-vnc,.pc-screen,#pc-url'))return;
- if(S.waitOpen){event.preventDefault();shut('wait');}
- else if(S.panel&&$('pc-panel')?.firstChild){event.preventDefault();shut('panel');}
+ const drawer=$('pc-drawer');
+ if(drawer&&(S.fan&&!tucked()||drawer.contains(event.target))){event.preventDefault();collapseDrawer();}
+ else if(S.panel&&$('pc-panel')?.firstChild){event.preventDefault();shut();}
  else if(S.full){event.preventDefault();leaveFull();$('pc-full')?.focus();}
 });
-window.addEventListener('resize',()=>fitBar());
+window.addEventListener('resize',()=>{fitBar();layoutDrawer();});
 // Leaving the bar (or Escape in it) shows the page's own address again, as a browser does. A redraw
 // replaces the bar, which blurs it too: that is not leaving, so it waits for the redraw to finish.
 document.addEventListener('focusout',event=>{if(event.target.id==='pc-url')setTimeout(()=>{if(document.activeElement?.id!=='pc-url'&&S.address!==null){S.address=null;render();}},0);});
@@ -670,12 +803,13 @@ const KEYS=new Set(['Enter','Tab','Backspace','Escape','ArrowUp','ArrowDown','Ar
 let typed='',typeTimer=null;
 document.addEventListener('keydown',event=>{
  if(event.target.id==='pc-url'&&event.key==='Escape'){S.address=null;render();return;}
- if(!event.target.closest?.('.pc-screen')||using()||event.metaKey||event.ctrlKey||event.altKey)return;
+ // Only what is typed on the screen itself: never a key on the drawer over it.
+ if(event.target.closest?.('#pc-drawer')||!event.target.closest?.('.pc-screen')||using()||event.metaKey||event.ctrlKey||event.altKey)return;
  if(KEYS.has(event.key)){event.preventDefault();flushTyped();void frame('key',{key:event.key});}
  else if(event.key.length===1){event.preventDefault();typed+=event.key;clearTimeout(typeTimer);typeTimer=setTimeout(flushTyped,250);}
 });
 function flushTyped(){clearTimeout(typeTimer);if(!typed)return;const text=typed;typed='';void frame('type',{text});}
-document.addEventListener('wheel',event=>{if(!event.target.closest?.('.pc-screen')||using())return;event.preventDefault();void frame('scroll',{dy:Math.max(-2000,Math.min(2000,Math.round(event.deltaY)))});},{passive:false});
+document.addEventListener('wheel',event=>{if(event.target.closest?.('#pc-drawer')||!event.target.closest?.('.pc-screen')||using())return;event.preventDefault();void frame('scroll',{dy:Math.max(-2000,Math.min(2000,Math.round(event.deltaY)))});},{passive:false});
 document.addEventListener('change',event=>{if(event.target.id==='pc-add-input'&&!filesHeld()){void addFiles([...event.target.files]);event.target.value='';}});
 // Where Files is on show: its window, or the panel under the live screen. There, a Pip run using the computer holds Add and Remove.
 const filesShown=()=>screenMode()?S.panel==='files':S.app==='files';
