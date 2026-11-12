@@ -27,7 +27,7 @@ import { McpBrowserRequest, editorIsRemote, handSignInBack, openMcpBrowser } fro
 import { routerCommand } from "./routerCommands";
 import { imagesCommand, MAX_WORKFLOW_CHARS } from "./imagesCommands";
 import { allowFromJobs, handleVideoMessage, VIDEO_MESSAGES } from "./videoHost";
-import { PipsEditor, openEngineSignIn, type ProjectWork } from "./pipsView";
+import { PipsEditor, openEngineSignIn, workSessionTitles, type OwnedPip, type ProjectWork } from "./pipsView";
 import { mcpAppsHost } from "./mcpApps";
 import { PLUGIN_ID, pluginLogoData, pluginLogoSource, type PluginLogoItem } from "./pluginLogos";
 import { pipsAttention, PipsAttentionState } from "./pipsAttention";
@@ -1524,11 +1524,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       void vscode.window.showInformationMessage("That session is open in a tab. Close its tab first, then delete it.");
       return;
     }
-    const DELETE = "Delete";
-    const choice = await vscode.window.showWarningMessage(
-      `Delete the session “${title || id}”? Its conversation is removed from this project, and this can't be undone.`,
-      { modal: true }, DELETE);
-    if (choice !== DELETE) { return; }
+    // The Project Pips it is the owner of (Pips API 89): its dialog names them and asks what becomes of them, and is
+    // the confirmation. A session that owns none is confirmed as it always was.
+    const owned = await this.ownedPips(id);
+    if (owned.length) {
+      if (!await this.settleSessionPips(id, title, owned, "delete")) { return; }
+    } else {
+      const DELETE = "Delete";
+      const choice = await vscode.window.showWarningMessage(
+        `Delete the session “${title || id}”? Its conversation is removed from this project, and this can't be undone.`,
+        { modal: true }, DELETE);
+      if (choice !== DELETE) { return; }
+    }
     try {
       const response = await this.requestState(this.ensureBackend(), "sessions", { type: "delete_session", path: `${id}.json` }, "sessions", 10000);
       if ((response as any).deleted === false) {
@@ -1541,6 +1548,108 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     } catch (err: any) {
       void vscode.window.showErrorMessage(err?.message || "DGC could not delete that session.");
     }
+  }
+
+  // ---- a session's Project Pips (their owner session, Pips API 89) --------------------------------
+
+  /** The Project Pips this session is the owner of. None when Pips can't be read: the session is then deleted or
+   *  archived as it always was. */
+  private async ownedPips(id: string): Promise<OwnedPip[]> {
+    try { return await this.ensurePipsBridge().sessionPips(id); } catch { return []; }
+  }
+
+  /** The project's other sessions, by the titles the Work list shows: where a session's Pips can be moved to. */
+  private async otherSessions(id: string): Promise<Array<{ id: string; title: string }>> {
+    try {
+      const response = await this.requestState(this.ensureBackend(), "sessions", { type: "list_sessions" }, "sessions", 10000);
+      return workSessionTitles((Array.isArray(response.items) ? response.items : []).map((item: any) => ({
+        id: path.basename(String(item?.path || "")).replace(/\.json$/i, ""),
+        title: String(item?.name || item?.preview || "Untitled session") }))).filter((item) => item.id !== id).slice(0, 200);
+    } catch { return []; }
+  }
+
+  private sessionPipsAsk?: { id: string; settle: (answer: { choice: string; to?: string }) => void };
+
+  /** The page's dialog for a session that owns Project Pips: what becomes of them. Resolves with its one answer
+   *  (Cancel when the page can't show it, or after five minutes). */
+  private askSessionPips(mode: "delete" | "archive", title: string, owned: OwnedPip[], sessions: Array<{ id: string; title: string }>): Promise<{ choice: string; to?: string }> {
+    this.sessionPipsAsk?.settle({ choice: "cancel" });
+    return new Promise((resolve) => {
+      const id = randomBytes(16).toString("hex");
+      const timer = setTimeout(() => settle({ choice: "cancel" }), 5 * 60_000);
+      (timer as any).unref?.();
+      const settle = (answer: { choice: string; to?: string }) => {
+        if (this.sessionPipsAsk?.id !== id) { return; }
+        this.sessionPipsAsk = undefined;
+        clearTimeout(timer);
+        this.post({ type: "sessionPipsDismiss", requestId: id });
+        resolve(answer);
+      };
+      this.sessionPipsAsk = { id, settle };
+      this.post({ type: "sessionPipsAsk", requestId: id, mode, title,
+        pips: owned.map((pip) => ({ id: pip.id, name: pip.name, pip_type: pip.pip_type })), sessions });
+    });
+  }
+
+  /** Ask, then do what was chosen for the Pips a session owns. True: the delete (or archive) goes on. False: it was
+   *  cancelled, or a Pip could not be moved or deleted, which is said and leaves the session where it is. */
+  private async settleSessionPips(id: string, title: string, owned: OwnedPip[], mode: "delete" | "archive"): Promise<boolean> {
+    const sessions = await this.otherSessions(id);
+    const answer = await this.askSessionPips(mode, title || id, owned, sessions);
+    return this.applySessionPips(answer, owned, sessions, mode);
+  }
+
+  private async applySessionPips(answer: { choice: string; to?: string }, owned: OwnedPip[], sessions: Array<{ id: string; title: string }>,
+    mode: "delete" | "archive"): Promise<boolean> {
+    try {
+      if (answer.choice === "keep" && mode === "archive") { return true; }
+      if (answer.choice === "move") {
+        const to = String(answer.to ?? "");
+        if (to && !sessions.some((item) => item.id === to)) { return false; }
+        await this.ensurePipsBridge().moveSessionPips(owned, to || null);
+        return true;
+      }
+      if (answer.choice === "delete" && mode === "delete") { await this.ensurePipsBridge().deleteSessionPips(owned); return true; }
+      return false;
+    } catch (err: any) {
+      void vscode.window.showWarningMessage(`The session was not ${mode === "delete" ? "deleted" : "archived"}. ${err?.message || "DGC couldn't change its Pips."}`);
+      return false;
+    }
+  }
+
+  /** Before a Work session is archived: the same question, where "Keep them here" (the default) changes nothing: they
+   *  come back when it is restored. True: archive it. (Nothing archives a Work session yet; this is its question.) */
+  async sessionPipsBeforeArchive(id: string, title: string): Promise<boolean> {
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) { return false; }
+    const owned = await this.ownedPips(id);
+    return owned.length ? this.settleSessionPips(id, title, owned, "archive") : true;
+  }
+
+  /** The same question where there is no page to ask it on (a tab's list of sessions): the editor's own dialogs. */
+  private async settleSessionPipsNatively(id: string, title: string, owned: OwnedPip[]): Promise<boolean> {
+    const one = owned.length === 1, them = one ? "it" : "them";
+    const MOVE = `Move ${them} to another session`, DELETE = `Delete ${them} too`;
+    const names = owned.slice(0, 12).map((pip) => pip.name).join(", ") + (owned.length > 12 ? ` and ${owned.length - 12} more` : "");
+    const choice = await vscode.window.showWarningMessage(
+      `“${title || id}” is the owner of ${owned.length} Project ${one ? "Pip" : "Pips"}: ${names}. ${one ? "Its" : "Their"} reports come to it. What becomes of ${them} when it is deleted?`,
+      { modal: true }, MOVE, DELETE);
+    const sessions = await this.otherSessions(id);
+    if (choice === MOVE) {
+      const NONE = "No session";
+      const pick: any = await vscode.window.showQuickPick(
+        [...sessions.map((item) => ({ label: item.title, id: item.id })), { label: NONE, id: "", detail: `${one ? "Its" : "Their"} reports wait in the Pips view` }],
+        { placeHolder: `The session to move ${them} to` });
+      return pick ? this.applySessionPips({ choice: "move", to: String(pick.id || "") }, owned, sessions, "delete") : false;
+    }
+    if (choice === DELETE) {
+      const SURE = "Delete permanently";
+      const sure = await vscode.window.showWarningMessage(one
+        ? `Delete ${owned[0].name} permanently? This erases its chat, runs, computer files, what it kept in your memory, saved sign-ins used only by this Pip, Pip-created artifacts and audit receipts. It also removes references to this Pip from other Pips. This cannot be undone.`
+        : `Delete ${owned.length} Pips permanently? This erases each one’s chat, runs, computer files, what it kept in your memory, saved sign-ins used only by that Pip, Pip-created artifacts and audit receipts. It also removes references to them from other Pips. This cannot be undone.`,
+        { modal: true }, SURE);
+      return sure === SURE ? this.applySessionPips({ choice: "delete" }, owned, sessions, "delete") : false;
+    }
+    return false;
   }
 
   // ---- chat slots ------------------------------------------------------------------------------
@@ -5404,6 +5513,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     if (msg?.type === "videoJobs") { this.videosJobs(String(msg.job || "")); return; }
+    if (msg?.type === "sessionPipsAnswer") {
+      // The page's one answer to what becomes of a session's Project Pips; only the question now open is answered.
+      if (this.sessionPipsAsk && msg.requestId === this.sessionPipsAsk.id) {
+        this.sessionPipsAsk.settle({ choice: String(msg.choice || "cancel"), ...(typeof msg.to === "string" ? { to: msg.to } : {}) });
+      }
+      return;
+    }
     if (msg?.type === "autoModeAnswer") {
       if (this.autoModePrompt && msg.requestId === this.autoModePrompt.id) {
         this.autoModePrompt.settle(msg.accepted === true && !this.sessionElsewhere);
@@ -7370,6 +7486,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     render();
     return new Promise<void>((resolve) => {
       qp.onDidTriggerItemButton(async (e) => {           // trash icon → delete + refresh the list
+        // The Project Pips it owns are asked about first (Pips API 89); Cancel keeps the session.
+        const sessionId = path.basename(String((e.item as any).path || "")).replace(/\.json$/i, "");
+        const owned = await this.ownedPips(sessionId);
+        if (owned.length && !await this.settleSessionPipsNatively(sessionId, String((e.item as any).label || ""), owned)) { return; }
         items = await listSessions({ type: "delete_session", path: (e.item as any).path });
         if (!items.length) { qp.hide(); resolve(); return; }
         render();
@@ -8135,6 +8255,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.pipsEditor.useArtifacts(() => this.artifacts);
       // Continue in Work on what a Pip changed in its copy of a project (Pips API 91).
       this.pipsEditor.useProjectWork((work) => this.continueProjectInWork(work));
+      // The Work list's titles, for a Project Pip's owner session picker (Pips API 89).
+      this.pipsEditor.useWorkSessions(() => this.otherSessions(""));
       this.pipsEditor.videoStop = (job) => this.videosStop(job);
       this.pipsEditor.fullScreenSide = this.fullScreenSide();
       this.pipsEditor.videoFollow = (job) => this.videosJobs(job);     // a Pip reply's video: Stop

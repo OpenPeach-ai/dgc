@@ -47,6 +47,7 @@ export const THEMES = {
     doing (what the running turn says it is doing), fixing (DGC is fixing what a Project Pip's post found),
     empty (no messages yet), api, settings (its page's every section has something in it; level: the one it is at), keys (a plugin's key card: true, or "two"),
     boot (in a tab: what the page holds before its script runs, as src/pipsView.ts writes it),
+    owner (a Project Pip's owner session, Pips API 89: true, or "none"),
     ownKeys (the Pip's own API keys, Pips API 82: true one waiting card, "refused" one its site turned away, "list" one saved, one waiting, one Not now;
     "generator" / "generator-refused" / "generator-list": a picture or video generator's key, kept in Settings;
     from api 85 a site's row carries terminal and terminal_name, and "list-terminal" is "list" with its saved key ticked for the Terminal). */
@@ -627,6 +628,21 @@ export const host = (opts) => `(${function (PIP, opts) {
       open_pip_project_change_in_work: (r) => { note(r); return { opened: true }; },
     });
     answers.list_pip_keys ||= () => ({ pip_id: PIP, keys: [] });   // (a Pip with no keys waiting, as most have)
+  }
+  // opts.owner: a Project Pip's owner session (Pips API 89; pass project: true, api: 89). true: it reports to the second
+  // of the project's four Work sessions; "none": it has no owner session. The editor's titles are the host's own answer.
+  if (opts.owner && project) {
+    const ids = ["20261104-180000-d4", "20261105-221000-c3", "20261106-091200-b2", "20261106-101500-a1"];
+    const titles = [{ id: ids[3], title: "Run the shell command `ls -la src` and tell me in one line what is there" }, { id: ids[2], title: "Visits page alignment" },
+      { id: ids[0], title: "Invoice totals round the wrong way" }];
+    const st = window.__owner = { session_id: opts.owner === "none" ? null : ids[2], chosen: opts.owner === "none" };
+    Object.assign(answers, {
+      get_pip_owner: () => ({ pip_id: PIP, ...st }),
+      set_pip_owner: (r) => { st.session_id = r.session_id; st.chosen = true; return { pip_id: PIP, session_id: r.session_id }; },
+      list_workspace_sessions: () => ({ workspace_id: W, sessions: ids.map((session_id) => ({ session_id, workspace_id: W, workspace_binding_id: "binding_" + "1".repeat(32), updated_at: "2026-11-06T10:15:00Z", runner_id: "runner_" + "2".repeat(32) })),
+        next_cursor: ids[3], has_more: false }),
+      list_work_session_titles: () => ({ sessions: titles }),
+    });
   }
   window.acquireVsCodeApi = () => ({ getState: () => undefined, setState() {}, postMessage(m) {
     // (What the page tells its host besides a request, such as a photo to open or a file to download: window.__posted.)

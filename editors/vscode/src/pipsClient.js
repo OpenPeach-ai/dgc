@@ -56,6 +56,7 @@ import {healthMarkup,failedRoutine,foldRoutineLines,failedRoutineMarkup,quietLin
 import {appLink,appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup,appLinkSettledMarkup,allowCardMarkup,calendarCardMarkup} from './pipAppLinks.js';
 import {pipAppsPage,pipAppSwitched,pipAppsMarkup} from './pipApps.js';
 import {pipSkillsPage,pipSkillSwitched,pipSkillsMarkup} from './pipSkills.js';
+import {OWNERS_API,pipOwner,pipOwnerSet,workTitles,ownerMarkup} from './pipOwner.js';
 import {TEAM_MAX,pipFolder,folderName,foldersInUse,pipsByFolder,folderMarkup,pipFolderMarkup,teamPips,teamCount,teamExportMarkup,teamExportRequest,teamExported,teamImported,teamExportedNotice,teamImportedNotice} from './pipTeams.js';
 import {githubLink,grokReply,importPrompt,sourceImported,sourceImportedNotice,githubImportMarkup,grokImportMarkup} from './pipImports.js';
 import {pipKeysPage,pipKeyResult,waitingKeys,pipKeyCardMarkup,pipKeysPageMarkup,pipKeyRemovedNote} from './pipKeys.js';
@@ -2380,12 +2381,60 @@ async function rejectWaitingThenConfirm(review){
  catch(error){if(token===scope()&&S.review===review){review.error=errorText(error);S.busy=false;renderReview();}return;}
  S.busy=false;renderReview();if(S.review===review)$('review-confirm')?.click();
 }
+// "Reports to" on a Project Pip's Settings (Pips API 89, pipOwner.js): its owner session, the one Work chat its reports
+// reach, and Change. A Personal Pip has its own chat; below API 89, and over a remote host, there is no row.
+const ownerState={pip:'',asked:'',value:null,error:'',busy:false,seq:0,picker:null,titles:new Map()};
+function ownerShown(){return S.apiVersion>=OWNERS_API&&!remoteHost&&!!S.pip&&!personalPip()&&!archived();}
+function resetOwner(){ownerState.pip='';ownerState.asked='';ownerState.value=null;ownerState.error='';ownerState.busy=false;ownerState.picker=null;ownerState.seq++;}
+// The titles the editor's Work list shows (the host's own answer): a session it has none for says when it is from.
+async function loadWorkTitles(){try{ownerState.titles=workTitles(await send('list_work_session_titles',{}));}catch{/* the sessions still say when they are from */}}
+async function loadOwner(){
+ if(!ownerShown()||!usable())return;
+ const token=scope(),pip=S.selected,sequence=++ownerState.seq;ownerState.asked=pip;
+ try{const [raw]=await Promise.all([send('get_pip_owner',{pip_id:pip}),loadWorkTitles()]);const value=pipOwner(raw,pip);if(token!==scope()||sequence!==ownerState.seq||S.selected!==pip)return;
+  ownerState.pip=pip;ownerState.value=value;ownerState.error='';render();}
+ catch(error){if(token===scope()&&sequence===ownerState.seq&&S.selected===pip){if(ownerState.pip!==pip){ownerState.pip=pip;ownerState.value=null;}ownerState.error=errorText(error);render();}}
+}
+function ownerSectionMarkup(off){
+ if(!ownerShown())return '';
+ if(ownerState.asked!==S.selected)void loadOwner();
+ const mine=ownerState.pip===S.selected;
+ return ownerMarkup(mine?ownerState.value:null,{esc,titles:ownerState.titles,picker:mine?ownerState.picker:null,busy:off||ownerState.busy,error:mine?ownerState.error:'',pipName:S.pip?.name||'This Pip'});
+}
+// Change: this project's Work sessions (the Pip's own project, as DGC lists them; 100 at most), newest first.
+async function openOwnerPicker(){
+ if(!ownerShown()||!usable()||ownerState.busy||ownerState.pip!==S.selected||!ownerState.value)return;
+ const token=scope(),pip=S.selected,workspace=S.pip.workspace_id,picker={sessions:null,error:''};
+ ownerState.picker=picker;ownerState.error='';render();
+ try{
+  const rows=[];let after='';
+  for(let page=0;page<5;page++){const got=workspaceSessionsPage(await send('list_workspace_sessions',{workspace_id:workspace,limit:20,...(after?{after}:{})}),workspace,after);rows.push(...got.sessions);after=got.next_cursor;if(!got.has_more)break;}
+  await loadWorkTitles();
+  if(token!==scope()||S.selected!==pip||ownerState.picker!==picker)return;
+  // Newest first: a session's id starts with when it began. The owner is always among them.
+  const ids=rows.map(r=>r.session_id);if(ownerState.value.session&&!ids.includes(ownerState.value.session))ids.push(ownerState.value.session);
+  picker.sessions=ids.sort().reverse();
+ }catch(error){if(token===scope()&&S.selected===pip&&ownerState.picker===picker){picker.sessions=[];picker.error=errorText(error);}}
+ if(token===scope()&&S.selected===pip&&ownerState.picker===picker){render();root.querySelector('.pip-owner [aria-checked="true"]')?.focus();}
+}
+async function chooseOwner(session){
+ if(!ownerShown()||!usable()||ownerState.busy||ownerState.pip!==S.selected||!ownerState.value||!ownerState.picker)return;
+ if((ownerState.value.session||null)===session){ownerState.picker=null;render();$('pip-owner-change')?.focus();return;}
+ const token=scope(),pip=S.selected,name=S.pip?.name||'This Pip';
+ ownerState.busy=true;ownerState.error='';render();
+ try{const value=pipOwnerSet(await send('set_pip_owner',{pip_id:pip,session_id:session}),pip,session);if(token!==scope()||S.selected!==pip)return;
+  ownerState.value=value;ownerState.picker=null;S.notice=session?`${name} now reports to that session.`:`${name} has no owner session. Its reports wait in the Pips view.`;}
+ catch(error){if(token===scope()&&S.selected===pip)ownerState.error=errorText(error);}
+ finally{ownerState.busy=false;if(token===scope()&&S.selected===pip){render();$('pip-owner-change')?.focus();}}
+}
 function jobSettingsMarkup(){
   if(archived())return `<section class="section"><h2>Archived${infoTip('pipArchivedSays','Archived','Its conversation and results are saved. Restore it to use it again.')}</h2><p class="goal">${esc(S.pip.goal)}</p>${lifecycleMarkup()}</section>`;
   const p=S.pip,off=S.busy||!usable();
   const what=S.editingGoal?`<form id="revision-form" class="form">${field('revisionGoal','What should it do?',true)}<div class="actions"><button type="submit" class="primary"${off?' disabled':''}>Save</button>${button('cancel-goal','Cancel',S.busy,'quiet')}</div></form>`:`<p class="goal">${esc(p.goal)}</p>`;
   return `<section class="section"><div class="section-head"><h2>What it does</h2><div class="actions">${S.editingGoal?'':button('edit-goal','Edit',off,'quiet')}${S.apiVersion>=23?button('setup-in-chat','Change in chat',off,'quiet'):''}</div></div>${what}</section>`
    +`<section class="section"><h2>When it runs${infoTip('pipRunsSays','When it runs',esc(quickScheduleParts().says))}</h2>${quickScheduleParts().html}</section>`
+   // Which Work session its reports come to (Pips API 89): its owner session, and Change.
+   +ownerSectionMarkup(off)
    // How much it asks, for a Project Pip (Pips API 80, pips-11): the same picker, about the handoffs it is sent.
    +(levelShown()?levelMarkup(levelState.pip===p.id?levelState.value:null,{esc,busy:off||levelState.busy,error:levelState.error,pipName:p.name,when:at=>shortDate(at)}):'')
    +artifactsSectionMarkup(p,off,true)
@@ -5334,7 +5383,7 @@ function renderReview() {
   $('review-title')?.focus({preventScroll:true});document.querySelector('[role=dialog]')?.scrollTo?.(0,0);
   picker.restore();
 }
-function clearSelection() { resetProjects();S.pipKeys=[];S.pipKeysError='';pipKeysSeq++;pipKeyBusy='';pipKeyConfirm='';pipKeyFilled.clear();pipKeyErrors.clear();pipKeyDone.clear();pipKeyTicked.clear();S.keyRequests=[];keyFilled.clear();keyErrors.clear();keySaved.clear();S.notes=null;S.notesPip='';S.notesError='';notesSeq++;noteConfirmAll=false;draft.noteAdd='';S.workingNotes=null;S.workingNotesPip='';S.workingNotesError='';workingNotesSeq++;workingNotesEditing=false;draft.workingNotesText='';S.dailyLog=null;S.dailyLogPip='';S.dailyLogError='';dailyLogSeq++;S.appLinks=[];S.appLinksError='';skillsUse.pip='';skillsUse.asked='';skillsUse.value=null;skillsUse.error='';skillsUse.busy=false;skillsUse.seq++;folderUi.open=false;folderUi.adding=false;folderUi.error='';folderUi.busy=false;appsUse.pip='';appsUse.asked='';appsUse.value=null;appsUse.error='';appsUse.busy=false;appsUse.confirm='';appsUse.seq++;allowFrom.clear();allowFromOpen='';S.plugins=[];S.pluginsInstalled=[];S.pluginsError='';pluginSeq++;pluginBusy='';S.routines=null;S.routinesError='';routineSeq++;routineEditing='';routineError='';S.pipPage='info';S.legacyOpen=false;pageNameDirty=false;lookDirty=false;shared.pip='';shared.seq++;window.clearTimeout(appLinkTimer);appLinkBusy=''; S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);postsSeq++;S.posts=[];S.postsCursor=null;S.postsPip='';S.postsLoaded=false;S.fixes=new Map();S.fixesPip='';fixesSeq++;S.postsLoading=false;S.postsError='';messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.chatWaiting=[];S.routineNotes=[];S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; dropLive(); selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
+function clearSelection() { resetProjects();resetOwner();S.pipKeys=[];S.pipKeysError='';pipKeysSeq++;pipKeyBusy='';pipKeyConfirm='';pipKeyFilled.clear();pipKeyErrors.clear();pipKeyDone.clear();pipKeyTicked.clear();S.keyRequests=[];keyFilled.clear();keyErrors.clear();keySaved.clear();S.notes=null;S.notesPip='';S.notesError='';notesSeq++;noteConfirmAll=false;draft.noteAdd='';S.workingNotes=null;S.workingNotesPip='';S.workingNotesError='';workingNotesSeq++;workingNotesEditing=false;draft.workingNotesText='';S.dailyLog=null;S.dailyLogPip='';S.dailyLogError='';dailyLogSeq++;S.appLinks=[];S.appLinksError='';skillsUse.pip='';skillsUse.asked='';skillsUse.value=null;skillsUse.error='';skillsUse.busy=false;skillsUse.seq++;folderUi.open=false;folderUi.adding=false;folderUi.error='';folderUi.busy=false;appsUse.pip='';appsUse.asked='';appsUse.value=null;appsUse.error='';appsUse.busy=false;appsUse.confirm='';appsUse.seq++;allowFrom.clear();allowFromOpen='';S.plugins=[];S.pluginsInstalled=[];S.pluginsError='';pluginSeq++;pluginBusy='';S.routines=null;S.routinesError='';routineSeq++;routineEditing='';routineError='';S.pipPage='info';S.legacyOpen=false;pageNameDirty=false;lookDirty=false;shared.pip='';shared.seq++;window.clearTimeout(appLinkTimer);appLinkBusy=''; S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);postsSeq++;S.posts=[];S.postsCursor=null;S.postsPip='';S.postsLoaded=false;S.fixes=new Map();S.fixesPip='';fixesSeq++;S.postsLoading=false;S.postsError='';messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.chatWaiting=[];S.routineNotes=[];S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; dropLive(); selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
 // "Report ready", "Last run failed": the Pip page's status names its latest run, so it opens that run (reported
 // 19 Oct: it read like a link and did nothing). A status that names no finished run stays words.
 // Since its runs post in its chat (API 51), the status says what the latest found and goes to that post.
@@ -5832,6 +5881,9 @@ document.addEventListener('click',event=>{
   if(target.dataset.hookClose!==undefined){closeHook();render();return;}
   if(target.dataset.reachTailscale!==undefined){askTailscale();return;}
   if(target.dataset.reachOff!==undefined){if(!S.busy)void reachCall({tunnel:null},'off','Turned off. Services on the internet can no longer reach your routines.');return;}
+  if(target.id==='pip-owner-change'){void openOwnerPicker();return;}
+  if(target.id==='pip-owner-cancel'){ownerState.picker=null;render();$('pip-owner-change')?.focus();return;}
+  if(target.dataset.ownerSession!==undefined){void chooseOwner(target.dataset.ownerSession||null);return;}
   if(target.dataset.routineEdit){editRoutine(target.dataset.routineEdit);return;}
   if(target.dataset.routineNew!==undefined){editRoutine('new');return;}
   if(target.dataset.routineCancel!==undefined){routineEditing='';routineError='';closeHook();render();return;}

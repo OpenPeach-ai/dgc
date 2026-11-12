@@ -1831,6 +1831,81 @@
     // autofocus with a console error ("Blocked autofocusing on a <button> element in a cross-origin subframe.").
     dialog.querySelector(".auto-mode-cancel").focus();
   }
+  // Deleting or archiving a Work session that is the owner of Project Pips (0.52, asked 12 Nov; Pips API 89). The host
+  // asks (sessionPipsAsk: the session's title, its Pips, the project's other sessions); this names the Pips, each with
+  // its face, and answers once (sessionPipsAnswer). Delete: move them to another session, or delete them too, behind
+  // the Pips view's own words for a permanent delete. Archive: keep them here (the default), or move them.
+  let sessionPipsDialog = null;
+  function closeSessionPips(answer) {
+    const current = sessionPipsDialog;
+    if (!current) return;
+    sessionPipsDialog = null;
+    current.dialog.remove();
+    if (current.focus?.isConnected) current.focus.focus();
+    if (answer) vscode.postMessage({ type: "sessionPipsAnswer", requestId: current.id, ...answer });
+  }
+  function showSessionPips(message) {
+    closeSessionPips({ choice: "cancel" });
+    const pips = (Array.isArray(message.pips) ? message.pips : []).filter((p) => p && typeof p.name === "string" && p.name).slice(0, 200);
+    if (typeof message.requestId !== "string" || !/^[a-f0-9]{32}$/.test(message.requestId) || !["delete", "archive"].includes(message.mode)
+      || !pips.length || pips.length !== (message.pips || []).length || pips.some((p) => !/^pip_[0-9a-f]{32}$/.test(String(p.id || "")))) return;
+    const archive = message.mode === "archive", n = pips.length, one = n === 1;
+    const sessions = (Array.isArray(message.sessions) ? message.sessions : []).filter((s) => s && /^[A-Za-z0-9_-]{1,128}$/.test(String(s.id || "")) && typeof s.title === "string").slice(0, 500);
+    const title = String(message.title || "").replace(/\s+/g, " ").trim().slice(0, 200) || "this session";
+    const dialog = document.createElement("dialog");
+    dialog.className = "session-pips-dialog dgc-dialog";
+    dialog.setAttribute("aria-labelledby", "session-pips-title");
+    dialog.setAttribute("aria-describedby", "session-pips-intro");
+    const types = window.DgcMentions?.PIP_TYPES || [];
+    const face = (p, i) => { const index = types.indexOf(p.pip_type);
+      return index >= 0 && window.PipConcepts?.plush ? window.PipConcepts.plush.markup({ index, name: p.name }, "idle", `sessionPip${i}`) : ""; };
+    const list = `<ul class="session-pips-list" aria-label="${one ? "The Project Pip it owns" : "The Project Pips it owns"}">${pips.map((p, i) =>
+      `<li><span class="session-pips-face" aria-hidden="true">${face(p, i)}</span><span class="session-pips-name" title="${esc(p.name)}">${esc(p.name)}</span></li>`).join("")}</ul>`;
+    const them = one ? "it" : "them";
+    const state = { step: "ask", choice: archive ? "keep" : "move", to: sessions[0]?.id || "" };
+    const paint = () => {
+      if (state.step === "sure") {
+        dialog.innerHTML = `<div class="session-pips-body"><h2 id="session-pips-title">${one ? `Delete ${esc(pips[0].name)} permanently?` : `Delete ${n} Pips permanently?`}</h2>
+          <p id="session-pips-intro" class="session-pips-intro">${one
+    ? "This erases its chat, runs, computer files, what it kept in your memory, saved sign-ins used only by this Pip, Pip-created artifacts and audit receipts. It also removes references to this Pip from other Pips. This cannot be undone."
+    : "This erases each one’s chat, runs, computer files, what it kept in your memory, saved sign-ins used only by that Pip, Pip-created artifacts and audit receipts. It also removes references to them from other Pips. This cannot be undone."}</p>
+          ${list}</div><div class="session-pips-buttons"><button type="button" class="act session-pips-back">Back</button><button type="button" class="act wide danger session-pips-confirm">Delete permanently</button></div>`;
+        dialog.querySelector(".session-pips-back").onclick = () => { state.step = "ask"; paint(); dialog.querySelector(".session-pips-confirm").focus(); };
+        dialog.querySelector(".session-pips-confirm").onclick = () => closeSessionPips({ choice: "delete" });
+        return;
+      }
+      const option = (value, words) => `<label class="session-pips-choice"><input type="radio" name="session-pips-choice" value="${value}"${state.choice === value ? " checked" : ""}><span>${words}</span></label>`;
+      const picker = `<select class="session-pips-to" aria-label="The session to move ${them} to"${state.choice === "move" ? "" : " disabled"}>${sessions.map((s) =>
+        `<option value="${esc(s.id)}"${s.id === state.to ? " selected" : ""}>${esc(s.title.replace(/\s+/g, " ").trim().slice(0, 200) || "Untitled session")}</option>`).join("")}<option value=""${state.to ? "" : " selected"}>No session: ${one ? "its" : "their"} reports wait in the Pips view</option></select>`;
+      const move = option("move", `Move ${them} to another session`) + picker;
+      dialog.innerHTML = `<div class="session-pips-body"><h2 id="session-pips-title">${archive ? "Archive" : "Delete"} “${esc(title)}”?</h2>
+        <p id="session-pips-intro" class="session-pips-intro">This session is the owner of ${n} Project ${one ? "Pip" : "Pips"}. ${one ? "Its" : "Their"} reports come to it.${archive ? "" : " Its conversation is removed from this project, and this can’t be undone."}</p>
+        ${list}<fieldset class="session-pips-choices"><legend>What becomes of ${them}?</legend>${archive
+    ? option("keep", `Keep ${them} here; ${one ? "it comes" : "they come"} back when you restore it`) + move
+    : move + option("delete", `Delete ${them} too`)}</fieldset></div>
+        <div class="session-pips-buttons"><button type="button" class="act session-pips-cancel">Cancel</button><button type="button" class="act wide ${archive ? "primary" : "danger"} session-pips-confirm">${archive ? "Archive session" : "Delete session"}</button></div>`;
+      const to = dialog.querySelector(".session-pips-to");
+      to.onchange = () => { state.to = to.value; };
+      dialog.querySelectorAll('input[name="session-pips-choice"]').forEach((input) => { input.onchange = () => { if (!input.checked) return; state.choice = input.value; to.disabled = state.choice !== "move"; }; });
+      dialog.querySelector(".session-pips-cancel").onclick = () => closeSessionPips({ choice: "cancel" });
+      dialog.querySelector(".session-pips-confirm").onclick = () => {
+        state.to = to.value;
+        if (state.choice === "delete") { state.step = "sure"; paint(); dialog.querySelector(".session-pips-back").focus(); return; }
+        closeSessionPips(state.choice === "move" ? { choice: "move", to: state.to } : { choice: "keep" });
+      };
+    };
+    sessionPipsDialog = { dialog, id: message.requestId, focus: document.activeElement };
+    paint();
+    dialog.addEventListener("cancel", (e) => { e.preventDefault(); closeSessionPips({ choice: "cancel" }); });
+    dialog.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Escape") { e.preventDefault(); closeSessionPips({ choice: "cancel" }); }
+    });
+    document.body.appendChild(dialog);
+    if (typeof dialog.showModal === "function") dialog.showModal(); else dialog.setAttribute("open", "");
+    // (Focused here, not by autofocus: see the Auto-mode dialog.)
+    dialog.querySelector(".session-pips-cancel").focus();
+  }
   function cycleMode() { setMode(MODE_ORDER[(MODE_ORDER.indexOf(curMode) + 1) % MODE_ORDER.length]); }
   function hideModeMenu() { $("modemenu").hidden = true; $("btn-mode").setAttribute("aria-expanded", "false"); }
   function toggleModeMenu() {
@@ -12393,6 +12468,8 @@ function permissionChoices(ev) {
     if (window.DgcVideo?.message(msg)) return;     // a video's bytes, its state or its Stop (src/videoHost.ts)
     if (window.DgcPictureFold?.message(msg)) return;   // which pictures stay folded, and the setting
     if (msg?.type === "autoModePrompt") { showAutoModePrompt(msg); return; }
+    if (msg?.type === "sessionPipsAsk") { showSessionPips(msg); return; }
+    if (msg?.type === "sessionPipsDismiss") { if (msg.requestId === sessionPipsDialog?.id) closeSessionPips(); return; }
     if (msg?.type === "autoModeDismiss") {
       if (msg.requestId === autoModeDialog?.id) closeAutoModePrompt();
       return;

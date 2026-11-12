@@ -16,7 +16,33 @@ type PipArtifactsHub = Pick<Artifacts, 'list' | 'open' | 'offers'>;
 const ARTIFACT_ID = /^ar_[a-f0-9]{16}$/;
 
 // (The last six: webhooks in, fully local, Pips API 90: a routine's own secret address, and how calls reach this computer.)
-const commands = new Set(['get_pip_import_prompt','import_pip_source','get_pip_skills','set_pip_skill','get_pip_apps','set_pip_app','add_pip_app_account','list_pip_conversations','create_pip_conversation','rename_pip_conversation','archive_pip_conversation','add_pip_computer','list_pip_keys','save_pip_key','decline_pip_key','remove_pip_key','list_pip_flows','get_pip_flow','create_pip_flow','set_pip_flow','get_pip_artifacts','set_pip_artifacts','list_pip_run_fixes','list_pip_templates','decide_pip_template_change','list_app_events','list_apps','accept_app_update','list_pip_borrows','allow_pip_borrow','decline_pip_borrow','stop_pip_borrow','get_pip_level','set_pip_level','get_pip_working_notes','set_pip_working_notes','list_pip_daily_log','list_pip_logins','save_pip_login','remove_pip_login','grant_pip_login','get_pip_computer_apps','set_pip_computer_apps','get_pip_eyes','set_pip_eyes','list_pip_run_posts','list_pip_unread','mark_pip_read','check_pip_source','get_pip_run_source','mark_pip_news_seen','set_pip_chat_options','set_plugin_permission','list_pip_sites','set_pip_careful','forget_pip_site','list_pip_notes','add_pip_note','forget_pip_note','list_pip_attention','get_pips_limit','set_pips_limit','list_pip_reply_stats','get_pip_chat_context','list_pip_plugins','allow_pip_plugin','decline_pip_plugin','list_pip_plugin_uses','list_pip_routines','add_pip_routine','update_pip_routine','delete_pip_routine','decide_pip_routine','set_pip_profile','list_pip_shared','get_pip_computers','update_pip_computers','reset_pip_computer','list_pip_apps','finish_pip_computer_check','list_pip_app_links','start_pip_app_link','check_pip_app_link','decline_pip_app_link','disconnect_pip_app_link','get_pip_computer_desktop','list_pip_computer_files','read_pip_computer_file','add_pip_computer_file','remove_pip_computer_file','run_pip_computer_command','list_pip_computer_terminal','get_pip_message_image','introduce_pip','always_allow_pip_computer_action','get_pip_computer','list_pip_computer_actions','decide_pip_computer_action','get_pip_computer_frame','list_pip_computer_frames','stop_pip_computer','open_pip_computer','use_pip_computer_view','always_allow_pip_app_action','list_pip_action_grants','revoke_pip_action_grant','set_pip_feedback','list_pip_feedback','export_pip','get_pip_usage','get_pips_backup','set_pips_backup','get_pip_backup','set_pip_backup','undo_pip_change','get_pips_payments','set_pips_payments','set_pip_paying','get_pips_desktop_notifications','set_pips_desktop_notifications','get_pips_keep_running','set_pips_keep_running','list_pip_starters','propose_starter_pip','get_pip_digest','mark_pip_digest_seen','get_pip_notify_settings','set_pip_notify_settings','get_pip_outcomes','get_pip_connector_draft','list_pip_connector_drafts','prepare_pip_connector_draft','dismiss_pip_connector_draft','inspect_pip_connector_actions','propose_pip_connector_action','get_pip_calendar_draft','list_pip_calendar_drafts','prepare_pip_calendar_draft','dismiss_pip_calendar_draft','inspect_pip_calendar_connection','propose_pip_calendar_action','get_pip_message_draft','list_pip_message_drafts','prepare_pip_message_draft','dismiss_pip_message_draft','inspect_pip_send_connection', 'propose_pip_app_action', 'get_pip_app_action', 'list_pip_app_actions', 'accept_pip_app_action', 'reject_pip_app_action', 'propose_pip_personal_handoff', 'list_pip_accounts', 'list_pip_connections', 'inspect_pip_connection', 'notify_pip_setup', 'revise_pip_setup', 'list_pip_setups', 'get_pip_setup', 'accept_pip_setup', 'reject_pip_setup', 'get_pip_statement_anchor', 'record_pip_statement', 'revoke_pip_statement', 'list_pip_statements', 'list_workspace_execution_receipts', 'get_workspace_execution_receipt', 'record_workspace_execution_context', 'archive_pip', 'restore_pip', 'delete_archived_pip', 'get_pip_exception_source', 'record_pip_exception', 'revoke_pip_exception', 'list_pip_memories', 'list_pip_notifications', 'mark_pip_notification_read', 'list_workspace_sessions', 'inspect_workspace_session_outcome', 'propose_workspace_session_outcome', 'get_workspace_session_outcome', 'list_workspace_session_outcomes', 'accept_workspace_session_outcome', 'reject_workspace_session_outcome', 'list_pip_types', 'list_pip_models', 'list_pip_messages', 'send_pip_message', 'list_workspaces', 'list_pips', 'create_pip', 'get_pip', 'get_pip_proposal', 'list_pip_adaptations', 'run_pip', 'list_pip_runs', 'get_pip_run', 'list_pip_run_activity', 'pause_pip', 'resume_pip', 'cancel_pip_run', 'propose_pip_update', 'accept_pip_update', 'reject_pip_update', 'list_pip_versions', 'list_pip_approvals', 'list_pip_checkpoints', 'review_pip_finding', 'review_pip_execution', 'get_pip_execution', 'propose_pip_handoff', 'propose_pip_artifact_handoff', 'get_pip_handoff', 'list_pip_handoffs', 'accept_pip_handoff', 'reject_pip_handoff', 'get_pip_runner', 'stop_pips', 'get_workspace_context', 'record_workspace_context', 'archive_workspace_context', 'accept_pip_finding', 'accept_pip_execution_context', 'rename_pip_computer', 'set_pip_computer_screen', 'get_pip_webhook', 'replace_pip_webhook_address', 'set_pip_webhook_signing', 'send_pip_webhook_test', 'get_webhook_reach', 'set_webhook_reach', ...PROJECT_COMMANDS]);
+/** A Project Pip's owner session (Pips API 89, dgc/pip_owners.py): the one Work chat its reports reach. get_pip_owner
+ *  {pip_id}, set_pip_owner {pip_id, session_id (null: no session)} and list_session_pips {session_id} are DGC's;
+ *  list_work_session_titles is the editor's own answer (the titles its Work list shows), never a Pip control. */
+export const OWNERS_API = 89;
+const OWNER_COMMANDS = ['get_pip_owner', 'set_pip_owner', 'list_session_pips'];
+export const WORK_SESSIONS_COMMAND = 'list_work_session_titles';
+const SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
+export function pipOwnersRefusal(request: any, apiVersion: number): string {
+  if (!OWNER_COMMANDS.includes(request?.type) && request?.type !== WORK_SESSIONS_COMMAND) return '';
+  if (apiVersion < OWNERS_API) return 'Update DGC to choose a Project Pip’s owner session.';
+  if (request.type === 'set_pip_owner' && request.session_id !== null && (typeof request.session_id !== 'string' || !SESSION_ID.test(request.session_id))) return 'Choose one of this project’s sessions.';
+  if (request.type === 'list_session_pips' && (typeof request.session_id !== 'string' || !SESSION_ID.test(request.session_id))) return 'Choose a session.';
+  return '';
+}
+/** The Work list's titles, checked: only real session ids, each once, a title cut at 200, 500 at most. */
+export function workSessionTitles(list: unknown): Array<{ id: string; title: string }> {
+  const seen = new Set<string>(), out: Array<{ id: string; title: string }> = [];
+  for (const item of Array.isArray(list) ? list : []) {
+    if (!item || typeof item.id !== 'string' || !SESSION_ID.test(item.id) || seen.has(item.id) || typeof item.title !== 'string' || out.length >= 500) continue;
+    seen.add(item.id);
+    out.push({ id: item.id, title: item.title.replace(/\s+/g, ' ').trim().slice(0, 200) });
+  }
+  return out;
+}
+/** A Project Pip a session owns, as list_session_pips lists it. */
+export interface OwnedPip { id: string; name: string; pip_type: string; status: string }
+const commands = new Set(['get_pip_import_prompt','import_pip_source','get_pip_skills','set_pip_skill','get_pip_apps','set_pip_app','add_pip_app_account','list_pip_conversations','create_pip_conversation','rename_pip_conversation','archive_pip_conversation','add_pip_computer','list_pip_keys','save_pip_key','decline_pip_key','remove_pip_key','list_pip_flows','get_pip_flow','create_pip_flow','set_pip_flow','get_pip_artifacts','set_pip_artifacts','list_pip_run_fixes','list_pip_templates','decide_pip_template_change','list_app_events','list_apps','accept_app_update','list_pip_borrows','allow_pip_borrow','decline_pip_borrow','stop_pip_borrow','get_pip_level','set_pip_level','get_pip_working_notes','set_pip_working_notes','list_pip_daily_log','list_pip_logins','save_pip_login','remove_pip_login','grant_pip_login','get_pip_computer_apps','set_pip_computer_apps','get_pip_eyes','set_pip_eyes','list_pip_run_posts','list_pip_unread','mark_pip_read','check_pip_source','get_pip_run_source','mark_pip_news_seen','set_pip_chat_options','set_plugin_permission','list_pip_sites','set_pip_careful','forget_pip_site','list_pip_notes','add_pip_note','forget_pip_note','list_pip_attention','get_pips_limit','set_pips_limit','list_pip_reply_stats','get_pip_chat_context','list_pip_plugins','allow_pip_plugin','decline_pip_plugin','list_pip_plugin_uses','list_pip_routines','add_pip_routine','update_pip_routine','delete_pip_routine','decide_pip_routine','set_pip_profile','list_pip_shared','get_pip_computers','update_pip_computers','reset_pip_computer','list_pip_apps','finish_pip_computer_check','list_pip_app_links','start_pip_app_link','check_pip_app_link','decline_pip_app_link','disconnect_pip_app_link','get_pip_computer_desktop','list_pip_computer_files','read_pip_computer_file','add_pip_computer_file','remove_pip_computer_file','run_pip_computer_command','list_pip_computer_terminal','get_pip_message_image','introduce_pip','always_allow_pip_computer_action','get_pip_computer','list_pip_computer_actions','decide_pip_computer_action','get_pip_computer_frame','list_pip_computer_frames','stop_pip_computer','open_pip_computer','use_pip_computer_view','always_allow_pip_app_action','list_pip_action_grants','revoke_pip_action_grant','set_pip_feedback','list_pip_feedback','export_pip','get_pip_usage','get_pips_backup','set_pips_backup','get_pip_backup','set_pip_backup','undo_pip_change','get_pips_payments','set_pips_payments','set_pip_paying','get_pips_desktop_notifications','set_pips_desktop_notifications','get_pips_keep_running','set_pips_keep_running','list_pip_starters','propose_starter_pip','get_pip_digest','mark_pip_digest_seen','get_pip_notify_settings','set_pip_notify_settings','get_pip_outcomes','get_pip_connector_draft','list_pip_connector_drafts','prepare_pip_connector_draft','dismiss_pip_connector_draft','inspect_pip_connector_actions','propose_pip_connector_action','get_pip_calendar_draft','list_pip_calendar_drafts','prepare_pip_calendar_draft','dismiss_pip_calendar_draft','inspect_pip_calendar_connection','propose_pip_calendar_action','get_pip_message_draft','list_pip_message_drafts','prepare_pip_message_draft','dismiss_pip_message_draft','inspect_pip_send_connection', 'propose_pip_app_action', 'get_pip_app_action', 'list_pip_app_actions', 'accept_pip_app_action', 'reject_pip_app_action', 'propose_pip_personal_handoff', 'list_pip_accounts', 'list_pip_connections', 'inspect_pip_connection', 'notify_pip_setup', 'revise_pip_setup', 'list_pip_setups', 'get_pip_setup', 'accept_pip_setup', 'reject_pip_setup', 'get_pip_statement_anchor', 'record_pip_statement', 'revoke_pip_statement', 'list_pip_statements', 'list_workspace_execution_receipts', 'get_workspace_execution_receipt', 'record_workspace_execution_context', 'archive_pip', 'restore_pip', 'delete_archived_pip', 'get_pip_exception_source', 'record_pip_exception', 'revoke_pip_exception', 'list_pip_memories', 'list_pip_notifications', 'mark_pip_notification_read', 'list_workspace_sessions', 'inspect_workspace_session_outcome', 'propose_workspace_session_outcome', 'get_workspace_session_outcome', 'list_workspace_session_outcomes', 'accept_workspace_session_outcome', 'reject_workspace_session_outcome', 'list_pip_types', 'list_pip_models', 'list_pip_messages', 'send_pip_message', 'list_workspaces', 'list_pips', 'create_pip', 'get_pip', 'get_pip_proposal', 'list_pip_adaptations', 'run_pip', 'list_pip_runs', 'get_pip_run', 'list_pip_run_activity', 'pause_pip', 'resume_pip', 'cancel_pip_run', 'propose_pip_update', 'accept_pip_update', 'reject_pip_update', 'list_pip_versions', 'list_pip_approvals', 'list_pip_checkpoints', 'review_pip_finding', 'review_pip_execution', 'get_pip_execution', 'propose_pip_handoff', 'propose_pip_artifact_handoff', 'get_pip_handoff', 'list_pip_handoffs', 'accept_pip_handoff', 'reject_pip_handoff', 'get_pip_runner', 'stop_pips', 'get_workspace_context', 'record_workspace_context', 'archive_workspace_context', 'accept_pip_finding', 'accept_pip_execution_context', 'rename_pip_computer', 'set_pip_computer_screen', 'get_pip_webhook', 'replace_pip_webhook_address', 'set_pip_webhook_signing', 'send_pip_webhook_test', 'get_webhook_reach', 'set_webhook_reach', ...OWNER_COMMANDS, ...PROJECT_COMMANDS]);
 /** Images sent with a Pip message, as data URIs: 2 MiB of image, base64, plus headers. */
 const MAX_IMAGE_URI_CHARS = 2_800_000;
 /** Pips API 52: photos and files go the Work chat's way. The host writes them into the backend's spool
@@ -374,6 +400,46 @@ export class PipsEditor implements vscode.Disposable {
    *  folder, `brief` in its box and the patch beside it as a file. False when no chat opened. Set by the panel. */
   private projectWork?: (work: ProjectWork) => Promise<boolean>;
   useProjectWork(open: (work: ProjectWork) => Promise<boolean>): void { this.projectWork = open; }
+  private workSessions?: () => Promise<Array<{ id: string; title: string }>>;
+  /** The Work sessions of the folder this window has open, by the titles its list shows (for a Project Pip's owner). */
+  useWorkSessions(list: () => Promise<Array<{ id: string; title: string }>>): void { this.workSessions = list; }
+  /** The Project Pips a Work session is the owner of: what deleting or archiving it asks about. None on a DGC before
+   *  Pips API 89 (it keeps no owner), or while Pips are off. */
+  async sessionPips(sessionId: string): Promise<OwnedPip[]> {
+    if (!this.state.connected || !this.state.supported || !this.state.enabled || this.apiVersion < OWNERS_API || !SESSION_ID.test(sessionId)) return [];
+    const result = await this.hostAsk('list_session_pips', { session_id: sessionId });
+    if (result?.session_id !== sessionId || !Array.isArray(result.pips)) throw new Error('DGC answered about another session. Try again.');
+    return result.pips.filter((p: any) => p && typeof p.id === 'string' && /^pip_[0-9a-f]{32}$/.test(p.id) && typeof p.name === 'string' && p.name)
+      .slice(0, 200).map((p: any) => ({ id: p.id, name: p.name.slice(0, 120), pip_type: String(p.pip_type || '').slice(0, 40), status: String(p.status || '').slice(0, 40) }));
+  }
+  /** Each of them to another session of its project (null: no session, its reports wait in the Pips view), one at a
+   *  time. The first DGC refuses stops it, named. */
+  async moveSessionPips(pips: OwnedPip[], sessionId: string | null): Promise<void> {
+    for (const pip of pips) {
+      try {
+        const result = await this.hostAsk('set_pip_owner', { pip_id: pip.id, session_id: sessionId });
+        if (result?.pip_id !== pip.id || (result.session_id ?? null) !== sessionId) throw new Error('DGC answered about another Pip. Try again.');
+      } catch (error) { throw new Error(`${pip.name}: ${error instanceof Error && error.message ? error.message : 'DGC couldn’t move it.'}`); }
+    }
+  }
+  /** Each of them deleted as the Pips view deletes one: archived (unless it is already), then deleted for good under
+   *  its own name. The first DGC refuses stops it, named: work still running must finish or be stopped first. */
+  async deleteSessionPips(pips: OwnedPip[]): Promise<void> {
+    for (const pip of pips) {
+      try {
+        let now = (await this.hostAsk('get_pip', { pip_id: pip.id }))?.pip;
+        const whole = (p: any) => p && p.id === pip.id && typeof p.name === 'string' && Number.isSafeInteger(p.current_version) && Number.isSafeInteger(p.lifecycle_revision);
+        if (!whole(now)) throw new Error('DGC answered about another Pip. Try again.');
+        if (now.status !== 'archived') {
+          now = (await this.hostAsk('archive_pip', { pip_id: pip.id, expected_version: now.current_version, expected_lifecycle_revision: now.lifecycle_revision,
+            request_key: 'owner-' + randomBytes(16).toString('hex'), reason: 'Deleted with its owner session.' }))?.pip;
+          if (!whole(now) || now.status !== 'archived') throw new Error('DGC didn’t confirm it was archived. Refresh, then try again.');
+        }
+        const gone = await this.hostAsk('delete_archived_pip', { pip_id: pip.id, expected_name: now.name, expected_version: now.current_version, expected_lifecycle_revision: now.lifecycle_revision });
+        if (gone?.deleted !== true || gone.pip_id !== pip.id) throw new Error('DGC didn’t confirm the deletion. Refresh, then try again.');
+      } catch (error) { throw new Error(`${pip.name}: ${error instanceof Error && error.message ? error.message : 'DGC couldn’t delete it.'}`); }
+    }
+  }
   constructor(private readonly extensionUri: vscode.Uri, private readonly send: (message: any, backendIdentity?: object) => boolean, private readonly connect: () => void, private readonly requireGeneration = false) {}
   attach(post: (message: any) => void): void {
     // The main panel is now the primary surface. Retire any old editor instance
@@ -617,7 +683,7 @@ export class PipsEditor implements vscode.Disposable {
     });
   }
   /** One read the host makes for Continue in Work, answered in DGC's own words when it is refused. */
-  private hostAsk(type: 'list_workspaces' | 'get_pip_project_change' | 'get_pip', fields: Record<string, unknown> = {}): Promise<any> {
+  private hostAsk(type: 'list_workspaces' | 'get_pip_project_change' | 'get_pip' | 'list_session_pips' | 'set_pip_owner' | 'archive_pip' | 'delete_archived_pip', fields: Record<string, unknown> = {}): Promise<any> {
     return new Promise((resolve, reject) => {
       if (!this.state.connected || !this.state.supported || !this.state.enabled) { reject(new Error('Pips aren’t available. Reconnect, then try again.')); return; }
       const requestId = 'pips-host-' + randomBytes(12).toString('hex');
@@ -1166,6 +1232,16 @@ export class PipsEditor implements vscode.Disposable {
     }
     // @ a project in a Personal Pip's chat (Pips API 91): an older DGC has no copies to list, apply or discard.
     { const refused = pipProjectsRefusal(request, this.apiVersion); if (refused) { fail(refused); return; } }
+    // A Project Pip's owner session (Pips API 89): an older DGC keeps no owner to read or set.
+    { const refused = pipOwnersRefusal(request, this.apiVersion); if (refused) { fail(refused); return; } }
+    if (request.type === WORK_SESSIONS_COMMAND) {
+      // The titles the editor's Work list shows, for the owner picker: the editor's own answer, never a Pip control.
+      if (computer) { fail('This tab only uses this Pip\'s computer.'); return; }
+      void Promise.resolve().then(() => this.workSessions ? this.workSessions() : []).then(
+        list => this.post({ type: 'pipsReply', id: message.id, ok: true, result: { sessions: workSessionTitles(list) } }, surface),
+        () => this.post({ type: 'pipsReply', id: message.id, ok: true, result: { sessions: [] } }, surface));
+      return;
+    }
     if (request.type === PROJECT_WORK_COMMAND) {
       // Continue in Work: the editor opens the Work chat itself; this is never a Pip control.
       if (computer || !projectWorkRequest(request)) { fail('That change can’t be opened in Work from here.'); return; }

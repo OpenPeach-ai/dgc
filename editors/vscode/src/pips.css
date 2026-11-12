@@ -1525,6 +1525,18 @@ label.team-pip>input[type=checkbox]{width:16px;height:16px;flex:none;margin:0}
 .import-reply{min-height:84px;max-height:min(30vh,220px)}
 .import-copy{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;min-width:0}
 .import-copy>.muted{font-size:12px;min-width:0}
+/* "Reports to" on a Project Pip's Settings (pipOwner.js): its owner session, and the picker Change opens. */
+.pip-owner .pip-owner-now{margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pip-owner p.muted.pip-owner-now{white-space:normal}
+.pip-owner-list{list-style:none;margin:10px 0 0;padding:4px;border:1px solid var(--pip-edge);border-radius:8px;display:grid;gap:1px;max-height:min(46vh,320px);overflow-y:auto;scrollbar-width:thin}
+.pip-owner-list>li{min-width:0}
+button.pip-owner-choice{display:flex;align-items:flex-start;gap:8px;width:100%;min-height:30px;padding:6px 8px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--vscode-foreground);text-align:left;font-weight:400}
+button.pip-owner-choice:hover:not(:disabled){background:var(--pip-wash)}
+.pip-owner-mark{flex:none;box-sizing:border-box;width:14px;height:14px;margin-top:2px;border:1px solid var(--text-2);border-radius:50%}
+.pip-owner-choice[aria-checked=true] .pip-owner-mark{border:4px solid var(--vscode-foreground)}
+.pip-owner-words{display:grid;gap:1px;min-width:0}
+.pip-owner-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pip-owner-words small{font-size:12px}
 /* A Pip's on/off switch in the side bar's top bar, which is full: with the switch in it the bar's gaps close up, so the
    Pip's name keeps the room it had, and a Project Pip's status beside its name (two letters of it were left) goes: its
    last run is in History, in the menu. (Last in the file: the chat's own top bar rules above are as specific.) */
