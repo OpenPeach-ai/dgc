@@ -699,24 +699,30 @@ def composio_toolkit(slug, links=()) -> str:
 
 
 def pin_batch(arguments, links) -> tuple:
-    """A multi-execute batch with every call for an app this Pip is linked to naming that link's account: (batch, None),
-    or (None, the one plain line refusing it) when a call names another. The account's address is taken for its id."""
-    from .pip_app_links import app_name
+    """A multi-execute batch with every call for an app this Pip is linked to naming one of its accounts for that app:
+    (batch, None), or (None, the one plain line refusing it). ``links``: {toolkit: [its links]} (pips-09: a Pip can hold
+    several). One account: it, named or not. Several: the call names one (its id or address); none, or another, refused."""
+    from .pip_app_links import app_name, choose
     calls = arguments.get("tools") if isinstance(arguments, dict) else None
     if not isinstance(calls, list) or not all(isinstance(c, dict) and isinstance(c.get("tool_slug"), str) for c in calls):
         # A batch DGC can't read can't be held to an account. With no link there's nothing to hold it to: as ever, it asks.
         return (None, "Give tools as a list of {tool_slug, arguments}. Nothing ran.") if links else (arguments, None)
     pinned = []
     for call in calls:
-        link = links.get(composio_toolkit(call["tool_slug"], links))
-        if link is None:
+        toolkit = composio_toolkit(call["tool_slug"], links)
+        found = links.get(toolkit)
+        if not found:
             pinned.append(call)
             continue
-        named = call.get("account")
-        label = str(link.get("label") or "")
-        if named not in (None, "", link["account"]) and not (isinstance(named, str) and label and named.strip().lower() == label.lower()):
-            return None, (f"{app_name(link['toolkit'])} on this Pip is linked to {label or link['account']}, and {call['tool_slug']} "
-                          "named another account, so nothing ran. Leave account out, or ask the user to change the link on this Pip's page.")
+        try:
+            link = choose(found, call.get("account"), toolkit)
+        except RegistryError as exc:
+            if len(found) == 1:
+                one = found[0]
+                return None, (f"{app_name(toolkit)} on this Pip is linked to {one.get('label') or one['account']}, and "
+                              f"{call['tool_slug']} named another account, so nothing ran. Leave account out, or ask the user "
+                              "to change the link on this Pip's page.")
+            return None, f"{exc} Nothing ran."
         pinned.append({**call, "account": link["account"]})
     return {**arguments, "tools": pinned}, None
 
@@ -1156,7 +1162,8 @@ class Session:
         if tool in COMPOSIO_UNPINNABLE:
             # These reach any app with no account to name: a Pip with its own app account never runs them (pips-09).
             if links:
-                toolkit, link = next(iter(links.items()))
+                toolkit, found = next(iter(links.items()))
+                link = found[0]
                 return None, (f"{tool} can't be held to one account, and this Pip has its own ({app_links.app_name(toolkit)}: "
                               f"{link.get('label') or link['account']}), so it did not run. Use {COMPOSIO_EXECUTE}, which "
                               "stays on the linked account.")

@@ -143,9 +143,10 @@ def _linked_account(store,payload):
     toolkit={'gmail_send':'gmail','calendar_create':'googlecalendar'}.get(payload.get('kind'))
     if toolkit is None:return
     from .pip_app_links import app_name,connected
-    link=next((a for a in connected(store.registry,payload['source']['pip_id']) if a['toolkit']==toolkit),None)
-    if link is not None and payload.get('account')!=link['account']:
-        raise RegistryError('account_changed',f"{app_name(toolkit)} on this Pip is linked to {link.get('label') or link['account']}, "
+    found=[a for a in connected(store.registry,payload['source']['pip_id']) if a['toolkit']==toolkit]
+    if found and payload.get('account') not in {a['account'] for a in found}:
+        labels=', '.join(str(a.get('label') or a['account']) for a in found)
+        raise RegistryError('account_changed',f"{app_name(toolkit)} on this Pip is linked to {labels}, "
                             "and this action names another account, so it didn't run. Prepare it again.")
 
 

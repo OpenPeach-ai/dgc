@@ -934,9 +934,13 @@ def check(store, actor, payload) -> None:
 def _route(registry, config, pip_id, toolkit):
     """The connected account a level sends with: the Pip's own connected app, its account and its current schema."""
     from . import pip_app_accounts, pip_app_links
-    link = next((a for a in pip_app_links.connected(registry, pip_id) if a["toolkit"] == toolkit), None)
-    if link is None:
+    found = [a for a in pip_app_links.connected(registry, pip_id) if a["toolkit"] == toolkit]
+    if not found:
         raise RegistryError("not_connected", f"{toolkit} isn't connected to this Pip.")
+    if len(found) > 1:
+        # Several accounts of one app (pips-09): which one sends is the user's to say on the card, never DGC's guess.
+        raise RegistryError("choose_account", f"This Pip has {len(found)} {toolkit} accounts: the card asks which one sends.")
+    link = found[0]
     if toolkit == "gmail":
         from .pip_app_sends import inspect
     else:

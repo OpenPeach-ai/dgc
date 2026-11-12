@@ -261,7 +261,8 @@ def _matching(grants, kind, draft_content, linked=None):
     for g in grants:
         if g["kind"] != kind:
             continue
-        if toolkit and (linked or {}).get(toolkit) and g.get("account") != linked[toolkit]:
+        mine = (linked or {}).get(toolkit) if toolkit else None
+        if mine and g.get("account") not in ({mine} if isinstance(mine, str) else set(mine)):
             continue
         # A connector draft pins its own discovered connection and tool schema: all must agree.
         if kind == "connector_call" and any(draft_content.get(k) != g[k] for k in ("server", "connection_digest", "schema_digest")):
@@ -287,7 +288,9 @@ def dispatch_for_run(registry, config, run_id) -> list:
         if not grants:
             return outcomes
         from .pip_app_links import connected
-        linked = {link["toolkit"]: link["account"] for link in connected(registry, row[0])}
+        linked = {}
+        for link in connected(registry, row[0]):
+            linked.setdefault(link["toolkit"], set()).add(link["account"])
     except Exception:
         return outcomes
     for draft_kind, action_kind, table in (("email", "gmail_send", "pip_message_drafts"),

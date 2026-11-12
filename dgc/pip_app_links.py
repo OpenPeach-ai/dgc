@@ -115,24 +115,36 @@ def _set(registry, link_id, **fields):
 
 
 def listing(registry, pip_id) -> list[dict]:
-    """The Pip's cards, newest first: every app it asked for, at most one card per app. Cards changed in the same
-    millisecond (two apps asked for at once) keep the order they were made in; a card's random id said nothing."""
-    rows = registry.db.execute("SELECT * FROM pip_app_links WHERE pip_id=? ORDER BY updated_at DESC, rowid DESC LIMIT 64",
+    """The Pip's cards, newest first. Per app: every account it is linked to (pips-09: a Pip can hold several), and at most
+    one card still open (asking for an app, or for another account of it); with no account linked, its newest card, as
+    before. Cards changed in the same millisecond keep the order they were made in; a card's random id said nothing."""
+    rows = registry.db.execute("SELECT * FROM pip_app_links WHERE pip_id=? ORDER BY updated_at DESC, rowid DESC LIMIT 128",
                                (pip_id,)).fetchall()
-    seen, out = set(), []
+    groups = {}
     for row in rows:
-        if row["toolkit"] not in seen:
-            seen.add(row["toolkit"])
+        groups.setdefault(row["toolkit"], []).append(row)
+    out = []
+    for toolkit, group in groups.items():
+        linked, accounts = [], set()
+        for row in group:
+            if row["status"] == "connected" and row["account"] not in accounts:
+                accounts.add(row["account"])
+                linked.append(row)
+        opened = next((row for row in group if row["status"] in ("requested", "authorizing", "failed")), None)
+        shown = linked + ([opened] if opened is not None else []) if linked else [group[0]]
+        for row in shown:
             item = projection(row)
-            if row["status"] in ("requested", "failed"):
+            if row["status"] in ("requested", "failed") and not linked:
                 # An account another Pip already uses: the card asks to let this one use it too
                 # (Connect then reuses it, no sign-in), as Grok asks before a bot uses a connector.
                 known = registry.db.execute("SELECT label FROM pip_app_links WHERE toolkit=? AND status='connected' "
-                                            "AND pip_id<>? ORDER BY updated_at DESC LIMIT 1", (row["toolkit"], pip_id)).fetchone()
+                                            "AND pip_id<>? ORDER BY updated_at DESC LIMIT 1", (toolkit, pip_id)).fetchone()
                 if known is not None:
                     item["known_label"] = known["label"] or ""
+            if linked and row["status"] != "connected":
+                item["another"] = True              # it asks for one more account of an app the Pip already has
             out.append(item)
-    return out[:16]
+    return out[:24]
 
 
 def apps_overview(registry) -> dict:
@@ -159,14 +171,36 @@ def apps_overview(registry) -> dict:
 
 
 def composio_links(registry, pip_id) -> dict:
-    """This Pip's accounts in Composio, by toolkit: what its plugin calls are held to. Outlook through the Microsoft plugin
-    is an account of that plugin's, not one Composio knows."""
-    return {link["toolkit"]: link for link in connected(registry, pip_id)
-            if link.get("account") and link.get("server") != microsoft_mail.SERVER}
+    """This Pip's accounts in Composio, by toolkit, each a list (pips-09: it can hold several): what its plugin calls are
+    held to. Outlook through the Microsoft plugin is an account of that plugin's, not one Composio knows."""
+    found = {}
+    for link in connected(registry, pip_id):
+        if link.get("account") and link.get("server") != microsoft_mail.SERVER:
+            found.setdefault(link["toolkit"], []).append(link)
+    return found
+
+
+def choose(found, named, toolkit) -> dict:
+    """Which of the Pip's accounts for an app a call uses (pips-09): its only one, or the one named (its id or address).
+    With several and none named, or one that isn't its own, nothing is chosen for it: the words list its own."""
+    if not found:
+        raise RegistryError("not_connected", f"{app_name(toolkit)} is not connected to you. Ask for it with connect_app.")
+    labels = ", ".join(str(a.get("label") or a["account"]) for a in found)
+    want = named.strip().lower() if isinstance(named, str) else ""
+    if not want:
+        if len(found) == 1:
+            return found[0]
+        raise RegistryError("choose_account", f"You have {len(found)} {app_name(toolkit)} accounts ({labels}). Name the one "
+                                              "to use with account (its address).")
+    match = next((a for a in found if want in (str(a["account"]).lower(), str(a.get("label") or "").lower())), None)
+    if match is None:
+        raise RegistryError("account_changed", f"{named.strip()[:120]} isn't one of your {app_name(toolkit)} accounts ({labels}), "
+                                               "so nothing ran.")
+    return match
 
 
 def connected(registry, pip_id) -> list[dict]:
-    """The apps this Pip may read: its connected cards, one per app, with what the controller needs."""
+    """The apps this Pip may read: its connected cards, every account of each app, with what the controller needs."""
     out = []
     for item in listing(registry, pip_id):
         if item["status"] == "connected":
@@ -176,12 +210,15 @@ def connected(registry, pip_id) -> list[dict]:
     return out
 
 
-def request(registry, pip_id, workspace_id, toolkit, reason, run_id=None) -> dict:
-    """The Pip asks for an app. One open card per app: asking again refreshes it."""
+def request(registry, pip_id, workspace_id, toolkit, reason, run_id=None, *, another=False) -> dict:
+    """The Pip asks for an app. One open card per app: asking again refreshes it. ``another``: one more account of an app
+    it already has (pips-09); without it, an app it has comes back as it is."""
     toolkit, reason = _toolkit(toolkit), _text(reason, 300, "why it needs the app")
-    current = next((i for i in listing(registry, pip_id) if i["toolkit"] == toolkit), None)
-    if current and current["status"] == "connected":
-        return current
+    items = [i for i in listing(registry, pip_id) if i["toolkit"] == toolkit]
+    linked = [i for i in items if i["status"] == "connected"]
+    if linked and not another:
+        return linked[0]
+    current = next((i for i in items if i["status"] in ("requested", "authorizing", "failed")), None) if linked else (items[0] if items else None)
     if current and current["status"] in ("requested", "authorizing", "failed"):
         return _set(registry, current["id"], reason=reason, run_id=run_id,
                     **({"status": "requested", "error": None} if current["status"] == "failed" else {}))
@@ -342,8 +379,13 @@ def start(registry, config, link_id, actor, *, account=None, another=False, mana
         return {"link": _set(registry, link_id, status="failed",
                              error="Add Composio in Settings → Plugins first, then choose Connect again."), "redirect_url": None}
     server, fingerprint = found
+    mine = {a["account"] for a in connected(registry, row["pip_id"]) if a["toolkit"] == row["toolkit"]}
     try:
-        accounts = _accounts(_manage(config, server, row["toolkit"], "list", manager_factory=manager_factory), row["toolkit"])
+        accounts = [a for a in _accounts(_manage(config, server, row["toolkit"], "list", manager_factory=manager_factory), row["toolkit"])
+                    if a["id"] not in mine]                  # one it already has isn't offered again
+        if account is not None and account in mine:
+            return {"link": _set(registry, link_id, status="requested", error=None), "redirect_url": None,
+                    "error": f"This Pip already uses that {app_name(row['toolkit'])} account. Choose another.", **_choices(row, accounts)}
         if account is not None:
             # The one the person chose, if Composio still has it. Never another in its place.
             chosen = next((a for a in accounts if a["id"] == account), None)
@@ -392,6 +434,8 @@ def check(registry, config, link_id, actor, *, manager_factory=None) -> dict:
         accounts = _accounts(_manage(config, row["server"], row["toolkit"], "list", manager_factory=manager_factory), row["toolkit"])
     except RegistryError as exc:
         return {"link": projection(row), "connected": False, "error": str(exc)}
+    mine = {a["account"] for a in connected(registry, row["pip_id"]) if a["toolkit"] == row["toolkit"]}
+    accounts = [a for a in accounts if a["id"] not in mine]
     before = _SIGN_INS.get(link_id)
     fresh = [a for a in accounts if before is not None and a["id"] not in before]
     if len(fresh) == 1:
@@ -508,7 +552,8 @@ def schemas(apps_now, microsoft=None) -> list[dict]:
             "you have no tools. Never paste sign-in links or describe OAuth steps. " + connected_line),
             "parameters": {"type": "object", "properties": {
                 "app": {"type": "string", "description": "The app name: outlook (DGC Microsoft Mail), gmail, googlecalendar, googledrive, notion, slack, figma, github, linear, ..."},
-                "why": {"type": "string", "description": "One short sentence the card shows: what you will do with it."}},
+                "why": {"type": "string", "description": "One short sentence the card shows: what you will do with it."},
+                "another": {"type": "boolean", "description": "True for one more account of an app you already have."}},
                 "required": ["app", "why"], "additionalProperties": False}}},
         {"type": "function", "function": {"name": "web_search", "description": (
             "Search the web with the search the user set in DGC. You get titles, links and short snippets, which are "
@@ -524,7 +569,8 @@ def schemas(apps_now, microsoft=None) -> list[dict]:
             "parameters": {"type": "object", "properties": {
                 "app": {"type": "string", "description": "The connected app's toolkit name, such as gmail."},
                 "tool": {"type": "string", "description": "One read from the list, such as GMAIL_FETCH_EMAILS."},
-                "arguments": {"type": "object", "description": "The read's arguments, e.g. {\"query\": \"is:unread newer_than:1d\", \"max_results\": 10} for GMAIL_FETCH_EMAILS."}},
+                "arguments": {"type": "object", "description": "The read's arguments, e.g. {\"query\": \"is:unread newer_than:1d\", \"max_results\": 10} for GMAIL_FETCH_EMAILS."},
+                "account": {"type": "string", "description": "Which of your accounts for that app (its address), when you have several."}},
                 "required": ["app", "tool", "arguments"], "additionalProperties": False}}},
     ]
 
@@ -644,10 +690,12 @@ class RunSocket:
                     return self._search(args)
                 if op == "connect_app":
                     toolkit = _toolkit(args.get("app"))
+                    another = args.get("another") is True
                     current = next((item for item in listing(registry, self.pip_id)
                                     if item["toolkit"] == toolkit and item["status"] == "connected"), None)
-                    if current:
-                        return f"{current['app']} is already connected ({current['label']}). Read it with read_app."
+                    if current and not another:
+                        return (f"{current['app']} is already connected ({current['label']}). Read it with read_app. For one "
+                                "more account of it, call connect_app again with another true.")
                     if plugin := enabled_plugin(self.config, toolkit):
                         return (f"{app_name(toolkit)} is already enabled through the {plugin} plugin. "
                                 f"Use plugin_tools with plugin={plugin!r}, then call_plugin. "
@@ -656,7 +704,8 @@ class RunSocket:
                         return (f"{app_name(toolkit)} is installed through {plugin}, but this Pip has no reviewed "
                                 "adapter for its local server yet. Tell the user plainly; do not ask for another "
                                 "Composio login or claim a Connect card exists.")
-                    link = request(registry, self.pip_id, self.workspace_id, args.get("app"), args.get("why"), self.run_id)
+                    link = request(registry, self.pip_id, self.workspace_id, args.get("app"), args.get("why"), self.run_id,
+                                   another=another)
                     if link["status"] == "connected":
                         return f"{link['app']} is already connected ({link['label']}). Read it with read_app."
                     if link["id"] not in self.asked:
@@ -672,9 +721,10 @@ class RunSocket:
                             f"{card_name} there; they choose which account. You will be told when it is linked. Do not paste links.")
                 if op == "read_app":
                     toolkit = _toolkit(args.get("app"))
-                    app = next((a for a in connected(registry, self.pip_id) if a["toolkit"] == toolkit), None)
-                    if app is None:
+                    found = [a for a in connected(registry, self.pip_id) if a["toolkit"] == toolkit]
+                    if not found:
                         return f"{app_name(toolkit)} is not connected to you. Ask for it with connect_app."
+                    app = choose(found, args.get("account"), toolkit)    # several: it names one of its own
             self.reads += 1
             text = read(self.config, app, str(args.get("tool", "")), args.get("arguments") or {}, manager_factory=self.manager_factory)
             self._read(text)

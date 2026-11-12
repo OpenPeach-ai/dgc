@@ -742,7 +742,13 @@ def check(registry, config, row, *, reader=None, now=None) -> str:
     from . import pip_app_links
     toolkit, tool = APP_KINDS[trigger["kind"]]
     every = timedelta(minutes=trigger["every_minutes"])
-    app = next((a for a in pip_app_links.connected(registry, row["pip_id"]) if a["toolkit"] == toolkit), None)
+    found = [a for a in pip_app_links.connected(registry, row["pip_id"]) if a["toolkit"] == toolkit]
+    if len(found) > 1:
+        name = "Gmail" if toolkit == "gmail" else "Google Calendar"
+        _record(registry, row, next_due_at=stamp(now + every), last_checked_at=stamp(now),
+                last_error=f"{job['name']} has {len(found)} {name} accounts and this routine watches only one, so it waits until it is told which.")
+        return "no_app"
+    app = found[0] if found else None
     if app is None:
         name = "Gmail" if toolkit == "gmail" else "Google Calendar"
         _record(registry, row, next_due_at=stamp(now + every), last_checked_at=stamp(now),
