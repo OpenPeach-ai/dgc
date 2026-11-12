@@ -70,6 +70,9 @@ class TheApp(unittest.TestCase):
         self.assertIn("VSCodium", offer["line"])
         self.assertIn("151 MB", offer["line"])
         self.assertIn("VSCodium's own", offer["line"], "not the system's package servers")
+        # Seen live (12 Nov): "from VSCodium's own, its signing key checked into its own folder" read as nonsense.
+        self.assertIn("DGC downloads VSCodium from VSCodium's own package server (its signing key checked) into its own "
+                      "folder: 151 MB, once.", offer["line"])
 
 
 class ItsBox(unittest.TestCase):

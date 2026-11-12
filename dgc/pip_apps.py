@@ -266,7 +266,7 @@ def _from(keys) -> str:
     system = sorted({SOURCES[k] for k in keys if k != "code"})
     said = [f"{' and '.join(system)} from your system's own package servers"] if system else []
     if "code" in keys:
-        said.append("VSCodium from VSCodium's own, its signing key checked")
+        said.append("VSCodium from VSCodium's own package server (its signing key checked)")
     return " and ".join(said)
 
 
