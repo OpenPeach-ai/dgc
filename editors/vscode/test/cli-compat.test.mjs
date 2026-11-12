@@ -76,12 +76,13 @@ const GATED_SENDERS = [{ method: "editorState", guard: "editorStateSupported" },
                        { method: "watchImages", guard: "imagesCapable" },
                        { method: "imagesLibrary", guard: "imagesLibraryCapable" },
                        { method: "routerThinking", guard: "routerThinkingCapable" },
-                       { method: "cancelWakeup", guard: "wakeupsCapable" }].map(g => g.method);
+                       { method: "cancelWakeup", guard: "wakeupsCapable" },
+                       { method: "goalRuns", guard: "goalRunsCapable" }].map(g => g.method);
 const GATED_SENDER_GUARDS = { editorState: "editorStateSupported", watchMcpApps: "mcpAppsSupported",
                               watchRouter: "routerCapable", watchImages: "imagesCapable",
                               imagesLibrary: "imagesLibraryCapable", routerThinking: "routerThinkingCapable",
                               watchVideos: "videosCapable", videosJobs: "videosCapable", videosStop: "videosCapable",
-                              videosLibrary: "videosCapable", cancelWakeup: "wakeupsCapable" };
+                              videosLibrary: "videosCapable", cancelWakeup: "wakeupsCapable", goalRuns: "goalRunsCapable" };
 
 /** Is this node inside a method with the given name? */
 function insideMethod(node, name) {

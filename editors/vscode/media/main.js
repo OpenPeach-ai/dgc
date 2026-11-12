@@ -2867,7 +2867,14 @@
   function agentMapCommands(list) {
     const entry = { name: "agents", description: "open the agent map: every agent and background task in this chat", action: "agentMap" };
     const out = list.map((c) => (c && c.name === "agents" ? { ...c, ...entry, accepts_args: false } : c));
-    return out.some((c) => c && c.name === "agents") ? out : [...out, entry];
+    return goalHistoryCommand(out.some((c) => c && c.name === "agents") ? out : [...out, entry]);
+  }
+  // "/goal-history" is the panel's own too (the Goals pill), offered only by a DGC that keeps a session's goals.
+  function goalHistoryCommand(list) {
+    if (!goalRunsLive) return list;
+    const entry = { name: "goal-history", description: "this session's goals: how each ended, its time and tokens, and its Trace", action: "goalHistory" };
+    const out = list.map((c) => (c && c.name === "goal-history" ? { ...c, ...entry, accepts_args: false } : c));
+    return out.some((c) => c && c.name === "goal-history") ? out : [...out, entry];
   }
   let streaming = false, turn = null;
   let viewerStreaming = null;          // set by the image viewer: keeps its Stop in step with the turn
@@ -5316,6 +5323,7 @@
       const savedTrace = complete && turn.savedTrace
         ? window.DgcTrace?.fromSaved(turn.savedTrace, turn.savedTrace.id, turn.savedTrace.model) : null;
       const trace = savedTrace || (complete ? window.DgcTrace?.finish(turn.trace, turn.traceEnd || (replaying ? null : Date.now())) : null);
+      turn.block._goalTrace = trace ? { trace, saved: !!savedTrace } : null;      // a goal's Trace is its turns' (goalRunTrace)
       const actions = responseActions(answer, turn.prompt, !complete, trace);
       // When the reply was written, first in its row: now, live; a saved turn's from its history.
       const writtenAt = window.DgcTime?.node(turn.replyAt ?? (replaying ? NaN : Date.now()));
@@ -5342,9 +5350,12 @@
     turn.block.querySelectorAll(".motion-arrive, .motion-resolved")
       .forEach((node) => node.classList.remove("motion-arrive", "motion-resolved"));
     const finished = turn.block;
+    // When this turn began, for a goal's end line and its Trace: now, live; a saved turn's from its history.
+    finished._turnAt = turn.t0 != null ? turn.t0 : turn.promptAt > 0 ? turn.promptAt : NaN;
     pipSetupCards?.finish(finished);
     pipDigestBar?.refresh();
     turn = null;
+    placeGoalEnds();                             // a goal that ended in this turn says so under it
     // Repaint the checklist now that no turn is live. The row hides itself only when it renders
     // with every item done AND nothing running, and nothing re-rendered it at the end of a turn --
     // so a finished list sat at "Tasks 4/4 · all done" above the composer for the whole idle gap,
@@ -7704,6 +7715,7 @@ function permissionChoices(ev) {
     const fixes = pipFixesForChip().length ? ["pipfixes"] : [];
     if (pipRunning.size) fixes.push("piprunning");
     if (wakeups?.length) fixes.push("wakeups");
+    if (goalHistoryShown) fixes.push("goalruns");
     composerRail.classList.add("as-chips");
     composerRail.hidden = true;
     composerRail.classList.toggle("has-monitors", !monitorsBar.hidden);
@@ -8022,12 +8034,12 @@ function permissionChoices(ev) {
   const RAIL_ROW_ORDER = ["queuebar", "pipsbar", "monitorsbar", "troupebar", "changesbar", "tasksbar", "goalbar", "pastebar"];
   const RAIL_POP_TITLES = { goal: "Goal", troupe: "Troupe", monitors: "Monitors", tasks: "Tasks",
     changes: "Changes in this chat", pips: "Pips", queue: "Queued messages", pipfixes: "Pip fixes", piprunning: "Pips running",
-    wakeups: "Wake-ups", paste: "Pasted text" };
+    wakeups: "Wake-ups", goalruns: "This session's goals", paste: "Pasted text" };
   // Which kinds stay on the bar longest when it is short of room; a kind that needs you outstays them all.
-  const RAIL_KEEP = ["queue", "changes", "tasks", "pipfixes", "troupe", "piprunning", "wakeups", "monitors", "goal", "pips", "paste"];
+  const RAIL_KEEP = ["queue", "changes", "tasks", "pipfixes", "troupe", "piprunning", "wakeups", "monitors", "goal", "pips", "goalruns", "paste"];
   // A kind's real row; Pip fixes have no row (their cards are in the chat): their popover lists them.
   const railBar = (kind) => (kind === "pipfixes" ? paintPipFixesPanel() : kind === "piprunning" ? paintPipRunningPanel()
-    : kind === "wakeups" ? paintWakeupsPanel()
+    : kind === "wakeups" ? paintWakeupsPanel() : kind === "goalruns" ? paintGoalRunsPanel()
     : (RAIL_KINDS.find(([name]) => name === kind) || [])[1] || null);
   const railCount = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
   function railTroupeLead() {
@@ -8045,6 +8057,11 @@ function permissionChoices(ev) {
         ? { icon: "watch", word: "Wakes", num: wakeupClock(next.at), detail: next.why, label: `Wakes at ${wakeupClock(next.at)} to: ${next.why}` }
         : { icon: "watch", num: String(wakeups.length), after: "wake-ups", detail: `next at ${wakeupClock(next.at)}`,
           label: `${wakeups.length} wake-ups waiting, the next at ${wakeupClock(next.at)}` };
+    }
+    if (kind === "goalruns") {
+      // "/goal-history": every goal this session ran, in its popover.
+      const n = goalRuns.length;
+      return { icon: "history", word: "Goals", num: String(n), label: `This session's goals: ${n}. Open the list`, tip: `Goals · ${n} in this session` };
     }
     if (kind === "paste") {
       const said = pasteClean()?.pill(pasteRemoved.n, pasteRemoved.counts);
@@ -8199,7 +8216,7 @@ function permissionChoices(ev) {
       if (kind === "tasks" && !tasksOpen()) { toggleTasks(); open.unfolded.push(() => { if (tasksOpen()) toggleTasks(); }); }
     },
     restore: (kind, bar) => {
-      if (bar === pipRunningPanel) bar.remove();        // the running Pips list is the popover's own
+      if (bar === pipRunningPanel || bar === goalRunsPanel) bar.remove();        // the running Pips list and the goals list are the popover's own
       else if (bar === pipFixesPanel) {
         // The panel is an inbox for this batch, not the whole fix archive. Dismissing it
         // acknowledges only finished fixes; active work stays visible until its result arrives.
@@ -8593,6 +8610,7 @@ function permissionChoices(ev) {
         liveSteering = ev.capabilities?.live_steering === true;
         nativeSteering = liveSteering && ev.capabilities?.steering_native !== false;
         agentsLive = ev.capabilities?.agents === true;
+        goalRunsLive = ev.capabilities?.goal_runs === true;        // the session's goal history (goal_runs)
         agentControlLive = ev.capabilities?.agent_control === true;
         agentControlForeground = agentControlLive && ev.capabilities?.agent_control_foreground === true;
         continueAgentLive = ev.capabilities?.continue_agent === 1;
@@ -8649,6 +8667,7 @@ function permissionChoices(ev) {
       case "history":
         if (ev.complete === true) prepareCompleteHistory(ev.items || []);
         renderHistory(ev.items || []);
+        askGoalRuns();                           // the goals this session ran: their end lines come back
         if (heldSend && sessionReady) setTimeout(flushHeldSend, 0);
         railSnapshot(ev.items);
         if (Array.isArray(ev.todos)) renderTodos(ev.todos);
@@ -9539,8 +9558,10 @@ function permissionChoices(ev) {
       case "goal_changed": {
         const text = String(ev.goal || "");
         setGoalState({ ...ev.details, text, status: ev.status, elapsed_seconds: ev.elapsed_seconds });
+        noteGoalChange(ev);                      // a goal that ended leaves its one line
         break;
       }
+      case "goal_runs": setGoalRuns(ev.runs); break;
       case "status":
         sysLine(`${ev.model} · ${ev.mode} · thinking ${ev.think} · context ${ev.context_used}/${ev.context_size}`
           + (ev.ultra_mode ? " · Ultra" : "")
@@ -10219,6 +10240,12 @@ function permissionChoices(ev) {
         // The map is the panel's own: the token goes, the rest of the draft stays.
         replacePopToken(); hidePop();
         openAgentMap({ command: true });
+        return;
+      }
+      if (it.action === "goalHistory") {
+        // So is the Goals pill: the token goes, the rest of the draft stays, and its list opens.
+        replacePopToken(); hidePop();
+        showGoalHistory();
         return;
       }
       if (it.action?.startsWith("workflow:")) {
@@ -12212,6 +12239,151 @@ function permissionChoices(ev) {
     wakeupsPanel.replaceChildren(list);
     return wakeupsPanel;
   }
+  // ---- a goal's end, and the session's goal history (0.52, asked 12 Nov) ----
+  // When a goal ends (done, blocked, or stopped by a new goal or a clear), one quiet line under its turn: "Goal done ·
+  // 2 h 14 min · 1.8M tokens · 7 cycles". On a DGC with goal_runs (ready.capabilities.goal_runs) the line is drawn from
+  // its list of the session's goals, so a reload brings the same lines back, each under the turn its goal ended in;
+  // an older DGC's line is said from what goal_changed told, in this window only. "/goal-history" adds a "Goals" pill to
+  // the bar: the goals newest first, each with how it ended, when, its time and tokens, and Trace for its turns.
+  var goalRunsLive = false;                      // `var`: the bar syncs while the panel is still starting up
+  var goalHistoryShown = false;
+  let goalRuns = [];                             // the session's goals as DGC lists them, oldest first
+  let goalWatch = null;                          // the goal as goal_changed last told it: its end is a change from this
+  let goalEndsWaiting = [];                      // ended, not yet said: said once no turn is running
+  const goalEndsSaid = new Set();
+  const GOAL_END_WORDS = { completed: "Goal done", blocked: "Goal blocked", stopped: "Goal stopped" };
+  const GOAL_RUN_WORDS = { completed: "Done", blocked: "Blocked", stopped: "Stopped", active: "Running now", paused: "Paused" };
+  function goalSpan(seconds) {
+    const total = Math.max(0, Math.floor(Number(seconds) || 0)), hours = Math.floor(total / 3600), minutes = Math.floor(total % 3600 / 60);
+    return hours ? (minutes ? `${hours} h ${minutes} min` : `${hours} h`) : minutes ? `${minutes} min` : `${total} s`;
+  }
+  function goalCount(n) {
+    const value = Math.max(0, Math.floor(Number(n) || 0));
+    const short = (x, unit) => `${String(Math.round(x * 10) / 10).replace(/\.0$/, "")}${unit}`;
+    return value >= 999950 ? short(value / 1e6, "M") : value >= 1000 ? short(value / 1000, "k") : String(value);
+  }
+  // "2 h 14 min · 1.8M tokens · 7 cycles"; tokens and cycles only when there are any to say.
+  function goalFacts(run) {
+    return [goalSpan(run.elapsed_seconds), run.tokens > 0 ? `${goalCount(run.tokens)} ${run.tokens === 1 ? "token" : "tokens"}` : "",
+      run.cycles > 0 ? `${run.cycles} ${run.cycles === 1 ? "cycle" : "cycles"}` : ""].filter(Boolean).join(" · ");
+  }
+  function cleanGoalRun(item) {
+    if (!item || typeof item !== "object" || !Object.hasOwn(GOAL_RUN_WORDS, String(item.status))) return null;
+    const at = (v) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null);
+    const count = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.floor(Number(v)) : 0);
+    return { id: String(item.id || "").slice(0, 64), name: String(item.name || "").replace(/\s+/g, " ").trim().slice(0, 200) || "A goal", status: String(item.status),
+      started_at: at(item.started_at), ended_at: at(item.ended_at), elapsed_seconds: count(item.elapsed_seconds), tokens: count(item.tokens), cycles: count(item.cycles) };
+  }
+  function askGoalRuns() { if (goalRunsLive) vscode.postMessage({ type: "goalRuns" }); }
+  function resetGoalRuns() {
+    goalRuns = []; goalWatch = null; goalEndsWaiting = []; goalEndsSaid.clear();
+    if (goalHistoryShown) { goalHistoryShown = false; syncComposerRail(); }
+  }
+  // goal_changed: a goal that was being pursued (or paused) and is now done, blocked, replaced or gone has ended.
+  function noteGoalChange(ev) {
+    const details = ev.details && typeof ev.details === "object" ? ev.details : {}, words = String(ev.goal || "");
+    const was = goalWatch;
+    goalWatch = words ? { id: String(details.id || ""), name: words, status: String(ev.status || "active"), elapsed_seconds: Number(ev.elapsed_seconds) || 0,
+      tokens: Number(details.tokens_used) || 0, cycles: Number(details.cycles) || 0 } : null;
+    if (!was || !["active", "paused"].includes(was.status)) return;      // first sight of it, or it had ended already
+    const same = !!goalWatch && goalWatch.id === was.id && goalWatch.name === was.name;
+    const how = !same ? "stopped" : ["completed", "blocked"].includes(goalWatch.status) ? goalWatch.status : "";
+    if (!how) return;
+    if (goalRunsLive) { askGoalRuns(); return; }                         // DGC's own record of it says the line
+    const last = same ? goalWatch : was;
+    noteGoalEnds([cleanGoalRun({ ...last, status: how, ended_at: Date.now() / 1000 })]);
+  }
+  function setGoalRuns(runs) {
+    goalRuns = (Array.isArray(runs) ? runs : []).map(cleanGoalRun).filter(Boolean).slice(-200);
+    noteGoalEnds(goalRuns);
+    if (goalHistoryShown) { paintRailChip("goalruns"); if (railOpenNow()?.kind === "goalruns") paintGoalRunsPanel(); }
+  }
+  const goalEndKey = (run) => `${run.id || run.name}|${run.status}|${Math.round(run.ended_at || 0)}`;
+  function noteGoalEnds(runs) {
+    for (const run of runs) {
+      if (!run || !Object.hasOwn(GOAL_END_WORDS, run.status) || !run.ended_at || goalEndsSaid.has(goalEndKey(run))) continue;
+      goalEndsSaid.add(goalEndKey(run));
+      goalEndsWaiting.push(run);
+    }
+    placeGoalEnds();
+  }
+  // Under the turn the goal ended in: the last turn that had begun by then. Never in the middle of a running turn (its
+  // line waits for the turn's end), and an old goal whose turns are not in this chat (folded away by compaction) says
+  // nothing.
+  function placeGoalEnds() {
+    if (turn || replaying || !goalEndsWaiting.length) return;
+    const blocks = [...log.querySelectorAll(".msg.dgc")].filter((block) => Number.isFinite(block._turnAt));
+    const waiting = goalEndsWaiting; goalEndsWaiting = [];
+    for (const run of waiting) {
+      const at = run.ended_at * 1000 + 1500;
+      const under = blocks.filter((block) => block._turnAt <= at).at(-1);
+      const line = el("div", "sys sys-marked goal-end", icon("target") + esc(`${GOAL_END_WORDS[run.status]} · ${goalFacts(run)}`));
+      line.setAttribute("role", "note");
+      line.title = `${GOAL_END_WORDS[run.status]}: ${run.name}`;
+      // No turn of it here, and it ended just now (a goal cleared before its first turn): the line goes at the end.
+      if (!under) { if (Math.abs(Date.now() / 1000 - run.ended_at) < 60) log.appendChild(line); continue; }
+      // After its turn, and after any line already said there (an earlier goal that ended in the same turn).
+      let after = under.closest(".turn") || under;
+      while (after.nextElementSibling?.classList.contains("goal-end")) after = after.nextElementSibling;
+      after.after(line);
+    }
+  }
+  // A goal's Trace: the Trace of each of its turns that is in this chat, from its first turn's start to its last
+  // turn's end, as one. null when none of them is here.
+  function goalRunTrace(run) {
+    if (!run.started_at) return null;
+    const from = run.started_at * 1000 - 1500, to = (run.ended_at || Date.now() / 1000) * 1000 + 1500;
+    const parts = [...log.querySelectorAll(".msg.dgc")].filter((block) => block._goalTrace?.trace?.rows?.length && Number.isFinite(block._turnAt) && block._turnAt >= from && block._turnAt <= to);
+    if (!parts.length) return null;
+    let rows = [], start = Infinity, end = 0;
+    for (const block of parts) {
+      const { trace, saved } = block._goalTrace, shift = saved ? block._turnAt - trace.start : 0;   // a saved reply's steps are timed from its own start
+      start = Math.min(start, trace.start + shift); end = Math.max(end, trace.end + shift);
+      for (const row of trace.rows) rows.push({ ...row, start: row.start + shift, end: row.end + shift });
+    }
+    const cut = rows.length > 1500;
+    if (cut) rows = rows.slice(-1500);
+    return { start: cut ? rows[0].start : start, end, id: run.name.slice(0, 40), rows,
+      model: `${parts.length} ${parts.length === 1 ? "turn" : "turns"}${cut ? " · its last 1,500 steps" : ""}` };
+  }
+  function goalRunWhen(seconds) {
+    const d = new Date(seconds * 1000);
+    return Number.isNaN(d.getTime()) ? "" : d.toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
+  }
+  function showGoalHistory() {
+    goalHistoryShown = true;
+    askGoalRuns();
+    syncComposerRail();
+    openRailPop("goalruns");
+  }
+  let goalRunsPanel = null;
+  function paintGoalRunsPanel() {
+    if (!goalRunsPanel) { goalRunsPanel = el("section", "goal-runs-panel"); goalRunsPanel.setAttribute("aria-label", "This session's goals"); }
+    const list = el("ul", "goal-runs-list");
+    for (const run of [...goalRuns].reverse()) {
+      const li = el("li", "goal-run"); li.dataset.status = run.status;
+      const name = el("span", "goal-run-name"); name.textContent = run.name; name.title = run.name;
+      const facts = el("span", "goal-run-facts");
+      facts.textContent = [GOAL_RUN_WORDS[run.status], run.ended_at ? goalRunWhen(run.ended_at) : "", goalFacts(run)].filter(Boolean).join(" · ");
+      const words = el("span", "goal-run-words"); words.append(name, facts);
+      const trace = el("button", "goal-run-trace"); trace.type = "button"; trace.textContent = "Trace";
+      const made = goalRunTrace(run);
+      trace.disabled = !made;
+      trace.title = made ? `Replay the trace of this goal's ${made.model.replace(/ ·.*/, "")}` : "Its turns are not in this chat any more, so there is no trace to replay";
+      trace.setAttribute("aria-label", made ? `Trace of the goal: ${run.name}` : `No trace for the goal: ${run.name}`);
+      trace.onclick = () => { const now = goalRunTrace(run); if (!now) return; closeRailPop({ restore: false }); window.DgcTrace?.open(now); };
+      li.append(words, trace);
+      list.append(li);
+    }
+    const foot = el("div", "goal-runs-foot");
+    const none = el("span", "goal-runs-none"); none.textContent = goalRuns.length ? "" : "No goals in this session yet. Choose Goal in the “/” menu to set one.";
+    const hide = el("button", "goal-runs-hide"); hide.type = "button"; hide.textContent = "Hide";
+    hide.title = "Take the Goals pill off the bar"; hide.setAttribute("aria-label", hide.title);
+    hide.onclick = () => { closeRailPop({ restore: false }); goalHistoryShown = false; syncComposerRail(); input.focus({ preventScroll: true }); };
+    foot.append(none, hide);
+    goalRunsPanel.replaceChildren(list, foot);
+    return goalRunsPanel;
+  }
   let pipRunningPanel = null;
   function paintPipRunningPanel() {
     if (!pipRunningPanel) { pipRunningPanel = el("section", "pip-running-panel"); pipRunningPanel.setAttribute("aria-label", "Pips running"); }
@@ -12845,6 +13017,7 @@ function permissionChoices(ev) {
     cacheClockOnSessionReset(kind);   // the incoming chat's backend says its own
     agentsOnSessionReset(kind); imagesOnSessionReset(kind); retryOnSessionReset(kind); askOnSessionReset(kind);
     pipFixesReset(kind);
+    resetGoalRuns();                            // the incoming chat's goals are its own
     if (kind !== "rewound") {                   // the incoming chat's own running Pips, asked for again
       setPipRunning([]);
       if (pipRunsLive) vscode.postMessage({ type: "pipRunsWatch" });

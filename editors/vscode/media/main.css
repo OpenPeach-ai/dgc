@@ -3350,6 +3350,25 @@ body.vscode-light .pip-report-line-state[data-good] { color: #1D7A44; }   /* --g
   color: var(--text-strong); font-weight: var(--w-semi); }
 .pip-fixes-state { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 
+/* A goal's end ("Goal done · 2 h 14 min · 1.8M tokens · 7 cycles"): one quiet line under its turn, in the muted ink
+   that reads at 4.5:1 (the line is a fact to read, not a passing notice). */
+.sys.goal-end { margin: var(--sp-1) 0 var(--sp-2); color: var(--muted-firm, var(--muted)); font-variant-numeric: tabular-nums; }
+.sys.goal-end > .ic { color: inherit; }
+/* The Goals pill's list ("/goal-history"): a goal a row, its name over how it ended, when, its time and tokens;
+   Trace at the row's end. */
+.goal-runs-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; max-height: min(46vh, 320px); overflow-y: auto; scrollbar-width: thin; }
+.goal-run { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; padding: 4px var(--sp-2); border-radius: var(--r-sm); }
+.goal-run-words { flex: 1 1 auto; display: grid; gap: 1px; min-width: 0; }
+.goal-run-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-strong); font: var(--w-med, 500) var(--t-sm)/1.45 var(--sans); }
+.goal-run-facts { min-width: 0; color: var(--muted-firm, var(--muted)); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.goal-run-trace, .goal-runs-hide { flex: none; box-sizing: border-box; width: var(--btn-w-sm); height: var(--btn-h-sm); padding: 0 var(--btn-pad-sm); border: 1px solid var(--btn-line); border-radius: var(--btn-r);
+  background: transparent; color: var(--btn-text); font: var(--w-med, 500) var(--t-xs)/calc(var(--btn-h-sm) - 2px) var(--sans); text-align: center; white-space: nowrap; cursor: pointer; }
+:is(.goal-run-trace, .goal-runs-hide):hover:not(:disabled) { border-color: var(--btn-line-hover); background: var(--btn-wash); }
+:is(.goal-run-trace, .goal-runs-hide):focus-visible { outline: var(--btn-ring); outline-offset: 2px; }
+.goal-run-trace:disabled { opacity: .55; cursor: default; }
+.goal-runs-foot { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); min-width: 0; padding: var(--sp-2) var(--sp-2) 2px; }
+.goal-runs-none { flex: 1 1 auto; min-width: 0; color: var(--muted-firm, var(--muted)); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+
 /* Memory that learns: the quiet "Remembered" line a look back adds, and /learn's skill card. */
 .memory-learned .memory-learned-rows { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .memory-learned .memory-learned-row { min-width: 0; overflow-wrap: anywhere; }

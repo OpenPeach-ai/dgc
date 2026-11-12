@@ -6197,6 +6197,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "stopMonitor":
         void this.stopMonitor(String(msg.id || ""));
         break;
+      case "goalRuns":
+        // The session's goals, for their end lines and the Goals pill: DGC answers with the goal_runs event.
+        this.goalRuns();
+        break;
       case "cancelWakeup":
         // A wake-up's Cancel on the bar: DGC takes it back and sends the row again.
         this.cancelWakeup(String(msg.id || ""));
@@ -8465,6 +8469,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   cancelWakeup(id: string): void {
     if (!this.wakeupsCapable() || !/^wake\d{1,9}$/.test(id)) return;
     this.backend?.send({ type: "cancel_wakeup", id } as any);
+  }
+  /** A session's goal history (dgc/goals.py goal_runs): only a CLI that says ready.capabilities.goal_runs takes it. */
+  goalRunsCapable(): boolean { return (this.lastReadyEvent?.capabilities as any)?.goal_runs === true; }
+  goalRuns(): void {
+    if (!this.goalRunsCapable()) return;
+    this.backend?.send({ type: "goal_runs", request_id: this.nextRequestId("goal-runs") } as any);
   }
   videosCapable(): boolean {
     const commands = (this.lastReadyEvent?.capabilities as any)?.videos?.commands;
