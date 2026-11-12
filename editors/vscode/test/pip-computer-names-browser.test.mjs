@@ -51,7 +51,7 @@ test("with several computers the icon opens a menu right under it: each one's na
         const menu = root.querySelector("#computer-menu"), icon = root.querySelector("#pip-computer-open");
         return { menu: r(menu), icon: r(icon), view: [innerWidth, innerHeight], classes: menu.className, role: menu.getAttribute("role"),
           rows: [...menu.querySelectorAll(".computer-row")].map((e) => ({ ...r(e), clipped: e.querySelector(".dgc-menu-label").scrollWidth > e.querySelector(".dgc-menu-label").clientWidth + 1 })),
-          dots: [...menu.querySelectorAll(".computer-state")].map((e) => { const s = getComputedStyle(e, "::before"); return { state: e.dataset.state, ground: s.backgroundColor, edge: parseFloat(s.borderTopWidth) || 0, size: parseFloat(s.width) }; }),
+          dots: [...menu.querySelectorAll(".computer-state")].map((e) => { const s = getComputedStyle(e, "::before"); return { state: e.dataset.state, ground: s.backgroundColor, edge: parseFloat(s.borderTopWidth) || 0, size: parseFloat(s.width), shown: e.checkVisibility() }; }),
           scrolls: (root.host || document.documentElement).scrollWidth > innerWidth + 1 };
       });
       assert.match(box.classes, /\bdgc-menu\b/, "the shared menu");
@@ -63,12 +63,13 @@ test("with several computers the icon opens a menu right under it: each one's na
       assert.equal(box.scrolls, false, "the page doesn't scroll sideways");
       for (const row of box.rows) { assert.ok(row.height >= 32, "a row is tall enough to press"); assert.equal(row.clipped, false, "a short name shows whole"); }
       const dot = Object.fromEntries(box.dots.map((d) => [d.state, d]));
-      assert.equal(dot.closed.ground, "rgba(0, 0, 0, 0)", "closed is a hollow ring");
-      assert.ok(dot.closed.edge >= 1, "with an edge");
+      // (From 12 Nov a row's dot is a badge on the corner of the computer's Portal, for open, working and needs you;
+      // a closed computer has no badge: its Portal alone, and "Closed" in words. It was a hollow ring.)
+      assert.equal(dot.closed.shown, false, "closed has no badge");
       assert.notEqual(dot.working.ground, "rgba(0, 0, 0, 0)");
       assert.equal(dot.needs_you.ground, "rgb(209, 144, 43)", "needs you is amber");
       assert.notEqual(dot.working.ground, dot.needs_you.ground);
-      assert.ok(box.dots.every((d) => d.size >= 6 && d.size <= 9), "small dots");
+      assert.ok(box.dots.filter((d) => d.shown).length === 2 && box.dots.filter((d) => d.shown).every((d) => d.size >= 6 && d.size <= 9), "small dots");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   }

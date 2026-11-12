@@ -222,6 +222,11 @@ test('the screen: the open names its computer, and a tab whose stream moved says
  x.message({type:'pipDesktopData',data:Buffer.from('RFB 003.008\n').toString('base64')});made[0].listeners.connect();
  x.message({type:'pipDesktopElsewhere',number:1,name:'Juniper'});
  assert.equal(x.d.querySelector('.pc-overlay p').textContent,'Showing Juniper in another tab');
+ // (From 12 Nov a line that names a computer shows that computer's Portal before its name: computer 1 is Iris.)
+ assert.equal(x.d.querySelector('.pc-overlay p [data-mark="portal"]')?.dataset.palette,'iris','the named computer\'s own Portal, before its name');
+ assert.equal(x.d.querySelector('.pc-overlay p .pc-portal').nextSibling.textContent,'Juniper in another tab');
+ // And the bar's own: this tab is its second computer (Lagoon), between the Pip's name and the computer's.
+ assert.equal(x.d.querySelector('.pc-title h1 [data-mark="portal"]').dataset.palette,'lagoon');
  assert.equal(x.d.querySelector('#pc-show-here').textContent,'Show here');
  assert.ok(made[0].closed,'its viewer lets go');
  assert.equal(x.sent.filter(m=>m.type==='pipDesktop'&&m.op==='close').length,0,'and it does not close the stream the other tab now has');

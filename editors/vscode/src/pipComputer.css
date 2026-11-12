@@ -14,13 +14,24 @@ input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-
    the chip for what waits, the screen's tools, then Full screen, Stop computer and "…". One row, 36 px, at any width:
    what a narrow tab has no room for goes into "…" by tiers (data-tier, set by fitBar in pipComputerClient.js):
    1 the tools keep their marks and lose their words; 2 the state's words go, and the chip keeps its count;
-   3 Stop computer goes into "…"; 4 Fit and 100% too, and the title may be cut short; 5 the title and the other tools too. */
+   3 Stop computer goes into "…"; 4 Fit and 100% too, and the title may be cut short (the Pip's name goes first, then
+   the computer's name is cut; its Portal stays); 5 the title and the other tools too. */
 .pc-topbar{position:relative;z-index:7;flex:none;display:flex;align-items:center;gap:6px;height:36px;padding:0 8px;border-bottom:1px solid var(--hair);white-space:nowrap}
 .pc-ident{flex:0 1 auto;min-width:0;display:flex;align-items:center;gap:8px}
 .pc-header{flex:0 1 auto;min-width:0;display:flex;align-items:center;gap:7px}
 .pc-face{width:22px;height:22px;flex:none}
 .pc-title{flex:0 1 auto;min-width:0;display:flex;align-items:baseline;gap:8px}
 .pc-title h1{flex:0 1 auto;min-width:0;max-width:260px;margin:0;font-size:var(--t-base);font-weight:600;overflow:hidden;text-overflow:ellipsis}
+/* This computer's own mark, the maintainer's Portal (media/shared/portal.css), 18 px as he sets it for a tab: after
+   the Pip's name and before the computer's, where the " · " was (which stays in the words, unseen). */
+.pc-sep{display:none}
+.pc-portal{display:inline-block;margin:0 5px 0 6px;line-height:0;vertical-align:middle}
+/* No room for the whole title (fitBar): the Pip's name gives way, since its face says which Pip. */
+.pc-topbar[data-title="computer"] .pc-pip-name{display:none}
+.pc-topbar[data-title="computer"] .pc-portal{margin-left:0}
+.pc-portal [data-mark]{--size:18px;vertical-align:top}
+.pc-overlay-card .pc-portal{margin:0 5px 0 1px;vertical-align:-4px}
+@media(forced-colors:active){.pc-portal [data-mark],.pc-portal [data-mark] *{forced-color-adjust:none}}
 .pc-status{flex:0 1 auto;min-width:0;margin:0;color:var(--muted);font-size:var(--t-sm);overflow:hidden;text-overflow:ellipsis}
 /* The chip, or "X is using it", says the state: its own words stay for a screen reader. */
 .pc-said .pc-status,.pc-topbar:not([data-tier="0"],[data-tier="1"]) :is(.pc-status,.pc-using){position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}

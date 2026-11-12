@@ -7,6 +7,8 @@ import { mcpAppsHost } from './mcpApps';
 import { handleVideoMessage, VIDEO_MESSAGES } from './videoHost';
 import { displayMentions, workspaceFiles } from './mentionsHost';
 import { APP_ID, appLogoData } from './pluginLogos';
+import { markIcon } from './dock';
+import marks from '../media/shared/marks.js';
 
 /** What a Pip's page uses of the artifacts (artifacts.ts): the person's dashboards, and opening one. */
 type PipArtifactsHub = Pick<Artifacts, 'list' | 'open' | 'offers'>;
@@ -393,6 +395,11 @@ export class PipsEditor implements vscode.Disposable {
     const panel = vscode.window.createWebviewPanel('dgc.pipComputer', title, vscode.ViewColumn.Active, {
       enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [this.extensionUri],
     });
+    // Its tab's icon is this computer's Portal at rest, in its number's palette (media/session-icons/portal-*.png):
+    // "Desk · Poppy" and "Desk · Studio" look different. The same palette as in the menu, on the Pip's page and in the
+    // tab's own bar; a Pip's one computer is its first.
+    const icon = markIcon(this.extensionUri, 'portal', marks.computerPalette(number ?? 1));
+    if (icon) panel.iconPath = icon;
     const surface = 'computer:' + key;
     this.computers.set(key, { panel, pip, ...(number ? { number } : {}) });
     panel.onDidDispose(() => {

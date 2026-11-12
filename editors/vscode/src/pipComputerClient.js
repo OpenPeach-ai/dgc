@@ -2,9 +2,12 @@
 // The tab talks to the extension host exactly as the Pips view does (pipsRequest/pipsReply), and
 // the host pins it to this one Pip and to the computer commands.
 import {carefulWords,sendsWords,isPayment,asksEveryTime,asksWords,coversWords} from './pipCareful.js';
+import {computerPortal} from './pipComputerNames.js';
 // One set of tokens for every page, first, so each page's own stylesheet can lean on it (media/shared/tokens.css).
 import '../media/shared/tokens.css';
 import '../media/shared/menu.css';
+// This computer's own mark, the maintainer's Portal, as he wrote it: in the bar, beside the computer's name.
+import '../media/shared/portal.css';
 import './pipComputer.css';
 import '../media/shared/menu.js';
 import '../media/pips/plush.js';
@@ -114,7 +117,9 @@ function chipMarkup(){
 function headerMarkup(){
  const waiting=pending().length;
  const status=!S.connected?'Connecting…':!S.computer?'Loading…':!S.computer.granted?'No computer yet':!S.computer.available?'Setup needed':using()?`${S.pip.name} is using its computer`:waiting?`${waiting} waiting for you`:'Idle';
- return `<header class="pc-header${waiting||screenMode()&&using()?' pc-said':''}"><span class="pc-face" aria-hidden="true">${plushFace(using()?'working':waiting?'waiting_approval':'idle')}</span><div class="pc-title"><h1 title="${esc(tabTitle())}">${esc(tabTitle())}</h1><p class="pc-status" role="status">${esc(status)}</p></div></header>${chipMarkup()}`;
+ // The face says which Pip; then the Pip's name, this computer's Portal (in its number's palette) and the computer's name.
+ // (The " · " between the names stays in the words, for the tab's name and a screen reader; the Portal stands where it was.)
+ return `<header class="pc-header${waiting||screenMode()&&using()?' pc-said':''}"><span class="pc-face" aria-hidden="true">${plushFace(using()?'working':waiting?'waiting_approval':'idle')}</span><div class="pc-title"><h1 title="${esc(tabTitle())}"><span class="pc-pip-name">${esc(S.pip?.name||'Pip')}</span><span class="pc-sep"> · </span><span class="pc-portal" aria-hidden="true">${computerPortal(S.number||1,18)}</span>${esc(computerName())}</h1><p class="pc-status" role="status">${esc(status)}</p></div></header>${chipMarkup()}`;
 }
 // The bar's end: Stop computer, and "…" for what a narrow tab has no room to show (the shared menu).
 const DOTS='<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="3.5" cy="8" r="1.25" fill="currentColor"/><circle cx="8" cy="8" r="1.25" fill="currentColor"/><circle cx="12.5" cy="8" r="1.25" fill="currentColor"/></svg>';
@@ -142,6 +147,11 @@ function fitBar(force=false){
  let tier=0;bar.classList.add('pc-measure');
  for(;tier<5;tier++){bar.dataset.tier=String(tier);if(bar.scrollWidth<=bar.clientWidth)break;}
  bar.classList.remove('pc-measure');bar.dataset.tier=String(tier);S.tier=tier;
+ // Still no room for the whole title: the Pip's name gives way (its face says which Pip, and the title's tooltip has
+ // the name), so this computer's Portal and name stay to say which of its computers this is.
+ const title=bar.querySelector('.pc-title h1');delete bar.dataset.title;
+ S.tight=!!title&&tier===4&&title.scrollWidth>title.clientWidth;
+ if(S.tight)bar.dataset.title='computer';
 }
 // A held submit that was not here a moment ago: the chip pulses once (pipComputer.css: never under reduced motion).
 function noteWaiting(){const ids=pending().map(a=>a.id),fresh=ids.some(id=>!seenWaiting.has(id));seenWaiting=new Set(ids);if(!ids.length)S.waitOpen=false;return fresh;}
@@ -239,7 +249,7 @@ function overlayMarkup(){
  const name=esc(S.pip?.name||'The Pip');
  if(S.screen.state==='opening')return `<p class="pc-overlay-note">Opening ${name}'s screen…</p>`;
  if(S.screen.state==='restarting')return `<p class="pc-overlay-note">Restarting ${name}'s computer…</p>`;
- if(S.screen.state==='elsewhere')return `<div class="pc-overlay-card"><p>${esc(`Showing ${S.screen.name||'its computer'} in another tab`)}</p><button type="button" id="pc-show-here">Show here</button></div>`;
+ if(S.screen.state==='elsewhere')return `<div class="pc-overlay-card"><p>Showing ${S.screen.name?`<span class="pc-portal" aria-hidden="true">${computerPortal(S.screen.number||1,18)}</span>${esc(S.screen.name)}`:'its computer'} in another tab</p><button type="button" id="pc-show-here">Show here</button></div>`;
  if(S.screen.state==='closed')return `<div class="pc-overlay-card"><p>${esc(S.screen.reason||'The screen closed.')}</p><button type="button" id="pc-reconnect">Open the screen again</button></div>`;
  return using()?`<p class="pc-overlay-badge">${name} is using its computer. You can watch; it is yours again when it stops.</p>`:'';
 }
@@ -337,7 +347,7 @@ function renderScreen(fresh){
  const app=document.getElementById('app');
  // One bar (the Pip, the screen's tools, Full screen, Stop computer), then the screen. Panels, the held submits' cards and
  // what the tab says all sit inside the screen's own box, over it: nothing but the bar is ever above the screen.
- if(!$('pc-live')){drawn.clear();app.innerHTML=`<div class="pc-stage" id="pc-stage"><div class="pc-topbar" id="pc-bar" data-tier="${S.tier}"><div class="pc-ident" id="pc-ident"></div><div class="pc-tools" id="pc-tools" role="toolbar" aria-label="Screen"></div><div class="pc-end" id="pc-end"></div></div>`
+ if(!$('pc-live')){drawn.clear();app.innerHTML=`<div class="pc-stage" id="pc-stage"><div class="pc-topbar" id="pc-bar" data-tier="${S.tier}"${S.tight?' data-title="computer"':''}><div class="pc-ident" id="pc-ident"></div><div class="pc-tools" id="pc-tools" role="toolbar" aria-label="Screen"></div><div class="pc-end" id="pc-end"></div></div>`
   +`<div class="pc-desktop pc-live" id="pc-live"><div id="pc-vnc" class="pc-vnc" aria-label="${esc(S.pip?.name||'The Pip')}'s computer screen"></div><div id="pc-overlay" class="pc-overlay"></div>${cursorMarkup()}`
   +`<div class="pc-notes" id="pc-notes"><div id="pc-says"></div><div id="pc-strip"></div></div><div class="pc-float" id="pc-panel"></div><div id="pc-wait"></div></div></div>`;}
  cleanupFace?.();
@@ -473,7 +483,7 @@ function render(){
  const focus=document.activeElement?.id,caret=document.activeElement?.selectionStart;
  cleanupFace?.();
  // The same slim bar (no screen tools here), and the held submits' cards float over the desktop.
- app.innerHTML=`<div class="pc-topbar" id="pc-bar" data-tier="${S.tier}"><div class="pc-ident" id="pc-ident">${headerMarkup()}</div><span class="pc-tools-end"></span><div class="pc-end" id="pc-end">${endMarkup()}</div></div>`
+ app.innerHTML=`<div class="pc-topbar" id="pc-bar" data-tier="${S.tier}"${S.tight?' data-title="computer"':''}><div class="pc-ident" id="pc-ident">${headerMarkup()}</div><span class="pc-tools-end"></span><div class="pc-end" id="pc-end">${endMarkup()}</div></div>`
   +`${S.error?`<p class="pc-error" role="alert">${esc(S.error)}</p>`:''}${S.notice?`<p class="pc-notice" role="status">${esc(S.notice)}</p>`:''}${installMarkup()}${appsMarkup()}<div class="pc-desktop">${pane}${S.computer?.granted&&S.computer.available?dockMarkup():''}${waitingMarkup()}</div>`;
  cleanupFace=window.PipConcepts?.plush?.mount?.(app);
  moreKeys();fitBar();if(fresh)pulseChip();
@@ -697,7 +707,7 @@ window.addEventListener('message',event=>{
  else if(m.type==='pipComputerNames'&&Array.isArray(m.names)){const mine=m.names.find(n=>record(n)&&n.number===S.number);
   if(mine&&typeof mine.name==='string'){S.name=mine.name.slice(0,60);if(Array.isArray(S.computer?.names))S.computer={...S.computer,names:S.computer.names.map(n=>{const now=m.names.find(v=>record(v)&&v.number===n.number);return now&&typeof now.name==='string'?{...n,name:now.name.slice(0,60)}:n;})};render();}}
  // Its screen is showing in another tab of this Pip (one stream per Pip): say so, and offer it here.
- else if(m.type==='pipDesktopElsewhere'){S.screen={state:'elsewhere',reason:'',name:typeof m.name==='string'?m.name.slice(0,60):''};const old=channel;channel=null;old?.end('');render();}
+ else if(m.type==='pipDesktopElsewhere'){S.screen={state:'elsewhere',reason:'',name:typeof m.name==='string'?m.name.slice(0,60):'',number:Number.isSafeInteger(m.number)&&m.number>=1&&m.number<=1000?m.number:1};const old=channel;channel=null;old?.end('');render();}
  else if(m.type==='pipDesktopData'&&typeof m.data==='string')channel?.deliver(m.data);
  // Restarting: its screen closing is expected, and it is opened again (a few tries while the old one winds down).
  else if(m.type==='pipDesktopClosed'&&S.restart&&S.restart.tries<5){const old=channel;channel=null;S.screen={state:'restarting',reason:''};old?.end('');render();reopenSoon(700+400*S.restart.tries);}

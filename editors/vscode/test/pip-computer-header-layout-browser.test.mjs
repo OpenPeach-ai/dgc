@@ -71,8 +71,10 @@ async function open(width, name = "Core") {
 // and the button's box.
 const header = (p) => p.evaluate(() => {
   const h1 = document.querySelector(".pc-header h1"), stop = document.getElementById("pc-stop"), bar = document.querySelector(".pc-header");
-  const range = document.createRange(); range.selectNodeContents(h1);
-  const rects = [...range.getClientRects()].filter((r) => r.width > 0.5);
+  // (Its words only, each run of them: the title also holds the computer's Portal, a small picture between the names,
+  // whose own boxes are not words.)
+  const rects = [];
+  for (let walk = document.createTreeWalker(h1, NodeFilter.SHOW_TEXT), node; (node = walk.nextNode());) { const range = document.createRange(); range.selectNodeContents(node); rects.push(...[...range.getClientRects()].filter((r) => r.width > 0.5)); }
   const box = (r) => ({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
   const words = { left: Math.min(...rects.map((r) => r.left)), top: Math.min(...rects.map((r) => r.top)),
     right: Math.max(...rects.map((r) => r.right)), bottom: Math.max(...rects.map((r) => r.bottom)) };

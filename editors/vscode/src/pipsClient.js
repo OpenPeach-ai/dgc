@@ -5,6 +5,8 @@ import '../media/shared/tokens.css';
 // One menu for every "+" and picker, as in Work and ChatDGC (window.DgcMenu).
 import '../media/shared/menu.css';
 import '../media/shared/menu.js';
+// A computer's own mark, the maintainer's Portal, as he wrote it (src/pipComputerNames.js draws it).
+import '../media/shared/portal.css';
 // One card for everything that asks or reports, as in Work and ChatDGC (window.DgcCard).
 import '../media/shared/card.css';
 import '../media/shared/card.js';
