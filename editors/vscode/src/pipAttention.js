@@ -147,6 +147,11 @@ function rowMarkup(i, key, {esc, face, now, busy, answers, held, tail = '', attr
 }
 
 const ARROW = {prev: 'M10 3 5 8l5 5', next: 'M6 3l5 5-5 5'};
+// The fold's mark: our own drawing, as the tray's icons are (trayIcon in pipsClient.js), and not a glyph of the icon font
+// asked for by class. The side bar's Pips view is in a shadow root, where that font's classes are not loaded: there the
+// glyph had no size and drew nothing (found 13 Nov). One drawing, pointing up; pips.css turns it down while the button
+// says the section is folded (aria-expanded), so the mark never says otherwise than the button does.
+const FOLD_MARK = '<span class="codicon attention-fold" aria-hidden="true"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m4 10 4-4 4 4"/></svg></span>';
 
 /** The Pips home's Needs attention: one card in view, whatever waits (asked 11 Nov: the list "gets too long"), with an
  *  arrow each side and dots below to go to the next or back. `at` is the card showing (attentionSpot). `face(item)`
@@ -173,7 +178,7 @@ export function attentionMarkup(page, {esc, face, expanded = false, now = Date.n
   const foot = many ? `<div class="attention-foot"><div class="attention-dots">${dots}</div><span class="attention-place muted" role="status" aria-live="polite">${n(index + 1)} of ${n(count)}</span></div>` : '';
   const cut = page?.truncated && expanded ? `<p class="muted attention-cut">The newest ${listed.length} of ${page.total.toLocaleString('en-US')}. Each Pip’s chat has the rest.</p>` : '';
   const said = expanded ? (error ? `<p class="notice error" role="alert">${esc(error)}</p>` : '') + (more ? `<p class="muted attention-cut">${esc(more)}</p>` : '') : '';
-  const toggle = `<button type="button" class="attention-toggle" data-attention-more="${expanded ? '0' : '1'}" aria-expanded="${Boolean(expanded)}" aria-controls="attention-list">Needs attention <span class="attention-count">${n(total)}</span><span class="codicon codicon-chevron-${expanded ? 'up' : 'down'}" aria-hidden="true"></span></button>`;
+  const toggle = `<button type="button" class="attention-toggle" data-attention-more="${expanded ? '0' : '1'}" aria-expanded="${Boolean(expanded)}" aria-controls="attention-list">Needs attention <span class="attention-count">${n(total)}</span>${FOLD_MARK}</button>`;
   // "View all" (asked 12 Nov): quiet words at the heading row's right end, when two or more wait and the section is open. It
   // opens the page that lists every one (attentionAllMarkup). Folded, or with one card, the heading is as it was.
   const link = viewAll && many ? `<button type="button" class="attention-all-link" id="attention-view-all" data-attention-all="1" aria-label="${esc(`View all ${n(count)} that need you`)}">View all</button>` : '';
