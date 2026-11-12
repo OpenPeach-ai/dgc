@@ -133,7 +133,11 @@ function browserMarkup(){
  const v=S.view;
  return `<section class="pc-pane pc-browser" aria-label="Browser"><form id="pc-go" class="pc-bar"><button type="button" id="pc-back" class="pc-quiet" aria-label="Back">←</button><input id="pc-url" aria-label="Address" placeholder="Search or type a web address" autocomplete="off" value="${esc(S.address??(v?.ok?v.url:''))}"><button type="submit">Go</button></form><div class="pc-screen${S.viewError.startsWith('The browser is closed.')?' pc-screen-closed':''}" tabindex="0" aria-label="The Pip's browser. Click to click there; type to type into the page.">${v?.ok?`<img id="pc-screen" alt="" src="${v.image}" data-width="${v.width}" data-height="${v.height}">${cursorMarkup()}`:`<p class="pc-muted">${esc(S.viewError||'Opening the browser…')}</p>${S.viewError.startsWith('The browser is closed.')?'<button type="button" id="pc-reopen-browser">Open browser</button>':''}`}</div><p class="pc-muted pc-hint">${using()?'The Pip is using its browser. You can watch; it is yours again when it stops.':'You are driving. What you submit here is sent; the Pip\'s own submits wait for you.'}</p></section>`;
 }
-function filesMarkup(){
+// Files, twice: the Files window on the desktop of a computer with no live screen, and (panel) the Files panel under the
+// live screen's bar. One markup and one set of handlers; in the panel, Add and Remove are off while a Pip run uses the
+// computer, as Keyboard and Clipboard are.
+function filesMarkup(panel=false){
+ const held=panel&&using(),why=held?` title="${esc(`${S.pip?.name||'The Pip'} is using it`)}"`:'';
  const f=S.files,crumbs=['Files',...(f.path?f.path.split('/'):[])];
  const size=n=>n==null?'':n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:n<1073741824?`${(n/1048576).toFixed(1)} MB`:`${(n/1073741824).toFixed(1)} GB`;
  const rows=f.entries.map(e=>`<li><button type="button" class="pc-file${f.selected===e.name?' active':''}" data-${e.kind==='folder'?'folder':'file'}="${esc(e.name)}"><span class="pc-icon" aria-hidden="true">${e.kind==='folder'?'▸':'·'}</span><span class="pc-name">${esc(e.name)}</span><span class="pc-size">${size(e.bytes)}</span></button></li>`).join('');
@@ -141,7 +145,7 @@ function filesMarkup(){
  // A copy under way: the file's name with "copying" (one command each, so no made-up progress bar).
  const copying=f.adding&&f.adding.folder===f.path?f.adding.names.map(name=>`<li class="pc-file pc-copying" role="status"><span class="pc-icon" aria-hidden="true">·</span><span class="pc-name">${esc(name)}</span><span class="pc-size">copying</span></li>`).join(''):'';
  const preview=!p?'<p class="pc-muted">Select a file to see it.</p>':p.text!=null?`<pre class="pc-text">${esc(p.text)}</pre>${p.truncated?'<p class="pc-muted">Showing the first 64 KB.</p>':''}`:p.data&&p.mime.startsWith('image/')?`<img class="pc-image" alt="${esc(p.name)}" src="${p.data}">`:`<p class="pc-muted">${p.too_large?'This file is over 2 MB, too large to show here.':'No preview for this kind of file.'}</p>`;
- return `<section class="pc-pane pc-files" aria-label="Files"><div class="pc-bar"><nav class="pc-crumbs" aria-label="Folder">${crumbs.map((c,i)=>`<button type="button" class="pc-crumb" data-crumb="${i}">${esc(c)}</button>`).join('<span aria-hidden="true">/</span>')}</nav>${bigFiles()?`<button type="button" id="pc-add" class="dgc-btn small pc-add-big"${f.adding||f.saving?' disabled':''}>${f.adding?'Adding…':'Add file…'}</button>`:'<label class="pc-add"><input type="file" id="pc-add-input" multiple hidden>Add files…</label>'}</div>${f.error?`<p class="pc-error" role="alert">${esc(f.error)}</p>`:''}<div class="pc-split"><ul class="pc-list" aria-label="Files in this folder">${copying}${rows||(copying?'':'<li class="pc-muted">Nothing here yet. Downloads from the browser land in Downloads.</li>')}</ul><div class="pc-preview">${p?`<div class="pc-bar"><strong>${esc(p.name)}</strong><span class="pc-muted">${size(p.bytes)}</span>${bigFiles()?`<button type="button" id="pc-save-as" class="dgc-btn small pc-save-big"${f.saving||f.adding?' disabled':''}>${f.saving===p.path?'Saving…':'Save to this computer…'}</button>`:`<button type="button" id="pc-save" class="pc-quiet"${p.data||p.text!=null&&!p.truncated?'':' disabled'}>Save to…</button>`}<button type="button" id="pc-remove" class="${bigFiles()?'dgc-btn small pc-remove-big':'pc-quiet'}">Remove</button></div>`:''}${preview}</div></div><p class="pc-muted">${size(f.total)} of 1 GB used. Only this computer's files: never your own.</p></section>`;
+ return `<section class="${panel?'pc-panel pc-files pc-files-panel" id="pc-files-panel':'pc-pane pc-files'}" aria-label="Files"><div class="pc-bar"><nav class="pc-crumbs" aria-label="Folder">${crumbs.map((c,i)=>`<button type="button" class="pc-crumb" data-crumb="${i}">${esc(c)}</button>`).join('<span aria-hidden="true">/</span>')}</nav>${bigFiles()?`<button type="button" id="pc-add" class="dgc-btn small pc-add-big"${f.adding||f.saving||held?' disabled':''}${why}>${f.adding?'Adding…':'Add file…'}</button>`:`<label class="pc-add${held?' pc-add-off':''}"${why}><input type="file" id="pc-add-input" multiple hidden${held?' disabled':''}>Add files…</label>`}</div>${f.error?`<p class="pc-error" role="alert">${esc(f.error)}</p>`:''}<div class="pc-split"><ul class="pc-list" aria-label="Files in this folder">${copying}${rows||(copying?'':'<li class="pc-muted">Nothing here yet. Downloads from the browser land in Downloads.</li>')}</ul><div class="pc-preview">${p?`<div class="pc-bar"><strong>${esc(p.name)}</strong><span class="pc-muted">${size(p.bytes)}</span>${bigFiles()?`<button type="button" id="pc-save-as" class="dgc-btn small pc-save-big"${f.saving||f.adding?' disabled':''}>${f.saving===p.path?'Saving…':'Save to this computer…'}</button>`:`<button type="button" id="pc-save" class="pc-quiet"${p.data||p.text!=null&&!p.truncated?'':' disabled'}>Save to…</button>`}<button type="button" id="pc-remove" class="${bigFiles()?'dgc-btn small pc-remove-big':'pc-quiet'}"${held?' disabled':''}${why}>Remove</button></div>`:''}${preview}</div></div><p class="pc-muted">${size(f.total)} of 1 GB used. Only this computer's files: never your own.</p></section>`;
 }
 function terminalMarkup(){
  const t=S.terminal;
@@ -219,6 +223,7 @@ const ICON={
  size:'<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="8.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 13.75h5M8 11.25v2.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
  keys:'<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="1.25" y="3.75" width="13.5" height="8.5" rx="1.75" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M4 6.5h.01M6.65 6.5h.01M9.35 6.5h.01M12 6.5h.01M4 9.6h.01M12 9.6h.01M6.4 9.6h3.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
  clip:'<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="3.25" y="2.75" width="9.5" height="11.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6 2.75V2a.75.75 0 0 1 .75-.75h2.5A.75.75 0 0 1 10 2v.75M5.75 7h4.5M5.75 9.5h4.5M5.75 12h2.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
+ files:'<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.75 4.25a1.5 1.5 0 0 1 1.5-1.5h2.9l1.6 1.75h5a1.5 1.5 0 0 1 1.5 1.5v5.75a1.5 1.5 0 0 1-1.5 1.5h-9.5a1.5 1.5 0 0 1-1.5-1.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
  full:'<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
  leave:'<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 2.5V6H2.5M13.5 6H10V2.5M10 13.5V10h3.5M2.5 10H6v3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>'};
 const bytesOf=text=>new TextEncoder().encode(text).length;
@@ -243,6 +248,8 @@ function toolsMarkup(){
   +(sizes.length?tool('pc-size','Screen size',ICON.size,{expanded:S.sizeMenu,popup:true}):'')
   +tool('pc-keys','Keyboard',ICON.keys,{expanded:S.panel==='keys'&&!off,off})
   +tool('pc-clip','Clipboard',ICON.clip,{expanded:S.panel==='clip'&&!off,off,dot:S.clip.fresh&&!off})
+  // Its Files (the folder DGC keeps for this computer): open whenever the computer is, also while a Pip run uses it.
+  +tool('pc-files','Files',ICON.files,{expanded:S.panel==='files'})
   +(busy?`<span class="pc-using" id="pc-using" role="status">${esc(why)}</span>`:'')
   +`<span class="pc-tools-end"></span>`+tool('pc-full',S.full?'Leave full screen':'Full screen',S.full?ICON.leave:ICON.full)+menu;
 }
@@ -256,6 +263,7 @@ const XK={esc:0xff1b,tab:0xff09,enter:0xff0d,del:0xffff,ctrl:0xffe3,alt:0xffe9,s
 const KEYBOARD=[['esc','Esc',[XK.esc]],['tab','Tab',[XK.tab]],['ctrl-alt-del','Ctrl+Alt+Del',[XK.ctrl,XK.alt,XK.del]],['ctrl-w','Ctrl+W',[XK.ctrl,0x77]],['ctrl-t','Ctrl+T',[XK.ctrl,0x74]],
  ['ctrl-l','Ctrl+L',[XK.ctrl,0x6c]],['alt-tab','Alt+Tab',[XK.alt,XK.tab]],['super','Super',[XK.super]],...Array.from({length:12},(_,i)=>[`f${i+1}`,`F${i+1}`,[0xffbe+i]])];
 function panelMarkup(){
+ if(S.panel==='files')return filesMarkup(true);
  if(!mayType()||!S.panel)return '';
  if(S.panel==='keys')return `<section class="pc-panel pc-keys-panel" id="pc-keys-panel" role="group" aria-label="Keyboard">`
   +KEYBOARD.map(([id,label])=>`${id==='f1'?'<span class="pc-key-break" aria-hidden="true"></span>':''}<button type="button" class="dgc-btn small pc-key" data-key="${id}">${label}</button>`).join('')+'</section>';
@@ -518,6 +526,7 @@ document.addEventListener('click',event=>{
  else if(t.id==='pc-size'){S.sizeMenu=!S.sizeMenu;render();if(S.sizeMenu)($('pc-size-menu')?.querySelector('[aria-checked="true"]')||$('pc-size-menu')?.querySelector('.dgc-menu-row'))?.focus();}
  else if(t.dataset.size)void chooseSize(t.dataset.size);
  else if(t.id==='pc-keys'||t.id==='pc-clip'){const panel=t.id==='pc-keys'?'keys':'clip';S.panel=S.panel===panel?'':panel;if(S.panel==='clip')S.clip={...S.clip,fresh:false};render();}
+ else if(t.id==='pc-files'){S.panel=S.panel==='files'?'':'files';render();if(S.panel==='files')void loadFiles();}
  else if(t.id==='pc-full'){if(S.full)leaveFull();else void enterFull();}
  else if(t.dataset.key)pressKeys(t.dataset.key);
  else if(t.id==='pc-paste')pasteIn();
@@ -536,10 +545,10 @@ document.addEventListener('click',event=>{
  else if(t.dataset.folder!==undefined){S.files.selected=null;S.files.preview=null;void loadFiles([S.files.path,t.dataset.folder].filter(Boolean).join('/'));}
  else if(t.dataset.file!==undefined)void openFile(t.dataset.file);
  else if(t.dataset.crumb!==undefined){const i=Number(t.dataset.crumb);S.files.selected=null;S.files.preview=null;void loadFiles(S.files.path.split('/').filter(Boolean).slice(0,i).join('/'));}
- else if(t.id==='pc-add'&&bigFiles()&&!S.files.adding&&!S.files.saving){S.files.adding={folder:S.files.path,names:[]};S.files.error='';render();vscode.postMessage({type:'pipComputerAddFiles',folder:S.files.path});}
+ else if(t.id==='pc-add'&&!filesHeld()&&bigFiles()&&!S.files.adding&&!S.files.saving){S.files.adding={folder:S.files.path,names:[]};S.files.error='';render();vscode.postMessage({type:'pipComputerAddFiles',folder:S.files.path});}
  else if(t.id==='pc-save-as'&&bigFiles()&&S.files.preview&&!S.files.adding&&!S.files.saving){S.files.saving=S.files.preview.path;S.files.error='';S.notice='';render();vscode.postMessage({type:'pipComputerSaveAs',path:S.files.preview.path});}
  else if(t.id==='pc-save'&&S.files.preview)vscode.postMessage({type:'pipComputerSave',name:S.files.preview.name,data:S.files.preview.data||null,text:S.files.preview.data?null:S.files.preview.text});
- else if(t.id==='pc-remove'&&S.files.preview){const path=S.files.preview.path;void send('remove_pip_computer_file',{pip_id:S.pip.id,path}).then(()=>{S.files.selected=null;S.files.preview=null;return loadFiles();},error=>{S.files.error=errorText(error);render();});}
+ else if(t.id==='pc-remove'&&S.files.preview&&!filesHeld()){const path=S.files.preview.path;void send('remove_pip_computer_file',{pip_id:S.pip.id,path}).then(()=>{S.files.selected=null;S.files.preview=null;return loadFiles();},error=>{S.files.error=errorText(error);render();});}
  else if(t.dataset.send)void decide(t.dataset.send,'send');
  else if(t.dataset.always)void decide(t.dataset.always,'always');
  else if(t.dataset.reject)void decide(t.dataset.reject,'reject');
@@ -567,9 +576,12 @@ document.addEventListener('keydown',event=>{
 });
 function flushTyped(){clearTimeout(typeTimer);if(!typed)return;const text=typed;typed='';void frame('type',{text});}
 document.addEventListener('wheel',event=>{if(!event.target.closest?.('.pc-screen')||using())return;event.preventDefault();void frame('scroll',{dy:Math.max(-2000,Math.min(2000,Math.round(event.deltaY)))});},{passive:false});
-document.addEventListener('change',event=>{if(event.target.id==='pc-add-input'){void addFiles([...event.target.files]);event.target.value='';}});
-document.addEventListener('dragover',event=>{if(S.app==='files'&&[...(event.dataTransfer?.types||[])].includes('Files'))event.preventDefault();});
-document.addEventListener('drop',event=>{if(S.app!=='files')return;const files=[...(event.dataTransfer?.files||[])];if(!files.length)return;event.preventDefault();void addFiles(files);});
+document.addEventListener('change',event=>{if(event.target.id==='pc-add-input'&&!filesHeld()){void addFiles([...event.target.files]);event.target.value='';}});
+// Where Files is on show: its window, or the panel under the live screen. There, a Pip run using the computer holds Add and Remove.
+const filesShown=()=>screenMode()?S.panel==='files':S.app==='files';
+const filesHeld=()=>screenMode()&&using();
+document.addEventListener('dragover',event=>{if(filesShown()&&!filesHeld()&&[...(event.dataTransfer?.types||[])].includes('Files'))event.preventDefault();});
+document.addEventListener('drop',event=>{if(!filesShown()||filesHeld())return;const files=[...(event.dataTransfer?.files||[])];if(!files.length)return;event.preventDefault();void addFiles(files);});
 async function addFiles(files){
  let said='';
  for(const file of files){

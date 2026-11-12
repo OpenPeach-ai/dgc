@@ -84,8 +84,8 @@ for (const width of WIDTHS) {
         inside(l.tools, l.view, "the bar");
         for (const b of l.buttons) { inside(b, l.view, b.id); assert.ok(b.height >= 22 && b.width >= 22, `${b.id} is large enough to press`); assert.doesNotMatch(b.ground, PURPLE, `${b.id} is not purple`); }
         apart(l.buttons, `the bar at ${width}px`);
-        assert.deepEqual(l.buttons.map((b) => b.id), ["pc-fit", "pc-actual", "pc-size", "pc-keys", "pc-clip", "pc-full"]);
-        assert.deepEqual(await x.p.evaluate(() => [...document.querySelectorAll("#pc-tools button")].map((b) => b.getAttribute("aria-label") || b.textContent)), ["Fit", "100%", "Screen size", "Keyboard", "Clipboard", "Full screen"]);
+        assert.deepEqual(l.buttons.map((b) => b.id), ["pc-fit", "pc-actual", "pc-size", "pc-keys", "pc-clip", "pc-files", "pc-full"]);
+        assert.deepEqual(await x.p.evaluate(() => [...document.querySelectorAll("#pc-tools button")].map((b) => b.getAttribute("aria-label") || b.textContent)), ["Fit", "100%", "Screen size", "Keyboard", "Clipboard", "Files", "Full screen"]);
         assert.deepEqual(x.errors, []);
       } finally { await x.close(); }
     }
@@ -439,7 +439,7 @@ test("a new copy on the computer puts one small mark on Clipboard until the pane
     const y = await openComputer(browser, { width: 700, ...opts });
     try {
       assert.equal(await y.p.$("#pc-size"), null, `${name}: no Screen size`);
-      assert.deepEqual(await y.p.evaluate(() => [...document.querySelectorAll("#pc-tools button")].map((b) => b.id)), ["pc-fit", "pc-actual", "pc-keys", "pc-clip", "pc-full"]);
+      assert.deepEqual(await y.p.evaluate(() => [...document.querySelectorAll("#pc-tools button")].map((b) => b.id)), ["pc-fit", "pc-actual", "pc-keys", "pc-clip", "pc-files", "pc-full"]);
       assert.deepEqual(y.errors, []);
     } finally { await y.close(); }
   }

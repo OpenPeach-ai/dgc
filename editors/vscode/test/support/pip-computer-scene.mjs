@@ -30,6 +30,11 @@ function host(PIP, scene) {
     get_pip_computer: () => ({ computer: { pip_id: PIP.id, granted: true, available: true, reason: "", pending: 0, actions: [], ...(scene.screens ? { screen: scene.screen, screens: scene.screens } : {}) } }),
     get_pip_computer_desktop: () => ({ desktop: { pip_id: PIP.id, available: true, reason: "", install: "", using: scene.using, browser: "Chromium", chrome_install: "" } }),
     use_pip_computer_view: () => ({ view: { ok: false, error: "" } }),
+    // Its Files (scene.files: the top folder), for the Files panel under the screen.
+    list_pip_computer_files: (r) => ({ path: r.path, entries: r.path ? [] : scene.files || [], more: false, total_bytes: (scene.files || []).reduce((n, f) => n + (f.bytes || 0), 0) }),
+    read_pip_computer_file: (r) => { const f = (scene.files || []).find((x) => x.name === r.path) || { bytes: 12 }; const big = f.bytes > 2 * 1024 * 1024;
+      return { path: r.path, name: r.path.split("/").at(-1), mime: big ? "application/octet-stream" : "text/plain", bytes: f.bytes, ...(big ? { too_large: true } : { text: "buy milk\n", truncated: false }) }; },
+    remove_pip_computer_file: (r) => { scene.files = (scene.files || []).filter((x) => x.name !== r.path); return { path: r.path, removed: true }; },
     set_pip_computer_screen: (r) => { scene.screen = r.size; void window.__rfb("size", r.size); return { pip_id: PIP.id, screen: r.size }; },
     // Stop: DGC says it is stopping, and the screen's stream closes a moment later.
     stop_pip_computer: () => { setTimeout(() => post({ type: "pipDesktopClosed", reason: "The computer's screen closed." }), 40); return { pip_id: PIP.id, stopping: true }; },
@@ -67,7 +72,7 @@ export async function openComputer(browser, opts = {}) {
   const { js, css } = await bundle();
   const t = THEMES[theme];
   const page = `<!DOCTYPE html><html><head><meta charset="utf-8">${VSCODE_WEBVIEW}<style>${t.css}</style><style>${css}</style></head><body class="${t.kind}"><main id="app"></main>`
-    + `<script>(${host})(${JSON.stringify(PIP)}, ${JSON.stringify({ api, using, screen, screens })});</script><script type="module" src="/ext/dist/pipComputer.js"></script></body></html>`;
+    + `<script>(${host})(${JSON.stringify(PIP)}, ${JSON.stringify({ api, using, screen, screens, files: opts.files || [] })});</script><script type="module" src="/ext/dist/pipComputer.js"></script></body></html>`;
   const context = await browser.newContext({ viewport: { width, height }, reducedMotion: "reduce", colorScheme: theme });
   const p = await context.newPage();
   const errors = [];

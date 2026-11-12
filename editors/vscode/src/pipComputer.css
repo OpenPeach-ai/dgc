@@ -106,6 +106,15 @@ body.pc-screen-mode{padding:0}
 /* A panel sits between the bar and the screen, which is fitted again to the room left; a tall panel scrolls in its own box. */
 #pc-panel{flex:none;max-height:46%;overflow:auto}
 .pc-panel{border-bottom:1px solid var(--hair);padding:8px}
+/* Files under the live screen: the same list, folder and buttons as the Files window, in the panel's own room. */
+.pc-files-panel{display:flex;flex-direction:column;gap:8px;font-size:var(--t-sm)}
+.pc-files-panel .pc-split{flex:none;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.pc-files-panel .pc-list{max-height:132px}
+.pc-files-panel .pc-preview{max-height:132px}
+.pc-files-panel .pc-text{max-height:64px;overflow:auto}
+.pc-files-panel .pc-image{max-height:64px;align-self:flex-start}
+.pc-files-panel>.pc-muted,.pc-files-panel .pc-preview>.pc-muted{font-size:var(--t-xs)}
+.pc-add-off{opacity:.5;pointer-events:none}
 .pc-keys-panel{display:flex;flex-wrap:wrap;gap:5px}
 .pc-key-break{flex-basis:100%;height:0}
 .dgc-btn.pc-key{width:auto;min-width:34px;padding:0 7px;font-family:var(--mono);font-size:var(--t-xs)}
@@ -121,7 +130,7 @@ body.pc-screen-mode{padding:0}
 .pc-clip-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
 .pc-clip-note{flex:1 1 120px;min-width:0;font-size:var(--t-sm);color:var(--muted)}
 .pc-clip-bad{color:var(--vscode-errorForeground,#f14c4c)}
-@media(max-width:560px){.pc-tool-label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}.pc-clip-panel{grid-template-columns:minmax(0,1fr)}#pc-panel{max-height:56%}}
+@media(max-width:560px){.pc-tool-label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}.pc-clip-panel{grid-template-columns:minmax(0,1fr)}#pc-panel{max-height:56%}.pc-files-panel .pc-split{grid-template-columns:minmax(0,1fr)}.pc-files-panel .pc-list,.pc-files-panel .pc-preview{max-height:96px}}
 .pc-vnc{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
 .pc-vnc>div{width:100%!important;height:100%!important;background:transparent!important}
 .pc-overlay{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
@@ -155,3 +164,6 @@ body.pc-screen-mode{padding:0}
 .pc-apps{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .pc-apps span{flex:1 1 320px}
 .pc-apps .pc-quiet{background:transparent;color:inherit;border:1px solid var(--line,rgba(127,127,127,.4))}
+
+/* The panel's error line sits with the rest of the panel, not indented by .pc-error's own side margin. */
+.pc-files-panel .pc-error{margin:0}
