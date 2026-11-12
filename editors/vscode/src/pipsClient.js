@@ -3389,7 +3389,7 @@ function attentionGo(key,index,{focus=false}={}){
  const old=document.querySelector('.attention-carousel'),from=Number(old?.dataset.at);if(!old||!key)return;
  const place=attentionPlace();if(place.key===key)return;
  const held=focus?document.activeElement?.id||'':'',was=old.querySelector('.attention-stage')?.getBoundingClientRect?.().height||0;
- place.key=key;place.index=Number.isSafeInteger(index)?index:place.index;render();
+ place.key=key;place.index=Number.isSafeInteger(index)?index:place.index;renderThenFocus();
  const now=document.querySelector('.attention-carousel'),stage=now?.querySelector('.attention-stage');if(!stage)return;
  if(focus&&!now.contains(document.activeElement))(held&&!$(held)?.disabled&&$(held)||now.querySelector('.attention-dot[aria-current]'))?.focus?.({preventScroll:true});
  if(attentionStill())return;
@@ -3497,13 +3497,13 @@ function attentionAllShown(){
 }
 function openAttentionAll(){
  Object.assign(attentionAll,{open:true,place:projectPlace()?'project':'personal',last:'',lastIndex:0,homeScroll:attentionScroller().scrollTop||0});
- render();attentionScroller().scrollTop=0;$('attention-all-back')?.focus?.({preventScroll:true});
+ renderThenFocus();attentionScroller().scrollTop=0;$('attention-all-back')?.focus?.({preventScroll:true});
 }
 function closeAttentionAll(){
  if(!attentionAll.open)return;attentionAll.open=false;
  // The card you were last on; one answered meanwhile gives its place to the next (attentionSpot).
  const place=attentionPlaces[attentionAll.place];if(place&&attentionAll.last){place.key=attentionAll.last;place.index=attentionAll.lastIndex;}
- render();attentionScroller().scrollTop=attentionAll.homeScroll;($('attention-view-all')||document.querySelector('.attention-toggle'))?.focus?.({preventScroll:true});
+ renderThenFocus();attentionScroller().scrollTop=attentionAll.homeScroll;($('attention-view-all')||document.querySelector('.attention-toggle'))?.focus?.({preventScroll:true});
 }
 function attentionAllPageMarkup(notes){
  const {page,draw}=attentionScene(true),drawn=attentionAllMarkup(page,{...draw,rejected:id=>heldRejects.has(id)});
@@ -4500,6 +4500,7 @@ function render() {
   settleProjectTab();
   noticeFades();syncNewPipModel();
   const focus=document.activeElement; const focusId=focus?.id; const focusActivity=focus?.dataset?.chatActivity; const focusData=focus?.getAttribute?.('data-run')||focus?.getAttribute?.('data-job')||focus?.getAttribute?.('data-pip-type'); const inBox=!!chatBox&&focus===chatBox.el;const selection=focus&&typeof focus.selectionStart==='number'&&!inBox?[focus.selectionStart,focus.selectionEnd]:null;const boxAt=inBox?Mentions.selectedOffsets(chatBox.el):null;
+  const focusPlace=focusMark(focus)||focusStillOwed();
   const oldLog=document.querySelector('.conversation-log'),oldScroll=oldLog?.scrollTop||0,oldHeight=oldLog?.scrollHeight||0,oldFirst=oldLog?.querySelector('[data-message]')?.dataset.message;
   const oldPipId=shell.dataset.motionPip||'',oldConv=shell.dataset.motionConv||'',oldMessageRows=[...(oldLog?.querySelectorAll('[data-message]')||[])];
   const oldMessages=new Set(oldMessageRows.map(e=>e.dataset.message));
@@ -4555,7 +4556,49 @@ function render() {
   if(focusId && !S.review) { const next=$(focusId);next?.focus({preventScroll:true});if(selection&&next?.setSelectionRange) next.setSelectionRange(...selection); }
   else if(focusActivity&&!S.review)[...document.querySelectorAll('[data-chat-activity]')].find(e=>e.dataset.chatActivity===focusActivity)?.focus({preventScroll:true});
   else if(focusData && !S.review) [...document.querySelectorAll('[data-job],[data-run],[data-pip-type]')].find(e=>e.dataset.job===focusData||e.dataset.run===focusData||e.dataset.pipType===focusData)?.focus({preventScroll:true});
+  if(!S.review)landFocus(focusPlace,!focusIsCallers);
   picker.restore();
+}
+// Where the keyboard is, kept across a redraw (found 13 Nov: Enter on a control with no id redrew it and the focus
+// dropped, to nothing in the side bar and to the body in a tab). render() finds a control with an id again by its id;
+// this is for the rest. `selector`: a control with no id is known by its tag and its data attributes (a card's row by
+// its card, a project's Pip by its id, Undo by what it takes back), less the ones that say how it looks now. `card`:
+// in Needs attention, the card it is on and where that card is in the list, for when the control itself is gone.
+const FOCUS_PASSING=['state','waiting','attentionIndex'];
+let focusIsCallers=false,focusOwed=null;
+// A redraw whose caller says where the keyboard goes next (another card, the page of them all and back): the same
+// control is still found again, but no other place is chosen here first.
+function renderThenFocus(){focusIsCallers=true;try{render();}finally{focusIsCallers=false;}}
+function focusMark(el){
+ if(!el||el===shell||!el.closest||!$('app')?.contains(el))return null;
+ const data=el.id?[]:Object.entries(el.dataset).filter(([name,value])=>!FOCUS_PASSING.includes(name)&&value.length<=200);
+ const selector=data.length?el.localName+data.map(([name,value])=>`[data-${name.replace(/[A-Z]/g,c=>'-'+c.toLowerCase())}="${CSS.escape(value)}"]`).join(''):'';
+ const li=el.closest('[data-attention-key]'),inList=!!el.closest('.attention-all-list');
+ const card=li||el.closest('.attention-carousel,.attention-all-link,.undo-reject')?{key:li?.dataset.attentionKey||'',index:li&&inList?[...li.parentNode.children].indexOf(li):0}:null;
+ return selector||card?{selector,nth:selector?[...document.querySelectorAll(selector)].indexOf(el):0,card}:null;
+}
+// After the redraw, and only when it left the keyboard nowhere: back on the same control; or, in Needs attention when
+// that control went with its card (answered, rejected, its moment for Undo over), on the card that took its place (the
+// next; after the last, the one before), then on what is left to go on from: the heading's fold, the way back from the
+// page of them all, Undo for a new Pip just rejected, the tab you are on. Nothing moves a focus that is somewhere.
+function landFocus(mark,elsewhere=true){
+ const at=document.activeElement;focusOwed=null;
+ if(!mark||at&&at!==shell&&at!==owner.body&&at.isConnected)return;
+ const again=mark.selector?[...document.querySelectorAll(mark.selector)]:[],same=again[mark.nth]||again[0];
+ if(same&&!same.disabled){same.focus({preventScroll:true});return;}
+ if(!mark.card||!elsewhere)return;
+ const rows=[...document.querySelectorAll('.attention-all-list>[data-attention-key]')],first=li=>li?.querySelector('button:not(:disabled)');
+ const card=rows.length?rows.find(li=>li.dataset.attentionKey===mark.card.key)||rows[Math.min(mark.card.index,rows.length-1)]:document.querySelector('.attention-stage>[data-attention-key]');
+ // Its card is there with every button off (its answer is on its way to DGC): the keyboard waits for the draw after.
+ if(card&&!first(card)){focusOwed=mark;return;}
+ (first(card)||$('attention-all-done')||[$('attention-toggle'),$('attention-all-back')].find(b=>b&&!b.disabled)||document.querySelector('.undo-reject button')||document.querySelector('[data-pips-tab][aria-selected="true"]'))?.focus?.({preventScroll:true});
+}
+// A place still owed from the draw before, while the keyboard is nowhere at all (not elsewhere in the window: the page
+// around a side bar's view names the view's host as its focus only while the focus is inside the view).
+function focusStillOwed(){
+ const at=owner.activeElement;
+ if(focusOwed&&at&&at!==owner.body)focusOwed=null;
+ return focusOwed;
 }
 async function chooseAppConnection(){
  if(remoteHost||S.apiVersion<29||!personalPip()||!usable())return;

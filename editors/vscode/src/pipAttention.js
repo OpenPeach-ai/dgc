@@ -178,7 +178,10 @@ export function attentionMarkup(page, {esc, face, expanded = false, now = Date.n
   const foot = many ? `<div class="attention-foot"><div class="attention-dots">${dots}</div><span class="attention-place muted" role="status" aria-live="polite">${n(index + 1)} of ${n(count)}</span></div>` : '';
   const cut = page?.truncated && expanded ? `<p class="muted attention-cut">The newest ${listed.length} of ${page.total.toLocaleString('en-US')}. Each Pip’s chat has the rest.</p>` : '';
   const said = expanded ? (error ? `<p class="notice error" role="alert">${esc(error)}</p>` : '') + (more ? `<p class="muted attention-cut">${esc(more)}</p>` : '') : '';
-  const toggle = `<button type="button" class="attention-toggle" data-attention-more="${expanded ? '0' : '1'}" aria-expanded="${Boolean(expanded)}" aria-controls="attention-list">Needs attention <span class="attention-count">${n(total)}</span>${FOLD_MARK}</button>`;
+  // The fold has a name of its own (its id): a redraw makes the button anew, and the page puts the keyboard back on it
+  // by that name (render in pipsClient.js), so Enter or Space on it leaves the focus where it was, on a button that now
+  // says the new state (aria-expanded).
+  const toggle = `<button type="button" class="attention-toggle" id="attention-toggle" data-attention-more="${expanded ? '0' : '1'}" aria-expanded="${Boolean(expanded)}" aria-controls="attention-list">Needs attention <span class="attention-count">${n(total)}</span>${FOLD_MARK}</button>`;
   // "View all" (asked 12 Nov): quiet words at the heading row's right end, when two or more wait and the section is open. It
   // opens the page that lists every one (attentionAllMarkup). Folded, or with one card, the heading is as it was.
   const link = viewAll && many ? `<button type="button" class="attention-all-link" id="attention-view-all" data-attention-all="1" aria-label="${esc(`View all ${n(count)} that need you`)}">View all</button>` : '';
