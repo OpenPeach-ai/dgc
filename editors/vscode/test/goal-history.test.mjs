@@ -202,3 +202,23 @@ test("a goal's Trace opens the Trace of the turns between its start and its end,
   assert.equal(dialog.querySelector(".dgc-trace-scrub").max, "95000", "from its first turn's start to its last turn's end");
   assert.deepEqual(x.v.errors, []);
 });
+
+test("a goal's own next turn says which goal turn it is; any other resume keeps its words", () => {
+  // Codex's shape (12 Nov night): each goal cycle is a turn of its own, started by DGC ("resume" on the wire, labelled
+  // "Goal · turn N"), never drawn as something you sent.
+  const x = chat();
+  x.event({ type: "turn_start", turn_id: "t1", prompt: "Ship the release", kind: "prompt" });
+  x.event({ type: "turn_end", turn_id: "t1", reason: "completed" });
+  x.event({ type: "turn_start", turn_id: "t2", prompt: "Goal · turn 2", kind: "resume" });
+  const notes = () => [...x.v.doc.querySelectorAll("#log .resume-note")].map((n) => text(n));
+  assert.deepEqual(notes(), ["Goal · turn 2"]);
+  assert.ok(x.v.doc.querySelector("#log .resume-note.goal-turn-note"), "drawn as a goal turn");
+  assert.equal(x.v.doc.querySelectorAll("#log .msg.user").length, 1, "only the prompt you sent is a bubble");
+  x.event({ type: "turn_end", turn_id: "t2", reason: "completed" });
+  x.event({ type: "turn_start", turn_id: "t3", prompt: "Continue the standing goal from where the previous session stopped.", kind: "resume" });
+  assert.deepEqual(notes(), ["Goal · turn 2", "Resumed the standing goal"]);
+  x.event({ type: "turn_end", turn_id: "t3", reason: "completed" });
+  x.event({ type: "turn_start", turn_id: "t4", prompt: "Goal · turn <b>2</b>", kind: "resume" });
+  assert.equal(notes().at(-1), "Resumed the standing goal", "only DGC's own label is shown");
+  assert.deepEqual(x.v.errors, []);
+});

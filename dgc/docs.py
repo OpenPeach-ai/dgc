@@ -3244,6 +3244,12 @@ In the terminal, `/goal <objective>` saves the objective and starts work. In VS 
 `/` menu, then type the objective. DGC continues an active goal across work cycles on native local/API and delegated
 subscription routes. Ordinary prompts do not create goals.
 
+In VS Code/Cursor each work cycle is a turn of its own, as in Codex: it ends like any turn, with its reply, the files
+it changed and its time, and then DGC starts the goal's next turn by itself, shown as "Goal · turn 3" instead of a
+message from you. A message you queue while it works runs first, as its own turn, and the goal carries on after it.
+A turn that ends with a question to you waits for your answer. In the terminal, and for an SDK app, the cycles still
+run inside the one turn.
+
 In the terminal, an active goal keeps a row directly above the composer: the objective, its
 status, and the work time counted so far — so what DGC is holding you to, and how long it has
 been at it, are visible without asking.
@@ -3290,8 +3296,9 @@ and keeps the goal you already had: nothing is truncated and nothing is lost.
 Native models use `update_goal` with a summary and evidence. Delegated models submit
 a structured closing report that DGC validates and removes from the displayed answer.
 Completion is applied after the work cycle succeeds; failed or cancelled work cannot
-complete a goal. Three consecutive cycles without distinct tool progress block the
-goal for review. Cancellation or a runtime failure pauses it.
+complete a goal. Three goal turns in a row that come back empty (no reply and no tool work)
+block the goal for review; whether repeated work is progress is the model's own check, as in
+Codex. Cancellation or a runtime failure pauses it.
 
 Use `/goal --tokens 100000 <objective>` for an optional token budget, or edit the
 budget in the goal card. Budgets are checked between native requests or delegated

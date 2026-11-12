@@ -304,9 +304,10 @@ def goal_record(text: str, status: str, details=None, now=None) -> str:
 
 class Progress:
     def __init__(self):
-        self.digest, self.count = hashlib.sha256(), 0
+        self.digest, self.count, self.calls = hashlib.sha256(), 0, 0
 
     def add(self, name: str, args: dict, output: str) -> None:
+        self.calls += 1                  # any tool work at all: what an empty goal turn lacks (Codex's rule)
         if name in ("update_goal", "todo"):
             return
         # Re-running one command with a changing timestamp or timing footer is not new work.
@@ -952,6 +953,7 @@ class GoalLifecycle:
         active = bool(self.goal and self.goal_status == "active")
         if self.depth or (external and not active):
             return step(prompt)
+        self._goal_next_turn = None             # set again only by a cycle that leaves the goal running
         result = False
         self._goal_owner = threading.get_ident()
         self._requested_goal_action = ""
@@ -998,6 +1000,7 @@ class GoalLifecycle:
                     self._accepting_steer = not external
                 self._end_turn_after_batch = ""
                 step_started = True
+                said_from = len(self.messages)
                 result = step(prompt)
                 if not self._goal_running:
                     return result  # no goal was adopted: retain ordinary turn semantics
@@ -1006,6 +1009,7 @@ class GoalLifecycle:
                 self._end_turn_after_batch = ""
                 ok = bool(result.get("ok")) if isinstance(result, dict) else result is not False
                 self._goal_details["cycles"] += 1
+                self._number_goal_turn(said_from, self._goal_details["cycles"])
                 report = self._pending_goal_report
                 if external:
                     report = clean_report(result.get("goal_report")) if isinstance(result, dict) else None
@@ -1037,13 +1041,19 @@ class GoalLifecycle:
                     return result
                 signature = str(result.get("progress_signature") or "") if external else self._goal_progress.signature()
                 details = self._goal_details
-                stalled = not signature or signature == details["last_progress"]
-                details["stalled_cycles"] = details["stalled_cycles"] + 1 if stalled else 0
+                # Codex's rule (12 Nov, his call): a goal turn is empty when it did no tool work and said nothing;
+                # three in a row and the goal is blocked. A turn that only waited on a job, or repeated a check, is
+                # not empty: whether that is progress is the model's audit (the cycle prompt's no-progress check).
+                if external:
+                    empty = not signature and not str(result.get("text") or "").strip()
+                else:
+                    empty = not self._goal_progress.calls and not self._said_since(said_from)
+                details["stalled_cycles"] = details["stalled_cycles"] + 1 if empty else 0
                 details["last_progress"] = signature
                 if report:
                     details["reason"], details["evidence"] = report["summary"], report["evidence"]
                 if details["stalled_cycles"] >= 3:
-                    reason = "Three consecutive goal cycles made no distinct tool progress. Review the remaining work before resuming."
+                    reason = "Three goal turns in a row came back empty: no reply and no tool work. Review the goal before resuming."
                     self.ui.info(reason)
                     return finish("blocked", result, reason=reason)
                 budget = details["token_budget"]
@@ -1059,10 +1069,15 @@ class GoalLifecycle:
                 if self.stopping:                    # the backend is going down between cycles
                     return finish("paused", result, reason=self._cancel_reason())
                 self._notify_goal()
-                self.ui.info(f"Continuing goal · work cycle {details['cycles'] + 1}")
                 refusal = str(getattr(self, "_goal_refusal_note", "") or "")
                 self._goal_refusal_note = ""
                 prompt = ((refusal + "\n\n") if refusal else "") + cycle_prompt(self.goal, details)
+                if getattr(self, "goal_turns", False):
+                    # Codex's shape (12 Nov, his call): each goal cycle is a turn of its own, with its own reply and
+                    # file changes; the frontend starts the next one when it is idle (after anything queued).
+                    self._goal_next_turn = prompt
+                    return result
+                self.ui.info(f"Continuing goal · work cycle {details['cycles'] + 1}")
             if self.cancelled.is_set() and self.goal_status == "active":
                 if getattr(self, "_requested_goal_action", "") == "clear":
                     self.set_goal("")
@@ -1085,6 +1100,44 @@ class GoalLifecycle:
             self._requested_goal_action = ""
             if had_goal:
                 self._notify_goal()
+
+    def _number_goal_turn(self, start: int, number: int) -> None:
+        """The cycle prompt this step wrote as the user says which goal turn it was, for the transcript after a
+        reload ("Goal · turn N", as the editor drew it live). A prompt a person typed is never marked."""
+        messages = self.messages
+        for message in messages[start:] if len(messages) >= start else ():
+            if (isinstance(message, dict) and message.get("role") == "user" and isinstance(message.get("content"), str)
+                    and CYCLE_MARKER in message["content"]):
+                message["_dgc_goal_turn"] = int(number)
+                return
+
+    def take_goal_continuing(self) -> bool:
+        """Whether this turn is a goal's next turn the frontend started by itself (goal_turns), read once."""
+        continuing = bool(getattr(self, "_goal_continuing", False))
+        self._goal_continuing = False
+        return continuing and bool(self.goal and self.goal_status == "active")
+
+    def take_goal_next_turn(self) -> str:
+        """The next goal turn's prompt, once, when the last cycle left the goal running (goal_turns), else ""."""
+        prompt = str(getattr(self, "_goal_next_turn", None) or "")
+        self._goal_next_turn = None
+        return prompt if prompt and self.goal and self.goal_status == "active" else ""
+
+    def _said_since(self, start: int) -> bool:
+        """Whether the transcript gained a reply with words since `start` (a compaction that shortened it counts as
+        having said something: what was said is no longer there to read)."""
+        messages = self.messages
+        if len(messages) < start:
+            return True
+        for message in messages[start:]:
+            if isinstance(message, dict) and message.get("role") == "assistant":
+                content = message.get("content")
+                if isinstance(content, str) and content.strip():
+                    return True
+                if isinstance(content, list) and any(isinstance(part, dict) and str(part.get("text") or "").strip()
+                                                     for part in content):
+                    return True
+        return False
 
     def goal_budget_exhausted(self) -> bool:
         budget = self._goal_details["token_budget"]

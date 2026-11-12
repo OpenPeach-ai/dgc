@@ -6389,6 +6389,9 @@ class Agent(GoalLifecycle):
         """
         self._last_turn_error = ""
         self._last_turn_pause = ""
+        # A goal's next turn the frontend started by itself (goal_turns, Codex's shape): its prompt is DGC's cycle
+        # prompt, not anything typed; its tools and skills follow the goal, and its inputs were given at its start.
+        continuing = self.take_goal_continuing()
         began_files = self._turn_files_begin() if self.depth == 0 else None
         # Hosted MCP servers connect in the background when a chat opens: this turn waits a
         # little for them, so a question asked at once still sees the plugin's tools.
@@ -6476,7 +6479,7 @@ class Agent(GoalLifecycle):
             # A question that closed unanswered after the last turn had already shut its steering
             # window. Tell the model now, before it acts on an assumption it never declared.
             # What they typed, for the user's memory: only these words can back a fact a tool keeps.
-            if pip_setup_notice is None:
+            if pip_setup_notice is None and not continuing:
                 typed = _typed_words(user_text)
                 if typed:
                     self._typed_turns = [*getattr(self, "_typed_turns", [])[-19:], typed]
@@ -6499,7 +6502,8 @@ class Agent(GoalLifecycle):
             try:
                 self.reload_skills()
                 try:
-                    safe_user_text, goal_context, goal_images = self.prepare_goal_inputs(safe_user_text)
+                    safe_user_text, goal_context, goal_images = (
+                        (safe_user_text, "", []) if continuing else self.prepare_goal_inputs(safe_user_text))
                     if goal_images:
                         from .attachments import validate_image_data_uris, MAX_EDITOR_IMAGE_TOTAL_BYTES
                         self._pending_images = validate_image_data_uris(
@@ -6511,16 +6515,18 @@ class Agent(GoalLifecycle):
                     self.update_goal("paused", reason=self._last_turn_error)
                     self.ui.error(self._last_turn_error)
                     return False
-                self._mcp_query_text = _trusted_intent_text(safe_user_text)
+                intent_text = self._safe_text(self.goal) if continuing else safe_user_text
+                self._mcp_query_text = _trusted_intent_text(intent_text)
                 self._active_mcp_tools.clear()
                 self._turn_notes_given = set()          # each note once per prompt (_turn_notes)
-                self._activate_tool_intents(safe_user_text, replace=True)
-                self._check_pips_repeat(safe_user_text)
+                self._activate_tool_intents(intent_text, replace=True)
+                if not continuing:
+                    self._check_pips_repeat(safe_user_text)
                 if ((pip_setup_notice is not None or _PIPS_REFERENCE_FRAME in safe_user_text)
                         and not self._pips_denied()):
                     self._pips_tools_loaded = True  # a turn about a Pip brings its tools along
                 try:
-                    self._activate_skill_intents(safe_user_text, replace=True)
+                    self._activate_skill_intents(intent_text, replace=True)
                 except ValueError as exc:
                     self._last_turn_error = str(exc)
                     self.ui.error(self._last_turn_error)
@@ -6954,6 +6960,7 @@ class Agent(GoalLifecycle):
         lifecycle hooks, transcript persistence, cancellation state, and exact session resume.
         ``runner`` receives sanitized user text and returns the normalized subscription result.
         """
+        continuing = self.take_goal_continuing()      # a goal's own next turn (goal_turns): see run_turn
         self._last_turn_error = ""
         self._last_turn_pause = ""
         self._notes_reminded = set()   # a reminder is worth saying once per turn
@@ -7029,14 +7036,16 @@ class Agent(GoalLifecycle):
             try:
                 self.reload_skills()
                 try:
-                    safe_user_text, goal_context, _ = self.prepare_goal_inputs(safe_user_text, external=True)
+                    safe_user_text, goal_context, _ = ((safe_user_text, "", []) if continuing
+                                                       else self.prepare_goal_inputs(safe_user_text, external=True))
                 except ValueError as exc:
                     self._last_turn_error = str(exc)
                     self.update_goal("paused", reason=self._last_turn_error)
                     self.ui.error(self._last_turn_error)
                     return {"ok": False, "rc": None, "text": "", "error": str(exc)}
                 try:
-                    self._activate_skill_intents(safe_user_text, replace=True)
+                    self._activate_skill_intents(self._safe_text(self.goal) if continuing else safe_user_text,
+                                                 replace=True)
                 except ValueError as exc:
                     self._last_turn_error = str(exc)
                     self.ui.error(self._last_turn_error)

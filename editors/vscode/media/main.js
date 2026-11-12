@@ -4884,8 +4884,11 @@
       appendTarget.appendChild(note);head=note;
     } else if (kind === "resume" || kind === "continue") {
       const note = el("div", replaying ? "resume-note hist" : "resume-note");
-      note.innerHTML = `<span class="note-icon" data-icon="play">${icon("play")}</span>`
-        + `<span>${kind === "continue" ? "Continued the interrupted turn" : "Resumed the standing goal"}</span>`;
+      // A goal's own next turn (Codex's shape, 12 Nov): DGC names it "Goal · turn 3"; any other resume keeps its words.
+      const goalTurn = kind === "resume" && /^Goal · turn \d{1,7}$/.test(String(prompt || "")) ? String(prompt) : "";
+      if (goalTurn) note.classList.add("goal-turn-note");
+      note.innerHTML = `<span class="note-icon" data-icon="${goalTurn ? "target" : "play"}">${icon(goalTurn ? "target" : "play")}</span>`
+        + `<span>${goalTurn ? esc(goalTurn) : kind === "continue" ? "Continued the interrupted turn" : "Resumed the standing goal"}</span>`;
       if (kind === "continue") note.classList.add("continue-note");
       appendTarget.appendChild(note);
       head = note;

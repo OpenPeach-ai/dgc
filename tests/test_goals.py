@@ -370,15 +370,6 @@ class GoalTests(unittest.TestCase):
         self.agent.update_goal("active")
         self.assertEqual(self.agent._goal_details["stalled_cycles"], 0)
 
-    def test_repeated_tool_work_does_not_reset_the_bound(self):
-        self.agent.set_goal("fix remaining work")
-        def step(_):
-            self.agent._goal_progress.add("read_file", {"path": "same"}, "same content")
-            return True
-        self.agent._run_turn = step
-        self.agent.run_turn("start")
-        self.assertEqual(self.agent.goal_snapshot()["cycles"], 4)
-        self.assertEqual(self.agent.goal_status, "blocked")
 
     def test_user_clear_is_applied_after_active_tool_cleanup(self):
         self.agent.set_goal("work")

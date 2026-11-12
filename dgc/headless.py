@@ -1569,7 +1569,12 @@ def _safe_busy(backend) -> bool:
         return False
 
 
-def _goal_scaffold(content: str) -> str:
+def _goal_turn_label(number) -> str:
+    """A goal's own turn, as the editor draws it: "Goal · turn 3"."""
+    return f"Goal · turn {int(number)}"
+
+
+def _goal_scaffold(content: str, message: dict | None = None) -> str:
     """The label for a goal-continuation prompt DGC wrote as the user, or "" if a person typed it.
 
     Matched by CONTENT, not equality: goal attachments and staged editor context are prepended to
@@ -1581,6 +1586,9 @@ def _goal_scaffold(content: str) -> str:
     if AUTO_RESUME_MARKER in text:
         return "Retried the standing goal after the last attempt stopped"
     if CYCLE_MARKER in text:
+        number = (message or {}).get("_dgc_goal_turn")
+        if isinstance(number, int) and not isinstance(number, bool) and 1 < number <= 1_000_000:
+            return _goal_turn_label(number)
         return "Continued the standing goal"
     if RESUME_PROMPT[:60] in text:
         return "Resumed the standing goal"
@@ -2827,6 +2835,8 @@ class Backend:
                           "session_paging": True,
                           # list_sessions {scope: "all"}: every project's sessions, each with its folder (12 Nov).
                           "session_scopes": True,
+                          # A goal runs one turn per cycle here (the editor's backend, Codex's shape, 12 Nov).
+                          "goal_turns": self._goal_turns_wanted(),
                           "plugin_management": True, "plugin_keys": True,
                           # Each installed plugin's name by its servers ({"example": "MCP Apps example"}): an Allow
                           # card for a plugin's tool names the plugin as its card does, before the plugin list loads.
@@ -4037,7 +4047,7 @@ class Backend:
             return "started", 0
 
     def _queued_prompt_count(self):
-        return sum(1 for item in self._queue if len(item) < 4 or item[3] != "pip_setup")
+        return sum(1 for item in self._queue if len(item) < 4 or item[3] not in ("pip_setup", "goal"))
 
     def _steer_queued(self, request_ids) -> tuple[list[str], str]:
         """Move queued prompts into the running turn as steering, in queue order ("Steer now", "Steer all").
@@ -4382,6 +4392,10 @@ class Backend:
                         wakeup = None if self._wake_blocked_locked() or book is None else book.take_due()
                         if wakeup is None:
                             continue
+                    elif turn_kind == "goal":
+                        # Paused, cleared, finished or replaced since it was queued: nothing to continue.
+                        if not (getattr(self.agent, "goal", "") and getattr(self.agent, "goal_status", "") == "active"):
+                            continue
                     self._running_turn_kind = turn_kind
                     self._running_pip_setup_text = text if turn_kind == "pip_setup" else None
                     self._memory_turn_started()
@@ -4415,7 +4429,7 @@ class Backend:
                 from .workflows import display_prompt
                 shown_prompt = display_prompt(text)
                 name_session = getattr(self.agent, "name_session", None)
-                if (turn_kind not in ("continue", "monitor", "wake", "wakeup", "pip_setup")
+                if (turn_kind not in ("continue", "monitor", "wake", "wakeup", "pip_setup", "goal")
                         and not getattr(self.agent, "session_name", None)
                         and callable(name_session)):
                     title = _prompt_thread_title(shown_prompt)
@@ -4445,6 +4459,14 @@ class Backend:
                 turn_prompt = (notification.label if notification is not None
                                else (wake_label if agent_notice is not None or wakeup is not None else shown_prompt))
                 wire_kind = "monitor" if turn_kind == "wakeup" else turn_kind
+                if turn_kind == "goal":
+                    # A goal's own next turn: drawn as one ("Goal · turn 3"), never as something the user sent. On the
+                    # wire it is a resume turn, which every editor and SDK already knows.
+                    try:
+                        number = int(getattr(self.agent, "_goal_details", {}).get("cycles", 0)) + 1
+                    except (TypeError, ValueError, AttributeError):
+                        number = 2
+                    turn_prompt, wire_kind = _goal_turn_label(max(2, number)), "resume"
                 live_turn = self._live_turn
                 if isinstance(live_turn, dict) and live_turn.get("id") == tid:
                     # What a window that attaches mid-turn is told this turn is (session_live).
@@ -4475,6 +4497,9 @@ class Backend:
                 # engine's) keeps None, and the panel counts edit-tool diffs as it always has.
                 if getattr(self, "agent", None) is not None:
                     self.agent.last_turn_files = None
+                    # One turn per goal cycle where the editor asked for it; this turn is the goal's own next one.
+                    self.agent.goal_turns = self._goal_turns_wanted()
+                    self.agent._goal_continuing = turn_kind == "goal"
                 try:
                     config_get = getattr(active_config, "get", None)
                     engine_key = str(
@@ -4554,6 +4579,7 @@ class Backend:
                     # A wake turn is not goal work: its success must not reset the retry budget and
                     # its failure must not queue a goal resume.
                     self._maybe_auto_resume_goal(failed, cancelled)
+                    self._maybe_continue_goal(failed, cancelled)
                 # Only what the user typed is looked back over: never a wake-up, a monitor's turn, a Pip
                 # setup notice, a goal's own resume, or a turn on a subscription CLI (no model of DGC's).
                 if turn_kind == "prompt" and not engine_key and not failed:
@@ -5185,6 +5211,37 @@ class Backend:
             f"the goal stopped — continuing it automatically "
             f"({used + 1} of {AUTO_RESUME_MAX})")
         return True
+
+    def _maybe_continue_goal(self, failed: bool, cancelled: bool) -> bool:
+        """Codex's shape for a goal (12 Nov, his call): each cycle is a turn of its own, and when one ends with the goal
+        still running, DGC queues the next, after anything already queued (a message you queued runs first, as its
+        own turn). Not after a turn that failed or was stopped (the goal is paused or being retried), not while a
+        question to you is open (your answer comes first), and not while the backend is going down."""
+        agent = getattr(self, "agent", None)
+        take = getattr(agent, "take_goal_next_turn", None)
+        prompt = take() if callable(take) else ""
+        if not prompt or failed or cancelled or getattr(agent, "stopping", False) is True:
+            return False
+        open_asks = getattr(agent, "_open_asks", None)
+        try:
+            if callable(open_asks) and open_asks():
+                return False
+        except Exception:
+            pass
+        with self._turn_state_lock():
+            if any(len(item) > 3 and item[3] == "goal" for item in self._queue):
+                return False                  # one next turn at a time
+            self._queue.append((prompt, None, None, "goal"))
+        return True
+
+    def _goal_turns_wanted(self) -> bool:
+        """Whether this backend runs a goal one turn per cycle: the editor's backend does (it starts `dgc serve` with
+        DGC_EDITOR_SESSION=1; an older editor draws such a turn as "Resumed the standing goal"). An SDK client, which
+        waits for a goal's one turn, keeps the goal inside it. DGC_GOAL_TURNS=0 or 1 says so explicitly."""
+        explicit = os.environ.get("DGC_GOAL_TURNS", "")
+        if explicit in ("0", "1"):
+            return explicit == "1"
+        return os.environ.get("DGC_EDITOR_SESSION", "") == "1"
 
     def _checklist_cleared(self) -> bool:
         """Did the user clear the checklist recently enough that a resume must not cite it?"""
@@ -6747,7 +6804,7 @@ class Backend:
                 open_turn("Continued the interrupted turn", "continue")
                 continue
             if role == "user" and isinstance(content, str) and _goal_scaffold(content):
-                open_turn(_goal_scaffold(content), "resume")
+                open_turn(_goal_scaffold(content, m), "resume")
                 continue
             if role == "user" and reports_on:
                 # The notice the editor's wake turn handed the model: DGC wrote it, nobody typed it.
