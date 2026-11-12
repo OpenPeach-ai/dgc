@@ -322,7 +322,8 @@ def _check_base(value) -> str:
 
 
 def describe_reach(registry) -> dict:
-    """get_webhook_reach: what is listening, and every way a call can reach it."""
+    """get_webhook_reach: what is listening, every way a call can reach it, and the latest calls to an address no
+    routine has (refused)."""
     from . import pip_tunnel
     chosen = reach(registry)
     listening = listener_state(registry)
@@ -332,7 +333,8 @@ def describe_reach(registry) -> dict:
             "listen_error": listening.get("error"), "local_network": chosen["local_network"],
             "network_address": network_address() if chosen["local_network"] else None,
             "tunnel": {"kind": chosen["tunnel"], "on": on, "public_base": _public_base(registry) if on else None,
-                       "tailscale": tailscale, "cloudflared": pip_tunnel.cloudflared_installed()}}
+                       "tailscale": tailscale, "cloudflared": pip_tunnel.cloudflared_installed()},
+            "refused": refusals(registry)}
 
 
 def set_reach(registry, request) -> dict:

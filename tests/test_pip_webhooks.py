@@ -101,6 +101,7 @@ class TheAddress(HookWorld, unittest.TestCase):
                          if hooks.has_table(self.registry.db, "pip_app_events") else 0, 0, "nothing queued")
         [refused] = hooks.refusals(self.registry)
         self.assertEqual((refused["reason"], refused["via"]), ("unknown_address", "internet"))
+        self.assertEqual(self.control("get_webhook_reach")["refused"], [refused], "the reach page lists them")
         self.assertNotIn(old, json.dumps(refused), "the log never keeps a secret, even a wrong one")
         self.call(old)
         self.call(old, via="network")
