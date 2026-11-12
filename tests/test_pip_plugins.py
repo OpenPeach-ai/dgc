@@ -273,12 +273,13 @@ class PluginAccessTests(PluginWorld, unittest.TestCase):
         self.assertIn("Connect card", said)
         self.assertEqual([kind for kind, _ in self.composio_seen], ["manage"], "read once a run")
 
-    def test_an_unlinked_pip_with_one_account_runs_as_ever(self):
+    def test_an_unlinked_pip_with_one_account_runs_on_that_account_by_name(self):
+        # pips-09: by name, so a second account added later can't take a call (Composio's default is the newest).
         info, tools = self.two_accounts()
         self.composio_accounts.pop()
         said = self.session._call(self.registry, info, tools, {"tool": pip_plugins.COMPOSIO_EXECUTE, "arguments": {"tools": [self.FETCH]}})
         self.assertIn("Untrusted data", said)
-        self.assertNotIn("account", [args for kind, args in self.composio_seen if kind == "run"][0]["tools"][0], "nothing added")
+        self.assertEqual([args for kind, args in self.composio_seen if kind == "run"][0]["tools"][0]["account"], "ca_first")
 
     def test_composio_tools_that_cant_name_an_account_are_refused_only_when_it_could_be_the_wrong_one(self):
         info, tools = self.two_accounts()
@@ -288,10 +289,16 @@ class PluginAccessTests(PluginWorld, unittest.TestCase):
                 said = self.session._call(self.registry, info, tools, {"tool": name, "arguments": {"code_to_execute": "1"}})
                 self.assertIn("can't be held to one account", said)
         self.assertFalse([1 for kind, _ in self.composio_seen if kind == "run"])
-        # One account, or no link: as it was (they ask with a card, as a change does).
+        # pips-09: a Pip with its own account never gets them, even with one account in Composio.
         self.composio_accounts.pop()
         self.session._account_lists.clear()
-        pending = self.session._call(self.registry, info, tools, {"tool": "COMPOSIO_REMOTE_WORKBENCH", "arguments": {"code_to_execute": "1"}})
+        said = self.session._call(self.registry, info, tools, {"tool": "COMPOSIO_REMOTE_WORKBENCH", "arguments": {"code_to_execute": "1"}})
+        self.assertIn("can't be held to one account", said)
+        # A Pip with no app account of its own: they ask with a card, as a change does.
+        other = self.store.create(self.registry.personal()["id"], "Bo", "Plans", "local-console")
+        session = pip_plugins.Session(self.registry.directory, self.cfg, other["id"], other["workspace_id"], self.RUN)
+        self.addCleanup(session.close)
+        pending = session._call(self.registry, info, tools, {"tool": "COMPOSIO_REMOTE_WORKBENCH", "arguments": {"code_to_execute": "1"}})
         self.assertIsInstance(pending, dict)
 
     def composio_batches(self, row):

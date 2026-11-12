@@ -254,9 +254,14 @@ def with_asked_again(registry, draft, kind) -> dict:
     return {**draft, "asked_again": why} if why else draft
 
 
-def _matching(grants, kind, draft_content):
+def _matching(grants, kind, draft_content, linked=None):
+    """The grant covering this draft. ``linked``: {toolkit: account} this Pip is linked to; an email or invitation grant
+    covers only that account (pips-09)."""
+    toolkit = {"gmail_send": "gmail", "calendar_create": "googlecalendar"}.get(kind)
     for g in grants:
         if g["kind"] != kind:
+            continue
+        if toolkit and (linked or {}).get(toolkit) and g.get("account") != linked[toolkit]:
             continue
         # A connector draft pins its own discovered connection and tool schema: all must agree.
         if kind == "connector_call" and any(draft_content.get(k) != g[k] for k in ("server", "connection_digest", "schema_digest")):
@@ -281,6 +286,8 @@ def dispatch_for_run(registry, config, run_id) -> list:
         grants = list_grants(registry, row[0])
         if not grants:
             return outcomes
+        from .pip_app_links import connected
+        linked = {link["toolkit"]: link["account"] for link in connected(registry, row[0])}
     except Exception:
         return outcomes
     for draft_kind, action_kind, table in (("email", "gmail_send", "pip_message_drafts"),
@@ -296,7 +303,7 @@ def dispatch_for_run(registry, config, run_id) -> list:
             try:
                 draft = drafts.get(store, draft_id, kind=draft_kind)
                 content = draft["payload"]["action" if draft_kind == "connector" else "event" if draft_kind == "calendar" else "message"]
-                grant = _matching(grants, action_kind, content)
+                grant = _matching(grants, action_kind, content, linked)
                 if grant is None or (draft_kind == "connector" and _always_ask({"kind": action_kind, **content})):
                     continue                     # Always ask, set after this grant was given, wins: its card waits
                 actor = "pip-grant:" + grant["id"]

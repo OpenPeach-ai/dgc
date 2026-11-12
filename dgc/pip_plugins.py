@@ -723,17 +723,29 @@ def pin_batch(arguments, links) -> tuple:
 
 def require_pinned(registry, pip_id, info, call) -> None:
     """Before an action the user allowed runs (and when it is proposed): what it sends still names this Pip's account. A
-    card edited, or written before the link changed, says so rather than running on another inbox."""
-    if not _composio(info) or not isinstance(call, dict) or call.get("tool") != COMPOSIO_EXECUTE:
+    card edited, or written before the link changed, says so rather than running on another inbox. Every app call names
+    its account (pips-09): one the Pip isn't linked to was named when the card was raised, so an account added since
+    can't take it; and a Pip with its own account never runs Composio's tools that can't be held to one."""
+    if not _composio(info) or not isinstance(call, dict):
         return
     from .pip_app_links import composio_links
     links = composio_links(registry, pip_id)
-    if not links:
+    if call.get("tool") in COMPOSIO_UNPINNABLE:
+        if links:
+            raise RegistryError("account_changed", f"{call['tool']} can't be held to one account, and this Pip has its own, "
+                                                   "so it doesn't run here. Ask the Pip to do it another way.")
+        return
+    if call.get("tool") != COMPOSIO_EXECUTE:
         return
     arguments = call.get("arguments")
     pinned, refused = pin_batch(arguments, links)
     if refused is not None:
         raise RegistryError("account_changed", refused)
+    rows = pinned.get("tools") if isinstance(pinned, dict) else None
+    if not isinstance(rows, list) or any(not (isinstance(row, dict) and isinstance(row.get("account"), str) and row["account"])
+                                         for row in rows):
+        raise RegistryError("account_changed", "This action doesn't name which account it uses, so it didn't run. "
+                                               "Ask the Pip to prepare it again.")
     if pinned != arguments:
         raise RegistryError("account_changed", "This action doesn't name the account linked to this Pip. Ask the Pip to prepare it again.")
 
@@ -1142,14 +1154,12 @@ class Session:
         from . import pip_app_links as app_links
         links = app_links.composio_links(registry, self.pip_id)
         if tool in COMPOSIO_UNPINNABLE:
-            # These reach any app with no account to name. Only when that could be the wrong account: a linked app with
-            # several. A list that can't be read counts, since nothing here could then be shown to be safe.
-            for toolkit, link in links.items():
-                accounts = self._accounts(tools, toolkit)
-                if accounts is None or len(accounts) >= 2:
-                    return None, (f"{tool} can't be held to one account, and {app_links.app_name(toolkit)} here is linked to "
-                                  f"{link.get('label') or link['account']} with other accounts in Composio, so it did not run. "
-                                  f"Use {COMPOSIO_EXECUTE}, which stays on the linked account.")
+            # These reach any app with no account to name: a Pip with its own app account never runs them (pips-09).
+            if links:
+                toolkit, link = next(iter(links.items()))
+                return None, (f"{tool} can't be held to one account, and this Pip has its own ({app_links.app_name(toolkit)}: "
+                              f"{link.get('label') or link['account']}), so it did not run. Use {COMPOSIO_EXECUTE}, which "
+                              "stays on the linked account.")
             return arguments, None
         pinned, refused = pin_batch(arguments, links)
         if refused is not None:
@@ -1160,6 +1170,18 @@ class Session:
             if toolkit in links:
                 continue
             accounts = self._accounts(tools, toolkit)
+            if accounts is not None and len(accounts) == 1:
+                # The one account there is, by name: Composio's own default is the newest account, so a card naming
+                # none would run on one added before the Allow (0.51's known gap).
+                only = accounts[0]
+                for index, row in enumerate(pinned["tools"]):
+                    if isinstance(row, dict) and composio_toolkit(row.get("tool_slug"), links) == toolkit:
+                        named = row.get("account")
+                        if named not in (None, "", only["id"]) and not (isinstance(named, str) and named.strip().lower() == str(only["label"]).lower()):
+                            return None, (f"{row['tool_slug']} named an account the user doesn't have in Composio, so nothing ran. "
+                                          "Leave account out.")
+                        pinned["tools"][index] = {**row, "account": only["id"]}
+                continue
             if accounts is not None and len(accounts) >= 2:
                 card = app_links.request(registry, self.pip_id, self.workspace_id, toolkit,
                                          f"To use your {app_links.app_name(toolkit)}. You have {len(accounts)} accounts in Composio: choose which one.",

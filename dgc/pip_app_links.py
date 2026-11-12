@@ -412,8 +412,14 @@ def decline(registry, link_id, actor) -> dict:
 
 
 def disconnect(registry, link_id, actor) -> dict:
-    """This Pip stops using the account. The underlying plugin remains connected for other uses."""
-    _owned(registry, link_id, actor)
+    """This Pip stops using the account. The underlying plugin remains connected for other uses. Its Always allow on
+    that account ends with it (pips-09): a grant never outlives the link it was given on."""
+    row = _owned(registry, link_id, actor)
+    if row["account"]:
+        from . import pip_action_grants as grants
+        for grant in grants.list_grants(registry, row["pip_id"]):
+            if grant.get("account") == row["account"]:
+                grants.revoke(registry, row["pip_id"], grant["id"], actor)
     return {"link": _set(registry, link_id, status="declined", account=None, label=None, error=None)}
 
 
