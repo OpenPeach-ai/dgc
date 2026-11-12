@@ -50,15 +50,15 @@ class ProfileTests(unittest.TestCase):
 
     def test_a_pip_has_a_default_look_until_you_change_it_and_reset_brings_it_back(self):
         got = self.control({"type": "get_pip", "pip_id": self.pip["id"]})
-        self.assertEqual(got["result"]["pip"]["profile"], {"title": "", "body": None, "color": None, "notify": True})
+        self.assertEqual(got["result"]["pip"]["profile"], {"title": "", "body": None, "color": None, "notify": True, "group": ""})
         changed = self.control({"type": "set_pip_profile", "pip_id": self.pip["id"],
                                 "changes": {"title": "  Inbox helper ", "body": "lens", "color": "mint", "notify": False}})
         self.assertTrue(changed["ok"], changed)
-        self.assertEqual(changed["result"]["profile"], {"title": "Inbox helper", "body": "lens", "color": "mint", "notify": False})
+        self.assertEqual(changed["result"]["profile"], {"title": "Inbox helper", "body": "lens", "color": "mint", "notify": False, "group": ""})
         listed = self.control({"type": "list_pips", "workspace_id": self.pip["workspace_id"]})
         self.assertEqual(listed["result"]["pips"][0]["profile"]["body"], "lens", "the list shows its face too")
         reset = pip_profile.update(self.store, self.pip["id"], {"body": None, "color": None}, "editor-user")
-        self.assertEqual(reset["profile"], {"title": "Inbox helper", "body": None, "color": None, "notify": False},
+        self.assertEqual(reset["profile"], {"title": "Inbox helper", "body": None, "color": None, "notify": False, "group": ""},
                          "Reset to default: its face and colour only")
 
     def test_only_you_change_it_and_only_to_what_exists(self):

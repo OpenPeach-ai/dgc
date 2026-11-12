@@ -149,7 +149,7 @@ export type PipMutationParams = {
   remove_pip_login: { login_id: string };
   grant_pip_login: { login_id: string; pips: "all" | string[] };
   set_pip_computer_apps: { choice: "download" | "not_now" };
-  set_pip_profile: { pip_id: string; changes: { title?: string; body?: string | null; color?: string | null; notify?: boolean } };
+  set_pip_profile: { pip_id: string; changes: { title?: string; body?: string | null; color?: string | null; notify?: boolean; group?: string } };
   update_pip_computers: Record<string, never>;
   reset_pip_computer: { pip_id: string };
   add_pip_routine: { pip_id: string; title: string; prompt: string; trigger: Record<string, PipJson> };
