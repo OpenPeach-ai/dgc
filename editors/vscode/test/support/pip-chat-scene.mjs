@@ -585,6 +585,48 @@ export const host = (opts) => `(${function (PIP, opts) {
     });
     if (want.slow) window.__slow = { set_webhook_reach: want.slow };
   }
+  // opts.projects: @ a project in a Personal Pip's chat (pips-21, Pips API 91; pass api: 91). The @ list's projects, and
+  // what the Pip changed in its copy of "shop" as one waiting change: three files (one with a long path, one whose diff
+  // has a long line and many lines) and, with {link: true}, a link it made. {noComputer: the Pip has no computer; held:
+  // Apply holds one file back (you changed it meanwhile); state: "applied" | "undone" | "discarded" (decided already)}.
+  // What was asked is kept in window.__projects, which answers as DGC does.
+  if (opts.projects && !project) {
+    const want = opts.projects === true ? {} : opts.projects, SHOP = "ws_" + "5".repeat(32), CID = "pchange_" + "d".repeat(32);
+    if (want.noComputer) delete pip.computer_plan; else pip.computer_plan = { schema_version: 1 };
+    const LONG = "services/checkout/internal/payments/reconciliation/adapters/settlement_batch_reconciler.py";
+    const files = [{ path: "app.py", change: "modified", plus: 28, minus: 3 }, { path: LONG, change: "added", plus: 4, minus: 0 }, { path: "README.md", change: "deleted", plus: 0, minus: 1 },
+      ...(want.link ? [{ path: "vendor/tools", change: "link", plus: 0, minus: 0 }] : [])];
+    const many = Array.from({ length: 26 }, (_, i) => `+    line_${i + 1} = round(items[${i}] * rate, 2)`).join("\n");
+    const diffs = { "app.py": `--- a/app.py\n+++ b/app.py\n@@ -1,6 +1,31 @@\n def total(items):\n-    return sum(items)\n+    return round(sum(items), 2)  # cents, as the receipts print them, so a total never shows a third decimal place on a customer's invoice\n \n def tax(items, rate):\n-    return sum(items) * rate\n-    # todo\n+    return round(total(items) * rate, 2)\n${many}\n`,
+      [LONG]: `--- /dev/null\n+++ b/${LONG}\n@@ -0,0 +1,4 @@\n+from app import total\n+\n+def test_total():\n+    assert total([0.105, 0.2]) == 0.31\n`,
+      "README.md": "--- a/README.md\n+++ /dev/null\n@@ -1 +0,0 @@\n-# Shop\n" };
+    const at = (min) => new Date(Date.now() - min * 60000).toISOString();
+    const HELD = [{ path: "README.md", why: "You changed it in the meantime; yours is kept." }];
+    const decided = { applied: { status: want.held ? "partial" : "applied", result: { applied: want.held ? ["app.py", LONG] : ["app.py", LONG, "README.md"], held_back: want.held ? HELD : [] } },
+      undone: { status: "undone", result: { applied: ["app.py", LONG], held_back: want.held ? HELD : [], restored: ["app.py", LONG], kept: [] } },
+      discarded: { status: "discarded", result: { left: [] } } }[want.state];
+    const change = { id: CID, workspace_id: SHOP, name: "shop", status: "pending", files, more: 0, digest: "digest-one", result: null, created_at: at(2), updated_at: at(decided ? 0 : 2), ...decided };
+    const st = window.__projects = { asked: [], change };
+    const note = (r) => { st.asked.push(JSON.parse(JSON.stringify(r))); };
+    const mine = (r) => { if (r.change_id !== CID) throw Error("This change is no longer there. Refresh."); return st.change; };
+    // What Apply held back is still different in the Pip's copy, so DGC lists it as a new change of that copy.
+    const NEXT = "pchange_" + "e".repeat(32);
+    const left = () => (st.change.status === "partial" ? [{ id: NEXT, workspace_id: SHOP, name: "shop", status: "pending", files: files.filter((f) => HELD.some((h) => h.path === f.path)), more: 0,
+      digest: "digest-two", result: null, created_at: st.change.updated_at, updated_at: st.change.updated_at }] : []);
+    Object.assign(answers, {
+      list_pip_project_choices: (r) => { note(r); return { projects: [{ workspace_id: SHOP, name: "shop" }, { workspace_id: "ws_" + "6".repeat(32), name: "marketing-site" },
+        { workspace_id: "ws_" + "7".repeat(32), name: "a-rather-long-project-name-for-a-narrow-side-bar" }] }; },
+      list_pip_project_changes: (r) => { note(r); return { pip_id: PIP, changes: [...left(), st.change] }; },
+      get_pip_project_change: (r) => { note(r); return { ...mine(r), path: r.path, diff: diffs[r.path] || `${r.path} is a link the Pip made: DGC doesn't follow or apply it.\n` }; },
+      apply_pip_project_change: (r) => { note(r); if (r.expected_digest !== mine(r).digest) throw Error("The Pip changed more since you looked. Look at it again, then Apply.");
+        return (st.change = { ...st.change, status: want.held ? "partial" : "applied", updated_at: at(0),
+          result: { applied: want.held ? ["app.py", LONG] : ["app.py", LONG, "README.md"], held_back: want.held ? HELD : [] } }); },
+      discard_pip_project_change: (r) => { note(r); return (st.change = { ...mine(r), status: "discarded", updated_at: at(0), result: { left: [] } }); },
+      undo_pip_project_change: (r) => { note(r); return (st.change = { ...mine(r), status: "undone", updated_at: at(0), result: { ...st.change.result, restored: st.change.result.applied, kept: [] } }); },
+      open_pip_project_change_in_work: (r) => { note(r); return { opened: true }; },
+    });
+    answers.list_pip_keys ||= () => ({ pip_id: PIP, keys: [] });   // (a Pip with no keys waiting, as most have)
+  }
   window.acquireVsCodeApi = () => ({ getState: () => undefined, setState() {}, postMessage(m) {
     // (What the page tells its host besides a request, such as a photo to open or a file to download: window.__posted.)
     if (m?.type !== "pipsRequest") { (window.__posted ||= []).push(m);
@@ -602,7 +644,7 @@ export const host = (opts) => `(${function (PIP, opts) {
     setTimeout(() => window.postMessage(reply, "*"), (m.request.tunnel === "tailscale" && window.__slow?.[m.request.type]) || opts.answerAfter || 1);   // (opts.answerAfter: a backend that takes a while, in ms)
   } });
   // Called once the page has mounted the client (the side bar mounts it after its other scripts).
-  window.__connect = () => window.postMessage({ type: "pipsConnection", apiVersion: opts.api || 78, generation: 1, connected: true, supported: true, enabled: true }, "*");
+  window.__connect = () => window.postMessage({ type: "pipsConnection", apiVersion: opts.api || 78, generation: 1, connected: true, supported: true, enabled: true, ...(opts.projects ? { displayMentions: true } : {}) }, "*");   // (opts.projects: a DGC that keeps a message's marks)
 }})(${JSON.stringify(PIP)}, ${JSON.stringify(opts)});`;
 
 /** Runs in the page before anything else: on every frame, what Pips shows, as one word (window.__frames, in order, a

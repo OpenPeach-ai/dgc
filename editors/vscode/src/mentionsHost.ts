@@ -5,11 +5,12 @@ const MARK_KINDS = ["plugin", "artifact", "pip", "skill", "template", "file", "c
 const IDENTITY = /^[A-Za-z0-9._:-]{1,128}$/;
 
 /** The display-only marks a prompt box sent (media/mentions.js), or undefined. Cosmetic data: the backend checks them
- *  against the text once more, and anything off leaves the plain words in the bubble. */
-export function displayMentions(value: unknown): unknown[] | undefined {
+ *  against the text once more, and anything off leaves the plain words in the bubble. `more`: kinds only this surface
+ *  sends (a Personal Pip's chat names a project, Pips API 91). */
+export function displayMentions(value: unknown, more: string[] = []): unknown[] | undefined {
   if (!Array.isArray(value) || !value.length || value.length > 24) return undefined;
   const fine = value.every((m: any) => m && typeof m === "object" && Number.isInteger(m.start) && m.start >= 0
-    && MARK_KINDS.includes(m.kind) && typeof m.label === "string" && m.label.length > 0 && m.label.length <= 120
+    && (MARK_KINDS.includes(m.kind) || more.includes(m.kind)) && typeof m.label === "string" && m.label.length > 0 && m.label.length <= 120
     && typeof m.identity === "string" && IDENTITY.test(m.identity)
     && (m.kind !== "pip" || PIP_TYPES.includes(m.pip_type)) && (m.wired === undefined || m.wired === true));
   return fine ? value : undefined;

@@ -41,7 +41,7 @@ body:is(.vscode-light, .vscode-high-contrast-light) {
 .composer-pill.pill-file::before { content: "@"; }
 /* Slash, file and link selections are words in the prompt too. The older small flex pill put
    their labels above the surrounding text and made their icons look detached from the line. */
-.composer-pill:is(.pill-skill, .pill-template, .pill-command, .pill-file, .pill-link) {
+.composer-pill:is(.pill-skill, .pill-template, .pill-command, .pill-file, .pill-link, .pill-project) {
   display: inline; font-size: inherit; line-height: inherit; font-family: inherit;
   font-weight: var(--w-med); vertical-align: baseline; gap: 0;
 }
@@ -89,10 +89,16 @@ body:is(.vscode-light, .vscode-high-contrast-light) {
   background: var(--mark-sent-shimmer);
   background-size: 400% 100%; background-clip: text; -webkit-background-clip: text;
   -webkit-text-fill-color: transparent; }
-.prompt-text .sent-mention:is(.pill-skill, .pill-template, .pill-file, .pill-command),
+.prompt-text .sent-mention:is(.pill-skill, .pill-template, .pill-file, .pill-command, .pill-project),
 .prompt-text .sent-mention:is(.pill-skill, .pill-template, .pill-file, .pill-command)::before,
 .user .bubble .prompt-link { color: var(--mark-sent); }
 .prompt-text .sent-mention.pill-command::before { content: none; }
+/* A project named in a Personal Pip's chat (pips-21): a folder, then its name, words in the sentence as a file is. The
+   folder is drawn in the mark's own colour (an SVG where the page has no icon font). */
+.composer-pill.pill-project::before { content: none; }
+.composer-project-mark { display: inline-block; width: 14px; height: 14px; line-height: 14px; vertical-align: -2px; margin-right: 4px; }
+.composer-project-mark svg { display: block; width: 14px; height: 14px; }
+.composer-project-mark .codicon { font-size: 14px; line-height: 14px; }
 .prompt-text .sent-attachment { cursor: pointer; }
 .prompt-text .sent-attachment:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
 .user .bubble .prompt-link:hover { color: var(--mark-sent-hover); }
@@ -142,6 +148,8 @@ body:is(.vscode-light, .vscode-high-contrast-light) {
 .pop .pi[aria-disabled="true"] .pi-plugin-mark img { opacity: .7; }
 .pop .pd { grid-column: 1 / -1; color: var(--faint); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pop .pi-pip-face, .pop .pi-pip-face .dgc-plush { display: inline-block; flex: none; width: 20px; height: 20px; }
+.pop .pi-project-mark { display: inline-grid; place-items: center; width: 16px; height: 16px; }
+.pop .pi-project-mark svg { display: block; width: 14px; height: 14px; }
 .pop .pi-plugin-mark img { display: block; width: 16px; height: 16px; object-fit: contain; filter: var(--mark-logo-filter, none); }
 
 /* A box that was a <textarea>: ChatDGC's and a Pip's. Its font and line height stay its page's; these are what a

@@ -287,6 +287,9 @@ export function presentation(pip, runs, connected, runnerState) {
   if (latest?.status === 'cancelled') return {state:'idle',label:'Last run cancelled'};
   return {state:'idle',label: pip ? 'Ready when you are' : 'Ready'};
 }
+// A refusal keeps DGC's own code beside its words ("conflict", "needs_computer"), for the few places that act on which
+// refusal it was; what is shown is always the words.
+const refusal = error => Object.assign(new Error(errorText(error)), record(error) && typeof error.code === 'string' && /^[a-z_]{1,64}$/.test(error.code) ? {code:error.code} : {});
 export function requestBroker(send, namespace=globalThis.crypto.randomUUID()) {
   let sequence = 0;
   const pending = new Map();
@@ -301,7 +304,7 @@ export function requestBroker(send, namespace=globalThis.crypto.randomUUID()) {
         catch (error) { pending.delete(id); reject(error); }
       });
     },
-    receive(message) { const item=pending.get(message.id); if (!item) return; pending.delete(message.id); message.ok === true ? item.resolve(message.result) : item.reject(new Error(errorText(message.error))); },
+    receive(message) { const item=pending.get(message.id); if (!item) return; pending.delete(message.id); message.ok === true ? item.resolve(message.result) : item.reject(refusal(message.error)); },
     reset() { for(const item of pending.values()) item.reject(new Error('The connection to DGC changed. Refresh and try again.')); pending.clear(); },
     expire(now) { for(const [id,item] of pending) if(now-item.at > (item.wait||60000)) { pending.delete(id); item.reject(new Error('DGC didn’t answer in time. Refresh to see whether it worked before trying again.')); } }
   };

@@ -1,6 +1,7 @@
 import {esc,activityLabel,personalStatusLabel} from './pipsModel.js';
 import {cronDays} from './pipRoutines.js';
 import {postArtifact,docCardMarkup} from './pipRunPosts.js';   // a long reply's document: the card a run's post draws
+import {FOLDER_ICON} from './pipProjects.js';   // a project's mark in a sent message (pips-21)
 import '../media/mentions.js';   // globalThis.DgcMentions: @ marks in the bubble, the same in all three chats
 import '../media/msgtime.js';   // globalThis.DgcTime: a message's time, the same in all three chats
 import '../media/pictureFold.js';   // globalThis.DgcPictureFold: a reply's pictures fold away, the same in all three chats
@@ -43,7 +44,7 @@ function promptWithMarks(m,pluginLogo){
   if(!M||!Array.isArray(m.display_mentions)||!m.display_mentions.length)return '';
   let n=0;
   const node=M.sentNode(String(m.text),m.display_mentions,{doc:globalThis.document,
-    pillFor:mark=>({logo:mark.kind==='plugin'?pluginLogo(mark.identity):'',plug:transcriptIcon('plug'),faceStyles:false,faceId:`sent-${m.id}-${++n}`}),
+    pillFor:mark=>({logo:mark.kind==='plugin'?pluginLogo(mark.identity):'',plug:transcriptIcon('plug'),folder:FOLDER_ICON,faceStyles:false,faceId:`sent-${m.id}-${++n}`}),
     decorate:(pill,mark)=>{if(mark.kind!=='pip')return;const face=pill.querySelector('.composer-pip-face');if(face){face.setAttribute('data-avatar-key',`mention-${m.id}-${n}`);face.setAttribute('data-character',mark.pip_type);face.setAttribute('data-pose','idle');}}});
   return node?node.innerHTML:'';
 }

@@ -27,7 +27,7 @@ import { McpBrowserRequest, editorIsRemote, handSignInBack, openMcpBrowser } fro
 import { routerCommand } from "./routerCommands";
 import { imagesCommand, MAX_WORKFLOW_CHARS } from "./imagesCommands";
 import { allowFromJobs, handleVideoMessage, VIDEO_MESSAGES } from "./videoHost";
-import { PipsEditor, openEngineSignIn } from "./pipsView";
+import { PipsEditor, openEngineSignIn, type ProjectWork } from "./pipsView";
 import { mcpAppsHost } from "./mcpApps";
 import { PLUGIN_ID, pluginLogoData, pluginLogoSource, type PluginLogoItem } from "./pluginLogos";
 import { pipsAttention, PipsAttentionState } from "./pipsAttention";
@@ -1119,6 +1119,28 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.rememberWorkFolder(folder);
     const tab = places.open("", path.basename(folder.replace(/[\\/]+$/, "")) || folder, { cwd: folder });
     tab.composeBrief(brief);
+    return true;
+  }
+
+  /** Continue in Work from a Pip's chat (Pips API 91): what the Pip changed in its private copy of this project, as a
+   *  patch file beside a new Work session here. The patch is kept in the extension's own storage, never in the
+   *  project; the session opens in the folder this chat works in, with the brief in its box, unsent, and the patch
+   *  attached as a file: the person reads it and sends it, and Work's own change and permission cards apply it. */
+  async continueProjectInWork(work: ProjectWork): Promise<boolean> {
+    const places = this.tab?.places ?? this.places, folder = this.activeSlot().cwd || this.cwd();
+    if (!places || !folder || !work.brief.trim() || !/^pchange_[0-9a-f]{32}$/.test(work.change_id) || !/^[A-Za-z0-9._-]{1,80}\.patch$/.test(work.file)) { return false; }
+    if (!(await this.mayOpenChatIn(folder))) { return false; }
+    let file: string;
+    try {
+      const dir = path.join(this.context.globalStorageUri.fsPath, "pip-changes", work.change_id);
+      await fs.promises.mkdir(dir, { recursive: true, mode: 0o700 });
+      file = path.join(dir, work.file);
+      await fs.promises.writeFile(file, work.patch, { mode: 0o600 });
+    } catch { return false; }
+    this.rememberWorkFolder(folder);
+    const tab = places.open("", path.basename(folder.replace(/[\\/]+$/, "")) || folder, { cwd: folder });
+    tab.composeBrief(work.brief);
+    tab.attachFileAs(vscode.Uri.file(file), work.file);
     return true;
   }
 
@@ -8111,6 +8133,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.pipsEditor.useSavedProviders(() => this.pipSavedProviders(), (id, model) => this.savePipProvider(id, model), () => this.noProvider());
       // A Pip's page lists the person's dashboards and opens its report and its dashboards (Pips API 67).
       this.pipsEditor.useArtifacts(() => this.artifacts);
+      // Continue in Work on what a Pip changed in its copy of a project (Pips API 91).
+      this.pipsEditor.useProjectWork((work) => this.continueProjectInWork(work));
       this.pipsEditor.videoStop = (job) => this.videosStop(job);
       this.pipsEditor.fullScreenSide = this.fullScreenSide();
       this.pipsEditor.videoFollow = (job) => this.videosJobs(job);     // a Pip reply's video: Stop
@@ -8205,6 +8229,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // A Pip's reply in this tab: its links and "Settings → Models" go where the side bar's do.
       this.pipsTab.usePageActions((message) => { void this.onMessage(message); });
       this.pipsTab.useArtifacts(() => this.artifacts);
+      this.pipsTab.useProjectWork((work) => this.continueProjectInWork(work));
       this.pipsTab.videoStop = (job) => this.videosStop(job);
       this.pipsTab.fullScreenSide = this.fullScreenSide();
       this.pipsTab.videoFollow = (job) => this.videosJobs(job);
@@ -9906,6 +9931,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       void vscode.window.showInformationMessage("Open or select a file to add it to DGC.");
     }
     return list;
+  }
+
+  /** One file beside the prompt under a name of its own (a patch DGC wrote outside the project), as attachFiles adds one. */
+  attachFileAs(uri: vscode.Uri, label: string): void {
+    this.inVisiblePanel(() => this.post({ type: "attach", label, resource: {
+      type: "file_mention", uri: uri.toString(), path: uri.fsPath, relative_path: uri.fsPath, workspace: "",
+    } }));
   }
 
   attachFiles(list: vscode.Uri[]): void {

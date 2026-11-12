@@ -77,6 +77,8 @@ import {watchButtons} from './buttonFit.js';
 import {pipArtifacts,dashboardList,artifactsPageMarkup,artifactsSectionsMarkup,reportNotice} from './pipArtifacts.js';
 import {templatePage,templateMarkup} from './pipTemplates.js';
 import {borrowsPage,borrowResult,shownBorrows,borrowActive,borrowMarkup} from './pipBorrow.js';
+import {PROJECTS_API,PROJECT_WORK_COMMAND,MOVED_ON,FOLDER_ICON,projectChoices,projectChanges,projectAnswer,shownProjectChanges,projectCardMarkup,needsComputerMarkup} from './pipProjects.js';
+import './pipProjects.css';
 import {routinesPage,routineDraft,routineFromDraft,shownRoutineCards,routineCardMarkup,routinesMarkup,routineFormMarkup,shortDate} from './pipRoutines.js';
 import {webhook,reach as webhookReach,webhooksOffered,testLine as webhookTestLine,webhookPanelMarkup,reachMarkup} from './pipWebhooks.js';
 import {pickerMarkup,createPicker} from './pipPicker.js';
@@ -233,24 +235,30 @@ const Mentions=remoteHost?null:globalThis.DgcMentions;
 const chatMarks=new Map();
 let chatBox=null,chatPop=null,chatPicker=null,boxPip='',projectFiles=[],projectFilesAsked=false;
 const rowTerminal='<svg class="pi-icon" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 4 3.5 3.5L3 11M8 12h5"/></svg>';
-function chatMarkLook(part){return{logo:part.kind==='plugin'?pluginLogoSrc(part.identity):'',plug:transcriptIcon('plug'),faceStyles:false};}
+function chatMarkLook(part){return{logo:part.kind==='plugin'?pluginLogoSrc(part.identity):'',plug:transcriptIcon('plug'),folder:FOLDER_ICON,faceStyles:false};}
 function rememberMarks(pip=S.selected){if(!chatBox||!pip)return;const parts=chatBox.parts();if(parts)chatMarks.set(pip,{text:chatBox.el.value,parts});else chatMarks.delete(pip);}
 // What this Pip can reach, and nothing else: the plugins it can call (a Personal Pip's), the other Pips of its own
 // workspace (what it can hand work to and be told about), and the project's files for a Pip that reads them. It makes
 // no Outputs: a Pip's chat has no Output menu and no artifact tools.
 function chatMentionSources(){
  const others=(S.jobs||[]).filter(p=>p.id!==S.selected&&p.status!=='archived'&&p.name).slice(0,100).map(p=>{const body=profile(p.profile).body;return{pip_id:p.id,name:p.name,pip_type:personalPip(p)&&body?body:p.pip_type,kind:`${p.pip_type} Pip`,detail:`${personalPip(p)?'Personal':'Project'} · v${p.current_version} · ${p.id.slice(-8)}`};}).filter(p=>Mentions.PIP_TYPES.includes(p.pip_type));
- return{plugins:personalPip()?(S.pluginsInstalled||[]).map(p=>({id:p.plugin,name:p.name})):[],outputs:[],pips:others,pipsEmpty:'No other Pips here',files:personalPip()?[]:projectFiles};
+ return{plugins:personalPip()?(S.pluginsInstalled||[]).map(p=>({id:p.plugin,name:p.name})):[],outputs:[],pips:others,pipsEmpty:'No other Pips here',files:personalPip()?[]:projectFiles,
+  // This computer's projects (pips-21, API 91): naming one gives this Pip a private copy of it.
+  projects:projectMentionsOn()?S.projectChoices:[]};
 }
 if(Mentions){
  const el=owner.createElement('div');el.id='chatText';el.className='mention-box';el.dataset.draft='chatText';el.setAttribute('data-dom-own','1');el.setAttribute('contenteditable','true');el.setAttribute('role','textbox');el.setAttribute('aria-multiline','true');el.setAttribute('aria-controls','chat-pop');el.setAttribute('aria-autocomplete','list');el.setAttribute('aria-haspopup','listbox');el.setAttribute('aria-expanded','false');
  chatPop=owner.createElement('div');chatPop.id='chat-pop';chatPop.className='pop pop-over';chatPop.setAttribute('role','listbox');chatPop.setAttribute('aria-label','Suggestions');chatPop.setAttribute('data-dom-own','1');
  chatBox=Mentions.box(el,{maxLength:CHAT_MAX_CHARS,faceStyles:false,edit:change=>chatEdit(change),pillOptions:chatMarkLook,cleanedChanged:()=>drawChatTray(),
-  pasteBack:part=>part.kind==='plugin'?chatMentionSources().plugins.some(p=>p.id===part.identity):part.kind==='pip'?chatMentionSources().pips.some(p=>p.pip_id===part.identity):part.kind==='file'&&!personalPip()});
+  pasteBack:part=>part.kind==='plugin'?chatMentionSources().plugins.some(p=>p.id===part.identity):part.kind==='pip'?chatMentionSources().pips.some(p=>p.pip_id===part.identity)
+   :part.kind==='project'?!!S.pip?.computer_plan&&chatMentionSources().projects.some(p=>p.workspace_id===part.identity):part.kind==='file'&&!personalPip()});
  chatPicker=Mentions.picker(chatBox,chatPop,{edit:change=>chatEdit(change),sources:chatMentionSources,pipsDetail:'This Pip\u2019s workspace · no work starts',
-  refresh(){if(!personalPip()&&!projectFilesAsked){projectFilesAsked=true;vscode.postMessage({type:'pipsFiles'});}},
+  refresh(){if(!personalPip()&&!projectFilesAsked){projectFilesAsked=true;vscode.postMessage({type:'pipsFiles'});}if(projectMentionsOn())void loadProjectChoices();},
+  projectsDetail:'A private copy for this Pip to work in',
+  // A Pip with no computer has nowhere to keep the copy: it is told to get one first, and no mark goes in.
+  projectPick:()=>{if(S.pip?.computer_plan)return true;askForComputer();return false;},
   face:(it,i)=>{const index=it.pipRow?Mentions.PIP_TYPES.indexOf(it.pipRow.pip_type):-1;return index>=0?`<span class="pi-pip-face" aria-hidden="true">${window.PipConcepts.plush.markup({index,name:it.pipRow.name},'idle',`pickerPip${i}`,{includeStyles:false})}</span>`:'';},
-  icon:it=>{if(!it.pluginId)return rowTerminal;const src=pluginLogoSrc(it.pluginId);return `<span class="pi-icon pi-plugin-mark" aria-hidden="true" data-plugin-mark="${esc(it.pluginId)}">${src?`<img alt="" src="${esc(src)}">`:transcriptIcon('plug')}</span>`;},
+  icon:it=>{if(it.projectRow)return `<span class="pi-icon pi-project-mark" aria-hidden="true">${FOLDER_ICON}</span>`;if(!it.pluginId)return rowTerminal;const src=pluginLogoSrc(it.pluginId);return `<span class="pi-icon pi-plugin-mark" aria-hidden="true" data-plugin-mark="${esc(it.pluginId)}">${src?`<img alt="" src="${esc(src)}">`:transcriptIcon('plug')}</span>`;},
   drawn:()=>hydratePluginLogos(),
   // The name is the words: the model reads "ask Scout", and what a Pip is comes beside them (named_pips).
   pipPart:p=>{const name=p.name.replace(/\s+/g,' ').trim();return{kind:'pip',label:name,wire:name,identity:p.pip_id,pipType:p.pip_type};},
@@ -921,7 +929,7 @@ function chatMarkup(){
   const live=liveMarkup(markdown);
   // A hello that failed says so, above what a new chat says about itself: nothing else has been said.
   const quietChat=S.messages.every(m=>m.role==='user'&&m.intro===true&&m.status==='failed')&&!items.some(i=>!(i.message&&failedHidden(i.message)))&&!live&&!items.some(i=>i.note||(i.message&&routineFailed(i.message)));
-  return `<section class="pip-conversation${simple?' chat-style':''}" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${noProviderMarkup()}${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(chatPosts()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`${messages}<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${quietChat?'':messages}${live}${simple?'':typing}${S.stream?.text&&!routineLive?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(replyParts(S.stream.text).join('\n\n'))}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${pipKeyCards()}${borrowCards()}${routineCards()}${settled.tail}${needsYouCard()}${cardRefusedCard()}${turnOpen?'</div>':''}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div><button type="button" id="pip-to-latest" class="pip-to-latest" data-dom-own="1" title="Jump to the newest message" aria-label="Jump to the newest message" hidden><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M4 9l4 4 4-4"/></svg><span data-latest-label>Latest</span></button>${simple?runnerOffMarkup():''}${pipOff(S.pip)?`<p class="pip-off-line" role="status">${PIP_OFF_SAYS}</p>`:''}<div class="pip-composer-shell">${routinePopoverMarkup()}${computerWaitingCards()}<div id="chat-tray" class="rail-line tray-only" data-dom-own="1"></div><form id="chat-form" class="pip-composer tray-box"><div class="dgc-drop" data-dom-own hidden aria-hidden="true">Drop to attach</div>${replyChipMarkup()}${canAttachImages()?imageStripMarkup():''}${chatBox?'<div id="chat-pop" class="pop pop-over" data-dom-own="1"></div>':''}<div class="composer-input">${chatBox?'<div id="chatText" class="mention-box" data-dom-own="1"></div>':`<label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="${CHAT_MAX_CHARS}"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea>`}</div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
+  return `<section class="pip-conversation${simple?' chat-style':''}" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${noProviderMarkup()}${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(chatPosts()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`${messages}<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${quietChat?'':messages}${live}${simple?'':typing}${S.stream?.text&&!routineLive?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(replyParts(S.stream.text).join('\n\n'))}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${pipKeyCards()}${borrowCards()}${projectChangeCards()}${routineCards()}${settled.tail}${needsYouCard()}${cardRefusedCard()}${turnOpen?'</div>':''}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div><button type="button" id="pip-to-latest" class="pip-to-latest" data-dom-own="1" title="Jump to the newest message" aria-label="Jump to the newest message" hidden><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M4 9l4 4 4-4"/></svg><span data-latest-label>Latest</span></button>${simple?runnerOffMarkup():''}${pipOff(S.pip)?`<p class="pip-off-line" role="status">${PIP_OFF_SAYS}</p>`:''}<div class="pip-composer-shell">${routinePopoverMarkup()}${computerWaitingCards()}${needsComputerCard()}<div id="chat-tray" class="rail-line tray-only" data-dom-own="1"></div><form id="chat-form" class="pip-composer tray-box"><div class="dgc-drop" data-dom-own hidden aria-hidden="true">Drop to attach</div>${replyChipMarkup()}${canAttachImages()?imageStripMarkup():''}${chatBox?'<div id="chat-pop" class="pop pop-over" data-dom-own="1"></div>':''}<div class="composer-input">${chatBox?'<div id="chatText" class="mention-box" data-dom-own="1"></div>':`<label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="${CHAT_MAX_CHARS}"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea>`}</div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
 }
 // ---- Its runs in its chat (Pips API 51) ----
 // Each finished run is a post from the Pip, read with list_pip_run_posts and drawn among the messages; History
@@ -1160,6 +1168,7 @@ async function loadMessages(more=false){
     if(!page.active_run){streamSeq++;streamLoading=false;S.stream=null;}else if(!S.stream||S.stream.runId!==page.active_run.id){streamSeq++;streamLoading=false;S.stream={runId:page.active_run.id,cursor:0,text:'',limited:false,error:'',truncated:false};}
     if(page.active_run)void loadChatStream();
     if(!more)void loadReplyStats();
+    if(!more)projectChangesDue(id,page);
   }catch(error){if(token===scope()&&sequence===messageSeq)S.messagesError=errorText(error);}
   finally{if(token===scope()&&sequence===messageSeq){S.messagesLoading=false;render();maybeMarkRead();}}
 }
@@ -1550,7 +1559,10 @@ async function sendChat(sent={}){
     if(S.selected===id&&S.conv!==conv){settleStashedSend(id,conv,pending,text,false);void loadConversations();return;}
     if(chatRequests.get(id)?.key===pending.key)chatRequests.delete(id);if(chatDrafts.get(id)?.trim()===text)chatDrafts.delete(id);if(pending.images?.length)chatImages.delete(id);if(pending.files?.length)chatFiles.delete(id);rememberView();if(token!==scope()||generation!==selectionGeneration)return;if(messageWords(draft.chatText)===text)draft.chatText='';await Promise.all([loadMessages(),refresh(false)]);}
   catch(error){if(token===scope()&&generation===selectionGeneration&&S.conv!==conv){settleStashedSend(id,conv,pending,text,true);S.notice='That message didn’t go. It’s back in its conversation’s box.';render();}
-   else if(token===scope()&&generation===selectionGeneration){if(String(errorText(error)).startsWith(CARD_REFUSED)){refuseCard(id);return;}chatEdit(()=>{if(!draft.chatText.trim()){draft.chatText=text;if(pending.parts)chatMarks.set(id,{text,parts:pending.parts});if(pending.reply&&!chatReplies.has(id))chatReplies.set(id,pending.reply);}setError(error);render();});}}
+   else if(token===scope()&&generation===selectionGeneration){if(String(errorText(error)).startsWith(CARD_REFUSED)){refuseCard(id);return;}
+    // DGC refused it because this Pip has no computer to keep a project's copy on: the line with the button that adds one says so.
+    const noComputer=error?.code==='needs_computer'&&projectsOn();if(noComputer){projectNeedsComputer=id;projectRefused=true;}
+    chatEdit(()=>{if(!draft.chatText.trim()){draft.chatText=text;if(pending.parts)chatMarks.set(id,{text,parts:pending.parts});if(pending.reply&&!chatReplies.has(id))chatReplies.set(id,pending.reply);}if(!noComputer)setError(error);render();});}}
   finally{if(S.sending?.key===pending.key)S.sending=null;if(token===scope()&&generation===selectionGeneration){S.busy=false;render();$('chatText')?.focus();}}
 }
 function hydrateAdaptation(pip){const p=adaptationPolicy(pip.adaptation_policy);draft.adaptationMode=p.mode;draft.adaptationName=p.allowed_fields.includes('name');draft.adaptationSource=p.allowed_fields.includes('source_ref');S.adaptationDraftVersion=pip.current_version;}
@@ -4579,6 +4591,99 @@ function pluginNotRun(){
  return last?(S.connectorDrafts||[]).filter(d=>d.status==='dismissed'&&d.source_run_id===last.run_id)
   .map(d=>`<p class="app-link-note plugin-not-run" role="status" data-plugin-not-run="${esc(d.id)}">Not run: you chose Don’t${d.subject?` for ${esc(d.subject)}`:''}.</p>`).join(''):'';
 }
+// @ a project in a Personal Pip's chat (pips-21, Pips API 91; src/pipProjects.js). The @ list offers this computer's
+// projects; naming one gives the Pip a private copy on its computer, and what it changed there comes back as one card per
+// project under its reply: Apply (always your click), Discard (asked first), Undo after Apply, and Continue in Work.
+// DGC compares the copies only when asked, so it is asked when the chat opens and when a reply lands, never on a look.
+S.projectChoices=[];S.projectChanges=[];S.projectsError='';
+let projectChoicesSeq=0,projectChoicesAt=0,projectChoicesBusy=false,projectChangesSeq=0,projectAsked='',projectBusy=null,projectConfirm='',projectNeedsComputer='',projectRefused=false;
+const projectOpen=new Set(),projectDiffs=new Map(),projectErrors=new Map(),projectNotes=new Map();
+const projectsOn=()=>S.apiVersion>=PROJECTS_API&&!remoteHost&&personalPip();
+// A project's mark travels as a display mention, so only where DGC keeps a message's marks; an archived Pip takes no message.
+const projectMentionsOn=()=>projectsOn()&&!!Mentions&&S.displayMentions&&!archived();
+function resetProjects(){S.projectChoices=[];S.projectChanges=[];S.projectsError='';projectChoicesSeq++;projectChoicesAt=0;projectChoicesBusy=false;projectChangesSeq++;projectAsked='';projectBusy=null;projectConfirm='';projectNeedsComputer='';projectRefused=false;projectOpen.clear();projectDiffs.clear();projectErrors.clear();projectNotes.clear();}
+async function loadProjectChoices(){
+ if(!projectMentionsOn()||!usable()||projectChoicesBusy||Date.now()-projectChoicesAt<5000)return;
+ const token=scope(),sequence=++projectChoicesSeq,pip=S.selected;projectChoicesBusy=true;
+ try{const list=projectChoices(await send('list_pip_project_choices',{pip_id:pip}));if(token!==scope()||sequence!==projectChoicesSeq)return;S.projectChoices=list;projectChoicesAt=Date.now();chatPicker?.refresh();}
+ catch{/* the list stays as it was: the other kinds are still offered */}
+ finally{if(sequence===projectChoicesSeq)projectChoicesBusy=false;}
+}
+// `refused`: DGC itself said so (this page's own idea of the Pip was behind), so the line stays whatever the page thinks.
+function askForComputer(pip=S.selected,refused=false){projectNeedsComputer=pip;projectRefused=refused;render();}
+function needsComputerCard(){
+ if(!projectsOn()||projectNeedsComputer!==S.selected||(S.pip?.computer_plan&&!projectRefused)||archived())return '';
+ return needsComputerMarkup(S.pip?.name,{esc,off:S.busy||!usable()});
+}
+// A reply landed, or the chat opened: what did the Pip change in its copies? `page`: the chat as just read.
+function projectChangesDue(pip,page){
+ if(!projectsOn()||S.tab!=='chat')return;
+ const last=[...S.messages].reverse().find(m=>m.role==='assistant'),first=!projectAsked.startsWith(pip+'|'+(S.conv||'')+'|');
+ const key=`${pip}|${S.conv||''}|${last?.id||''}|${page.active_run?'writing':'idle'}`;
+ if(key===projectAsked)return;projectAsked=key;
+ if(first||!page.active_run)void loadProjectChanges();
+}
+async function loadProjectChanges(){
+ if(!projectsOn()||!usable())return;
+ const token=scope(),sequence=++projectChangesSeq,pip=S.selected;
+ try{const list=projectChanges(await send('list_pip_project_changes',{pip_id:pip}),pip);if(token!==scope()||sequence!==projectChangesSeq)return;
+  S.projectChanges=list;S.projectsError='';
+  // What is kept is only for the changes still listed, as they are now; an open file of a change that grew is read again.
+  const now=new Map(list.map(c=>[c.id,c]));
+  for(const key of [...projectDiffs.keys()]){const [id,digest]=key.split('|');if(now.get(id)?.digest!==digest||now.get(id)?.status!=='pending')projectDiffs.delete(key);}
+  for(const key of [...projectOpen]){const at=key.indexOf('|'),c=now.get(key.slice(0,at)),path=key.slice(at+1);if(!c||c.status!=='pending'||!c.files.some(f=>f.path===path))projectOpen.delete(key);else void loadProjectDiff(c.id,path);}
+  for(const map of [projectErrors,projectNotes])for(const id of [...map.keys()])if(!now.has(id))map.delete(id);
+  if(projectConfirm&&now.get(projectConfirm)?.status!=='pending')projectConfirm='';
+  render();}
+ catch(error){if(token===scope()&&sequence===projectChangesSeq){S.projectsError=errorText(error);render();}}
+}
+function projectChangeCards(){
+ if(!projectsOn())return '';
+ const lastUserAt=Math.max(0,...(S.messages||[]).filter(m=>m.role==='user'&&m.intro!==true).map(m=>Date.parse(m.created_at)||0));
+ const off=archived()||!usable();
+ return shownProjectChanges(S.projectChanges,{lastUserAt}).map(c=>projectCardMarkup(c,{esc,open:projectOpen,diffs:projectDiffs,busy:projectBusy?.id===c.id?projectBusy.what:'',off:off||(!!projectBusy&&projectBusy.id!==c.id),
+   confirm:projectConfirm===c.id,note:projectNotes.get(c.id)||'',error:projectErrors.get(c.id)||''})).join('')
+  +(S.projectsError?`<p class="app-link-note" role="alert">${esc(S.projectsError)}</p>`:'');
+}
+async function loadProjectDiff(id,path){
+ const change=S.projectChanges.find(c=>c.id===id);if(!change||!usable())return;
+ const key=`${id}|${change.digest}|${path}`;if(projectDiffs.has(key))return;
+ const token=scope(),pip=S.selected,entry={loading:true,text:'',error:''};projectDiffs.set(key,entry);render();
+ try{const got=await send('get_pip_project_change',{pip_id:pip,change_id:id,path});if(typeof got?.diff!=='string'||got.id!==id||got.path!==path)throw new Error('This file’s changes didn’t load. Open it again.');entry.text=got.diff;}
+ catch(error){entry.error=errorText(error);}
+ finally{entry.loading=false;if(token===scope()&&projectDiffs.get(key)===entry)render();}
+}
+function toggleProjectFile(id,path){
+ const key=`${id}|${path}`,change=S.projectChanges.find(c=>c.id===id);if(!change)return;
+ if(projectOpen.has(key)){projectOpen.delete(key);render();return;}
+ projectOpen.add(key);const kept=`${id}|${change.digest}|${path}`;if(projectDiffs.get(kept)?.error)projectDiffs.delete(kept);
+ render();void loadProjectDiff(id,path);
+}
+// Apply, Discard and Undo: each is the user's click on this card, and each answers the change as DGC now lists it.
+async function projectDecide(what,id){
+ const change=S.projectChanges.find(c=>c.id===id);if(!change||!usable()||!projectsOn()||projectBusy||archived())return;
+ const token=scope(),pip=S.selected,type={apply:'apply_pip_project_change',discard:'discard_pip_project_change',undo:'undo_pip_project_change'}[what];
+ projectBusy={id,what};projectErrors.delete(id);projectNotes.delete(id);render();
+ try{const decided=projectAnswer(await send(type,{pip_id:pip,change_id:id,...(what==='apply'?{expected_digest:change.digest}:{})}),id);if(token!==scope()||S.selected!==pip)return;
+  S.projectChanges=S.projectChanges.map(c=>c.id===id?decided:c);projectConfirm='';
+  for(const key of [...projectOpen])if(key.startsWith(id+'|'))projectOpen.delete(key);
+  // What Apply held back is still different in the Pip's copy: DGC lists it as a change of its own.
+  if(what==='apply')void loadProjectChanges();}
+ catch(error){if(token!==scope()||S.selected!==pip)return;
+  // The Pip changed more since this card was drawn: nothing was applied. The change is read and shown again.
+  if(what==='apply'&&error?.code==='conflict'){projectNotes.set(id,MOVED_ON);await loadProjectChanges();}
+  else projectErrors.set(id,errorText(error));}
+ finally{if(projectBusy?.id===id)projectBusy=null;if(token===scope())render();}
+}
+// Continue in Work: the editor opens a new Work chat in this project, with the change's patch as a file beside its first
+// message. Nothing is decided here: the change still waits in this chat.
+async function projectWork(id){
+ if(!S.projectChanges.some(c=>c.id===id)||!usable()||!projectsOn()||projectBusy)return;
+ const token=scope(),pip=S.selected;projectBusy={id,what:'work'};projectErrors.delete(id);render();
+ try{await send(PROJECT_WORK_COMMAND,{pip_id:pip,change_id:id});}
+ catch(error){if(token===scope()&&S.selected===pip)projectErrors.set(id,errorText(error));}
+ finally{if(projectBusy?.id===id)projectBusy=null;if(token===scope())render();}
+}
 // Borrowing your own signed-in Chrome (pip_borrow, API 59): the card it asks with, Allow once or Not now; while lent,
 // "Using your Chrome · site" with Stop; then "Gave your Chrome back". Looked at again every 1.5 s while one is lent.
 S.borrows=[];S.borrowsError='';let borrowSeq=0,borrowBusy='',borrowTimer=0;
@@ -5229,7 +5334,7 @@ function renderReview() {
   $('review-title')?.focus({preventScroll:true});document.querySelector('[role=dialog]')?.scrollTo?.(0,0);
   picker.restore();
 }
-function clearSelection() { S.pipKeys=[];S.pipKeysError='';pipKeysSeq++;pipKeyBusy='';pipKeyConfirm='';pipKeyFilled.clear();pipKeyErrors.clear();pipKeyDone.clear();pipKeyTicked.clear();S.keyRequests=[];keyFilled.clear();keyErrors.clear();keySaved.clear();S.notes=null;S.notesPip='';S.notesError='';notesSeq++;noteConfirmAll=false;draft.noteAdd='';S.workingNotes=null;S.workingNotesPip='';S.workingNotesError='';workingNotesSeq++;workingNotesEditing=false;draft.workingNotesText='';S.dailyLog=null;S.dailyLogPip='';S.dailyLogError='';dailyLogSeq++;S.appLinks=[];S.appLinksError='';skillsUse.pip='';skillsUse.asked='';skillsUse.value=null;skillsUse.error='';skillsUse.busy=false;skillsUse.seq++;folderUi.open=false;folderUi.adding=false;folderUi.error='';folderUi.busy=false;appsUse.pip='';appsUse.asked='';appsUse.value=null;appsUse.error='';appsUse.busy=false;appsUse.confirm='';appsUse.seq++;allowFrom.clear();allowFromOpen='';S.plugins=[];S.pluginsInstalled=[];S.pluginsError='';pluginSeq++;pluginBusy='';S.routines=null;S.routinesError='';routineSeq++;routineEditing='';routineError='';S.pipPage='info';S.legacyOpen=false;pageNameDirty=false;lookDirty=false;shared.pip='';shared.seq++;window.clearTimeout(appLinkTimer);appLinkBusy=''; S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);postsSeq++;S.posts=[];S.postsCursor=null;S.postsPip='';S.postsLoaded=false;S.fixes=new Map();S.fixesPip='';fixesSeq++;S.postsLoading=false;S.postsError='';messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.chatWaiting=[];S.routineNotes=[];S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; dropLive(); selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
+function clearSelection() { resetProjects();S.pipKeys=[];S.pipKeysError='';pipKeysSeq++;pipKeyBusy='';pipKeyConfirm='';pipKeyFilled.clear();pipKeyErrors.clear();pipKeyDone.clear();pipKeyTicked.clear();S.keyRequests=[];keyFilled.clear();keyErrors.clear();keySaved.clear();S.notes=null;S.notesPip='';S.notesError='';notesSeq++;noteConfirmAll=false;draft.noteAdd='';S.workingNotes=null;S.workingNotesPip='';S.workingNotesError='';workingNotesSeq++;workingNotesEditing=false;draft.workingNotesText='';S.dailyLog=null;S.dailyLogPip='';S.dailyLogError='';dailyLogSeq++;S.appLinks=[];S.appLinksError='';skillsUse.pip='';skillsUse.asked='';skillsUse.value=null;skillsUse.error='';skillsUse.busy=false;skillsUse.seq++;folderUi.open=false;folderUi.adding=false;folderUi.error='';folderUi.busy=false;appsUse.pip='';appsUse.asked='';appsUse.value=null;appsUse.error='';appsUse.busy=false;appsUse.confirm='';appsUse.seq++;allowFrom.clear();allowFromOpen='';S.plugins=[];S.pluginsInstalled=[];S.pluginsError='';pluginSeq++;pluginBusy='';S.routines=null;S.routinesError='';routineSeq++;routineEditing='';routineError='';S.pipPage='info';S.legacyOpen=false;pageNameDirty=false;lookDirty=false;shared.pip='';shared.seq++;window.clearTimeout(appLinkTimer);appLinkBusy=''; S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);postsSeq++;S.posts=[];S.postsCursor=null;S.postsPip='';S.postsLoaded=false;S.fixes=new Map();S.fixesPip='';fixesSeq++;S.postsLoading=false;S.postsError='';messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.chatWaiting=[];S.routineNotes=[];S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; dropLive(); selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
 // "Report ready", "Last run failed": the Pip page's status names its latest run, so it opens that run (reported
 // 19 Oct: it read like a link and did nothing). A status that names no finished run stays words.
 // Since its runs post in its chat (API 51), the status says what the latest found and goes to that post.
@@ -5882,6 +5987,15 @@ document.addEventListener('click',event=>{
   // No connector for it, or Composio isn't set up: the plugin directory, searching for that app.
   if(target.dataset.appLinkSettings){vscode.postMessage({type:'openSettings',section:'plugins',browse:String(target.dataset.appLinkApp||'')});return;}
   if(target.dataset.composerMore!==undefined){S.composerNoteOpen=!S.composerNoteOpen;render();document.querySelector('[data-composer-more]')?.focus();return;}
+  if(target.dataset.projectFile!==undefined&&target.dataset.projectOf){toggleProjectFile(target.dataset.projectOf,target.dataset.projectFile);return;}
+  if(target.dataset.projectApply){void projectDecide('apply',target.dataset.projectApply);return;}
+  if(target.dataset.projectDiscard){projectConfirm=target.dataset.projectDiscard;projectErrors.delete(projectConfirm);render();document.querySelector(`[data-project-keep="${projectConfirm}"]`)?.focus();return;}
+  if(target.dataset.projectKeep){const id=target.dataset.projectKeep;projectConfirm='';render();document.querySelector(`[data-project-discard="${id}"]`)?.focus();return;}
+  if(target.dataset.projectDiscardYes){void projectDecide('discard',target.dataset.projectDiscardYes);return;}
+  if(target.dataset.projectUndo){void projectDecide('undo',target.dataset.projectUndo);return;}
+  if(target.dataset.projectWork){void projectWork(target.dataset.projectWork);return;}
+  if(target.dataset.projectComputer!==undefined){projectNeedsComputer='';projectRefused=false;grantComputer(true);return;}
+  if(target.dataset.projectComputerNo!==undefined){projectNeedsComputer='';projectRefused=false;render();$('chatText')?.focus();return;}
   if(target.dataset.borrowAllow){void borrowAnswer('allow_pip_borrow',target.dataset.borrowAllow);return;}
   if(target.dataset.borrowDecline){void borrowAnswer('decline_pip_borrow',target.dataset.borrowDecline);return;}
   if(target.dataset.borrowStop){void borrowAnswer('stop_pip_borrow',target.dataset.borrowStop);return;}

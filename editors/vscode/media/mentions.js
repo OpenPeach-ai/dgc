@@ -18,9 +18,10 @@
 
   const BLOCK = new Set(["DIV", "P", "LI", "TR", "SECTION", "ARTICLE", "BLOCKQUOTE", "PRE"]);
   const PIP_TYPES = ["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"];
-  const MARK_KINDS = ["plugin", "artifact", "pip", "skill", "template", "file", "command"];
+  // project: one of this computer's projects named in a Personal Pip's chat (pips-21): it gets a private copy.
+  const MARK_KINDS = ["plugin", "artifact", "pip", "skill", "template", "file", "command", "project"];
   // What a selected attachment contributes to the prompt's text: nothing, unless it says otherwise (`wired`).
-  const ZERO_WIDTH = new Set(["pip", "skill", "template", "file"]);
+  const ZERO_WIDTH = new Set(["pip", "skill", "template", "file", "project"]);
   // The character that stands for a pill while a selection is split into its words and pills.
   const PILL_MARK = "";
 
@@ -299,6 +300,16 @@
       node.title = `${label} · connected plugin`;
       return node;
     }
+    if (kind === "project") {
+      // A project named in a Personal Pip's chat: a folder, then its name. `opts.folder`: the folder's own markup, where
+      // the page has no icon font (a Pip's chat in the side bar's shadow root).
+      const mark = doc.createElement("span"); mark.className = "composer-project-mark"; mark.setAttribute("aria-hidden", "true");
+      mark.innerHTML = opts.folder || '<span class="codicon codicon-folder"></span>';
+      const name = doc.createElement("span"); name.className = "composer-project-name"; name.textContent = label;
+      node.append(mark, name);
+      node.title = `${label} · a private copy for this Pip`;
+      return node;
+    }
     if (kind === "artifact") {
       node.dataset.artifactKind = identity;
       const mark = doc.createElement("span"); mark.className = `composer-artifact-mark codicon codicon-${opts.glyph || "output"}`;
@@ -338,7 +349,7 @@
   function pillToken(node) {
     const kind = node.dataset.kind, name = pillLabel(node);
     if (kind === "link") return node.dataset.pill || node.title || name;
-    return (kind === "skill" ? "$" : ["file", "pip", "plugin", "artifact"].includes(kind) ? "@" : "/") + name;
+    return (kind === "skill" ? "$" : ["file", "pip", "plugin", "artifact", "project"].includes(kind) ? "@" : "/") + name;
   }
 
   // The box's words and pills in order: a string for words, {kind, label, wire, identity} for a pill. null with no pills.
@@ -381,7 +392,7 @@
     const marks = [];
     for (const part of list) {
       if (typeof part === "string") { offset += lengthOf(part); continue; }
-      if (["plugin", "artifact", "pip"].includes(part.kind)
+      if (["plugin", "artifact", "pip", "project"].includes(part.kind)
           || (rich && ["skill", "template", "file", "command"].includes(part.kind) && part.label.length <= 120)) {
         // A selection that adds no words: a trailing space before one is removed by submit(), so an end-of-prompt
         // mark anchors at the trimmed text's end. One whose name IS the words (a Pip named in ChatDGC) says so.
@@ -1002,6 +1013,11 @@
       opts.refresh?.();
       const rows = [];
       if (pipsOffered && (!query || "pips".includes(query))) rows.push({ label: "Reference a Pip…", kind: "Pips", detail: opts.pipsDetail || "No work starts", pipPicker: true });
+      // This computer's projects, in a Personal Pip's chat (pips-21): each one a row with a folder.
+      for (const row of source.projects || []) {
+        const label = String(row.name || "").replace(/\s+/g, " ").trim().slice(0, 80);
+        if (label && (label.toLowerCase().includes(query) || "projects".startsWith(query))) rows.push({ label, kind: "Project", detail: opts.projectsDetail || "", projectRow: row });
+      }
       for (const row of source.plugins || []) {
         const label = String(row.name || row.id).trim().slice(0, 80);
         if (label && `${label} ${row.id}`.toLowerCase().includes(query)) rows.push({ label, kind: "Plugin", detail: "Connected", pluginId: row.id });
@@ -1031,8 +1047,11 @@
         opts.refresh?.();
         return;
       }
+      // A project the box can't take now (a Pip with no computer to hold its copy): the page says why, and no mark goes in.
+      if (it.projectRow && opts.projectPick && opts.projectPick(it.projectRow) === false) { hide(); return; }
       const name = String(it.label || "").trim();
       const part = it.pipRow ? opts.pipPart(it.pipRow)
+        : it.projectRow ? { kind: "project", label: name, wire: name, identity: it.projectRow.workspace_id }
         : it.pluginId ? { kind: "plugin", label: name, wire: name, identity: it.pluginId }
         : it.artifactKind ? { kind: "artifact", label: name, wire: name, identity: it.artifactKind, glyph: it.artifactGlyph }
         : opts.filePart ? opts.filePart(it) : null;

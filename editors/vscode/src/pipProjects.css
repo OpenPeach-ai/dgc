@@ -1,0 +1,57 @@
+/* What a Pip changed in its copy of a project (pips-21, src/pipProjects.js): one card per project under its reply, in
+   the shared card's look (media/shared/card.css). Each file is one of Work's diff boxes: the .diff rules below are
+   Work's own (media/main.css, "diffs"), held to this card, so a diff reads the same in a Pip's chat as in Work.
+   Neutral greys; green and red only for what was added and removed. Nothing here is purple. */
+.pip-project-card .pip-project-files, .pip-project-card .pip-project-held { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-width: 0; margin: 10px 0 0 31px; padding: 0; list-style: none; }
+.pip-project-card .diff { min-width: 0; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--term); overflow: hidden; }
+.pip-project-card .diff .dhead { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; padding: 0; font: var(--w-med) var(--t-sm)/1 var(--mono); }
+.pip-project-card .diff.open .dhead { border-bottom: 1px solid var(--border); }
+.pip-project-card .diff .diff-toggle { display: flex; align-items: center; gap: var(--sp-2); flex: 1; box-sizing: border-box; width: auto; min-width: 0; min-height: 0; height: auto; margin: 0; padding: var(--sp-2); border: 0; border-radius: 0;
+  background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; box-shadow: none; }
+.pip-project-card .diff .diff-toggle.is-still { cursor: default; }
+.pip-project-card .diff button.diff-toggle:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.pip-project-card .diff button.diff-toggle:focus-visible { outline: var(--btn-ring); outline-offset: -2px; }
+.pip-project-card .diff .diff-toggle .chev { flex: none; width: 9px; color: var(--faint); font-size: var(--t-base); line-height: 1; }
+/* A path: its folders give way first, with an ellipsis, and its file's name stays whole while there is room for it. */
+/* (The line is tall enough for an underscore: at a line-height of 1 the clip below takes it off.) */
+.pip-project-card .f { display: flex; flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--text); line-height: 1.4; white-space: nowrap; }
+.pip-project-card .f .fd { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.pip-project-card .f .fn { flex: 0 0 auto; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.pip-project-card .pip-project-kind { flex: none; color: var(--muted); font: var(--w-reg) var(--t-xs)/1 var(--sans); white-space: nowrap; }
+.pip-project-card .diff .diff-stat { flex: none; font-weight: var(--w-bold); }
+.pip-project-card .diff .add-stat { color: var(--good); }
+.pip-project-card .diff .del-stat { color: var(--del-text); }
+.pip-project-card .diff pre { display: block; box-sizing: border-box; max-width: 100%; max-height: 320px; margin: 0; padding: var(--sp-1) 0; border: 0; border-radius: 0; background: none; overflow: auto; font: var(--w-reg) var(--t-xs)/1.6 var(--mono); color: var(--text); white-space: pre; }
+.pip-project-card .diff pre > span { display: flex; min-width: max-content; padding: 0 var(--sp-2) 0 0; white-space: pre; }
+.pip-project-card .diff .ln { display: inline-block; flex: none; width: 35px; padding-right: var(--sp-2); color: var(--faint); text-align: right; user-select: none; }
+.pip-project-card .diff .dc { display: inline-block; white-space: pre; }
+.pip-project-card .diff .add { color: var(--text-strong); background: var(--good-soft); box-shadow: inset 2px 0 0 var(--good); }
+.pip-project-card .diff .del { color: var(--text); background: var(--del-soft); box-shadow: inset 2px 0 0 var(--del); }
+.pip-project-card .diff .hh { color: var(--faint); opacity: .8; }
+.pip-project-card .diff .ctx { color: var(--faint); }
+.pip-project-card .diff pre.pip-project-wait { padding: var(--sp-2); color: var(--muted); font-family: var(--sans); white-space: pre-wrap; overflow-wrap: anywhere; }
+.pip-project-card .pip-project-more { color: var(--text-2); font-size: var(--t-sm); }
+/* After Apply or Undo: each file left alone, and why, on a line of its own. */
+.pip-project-card .pip-project-label { margin: 10px 0 0 31px; color: var(--text-2); font-size: var(--t-sm); }
+.pip-project-card .pip-project-label + .pip-project-held { margin-top: 6px; }
+.pip-project-card .pip-project-held li { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; min-width: 0; padding: 7px var(--sp-2); border: 1px solid var(--hair); border-radius: var(--r-md); }
+.pip-project-card .pip-project-held .f { font: var(--w-med) var(--t-sm)/1.3 var(--mono); }
+.pip-project-card .pip-project-why { color: var(--text-2); font-size: var(--t-sm); overflow-wrap: anywhere; }
+/* "Continue in Work" and "Give it a computer" are longer than a button's one width: the roomy width, never cut. */
+.dgc-card.pip-project-card .dgc-card-actions > .dgc-card-btn.pip-project-work { width: var(--btn-w-wide); }
+.pip-project-line { max-width: 560px; margin: 8px 0; color: var(--muted); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+/* Above the box: a Pip with no computer was given a project. */
+.pip-composer-shell > .pip-project-needs { margin: 0 0 8px; }
+@container (max-width: 380px) {
+  .pip-project-card .pip-project-files, .pip-project-card .pip-project-held, .pip-project-card .pip-project-label { margin-left: 0; }
+  /* Three answers don't share 270 px: the two short ones halve the first row, the long one takes a row of its own. */
+  .dgc-card.pip-project-card[data-state="pending"] .dgc-card-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dgc-card.pip-project-card[data-state="pending"] .dgc-card-actions > .dgc-card-btn { width: auto; max-width: none; }
+  .dgc-card.pip-project-card[data-state="pending"] .dgc-card-actions > .dgc-card-btn.pip-project-work { grid-column: 1 / -1; }
+  .dgc-card.pip-project-needs .dgc-card-actions > .dgc-card-btn.pip-project-work { flex: 0 0 auto; width: var(--btn-w-wide); max-width: 100%; }
+}
+@media (forced-colors: active) {
+  .pip-project-card .diff, .pip-project-card .pip-project-held li { border: 1px solid CanvasText; }
+  .pip-project-card .diff .add { color: CanvasText; background: Canvas; box-shadow: none; }
+  .pip-project-card .diff .del { color: GrayText; background: Canvas; box-shadow: none; }
+}
