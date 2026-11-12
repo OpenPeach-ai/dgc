@@ -34,6 +34,7 @@ import { pipsAttention, PipsAttentionState } from "./pipsAttention";
 import { settingsDocument } from "./settingsView";
 import { onPicturesSetting, pictureFoldsMessage, rememberPictureFold, setPicturesInReplies, picturesFolded } from "./pictureFolds";
 import { dockOf, dockSettings, setDockSetting } from "./dock";
+import { folderLabel, folderRows, foldersOffered, fullFolder, homeAsTilde, keepProjectFolder, projectFolder, type FolderRow } from "./projectFolder";
 import { openCodePreview } from "./codePreview";
 import { DEV_SAVED_KEY, DEV_WARNED_KEY, devLimitsTable, devLimitValues, devShown, type DevLimit } from "./devMode";
 import { homePages, homePagesAttr, homeShowAttr, noteHomePage, pipHomeDismissedAttr, rememberHomePagesDismissed, rememberHomeShow, rememberPipHomeDismissed } from "./pipHomeDismiss";
@@ -942,6 +943,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   // more, and a search over names, first messages and everything said.
   private sessionsQuery = "";
   private sessionsShown = 200;
+  // The Project Folder dropdown (0.52): the folders DGC last listed (undefined: this DGC offers none, and everything is
+  // as before), and where each of another folder's sessions belongs, by id, so one opens in a tab in its own folder.
+  private folderRowsShown: FolderRow[] | undefined;
+  private sessionsElsewhere = new Map<string, { project: string; name: string; exists: boolean }>();
 
   constructor(private readonly context: vscode.ExtensionContext, tab?: ChatTabInit) {
     // Before anything mutates them: this is what "a chat nobody has used yet" looks like. Copied,
@@ -1412,8 +1417,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private retitle(prompt = ""): void {
     if (!this.tab) { return; }
     const name = this.currentSessionName.trim();
-    if (name) { this.tabTitled = true; this.tab.title(name); return; }
-    if (prompt.trim() && !this.tabTitled) { this.tabTitled = true; this.tab.title(prompt); }
+    if (name) { this.tabTitled = true; this.tab.title(this.inTabFolder(name)); return; }
+    if (prompt.trim() && !this.tabTitled) { this.tabTitled = true; this.tab.title(this.inTabFolder(prompt)); }
+  }
+
+  /** A tab working in another folder says so: the folder's name, then the session's ("garden · Herb bed"). */
+  private inTabFolder(text: string): string {
+    const folder = this.tab?.cwd && this.slots.some((slot) => slot.cwd === this.tab?.cwd) ? folderLabel(this.tab.cwd) : "";
+    return folder && text.trim() ? `${folder} · ${text.trim()}` : folder || text;
   }
 
   /** A tab's session changed: its webview keeps the id for a reload, and the list follows. */
@@ -1437,17 +1448,28 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const request = ++this.sessionsRequest;
     let items: any[] = [];
     let error = "";
+    // The Project Folder dropdown: the folders with a session or a Project Pip, then the sessions of the one chosen
+    // (All projects: every folder's). A DGC that lists no folders is asked for this project's, as before.
+    let folders: FolderRow[] | undefined;
+    if (this.projectFoldersOffered()) {
+      try { folders = folderRows(await this.readProjectFolders()); } catch { folders = undefined; }
+      if (request !== this.sessionsRequest) { return; }
+    }
     try {
       const paging = this.lastReadyEvent?.capabilities?.session_paging === true;
-      const command: any = paging
+      const choice = folders ? this.folderChoice(folders) : "";
+      const command: any = folders
+        ? { type: "list_sessions", ...this.sessionsOf(choice), limit: this.sessionsShown + 1, ...(this.sessionsQuery ? { query: this.sessionsQuery } : {}) }
+        : paging
         ? { type: "list_sessions", limit: this.sessionsShown + 1, ...(this.sessionsQuery ? { query: this.sessionsQuery } : {}) }
         : { type: "list_sessions" };
       const response = await this.requestState(this.ensureBackend(), "sessions", command, "sessions", 30000);
       items = Array.isArray(response.items) ? response.items : [];
     } catch (err: any) {
-      error = err?.message || "DGC could not list this project's sessions.";
+      error = err?.message || (folders ? "DGC could not list your sessions." : "DGC could not list this project's sessions.");
     }
     if (request !== this.sessionsRequest) { return; }
+    this.folderRowsShown = folders;
     this.postSessionItems(items, error);
     // Which of them a backend is still running with no window: the list marks them, and the marks
     // follow the work while there is any (live_sessions -> liveSessionsArrived repaints the list).
@@ -1466,6 +1488,52 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return found;
   }
 
+  /** Whether this DGC offers the Project Folder dropdown (it lists every project's sessions, and the folders). */
+  private projectFoldersOffered(): boolean {
+    return foldersOffered(this.lastReadyEvent?.capabilities);
+  }
+
+  /** The folders with a Work session or a Project Pip (list_project_folders), asked through the side bar's Pips. */
+  private readProjectFolders(): Promise<any> {
+    return (this.tab?.host ?? this).ensurePipsBridge().projectFolders();
+  }
+
+  /** The folder this window has open, as the dropdown names a folder; nothing with no folder open. */
+  private windowFolder(): { window?: { folder: string; shown: string; name: string } } {
+    const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    return folder ? { window: { folder, shown: homeAsTilde(folder), name: basename(folder) || folder } } : {};
+  }
+
+  /** list_sessions' fields for every project's sessions, or one folder's. Only ever sent to a DGC that lists them
+   *  (capability session_scopes: projectFoldersOffered); an older one would refuse the whole command. */
+  private sessionsOf(folder: string): { scope: "all"; folder?: string } {
+    return { scope: "all", ...(folder ? { folder } : {}) };
+  }
+
+  /** The folder chosen, when DGC still lists it; else "" (All projects, the default). */
+  private folderChoice(rows: FolderRow[]): string {
+    const kept = projectFolder(this.context);
+    return kept && rows.some((row) => row.folder === kept) ? kept : "";
+  }
+
+  /** The dropdown's choice: All projects ("") or one of the folders DGC listed. Kept in the extension's own storage,
+   *  so every window and a restart agree; the lists that follow it are read again. */
+  private chooseProjectFolder(value: unknown): void {
+    if (!this.home || !this.projectFoldersOffered()) { return; }
+    const folder = value === "" ? "" : fullFolder(value);
+    if (value !== "" && !(folder && (this.folderRowsShown ?? []).some((row) => row.folder === folder))) { return; }
+    if (folder === projectFolder(this.context)) { return; }
+    keepProjectFolder(this.context, folder);
+    this.projectFolderChanged();
+  }
+
+  /** The choice changed (here, or in the Pips view): the Work sessions and Home follow it. */
+  projectFolderChanged(): void {
+    if (!this.home) { return; }
+    this.sessionsShown = 200;
+    void this.postSessions();
+  }
+
   private postSessionItems(items: any[], error = ""): void {
     this.lastSessionItems = items;
     this.lastSessionError = error;
@@ -1482,10 +1550,22 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const paging = this.lastReadyEvent?.capabilities?.session_paging === true;
     // One more than shown was asked for: its presence is what says there are more.
     const shown = paging ? this.sessionsShown : 500;
+    const folders = this.folderRowsShown, choice = folders ? this.folderChoice(folders) : "";
+    // Where each of another folder's sessions belongs: what opening one here goes by (never what the page says).
+    this.sessionsElsewhere.clear();
     this.post({ type: "sessions_list", error, searchable: paging, query: paging ? this.sessionsQuery : "", more: items.length > shown,
+      // The dropdown: what is chosen and the folders to choose from; one folder's path is named once, above the list.
+      // (This window's folder too, listed or not: New Session's dialog opens on it.)
+      ...(folders ? { folders: { choice, rows: folders.map(({ workspace_id, ...row }) => row), ...this.windowFolder() }, ...(choice ? { folder: homeAsTilde(choice), folderPath: choice } : {}) } : {}),
       items: items.slice(0, shown).map((item) => {
       const id = path.basename(String(item?.path || "")).replace(/\.json$/i, "");
+      // Its folder, with the home folder as ~ (the whole path is its tooltip). Another folder's opens in a tab that
+      // runs there; one whose folder is gone doesn't open.
+      const project = folders ? fullFolder(item?.project) : "", elsewhere = !!project && item?.here === false;
+      const projectName = project ? String(item?.project_name || basename(project) || project).slice(0, 200) : "";
+      if (elsewhere && /^[A-Za-z0-9_-]{1,128}$/.test(id)) { this.sessionsElsewhere.set(id, { project, name: projectName, exists: item?.folder_exists !== false }); }
       return { id, path: String(item?.path || ""), name: String(item?.name || ""), preview: String(item?.preview || ""),
+               ...(project ? { project: homeAsTilde(project), projectPath: project, projectName, ...(elsewhere ? { here: false, ...(item?.folder_exists === false ? { gone: true } : {}) } : {}) } : {}),
                when: String(item?.when || ""), count: Number(item?.count) || 0, open: open.has(id),
                ...(working.has(id) ? { running: true } : {}),          // its tab is mid-turn: the dock's running dot
                ...(windowless.has(id) && !open.has(id) ? { windowless: windowless.get(id) || "working" } : {}),
@@ -1498,7 +1578,71 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   private openSessionInEditor(id: string, title: string): void {
     if (!this.places || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) { return; }
+    // Another folder's session: in a tab here, running in its own folder.
+    const elsewhere = this.sessionsElsewhere.get(id);
+    if (elsewhere && !this.places.openSessions().has(id)) { void this.openSessionElsewhere(id, title, elsewhere); return; }
     this.places.open(id, title);
+  }
+
+  /** A session from another folder opens in a tab here and keeps running in its own folder (its files, permissions,
+   *  checkpoints and git are all there), with the folder named on the tab. It never moves into this window's folder.
+   *  A folder outside the window's is asked about first, as any chat in another folder is; one that is gone opens
+   *  nothing. */
+  private async openSessionElsewhere(id: string, title: string, from: { project: string; name: string; exists: boolean }): Promise<boolean> {
+    const places = this.tab?.places ?? this.places;
+    if (!places || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) { return false; }
+    const folder = from.project;
+    let there = false;
+    try { there = from.exists && fs.statSync(folder).isDirectory(); } catch { there = false; }
+    if (!there) {
+      void vscode.window.showInformationMessage(`Folder not found: ${folder}. This session can open once its folder is back.`);
+      return false;
+    }
+    if (!(await this.mayOpenChatIn(folder))) { return false; }
+    this.rememberWorkFolder(folder);
+    places.open(id, [folderLabel(folder), title.trim()].filter(Boolean).join(" · "), { cwd: folder });
+    return true;
+  }
+
+  /** Whether two paths are one folder. */
+  private sameFolder(a: string, b: string): boolean {
+    const real = (target: string) => { try { return fs.realpathSync(target); } catch { return resolve(target); } };
+    return real(a) === real(b);
+  }
+
+  /** New Session in the folder its dialog chose: this window's opens as it always did; another's in a tab that runs
+   *  there, the folder named on it (asked about first when it is outside the window's, as any chat in another folder). */
+  private async newSessionIn(value: unknown): Promise<boolean> {
+    const places = this.tab?.places ?? this.places, folder = fullFolder(value);
+    if (!places || !folder) { return false; }
+    if (this.sameFolder(folder, this.cwd())) { places.open(""); return true; }
+    let there = false;
+    try { there = fs.statSync(folder).isDirectory(); } catch { there = false; }
+    if (!there) {
+      void vscode.window.showInformationMessage(`Folder not found: ${folder}. Choose another folder for the new session.`);
+      return false;
+    }
+    if (!(await this.mayOpenChatIn(folder))) { return false; }
+    this.rememberWorkFolder(folder);
+    places.open("", folderLabel(folder), { cwd: folder }).namedByFirstPrompt();
+    return true;
+  }
+
+  /** A new session's tab in another folder (New Session's dialog): its first prompt names it, after the folder's name.
+   *  (Continue in Work's tab keeps the folder's name alone: it starts from a brief, not from your words.) */
+  namedByFirstPrompt(): void {
+    if (this.tab && !this.tab.session) { this.tabTitled = false; }
+  }
+
+  /** New Session's "Add a folder…": the editor's own folder picker (so only a folder that exists), then the session
+   *  opens in the folder picked. */
+  private async newSessionInPickedFolder(): Promise<void> {
+    const picked = await vscode.window.showOpenDialog({
+      canSelectFolders: true, canSelectFiles: false, canSelectMany: false,
+      openLabel: "Start session here", title: "Add a folder: start a Work session in it",
+    });
+    const folder = picked?.[0]?.fsPath;
+    if (folder) { await this.newSessionIn(folder); }
   }
 
   /** A click on something pinned to the dock: a session or a chat in its tab, an artifact, a file or a widget where
@@ -1520,6 +1664,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   private async deleteSessionFromHome(id: string, title: string): Promise<void> {
     if (!this.places || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) { return; }
+    // Delete is for this window's folder's sessions: another folder's is deleted from its own window.
+    if (this.sessionsElsewhere.has(id)) { return; }
     if (this.places.openSessions().has(id)) {
       void vscode.window.showInformationMessage("That session is open in a tab. Close its tab first, then delete it.");
       return;
@@ -1544,7 +1690,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // A deleted session leaves the dock, and its colour goes with it.
       else { void dockOf(this.context).forget("work", id); }
       this.sessionsRequest++;
-      this.postSessionItems(Array.isArray(response.items) ? response.items : []);
+      // (DGC answers with this project's sessions: with the dropdown, the list it shows is asked for again.)
+      if (this.folderRowsShown) { void this.postSessions(); }
+      else { this.postSessionItems(Array.isArray(response.items) ? response.items : []); }
     } catch (err: any) {
       void vscode.window.showErrorMessage(err?.message || "DGC could not delete that session.");
     }
@@ -2327,6 +2475,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (this.settingsEditor) this.refreshEditorSettings();   // new backend, same page the user is on
     this.pipsEditor?.ready(this.lastReadyEvent?.capabilities, this.backend);
     this.pipsTab?.ready(this.lastReadyEvent?.capabilities, this.backend);
+    // A list drawn before DGC said what it offers has no Project Folder dropdown yet: it is read again with it.
+    if (this.home && this.webviewReady && this.lastSessionItems && this.projectFoldersOffered() !== !!this.folderRowsShown) { void this.postSessions(); }
     this.startPipsAttention();
     // A reattached chat's turn did not stop: it is still running, or it finished with no window.
     if (!reattached) { void this.resumeInterruptedWork(be); }
@@ -4500,7 +4650,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           this.rememberSession();
           this.postChatSlots();                      // the chip carries this chat's name
           // /new or /clear in a tab: it is a new session's tab now, named by its next prompt.
-          if (this.tab && (ev.kind === "new" || ev.kind === "cleared")) { this.tabTitled = false; this.tab.title(""); }
+          // (A tab in another folder keeps that folder's name before its next prompt's words.)
+          if (this.tab && (ev.kind === "new" || ev.kind === "cleared")) { this.tabTitled = false; this.tab.title(this.inTabFolder("")); }
           this.retitle();
           this.tabSessionChanged();
         }
@@ -5664,7 +5815,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         }
         return;
       case "newSessionInEditor":
+        // New Session's dialog names the folder (the Project Folder dropdown); without one, this window's, as always.
+        if (this.home && typeof msg.folder === "string" && msg.folder) { await this.newSessionIn(msg.folder); return; }
         (this.tab?.places ?? this.places)?.open("");
+        return;
+      case "newSessionAddFolder":
+        if (this.home) { await this.newSessionInPickedFolder(); }
+        return;
+      case "projectFolderChoose":
+        this.chooseProjectFolder(msg.folder);
         return;
       case "deleteSession":
         if (this.home) { await this.deleteSessionFromHome(String(msg.id ?? ""), String(msg.title ?? "")); }
@@ -7473,19 +7632,37 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         return [];
       }
     };
-    let items = await listSessions({ type: "list_sessions" });
-    if (!items.length) { vscode.window.showInformationMessage("No past DGC sessions in this project."); return; }
+    // The Project Folder choice (the side bar's dropdown) is this picker's too: every project's sessions, each with
+    // its folder, or one folder's. A DGC that lists no folders shows this project's, as before.
+    let folders: FolderRow[] | undefined;
+    if (this.projectFoldersOffered()) { try { folders = folderRows(await this.readProjectFolders()); } catch { folders = undefined; } }
+    const choice = folders ? this.folderChoice(folders) : "";
+    const listing = folders ? { type: "list_sessions", ...this.sessionsOf(choice), limit: 500 } : { type: "list_sessions" };
+    let items = await listSessions(listing);
+    if (!items.length) {
+      vscode.window.showInformationMessage(!folders ? "No past DGC sessions in this project." : choice ? `No past DGC sessions in ${folderLabel(choice)}.` : "No past DGC sessions in any project.");
+      return;
+    }
 
     const trash = new vscode.ThemeIcon("trash");
     const qp = vscode.window.createQuickPick<any>();
-    qp.placeholder = "Resume a session — trash icon deletes";
+    qp.placeholder = !folders ? "Resume a session — trash icon deletes"
+      : choice ? `Resume a session in ${folderLabel(choice)}` : "Resume a session from any project: it opens here and runs in its own folder";
+    if (folders) { qp.matchOnDetail = true; }
     const render = () => {
-      qp.items = items.map((s) => ({
-        label: s.name ? `${s.name} · ${s.preview}` : (s.preview || s.path),
-        description: `${s.when} · ${s.count} msgs`,
-        path: s.path,
-        buttons: [{ iconPath: trash, tooltip: "Delete this session" }],
-      }));
+      qp.items = items.map((s) => {
+        const project = folders ? fullFolder(s.project) : "", gone = !!project && s.folder_exists === false;
+        return {
+          label: s.name ? `${s.name} · ${s.preview}` : (s.preview || s.path),
+          description: `${s.when} · ${s.count} msgs`,
+          path: s.path,
+          // On All projects each says its folder; one folder's are all in the folder the picker names.
+          ...(project ? { project, projectName: String(s.project_name || ""), gone } : {}),
+          ...(project && !choice ? { detail: `${gone ? "Folder not found · " : ""}${homeAsTilde(project)}` } : gone ? { detail: "Folder not found" } : {}),
+          // Delete is for the sessions of the folder this chat works in.
+          ...(!project || s.here !== false ? { buttons: [{ iconPath: trash, tooltip: "Delete this session" }] } : {}),
+        };
+      });
     };
     render();
     return new Promise<void>((resolve) => {
@@ -7495,14 +7672,20 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         const owned = await this.ownedPips(sessionId);
         if (owned.length && !await this.settleSessionPipsNatively(sessionId, String((e.item as any).label || ""), owned)) { return; }
         items = await listSessions({ type: "delete_session", path: (e.item as any).path });
+        if (folders) { items = await listSessions(listing); }
         if (!items.length) { qp.hide(); resolve(); return; }
         render();
       });
       qp.onDidAccept(() => {
         const pick = qp.selectedItems[0] as any;
+        const id = path.basename(String(pick?.path || "")).replace(/\.json$/i, "");
+        // Another folder's session: a tab here that runs in its own folder. One whose folder is gone doesn't open.
+        if (pick?.project && !this.sameFolder(String(pick.project), this.cwd())) {
+          void this.openSessionElsewhere(id, String(pick.label || ""), { project: String(pick.project), name: String(pick.projectName || ""), exists: !pick.gone });
+        }
         // In a tab, a session opens in a tab of its own: one session, one tab.
-        if (pick && this.tab) {
-          this.tab.places.open(path.basename(String(pick.path || "")).replace(/\.json$/i, ""), String(pick.label || ""));
+        else if (pick && this.tab) {
+          this.tab.places.open(id, String(pick.label || ""));
         } else if (pick) { this.openPastSession(be, String(pick.path || "")); }
         qp.hide();
       });
@@ -10183,6 +10366,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const dockJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "dock.js"));
     // Home, the side bar's first tab: every card that needs you or is new, under a Show filter (media/shared/hub.js, window.DgcHub).
     const hubJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "hub.js"));
+    // The Project Folder dropdown over the Work sessions and in New Session's dialog (media/shared/folderpick.js, window.DgcFolderPick).
+    const folderPickJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "folderpick.js"));
     const queueJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "messagequeue.js"));
     const genuiCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "genui.css"));
     const js = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.js"));
@@ -10508,7 +10693,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${composerJs}"></script><script nonce="${nonce}" src="${trayJs}"></script>
 <script nonce="${nonce}" src="${cardJs}"></script>
 <script nonce="${nonce}" src="${sheetJs}"></script>
-<script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script>
+<script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script><script nonce="${nonce}" src="${folderPickJs}"></script>
 <script nonce="${nonce}" src="${mcpAppsJs}"></script>
 <script nonce="${nonce}" src="${markdown}"></script>
 <script nonce="${nonce}" src="${breakdownScript}"></script>

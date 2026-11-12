@@ -9,6 +9,7 @@ import { displayMentions, workspaceFiles } from './mentionsHost';
 import { APP_ID, appLogoData } from './pluginLogos';
 import { markIcon } from './dock';
 import marks from '../media/shared/marks.js';
+import { FOLDERS_API } from './projectFolder';
 import { PROJECTS_API, PROJECT_COMMANDS, PROJECT_WORK_COMMAND, patchFileName, pipProjectsRefusal, projectChange, projectWorkBrief, projectWorkRequest } from './pipProjects.js';
 
 /** What a Pip's page uses of the artifacts (artifacts.ts): the person's dashboards, and opening one. */
@@ -696,8 +697,14 @@ export class PipsEditor implements vscode.Disposable {
       }
     });
   }
+  /** The folders with a Work session or a Project Pip (list_project_folders, Pips API 93), for the Project Folder
+   *  dropdown. An older DGC is never asked. */
+  projectFolders(): Promise<any> {
+    if (this.apiVersion < FOLDERS_API) return Promise.reject(new Error('Update DGC to choose a project folder.'));
+    return this.hostAsk('list_project_folders');
+  }
   /** One read the host makes for Continue in Work, answered in DGC's own words when it is refused. */
-  private hostAsk(type: 'list_workspaces' | 'get_pip_project_change' | 'get_pip' | 'list_session_pips' | 'set_pip_owner' | 'archive_pip' | 'delete_archived_pip', fields: Record<string, unknown> = {}): Promise<any> {
+  private hostAsk(type: 'list_project_folders' | 'add_project_folder' | 'list_workspaces' | 'get_pip_project_change' | 'get_pip' | 'list_session_pips' | 'set_pip_owner' | 'archive_pip' | 'delete_archived_pip', fields: Record<string, unknown> = {}): Promise<any> {
     return new Promise((resolve, reject) => {
       if (!this.state.connected || !this.state.supported || !this.state.enabled) { reject(new Error('Pips aren’t available. Reconnect, then try again.')); return; }
       const requestId = 'pips-host-' + randomBytes(12).toString('hex');

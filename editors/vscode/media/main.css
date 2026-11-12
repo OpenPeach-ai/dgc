@@ -14,6 +14,7 @@
 @import url("./shared/dock.css");
 @import url("./shared/tabs.css");
 @import url("./shared/hub.css");
+@import url("./shared/folderpick.css");
 @import url("./pips/wordmark.css");
 /* DGC panel — Codex's quiet editor hierarchy with a restrained DGC accent. */
 * { box-sizing: border-box; }
@@ -227,6 +228,37 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 #sessions-host .sessions-all[hidden] { display:none; }
 #sessions-host .sessions-all:hover, #sessions-host .sessions-all[aria-expanded="true"] { color:var(--text-strong); background:var(--wash); }
 #sessions-host .home-work { position:relative; }
+/* The Project Folder dropdown over the Work sessions (media/shared/folderpick.css), then one folder's path, once, in the
+   quiet tone. On All projects each session says its folder under its name (.dgc-path: cut in the middle), in the second
+   line's tone; one whose folder is gone is dimmed and says so. */
+#sessions-host .sessions-folderbar { display:flex; flex-direction:column; align-items:flex-start; gap:var(--sp-1); min-width:0; }
+#sessions-host .sessions-folderbar[hidden], #sessions-host .sessions-all-folder[hidden] { display:none; }
+#sessions-host :is(.sessions-folder-slot, .sessions-all-folder) { display:flex; min-width:0; max-width:100%; }
+#sessions-host .sessions-all-folder { flex:none; padding:2px var(--sp-1); }
+#sessions-host .sessions-folder { display:flex; align-items:center; gap:6px; min-width:0; max-width:100%; margin:0; color:var(--muted); font:var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+#sessions-host .sessions-folder[hidden] { display:none; }
+#sessions-host .sessions-folder .codicon { flex:none; font-size:12px; }
+#sessions-host .sessions-folder .dgc-path { flex:0 1 auto; }
+#sessions-host .session-path { color:var(--text-2); font:var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+#sessions-host .session-row:is(:hover, :focus-within) .session-path, #sessions-host .sessions-popover .session-path { color:color-mix(in srgb, var(--text) 80%, transparent); }
+#sessions-host .session-path-note { flex:none; }
+#sessions-host .session-path-note::after { content:"·"; margin:0 5px; }
+#sessions-host .session-gone { cursor:default; }
+#sessions-host .session-gone:hover, #sessions-host .sessions-popover .session-gone:hover { background:transparent; }
+#sessions-host .session-gone .session-name { color:var(--muted); }
+#sessions-host .session-gone .session-blob { opacity:.4; filter:grayscale(1); }
+/* New session's dialog: its title, one line of what it does, the dropdown and the folder's path, and the two buttons.
+   The shared dialog lift and the shared button; no colour of its own. */
+.new-session-dialog { box-sizing:border-box; width:min(380px, calc(100vw - 28px)); max-height:calc(100vh - 28px); padding:0; overflow:visible;
+  background:var(--vscode-editorWidget-background, var(--surface)); color:var(--text); font:var(--t-base)/1.5 var(--sans); }
+.new-session-body { display:flex; flex-direction:column; align-items:flex-start; gap:var(--sp-2); min-width:0; padding:var(--sp-5) var(--sp-5) var(--sp-4); }
+.new-session-body h2 { margin:0; color:var(--text-strong); font:var(--w-semi) var(--t-base)/1.35 var(--sans); }
+.new-session-intro { margin:0 0 var(--sp-1); color:var(--text-2); overflow-wrap:anywhere; }
+.new-session-field { display:flex; min-width:0; max-width:100%; }
+.new-session-path { display:flex; min-width:0; max-width:100%; margin:0; color:var(--text-2); font:var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+.new-session-path[hidden] { display:none; }
+.new-session-buttons { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:var(--sp-2); padding:0 var(--sp-5) var(--sp-5); }
+@media (max-width: 480px) { .new-session-body { padding:var(--sp-4) var(--sp-4) var(--sp-3); } .new-session-buttons { padding:0 var(--sp-4) var(--sp-4); } }
 #sessions-host .sessions-popover { position:absolute; z-index:5; left:calc(-1 * var(--home-bleed)); right:calc(-1 * var(--home-bleed)); box-sizing:border-box; display:flex; flex-direction:column; gap:var(--sp-1);
   transform-origin:50% 0; animation:home-popover-open var(--dur-menu) var(--ease-out); }
 @keyframes home-popover-open { from { opacity:0; transform:translateY(4px) scale(.98); } }

@@ -1,0 +1,47 @@
+/* The Project Folder dropdown (media/shared/folderpick.js): a quiet button that names the folder chosen, and the shared
+   menu it opens (media/shared/menu.css) with a folder a row: its name over its path, "This window" or "Not found" at the
+   row's end. Neutral greys, never the accent (the chosen row's check is the menu's own). Tokens from
+   media/shared/tokens.css. The same over the Work sessions, in New Session's dialog and in the Pips view. */
+.dgc-folder {
+  display: inline-flex; align-items: center; gap: 6px; box-sizing: border-box; min-width: 0; max-width: 100%; height: 26px; margin: 0; padding: 0 9px 0 11px;
+  border: 1px solid var(--hair-strong); border-radius: var(--r-full); background: transparent; color: var(--text-2);
+  font: var(--w-reg) var(--t-sm)/1 var(--sans); white-space: nowrap; cursor: pointer;
+  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out);
+}
+.dgc-folder[hidden] { display: none; }
+.dgc-folder:hover:not(:disabled), .dgc-folder[aria-expanded="true"] { background: var(--wash); color: var(--text); }
+.dgc-folder:disabled { cursor: default; opacity: .55; }
+.dgc-folder:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.dgc-folder-k { flex: none; }
+.dgc-folder-v { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-strong); font-weight: var(--w-med); }
+.dgc-folder-chevron { flex: none; margin-left: -1px; }
+@media (prefers-reduced-motion: reduce) { .dgc-folder { transition: none; } }
+@media (forced-colors: active) { .dgc-folder { border-color: CanvasText; } }
+
+/* Its menu floats over the page, placed by the script under (or over) its button. */
+.dgc-menu.dgc-folder-menu {
+  position: fixed; z-index: 60; box-sizing: border-box; min-width: 200px; max-width: min(360px, calc(100vw - 12px)); max-height: calc(100vh - 12px); overflow-y: auto; scrollbar-width: thin;
+  transform-origin: var(--pop-x, 24px) var(--pop-y, 0%);
+}
+.dgc-folder-menu .dgc-menu-row { gap: 8px; }
+.dgc-folder-menu .dgc-menu-row.dgc-menu-row-sub { align-items: center; padding-block: 5px; }
+.dgc-folder-menu .dgc-menu-words { gap: 1px; }
+/* (A row's second line and its mark are words to read on the raised grey and on the chosen row's wash: the text colour
+   at 80%, which clears 4.5:1 on both; the quiet grey is 4.0:1 on the wash.) */
+.dgc-folder-menu .dgc-menu-sub { display: block; min-width: 0; color: color-mix(in srgb, var(--text) 80%, transparent); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); white-space: nowrap; }
+/* "This window", "Not found": quiet words at the row's end, never cut (the name and the path give way). */
+.dgc-folder-note { flex: none; margin-left: auto; color: color-mix(in srgb, var(--text) 80%, transparent); font: var(--w-reg) var(--t-xs)/1.2 var(--sans); white-space: nowrap; }
+.dgc-folder-menu .dgc-menu-check { order: -1; margin: 0; }
+.dgc-folder-menu .dgc-folder-add { padding-left: 32px; }
+.dgc-folder-menu .dgc-menu-row:disabled { opacity: 1; }
+.dgc-folder-menu .dgc-menu-row:disabled :is(.dgc-menu-label, .dgc-menu-sub) { opacity: .55; }
+
+/* A folder's path on one line, cut in the middle when it doesn't fit: the part before the folder's own name gives way
+   (its end becomes an ellipsis), so the name stays in sight. The name never shrinks while that part can (a shared
+   shrink, however weighted, takes a fraction of a pixel off the name, and any overflow at all draws an ellipsis); only
+   a name wider than the line is cut itself. */
+.dgc-path { display: flex; min-width: 0; max-width: 100%; overflow: hidden; white-space: nowrap; }
+.dgc-path-head { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dgc-path-head.dgc-path-long { min-width: 1.4em; }
+.dgc-path-tail { flex: 0 0 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dgc-path-head.dgc-path-long + .dgc-path-tail { max-width: calc(100% - 1.4em); }

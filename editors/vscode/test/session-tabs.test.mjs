@@ -5,7 +5,7 @@ import { after, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -19,7 +19,7 @@ class Emitter {
   dispose() { this.listeners = []; }
 }
 
-const world = { panels: [], serializers: [], warnings: [], infos: [], answer: undefined, statusBar: null, workspaceState: new Map() };
+const world = { panels: [], serializers: [], warnings: [], infos: [], answer: undefined, statusBar: null, workspaceState: new Map(), globalState: new Map(), picked: undefined, pickers: [] };
 function fakePanel(viewType, title) {
   const viewState = new Emitter(), disposed = new Emitter();
   const panel = {
@@ -59,6 +59,8 @@ globalThis.__DGC_TEST_VSCODE = {
     showWarningMessage: async (message) => { world.warnings.push(String(message)); return world.answer; },
     showErrorMessage: async () => undefined,
     showInformationMessage: async (message) => { world.infos.push(String(message)); },
+    // VS Code's own folder picker ("Add a folder…"): what was asked, and the folder the test says was picked.
+    showOpenDialog: async (options) => { world.pickers.push(options); return world.picked ? [{ fsPath: world.picked }] : undefined; },
   },
   workspace: {
     isTrusted: true, workspaceFile: undefined, workspaceFolders: [{ uri: { fsPath: scratch, toString: () => `file://${scratch}` } }],
@@ -104,7 +106,9 @@ const context = () => ({
   extensionUri: { fsPath: root, toString: () => root },
   secrets: { async get() {}, async store() {}, async delete() {} },
   subscriptions: [],
-  globalState: { get() {}, async update() {} },
+  globalState: { get: (key) => world.globalState.get(key), async update(key, value) {
+    if (value === undefined) world.globalState.delete(key); else world.globalState.set(key, value);
+  } },
   workspaceState: { get: (key) => world.workspaceState.get(key), async update(key, value) {
     if (value === undefined) world.workspaceState.delete(key); else world.workspaceState.set(key, value);
   } },
@@ -134,7 +138,7 @@ const settle = () => new Promise((done) => setTimeout(done, 0));
 
 beforeEach(() => {
   world.panels.length = 0; world.serializers.length = 0; world.warnings.length = 0; world.infos.length = 0;
-  world.answer = undefined; world.workspaceState.clear();
+  world.answer = undefined; world.workspaceState.clear(); world.globalState.clear(); world.picked = undefined; world.pickers.length = 0;
 });
 
 test("a session opens in a tab of its own, and opening it again shows that tab", () => {
@@ -594,4 +598,239 @@ test("Home's Allow once and Deny reach that session's own process, once, and nev
   first.onEvent({ type: "turn_start", turn_id: "t3", kind: "prompt", prompt: "again" }); first.onEvent(ask("perm-7"));
   await second.onMessage({ type: "homeSessionAnswer", session: "20261006-101500-a1", id: "perm-7", decision: "once" });
   assert.equal(answersOf(first).length, 1);
+});
+
+// ---- The Project Folder dropdown (0.52, 12 Nov): one shared choice, "All projects" by default ----------------------------
+// Kept in the extension's own storage (every window, the side bar and tabs agree; a restart keeps it). All projects asks
+// list_sessions {scope: "all"}; a folder asks {scope: "all", folder}. Only where DGC lists folders (session_scopes and
+// Pips API 93). Another folder's session opens in a tab here whose backend runs in that folder.
+const HOME = homedir();
+const GARDEN = join(HOME, "code", "garden"), NOTES = join(HOME, "code", "notes");
+const HERE_WS = "ws_" + "d".repeat(32);
+const HERE = [{ path: "/p/s1.json", when: "2026-11-10 10:15", preview: "Fix the checkout total", count: 4, name: "Checkout" }];
+const everywhereRows = (garden = GARDEN, notes = NOTES) => [
+  { path: "/g/g1.json", when: "2026-11-12 09:00", preview: "Water the tomatoes on Fridays", count: 6, name: "", project: garden, project_name: "garden", here: false, folder_exists: true },
+  { path: "/p/s1.json", when: "2026-11-10 10:15", preview: "Fix the checkout total", count: 4, name: "Checkout", project: scratch, project_name: "shop", here: true, folder_exists: true },
+  { path: "/n/n1.json", when: "2026-11-01 08:00", preview: "Tidy the reading list", count: 2, name: "", project: notes, project_name: "notes", here: false, folder_exists: false },
+];
+const folderRows = (garden = GARDEN, notes = NOTES) => [
+  { folder: garden, name: "garden", here: false, exists: true, sessions: 1, pips: 0, workspace_id: null, updated_at: "2026-11-12T03:30:00.000Z" },
+  { folder: scratch, name: "shop", here: true, exists: true, sessions: 1, pips: 2, workspace_id: HERE_WS, updated_at: "2026-11-10T04:45:00.000Z" },
+  { folder: notes, name: "notes", here: false, exists: false, sessions: 1, pips: 0, workspace_id: null, updated_at: "2026-11-01T02:30:00.000Z" },
+];
+const FOLDER_CAPS = { session_paging: true, session_scopes: true, pips_supported: true, pips_enabled: true, pips_api_version: 93 };
+/** A provider whose DGC lists every project's sessions and the folders that have any. */
+function withFolders(provider, { rows = everywhereRows(), folders = folderRows(), capabilities = FOLDER_CAPS, backend = provider.backend } = {}) {
+  const plain = backend.request.bind(backend);
+  backend.request = (command) => (command.type === "list_sessions" && command.scope === "all"
+    ? (backend.requested.push(command), Promise.resolve({ type: "sessions", items: command.folder ? rows.filter((r) => r.project === command.folder) : rows })) : plain(command));
+  provider.lastReadyEvent = { type: "ready", capabilities };
+  provider.folderReads = 0;
+  provider.readProjectFolders = async () => { provider.folderReads++; return { folders }; };
+  return backend;
+}
+/** A window whose DGC offers the Project Folder dropdown (or, with other `capabilities`, one that doesn't). */
+function folderWindow(options = {}) {
+  const x = windowWith(HERE);
+  const backend = withFolders(x.sidebar, options);
+  const lists = () => backend.requested.filter((c) => c.type === "list_sessions").map(({ type, request_id, ...rest }) => rest);
+  const listed = () => x.sidebar.posted.filter((m) => m.type === "sessions_list").at(-1);
+  return { ...x, backend, lists, listed };
+}
+const settled = async () => { for (let i = 0; i < 8; i++) await settle(); };
+const CHOICE_KEY = "dgc.projectFolder.v1";
+
+test("Project Folder: All projects by default, every project's sessions asked for, each with its folder (the home folder as ~)", async () => {
+  const { sidebar, lists, listed } = folderWindow();
+  await sidebar.onMessage({ type: "sessionsList" }); await settled();
+  assert.deepEqual(lists(), [{ scope: "all", limit: 201 }], "All projects: every project's sessions, in one request");
+  const all = listed();
+  assert.equal(all.folders?.choice, "", "All projects is the default");
+  assert.deepEqual(all.folders.rows.map((r) => [r.folder, r.shown, r.name, r.here, r.exists]), [
+    [GARDEN, "~/code/garden", "garden", false, true], [scratch, scratch, "shop", true, true], [NOTES, "~/code/notes", "notes", false, false]],
+    "the folders that have a session or a Project Pip, newest first, this window's marked, a gone one marked");
+  assert.deepEqual(all.items.map((i) => [i.id, i.here !== false, i.project, i.projectPath, i.projectName, i.gone === true]), [
+    ["g1", false, "~/code/garden", GARDEN, "garden", false],
+    ["s1", true, scratch, scratch, "shop", false],
+    ["n1", false, "~/code/notes", NOTES, "notes", true]], "each session says its folder; one whose folder is gone is said");
+  assert.equal("folder" in all, false, "no one folder to name above the list");
+});
+
+test("Project Folder: a folder chosen is asked for by its path, kept in the extension's storage, and a new window opens on it", async () => {
+  const { ctx, sidebar, backend, lists, listed } = folderWindow();
+  await sidebar.onMessage({ type: "sessionsList" }); await settled();
+  backend.requested.length = 0;
+  await sidebar.onMessage({ type: "projectFolderChoose", folder: GARDEN }); await settled();
+  assert.equal(world.globalState.get(CHOICE_KEY), GARDEN, "kept in the extension's own storage: every window and a restart agree");
+  assert.deepEqual(lists(), [{ scope: "all", folder: GARDEN, limit: 201 }], "one folder: that folder's sessions");
+  assert.equal(listed().folders.choice, GARDEN);
+  assert.deepEqual([listed().folder, listed().folderPath], ["~/code/garden", GARDEN], "its path, once, for the top of the list");
+  assert.deepEqual(listed().items.map((i) => i.id), ["g1"]);
+  // The search and Load more follow the choice.
+  backend.requested.length = 0;
+  await sidebar.onMessage({ type: "sessionsSearch", query: "tomatoes" }); await settled();
+  assert.deepEqual(lists(), [{ scope: "all", folder: GARDEN, limit: 201, query: "tomatoes" }]);
+  await sidebar.onMessage({ type: "sessionsSearch", query: "" }); await settled();
+  backend.requested.length = 0;
+  await sidebar.onMessage({ type: "sessionsMore" }); await settled();
+  assert.deepEqual(lists().at(-1), { scope: "all", folder: GARDEN, limit: 401 });
+  // Reopened (a new window, a restart): the same choice, from storage.
+  const again = new DgcViewProvider(ctx), tabs = new SessionTabs(ctx, again, (init) => quiet(new DgcViewProvider(ctx, init)));
+  again.useSessionsHome(tabs); quiet(again, recordingBackend(HERE)); again.webviewReady = true;
+  const second = withFolders(again);
+  await again.onMessage({ type: "sessionsList" }); await settled();
+  assert.deepEqual(second.requested.filter((c) => c.type === "list_sessions").map(({ type, request_id, ...rest }) => rest), [{ scope: "all", folder: GARDEN, limit: 201 }]);
+  // Back to All projects; a folder DGC never listed is not a choice.
+  await sidebar.onMessage({ type: "projectFolderChoose", folder: "" }); await settled();
+  assert.equal(world.globalState.get(CHOICE_KEY) || "", "");
+  assert.deepEqual(lists().at(-1), { scope: "all", limit: 201 });
+  await sidebar.onMessage({ type: "projectFolderChoose", folder: "/somewhere/never/listed" }); await settled();
+  assert.equal(world.globalState.get(CHOICE_KEY) || "", "", "only All projects or a folder DGC listed");
+});
+
+test("Project Folder: an older DGC has no dropdown, and is asked for this project's sessions as before", async () => {
+  for (const capabilities of [{ session_paging: true }, { ...FOLDER_CAPS, pips_api_version: 92 }, { ...FOLDER_CAPS, session_scopes: false }]) {
+    world.globalState.set(CHOICE_KEY, GARDEN);          // a choice kept by a newer DGC changes nothing here
+    const { sidebar, lists, listed } = folderWindow({ capabilities });
+    await sidebar.onMessage({ type: "projectFolderChoose", folder: "" });
+    await sidebar.onMessage({ type: "sessionsList" }); await settled();
+    assert.deepEqual(lists(), [{ limit: 201 }], `no scope and no folder reach a DGC that doesn't know them (${JSON.stringify(capabilities)})`);
+    assert.equal("folders" in listed(), false, "no dropdown");
+    assert.equal(sidebar.folderReads, 0, "and the folders are never asked for");
+    assert.equal(world.globalState.get(CHOICE_KEY), GARDEN, "what was kept stays");
+    assert.deepEqual(listed().items.map((i) => ["project" in i, "here" in i]), [[false, false]]);
+  }
+});
+
+test("Project Folder: a session from another folder opens in a tab here whose backend runs in its own folder, the folder named on the tab", async () => {
+  const garden = join(scratch, "garden");
+  mkdirSync(garden, { recursive: true });
+  const { sidebar, tabs, made, backend } = folderWindow({ rows: everywhereRows(garden), folders: folderRows(garden) });
+  await sidebar.onMessage({ type: "sessionsList" }); await settled();
+  await sidebar.onMessage({ type: "openSessionInEditor", id: "g1", title: "Water the tomatoes on Fridays" }); await settled();
+  assert.deepEqual(world.warnings, [], "a folder in the window's: nothing to ask");
+  assert.equal(world.panels.length, 1);
+  assert.equal(world.panels[0].title, "garden · Water the tomatoes on Fridays", "the tab says the folder, then the session");
+  const [tab] = made;
+  assert.equal(tab.activeSlot().cwd, garden, "its backend runs in the session's own folder, never the window's");
+  assert.equal(tab.sessionId(), "g1", "and resumes that session");
+  const html = world.panels[0].webview.html, quoted = garden.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  assert.match(html, new RegExp(`data-tab-session="g1" data-tab-cwd="${quoted}"`), "both kept in the tab's state, so a reload brings it back there");
+  assert.equal(tabs.openSessions().has("g1"), true);
+  // Its name, when it has one, follows the folder's; /new keeps the folder on the tab.
+  tab.onEvent({ type: "session", session_id: "g1", kind: "resumed", name: "Friday watering" });
+  assert.equal(world.panels[0].title, "garden · Friday watering");
+  tab.onEvent({ type: "session", session_id: "g9", kind: "new", name: "" });
+  assert.equal(world.panels[0].title, "garden");
+  tab.onEvent({ type: "turn_start", turn_id: "t1", kind: "prompt", prompt: "Plan the herb bed" });
+  assert.equal(world.panels[0].title, "garden · Plan the herb bed");
+  // This window's own opens as it always did, in the window's folder.
+  await sidebar.onMessage({ type: "sessionsList" }); await settled();
+  await sidebar.onMessage({ type: "openSessionInEditor", id: "s1", title: "Checkout" }); await settled();
+  assert.equal(world.panels.length, 2);
+  assert.equal(world.panels[1].title, "Checkout");
+  assert.equal(made[1].activeSlot().cwd, undefined);
+  // Delete is only for this window's folder's sessions: another folder's deletes nothing and asks nothing.
+  await sidebar.onMessage({ type: "deleteSession", id: "n1", title: "Tidy the reading list" });
+  assert.equal(backend.requested.some((c) => c.type === "delete_session"), false);
+  assert.deepEqual(world.warnings, []);
+});
+
+test("Project Folder: another folder outside the window's is asked about first; said no, nothing opens", async () => {
+  const outside = mkdtempSync(join(tmpdir(), "dgc-garden-elsewhere-"));
+  try {
+    const { sidebar, made } = folderWindow({ rows: everywhereRows(outside), folders: folderRows(outside) });
+    await sidebar.onMessage({ type: "sessionsList" }); await settled();
+    await sidebar.onMessage({ type: "openSessionInEditor", id: "g1", title: "Water the tomatoes" }); await settled();
+    assert.match(world.warnings[0], /Open a DGC chat in .*dgc-garden-elsewhere-/);
+    assert.equal(world.panels.length, 0, "said no: nothing opens");
+    world.answer = "Trust it and open";
+    await sidebar.onMessage({ type: "openSessionInEditor", id: "g1", title: "Water the tomatoes" }); await settled();
+    assert.equal(world.panels.length, 1);
+    assert.equal(made[0].activeSlot().cwd, outside);
+    assert.deepEqual(world.workspaceState.get("dgc.workFolders.v1"), [outside], "a reload brings its tab back there without asking again");
+  } finally { rmSync(outside, { recursive: true, force: true }); }
+});
+
+test("Project Folder: a session whose folder is gone doesn't open, and says why", async () => {
+  // n1's folder is said to be gone; g1's was there when listed and isn't now.
+  const was = join(scratch, "was-here-a-moment-ago");
+  const { sidebar } = folderWindow({ rows: everywhereRows(was), folders: folderRows(was) });
+  await sidebar.onMessage({ type: "sessionsList" }); await settled();
+  for (const id of ["n1", "g1"]) {
+    world.infos.length = 0;
+    await sidebar.onMessage({ type: "openSessionInEditor", id, title: "x" }); await settled();
+    assert.equal(world.panels.length, 0, `${id}: no tab`);
+    assert.match(world.infos.at(-1) || "", /^Folder not found: /, `${id}: said in plain words`);
+  }
+  assert.deepEqual(world.warnings, [], "nothing is asked about a folder that isn't there");
+});
+
+test("New Session: in the folder chosen in its dialog; this window's opens as always, another's in a tab running there", async () => {
+  const garden = join(scratch, "garden-new");
+  mkdirSync(garden, { recursive: true });
+  const { sidebar, made } = folderWindow({ rows: everywhereRows(garden), folders: folderRows(garden) });
+  await sidebar.onMessage({ type: "sessionsList" }); await settled();
+  await sidebar.onMessage({ type: "newSessionInEditor", folder: scratch }); await settled();
+  assert.deepEqual([world.panels.length, world.panels[0].title, made[0].activeSlot().cwd], [1, "New session", undefined], "this window's folder: a new tab, as always");
+  await sidebar.onMessage({ type: "newSessionInEditor", folder: garden }); await settled();
+  assert.deepEqual([world.panels.length, world.panels[1].title, made[1].activeSlot().cwd, made[1].sessionId()], [2, "garden-new", garden, ""], "another folder: a new session's tab that runs there, the folder named on it");
+  made[1].onEvent({ type: "turn_start", turn_id: "t1", kind: "prompt", prompt: "Plan the herb bed" });
+  assert.equal(world.panels[1].title, "garden-new · Plan the herb bed");
+  // A folder that is gone, or one that isn't a full path, opens nothing.
+  await sidebar.onMessage({ type: "newSessionInEditor", folder: join(scratch, "not-there") }); await settled();
+  assert.equal(world.panels.length, 2);
+  assert.match(world.infos.at(-1) || "", /^Folder not found: /);
+  await sidebar.onMessage({ type: "newSessionInEditor", folder: "relative/path" }); await settled();
+  assert.equal(world.panels.length, 2, "never a relative path");
+});
+
+test("New Session: Add a folder… is VS Code's own folder picker, and the session opens in the folder picked", async () => {
+  const picked = mkdtempSync(join(tmpdir(), "dgc-picked-folder-"));
+  try {
+    const { sidebar, made } = folderWindow();
+    await sidebar.onMessage({ type: "sessionsList" }); await settled();
+    await sidebar.onMessage({ type: "newSessionAddFolder" }); await settled();
+    assert.equal(world.pickers.length, 1, "the editor's own picker");
+    assert.deepEqual([world.pickers[0].canSelectFolders, world.pickers[0].canSelectFiles, world.pickers[0].canSelectMany], [true, false, false], "folders only, one");
+    assert.equal(world.panels.length, 0, "closed without a folder: nothing opens");
+    world.picked = picked;
+    await sidebar.onMessage({ type: "newSessionAddFolder" }); await settled();
+    assert.match(world.warnings.at(-1) || "", /Open a DGC chat in .*dgc-picked-folder-/, "a folder outside the window's is asked about first");
+    assert.equal(world.panels.length, 0);
+    world.answer = "Trust it and open";
+    await sidebar.onMessage({ type: "newSessionAddFolder" }); await settled();
+    assert.equal(world.panels.length, 1);
+    assert.equal(made[0].activeSlot().cwd, picked, "the session runs in the folder picked");
+  } finally { rmSync(picked, { recursive: true, force: true }); }
+});
+
+test("a tab's session picker follows the Project Folder choice: every project's with its folder, and one opens in its own folder", async () => {
+  const garden = join(scratch, "garden-picker");
+  mkdirSync(garden, { recursive: true });
+  const { tabs, made } = folderWindow();
+  tabs.open("");
+  const [tab] = made;
+  const backend = recordingBackend(HERE);
+  quiet(tab, backend); withFolders(tab, { rows: everywhereRows(garden), folders: folderRows(garden) });
+  const vs = globalThis.__DGC_TEST_VSCODE.window, kept = vs.createQuickPick;
+  const qp = { items: [], selectedItems: [], value: "", busy: false, shown: 0, hidden: 0, onDidTriggerItemButton() {}, onDidAccept(fn) { this.accept = fn; }, onDidHide() {},
+    show() { this.shown++; }, hide() { this.hidden++; }, dispose() {} };
+  vs.createQuickPick = () => qp;
+  try {
+    void tab.resume(); await settled();
+    assert.equal(qp.shown, 1);
+    assert.deepEqual(backend.requested.filter((c) => c.type === "list_sessions").map(({ type, request_id, ...rest }) => rest), [{ scope: "all", limit: 500 }]);
+    assert.deepEqual(qp.items.map((i) => [i.label, i.detail, i.buttons?.length]), [
+      ["Water the tomatoes on Fridays", garden, undefined], ["Checkout · Fix the checkout total", scratch, 1], ["Tidy the reading list", "Folder not found · ~/code/notes", undefined]],
+      "each says its folder; only this window's folder's can be deleted");
+    qp.selectedItems = [qp.items[2]]; await qp.accept(); await settled();
+    assert.equal(world.panels.length, 1, "a gone folder's session opens nothing");
+    assert.match(world.infos.at(-1), /^Folder not found: /);
+    qp.selectedItems = [qp.items[0]]; await qp.accept(); await settled();
+    assert.equal(world.panels.length, 2);
+    assert.equal(world.panels[1].title, "garden-picker · Water the tomatoes on F…", "the folder, then the session (a tab's name is 40 characters at most)");
+    assert.equal(made[1].activeSlot().cwd, garden);
+    assert.equal(made[1].sessionId(), "g1");
+  } finally { vs.createQuickPick = kept; }
 });

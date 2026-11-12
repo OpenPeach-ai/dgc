@@ -728,6 +728,133 @@
   // A search from the tab's own box still lists everything it found.
   const SESSIONS_SHOWN = 6;
   let sessionItems = [], sessionsMoreToLoad = false, allSessions = null, lastSessions = null;
+  // The Project Folder dropdown (0.52, media/shared/folderpick.js): "All projects" or one folder, one choice the host
+  // keeps for every window (it also filters the Pips view's Project tab and Needs attention). The host says what is
+  // chosen and the folders to choose from with each list; a DGC that lists none has no dropdown (projectFolders null).
+  // On All projects each session says its folder under its name; one folder's path shows once, above the list.
+  // Another folder's session opens in a tab here that runs there, and offers only Open.
+  let projectFolders = null;
+  const chooseFolder = (folder) => { if (projectFolders && folder !== projectFolders.choice) vscode.postMessage({ type: "projectFolderChoose", folder }); };
+  function folderMenu(button, keyboard) {
+    const Pick = window.DgcFolderPick;
+    if (!Pick || !projectFolders) return;
+    if (button.getAttribute("aria-expanded") === "true") { Pick.close(true); return; }
+    Pick.open(button, { rows: projectFolders.rows, choice: projectFolders.choice, all: true, keyboard, onChoose: chooseFolder });
+  }
+  /** A slot that holds the dropdown's button: a click, or Down, opens its menu. */
+  function folderSlot(cls) {
+    const slot = el("div", cls);
+    slot.addEventListener("click", (e) => { const button = e.target.closest("[data-folder-pick]"); if (button) folderMenu(button, e.detail === 0); });
+    slot.addEventListener("keydown", (e) => {
+      const button = e.target.closest?.("[data-folder-pick]");
+      if (button && e.key === "ArrowDown" && button.getAttribute("aria-expanded") !== "true") { e.preventDefault(); e.stopPropagation(); folderMenu(button, true); }
+    });
+    return slot;
+  }
+  /** The button in a slot, drawn again only when what it says changed (the keyboard stays on it). */
+  function paintFolderSlot(slot, id) {
+    const Pick = window.DgcFolderPick, drawn = JSON.stringify(projectFolders);
+    if (!slot || !Pick || slot.dataset.drawn === drawn) return;
+    const held = slot.contains(document.activeElement);
+    slot.dataset.drawn = drawn;
+    slot.innerHTML = projectFolders ? Pick.buttonHtml({ id, cls: "sessions-folder-pick", rows: projectFolders.rows, choice: projectFolders.choice,
+      title: projectFolders.choice ? `Sessions in ${projectFolders.choice}. Choose another folder, or All projects.` : "Sessions from every project. Choose one folder to see only its sessions." }) : "";
+    if (held) slot.querySelector("button")?.focus({ preventScroll: true });
+  }
+  /** A folder on one line, cut in the middle when it doesn't fit: the folder's own name stays in sight, and the whole
+   *  path is the tooltip. `shown` has the home folder as ~. */
+  function pathLine(cls, shown, full) {
+    const line = el("span", `dgc-path ${cls}`), cut = String(shown || "").replace(/[\\/]+$/, "") || String(shown || "");
+    const at = Math.max(cut.lastIndexOf("/"), cut.lastIndexOf("\\"));
+    const head = el("span", "dgc-path-head"), tail = el("span", "dgc-path-tail");
+    head.textContent = at > 0 ? cut.slice(0, at) : ""; tail.textContent = at > 0 ? cut.slice(at) : cut;
+    if (head.textContent.length > 2) head.classList.add("dgc-path-long");
+    if (head.textContent) line.append(head);
+    line.append(tail);
+    line.title = String(full || shown || "");
+    return line;
+  }
+  /** Above the list: the dropdown, then (with one folder chosen) that folder's path, once. Made when a DGC first lists folders. */
+  function paintFolderBar(msg) {
+    let bar = $("sessions-folderbar");
+    if (!projectFolders || !window.DgcFolderPick) { if (bar) { bar.hidden = true; window.DgcFolderPick?.close(); } return; }
+    if (!bar) {
+      bar = el("div", "sessions-folderbar"); bar.id = "sessions-folderbar";
+      const once = el("p", "sessions-folder"); once.id = "sessions-folder"; once.hidden = true;
+      bar.append(folderSlot("sessions-folder-slot"), once);
+      $("sessions-status").before(bar);
+    }
+    bar.hidden = false;
+    paintFolderSlot(bar.firstChild, "sessions-folder-pick");
+    const once = $("sessions-folder"), shown = projectFolders.choice && typeof msg.folder === "string" ? msg.folder : "";
+    once.hidden = !shown;
+    if (once.dataset.shown !== shown) {
+      once.dataset.shown = shown;
+      const glyph = el("span", "codicon codicon-folder"); glyph.setAttribute("aria-hidden", "true");
+      const said = el("span", "session-tab-words"); said.textContent = "Folder: ";
+      once.replaceChildren(glyph, said, pathLine("sessions-folder-path", shown, msg.folderPath || shown));
+      once.title = String(msg.folderPath || shown);
+    }
+  }
+  // ---- New session (asked 12 Nov): a small dialog with the Project Folder dropdown, this window's folder chosen, no
+  // "All projects", and "Add a folder…" at its end (the editor's own folder picker). The session opens in an editor tab
+  // here and works in the folder chosen. A DGC that lists no folders opens a session at once, as before. ----
+  let newSessionDialog = null;
+  function closeNewSession(refocus = true) {
+    const current = newSessionDialog;
+    if (!current) return;
+    newSessionDialog = null;
+    window.DgcFolderPick?.close();
+    current.dialog.remove();
+    if (refocus && current.focus?.isConnected) current.focus.focus();
+  }
+  function openNewSession() {
+    const Pick = window.DgcFolderPick;
+    if (!projectFolders || !Pick) { vscode.postMessage({ type: "newSessionInEditor" }); return; }
+    closeNewSession(false);
+    // This window's folder first, whether or not it has a session yet.
+    const own = projectFolders.window, listed = projectFolders.rows;
+    const rows = own && !listed.some((r) => r.folder === own.folder) ? [{ ...own, here: true, exists: true }, ...listed] : listed;
+    const state = { folder: (rows.find((r) => r.here && r.exists !== false) || {}).folder || "" };
+    const dialog = document.createElement("dialog");
+    dialog.className = "new-session-dialog dgc-dialog";
+    dialog.setAttribute("aria-labelledby", "new-session-title"); dialog.setAttribute("aria-describedby", "new-session-intro");
+    dialog.innerHTML = `<div class="new-session-body"><h2 id="new-session-title">New session</h2>
+      <p id="new-session-intro" class="new-session-intro">It opens in an editor tab here and works in the folder you choose.</p>
+      <div class="new-session-field"></div><p class="new-session-path" hidden></p></div>
+      <div class="new-session-buttons"><button type="button" class="act new-session-cancel">Cancel</button><button type="button" class="act wide primary new-session-start">Start session</button></div>`;
+    const field = dialog.querySelector(".new-session-field"), where = dialog.querySelector(".new-session-path"), start = dialog.querySelector(".new-session-start");
+    const paint = () => {
+      const row = rows.find((r) => r.folder === state.folder), held = field.contains(document.activeElement);
+      field.innerHTML = Pick.buttonHtml({ id: "new-session-folder", rows, choice: state.folder, empty: "Choose a folder", title: row ? row.folder : "Choose the folder this session works in" });
+      where.hidden = !row;
+      if (row) { where.replaceChildren(pathLine("new-session-where", row.shown || row.folder, row.folder)); where.title = row.folder; }
+      start.disabled = !row;
+      if (held) field.querySelector("button")?.focus({ preventScroll: true });
+    };
+    const menu = (keyboard) => {
+      const button = field.querySelector("button");
+      if (button.getAttribute("aria-expanded") === "true") { Pick.close(true); return; }
+      Pick.open(button, { rows, choice: state.folder, all: false, add: true, goneOff: true, keyboard, trigger: () => field.querySelector("button"),
+        onChoose: (folder) => { state.folder = folder; paint(); field.querySelector("button")?.focus({ preventScroll: true }); },
+        onAdd: () => { closeNewSession(); vscode.postMessage({ type: "newSessionAddFolder" }); } });
+    };
+    field.addEventListener("click", (e) => { if (e.target.closest("[data-folder-pick]")) menu(e.detail === 0); });
+    dialog.querySelector(".new-session-cancel").onclick = () => closeNewSession();
+    start.onclick = () => { if (!state.folder) return; const folder = state.folder; closeNewSession(); vscode.postMessage({ type: "newSessionInEditor", folder }); };
+    dialog.addEventListener("cancel", (e) => { e.preventDefault(); if (Pick.opened()) Pick.close(true); else closeNewSession(); });
+    dialog.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Escape") { e.preventDefault(); closeNewSession(); }
+      else if (e.key === "ArrowDown" && e.target.closest?.("[data-folder-pick]")) { e.preventDefault(); menu(true); }
+    });
+    newSessionDialog = { dialog, focus: document.activeElement };
+    paint();
+    $("sessions-host").appendChild(dialog);
+    if (typeof dialog.showModal === "function") dialog.showModal(); else dialog.setAttribute("open", "");
+    // (Focused here, not by autofocus: see the Auto-mode dialog.)
+    if (start.disabled) field.querySelector("button").focus(); else start.focus();
+  }
   /** How long ago, in a few characters. `when` is the host's "YYYY-MM-DD HH:MM"; anything else is shown as it is. */
   function sessionAge(when, now = Date.now()) {
     const m = /^(\d{4})-(\d\d)-(\d\d)[ T](\d\d):(\d\d)/.exec(String(when || ""));
@@ -763,11 +890,22 @@
     row.tabIndex = 0; row.dataset.id = item.id;
     row.dataset.motionState = item.windowless ? "working" : item.open ? "open" : "idle";
     if (before?.has(item.id) && before.get(item.id) !== row.dataset.motionState) row.classList.add("motion-state-change");
-    const open_ = () => { openSession(item); opened?.(); };
+    // On All projects each session says its folder under its name. Another folder's opens here and runs there; one
+    // whose folder is gone is shown dimmed, says so, and doesn't open.
+    const everywhere = !!projectFolders && !projectFolders.choice && typeof item.project === "string" && !!item.project;
+    const elsewhere = !!projectFolders && item.here === false, gone = elsewhere && item.gone === true;
+    if (elsewhere) row.classList.add("session-elsewhere");
+    if (gone) { row.classList.add("session-gone"); row.setAttribute("aria-disabled", "true"); row.title = `Folder not found: ${item.projectPath || item.project || ""}`; }
+    const open_ = () => { if (gone) return; openSession(item); opened?.(); };
     const running = item.running === true || !!item.windowless;
     const main = el("div", "session-main");
     const name = el("span", "session-name"); name.textContent = title; name.title = title;
     main.append(name);
+    if (everywhere || gone) {
+      const where = pathLine("session-path", item.project || item.projectName || "", item.projectPath || item.project);
+      if (gone) { const note = el("span", "session-path-note"); note.textContent = "Folder not found"; where.prepend(note); }
+      main.append(where);
+    }
     const count = Number(item.count) || 0;
     // Under the name: the words a search found, or what it is doing now. Running with no window (a reload, a closed
     // window or tab) is picked up where it is by opening it.
@@ -778,7 +916,10 @@
       sub.textContent = [item.windowless ? "Running, no window" : running ? "Running" : item.open ? "Open in a tab" : "", plural(count, "message")].filter(Boolean).join(" · ");
       if (item.windowless) sub.title = `Running, no window: ${String(item.windowless).slice(0, 200)}. Open it to pick it up, or stop it in Settings › Running sessions.`;
     }
-    main.append(sub);
+    // With its folder on the second line, a third only for what a search found or what it is doing now.
+    const found = sub.classList.contains("session-match") || sub.classList.contains("session-waiting");
+    if ((everywhere || gone) && !found) sub.textContent = item.windowless ? "Running, no window" : running ? "Running" : item.open ? "Open in a tab" : "";
+    if (!(everywhere || gone) || sub.textContent) main.append(sub);
     const end = el("span", "session-end");
     const age = el("span", "session-age"); age.textContent = sessionAge(item.when);
     age.title = [item.when, plural(count, "message")].filter(Boolean).join(" · ");
@@ -786,23 +927,27 @@
     if (running) { age.hidden = true; end.append(liveDot(item.windowless ? "Running, no window" : "Running")); }
     const actions = el("span", "session-actions");
     const open = sessionButton("session-open", "go-to-file", open_);
-    open.title = "Open in an editor tab";
-    open.setAttribute("aria-label", `Open in Editor: ${title}`);
+    open.title = elsewhere ? `Open in an editor tab here. It keeps working in ${item.projectName || "its own folder"}.` : "Open in an editor tab";
+    open.setAttribute("aria-label", elsewhere ? `Open in Editor: ${title}, in ${item.projectName || item.project}` : `Open in Editor: ${title}`);
     const remove = sessionButton("session-delete", "trash", () => vscode.postMessage({ type: "deleteSession", id: item.id, title }));
     remove.title = item.open ? "Close its tab to delete this session" : "Delete this session";
     remove.setAttribute("aria-label", `Delete session: ${title}`);
     // Pin it to the dock, and "..." for its colour, between Open in Editor and Delete.
     const pinItem = { kind: "work", id: item.id, title };
-    if (window.DgcDock) actions.append(open, pinButton(pinItem), moreButton("work", item.id, title, open_, pinItem), remove);
+    // Pin, colour and Delete are for this window's folder's sessions; another folder's offers Open; a gone folder's, nothing.
+    if (gone) { /* nothing to do with it from here */ }
+    else if (elsewhere) actions.append(open);
+    else if (window.DgcDock) actions.append(open, pinButton(pinItem), moreButton("work", item.id, title, open_, pinItem), remove);
     else actions.append(open, remove);
-    end.append(age, actions);
+    end.append(age);
+    if (!gone) end.append(actions);
     row.append(blobSpan("work", item.id, running), main, end);
     // A click opens it, as a chat in the Chat tab opens: the second click of a double-click opens nothing more.
     row.onclick = (e) => { if (e.detail < 2) open_(); };
     row.onkeydown = (e) => {
       if (e.target !== row) return;
       if (e.key === "Enter") { e.preventDefault(); open_(); }
-      else if (e.key === "Delete") { e.preventDefault(); remove.click(); }
+      else if (e.key === "Delete") { e.preventDefault(); if (!elsewhere) remove.click(); }
       else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         const next = e.key === "ArrowDown" ? row.nextElementSibling : row.previousElementSibling;
@@ -826,6 +971,13 @@
     const list = $("sessions-list"), status = $("sessions-status");
     lastSessions = msg;
     const every = Array.isArray(msg.items) ? msg.items : [];
+    // The Project Folder dropdown, from a DGC that lists folders: what is chosen, and the folders to choose from.
+    const offered = msg.folders && typeof msg.folders === "object" && Array.isArray(msg.folders.rows) ? msg.folders : null;
+    projectFolders = offered ? { choice: typeof offered.choice === "string" ? offered.choice : "", rows: offered.rows.filter((r) => r && typeof r.folder === "string" && r.folder).slice(0, 200),
+      window: offered.window && typeof offered.window.folder === "string" && offered.window.folder ? offered.window : null } : null;
+    if (!projectFolders) closeNewSession(false);
+    paintFolderBar(msg);
+    const chosen = projectFolders?.choice ? window.DgcFolderPick?.valueOf(projectFolders.rows, projectFolders.choice) || "this folder" : "";
     // Thousands of sessions: a search over names, first messages and everything said, and Load more.
     const search = $("sessions-search"), more = $("sessions-more");
     sessionsSearchable = msg.searchable === true;
@@ -834,11 +986,17 @@
     const items = sessionsSearchable || !wanted ? every : every.filter((item) => sessionTitle(item).toLowerCase().includes(wanted));
     sessionItems = every; sessionsMoreToLoad = msg.more === true;
     if (search && sessionsSearchable && document.activeElement !== search) search.value = query;
+    if (search) search.setAttribute("aria-label", !projectFolders ? "Search this project's sessions: names and everything said"
+      : chosen ? `Search the sessions in ${chosen}: names and everything said` : "Search every project’s sessions: names and everything said");
+    list.setAttribute("aria-label", !projectFolders ? "Sessions in this project" : chosen ? `Sessions in ${chosen}` : "Sessions in every project");
     // Load more belongs to a search's finds here; with no search it is in the View all popover.
     if (more) { more.hidden = !(sessionsMoreToLoad && query); more.disabled = false; more.textContent = "Load more"; }
-    if (!query) sessionNews(every);
+    // (One folder's list is not every session there is: what isn't in it keeps its news.)
+    if (!query) { if (chosen) noteNews("work", every, every.filter((item) => item.running === true || !!item.windowless).map((item) => item.id), false); else sessionNews(every); }
     status.textContent = msg.error ? String(msg.error)
       : items.length ? "" : query ? `No session mentions “${query}”.`
+      : chosen ? `No sessions in ${chosen} yet. Start one with New: it opens in an editor tab.`
+      : projectFolders ? "No sessions in any project yet. Start one with New: it opens in an editor tab."
       : "No sessions in this project yet. Start one with New: it opens in an editor tab.";
     if (msg.error) status.dataset.kind = "error"; else delete status.dataset.kind;
     status.hidden = !status.textContent;
@@ -847,7 +1005,9 @@
     const all = viewAllButton();
     all.hidden = !!query || (items.length <= shown.length && !sessionsMoreToLoad);
     all.textContent = `View all (${items.length}${sessionsMoreToLoad ? "+" : ""})`;
-    if (allSessions) { if (all.hidden) closeAllSessions(); else fillAllSessions(); }
+    all.title = !projectFolders ? "Every session in this project, with a search" : chosen ? `Every session in ${chosen}, with a search` : "Every session in every project, with a search";
+    // (Open with the dropdown in it, the page stays while the choice changes what it lists.)
+    if (allSessions) { if (all.hidden && !projectFolders) closeAllSessions(); else fillAllSessions(); }
     if (dock) paintDock();                 // a pinned session's name and what it is doing now
     paintHub();
   }
@@ -872,20 +1032,22 @@
     const status = el("p", "sessions-status sessions-all-status"); status.setAttribute("role", "status"); status.hidden = true;
     const more = el("button", "sessions-more sessions-all-more"); more.type = "button"; more.title = "Show 200 more sessions"; more.hidden = true;
     more.onclick = () => { more.disabled = true; more.textContent = "Loading…"; vscode.postMessage({ type: "sessionsMore" }); };
-    pop.append(field, status, rows);
+    // The Project Folder dropdown, in the page of them all too: the same choice.
+    const folder = folderSlot("sessions-all-folder");
+    pop.append(field, folder, status, rows);
     // Over the list, from its first row down to the side bar's end (never shorter than a few rows).
     pop.style.top = `${list.offsetTop}px`;
     const room = host.getBoundingClientRect().bottom - list.getBoundingClientRect().top - 12;
     pop.style.maxHeight = `${Math.max(220, Math.min(440, Math.round(room)))}px`;
     home.append(pop);
-    const outside = (e) => { if (!pop.contains(e.target) && !$("sessions-all").contains(e.target)) closeAllSessions(); };
+    const outside = (e) => { if (!pop.contains(e.target) && !$("sessions-all").contains(e.target) && !e.target.closest?.(".dgc-folder-menu")) closeAllSessions(); };
     document.addEventListener("pointerdown", outside, true);
     pop.addEventListener("keydown", (e) => {
       if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeAllSessions(true); }
       else if (e.key === "ArrowDown" && e.target === field) { e.preventDefault(); rows.querySelector(".session-row")?.focus(); }
     });
     field.addEventListener("input", fillAllSessions);
-    allSessions = { pop, field, list: rows, status, more, outside };
+    allSessions = { pop, field, list: rows, status, more, outside, folder };
     $("sessions-all").setAttribute("aria-expanded", "true");
     fillAllSessions();
     pop.scrollIntoView({ block: "nearest" });
@@ -894,7 +1056,10 @@
   function fillAllSessions() {
     if (!allSessions) return;
     const { field, list, status, more } = allSessions, query = field.value.trim(), wanted = query.toLowerCase();
-    const found = wanted ? sessionItems.filter((item) => sessionTitle(item).toLowerCase().includes(wanted)) : sessionItems;
+    // (On All projects a folder's name finds its sessions too.)
+    const found = wanted ? sessionItems.filter((item) => `${sessionTitle(item)}\n${projectFolders && !projectFolders.choice ? item.project || "" : ""}`.toLowerCase().includes(wanted)) : sessionItems;
+    allSessions.folder.hidden = !projectFolders;
+    paintFolderSlot(allSessions.folder, "");
     more.remove();
     fillSessions(list, found);
     // More to load, and no search narrowing what is here: the rest are asked for 200 at a time.
@@ -1378,7 +1543,7 @@
   function showSideTab(name, focus = false) {
     if (chatPlace !== "home") return;
     const next = SIDE_TABS.includes(name) && sideTabOffered(name) ? name : "home";
-    closeAllSessions(); hub?.closeMenu(); window.DgcBlob?.close();
+    closeAllSessions(); hub?.closeMenu(); window.DgcBlob?.close(); window.DgcFolderPick?.close();
     // The Pips tab leads to the list of your Pips, never to the chat that was last open in it.
     if (next === "pips") openPipsAt({ overview: true });
     else { sideTab = lastListTab = next; showSessions(); }
@@ -11165,7 +11330,7 @@ function permissionChoices(ev) {
   if (chatPlace === "home") {
     // The side bar: four tabs over everything, Home first. (Pips' own back, where a Pips screen offers one, returns to
     // the tab that was open before it.)
-    $("sessions-new").onclick = () => vscode.postMessage({ type: "newSessionInEditor" });
+    $("sessions-new").onclick = () => openNewSession();
     try { homePagesNow = homePagesFrom(JSON.parse(document.documentElement.dataset.homePages || "[]")); } catch { homePagesNow = []; }
     mountHub();
     // Your Pips' part of Home: the ones that need you and the ones with news, as cards (src/pipHomeStrip.js).
