@@ -1525,6 +1525,20 @@ label.team-pip>input[type=checkbox]{width:16px;height:16px;flex:none;margin:0}
 .import-reply{min-height:84px;max-height:min(30vh,220px)}
 .import-copy{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;min-width:0}
 .import-copy>.muted{font-size:12px;min-width:0}
+/* A Personal Pip's goal (pipGoal.js): the shared card, pinned above the prompt box and as wide as it. The objective is
+   two lines until "more"; the turn and how it stands are one quiet line; its ending's reason and evidence open below. */
+.pip-goal-card{width:100%;max-width:none;margin:0 0 8px;min-width:0}
+.pip-goal-card .pip-goal-objective{display:block;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.pip-goal-card .pip-goal-objective.is-clamped{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;white-space:normal}
+.pip-goal-card button.pip-goal-more{justify-self:start;min-height:0;margin:0;padding:0}
+.dgc-card.pip-goal-card .pip-goal-line{display:flex;flex-wrap:wrap;gap:0 5px;min-width:0;font-variant-numeric:tabular-nums}
+.pip-goal-card .pip-goal-turn{flex:none;white-space:nowrap}
+.pip-goal-card .pip-goal-turn::after{content:" ·"}
+.pip-goal-card .pip-goal-status{min-width:0;overflow-wrap:anywhere}
+.pip-goal-card .pip-goal-details{min-width:0;margin:8px 0 0 31px;font-size:12px;line-height:1.5;color:var(--text-2)}
+.pip-goal-card .pip-goal-reason{margin:0;overflow-wrap:anywhere}
+.pip-goal-card .pip-goal-evidence{display:grid;gap:3px;margin:6px 0 0;padding:0 0 0 16px;max-height:min(30vh,180px);overflow-y:auto;scrollbar-width:thin}
+.pip-goal-card .pip-goal-evidence li{min-width:0;overflow-wrap:anywhere}
 /* "Reports to" on a Project Pip's Settings (pipOwner.js): its owner session, and the picker Change opens. */
 .pip-owner .pip-owner-now{margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pip-owner p.muted.pip-owner-now{white-space:normal}

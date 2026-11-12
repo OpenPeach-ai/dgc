@@ -48,6 +48,7 @@ export const THEMES = {
     empty (no messages yet), api, settings (its page's every section has something in it; level: the one it is at), keys (a plugin's key card: true, or "two"),
     boot (in a tab: what the page holds before its script runs, as src/pipsView.ts writes it),
     owner (a Project Pip's owner session, Pips API 89: true, or "none"),
+    goal (a Personal Pip's goal, Pips API 92: what DGC says it is),
     ownKeys (the Pip's own API keys, Pips API 82: true one waiting card, "refused" one its site turned away, "list" one saved, one waiting, one Not now;
     "generator" / "generator-refused" / "generator-list": a picture or video generator's key, kept in Settings;
     from api 85 a site's row carries terminal and terminal_name, and "list-terminal" is "list" with its saved key ticked for the Terminal). */
@@ -628,6 +629,22 @@ export const host = (opts) => `(${function (PIP, opts) {
       open_pip_project_change_in_work: (r) => { note(r); return { opened: true }; },
     });
     answers.list_pip_keys ||= () => ({ pip_id: PIP, keys: [] });   // (a Pip with no keys waiting, as most have)
+  }
+  // opts.goal: a Personal Pip's goal for this conversation (pips-15, Pips API 92; pass api: 92): what get_pip_goal says
+  // ({objective, status, turns, reason, evidence}); Stop stops it, and "/goal x" sets a new one. Kept in window.__goal.
+  if (opts.goal && !project) {
+    const made = (extra) => ({ id: "pipgoal_" + "1".repeat(32), pip_id: PIP, conversation_id: null, objective: "Plan my week.", status: "active", turns: 0, max_turns: 20, reason: "", evidence: [],
+      started_at: at(30), updated_at: at(1), ...extra });
+    const st = window.__goal = { goal: made(opts.goal) };
+    Object.assign(answers, {
+      get_pip_goal: () => ({ pip_id: PIP, goal: st.goal }),
+      set_pip_goal: (r) => { st.goal = made({ id: "pipgoal_" + "2".repeat(32), objective: r.objective }); return { goal: st.goal }; },
+      stop_pip_goal: () => { st.goal = { ...st.goal, status: "stopped", reason: "Stopped by you." }; return { goal: st.goal }; },
+    });
+    // (What a chat at API 92 also reads: its keys and what it changed in a project's copy, each empty, and its one conversation.)
+    answers.list_pip_keys ||= () => ({ pip_id: PIP, keys: [] });
+    answers.list_pip_project_changes ||= () => ({ pip_id: PIP, changes: [] });
+    answers.list_pip_conversations ||= () => ({ pip_id: PIP, conversations: [{ id: "conv_" + "1".repeat(32), title: "", first: true, created_at: at(600), updated_at: at(1), archived: false, unread: 0 }] });
   }
   // opts.owner: a Project Pip's owner session (Pips API 89; pass project: true, api: 89). true: it reports to the second
   // of the project's four Work sessions; "none": it has no owner session. The editor's titles are the host's own answer.
