@@ -4699,7 +4699,9 @@ async function setGoal(objective,typed){
  if(!objective){setError(`Say what the goal is after /goal: what ${name} should keep working on until it is done.`);return;}
  if([...objective].length>MAX_OBJECTIVE){setError(`Say what the goal is, in up to ${MAX_OBJECTIVE.toLocaleString('en-US')} characters. Nothing was set.`);return;}
  const token=scope(),pip=S.selected,conv=S.conv||'';
- goalState.busy=true;S.error='';chatEdit(()=>{draft.chatText='';chatDrafts.set(pip,'');render();});
+ // As a sent message clears the box: the box itself and what the page keeps for a reload (a reload brought the last
+ // "/goal ..." back, and the next one was typed into the middle of it; 12 Nov).
+ goalState.busy=true;S.error='';chatEdit(()=>{draft.chatText='';const box=$('chatText');if(box)box.value='';chatDrafts.set(pip,'');rememberView();render();});
  try{const value=pipGoal((await send('set_pip_goal',{pip_id:pip,objective,...convArg()}))?.goal,pip);if(token!==scope()||S.selected!==pip)return;
   if(!value)throw Error('DGC didn’t confirm the goal. Try again.');
   goalState.seq++;goalState.pip=pip;goalState.conv=conv;goalState.value=value;goalState.error='';goalState.open=false;goalState.details=false;

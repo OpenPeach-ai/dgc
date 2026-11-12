@@ -109,6 +109,17 @@ test('"/goal <what>" sets the goal for this conversation: no message is sent, an
   assert.deepEqual([...card.querySelectorAll("button")].map(text).filter((t) => t !== "more"), ["Stop"]);
 });
 
+test('a goal that was set never comes back in the box after a reload', async () => {
+  // Live, 12 Nov: after a window reload the last "/goal ..." was back in the box, and the next one typed into the
+  // middle of it set a goal with both objectives.
+  const x = pipsPage(); await x.open();
+  x.type(`/goal ${OBJECTIVE}`); await x.submit();
+  assert.equal(x.requests("set_pip_goal").length, 1);
+  assert.doesNotMatch(JSON.stringify(x.savedState() || {}), /\/goal /, "what the page keeps for a reload holds no /goal");
+  const again = pipsPage({ saved: x.savedState() }); await again.open();
+  assert.equal(again.d.querySelector("#chatText").value, "", "the box is empty after the reload");
+});
+
 test('"/goal" with nothing after it says what to write, and a goal DGC refuses stays in the box with its words', async () => {
   const x = pipsPage(); await x.open();
   x.type("/goal"); await x.submit();
