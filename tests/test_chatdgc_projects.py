@@ -410,3 +410,65 @@ class LibraryTests(Phase7):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ToolModel(Model):
+    """Model, answering from a script that may call tools, and keeping the tools each request offered."""
+
+    def chat(self, messages, tools=None, reasoning_effort=None, on_text=None, on_thinking=None, cancel=None):
+        if str(messages[0]["content"]).startswith(LOOK_UP[:60]):
+            return super().chat(messages, tools, reasoning_effort, on_text, on_thinking, cancel)
+        self.world["tools"].append([t["function"]["name"] for t in (tools or [])])
+        step = self.world["script"].pop(0) if self.world["script"] else "OK."
+        self.world["read"].append([dict(m) for m in messages])        # as it was at this request
+        if isinstance(step, tuple):
+            return SimpleNamespace(content="", tool_calls=[ToolCall(f"c{len(self.world['read'])}", step[0], step[1])],
+                                   finish_reason="tool_calls", thinking="", usage={})
+        if on_text:
+            on_text(step)
+        return SimpleNamespace(content=step, tool_calls=[], finish_reason="stop", thinking="",
+                               usage={"input_tokens": 10, "output_tokens": 5})
+
+
+class ProjectFilesThatDontFit(unittest.TestCase):
+    """His call (12 Nov, after Claude's Projects): a project's files that don't fit a chat's window can still be
+    searched and read; until now they were only named."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory(prefix="chatdgc-pf-")
+        self.addCleanup(temp.cleanup)
+        self.folder = Path(temp.name)
+        self.world = {"read": [], "replies": [], "script": [], "tools": []}
+        self.store = ChatStore(self.folder / "chat")
+        self.engine = ChatEngine(Config(thinking="off"), self.store, searcher=lambda q: [],
+                                 memory=SharedMemory(self.folder / "memory"), projects=lambda hidden: [],
+                                 client_factory=lambda model: ToolModel(model or "chat-model", self.world))
+
+    def chat_in(self, project, text):
+        chat = self.engine.open(project=project["id"])
+        return self.engine.send(chat["id"], text, search="off")
+
+    def test_a_file_that_didnt_fit_is_searched_and_read(self):
+        trip = self.store.create_project("Big")
+        big = self.folder / "minutes.txt"
+        big.write_text(("word " * 20 + "\n") * 3000 + "Decision: the caterer is Anchovy & Co.\n")
+        self.engine.add_project_files(trip["id"], [{"kind": "file", "path": str(big)}])
+        self.world["script"] = [("project_files_search", {"text": "caterer"}),
+                                ("project_file_read", {"name": "minutes.txt", "start_line": 3001}),
+                                "Anchovy & Co."]
+        self.chat_in(trip, "Who is the caterer?")
+        self.assertIn("project_files_search", self.world["tools"][0])
+        self.assertIn("project_file_read", self.world["tools"][0])
+        system = self.world["read"][0][0]["content"]
+        self.assertIn("project_files_search", system, "the cut file's note says how to reach the rest")
+        found = str(self.world["read"][1][-1]["content"])
+        self.assertIn("minutes.txt:3001: Decision: the caterer is Anchovy & Co.", found)
+        read = str(self.world["read"][2][-1]["content"])
+        self.assertIn("3001\tDecision: the caterer is Anchovy & Co.", read)
+
+    def test_a_project_whose_files_fit_offers_no_more_tools(self):
+        trip = self.store.create_project("Small")
+        self.engine.add_project_files(trip["id"], [{"kind": "text", "text": "Hotel: Casa Anjuna", "name": "Hotel"}])
+        self.world["script"] = ["Casa Anjuna."]
+        self.chat_in(trip, "Where do we stay?")
+        self.assertNotIn("project_files_search", self.world["tools"][0])

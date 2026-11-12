@@ -27,6 +27,8 @@ MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_MESSAGE_BYTES = 200 * 1024 * 1024
 MAX_PASTE_CHARS = 1_000_000
 MAX_MODEL_CHARS = 200_000          # of one attachment's text, for the model
+# A project's file keeps more: a chat searches and reads it in parts when it doesn't fit (project_files, 12 Nov).
+MAX_PROJECT_CHARS = 2_000_000
 ATTACHMENT_ID = re.compile(r"att_[a-f0-9]{32}\Z")
 IMAGE_TYPES = {"image/png": b"\x89PNG\r\n\x1a\n", "image/jpeg": b"\xff\xd8\xff", "image/gif": b"GIF8",
                "image/webp": b"RIFF"}
@@ -54,7 +56,7 @@ def _name(value, fallback: str) -> str:
     return text or fallback
 
 
-def _text_of(raw: bytes, name: str) -> tuple[str, bool, dict]:
+def _text_of(raw: bytes, name: str, max_chars: int = MAX_MODEL_CHARS) -> tuple[str, bool, dict]:
     """A file's text for the model: a document through DGC's reader, else UTF-8 text, else refused."""
     from .. import documents
     try:
@@ -63,7 +65,7 @@ def _text_of(raw: bytes, name: str) -> tuple[str, bool, dict]:
         raise AttachmentError(f"{name} can't be read: {_problem(exc)}") from exc
     if fmt is not None:
         try:
-            found = documents.extract_text(raw, name, max_chars=MAX_MODEL_CHARS)
+            found = documents.extract_text(raw, name, max_chars=max_chars)
         except (documents.DocumentError, documents.UnsupportedDocument) as exc:
             raise AttachmentError(f"{name} can't be read: {_problem(exc)}") from exc
         return found.text, bool(found.truncated), dict(found.summary or {})
@@ -73,7 +75,7 @@ def _text_of(raw: bytes, name: str) -> tuple[str, bool, dict]:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise AttachmentError(f"{name} isn't UTF-8 text, an image or a document ChatDGC can read.") from exc
-    return text[:MAX_MODEL_CHARS], len(text) > MAX_MODEL_CHARS, {}
+    return text[:max_chars], len(text) > max_chars, {}
 
 
 def _problem(exc) -> str:
@@ -81,9 +83,10 @@ def _problem(exc) -> str:
     return message[7:].lstrip() if message.startswith("error: ") else message
 
 
-def prepare(items) -> list[dict]:
+def prepare(items, *, max_chars: int = MAX_MODEL_CHARS) -> list[dict]:
     """Check and read what came with a message. Each result: ``meta`` (what the message keeps and the screen
-    shows), ``raw`` (the bytes the chat keeps), and ``text`` (what the model reads, for a non-image)."""
+    shows), ``raw`` (the bytes the chat keeps), and ``text`` (what the model reads, for a non-image). ``max_chars``:
+    how much of a text is kept (a project's file keeps MAX_PROJECT_CHARS)."""
     if items is None:
         return []
     if not isinstance(items, list):
@@ -96,11 +99,11 @@ def prepare(items) -> list[dict]:
             raise AttachmentError("An attachment is a file, an image or pasted text.")
         kind = item.get("kind")
         if kind == "file":
-            out.append(_file(item))
+            out.append(_file(item, max_chars))
         elif kind == "image":
             out.append(_pasted_image(item))
         elif kind == "text":
-            out.append(_pasted_text(item))
+            out.append(_pasted_text(item, max_chars))
         else:
             raise AttachmentError("An attachment is a file, an image or pasted text.")
         if sum(len(made["raw"]) for made in out if isinstance(made.get("raw"), (bytes, bytearray))) > MAX_MESSAGE_BYTES:
@@ -108,7 +111,7 @@ def prepare(items) -> list[dict]:
     return out
 
 
-def _file(item: dict) -> dict:
+def _file(item: dict, max_chars: int = MAX_MODEL_CHARS) -> dict:
     path = Path(str(item.get("path") or ""))
     name = _name(item.get("name") or path.name, "file")
     if not path.is_absolute():
@@ -145,7 +148,7 @@ def _file(item: dict) -> dict:
         if len(raw) > MAX_IMAGE_BYTES:
             raise AttachmentError(f"{name} is larger than {MAX_IMAGE_BYTES // (1024 * 1024)} MB.")
         return _attached("image", name, raw, mime)
-    text, truncated, summary = _text_of(raw, name)
+    text, truncated, summary = _text_of(raw, name, max_chars)
     return _attached("document", name, raw, "", text=text, truncated=truncated, summary=summary)
 
 
@@ -165,7 +168,7 @@ def _pasted_image(item: dict) -> dict:
     return _attached("image", _name(item.get("name"), "Pasted image"), raw, mime)
 
 
-def _pasted_text(item: dict) -> dict:
+def _pasted_text(item: dict, max_chars: int = MAX_MODEL_CHARS) -> dict:
     text = item.get("text")
     if not isinstance(text, str) or not text.strip():
         raise AttachmentError("That pasted text is empty.")
@@ -173,7 +176,7 @@ def _pasted_text(item: dict) -> dict:
         raise AttachmentError("That pasted text is too long to send.")
     raw = text.encode("utf-8")
     return _attached("text", _name(item.get("name"), "Pasted text"), raw, "text/plain",
-                     text=text[:MAX_MODEL_CHARS], truncated=len(text) > MAX_MODEL_CHARS)
+                     text=text[:max_chars], truncated=len(text) > max_chars)
 
 
 def _attached(kind: str, name: str, raw: bytes, mime: str, *, text: str | None = None, truncated: bool = False,

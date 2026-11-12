@@ -24,6 +24,7 @@ from . import attachments as attached
 from . import canvas as chat_canvas
 from . import data as chat_data
 from . import folder as chat_folder
+from . import project_files as chat_project_files
 from . import images as chat_images
 from . import videos as chat_videos
 from . import plugins as chat_plugins
@@ -709,7 +710,7 @@ class ChatEngine:
         """Files for every chat in a project: read and kept as an attachment is, in the project's own folder."""
         self.store.project(project_id)
         try:
-            prepared = attached.prepare(items)
+            prepared = attached.prepare(items, max_chars=attached.MAX_PROJECT_CHARS)
         except attached.AttachmentError as exc:
             raise ChatEngineError(str(exc)) from exc
         if not prepared:
@@ -757,11 +758,12 @@ class ChatEngine:
             left = budget - used
             if left <= 0:
                 files.append(f"[{name_of} is in the project's files, but there's no room for it in this chat's "
-                             "context window: ask about it by name, or choose a larger window in Settings]")
+                             "context window: search it with project_files_search, or read it with project_file_read]")
                 continue
             if len(words) > left:
                 files.append(attached.frame({**meta, "truncated": True}, raw, words[:left])
-                             + f"\n[Only the first part of {name_of} fits; ask about a later part and quote it.]")
+                             + f"\n[Only the first part of {name_of} fits; the rest: project_files_search to find a part, "
+                               "project_file_read from a later line.]")
                 used += left
             else:
                 files.append(attached.frame(meta, raw, words))
@@ -781,6 +783,23 @@ class ChatEngine:
             out.append("The user keeps this project to itself: you don't have their saved memories here, only this "
                        "chat, the project's instructions and files, and its other chats.")
         return "\n\n".join(out), used // fit_window.CHARS_PER_TOKEN, pictures
+
+    def _project_cut(self, project: dict, room: int) -> bool:
+        """Whether a project's files didn't all fit this chat's window (as _project_context gives them): then the
+        chat may search and read them (project_files)."""
+        budget = int(room * PROJECT_SHARE) * fit_window.CHARS_PER_TOKEN if room else PROJECT_FILE_CHARS
+        used = 0
+        for meta in project.get("files") or []:
+            if meta.get("kind") == "image":
+                continue
+            try:
+                _raw, text = self.store.get_project_file(project["id"], meta.get("id", ""))
+            except ChatStoreError:
+                continue
+            used += len(text or "")
+            if used > budget:
+                return True
+        return False
 
     def delete(self, chat_id: str) -> None:
         with self._lock:
@@ -2907,6 +2926,10 @@ class ChatEngine:
         nudged = {"widget": False}
         folder_root = self.folder_of(chat) if name not in self._toolless else None
         folder_state = {"calls": 0}
+        # A project's files that didn't all fit the window: the chat may search and read them (12 Nov).
+        project_now = self._project_of(chat) if name not in self._toolless else None
+        project_cut = bool(project_now) and self._project_cut(project_now, room)
+        project_state = {"calls": 0}
         image_state = {"calls": 0}
         tables = self._tables(chat) if name not in self._toolless else None
         plugins = self._plugins(chat) if name not in self._toolless else None
@@ -2944,6 +2967,8 @@ class ChatEngine:
                 out += chat_plugins.schemas(plugins_now)
             if folder_root is not None and folder_state["calls"] < chat_folder.MAX_CALLS:
                 out += list(chat_folder.TOOLS)
+            if project_cut and project_state["calls"] < chat_project_files.MAX_CALLS:
+                out += list(chat_project_files.TOOLS)
             if not spoken and image_state["calls"] < chat_images.MAX_CALLS:
                 out += list(chat_images.TOOLS)      # image generation: offered whether or not one is set up
             if not spoken and image_state.get("videos", 0) < chat_videos.MAX_CALLS:
@@ -3074,6 +3099,13 @@ class ChatEngine:
                             on_activity("making", artifact_tools.args_preview(call.arguments)[:80])
                         told = self._artifact_call(chat, call, artifact_cards, artifact_state, canvases, canvas_state,
                                                    before + len("".join(streamed)), on_canvas)
+                    elif call.name in chat_project_files.NAMES:
+                        project_state["calls"] += 1
+                        args = call.arguments if isinstance(call.arguments, dict) else {}
+                        if on_activity is not None:
+                            on_activity("looking", str(args.get("text") or args.get("name") or "the project's files")[:80])
+                        told = (chat_project_files.call(self.store, project_now, call.name, args) if project_now
+                                else "error: this chat isn't in a project.")
                     elif call.name in chat_folder.NAMES:
                         folder_state["calls"] += 1
                         args = call.arguments if isinstance(call.arguments, dict) else {}
