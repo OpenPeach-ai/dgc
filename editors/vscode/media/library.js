@@ -295,6 +295,10 @@
     }
     return out;
   }
+  // The palette each widget's Folio wears: the host keeps them (src/dock.ts) and says every one in "dock". A widget
+  // with none yet is given one here, the first its neighbours in the list don't wear, and the host is asked to keep it.
+  const marks = window.DgcMarks?.keeper((message) => vscode.postMessage(message)) || null;
+  let wornSaid = "";
   function widgetRow(w) {
     const item = el("li", "lib-row");
     const main = el("div", "lib-main");
@@ -307,8 +311,10 @@
       action("comment-discussion", "Open the chat it's in", () => vscode.postMessage({ type: "widgetChat", widget: w })),
       pinAction({ kind: "widget", id: String(w.id || ""), title: String(w.title || "Interactive"), sub: `Widget · in “${w.chat_title || "a chat"}”`, ref: { chat_id: String(w.chat_id || "") } }),
       action("trash", "Delete the widget", () => vscode.postMessage({ type: "widgetRemove", widget: w })));
-    const box = el("span", "lib-preview");
-    box.append(icon("play-circle"));
+    // Its Folio, in the palette the widget wears (media/shared/marks.js): the same one its card, its tab and the dock show.
+    const box = el("span", "lib-preview lib-widget");
+    if (marks) box.innerHTML = marks.mark("widget", String(w.id || ""));
+    else box.append(icon("play-circle"));
     item.append(box, main, actions);
     return item;
   }
@@ -440,6 +446,8 @@
     if (artifacts) artifactFilters();
     else if (clips) videoFilters();
     else if (!widgets) { $("lib-kinds").setAttribute("aria-label", "Show"); origins(); kinds(); }
+    // The widgets in view, in the list's order: each without a palette gets the first its neighbours don't wear.
+    if (widgets) marks?.wear("widget", state.widgets.map((w) => ({ id: String(w.id || "") })));
     $("lib-list").replaceChildren(...(clips ? state.videos.rows.map(videoRow) : artifacts ? artifactsShown().map(artifactRow)
       : widgets ? state.widgets.map(widgetRow) : listed().map((item) => item.node())));
     const has = (next) => next !== null && next !== undefined;
@@ -483,6 +491,10 @@
     if (msg.type === "dock") {
       docked = new Set((Array.isArray(msg.pins) ? msg.pins : []).map((pin) => pin?.key).filter((key) => typeof key === "string"));
       for (const button of document.querySelectorAll(".lib-pin[data-pin]")) paintPin(button);
+      const first = marks && !marks.heard(), worn = JSON.stringify(msg.colours || {});
+      marks?.said(msg);
+      if ((first || worn !== wornSaid) && state.view === "widgets" && state.widgets.length) render();
+      wornSaid = worn;
       return;
     }
     if (window.DgcVideo?.message(msg)) return;

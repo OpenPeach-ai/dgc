@@ -931,7 +931,7 @@
   /** A session's or a chat's mark as HTML. It moves only while its session is at work; else it rests. */
   const markHtml = (kind, id, moving, more) => keeper?.mark(kind, id, { moving: !!moving, born: bornOf(kind, id), ...more }) || "";
   /** When a session or a chat was made, from its id or the list it is in (NaN: nothing says, so it counts as new). */
-  const bornOf = (kind, id) => (kind === "work" ? window.DgcMarks?.born(id, sessionItems.find((s) => s.id === id)?.when)
+  const bornOf = (kind, id) => (kind === "widget" ? NaN : kind === "work" ? window.DgcMarks?.born(id, sessionItems.find((s) => s.id === id)?.when)
     : window.DgcMarks?.born("", (chatItems.find((c) => c.id === id) || {}).created_at || (chatItems.find((c) => c.id === id) || {}).updated_at));
   const PIN_PATH = "M10.2 1.8l4 4-2.2.9-2.4 2.4.3 3.1-1.1 1.1-2.6-2.6L2.8 14l-.8-.8 3.3-3.4-2.6-2.6 1.1-1.1 3.1.3 2.4-2.4z";
   const pinSvg = (filled) => `<svg viewBox="0 0 16 16" fill="${filled ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="${PIN_PATH}"/></svg>`;
@@ -974,7 +974,7 @@
   const PIP_BODIES = ["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"];
   /** What the dock shows for each pin: its picture, its name, what it is doing, its dot and its number. */
   function dockItems() {
-    const B = window.DgcBlob, sheets = window.DgcFileSheet, plush = window.PipConcepts?.plush;
+    const sheets = window.DgcFileSheet, plush = window.PipConcepts?.plush;
     const renamed = [], gone = [];
     const items = dockState.pins.map((pin) => {
       const item = { key: pin.key, kind: pin.kind, title: pin.title, state: "", icon: "", dot: "", badge: 0 };
@@ -1006,7 +1006,7 @@
         item.icon = `<span class="dgc-dock-face">${face}</span>`;
       } else if (pin.kind === "widget") {
         item.state = pin.sub || "Widget";
-        item.icon = B ? B.cube({ id: pin.id }) : "";
+        item.icon = markHtml("widget", pin.id, false);
       } else {
         item.state = pin.sub || (pin.kind === "artifact" ? "Artifact" : "Library file");
         const sheet = sheets ? (pin.kind === "artifact" ? sheets.html(pin.look?.type || "file") : sheets.forFile(pin.look?.type || "", pin.title)) : "";
@@ -1028,7 +1028,7 @@
     paintSessionBlob();
     if (!dock) return;
     // A pinned session with no palette yet: the pinned ones are its neighbours.
-    for (const kind of ["work", "chat"]) wearMarks(kind, dockState.pins.filter((pin) => pin.kind === kind).map((pin) => ({ id: pin.id, born: bornOf(kind, pin.id) })));
+    for (const kind of ["work", "chat", "widget"]) wearMarks(kind, dockState.pins.filter((pin) => pin.kind === kind).map((pin) => ({ id: pin.id, born: bornOf(kind, pin.id) })));
     dock.update({ items: dockItems(), show: dockState.show, size: dockState.size, offers: { chat: chatsAvailable, pip: !!window.DgcPips?.mount } });
   }
   function onDock(msg) {

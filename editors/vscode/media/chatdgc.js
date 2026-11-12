@@ -271,6 +271,16 @@
     const m = /<title>([^<]{1,80})<\/title>/i.exec(html) || /<h[1-3][^>]*>([^<]{1,80})</i.exec(html);
     return (m?.[1] || "Interactive").replace(/\s+/g, " ").trim();
   }
+  // The palette each chat's and each widget's mark wears: the host keeps them (src/dock.ts) and says every one in
+  // "dock"; one with none yet is given it here and the host is asked to keep it (media/shared/marks.js `keeper`).
+  const chatMarks = window.DgcMarks?.keeper((message) => vscode.postMessage(message)) || null;
+  /** A widget's Folio in its holder (data-folio: the widget's id, or its card's ref while it has none). */
+  function paintFolio(holder) {
+    const M = window.DgcMarks, id = holder.dataset.folio || "";
+    if (!M) { if (!holder.firstChild) holder.append(icon("play-circle")); return; }
+    const html = /^wg_[a-f0-9]{16}$/.test(id) && chatMarks ? chatMarks.mark("widget", id) : M.of("widget", M.fallback("widget", id));
+    if (holder.dataset.drawn !== html) { holder.dataset.drawn = html; holder.innerHTML = html; }
+  }
   function widgetBlocks(node, message, live) {
     for (const pre of node.querySelectorAll('pre.code[data-language="widget"]')) {
       const html = decodeURIComponent(pre.querySelector(".copy[data-c]")?.dataset.c || "").replace(/\n$/, "");
@@ -285,8 +295,11 @@
     const row = el("div", "cd-file cd-widget-card");
     row.setAttribute("role", "group");
     row.setAttribute("aria-label", `Interactive: ${title}`);
+    // Its Folio, in the palette the widget wears (a stored widget keeps one, by its id; a block with no id yet takes
+    // the one its page gives it): the same in the chat's Widgets list, the Library, its tab and the dock.
     const mark = el("span", "cd-file-badge cd-widget-badge");
-    mark.append(icon("play-circle"));
+    mark.dataset.folio = id || ref;
+    paintFolio(mark);
     if (removed) {
       // Deleted from the Library: its name stays, as a deleted file's does; nothing to open or show.
       row.dataset.removed = "";
@@ -2904,7 +2917,8 @@
     row.dataset.widget = w.id;
     if (w.removed) row.dataset.removed = "";
     const badge = el("span", "cd-wbadge");
-    badge.append(icon("play-circle"));
+    badge.dataset.folio = w.id;
+    paintFolio(badge);
     const words = el("span", "cd-wwords");
     const when = window.DgcTime?.label(Date.parse(w.created_at)) || "";
     const meta = w.removed ? "Deleted" : [when, w.prompt ? `from “${w.prompt}”` : ""].filter(Boolean).join(" · ");
@@ -2954,6 +2968,8 @@
     head.append(title, el("span", "cd-wcount", all.length ? `${live}, in the order they were made` : ""));
     const list = el("ul", "cd-wlist");
     list.setAttribute("aria-labelledby", title.id);
+    // In the order they were made: each without a palette gets the first its neighbours here don't wear.
+    chatMarks?.wear("widget", all.map((w) => ({ id: w.id })));
     list.append(...all.map(widgetRow));
     if (!all.length) list.append(el("li", "cd-wempty", "No widgets in this chat."));
     const parts = [head, list];
@@ -4289,7 +4305,6 @@
   // The host keeps the palette each chat's mark wears (src/dock.ts) and says every one in "dock". A project's page and
   // an Incognito chat (which is never listed) have none. A chat with no palette yet is given one here, and the host is
   // asked to keep it (media/shared/marks.js `keeper`; the host runs the same code).
-  const chatMarks = window.DgcMarks?.keeper((message) => vscode.postMessage(message)) || null;
   function chatPalette(id) {
     // Alone in its tab, its neighbours are the chats given a palette most recently.
     chatMarks.wear("chat", [{ id, born: window.DgcMarks.born("", state.conversation?.created_at || state.conversation?.updated_at) }]);
@@ -4327,6 +4342,7 @@
     const msg = event.data || {};
     if (msg.type === "dock") {
       chatMarks?.said(msg);
+      for (const holder of document.querySelectorAll("[data-folio]")) paintFolio(holder);      // each widget's Folio follows
       paintChatBlob(); return;
     }
     if (window.DgcVideo?.message(msg)) return;           // a video card's bytes, state or Stop (src/videoHost.ts)

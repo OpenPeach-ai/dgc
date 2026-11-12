@@ -199,12 +199,12 @@ test("the Library: a file, an artifact and a widget each have a pin beside their
   } finally { await x.page.close(); }
 });
 
-test("what a pinned thing looks like: a Pip's face, a session's mark, a file's small sheet, a widget's cube", async (t) => {
+test("what a pinned thing looks like: a Pip's face, a session's mark, a file's small sheet, a widget's Folio", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openDock(browser, { pins: [PINS[0], PINS[3], PINS[5], ...LIBRARY_PINS], most: 16, width: 360 });
   try {
     const d = await dockNow(x.page);
-    assert.deepEqual(d.items.map((i) => i.holds), ["face", "voxel", "mote", "sheet", "sheet", "sheet", "cube", "plus"]);
+    assert.deepEqual(d.items.map((i) => i.holds), ["face", "voxel", "mote", "sheet", "sheet", "sheet", "folio", "plus"]);
     const sheet = await x.page.evaluate(() => [...document.querySelectorAll("#dgc-dock .dgc-sheet")].map((s) => { const r = s.getBoundingClientRect(), tile = s.closest(".dgc-dock-item").getBoundingClientRect();
       return { kind: s.dataset.kind, h: r.height, tile: tile.height, inside: r.top >= tile.top - 0.5 && r.bottom <= tile.bottom + 0.5 }; }));
     assert.deepEqual(sheet.map((s) => s.kind), ["page", "sheet", "pdf"], "the output cards' sheet, by kind");
@@ -657,7 +657,7 @@ test("a mark on the dock: his own markup and CSS, no canvas; the running one mov
 });
 
 test("our own code: no third-party shader or library, nothing to credit, and the dock's own sheets take every colour from the tokens", () => {
-  for (const file of ["media/shared/marks.js", "media/shared/blob.js", "media/shared/dock.js", "media/shared/blob.css", "media/shared/dock.css", "media/shared/mote.css", "media/shared/voxel.css", "src/dock.ts"]) {
+  for (const file of ["media/shared/marks.js", "media/shared/blob.js", "media/shared/dock.js", "media/shared/blob.css", "media/shared/dock.css", "media/shared/mote.css", "media/shared/voxel.css", "media/shared/folio.css", "src/dock.ts"]) {
     const text = read(file);
     assert.doesNotMatch(text, /paper|shader|webgl|getContext|<canvas/i, `${file} draws with nothing but its own code`);
     const imports = [...text.matchAll(/^import .* from "([^"]+)";$/gm)].map((m) => m[1]);
@@ -666,10 +666,9 @@ test("our own code: no third-party shader or library, nothing to credit, and the
     assert.doesNotMatch(text, /https?:\/\//, `${file} links to nothing`);
   }
   assert.doesNotMatch(read("THIRD_PARTY_NOTICES.md"), /blob|liquid|dock/i, "nothing to credit");
-  const tokens = read("media/shared/tokens.css");
-  const pairs = [["a855f7", "ec4899"], ["3b82f6", "a855f7"], ["22d3ee", "3b82f6"], ["4ade80", "22d3ee"], ["facc15", "4ade80"], ["fb923c", "facc15"], ["ef4444", "fb923c"]];
-  pairs.forEach(([from, to], i) => { assert.match(tokens, new RegExp(`--blob-${i + 1}a:#${from}; --blob-${i + 1}b:#${to};`), `pair ${i + 1}`); });
-  assert.doesNotMatch(read("media/shared/blob.css") + read("media/shared/dock.css"), /#[0-9a-f]{6}\b/i, "the menu, the cube and the dock take every colour from the tokens");
+  // The seven colour pairs of the old blob and cube are gone with them: nothing wears them now.
+  assert.doesNotMatch(read("media/shared/tokens.css"), /--blob-/, "no token is left behind for a look that is gone");
+  assert.doesNotMatch(read("media/shared/blob.css") + read("media/shared/dock.css"), /#[0-9a-f]{6}\b/i, "the menu and the dock take every colour from the tokens");
 });
 
 // ---- a session's colour, from its three places -------------------------------------------------------------------------

@@ -98,7 +98,7 @@ export const dockNow = (page) => page.evaluate(() => {
   const items = [...host.querySelectorAll(".dgc-dock-item")].map((b) => ({ key: b.dataset.key || "+", kind: b.dataset.kind || "add", label: b.getAttribute("aria-label"), tab: b.tabIndex,
     ...rect(b), dot: b.querySelector(".dgc-dock-dot")?.dataset.dot || "", badge: b.querySelector(".dgc-dock-badge")?.textContent || "",
     mark: b.querySelector("[data-mark]") ? { set: b.querySelector("[data-mark]").dataset.mark, palette: b.querySelector("[data-mark]").dataset.palette, moving: b.querySelector("[data-mark]").hasAttribute("data-moving") } : null,
-    holds: b.querySelector("[data-mark]") ? b.querySelector("[data-mark]").dataset.mark : b.querySelector(".dgc-cube") ? "cube" : b.querySelector(".dgc-sheet") ? "sheet" : b.querySelector(".dgc-dock-face svg, .dgc-dock-face > *") ? "face" : b.querySelector(".dgc-dock-plus") ? "plus" : "" }));
+    holds: b.querySelector("[data-mark]") ? b.querySelector("[data-mark]").dataset.mark : b.querySelector(".dgc-sheet") ? "sheet" : b.querySelector(".dgc-dock-face svg, .dgc-dock-face > *") ? "face" : b.querySelector(".dgc-dock-plus") ? "plus" : "" }));
   const page = [...document.body.children].find((n) => n.id === "sessions-host" && n.checkVisibility()) || [...document.body.children].find((n) => n.id === "pips-host" && n.checkVisibility());
   const active = document.activeElement;
   const room = (n) => { const area = n.id === "pips-host" ? n.shadowRoot?.querySelector(".pip-app-root") || n : n, r = area.getBoundingClientRect(), cs = getComputedStyle(area);

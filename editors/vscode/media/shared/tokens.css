@@ -165,17 +165,6 @@
   --mark-word: #c7b5ff; --mark-word-shimmer: linear-gradient(105deg,#c7b5ff,#ece4ff,#ad96f4,#d8caff,#c7b5ff);
   --mark-plugin: #c5a9ff; --mark-icon: #b6a0ff;
   --mark-plugin-glow: linear-gradient(90deg, transparent, rgba(114,68,213,.24), rgba(121,69,235,.38), rgba(114,68,213,.24), transparent);
-  /* A session's liquid blob and a widget's cube (media/shared/blob.css): seven colour pairs, each rising from its first
-     colour at the bottom to its second at the top, and the glow a running session's blob takes. They are a session's own
-     colour, never the accent: a colour chosen from an id is one of pairs 2 to 7, so none is led by purple, and pair 1 is
-     there only when it is picked by hand. */
-  --blob-1a:#a855f7; --blob-1b:#ec4899; --blob-1g:#a855f7;
-  --blob-2a:#3b82f6; --blob-2b:#a855f7; --blob-2g:#3b82f6;
-  --blob-3a:#22d3ee; --blob-3b:#3b82f6; --blob-3g:#06b6d4;
-  --blob-4a:#4ade80; --blob-4b:#22d3ee; --blob-4g:#10b981;
-  --blob-5a:#facc15; --blob-5b:#4ade80; --blob-5g:#eab308;
-  --blob-6a:#fb923c; --blob-6b:#facc15; --blob-6g:#f97316;
-  --blob-7a:#ef4444; --blob-7b:#fb923c; --blob-7g:#ef4444;
   /* The dock at the foot of the side bar (media/shared/dock.css): a raised neutral ground, a hairline of light inside
      its top edge, and layered soft shadows. A tile is one more step of the text colour. */
   --dock-ground: color-mix(in srgb, var(--text) 7%, var(--bg));

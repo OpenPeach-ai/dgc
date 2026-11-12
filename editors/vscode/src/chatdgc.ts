@@ -1153,6 +1153,15 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
 
   private adoptWidget(panel: vscode.WebviewPanel, key: string, id: string, chat: string, html: string, name: string): void {
     panel.title = name;
+    // Its tab's icon is its Folio at rest, in the palette the widget wears (src/dock.ts keeps it by the widget's id;
+    // a page with no id yet wears the one its page gives it). It follows the palette once a list has given it one.
+    const paint = () => {
+      const icon = sessionIcon(this.context.extensionUri, "widget", key, dockOf(this.context).colour("widget", key));
+      try { if (icon && String(panel.iconPath) !== String(icon)) panel.iconPath = icon; } catch { /* a tab on its way out */ }
+    };
+    paint();
+    const worn = dockOf(this.context).onChange(paint);
+    panel.onDidDispose(() => worn.dispose());
     panel.webview.html = widgetDocument(html, this.widgetStates()[key]?.fields, id && chat ? { id, chat, title: name } : undefined);
     this.widgetPanels.set(key, panel);
     this.widgetPages.set(key, html);

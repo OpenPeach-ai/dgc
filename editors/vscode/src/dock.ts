@@ -6,12 +6,13 @@
 // Deleting a pinned session, chat, artifact, file or widget takes it off the dock (forget); a pinned Pip that is gone
 // is taken off by the side bar once its list no longer has it.
 //
-// A session's mark is the maintainer's own Voxel (a Work session) or Mote (a ChatDGC chat), in one of twelve palettes
-// (media/shared/marks.js). The palette a session wears is kept here, with the pins, from the moment it is given: a new
-// session gets the first palette not worn by the sessions around it, a session from before the marks the palette nearest
-// its old colour, and its owner may choose another of the twelve. Kept, it never changes with a reload or a new order.
-// Its editor tab's icon is its mark at rest, a PNG in media/session-icons/ (scripts/render-session-icons.mjs makes them
-// from the shipped CSS).
+// A session's mark is the maintainer's own Voxel (a Work session) or Mote (a ChatDGC chat), and a widget's his Folio,
+// each in one of twelve palettes (media/shared/marks.js). The palette a thing wears is kept here, with the pins, from
+// the moment it is given: a new session or widget gets the first palette not worn by the ones around it, a session from
+// before the marks the palette nearest its old colour, and a session's owner may choose another of the twelve. Kept, it
+// never changes with a reload or a new order. (DGC keeps nothing about a widget's look, so its palette is kept here, by
+// the widget's id.) An editor tab's icon is the mark at rest, a PNG in media/session-icons/
+// (scripts/render-session-icons.mjs makes them from the shipped CSS).
 import * as vscode from "vscode";
 import { readFileSync } from "fs";
 import marks from "../media/shared/marks.js";
@@ -54,7 +55,9 @@ export function dockPin(value: any, where = ""): DockPin | undefined {
     where: scoped ? String(typeof value.where === "string" ? value.where : where).slice(0, 1000) : "" };
 }
 const COLOUR_KEY = /^(?:work|chat):[A-Za-z0-9_.:|-]{1,200}$/;
-export type MarkKind = "work" | "chat";
+/** What may wear a palette: a session, a chat (their owner may also choose it), and a widget. */
+const WORN_KEY = /^(?:work|chat|widget):[A-Za-z0-9_.:|-]{1,200}$/;
+export type MarkKind = "work" | "chat" | "widget";
 
 /** Settings -> General -> Dock, as the editor keeps them. */
 export function dockSettings(): { show: DockShow; most: number; size: number } {
@@ -109,12 +112,13 @@ export class Dock {
     const here = this.folder();
     return this.all().filter((pin) => !pin.where || pin.where === here);
   }
-  /** The palette each session wears, the oldest first. A colour chosen before the marks counts as its palette. */
+  /** The palette each session, chat and widget wears, the oldest first. A colour chosen before the marks counts as
+   *  its session's palette. */
   colours(): Record<string, string> {
     const saved = this.context?.globalState?.get?.<Record<string, unknown>>(PALETTES), out: Record<string, string> = {};
     const before = this.context?.globalState?.get?.<Record<string, unknown>>(COLOURS);
     if (before && typeof before === "object") for (const [key, value] of Object.entries(before)) { const palette = marks.fromOld(value as number); if (COLOUR_KEY.test(key) && palette) out[key] = palette; }
-    if (saved && typeof saved === "object") for (const [key, value] of Object.entries(saved)) if (COLOUR_KEY.test(key) && marks.isPalette(value)) { delete out[key]; out[key] = value; }
+    if (saved && typeof saved === "object") for (const [key, value] of Object.entries(saved)) if (WORN_KEY.test(key) && marks.isPalette(value)) { delete out[key]; out[key] = value; }
     return out;
   }
   /** When the marks arrived on this computer: noted the first time it is asked, and kept. A session made before then
@@ -138,11 +142,11 @@ export class Dock {
   /** A page drew things with no palette yet (dockPalettes { kind, list: [{ id, born? }] }, its list in order): each is
    *  given one and it is kept. What already has a palette keeps it, whatever the page says. */
   async wear(kind: unknown, list: unknown): Promise<void> {
-    if (kind !== "work" && kind !== "chat") return;
+    if (kind !== "work" && kind !== "chat" && kind !== "widget") return;
     const rows: { id: string; born?: number }[] = [];
     for (const row of Array.isArray(list) ? list.slice(0, 200) : []) {
       const id = String((row as any)?.id ?? ""), born = (row as any)?.born;
-      if (COLOUR_KEY.test(dockKey(kind, id))) rows.push({ id, ...(typeof born === "number" && Number.isFinite(born) ? { born } : {}) });
+      if (WORN_KEY.test(dockKey(kind, id))) rows.push({ id, ...(typeof born === "number" && Number.isFinite(born) ? { born } : {}) });
     }
     const colours = this.colours(), fresh = marks.assign({ kind, list: rows, known: colours, since: this.since() });
     if (Object.keys(fresh).length) await this.keepColours({ ...colours, ...fresh });
@@ -276,7 +280,7 @@ export function dockOf(context: vscode.ExtensionContext): Dock {
 // ---- a mark as a still picture: an editor tab's icon ----------------------------------------------------------------
 const icons = new Map<string, vscode.Uri>();
 /** A mark at rest as a tab's icon: media/session-icons/<set>-<palette>.png (64 px, clear around it), carried inside the
- *  URI (nothing to fetch after a reload; see tabIcon.ts). `set`: "mote" | "voxel". undefined when it can't be read:
+ *  URI (nothing to fetch after a reload; see tabIcon.ts). `set`: "mote" | "voxel" | "folio". undefined when it can't be read:
  *  the tab keeps the plain mark. */
 export function markIcon(extensionUri: vscode.Uri, set: string, palette: string): vscode.Uri | undefined {
   if (!Object.prototype.hasOwnProperty.call(marks.SETS, set) || !marks.isPalette(palette)) return undefined;
@@ -288,8 +292,8 @@ export function markIcon(extensionUri: vscode.Uri, set: string, palette: string)
   }
   return uri;
 }
-/** A session's tab icon: its Voxel (Work) or its Mote (ChatDGC), in the palette it wears. undefined for a session with
- *  no id yet: it keeps the plain mark. */
+/** A session's tab icon: its Voxel (Work) or its Mote (ChatDGC), in the palette it wears; a widget's: its Folio.
+ *  undefined for one with no id yet: it keeps the plain mark. */
 export function sessionIcon(extensionUri: vscode.Uri, kind: MarkKind, id: string, palette: string): vscode.Uri | undefined {
   return id ? markIcon(extensionUri, marks.SET_OF[kind], marks.isPalette(palette) ? palette : marks.fallback(kind, id)) : undefined;
 }

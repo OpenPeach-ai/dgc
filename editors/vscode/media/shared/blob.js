@@ -1,5 +1,5 @@
 // The small menu a session's "...", its header's mark and the dock open (media/shared/blob.css is how it looks), with
-// the twelve palettes a session's mark can wear, and a widget's cube. A session's mark itself is the maintainer's own
+// the twelve palettes a session's mark can wear. A session's mark itself is the maintainer's own
 // Mote (a ChatDGC chat) or Voxel (a Work session), drawn by media/shared/marks.js (window.DgcMarks), which the pages
 // load before this. A classic script: Work's and ChatDGC's pages and the Library load it before their own script, so
 // all share window.DgcBlob.
@@ -9,33 +9,6 @@
   if (root.DgcBlob) return;
 
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  // A widget's cube still wears one of the seven colour pairs from before the marks (tokens.css: --blob-1a ...).
-  const PAIRS = 7;
-  const valid = (n) => Number.isInteger(n) && n >= 1 && n <= PAIRS;
-  /** The pair a widget's id gets by itself: one of 2 to 7, the same every time. Never 1, which is led by purple. */
-  function own(id) {
-    let h = 2166136261;
-    for (const ch of String(id || "")) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619); }
-    return 2 + ((h >>> 0) % (PAIRS - 1));
-  }
-  const pairOf = (id, picked) => (valid(Number(picked)) ? Number(picked) : own(id));
-
-  let cubes = 0;
-  /** A widget's cube as HTML, in the pair its id gets. */
-  function cube({ id = "", pair, size } = {}) {
-    const n = pairOf(id, pair), k = `dgc-cube-${++cubes}`;
-    return `<span class="dgc-cube" data-pair="${n}"${size ? ` style="--blob-size:${Number(size)}px"` : ""} aria-hidden="true"><svg viewBox="0 0 24 24"><defs>`
-      + `<linearGradient id="${k}t" x1="0" y1="0" x2="1" y2="1"><stop offset="0" class="cl"/><stop offset=".6" class="cb"/><stop offset="1" class="cm"/></linearGradient>`
-      + `<linearGradient id="${k}l" x1="0" y1="0" x2=".4" y2="1"><stop offset="0" class="cm"/><stop offset="1" class="ca"/></linearGradient>`
-      + `<linearGradient id="${k}r" x1="0" y1="0" x2="-.3" y2="1"><stop offset="0" class="ca"/><stop offset="1" class="cd"/></linearGradient>`
-      + `<radialGradient id="${k}h" cx=".35" cy=".3" r=".6"><stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs>`
-      + `<g stroke-linejoin="round" stroke-width="2.2">`
-      + `<path d="M12 3 L20.5 7.6 L12 12.2 L3.5 7.6 Z" fill="url(#${k}t)" stroke="url(#${k}t)"/>`
-      + `<path d="M3.5 7.6 L12 12.2 L12 21 L3.5 16.4 Z" fill="url(#${k}l)" stroke="url(#${k}l)"/>`
-      + `<path d="M20.5 7.6 L12 12.2 L12 21 L20.5 16.4 Z" fill="url(#${k}r)" stroke="url(#${k}r)"/>`
-      + `<path d="M12 3 L20.5 7.6 L12 12.2 L3.5 7.6 Z" fill="url(#${k}h)" stroke="none"/></g></svg></span>`;
-  }
-
   // ---- the small menu: rows, then (for a session) its twelve palettes ---------------------------------------------------
   const ICONS = {
     open: '<path d="M9 3h4v4M13 3 7.5 8.5M11.5 9.5V13H3V4.5h4"/>',
@@ -156,5 +129,5 @@
     return menu;
   }
 
-  root.DgcBlob = Object.freeze({ cube, popup, close, swatches, icon, isOpen: () => !!open, menu: () => open?.menu || null });
+  root.DgcBlob = Object.freeze({ popup, close, swatches, icon, isOpen: () => !!open, menu: () => open?.menu || null });
 })();

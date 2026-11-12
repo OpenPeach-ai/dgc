@@ -1,0 +1,12 @@
+/* Folio widget icons: span.folio > i + i + i. */
+.folio{--size:52px;--h:177;--sat:83%;--light:43%;--cycle:8s;--phase:0s;--body:linear-gradient(145deg,hsl(var(--h) var(--sat) 72%) 0%,hsl(var(--h) var(--sat) var(--light)) 45%,hsl(var(--h) var(--sat) 28%) 100%);--fold:linear-gradient(160deg,hsl(var(--h) 90% 83% / .8),hsl(var(--h) 85% 60% / .1) 63%,hsl(var(--h) 90% 35% / .5));--glaze:linear-gradient(145deg,hsl(var(--h) 95% 85% / .68),hsl(var(--h) 90% 55% / .06));display:inline-block;position:relative;width:var(--size);height:var(--size);flex:none;isolation:isolate;vertical-align:middle}
+.folio i{position:absolute;display:block;box-sizing:border-box;width:64%;height:68%;border-radius:24%;background:var(--body);box-shadow:inset 0 1px 1px #ffffff45,inset -1px -2px 2px #00000018;overflow:hidden;animation-duration:var(--cycle);animation-delay:var(--phase);animation-timing-function:ease-in-out;animation-iteration-count:infinite;animation-play-state:var(--folio-play,running)}
+.folio i::before,.folio i::after{content:"";position:absolute;display:block;pointer-events:none}
+.folio i::before{inset:-15% 13% 25% -12%;border-radius:30%;background:var(--fold);transform:rotate(-30deg)}
+.folio i::after{inset:35% 22% 6% 21%;border-radius:28%;background:var(--glaze);transform:rotate(14deg)}
+.folio i:nth-child(1){left:9%;top:8%;transform:rotate(-12deg)}
+.folio i:nth-child(2){left:19%;top:18%;transform:rotate(-3deg);background:linear-gradient(145deg,hsl(var(--h) 90% 72%),hsl(var(--h) 85% 44%) 70%,hsl(var(--h) 85% 29%))}
+.folio i:nth-child(3){left:27%;top:25%;transform:rotate(8deg);animation-name:folio-tilt}
+.folio--ember{--h:3;--sat:80%;--light:58%}.folio--peach{--h:22;--sat:92%;--light:67%}.folio--saffron{--h:39;--sat:96%;--light:52%}.folio--citron{--h:62;--sat:76%;--light:56%}.folio--lime{--h:90;--sat:74%;--light:52%}.folio--fern{--h:133;--sat:52%;--light:42%}.folio--mint{--h:158;--sat:65%;--light:71%}.folio--lagoon{--h:177;--sat:83%;--light:43%}.folio--ice{--h:195;--sat:86%;--light:74%}.folio--azure{--h:213;--sat:91%;--light:57%}.folio--iris{--h:247;--sat:87%;--light:65%}.folio--lilac{--h:273;--sat:67%;--light:77%}.folio--orchid{--h:294;--sat:70%;--light:51%}.folio--rose{--h:331;--sat:88%;--light:64%}
+@keyframes folio-tilt{0%,100%{transform:rotate(8deg) translate(0,0)}50%{transform:rotate(2deg) translate(-2%,-3%)}}
+@media(prefers-reduced-motion:reduce){.folio i{animation:none!important}}

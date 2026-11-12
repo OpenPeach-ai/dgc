@@ -2077,3 +2077,61 @@ test("a chat's wake-ups (0.52): its row reaches its tab, a due one is sent as it
   chat.onEvent({ type: "chatdgc_wakeups", conversation_id: ID(8), items: [] });
   assert.deepEqual(panel.last("wakeups"), { type: "wakeups", items: [] });
 });
+
+// A widget's tab wears its Folio (the maintainer's own mark for a widget, media/shared/folio.css): the still PNG of the
+// palette the widget wears, as a session's tab wears its Voxel or Mote. The palette is kept by the widget's id, with the
+// sessions' (src/dock.ts), from the moment a list gives it one.
+test("a widget's tab icon is its Folio's PNG, in the palette the widget wears, and follows it; a chat's own tab is its Mote's", async () => {
+  const kept = new Map(), globalState = { get: (k) => kept.get(k), update: async (k, v) => { kept.set(k, JSON.parse(JSON.stringify(v))); } };
+  kept.set("dgc.sessionPalettesSince", 1);
+  const c = new ChatDGC({ extensionUri: { fsPath: root, toString: () => root }, globalState });
+  c.attach(host);
+  host.offers = { version: 1, widget_library: 1 };
+  const png = (name) => `data:image/png;base64,${readFileSync(join(root, "media", "session-icons", `${name}.png`)).toString("base64")}`;
+  const marks = createRequire(import.meta.url)(join(root, "media", "shared", "marks.js"));
+  c.openLibrary();
+  const library = world.panels.at(-1);
+  library.say({ type: "ready" });
+  assert.equal(library.last("dock").since, 1, "the Library is told what each widget wears, and since when");
+  const W = (n) => ({ chat_id: ID(7), id: `wg_${String(n).repeat(16)}`, title: `Widget ${n}`, message_id: MSG(2), created_at: "2026-10-11T10:00:00Z", chat_title: "Loan" });
+  const open = (w) => {
+    library.say({ type: "widgetOpen", widget: w });
+    const get = last("chatdgc_widgets");
+    c.onEvent({ type: "chatdgc_widgets", request_id: get.request_id, op: "get", conversation_id: w.chat_id, widget_id: w.id, widget: { id: w.id, title: w.title, html: "<i>w</i>", at: 0, message_id: MSG(2) } });
+    return world.panels.at(-1);
+  };
+  // Opened before any list has drawn it: the palette its id alone gives, the same every time.
+  const first = open(W(1));
+  assert.equal(first.viewType, CHATDGC_WIDGET);
+  assert.equal(String(first.iconPath), png(`folio-${marks.fallback("widget", W(1).id)}`), "its Folio, as a PNG inside the URI");
+  assert.doesNotMatch(String(first.iconPath), /media|file:/, "nothing names the extension's folder");
+  // The Library draws its Widgets tab: each widget is given the first palette its neighbours don't wear, and it is kept.
+  library.say({ type: "dockPalettes", kind: "widget", list: [1, 2, 3].map((n) => ({ id: W(n).id })) });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual([1, 2, 3].map((n) => kept.get("dgc.sessionPalettes")[`widget:${W(n).id}`]), ["ember", "peach", "saffron"], "kept by the widget's id, with the sessions' palettes");
+  assert.equal(String(first.iconPath), png("folio-ember"), "the open tab follows");
+  assert.deepEqual([1, 2, 3].map((n) => library.last("dock").colours[`widget:${W(n).id}`]), ["ember", "peach", "saffron"], "and the page is told");
+  const second = open(W(2)), third = open(W(3));
+  assert.deepEqual([String(second.iconPath), String(third.iconPath)], [png("folio-peach"), png("folio-saffron")], "widgets side by side look different");
+  // "A reload": a new ChatDGC over the same kept state gives the same widget the same Folio.
+  const again = new ChatDGC({ extensionUri: { fsPath: root, toString: () => root }, globalState });
+  again.attach(host);
+  again.openLibrary();
+  const library2 = world.panels.at(-1);
+  library2.say({ type: "widgetOpen", widget: W(2) });
+  const get = last("chatdgc_widgets");
+  again.onEvent({ type: "chatdgc_widgets", request_id: get.request_id, op: "get", conversation_id: ID(7), widget_id: W(2).id, widget: { id: W(2).id, title: "Widget 2", html: "<i>w</i>", at: 0, message_id: MSG(2) } });
+  assert.equal(String(world.panels.at(-1).iconPath), png("folio-peach"));
+  // A ```widget block has no id: its tab still wears a Folio, one of the twelve, by its page.
+  const panel = (c.open(ID(7)), world.panels.at(-1));
+  panel.say({ type: "ready" });
+  c.onEvent({ type: "chatdgc_opened", request_id: last("chatdgc_open").request_id, conversation: { id: ID(7), title: "Loan" }, messages: [] });
+  panel.say({ type: "widgetOpen", html: "<i>fence</i>", title: "Tip calculator" });
+  const fenced = world.panels.at(-1);
+  assert.equal(fenced.title, "Tip calculator");
+  assert.match(String(fenced.iconPath), /^data:image\/png;base64,/);
+  assert.ok(marks.PALETTES.some((name) => String(fenced.iconPath) === png(`folio-${name}`)), "one of the twelve Folios");
+  // The chat's own tab wears its Mote, never a Folio.
+  assert.equal(String(panel.iconPath), png(`mote-${marks.fallback("chat", ID(7))}`));
+  c.dispose(); again.dispose();
+});

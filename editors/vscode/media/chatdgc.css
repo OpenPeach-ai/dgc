@@ -51,8 +51,9 @@ body { --bg: var(--vscode-editor-background, var(--fallback-bg)); --cd-col: 760p
 .cd-wlist { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: 0; padding: 4px; list-style: none; }
 .cd-wrow { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: var(--r-md); }
 .cd-wrow:hover, .cd-wrow:focus-within { background: color-mix(in srgb, var(--text) 5%, transparent); }
-.cd-wbadge { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; color: #fff; font-size: 14px;
-  background: color-mix(in srgb, var(--accent) 45%, #0f766e); }
+/* A widget's Folio (media/shared/folio.css, the maintainer's own), 24 px in a list as he sets it. */
+.cd-wbadge { flex: none; display: grid; place-items: center; width: 28px; height: 28px; line-height: 0; color: var(--muted); font-size: 14px; }
+.cd-wbadge [data-mark] { --size: 24px; }
 .cd-wrow[data-removed] .cd-wbadge { opacity: .4; }
 .cd-wwords { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .cd-wname, .cd-wmeta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -751,6 +752,9 @@ button.cd-project-card:hover { border-color: var(--border-strong); background: v
 /* A row's small sheet of its kind (media/shared/filesheet.css) needs no tile under it, and room for its tab. */
 .lib-preview.lib-sheet { overflow: visible; background: none; border: 0; box-shadow: none; }
 .lib-preview .codicon { font-size: 18px; }
+/* A widget's row: its Folio (media/shared/folio.css), with no tile under it. */
+.lib-preview.lib-widget { overflow: visible; background: none; line-height: 0; }
+.lib-preview.lib-widget [data-mark] { --size: 36px; }
 .lib-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .lib-name { overflow: hidden; color: var(--text); font: var(--w-med) var(--t-sm)/1.35 var(--sans); text-overflow: ellipsis; white-space: nowrap; }
 .lib-meta { overflow: hidden; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); text-overflow: ellipsis; white-space: nowrap; }
@@ -989,7 +993,9 @@ path.cd-chart-mark, rect.cd-chart-mark { stroke: none; }
 
 /* An interactive answer: a card, as a file's is, for a widget that opens in its own locked-down tab; its page below. */
 .cd-widget { max-width: 560px; }
-.cd-widget-badge { background: color-mix(in srgb, var(--accent) 45%, #0f766e); font-size: 16px; }
+/* Its Folio stands where a file's badge does, with no tile under it. */
+.cd-widget-badge { background: none; color: var(--muted); font-size: 16px; line-height: 0; }
+.cd-widget-badge [data-mark] { --size: 36px; }
 .cd-widget pre.code { margin: 6px 0 0; max-height: 360px; overflow: auto; }
 /* New replies and newly made widgets/Outputs appear once. Reopened history stays still. */
 @media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
