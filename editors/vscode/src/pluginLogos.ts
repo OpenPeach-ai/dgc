@@ -42,6 +42,30 @@ export function pluginLogoSource(extensionUri: vscode.Uri, item: PluginLogoItem)
   return file ? { file } : {};
 }
 
+/** An app a Pip reaches through Composio, as DGC names its toolkit (dgc/pip_app_links.py, TOOLKIT). */
+export const APP_ID = /^[a-z0-9][a-z0-9_]{1,39}$/;
+
+// The logo DGC ships for such an app, by its toolkit id: a small fixed list of the files in media/plugin-logos (the
+// same pictures the Google Workspace and Microsoft plugins use for these services). An app not listed has none.
+const APP_LOGOS: Record<string, string> = {
+  gmail: "gmail.png", googlecalendar: "calendar.png", googledrive: "drive.png", googlecontacts: "contacts.png",
+  googledocs: "docs.png", googleslides: "slides.png", notion: "notion.png", outlook: "outlook.png", onedrive: "onedrive.png",
+  github: "github.png", linear: "linear.png", dropbox: "dropbox.png", zoom: "zoom.png",
+};
+
+/** The logo of an app in a Pip's "Apps it can use", as a data: URI, by its toolkit id; "" when DGC ships none. The
+ *  file is chosen from the list above, never made from the id: the page only ever names the app. */
+export function appLogoData(extensionUri: vscode.Uri, toolkit: string): string {
+  if (typeof toolkit !== "string" || !APP_ID.test(toolkit) || !Object.hasOwn(APP_LOGOS, toolkit)) return "";
+  try {
+    const file = vscode.Uri.joinPath(extensionUri, "media", "plugin-logos", APP_LOGOS[toolkit]);
+    const data = readBoundedFileSync(fs.realpathSync(file.fsPath), MAX_BYTES);
+    return data?.subarray(0, 8).equals(PNG) ? `data:image/png;base64,${data.toString("base64")}` : "";
+  } catch {
+    return "";
+  }
+}
+
 const TYPES: Record<string, string> = { ".png": "image/png", ".svg": "image/svg+xml", ".ico": "image/x-icon" };
 
 /** The logo as a data: URI, for a reply's "Used Aave" line: it works in any webview (each allows img-src data:),

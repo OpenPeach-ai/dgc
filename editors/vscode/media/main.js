@@ -12406,7 +12406,7 @@ function permissionChoices(ev) {
     if (msg.type === "chat_tab") { rememberTab(msg.session); paintSessionBlob(msg.session); return; }
     // pipsModelsChanged: Settings or the Router changed, so the embedded Pips page reads its model list again.
     // pipsUnreadChanged: a Pip was marked read somewhere (its pill, its chat, a card acted on): it reads its counts again.
-    if (["pipsPluginLogos", "pipsFiles", "pipsModelsChanged", "pipsUnreadChanged"].includes(msg.type)) { for (const listener of pipsListeners) listener(msg); return; }
+    if (["pipsPluginLogos", "pipsAppLogos", "pipsFiles", "pipsModelsChanged", "pipsUnreadChanged"].includes(msg.type)) { for (const listener of pipsListeners) listener(msg); return; }
     // pipSetupChanged: a new-Pip card was created or turned down somewhere else; this chat's copy and the Pips page read it again.
     if (msg.type === "pipSetupChanged") { pipSetupCards?.receive(msg); for (const listener of pipsListeners) listener(msg); return; }
     if (["pipsConnection","pipsReply","pipsVisibility"].includes(msg.type)) {

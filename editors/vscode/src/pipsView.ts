@@ -6,6 +6,7 @@ import type { Artifacts } from './artifacts';
 import { mcpAppsHost } from './mcpApps';
 import { handleVideoMessage, VIDEO_MESSAGES } from './videoHost';
 import { displayMentions, workspaceFiles } from './mentionsHost';
+import { APP_ID, appLogoData } from './pluginLogos';
 
 /** What a Pip's page uses of the artifacts (artifacts.ts): the person's dashboards, and opening one. */
 type PipArtifactsHub = Pick<Artifacts, 'list' | 'open' | 'offers'>;
@@ -959,6 +960,15 @@ export class PipsEditor implements vscode.Disposable {
       const logos: Record<string, string> = {};
       for (const id of ids) logos[id] = this.pluginLogo?.(id) || '';
       this.post({ type: 'pipsPluginLogos', logos }, surface);
+      return;
+    }
+    if (message?.type === 'pipsAppLogos' && !computer) {
+      // The logos of the apps in a Pip's "Apps it can use" (its Composio toolkits), by id; "" for one DGC ships none for.
+      const ids = Array.isArray(message.apps) ? message.apps.filter((id: unknown) => typeof id === 'string' && APP_ID.test(id)).slice(0, 16) : [];
+      if (!ids.length) return;
+      const logos: Record<string, string> = {};
+      for (const id of ids) logos[id] = appLogoData(this.extensionUri, id);
+      this.post({ type: 'pipsAppLogos', logos }, surface);
       return;
     }
     if (message?.type === 'pipDesktop' && computer) {

@@ -2,6 +2,8 @@
 // One row an app: a plugin turned on in Settings, or an app the Pip reaches through Composio, each with a switch
 // (every app on until you switch it off; switched off, its link stays). An app with addresses lists them under it,
 // each with Disconnect (it asks first), and "Add another address" raises a Connect card in the Pip's chat.
+// Each row has the app's logo left of its name (asked 12 Nov): a plugin's own, or the one DGC ships for the app. The
+// host finds it (the page names the app, never a file); an app with none shows its first letter in the same square.
 import {infoTip} from './pipInfoTip.js';
 
 const ID = /^[a-z0-9][a-z0-9_-]{1,39}$/;
@@ -27,13 +29,25 @@ export function pipAppSwitched(value, app, on) {
 }
 
 const KIND = { plugin: 'A plugin from Settings', app: 'An app through Composio' };
+const PLUGIN_ID = /^[a-z0-9][a-z0-9-]{0,63}$/, APP_ID = /^[a-z0-9][a-z0-9_]{1,39}$/, LOGO = /^data:image\/(png|svg\+xml|x-icon);base64,[A-Za-z0-9+/=]+$/;
+
+/** The app's mark, left of its name: its logo when the page has it (`logo(app)` -> a data: URI, or ""), else its first
+ *  letter. A mark with no logo yet says which app it is ([data-plugin-mark] for a plugin, [data-app-mark] for an app
+ *  through Composio), and the page fills it once the host sends the logo. Always a square of the same size, so names
+ *  stay in line. */
+function appMark(a, esc, logo) {
+  const own = a.kind === 'plugin' ? (PLUGIN_ID.test(a.id) ? ` data-plugin-mark="${a.id}"` : '') : APP_ID.test(a.id) ? ` data-app-mark="${a.id}"` : '';
+  const found = own && typeof logo === 'function' ? logo(a) : '', src = typeof found === 'string' && LOGO.test(found) ? found : '';
+  return `<span class="dgc-card-icon app-link-mark pip-app-mark${src ? ' has-logo' : ''}" aria-hidden="true"${own}>${src ? `<img alt="" src="${src}">` : esc(([...a.name.trim()][0] || '?').toUpperCase())}</span>`;
+}
 
 /**
  * The section. `apps`: pipAppsPage's list, or null while it loads. `links`: the Pip's app links (list_pip_app_links),
  * whose connected ones are an app's addresses, each with its card id for Disconnect. `confirm`: the link whose
- * Disconnect is asking. `waiting`: the apps with a Connect card already open for one more address.
+ * Disconnect is asking. `waiting`: the apps with a Connect card already open for one more address. `logo(app)`: the
+ * app's logo as the page has it, or "".
  */
-export function pipAppsMarkup(apps, { esc, links = [], busy = false, error = '', pipName = 'This Pip', confirm = '', waiting = [] }) {
+export function pipAppsMarkup(apps, { esc, links = [], busy = false, error = '', pipName = 'This Pip', confirm = '', waiting = [], logo = null }) {
   const off = busy ? ' disabled' : '', name = esc(pipName);
   const head = `<section class="pip-page-group pip-apps" aria-label="Apps it can use"><h3 class="pip-page-label">Apps it can use${infoTip('pipAppsUseSays', 'Apps it can use',
     `Every app is on until you switch it off here. Off, ${name} can’t read it, use it or ask for it; its sign-in stays, so switching it back on needs nothing more. Other Pips are not changed.`)}</h3>`;
@@ -60,7 +74,7 @@ export function pipAppsMarkup(apps, { esc, links = [], busy = false, error = '',
         ? `<span class="row-words"><small>A card for one more ${esc(a.name)} address is waiting in its chat.</small></span><button type="button" class="quiet pill" data-pip-app-add="${esc(a.id)}"${off}>Show the card</button>`
         : `<button type="button" class="quiet pill wide" data-pip-app-add="${esc(a.id)}"${off}>Add another address</button>`}</li>` : '';
     return `<li class="pip-app${a.on ? '' : ' is-off'}" data-pip-app="${esc(a.id)}" data-kind="${a.kind}" data-on="${a.on}">`
-      + `<div class="pip-page-row static"><span class="row-words"><strong>${esc(a.name)}</strong><small id="${esc(sid)}">${says}</small></span>`
+      + `<div class="pip-page-row static">${appMark(a, esc, logo)}<span class="row-words"><strong>${esc(a.name)}</strong><small id="${esc(sid)}">${says}</small></span>`
       + `<label class="switch" title="${a.on ? 'On' : 'Off'}"><input type="checkbox" role="switch" data-pip-app-switch="${esc(a.id)}" aria-label="${esc(a.name)} for ${name}" aria-describedby="${esc(sid)}"${a.on ? ' checked' : ''}${off}><span aria-hidden="true"></span></label></div>`
       + (list || more ? `<ul class="pip-page-list pip-app-addresses" aria-label="${esc(a.name)} addresses">${list}${more}</ul>` : '') + '</li>';
   };

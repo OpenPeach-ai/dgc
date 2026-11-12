@@ -1368,6 +1368,14 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 .pip-app-addresses>.pip-page-row.sub{padding-left:28px}
 .pip-app-address .row-words>span{overflow-wrap:anywhere}
 .pip-app.is-off>.pip-page-row .row-words>strong,.pip-app.is-off .pip-app-address .row-words>span{color:var(--muted)}
+/* Its logo left of its name (asked 12 Nov): the mark a plugin's card has in the Pip's chat (22 px, a 16 px logo, on
+   the tile that logo's own colours want: the same in dark and light). No logo: the app's first letter in the same
+   square, quiet grey, never a gap, so names stay in line. Off: the mark is grey and faint with the row. */
+.pip-app-mark.app-link-mark{width:22px;height:22px;margin:0;border-radius:7px;font:500 11px/1 var(--sans,var(--vscode-font-family))}
+.pip-app-mark.app-link-mark:not(.has-logo){background:color-mix(in srgb,var(--text,var(--vscode-foreground)) 8%,transparent);color:var(--text,var(--vscode-foreground))}
+.pip-app.is-off>.pip-page-row>.pip-app-mark{filter:grayscale(1);opacity:.5}
+/* The mark takes its room from the words (22 px and the row's 12 px gap), so the switch stays beside the name at the width it did before. */
+.pip-app>.pip-page-row.static>.row-words{flex-basis:146px}
 .pip-app-more{justify-content:flex-end}.pip-app-more>button{margin-left:auto}
 .pip-app-confirm{flex-wrap:wrap;justify-content:flex-end;color:var(--text-2)}
 .pip-apps>p.error{margin:0;padding:8px 14px 10px;font-size:12px}

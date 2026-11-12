@@ -145,3 +145,50 @@ test('the allow-list: the three commands go from the Pips page at API 88, an app
  const tab=h.panels.at(-1);assert.ok(tab,'its computer tab opened');
  for(const request of [{type:'get_pip_apps',pip_id:PIP},{type:'set_pip_app',pip_id:PIP,app:'gmail',on:false}]){const r=h.ask(request,tab);assert.equal(r.call,undefined);assert.equal(r.reply.ok,false);}
 });
+
+// A logo beside each app (asked 12 Nov: "each app should show its logo as well next to the name"). The row's mark sits
+// left of the name: the logo when the page has it, else the app's first letter in the same square, and it says which
+// app it is so the page can fill it once the host sends the logo. The page never makes a path or a URL from an app.
+test('each app’s row has its mark left of the name: its logo when the page has it, else its first letter, and which app to ask for',()=>{
+ const PNG='data:image/png;base64,iVBORw0KGgo=';
+ const apps=pipAppsPage({pip_id:PIP,apps:[...APPS,{id:'google_tasks',name:'google tasks',kind:'app',on:true}]},PIP);
+ const none=dom(pipAppsMarkup(apps,{esc,links:LINKS,pipName:'Mornings'}));
+ const rows=d=>[...d.querySelectorAll('.pip-apps-list>.pip-app')];
+ for(const li of rows(none)){
+  const row=li.querySelector(':scope>.pip-page-row'),mark=row.firstElementChild;
+  assert.ok(mark.classList.contains('pip-app-mark'),`${li.dataset.pipApp}: the mark is first in the row, left of the name`);
+  assert.equal(mark.nextElementSibling,row.querySelector('.row-words'));
+  assert.equal(mark.getAttribute('aria-hidden'),'true','the name beside it says the app; the mark is not read out');
+  assert.ok(mark.classList.contains('dgc-card-icon')&&mark.classList.contains('app-link-mark'),'the mark a card in the Pip’s chat has');
+  assert.equal(mark.querySelector('img'),null);
+  assert.equal(mark.textContent,li.querySelector('strong').textContent[0].toUpperCase(),'no logo yet: its first letter, never a gap');
+  assert.equal(mark.classList.contains('has-logo'),false);
+ }
+ // Which app the page asks the host for: a plugin by its id, an app through Composio by its toolkit.
+ assert.deepEqual(rows(none).map(li=>{const m=li.querySelector('.pip-app-mark');return [li.dataset.pipApp,m.dataset.pluginMark||'',m.dataset.appMark||''];}),
+  [['airtable','airtable',''],['stripe','stripe',''],['gmail','','gmail'],['slack','','slack'],['google_tasks','','google_tasks']]);
+ assert.equal(rows(none)[4].querySelector('.pip-app-mark').textContent,'G','a lower-case name: its letter in capitals');
+ // The addresses under an app have no mark of their own.
+ assert.equal(none.querySelectorAll('.pip-app-addresses .pip-app-mark').length,0);
+ assert.equal(none.querySelectorAll('.pip-app-mark').length,5,'one mark an app');
+ // With the logos the page has: a picture, for the app it was asked about and by its kind.
+ const asked=[];
+ const some=dom(pipAppsMarkup(apps,{esc,links:LINKS,pipName:'Mornings',logo:a=>{asked.push(`${a.kind}:${a.id}`);return a.id==='airtable'||a.id==='gmail'?PNG:'';}}));
+ assert.deepEqual(asked,['plugin:airtable','plugin:stripe','app:gmail','app:slack','app:google_tasks']);
+ const marks=Object.fromEntries(rows(some).map(li=>[li.dataset.pipApp,li.querySelector('.pip-app-mark')]));
+ for(const id of ['airtable','gmail']){assert.equal(marks[id].querySelector('img').getAttribute('src'),PNG);assert.equal(marks[id].querySelector('img').getAttribute('alt'),'');
+  assert.ok(marks[id].classList.contains('has-logo'));assert.equal(marks[id].textContent,'','the logo in place of the letter');}
+ for(const id of ['stripe','slack','google_tasks']){assert.equal(marks[id].querySelector('img'),null);assert.equal(marks[id].textContent,id[0].toUpperCase());}
+ // An app that is off keeps its mark (the row's own class mutes it), and the row's words are as they were.
+ assert.ok(rows(some)[1].classList.contains('is-off'));assert.ok(marks.stripe);
+ assert.equal(rows(some)[0].querySelector('.row-words').textContent,'AirtableA plugin from Settings');
+ // Only a picture's data: URI is ever drawn: anything else the page is handed is the letter.
+ for(const bad of ['javascript:alert(1)','https://logos.example/gmail.png','data:text/html;base64,PGI+','data:image/png;base64,AAAA" onerror="x',7,null,{}]){
+  const d=dom(pipAppsMarkup(apps,{esc,logo:()=>bad}));
+  assert.equal(d.querySelector('img'),null,String(bad));assert.equal(d.querySelectorAll('.pip-app-mark.has-logo').length,0);
+  assert.equal(d.querySelector('[onerror]'),null);
+ }
+ // The page's markup never names a file or an address for a logo.
+ assert.doesNotMatch(pipAppsMarkup(apps,{esc,links:LINKS}),/plugin-logos|\.png|https?:/);
+ assert.doesNotMatch(none.body.textContent,/\bAI\b/);
+});

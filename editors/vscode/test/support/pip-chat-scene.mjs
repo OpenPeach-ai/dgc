@@ -253,13 +253,17 @@ export const host = (opts) => `(${function (PIP, opts) {
   // Airtable (a plugin, on), Stripe (a plugin, switched off), Gmail (an app with two addresses) and Google Calendar (an
   // app with one). "one": Gmail has one address too. "refuse": a switch is refused. What is switched, added and
   // disconnected changes what the next read answers, as DGC would (window.__apps).
+  // "logos": the same, and Todoist (an app with one address, which DGC ships no logo for) and Notion (an app switched
+  // off). opts.logos: what the host answers a logo request with, {plugins: {id: data URI}, apps: {id: data URI}}
+  // ("" for any other id), as src/pipsView.ts does; without it the host stays silent, and every mark is a letter.
   // opts.allow: an email this Pip wrote waits as an Allow card ("event": a calendar event it drafted waits too).
   if (opts.apps && !project) {
     const alink = (c, toolkit, app, label, account) => ({ ...link, id: "applink_" + c.repeat(32), toolkit, app, status: "connected", label, server: "composio", account, reason: `To use your ${app}.` });
     const state = window.__apps = { off: new Set(["stripe"]), next: 0, links: [alink("1", "gmail", "Gmail", "pitch@studio.example", "ca_pitch000"),
       ...(opts.apps === "one" ? [] : [alink("2", "gmail", "Gmail", "dev@studio.example", "ca_dev00000")]), alink("3", "googlecalendar", "Google Calendar", "pitch@studio.example", "ca_cal00000"),
       ...(opts.allow === "event" ? [alink("4", "googlecalendar", "Google Calendar", "family@home.example", "ca_family00")] : [])] };
-    const plugins = [["airtable", "Airtable"], ["stripe", "Stripe"]], names = { gmail: "Gmail", googlecalendar: "Google Calendar" };
+    const plugins = [["airtable", "Airtable"], ["stripe", "Stripe"]], names = { gmail: "Gmail", googlecalendar: "Google Calendar", notion: "Notion", todoist: "Todoist" };
+    if (opts.apps === "logos") { state.links.push(alink("5", "todoist", "Todoist", "me@todo.example", "ca_todo0000")); state.off.add("notion"); }
     const find = (r) => { const found = state.links.find((l) => l.id === r.link_id); if (!found) throw Error("That app connection card no longer exists."); return found; };
     Object.assign(answers, {
       // (As dgc/pip_app_switches.py lists them: the plugins, then each linked app with its accounts, then any other app switched off.)
@@ -519,7 +523,12 @@ export const host = (opts) => `(${function (PIP, opts) {
   if (opts.convs && (opts.api || 0) >= 86 && !opts.ownKeys && !opts.keys) answers.list_pip_keys ||= () => ({ pip_id: PIP, keys: [] });
   window.acquireVsCodeApi = () => ({ getState: () => undefined, setState() {}, postMessage(m) {
     // (What the page tells its host besides a request, such as a photo to open or a file to download: window.__posted.)
-    if (m?.type !== "pipsRequest") { (window.__posted ||= []).push(m); return; }
+    if (m?.type !== "pipsRequest") { (window.__posted ||= []).push(m);
+      // A logo request (opts.logos): answered as the host does, a data: URI or "" for each id asked.
+      const asked = opts.logos && (m?.type === "pipsPluginLogos" ? m.plugins : m?.type === "pipsAppLogos" ? m.apps : null);
+      if (asked) { const known = opts.logos[m.type === "pipsPluginLogos" ? "plugins" : "apps"] || {};
+        setTimeout(() => window.postMessage({ type: m.type, logos: Object.fromEntries(asked.map((id) => [id, known[id] || ""])) }, "*"), opts.logosAfter || 1); }
+      return; }
     const make = answers[m.request.type];
     if (!make) window.__unanswered.push(m.request.type);
     (window.__sent ||= []).push(m.request);

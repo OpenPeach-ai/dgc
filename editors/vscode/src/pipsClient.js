@@ -1233,6 +1233,8 @@ const PIP_DOCUMENT_EXTENSIONS=['.pdf','.docx','.xlsx','.pptx','.odt','.ods','.od
 const chatImages=new Map(),messageImageCache=new Map(),messageImageFlight=new Set();
 // Plugin logos for "Used [logo] Aave", by plugin id: the host reads each once (a data: URI; "" for none).
 const pluginLogoCache=new Map(),pluginLogoAsked=new Set();
+// The logos of the apps in "Apps it can use" that a Pip reaches through Composio, by toolkit id: the host finds each (src/pluginLogos.ts).
+const appLogoCache=new Map(),appLogoAsked=new Set();
 // Files go with a message too, as in the main chat: text and code, PDF, Word, Excel, PowerPoint,
 // OpenDocument, RTF, CSV and TSV. Inline, up to 4 and 2 MB in all with any images; from API 52, the Work
 // chat's limits: up to 16, a document up to 16 MB, a text or code file up to 1 MB, 32 MB in all.
@@ -1310,17 +1312,17 @@ function hydratePluginLogos(){
  // A logo already drawn (with the card's markup) gets the backdrop its own colours want (media/pluginCalls.js).
  for(const img of document.querySelectorAll('.app-link-mark.has-logo img'))if(!img.parentElement.classList.contains('logo-on-dark')&&!img.parentElement.classList.contains('logo-on-light'))globalThis.DgcPluginCalls?.backdrop(img,img.parentElement);
  const wanted=[...new Set([...document.querySelectorAll('[data-plugin-mark]')].map(n=>n.dataset.pluginMark))].filter(id=>!pluginLogoCache.has(id)&&!pluginLogoAsked.has(id)).slice(0,16);
- if(!wanted.length)return;
- for(const id of wanted)pluginLogoAsked.add(id);
- vscode.postMessage({type:'pipsPluginLogos',plugins:wanted});
+ if(wanted.length){for(const id of wanted)pluginLogoAsked.add(id);vscode.postMessage({type:'pipsPluginLogos',plugins:wanted});}
+ const apps=[...new Set([...document.querySelectorAll('[data-app-mark]')].map(n=>n.dataset.appMark))].filter(id=>!appLogoCache.has(id)&&!appLogoAsked.has(id)).slice(0,16);
+ if(apps.length){for(const id of apps)appLogoAsked.add(id);vscode.postMessage({type:'pipsAppLogos',apps});}
 }
-function takePluginLogos(logos){
+function takePluginLogos(logos,app=false){
  if(!record(logos))return;
  for(const [id,src] of Object.entries(logos)){
-  if(!/^[a-z0-9][a-z0-9-]{0,63}$/.test(id)||typeof src!=='string'||src&&!/^data:image\/(png|svg\+xml|x-icon);base64,/.test(src))continue;
-  pluginLogoCache.set(id,src);
+  if(!(app?/^[a-z0-9][a-z0-9_]{1,39}$/:/^[a-z0-9][a-z0-9-]{0,63}$/).test(id)||typeof src!=='string'||src&&!/^data:image\/(png|svg\+xml|x-icon);base64,/.test(src))continue;
+  (app?appLogoCache:pluginLogoCache).set(id,src);
   if(!src)continue;
-  for(const mark of document.querySelectorAll(`[data-plugin-mark="${id}"]`)){const img=document.createElement('img');img.alt='';img.src=src;mark.replaceChildren(img);if(mark.classList.contains('app-link-mark')){mark.classList.add('has-logo');globalThis.DgcPluginCalls?.backdrop(img,mark);}}
+  for(const mark of document.querySelectorAll(`[data-${app?'app':'plugin'}-mark="${id}"]`)){const img=document.createElement('img');img.alt='';img.src=src;mark.replaceChildren(img);if(mark.classList.contains('app-link-mark')){mark.classList.add('has-logo');globalThis.DgcPluginCalls?.backdrop(img,mark);}}
  }
 }
 // A thumbnail of a big photo is drawn from the original once and kept small (a 12 MP photo is 48 MB once
@@ -1674,7 +1676,7 @@ function appsUseMarkup(off){
  if(appsUse.asked!==S.selected)void loadAppsUse();
  const mine=appsUse.pip===S.selected;
  return pipAppsMarkup(mine?appsUse.value:null,{esc,links:S.appLinks||[],busy:off||appsUse.busy||!!appLinkBusy,error:mine?appsUse.error:'',pipName:S.pip?.name||'This Pip',confirm:appsUse.confirm,
-  waiting:shownAppLinks(S.appLinks).filter(l=>l.another===true).map(l=>l.toolkit)});
+  waiting:shownAppLinks(S.appLinks).filter(l=>l.another===true).map(l=>l.toolkit),logo:a=>(a.kind==='plugin'?pluginLogoCache:appLogoCache).get(a.id)||''});
 }
 async function setAppUse(app,on){
  const row=appsUse.pip===S.selected?(appsUse.value||[]).find(a=>a.id===app):null;
@@ -6182,6 +6184,7 @@ const stopMessages=options.onMessage(message=>{
   if(message.type==='pipsReply'){broker.receive(message);if(message.ok===true)window.setTimeout(clearBusy,0);return;}
   if(globalThis.DgcPictureFold?.message(message))return;     // which pictures stay folded, and the setting
   if(message.type==='pipsPluginLogos'){takePluginLogos(message.logos);return;}
+  if(message.type==='pipsAppLogos'){takePluginLogos(message.logos,true);return;}
   if(message.type==='pipsFiles'){projectFiles=(Array.isArray(message.files)?message.files:[]).filter(f=>record(f)&&typeof f.label==='string').slice(0,600);chatPicker?.refresh();return;}
   // Settings or the Router changed: Default may run somewhere else now. A list already read is read again.
   // A Pip was marked read somewhere else (its pill on the home, a card in a Work chat): the counts are read again.
