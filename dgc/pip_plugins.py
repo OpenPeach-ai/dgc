@@ -321,8 +321,14 @@ def listing(registry, pip_id, config) -> dict:
 
 
 def allowed(registry, pip_id, config) -> dict:
-    """The plugins this Pip may use now: every one installed and turned on in Settings → Plugins."""
-    return installed(config)
+    """The plugins this Pip may use now: every one installed and turned on in Settings → Plugins, but for any switched
+    off on this Pip's page (pip_app_switches, pips-09)."""
+    found = installed(config)
+    if registry is None or not found:
+        return found
+    from .pip_app_switches import off
+    gone = off(registry, pip_id)
+    return {plugin: info for plugin, info in found.items() if plugin not in gone}
 
 
 def require_server(registry, pip_id, server, config):
@@ -727,6 +733,22 @@ def pin_batch(arguments, links) -> tuple:
     return {**arguments, "tools": pinned}, None
 
 
+def _switched_off(registry, pip_id, arguments, links) -> str:
+    """The words refusing a batch with a call for an app switched off on this Pip's page (pips-09), or ''."""
+    from .pip_app_links import app_name
+    from .pip_app_switches import off
+    gone = off(registry, pip_id)
+    calls = arguments.get("tools") if isinstance(arguments, dict) else None
+    if not gone or not isinstance(calls, list):
+        return ""
+    for call in calls:
+        toolkit = composio_toolkit(call.get("tool_slug"), links) if isinstance(call, dict) else ""
+        if toolkit in gone:
+            return (f"{app_name(toolkit)} is switched off for this Pip on its page, so nothing ran. The user can switch "
+                    "it back on there.")
+    return ""
+
+
 def require_pinned(registry, pip_id, info, call) -> None:
     """Before an action the user allowed runs (and when it is proposed): what it sends still names this Pip's account. A
     card edited, or written before the link changed, says so rather than running on another inbox. Every app call names
@@ -744,6 +766,9 @@ def require_pinned(registry, pip_id, info, call) -> None:
     if call.get("tool") != COMPOSIO_EXECUTE:
         return
     arguments = call.get("arguments")
+    off = _switched_off(registry, pip_id, arguments, links)
+    if off:
+        raise RegistryError("app_off", off)
     pinned, refused = pin_batch(arguments, links)
     if refused is not None:
         raise RegistryError("account_changed", refused)
@@ -1057,6 +1082,10 @@ class Session:
         mine = allowed(registry, self.pip_id, self.config)
         plugin = _plugin_name(args.get("plugin"), mine)
         if plugin not in mine:
+            from .pip_app_switches import off
+            if plugin in off(registry, self.pip_id):
+                return (f"error: {plugin} is switched off for this Pip on its page, so nothing ran. Say so in one sentence; "
+                        "the user can switch it back on there.")
             return (f"{plugin} isn’t added in DGC, or it’s turned off. Tell the user in one sentence to add it in "
                     "Settings → Plugins (and sign in there if it asks).")
         info = {**mine[plugin], "plugin": plugin}
@@ -1168,6 +1197,9 @@ class Session:
                               f"{link.get('label') or link['account']}), so it did not run. Use {COMPOSIO_EXECUTE}, which "
                               "stays on the linked account.")
             return arguments, None
+        refused = _switched_off(registry, self.pip_id, arguments, links)
+        if refused:
+            return None, refused
         pinned, refused = pin_batch(arguments, links)
         if refused is not None:
             return None, refused

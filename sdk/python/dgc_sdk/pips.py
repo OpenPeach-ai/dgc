@@ -434,6 +434,11 @@ API86_FIELDS = {'open_pip_computer': frozenset({'number'}), 'use_pip_computer_vi
 # DGC takes them only from the user on the computer it runs on: an app built on the SDK is refused by the runtime.
 API87_MUTATIONS = frozenset({'copy_pip_computer_file_in', 'copy_pip_computer_file_out'})
 MUTATION_COMMANDS |= API87_MUTATIONS
+# API 88 (pips-09): "Apps it can use", a switch per app on each Pip (every app on until switched off).
+API88_READS = frozenset({'get_pip_apps'})
+API88_MUTATIONS = frozenset({'set_pip_app'})
+READ_COMMANDS |= API88_READS
+MUTATION_COMMANDS |= API88_MUTATIONS
 PIP_KEY_ID = re.compile(r"pipkey_[a-f0-9]{32}\Z")
 PIP_REPORT_AS = frozenset({'chat', 'doc', 'sheet'})
 TEMPLATE_CHANGE_ID = re.compile(r"tmplchange_[a-f0-9]{32}\Z")
@@ -557,6 +562,8 @@ COMMAND_FIELDS = {
     'set_pip_computer_screen': frozenset({'pip_id', 'size'}),
     'copy_pip_computer_file_in': frozenset({'pip_id', 'path', 'source'}),
     'copy_pip_computer_file_out': frozenset({'pip_id', 'path', 'target'}),
+    'get_pip_apps': frozenset({'pip_id'}),
+    'set_pip_app': frozenset({'pip_id', 'app', 'on'}),
     'get_pips_payments': frozenset(),
     'set_pips_payments': frozenset({'limit'}),
     'set_pip_paying': frozenset({'pip_id', 'rule'}),
@@ -874,7 +881,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API87_MUTATIONS:
+        if command in API88_READS | API88_MUTATIONS:
+            minimum = 88
+        elif command in API87_MUTATIONS:
             minimum = 87
         elif command in API86_MUTATIONS:
             minimum = 86

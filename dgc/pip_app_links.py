@@ -615,7 +615,10 @@ class RunSocket:
 
     def pin(self) -> dict:
         with WorkspaceRegistry(self.directory) as registry:
-            now = [{"app": a["app"], "label": a["label"], "toolkit": a["toolkit"]} for a in connected(registry, self.pip_id)]
+            from .pip_app_switches import off
+            gone = off(registry, self.pip_id)
+            now = [{"app": a["app"], "label": a["label"], "toolkit": a["toolkit"]} for a in connected(registry, self.pip_id)
+                   if a["toolkit"] not in gone]
             try:
                 plugins = self.plugins.pin(registry)
             except Exception:
@@ -690,6 +693,8 @@ class RunSocket:
                     return self._search(args)
                 if op == "connect_app":
                     toolkit = _toolkit(args.get("app"))
+                    from .pip_app_switches import require_on
+                    require_on(registry, self.pip_id, toolkit)          # switched off on its page: not asked for
                     another = args.get("another") is True
                     current = next((item for item in listing(registry, self.pip_id)
                                     if item["toolkit"] == toolkit and item["status"] == "connected"), None)
@@ -721,6 +726,8 @@ class RunSocket:
                             f"{card_name} there; they choose which account. You will be told when it is linked. Do not paste links.")
                 if op == "read_app":
                     toolkit = _toolkit(args.get("app"))
+                    from .pip_app_switches import require_on
+                    require_on(registry, self.pip_id, toolkit)
                     found = [a for a in connected(registry, self.pip_id) if a["toolkit"] == toolkit]
                     if not found:
                         return f"{app_name(toolkit)} is not connected to you. Ask for it with connect_app."

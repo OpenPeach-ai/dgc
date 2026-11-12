@@ -142,6 +142,8 @@ def _linked_account(store,payload):
     """An email or an invitation runs only on the account linked to its Pip for that app, when the Pip has one (pips-09)."""
     toolkit={'gmail_send':'gmail','calendar_create':'googlecalendar'}.get(payload.get('kind'))
     if toolkit is None:return
+    from .pip_app_switches import require_on
+    require_on(store.registry,payload['source']['pip_id'],toolkit)       # switched off on the Pip's page: never sent
     from .pip_app_links import app_name,connected
     found=[a for a in connected(store.registry,payload['source']['pip_id']) if a['toolkit']==toolkit]
     if found and payload.get('account') not in {a['account'] for a in found}:

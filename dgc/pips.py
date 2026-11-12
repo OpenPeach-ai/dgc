@@ -64,6 +64,7 @@ CONTROL_COMMANDS = frozenset({
     "always_allow_pip_computer_action",
     "list_pip_computer_files", "read_pip_computer_file", "add_pip_computer_file", "remove_pip_computer_file",
     "copy_pip_computer_file_in", "copy_pip_computer_file_out",
+    "get_pip_apps", "set_pip_app",
     "run_pip_computer_command", "list_pip_computer_terminal", "get_pip_computer_desktop",
     "get_pips_keep_running", "set_pips_keep_running",
     "get_pips_desktop_notifications", "set_pips_desktop_notifications",
@@ -212,6 +213,7 @@ _COMMAND_ARGS = {
     "list_pip_computer_files": {"pip_id", "path"}, "read_pip_computer_file": {"pip_id", "path"},
     "add_pip_computer_file": {"pip_id", "path", "name", "data"}, "remove_pip_computer_file": {"pip_id", "path"},
     "copy_pip_computer_file_in": {"pip_id", "path", "source"}, "copy_pip_computer_file_out": {"pip_id", "path", "target"},
+    "get_pip_apps": {"pip_id"}, "set_pip_app": {"pip_id", "app", "on"},
     "run_pip_computer_command": {"pip_id", "command"}, "list_pip_computer_terminal": {"pip_id"},
     "get_pip_computer_desktop": {"pip_id"},
     "get_pips_keep_running": set(), "set_pips_keep_running": {"enabled"},
@@ -6425,6 +6427,13 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
             elif command == "get_pip_computer_desktop":
                 from . import pip_computer
                 result = {"desktop": pip_computer.desktop_status(registry, pip_id, actor)}
+            elif command in ("get_pip_apps", "set_pip_app"):
+                # Pips API 88 (pips-09): "Apps it can use", a switch per app, every app on until switched off.
+                from . import pip_app_switches
+                if actor not in ("editor-user", "local-console"):
+                    raise RegistryError("local_only", "Only you can choose a Pip's apps, on this computer.")
+                result = (pip_app_switches.listing(registry, pip_id, config) if command == "get_pip_apps"
+                          else pip_app_switches.set_app(registry, pip_id, request.get("app"), request.get("on"), actor))
             elif command in ("list_pip_computer_files", "read_pip_computer_file", "add_pip_computer_file",
                              "remove_pip_computer_file", "run_pip_computer_command", "list_pip_computer_terminal",
                              "copy_pip_computer_file_in", "copy_pip_computer_file_out"):

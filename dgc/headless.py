@@ -483,7 +483,11 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # through the editor's 2 MB transport. copy_pip_computer_file_in {pip_id, path (its folder in Files), source (a file the
 # user picked here, an absolute path)} and copy_pip_computer_file_out {pip_id, path (a file in Files), target (where the
 # user chose to save it)}, up to the Files folder's limit (1 GB); over it, words that say the limit. Local only.
-PIPS_API_VERSION = 87
+# API 88 (0.52, pips-09): "Apps it can use". get_pip_apps {pip_id} lists the Pip's apps (every plugin turned on in Settings
+# and every app it is linked to, with its accounts), each {id, name, kind: plugin|app, on}; set_pip_app {pip_id, app, on}
+# switches one for that Pip alone (every app on until switched off). Local only. A switched-off app is refused on every
+# path: its plugin isn't listed or callable, its reads, Composio calls and sends are refused, and it can't be asked for.
+PIPS_API_VERSION = 88
 
 
 def attachment_limits() -> dict:
