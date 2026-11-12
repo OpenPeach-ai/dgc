@@ -458,6 +458,19 @@ export const host = (opts) => `(${function (PIP, opts) {
         plugins: [{ plugin: "stripe", name: "Stripe", money: true, permission: "any_changes" }, { plugin: "linear", name: "Linear", money: false, permission: "important" }] }),
     });
   }
+  // opts.switches: a Pip's on/off switch (0.52). pause_pip and resume_pip answer as DGC does (dgc/pips.py set_paused):
+  // the Pip back with its new status, and a revision that is not the Pip's refused in DGC's words.
+  // opts.switches === "refuse": every one is refused so. opts.off: the scene's own Pip is off. A project lists a
+  // second Pip, off ("Docs drafts").
+  if (opts.off) pip.status = "paused";
+  if (opts.switches) {
+    if (project) { const list = [pip, { ...pip, id: "pip_" + "7".repeat(32), pip_type: "quill", name: "Docs drafts", status: "paused", proposals: [], pending_review_count: 0 }];
+      answers.list_pips = () => ({ pips: list, total: list.length, next_offset: null }); }
+    const turn = (on) => (r) => { const found = answers.list_pips().pips.find((v) => v.id === r.pip_id);
+      if (!found || opts.switches === "refuse" || r.expected_lifecycle_revision !== found.lifecycle_revision) throw Error("This Pip changed. Refresh, then try again.");
+      found.status = on ? "active" : "paused"; return { pip: { ...found } }; };
+    Object.assign(answers, { pause_pip: turn(false), resume_pip: turn(true) });
+  }
   // opts.teams: pips-12 (Pips API 88; pass api: 88): a Pip's skills with a switch each (get_pip_skills, set_pip_skill:
   // budget on, deep-research switched off, one from a plugin with a long line, one with no line); a Pip's folder
   // (set_pip_profile changes.group), and with opts.many two folders in the list ("Launch" with two Pips and a

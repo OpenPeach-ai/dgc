@@ -511,6 +511,20 @@ button.pip-page-row:hover{background:var(--pip-wash)}
 .switch input:focus-visible+span{outline:1px solid var(--vscode-focusBorder);outline-offset:2px}
 .switch input:disabled+span{opacity:.5}
 @media(prefers-reduced-motion:reduce){.switch span,.switch span::after{transition:none}}
+/* The same switch as a button (role="switch", aria-checked): a Pip's on/off. One look: the sizes, the track and the
+   thumb are the rules above. */
+button.switch{padding:0;border:0;border-radius:999px;background:transparent;min-height:0;min-width:36px;font:inherit;line-height:0;vertical-align:middle;-webkit-appearance:none;appearance:none}
+button.switch[aria-checked="true"]>span{background:var(--pip-accent)}
+button.switch[aria-checked="true"]>span::after{transform:translateX(15px)}
+button.switch:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:2px}
+button.switch:disabled{cursor:default}button.switch:disabled>span{opacity:.5}
+/* A Pip's on/off switch (0.52): in the list it is beside its row, at the right end, and the row keeps its own marks
+   and pin inside its own box. Off, the row reads black and white, face included, a little muted; the switch stays as
+   clear. The same on its own page and chat: the pill in the top bar, and one quiet line over the prompt box. */
+.pip-row-line{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:2px;min-width:0}
+.pip-row-line>.pip-switch{margin:0 10px 0 4px}
+.pip-row-line.is-off>:not(.pip-switch),.pip-pill.is-off{filter:grayscale(1);opacity:.72}
+.pip-off-line{flex:none;margin:0 0 8px;padding:0 4px;color:var(--muted);font-size:12px;line-height:1.5}
 /* Routines: one row each, an on/off switch, then Add routine. */
 .routine-list{list-style:none;margin:0;padding:0}
 .routine-list>li+li{border-top:1px solid var(--pip-edge)}
@@ -1453,3 +1467,7 @@ label.team-pip>input[type=checkbox]{width:16px;height:16px;flex:none;margin:0}
 .import-reply{min-height:84px;max-height:min(30vh,220px)}
 .import-copy{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;min-width:0}
 .import-copy>.muted{font-size:12px;min-width:0}
+/* A Pip's on/off switch in the side bar's top bar, which is full: with the switch in it the bar's gaps close up, so the
+   Pip's name keeps the room it had, and a Project Pip's status beside its name (two letters of it were left) goes: its
+   last run is in History, in the menu. (Last in the file: the chat's own top bar rules above are as specific.) */
+@container(max-width:340px){.simple-pips .pip-topbar:has(.pip-switch){gap:4px;padding-right:8px}.simple-pips .pip-topbar:has(.pip-switch) .topbar-actions{gap:2px}.simple-pips .pip-topbar:has(.pip-switch) .pip-pill{gap:6px;padding-right:2px}.simple-pips .pip-topbar:has(.pip-switch) .pip-pill small.pip-status{display:none}}
