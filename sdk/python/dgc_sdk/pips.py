@@ -439,6 +439,11 @@ API88_READS = frozenset({'get_pip_apps', 'export_pip_team', 'get_pip_skills'})
 API88_MUTATIONS = frozenset({'set_pip_app', 'add_pip_app_account', 'set_pip_skill'})
 READ_COMMANDS |= API88_READS
 MUTATION_COMMANDS |= API88_MUTATIONS
+# API 89 (asked 12 Nov): a Project Pip's one owner session, the chat its cards reach; and what a session owns. Local only.
+API89_READS = frozenset({'get_pip_owner', 'list_session_pips'})
+API89_MUTATIONS = frozenset({'set_pip_owner'})
+READ_COMMANDS |= API89_READS
+MUTATION_COMMANDS |= API89_MUTATIONS
 
 
 def _api88_field(command, values) -> bool:
@@ -576,6 +581,9 @@ COMMAND_FIELDS = {
     'export_pip_team': frozenset({'pip_ids', 'name'}),
     'get_pip_skills': frozenset({'pip_id'}),
     'set_pip_skill': frozenset({'pip_id', 'skill', 'on'}),
+    'get_pip_owner': frozenset({'pip_id'}),
+    'set_pip_owner': frozenset({'pip_id', 'session_id'}),
+    'list_session_pips': frozenset({'session_id'}),
     'get_pips_payments': frozenset(),
     'set_pips_payments': frozenset({'limit'}),
     'set_pip_paying': frozenset({'pip_id', 'rule'}),
@@ -893,7 +901,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API88_READS | API88_MUTATIONS:
+        if command in API89_READS | API89_MUTATIONS:
+            minimum = 89
+        elif command in API88_READS | API88_MUTATIONS:
             minimum = 88
         elif command in API87_MUTATIONS:
             minimum = 87

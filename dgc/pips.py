@@ -65,6 +65,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_computer_files", "read_pip_computer_file", "add_pip_computer_file", "remove_pip_computer_file",
     "copy_pip_computer_file_in", "copy_pip_computer_file_out",
     "get_pip_apps", "set_pip_app", "add_pip_app_account", "get_pip_skills", "set_pip_skill",
+    "get_pip_owner", "set_pip_owner", "list_session_pips",
     "run_pip_computer_command", "list_pip_computer_terminal", "get_pip_computer_desktop",
     "get_pips_keep_running", "set_pips_keep_running",
     "get_pips_desktop_notifications", "set_pips_desktop_notifications",
@@ -214,6 +215,7 @@ _COMMAND_ARGS = {
     "add_pip_computer_file": {"pip_id", "path", "name", "data"}, "remove_pip_computer_file": {"pip_id", "path"},
     "copy_pip_computer_file_in": {"pip_id", "path", "source"}, "copy_pip_computer_file_out": {"pip_id", "path", "target"},
     "get_pip_apps": {"pip_id"}, "set_pip_app": {"pip_id", "app", "on"}, "add_pip_app_account": {"pip_id", "app"},
+    "get_pip_owner": {"pip_id"}, "set_pip_owner": {"pip_id", "session_id"}, "list_session_pips": {"session_id"},
     "get_pip_skills": {"pip_id"}, "set_pip_skill": {"pip_id", "skill", "on"},
     "run_pip_computer_command": {"pip_id", "command"}, "list_pip_computer_terminal": {"pip_id"},
     "get_pip_computer_desktop": {"pip_id"},
@@ -6441,6 +6443,19 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     raise RegistryError("local_only", "Only you can choose a Pip's skills, on this computer.")
                 result = (pip_skill_switches.listing(registry, pip_id, personal_skills(config)) if command == "get_pip_skills"
                           else pip_skill_switches.set_skill(registry, pip_id, request.get("skill"), request.get("on"), actor))
+            elif command in ("get_pip_owner", "set_pip_owner", "list_session_pips"):
+                # Pips API 89 (asked 12 Nov): a Project Pip's one owner session, the chat its cards reach.
+                from . import pip_owners
+                if actor not in ("editor-user", "local-console"):
+                    raise RegistryError("local_only", "Only you choose a Pip's owner session, on this computer.")
+                if command == "list_session_pips":
+                    result = pip_owners.owned(registry, request.get("session_id"))
+                elif command == "set_pip_owner":
+                    result = pip_owners.set_owner(registry, pip_id, request.get("session_id"), actor)
+                else:
+                    found = pip_owners.owner(registry.db, pip_id)
+                    result = {"pip_id": pip_id, "session_id": found["session_id"] if found else None,
+                              "chosen": bool(found and found["chosen"])}
             elif command in ("get_pip_apps", "set_pip_app", "add_pip_app_account"):
                 # Pips API 88 (pips-09): "Apps it can use", a switch per app, every app on until switched off; and from
                 # its page, one more address of an app it has (a Connect card, chosen there as any other).

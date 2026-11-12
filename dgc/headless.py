@@ -505,7 +505,11 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # supervisor lets its live view go (before, it read open until the view's ten idle minutes ran out).
 # pips-18: get_pip_import_prompt gives the prompt to paste into a Grok bot; import_pip_source {source: "grok", text}
 # or {source: "github", url} turns what the bot wrote, or a team or Pip file on GitHub, into setup cards.
-PIPS_API_VERSION = 88
+# API 89 (0.52, asked 12 Nov): a Project Pip's one owner session. get_pip_owner {pip_id} -> {pip_id, session_id (null:
+# none), chosen}; set_pip_owner {pip_id, session_id (null: no session)}; list_session_pips {session_id} -> {session_id,
+# pips: [{id, name, pip_type, status}]}, what archiving or deleting that session asks about. Local only. Its cards (run
+# reports) reach its owner alone; attach_pip_to_session makes that chat the owner. A Personal Pip has none.
+PIPS_API_VERSION = 89
 
 
 def attachment_limits() -> dict:

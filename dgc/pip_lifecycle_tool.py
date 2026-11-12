@@ -179,6 +179,11 @@ def apply(operation, args, ctx):
                             registry.event(pin['workspace_id'], 'pip_attached_to_session', pip_id=pin['pip_id'],
                                            payload={'actor': actor, 'job_version': current['job_version']})
                             changed = True
+                        # One owner per Project Pip (asked 12 Nov): attaching it here makes this chat its owner session.
+                        from . import pip_owners
+                        pip_owners.ensure(registry.db)
+                        registry.db.execute("INSERT OR REPLACE INTO pip_owner_sessions VALUES(?,?,?,?,?)",
+                                            (pin['pip_id'], pin['workspace_id'], pin['session_id'], registry.clock(), actor))
                     else:
                         if operation == 'resume_pip':
                             from .pip_daemon import is_runtime_paused

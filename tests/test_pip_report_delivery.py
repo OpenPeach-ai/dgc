@@ -194,17 +194,19 @@ class WhichChatTests(Scene):
         fresh = self.finished(findings=[finding("New since attaching")])
         self.assertEqual([card["run_id"] for card in self.shown(chat)], [fresh])
 
-    def test_every_attached_chat_gets_it_once(self):
+    def test_only_its_owner_session_gets_it_once(self):
+        # One owner per Project Pip (asked 12 Nov): of two chats it was attached to, the newest is its owner and the
+        # only one its cards reach (before, every attached chat got each card).
         first, second = self.chat("chat-a"), self.chat("chat-b")
         self.attach(first)
+        self.later(1)
         self.attach(second)
         self.later(1)
         run = self.finished(findings=[finding("Shared")])
-        self.assertEqual([c["run_id"] for c in self.deliver(first)], [run])
+        self.assertEqual(self.deliver(first), [], "not its owner")
         self.assertEqual([c["run_id"] for c in self.deliver(second)], [run])
-        self.assertEqual(self.deliver(first), [], "exactly once per chat")
-        self.assertEqual(self.pending(second), [])
-        self.assertEqual(delivery.record(self.registry, first, [{"run_id": run, "pip_id": self.pip["id"],
+        self.assertEqual(self.deliver(second), [], "exactly once")
+        self.assertEqual(delivery.record(self.registry, second, [{"run_id": run, "pip_id": self.pip["id"],
             "outcome": "findings", "signature": "x", "shown": True, "finished_at": self.now}]), 0,
             "a second entry for the same chat and run is refused by the ledger's key")
 

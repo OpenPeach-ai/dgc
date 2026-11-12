@@ -8,8 +8,9 @@ report / Dismiss. It never starts a turn and never reaches the model by itself (
 model reads a report only when the user sends a prompt that asks it to: the card's prepared prompt
 names the run, and ``pips_context`` reads it.
 
-Which chat. The chat a Pip was set up in, every chat it is attached to (``attach_pip_to_session``),
-and, for that one run, the chat that ran it (``run_pip_now``). A Pip with no chat reports where it
+Which chat. Its owner session (pip_owners: the chat it was set up in, unless you chose another; attaching
+it to a chat with ``attach_pip_to_session`` makes that chat its owner), and, for that one run, the chat that ran it
+(``run_pip_now``). A Pip with no chat reports where it
 always has: the Pips view, Needs attention and the home strip.
 
 Which runs. A finished source review (Scout, Lens, Rook, Lock), Pulse check or live-data run
@@ -145,55 +146,22 @@ def chat_identity(session_id: str) -> str:
 
 
 def _links(db, session_id: str, workspace_id: str) -> dict[str, str]:
-    """pip_id -> since when this chat hears from it: attached, or set up here (accepted)."""
-    links: dict[str, str] = {}
-    for row in db.execute("SELECT pip_id,created_at FROM session_pip_attachments WHERE session_id=? AND workspace_id=?",
-                          (session_id, workspace_id)):
-        links[row[0]] = row[1]
-    for (raw,) in db.execute("""SELECT receipt FROM pip_setup_proposals WHERE session_id=? AND workspace_id=?
-            AND status='accepted' AND length(CAST(receipt AS BLOB))<=4096 LIMIT 200""", (session_id, workspace_id)):
-        try:
-            receipt = json.loads(raw)
-            pip_id, since = receipt["pip_id"], receipt["resolved_at"]
-        except (TypeError, ValueError, KeyError, RecursionError):
-            continue
-        if receipt.get("accepted") is True and isinstance(pip_id, str) and isinstance(since, str):
-            links[pip_id] = min(links.get(pip_id, since), since)
-    return {pip: since for pip, since in links.items() if isinstance(pip, str) and _PIP.match(pip)}
+    """pip_id -> since when this chat hears from it: the Pips this chat is the owner session of (pip_owners, asked
+    12 Nov: one owner per Project Pip, its cards there alone)."""
+    from .pip_owners import links
+    return {pip: since for pip, since in links(db, session_id, workspace_id).items() if isinstance(pip, str) and _PIP.match(pip)}
 
 
 def report_chats(registry, pip_id: str) -> int:
-    """How many chats this Pip's reports reach (the Pip page says so, or how to attach one)."""
-    ids = {row[0] for row in registry.db.execute(
-        "SELECT session_id FROM session_pip_attachments WHERE pip_id=?", (pip_id,))}
-    for session, raw in registry.db.execute("""SELECT session_id,receipt FROM pip_setup_proposals
-            WHERE status='accepted' AND length(CAST(receipt AS BLOB))<=4096 LIMIT 2000"""):
-        try:
-            receipt = json.loads(raw)
-        except (TypeError, ValueError, RecursionError):
-            continue
-        if isinstance(receipt, dict) and receipt.get("pip_id") == pip_id and receipt.get("accepted") is True:
-            ids.add(session)
-    return len(ids)
+    """How many chats this Pip's reports reach: its owner session, or none (the Pip page says so, or how to give it one)."""
+    return 1 if report_session(registry, pip_id) else 0
 
 
 def report_session(registry, pip_id: str) -> str | None:
-    """The newest chat this Pip reports to (attached, or set up there), or None: where Ask DGC to fix
-    goes from the Pip's own chat."""
-    found: list[tuple[str, str]] = [(row[1], row[0]) for row in registry.db.execute(
-        "SELECT session_id,created_at FROM session_pip_attachments WHERE pip_id=?", (pip_id,))]
-    for session, raw in registry.db.execute("""SELECT session_id,receipt FROM pip_setup_proposals
-            WHERE status='accepted' AND length(CAST(receipt AS BLOB))<=4096 LIMIT 2000"""):
-        try:
-            receipt = json.loads(raw)
-        except (TypeError, ValueError, RecursionError):
-            continue
-        if (isinstance(receipt, dict) and receipt.get("pip_id") == pip_id and receipt.get("accepted") is True
-                and isinstance(receipt.get("resolved_at"), str)):
-            found.append((receipt["resolved_at"], session))
-    found = [(at, session) for at, session in found
-             if isinstance(at, str) and isinstance(session, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", session)]
-    return max(found)[1] if found else None
+    """Its owner session, or None: where Ask DGC to fix goes from the Pip's own chat."""
+    from .pip_owners import owner
+    found = owner(registry.db, pip_id)
+    return found["session_id"] if found else None
 
 
 def _pip(db, pip_id: str) -> dict | None:
