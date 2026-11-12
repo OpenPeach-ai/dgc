@@ -577,7 +577,9 @@ class AppsTests(Temp):
         self.assertEqual(recorded, {"packages": {"libreoffice-draw": "1:24.2", "evince": "46.3"}, "size": 2_000_000})
         with patch.object(pip_apps, "consented", lambda: True), \
                 patch.object(pip_apps, "wanted_packages", lambda keys=None: ["evince"]), \
-                patch("dgc.pip_screen.PROGRAMS", {}), patch("dgc.pip_computer_box._real_binary", lambda p: True):
+                patch("dgc.pip_screen.PROGRAMS", {}), patch("dgc.pip_computer_box._real_binary", lambda p: True), \
+                patch("dgc.pip_screen_setup.shutil.which", lambda name, *a, **k: f"/usr/bin/{name}"):
+            # (The desktop's programs, its Terminal and Chrome all here: only the apps are wanted.)
             self.assertEqual(pip_screen_setup.wanted(), ["evince"])
 
 
