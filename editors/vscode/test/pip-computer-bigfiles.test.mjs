@@ -123,7 +123,7 @@ test('a dropped file has no path: up to 2 MB it goes as before, a bigger one say
  x.drop([big,small]);
  await settle(()=>x.requests('add_pip_computer_file').length===1,'the small one goes as a data URI');await x.drain();
  assert.equal(x.requests('add_pip_computer_file')[0].request.name,'hi.txt');
- assert.equal(x.d.querySelector('.pc-files .pc-error').textContent,'Use Add file… for files over 2 MB (up to 1 GB).');
+ assert.equal(x.d.querySelector('.pc-files .pc-error').textContent,'Use Add file… for files over 2 MB.');
  assert.equal(x.posted('pipComputerAddFiles').length,0,'a drop opens no dialog');
 });
 

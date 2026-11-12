@@ -266,8 +266,8 @@ def add_raw_file(root: Path, folder: str, name: str, raw: bytes, *, maximum: int
 
 
 def _write_new(root: Path, parts: list[str], name: str, raw: bytes) -> dict:
-    if folder_bytes(root) + len(raw) > MAX_FOLDER_BYTES:
-        raise RegistryError("computer_full", "This computer's Files are full (1 GB). Remove something first.")
+    if folder_bytes(root) + len(raw) > folder_limit():
+        raise RegistryError("computer_full", f"This computer's Files are full ({_limit_words()}). Remove something first.")
     fd = _open_dir(root, parts)
     staging = f".dgc-add-{os.getpid()}-{os.urandom(6).hex()}"
     try:
@@ -303,8 +303,17 @@ MAX_COPY_BYTES = MAX_FOLDER_BYTES
 COPY_CHUNK = 1024 * 1024
 
 
+def folder_limit() -> int:
+    """How much a computer's Files may hold, and so how big one file may be: 1 GB, or the GB you set in Dev Mode
+    (pip_files_gb)."""
+    from .dev_mode import chosen
+    gb = chosen("pip_files_gb")
+    return MAX_FOLDER_BYTES if gb is None else gb * 1024 ** 3
+
+
 def _limit_words() -> str:
-    return f"{MAX_COPY_BYTES // 1024 ** 3} GB" if MAX_COPY_BYTES % 1024 ** 3 == 0 else f"{MAX_COPY_BYTES // 1024 ** 2} MB"
+    limit = folder_limit()
+    return f"{limit // 1024 ** 3} GB" if limit % 1024 ** 3 == 0 else f"{limit // 1024 ** 2} MB"
 
 
 def _picked(path, what: str) -> Path:
@@ -314,7 +323,7 @@ def _picked(path, what: str) -> Path:
 
 
 def copy_in(root: Path, folder, source) -> dict:
-    """A file the user picked on this computer, copied into Files (in ``folder``), up to MAX_COPY_BYTES and the room
+    """A file the user picked on this computer, copied into Files (in ``folder``), up to folder_limit() and the room
     left in Files. Streamed into a hidden staging file, then published under its name (or "name (1)")."""
     parts = _parts(folder)
     picked = _picked(source, "file")
@@ -329,10 +338,11 @@ def copy_in(root: Path, folder, source) -> dict:
         name = picked.name
         if not name or len(name.encode("utf-8")) > MAX_NAME_BYTES or name in (".", ".."):
             raise RegistryError("invalid_request", "That file's name can't be used in a Pip's Files.")
-        if info.st_size > MAX_COPY_BYTES:
+        limit = folder_limit()
+        if info.st_size > limit:
             raise RegistryError("too_big", f"That file is {info.st_size / 1024 ** 3:.1f} GB. A Pip's computer takes "
                                            f"files up to {_limit_words()}.")
-        if folder_bytes(root) + info.st_size > MAX_FOLDER_BYTES:
+        if folder_bytes(root) + info.st_size > limit:
             raise RegistryError("computer_full", f"This computer's Files are full ({_limit_words()}). Remove something first.")
         fd = _open_dir(root, parts)
         staging = f".dgc-add-{os.getpid()}-{os.urandom(6).hex()}"
@@ -345,7 +355,7 @@ def copy_in(root: Path, folder, source) -> dict:
                     if not chunk:
                         break
                     copied += len(chunk)
-                    if copied > MAX_COPY_BYTES:          # it grew while copying
+                    if copied > limit:                   # it grew while copying
                         raise RegistryError("too_big", f"A Pip's computer takes files up to {_limit_words()}.")
                     out.write(chunk)
             return _publish(fd, parts, name, staging, copied)
@@ -605,8 +615,8 @@ def run_command(computer_root: Path, command, by: str, *, policy=None, env: dict
     .terminal_env, at Do it all only); what it prints is masked of them before anyone sees or keeps it."""
     command = _check(command, by)
     files = files_root(computer_root)
-    if folder_bytes(files) > MAX_FOLDER_BYTES:
-        raise RegistryError("computer_full", "This computer's Files are full (1 GB). Remove something first.")
+    if folder_bytes(files) > folder_limit():
+        raise RegistryError("computer_full", f"This computer's Files are full ({_limit_words()}). Remove something first.")
     marker = Path(computer_root) / "terminal.running"
     with _TerminalLock(computer_root, COMMAND_SECONDS + 10):
         started, at = time.monotonic(), int(time.time())
@@ -717,8 +727,8 @@ def start_background(computer_root: Path, command, by: str, *, policy=None, env:
         raise RegistryError("unsupported", "Background commands aren't on a Mac yet: run it, up to 60 seconds.")
     command = _check(command, by)
     files = files_root(computer_root)
-    if folder_bytes(files) > MAX_FOLDER_BYTES:
-        raise RegistryError("computer_full", "This computer's Files are full (1 GB). Remove something first.")
+    if folder_bytes(files) > folder_limit():
+        raise RegistryError("computer_full", f"This computer's Files are full ({_limit_words()}). Remove something first.")
     seconds, most = background_limits()
     if sum(1 for job in jobs(computer_root) if job["state"] == "running") >= most:
         raise RegistryError("busy", f"{most} background commands are already running here. Stop one (stop_job) or "

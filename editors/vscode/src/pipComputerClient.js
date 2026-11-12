@@ -586,7 +586,7 @@ async function addFiles(files){
  let said='';
  for(const file of files){
   // A dropped file has no path in a webview, so it travels as before, 2 MB at most; a bigger one goes by Add file….
-  if(file.size>2*1024*1024){S.files.error=bigFiles()?'Use Add file… for files over 2 MB (up to 1 GB).':`${file.name} is over 2 MB.`;said=S.files.error;render();continue;}
+  if(file.size>2*1024*1024){S.files.error=bigFiles()?'Use Add file… for files over 2 MB.':`${file.name} is over 2 MB.`;said=S.files.error;render();continue;}
   const data=await new Promise(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>resolve(null);reader.readAsDataURL(file);});
   if(typeof data!=='string')continue;
   try{await send('add_pip_computer_file',{pip_id:S.pip.id,path:S.files.path,name:file.name,data});}

@@ -50,6 +50,9 @@ LIMITS = (
           "pip_computer_files.background_limits"),
     Limit("pip_background_minutes", 60, 60, "Minutes one background command may run",
           "A longer build or download holds its share of the machine for longer.", "pip_computer_files.background_limits"),
+    Limit("pip_files_gb", 1, 1, "Files on each Pip's computer (GB)",
+          "Each computer's Files can hold this much of this machine's disk, and one file can be as big; a full disk "
+          "stops every Pip.", "pip_computer_files.folder_limit"),
     Limit("pip_queue", 20, 20, "Pip runs waiting at once",
           "Each waiting run holds its inputs in the Pips registry until it starts.", "pips.max_queue"),
     # How much one turn holds
