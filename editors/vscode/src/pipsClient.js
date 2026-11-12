@@ -4244,12 +4244,15 @@ function simpleMarkup(){
  if(!S.pip)return `${bar}${loadingMark()}`;
  return `${convColumnMarkup()}${simplePipHeader()}${pipSetupNotes()}<div class="simple-content${S.tab==='chat'?' chat':''}" data-view="${esc(S.tab)}">${S.tab==='chat'?chatMarkup():`${notes}${waitingMarkup()}${simpleTabContent()}`}</div>`;
 }
-// A page inside one Pip is open (its chat, its Settings with Instructions and Face, History, Changes, Notifications,
-// Memory and the rest of its menu, or "Change in chat"): the side bar gives it the room its dock and its tab bar take
-// (media/main.js, onInsidePip). Each such page has its own back arrow, and that is what is looked for. The list of Pips,
-// a new Pip's page and Pips settings are not inside one. Said on every draw, so the page is never a draw behind.
-function insidePipBack(){return $('simple-back')||$('simple-to-chat')||$('pip-page-back')||(S.create&&setupEditing&&S.selected&&S.pip?$('create-back'):null);}
-function tellInsidePip(){if(typeof options.onInsidePip!=='function')return;try{options.onInsidePip((shell.classList.contains('chat-open')&&!!$('chat-form'))||!!insidePipBack());}catch{}}
+// A page with a back arrow is open: the side bar gives it the room its dock and its tab bar take (media/main.js,
+// onInsidePip). That is every page inside one Pip (its chat, its Settings with Instructions and Face, History, Changes,
+// Notifications, Memory and the rest of its menu, "Change in chat"), and, from 12 Nov, every other page of this view
+// that has one: Pips settings with its tabs, Needs attention's View all, a project's New Pip page and its Workspace
+// context and Notifications. One rule: the page's top bar begins with a back arrow, and that is what is looked for, so
+// a page added later follows it too. The list of Pips has none and keeps both. Said on every draw, so the page is
+// never a draw behind.
+function pageBack(){return shell.querySelector('.pip-topbar > button.topbar-icon:first-child');}
+function tellInsidePip(){if(typeof options.onInsidePip!=='function')return;try{options.onInsidePip((shell.classList.contains('chat-open')&&!!$('chat-form'))||!!pageBack());}catch{}}
 function render() {
   if(disposed)return;
   // A redraw replaces the slider under a pointer that is dragging it, and the drag ends where it was (final check,
@@ -6339,7 +6342,7 @@ if(typeof ResizeObserver==='function'){const observer=new ResizeObserver(fitChat
 const pollingTimer=window.setInterval(()=>{broker.expire(Date.now());if(polling||!S.visible||document.hidden||!usable()||S.busy||S.review||S.create||!['runs','chat'].includes(S.tab))return;polling=true;void refresh(false).finally(()=>{polling=false;});},4000);
 motion();render();waitForConnection();vscode.postMessage({type:'pipsReady'});
 return {async navigate(value){attentionAll.open=false;   // the host asks for another page: not Needs attention's own
- if(value?.overview===true){if(!S.workspace||!usable()){options.navigation=value;navigationPending=true;S.overview=true;return;}await navigateFromHost(value);return;}if(!S.workspace||!usable()){options.navigation=value;navigationPending=true;return;}try{await refresh(false);await navigateFromHost(value);}catch(error){setError(error);}},focusInside(){const box=chatBox?.el?.isConnected?chatBox.el:insidePipBack();try{box?.focus({preventScroll:true});}catch{}},setMotionPaused(paused){motionPaused=paused===true;motion();},setVisible(visible){S.visible=visible===true;motion();if(S.visible)void refresh(false);},dispose(){if(disposed)return;disposed=true;window.clearTimeout(noticeTimer);window.clearTimeout(appLinkTimer);S.epoch++;broker.reset();window.clearInterval(pollingTimer);window.clearInterval(workingClock);window.clearTimeout(streamTimer);window.clearTimeout(liveTimer);avatarObserver?.disconnect();characterCleanup?.();characterCleanup=null;for(const dispose of disposers)dispose?.();characterStyles.remove();if(embedded)shell.remove();}};
+ if(value?.overview===true){if(!S.workspace||!usable()){options.navigation=value;navigationPending=true;S.overview=true;return;}await navigateFromHost(value);return;}if(!S.workspace||!usable()){options.navigation=value;navigationPending=true;return;}try{await refresh(false);await navigateFromHost(value);}catch(error){setError(error);}},focusInside(){const box=chatBox?.el?.isConnected?chatBox.el:pageBack();try{box?.focus({preventScroll:true});}catch{}},setMotionPaused(paused){motionPaused=paused===true;motion();},setVisible(visible){S.visible=visible===true;motion();if(S.visible)void refresh(false);},dispose(){if(disposed)return;disposed=true;window.clearTimeout(noticeTimer);window.clearTimeout(appLinkTimer);S.epoch++;broker.reset();window.clearInterval(pollingTimer);window.clearInterval(workingClock);window.clearTimeout(streamTimer);window.clearTimeout(liveTimer);avatarObserver?.disconnect();characterCleanup?.();characterCleanup=null;for(const dispose of disposers)dispose?.();characterStyles.remove();if(embedded)shell.remove();}};
 
 }
 if(typeof window!=='undefined')window.DgcPips={mount:mountPips,mountSetupCards,mountDigestBar,mountHomePips};

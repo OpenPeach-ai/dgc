@@ -95,9 +95,10 @@ body {
 body.pips-active #dgc-dock[data-show="always"] { background:var(--surface); }
 body.pips-active #side-tabs { background:var(--surface); }
 body.pips-active > :not(#phead):not(#side-tabs):not(#pips-host):not(#announcer):not(.dgc-trace-backdrop):not(#dgc-dock):not(.dgc-pop):not(script) { display:none !important; }
-/* Inside one Pip (its chat, its Settings, History and its other pages) the page has the side bar to itself: no dock and
-   no tab bar (main.js, onInsidePip), and the page takes their room. DGC's own header stays. Not drawn, so neither can
-   take focus. */
+/* A page of the Pips view with a back arrow (a Pip's chat, its Settings, History and its other pages; Pips settings,
+   Needs attention's View all, a project's New Pip, Workspace context and Notifications) has the side bar to itself: no
+   dock and no tab bar (main.js, onInsidePip), and the page takes their room. DGC's own header stays. Not drawn, so
+   neither can take focus. */
 body.pips-active.inside-pip > :is(#dgc-dock, #side-tabs) { display:none !important; }
 body.pips-active #phead :is(.thread-title,.pd,.chat-add,.agent-back,.agent-mark) { display:none !important; }
 body.pips-active #phead .pm { display:inline-flex; flex:1; }

@@ -584,10 +584,11 @@
     }
     return pipDigestBar;
   }
-  // Inside one Pip the page has the side bar to itself (asked 11 Nov for its chat, 12 Nov for every page of it): while its
-  // chat, its Settings, History, Changes, Notifications or Memory is open, the dock and the tab bar are not shown
-  // (main.css, body.inside-pip) and the page takes their room. The page's own back arrow leads back, in the end to the
-  // list of Pips, where both are again. The Pips view says so with each draw (src/pipsClient.js).
+  // A page of the Pips view with a back arrow has the side bar to itself (asked 11 Nov for a Pip's chat, 12 Nov for every
+  // page of a Pip, then for every page with a back arrow: Pips settings, Needs attention's View all, a project's New Pip,
+  // Workspace context and Notifications): while one is open, the dock and the tab bar are not shown (main.css,
+  // body.inside-pip) and the page takes their room. The page's own back arrow leads back, in the end to the list of
+  // Pips, where both are again. The Pips view says so with each draw (src/pipsClient.js).
   function onInsidePip(inside) {
     if (chatPlace !== "home") return;
     const was = document.body.classList.contains("inside-pip"), at = document.activeElement;
@@ -663,7 +664,8 @@
       return;
     }
     // The list is what is asked for: the tab bar and the dock are there from the first frame, whatever was open last.
-    if (navigation?.overview === true || navigation?.create) onInsidePip(false);
+    // (A new Pip's page says for itself whether it has a back arrow, with its own draw.)
+    if (navigation?.overview === true) onInsidePip(false);
     showPips();
     if (navigation) pipsApp?.navigate?.(navigation);
   }

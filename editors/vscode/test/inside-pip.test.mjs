@@ -2,15 +2,16 @@
 // to have the dock at the bottom, even the top header tabs do not need to come on this page"). A Pip's chat already
 // showed neither the dock (media/shared/dock.js) nor the tab bar (Home, Work, Chat, Pips): dock-pip-chat.test.mjs. Now
 // every page of one Pip is the same: its Settings (with Instructions and Face), History, Changes, Notifications, Memory
-// and the rest of its menu, and "Change in chat". The list of Pips, Pips settings (for all Pips), a new Pip's page and a
-// project's own Context and Notifications keep both. Measured in real Chromium on the side bar's real page
+// and the rest of its menu, and "Change in chat". The list of Pips and a new Pip keep both. (Pips settings and a project's
+// own Context and Notifications kept both until later that day: now every page with a back arrow shows neither,
+// test/pips-pages-no-dock.test.mjs.) Measured in real Chromium on the side bar's real page
 // (support/dock-scene.mjs), with a Personal Pip and a Project Pip. Held here:
 //   - each page inside a Pip: no dock, no tab bar, DGC's header stays, and the page takes their room down to the foot
 //   - each has one back arrow, a named button, that works by a click and by Tab then Enter: to the chat (or the page
 //     above), and from the chat to the list, where both are again
 //   - the keyboard never lands on the hidden dock or tab bar, and focus is never left on a hidden thing
 //   - nothing flickers: no frame shows a Pip's page with either, or the list without them, and they turn once each way
-//   - the list, Pips settings, New Pip and a project's Context and Notifications show both
+//   - the list and New Pip show both; Pips settings and a project's Context and Notifications, neither
 //   - the list's Controls menu ("…" beside Start) closes on Escape and focus returns to its button (found in a live check)
 //   - "When I point at the bottom": nothing rises over a Pip's Settings; leaving for another tab brings both back
 import { after, before, test } from "node:test";
@@ -221,7 +222,9 @@ test("a Project Pip's \"Change in chat\": neither bar, and its arrow leads back 
   } finally { await x.close(); }
 });
 
-test("the list of Pips, Pips settings and New Pip keep the dock and the tab bar", async (t) => {
+// (From 12 Nov, later the same day: every page of the view with a back arrow has the side bar to itself, so Pips settings and
+// a project's Workspace context and Notifications show neither bar now; test/pips-pages-no-dock.test.mjs has them in full.)
+test("the list of Pips and New Pip keep the dock and the tab bar; Pips settings and a project's own pages, which have a back arrow, show neither", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openDock(browser, { width: 300, height: 700 });
   try {
@@ -230,17 +233,17 @@ test("the list of Pips, Pips settings and New Pip keep the dock and the tab bar"
     // Pips settings, for all Pips: from the list's own button, and back.
     await press(x, "#pips-settings-open"); await gone(x, "[data-job]"); await x.settle();
     const settings = await now(x.page);
-    withBoth(settings, list, "Pips settings");
+    alone(settings, list, "Pips settings");
     assert.equal(settings.list, false, "(the settings page, not the list)");
-    const d = await dockNow(x.page);
-    assert.ok(d.shown && Math.abs(d.host.bottom - d.height) < 0.6, "the dock is whole at the foot of Pips settings");
-    // After a Pip's own Settings were open, Pips settings still has both (it is not inside a Pip).
+    assert.equal((await dockNow(x.page)).shown, false, "no dock at the foot of Pips settings");
+    // After a Pip's own Settings were open, Pips settings is the same, and the list after it has both again.
     await press(x, "#pips-settings-close"); await inRoot(x, "[data-job]"); await x.settle();
     await toChat(x); await toPage(x, "job");
     await back(x, "simple-to-chat"); await back(x, "simple-back");
     await press(x, "#pips-settings-open"); await gone(x, "[data-job]"); await x.settle();
-    withBoth(await now(x.page), list, "Pips settings, after a Pip's Settings");
+    alone(await now(x.page), list, "Pips settings, after a Pip's Settings");
     await press(x, "#pips-settings-close"); await inRoot(x, "[data-job]"); await x.settle();
+    withBoth(await now(x.page), list, "the list, back from Pips settings");
     // New Pip.
     await press(x, "#simple-new"); await x.settle(); await x.page.waitForTimeout(120);
     withBoth(await now(x.page), list, "New Pip");
@@ -255,8 +258,9 @@ test("the list of Pips, Pips settings and New Pip keep the dock and the tab bar"
       await press(p, `#${id}`); await inRoot(p, "#workspace-back"); await p.settle();
       const s = await now(p.page);
       assert.equal(s.title, title);
-      withBoth(s, list, `the project's ${title}`);
+      alone(s, list, `the project's ${title}`);
       await p.page.locator("#pips-host #workspace-back").click(); await inRoot(p, "[data-job]"); await p.settle();
+      withBoth(await now(p.page), list, `the list, back from the project's ${title}`);
     }
     await press(p, "#simple-new"); await p.settle(); await p.page.waitForTimeout(120);
     withBoth(await now(p.page), list, "a project's New Pip");
