@@ -459,6 +459,11 @@ API91_READS = frozenset({'list_pip_project_choices', 'list_pip_project_changes',
 API91_MUTATIONS = frozenset({'apply_pip_project_change', 'discard_pip_project_change', 'undo_pip_project_change'})
 READ_COMMANDS |= API91_READS
 MUTATION_COMMANDS |= API91_MUTATIONS
+# API 92 (pips-15): a goal for a Personal Pip's conversation, kept going turn by turn until done. Local only.
+API92_READS = frozenset({'get_pip_goal'})
+API92_MUTATIONS = frozenset({'set_pip_goal', 'stop_pip_goal'})
+READ_COMMANDS |= API92_READS
+MUTATION_COMMANDS |= API92_MUTATIONS
 
 
 def _api88_field(command, values) -> bool:
@@ -611,6 +616,9 @@ COMMAND_FIELDS = {
     'apply_pip_project_change': frozenset({'pip_id', 'change_id', 'expected_digest'}),
     'discard_pip_project_change': frozenset({'pip_id', 'change_id'}),
     'undo_pip_project_change': frozenset({'pip_id', 'change_id'}),
+    'set_pip_goal': frozenset({'pip_id', 'objective', 'conversation_id'}),
+    'get_pip_goal': frozenset({'pip_id', 'conversation_id'}),
+    'stop_pip_goal': frozenset({'pip_id', 'goal_id'}),
     'get_pips_payments': frozenset(),
     'set_pips_payments': frozenset({'limit'}),
     'set_pip_paying': frozenset({'pip_id', 'rule'}),
@@ -928,7 +936,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API91_READS | API91_MUTATIONS:
+        if command in API92_READS | API92_MUTATIONS:
+            minimum = 92
+        elif command in API91_READS | API91_MUTATIONS:
             minimum = 91
         elif command in API90_READS | API90_MUTATIONS:
             minimum = 90

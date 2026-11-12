@@ -519,7 +519,11 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # list_pip_project_choices {pip_id}, list_pip_project_changes {pip_id}, get_pip_project_change {pip_id, change_id, path?}
 # (a file's diff, or the whole patch), apply_pip_project_change {pip_id, change_id, expected_digest},
 # discard_pip_project_change and undo_pip_project_change {pip_id, change_id}. Local only.
-PIPS_API_VERSION = 91
+# API 92 (0.52, pips-15): a goal for a Personal Pip's conversation, "keep going until done": set_pip_goal {pip_id,
+# objective, conversation_id} (its first turn starts; a new goal replaces the one there), get_pip_goal {pip_id,
+# conversation_id} (the latest, with status active|done|needs_you|blocked|stopped, turns, max_turns, reason) and
+# stop_pip_goal {pip_id, goal_id}. Local only.
+PIPS_API_VERSION = 92
 
 
 def attachment_limits() -> dict:

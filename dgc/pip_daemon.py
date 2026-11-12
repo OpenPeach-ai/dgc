@@ -241,6 +241,15 @@ def _webhooks_tick(registry, directory, clock, keeper):
     return keeper
 
 
+def _goals_tick(registry, config) -> None:
+    """A Pip's goal (pip_goals, pips-15): its next turn once the last one finished; never stops the runner."""
+    try:
+        from .pip_goals import tick
+        tick(registry, config)
+    except Exception as exc:                     # noqa: BLE001 - reported, and the next heartbeat tries again
+        print(f"[pip goals] {type(exc).__name__}: {str(exc)[:300]}", file=sys.stderr, flush=True)
+
+
 def _computer_tick(registry, config) -> None:
     """Pip computers: honour stop requests, carry out the user's decisions, close idle ones.
 
@@ -376,6 +385,7 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now, server=False)
                         routine_tick.start()
                     _computer_tick(registry, runtime_config)
                     webhooks = _webhooks_tick(registry, directory, clock, webhooks)
+                    _goals_tick(registry, runtime_config)
                     _app_approvals_tick(registry, runtime_config)
                     pips.start_queued(runtime_config)
                     if notifier is not None:

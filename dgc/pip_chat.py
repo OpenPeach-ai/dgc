@@ -708,7 +708,9 @@ BORROW_KEY = "borrow_"
 BORROW_NO_KEY = BORROW_KEY + "no_"
 # After the user saves (or says Not now to) a key the Pip asked for with ask_for_key (pip_keys, Pips API 82).
 KEYS_KEY = "keys_"
-DGC_KEYS = (INTRO_KEY, COMPUTER_KEY, APPS_KEY, CHECK_KEY, ROUTINE_KEY, PLUGINS_KEY, BORROW_KEY, KEYS_KEY)
+# A goal's turn (pip_goals, pips-15): DGC carries on toward the goal the user set the conversation.
+GOAL_KEY = "goal_"
+DGC_KEYS = (INTRO_KEY, COMPUTER_KEY, APPS_KEY, CHECK_KEY, ROUTINE_KEY, PLUGINS_KEY, BORROW_KEY, KEYS_KEY, GOAL_KEY)
 # The turns DGC writes so the Pip carries on with what the user asked: they see the photos of that ask again.
 FOLLOW_UP_KEYS = (COMPUTER_KEY, APPS_KEY, CHECK_KEY, PLUGINS_KEY, BORROW_KEY, KEYS_KEY)
 KEY_SAVED = ("This message is from DGC, not the user. The user saved the {name} for {host}. Read the API with "
@@ -1391,6 +1393,10 @@ def prepare(store, pip, req, *, context_size=32768, secrets=()):
     projects = context_for(store, pip, req)
     if projects:
         context["projects"] = projects                    # pips-21: where each named project's copy is
+    from .pip_goals import context_for as goal_for
+    goal = goal_for(store, pip, req)
+    if goal:
+        context["goal"] = goal                            # pips-15: a goal's turn, which may call update_goal
     if req.get("reply_to"):
         # Reply on one of its messages (pip_replies): a bounded quote of its own words, given with this turn only.
         context["reply_to"] = req["reply_to"]
@@ -1572,7 +1578,7 @@ def valid_apps(value):
 
 
 def insert_reply(store, run, result, now):
-    if set(result) - {"text", "kept_document", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "core_setup_drafts", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes", "apps"}:
+    if set(result) - {"text", "kept_document", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "core_setup_drafts", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes", "apps", "goal_update"}:
         raise RegistryError("invalid_reply", "Conversation replies cannot contain source findings or control actions.")
     if "apps" in result and valid_apps(result["apps"]) is None:
         raise RegistryError("invalid_reply", "This reply's plugin cards are invalid.")
@@ -1585,6 +1591,10 @@ def insert_reply(store, run, result, now):
         validate_context(result["context"])
     if "plugins" in result and used_plugins(result["plugins"]) is None:
         raise RegistryError("invalid_reply", "This reply's plugins are invalid.")
+    if "goal_update" in result:
+        from .pip_goals import valid_update
+        if not valid_update(result["goal_update"]):
+            raise RegistryError("invalid_reply", "This reply's goal update is invalid.")
     if "eyes" in result:
         # It couldn't see (pip_eyes): its choices are DGC's own card, answered by a tap.
         from .pip_eyes import labels, validate_card
@@ -1655,6 +1665,8 @@ def insert_reply(store, run, result, now):
     if waits:
         from .pip_routine_care import mark_told             # Core has said them: never again (Pips package 2)
         mark_told(store.db, [item.get("id") for item in waits if isinstance(item, dict)])
+    from .pip_goals import commit as commit_goal            # a goal's turn (pips-15): counted, and how it stands
+    commit_goal(store, run, result, choices)
     from .pip_chat_continuity import commit
     commit(store, run, result, now)
 
@@ -2036,7 +2048,7 @@ def _left_waiting(store, run, result) -> bool:
 
 def validate_context(value):
     if (not isinstance(value, dict) or set(value) - {"images", "files", "run_posts", "card_context", "cards_waiting", "named_pips", "projects",
-                                                    "long_waits", "conversation_id", "inputs_ref", "reply_to"} not in (
+                                                    "goal", "long_waits", "conversation_id", "inputs_ref", "reply_to"} not in (
             {"text", "history", "history_omitted_count", "last_report"},
             {"text", "history", "history_omitted_count", "last_report", "continuity"})):
         raise RegistryError("invalid_history", "Conversation context has an unsupported shape.")
@@ -2065,6 +2077,10 @@ def validate_context(value):
             not isinstance(p, dict) or set(p) != {"name", "folder", "files"} for p in value["projects"])
             or len(_json(value["projects"]).encode()) > 2048):
         raise RegistryError("invalid_history", "The named projects exceed their bounded context contract.")
+    if "goal" in value:
+        from .pip_goals import valid_context as valid_goal
+        if not valid_goal(value["goal"]):
+            raise RegistryError("invalid_history", "The goal exceeds its bounded context contract.")
     if "reply_to" in value:
         from .pip_replies import valid as valid_reply
         if not valid_reply(value["reply_to"]):
