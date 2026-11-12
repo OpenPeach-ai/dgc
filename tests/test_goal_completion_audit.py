@@ -63,6 +63,14 @@ class TheReminderAndTheTool(unittest.TestCase):
             with self.subTest(words=words):
                 self.assertIn(words, check)
 
+    def test_a_later_reminder_refers_back_briefly(self):
+        """The suite's check: later reminders only refer back (under 600 characters); the audit is still named."""
+        again = goals.REMINDER_CHECK_AGAIN
+        for words in ("completion is unproven", "every requirement", "three goal turns"):
+            with self.subTest(words=words):
+                self.assertIn(words, again)
+        self.assertLess(len(again) + 120 + goals.GoalLifecycle._GOAL_REFERENCE_CHARS + 1, 600)
+
     def test_the_system_prompts_goal_section(self):
         section = goals.SYSTEM_GOAL_RULES
         for words in ("treat completion as unproven", "no required work remains", "three consecutive goal turns"):

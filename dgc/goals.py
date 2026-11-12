@@ -493,6 +493,10 @@ REMINDER_CHECK = ("\nBefore you stop: treat completion as unproven. Call update_
                   "it is not proved, take the next concrete step toward the full objective now; never shrink it to "
                   "what is easy. Mark it blocked only after the same blocker three goal turns running.\n"
                   "</system-reminder>")
+# Later reminders refer back to it, as they do to the goal: the whole audit is in the system prompt and every cycle.
+REMINDER_CHECK_AGAIN = ("\nBefore you stop: completion is unproven until current evidence proves every requirement; "
+                        "otherwise take the next concrete step. Blocked only after the same blocker three goal turns "
+                        "running.\n</system-reminder>")
 
 # The system prompt's goal section.
 SYSTEM_GOAL_RULES = (
@@ -610,7 +614,7 @@ class GoalLifecycle:
         flat = " ".join(str(self.goal or "").split())
         head = flat[:self._GOAL_REFERENCE_CHARS] + ("\u2026" if len(flat) > self._GOAL_REFERENCE_CHARS else "")
         return ("<system-reminder>\nYour standing goal for this session \u2014 stated in full earlier "
-                f"in this conversation \u2014 begins: {head}" + check)
+                f"in this conversation \u2014 begins: {head}" + REMINDER_CHECK_AGAIN)
 
     def goal_max_chars(self) -> int:
         """How long a standing objective may be, measured against the window it must live in.
