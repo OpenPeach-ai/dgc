@@ -1,6 +1,6 @@
 """pips-12: export or import a whole team as one file. The team file is the Pips' shared files, one per Pip (the job,
-never the person's accounts, memory or results), with each Pip's folder in the list. Importing makes one pending setup
-card per Pip, nothing created until each is approved; a file carrying a configured secret saves nothing."""
+never the person's accounts, memory or results); a Pip's folder in the Personal list is not in it. Importing makes one
+pending setup card per Pip, nothing created until each is approved; a file carrying a configured secret saves nothing."""
 import json
 import unittest
 from types import SimpleNamespace
