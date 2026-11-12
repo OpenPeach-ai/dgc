@@ -493,6 +493,8 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # add_pip_app_account {pip_id, app} raises a Connect card for one more address of an app the Pip has (several allowed).
 # pips-12: export_pip_team {pip_ids, name} gives one file for a whole team (format dgc-team: each Pip's shared file);
 # import_pip_team {document} makes one pending setup card per Pip in it (256 KiB at most). Local only.
+# get_pip_skills {pip_id} and set_pip_skill {pip_id, skill, on}: a switch per skill on each Pip (every skill on until
+# switched off; a skill switched off is never offered to its model). Local only.
 PIPS_API_VERSION = 88
 
 

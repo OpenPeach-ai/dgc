@@ -435,8 +435,8 @@ API86_FIELDS = {'open_pip_computer': frozenset({'number'}), 'use_pip_computer_vi
 API87_MUTATIONS = frozenset({'copy_pip_computer_file_in', 'copy_pip_computer_file_out'})
 MUTATION_COMMANDS |= API87_MUTATIONS
 # API 88 (pips-09): "Apps it can use", a switch per app on each Pip (every app on until switched off).
-API88_READS = frozenset({'get_pip_apps', 'export_pip_team'})
-API88_MUTATIONS = frozenset({'set_pip_app', 'add_pip_app_account'})
+API88_READS = frozenset({'get_pip_apps', 'export_pip_team', 'get_pip_skills'})
+API88_MUTATIONS = frozenset({'set_pip_app', 'add_pip_app_account', 'set_pip_skill'})
 READ_COMMANDS |= API88_READS
 MUTATION_COMMANDS |= API88_MUTATIONS
 PIP_KEY_ID = re.compile(r"pipkey_[a-f0-9]{32}\Z")
@@ -566,6 +566,8 @@ COMMAND_FIELDS = {
     'set_pip_app': frozenset({'pip_id', 'app', 'on'}),
     'add_pip_app_account': frozenset({'pip_id', 'app'}),
     'export_pip_team': frozenset({'pip_ids', 'name'}),
+    'get_pip_skills': frozenset({'pip_id'}),
+    'set_pip_skill': frozenset({'pip_id', 'skill', 'on'}),
     'get_pips_payments': frozenset(),
     'set_pips_payments': frozenset({'limit'}),
     'set_pip_paying': frozenset({'pip_id', 'rule'}),

@@ -203,6 +203,8 @@ export type PipMutationParams = {
   set_pip_app: { pip_id: string; app: string; on: boolean };
   add_pip_app_account: { pip_id: string; app: string };
   export_pip_team: { pip_ids: string[]; name?: string };
+  get_pip_skills: { pip_id: string };
+  set_pip_skill: { pip_id: string; skill: string; on: boolean };
   set_pips_keep_running: { enabled: boolean };
   mark_pip_digest_seen: { until: string };
   mark_pip_news_seen: { pip_ids: string[]; until: string };
@@ -388,6 +390,8 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   set_pip_app: ["pip_id", "app", "on"],
   add_pip_app_account: ["pip_id", "app"],
   export_pip_team: ["pip_ids", "name"],
+  get_pip_skills: ["pip_id"],
+  set_pip_skill: ["pip_id", "skill", "on"],
   get_pips_keep_running: [],
   set_pips_keep_running: ["enabled"],
   get_pip_digest: [],
@@ -913,8 +917,8 @@ const API86_FIELDS: Record<string, string[]> = { open_pip_computer: ["number"], 
 const API87_MUTATIONS = new Set(["copy_pip_computer_file_in", "copy_pip_computer_file_out"]);
 for (const command of API87_MUTATIONS) MUTATIONS.add(command);
 // API 88 (pips-09): "Apps it can use", a switch per app on each Pip (every app on until switched off).
-const API88_READS = new Set(["get_pip_apps", "export_pip_team"]);
-const API88_MUTATIONS = new Set(["set_pip_app", "add_pip_app_account"]);
+const API88_READS = new Set(["get_pip_apps", "export_pip_team", "get_pip_skills"]);
+const API88_MUTATIONS = new Set(["set_pip_app", "add_pip_app_account", "set_pip_skill"]);
 for (const command of API88_READS) READS.add(command);
 for (const command of API88_MUTATIONS) MUTATIONS.add(command);
 const CONVERSATION_ID = /^conv_[0-9a-f]{32}$/;
