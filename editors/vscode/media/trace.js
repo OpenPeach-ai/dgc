@@ -129,9 +129,12 @@
       tick.textContent = clock(duration * i / 6); ticks.appendChild(tick); }
     ruler.appendChild(ticks);
     const body = document.createElement("div"); body.className = "dgc-trace-body";
+    // The rows, the grid lines and the playhead share one box as tall as every row, so a scrolled list keeps them
+    // (reported 12 Nov: on a long trace they stopped at the first screen).
+    const list = document.createElement("div"); list.className = "dgc-trace-rows"; body.appendChild(list);
     const grid = document.createElement("div"); grid.className = "dgc-trace-grid";
     for (let i = 1; i <= 5; i++) { const line = document.createElement("i"); line.style.left = `${i * 16.66}%`; grid.appendChild(line); }
-    body.appendChild(grid);
+    list.appendChild(grid);
     for (const row of trace.rows) {
       const item = document.createElement("div"); item.className = `dgc-trace-row ${row.kind}${row.error ? " error" : ""}`;
       const label = document.createElement("span"); label.className = "dgc-trace-label";
@@ -145,10 +148,10 @@
       const meta = document.createElement("span"); meta.className = "dgc-trace-meta";
       const detail = document.createElement("span"); detail.textContent = row.tokens && !row.error ? `${row.tokens.toLocaleString()} tk` : row.detail || "";
       const time = document.createElement("span"); time.textContent = fmt(row.end - row.start);
-      meta.append(detail, time); item.append(label, lane, meta); body.appendChild(item);
+      meta.append(detail, time); item.append(label, lane, meta); list.appendChild(item);
       item.title = [row.label, row.tokens && !row.error ? `${row.tokens.toLocaleString()} tk` : row.detail, fmt(row.end - row.start)].filter(Boolean).join(" · ");
     }
-    const cursor = document.createElement("div"); cursor.className = "dgc-trace-cursor"; body.appendChild(cursor);
+    const cursor = document.createElement("div"); cursor.className = "dgc-trace-cursor"; list.appendChild(cursor);
     const transport = document.createElement("div"); transport.className = "dgc-trace-transport";
     const play = document.createElement("button"); play.type = "button"; play.className = "dgc-trace-play";
     // Drawn, not typed: "▶" and "Ⅱ" come from whichever font has them, with their own size and place in the circle.
@@ -164,7 +167,7 @@
     transport.append(play, scrub, elapsed); dialog.append(header, ...notes, ruler, body, transport); backdrop.appendChild(dialog);
     let frame = 0, last = 0, position = duration;
     const paint = () => { const fraction = position / duration;
-      cursor.style.left = `calc(var(--trace-name-width) + (100% - var(--trace-name-width) - var(--trace-meta-width)) * ${fraction})`;
+      cursor.style.left = `calc(var(--trace-name-width) + (100% - var(--trace-name-width) - var(--trace-meta-width) - var(--trace-lane-gap)) * ${fraction})`;
       scrub.value = String(Math.round(position)); scrub.style.setProperty("--pos", `${fraction * 100}%`); elapsed.textContent = `${clock(position)} / ${clock(duration)}`;
       body.querySelectorAll(".dgc-trace-row").forEach((item, index) =>
         item.classList.toggle("future", trace.rows[index].start - trace.start > position));

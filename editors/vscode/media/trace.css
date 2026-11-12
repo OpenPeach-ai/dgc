@@ -14,7 +14,7 @@
 .dgc-trace-backdrop { position: fixed; z-index: 10000; inset: 0; display: grid; place-items: center; padding: 24px; }
 /* (Its scrim, lift, corner and arrival are the shared dialog's, media/shared/dialog.css; its edge stays its own.) */
 .dgc-trace-backdrop .dgc-trace-dialog { border-color: var(--border-strong); }
-.dgc-trace-dialog { --trace-name-width: 168px; --trace-meta-width: 150px; width: min(820px, 100%); max-height: min(760px, calc(100vh - 48px)); display: flex; flex-direction: column; overflow: hidden; color: var(--text-strong); background: var(--surface); font: 11.5px/1.35 var(--vscode-editor-font-family, ui-monospace, monospace); }
+.dgc-trace-dialog { --trace-name-width: 168px; --trace-meta-width: 150px; --trace-lane-gap: 14px; width: min(820px, 100%); max-height: min(760px, calc(100vh - 48px)); display: flex; flex-direction: column; overflow: hidden; color: var(--text-strong); background: var(--surface); font: 11.5px/1.35 var(--vscode-editor-font-family, ui-monospace, monospace); }
 .dgc-trace-head { min-height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--border); }
 .dgc-trace-head strong { font-size: 12px; font-weight: 600; }
 /* D14: a model change, said in one line under the header; it wraps in a narrow window rather than being cut. */
@@ -24,10 +24,11 @@
 .dgc-trace-close { border: 0; background: none; color: var(--muted); cursor: pointer; font: 16px/1 sans-serif; width: 24px; height: 24px; min-width: 0; min-height: 0; display: grid; place-items: center; padding: 0; border-radius: 5px; }
 .dgc-trace-close:hover { color: var(--text-strong); }
 .dgc-trace-ruler { height: 24px; flex: none; position: relative; border-bottom: 1px solid var(--border); }
-.dgc-trace-ticks { position: absolute; inset: 0 var(--trace-meta-width) 0 var(--trace-name-width); }
+.dgc-trace-ticks { position: absolute; inset: 0 calc(var(--trace-meta-width) + var(--trace-lane-gap)) 0 var(--trace-name-width); }
 .dgc-trace-ticks span { position: absolute; top: 5px; transform: translateX(-50%); color: var(--muted); font-size: 10px; }
 .dgc-trace-body { position: relative; min-height: 0; overflow: auto; padding: 3px 0; }
-.dgc-trace-grid { position: absolute; inset: 0 var(--trace-meta-width) 0 var(--trace-name-width); pointer-events: none; }
+.dgc-trace-rows { position: relative; }
+.dgc-trace-grid { position: absolute; inset: 0 calc(var(--trace-meta-width) + var(--trace-lane-gap)) 0 var(--trace-name-width); pointer-events: none; }
 .dgc-trace-grid i { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border); }
 .dgc-trace-row { height: 26px; display: grid; grid-template-columns: var(--trace-name-width) minmax(0,1fr) var(--trace-meta-width); align-items: center; position: relative; }
 .dgc-trace-row:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
@@ -35,7 +36,7 @@
 .dgc-trace-label { min-width: 0; display: flex; align-items: center; gap: 7px; padding: 0 12px; overflow: hidden; white-space: nowrap; font-weight: 500; }
 .dgc-trace-label > span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .dgc-trace-glyph.codicon[class*="codicon-"] { color: var(--muted); flex: none; font-size: 12px; }
-.dgc-trace-lane { height: 100%; position: relative; }
+.dgc-trace-lane { height: 100%; position: relative; margin-right: var(--trace-lane-gap); }
 .dgc-trace-bar { position: absolute; top: calc(50% - 2.5px); height: 5px; min-width: 3px; border-radius: 5px; background: var(--muted); }
 .dgc-trace-row.model .dgc-trace-bar { background: var(--text-strong); }
 .dgc-trace-row.error .dgc-trace-bar { background: var(--err, #768A00); }
@@ -62,7 +63,7 @@
    line, the full width. The cursor, ruler and grid follow it through the two width tokens. */
 @media (max-width: 520px) {
   .dgc-trace-backdrop { padding: 8px; }
-  .dgc-trace-dialog { --trace-name-width: 12px; --trace-meta-width: 12px; }
+  .dgc-trace-dialog { --trace-name-width: 12px; --trace-meta-width: 12px; --trace-lane-gap: 0px; }   /* the numbers sit above the lane here */
   .dgc-trace-head { min-height: 34px; gap: 8px; padding: 0 6px 0 10px; }
   .dgc-trace-head strong { font-size: 11.5px; }
   .dgc-trace-model { display: none; }
