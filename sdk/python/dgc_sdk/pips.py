@@ -444,6 +444,15 @@ API89_READS = frozenset({'get_pip_owner', 'list_session_pips'})
 API89_MUTATIONS = frozenset({'set_pip_owner'})
 READ_COMMANDS |= API89_READS
 MUTATION_COMMANDS |= API89_MUTATIONS
+# API 90 (pips-22): webhooks in, fully local. A routine's own secret address, its signing secret and a test call; how
+# calls reach this computer (the home network switch, the user's own tunnel). list_pip_routines' webhooks lists the
+# routines a service calls. Local only.
+API90_READS = frozenset({'get_pip_webhook', 'get_webhook_reach'})
+API90_MUTATIONS = frozenset({'replace_pip_webhook_address', 'set_pip_webhook_signing', 'send_pip_webhook_test',
+                             'set_webhook_reach'})
+API90_FIELDS = {'list_pip_routines': frozenset({'webhooks'})}
+READ_COMMANDS |= API90_READS
+MUTATION_COMMANDS |= API90_MUTATIONS
 
 
 def _api88_field(command, values) -> bool:
@@ -526,7 +535,7 @@ COMMAND_FIELDS = {
     'update_pip_computers': frozenset(),
     'reset_pip_computer': frozenset({'pip_id'}),
     'list_pip_apps': frozenset(),
-    'list_pip_routines': frozenset({'pip_id', 'app_events'}),
+    'list_pip_routines': frozenset({'pip_id', 'app_events', 'webhooks'}),
     'add_pip_routine': frozenset({'pip_id', 'title', 'prompt', 'trigger'}),
     'update_pip_routine': frozenset({'pip_id', 'routine_id', 'changes'}),
     'delete_pip_routine': frozenset({'pip_id', 'routine_id'}),
@@ -584,6 +593,12 @@ COMMAND_FIELDS = {
     'get_pip_owner': frozenset({'pip_id'}),
     'set_pip_owner': frozenset({'pip_id', 'session_id'}),
     'list_session_pips': frozenset({'session_id'}),
+    'get_pip_webhook': frozenset({'pip_id', 'routine_id'}),
+    'replace_pip_webhook_address': frozenset({'pip_id', 'routine_id'}),
+    'set_pip_webhook_signing': frozenset({'pip_id', 'routine_id', 'secret'}),
+    'send_pip_webhook_test': frozenset({'pip_id', 'routine_id'}),
+    'get_webhook_reach': frozenset(),
+    'set_webhook_reach': frozenset({'local_network', 'tunnel', 'own_base'}),
     'get_pips_payments': frozenset(),
     'set_pips_payments': frozenset({'limit'}),
     'set_pip_paying': frozenset({'pip_id', 'rule'}),
@@ -901,7 +916,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API89_READS | API89_MUTATIONS:
+        if command in API90_READS | API90_MUTATIONS:
+            minimum = 90
+        elif command in API89_READS | API89_MUTATIONS:
             minimum = 89
         elif command in API88_READS | API88_MUTATIONS:
             minimum = 88
@@ -1157,6 +1174,11 @@ class Pips:
                 raise DGCUnsupportedError("Routines on your app's events require a runtime advertising Pips API 63 or newer")
             if type(values['app_events']) is not bool:
                 raise DGCConfigError("app_events is True or False")
+        if API90_FIELDS.get(command, frozenset()) & set(values):
+            if version < 90:
+                raise DGCUnsupportedError("Routines a service calls (webhooks) require a runtime advertising Pips API 90 or newer")
+            if type(values['webhooks']) is not bool:
+                raise DGCConfigError("webhooks is True or False")
         if command == 'ensure_pip_template':
             if 'template' not in values:
                 raise DGCConfigError("ensure_pip_template takes a template")

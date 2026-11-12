@@ -83,7 +83,9 @@ class RoutineTests(unittest.TestCase):
         self.assertEqual(pip_routines.validate_trigger({"kind": "calendar"})["lead_minutes"], 15, "sensible defaults")
         for bad in ({"kind": "schedule", "schedule": None}, {"kind": "email", "query": ""},
                     {"kind": "email", "query": "x", "every_minutes": 1}, {"kind": "calendar", "lead_minutes": 500},
-                    {"kind": "webhook"}, {"kind": "schedule", "schedule": {"type": "interval", "minutes": 1}}):
+                    # A webhook is a kind since API 90 (pips-22); one with anything but its kind is still refused.
+                    {"kind": "sms"}, {"kind": "webhook", "url": "https://example.com"},
+                    {"kind": "schedule", "schedule": {"type": "interval", "minutes": 1}}):
             with self.subTest(bad=bad), self.assertRaises(RegistryError):
                 pip_routines.validate_trigger(bad)
 

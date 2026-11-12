@@ -229,6 +229,18 @@ def _shutdown_owned(registry, runtime_config, record):
         raise failure
 
 
+def _webhooks_tick(registry, directory, clock, keeper):
+    """Listen for webhook calls while a webhook routine is on (pip_webhooks); never stops the runner."""
+    try:
+        if keeper is None:
+            from .pip_webhook_listener import Keeper
+            keeper = Keeper(directory, clock)
+        keeper.check(registry)
+    except Exception as exc:                     # noqa: BLE001 - reported once a heartbeat at most
+        print(f"[pip webhooks] {type(exc).__name__}: {str(exc)[:300]}", file=sys.stderr, flush=True)
+    return keeper
+
+
 def _computer_tick(registry, config) -> None:
     """Pip computers: honour stop requests, carry out the user's decisions, close idle ones.
 
@@ -312,6 +324,7 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now, server=False)
     schedule_tick = None
     event_tick = None
     routine_tick = None
+    webhooks = None                              # the webhook listener's keeper (pip_webhook_listener), made on start
     try:
         with WorkspaceRegistry(directory, clock=clock) as registry:
             if is_runtime_paused(registry):
@@ -362,6 +375,7 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now, server=False)
                         routine_tick = RoutineTick(runtime_config, directory, clock)
                         routine_tick.start()
                     _computer_tick(registry, runtime_config)
+                    webhooks = _webhooks_tick(registry, directory, clock, webhooks)
                     _app_approvals_tick(registry, runtime_config)
                     pips.start_queued(runtime_config)
                     if notifier is not None:
@@ -378,6 +392,8 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now, server=False)
                 schedule_failure = None
                 if awake is not None:
                     awake.stop()
+                if webhooks is not None:
+                    webhooks.stop(registry)
                 if routine_tick is not None:
                     routine_tick.stop()
                     routine_tick.join()

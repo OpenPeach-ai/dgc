@@ -13,7 +13,9 @@ Three kinds of "when":
   first email check only notes what is already there; each later one that finds new items runs the
   routine with up to five of them as untrusted data, and no item runs twice;
 - an event your own app sends (pip_sdk_app_events, Pips API 63): {kind: "app", app, event}, such as
-  the shop app's order.created. Each event runs it once, with what the app sent as untrusted data.
+  the shop app's order.created. Each event runs it once, with what the app sent as untrusted data;
+- a call to its own webhook address (pip_webhooks, Pips API 90): {kind: "webhook"}, when a service such as
+  Stripe or GitHub calls it. Only the user adds one, in the Pip's Settings; a Pip never suggests it.
 
 A routine may run a troupe instead (troupe_routines): many read-only agents on a project's committed
 code, as a job of its own, with the Pip telling the user what it found. It is scheduled from a DGC
@@ -118,10 +120,14 @@ def validate_trigger(value) -> dict:
     """The routine's "when", in its one stored shape."""
     if isinstance(value, dict) and "kind" not in value and set(value) == {"app", "event"}:
         value = {"kind": "app", **value}             # {app, event}: when your own app sends that event
-    if not isinstance(value, dict) or value.get("kind") not in ("schedule", "email", "calendar", "app"):
-        raise RegistryError("invalid_routine", "Choose when it runs: a time, a new email, a calendar event, or an "
-                                               "event your app sends.")
+    if not isinstance(value, dict) or value.get("kind") not in ("schedule", "email", "calendar", "app", "webhook"):
+        raise RegistryError("invalid_routine", "Choose when it runs: a time, a new email, a calendar event, an "
+                                               "event your app sends, or a call to its webhook address.")
     kind = value["kind"]
+    if kind == "webhook":
+        if set(value) != {"kind"}:
+            raise RegistryError("invalid_routine", "A routine a service calls has only its kind: DGC makes its address.")
+        return {"kind": "webhook"}
     if kind == "app":
         if set(value) != {"kind", "app", "event"}:
             raise RegistryError("invalid_routine", "A routine on your app's event has the app's name and the event's.")
@@ -160,6 +166,8 @@ def validate_trigger(value) -> dict:
 
 def label(trigger: dict) -> str:
     """When it runs, in words (the editor has its own; this one is for the Pip's turn)."""
+    if trigger["kind"] == "webhook":
+        return "when a service calls its webhook address"
     if trigger["kind"] == "app":
         from .pip_sdk_apps import phrase
         return f"when {phrase(trigger['app'])} sends {trigger['event']}"
@@ -226,8 +234,8 @@ def projection(row) -> dict:
 
 
 def _first_due(trigger: dict, now: datetime) -> str | None:
-    if trigger["kind"] == "app":
-        return None                          # due when the app sends the event (pip_sdk_app_events.trigger)
+    if trigger["kind"] in ("app", "webhook"):
+        return None                          # due when the app sends the event, or a service calls (pip_webhooks)
     if trigger["kind"] != "schedule":
         return stamp(now)                    # an app routine checks at once (the first email check only notes)
     from .pip_schedules import next_due
@@ -254,15 +262,19 @@ def _row(registry, pip_id, routine_id):
     return row
 
 
-def listing(store, pip_id, app_events=False) -> dict:
+def listing(store, pip_id, app_events=False, webhooks=False) -> dict:
     """Its routines. One on your own app's event (Pips API 63) is listed only to a caller that asks for them
-    (app_events: true): an older editor refuses a "when" it doesn't know, and with it the whole list."""
+    (app_events: true), and one a service calls (Pips API 90) only with webhooks: true: an older editor refuses a
+    "when" it doesn't know, and with it the whole list."""
     job = store._job(pip_id)
     if app_events not in (None, True, False):
         raise RegistryError("invalid_request", "app_events is true or false.")
+    if webhooks not in (None, True, False):
+        raise RegistryError("invalid_request", "webhooks is true or false.")
     rows = store.registry.db.execute("SELECT * FROM pip_routines WHERE pip_id=? AND status<>'declined' ORDER BY created_at",
                                      (pip_id,)).fetchall()
-    shown = [r for r in rows if app_events or json.loads(r["trigger"]).get("kind") != "app"]
+    hidden = ({"app"} - ({"app"} if app_events else set())) | ({"webhook"} - ({"webhook"} if webhooks else set()))
+    shown = [r for r in rows if json.loads(r["trigger"]).get("kind") not in hidden]
     return {"pip_id": pip_id, "workspace_id": job["workspace_id"], "routines": [projection(r) for r in shown]}
 
 
@@ -293,6 +305,9 @@ def _insert(store, pip_id, title, prompt, trigger, *, status, created_by, run_id
                             (routine_id, pip_id, job["workspace_id"], title, prompt, json.dumps(trigger), status, created_by,
                              run_id, stamp(now), _first_due(trigger, now) if status == "on" else None, stamp(now), stamp(now),
                              None if troupe is None else json.dumps(troupe)))
+        if trigger["kind"] == "webhook":
+            from .pip_webhooks import create
+            create(registry.db, routine_id, pip_id, stamp(now))     # its own secret address, made with it
         registry.event(job["workspace_id"], "pip_routine_added", pip_id=pip_id,
                        payload={"routine_id": routine_id, "status": status, "by": created_by})
     return projection(_row(registry, pip_id, routine_id))
@@ -362,6 +377,12 @@ def update(store, pip_id, routine_id, changes: dict) -> dict:
         if status == "off" or "trigger" in changes:
             from .pip_sdk_app_events import forget
             forget(registry.db, routine_id)        # what waited on its app's events is let go
+        if "trigger" in changes:
+            from .pip_webhooks import create, remove
+            if trigger["kind"] == "webhook":
+                create(registry.db, routine_id, pip_id, stamp(now))  # kept if it had one: its address stays
+            else:
+                remove(registry.db, routine_id)
     return projection(_row(registry, pip_id, routine_id))
 
 
@@ -374,6 +395,8 @@ def delete(store, pip_id, routine_id) -> dict:
         registry.db.execute("DELETE FROM pip_routines WHERE id=?", (routine_id,))
         from .pip_sdk_app_events import forget
         forget(registry.db, routine_id)
+        from .pip_webhooks import remove
+        remove(registry.db, routine_id)            # its address ends with it
     return {"pip_id": pip_id, "routine_id": routine_id, "deleted": True}
 
 
@@ -436,8 +459,13 @@ def validate_candidate(value) -> dict:
     """What a run may hand back: a routine to suggest, checked again before it is saved."""
     if not isinstance(value, dict) or set(value) != {"title", "prompt", "trigger"}:
         raise RegistryError("invalid_routine", "Suggest a routine with a name, what to do, and when.")
+    trigger = validate_trigger(value["trigger"])
+    if trigger["kind"] == "webhook":
+        # A public address into this computer is the user's to make, never a Pip's.
+        raise RegistryError("invalid_routine", "A routine a service calls is added by the user in your Settings, where "
+                                               "its address is made. Tell them how, instead.")
     return {"title": _text(value["title"], 160, "its name"), "prompt": _text(value["prompt"], 4000, "what to do"),
-            "trigger": validate_trigger(value["trigger"])}
+            "trigger": trigger}
 
 
 def tool_result(arguments: dict, connected_toolkits, own_apps=(), *, direct=False) -> tuple[dict | None, str]:
@@ -737,6 +765,10 @@ def check(registry, config, row, *, reader=None, now=None) -> str:
     if trigger["kind"] == "app":
         # An event your own app sent (pip_sdk_app_events): its oldest waiting one, as this turn.
         from .pip_sdk_app_events import run_next
+        return run_next(store, config, row, trigger, now)
+    if trigger["kind"] == "webhook":
+        # A service called its address (pip_webhooks): its oldest waiting call, as this turn.
+        from .pip_webhooks import run_next
         return run_next(store, config, row, trigger, now)
     # An app event: one read through the Pip's own connected app, with no model.
     from . import pip_app_links

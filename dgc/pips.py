@@ -66,6 +66,8 @@ CONTROL_COMMANDS = frozenset({
     "copy_pip_computer_file_in", "copy_pip_computer_file_out",
     "get_pip_apps", "set_pip_app", "add_pip_app_account", "get_pip_skills", "set_pip_skill",
     "get_pip_owner", "set_pip_owner", "list_session_pips",
+    "get_pip_webhook", "replace_pip_webhook_address", "set_pip_webhook_signing", "send_pip_webhook_test",
+    "get_webhook_reach", "set_webhook_reach",
     "run_pip_computer_command", "list_pip_computer_terminal", "get_pip_computer_desktop",
     "get_pips_keep_running", "set_pips_keep_running",
     "get_pips_desktop_notifications", "set_pips_desktop_notifications",
@@ -128,7 +130,8 @@ _COMMAND_ARGS = {
     "decline_pip_app_link": {"pip_id", "link_id"}, "disconnect_pip_app_link": {"pip_id", "link_id"},
     "finish_pip_computer_check": {"pip_id"},
     # app_events (API 63): list routines on your own app's events too (an older editor refuses a "when" it doesn't know).
-    "list_pip_routines": {"pip_id", "app_events"}, "add_pip_routine": {"pip_id", "title", "prompt", "trigger"},
+    # webhooks (API 90): list routines a service calls too.
+    "list_pip_routines": {"pip_id", "app_events", "webhooks"}, "add_pip_routine": {"pip_id", "title", "prompt", "trigger"},
     "update_pip_routine": {"pip_id", "routine_id", "changes"}, "delete_pip_routine": {"pip_id", "routine_id"},
     "decide_pip_routine": {"pip_id", "routine_id", "add"},
     # API 77: Undo on a change a Personal Pip made about itself at once, in a turn the user started (pip_own_changes).
@@ -216,6 +219,10 @@ _COMMAND_ARGS = {
     "copy_pip_computer_file_in": {"pip_id", "path", "source"}, "copy_pip_computer_file_out": {"pip_id", "path", "target"},
     "get_pip_apps": {"pip_id"}, "set_pip_app": {"pip_id", "app", "on"}, "add_pip_app_account": {"pip_id", "app"},
     "get_pip_owner": {"pip_id"}, "set_pip_owner": {"pip_id", "session_id"}, "list_session_pips": {"session_id"},
+    # Webhooks in (pip_webhooks, API 90): a routine's own address, its signing secret, a test call; how calls reach it.
+    "get_pip_webhook": {"pip_id", "routine_id"}, "replace_pip_webhook_address": {"pip_id", "routine_id"},
+    "set_pip_webhook_signing": {"pip_id", "routine_id", "secret"}, "send_pip_webhook_test": {"pip_id", "routine_id"},
+    "get_webhook_reach": set(), "set_webhook_reach": {"local_network", "tunnel", "own_base"},
     "get_pip_skills": {"pip_id"}, "set_pip_skill": {"pip_id", "skill", "on"},
     "run_pip_computer_command": {"pip_id", "command"}, "list_pip_computer_terminal": {"pip_id"},
     "get_pip_computer_desktop": {"pip_id"},
@@ -5858,7 +5865,9 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                        # A plugin's key pasted on its card (pips-10): kept as typed for plugin_keys, never answered.
                        {"keys": request["keys"]} if command == "allow_pip_plugin" and "keys" in request else
                        # A Pip's own API key pasted on its card (pip_keys): the same.
-                       {"value": request["value"]} if command == "save_pip_key" and "value" in request else {})
+                       {"value": request["value"]} if command == "save_pip_key" and "value" in request else
+                       # A service's webhook signing secret (pip_webhooks): kept as typed, never answered.
+                       {"secret": request["secret"]} if command == "set_pip_webhook_signing" and "secret" in request else {})
         request = redact_value(request, secret_values(config))
         request.update(credentials)
         choice = request.get("model_choice") if command == "create_pip" else (
@@ -5880,7 +5889,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 "get_workspace_session_outcome", "list_workspace_session_outcomes",
                 "accept_workspace_session_outcome", "reject_workspace_session_outcome", "get_workspace_context")
             receipt_command = command in ("list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context")
-            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("list_pip_flows", "get_pip_flow", "create_pip_flow", "set_pip_flow", "get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "list_pip_keys", "save_pip_key", "decline_pip_key", "remove_pip_key", "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret", "list_app_approvals", "decide_app_approval", "trigger_app_event", "list_app_events", "ensure_pip_template", "prune_pip_templates", "list_pip_templates", "decide_pip_template_change", "export_pip", "export_pip_team", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "add_pip_computer", "rename_pip_computer", "set_pip_computer_screen", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "delete_archived_pip", "list_pip_attention") else registry.resolve(config.project_root)
+            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("list_pip_flows", "get_pip_flow", "create_pip_flow", "set_pip_flow", "get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_webhook_reach", "set_webhook_reach", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "list_pip_keys", "save_pip_key", "decline_pip_key", "remove_pip_key", "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret", "list_app_approvals", "decide_app_approval", "trigger_app_event", "list_app_events", "ensure_pip_template", "prune_pip_templates", "list_pip_templates", "decide_pip_template_change", "export_pip", "export_pip_team", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "add_pip_computer", "rename_pip_computer", "set_pip_computer_screen", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "delete_archived_pip", "list_pip_attention") else registry.resolve(config.project_root)
             workspace_id = request.get("workspace_id", current["id"] if current else "")
             if actor not in ('editor-user','local-console'):
                 # Personal scope is deliberately local for this milestone. Existing
@@ -6265,7 +6274,8 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 if actor not in ('editor-user', 'local-console'):
                     raise RegistryError('local_only', "Only you change a Pip's routines, on this computer.")
                 if command == 'list_pip_routines':
-                    result = pip_routines.listing(store, pip_id, app_events=request.get('app_events', False))
+                    result = pip_routines.listing(store, pip_id, app_events=request.get('app_events', False),
+                                                  webhooks=request.get('webhooks', False))
                 elif command == 'add_pip_routine':
                     result = {'routine': pip_routines.add(store, pip_id, request.get('title'), request.get('prompt'), request.get('trigger'))}
                 elif command == 'update_pip_routine':
@@ -6443,6 +6453,12 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     raise RegistryError("local_only", "Only you can choose a Pip's skills, on this computer.")
                 result = (pip_skill_switches.listing(registry, pip_id, personal_skills(config)) if command == "get_pip_skills"
                           else pip_skill_switches.set_skill(registry, pip_id, request.get("skill"), request.get("on"), actor))
+            elif command in ("get_pip_webhook", "replace_pip_webhook_address", "set_pip_webhook_signing",
+                             "send_pip_webhook_test", "get_webhook_reach", "set_webhook_reach"):
+                # Pips API 90 (pips-22, decided 12 Nov): webhooks in, fully local; the internet only through the
+                # user's own tunnel. Local only.
+                from . import pip_webhooks
+                result = pip_webhooks.control(store, command, request, actor)
             elif command in ("get_pip_owner", "set_pip_owner", "list_session_pips"):
                 # Pips API 89 (asked 12 Nov): a Project Pip's one owner session, the chat its cards reach.
                 from . import pip_owners

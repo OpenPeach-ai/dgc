@@ -417,7 +417,32 @@ def turn_extra(base: str, app: str, event: str, received_at: str, payload: str, 
 
 def run_next(store, config, row, trigger, now) -> str:
     """One routine on an app event, due: its oldest waiting event becomes its turn in the Pip's chat."""
-    from .pip_routines import _fire, stamp, turn_text
+    from .pip_routines import stamp, turn_text
+
+    def registered(settle):
+        try:
+            app = pip_sdk_apps.get(trigger["app"])
+        except RegistryError as exc:
+            settle({"next_due_at": stamp(now + ERROR_RETRY), "last_error": str(exc)[:500]})
+            return "error"
+        if app is None:
+            with store.registry.transaction():
+                forget(store.db, row["id"])
+            settle({"next_due_at": None, "last_error": f"Waiting for {pip_sdk_apps.display(trigger['app'])}: it isn't "
+                                                       "registered with DGC now."})
+            return "no_app"
+        return None
+
+    return run_queued(store, config, row, now,
+                      lambda item, dropped: turn_extra(turn_text(row, trigger), trigger["app"], item["event"],
+                                                       item["created_at"], item["payload"], dropped),
+                      before=registered)
+
+
+def run_queued(store, config, row, now, extra_for, before=None) -> str:
+    """A routine whose due work is a queue of calls (an app's events, a webhook's calls): its oldest waiting one becomes
+    its turn in the Pip's chat. ``extra_for(item, dropped)`` words it; ``before(settle)`` may stop it first."""
+    from .pip_routines import _fire, stamp
     registry, db = store.registry, store.db
     at = stamp(now)
 
@@ -435,18 +460,11 @@ def run_next(store, config, row, trigger, now) -> str:
     if not has_tables(db):
         settle({"next_due_at": None})
         return "nothing_new"
-    try:
-        app = pip_sdk_apps.get(trigger["app"])
-    except RegistryError as exc:
-        settle({"next_due_at": stamp(now + ERROR_RETRY), "last_error": str(exc)[:500]})
-        return "error"
-    if app is None:
-        with registry.transaction():
-            forget(db, row["id"])
-        settle({"next_due_at": None, "last_error": f"Waiting for {pip_sdk_apps.display(trigger['app'])}: it isn't "
-                                                   "registered with DGC now."})
-        return "no_app"
-    item = db.execute("SELECT q.seq,q.event_id,e.event,e.payload,e.created_at FROM pip_app_event_queue q "
+    if before is not None:
+        stopped = before(settle)
+        if stopped:
+            return stopped
+    item = db.execute("SELECT q.seq,q.event_id,e.event,e.payload,e.created_at,e.answer FROM pip_app_event_queue q "
                       "JOIN pip_app_events e ON e.id=q.event_id WHERE q.routine_id=? AND q.status='waiting' "
                       "ORDER BY q.seq LIMIT 1", (row["id"],)).fetchone()
     if item is None:
@@ -454,7 +472,7 @@ def run_next(store, config, row, trigger, now) -> str:
         return "nothing_new"
     dropped = db.execute("SELECT count(*) FROM pip_app_event_queue WHERE pip_id=? AND status='dropped' AND told=0",
                          (row["pip_id"],)).fetchone()[0]
-    extra = turn_extra(turn_text(row, trigger), trigger["app"], item["event"], item["created_at"], item["payload"], dropped)
+    extra = extra_for(item, dropped)
     try:
         sent = _fire(store, row, config, extra, "appevent:" + item["event_id"])
     except RegistryError as exc:

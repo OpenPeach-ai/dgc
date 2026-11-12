@@ -509,7 +509,12 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # none), chosen}; set_pip_owner {pip_id, session_id (null: no session)}; list_session_pips {session_id} -> {session_id,
 # pips: [{id, name, pip_type, status}]}, what archiving or deleting that session asks about. Local only. Its cards (run
 # reports) reach its owner alone; attach_pip_to_session makes that chat the owner. A Personal Pip has none.
-PIPS_API_VERSION = 89
+# API 90 (0.52, pips-22, decided 12 Nov): webhooks in, fully local. A Personal Pip's routine may wait for a call to its
+# own secret address ({kind: "webhook"}, added by the user, listed only with list_pip_routines webhooks: true).
+# get_pip_webhook / replace_pip_webhook_address / set_pip_webhook_signing {secret|null} / send_pip_webhook_test
+# {pip_id, routine_id}; get_webhook_reach {} and set_webhook_reach {local_network, tunnel: tailscale|own|null,
+# own_base}: how calls reach this computer. Local only.
+PIPS_API_VERSION = 90
 
 
 def attachment_limits() -> dict:
