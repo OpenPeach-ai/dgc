@@ -552,6 +552,53 @@ button.routine-open:hover .routine-words strong{text-decoration:underline}
 .routine-when .inline{display:inline-flex;align-items:center;gap:6px;margin:0;white-space:nowrap}
 .routine-when #routineQuery,.routine-when #routineAt{flex:1 1 200px;width:auto}
 .routine-legacy-edit{padding:4px 14px 12px}
+/* Webhooks in (pips-22, pipWebhooks.js): a routine's panel under its card, and Pips settings → Webhooks. An address
+   sits on one line beside its button and ends in an ellipsis when it is longer than the row. */
+.webhook-panel-row{padding:4px 14px 14px}
+.routine-list>li.routine-form-row+li.webhook-panel-row{border-top:0;padding-top:0}
+.webhook-panel{display:flex;flex-direction:column;gap:8px;min-width:0;padding:12px;border:1px solid var(--pip-edge);border-radius:10px}
+.webhook-panel h4{margin:6px 0 0;font-size:12px;font-weight:600;color:var(--muted)}
+.webhook-panel p,.webhook-internet-body p{margin:0;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.webhook-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}
+.webhook-head h4{margin:0}
+.webhook-addresses{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.webhook-address{display:flex;flex-direction:column;gap:3px;min-width:0}
+.webhook-way{font-size:12px;color:var(--muted)}
+.webhook-line{display:flex;align-items:center;gap:8px;min-width:0}
+.webhook-line>button{flex:none}
+.webhook-line>input{flex:1 1 auto;min-width:0;width:auto}
+.webhook-line-wrap{flex-wrap:wrap}
+.webhook-line-wrap>input{flex:1 1 150px}
+.webhook-url{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:4px 8px;border-radius:6px;background:var(--vscode-textCodeBlock-background,var(--pip-wash));font-family:var(--vscode-editor-font-family,ui-monospace,monospace);font-size:12px;line-height:1.5;color:var(--vscode-foreground)}
+.webhook-actions{display:flex;flex-wrap:wrap;gap:8px}
+.webhook-listening,.webhook-error,.webhook-refusal,.row-words small.webhook-error{color:var(--vscode-errorForeground)}
+.webhook-signing{display:flex;flex-direction:column;gap:6px;min-width:0;margin:6px 0 0}
+.webhook-signing label{margin:0;font-size:12px;font-weight:600;color:var(--muted)}
+.webhook-signed{margin-left:6px;font-weight:400;color:var(--vscode-foreground)}
+.webhook-calls{list-style:none;margin:0;padding:0}
+.webhook-call{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;padding:7px 0;font-size:12px;line-height:1.45}
+.webhook-call+.webhook-call{border-top:1px solid var(--pip-edge)}
+.webhook-call-who{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+.webhook-call-who strong{font-weight:600}
+.webhook-call-event{margin-left:6px;color:var(--muted);font-family:var(--vscode-editor-font-family,ui-monospace,monospace);font-size:11px}
+.webhook-call-what{flex:0 1 auto;min-width:0;overflow-wrap:anywhere}
+.webhook-call[data-outcome=refused] .webhook-call-what{color:var(--vscode-errorForeground)}
+.webhook-call small{flex:1 1 100%;order:1;color:var(--muted);font-size:11px}
+.webhook-empty{color:var(--muted)}
+button.link.hook-link{display:inline;min-height:0;padding:0;border:0;border-radius:3px;font:inherit;color:inherit;text-align:left;text-decoration:underline;text-decoration-color:color-mix(in srgb,currentColor 35%,transparent);text-underline-offset:2px;cursor:pointer;overflow-wrap:anywhere}
+button.link.hook-link:hover{background:transparent;color:var(--pip-ink);text-decoration-color:currentColor}
+.pip-page-row.webhook-internet{align-items:flex-start}
+.webhook-internet-body{flex:1 1 100%;min-width:0;display:flex;flex-direction:column;gap:8px}
+.webhook-internet-body p.muted,.webhook-own p.muted{color:var(--muted)}
+.webhook-on-words{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:8px;font-size:12px;white-space:nowrap}
+.webhook-own>summary{width:fit-content;max-width:100%;font-size:12px;color:var(--muted);cursor:pointer}
+.webhook-own>summary:hover{color:var(--vscode-foreground)}
+.webhook-own-form{display:flex;flex-direction:column;gap:6px;min-width:0;margin-top:8px}
+.webhook-refused .row-words small{font-size:12px}
+/* Pips settings has a fourth tab (Webhooks): in a narrow side bar the four stay inside it. */
+.pip-page-tabs[aria-label="Pips settings"]{max-width:100%;min-width:0}
+.pip-page-tabs[aria-label="Pips settings"] button.seg{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@container(max-width:340px){.webhook-address .webhook-line>button,.webhook-head>button{width:var(--btn-w-sm,76px)}.pip-page-tabs[aria-label="Pips settings"]{gap:2px}.pip-page-tabs[aria-label="Pips settings"] button.seg{padding:5px 7px}}
 .routine-card .routine-prompt{margin:0;font-size:12px;line-height:1.5;color:var(--vscode-foreground);white-space:pre-wrap;overflow-wrap:anywhere;max-height:7.5em;overflow:auto}
 /* Its face: one of the eight original Pips. */
 .pip-character{display:flex;flex-direction:column;gap:8px}

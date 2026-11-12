@@ -534,6 +534,55 @@ export const host = (opts) => `(${function (PIP, opts) {
     list_pip_run_activity: ((base) => (r) => { const page = base(r); return { ...page, run_id: r.run_id, events: page.events.map((e) => ({ ...e, run_id: r.run_id })) }; })(answers.list_pip_run_activity) });
   // A Pip with named computers (api 86) and no key cards asked for has no keys waiting, as most Pips have.
   if (opts.convs && (opts.api || 0) >= 86 && !opts.ownKeys && !opts.keys) answers.list_pip_keys ||= () => ({ pip_id: PIP, keys: [] });
+  // opts.webhooks: webhooks in (pips-22, Pips API 90; pass api: 90 and settings: true). A routine a service calls
+  // ("New payments") beside the Pip's others, its address and its latest calls, and how calls reach this computer.
+  // {network: the home network switch is on, tunnel: "tailscale" | "own" (on already), tailscale: "missing" | "blocked"
+  // (not installed; Funnel not allowed yet), calls: false (none yet), signing, listening: false, cloudflared, refused:
+  // calls to an address no routine has, slow: ms Tailscale takes to turn on, needsYou: turning it on is refused with
+  // Tailscale's link, longBase: a long address of your own}. What was asked is kept in window.__hooks, which answers
+  // as DGC does; no tailscale command is run anywhere.
+  if (opts.webhooks && !project) {
+    const want = opts.webhooks === true ? {} : opts.webhooks, RID = "routine_" + "c".repeat(32), PORT = 47615;
+    const TS = "https://studio-mac.tail1a2b3c.ts.net/dgc-hooks", OWN = want.longBase ? "https://hooks.a-rather-long-company-name-for-a-tunnel.example.com/services/incoming/dgc" : "https://hooks.example.com/dgc";
+    const OPENS = "Turning it on makes only DGC's webhook path reachable from the internet, at this computer's Tailscale name followed by /dgc-hooks/, and only a routine's secret address gets an answer. Nothing else on this computer, and nothing else you serve with Tailscale, is opened. You can turn it off here at any time.";
+    const st = window.__hooks = { token: "4ebed6" + "0123456789abcdef".repeat(3).slice(0, 42), signing: !!want.signing, local: !!want.network, tunnel: want.tunnel || null, own: want.tunnel === "own" ? OWN : null, asked: [], routine: RID };
+    const hookRoutine = { ...suggested, id: RID, title: "New payments", prompt: "Say who paid and how much, and add it to the sales sheet.", trigger: { kind: "webhook" }, label: "when a service calls its webhook address",
+      status: "on", created_by: "user" };
+    const ago = (min) => new Date(Date.now() - min * 60000).toISOString();
+    const call = (min, extra) => ({ at: ago(min), via: "internet", service: "Stripe", event: "payment_intent.succeeded", outcome: "queued", reason: null, times: 1, bytes: 812, ran: true, run_id: null, ...extra });
+    const calls = want.calls === false ? [] : [call(4, { ran: false }), call(38, {}), call(52, { service: null, event: null, outcome: "refused", reason: "rate_limited", times: 3, ran: false }),
+      call(180, { service: "GitHub", event: "ping", via: "computer", outcome: "test", reason: "ping", ran: false }), call(1500, { via: "network", service: "DGC", event: null, outcome: "paused", reason: "routine_off", ran: false })];
+    const base = () => (st.tunnel === "tailscale" ? TS : st.tunnel === "own" ? st.own : null);
+    const describe = () => ({ pip_id: PIP, routine_id: RID, path: "/hooks/" + st.token, addresses: { computer: `http://127.0.0.1:${PORT}/hooks/${st.token}`, network: st.local ? `http://192.0.2.20:${PORT}/hooks/${st.token}` : null,
+      internet: base() ? `${base()}/${st.token}` : null }, signing: st.signing, listening: want.listening !== false, listen_error: null, calls });
+    const tailscale = () => (want.tailscale === "missing" ? { installed: false, running: false, funnel_allowed: false, operator: true, ready: false, on: false, public_base: null, port: null, opens: OPENS,
+      words: "Install Tailscale from tailscale.com and sign in with your own account. Then DGC can turn on Tailscale Funnel for your routines' addresses with one click." }
+      : { installed: true, running: true, funnel_allowed: want.tailscale !== "blocked", operator: true, ready: want.tailscale !== "blocked", on: st.tunnel === "tailscale", public_base: st.tunnel === "tailscale" ? TS : null,
+        port: st.tunnel === "tailscale" ? 443 : null, opens: OPENS, words: want.tailscale === "blocked" ? "Tailscale Funnel isn't allowed for this computer in your Tailscale account yet. Turn it on and Tailscale shows a link to allow Funnel and HTTPS; or allow them in its admin console." : "" });
+    const reached = () => ({ listening: want.listening !== false, port: PORT, bind: st.local ? "0.0.0.0" : "127.0.0.1", listen_error: null, local_network: st.local, network_address: st.local ? "192.0.2.20" : null,
+      tunnel: { kind: st.tunnel, on: !!st.tunnel, public_base: base(), tailscale: tailscale(), cloudflared: !!want.cloudflared },
+      refused: want.refused ? [{ at: ago(12), via: "internet", reason: "unknown_address", times: 4 }, { at: ago(300), via: "network", reason: "unknown_address", times: 1 }] : [] });
+    const others = answers.list_pip_routines;
+    const note = (r) => { st.asked.push(JSON.parse(JSON.stringify(r))); };
+    Object.assign(answers, {
+      list_pip_routines: (r) => { const page = others(r); return { ...page, routines: [...page.routines.filter((x) => x.status !== "suggested"), ...(r.webhooks ? [hookRoutine] : [])] }; },
+      get_pip_webhook: (r) => { note(r); return describe(); },
+      replace_pip_webhook_address: (r) => { note(r); st.token = "77aa10" + "fedcba9876543210".repeat(3).slice(0, 42); return describe(); },
+      set_pip_webhook_signing: (r) => { note({ ...r, secret: r.secret === null ? null : "(a secret)" }); st.signing = r.secret !== null; return describe(); },
+      send_pip_webhook_test: (r) => { note(r); if (want.listening === false) throw Error("Nothing is listening for calls: the Pips runner isn't running on this computer. Turn Pips on, then send the test again.");
+        calls.unshift(call(0, { via: "computer", service: "DGC", event: null, ran: false })); return { ...describe(), test: { status: 202, outcome: "queued" } }; },
+      get_webhook_reach: (r) => { note(r); return reached(); },
+      set_webhook_reach: (r) => { note(r);
+        if ("local_network" in r) st.local = r.local_network;
+        if ("tunnel" in r) {
+          if (r.tunnel === "tailscale" && want.needsYou) throw Error("Tailscale asks you to allow Funnel first: open https://login.tailscale.com/f/funnel?node=nABC123CNTRL and allow it, then turn it on here again.");
+          if (r.tunnel === "own" && !/^https:\/\//.test(r.own_base || "")) throw Error("An address of your own starts with https:// and has no ? or #: the service calls it with the routine's secret after it.");
+          st.tunnel = r.tunnel; st.own = r.tunnel === "own" ? r.own_base.replace(/\/+$/, "") : null; }
+        return reached(); },
+      get_pip_computers: answers.get_pip_computers || (() => ({ available: true, setup: { state: "ready" }, computers: [] })),
+    });
+    if (want.slow) window.__slow = { set_webhook_reach: want.slow };
+  }
   window.acquireVsCodeApi = () => ({ getState: () => undefined, setState() {}, postMessage(m) {
     // (What the page tells its host besides a request, such as a photo to open or a file to download: window.__posted.)
     if (m?.type !== "pipsRequest") { (window.__posted ||= []).push(m);
@@ -548,7 +597,7 @@ export const host = (opts) => `(${function (PIP, opts) {
     let reply;
     try { reply = make ? { type: "pipsReply", id: m.id, ok: true, result: make(m.request) } : { type: "pipsReply", id: m.id, ok: false, error: "not offered here" }; }
     catch (error) { reply = { type: "pipsReply", id: m.id, ok: false, error: error.message }; }
-    setTimeout(() => window.postMessage(reply, "*"), opts.answerAfter || 1);   // (opts.answerAfter: a backend that takes a while, in ms)
+    setTimeout(() => window.postMessage(reply, "*"), (m.request.tunnel === "tailscale" && window.__slow?.[m.request.type]) || opts.answerAfter || 1);   // (opts.answerAfter: a backend that takes a while, in ms)
   } });
   // Called once the page has mounted the client (the side bar mounts it after its other scripts).
   window.__connect = () => window.postMessage({ type: "pipsConnection", apiVersion: opts.api || 78, generation: 1, connected: true, supported: true, enabled: true }, "*");

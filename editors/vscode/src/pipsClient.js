@@ -78,6 +78,7 @@ import {pipArtifacts,dashboardList,artifactsPageMarkup,artifactsSectionsMarkup,r
 import {templatePage,templateMarkup} from './pipTemplates.js';
 import {borrowsPage,borrowResult,shownBorrows,borrowActive,borrowMarkup} from './pipBorrow.js';
 import {routinesPage,routineDraft,routineFromDraft,shownRoutineCards,routineCardMarkup,routinesMarkup,routineFormMarkup,shortDate} from './pipRoutines.js';
+import {webhook,reach as webhookReach,webhooksOffered,testLine as webhookTestLine,webhookPanelMarkup,reachMarkup} from './pipWebhooks.js';
 import {pickerMarkup,createPicker} from './pipPicker.js';
 import {createChatFollow,AT_BOTTOM_PX} from './pipsFollow.js';
 import {computerNames,computerNameProblem,cleanComputerName,urgentComputerState,computerIconWords,computersMenuMarkup,computerNamesMarkup} from './pipComputerNames.js';
@@ -4490,6 +4491,12 @@ function pipKeyCards(){
 document.addEventListener('input',event=>{const box=event.target;if(box?.dataset?.pipKeyBox)pipKeyTyped(box);});
 document.addEventListener('change',event=>{const tick=event.target,id=tick?.dataset?.pipKeyTerminal;if(!id)return;if(tick.checked)pipKeyTicked.add(id);else pipKeyTicked.delete(id);});
 document.addEventListener('submit',event=>{const id=event.target?.dataset?.pipKeyForm;if(!id)return;event.preventDefault();void pipKeySave(id);});
+// A webhook routine's signing secret, and an address of your own for calls from the internet (pipWebhooks.js).
+document.addEventListener('submit',event=>{const d=event.target?.dataset;if(!d)return;
+ if(d.hookSigningForm!==undefined){event.preventDefault();saveHookSigning();return;}
+ if(d.reachOwnForm!==undefined){event.preventDefault();if(S.busy)return;const own=String(draft.hookOwnBase||'').trim();
+  if(!/^https:\/\/\S+$/.test(own)){pipsSettings.reachRefusal='Type the address as https://your.domain/path.';render();$('hookOwnBase')?.focus();return;}
+  void reachCall({tunnel:'own',own_base:own},'own','Saved. Services on the internet reach your routines through your own address.');}});
 // Your own apps (Pips API 61): registered by your code; a change a Pip proposes in one is this same Allow card.
 S.ownApps=[];S.ownAppsError='';let ownAppsSeq=0;
 async function loadOwnApps(){
@@ -4657,8 +4664,9 @@ function sameJson(a,b){const norm=v=>Array.isArray(v)?v.map(norm):record(v)?Obje
 async function loadRoutines(){
  if(remoteHost||S.apiVersion<43||!personalPip()||!usable())return;
  const token=scope(),sequence=++routineSeq,pip=S.selected;
- // From Pips API 63 its routines on your own app's events too (an older DGC lists none and takes no such field).
- try{const list=routinesPage(await send('list_pip_routines',{pip_id:pip,...(appEventRoutines()?{app_events:true}:{})}),pip);if(token!==scope()||sequence!==routineSeq)return;S.routines=list;S.routinesError='';render();}
+ // From Pips API 63 its routines on your own app's events too (an older DGC lists none and takes no such field), and
+ // from API 90 the ones a service calls.
+ try{const list=routinesPage(await send('list_pip_routines',{pip_id:pip,...(appEventRoutines()?{app_events:true}:{}),...(webhookRoutines()?{webhooks:true}:{})}),pip);if(token!==scope()||sequence!==routineSeq)return;S.routines=list;S.routinesError='';render();}
  catch(error){if(token===scope()&&sequence===routineSeq){S.routinesError=errorText(error);render();}}
 }
 function routineCards(){
@@ -4673,6 +4681,7 @@ async function routineCall(command,args,id,notice){
 }
 function routineStartNotice(result){
  const routine=result?.routine,kind=routine?.trigger?.kind;
+ if(kind==='webhook')return 'Routine added. Paste its address into the service that calls it.';
  const toolkit=kind==='email'?'gmail':kind==='calendar'?'googlecalendar':'';
  if(toolkit&&!(S.appLinks||[]).some(link=>link.status==='connected'&&link.toolkit===toolkit))
   return `Routine saved. It waits for ${kind==='email'?'Gmail':'Google Calendar'} to be linked to this Pip. Use the link card in this chat if shown, or ask this Pip to link the app. DGC can reuse an active Composio account.`;
@@ -4680,8 +4689,79 @@ function routineStartNotice(result){
 }
 function editRoutine(id){
  const r=(S.routines||[]).find(x=>x.id===id);if(id!=='new'&&!r)return;
- routineEditing=id;routineError='';Object.assign(draft,routineDraft(id==='new'?null:r,defaultZone,ownAppNames()[0]||''));render();$('routineTitle')?.focus();
+ routineEditing=id;routineError='';Object.assign(draft,routineDraft(id==='new'?null:r,defaultZone,ownAppNames()[0]||''));
+ if(r?.trigger.kind==='webhook'&&webhookRoutines()){if(hook.routine!==id||hook.pip!==S.selected)openHook(id);}else closeHook();
+ render();$('routineTitle')?.focus();
  if(draft.routineKind==='app')void loadAppEvents(draft.routineApp);
+}
+// A routine a service calls (Pips API 90, pipWebhooks.js; local only): its panel under its card, open while you edit
+// it and right after you add it. Its address is a secret: `hook.shown` is off whenever the panel opens, the whole
+// address stays in `hook.value` (never in the page until Show), and nothing here logs it or says it in a notice.
+const hook={pip:'',routine:'',value:null,error:'',signingError:'',busy:'',shown:false,tested:'',seq:0};
+Object.assign(draft,{hookSecret:'',hookOwnBase:''});
+Object.assign(pipsSettings,{reach:null,reachError:'',reachBusy:'',reachRefusal:''});
+function webhookRoutines(){return webhooksOffered(S.apiVersion,remoteHost);}
+function closeHook(){hook.seq++;Object.assign(hook,{pip:'',routine:'',value:null,error:'',signingError:'',busy:'',shown:false,tested:''});draft.hookSecret='';}
+function openHook(id){closeHook();if(!webhookRoutines()||!S.selected)return;hook.pip=S.selected;hook.routine=id;void loadHook();}
+async function loadHook(){
+ if(!hook.routine||!webhookRoutines()||!usable())return;
+ const token=scope(),sequence=++hook.seq,pip=hook.pip,id=hook.routine;
+ try{const value=webhook(await send('get_pip_webhook',{pip_id:pip,routine_id:id}),pip,id);if(token!==scope()||sequence!==hook.seq)return;hook.value=value;hook.error='';}
+ catch(error){if(token!==scope()||sequence!==hook.seq)return;hook.error=errorText(error);}
+ render();
+}
+async function hookCall(command,args,what,after){
+ if(hook.busy||!usable()||!hook.routine||!webhookRoutines())return false;
+ const token=scope(),pip=hook.pip,id=hook.routine,mine=()=>token===scope()&&hook.pip===pip&&hook.routine===id;
+ hook.seq++;hook.busy=what;hook.error='';hook.signingError='';if(what==='test')hook.tested='';render();
+ try{const value=webhook(await send(command,{pip_id:pip,routine_id:id,...args}),pip,id);if(!mine())return false;hook.value=value;after?.(value);return true;}
+ catch(error){if(mine()){const words=errorText(error);if(what==='test')hook.tested=words;else if(what==='signing')hook.signingError=words;else hook.error=words;}return false;}
+ finally{if(mine()){hook.busy='';render();}}
+}
+function hookPanel(r){
+ if(r.trigger.kind!=='webhook'||!webhookRoutines()||hook.routine!==r.id||hook.pip!==S.selected)return '';
+ return webhookPanelMarkup(hook.value,{esc,routineId:r.id,busy:hook.busy,off:S.busy||!usable(),shown:hook.shown,error:hook.error,signingError:hook.signingError,tested:hook.tested,secret:draft.hookSecret,alone:routineEditing!==r.id,formatDate:shortDate});
+}
+function copyHookAddress(way){
+ const address=hook.value?.addresses?.[way];if(!address)return;
+ vscode.postMessage({type:'copy',text:address});S.notice='Copied its address.';render();
+}
+function replaceHookAddress(){
+ if(!hook.value||hook.busy||S.busy)return;
+ openReview({title:'Replace its address?',description:'The old address stops working at once. Services that use it need the new one.',confirm:'Replace address',working:'Replacing…',danger:true,request:{},
+  run:()=>hookCall('replace_pip_webhook_address',{},'replace',()=>{hook.shown=false;hook.tested='';S.notice='Its address is replaced. The old one stopped working.';})});
+}
+function saveHookSigning(remove=false){
+ if(!hook.value||hook.busy||S.busy)return;
+ const secret=remove?null:String(draft.hookSecret||'').trim();
+ if(!remove&&!secret){hook.signingError='Paste the secret first.';render();$('hookSecret')?.focus();return;}
+ void hookCall('set_pip_webhook_signing',{secret},'signing',()=>{draft.hookSecret='';const box=$('hookSecret');if(box)box.value='';
+  S.notice=remove?'Removed. Calls are no longer checked for a signature.':'Saved. DGC refuses calls this secret didn’t sign.';});
+}
+// A dialog whose Confirm runs something of the page's own (`review.run`): it stays open, saying what is under way,
+// until that ends; what went wrong is said where the control is, not in the dialog.
+async function runReview(review){
+ if(S.busy)return;S.busy=true;render();renderReview();
+ try{await review.run();}catch{/* said by what ran */}
+ finally{S.busy=false;if(S.review===review)closeReview();render();}
+}
+// How calls reach this computer (Pips settings → Webhooks). Turning on Tailscale Funnel can take half a minute.
+async function reachCall(args,what,notice){
+ if(pipsSettings.reachBusy||!usable()||!webhookRoutines())return false;
+ const token=S.epoch;pipsSettings.reachBusy=what;pipsSettings.reachRefusal='';render();
+ try{const value=webhookReach(await send('set_webhook_reach',args));if(token!==S.epoch)return false;pipsSettings.reach=value;pipsSettings.reachError='';
+  if(what==='own')draft.hookOwnBase='';S.notice=typeof notice==='function'?notice(value):notice;return true;}
+ catch(error){if(token===S.epoch)pipsSettings.reachRefusal=errorText(error);return false;}
+ finally{pipsSettings.reachBusy='';if(token===S.epoch)render();}
+}
+function askTailscale(){
+ const ts=pipsSettings.reach?.tunnel?.tailscale;if(!ts||pipsSettings.reachBusy||S.busy)return;
+ openReview({title:'Use Tailscale Funnel?',description:ts.opens,confirm:'Turn on',working:'Turning on…',request:{},
+  run:()=>reachCall({tunnel:'tailscale'},'tailscale','Tailscale Funnel is on. Services on the internet can call your routines’ addresses.')});
+}
+function openReachSettings(){
+ routineEditing='';routineError='';closeHook();clearSelection();S.selected='';S.create=false;S.overview=true;rememberView();
+ pipsSettings.view='webhooks';pipsSettings.reachRefusal='';render();void loadPipsSettings();
 }
 // A routine on your own app's event (Pips API 63): choose the app, then type the event or pick one it sent lately.
 const appEventNames=new Map();let appEventsSeq=0;
@@ -4698,17 +4778,19 @@ async function loadAppEvents(app){
 async function saveRoutine(){
  const isNew=routineEditing==='new',current=(S.routines||[]).find(x=>x.id===routineEditing);
  let value;try{value=routineFromDraft(draft.routineKind==='custom'?{...draft,routineKind:'daily'}:draft);}catch(error){routineError=errorText(error);render();return;}
- if(isNew){if(await routineCall('add_pip_routine',value,'form',routineStartNotice))routineEditing='';render();return;}
+ if(isNew){const added=await routineCall('add_pip_routine',value,'form',routineStartNotice);
+  // One a service calls: its panel opens under its card, with the address to paste.
+  if(added){routineEditing='';if(added.routine?.trigger?.kind==='webhook'&&typeof added.routine.id==='string')openHook(added.routine.id);}render();return;}
  if(!current)return;
  const changes={title:value.title,prompt:value.prompt};if(draft.routineKind!=='custom'&&!sameJson(value.trigger,current.trigger))changes.trigger=value.trigger;
- if(await routineCall('update_pip_routine',{routine_id:current.id,changes},'form','Saved.'))routineEditing='';render();
+ if(await routineCall('update_pip_routine',{routine_id:current.id,changes},'form','Saved.')){routineEditing='';closeHook();}render();
 }
 function routinesSectionMarkup(short=false){   // short: on its page, where the "i" beside Routines says what one is
  if(S.routinesError&&!S.routines)return errorMarkup(S.routinesError);
  if(!S.routines)return '<p class="muted" role="status">Loading…</p>';
  const links=S.appLinks||[],busy=!!routineBusy||S.busy||!usable();
- const form=routineEditing?routineFormMarkup(draft,{esc,busy,error:routineError,isNew:routineEditing==='new',gmail:links.some(l=>l.status==='connected'&&l.toolkit==='gmail'),calendar:links.some(l=>l.status==='connected'&&l.toolkit==='googlecalendar'),apps:ownAppNames(),events:appEventNames.get(draft.routineApp)||[]}):'';
- return routinesMarkup(S.routines,{esc,busy,editing:routineEditing,form,formatDate:date,pipName:S.pip.name,short,posts:r=>convList()?routinePostsMarkup(r,convList(),{esc,busy}):'',schedule:S.pip.schedule?scheduleLabel(S.pip.schedule):'',gmail:links.some(l=>l.status==='connected'&&l.toolkit==='gmail'),calendar:links.some(l=>l.status==='connected'&&l.toolkit==='googlecalendar')})+(S.legacyOpen&&S.pip.schedule?`<div class="routine-legacy-edit">${quickScheduleMarkup()}</div>`:'');
+ const form=routineEditing?routineFormMarkup(draft,{esc,busy,error:routineError,isNew:routineEditing==='new',gmail:links.some(l=>l.status==='connected'&&l.toolkit==='gmail'),calendar:links.some(l=>l.status==='connected'&&l.toolkit==='googlecalendar'),apps:ownAppNames(),events:appEventNames.get(draft.routineApp)||[],webhooks:webhookRoutines()}):'';
+ return routinesMarkup(S.routines,{esc,busy,editing:routineEditing,form,formatDate:date,pipName:S.pip.name,short,posts:r=>convList()?routinePostsMarkup(r,convList(),{esc,busy}):'',panel:hookPanel,schedule:S.pip.schedule?scheduleLabel(S.pip.schedule):'',gmail:links.some(l=>l.status==='connected'&&l.toolkit==='gmail'),calendar:links.some(l=>l.status==='connected'&&l.toolkit==='googlecalendar')})+(S.legacyOpen&&S.pip.schedule?`<div class="routine-legacy-edit">${quickScheduleMarkup()}</div>`:'');
 }
 function routinePopoverMarkup(){
  if(S.composerPanel!=='routines'||!personalPip()||S.apiVersion<43)return '';
@@ -4717,7 +4799,7 @@ function routinePopoverMarkup(){
 }
 function openPipPage(view='info'){
  const p=S.pip;if(!p)return;
- S.pipPage=view;draft.pipPageName=p.name;draft.pipPageTitle=profile(p.profile).title;pageNameDirty=false;titleEditing=false;lookDirty=false;routineEditing='';routineError='';
+ S.pipPage=view;draft.pipPageName=p.name;draft.pipPageTitle=profile(p.profile).title;pageNameDirty=false;titleEditing=false;lookDirty=false;routineEditing='';routineError='';closeHook();
  void loadRoutines();void loadAppLinks();void loadPlugins();void loadNotes();void loadCareful();void loadEyes();void loadLevel();void loadPipBackup();void loadTemplate();void loadLogins();void loadArtifacts();void loadAppsUse();void loadSkillsUse();folderUi.open=false;folderUi.adding=false;folderUi.error='';draft.pipFolderName='';noteConfirmAll=false;sitesAll=false;loginsState.confirm='';pipKeyConfirm='';appsUse.confirm='';
 }
 function putProfile(pipId,value){
@@ -4786,12 +4868,13 @@ function pipPageMenu(){
 async function loadPipsSettings(){
  if(remoteHost||S.apiVersion<43||!usable())return;
  const token=S.epoch,sequence=++pipsSettings.seq,view=pipsSettings.view;
- try{if(view==='plugins'){const uses=pluginUsesPage(await send('list_pip_plugin_uses'));if(token!==S.epoch||sequence!==pipsSettings.seq)return;pipsSettings.plugins=uses;pipsSettings.pluginsError='';}
+ try{if(view==='webhooks'&&webhookRoutines()){const value=webhookReach(await send('get_webhook_reach'));if(token!==S.epoch||sequence!==pipsSettings.seq)return;pipsSettings.reach=value;pipsSettings.reachError='';}
+  else if(view==='plugins'){const uses=pluginUsesPage(await send('list_pip_plugin_uses'));if(token!==S.epoch||sequence!==pipsSettings.seq)return;pipsSettings.plugins=uses;pipsSettings.pluginsError='';}
   else if(view==='apps'){const [listed]=await Promise.all([send('list_pip_apps'),loadOwnApps()]);const apps=appsPage(listed);if(token!==S.epoch||sequence!==pipsSettings.seq)return;pipsSettings.apps=apps;pipsSettings.appsError='';
    if(S.apiVersion>=44){const v=await send('get_pips_limit');if(token===S.epoch&&record(v)&&Number.isSafeInteger(v.max_pips)){pipsSettings.limit=v;if(draft.pipsMax==='')draft.pipsMax=String(v.max_pips);}}}
   else{const value=computersPage(await send('get_pip_computers'));if(token!==S.epoch||sequence!==pipsSettings.seq)return;pipsSettings.computers=value;pipsSettings.computersError='';
    if(value.setup.state==='running'||value.computers.some(c=>c.resetting))window.setTimeout(()=>{if(pipsSettings.view==='computer'&&!disposed)void loadPipsSettings();},3000);}}
- catch(error){if(token===S.epoch&&sequence===pipsSettings.seq){if(view==='models')pipsSettings.backupError=errorText(error);else if(view==='plugins')pipsSettings.pluginsError=errorText(error);else if(view==='apps')pipsSettings.appsError=errorText(error);else pipsSettings.computersError=errorText(error);}}
+ catch(error){if(token===S.epoch&&sequence===pipsSettings.seq){if(view==='webhooks')pipsSettings.reachError=errorText(error);else if(view==='models')pipsSettings.backupError=errorText(error);else if(view==='plugins')pipsSettings.pluginsError=errorText(error);else if(view==='apps')pipsSettings.appsError=errorText(error);else pipsSettings.computersError=errorText(error);}}
  finally{if(token===S.epoch)render();}
 }
 // A Pip's fallback model (API 76; D14): chosen with the ⋯ beside a model in its model picker. When its own model doesn't
@@ -4829,9 +4912,10 @@ async function pipsSettingsCall(command,args,notice){
  finally{pipsSettings.busy=false;if(token===S.epoch)render();}
 }
 function pipsSettingsMarkup(){
- const view=['apps','plugins'].includes(pipsSettings.view)&&(pipsSettings.view!=='plugins'||S.apiVersion>=44)?pipsSettings.view:'computer',busy=pipsSettings.busy||S.busy||!usable();
- const tabs=`<nav class="pip-page-tabs" aria-label="Pips settings">${[['computer','Computer'],['apps','Apps'],...(S.apiVersion>=44?[['plugins','Plugins']]:[])].map(([k,l])=>`<button type="button" class="seg" data-pips-settings="${k}" aria-pressed="${view===k}">${l}</button>`).join('')}</nav>`;
- const body=view==='plugins'?pluginUsesMarkup(pipsSettings.plugins,{esc,busy,error:pipsSettings.pluginsError}):view==='apps'?ownAppsMarkup(S.apiVersion>=61?S.ownApps:[],{esc,busy,error:S.apiVersion>=61?S.ownAppsError:''})+appsSettingsMarkup(pipsSettings.apps,{esc,busy,error:pipsSettings.appsError,ownApps:S.apiVersion>=61&&(S.ownApps||[]).length>0})+(S.apiVersion>=43&&!remoteHost?`<section class="pip-page-group"><div class="pip-page-row static"><span class="row-words"><strong>Skills</strong><small>Your Pips use your DGC skills that fit everyday work: deep research, charts and planning, and the ones you add. A skill is instructions; it never gives a Pip new access.</small></span>${button('manage-skills','Manage skills…',false,'quiet pill')}</div></section>`:'')+(S.apiVersion>=44&&!remoteHost&&pipsSettings.limit?`<section class="pip-page-group"><form id="pips-limit-form" class="pip-page-row static"><span class="row-words"><label for="pipsMax"><strong>How many Pips you can have</strong></label><small>${pipsSettings.limit.default.toLocaleString('en-US')} unless you choose another number, up to ${pipsSettings.limit.maximum.toLocaleString('en-US')}. Archived Pips don’t count. A powerful computer can run thousands.</small></span><input id="pipsMax" data-draft="pipsMax" type="number" min="1" max="${pipsSettings.limit.maximum}" step="1" inputmode="numeric" value="${esc(draft.pipsMax)}" aria-label="How many Pips you can have"><button type="submit" class="quiet pill"${busy||String(pipsSettings.limit.max_pips)===draft.pipsMax?' disabled':''}>Save</button></form></section>`:'')
+ const view=['apps','plugins','webhooks'].includes(pipsSettings.view)&&(pipsSettings.view!=='plugins'||S.apiVersion>=44)&&(pipsSettings.view!=='webhooks'||webhookRoutines())?pipsSettings.view:'computer',busy=pipsSettings.busy||S.busy||!usable();
+ const tabs=`<nav class="pip-page-tabs" aria-label="Pips settings">${[['computer','Computer'],['apps','Apps'],...(S.apiVersion>=44?[['plugins','Plugins']]:[]),...(webhookRoutines()?[['webhooks','Webhooks']]:[])].map(([k,l])=>`<button type="button" class="seg" data-pips-settings="${k}" aria-pressed="${view===k}">${l}</button>`).join('')}</nav>`;
+ const body=view==='webhooks'?reachMarkup(pipsSettings.reach,{esc,busy:pipsSettings.reachBusy,off:busy,error:pipsSettings.reachError,refusal:pipsSettings.reachRefusal,ownBase:draft.hookOwnBase,formatDate:shortDate})
+  :view==='plugins'?pluginUsesMarkup(pipsSettings.plugins,{esc,busy,error:pipsSettings.pluginsError}):view==='apps'?ownAppsMarkup(S.apiVersion>=61?S.ownApps:[],{esc,busy,error:S.apiVersion>=61?S.ownAppsError:''})+appsSettingsMarkup(pipsSettings.apps,{esc,busy,error:pipsSettings.appsError,ownApps:S.apiVersion>=61&&(S.ownApps||[]).length>0})+(S.apiVersion>=43&&!remoteHost?`<section class="pip-page-group"><div class="pip-page-row static"><span class="row-words"><strong>Skills</strong><small>Your Pips use your DGC skills that fit everyday work: deep research, charts and planning, and the ones you add. A skill is instructions; it never gives a Pip new access.</small></span>${button('manage-skills','Manage skills…',false,'quiet pill')}</div></section>`:'')+(S.apiVersion>=44&&!remoteHost&&pipsSettings.limit?`<section class="pip-page-group"><form id="pips-limit-form" class="pip-page-row static"><span class="row-words"><label for="pipsMax"><strong>How many Pips you can have</strong></label><small>${pipsSettings.limit.default.toLocaleString('en-US')} unless you choose another number, up to ${pipsSettings.limit.maximum.toLocaleString('en-US')}. Archived Pips don’t count. A powerful computer can run thousands.</small></span><input id="pipsMax" data-draft="pipsMax" type="number" min="1" max="${pipsSettings.limit.maximum}" step="1" inputmode="numeric" value="${esc(draft.pipsMax)}" aria-label="How many Pips you can have"><button type="submit" class="quiet pill"${busy||String(pipsSettings.limit.max_pips)===draft.pipsMax?' disabled':''}>Save</button></form></section>`:'')
   :computersMarkup(pipsSettings.computers,{esc,busy,error:pipsSettings.computersError,formatDate:shortDate,confirming:pipsSettings.confirmReset});
  return `<header class="pip-topbar"><button type="button" id="pips-settings-close" class="topbar-icon" aria-label="Your Pips" title="Your Pips">${simpleIcon('back')}</button><div class="pip-pill settings-pill"><span>Pips settings</span></div><span></span></header><div class="simple-content"><div class="pip-page">${tabs}<div class="pip-page-body">${body}</div></div></div>`;
 }
@@ -5412,7 +5496,7 @@ const dropOverlay=on=>{const o=document.querySelector('#chat-form > .dgc-drop');
 document.addEventListener('dragenter',event=>{if(!canAttachImages()||!event.target?.closest?.('#chat-form')||![...(event.dataTransfer?.types||[])].includes('Files'))return;dropDepth++;dropOverlay(true);});
 document.addEventListener('dragleave',event=>{if(!event.target?.closest?.('#chat-form'))return;dropDepth=Math.max(0,dropDepth-1);if(!dropDepth)dropOverlay(false);});
 document.addEventListener('drop',event=>{dropDepth=0;dropOverlay(false);if(!canAttachImages()||!event.target?.closest?.('#chat-form'))return;const files=[...(event.dataTransfer?.files||[])];if(!files.length)return;event.preventDefault();addImageFiles(files);});
-document.addEventListener('change',event=>{if(event.target.dataset?.pluginLevel){const t=event.target,level=t.value,label=(PLUGIN_LEVELS.find(l=>l[0]===level)||[])[1]||level;void pipsSettingsCall('set_plugin_permission',{plugin:t.dataset.pluginLevel,level},`Saved. ${t.dataset.pluginName||'This plugin'}: ${label.toLowerCase()}.`);return;}if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pips-pay-limit'){void setPayLimit(event.target.value);return;}if(event.target.id==='pipEyes'){void setEyes(event.target.value);return;}if(event.target.id==='pipLevel'){void setLevel(event.target.value)}if(event.target.id==='pipPaying'){void setPaying(event.target.value);return;}if(event.target.id==='pipReportAs'){const v=event.target.value;void setArtifacts({report_as:v},value=>reportNotice(value,S.pip?.name||'It'));return;}if(event.target.id==='pipDashboardAdd'){const id=event.target.value;if(id&&artifactsState.value){const list=[...artifactsState.value.dashboards,id];void setArtifacts({dashboards:dashboardsToSave(list)},`${S.pip?.name||'It'} refreshes “${dashboardTitle(id)}” after every run it finishes.${goneNote(list)}`);}return;}if(event.target.dataset?.loginAll){const l=(loginsState.value||[]).find(x=>x.id===event.target.dataset.loginAll),all=event.target.checked;if(l)void loginCall('grant_pip_login',{login_id:l.id,pips:all?'all':[S.selected]},all?`All your Pips can use the login for ${l.site}.`:`Only ${S.pip?.name||'this Pip'} uses the login for ${l.site} now.`);return;}if(event.target.dataset?.pipAppSwitch){void setAppUse(event.target.dataset.pipAppSwitch,event.target.checked);return;}if(event.target.dataset?.pipSkillSwitch){void setSkillUse(event.target.dataset.pipSkillSwitch,event.target.checked);return;}if(event.target.dataset?.teamPip){teamTicked(event.target);return;}if(event.target.id==='pipCareful'){const on=event.target.checked;void carefulCall('set_pip_careful',{on},on?'Careful mode is on.':'Careful mode is off. Its submits still wait for you.');return;}if(event.target.id==='pipNotify'){const on=event.target.checked;void setProfile({notify:on},on?'It tells you when it finishes something on its own or needs you.':'It won’t notify you. Its chat still has everything.');return;}if(event.target.dataset?.routineToggle){const id=event.target.dataset.routineToggle,on=event.target.checked;void routineCall('update_pip_routine',{routine_id:id,changes:{status:on?'on':'off'}},id,on?'Routine on.':'Routine off. It won’t run until you turn it on.');return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
+document.addEventListener('change',event=>{if(event.target.dataset?.pluginLevel){const t=event.target,level=t.value,label=(PLUGIN_LEVELS.find(l=>l[0]===level)||[])[1]||level;void pipsSettingsCall('set_plugin_permission',{plugin:t.dataset.pluginLevel,level},`Saved. ${t.dataset.pluginName||'This plugin'}: ${label.toLowerCase()}.`);return;}if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='hook-network'){const on=event.target.checked;void reachCall({local_network:on},'network',on?'Devices on your home network can call your routines’ addresses.':'Your home network can no longer call your routines’ addresses.');return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pips-pay-limit'){void setPayLimit(event.target.value);return;}if(event.target.id==='pipEyes'){void setEyes(event.target.value);return;}if(event.target.id==='pipLevel'){void setLevel(event.target.value)}if(event.target.id==='pipPaying'){void setPaying(event.target.value);return;}if(event.target.id==='pipReportAs'){const v=event.target.value;void setArtifacts({report_as:v},value=>reportNotice(value,S.pip?.name||'It'));return;}if(event.target.id==='pipDashboardAdd'){const id=event.target.value;if(id&&artifactsState.value){const list=[...artifactsState.value.dashboards,id];void setArtifacts({dashboards:dashboardsToSave(list)},`${S.pip?.name||'It'} refreshes “${dashboardTitle(id)}” after every run it finishes.${goneNote(list)}`);}return;}if(event.target.dataset?.loginAll){const l=(loginsState.value||[]).find(x=>x.id===event.target.dataset.loginAll),all=event.target.checked;if(l)void loginCall('grant_pip_login',{login_id:l.id,pips:all?'all':[S.selected]},all?`All your Pips can use the login for ${l.site}.`:`Only ${S.pip?.name||'this Pip'} uses the login for ${l.site} now.`);return;}if(event.target.dataset?.pipAppSwitch){void setAppUse(event.target.dataset.pipAppSwitch,event.target.checked);return;}if(event.target.dataset?.pipSkillSwitch){void setSkillUse(event.target.dataset.pipSkillSwitch,event.target.checked);return;}if(event.target.dataset?.teamPip){teamTicked(event.target);return;}if(event.target.id==='pipCareful'){const on=event.target.checked;void carefulCall('set_pip_careful',{on},on?'Careful mode is on.':'Careful mode is off. Its submits still wait for you.');return;}if(event.target.id==='pipNotify'){const on=event.target.checked;void setProfile({notify:on},on?'It tells you when it finishes something on its own or needs you.':'It won’t notify you. Its chat still has everything.');return;}if(event.target.dataset?.routineToggle){const id=event.target.dataset.routineToggle,on=event.target.checked;void routineCall('update_pip_routine',{routine_id:id,changes:{status:on?'on':'off'}},id,on?'Routine on.':'Routine off. It won’t run until you turn it on.');return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
 document.addEventListener('submit',event=>{
   if(event.target.id==='pip-flow-form'){event.preventDefault();reviewFlow();return;}
   if(event.target.id==='pip-folder-form'){event.preventDefault();addPipFolder();return;}
@@ -5629,10 +5713,19 @@ document.addEventListener('click',event=>{
   if(target.dataset.revokeGrant){revokeGrant(target.dataset.revokeGrant);return;}
   if(target.dataset.routineAdd){const id=target.dataset.routineAdd;void routineCall('decide_pip_routine',{routine_id:id,add:true},id,routineStartNotice);return;}
   if(target.dataset.routineDecline){const id=target.dataset.routineDecline;void routineCall('decide_pip_routine',{routine_id:id,add:false},id,'');return;}
+  if(target.dataset.hookCopy){copyHookAddress(target.dataset.hookCopy);return;}
+  if(target.dataset.hookShow!==undefined){hook.shown=!hook.shown;render();return;}
+  if(target.dataset.hookReplace!==undefined){replaceHookAddress();return;}
+  if(target.dataset.hookSigningRemove!==undefined){saveHookSigning(true);return;}
+  if(target.dataset.hookTest!==undefined){if(!S.busy)void hookCall('send_pip_webhook_test',{},'test',value=>{hook.tested=webhookTestLine(value);});return;}
+  if(target.dataset.hookReach!==undefined){openReachSettings();return;}
+  if(target.dataset.hookClose!==undefined){closeHook();render();return;}
+  if(target.dataset.reachTailscale!==undefined){askTailscale();return;}
+  if(target.dataset.reachOff!==undefined){if(!S.busy)void reachCall({tunnel:null},'off','Turned off. Services on the internet can no longer reach your routines.');return;}
   if(target.dataset.routineEdit){editRoutine(target.dataset.routineEdit);return;}
   if(target.dataset.routineNew!==undefined){editRoutine('new');return;}
-  if(target.dataset.routineCancel!==undefined){routineEditing='';routineError='';render();return;}
-  if(target.dataset.routineDelete){const id=target.dataset.routineDelete;void routineCall('delete_pip_routine',{routine_id:id},id,'Routine deleted.').then(r=>{if(r){routineEditing='';render();}});return;}
+  if(target.dataset.routineCancel!==undefined){routineEditing='';routineError='';closeHook();render();return;}
+  if(target.dataset.routineDelete){const id=target.dataset.routineDelete;void routineCall('delete_pip_routine',{routine_id:id},id,'Routine deleted.').then(r=>{if(r){routineEditing='';closeHook();render();}});return;}
   if(target.dataset.routineLegacy!==undefined){S.legacyOpen=!S.legacyOpen;render();return;}
   if(target.dataset.pipPage){const v=target.dataset.pipPage;if(v==='instructions')draft.pipInstructions=S.pip?.goal||'';if(v==='character'){const look=profile(S.pip?.profile);draft.lookBody=look.body||'';lookDirty=false;}S.pipPage=v;render();if(v==='instructions')$('pipInstructions')?.focus();if(v==='info')void loadRoutines();return;}
   if(target.dataset.pipPageTab){S.pipPage=target.dataset.pipPageTab;routineEditing='';render();if(S.pipPage==='info')void loadRoutines();else void loadShared(S.pipPage);return;}
@@ -6008,6 +6101,7 @@ document.addEventListener('click',event=>{
     case 'cancel-goal':S.editingGoal=false;draft.revisionGoal='';render();break;
     case 'review-confirm':{
       const review=S.review;if(!review||review.scope!==scope()||!usable())return;
+      if(review.run){void runReview(review);return;}
       if(review.emailDraft){void chooseMessageConnection(review.emailDraft,review.calendarAction===true);return;}
       if(review.savedConnectorDraft){void chooseConnectorTool(review.savedConnectorDraft.payload.action.server,review.savedConnectorDraft);return;}
       if(review.connectorForm){prepareConnector(review);return;}

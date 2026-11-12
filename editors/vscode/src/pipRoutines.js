@@ -1,6 +1,6 @@
 // A Personal Pip's routines (pip_routines), Grok's Routines: something it does on its own, at a time,
-// when a matching email arrives, before a calendar event, or when your own app sends an event (Pips API 63:
-// "When the shop app sends order.created"). You add and edit them in its Settings; the Pip may suggest one
+// when a matching email arrives, before a calendar event, when your own app sends an event (Pips API 63:
+// "When the shop app sends order.created"), or when a service calls its own secret address (Pips API 90, pipWebhooks.js). You add and edit them in its Settings; the Pip may suggest one
 // in its chat, and the card under its message is your Add routine / Not now.
 
 const STATUSES = ['suggested', 'on', 'off'];
@@ -23,7 +23,7 @@ export function routine(value, pip) {
   const fail = () => { throw new Error('This routine didn’t load. Refresh to try again.'); };
   if (!record(value) || !/^routine_[a-f0-9]{32}$/.test(value.id) || value.pip_id !== pip || !text(value.title, 160) || !value.title
     || !text(value.prompt, 4000) || !STATUSES.includes(value.status) || !['user', 'pip'].includes(value.created_by)
-    || !record(value.trigger) || !['schedule', 'email', 'calendar', 'app'].includes(value.trigger.kind)
+    || !record(value.trigger) || !['schedule', 'email', 'calendar', 'app', 'webhook'].includes(value.trigger.kind)
     || !(value.run_id === null || value.run_id === undefined || /^run_[A-Za-z0-9]{1,64}$/.test(value.run_id))
     || !(value.next_due_at === null || time(value.next_due_at)) || !(value.last_run_at === null || time(value.last_run_at))
     || !(value.last_error === null || text(value.last_error, 600)) || !time(value.updated_at)
@@ -70,6 +70,7 @@ export function cronDays(cron) {
 /** When it runs, in words. */
 export function routineWhen(trigger, formatDate = v => new Date(v).toLocaleString()) {
   if (trigger.kind === 'app') return `When ${appPhrase(trigger.app)} sends ${trigger.event}`;
+  if (trigger.kind === 'webhook') return 'When a service calls its address';
   if (trigger.kind === 'email') return `When an email matching “${trigger.query}” arrives`;
   if (trigger.kind === 'calendar') return `${trigger.lead_minutes} minutes before each calendar event`;
   const s = trigger.schedule;
@@ -88,6 +89,7 @@ export function routineDraft(value = null, zone = 'UTC', app = '') {
   const t = value?.trigger;
   if (!t) return d;
   if (t.kind === 'app') return { ...d, routineKind: 'app', routineApp: t.app, routineEvent: t.event };
+  if (t.kind === 'webhook') return { ...d, routineKind: 'webhook' };
   if (t.kind === 'email') return { ...d, routineKind: 'email', routineQuery: t.query };
   if (t.kind === 'calendar') return { ...d, routineKind: 'calendar', routineLead: String(t.lead_minutes) };
   const s = t.schedule;
@@ -146,6 +148,8 @@ export function routineFromDraft(d, now = Date.now()) {
       if (!EVENT.test(event)) throw new Error('An event’s name is lowercase letters, digits, dots, hyphens or underscores, such as order.created.');
       trigger = { kind: 'app', app, event }; break;
     }
+    // DGC makes its address; nothing else is chosen here.
+    case 'webhook': trigger = { kind: 'webhook' }; break;
     default: throw new Error('Choose when it runs.');
   }
   return { title, prompt, trigger };
@@ -171,16 +175,18 @@ export function routineCardMarkup(r, { esc, busy = false, formatDate }) {
 }
 
 /** Its routines in Settings: one row each with an on/off switch, then Add routine. */
-export function routinesMarkup(routines, { esc, busy = false, editing = '', form = '', formatDate, pipName = 'It', schedule = '', gmail = false, calendar = false, short = false, posts = () => '' }) {
+export function routinesMarkup(routines, { esc, busy = false, editing = '', form = '', formatDate, pipName = 'It', schedule = '', gmail = false, calendar = false, short = false, posts = () => '', panel = () => '' }) {
   const off = busy ? ' disabled' : '';
   const shown = (routines || []).filter(r => r.status !== 'suggested');
-  const rows = shown.map(r => editing === r.id ? form : `<li class="routine-row" data-state="${esc(r.status)}">`
+  // A routine a service calls has a panel under its card (its address and its calls), open or being edited.
+  const under = r => { const p = panel(r); return p ? `<li class="webhook-panel-row">${p}</li>` : ''; };
+  const rows = shown.map(r => (editing === r.id ? form : `<li class="routine-row" data-state="${esc(r.status)}">`
     + `<button type="button" class="routine-open" data-routine-edit="${esc(r.id)}"${off}>${mark}<span class="routine-words"><strong>${esc(r.title)}</strong>`
     + `<small>${esc(routineWhen(r.trigger, formatDate))}${r.status === 'on' && r.next_due_at && r.trigger.kind === 'schedule' && r.trigger.schedule.type !== 'once' ? ` · next ${esc(shortDate(r.next_due_at))}` : ''}</small>`
     + `${r.status === 'on' && !r.last_error && ((r.trigger.kind === 'email' && !gmail) || (r.trigger.kind === 'calendar' && !calendar)) ? `<small class="routine-error">Waiting for ${r.trigger.kind === 'email' ? 'Gmail' : 'Google Calendar'} to be linked to this Pip.</small>` : ''}`
     + `${r.troupe ? `<small class="routine-troupe">Troupe · ${esc([r.troupe.plan, r.troupe.project].filter(Boolean).join(' · '))}</small>` : ''}`
     + `${r.last_error ? `<small class="routine-error">${esc(r.last_error)}</small>` : ''}</span></button>`
-    + `<label class="switch" title="${r.status === 'on' ? 'On' : 'Off'}"><input type="checkbox" role="switch" data-routine-toggle="${esc(r.id)}"${r.status === 'on' ? ' checked' : ''}${off} aria-label="${esc(r.title)} ${r.status === 'on' ? 'on' : 'off'}"><span aria-hidden="true"></span></label>${posts(r)}</li>`).join('');
+    + `<label class="switch" title="${r.status === 'on' ? 'On' : 'Off'}"><input type="checkbox" role="switch" data-routine-toggle="${esc(r.id)}"${r.status === 'on' ? ' checked' : ''}${off} aria-label="${esc(r.title)} ${r.status === 'on' ? 'on' : 'off'}"><span aria-hidden="true"></span></label>${posts(r)}</li>`) + under(r)).join('');
   const legacy = schedule ? `<li class="routine-row legacy"><span class="routine-open static">${mark}<span class="routine-words"><strong>Its task</strong><small>${esc(schedule)}</small></span></span><button type="button" class="quiet" data-routine-legacy${off}>Change</button></li>` : '';
   const empty = !shown.length && !schedule && editing !== 'new' ? `<p class="routine-empty">No routines yet.${short ? '' : ` A routine is something ${esc(pipName)} does on its own: every morning, when an email arrives, or before a meeting.`}</p>` : '';
   return `<ul class="routine-list">${legacy}${rows}${editing === 'new' ? form : ''}</ul>${empty}`
@@ -188,7 +194,7 @@ export function routinesMarkup(routines, { esc, busy = false, editing = '', form
 }
 
 /** Add or edit one routine. */
-export function routineFormMarkup(d, { esc, busy = false, error = '', gmail = false, calendar = false, isNew = true, apps = [], events = [] }) {
+export function routineFormMarkup(d, { esc, busy = false, error = '', gmail = false, calendar = false, isNew = true, apps = [], events = [], webhooks = false }) {
   const off = busy ? ' disabled' : '';
   // A troupe routine runs on a schedule only, and what it does was approved in a DGC chat: its words can't be edited.
   const troupe = d.routineTroupe;
@@ -196,7 +202,9 @@ export function routineFormMarkup(d, { esc, busy = false, error = '', gmail = fa
   const own = [...new Set([...(apps || []), ...(d.routineKind === 'app' && d.routineApp ? [d.routineApp] : [])])].filter(a => APP.test(a));
   const kinds = [['daily', 'Every day'], ['weekdays', 'Weekdays'], ['weekly', 'Every week'], ['hours', 'Every few hours'], ['once', 'Once'],
     ...(troupe ? [] : [['email', 'When an email arrives'], ['calendar', 'Before calendar events']]),
-    ...(troupe || !own.length ? [] : [['app', 'When my app sends an event']]), ...(d.routineKind === 'custom' ? [['custom', 'Its current schedule']] : [])];
+    ...(troupe || !own.length ? [] : [['app', 'When my app sends an event']]),
+    // A service calls it (Pips API 90, on this computer): the user's choice only, never a Pip's.
+    ...(!troupe && (webhooks || d.routineKind === 'webhook') ? [['webhook', 'A service calls its address']] : []), ...(d.routineKind === 'custom' ? [['custom', 'Its current schedule']] : [])];
   const appName = a => { const w = String(a).replace(/-/g, ' '); return w.slice(0, 1).toUpperCase() + w.slice(1) + ' app'; };
   const at = ['daily', 'weekdays', 'weekly'].includes(d.routineKind)
     ? `${d.routineKind === 'weekly' ? `<select id="routineDay" data-draft="routineDay" aria-label="Day"${off}>${WEEKDAYS.map((w, i) => `<option value="${i}"${String(d.routineDay) === String(i) ? ' selected' : ''}>${w.slice(0, -1)}</option>`).join('')}</select>` : ''}<label class="inline">at <input id="routineTime" data-draft="routineTime" type="time" step="60" value="${esc(d.routineTime)}"${off}></label>`
@@ -210,6 +218,7 @@ export function routineFormMarkup(d, { esc, busy = false, error = '', gmail = fa
   const note = d.routineKind === 'email' ? (gmail ? 'It looks every 10 minutes. Emails that are already there don’t count.' : 'Needs Gmail. Ask it in the chat to connect Gmail; the routine waits until then.')
     : d.routineKind === 'calendar' ? (calendar ? 'It looks every 10 minutes and runs once per event.' : 'Needs Google Calendar. Ask it in the chat to connect it; the routine waits until then.')
     : d.routineKind === 'app' ? 'It runs once for each event your app sends, with what the app sent.'
+    : d.routineKind === 'webhook' ? 'DGC makes a secret address for it. Paste that address into the service (Stripe, GitHub, a form).'
     : ['daily', 'weekdays', 'weekly'].includes(d.routineKind) ? `Times are in ${esc(d.routineZone)}.` : d.routineKind === 'custom' ? 'Choose a new time to change it.' : '';
   return `<li class="routine-form-row"><form id="routine-form" class="routine-form form">`
     + `<label for="routineTitle">Name</label><input id="routineTitle" data-draft="routineTitle" maxlength="160" placeholder="Morning brief" value="${esc(d.routineTitle)}"${off}>`
