@@ -198,3 +198,25 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
     } finally { await x.close(); }
   });
 }
+
+// Asked 12 Nov: in the list, an "on" switch is quiet: a grey track, not the accent (a whole column of purple switches was
+// too much); on and off still differ, by the thumb and a brighter track. The Pip's own page keeps the accent.
+for (const theme of ["dark", "light"]) {
+  test(`Personal list: an on switch is quiet grey, off is fainter, and the Pip's own page keeps its accent (${theme})`, async (t) => {
+    if (skipOrFail(t)) return;
+    const x = await open(theme, 700, { many: true, home: true });
+    try {
+      await x.p.waitForSelector(toggle(RECEIPTS)); await x.p.waitForTimeout(300);
+      const on = await x.p.evaluate((id) => { const root = window.__pipsRoot || document, b = root.querySelector(`[data-pip-switch="${id}"]`);
+        const c = getComputedStyle(b.firstElementChild).backgroundColor; return { c, checked: b.getAttribute("aria-checked") }; }, PIP);
+      const off = await x.p.evaluate((id) => { const root = window.__pipsRoot || document, b = root.querySelector(`[data-pip-switch="${id}"]`);
+        return { c: getComputedStyle(b.firstElementChild).backgroundColor, checked: b.getAttribute("aria-checked") }; }, RECEIPTS);
+      assert.equal(on.checked, "true"); assert.equal(off.checked, "false");
+      const parts = (c) => c.match(/[\d.]+/g).map(Number);
+      const [r, g, b] = parts(on.c);
+      assert.ok(Math.max(r, g, b) - Math.min(r, g, b) <= 6, `an on switch in the list is grey, not the accent: ${on.c}`);
+      assert.notEqual(on.c, off.c, "on and off tracks differ");
+      assert.deepEqual(x.errors, []);
+    } finally { await x.close(); }
+  });
+}

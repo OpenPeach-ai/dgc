@@ -523,6 +523,9 @@ button.switch:disabled{cursor:default}button.switch:disabled>span{opacity:.5}
    clear. The same on its own page and chat: the pill in the top bar, and one quiet line over the prompt box. */
 .pip-row-line{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:2px;min-width:0}
 .pip-row-line>.pip-switch{margin:0 10px 0 4px}
+/* In the list an on switch is quiet (asked 12 Nov: a column of accent switches was too much): a grey track, brighter
+   than off's; the thumb's side still says which. The Pip's own page keeps the accent. */
+.pip-row-line>.pip-switch[aria-checked="true"]>span{background:color-mix(in srgb,var(--vscode-foreground) 52%,transparent)}
 .pip-row-line.is-off>:not(.pip-switch),.pip-pill.is-off{filter:grayscale(1);opacity:.72}
 .pip-off-line{flex:none;margin:0 0 8px;padding:0 4px;color:var(--muted);font-size:12px;line-height:1.5}
 /* Routines: one row each, an on/off switch, then Add routine. */
