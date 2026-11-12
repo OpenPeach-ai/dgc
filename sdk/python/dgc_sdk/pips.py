@@ -453,6 +453,12 @@ API90_MUTATIONS = frozenset({'replace_pip_webhook_address', 'set_pip_webhook_sig
 API90_FIELDS = {'list_pip_routines': frozenset({'webhooks'})}
 READ_COMMANDS |= API90_READS
 MUTATION_COMMANDS |= API90_MUTATIONS
+# API 91 (pips-21): @ a project in a Personal Pip's chat: its private copy on the Pip's computer and what changed in it.
+# Applying is always the user's own call. Local only.
+API91_READS = frozenset({'list_pip_project_choices', 'list_pip_project_changes', 'get_pip_project_change'})
+API91_MUTATIONS = frozenset({'apply_pip_project_change', 'discard_pip_project_change', 'undo_pip_project_change'})
+READ_COMMANDS |= API91_READS
+MUTATION_COMMANDS |= API91_MUTATIONS
 
 
 def _api88_field(command, values) -> bool:
@@ -599,6 +605,12 @@ COMMAND_FIELDS = {
     'send_pip_webhook_test': frozenset({'pip_id', 'routine_id'}),
     'get_webhook_reach': frozenset(),
     'set_webhook_reach': frozenset({'local_network', 'tunnel', 'own_base'}),
+    'list_pip_project_choices': frozenset({'pip_id'}),
+    'list_pip_project_changes': frozenset({'pip_id'}),
+    'get_pip_project_change': frozenset({'pip_id', 'change_id', 'path'}),
+    'apply_pip_project_change': frozenset({'pip_id', 'change_id', 'expected_digest'}),
+    'discard_pip_project_change': frozenset({'pip_id', 'change_id'}),
+    'undo_pip_project_change': frozenset({'pip_id', 'change_id'}),
     'get_pips_payments': frozenset(),
     'set_pips_payments': frozenset({'limit'}),
     'set_pip_paying': frozenset({'pip_id', 'rule'}),
@@ -916,7 +928,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API90_READS | API90_MUTATIONS:
+        if command in API91_READS | API91_MUTATIONS:
+            minimum = 91
+        elif command in API90_READS | API90_MUTATIONS:
             minimum = 90
         elif command in API89_READS | API89_MUTATIONS:
             minimum = 89

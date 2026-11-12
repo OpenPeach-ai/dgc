@@ -514,7 +514,12 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # get_pip_webhook / replace_pip_webhook_address / set_pip_webhook_signing {secret|null} / send_pip_webhook_test
 # {pip_id, routine_id}; get_webhook_reach {} and set_webhook_reach {local_network, tunnel: tailscale|own|null,
 # own_base}: how calls reach this computer. Local only.
-PIPS_API_VERSION = 90
+# API 91 (0.52, pips-21): @ a project in a Personal Pip's chat. A {kind: "project", identity: <workspace id>} mention in
+# send_pip_message makes a private copy on the Pip's computer (refused: needs_computer, project_too_big).
+# list_pip_project_choices {pip_id}, list_pip_project_changes {pip_id}, get_pip_project_change {pip_id, change_id, path?}
+# (a file's diff, or the whole patch), apply_pip_project_change {pip_id, change_id, expected_digest},
+# discard_pip_project_change and undo_pip_project_change {pip_id, change_id}. Local only.
+PIPS_API_VERSION = 91
 
 
 def attachment_limits() -> dict:

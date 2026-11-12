@@ -1387,6 +1387,10 @@ def prepare(store, pip, req, *, context_size=32768, secrets=()):
     named = _named_pips(store, pip, req)
     if named:
         context["named_pips"] = named
+    from .pip_project_copies import context_for
+    projects = context_for(store, pip, req)
+    if projects:
+        context["projects"] = projects                    # pips-21: where each named project's copy is
     if req.get("reply_to"):
         # Reply on one of its messages (pip_replies): a bounded quote of its own words, given with this turn only.
         context["reply_to"] = req["reply_to"]
@@ -1882,6 +1886,11 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
         marks = checked_mentions(display_mentions, req["text"])
         if marks:
             req["display_mentions"] = marks
+        if any(m["kind"] == "project" for m in marks):
+            # pips-21: each project it names gets its private copy on the Pip's computer before the turn starts (or
+            # keeps the one it has while a change of it waits); no computer, too big: refused before anything is kept.
+            from .pip_project_copies import prepare
+            prepare(store, pip_id, marks, key)
     result = _deliver(store, pip_id, req, actor, config, _intro)
     if not _intro:
         from .pip_steering import forget_resent
@@ -2026,7 +2035,7 @@ def _left_waiting(store, run, result) -> bool:
 
 
 def validate_context(value):
-    if (not isinstance(value, dict) or set(value) - {"images", "files", "run_posts", "card_context", "cards_waiting", "named_pips",
+    if (not isinstance(value, dict) or set(value) - {"images", "files", "run_posts", "card_context", "cards_waiting", "named_pips", "projects",
                                                     "long_waits", "conversation_id", "inputs_ref", "reply_to"} not in (
             {"text", "history", "history_omitted_count", "last_report"},
             {"text", "history", "history_omitted_count", "last_report", "continuity"})):
@@ -2052,6 +2061,10 @@ def validate_context(value):
     if "named_pips" in value and (not isinstance(value["named_pips"], list) or len(value["named_pips"]) > 8
                                   or len(_json(value["named_pips"]).encode()) > 8192):
         raise RegistryError("invalid_history", "The named Pips exceed their bounded context contract.")
+    if "projects" in value and (not isinstance(value["projects"], list) or not 0 < len(value["projects"]) <= 3 or any(
+            not isinstance(p, dict) or set(p) != {"name", "folder", "files"} for p in value["projects"])
+            or len(_json(value["projects"]).encode()) > 2048):
+        raise RegistryError("invalid_history", "The named projects exceed their bounded context contract.")
     if "reply_to" in value:
         from .pip_replies import valid as valid_reply
         if not valid_reply(value["reply_to"]):

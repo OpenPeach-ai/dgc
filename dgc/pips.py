@@ -68,6 +68,8 @@ CONTROL_COMMANDS = frozenset({
     "get_pip_owner", "set_pip_owner", "list_session_pips",
     "get_pip_webhook", "replace_pip_webhook_address", "set_pip_webhook_signing", "send_pip_webhook_test",
     "get_webhook_reach", "set_webhook_reach",
+    "list_pip_project_choices", "list_pip_project_changes", "get_pip_project_change", "apply_pip_project_change",
+    "discard_pip_project_change", "undo_pip_project_change",
     "run_pip_computer_command", "list_pip_computer_terminal", "get_pip_computer_desktop",
     "get_pips_keep_running", "set_pips_keep_running",
     "get_pips_desktop_notifications", "set_pips_desktop_notifications",
@@ -223,6 +225,11 @@ _COMMAND_ARGS = {
     "get_pip_webhook": {"pip_id", "routine_id"}, "replace_pip_webhook_address": {"pip_id", "routine_id"},
     "set_pip_webhook_signing": {"pip_id", "routine_id", "secret"}, "send_pip_webhook_test": {"pip_id", "routine_id"},
     "get_webhook_reach": set(), "set_webhook_reach": {"local_network", "tunnel", "own_base"},
+    # @ a project in a Personal Pip's chat (pip_project_copies, API 91): its private copy and what changed in it.
+    "list_pip_project_choices": {"pip_id"}, "list_pip_project_changes": {"pip_id"},
+    "get_pip_project_change": {"pip_id", "change_id", "path"},
+    "apply_pip_project_change": {"pip_id", "change_id", "expected_digest"},
+    "discard_pip_project_change": {"pip_id", "change_id"}, "undo_pip_project_change": {"pip_id", "change_id"},
     "get_pip_skills": {"pip_id"}, "set_pip_skill": {"pip_id", "skill", "on"},
     "run_pip_computer_command": {"pip_id", "command"}, "list_pip_computer_terminal": {"pip_id"},
     "get_pip_computer_desktop": {"pip_id"},
@@ -4068,6 +4075,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
         if conversation.get("named_pips"):
             # The other Pips the user's message names with @: its words hold only their names.
             reference["named_pips"] = conversation["named_pips"]
+        if conversation.get("projects"):
+            # pips-21: the projects the user's message names, each copied privately to this Pip's computer.
+            reference["projects"] = conversation["projects"]
         from . import pip_replies
         replying = conversation.get("reply_to") if pip_replies.valid(conversation.get("reply_to")) else None
         if replying:
@@ -4109,6 +4119,12 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             + ("\n\nnamed_pips: other Pips of the user's that their message names, for reference. You can't run or "
                "change them yourself: say what you know of one, or that they can ask it in its own chat."
                if conversation.get("named_pips") else "")
+            + ("\n\nprojects: projects of the user's that their message names. A private copy of each is on your "
+               "computer, in Files at its folder (in your Terminal: ~/<folder>). Work on that copy freely: read, edit, "
+               "run, test. Nothing reaches the real project until the user presses Apply on the change DGC shows them "
+               "after your reply, so say what you changed and whether its tests ran. Installed packages (node_modules, "
+               ".venv) and files the project ignores aren't in the copy: install what you need in the Terminal first."
+               if conversation.get("projects") else "")
             + ("\n\n" + pip_replies.NOTICE if replying else "")
             + ("\n\n" + live_notice if live_pin is not None else "")
             + ("\n\nuser_notes: " + notes_notice if user_notes else "")
@@ -6453,6 +6469,11 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     raise RegistryError("local_only", "Only you can choose a Pip's skills, on this computer.")
                 result = (pip_skill_switches.listing(registry, pip_id, personal_skills(config)) if command == "get_pip_skills"
                           else pip_skill_switches.set_skill(registry, pip_id, request.get("skill"), request.get("on"), actor))
+            elif command in ("list_pip_project_choices", "list_pip_project_changes", "get_pip_project_change",
+                             "apply_pip_project_change", "discard_pip_project_change", "undo_pip_project_change"):
+                # Pips API 91 (pips-21): @ a project in a Personal Pip's chat. Applying is always the user's click.
+                from . import pip_project_copies
+                result = pip_project_copies.control(store, command, request, actor)
             elif command in ("get_pip_webhook", "replace_pip_webhook_address", "set_pip_webhook_signing",
                              "send_pip_webhook_test", "get_webhook_reach", "set_webhook_reach"):
                 # Pips API 90 (pips-22, decided 12 Nov): webhooks in, fully local; the internet only through the

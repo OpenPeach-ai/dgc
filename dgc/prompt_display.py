@@ -8,8 +8,9 @@ import re
 
 
 _ID = re.compile(r"[A-Za-z0-9._:-]{1,128}\Z")
-_KINDS = {"plugin", "artifact", "pip", "skill", "template", "file", "command"}
-_ZERO_WIDTH = {"pip", "skill", "template", "file"}
+# project: one of this computer's projects named in a Personal Pip's chat (pips-21, its workspace id): a private copy.
+_KINDS = {"plugin", "artifact", "pip", "skill", "template", "file", "command", "project"}
+_ZERO_WIDTH = {"pip", "skill", "template", "file", "project"}
 _KEYS = {"start", "kind", "label", "identity"}
 _PIP_TYPES = {"core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"}
 

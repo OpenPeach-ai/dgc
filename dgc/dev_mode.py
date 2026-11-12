@@ -53,6 +53,8 @@ LIMITS = (
     Limit("pip_files_gb", 1, 1, "Files on each Pip's computer (GB)",
           "Each computer's Files can hold this much of this machine's disk, and one file can be as big; a full disk "
           "stops every Pip.", "pip_computer_files.folder_limit"),
+    Limit("pip_project_copy_mb", 200, 200, "A project's copy on a Pip's computer (MB)",
+          "A bigger copy takes longer to make and holds more of this machine's disk.", "pip_project_copies.copy_limit"),
     Limit("pip_queue", 20, 20, "Pip runs waiting at once",
           "Each waiting run holds its inputs in the Pips registry until it starts.", "pips.max_queue"),
     # How much one turn holds
