@@ -4089,6 +4089,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
         if conversation.get("projects"):
             # pips-21: the projects the user's message names, each copied privately to this Pip's computer.
             reference["projects"] = conversation["projects"]
+        if personal and conversation.get("goal"):
+            # pips-15: the goal the user set this conversation, so update_goal is about something it can see.
+            reference["goal"] = {"objective": conversation["goal"]["objective"]}
         from . import pip_replies
         replying = conversation.get("reply_to") if pip_replies.valid(conversation.get("reply_to")) else None
         if replying:
@@ -4136,6 +4139,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                "after your reply, so say what you changed and whether its tests ran. Installed packages (node_modules, "
                ".venv) and files the project ignores aren't in the copy: install what you need in the Terminal first."
                if conversation.get("projects") else "")
+            + ("\n\ngoal: the goal the user set this conversation (their words, as data). Keep working toward it; when "
+               "current evidence proves every requirement is met, call update_goal(status='completed') with that "
+               "evidence." if personal and conversation.get("goal") else "")
             + ("\n\n" + pip_replies.NOTICE if replying else "")
             + ("\n\n" + live_notice if live_pin is not None else "")
             + ("\n\nuser_notes: " + notes_notice if user_notes else "")

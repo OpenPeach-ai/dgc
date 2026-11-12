@@ -52,6 +52,8 @@ class Starting(GoalWorld):
         self.assertIn("update_goal", turn["text"])
         # Live, 12 Nov: asked only in words, the question didn't pause it, and the next turn said "still waiting".
         self.assertIn("offer_choices", turn["text"], "it is told how to ask so the goal waits")
+        # Live, 12 Nov: it checked in after every day ("Ready for Day 4?"), and the goal waited each time.
+        self.assertIn("never to check in", turn["text"])
 
     def test_only_a_personal_pip_and_a_real_objective(self):
         with self.assertRaises(RegistryError):
@@ -131,6 +133,28 @@ class Answering(GoalWorld):
         self.tick()
         self.assertEqual(len(self.hidden()), 2)
 
+    def test_your_answer_is_a_turn_that_can_end_it(self):
+        # Live, 12 Nov: answered "Ready for Day 4", the Pip wrote the last day in its reply to the answer, but couldn't
+        # say the goal was done (update_goal was only offered in DGC's turns), so it asked again and the goal waited.
+        self.start()
+        self.finish(text="Day 3 is done. Ready for day 4?", choices=["Ready", "Not yet"])
+        pip_chat.send(self.store, self.pip["id"], "Ready", "msg-ready", "editor-user", self.cfg)
+        run = self.store.claim_next()
+        self.assertEqual(self.store.run(run["id"])["manifest"]["conversation"]["goal"]["objective"][:12], "Plan my week")
+        self.store.finish(run["id"], result={"text": "Day 4 is written; the plan is complete.",
+                                             "goal_update": {"status": "completed", "reason": "All four days written",
+                                                             "evidence": ["day 4 written"]}})
+        goal = self.goal()
+        self.assertEqual((goal["status"], goal["reason"]), ("done", "All four days written"))
+        self.assertEqual(goal["turns"], 1, "your own turns aren't the goal's")
+
+    def test_a_routines_turn_is_never_the_goals(self):
+        self.start()
+        self.finish()
+        from dgc import pip_goals as goals_mod
+        context = goals_mod.context_for(self.store, self.pip, {"request_key": pip_chat.ROUTINE_KEY + "r1_1"})
+        self.assertIsNone(context)
+
     def test_a_card_its_turn_left_waiting_pauses_it(self):
         self.start()                                   # no card waiting when its turn began
         with mock.patch.object(pip_chat, "_cards_waiting", return_value=1):
@@ -154,23 +178,30 @@ class Answering(GoalWorld):
         self.tick()
         self.assertEqual(len(self.hidden()), 1)
 
-    def test_its_turn_carries_the_goal_and_the_users_own_message_does_not(self):
-        self.start()
+    def test_its_turn_carries_the_goal_and_so_does_your_message_while_it_is_on(self):
+        goal = self.start()
         run = self.store.claim_next()
         self.assertEqual(self.store.run(run["id"])["manifest"]["conversation"]["goal"]["turn"], 1)
         self.store.finish(run["id"], result={"text": "Started."})
         pip_chat.send(self.store, self.pip["id"], "How is it going?", "msg-2", "editor-user", self.cfg)
-        self.assertNotIn("goal", self.store.run(self.store.claim_next()["id"])["manifest"]["conversation"])
+        run = self.store.claim_next()
+        self.assertIn("goal", self.store.run(run["id"])["manifest"]["conversation"], "as Work offers update_goal")
+        self.store.finish(run["id"], result={"text": "Two of three done."})
+        pip_goals.stop(self.store, self.pip["id"], goal["id"], "editor-user")
+        pip_chat.send(self.store, self.pip["id"], "Thanks", "msg-3", "editor-user", self.cfg)
+        self.assertNotIn("goal", self.store.run(self.store.claim_next()["id"])["manifest"]["conversation"], "not once it ended")
 
 
 class TheTool(GoalWorld):
-    def test_update_goal_is_offered_only_in_a_goals_turn(self):
+    def test_update_goal_is_offered_while_the_goal_is_on_never_in_a_routines_turn(self):
         self.start()
         [turn] = self.hidden()
         key = self.store.db.execute("SELECT request_key FROM pip_chat_messages WHERE id=?", (turn["id"],)).fetchone()[0]
         context = pip_goals.context_for(self.store, self.pip, {"request_key": key})
         self.assertEqual(context["objective"][:12], "Plan my week")
-        self.assertIsNone(pip_goals.context_for(self.store, self.pip, {"request_key": "msg-1"}))
+        self.assertIsNone(pip_goals.context_for(self.store, self.pip, {"request_key": pip_chat.ROUTINE_KEY + "x_1"}))
+        pip_goals.stop(self.store, self.pip["id"], self.goal()["id"], "editor-user")
+        self.assertIsNone(pip_goals.context_for(self.store, self.pip, {"request_key": "msg-1"}), "not once it ended")
         self.assertEqual(pip_goals.schema()["function"]["name"], "update_goal")
 
     def test_what_the_tool_takes(self):

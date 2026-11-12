@@ -92,9 +92,10 @@ def _turn_key(goal_id: str, turn: int) -> str:
 def _turn_text(row) -> str:
     from .goals import cycle_prompt
     return (f"This message is from DGC, not the user: the user set this conversation a goal, and this is your turn "
-            f"{row['turns'] + 1} of at most {MAX_TURNS} toward it. When you need something from the user to go on, ask them "
-            "with offer_choices (the answers you expect; they can always type their own): the goal then waits for "
-            "their answer. A question asked only in your words doesn't pause it.\n\n" + cycle_prompt(row["objective"]))
+            f"{row['turns'] + 1} of at most {MAX_TURNS} toward it. Ask the user only when you can't take the next step "
+            "without something only they can give, and never to check in or confirm progress: ask with offer_choices "
+            "(the answers you expect; they can always type their own), and the goal waits for their answer. A question "
+            "asked only in your words doesn't pause it.\n\n" + cycle_prompt(row["objective"]))
 
 
 def _send_turn(store, row, config) -> dict:
@@ -188,11 +189,30 @@ def _by_key(db, key):
 
 
 def context_for(store, pip, req) -> dict | None:
-    """In a goal's turn: what the Pip is told of it, and the sign that it may call update_goal."""
-    row, turn = _by_key(store.db, req.get("request_key"))
-    if row is None or row["pip_id"] != pip["id"] or row["status"] != "active":
+    """What the Pip is told of its goal, and the sign that it may call update_goal: in a goal's own turn, and (as Work
+    offers update_goal in every turn while a goal is on) in a reply to the user's own message, or to DGC's turn after a
+    card they decided, in that conversation while its goal is on or waits for them. Never in a routine's turn."""
+    key = req.get("request_key")
+    row, turn = _by_key(store.db, key)
+    if row is not None:
+        if row["pip_id"] != pip["id"] or row["status"] != "active":
+            return None
+        return {"objective": row["objective"][:2000], "turn": turn, "max_turns": MAX_TURNS}
+    from .pip_chat import DGC_KEYS, FOLLOW_UP_KEYS
+    if not _has(store.db) or (str(key or "").startswith(DGC_KEYS) and not str(key or "").startswith(FOLLOW_UP_KEYS)):
         return None
-    return {"objective": row["objective"][:2000], "turn": turn, "max_turns": MAX_TURNS}
+    row = _open_goal(store, pip["id"], req.get("conversation_id"))
+    if row is None:
+        return None
+    return {"objective": row["objective"][:2000], "turn": max(1, min(row["turns"], MAX_TURNS)), "max_turns": MAX_TURNS}
+
+
+def _open_goal(store, pip_id, conversation_id):
+    """The goal of this conversation (the first when none is named) that is on or waits for the user, or None."""
+    from .pip_conversations import first_id
+    where = conversation_id if isinstance(conversation_id, str) else first_id(store.db, pip_id)
+    return store.db.execute("SELECT * FROM pip_goals WHERE pip_id=? AND conversation_id IS ? AND status IN "
+                            "('active','needs_you') ORDER BY created_at DESC,rowid DESC LIMIT 1", (pip_id, where)).fetchone()
 
 
 def valid_context(value) -> bool:
@@ -266,7 +286,8 @@ def commit(store, run, result, choices=None) -> None:
     key = db.execute("SELECT request_key FROM pip_chat_messages WHERE run_id=? AND role='user'", (run["id"],)).fetchone()
     row, turn = _by_key(db, key[0] if key else None)
     if row is None:
-        _answered(store, run, result, choices)
+        if not _ended_by(store, run, result):
+            _answered(store, run, result, choices)
         return
     if row["status"] != "active" or turn != row["turns"] + 1 or row["pip_id"] != run["pip_id"]:
         return                                         # not the turn it is waiting on
@@ -281,6 +302,22 @@ def commit(store, run, result, choices=None) -> None:
         status, reason = "blocked", f"Stopped after {MAX_TURNS} turns without finishing. Look at where it got to, then set it again."
     db.execute("UPDATE pip_goals SET turns=?,status=?,reason=COALESCE(?,reason),evidence=COALESCE(?,evidence),updated_at=? "
                "WHERE id=?", (turn, status, reason, evidence, _now(store.registry), row["id"]))
+
+
+def _ended_by(store, run, result) -> bool:
+    """A reply to the user's own message (or after a card) that said, with update_goal, how the goal ended."""
+    update = result.get("goal_update")
+    if not isinstance(update, dict) or update.get("status") not in UPDATES:
+        return False
+    where = store.db.execute("SELECT conversation_id FROM pip_chat_messages WHERE run_id=? AND role='user'",
+                             (run["id"],)).fetchone()
+    row = _open_goal(store, run["pip_id"], where[0] if where else None) if where else None
+    if row is None:
+        return False
+    store.db.execute("UPDATE pip_goals SET status=?,reason=?,evidence=?,updated_at=? WHERE id=?",
+                     ("done" if update["status"] == "completed" else "blocked", update.get("reason") or None,
+                      json.dumps(update.get("evidence") or []), _now(store.registry), row["id"]))
+    return True
 
 
 def _answered(store, run, result, choices) -> None:
