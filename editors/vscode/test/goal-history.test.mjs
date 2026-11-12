@@ -43,7 +43,10 @@ test("a goal that ends leaves one quiet line under its turn: how it ended, its t
   const before = x.asked();
   x.event(goal("g1", "completed", { elapsed: 8040, tokens: 1_800_000, cycles: 7 }));
   assert.equal(x.asked(), before + 1, "the page asks DGC for the session's goals");
-  x.event({ type: "goal_runs", runs: [run("g1", "completed", { started_at: now() - 8040, ended_at: now() + 1 })] });
+  // One record, listed twice as DGC would: built once, so a slow machine can't give its two copies different end times
+  // (it read the clock twice, and more than half a second apart the two rounded end times differed: 13 Nov).
+  const record = run("g1", "completed", { started_at: now() - 8040, ended_at: now() + 1 });
+  x.event({ type: "goal_runs", runs: [record] });
   assert.equal(x.lines().length, 0, "not in the middle of the turn");
   x.end("t1");
   assert.deepEqual(x.lines().map(text), ["Goal done · 2 h 14 min · 1.8M tokens · 7 cycles"]);
@@ -51,7 +54,7 @@ test("a goal that ends leaves one quiet line under its turn: how it ended, its t
   assert.equal(line.previousElementSibling, under(x.v.doc.querySelector("#log .msg.dgc")), "under that turn");
   assert.equal(line.nextElementSibling, null, "the last thing in the chat");
   assert.match(line.title, /Ship the release/, "its tooltip names the goal");
-  x.event({ type: "goal_runs", runs: [run("g1", "completed", { started_at: now() - 8040, ended_at: now() + 1 })] });
+  x.event({ type: "goal_runs", runs: [{ ...record }] });
   assert.equal(x.lines().length, 1, "said once, however often DGC lists it");
   assert.deepEqual(x.v.errors, []);
 });
