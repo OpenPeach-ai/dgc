@@ -111,6 +111,15 @@ test('Change opens a picker of this project’s Work sessions, newest first, plu
   assert.equal(text(x.$('.pip-owner-now')),'No session: its reports wait in the Pips view');
 });
 
+test('a session with nothing in it is never offered, and never called “(empty)”',async()=>{
+  // Live, 12 Nov: most of the picker read “(empty)” (the backend's preview of a session with no message), and one
+  // became the owner.
+  const S4='20261104-080000-d4';
+  const x=setup({sessions:[S4,S3,S2,S1],owner:{session_id:S2,chosen:false},titles:[...TITLES,{id:S4,title:'',empty:true}]});
+  await x.settings(AUDIT);await x.click('#pip-owner-change');
+  assert.deepEqual(choices(x).map(c=>c[0]),[S1,S2,S3,''],'the empty session is left out');
+  assert.ok(choices(x).every(c=>c[1]!=='(empty)'));
+});
 test('the picker closes with Cancel and changes nothing; choosing the owner it has asks nothing',async()=>{
   const x=setup();await x.settings(AUDIT);
   await x.click('#pip-owner-change');

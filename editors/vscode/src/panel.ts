@@ -1559,12 +1559,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** The project's other sessions, by the titles the Work list shows: where a session's Pips can be moved to. */
-  private async otherSessions(id: string): Promise<Array<{ id: string; title: string }>> {
+  private async otherSessions(id: string): Promise<Array<{ id: string; title: string; empty?: true }>> {
     try {
       const response = await this.requestState(this.ensureBackend(), "sessions", { type: "list_sessions" }, "sessions", 10000);
       return workSessionTitles((Array.isArray(response.items) ? response.items : []).map((item: any) => ({
         id: path.basename(String(item?.path || "")).replace(/\.json$/i, ""),
-        title: String(item?.name || item?.preview || "Untitled session") }))).filter((item) => item.id !== id).slice(0, 200);
+        title: String(item?.name || item?.preview || ""), ...(item?.count === 0 ? { empty: true } : {}) }))).filter((item) => item.id !== id).slice(0, 200);
     } catch { return []; }
   }
 
@@ -1594,7 +1594,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   /** Ask, then do what was chosen for the Pips a session owns. True: the delete (or archive) goes on. False: it was
    *  cancelled, or a Pip could not be moved or deleted, which is said and leaves the session where it is. */
   private async settleSessionPips(id: string, title: string, owned: OwnedPip[], mode: "delete" | "archive"): Promise<boolean> {
-    const sessions = await this.otherSessions(id);
+    const sessions = (await this.otherSessions(id)).filter((item) => !item.empty);   // never into a session with nothing in it
     const answer = await this.askSessionPips(mode, title || id, owned, sessions);
     return this.applySessionPips(answer, owned, sessions, mode);
   }
@@ -1633,7 +1633,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const choice = await vscode.window.showWarningMessage(
       `“${title || id}” is the owner of ${owned.length} Project ${one ? "Pip" : "Pips"}: ${names}. ${one ? "Its" : "Their"} reports come to it. What becomes of ${them} when it is deleted?`,
       { modal: true }, MOVE, DELETE);
-    const sessions = await this.otherSessions(id);
+    const sessions = (await this.otherSessions(id)).filter((item) => !item.empty);   // never into a session with nothing in it
     if (choice === MOVE) {
       const NONE = "No session";
       const pick: any = await vscode.window.showQuickPick(

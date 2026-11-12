@@ -42,12 +42,15 @@ export function pipOwnersRefusal(request: any, apiVersion: number): string {
   return '';
 }
 /** The Work list's titles, checked: only real session ids, each once, a title cut at 200, 500 at most. */
-export function workSessionTitles(list: unknown): Array<{ id: string; title: string }> {
-  const seen = new Set<string>(), out: Array<{ id: string; title: string }> = [];
+export function workSessionTitles(list: unknown): Array<{ id: string; title: string; empty?: true }> {
+  const seen = new Set<string>(), out: Array<{ id: string; title: string; empty?: true }> = [];
   for (const item of Array.isArray(list) ? list : []) {
     if (!item || typeof item.id !== 'string' || !SESSION_ID.test(item.id) || seen.has(item.id) || typeof item.title !== 'string' || out.length >= 500) continue;
     seen.add(item.id);
-    out.push({ id: item.id, title: item.title.replace(/\s+/g, ' ').trim().slice(0, 200) });
+    // A session with nothing in it (12 Nov: the picker read "(empty)", the backend's preview of one): said to be empty,
+    // never offered, and that preview is never its title.
+    const title = item.title.replace(/\s+/g, ' ').trim().slice(0, 200);
+    out.push({ id: item.id, title: title === '(empty)' ? '' : title, ...(item.empty === true ? { empty: true as const } : {}) });
   }
   return out;
 }
@@ -411,9 +414,9 @@ export class PipsEditor implements vscode.Disposable {
    *  folder, `brief` in its box and the patch beside it as a file. False when no chat opened. Set by the panel. */
   private projectWork?: (work: ProjectWork) => Promise<boolean>;
   useProjectWork(open: (work: ProjectWork) => Promise<boolean>): void { this.projectWork = open; }
-  private workSessions?: () => Promise<Array<{ id: string; title: string }>>;
+  private workSessions?: () => Promise<Array<{ id: string; title: string; empty?: true }>>;
   /** The Work sessions of the folder this window has open, by the titles its list shows (for a Project Pip's owner). */
-  useWorkSessions(list: () => Promise<Array<{ id: string; title: string }>>): void { this.workSessions = list; }
+  useWorkSessions(list: () => Promise<Array<{ id: string; title: string; empty?: true }>>): void { this.workSessions = list; }
   /** The Project Pips a Work session is the owner of: what deleting or archiving it asks about. None on a DGC before
    *  Pips API 89 (it keeps no owner), or while Pips are off. */
   async sessionPips(sessionId: string): Promise<OwnedPip[]> {

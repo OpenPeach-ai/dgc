@@ -64,6 +64,11 @@ test("the Work list's titles are the editor's own answer, never a Pip control", 
   assert.deepEqual(x.sent, [], "DGC is not asked");
   assert.deepEqual(x.reply()?.result, { sessions: [{ id: SESSION, title: "Run the shell command" }, { id: OTHER, title: "Visits page alignment" }, { id: "s3", title: "y".repeat(200) }] },
     "the titles as the editor shows them: only real session ids, a title cut at 200");
+  // A session with nothing in it is said to be empty, and the backend's "(empty)" preview is never a title (12 Nov).
+  const empties = editor(89, { titles: [{ id: SESSION, title: "", empty: true }, { id: OTHER, title: "(empty)", empty: true }] });
+  empties.ask({ type: "list_work_session_titles" });
+  await tick();
+  assert.deepEqual(empties.reply()?.result, { sessions: [{ id: SESSION, title: "", empty: true }, { id: OTHER, title: "", empty: true }] });
   const none = editor(89);
   none.ask({ type: "list_work_session_titles" });
   await tick();

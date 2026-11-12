@@ -21,7 +21,9 @@ export function pipOwnerSet(value,pip,session){
 }
 /** The editor's Work titles, as the host answers them: {sessions: [{id, title}]} -> Map id -> title. */
 export function workTitles(value){
-  const titles=new Map();
+  // (`titles.empty`: the sessions with nothing in them, never offered as an owner; 12 Nov.)
+  const titles=new Map();titles.empty=new Set();
+  for(const s of Array.isArray(value?.sessions)?value.sessions.slice(0,500):[])if(s&&typeof s.id==='string'&&SESSION.test(s.id)&&s.empty===true)titles.empty.add(s.id);
   for(const s of Array.isArray(value?.sessions)?value.sessions.slice(0,500):[])if(s&&typeof s.id==='string'&&SESSION.test(s.id)&&typeof s.title==='string'&&s.title.trim())titles.set(s.id,s.title.trim().slice(0,200));
   return titles;
 }
@@ -46,7 +48,7 @@ export function ownerMarkup(owner,{esc,titles,picker=null,busy=false,error='',pi
   if(!picker)return `${head}<div class="actions"><button type="button" id="pip-owner-change" class="quiet"${off}>Change</button></div></div>${now}${said}</section>`;
   const choice=(id,title,sub)=>`<li><button type="button" class="pip-owner-choice" role="radio" aria-checked="${(owner.session||'')===id}" data-owner-session="${esc(id)}"${off}>`
     +`<span class="pip-owner-mark" aria-hidden="true"></span><span class="pip-owner-words"><span class="pip-owner-title">${esc(title)}</span>${sub?`<small>${esc(sub)}</small>`:''}</span></button></li>`;
-  const list=picker.sessions?`<ul class="pip-owner-list" role="radiogroup" aria-label="The session ${name} reports to">${picker.sessions.map(id=>choice(id,sessionWords(id,titles),'')).join('')}${choice('','No session','Its reports wait in the Pips view')}</ul>`
+  const list=picker.sessions?`<ul class="pip-owner-list" role="radiogroup" aria-label="The session ${name} reports to">${picker.sessions.filter(id=>id===(owner.session||'')||!titles?.empty?.has?.(id)).map(id=>choice(id,sessionWords(id,titles),'')).join('')}${choice('','No session','Its reports wait in the Pips view')}</ul>`
     :picker.error?'':'<p class="muted" role="status">Loading this project’s sessions…</p>';
   return `${head}</div>${now}${list}${picker.error?`<p class="error" role="alert">${esc(picker.error)}</p>`:''}${said}<div class="actions"><button type="button" id="pip-owner-cancel" class="quiet"${off}>Cancel</button></div></section>`;
 }
