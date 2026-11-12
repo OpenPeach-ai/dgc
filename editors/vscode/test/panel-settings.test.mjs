@@ -2735,6 +2735,23 @@ test("Pips opens the main panel and correlates controls without creating an edit
  provider.pipsEditor.dispose();
 });
 
+test("the side bar's Pips page reaches its Pips view with the Project Folder dropdown's choice and Add a folder…", async()=>{
+ // Seen live (12 Nov): on the side bar's Pips tab, choosing a folder in the Project tab's dropdown changed nothing, and
+ // Create Project Pip's Add a folder… opened nothing: the side bar passed neither message on to its Pips view.
+ const {provider}=catalogHarness([]);const backend={send:()=>true};
+ provider.ensureBackend=()=>backend;provider.post=()=>{};provider.inVisiblePanel=action=>action();
+ provider.sessionReady=true;provider.backend=backend;
+ provider.lastReadyEvent={capabilities:{pips_supported:true,pips_api_version:93,pips_enabled:true,session_scopes:true}};
+ provider.openPips();
+ const got=[],receive=provider.pipsEditor.receive.bind(provider.pipsEditor);
+ provider.pipsEditor.receive=(message)=>{got.push(message.type);return receive(message);};
+ await provider.onMessage({type:'pipsProjectFolderChoose',documentId:provider.pipsDocumentId,folder:''});
+ await provider.onMessage({type:'pipsPickFolder',documentId:provider.pipsDocumentId,id:'new-pip-folder'});
+ await provider.onMessage({type:'pipsProjectFolderChoose',documentId:'another-page',folder:''});
+ assert.deepEqual(got,['pipsProjectFolderChoose','pipsPickFolder'],'both reach the Pips view; another page\'s never');
+ provider.pipsEditor.dispose();
+});
+
 function pipsDocumentHarness() {
  const vs=globalThis.__DGC_TEST_VSCODE,savedUri=vs.Uri;
  vs.Uri={joinPath:(...parts)=>({fsPath:parts.map(String).join('/')}),file:value=>({fsPath:value})};

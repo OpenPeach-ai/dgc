@@ -5832,6 +5832,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "pipsPluginLogos":
       case "pipsAppLogos":
       case "pipsFiles":
+      // The Project Folder dropdown on the Project tab, and Create Project Pip's Add a folder… (12 Nov, seen live: the
+      // side bar passed neither on, so neither did anything there).
+      case "pipsProjectFolderChoose":
+      case "pipsPickFolder":
         if (msg.documentId !== this.pipsDocumentId) return;
         this.ensurePipsBridge().receive(msg);
         return;
