@@ -217,6 +217,8 @@ def wanted() -> list[str]:
     from . import pip_screen
     from .pip_computer_box import GOOGLE_CHROME, _real_binary
     names = [DESKTOP_PACKAGES[role] for role, program in pip_screen.PROGRAMS.items() if not shutil.which(program)]
+    if not shutil.which("lxterminal"):
+        names.append("lxterminal")        # the modern Terminal; xterm stays its fallback, so it never blocks a computer
     if not any(_real_binary(path) for path in GOOGLE_CHROME):
         names.append(CHROME_PACKAGE)
     # The image editor, document editor and PDF viewer, once the user said yes to downloading them (pip_apps).

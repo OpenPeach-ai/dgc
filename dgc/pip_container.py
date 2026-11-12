@@ -360,7 +360,7 @@ class Computer:
             shutil.copyfile(Path(__file__).with_name("pip_boxd.py"), runtime / "boxd" / "pip_boxd.py")
             from . import pip_screen
             from .pip_computer import computer_number          # the same dock, apps and desktop.sh as on Linux,
-            pip_screen.write_config(runtime / "conf", "Pip", number=computer_number(self.root))   # its own wallpaper
+            pip_screen.write_config(runtime / "conf", "Pip", number=computer_number(self.root), mac=True)   # its own wallpaper
             home = self.root / "home"
             home.mkdir(parents=True, exist_ok=True)
             self.sockets.mkdir(mode=0o700, parents=True, exist_ok=True)

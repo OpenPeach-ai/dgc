@@ -201,8 +201,27 @@ def _write(path: Path, text: str, mode: int = 0o600) -> None:
 
 # What the dock's Files and Terminal run, and what DGC's launch FIFO runs when the Pip opens them (launch_app).
 FILES_COMMAND = "pcmanfm /home/pip/Files"
-TERMINAL_COMMAND = ("sh -c 'cd /home/pip/Files && exec xterm -fa Monospace -fs 11 -bg \"#1d2430\" "
-                    "-fg \"#e6edf3\" -geometry 100x28 -title Terminal'")
+XTERM_COMMAND = ("sh -c 'cd /home/pip/Files && exec xterm -fa Monospace -fs 11 -bg \"#1d2430\" "
+                 "-fg \"#e6edf3\" -geometry 100x28 -title Terminal'")
+TERMINAL_COMMAND = XTERM_COMMAND        # (older name, kept for callers)
+# pc-vscode-terminal: a modern terminal in place of xterm. lxterminal is GTK 3 (it wears the desktop's dark theme) and
+# needs no session bus, unlike GNOME's; it opens with xterm's colours, size and folder (lxterminal.conf below). xterm
+# stays the fallback, so a computer never waits for it. The Mac's image is built from its own recipe and keeps xterm.
+LXTERMINAL_COMMAND = "lxterminal --working-directory=/home/pip/Files --title=Terminal"
+LXTERMINAL_CONF = ("[general]\nfontname=Monospace 11\nbgcolor=#1d2430\nfgcolor=#e6edf3\nscrollback=5000\n"
+                   "geometry_columns=100\ngeometry_rows=28\nhidemenubar=true\nhidescrollbar=false\ncursorblinks=false\n"
+                   "audiblebell=false\ndisablef10=true\ndisableconfirm=true\ntabpos=top\n")
+
+
+def terminal_command(mac: bool = False) -> str:
+    """What the desktop's Terminal runs: lxterminal when this machine or DGC's own download has it, else xterm."""
+    if mac:
+        return XTERM_COMMAND
+    prefix = _prefix()
+    own = prefix / "usr" / "bin" / "lxterminal" if prefix else None
+    if (own is not None and own.exists()) or shutil.which("lxterminal"):
+        return LXTERMINAL_COMMAND
+    return XTERM_COMMAND
 # The lines the dock (and only the dock) writes to DGC's control FIFO: the browser, and the apps that run in boxes
 # of their own (pip_apps), which DGC starts.
 CONTROL_LINES = frozenset({"browser", "images", "documents", "pdf"})
@@ -253,10 +272,11 @@ def _write_top_bar(conf: Path) -> None:
     ]) + "\n")
 
 
-def write_config(conf: Path, name: str, apps_shown=(), screen=(WIDTH, HEIGHT), number=1) -> None:
+def write_config(conf: Path, name: str, apps_shown=(), screen=(WIDTH, HEIGHT), number=1, mac: bool = False) -> None:
     """The dock, its apps, the window manager's settings and the wallpaper. ``apps_shown``: the image editor,
     document editor and PDF viewer this computer has (pip_apps), each on the dock after the Terminal. ``number``:
-    which of the Pip's computers this is, for its own wallpaper."""
+    which of the Pip's computers this is, for its own wallpaper. ``mac``: the Mac's image (its Terminal is xterm)."""
+    terminal = terminal_command(mac)
     from . import pip_apps
     conf.mkdir(mode=0o700, parents=True, exist_ok=True)
     (conf / "apps").mkdir(mode=0o700, exist_ok=True)
@@ -267,7 +287,7 @@ def write_config(conf: Path, name: str, apps_shown=(), screen=(WIDTH, HEIGHT), n
     apps = {
         "browser": ("Browser", "sh -c 'echo browser > /run/dgc/sock/control'", "browser.png", "Its web browser"),
         "files": ("Files", FILES_COMMAND, "files.png", "Its Files folder"),
-        "terminal": ("Terminal", TERMINAL_COMMAND, "terminal.png", "A shell in its Files folder"),
+        "terminal": ("Terminal", terminal, "terminal.png", "A shell in its Files folder"),
     }
     for key in apps_shown:
         if key in pip_apps.APPS:
@@ -286,6 +306,7 @@ def write_config(conf: Path, name: str, apps_shown=(), screen=(WIDTH, HEIGHT), n
            f'{items} </menu>\n</openbox_menu>\n')
     # Apps open by one click, with no "run or open?" question (the Apps window and the desktop's icons).
     _write(conf / "libfm.conf", "[config]\nquick_exec=1\nsingle_click=0\n[ui]\nbig_icon_size=48\n")
+    _write(conf / "lxterminal.conf", LXTERMINAL_CONF)
     gtk3, gtk2 = gtk_settings()
     (conf / "gtk-3.0").mkdir(mode=0o700, parents=True, exist_ok=True)
     _write(conf / "gtk-3.0" / "settings.ini", gtk3)
@@ -327,6 +348,7 @@ for loaders in /opt/desk/usr/lib/*/imlib2/loaders; do [ -d "$loaders" ] && expor
 mkdir -p /tmp/config/pcmanfm /tmp/config/openbox /tmp/config/libfm /home/pip/Desktop
 cp -r /run/dgc/conf/pcmanfm/dgc /tmp/config/pcmanfm/dgc
 cp /run/dgc/conf/libfm.conf /tmp/config/libfm/libfm.conf
+mkdir -p /tmp/config/lxterminal && cp /run/dgc/conf/lxterminal.conf /tmp/config/lxterminal/lxterminal.conf
 # The machine's best dark theme and icons for the file manager and the desktop (pc-look).
 cp -r /run/dgc/conf/gtk-3.0 /tmp/config/gtk-3.0
 export GTK2_RC_FILES=/run/dgc/conf/gtkrc-2.0
@@ -352,7 +374,7 @@ topbar=$!
     while read -r app; do
       case "$app" in
         files) {FILES_COMMAND} > /dev/null 2>&1 & ;;
-        terminal) {TERMINAL_COMMAND} > /dev/null 2>&1 & ;;
+        terminal) {terminal} > /dev/null 2>&1 & ;;
       esac
     done < /run/dgc/sock/launch
   done ) &
