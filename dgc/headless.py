@@ -479,7 +479,11 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # each computer its own. Without `number` they act as before (the one at work, else the first). Local only, as before.
 # And its screen's size (pc-fills-tab): get_pip_computer's `screen` ("1280x800") and `screens` (the sizes it may have:
 # 1280x800, 1440x900, 1920x1080); set_pip_computer_screen {pip_id, size} chooses one, taken as its screen next starts.
-PIPS_API_VERSION = 86
+# API 87 (0.52, pc-background-commands): big files between this computer and a Pip computer's Files, streamed, never
+# through the editor's 2 MB transport. copy_pip_computer_file_in {pip_id, path (its folder in Files), source (a file the
+# user picked here, an absolute path)} and copy_pip_computer_file_out {pip_id, path (a file in Files), target (where the
+# user chose to save it)}, up to the Files folder's limit (1 GB); over it, words that say the limit. Local only.
+PIPS_API_VERSION = 87
 
 
 def attachment_limits() -> dict:

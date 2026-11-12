@@ -297,6 +297,123 @@ def _write_new(root: Path, parts: list[str], name: str, raw: bytes) -> dict:
         os.close(fd)
 
 
+# Big files between this computer and a Pip computer's Files (Pips API 87): a path the user picked here, streamed, never
+# through the editor's 2 MB transport. One file may be as big as the whole Files folder.
+MAX_COPY_BYTES = MAX_FOLDER_BYTES
+COPY_CHUNK = 1024 * 1024
+
+
+def _limit_words() -> str:
+    return f"{MAX_COPY_BYTES // 1024 ** 3} GB" if MAX_COPY_BYTES % 1024 ** 3 == 0 else f"{MAX_COPY_BYTES // 1024 ** 2} MB"
+
+
+def _picked(path, what: str) -> Path:
+    if not isinstance(path, str) or not path or "\0" in path or not os.path.isabs(path) or len(path) > 4096:
+        raise RegistryError("invalid_request", f"Choose a {what} on this computer.")
+    return Path(path)
+
+
+def copy_in(root: Path, folder, source) -> dict:
+    """A file the user picked on this computer, copied into Files (in ``folder``), up to MAX_COPY_BYTES and the room
+    left in Files. Streamed into a hidden staging file, then published under its name (or "name (1)")."""
+    parts = _parts(folder)
+    picked = _picked(source, "file")
+    try:
+        sfd = os.open(picked, os.O_RDONLY | os.O_NONBLOCK)
+    except OSError as exc:
+        raise RegistryError("not_found", "That file isn't there any more.") from exc
+    with os.fdopen(sfd, "rb") as src:
+        info = os.fstat(src.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise RegistryError("invalid_request", "Choose a file, not a folder.")
+        name = picked.name
+        if not name or len(name.encode("utf-8")) > MAX_NAME_BYTES or name in (".", ".."):
+            raise RegistryError("invalid_request", "That file's name can't be used in a Pip's Files.")
+        if info.st_size > MAX_COPY_BYTES:
+            raise RegistryError("too_big", f"That file is {info.st_size / 1024 ** 3:.1f} GB. A Pip's computer takes "
+                                           f"files up to {_limit_words()}.")
+        if folder_bytes(root) + info.st_size > MAX_FOLDER_BYTES:
+            raise RegistryError("computer_full", f"This computer's Files are full ({_limit_words()}). Remove something first.")
+        fd = _open_dir(root, parts)
+        staging = f".dgc-add-{os.getpid()}-{os.urandom(6).hex()}"
+        try:
+            ffd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=fd)
+            copied = 0
+            with os.fdopen(ffd, "wb") as out:
+                while True:
+                    chunk = src.read(COPY_CHUNK)
+                    if not chunk:
+                        break
+                    copied += len(chunk)
+                    if copied > MAX_COPY_BYTES:          # it grew while copying
+                        raise RegistryError("too_big", f"A Pip's computer takes files up to {_limit_words()}.")
+                    out.write(chunk)
+            return _publish(fd, parts, name, staging, copied)
+        finally:
+            try:
+                os.unlink(staging, dir_fd=fd)
+            except OSError:
+                pass
+            os.close(fd)
+
+
+def copy_out(root: Path, path, target) -> dict:
+    """A file in Files, copied to the place the user picked on this computer (a file in a folder that exists),
+    without following a link in Files. Written beside the target first, then moved into place."""
+    parts = _parts(path)
+    if not parts:
+        raise RegistryError("invalid_request", "Choose a file in this computer's Files.")
+    goal = _picked(target, "place to save it")
+    if goal.is_dir() or not goal.parent.is_dir():
+        raise RegistryError("invalid_request", "Choose a file name in a folder that exists.")
+    fd = _open_dir(root, parts[:-1])
+    try:
+        try:
+            ffd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+        except OSError as exc:
+            raise RegistryError("not_found", "That file is not in this computer's Files.") from exc
+        with os.fdopen(ffd, "rb") as src:
+            if not stat.S_ISREG(os.fstat(src.fileno()).st_mode):
+                raise RegistryError("not_found", "That is not a file.")
+            temp = goal.parent / f".{goal.name}.dgc-{os.getpid()}-{os.urandom(4).hex()}"
+            copied = 0
+            try:
+                with open(temp, "xb") as out:
+                    while True:
+                        chunk = src.read(COPY_CHUNK)
+                        if not chunk:
+                            break
+                        copied += len(chunk)
+                        out.write(chunk)
+                os.replace(temp, goal)
+            except BaseException:
+                try:
+                    temp.unlink()
+                except OSError:
+                    pass
+                raise
+            return {"path": "/".join(parts), "target": str(goal), "bytes": copied}
+    finally:
+        os.close(fd)
+
+
+def _publish(fd: int, parts: list[str], name: str, staging: str, size: int) -> dict:
+    for n in range(100):
+        if n == 0:
+            final = name
+        else:
+            stem, dot, ext = name.rpartition(".")
+            suffix = f" ({n})" + (f".{ext}" if dot and stem and len(ext.encode("utf-8")) <= 64 else "")
+            base = stem if dot and stem and len(ext.encode("utf-8")) <= 64 else name
+            final = base.encode("utf-8")[:MAX_NAME_BYTES - len(suffix.encode("utf-8"))].decode("utf-8", "ignore") + suffix
+        try:
+            os.link(staging, final, src_dir_fd=fd, dst_dir_fd=fd)
+        except FileExistsError:
+            continue
+        return {"path": "/".join(parts + [final]), "name": final, "bytes": size}
+    raise RegistryError("computer_files", "Too many files share that name. Choose a different name.")
+
+
 def remove_file(root: Path, path) -> dict:
     parts = _parts(path)
     if not parts:

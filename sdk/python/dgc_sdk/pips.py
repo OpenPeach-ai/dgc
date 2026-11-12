@@ -430,6 +430,10 @@ MUTATION_COMMANDS |= API82_MUTATIONS
 API86_MUTATIONS = frozenset({'rename_pip_computer', 'set_pip_computer_screen'})
 MUTATION_COMMANDS |= API86_MUTATIONS
 API86_FIELDS = {'open_pip_computer': frozenset({'number'}), 'use_pip_computer_view': frozenset({'number'})}
+# API 87 (pc-background-commands): big files between this computer and a Pip computer's Files, by path on this computer.
+# DGC takes them only from the user on the computer it runs on: an app built on the SDK is refused by the runtime.
+API87_MUTATIONS = frozenset({'copy_pip_computer_file_in', 'copy_pip_computer_file_out'})
+MUTATION_COMMANDS |= API87_MUTATIONS
 PIP_KEY_ID = re.compile(r"pipkey_[a-f0-9]{32}\Z")
 PIP_REPORT_AS = frozenset({'chat', 'doc', 'sheet'})
 TEMPLATE_CHANGE_ID = re.compile(r"tmplchange_[a-f0-9]{32}\Z")
@@ -551,6 +555,8 @@ COMMAND_FIELDS = {
     'add_pip_computer': frozenset({'pip_id'}),
     'rename_pip_computer': frozenset({'pip_id', 'number', 'name'}),
     'set_pip_computer_screen': frozenset({'pip_id', 'size'}),
+    'copy_pip_computer_file_in': frozenset({'pip_id', 'path', 'source'}),
+    'copy_pip_computer_file_out': frozenset({'pip_id', 'path', 'target'}),
     'get_pips_payments': frozenset(),
     'set_pips_payments': frozenset({'limit'}),
     'set_pip_paying': frozenset({'pip_id', 'rule'}),
@@ -868,7 +874,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API86_MUTATIONS:
+        if command in API87_MUTATIONS:
+            minimum = 87
+        elif command in API86_MUTATIONS:
             minimum = 86
         elif command in API82_READS | API82_MUTATIONS:
             minimum = 82

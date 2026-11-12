@@ -3519,6 +3519,10 @@ def desk(registry, command: str, pip_id: str, request: dict, actor: str) -> dict
         return files.add_file(folder, request.get("path") or "", request.get("name"), request.get("data"))
     if command == "remove_pip_computer_file":
         return files.remove_file(folder, request.get("path"))
+    if command == "copy_pip_computer_file_in":           # Pips API 87: a big file the user picked here, streamed
+        return files.copy_in(folder, request.get("path") or "", request.get("source"))
+    if command == "copy_pip_computer_file_out":
+        return files.copy_out(folder, request.get("path"), request.get("target"))
     if command == "run_pip_computer_command":
         return files.start_command(root, request.get("command"), "you")
     return {"entries": files.history(root), "running": files.running(root)}

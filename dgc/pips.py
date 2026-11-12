@@ -63,6 +63,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view",
     "always_allow_pip_computer_action",
     "list_pip_computer_files", "read_pip_computer_file", "add_pip_computer_file", "remove_pip_computer_file",
+    "copy_pip_computer_file_in", "copy_pip_computer_file_out",
     "run_pip_computer_command", "list_pip_computer_terminal", "get_pip_computer_desktop",
     "get_pips_keep_running", "set_pips_keep_running",
     "get_pips_desktop_notifications", "set_pips_desktop_notifications",
@@ -210,6 +211,7 @@ _COMMAND_ARGS = {
     "use_pip_computer_view": {"pip_id", "op", "x", "y", "text", "key", "dy", "url", "number"},
     "list_pip_computer_files": {"pip_id", "path"}, "read_pip_computer_file": {"pip_id", "path"},
     "add_pip_computer_file": {"pip_id", "path", "name", "data"}, "remove_pip_computer_file": {"pip_id", "path"},
+    "copy_pip_computer_file_in": {"pip_id", "path", "source"}, "copy_pip_computer_file_out": {"pip_id", "path", "target"},
     "run_pip_computer_command": {"pip_id", "command"}, "list_pip_computer_terminal": {"pip_id"},
     "get_pip_computer_desktop": {"pip_id"},
     "get_pips_keep_running": set(), "set_pips_keep_running": {"enabled"},
@@ -6424,7 +6426,8 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 from . import pip_computer
                 result = {"desktop": pip_computer.desktop_status(registry, pip_id, actor)}
             elif command in ("list_pip_computer_files", "read_pip_computer_file", "add_pip_computer_file",
-                             "remove_pip_computer_file", "run_pip_computer_command", "list_pip_computer_terminal"):
+                             "remove_pip_computer_file", "run_pip_computer_command", "list_pip_computer_terminal",
+                             "copy_pip_computer_file_in", "copy_pip_computer_file_out"):
                 # The computer's Files and Terminal (its browser is above): local only, its own folder only.
                 from . import pip_computer
                 result = pip_computer.desk(registry, command, pip_id, request, actor)
