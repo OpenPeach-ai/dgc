@@ -344,6 +344,13 @@ def _now():
     return timestamp(datetime.now(timezone.utc))
 
 
+def computer_number(root) -> int:
+    """Which of a Pip's computers a computer folder is (computer_root's names): <pip id> is the first, <pip id>.c<n>."""
+    name = Path(root).name
+    head, dot, tail = name.rpartition(".c")
+    return int(tail) if dot and head and tail.isdigit() else 1
+
+
 def computer_root(state_directory, pip_id: str, number: int = 1) -> Path:
     """A Pip's computer's folder: its first computer's is computers/<pip id> (as always); a second or later one's
     computers/<pip id>.c<n>, its own browser and home, with the first one's Files (Pool)."""
@@ -529,7 +536,7 @@ class Host:
             from .pip_computer_files import files_root
             size = Host._screen_size(self)
             desktop = pip_screen.make_desktop(socket_dir() / f"{self.tag}-desk", self.files_dir, "Pip",
-                                              egress=self.proxy.path, size=size)
+                                              egress=self.proxy.path, size=size, number=getattr(self, "number", 1))
             # The browser's window fills the screen above the dock's strip.
             shown = getattr(desktop, "size", (pip_screen.WIDTH, pip_screen.HEIGHT))
             self.browser.window_size = (shown[0], shown[1] - pip_screen.TOP_BAR - pip_screen.BROWSER_STRIP)

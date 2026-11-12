@@ -310,7 +310,7 @@ class DesktopWithoutBrowserTests(unittest.TestCase):
         # This machine's kind of screen is the stand-in: a box on Linux, the computer's VM on a Mac. Replacing only
         # Linux's let this test start a real VM on a Mac and leave it running.
         with patch.object(pip_screen, "availability", return_value={"available": True, "reason": ""}), \
-                patch.object(pip_screen, "make_desktop", lambda runtime, files, name, egress=None, size=None: Screen(runtime, files, name, egress)):
+                patch.object(pip_screen, "make_desktop", lambda runtime, files, name, egress=None, size=None, number=1: Screen(runtime, files, name, egress)):
             self.assertTrue(pip_computer.Host.ensure_desktop(host))
         self.assertIsInstance(host.desktop, Screen)
         self.assertTrue(host.desktop.started)

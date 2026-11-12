@@ -21,6 +21,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 from .workspace_registry import RegistryError
 
@@ -44,6 +45,26 @@ def parse_size(text) -> tuple[int, int] | None:
     return next((size for size in SIZES if size_name(size) == text), None) if isinstance(text, str) else None
 DISPLAY = ":1"
 ASSETS = Path(__file__).with_name("desktop_assets")
+
+
+class Wallpaper(NamedTuple):
+    file: str
+    fg: str           # the desktop's icon labels
+    shadow: str       # and their shadow
+
+
+# Each of a Pip's computers wears its own (asked 12 Nov): the first Dusk, the second Aurora, the third Daylight (light, so
+# its icon labels are dark), then round again.
+WALLPAPERS = (Wallpaper("wallpaper.jpg", "#ffffff", "#000000"), Wallpaper("wallpaper-2.jpg", "#ffffff", "#000000"),
+              Wallpaper("wallpaper-3.jpg", "#1f1b2e", "#ffffff"))
+
+
+def wallpaper_for(number) -> Wallpaper:
+    try:
+        number = int(number)
+    except (TypeError, ValueError):
+        number = 1
+    return WALLPAPERS[(max(number, 1) - 1) % len(WALLPAPERS)]
 START_SECONDS = 15
 
 
@@ -204,14 +225,17 @@ def _write_top_bar(conf: Path) -> None:
     ]) + "\n")
 
 
-def write_config(conf: Path, name: str, apps_shown=(), screen=(WIDTH, HEIGHT)) -> None:
+def write_config(conf: Path, name: str, apps_shown=(), screen=(WIDTH, HEIGHT), number=1) -> None:
     """The dock, its apps, the window manager's settings and the wallpaper. ``apps_shown``: the image editor,
-    document editor and PDF viewer this computer has (pip_apps), each on the dock after the Terminal."""
+    document editor and PDF viewer this computer has (pip_apps), each on the dock after the Terminal. ``number``:
+    which of the Pip's computers this is, for its own wallpaper."""
     from . import pip_apps
     conf.mkdir(mode=0o700, parents=True, exist_ok=True)
     (conf / "apps").mkdir(mode=0o700, exist_ok=True)
-    for asset in ("browser.png", "files.png", "terminal.png", "wallpaper.jpg", "images.png", "documents.png", "pdf.png"):
+    for asset in ("browser.png", "files.png", "terminal.png", "images.png", "documents.png", "pdf.png"):
         shutil.copyfile(ASSETS / asset, conf / asset)
+    wallpaper = wallpaper_for(number)
+    shutil.copyfile(ASSETS / wallpaper.file, conf / "wallpaper.jpg")
     apps = {
         "browser": ("Browser", "sh -c 'echo browser > /run/dgc/sock/control'", "browser.png", "Its web browser"),
         "files": ("Files", FILES_COMMAND, "files.png", "Its Files folder"),
@@ -262,8 +286,8 @@ def write_config(conf: Path, name: str, apps_shown=(), screen=(WIDTH, HEIGHT)) -
     desktop = conf / "pcmanfm" / "dgc"
     desktop.mkdir(parents=True, exist_ok=True)
     _write(desktop / "desktop-items-0.conf", "[*]\nwallpaper_mode=crop\nwallpaper_common=1\n"
-           "wallpaper=/run/dgc/conf/wallpaper.jpg\ndesktop_bg=#171820\ndesktop_fg=#ffffff\n"
-           "desktop_shadow=#000000\nshow_wm_menu=1\nshow_documents=0\nshow_trash=0\nshow_mounts=0\n")
+           f"wallpaper=/run/dgc/conf/wallpaper.jpg\ndesktop_bg=#171820\ndesktop_fg={wallpaper.fg}\n"
+           f"desktop_shadow={wallpaper.shadow}\nshow_wm_menu=1\nshow_documents=0\nshow_trash=0\nshow_mounts=0\n")
     _write(desktop / "pcmanfm.conf", "[config]\nbm_open_method=0\n[ui]\nalways_show_tabs=0\nshow_hidden=0\n")
     _write(conf / "desktop.sh", f"""
 export LD_LIBRARY_PATH="${{DESK_LIB:-}}" PATH="${{DESK_BIN:-}}:/usr/bin:/bin" HOME=/home/pip XDG_CONFIG_HOME=/tmp/config
@@ -350,20 +374,21 @@ def desktop_argv(runtime: Path, files: Path, name: str, egress: Path | None = No
     return argv + ["sh", "/run/dgc/conf/desktop.sh"]
 
 
-def make_desktop(runtime: Path, files: Path, name: str, egress: Path | None = None, size=(WIDTH, HEIGHT)):
+def make_desktop(runtime: Path, files: Path, name: str, egress: Path | None = None, size=(WIDTH, HEIGHT), number=1):
     """This machine's kind of screen: a box here on Linux, the computer's VM on a Mac (where the screen is 1280x800 for
     now: its browser's window is sized for it)."""
     if sys.platform == "darwin":
         from .pip_container import ContainerDesktop
         return ContainerDesktop(runtime, files, name, egress)
-    return Desktop(runtime, files, name, egress, size=size)
+    return Desktop(runtime, files, name, egress, size=size, number=number)
 
 
 class Desktop:
     """One Pip computer's screen. Owned by its Host in the supervisor; started on first use."""
 
-    def __init__(self, runtime: Path, files: Path, name: str, egress: Path | None = None, size=(WIDTH, HEIGHT)):
+    def __init__(self, runtime: Path, files: Path, name: str, egress: Path | None = None, size=(WIDTH, HEIGHT), number=1):
         self.runtime, self.files, self.name = Path(runtime), Path(files), name
+        self.number = number              # which of the Pip's computers: its own wallpaper
         self.size = tuple(size) if tuple(size) in SIZES else (WIDTH, HEIGHT)
         self.egress = Path(egress) if egress is not None else None
         self.proc: subprocess.Popen | None = None
@@ -409,7 +434,7 @@ class Desktop:
                 pass
         from . import pip_apps
         write_config(self.runtime / "conf", self.name, [key for key in pip_apps.APPS if pip_apps.find(key) is not None],
-                     self.size)
+                     self.size, number=self.number)
         for fifo in ("control", "launch"):
             if not (self.runtime / "sock" / fifo).exists():
                 os.mkfifo(self.runtime / "sock" / fifo, 0o600)
