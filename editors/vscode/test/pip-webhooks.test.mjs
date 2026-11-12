@@ -227,7 +227,7 @@ test('its latest calls, in words',async()=>{
 
 test('when nothing is listening it says so, or says DGC’s reason',async()=>{
  const x=setup({list:[routine()],webhook:hook({listening:false})});await openPanel(x);
- assert.equal(x.text('.webhook-listening'),'Nothing is listening for calls: turn Pips on.');
+ assert.equal(x.text('.webhook-listening'),'Not listening yet. With Pips on, DGC starts listening within a few seconds of a routine like this being on.');
  const y=setup({list:[routine()],webhook:hook({listening:false,listen_error:'Port 47615 is in use by another program.'})});await openPanel(y);
  assert.equal(y.text('.webhook-listening'),'Port 47615 is in use by another program.');
  const z=setup({list:[routine()]});await openPanel(z);

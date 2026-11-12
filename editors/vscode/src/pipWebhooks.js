@@ -108,7 +108,7 @@ export function webhookPanelMarkup(hook, { esc, routineId, busy = '', off = fals
   const rows = WAYS.filter(([way]) => hook.addresses[way]).map(([way, label]) => `<li class="webhook-address" data-hook-way="${way}"><span class="webhook-way">${label}</span>`
     + `<span class="webhook-line"><code class="webhook-url">${esc(shown ? hook.addresses[way] : cutShort(hook.addresses[way]))}</code>`
     + `<button type="button" class="quiet" data-hook-copy="${way}" aria-label="Copy the address ${label.toLowerCase()}"${off ? ' disabled' : ''}>Copy</button></span></li>`).join('');
-  const listening = hook.listening ? '' : `<p class="webhook-listening" role="status">${esc(hook.listen_error || 'Nothing is listening for calls: turn Pips on.')}</p>`;
+  const listening = hook.listening ? '' : `<p class="webhook-listening" role="status">${esc(hook.listen_error || 'Not listening yet. With Pips on, DGC starts listening within a few seconds of a routine like this being on.')}</p>`;
   const unreached = hook.addresses.internet ? '' : `<p class="webhook-unreached">Services on the internet can’t reach it yet. <button type="button" class="link hook-link" data-hook-reach>Set up how calls reach this computer.</button></p>`;
   const calls = hook.calls.length ? `<ul class="webhook-calls">${hook.calls.map(c => `<li class="webhook-call" data-outcome="${c.outcome}"><span class="webhook-call-who"><strong>${esc(c.service || 'A service')}</strong>`
     + `${c.event ? `<span class="webhook-call-event">${esc(c.event)}</span>` : ''}</span><small>${when(c.at, esc, formatDate)} · ${VIA[c.via]}</small>`
