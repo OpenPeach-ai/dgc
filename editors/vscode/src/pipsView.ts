@@ -11,7 +11,7 @@ import { displayMentions, workspaceFiles } from './mentionsHost';
 type PipArtifactsHub = Pick<Artifacts, 'list' | 'open' | 'offers'>;
 const ARTIFACT_ID = /^ar_[a-f0-9]{16}$/;
 
-const commands = new Set(['get_pip_apps','set_pip_app','add_pip_app_account','list_pip_conversations','create_pip_conversation','rename_pip_conversation','archive_pip_conversation','add_pip_computer','list_pip_keys','save_pip_key','decline_pip_key','remove_pip_key','list_pip_flows','get_pip_flow','create_pip_flow','set_pip_flow','get_pip_artifacts','set_pip_artifacts','list_pip_run_fixes','list_pip_templates','decide_pip_template_change','list_app_events','list_apps','accept_app_update','list_pip_borrows','allow_pip_borrow','decline_pip_borrow','stop_pip_borrow','get_pip_level','set_pip_level','get_pip_working_notes','set_pip_working_notes','list_pip_daily_log','list_pip_logins','save_pip_login','remove_pip_login','grant_pip_login','get_pip_computer_apps','set_pip_computer_apps','get_pip_eyes','set_pip_eyes','list_pip_run_posts','list_pip_unread','mark_pip_read','check_pip_source','get_pip_run_source','mark_pip_news_seen','set_pip_chat_options','set_plugin_permission','list_pip_sites','set_pip_careful','forget_pip_site','list_pip_notes','add_pip_note','forget_pip_note','list_pip_attention','get_pips_limit','set_pips_limit','list_pip_reply_stats','get_pip_chat_context','list_pip_plugins','allow_pip_plugin','decline_pip_plugin','list_pip_plugin_uses','list_pip_routines','add_pip_routine','update_pip_routine','delete_pip_routine','decide_pip_routine','set_pip_profile','list_pip_shared','get_pip_computers','update_pip_computers','reset_pip_computer','list_pip_apps','finish_pip_computer_check','list_pip_app_links','start_pip_app_link','check_pip_app_link','decline_pip_app_link','disconnect_pip_app_link','get_pip_computer_desktop','list_pip_computer_files','read_pip_computer_file','add_pip_computer_file','remove_pip_computer_file','run_pip_computer_command','list_pip_computer_terminal','get_pip_message_image','introduce_pip','always_allow_pip_computer_action','get_pip_computer','list_pip_computer_actions','decide_pip_computer_action','get_pip_computer_frame','list_pip_computer_frames','stop_pip_computer','open_pip_computer','use_pip_computer_view','always_allow_pip_app_action','list_pip_action_grants','revoke_pip_action_grant','set_pip_feedback','list_pip_feedback','export_pip','get_pip_usage','get_pips_backup','set_pips_backup','get_pip_backup','set_pip_backup','undo_pip_change','get_pips_payments','set_pips_payments','set_pip_paying','get_pips_desktop_notifications','set_pips_desktop_notifications','get_pips_keep_running','set_pips_keep_running','list_pip_starters','propose_starter_pip','get_pip_digest','mark_pip_digest_seen','get_pip_notify_settings','set_pip_notify_settings','get_pip_outcomes','get_pip_connector_draft','list_pip_connector_drafts','prepare_pip_connector_draft','dismiss_pip_connector_draft','inspect_pip_connector_actions','propose_pip_connector_action','get_pip_calendar_draft','list_pip_calendar_drafts','prepare_pip_calendar_draft','dismiss_pip_calendar_draft','inspect_pip_calendar_connection','propose_pip_calendar_action','get_pip_message_draft','list_pip_message_drafts','prepare_pip_message_draft','dismiss_pip_message_draft','inspect_pip_send_connection', 'propose_pip_app_action', 'get_pip_app_action', 'list_pip_app_actions', 'accept_pip_app_action', 'reject_pip_app_action', 'propose_pip_personal_handoff', 'list_pip_accounts', 'list_pip_connections', 'inspect_pip_connection', 'notify_pip_setup', 'revise_pip_setup', 'list_pip_setups', 'get_pip_setup', 'accept_pip_setup', 'reject_pip_setup', 'get_pip_statement_anchor', 'record_pip_statement', 'revoke_pip_statement', 'list_pip_statements', 'list_workspace_execution_receipts', 'get_workspace_execution_receipt', 'record_workspace_execution_context', 'archive_pip', 'restore_pip', 'delete_archived_pip', 'get_pip_exception_source', 'record_pip_exception', 'revoke_pip_exception', 'list_pip_memories', 'list_pip_notifications', 'mark_pip_notification_read', 'list_workspace_sessions', 'inspect_workspace_session_outcome', 'propose_workspace_session_outcome', 'get_workspace_session_outcome', 'list_workspace_session_outcomes', 'accept_workspace_session_outcome', 'reject_workspace_session_outcome', 'list_pip_types', 'list_pip_models', 'list_pip_messages', 'send_pip_message', 'list_workspaces', 'list_pips', 'create_pip', 'get_pip', 'get_pip_proposal', 'list_pip_adaptations', 'run_pip', 'list_pip_runs', 'get_pip_run', 'list_pip_run_activity', 'pause_pip', 'resume_pip', 'cancel_pip_run', 'propose_pip_update', 'accept_pip_update', 'reject_pip_update', 'list_pip_versions', 'list_pip_approvals', 'list_pip_checkpoints', 'review_pip_finding', 'review_pip_execution', 'get_pip_execution', 'propose_pip_handoff', 'propose_pip_artifact_handoff', 'get_pip_handoff', 'list_pip_handoffs', 'accept_pip_handoff', 'reject_pip_handoff', 'get_pip_runner', 'stop_pips', 'get_workspace_context', 'record_workspace_context', 'archive_workspace_context', 'accept_pip_finding', 'accept_pip_execution_context', 'rename_pip_computer', 'set_pip_computer_screen']);
+const commands = new Set(['get_pip_skills','set_pip_skill','get_pip_apps','set_pip_app','add_pip_app_account','list_pip_conversations','create_pip_conversation','rename_pip_conversation','archive_pip_conversation','add_pip_computer','list_pip_keys','save_pip_key','decline_pip_key','remove_pip_key','list_pip_flows','get_pip_flow','create_pip_flow','set_pip_flow','get_pip_artifacts','set_pip_artifacts','list_pip_run_fixes','list_pip_templates','decide_pip_template_change','list_app_events','list_apps','accept_app_update','list_pip_borrows','allow_pip_borrow','decline_pip_borrow','stop_pip_borrow','get_pip_level','set_pip_level','get_pip_working_notes','set_pip_working_notes','list_pip_daily_log','list_pip_logins','save_pip_login','remove_pip_login','grant_pip_login','get_pip_computer_apps','set_pip_computer_apps','get_pip_eyes','set_pip_eyes','list_pip_run_posts','list_pip_unread','mark_pip_read','check_pip_source','get_pip_run_source','mark_pip_news_seen','set_pip_chat_options','set_plugin_permission','list_pip_sites','set_pip_careful','forget_pip_site','list_pip_notes','add_pip_note','forget_pip_note','list_pip_attention','get_pips_limit','set_pips_limit','list_pip_reply_stats','get_pip_chat_context','list_pip_plugins','allow_pip_plugin','decline_pip_plugin','list_pip_plugin_uses','list_pip_routines','add_pip_routine','update_pip_routine','delete_pip_routine','decide_pip_routine','set_pip_profile','list_pip_shared','get_pip_computers','update_pip_computers','reset_pip_computer','list_pip_apps','finish_pip_computer_check','list_pip_app_links','start_pip_app_link','check_pip_app_link','decline_pip_app_link','disconnect_pip_app_link','get_pip_computer_desktop','list_pip_computer_files','read_pip_computer_file','add_pip_computer_file','remove_pip_computer_file','run_pip_computer_command','list_pip_computer_terminal','get_pip_message_image','introduce_pip','always_allow_pip_computer_action','get_pip_computer','list_pip_computer_actions','decide_pip_computer_action','get_pip_computer_frame','list_pip_computer_frames','stop_pip_computer','open_pip_computer','use_pip_computer_view','always_allow_pip_app_action','list_pip_action_grants','revoke_pip_action_grant','set_pip_feedback','list_pip_feedback','export_pip','get_pip_usage','get_pips_backup','set_pips_backup','get_pip_backup','set_pip_backup','undo_pip_change','get_pips_payments','set_pips_payments','set_pip_paying','get_pips_desktop_notifications','set_pips_desktop_notifications','get_pips_keep_running','set_pips_keep_running','list_pip_starters','propose_starter_pip','get_pip_digest','mark_pip_digest_seen','get_pip_notify_settings','set_pip_notify_settings','get_pip_outcomes','get_pip_connector_draft','list_pip_connector_drafts','prepare_pip_connector_draft','dismiss_pip_connector_draft','inspect_pip_connector_actions','propose_pip_connector_action','get_pip_calendar_draft','list_pip_calendar_drafts','prepare_pip_calendar_draft','dismiss_pip_calendar_draft','inspect_pip_calendar_connection','propose_pip_calendar_action','get_pip_message_draft','list_pip_message_drafts','prepare_pip_message_draft','dismiss_pip_message_draft','inspect_pip_send_connection', 'propose_pip_app_action', 'get_pip_app_action', 'list_pip_app_actions', 'accept_pip_app_action', 'reject_pip_app_action', 'propose_pip_personal_handoff', 'list_pip_accounts', 'list_pip_connections', 'inspect_pip_connection', 'notify_pip_setup', 'revise_pip_setup', 'list_pip_setups', 'get_pip_setup', 'accept_pip_setup', 'reject_pip_setup', 'get_pip_statement_anchor', 'record_pip_statement', 'revoke_pip_statement', 'list_pip_statements', 'list_workspace_execution_receipts', 'get_workspace_execution_receipt', 'record_workspace_execution_context', 'archive_pip', 'restore_pip', 'delete_archived_pip', 'get_pip_exception_source', 'record_pip_exception', 'revoke_pip_exception', 'list_pip_memories', 'list_pip_notifications', 'mark_pip_notification_read', 'list_workspace_sessions', 'inspect_workspace_session_outcome', 'propose_workspace_session_outcome', 'get_workspace_session_outcome', 'list_workspace_session_outcomes', 'accept_workspace_session_outcome', 'reject_workspace_session_outcome', 'list_pip_types', 'list_pip_models', 'list_pip_messages', 'send_pip_message', 'list_workspaces', 'list_pips', 'create_pip', 'get_pip', 'get_pip_proposal', 'list_pip_adaptations', 'run_pip', 'list_pip_runs', 'get_pip_run', 'list_pip_run_activity', 'pause_pip', 'resume_pip', 'cancel_pip_run', 'propose_pip_update', 'accept_pip_update', 'reject_pip_update', 'list_pip_versions', 'list_pip_approvals', 'list_pip_checkpoints', 'review_pip_finding', 'review_pip_execution', 'get_pip_execution', 'propose_pip_handoff', 'propose_pip_artifact_handoff', 'get_pip_handoff', 'list_pip_handoffs', 'accept_pip_handoff', 'reject_pip_handoff', 'get_pip_runner', 'stop_pips', 'get_workspace_context', 'record_workspace_context', 'archive_workspace_context', 'accept_pip_finding', 'accept_pip_execution_context', 'rename_pip_computer', 'set_pip_computer_screen']);
 /** Images sent with a Pip message, as data URIs: 2 MiB of image, base64, plus headers. */
 const MAX_IMAGE_URI_CHARS = 2_800_000;
 /** Pips API 52: photos and files go the Work chat's way. The host writes them into the backend's spool
@@ -80,6 +80,33 @@ export function pipAppsRefusal(request: any, apiVersion: number): string {
   if (request.type !== 'get_pip_apps' && (typeof request.app !== 'string' || !PIP_APP.test(request.app))) return 'Choose one of the apps on this Pip’s page.';
   if (request.type === 'set_pip_app' && typeof request.on !== 'boolean') return 'Switch an app on or off.';
   return '';
+}
+/** pips-12: a switch per skill on a Pip's page, and folders in the Personal list (Pips API 88). get_pip_skills {pip_id}
+ *  lists its skills, set_pip_skill {pip_id, skill, on} switches one; a Pip's folder is set_pip_profile's changes.group.
+ *  Why a request is refused, or '' when it may go: an older DGC is never sent one; a skill is named as DGC names it; on
+ *  is true or false; a folder's name is one line of up to 40 characters. */
+const PIP_SKILL = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
+export function pipTeamsRefusal(request: any, apiVersion: number): string {
+  if (['get_pip_skills', 'set_pip_skill'].includes(request?.type)) {
+    if (apiVersion < 88) return 'Update DGC to choose the skills a Pip can use.';
+    if (request.type === 'set_pip_skill' && (typeof request.skill !== 'string' || !PIP_SKILL.test(request.skill))) return 'Choose one of the skills on this Pip’s page.';
+    if (request.type === 'set_pip_skill' && typeof request.on !== 'boolean') return 'Switch a skill on or off.';
+    return '';
+  }
+  if (request?.type === 'set_pip_profile' && request.changes && typeof request.changes === 'object' && Object.prototype.hasOwnProperty.call(request.changes, 'group')) {
+    if (apiVersion < 88) return 'Update DGC to put Pips in folders.';
+    const group = request.changes.group;
+    if (typeof group !== 'string' || [...group.trim()].length > 40 || /[\u0000-\u001f\u007f]/.test(group)) return 'A folder’s name is one line of up to 40 characters.';
+  }
+  return '';
+}
+/** pips-12: a whole team as one file (Pips API 88, format dgc-team): up to 20 Pips, 256 KiB at most. */
+const TEAM_FILE_BYTES = 256 * 1024;
+const TEAM_PIPS = 20;
+/** The name a team's file is offered under in the save dialog: the team's name in plain letters, then .dgc-team.json. */
+export function teamFileName(name: unknown): string {
+  const base = String(typeof name === 'string' ? name : '').normalize('NFKD').replace(/[^A-Za-z0-9 _-]+/g, ' ').trim().replace(/\s+/g, '-').slice(0, 60).replace(/^-+|-+$/g, '');
+  return (base || 'my-team').toLowerCase() + '.dgc-team.json';
 }
 /** pc-fills-tab: a Pip's computers have a screen size (Pips API 86). set_pip_computer_screen {pip_id, size} chooses one
  *  of the sizes DGC offers ("1440x900"), taken as its screen next starts. Why a request is refused, or '' when it may go. */
@@ -202,7 +229,7 @@ export class PipsEditor implements vscode.Disposable {
   private desktopNumbers = false;
   /** /learn in a Pip's chat (ready.capabilities.learn): learn_skill drafts, save_skill writes a personal skill. */
   private learn = false;
-  private pending = new Map<string, { client: string; command: string; at: number; surface?: string; document?: { run: string; save: boolean; generation: number }; exportFile?: { generation: number }; keptImage?: { pip: string; message: string; index: number; generation: number }; spooled?: string[]; newsDismiss?: { pipIds: string[]; until: string } }>();
+  private pending = new Map<string, { client: string; command: string; at: number; surface?: string; document?: { run: string; save: boolean; generation: number }; exportFile?: { generation: number }; exportTeam?: { generation: number }; keptImage?: { pip: string; message: string; index: number; generation: number }; spooled?: string[]; newsDismiss?: { pipIds: string[]; until: string } }>();
   private generation = 0;
   private apiVersion = 0;
   /** The backend's image spool (ready.capabilities.image_spool_dir), where a Pip message's photos and files go from API 52. */
@@ -545,6 +572,10 @@ export class PipsEditor implements vscode.Disposable {
       void this.openExport(owner.client, owner.exportFile.generation, event.result);
       return true;
     }
+    if (owner.exportTeam && event.type === 'pips_result' && event.ok === true) {
+      void this.saveTeam(owner.client, owner.exportTeam.generation, event.result);
+      return true;
+    }
     if (owner.spooled && !(event.type === 'pips_result' && event.ok === true)) void this.unspool(owner.spooled);
     if (owner.keptImage && event.type === 'pips_result' && event.ok === true) {
       void this.keptImage(event.result, owner.keptImage).then(
@@ -630,6 +661,44 @@ export class PipsEditor implements vscode.Disposable {
       }
     } catch (error) {
       fail(error instanceof Error ? error.message : 'Could not read the shared Pip file.');
+    }
+  }
+  /** pips-12: a team's file is saved where the user chooses in the save dialog. The text came from DGC's own export; the
+   *  page hears the file's name and what was left out, never where it is. */
+  private async saveTeam(client: string, generation: number, result: any): Promise<void> {
+    try {
+      if (generation !== this.generation || !this.state.connected) throw Error('The DGC connection changed. Export again.');
+      const text = result?.text, team = result?.document;
+      if (typeof text !== 'string' || !text.trim() || Buffer.byteLength(text, 'utf8') > TEAM_FILE_BYTES || team?.format !== 'dgc-team' || typeof team.name !== 'string'
+        || !Array.isArray(team.pips) || !team.pips.length || team.pips.length > TEAM_PIPS) throw Error('The team file is invalid.');
+      const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir()), teamFileName(team.name)),
+        saveLabel: 'Save team', filters: { 'DGC team': ['json'] } });
+      if (!target) { this.post({ type: 'pipsReply', id: client, ok: true, result: { cancelled: true } }); return; }
+      await vscode.workspace.fs.writeFile(target, Buffer.from(text, 'utf8'));
+      const leftOut: string[] = [];
+      for (const pip of team.pips) for (const note of Array.isArray(pip?.left_out) ? pip.left_out : []) if (typeof note === 'string' && !leftOut.includes(note)) leftOut.push(note);
+      this.post({ type: 'pipsReply', id: client, ok: true, result: { saved: true, file: String(target.path).split(/[\\/]/).pop() || teamFileName(team.name), name: team.name, count: team.pips.length, left_out: leftOut.slice(0, 8) } });
+    } catch (error) {
+      this.post({ type: 'pipsReply', id: client, ok: false, error: { message: error instanceof Error ? error.message : 'Could not export the team.' } });
+    }
+  }
+  /** pips-12: the user picks a team file; the host reads it and the chat saves one setup card per Pip in it. */
+  private async importTeamFile(client: string): Promise<void> {
+    const fail = (text: string) => this.post({ type: 'pipsReply', id: client, ok: false, error: { message: text } });
+    try {
+      const generation = this.generation;
+      const picked = await vscode.window.showOpenDialog({ canSelectMany: false, openLabel: 'Import team', filters: { 'DGC team': ['json'] } });
+      if (!picked || !picked.length) { this.post({ type: 'pipsReply', id: client, ok: true, result: { cancelled: true } }); return; }
+      const bytes = await vscode.workspace.fs.readFile(picked[0]);
+      if (bytes.byteLength > TEAM_FILE_BYTES) { fail('A team file is at most 256 KiB.'); return; }
+      if (generation !== this.generation || !this.state.connected) { fail('The DGC connection changed. Import again.'); return; }
+      const requestId = 'pips-editor-' + randomBytes(12).toString('hex');
+      this.pending.set(requestId, { client, command: 'import_pip_team', at: Date.now() });
+      if (!this.send({ type: 'pips_control', request: { type: 'import_pip_team', document: Buffer.from(bytes).toString('utf8'), request_id: requestId } }, this.backendIdentity)) {
+        this.pending.delete(requestId); fail('DGC could not send the file. Nothing was saved.');
+      }
+    } catch (error) {
+      fail(error instanceof Error ? error.message : 'Could not read the team file.');
     }
   }
   private async openResultDocument(client: string, requested: { run: string; save: boolean; generation: number }, run: any): Promise<void> {
@@ -975,6 +1044,24 @@ export class PipsEditor implements vscode.Disposable {
       }
       return;
     }
+    if (request.type === 'export_pip_team_file' || request.type === 'import_pip_team_file') {
+      // pips-12: a whole team as one file. The page names the Pips and the team; the host shows the dialog and holds the file.
+      if (this.apiVersion < 88) { fail('Update DGC to share a team of Pips.'); return; }
+      if (request.type === 'import_pip_team_file') {
+        if (Object.keys(request).some(key => key !== 'type')) { fail('Choose a team file to import.'); return; }
+        void this.importTeamFile(message.id); return;
+      }
+      const ids = request.pip_ids;
+      if (Object.keys(request).some(key => !['type','pip_ids','name'].includes(key)) || !Array.isArray(ids) || !ids.length || ids.length > TEAM_PIPS
+        || ids.some((id: unknown) => typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) || new Set(ids).size !== ids.length) { fail('Choose 1 to 20 Pips to share as a team.'); return; }
+      if (typeof request.name !== 'string' || [...request.name].length > 80 || /[\u0000-\u001f\u007f]/.test(request.name)) { fail('A team’s name is one line of up to 80 characters.'); return; }
+      const requestId = 'pips-export-' + randomBytes(12).toString('hex');
+      this.pending.set(requestId, { client: message.id, command: 'export_pip_team', at: Date.now(), exportTeam: { generation: this.generation } });
+      if (!this.send({ type: 'pips_control', request: { type: 'export_pip_team', pip_ids: ids, name: request.name, request_id: requestId } }, this.backendIdentity)) {
+        this.pending.delete(requestId); fail('DGC could not export the team.');
+      }
+      return;
+    }
     if (request.type === 'open_pip_document') {
       if (Object.keys(request).some(key => !['type','run_id','save'].includes(key)) || !/^run_[a-f0-9]{32}$/.test(request.run_id) || typeof request.save !== 'boolean') {
         fail('Choose a saved Pip result to open.'); return;
@@ -1054,6 +1141,7 @@ export class PipsEditor implements vscode.Disposable {
     { const refused = computerNamesRefusal(request, this.apiVersion); if (refused) { fail(refused); return; } }
     { const refused = computerScreenRefusal(request, this.apiVersion); if (refused) { fail(refused); return; } }
     { const refused = pipAppsRefusal(request, this.apiVersion); if (refused) { fail(refused); return; } }
+    { const refused = pipTeamsRefusal(request, this.apiVersion); if (refused) { fail(refused); return; } }
     if(['list_pip_unread','mark_pip_read'].includes(request.type) && this.apiVersion < 69) { fail('Update DGC to track unread Pip messages.'); return; }
     if(request.type === 'list_pip_run_fixes' && this.apiVersion < 65) { fail('Update DGC to see what it fixed in a Pip\'s chat.'); return; }
     // API 53: a Pip's eyes and cursor (how a text-only Pip sees; where it clicked, in the timeline and the live view).

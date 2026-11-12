@@ -454,6 +454,35 @@ export const host = (opts) => `(${function (PIP, opts) {
         plugins: [{ plugin: "stripe", name: "Stripe", money: true, permission: "any_changes" }, { plugin: "linear", name: "Linear", money: false, permission: "important" }] }),
     });
   }
+  // opts.teams: pips-12 (Pips API 88; pass api: 88): a Pip's skills with a switch each (get_pip_skills, set_pip_skill:
+  // budget on, deep-research switched off, one from a plugin with a long line, one with no line); a Pip's folder
+  // (set_pip_profile changes.group), and with opts.many two folders in the list ("Launch" with two Pips and a
+  // long-named one with two); and the host's two team-file answers: export_pip_team_file says the file was saved,
+  // import_pip_team_file adds three new-Pip cards (the team "Launch crew"). opts.teams === "refuse": DGC refuses a switch.
+  if (opts.teams && !project) {
+    const state = { off: new Set(["deep-research"]) };
+    const skills = [["budget", "Plans a monthly budget from what you spend, and says where it went.", "user"], ["deep-research", "Researches a question across many sources, cross-checks them and cites each one.", "builtin"],
+      ["invoice-chaser.follow-ups_for-late-payers", "Writes a polite follow-up for each unpaid invoice, a firmer one after fourteen days, and a last one after thirty days that names the amount, the date it was due and how to pay it today.", "plugin"],
+      ["standup", "", "user"]];
+    const blank = { title: "", body: null, color: null, notify: true, group: "" };
+    const everyone = () => answers.list_pips().pips;
+    if (opts.many) { const pips = everyone(), put = (i, group) => { pips[i].profile = { ...blank, ...pips[i].profile, group }; };
+      put(2, "Launch"); put(3, "Launch"); put(4, "Home, money and yearly renewals to watch"); put(5, "Home, money and yearly renewals to watch"); }
+    for (const v of everyone()) v.profile = { ...blank, ...v.profile };
+    const team = [["Researcher", "Research the market each morning and keep a list of what changed."], ["Writer", "Write the weekly post from the Researcher's list."], ["Fact check", "Check every claim in the post against its source."]];
+    Object.assign(answers, {
+      get_pip_skills: (r) => ({ pip_id: r.pip_id, skills: skills.map(([name, description, source]) => ({ name, description, source, on: !state.off.has(name) })) }),
+      set_pip_skill: (r) => { if (opts.teams === "refuse") throw Error("Only you can choose a Pip's skills, on this computer."); if (r.on) state.off.delete(r.skill); else state.off.add(r.skill); return { skill: r.skill, on: r.on }; },
+      set_pip_profile: (r) => { const v = everyone().find((x) => x.id === r.pip_id); v.profile = { ...blank, ...v.profile, ...r.changes }; return { pip_id: r.pip_id, profile: v.profile }; },
+      export_pip_team_file: (r) => ({ saved: true, file: `${(r.name || "my team").toLowerCase().replace(/[^a-z0-9]+/g, "-")}.dgc-team.json`, name: r.name || "My team", count: r.pip_ids.length,
+        left_out: ["Memory, history, findings and results stay with the original Pip."] }),
+      import_pip_team_file: () => { const made = team.map(([n, goal], i) => ({ ...setupOf(i), id: "setup_" + "abc"[i].repeat(32), name: n, goal, pip_type: "lens", schedule: null, run_now: false, run_now_policy: null,
+          reason: "Imported from a shared Pip file.", created_at: new Date(Date.now() - i * 1000).toISOString() }));
+        for (const v of made) { setups.push(v); attentionItems.unshift({ id: `setup:${v.id}`, kind: "setup", card: v.id, pip_id: null, pip_name: "", pip_type: "", workspace_id: W, title: `Create the Pip “${v.name}”?`, detail: v.goal, created_at: v.created_at, expires_at: null }); }
+        return { setups: made, name: "Launch crew", left_out: ["Reads from connected apps: they name your accounts."] }; },
+    });
+    if (opts.many) { const was = answers.list_pip_attention; answers.list_pip_attention = () => ({ ...was(), total: attentionItems.length, items: [...attentionItems] }); }
+  }
   // opts.answers: two things a Needs attention card answers by itself, as Home does: a change the Pip wants to itself
   // (Apply / Not now) and a visit to a new site (Allow / Not now), beside whatever else waits (which only opens).
   if (opts.answers) {

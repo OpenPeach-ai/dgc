@@ -53,6 +53,8 @@ import {mountHomePips} from './pipHomeStrip.js';
 import {healthMarkup,failedRoutine,foldRoutineLines,failedRoutineMarkup,quietLineMarkup,noteMarkup,routineNotes,withNotes} from './pipRoutineHealth.js';
 import {appLink,appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup,appLinkSettledMarkup,allowCardMarkup,calendarCardMarkup} from './pipAppLinks.js';
 import {pipAppsPage,pipAppSwitched,pipAppsMarkup} from './pipApps.js';
+import {pipSkillsPage,pipSkillSwitched,pipSkillsMarkup} from './pipSkills.js';
+import {TEAM_MAX,pipFolder,folderName,foldersInUse,pipsByFolder,folderMarkup,pipFolderMarkup,teamPips,teamCount,teamExportMarkup,teamExportRequest,teamExported,teamImported,teamExportedNotice,teamImportedNotice} from './pipTeams.js';
 import {pipKeysPage,pipKeyResult,waitingKeys,pipKeyCardMarkup,pipKeysPageMarkup,pipKeyRemovedNote} from './pipKeys.js';
 import {pluginsPage,pluginResult,keyRequests,keyCardMarkup,shownPluginCards,pluginForServer,installedForServer,pluginCardMarkup,pluginActionMarkup,pluginsPageMarkup,pluginUsesPage,pluginUsesMarkup,argumentValues,editedArguments,PLUGIN_LEVELS} from './pipPlugins.js';
 import {attentionPage,waitingOn,needWords,attentionMarkup,attentionCards,attentionSpot,setupCardMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
@@ -336,11 +338,13 @@ const askedRuns=new Set(Array.isArray(savedView?.asked)?savedView.asked.filter(r
 // Needs attention's fold (attentionOpen) and Reject's moment to undo (rejectSoon), kept with the view.
 const attentionFolded=new Set(Array.isArray(savedView?.attention_folded)?savedView.attention_folded.filter(k=>typeof k==='string').slice(-500):[]);
 let attentionUserFolded=attentionFolded.size>0;
+// The folders folded in the Personal list (pips-12), kept with the view.
+const foldersClosed=new Set(Array.isArray(savedView?.folders_closed)?savedView.folders_closed.filter(f=>typeof f==='string'&&f.length<=80).slice(-100):[]);
 const heldRejects=new Map(),REJECT_HOLD_MS=6000;
 // Show all, opened on a run's result or a routine's reply (by run or message id): for this view only.
 const shownInFull=new Set();
 S.sidebarPinned=savedView?.sidebar_pinned===true;
-function rememberView(){savedView={workspace_id:S.workspace?.id,scope_tab:S.workspace?scopeTab():undefined,selected:S.selected,tab:S.tab,overview:S.overview,sidebar_pinned:S.sidebarPinned,conversations:Object.fromEntries([...convShown].slice(-20)),conversation_drafts:Object.fromEntries([...convDrafts].slice(-40)),conversations_hidden:convState.collapsed,drafts:Object.fromEntries([...chatDrafts].slice(-20)),draft_marks:Object.fromEntries([...chatMarks].slice(-20)),chat_queues:Object.fromEntries([...chatQueues].filter(([,list])=>list.length).slice(-20)),asked:[...askedRuns].slice(-100),attention_folded:[...attentionFolded].slice(-500)};options.setState?.(savedView);}
+function rememberView(){savedView={workspace_id:S.workspace?.id,scope_tab:S.workspace?scopeTab():undefined,selected:S.selected,tab:S.tab,overview:S.overview,sidebar_pinned:S.sidebarPinned,conversations:Object.fromEntries([...convShown].slice(-20)),conversation_drafts:Object.fromEntries([...convDrafts].slice(-40)),conversations_hidden:convState.collapsed,drafts:Object.fromEntries([...chatDrafts].slice(-20)),draft_marks:Object.fromEntries([...chatMarks].slice(-20)),chat_queues:Object.fromEntries([...chatQueues].filter(([,list])=>list.length).slice(-20)),asked:[...askedRuns].slice(-100),attention_folded:[...attentionFolded].slice(-500),folders_closed:[...foldersClosed].slice(-100)};options.setState?.(savedView);}
 const characterStyles=document.createElement('style');characterStyles.id='pips-plush-styles';characterStyles.textContent=window.PipConcepts.plush.styles;document.head.append(characterStyles);
 let outcomeSessions=[],outcomeSessionsCursor='',outcomeSessionsMore=false,outcomeSessionsLoaded=false,outcomeSessionsLoading=false,outcomeSessionsError='',outcomeHistory=[],outcomeCursor=null,outcomeLoaded=false,outcomeLoading=false,outcomeError='',outcomeInspection=null,outcomeInspecting=false,outcomeSessionSeq=0,outcomeSeq=0,outcomeInspectSeq=0,outcomeReviewSeq=0,outcomeRetry=null;
 let notifications=null,notificationItems=[],notificationLoading=false,notificationError='',notificationSeq=0,notificationMark='';
@@ -350,7 +354,7 @@ let commandReceipts=[],commandCursor=null,commandMore=false,commandTotal=0,comma
 let pulseCommands=[{argv:[''],cwd:'.'}],commitRules=[{kind:'exact',path:''}];
 // The Source section's Excluded folders (safe_source_v2, API 50), its size check and one run's left-out record.
 let sourceExcludeList=[],sourceExcludeProblem='',sourceCheckState={pip:'',value:null,loading:false,error:''},runSourceState={run:'',value:null,error:''};
-const draft = {deletePipName:'',sourceExcludeInput:'',noteAdd:'',workingNotesText:'',pipLearnText:'',newPipName:'',newPipCharacter:'scout',quickKind:'manual',quickTime:'08:30',quickHours:'4',quickZone:defaultZone,feedbackNote:'',webReads:'',setupTask:'',verificationEnabled:false,pulseMode:'tests',liveCommands:'',statementKind:'fact',statementTitle:'',statementText:'',statementReason:'',statementExpiry:'',statementSource:'',specialistExplorer:false,specialistCritic:false,specialistWorker:false,specialistCalls:'1',memoryExpiry:'',outcomeSession:'',outcomeSourceKind:'commit',outcomeSourceValue:'',outcomeTitle:'',outcomeText:'',sourceMode:'committed_only',sourceReason:'',triggerContext:false,triggerFinding:false,triggerCommit:false,triggerSession:false,triggerPaths:false,triggerMinutes:'5',adaptationMode:'suggest_changes',adaptationName:false,adaptationSource:false,adaptationReason:'',handoffText:'',handoffTarget:'',handoffTask:'',handoffPaths:'',handoffTests:'[]',createModel:'default',pipModel:'default',modelReason:'',findingReviewReason:'',chatText:'',scheduleType:'manual',scheduleAt:'',scheduleCron:'0 9 * * 1-5',scheduleMinutes:'60',scheduleTime:'09:00',scheduleZone:defaultZone,scheduleReason:'',name:'',goal:'',source_ref:'HEAD',revisionGoal:'',revisionReason:'',contextKind:'decision',contextTitle:'',contextContent:''};
+const draft = {pipFolderName:'',teamName:'',deletePipName:'',sourceExcludeInput:'',noteAdd:'',workingNotesText:'',pipLearnText:'',newPipName:'',newPipCharacter:'scout',quickKind:'manual',quickTime:'08:30',quickHours:'4',quickZone:defaultZone,feedbackNote:'',webReads:'',setupTask:'',verificationEnabled:false,pulseMode:'tests',liveCommands:'',statementKind:'fact',statementTitle:'',statementText:'',statementReason:'',statementExpiry:'',statementSource:'',specialistExplorer:false,specialistCritic:false,specialistWorker:false,specialistCalls:'1',memoryExpiry:'',outcomeSession:'',outcomeSourceKind:'commit',outcomeSourceValue:'',outcomeTitle:'',outcomeText:'',sourceMode:'committed_only',sourceReason:'',triggerContext:false,triggerFinding:false,triggerCommit:false,triggerSession:false,triggerPaths:false,triggerMinutes:'5',adaptationMode:'suggest_changes',adaptationName:false,adaptationSource:false,adaptationReason:'',handoffText:'',handoffTarget:'',handoffTask:'',handoffPaths:'',handoffTests:'[]',createModel:'default',pipModel:'default',modelReason:'',findingReviewReason:'',chatText:'',scheduleType:'manual',scheduleAt:'',scheduleCron:'0 9 * * 1-5',scheduleMinutes:'60',scheduleTime:'09:00',scheduleZone:defaultZone,scheduleReason:'',name:'',goal:'',source_ref:'HEAD',revisionGoal:'',revisionReason:'',contextKind:'decision',contextTitle:'',contextContent:''};
 // The face-and-dropdown pickers (pipPicker.js): New Pip's job or character, and a Personal Pip's face on its page. A pick
 // redraws what it changes, the big face and what follows it, and gives the dropdown's button the focus back.
 const picker=createPicker({root:document,onPick(id,value){
@@ -1692,6 +1696,105 @@ async function addAppAddress(app){
   S.tab='chat';rememberView();void loadMessages();}
  catch(error){if(token===scope()&&S.selected===pip)appsUse.error=errorText(error);}
  finally{appsUse.busy=false;if(token===scope()){render();watchAppSignIn();}}
+}
+// "Skills" on a Personal Pip's page (pips-12, Pips API 88): a switch per skill, every skill on until switched off on
+// this Pip. Below API 88 there is no such section.
+const skillsUse={pip:'',asked:'',value:null,error:'',busy:false,seq:0};
+async function loadSkillsUse(){
+ if(!appsUseShown()||!usable())return;
+ const token=scope(),pip=S.selected,sequence=++skillsUse.seq;skillsUse.asked=pip;
+ try{const value=pipSkillsPage(await send('get_pip_skills',{pip_id:pip}),pip);if(token!==scope()||sequence!==skillsUse.seq||S.selected!==pip)return;
+  skillsUse.pip=pip;skillsUse.value=value;skillsUse.error='';render();}
+ catch(error){if(token===scope()&&sequence===skillsUse.seq&&S.selected===pip){if(skillsUse.pip!==pip){skillsUse.pip=pip;skillsUse.value=null;}skillsUse.error=errorText(error);render();}}
+}
+function skillsUseMarkup(off){
+ if(!appsUseShown())return '';
+ if(skillsUse.asked!==S.selected)void loadSkillsUse();
+ const mine=skillsUse.pip===S.selected;
+ return pipSkillsMarkup(mine?skillsUse.value:null,{esc,busy:off||skillsUse.busy,error:mine?skillsUse.error:'',pipName:S.pip?.name||'This Pip'});
+}
+async function setSkillUse(skill,on){
+ const row=skillsUse.pip===S.selected?(skillsUse.value||[]).find(s=>s.name===skill):null;
+ if(!row||skillsUse.busy||!usable()||!appsUseShown()){render();return;}
+ const token=scope(),pip=S.selected,name=S.pip?.name||'this Pip';
+ skillsUse.busy=true;skillsUse.error='';row.on=on;render();
+ try{pipSkillSwitched(await send('set_pip_skill',{pip_id:pip,skill,on}),skill,on);if(token!==scope()||S.selected!==pip)return;
+  S.notice=on?`${skill} is on for ${name}.`:`${skill} is off for ${name}. Other Pips keep it.`;}
+ // (Refused: the switch goes back and the reason stays in sight.)
+ catch(error){if(token===scope()&&S.selected===pip){row.on=!on;skillsUse.error=errorText(error);}}
+ finally{skillsUse.busy=false;if(token===scope()&&S.selected===pip){render();document.querySelector(`[data-pip-skill-switch="${skill}"]`)?.focus?.({preventScroll:true});}}
+}
+// Folders in the Personal list (pips-12, Pips API 88): a Pip's folder is set on its page, from a small menu of the
+// folders in use, "New folder…" and "No folder". A folder only groups the list. The Project list has none.
+const folderUi={open:false,adding:false,error:'',busy:false};
+function foldersListed(){return S.apiVersion>=88&&!remoteHost&&S.workspace?.kind==='personal';}
+function pipFolderSetMarkup(off){
+ if(!appsUseShown())return '';
+ return pipFolderMarkup({esc,folder:pipFolder(S.pip?.profile),folders:foldersInUse(S.jobs.filter(p=>p.status!=='archived')),open:folderUi.open,adding:folderUi.adding,draft:draft.pipFolderName||'',busy:off||folderUi.busy,error:folderUi.error,pipName:S.pip?.name||'This Pip'});
+}
+function closeFolderMenu(focus=false){if(!folderUi.open)return;folderUi.open=false;render();if(focus)$('pip-folder-btn')?.focus({preventScroll:true});}
+async function setPipFolder(group){
+ if(!S.pip||folderUi.busy||S.busy||!usable()||!appsUseShown())return;
+ if(group===pipFolder(S.pip.profile)){folderUi.open=false;folderUi.adding=false;folderUi.error='';render();$('pip-folder-btn')?.focus({preventScroll:true});return;}
+ const token=scope(),pip=S.pip.id,name=S.pip.name;folderUi.busy=true;folderUi.error='';folderUi.open=false;render();
+ try{const result=await send('set_pip_profile',{pip_id:pip,changes:{group}});if(token!==scope())return;
+  if(!record(result)||result.pip_id!==pip||pipFolder(result.profile)!==group)throw Error('DGC answered about another Pip. Refresh.');
+  putProfile(pip,result.profile);folderUi.adding=false;draft.pipFolderName='';if(group)foldersClosed.delete(group);
+  S.notice=group?`${name} is in the folder “${group}”.`:`${name} is in no folder.`;}
+ catch(error){if(token===scope())folderUi.error=errorText(error);}
+ finally{folderUi.busy=false;if(token===scope()){render();(folderUi.adding?$('pipFolderName'):$('pip-folder-btn'))?.focus({preventScroll:true});}}
+}
+function addPipFolder(){
+ let name;try{name=folderName(draft.pipFolderName);}catch(error){folderUi.error=errorText(error);render();$('pipFolderName')?.focus();return;}
+ void setPipFolder(name);
+}
+// A whole team as one file (pips-12, Pips API 88), from the Personal list's Teams menu. Export: tick the Pips (all
+// ticked at first) and name the team; the host saves the file where you choose. Import: the host reads the file you
+// pick and DGC makes one setup card per Pip, which wait with the other new Pips. The page never handles a path.
+const teamDraft={pips:[],ticked:new Set()};
+const TEAM_FILE_WAIT=10*60*1000;   // a file dialog is open as long as the user leaves it open
+function teamsShown(){return foldersListed()&&simpleMode();}
+function teamMenuMarkup(){
+ if(!teamsShown())return '';
+ return `<details class="pip-menu team-menu" data-details="team-menu"><summary class="topbar-icon" aria-label="Teams" title="Teams: save Pips as one file, or add a team from a file">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${button('team-export','Export team…',S.busy||!usable()||!teamPips(S.jobs).length)}${button('team-import','Import team…',S.busy||!usable())}</div></details>`;
+}
+function teamExportBody(){
+ const live=S.jobs.filter(p=>p.status!=='archived').length;
+ return teamExportMarkup({esc,pips:teamDraft.pips,ticked:teamDraft.ticked,name:draft.teamName||'',left:Math.max(0,live-teamDraft.pips.length),busy:S.busy});
+}
+function openTeamExport(){
+ if(S.busy||!usable()||!teamsShown())return;
+ const pips=teamPips(S.jobs);if(!pips.length)return;
+ teamDraft.pips=pips;teamDraft.ticked=new Set(pips.slice(0,TEAM_MAX).map(p=>p.id));draft.teamName='';
+ openReview({title:'Export team',description:'Save several Pips as one file that someone else can import.',body:teamExportBody(),confirm:'Export…',teamExport:true,blocked:false,request:{type:'export_pip_team_file'}});
+ $('teamName')?.focus();
+}
+function teamTicked(box){
+ const review=S.review;if(!review?.teamExport)return;
+ if(box.checked)teamDraft.ticked.add(box.dataset.teamPip);else teamDraft.ticked.delete(box.dataset.teamPip);
+ // Said in place, so the tick keeps the keyboard: how many are in, and whether the file can be made.
+ const said=teamCount(teamDraft.pips.filter(p=>teamDraft.ticked.has(p.id)).length),line=$('team-count'),go=$('review-confirm');
+ review.blocked=!said.ok;review.error='';review.body=teamExportBody();
+ if(line){line.textContent=said.says;line.classList.toggle('is-stop',!said.ok);}if(go)go.disabled=S.busy||!usable()||!said.ok;
+}
+async function exportTeam(review){
+ let request;try{request=teamExportRequest(teamDraft.pips,teamDraft.ticked,draft.teamName);}catch(error){review.error=errorText(error);renderReview();return;}
+ if(S.busy||!usable()||!teamsShown())return;const token=scope();S.busy=true;review.error='';review.body=teamExportBody();renderReview();
+ try{const done=teamExported(await broker.request({type:'export_pip_team_file',...request},TEAM_FILE_WAIT));if(token!==scope())return;
+  S.busy=false;if(!done){review.body=teamExportBody();renderReview();return;}   // the save dialog was closed: the choices stay
+  closeReview();S.notice=teamExportedNotice(done);render();}
+ catch(error){if(token===scope()){S.busy=false;review.error=errorText(error);review.body=teamExportBody();renderReview();}}
+}
+async function importTeam(){
+ if(S.busy||!usable()||!teamsShown())return;
+ const token=scope(),workspace=S.workspace.id;S.busy=true;S.error='';render();
+ try{const done=teamImported(await broker.request({type:'import_pip_team_file'},TEAM_FILE_WAIT));if(token!==scope()||!done)return;
+  const here=done.setups.filter(s=>s.workspace_id===workspace).length;
+  S.notice=teamImportedNotice(done,here);S.create=false;S.overview=true;
+  // Its cards wait with the other new Pips, read as any are (five at a time).
+  void loadSetups();void loadAttention();}
+ catch(error){if(token===scope())setError(error);}
+ finally{if(token===scope()){S.busy=false;render();}}
 }
 function grantsMarkup(){
  if(S.apiVersion<41||!S.pip||S.pip.source_policy?.mode!=='personal')return '';
@@ -3490,7 +3593,13 @@ function simpleHomeList(all,live){
   const label=`Mark ${p.name}'s ${unread.count} new message${unread.count===1?'':'s'} as read`,dot=pose.state==='working'||pose.state==='waiting_approval'&&!waiting;
   return `<div class="pip-row-item${dot?' pip-row-dot':''}">${button}<span class="pip-row-marks pip-row-marks-live${count?' pip-row-both':''}"><button type="button" class="pip-row-read" id="pip-read-${esc(p.id)}" data-pip-read="${esc(p.id)}" aria-label="${esc(label)}" title="Mark as read, without opening its chat"><span class="pip-new-dot" aria-hidden="true"></span><span class="pip-read-word">Read</span></button>${count}</span></div>`;};
  const project=projectHome();
- return `<section class="simple-home" aria-label="Your Pips"><div class="simple-home-head"><h2>Your Pips</h2><span class="simple-home-actions">${project?projectHomeMenu():S.apiVersion>=43&&!remoteHost?`<button type="button" id="pips-settings-open" class="topbar-icon" aria-label="Pips settings" title="Pips settings: computers, apps and plugins"${!usable()?' disabled':''}>${simpleIcon('gear')}</button>`:''}${button('simple-new','New Pip',S.busy||!usable(),'primary pill')}</span></div>${pipsPaged()?`<div class="pip-search"><label class="sr-only" for="pip-search">Search your Pips</label><input id="pip-search" type="search" placeholder="Search your Pips" autocomplete="off" value="${esc(draft.pipSearch||'')}" maxlength="120">${S.jobsTotal!==null&&(S.jobsTotal>S.jobs.length||S.pipSearch)?`<small class="pip-search-count">${S.pipSearch?`${S.jobsTotal.toLocaleString('en-US')} found`:`Showing ${S.jobs.length.toLocaleString('en-US')} of ${S.jobsTotal.toLocaleString('en-US')}`}</small>`:''}</div>`:''}${project?(S.jobs.length||S.pipSearch?'':projectFirstMarkup()):live.some(p=>p.pip_type==='core')||S.pipSearch?'':`<div class="core-offer">${avatar('idle',characterType('core'),'core-offer')}<p><strong>Meet Core</strong><span>Your Primary Pip, for everyday tasks.</span></p>${button('create-core','Create',S.busy||!usable(),'primary pill')}</div>`}<div class="pip-rows">${order.map(p=>{const pin=jobPin(p);return pin?`<div class="pip-row-slot${dockPins.has(`pip:${p.id}`)?' is-pinned':''}">${row(p)}${pin}</div>`:row(p);}).join('')}</div>${S.pipSearch&&!S.jobs.length?`<p class="muted">No Pip matches “${esc(S.pipSearch)}” in its name, instructions or chat.</p>`:''}${pipsPaged()&&S.jobsNext!==null?button('pips-more',jobsMoreBusy?'Loading…':'Load more',jobsMoreBusy||!usable(),'link'):''}${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived':'Show archived',false,'link'):''}</section>`;
+ // Folders (pips-12): Pips with no folder first, under no heading; then each folder under its heading, which folds it.
+ // A search is one list of what matched. The Project list has no folders.
+ const slot=p=>{const pin=jobPin(p);return pin?`<div class="pip-row-slot${dockPins.has(`pip:${p.id}`)?' is-pinned':''}">${row(p)}${pin}</div>`:row(p);};
+ const held=foldersListed()&&!S.pipSearch?pipsByFolder(order):null;
+ const listed=held?.folders.length?`${held.loose.length?`<div class="pip-rows">${held.loose.map(slot).join('')}</div>`:''}<div class="pip-folders">${held.folders.map((f,i)=>folderMarkup(f,i,{esc,open:!foldersClosed.has(f.name),rows:f.pips.map(slot).join('')})).join('')}</div>`
+  :`<div class="pip-rows">${order.map(slot).join('')}</div>`;
+ return `<section class="simple-home" aria-label="Your Pips"><div class="simple-home-head"><h2>Your Pips</h2><span class="simple-home-actions">${project?projectHomeMenu():S.apiVersion>=43&&!remoteHost?`<button type="button" id="pips-settings-open" class="topbar-icon" aria-label="Pips settings" title="Pips settings: computers, apps and plugins"${!usable()?' disabled':''}>${simpleIcon('gear')}</button>`:''}${project?'':teamMenuMarkup()}${button('simple-new','New Pip',S.busy||!usable(),'primary pill')}</span></div>${pipsPaged()?`<div class="pip-search"><label class="sr-only" for="pip-search">Search your Pips</label><input id="pip-search" type="search" placeholder="Search your Pips" autocomplete="off" value="${esc(draft.pipSearch||'')}" maxlength="120">${S.jobsTotal!==null&&(S.jobsTotal>S.jobs.length||S.pipSearch)?`<small class="pip-search-count">${S.pipSearch?`${S.jobsTotal.toLocaleString('en-US')} found`:`Showing ${S.jobs.length.toLocaleString('en-US')} of ${S.jobsTotal.toLocaleString('en-US')}`}</small>`:''}</div>`:''}${project?(S.jobs.length||S.pipSearch?'':projectFirstMarkup()):live.some(p=>p.pip_type==='core')||S.pipSearch?'':`<div class="core-offer">${avatar('idle',characterType('core'),'core-offer')}<p><strong>Meet Core</strong><span>Your Primary Pip, for everyday tasks.</span></p>${button('create-core','Create',S.busy||!usable(),'primary pill')}</div>`}${listed}${S.pipSearch&&!S.jobs.length?`<p class="muted">No Pip matches “${esc(S.pipSearch)}” in its name, instructions or chat.</p>`:''}${pipsPaged()&&S.jobsNext!==null?button('pips-more',jobsMoreBusy?'Loading…':'Load more',jobsMoreBusy||!usable(),'link'):''}${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived':'Show archived',false,'link'):''}</section>`;
 }
 // A Personal Pip's character is only its face and its name (its job is what you tell it): its big face, and a list of
 // the names, each with its small face.
@@ -4467,10 +4576,10 @@ function routinePopoverMarkup(){
 function openPipPage(view='info'){
  const p=S.pip;if(!p)return;
  S.pipPage=view;draft.pipPageName=p.name;draft.pipPageTitle=profile(p.profile).title;pageNameDirty=false;titleEditing=false;lookDirty=false;routineEditing='';routineError='';
- void loadRoutines();void loadAppLinks();void loadPlugins();void loadNotes();void loadCareful();void loadEyes();void loadLevel();void loadPipBackup();void loadTemplate();void loadLogins();void loadArtifacts();void loadAppsUse();noteConfirmAll=false;sitesAll=false;loginsState.confirm='';pipKeyConfirm='';appsUse.confirm='';
+ void loadRoutines();void loadAppLinks();void loadPlugins();void loadNotes();void loadCareful();void loadEyes();void loadLevel();void loadPipBackup();void loadTemplate();void loadLogins();void loadArtifacts();void loadAppsUse();void loadSkillsUse();folderUi.open=false;folderUi.adding=false;folderUi.error='';draft.pipFolderName='';noteConfirmAll=false;sitesAll=false;loginsState.confirm='';pipKeyConfirm='';appsUse.confirm='';
 }
 function putProfile(pipId,value){
- const p=profile(value);if(S.pip?.id===pipId)S.pip={...S.pip,profile:p};S.jobs=S.jobs.map(j=>j.id===pipId?{...j,profile:p}:j);
+ const p={...profile(value),group:pipFolder(value)};if(S.pip?.id===pipId)S.pip={...S.pip,profile:p};S.jobs=S.jobs.map(j=>j.id===pipId?{...j,profile:p}:j);
 }
 async function setProfile(changes,notice){
  if(S.busy||!usable()||!S.pip||profileBusy)return false;const pip=S.pip.id,token=scope();profileBusy=true;S.busy=true;S.error='';render();
@@ -4512,7 +4621,7 @@ function pipPageMarkup(){
  const body=tab==='links'?linksMarkup(items,{esc,formatDate:shortDate,loading,error})
   :tab==='media'?mediaMarkup(items,{esc,imageSrc:messageImageSrc,loading,error})
   :tab==='files'?filesMarkup(items,mine?shared.desk:null,{esc,formatDate:shortDate,loading,error,hasComputer:computerState.pip===S.selected&&!!computerState.value?.granted})
-  :(templateShown()?templateMarkup(templateState.pip===p.id?templateState.value:null,{esc,busy:off||templateState.busy,error:templateState.pip===p.id?templateState.error:'',pipName:p.name}):'')+infoMarkup({esc,goal:p.goal,routines:routinesSectionMarkup(true),notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+appsUseMarkup(off)+computerRowMarkup(p,off)+(S.apiVersion>=53&&!remoteHost&&personalPip()?eyesMarkup(eyesState.pip===p.id?eyesState.value:null,{esc,busy:off||eyesState.busy,error:eyesState.error,pipName:p.name}):'')+(levelShown()?levelMarkup(levelState.pip===p.id?levelState.value:null,{esc,busy:off||levelState.busy,error:levelState.error,pipName:p.name,payLimit:payLimitFor(levelState.pip===p.id?levelState.value:null),when:at=>shortDate(at)}):'')+artifactsSectionMarkup(p,off)+(S.apiVersion>=44&&!remoteHost&&p.computer_plan?carefulMarkup(carefulState.pip===p.id?carefulState.value:null,{esc,busy:off||carefulState.busy,error:carefulState.error,pipName:p.name,showAll:sitesAll}):'')+(S.apiVersion>=56&&!remoteHost&&p.computer_plan?loginsMarkup(loginsState.pip===p.id?loginsState.value:null,{esc,busy:off||loginsState.busy,error:loginsState.error,pipId:p.id,pipName:p.name,names:pipNames(),confirm:loginsState.confirm}):'')+(pipKeysShown()?pipKeysPageMarkup(S.pipKeys,{esc,busy:off||!!pipKeyBusy,pipName:p.name,confirm:pipKeyConfirm,error:S.pipKeysError,level:levelState.pip===p.id?levelState.value?.level||'':''}):'')+(S.apiVersion>=44&&!remoteHost?notesMarkup(S.notesPip===p.id?S.notes:null,{esc,busy:off||notesBusy,error:S.notesError,pipName:p.name,adding:draft.noteAdd,confirmAll:noteConfirmAll}):'')+(workingNotesShown()?workingNotesMarkup(S.workingNotesPip===p.id?S.workingNotes:null,{esc,busy:off||workingNotesBusy,error:S.workingNotesError,pipName:p.name,editing:workingNotesEditing,text:draft.workingNotesText})+dailyLogMarkup(S.dailyLogPip===p.id?S.dailyLog:null,{esc,error:S.dailyLogError,pipName:p.name,today:localDay()}):'')+allowedMarkup()+(S.apiVersion>=44&&!remoteHost?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
+  :(templateShown()?templateMarkup(templateState.pip===p.id?templateState.value:null,{esc,busy:off||templateState.busy,error:templateState.pip===p.id?templateState.error:'',pipName:p.name}):'')+infoMarkup({esc,goal:p.goal,routines:routinesSectionMarkup(true),notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+pipFolderSetMarkup(off)+appsUseMarkup(off)+skillsUseMarkup(off)+computerRowMarkup(p,off)+(S.apiVersion>=53&&!remoteHost&&personalPip()?eyesMarkup(eyesState.pip===p.id?eyesState.value:null,{esc,busy:off||eyesState.busy,error:eyesState.error,pipName:p.name}):'')+(levelShown()?levelMarkup(levelState.pip===p.id?levelState.value:null,{esc,busy:off||levelState.busy,error:levelState.error,pipName:p.name,payLimit:payLimitFor(levelState.pip===p.id?levelState.value:null),when:at=>shortDate(at)}):'')+artifactsSectionMarkup(p,off)+(S.apiVersion>=44&&!remoteHost&&p.computer_plan?carefulMarkup(carefulState.pip===p.id?carefulState.value:null,{esc,busy:off||carefulState.busy,error:carefulState.error,pipName:p.name,showAll:sitesAll}):'')+(S.apiVersion>=56&&!remoteHost&&p.computer_plan?loginsMarkup(loginsState.pip===p.id?loginsState.value:null,{esc,busy:off||loginsState.busy,error:loginsState.error,pipId:p.id,pipName:p.name,names:pipNames(),confirm:loginsState.confirm}):'')+(pipKeysShown()?pipKeysPageMarkup(S.pipKeys,{esc,busy:off||!!pipKeyBusy,pipName:p.name,confirm:pipKeyConfirm,error:S.pipKeysError,level:levelState.pip===p.id?levelState.value?.level||'':''}):'')+(S.apiVersion>=44&&!remoteHost?notesMarkup(S.notesPip===p.id?S.notes:null,{esc,busy:off||notesBusy,error:S.notesError,pipName:p.name,adding:draft.noteAdd,confirmAll:noteConfirmAll}):'')+(workingNotesShown()?workingNotesMarkup(S.workingNotesPip===p.id?S.workingNotes:null,{esc,busy:off||workingNotesBusy,error:S.workingNotesError,pipName:p.name,editing:workingNotesEditing,text:draft.workingNotesText})+dailyLogMarkup(S.dailyLogPip===p.id?S.dailyLog:null,{esc,error:S.dailyLogError,pipName:p.name,today:localDay()}):'')+allowedMarkup()+(S.apiVersion>=44&&!remoteHost?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
  return `<div class="pip-page">${head}${healthMarkup(p.routine_health,{busy:off,canSignIn:!remoteHost})}${pageTabsMarkup(tab)}<div class="pip-page-body" data-page="${tab}">${body}</div></div>`;
 }
 // What it may do without asking (an Always allow you gave): only shown when there is one, and each
@@ -4891,7 +5000,7 @@ function renderReview() {
   $('review-title')?.focus({preventScroll:true});document.querySelector('[role=dialog]')?.scrollTo?.(0,0);
   picker.restore();
 }
-function clearSelection() { S.pipKeys=[];S.pipKeysError='';pipKeysSeq++;pipKeyBusy='';pipKeyConfirm='';pipKeyFilled.clear();pipKeyErrors.clear();pipKeyDone.clear();pipKeyTicked.clear();S.keyRequests=[];keyFilled.clear();keyErrors.clear();keySaved.clear();S.notes=null;S.notesPip='';S.notesError='';notesSeq++;noteConfirmAll=false;draft.noteAdd='';S.workingNotes=null;S.workingNotesPip='';S.workingNotesError='';workingNotesSeq++;workingNotesEditing=false;draft.workingNotesText='';S.dailyLog=null;S.dailyLogPip='';S.dailyLogError='';dailyLogSeq++;S.appLinks=[];S.appLinksError='';appsUse.pip='';appsUse.asked='';appsUse.value=null;appsUse.error='';appsUse.busy=false;appsUse.confirm='';appsUse.seq++;allowFrom.clear();allowFromOpen='';S.plugins=[];S.pluginsInstalled=[];S.pluginsError='';pluginSeq++;pluginBusy='';S.routines=null;S.routinesError='';routineSeq++;routineEditing='';routineError='';S.pipPage='info';S.legacyOpen=false;pageNameDirty=false;lookDirty=false;shared.pip='';shared.seq++;window.clearTimeout(appLinkTimer);appLinkBusy=''; S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);postsSeq++;S.posts=[];S.postsCursor=null;S.postsPip='';S.postsLoaded=false;S.fixes=new Map();S.fixesPip='';fixesSeq++;S.postsLoading=false;S.postsError='';messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.chatWaiting=[];S.routineNotes=[];S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; dropLive(); selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
+function clearSelection() { S.pipKeys=[];S.pipKeysError='';pipKeysSeq++;pipKeyBusy='';pipKeyConfirm='';pipKeyFilled.clear();pipKeyErrors.clear();pipKeyDone.clear();pipKeyTicked.clear();S.keyRequests=[];keyFilled.clear();keyErrors.clear();keySaved.clear();S.notes=null;S.notesPip='';S.notesError='';notesSeq++;noteConfirmAll=false;draft.noteAdd='';S.workingNotes=null;S.workingNotesPip='';S.workingNotesError='';workingNotesSeq++;workingNotesEditing=false;draft.workingNotesText='';S.dailyLog=null;S.dailyLogPip='';S.dailyLogError='';dailyLogSeq++;S.appLinks=[];S.appLinksError='';skillsUse.pip='';skillsUse.asked='';skillsUse.value=null;skillsUse.error='';skillsUse.busy=false;skillsUse.seq++;folderUi.open=false;folderUi.adding=false;folderUi.error='';folderUi.busy=false;appsUse.pip='';appsUse.asked='';appsUse.value=null;appsUse.error='';appsUse.busy=false;appsUse.confirm='';appsUse.seq++;allowFrom.clear();allowFromOpen='';S.plugins=[];S.pluginsInstalled=[];S.pluginsError='';pluginSeq++;pluginBusy='';S.routines=null;S.routinesError='';routineSeq++;routineEditing='';routineError='';S.pipPage='info';S.legacyOpen=false;pageNameDirty=false;lookDirty=false;shared.pip='';shared.seq++;window.clearTimeout(appLinkTimer);appLinkBusy=''; S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);postsSeq++;S.posts=[];S.postsCursor=null;S.postsPip='';S.postsLoaded=false;S.fixes=new Map();S.fixesPip='';fixesSeq++;S.postsLoading=false;S.postsError='';messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.chatWaiting=[];S.routineNotes=[];S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; dropLive(); selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
 // "Report ready", "Last run failed": the Pip page's status names its latest run, so it opens that run (reported
 // 19 Oct: it read like a link and did nothing). A status that names no finished run stays words.
 // Since its runs post in its chat (API 51), the status says what the latest found and goes to that post.
@@ -5160,9 +5269,10 @@ const dropOverlay=on=>{const o=document.querySelector('#chat-form > .dgc-drop');
 document.addEventListener('dragenter',event=>{if(!canAttachImages()||!event.target?.closest?.('#chat-form')||![...(event.dataTransfer?.types||[])].includes('Files'))return;dropDepth++;dropOverlay(true);});
 document.addEventListener('dragleave',event=>{if(!event.target?.closest?.('#chat-form'))return;dropDepth=Math.max(0,dropDepth-1);if(!dropDepth)dropOverlay(false);});
 document.addEventListener('drop',event=>{dropDepth=0;dropOverlay(false);if(!canAttachImages()||!event.target?.closest?.('#chat-form'))return;const files=[...(event.dataTransfer?.files||[])];if(!files.length)return;event.preventDefault();addImageFiles(files);});
-document.addEventListener('change',event=>{if(event.target.dataset?.pluginLevel){const t=event.target,level=t.value,label=(PLUGIN_LEVELS.find(l=>l[0]===level)||[])[1]||level;void pipsSettingsCall('set_plugin_permission',{plugin:t.dataset.pluginLevel,level},`Saved. ${t.dataset.pluginName||'This plugin'}: ${label.toLowerCase()}.`);return;}if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pips-pay-limit'){void setPayLimit(event.target.value);return;}if(event.target.id==='pipEyes'){void setEyes(event.target.value);return;}if(event.target.id==='pipLevel'){void setLevel(event.target.value)}if(event.target.id==='pipPaying'){void setPaying(event.target.value);return;}if(event.target.id==='pipReportAs'){const v=event.target.value;void setArtifacts({report_as:v},value=>reportNotice(value,S.pip?.name||'It'));return;}if(event.target.id==='pipDashboardAdd'){const id=event.target.value;if(id&&artifactsState.value){const list=[...artifactsState.value.dashboards,id];void setArtifacts({dashboards:dashboardsToSave(list)},`${S.pip?.name||'It'} refreshes “${dashboardTitle(id)}” after every run it finishes.${goneNote(list)}`);}return;}if(event.target.dataset?.loginAll){const l=(loginsState.value||[]).find(x=>x.id===event.target.dataset.loginAll),all=event.target.checked;if(l)void loginCall('grant_pip_login',{login_id:l.id,pips:all?'all':[S.selected]},all?`All your Pips can use the login for ${l.site}.`:`Only ${S.pip?.name||'this Pip'} uses the login for ${l.site} now.`);return;}if(event.target.dataset?.pipAppSwitch){void setAppUse(event.target.dataset.pipAppSwitch,event.target.checked);return;}if(event.target.id==='pipCareful'){const on=event.target.checked;void carefulCall('set_pip_careful',{on},on?'Careful mode is on.':'Careful mode is off. Its submits still wait for you.');return;}if(event.target.id==='pipNotify'){const on=event.target.checked;void setProfile({notify:on},on?'It tells you when it finishes something on its own or needs you.':'It won’t notify you. Its chat still has everything.');return;}if(event.target.dataset?.routineToggle){const id=event.target.dataset.routineToggle,on=event.target.checked;void routineCall('update_pip_routine',{routine_id:id,changes:{status:on?'on':'off'}},id,on?'Routine on.':'Routine off. It won’t run until you turn it on.');return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
+document.addEventListener('change',event=>{if(event.target.dataset?.pluginLevel){const t=event.target,level=t.value,label=(PLUGIN_LEVELS.find(l=>l[0]===level)||[])[1]||level;void pipsSettingsCall('set_plugin_permission',{plugin:t.dataset.pluginLevel,level},`Saved. ${t.dataset.pluginName||'This plugin'}: ${label.toLowerCase()}.`);return;}if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pips-pay-limit'){void setPayLimit(event.target.value);return;}if(event.target.id==='pipEyes'){void setEyes(event.target.value);return;}if(event.target.id==='pipLevel'){void setLevel(event.target.value)}if(event.target.id==='pipPaying'){void setPaying(event.target.value);return;}if(event.target.id==='pipReportAs'){const v=event.target.value;void setArtifacts({report_as:v},value=>reportNotice(value,S.pip?.name||'It'));return;}if(event.target.id==='pipDashboardAdd'){const id=event.target.value;if(id&&artifactsState.value){const list=[...artifactsState.value.dashboards,id];void setArtifacts({dashboards:dashboardsToSave(list)},`${S.pip?.name||'It'} refreshes “${dashboardTitle(id)}” after every run it finishes.${goneNote(list)}`);}return;}if(event.target.dataset?.loginAll){const l=(loginsState.value||[]).find(x=>x.id===event.target.dataset.loginAll),all=event.target.checked;if(l)void loginCall('grant_pip_login',{login_id:l.id,pips:all?'all':[S.selected]},all?`All your Pips can use the login for ${l.site}.`:`Only ${S.pip?.name||'this Pip'} uses the login for ${l.site} now.`);return;}if(event.target.dataset?.pipAppSwitch){void setAppUse(event.target.dataset.pipAppSwitch,event.target.checked);return;}if(event.target.dataset?.pipSkillSwitch){void setSkillUse(event.target.dataset.pipSkillSwitch,event.target.checked);return;}if(event.target.dataset?.teamPip){teamTicked(event.target);return;}if(event.target.id==='pipCareful'){const on=event.target.checked;void carefulCall('set_pip_careful',{on},on?'Careful mode is on.':'Careful mode is off. Its submits still wait for you.');return;}if(event.target.id==='pipNotify'){const on=event.target.checked;void setProfile({notify:on},on?'It tells you when it finishes something on its own or needs you.':'It won’t notify you. Its chat still has everything.');return;}if(event.target.dataset?.routineToggle){const id=event.target.dataset.routineToggle,on=event.target.checked;void routineCall('update_pip_routine',{routine_id:id,changes:{status:on?'on':'off'}},id,on?'Routine on.':'Routine off. It won’t run until you turn it on.');return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
 document.addEventListener('submit',event=>{
   if(event.target.id==='pip-flow-form'){event.preventDefault();reviewFlow();return;}
+  if(event.target.id==='pip-folder-form'){event.preventDefault();addPipFolder();return;}
   if(event.target.id==='login-form'){event.preventDefault();void saveLogin();return;}
   if(event.target.id==='computer-go'){event.preventDefault();const url=$('computer-url').value.trim();if(url)void computerView('go',{url:/^https?:\/\//i.test(url)?url:'https://'+url});return;}
   if(event.target.id==='computer-type'){event.preventDefault();const input=$('computer-text'),text=input.value;if(text){input.value='';void computerView('type',{text});}return;}
@@ -5294,6 +5404,7 @@ document.addEventListener('click',event=>{
   if(picker.click(event))return;
   if(DgcCard.click(event.target))return;   // a card's Details opens in place
   if(allowFromOpen&&!event.target.closest?.('.allow-from'))closeAllowFrom();
+  if(folderUi.open&&!event.target.closest?.('.pip-folder-set'))closeFolderMenu();
   if(S.composerPanel&&!event.target.closest?.('.composer-model-menu,.pip-routines-popover,.composer-add-menu,.composer-level-menu,#chat-model,#chat-context-toggle,#chat-routines,#chat-attach,#chat-level')){S.composerPanel='';render();}
   // Opening Controls reads the payments switch again: how many it paid today changes as Pips pay.
   if(event.target.closest?.('#runner-controls-toggle')&&paymentsState.asked)void loadPayments();
@@ -5506,6 +5617,11 @@ document.addEventListener('click',event=>{
   if(target.dataset.pipAppKeep!==undefined){const id=appsUse.confirm;appsUse.confirm='';render();document.querySelector(`[data-pip-app-ask-disconnect="${id}"]`)?.focus();return;}
   if(target.dataset.pipAppDisconnect){appsUse.confirm='';void appLinkAction('disconnect_pip_app_link',target.dataset.pipAppDisconnect);return;}
   if(target.dataset.pipAppAdd){void addAppAddress(target.dataset.pipAppAdd);return;}
+  if(target.dataset.pipFolderOpen!==undefined){if(folderUi.open){closeFolderMenu(true);return;}folderUi.open=true;folderUi.error='';render();const menu=document.querySelector('.pip-folder-menu');(menu?.querySelector('[aria-checked="true"]')||menu?.querySelector('.dgc-menu-row'))?.focus();return;}
+  if(target.dataset.pipFolderPick!==undefined){void setPipFolder(target.dataset.pipFolderPick);return;}
+  if(target.dataset.pipFolderNew!==undefined){folderUi.open=false;folderUi.adding=true;folderUi.error='';draft.pipFolderName='';render();$('pipFolderName')?.focus();return;}
+  if(target.dataset.pipFolderCancel!==undefined){folderUi.adding=false;folderUi.error='';draft.pipFolderName='';render();$('pip-folder-btn')?.focus({preventScroll:true});return;}
+  if(target.dataset.pipFolderToggle!==undefined){const f=target.dataset.pipFolderToggle;if(foldersClosed.has(f))foldersClosed.delete(f);else foldersClosed.add(f);rememberView();render();[...document.querySelectorAll('[data-pip-folder-toggle]')].find(b=>b.dataset.pipFolderToggle===f)?.focus({preventScroll:true});return;}
   if(target.dataset.allowSend){void allowSend(target.dataset.allowSend);return;}
   if(target.dataset.allowAlways){void allowSend(target.dataset.allowAlways,true);return;}
   if(target.dataset.allowDismiss){void allowDismiss(target.dataset.allowDismiss);return;}
@@ -5721,6 +5837,8 @@ document.addEventListener('click',event=>{
       break;
     }
     case 'simple-new':openNewPip();break;
+    case 'team-export':target.closest('details')?.removeAttribute('open');openTeamExport();break;
+    case 'team-import':target.closest('details')?.removeAttribute('open');void importTeam();break;
     case 'flow-new':flowDraft.name='';flowDraft.mode='reviewed';flowDraft.count=3;flowDraft.pips=['','','',''];flowDraft.tasks=['','',''];flowState.form=true;flowState.error='';render();$('flow-name')?.focus();break;
     case 'flow-cancel':flowState.form=false;flowState.error='';render();break;
     case 'create-core':void createSimplePip('core','Core');break;
@@ -5745,6 +5863,7 @@ document.addEventListener('click',event=>{
       if(review.savedConnectorDraft){void chooseConnectorTool(review.savedConnectorDraft.payload.action.server,review.savedConnectorDraft);return;}
       if(review.connectorForm){prepareConnector(review);return;}
       if(review.projectPip){createProjectPip(review);return;}
+      if(review.teamExport){void exportTeam(review);return;}
       if(review.newPip){void createSimplePip(draft.newPipCharacter,draft.newPipName,review);return;}
       if(review.computerGrant!==undefined){void applyComputerGrant(review);return;}
       if(review.computerAction){if(!reviewBlocked(review))void decideComputerAction(review,true);else{review.error='This action expired. Nothing was sent.';renderReview();}return;}
@@ -5867,6 +5986,11 @@ document.addEventListener('keydown',event=>{
    if(menu&&menu.contains(event.target)){if(globalThis.DgcMenu?.handle(menu,event,{rows:'.dgc-menu-row',close:()=>{allowFromOpen='';render();},trigger:()=>document.querySelector(`[data-allow-from="${menu.dataset.allowFromMenu}"]`)}))return;}
    else if(row&&event.key==='Escape'){event.preventDefault();event.stopPropagation();closeAllowFrom(true);return;}
    else if(row&&event.key==='ArrowDown'&&menu){event.preventDefault();menu.querySelector('.dgc-menu-row')?.focus();return;}}
+  if(!S.review&&folderUi.open){const set=event.target.closest?.('.pip-folder-set'),menu=set?.querySelector('.pip-folder-menu');
+   if(menu&&menu.contains(event.target)){if(globalThis.DgcMenu?.handle(menu,event,{rows:'.dgc-menu-row',close:()=>{folderUi.open=false;render();},trigger:()=>$('pip-folder-btn')}))return;}
+   else if(set&&event.key==='Escape'){event.preventDefault();event.stopPropagation();closeFolderMenu(true);return;}
+   else if(set&&event.key==='ArrowDown'&&menu){event.preventDefault();menu.querySelector('.dgc-menu-row')?.focus();return;}}
+  if(!S.review&&folderUi.adding&&event.key==='Escape'&&event.target.id==='pipFolderName'){event.preventDefault();event.stopPropagation();folderUi.adding=false;folderUi.error='';draft.pipFolderName='';render();$('pip-folder-btn')?.focus({preventScroll:true});return;}
   if(!S.review&&convKeydown(event))return;
   if(!S.review&&computerKeydown(event))return;
   if(!S.review&&DgcCard.key(event)){event.preventDefault();return;}   // Esc closes a card's open detail
