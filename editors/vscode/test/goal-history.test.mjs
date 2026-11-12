@@ -93,6 +93,35 @@ test("a goal already ended when the window opened says nothing new by itself, an
   assert.deepEqual(old.lines().map(text), ["Goal done · 12 min · 20.5k tokens · 2 cycles"], "the line is still said, from what goal_changed told");
 });
 
+test("a window that opens on a goal already running (a session that ran with no window) still says its end", () => {
+  // Seen live (12 Nov): a session kept running its goal with no window; opened again, its tab showed the goal running
+  // (from the panel's state, not a goal_changed), and when the goal was done no line came.
+  const x = chat();
+  x.v.send({ type: "state", state: { model: "qwen3.8:27b", mode: "default", think: "off",
+    goal: { id: "g1", text: "Ship the release", status: "active", elapsed_seconds: 600 } } });
+  x.turn("t1");
+  const before = x.asked();
+  x.event(goal("g1", "completed", { elapsed: 643, tokens: 66_015, cycles: 1 }));
+  assert.equal(x.asked(), before + 1, "the page asks DGC for the session's goals");
+  x.event({ type: "goal_runs", runs: [run("g1", "completed", { started_at: now() - 643, ended_at: now() + 1, elapsed_seconds: 643, tokens: 66_015, cycles: 1 })] });
+  x.end("t1");
+  assert.deepEqual(x.lines().map(text), ["Goal done · 10 min · 66k tokens · 1 cycle"]);
+  const old = chat({ goalRuns: false });
+  old.v.send({ type: "state", state: { model: "qwen3.8:27b", mode: "default", think: "off",
+    goal: { id: "g1", text: "Ship the release", status: "active", elapsed_seconds: 600 } } });
+  old.turn("t1");
+  old.event(goal("g1", "completed", { elapsed: 643, tokens: 66_015, cycles: 1 }));
+  old.end("t1");
+  assert.deepEqual(old.lines().map(text), ["Goal done · 10 min · 66k tokens · 1 cycle"], "an older DGC: from what goal_changed told");
+  const done = chat();
+  done.v.send({ type: "state", state: { model: "qwen3.8:27b", mode: "default", think: "off",
+    goal: { id: "g1", text: "Ship the release", status: "completed", elapsed_seconds: 60 } } });
+  const asked = done.asked();
+  done.event(goal("g1", "completed", { elapsed: 60 }));
+  assert.equal(done.asked(), asked, "a goal that had ended before the window opened is not a new end");
+  assert.deepEqual(x.v.errors, []);
+});
+
 test("after a reload the same lines come back, each under the turn its goal ended in", () => {
   const x = chat();
   const turn = (id, at, prompt) => [{ type: "turn_start", turn_id: id, prompt, kind: "prompt" }, { role: "time", of: "prompt", at },

@@ -12451,6 +12451,15 @@ function permissionChoices(ev) {
     goalRuns = []; goalWatch = null; goalEndsWaiting = []; goalEndsSaid.clear();
     if (goalHistoryShown) { goalHistoryShown = false; syncComposerRail(); }
   }
+  // A window that opens on a goal already being pursued (a session that ran on with no window, or a reload mid-goal)
+  // learns it from the panel's state, not from a goal_changed: it is watched from here, so its end says its line (12
+  // Nov, seen live). A goal that had already ended is not watched: its line, if any, comes from goal_runs.
+  function joinGoal(state) {
+    const words = String(state?.text ?? state?.goal ?? ""), status = String(state?.status || "");
+    if (goalWatch || !words || !["active", "paused"].includes(status)) return;
+    goalWatch = { id: String(state.id || ""), name: words, status, elapsed_seconds: Number(state.elapsed_seconds) || 0,
+      tokens: Number(state.tokens_used) || 0, cycles: Number(state.cycles) || 0 };
+  }
   // goal_changed: a goal that was being pursued (or paused) and is now done, blocked, replaced or gone has ended.
   function noteGoalChange(ev) {
     const details = ev.details && typeof ev.details === "object" ? ev.details : {}, words = String(ev.goal || "");
@@ -12954,6 +12963,7 @@ function permissionChoices(ev) {
       if (pmodel) { pmodel.textContent = noProvider ? "No provider" : curModel || "dgc"; pmodel.title = noProvider ? "No model provider yet. Click to add one in Settings → Models." : "Model: " + (curModel || "dgc") + " — click to change"; pmodel.setAttribute("aria-label", "Change model. Current model: " + (curModel || "dgc")); }
       applyMode(msg.state.mode || "default");
       setGoalState(msg.state.goal || { text: "", status: "none", elapsed_seconds: 0 });
+      joinGoal(msg.state.goal);                 // a goal already running when this window opened: its end is said too
     }
     else if (msg.type === "providerModels") { if (allModelsStep && allModelsStep.key === msg.id && !$("modelmenu").hidden) showAllModels(allModelsStep, { ids: Array.isArray(msg.ids) ? msg.ids.filter((id) => typeof id === "string" && id) : [], error: msg.error }); }
     else if (msg.type === "models" && !$("modelmenu").hidden) { renderModelMenu(msg.ids || [], msg.current, msg.err, msg.subscription, msg.label, msg.supportsEffort, msg.routes, msg.cliDefaultModel, msg.cliDefaultListed, msg.currentRouteKey, msg.fallback); }
