@@ -58,16 +58,22 @@ export function pipOwnersRefusal(request: any, apiVersion: number): string {
   if (request.type === 'list_session_pips' && (typeof request.session_id !== 'string' || !SESSION_ID.test(request.session_id))) return 'Choose a session.';
   return '';
 }
+/** A Work session as the owner picker and the "move its Pips" dialog are told of it: `when` is DGC's own
+ *  "YYYY-MM-DD HH:MM" for when it is from (list_sessions' `when`), so same-titled sessions can be told apart. */
+export interface WorkSessionTitle { id: string; title: string; empty?: true; when?: string }
+const SESSION_WHEN = /^\d{4}-\d\d-\d\d[ T]\d\d:\d\d/;
 /** The Work list's titles, checked: only real session ids, each once, a title cut at 200, 500 at most. */
-export function workSessionTitles(list: unknown): Array<{ id: string; title: string; empty?: true }> {
-  const seen = new Set<string>(), out: Array<{ id: string; title: string; empty?: true }> = [];
+export function workSessionTitles(list: unknown): WorkSessionTitle[] {
+  const seen = new Set<string>(), out: WorkSessionTitle[] = [];
   for (const item of Array.isArray(list) ? list : []) {
     if (!item || typeof item.id !== 'string' || !SESSION_ID.test(item.id) || seen.has(item.id) || typeof item.title !== 'string' || out.length >= 500) continue;
     seen.add(item.id);
     // A session with nothing in it (12 Nov: the picker read "(empty)", the backend's preview of one): said to be empty,
     // never offered, and that preview is never its title.
     const title = item.title.replace(/\s+/g, ' ').trim().slice(0, 200);
-    out.push({ id: item.id, title: title === '(empty)' ? '' : title, ...(item.empty === true ? { empty: true as const } : {}) });
+    // (When it is from, 12 Nov night: only DGC's own date and time, cut there; anything else is left out.)
+    out.push({ id: item.id, title: title === '(empty)' ? '' : title, ...(item.empty === true ? { empty: true as const } : {}),
+      ...(typeof item.when === 'string' && SESSION_WHEN.test(item.when) ? { when: item.when.slice(0, 16) } : {}) });
   }
   return out;
 }

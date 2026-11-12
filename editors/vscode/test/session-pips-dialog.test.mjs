@@ -53,6 +53,22 @@ test("Move them to another session: the answer names the session chosen", () => 
   assert.deepEqual(none.answers(), [{ type: "sessionPipsAnswer", requestId: ID, choice: "move", to: "" }]);
 });
 
+test("Move them to another session: sessions with the same title are told apart by when each is from", () => {
+  // (12 Nov night.) "title · 2h", in the Work list's own words; a session with no time the page can read is its title alone.
+  const pad = (n) => String(n).padStart(2, "0");
+  const ago = (minutes) => { const d = new Date(Date.now() - minutes * 60000); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  const HELLO = "Say hello in three words.";
+  const sessions = [{ id: "20261112-190000-e5", title: HELLO, when: ago(150) }, { id: "20261111-180000-d4", title: HELLO, when: ago(26 * 60) }, { id: "20261021-080000-g7", title: HELLO, when: ago(22 * 1440) },
+    { id: "20261020-080000-h8", title: HELLO }, { id: "20261019-080000-i9", title: HELLO, when: "<b>soon</b>" }];
+  const x = open({ sessions });
+  assert.deepEqual([...x.dialog().querySelectorAll(".session-pips-to option")].map((o) => [o.value, o.textContent]),
+    [[sessions[0].id, `${HELLO} · 2h`], [sessions[1].id, `${HELLO} · 1d`], [sessions[2].id, `${HELLO} · 3w`], [sessions[3].id, HELLO], [sessions[4].id, HELLO], ["", "No session: their reports wait in the Pips view"]]);
+  const to = x.dialog().querySelector(".session-pips-to");
+  to.value = sessions[1].id;
+  x.press(".session-pips-confirm");
+  assert.deepEqual(x.answers(), [{ type: "sessionPipsAnswer", requestId: ID, choice: "move", to: sessions[1].id }], "the answer is the session, as before");
+});
+
 test("Delete them too asks once more, in the Pips view's own words, before anything is answered", () => {
   const x = open();
   x.pick("delete");

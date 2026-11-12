@@ -652,12 +652,23 @@ export const host = (opts) => `(${function (PIP, opts) {
     const ids = ["20261104-180000-d4", "20261105-221000-c3", "20261106-091200-b2", "20261106-101500-a1"];
     const titles = [{ id: ids[3], title: "Run the shell command `ls -la src` and tell me in one line what is there" }, { id: ids[2], title: "Visits page alignment" },
       { id: ids[0], title: "Invoice totals round the wrong way" }];
+    // "same" (12 Nov night): six sessions with one title and one with a very long one, each with when it is from (the
+    // host's "YYYY-MM-DD HH:MM"), so the picker's times can be seen and measured.
+    if (opts.owner === "same") {
+      const pad = (n) => String(n).padStart(2, "0");
+      const ago = (minutes) => { const d = new Date(Date.now() - minutes * 60000); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+      const same = ["20261021-080000-g7", "20261104-180000-d4", "20261105-221000-c3", "20261106-091200-b2", "20261106-101500-a1", "20261111-180000-d4", "20261112-190000-e5"];
+      const minutes = [22 * 1440, 8 * 1440, 6 * 1440 + 90, 26 * 60, 150, 47, 5];
+      ids.length = 0; ids.push(...same);
+      titles.length = 0;
+      titles.push(...same.map((id, i) => ({ id, title: i === 1 ? "Run the shell command `ls -la src` and tell me in one line what is there, then say hello in three words" : "Say hello in three words.", when: ago(minutes[i]) })));
+    }
     const st = window.__owner = { session_id: opts.owner === "none" ? null : ids[2], chosen: opts.owner === "none" };
     Object.assign(answers, {
       get_pip_owner: () => ({ pip_id: PIP, ...st }),
       set_pip_owner: (r) => { st.session_id = r.session_id; st.chosen = true; return { pip_id: PIP, session_id: r.session_id }; },
       list_workspace_sessions: () => ({ workspace_id: W, sessions: ids.map((session_id) => ({ session_id, workspace_id: W, workspace_binding_id: "binding_" + "1".repeat(32), updated_at: "2026-11-06T10:15:00Z", runner_id: "runner_" + "2".repeat(32) })),
-        next_cursor: ids[3], has_more: false }),
+        next_cursor: ids.at(-1), has_more: false }),
       list_work_session_titles: () => ({ sessions: titles }),
     });
   }
@@ -750,6 +761,19 @@ ${script(host(opts))}${script(markdown)}${script(js)}${script(`(${function (text
 /** What the chat measures as, read in the page (pass it to page.evaluate). Colours are resolved by painting them
     (color-mix and translucent inks come out as real pixels): an element's ground is every background from the page
     down to it, one over the other; its ink is painted over that. */
+/** A Project Pip's Settings with its "Reports to" picker open, on a project of seven Work sessions, six with one title
+ *  (opts.owner "same"). Shared by pip-owner-ages-browser.test.mjs and render-queue6.mjs. */
+export async function openOwnerPicker(browser, { width, theme }) {
+  const x = await openChat(browser, { width, height: 760, theme, project: true, api: 89, owner: "same", settings: true });
+  await x.p.evaluate(() => { const root = window.__pipsRoot || document; (root.querySelector('.pip-topbar .pip-menu [data-tab="job"]') || root.querySelector('[data-tab="job"]')).click(); });
+  await x.p.waitForSelector(".pip-owner .pip-owner-now");
+  await x.p.click("#pip-owner-change");
+  await x.p.waitForSelector(".pip-owner [data-owner-session]");
+  await x.p.evaluate(() => (window.__pipsRoot || document).querySelector(".pip-owner").scrollIntoView({ block: "center" }));
+  await x.p.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(done, 200)))));
+  return x;
+}
+
 export const facts = () => {
   const root = window.__pipsRoot || document, q = (s) => root.querySelector(s), all = (s) => [...root.querySelectorAll(s)];
   const canvas = document.createElement("canvas"); canvas.width = canvas.height = 1;

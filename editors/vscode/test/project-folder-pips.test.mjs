@@ -34,7 +34,7 @@ const card=(n,pipRow,title)=>({id:`email:maildraft_${hex(String(n))}`,kind:'emai
 async function flush(){for(let i=0;i<15;i++)await Promise.resolve();}
 
 /** `choice`: what the host says is chosen ("" All projects). `api`: the DGC's Pips API. `refuse`: add_project_folder's refusal. */
-function setup({choice='',api=93,saved,refuse='',attention=[]}={}){
+function setup({choice='',api=93,saved,refuse='',attention=[],listed=folders()}={}){
  const dom=new JSDOM('<!doctype html><html><body><div id="pips-host"></div></body></html>',{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);
  const sent=[],answered=new Set(),listeners=new Set(),states=[];
  w.HTMLCanvasElement.prototype.getContext=()=>null;w.TextEncoder=TextEncoder;w.CSS={escape:s=>s};
@@ -49,7 +49,7 @@ function setup({choice='',api=93,saved,refuse='',attention=[]}={}){
  const every=()=>[core,audit,other,...made];
  const reply=r=>({list_workspaces:()=>({workspaces:spaces,current_workspace_id:W}),
   list_pip_types:()=>({types}),list_pip_setups:()=>({setups:[]}),list_pip_starters:()=>({starters:[]}),get_pip_runner:()=>({runner}),
-  list_project_folders:()=>({folders:folders()}),
+  list_project_folders:()=>({folders:listed}),
   add_project_folder:()=>{if(refuse)return {error:{code:'invalid_request',message:refuse}};if(!spaces.some(s=>s.id===N))spaces.push({id:N,name:r.folder.split('/').pop(),kind:'git'});return {workspace:{id:N,name:r.folder.split('/').pop(),kind:'git'}};},
   list_pips:()=>r.scope==='projects'?{pips:[other,audit,...made],total:2+made.length,next_offset:null}:{pips:pips[r.workspace_id]||[],total:(pips[r.workspace_id]||[]).length,next_offset:null},
   create_pip:()=>{const p=pip(MADE,r.workspace_id,r.name,r.pip_type);made.push(p);(pips[r.workspace_id]||=[]).push(p);return {pip:p};},
@@ -179,6 +179,56 @@ test('Create a Project Pip has the folder field: this window\'s folder first, no
  assert.equal(x.requests('add_project_folder').length,0,'a folder that is a project already is not added again');
  assert.deepEqual(x.requests('create_pip').map(r=>[r.workspace_id,r.name]),[[X,'Invoice checker']],'made in the chosen folder\'s workspace');
  assert.equal(x.requests('list_pip_messages').some(r=>r.pip_id===MADE),true,'and it opens here');
+});
+
+// ---- seen live, 12 Nov night ----------------------------------------------------------------------
+const folderWords=x=>x.$('#new-pip-folder').textContent.replace(/\s+/g,' ').trim();
+const runsIn=x=>(/It runs when you ask, in ([^.]+)\./.exec(x.$('.new-pip-kind')?.textContent||'')||[])[1];
+test('New Pip starts in the folder chosen in the Project tab\'s dropdown, and the words under the field follow it',async()=>{
+ // Seen live: with another folder chosen, New Pip opened on this window's folder and said "It runs when you ask, in <this window's>".
+ const x=setup({choice:BILLING});await x.drain();await x.tab('project');
+ await x.click('#simple-new');
+ assert.equal(folderWords(x),'Project Folder billing-app','the folder whose Pips are listed, not this window\'s');
+ assert.equal(x.$('.new-pip-folder-path').title,BILLING);
+ assert.equal(runsIn(x),'billing-app','and the words under it say that folder');
+ x.$('#name').value='Invoice checker';x.$('#name').dispatchEvent(new x.w.Event('input',{bubbles:true}));
+ x.$('#goal').value='Check the invoices';x.$('#goal').dispatchEvent(new x.w.Event('input',{bubbles:true}));
+ await x.click('#review-confirm');
+ assert.deepEqual(x.requests('create_pip').map(r=>[r.workspace_id,r.name]),[[X,'Invoice checker']],'made there with nothing more chosen');
+ assert.deepEqual(x.posted('pipsProjectFolderChoose'),[],'the list\'s choice is not changed by the form');
+});
+test('New Pip on All projects, and with a chosen folder that is gone, starts on this window\'s folder, as before',async()=>{
+ const all=setup({choice:''});await all.drain();await all.tab('project');
+ await all.click('#projects-new');
+ assert.equal(folderWords(all),'Project Folder erp-tools','All projects: this window\'s folder');
+ assert.equal(runsIn(all),'erp-tools');
+ // A folder that is gone, though DGC still lists its Pips: a Pip can't be made in it.
+ const gone=setup({choice:BILLING,listed:folders().map(r=>r.folder===BILLING?{...r,exists:false}:r)});await gone.drain();await gone.tab('project');
+ assert.ok(gone.$(`#pips-tabpanel [data-job="${OTHER}"]`),'its Pips are still listed');
+ await gone.click('#simple-new');
+ assert.equal(folderWords(gone),'Project Folder erp-tools','a gone folder: this window\'s');
+ assert.equal(runsIn(gone),'erp-tools');
+ // This window's own folder chosen: itself.
+ const here=setup({choice:HERE});await here.drain();await here.tab('project');
+ await here.click('#simple-new');
+ assert.equal(folderWords(here),'Project Folder erp-tools');
+});
+test('the Project tab heads its list "Project Pips" on one folder as on All projects; the Personal tab keeps "Your Pips"',async()=>{
+ // Seen live: one folder's list was headed "Your Pips" (the project home's old heading) and All projects' "Project Pips".
+ const head=x=>[x.$('#pips-tabpanel .simple-home-head h2')?.textContent,x.$('#pips-tabpanel .simple-home')?.getAttribute('aria-label')];
+ const one=setup({choice:BILLING});await one.drain();await one.tab('project');
+ assert.deepEqual(head(one),['Project Pips','Project Pips'],'one folder');
+ one.message({type:'pipsProjectFolder',folder:HERE});await one.drain();
+ assert.deepEqual(head(one),['Project Pips','Project Pips'],'this window\'s folder too');
+ one.message({type:'pipsProjectFolder',folder:''});await one.drain();
+ assert.equal(head(one)[0],'Project Pips','All projects, as it was');
+ await one.tab('personal');
+ assert.deepEqual(head(one),['Your Pips','Your Pips'],'the Personal tab keeps its own');
+ // An older DGC has no dropdown; its Project tab is headed the same way.
+ const old=setup({api:92});await old.drain();await old.tab('project');
+ assert.deepEqual(head(old),['Project Pips','Project Pips']);
+ await old.tab('personal');
+ assert.deepEqual(head(old),['Your Pips','Your Pips']);
 });
 
 test('Create a Project Pip: Add a folder… asks the editor for a folder, adds it as a project, and makes the Pip there; DGC\'s refusal shows in the form',async()=>{

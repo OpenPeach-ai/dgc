@@ -883,13 +883,14 @@ test("a Project Pip of another folder reports to a session of its own folder: it
   const folders = folderRows(garden).map((row) => (row.folder === garden ? { ...row, pips: 1, workspace_id: GARDEN_WS } : row));
   const { sidebar, backend, lists } = folderWindow({ rows: everywhereRows(garden), folders });
   sidebar.pipWorkspace = async (id) => (id === PIP ? GARDEN_WS : HERE_WS);
-  assert.deepEqual(await sidebar.sessionsForPip(PIP), [{ id: "g1", title: "Water the tomatoes on Fridays" }], "that folder's sessions, by the titles its list shows");
+  // (Each with when it is from, since 12 Nov night: the picker tells same-titled sessions apart by it.)
+  assert.deepEqual(await sidebar.sessionsForPip(PIP), [{ id: "g1", title: "Water the tomatoes on Fridays", when: "2026-11-12 09:00" }], "that folder's sessions, by the titles its list shows");
   assert.deepEqual(lists(), [{ scope: "all", folder: garden, limit: 500 }], "asked for by its folder");
   backend.requested.length = 0;
-  assert.deepEqual(await sidebar.sessionsForPip(MINE), [{ id: "s1", title: "Checkout" }], "this window's own Pip: this project's sessions, as before");
+  assert.deepEqual(await sidebar.sessionsForPip(MINE), [{ id: "s1", title: "Checkout", when: "2026-11-10 10:15" }], "this window's own Pip: this project's sessions, as before");
   assert.deepEqual(lists(), [{}]);
   backend.requested.length = 0;
-  assert.deepEqual(await sidebar.sessionsForPip(), [{ id: "s1", title: "Checkout" }]);
+  assert.deepEqual(await sidebar.sessionsForPip(), [{ id: "s1", title: "Checkout", when: "2026-11-10 10:15" }]);
   // An older DGC is never asked by folder.
   const old = folderWindow({ capabilities: { session_paging: true } });
   old.sidebar.pipWorkspace = async () => GARDEN_WS;

@@ -839,19 +839,10 @@
     // (Focused here, not by autofocus: see the Auto-mode dialog.)
     if (start.disabled) field.querySelector("button").focus(); else start.focus();
   }
-  /** How long ago, in a few characters. `when` is the host's "YYYY-MM-DD HH:MM"; anything else is shown as it is. */
-  function sessionAge(when, now = Date.now()) {
-    const m = /^(\d{4})-(\d\d)-(\d\d)[ T](\d\d):(\d\d)/.exec(String(when || ""));
-    if (!m) return String(when || "").slice(0, 12);
-    const minutes = Math.floor((now - new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).getTime()) / 60000);
-    if (minutes < 1) return "now";
-    if (minutes < 60) return `${minutes}m`;
-    if (minutes < 1440) return `${Math.floor(minutes / 60)}h`;
-    const days = Math.floor(minutes / 1440);
-    if (days < 7) return `${days}d`;
-    if (days < 30) return `${Math.floor(days / 7)}w`;
-    if (days <= 365) return `${Math.floor(days / 30)}mo`;
-    return `${Math.floor(days / 365)}y`;
+  /** How long ago, in a few characters. `when` is the host's "YYYY-MM-DD HH:MM"; anything else is shown as it is.
+   *  The one helper every place that says a Work session's age shares (media/shared/age.js, loaded before this). */
+  function sessionAge(when, now) {
+    return window.DgcAge ? window.DgcAge.sessionAge(when, now) : String(when || "").slice(0, 12);
   }
   /** One session: its mark (a Voxel; a chat's is a Mote), its title over what it is doing, its age (the purple dot while it runs), and (pointed at or
    *  focused) Open in Editor, the pin, its colour and Delete in the age's place. `before` is each row's state at the last
@@ -1998,6 +1989,9 @@
     const list = `<ul class="session-pips-list" aria-label="${one ? "The Project Pip it owns" : "The Project Pips it owns"}">${pips.map((p, i) =>
       `<li><span class="session-pips-face" aria-hidden="true">${face(p, i)}</span><span class="session-pips-name" title="${esc(p.name)}">${esc(p.name)}</span></li>`).join("")}</ul>`;
     const them = one ? "it" : "them";
+    // Sessions with the same title are told apart by when each is from (12 Nov night), in the Work list's words;
+    // only the host's own date and time is read.
+    const sessionWhen = (s) => (typeof s.when === "string" && /^\d{4}-\d\d-\d\d[ T]\d\d:\d\d/.test(s.when) ? sessionAge(s.when) : "");
     const state = { step: "ask", choice: archive ? "keep" : "move", to: sessions[0]?.id || "" };
     const paint = () => {
       if (state.step === "sure") {
@@ -2012,7 +2006,7 @@
       }
       const option = (value, words) => `<label class="session-pips-choice"><input type="radio" name="session-pips-choice" value="${value}"${state.choice === value ? " checked" : ""}><span>${words}</span></label>`;
       const picker = `<select class="session-pips-to" aria-label="The session to move ${them} to"${state.choice === "move" ? "" : " disabled"}>${sessions.map((s) =>
-        `<option value="${esc(s.id)}"${s.id === state.to ? " selected" : ""}>${esc(s.title.replace(/\s+/g, " ").trim().slice(0, 200) || "Untitled session")}</option>`).join("")}<option value=""${state.to ? "" : " selected"}>No session: ${one ? "its" : "their"} reports wait in the Pips view</option></select>`;
+        `<option value="${esc(s.id)}"${s.id === state.to ? " selected" : ""}>${esc(s.title.replace(/\s+/g, " ").trim().slice(0, 200) || "Untitled session")}${sessionWhen(s) ? ` · ${esc(sessionWhen(s))}` : ""}</option>`).join("")}<option value=""${state.to ? "" : " selected"}>No session: ${one ? "its" : "their"} reports wait in the Pips view</option></select>`;
       const move = option("move", `Move ${them} to another session`) + picker;
       dialog.innerHTML = `<div class="session-pips-body"><h2 id="session-pips-title">${archive ? "Archive" : "Delete"} “${esc(title)}”?</h2>
         <p id="session-pips-intro" class="session-pips-intro">This session is the owner of ${n} Project ${one ? "Pip" : "Pips"}. ${one ? "Its" : "Their"} reports come to it.${archive ? "" : " Its conversation is removed from this project, and this can’t be undone."}</p>

@@ -3,6 +3,7 @@
 // picker of the project's Work sessions plus "No session" (its reports then wait in the Pips view). A Personal Pip
 // has its own chat and no such row.
 import {infoTip} from './pipInfoTip.js';
+import '../media/shared/age.js';   // DgcAge.sessionAge: how long ago, in the Work list's own words
 
 export const OWNERS_API=89;
 const SESSION=/^[A-Za-z0-9_-]{1,128}$/;
@@ -19,13 +20,21 @@ export function pipOwnerSet(value,pip,session){
   if(!value||value.pip_id!==pip||(value.session_id??null)!==session)throw new Error('DGC answered about another Pip. Refresh the Pip.');
   return {session,chosen:true};
 }
-/** The editor's Work titles, as the host answers them: {sessions: [{id, title}]} -> Map id -> title. */
+/** The editor's Work titles, as the host answers them: {sessions: [{id, title, when}]} -> Map id -> title.
+ *  (`titles.when`: id -> when the session is from, the host's "YYYY-MM-DD HH:MM"; 12 Nov night.) */
+const WHEN=/^\d{4}-\d\d-\d\d[ T]\d\d:\d\d/;
 export function workTitles(value){
   // (`titles.empty`: the sessions with nothing in them, never offered as an owner; 12 Nov.)
-  const titles=new Map();titles.empty=new Set();
+  const titles=new Map();titles.empty=new Set();titles.when=new Map();
   for(const s of Array.isArray(value?.sessions)?value.sessions.slice(0,500):[])if(s&&typeof s.id==='string'&&SESSION.test(s.id)&&s.empty===true)titles.empty.add(s.id);
   for(const s of Array.isArray(value?.sessions)?value.sessions.slice(0,500):[])if(s&&typeof s.id==='string'&&SESSION.test(s.id)&&typeof s.title==='string'&&s.title.trim())titles.set(s.id,s.title.trim().slice(0,200));
+  for(const s of Array.isArray(value?.sessions)?value.sessions.slice(0,500):[])if(s&&typeof s.id==='string'&&SESSION.test(s.id)&&typeof s.when==='string'&&WHEN.test(s.when))titles.when.set(s.id,s.when.slice(0,16));
   return titles;
+}
+/** How long ago a session the Work list has is from, as the Work list says it ("2h", "1d", "3w"); '' when unknown. */
+export function sessionAgo(id,titles,now){
+  const when=titles?.when?.get?.(id);
+  return when&&titles.has?.(id)?globalThis.DgcAge.sessionAge(when,now):'';
 }
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 /** What a session is called: the title the Work list shows, else when it is from (its id starts with its date and
@@ -53,9 +62,11 @@ export function ownerMarkup(owner,{esc,titles,picker=null,busy=false,error='',pi
   if(!owner)return `${head}</div>${said||'<p class="muted" role="status">Loading…</p>'}</section>`;
   const now=owner.session?`<p class="goal pip-owner-now" title="${esc(sessionWords(owner.session,titles))}">${esc(sessionWords(owner.session,titles))}</p>`:`<p class="muted pip-owner-now">${NO_SESSION}</p>`;
   if(!picker)return `${head}<div class="actions"><button type="button" id="pip-owner-change" class="quiet"${off}>Change</button></div></div>${now}${said}</section>`;
-  const choice=(id,title,sub)=>`<li><button type="button" class="pip-owner-choice" role="radio" aria-checked="${(owner.session||'')===id}" data-owner-session="${esc(id)}"${off}>`
-    +`<span class="pip-owner-mark" aria-hidden="true"></span><span class="pip-owner-words"><span class="pip-owner-title">${esc(title)}</span>${sub?`<small>${esc(sub)}</small>`:''}</span></button></li>`;
-  const list=picker.sessions?`<ul class="pip-owner-list" role="radiogroup" aria-label="The session ${name} reports to">${offered(picker.sessions,owner,titles).map(id=>choice(id,sessionWords(id,titles),'')).join('')}${choice('','No session','Its reports wait in the Pips view')}</ul>`
+  // Each choice also says when its session is from, muted, at its right end: sessions with one title are told apart
+  // (seen live, 12 Nov night: six "Say hello in three words.").
+  const choice=(id,title,sub,ago='')=>`<li><button type="button" class="pip-owner-choice" role="radio" aria-checked="${(owner.session||'')===id}" data-owner-session="${esc(id)}"${off}>`
+    +`<span class="pip-owner-mark" aria-hidden="true"></span><span class="pip-owner-words"><span class="pip-owner-title">${esc(title)}</span>${sub?`<small>${esc(sub)}</small>`:''}</span>${ago?`<span class="pip-owner-when">${esc(ago)}</span>`:''}</button></li>`;
+  const list=picker.sessions?`<ul class="pip-owner-list" role="radiogroup" aria-label="The session ${name} reports to">${offered(picker.sessions,owner,titles).map(id=>choice(id,sessionWords(id,titles),'',sessionAgo(id,titles))).join('')}${choice('','No session','Its reports wait in the Pips view')}</ul>`
     :picker.error?'':'<p class="muted" role="status">Loading this project’s sessions…</p>';
   return `${head}</div>${now}${list}${picker.error?`<p class="error" role="alert">${esc(picker.error)}</p>`:''}${said}<div class="actions"><button type="button" id="pip-owner-cancel" class="quiet"${off}>Cancel</button></div></section>`;
 }

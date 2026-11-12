@@ -162,3 +162,42 @@ test('a Personal Pip has no such row, and a DGC before Pips API 89 is never aske
   assert.equal(old.$('.pip-owner'),null,'no row below API 89');
   for(const t of ['get_pip_owner','set_pip_owner','list_work_session_titles'])assert.equal(old.requests(t).length,0,t);
 });
+
+// ---- when each session is from (12 Nov night) -----------------------------------------------------
+// Seen live: Change listed six "Say hello in three words." sessions and nothing told them apart. Each choice also says
+// when its session is from, in the Work list's own words (media/shared/age.js), from the `when` the host's titles carry.
+const pad=n=>String(n).padStart(2,'0');
+/** The host's "YYYY-MM-DD HH:MM" (local time) for so many minutes ago. */
+const ago=minutes=>{const d=new Date(Date.now()-minutes*60000);return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;};
+const whens=x=>x.$$('.pip-owner [data-owner-session]').map(b=>[b.dataset.ownerSession,text(b.querySelector('.pip-owner-title')),b.querySelector('.pip-owner-when')?.textContent??null]);
+const HELLO='Say hello in three words.';
+const SAME=['20261112-210000-f6','20261112-190000-e5','20261111-180000-d4','20261106-101500-a1','20261106-091200-b2','20261021-080000-g7'];
+const AGES=[5,150,26*60,6*1440+90,8*1440,22*1440],WORDS=['5m','2h','1d','6d','1w','3w'];
+
+test('sessions with the same title are told apart: each choice says when it is from, in the Work list’s words',async()=>{
+  const x=setup({sessions:SAME,owner:{session_id:SAME[1],chosen:true},titles:SAME.map((id,i)=>({id,title:HELLO,when:ago(AGES[i])}))});
+  await x.settings(AUDIT);await x.click('#pip-owner-change');
+  assert.deepEqual(whens(x),[...SAME.map((id,i)=>[id,HELLO,WORDS[i]]),['','No session',null]],'the title, then how long ago; No session has no time');
+  assert.equal(new Set(whens(x).slice(0,6).map(c=>c[2])).size,6,'no two read the same');
+  for(const b of x.$$('.pip-owner [data-owner-session]').slice(0,6)){
+    const when=b.querySelector('.pip-owner-when'),words=b.querySelector('.pip-owner-words');
+    assert.ok(when&&!words.contains(when)&&words.compareDocumentPosition(when)&x.w.Node.DOCUMENT_POSITION_FOLLOWING,'after the title, at the row’s end, never inside the title’s own line');
+    assert.equal(b.getAttribute('aria-label'),null,'read as it is written: the title, then when');
+  }
+  assert.equal(x.$('.pip-owner-now').querySelector('.pip-owner-when'),null,'the row that says the owner stays its title alone');
+});
+
+test('the times change nothing about what is offered: sessions with something in them, plus the current owner',async()=>{
+  const S4='20261104-080000-d4';
+  const x=setup({sessions:[S4,S3,S2,S1],owner:{session_id:S3,chosen:true},
+    titles:[{id:S1,title:HELLO,when:ago(150)},{id:S2,title:HELLO,when:ago(26*60)},{id:S4,title:'',empty:true,when:ago(5)}]});
+  await x.settings(AUDIT);await x.click('#pip-owner-change');
+  assert.deepEqual(whens(x),[[S1,HELLO,'2h'],[S2,HELLO,'1d'],[S3,'Session from 5 Nov, 22:10',null],['','No session',null]],
+    'the empty one is left out though it has a time; the owner the Work list doesn’t have stays, by when it began, with no second time');
+});
+
+test('a time the page can’t read is left out, never shown raw',async()=>{
+  const x=setup({titles:[{id:S1,title:HELLO,when:'<b>soon</b>'},{id:S2,title:HELLO,when:12},{id:S3,title:HELLO}]});
+  await x.settings(AUDIT);await x.click('#pip-owner-change');
+  assert.deepEqual(whens(x),[[S1,HELLO,null],[S2,HELLO,null],[S3,HELLO,null],['','No session',null]]);
+});

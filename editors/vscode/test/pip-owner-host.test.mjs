@@ -79,6 +79,17 @@ test("the Work list's titles are the editor's own answer, never a Pip control", 
   assert.match(old.reply()?.error?.message || "", /^Update DGC to choose a Project Pip’s owner session\.$/);
 });
 
+test("each title carries when its session is from, as the Work list has it; anything else is left out", async () => {
+  // (12 Nov night: six sessions with one title; the picker says how long ago each is from.)
+  const x = editor(89, { titles: [{ id: SESSION, title: "Say hello in three words.", when: "2026-11-06 10:15" }, { id: OTHER, title: "Say hello in three words.", when: "2026-11-06 09:12:44 and more" },
+    { id: "s3", title: "Say hello in three words.", when: "<b>soon</b>" }, { id: "s4", title: "Say hello in three words.", when: 1762424100 }, { id: "s5", title: "", empty: true, when: "2026-11-05 08:00" }] });
+  x.ask({ type: "list_work_session_titles" });
+  await tick();
+  assert.deepEqual(x.reply()?.result, { sessions: [{ id: SESSION, title: "Say hello in three words.", when: "2026-11-06 10:15" }, { id: OTHER, title: "Say hello in three words.", when: "2026-11-06 09:12" },
+    { id: "s3", title: "Say hello in three words." }, { id: "s4", title: "Say hello in three words." }, { id: "s5", title: "", empty: true, when: "2026-11-05 08:00" }] },
+    "the host's own YYYY-MM-DD HH:MM, cut there; the same sessions as before, none added or dropped");
+});
+
 test("before a session is deleted or archived: the Project Pips it owns", async () => {
   const x = editor(89);
   const found = has(x, "sessionPips")(SESSION);

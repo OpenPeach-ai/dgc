@@ -54,13 +54,24 @@ test("it owns Project Pips: the page is asked, with the Pips and the project's o
   assert.match(ask.requestId, /^[a-f0-9]{32}$/);
   assert.deepEqual({ ...ask, requestId: "" }, { type: "sessionPipsAsk", requestId: "", mode: "delete", title: TITLE,
     pips: OWNED.map(({ id, name, pip_type }) => ({ id, name, pip_type })),
-    sessions: [{ id: "20261106-091200-b2", title: "Visits page alignment" }, { id: "20261105-221000-c3", title: "What does nextWatering return?" }] });
+    // (Each with when it is from, since 12 Nov night: same-titled sessions are told apart by it.)
+    sessions: [{ id: "20261106-091200-b2", title: "Visits page alignment", when: "2026-11-06 09:12" }, { id: "20261105-221000-c3", title: "What does nextWatering return?", when: "2026-11-05 22:10" }] });
   assert.deepEqual(notices.warnings, [], "its dialog is the confirmation: no second one");
   assert.deepEqual(x.deleted(), [], "nothing is deleted while it waits");
   await x.provider.onMessage({ type: "sessionPipsAnswer", requestId: ask.requestId, choice: "cancel" });
   await going;
   assert.deepEqual(x.calls, [["sessionPips", ID]], "Cancel: no Pip is touched");
   assert.deepEqual(x.deleted(), []);
+});
+
+test("the sessions it can be moved to each say when they are from, as the Work list has it", async () => {
+  // (12 Nov night: same-titled sessions are told apart by how long ago each is from.)
+  const x = home();
+  const going = x.provider.onMessage({ type: "deleteSession", id: ID, title: TITLE });
+  await tick();
+  assert.deepEqual(x.asks()[0].sessions.map((s) => [s.id, s.when]), [["20261106-091200-b2", "2026-11-06 09:12"], ["20261105-221000-c3", "2026-11-05 22:10"]], "DGC's own `when` for each, carried through");
+  await x.provider.onMessage({ type: "sessionPipsAnswer", requestId: x.asks()[0].requestId, choice: "cancel" });
+  await going;
 });
 
 test("Move them to another session: each Pip is moved, then the session is deleted", async () => {
