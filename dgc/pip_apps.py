@@ -63,6 +63,7 @@ LIBREOFFICE_SETTINGS = """<?xml version="1.0" encoding="UTF-8"?>
 <item oor:path="/org.openoffice.Office.Common/Misc"><prop oor:name="ShowTipOfTheDay" oor:op="fuse"><value>false</value></prop></item>
 <item oor:path="/org.openoffice.Office.Common/Misc"><prop oor:name="FirstRun" oor:op="fuse"><value>false</value></prop></item>
 <item oor:path="/org.openoffice.Office.Common/Misc"><prop oor:name="CrashReport" oor:op="fuse"><value>false</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Misc"><prop oor:name="SymbolStyle" oor:op="fuse"><value>colibre_dark</value></prop></item>
 <item oor:path="/org.openoffice.Setup/Product"><prop oor:name="ooSetupLastVersion" oor:op="fuse"><value>99.0</value></prop></item>
 <item oor:path="/org.openoffice.Setup/Product"><prop oor:name="LastTimeGetInvolvedShown" oor:op="fuse"><value>4102444800</value></prop></item>
 <item oor:path="/org.openoffice.Setup/Product"><prop oor:name="LastTimeDonateShown" oor:op="fuse"><value>4102444800</value></prop></item>
@@ -275,7 +276,14 @@ def _triplets(prefix: str) -> str:
 
 
 def seed_settings(config: Path) -> None:
-    """The app's private settings folder, made once: LibreOffice without its first-run screens."""
+    """The app's private settings folder: LibreOffice without its first-run screens, made once; and the desktop's
+    dark theme for GTK (pc-look), written each time so it follows the machine."""
+    from .pip_screen import gtk_settings
+    gtk = config / "gtk-3.0"
+    gtk.mkdir(mode=0o700, parents=True, exist_ok=True)
+    settings_ini = gtk / "settings.ini"
+    if not settings_ini.is_symlink():
+        settings_ini.write_text(gtk_settings()[0], encoding="utf-8")
     user = config / "libreoffice" / "user"
     user.mkdir(mode=0o700, parents=True, exist_ok=True)
     settings = user / "registrymodifications.xcu"
@@ -325,6 +333,7 @@ def box_argv(key: str, *, x11_dir: Path, files: Path, config: Path, file: str | 
         var = root / "var" / "lib" / "libreoffice" if own else Path("/var/lib/libreoffice")
         argv += ["--ro-bind-try", str(etc), "/etc/libreoffice", "--ro-bind-try", str(var), "/var/lib/libreoffice",
                  "--ro-bind-try", "/var/spool/libreoffice", "/var/spool/libreoffice"]
+        argv += ["--setenv", "SAL_USE_VCLPLUGIN", "gtk3"]          # LibreOffice follows the GTK theme (pc-look)
         program = ["/opt/apps/libreoffice/program/soffice", "-env:UserInstallation=file:///home/pip/.config/libreoffice",
                    "--norestore", "--nologo", *APPS[key]["args"]]
     online = egress is not None and forwarder is not None

@@ -166,6 +166,34 @@ def _desktop_bin_overlay(runtime: Path, prefix: Path | None, host_bin: Path = Pa
     return overlay
 
 
+# pc-look: the best dark theme the machine has, for the desktop's file manager and its apps (GTK 3 and 2). Yaru's purple
+# dark matches DGC; Adwaita dark is built into every GTK 3, so there is always one. Nothing is downloaded for it.
+SHARES = (Path("/usr/share"),)
+THEMES = ("Yaru-purple-dark", "Yaru-dark", "Adwaita-dark")
+ICON_THEMES = ("Yaru-purple-dark", "Yaru-dark", "Yaru", "Adwaita")
+
+
+def _shares() -> list[Path]:
+    prefix = _prefix()
+    return [*SHARES, *([prefix / "usr" / "share"] if prefix is not None else [])]
+
+
+def theme_names() -> tuple[str, str]:
+    """(the GTK theme, the icon theme) a Pip's desktop and apps use."""
+    shares = _shares()
+    theme = next((t for t in THEMES[:-1] if any((s / "themes" / t / "gtk-3.0").is_dir() for s in shares)), THEMES[-1])
+    icons = next((i for i in ICON_THEMES if any((s / "icons" / i / "index.theme").is_file() for s in shares)), "Adwaita")
+    return theme, icons
+
+
+def gtk_settings() -> tuple[str, str]:
+    """(GTK 3's settings.ini, GTK 2's gtkrc) for that theme."""
+    theme, icons = theme_names()
+    return (f"[Settings]\ngtk-theme-name={theme}\ngtk-icon-theme-name={icons}\n"
+            "gtk-application-prefer-dark-theme=1\ngtk-font-name=Sans 10\n",
+            f'gtk-theme-name="{theme}"\ngtk-icon-theme-name="{icons}"\ngtk-font-name="Sans 10"\n')
+
+
 def _write(path: Path, text: str, mode: int = 0o600) -> None:
     path.write_text(text, encoding="utf-8")
     path.chmod(mode)
@@ -258,6 +286,10 @@ def write_config(conf: Path, name: str, apps_shown=(), screen=(WIDTH, HEIGHT), n
            f'{items} </menu>\n</openbox_menu>\n')
     # Apps open by one click, with no "run or open?" question (the Apps window and the desktop's icons).
     _write(conf / "libfm.conf", "[config]\nquick_exec=1\nsingle_click=0\n[ui]\nbig_icon_size=48\n")
+    gtk3, gtk2 = gtk_settings()
+    (conf / "gtk-3.0").mkdir(mode=0o700, parents=True, exist_ok=True)
+    _write(conf / "gtk-3.0" / "settings.ini", gtk3)
+    _write(conf / "gtkrc-2.0", gtk2)
     _write(conf / "tint2rc", "\n".join([
         # Background 1: the dock's frosted, rounded bar.
         "rounded = 16", "border_width = 1", "border_sides = TBLR",
@@ -295,6 +327,9 @@ for loaders in /opt/desk/usr/lib/*/imlib2/loaders; do [ -d "$loaders" ] && expor
 mkdir -p /tmp/config/pcmanfm /tmp/config/openbox /tmp/config/libfm /home/pip/Desktop
 cp -r /run/dgc/conf/pcmanfm/dgc /tmp/config/pcmanfm/dgc
 cp /run/dgc/conf/libfm.conf /tmp/config/libfm/libfm.conf
+# The machine's best dark theme and icons for the file manager and the desktop (pc-look).
+cp -r /run/dgc/conf/gtk-3.0 /tmp/config/gtk-3.0
+export GTK2_RC_FILES=/run/dgc/conf/gtkrc-2.0
 # Each app as a labelled icon on the desktop (the home is the box's own, never the Pip's Files).
 for app in /run/dgc/conf/apps/*.desktop; do cp "$app" /home/pip/Desktop/ && chmod 755 "/home/pip/Desktop/${{app##*/}}"; done
 # The Terminal's way online: a relay to DGC's egress socket, when DGC bound one (public sites only).
