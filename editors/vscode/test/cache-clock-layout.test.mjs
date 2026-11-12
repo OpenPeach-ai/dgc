@@ -6,6 +6,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { THEMES, panelHtml } from "./support/options-scene.mjs";
+import { IDLE_LINE, openIdle } from "./support/idle-cache-scene.mjs";
 
 let chromium;
 try { ({ chromium } = await import("@playwright/test")); } catch { chromium = null; }
@@ -199,4 +200,71 @@ test("pointed at, the dimmed clock's label names the provider, in the panel's ow
                  "OpenAI may cache your prompt, but it doesn't say for how long, so DGC can't show a timer.", "and the title is back once it goes");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
+});
+
+// ---- 0.52: the idle line at the end of an open chat ---------------------------------------------------------
+// jsdom says when it is written (cache-clock.test.mjs); only a browser says where it lands and how it reads.
+for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 300]) {
+  test(`an idle chat's line sits under its long last reply, above the prompt box, as a quiet note (${theme}, ${width}px)`, async (t) => {
+    if (skipOrFail(t)) return;
+    const s = await openIdle(browser, { theme, width });
+    try {
+      // A quiet note of the transcript's own, to compare with: the reopen note has always been one.
+      const f = await s.page.evaluate(() => {
+        const log = document.getElementById("log"), lines = [...log.querySelectorAll(".sys.cache-idle")], line = lines[0];
+        if (!line) return { lines: 0 };
+        const atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 2;
+        const plain = document.createElement("div"); plain.className = "sys"; plain.textContent = "A quiet note"; log.append(plain);
+        const probe = document.createElement("span"); probe.style.color = "var(--faint)"; document.body.append(probe);
+        const cs = getComputedStyle(line), ps = getComputedStyle(plain), r = line.getBoundingClientRect(), l = log.getBoundingClientRect();
+        const reply = [...log.querySelectorAll(".text")].at(-1).getBoundingClientRect(), box = document.getElementById("cbox").getBoundingClientRect();
+        const out = { lines: lines.length, text: line.textContent, last: plain.previousElementSibling === line, color: cs.color, faint: getComputedStyle(probe).color,
+          same: [cs.color, cs.fontSize, cs.fontWeight, cs.fontFamily, cs.fontStyle, cs.lineHeight].join("|") === [ps.color, ps.fontSize, ps.fontWeight, ps.fontFamily, ps.fontStyle, ps.lineHeight].join("|"),
+          fill: cs.backgroundColor, border: cs.borderTopWidth, size: parseFloat(cs.fontSize), replySize: parseFloat(getComputedStyle(log.querySelector(".text")).fontSize),
+          top: r.top, bottom: r.bottom, left: r.left, right: r.right, height: r.height, turnBottom: line.previousElementSibling.getBoundingClientRect().bottom, lineHeight: parseFloat(cs.lineHeight), replyBottom: reply.bottom, replyLeft: reply.left, boxTop: box.top,
+          logRight: l.right, logLeft: l.left, wide: log.scrollWidth <= log.clientWidth, pageWide: document.documentElement.scrollWidth <= innerWidth, atEnd };
+        plain.remove(); probe.remove();
+        return out;
+      });
+      assert.equal(f.lines, 1, "one line");
+      assert.equal(f.text, IDLE_LINE);
+      assert.equal(f.last, true, "at the end of the chat");
+      assert.ok(f.top >= f.replyBottom - 0.5, `under the last reply (${f.top} after ${f.replyBottom})`);
+      assert.ok(f.top >= f.turnBottom - 0.5 && f.top - f.turnBottom <= 24 && f.top - f.replyBottom <= 64,
+        `close under it: after the reply's own row of buttons (${(f.top - f.turnBottom).toFixed(1)}px under the turn, ${(f.top - f.replyBottom).toFixed(1)}px under its words)`);
+      assert.ok(f.bottom <= f.boxTop + 0.5, `above the prompt box, in view (${f.bottom} over ${f.boxTop})`);
+      assert.equal(f.atEnd, true, "a chat that was at its end still is: the line is in view");
+      assert.ok(Math.abs(f.left - f.replyLeft) <= 1, "on the reply's left edge");
+      assert.ok(f.right <= f.logRight + 0.5 && f.wide && f.pageWide, "inside the chat, nothing scrolls sideways");
+      assert.equal(f.same, true, "the look of the transcript's quiet note");
+      assert.equal(f.color, f.faint, "muted");
+      assert.deepEqual([f.fill, f.border], ["rgba(0, 0, 0, 0)", "0px"], "a line of text: no box");
+      assert.ok(f.size < f.replySize, "smaller than the reply it follows");
+      const rows = Math.round(f.height / f.lineHeight);
+      assert.ok(width === 700 ? rows === 1 : rows >= 2 && rows <= 4, `${width}px: ${rows} row(s)`);
+      const purple = (c) => { const m = c.match(/-?[\d.]+/g).map(Number), [r, g, b] = c.startsWith("color(srgb") ? m.map((v) => v * 255) : m, mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+        if (mx - mn < 18) return false; const h = mx === b ? 240 + 60 * (r - g) / (mx - mn) : mx === r ? (360 + 60 * (g - b) / (mx - mn)) % 360 : 120 + 60 * (b - r) / (mx - mn); return h > 235 && h < 290; };
+      assert.equal(purple(f.color), false, "no purple in it");
+      // The footer's clock agrees, and coming back later brings the line's time up to date in place.
+      assert.equal(await s.page.evaluate(() => document.getElementById("cache-clock").dataset.cacheWindow), "cold");
+      await s.advance(7 * 3600000);
+      await s.shown(); await s.settle();
+      assert.deepEqual(await s.page.evaluate(() => [...document.querySelectorAll("#log .sys.cache-idle")].map((n) => n.textContent)),
+        [IDLE_LINE.replace("1d 17h", "2d 0h")], "still one line, with the time it is now");
+      assert.deepEqual(s.errors, []);
+    } finally { await s.close(); }
+  });
+}
+
+test("a chat still warm, or mid-turn, shows no idle line in the real panel", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openIdle(browser, { idle: false });
+  try {
+    await s.advance(60000); await s.shown(); await s.settle();
+    assert.equal(await s.page.locator("#log .sys.cache-idle").count(), 0, "warm: nothing to say");
+    await s.event({ type: "turn_start", turn_id: "t2", prompt: "And the changelog?" });
+    await s.advance(3600000); await s.shown(); await s.settle();
+    assert.equal(await s.page.locator("#log .sys.cache-idle").count(), 0, "a turn is running");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.close(); }
 });

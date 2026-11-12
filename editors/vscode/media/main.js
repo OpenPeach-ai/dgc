@@ -2060,12 +2060,15 @@
   // Copied from Claude Code: warm -> a clock and the whole minutes left ("4m"), changed at most once a minute
   // (no seconds, no animation); gone -> the clock alone in the error colour. Timed only where the backend knows it
   // from the provider itself (Anthropic's own cache report, a local Ollama's /api/ps), after a reply that used a
-  // cache. Reopening a chat whose cache has gone says so once. Unknown (0.48.3) -> the clock still there, dimmed,
+  // cache. Reopening a chat whose cache has gone says so once, and (0.52) so does an open chat left idle past its
+  // cache window: the same line at its end, once an idle stretch. Unknown (0.48.3) -> the clock still there, dimmed,
   // no minutes, its tooltip naming the provider that doesn't say ("Ollama Cloud may cache your prompt, ..."); it
   // used to be hidden, and a missing clock read as a broken one. A click, in any state, opens the context meter's
   // details, which say how many tokens the provider reported as cached.
   let cacheClock = null, cacheClockTimer = null;
   const cacheClockNoted = new Set();
+  // The line this idle stretch has written (the reopen note is that line too), or null: none yet, or the stretch ended.
+  let cacheIdleLine = null;
   function cacheIdle(ms) {
     const minutes = Math.max(0, Math.floor(ms / 60000));
     if (minutes < 60) return `${minutes}m`;
@@ -2157,9 +2160,41 @@
     if ($("cachemenu") && !$("cachemenu").hidden) renderCacheMenu();
     // The next change is the next whole minute (or the moment it runs out): one wake-up, never a tick.
     if (win.kind === "warm" && !win.kept) {
-      cacheClockTimer = setTimeout(renderCacheClock, win.msLeft - (win.minutesLeft - 1) * 60000 + 50);
+      // (When that wake-up is the window running out, an idle chat says so at its end.)
+      cacheClockTimer = setTimeout(() => { renderCacheClock(); cacheIdleSay(); }, win.msLeft - (win.minutesLeft - 1) * 60000 + 50);
     }
   }
+  // ---- "Idle 1d 17h. The prompt cache has likely expired, so your next message will re-cache about 524k tokens."
+  // Claude Code's line at the end of a session left idle (0.52). Written when the chat is found idle with its cache
+  // gone: the clock's own timer running out, the provider saying so (an Ollama that unloaded the model), or the window
+  // shown again. One line an idle stretch, in the reopen note's words and look; while the chat stays idle its time is
+  // brought up to date when the window is shown again, never by a timer. The next turn ends the stretch: the line
+  // stays in the transcript where it was said. Never while a turn runs, never where DGC can't time the cache (the
+  // dimmed clock), never in a chat with nothing in it.
+  function cacheIdleSay(note) {
+    if (turn || streaming || replaying) return null;
+    const text = note || cacheReopenNote(cacheWindow());
+    if (!text) return null;
+    if (cacheIdleLine?.isConnected) {
+      if (cacheIdleLine.textContent !== text) cacheIdleLine.textContent = text;
+      return cacheIdleLine;
+    }
+    if (!log.querySelector(".msg, .turn")) return null;       // a brand-new chat: nothing said, nothing to re-cache
+    const stay = following;
+    cacheIdleLine = sysLine(text);
+    cacheIdleLine.classList.add("cache-idle");
+    if (stay) scroll(); else noteNewContent();
+    return cacheIdleLine;
+  }
+  function cacheIdleEnd() { cacheIdleLine = null; }
+  // The window shown again: the side bar reopened, the tab chosen, the editor's window back in front.
+  function cacheIdleOnShown() {
+    if (document.hidden) return;
+    if (cacheWindow().kind === "cold") renderCacheClock();    // the footer's clock reads the same idle time
+    cacheIdleSay();
+  }
+  document.addEventListener("visibilitychange", cacheIdleOnShown);
+  window.addEventListener("focus", cacheIdleOnShown);
   // The clock's own popup: how long the cache lasts, what the next message costs, and what the provider reported.
   function cacheHeadline(win) {
     if (win.kind === "warm") {
@@ -2206,12 +2241,26 @@
   function onCacheClock(ev) {
     cacheClock = { ...ev };
     renderCacheClock();
-    if (ev.resumed !== true) return;
-    const note = cacheReopenNote(cacheWindow());
+    const win = cacheWindow();
+    if (ev.resumed !== true) {
+      // The provider's own word that the cache has gone while the chat sat idle (an Ollama that unloaded the model,
+      // a window that ran out). A compaction is something a turn or you did, not idling: the window coming back to
+      // a chat still cold says what the next message will do.
+      if (win.kind === "cold" && win.reason !== "compacted") cacheIdleSay();
+      return;
+    }
+    // A chat reopened cold: the note is this idle stretch's line, so staying idle never adds a second.
+    const note = cacheReopenNote(win);
     const key = `${ev.session_id || ""}:${ev.anchor_ms || ""}:${ev.reason || ""}`;
-    if (note && !cacheClockNoted.has(key)) { cacheClockNoted.add(key); sysLine(note); }
+    if (!note || cacheClockNoted.has(key)) return;
+    cacheClockNoted.add(key);
+    if (cacheIdleSay(note)) return;
+    // (As before 0.52, it is said even where the transcript is still to come, or a turn is already running again.)
+    const line = sysLine(note);
+    line.classList.add("cache-idle");
+    if (!turn && !streaming) cacheIdleLine = line;
   }
-  function cacheClockOnSessionReset() { cacheClock = null; renderCacheClock(); }
+  function cacheClockOnSessionReset() { cacheClock = null; cacheIdleEnd(); renderCacheClock(); }
   // A cold clock's "idle" is read when you look at it, not counted on screen.
   $("cache-clock")?.addEventListener("mouseenter", () => { if (cacheWindow().kind === "cold") renderCacheClock(); });
   // A click, Enter or Space opens the clock's own popup. The context details open only from the meter.
@@ -4602,6 +4651,7 @@
   function startTurn(prompt = "", kind = "prompt", id = "", promptNode = null, requestId = "", savedAttachments = [], answerQuestion = "", displayMentions = []) {
     // A page of restored turns is a sequence of finished turns, not one turn interrupting another.
     if (turn) endTurn(replaying ? "completed" : "cancelled");
+    if (!replaying) cacheIdleEnd();           // a new turn ends the idle stretch: its line stays where it was said
     speak("DGC is working");
     // What opens this turn's box (wrapTurn): its prompt row, or the note of a turn nobody typed.
     let wakeNote = null, head = promptNode;

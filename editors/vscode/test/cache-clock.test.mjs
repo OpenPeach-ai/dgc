@@ -2,7 +2,8 @@
 //
 // warm -> a clock and the whole minutes left ("4m", tabular figures), changed at most once a minute,
 // never seconds, no animation; cold -> the clock alone in the mild notice's colour, with the reason in its
-// tooltip. Reopening a chat whose cache went cold adds one note to the transcript. unknown (0.48.3) ->
+// tooltip. Reopening a chat whose cache went cold adds one note to the transcript, and (0.52) so does an open chat
+// left idle past its cache window: the same line, once an idle stretch. unknown (0.48.3) ->
 // the clock still there, dimmed, no minutes, its tooltip naming the provider that doesn't say how long
 // it caches (it was hidden, and a user, on Ollama Cloud, took the missing clock for a broken one).
 // A click opens the clock's own popup: the time left, what the next message does, and the tokens reported as cached.
@@ -278,4 +279,211 @@ test("the popup says expired once: the headline, then what the next message cost
   x.event({ type: "cache_clock", state: "warm", source: "anthropic", anchor_ms: T0, expires_ms: T0 + 4 * 60000, ttl_s: 300 });
   assert.equal(said.hidden, false, "warm still says its one line");
   assert.notEqual(said.textContent, "");
+});
+
+// ---- 0.52: an open chat that sits idle past its cache window says so once, at its end -------------------
+// Claude Code writes "Idle 1d 17h. The prompt cache has likely expired, so your next message will re-cache about 524k
+// tokens." under the last reply of a session left idle. Work wrote that line only when a chat was REOPENED cold; a chat
+// left open said nothing. Now the open chat says it too: when the clock's own timer runs out, when the provider says
+// the cache has gone, or when the window is shown again and finds it gone. One line an idle stretch, the same line as
+// the reopen note, its time brought up to date only when the window is shown again.
+const IDLE = (said, tokens = "41k") => `Idle ${said}. The prompt cache has likely expired, so your next message will re-cache about ${tokens} tokens.`;
+function idleDom() {
+  const x = clockDom();
+  const lines = () => [...x.doc.querySelectorAll("#log .sys")];
+  const notes = () => lines().map((n) => n.textContent);
+  // A finished turn: your prompt, a reply, and the clock the reply's own cache report started (sent `ago` ms ago).
+  const turn = (id, { ago = 30000, clock = true, ttl = 300, tokens = 41000 } = {}) => {
+    x.event({ type: "turn_start", turn_id: id, prompt: "Go" });
+    x.event({ type: "text_delta", text: "Done." });
+    x.event({ type: "stream_end", message_id: `${id}:1`, phase: "final_answer" });
+    if (clock) x.event({ type: "cache_clock", state: "warm", source: "anthropic", anchor_ms: x.now() - ago, expires_ms: x.now() - ago + ttl * 1000, ttl_s: ttl, tokens, session_id: "s1" });
+    x.event({ type: "turn_end", turn_id: id, reason: "completed" });
+  };
+  // The window is shown again (the side bar reopened, the tab chosen, the editor's window back in front).
+  const shown = (how = "visibilitychange") => (how === "focus" ? x.dom.window.dispatchEvent(new x.dom.window.Event("focus")) : x.doc.dispatchEvent(new x.dom.window.Event("visibilitychange")));
+  x.event({ type: "session", kind: "new", session_id: "s1" });
+  // Time passing as it does: the wall clock and the timers together, half a minute at a step (clockDom's tick moves
+  // the wall the whole way first, so a timer due on the way would read the time at the end).
+  const pass = (ms) => { for (let left = ms; left > 0; left -= 30000) x.tick(Math.min(30000, left)); };
+  return { ...x, tick: pass, lines, notes, turn, shown };
+}
+
+test("an open chat left idle past its cache window gets the line once, at its end, when the clock's own timer runs out", () => {
+  const x = idleDom();
+  x.turn("t1");
+  assert.equal(x.node.dataset.cacheWindow, "warm");
+  x.tick(4 * 60000);
+  assert.deepEqual(x.notes(), [], "nothing while the cache is warm");
+  x.tick(60000);                                   // 5 min 30 s after the reply was sent: the window ran out 30 s ago
+  assert.equal(x.node.dataset.cacheWindow, "cold");
+  assert.deepEqual(x.notes(), [IDLE("5m")], "the idle time counts from the last reply and is said as the line is drawn");
+  const [line] = x.lines();
+  assert.equal(line.className, "sys cache-idle", "the transcript's quiet note, as the reopen note is");
+  assert.equal(line.getAttribute("role"), null, "not an alert");
+  assert.equal(x.doc.getElementById("log").lastElementChild, line, "at the end of the chat, under the last reply");
+  assert.match(line.previousElementSibling.textContent, /Done\./, "the reply is right above it");
+  // Never by a ticking timer: left for two days, nothing wakes up and the line reads as it did.
+  const scheduled = [];
+  const realSet = x.dom.window.setTimeout;
+  x.dom.window.setTimeout = (fn, ms) => { scheduled.push(ms); return realSet(fn, ms); };
+  x.tick(41 * 3600000);
+  assert.deepEqual(x.notes(), [IDLE("5m")]);
+  assert.deepEqual(scheduled, [], "no timer runs for it");
+  assert.deepEqual(x.errors, []);
+});
+
+test("shown again while still idle: the line's time is brought up to date, and it is never said twice", () => {
+  const x = idleDom();
+  x.turn("t1");
+  x.tick(5 * 60000);
+  assert.deepEqual(x.notes(), [IDLE("5m")]);
+  const [line] = x.lines();
+  x.tick(2 * 3600000);
+  x.shown();
+  assert.deepEqual(x.notes(), [IDLE("2h 5m")], "the same line, with the time it is now");
+  assert.equal(x.lines()[0], line, "the very same line, where it was said");
+  x.tick(39 * 3600000 + 10 * 60000);
+  x.shown("focus");
+  assert.deepEqual(x.notes(), [IDLE("1d 17h")]);
+  x.shown(); x.shown("focus");
+  assert.deepEqual(x.notes(), [IDLE("1d 17h")], "still one");
+  // A repaint of the clock by its backend, and pointing at the clock, don't add one either.
+  x.event({ type: "cache_clock", state: "cold", reason: "expired", source: "anthropic", anchor_ms: x.now() - 41 * 3600000 - 15 * 60000, ttl_s: 300, tokens: 41000, session_id: "s1" });
+  x.node.dispatchEvent(new x.dom.window.MouseEvent("mouseenter"));
+  assert.equal(x.notes().filter((t) => t.startsWith("Idle")).length, 1);
+  assert.deepEqual(x.errors, []);
+});
+
+test("the window coming back finds the cache cold: the line is written then (a timer that never fired while hidden)", () => {
+  const x = idleDom();
+  x.turn("t1");
+  // The page was hidden and its timer never ran: only the wall clock moved.
+  const frozen = x.dom.window.setTimeout;
+  x.dom.window.setTimeout = () => 0;
+  x.event({ type: "cache_clock", state: "warm", source: "anthropic", anchor_ms: x.now() - 30000, expires_ms: x.now() + 270000, ttl_s: 300, tokens: 524000, session_id: "s1" });
+  x.dom.window.setTimeout = frozen;
+  x.tick(41 * 3600000);
+  assert.deepEqual(x.notes(), [], "nothing woke it");
+  x.shown();
+  assert.deepEqual(x.notes(), [IDLE("1d 17h", "524k")], "his example, to the letter");
+  assert.equal(x.node.dataset.cacheWindow, "cold", "and the clock in the footer agrees");
+  assert.deepEqual(x.errors, []);
+});
+
+test("never while a turn is running; the next message ends the idle stretch and the line stays where it was said", () => {
+  const x = idleDom();
+  x.turn("t1");
+  // A second turn that runs for ten minutes without a new request (a long command): the clock runs out under it.
+  x.event({ type: "turn_start", turn_id: "t2", prompt: "Run the suite" });
+  x.tick(6 * 60000);
+  assert.equal(x.node.dataset.cacheWindow, "cold");
+  x.shown();
+  assert.deepEqual(x.notes(), [], "a turn is running: the chat isn't idle");
+  x.event({ type: "text_delta", text: "Green." });
+  x.event({ type: "stream_end", message_id: "t2:1", phase: "final_answer" });
+  x.event({ type: "cache_clock", state: "warm", source: "anthropic", anchor_ms: x.now() - 1000, expires_ms: x.now() + 299000, ttl_s: 300, tokens: 52000, session_id: "s1" });
+  x.event({ type: "turn_end", turn_id: "t2", reason: "completed" });
+  assert.deepEqual(x.notes(), []);
+  x.tick(12 * 60000);
+  assert.deepEqual(x.notes(), [IDLE("5m", "52k")], "idle again: one line for this stretch");
+  const [first] = x.lines();
+  // The next message: a new turn. The line stays in the transcript above it, as it was said.
+  x.tick(3600000);
+  x.turn("t3", { ago: 2000, tokens: 60000 });
+  x.shown();
+  assert.deepEqual(x.notes(), [IDLE("5m", "52k")], "the old line isn't brought up to date once its stretch has ended");
+  assert.equal(x.lines()[0], first);
+  assert.ok(first.compareDocumentPosition([...x.doc.querySelectorAll("#log .turn")].at(-1)) & 4, "it stays above the turn that followed");
+  x.tick(20 * 60000);
+  assert.deepEqual(x.notes(), [IDLE("5m", "52k"), IDLE("5m", "60k")], "and the next idle stretch gets its own, at the end");
+  assert.equal(x.doc.getElementById("log").lastElementChild, x.lines()[1]);
+  x.tick(3600000); x.shown();
+  assert.deepEqual(x.notes(), [IDLE("5m", "52k"), IDLE("1h 20m", "60k")], "only the current stretch's line follows the time");
+  assert.deepEqual(x.errors, []);
+});
+
+test("a chat reopened after going cold shows one line: the reopen note is the idle line", () => {
+  const x = clockDom();
+  const notes = () => [...x.doc.querySelectorAll("#log .sys")].map((n) => n.textContent);
+  x.event({ type: "session", kind: "resumed", session_id: "s1", message_count: 4 });
+  x.event({ type: "history", items: [{ role: "user", text: "Earlier" }, { role: "assistant", text: "Done." }] });
+  const cold = { type: "cache_clock", state: "cold", reason: "expired", source: "anthropic", resumed: true,
+                 anchor_ms: T0 - (2 * 3600 + 5 * 60) * 1000, ttl_s: 300, tokens: 180000, session_id: "s1" };
+  x.event(cold);
+  assert.deepEqual(notes(), [IDLE("2h 5m", "180k")]);
+  x.doc.dispatchEvent(new x.dom.window.Event("visibilitychange"));
+  x.tick(60000);
+  assert.deepEqual(notes(), [IDLE("2h 5m", "180k")], "reopened and still idle: one, never two");
+  x.tick(3 * 3600000);
+  x.doc.dispatchEvent(new x.dom.window.Event("visibilitychange"));
+  assert.deepEqual(notes(), [IDLE("5h 6m", "180k")], "and it follows the time as any idle line does");
+  assert.equal(x.doc.querySelector("#log .sys").className, "sys cache-idle");
+  assert.deepEqual(x.errors, []);
+});
+
+test("no line for a provider DGC can't time, in a brand-new chat, or for a warm cache", () => {
+  // The dimmed clock: nothing to time, so nothing to say, however long the chat sits.
+  const x = idleDom();
+  route(x, { model: "gpt-5.2", base_url: "https://api.openai.com/v1" });
+  x.turn("t1", { clock: false });
+  x.event({ type: "cache_clock", state: "unknown" });
+  x.tick(41 * 3600000); x.shown(); x.shown("focus");
+  assert.equal(x.node.dataset.cacheWindow, "unknown");
+  assert.deepEqual(x.notes(), []);
+  // A brand-new chat: nothing said yet, so nothing to re-cache.
+  const y = idleDom();
+  y.event({ type: "cache_clock", state: "cold", reason: "expired", source: "anthropic", anchor_ms: T0 - 3600000, ttl_s: 300, tokens: 41000, session_id: "s1" });
+  y.tick(3600000); y.shown();
+  assert.equal(y.node.dataset.cacheWindow, "cold");
+  assert.deepEqual(y.notes(), []);
+  // A local Ollama that keeps the model loaded until it stops: warm for good.
+  const z = idleDom();
+  z.turn("t1", { clock: false });
+  z.event({ type: "cache_clock", state: "warm", source: "ollama", anchor_ms: z.now(), session_id: "s1" });
+  z.tick(41 * 3600000); z.shown();
+  assert.deepEqual(z.notes(), []);
+  assert.deepEqual([...x.errors, ...y.errors, ...z.errors], []);
+});
+
+test("the other reasons, in the reopen note's own words: an Ollama that unloaded the model, a compacted conversation", () => {
+  // Ollama says when it will unload the model; its backend also says so the moment it has (another model was loaded).
+  const x = idleDom();
+  x.turn("t1", { clock: false });
+  x.event({ type: "cache_clock", state: "warm", source: "ollama", anchor_ms: x.now(), expires_ms: x.now() + 30 * 60000, tokens: 9000, session_id: "s1" });
+  x.tick(12 * 60000);
+  assert.deepEqual(x.notes(), []);
+  x.event({ type: "cache_clock", state: "cold", reason: "unloaded", source: "ollama", anchor_ms: x.now() - 12 * 60000, tokens: 9000, session_id: "s1" });
+  assert.deepEqual(x.notes(), ["Ollama unloaded the model (idle 12m), so your next message will re-cache about 9k tokens."]);
+  x.tick(3600000); x.shown();
+  assert.deepEqual(x.notes(), ["Ollama unloaded the model (idle 1h 12m), so your next message will re-cache about 9k tokens."]);
+  // Its own timer running out reads the same.
+  const y = idleDom();
+  y.turn("t1", { clock: false });
+  y.event({ type: "cache_clock", state: "warm", source: "ollama", anchor_ms: y.now(), expires_ms: y.now() + 5 * 60000, tokens: 9000, session_id: "s1" });
+  y.tick(5 * 60000 + 1000);
+  assert.deepEqual(y.notes(), ["Ollama unloaded the model (idle 5m), so your next message will re-cache about 9k tokens."]);
+  // Compacting is something you (or a turn) did, not idling: its event alone says nothing more; the window coming
+  // back to a chat still cold says what the next message will do.
+  const z = idleDom();
+  z.turn("t1");
+  z.event({ type: "cache_clock", state: "cold", reason: "compacted", source: "anthropic", anchor_ms: z.now() - 60000, session_id: "s1" });
+  assert.deepEqual(z.notes(), [], "not the moment the conversation is compacted");
+  z.tick(30 * 60000); z.shown();
+  assert.deepEqual(z.notes(), ["The conversation was compacted, so your next message will re-cache it."]);
+  z.tick(3600000); z.shown();
+  assert.equal(z.notes().length, 1);
+  assert.deepEqual([...x.errors, ...y.errors, ...z.errors], []);
+});
+
+test("switching to another chat ends the stretch: its line belongs to the chat it was said in", () => {
+  const x = idleDom();
+  x.turn("t1");
+  x.tick(6 * 60000);
+  assert.deepEqual(x.notes(), [IDLE("5m")]);
+  x.event({ type: "session", kind: "new", session_id: "s2" });
+  x.tick(3600000); x.shown();
+  assert.deepEqual(x.notes(), [], "a new chat has no line, and the old chat's is not carried into it");
+  assert.equal(x.node.dataset.cacheWindow, "unknown");
+  assert.deepEqual(x.errors, []);
 });
