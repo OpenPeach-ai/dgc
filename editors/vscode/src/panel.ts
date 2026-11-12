@@ -4708,6 +4708,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                                    router_capable: this.routerCapable(),
                                    router_pips_default: this.routerCapable() && Number((this.lastReadyEvent?.capabilities as any)?.router?.pips_default) >= 1,
                                    router_thinking: this.routerThinkingCapable(),
+                                   // A saved provider as a Router system, and what a model costs (router.providers, router.prices).
+                                   router_providers: this.routerProvidersCapable(),
+                                   router_prices: this.routerPricesCapable(),
                                    // Nor these: the subagent_settings event that came just before (helpers' Thinking).
                                    ...(Number((this.lastReadyEvent?.capabilities as any)?.subagent_thinking) >= 1 && this.subagentSettings ? { subagent_thinking: this.subagentSettings.thinking, subagent_thinking_settable: true } : {}),
                                    // Nor this: image generation's commands (ready.capabilities.images); without, no Images.
@@ -8238,6 +8241,33 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       && ((this.lastReadyEvent?.capabilities as any)?.router?.commands || []).includes("router_thinking");
   }
 
+  /** A saved provider can be a Router system (ready.capabilities.router.providers, 0.52), on a CLI that also keeps
+   *  saved providers (saved_model_providers): the copy it reads the address and the key from. */
+  private routerProvidersCapable(): boolean {
+    const caps = (this.lastReadyEvent?.capabilities as any) || {};
+    return this.routerCapable() && caps.router?.providers === 1 && caps.saved_model_providers === 1;
+  }
+
+  /** The CLI says and takes what a model costs (ready.capabilities.router.prices, 0.52). */
+  private routerPricesCapable(): boolean {
+    return this.routerCapable() && (this.lastReadyEvent?.capabilities as any)?.router?.prices === 1;
+  }
+
+  /** Settings -> DGC Router -> + Add system -> One of your providers: the models that provider lists (the list a Pip's
+   *  model menu shows). Model names only. */
+  private async routerProviderModels(reply: (fields: Record<string, unknown>) => unknown, id: unknown): Promise<void> {
+    if (!this.routerProvidersCapable()) { reply({ ok: false, error: "Update the DGC CLI to add one of your providers to DGC Router." }); return; }
+    const row = typeof id === "string" ? listProfiles(this.context).find(item => item.id === id && item.kind !== "subscription") : undefined;
+    if (!row) { reply({ ok: false, error: "That provider isn't saved any more." }); return; }
+    try {
+      const { ids, listError } = await this.chatdgcModels(row.id);
+      reply({ ok: true, models: ids.filter((model) => typeof model === "string" && model).slice(0, 2000),
+              ...(listError ? { error: String(listError).slice(0, 200) } : {}) });
+    } catch (err: any) {
+      reply({ ok: false, error: String(err?.message || "") || "DGC didn't answer." });
+    }
+  }
+
   /** The CLI takes DGC Router's commands (ready.capabilities.router, 0.51). */
   private routerCapable(): boolean {
     const commands = (this.lastReadyEvent?.capabilities as any)?.router?.commands;
@@ -8400,9 +8430,22 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const reply = (fields: Record<string, unknown>) =>
       this.settingsEditor?.webview.postMessage({ type: "routerReply", token, ...fields });
     if (this.lastReadyEvent && !this.routerCapable()) { reply({ ok: false, error: "Update the DGC CLI to use DGC Router." }); return; }
+    // Not a DGC command: the models one saved provider lists, for "One of your providers". Names only, never a key.
+    if (msg?.command?.type === "router_provider_models") { await this.routerProviderModels(reply, msg.command.provider); return; }
     const cmd = routerCommand(msg?.command);
     if (!cmd) { reply({ ok: false, error: "That isn't a DGC Router change." }); return; }
     if (cmd.type === "router_thinking") { await this.routerThinking(token, cmd); return; }
+    // A model's price only goes to a CLI that takes it (ready.capabilities.router.prices); an older one hears nothing of it.
+    if (!this.routerPricesCapable()) { delete cmd.price_in; delete cmd.price_out; }
+    if (cmd.provider) {
+      // One of the saved providers becomes a system: DGC needs its own copy first (its route and key, where DGC keeps
+      // keys, as for a Pip on that provider). The page sent the provider's id and model names; the key is read here.
+      if (!this.routerProvidersCapable()) { reply({ ok: false, error: "Update the DGC CLI to add one of your providers to DGC Router." }); return; }
+      const models = Array.isArray(cmd.models) ? cmd.models as string[] : [];
+      if (!models.length) { reply({ ok: false, error: "Tick at least one model." }); return; }
+      try { await this.savePipProvider(String(cmd.provider), models[0]); }
+      catch (err: any) { reply({ ok: false, error: String(err?.message || "") || "DGC couldn't copy that provider." }); return; }
+    }
     const responseType = cmd.type === "router_suggest" ? "router_suggestion" : "router_status";
     // A test runs a few real requests on that computer; a look on the network or an add reads several servers.
     const timeout = cmd.type === "router_probe" ? 180000 : cmd.type === "router_find" || cmd.action === "add_system" ? 90000 : 30000;

@@ -151,7 +151,10 @@ function keepPlace() {
 }
 for (const kind of ['wheel', 'mousedown', 'touchstart', 'keydown'])
     document.addEventListener(kind, () => { if (placeWanted?.until) placeWanted = null; }, { passive: true, capture: true });
-const router = createRouter({ send, esc, switchHTML, ui, onPaint: () => {
+// The saved API providers (never a subscription): id, name and its own model, for "One of your providers". No key is here.
+const routerProviders = () => savedProfiles.filter(row => row && row.kind !== 'subscription' && /^provider_[0-9a-f]{32}$/.test(String(row.id || '')))
+    .map(row => ({ id: row.id, name: String(row.name || ''), model: String(row.model || '') }));
+const router = createRouter({ send, esc, switchHTML, ui, providers: routerProviders, onPaint: () => {
     if (section !== 'models' || !config || saving) return;
     if (routerShownOn !== null && routerShownOn !== router.on()) { snapshot(); render(); keepPlace(); return; }
     const line = $('router-subagents-line');
@@ -225,6 +228,8 @@ function applyConfig(ev) {
     draft.router_capable = ev.router_capable === true;
     draft.router_pips_default = ev.router_pips_default === true;
     draft.router_thinking = ev.router_thinking === true;       // each model's Thinking (router.thinking)
+    draft.router_providers = ev.router_providers === true;     // a saved provider as a system (router.providers)
+    draft.router_prices = ev.router_prices === true;           // what a model costs (router.prices)
     router.setCapability(draft);
     // Image generation, from a CLI that makes images (ready.capabilities.images; the extension adds it).
     draft.images_capable = ev.images_capable === true;

@@ -3,6 +3,10 @@
 // commands (ready.capabilities.router), never with the page's Save all; the list follows router_status and
 // router_changed live. Keys and pairing tokens go to DGC once (router_update set_key, router_hardware token) and are
 // never sent back: the page only learns has_key / hardware.has_token.
+// 0.52: a system can be one of the saved providers (Settings → Models → Providers): Add offers "One of your
+// providers", its card says "Your provider · Groq" and has no key field (the key stays with the provider; the page
+// sends the provider's id and the host copies it to DGC). And each model row says, quietly, what the model costs,
+// with the person's own price in its edit row. Both only from a CLI that says so (router.providers, router.prices).
 import { bindContextCombos, contextComboHTML, parseContext } from './contextCombo.js';
 
 // The ports a look on the network checks: dgc/router_probe.py KNOWN_PORTS (8188 is ComfyUI, for image generation).
@@ -103,6 +107,25 @@ export function testWords(model) {
     else if (model?.tools === false) bits.push('tool calls ✗');
     return bits.join(' · ');
 }
+/** A price in US dollars per million tokens, as DGC's own status says it (dgc/router_tools.py _dollars): $0.59, $12.00,
+ *  and a price under a cent with its own digits ($0.005). */
+export function dollars(value) {
+    const amount = Number(value);
+    if (!Number.isFinite(amount) || amount < 0) return '';
+    if (amount >= 0.01 || amount === 0) return '$' + amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return '$' + amount.toFixed(4).replace(/0+$/, '');
+}
+const priced = v => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+/** What a model costs, in one quiet line: "$0.59 in · $0.79 out per million tokens", "Free" when both are 0 (0 is a
+ *  price), "" when DGC knows neither. `model`: a status row or an `available` row (price_in, price_out). */
+export function priceWords(model) {
+    const hasIn = priced(model?.price_in), hasOut = priced(model?.price_out);
+    if (!hasIn && !hasOut) return '';
+    if ((!hasIn || model.price_in === 0) && (!hasOut || model.price_out === 0)) return 'Free';
+    return [hasIn ? `${dollars(model.price_in)} in` : '', hasOut ? `${dollars(model.price_out)} out` : ''].filter(Boolean).join(' · ') + ' per million tokens';
+}
+/** A price as its box holds it: "0.59", "12", "0.005". */
+const priceText = v => priced(v) ? String(Math.round(v * 10000) / 10000) : '';
 /** How long ago, said as a person would: "just now" only in its first minute, then whole minutes, hours or days. */
 export function ago(seconds) {
     const s = Math.max(0, Math.floor(Date.now() / 1000 - Number(seconds)));
@@ -161,8 +184,8 @@ export function thinkingWords(m) {
     return (THINKING.find(([v]) => v === (m.thinking || '')) || THINKING[0])[1];
 }
 
-export function createRouter({ send, esc, switchHTML, onPaint, ui }) {
-    const S = { capable: false, pipsDefault: false, thinking: false, status: null, asked: false, unavailable: '', seq: 0,
+export function createRouter({ send, esc, switchHTML, onPaint, ui, providers = () => [] }) {
+    const S = { capable: false, pipsDefault: false, thinking: false, providers: false, prices: false, status: null, asked: false, unavailable: '', seq: 0,
         waiting: new Map(), busy: new Set(), notes: new Map(), edits: new Map(), adding: null, find: null,
         suggestions: new Map(), probes: new Map(), removing: '', switching: false, error: '' };
     const page = () => document.getElementById('models-router');
@@ -197,11 +220,19 @@ export function createRouter({ send, esc, switchHTML, onPaint, ui }) {
         S.pipsDefault = config?.router_pips_default === true;
         // Each model's Thinking (ready.capabilities.router.thinking; the extension adds it): an older CLI has none.
         S.thinking = config?.router_thinking === true;
+        // A saved provider as a system, and what a model costs (router.providers, router.prices): an older CLI has neither.
+        S.providers = config?.router_providers === true;
+        S.prices = config?.router_prices === true;
         if (S.capable && !S.asked) { S.asked = true; void command({ type: 'router_status' }); }
     }
     const on = () => S.status?.enabled === true;
     const systems = () => S.status?.systems || [];
     const system = id => systems().find(s => s.id === id);
+    /** The saved providers Add can offer: none without the CLI's say-so. [{id, name, model}], never a key. */
+    const offeredProviders = () => (S.providers ? (providers() || []).filter(p => p && p.id && p.name) : []);
+    /** The provider a system is, by the name it is saved under (the system's own name if it is no longer saved). */
+    const providerName = s => (providers() || []).find(p => p.id === s.provider)?.name || s.name;
+    const price = m => (S.prices ? priceWords(m) : '');
     const note = (key, text, error = false) => { if (text) S.notes.set(key, { text: String(text), error }); else S.notes.delete(key); };
 
     // ---- the page's own blocks ----
@@ -261,7 +292,8 @@ export function createRouter({ send, esc, switchHTML, onPaint, ui }) {
         const n = S.notes.get(s.id);
         const probe = S.probes.get(s.id), suggestion = S.suggestions.get(s.id);
         const head = `<div class="router-card-head">${dot(s)}<span class="router-name">${esc(s.name)}</span>`
-            + `<span class="router-where">${esc(SERVER_NAMES[s.server] || s.server)} · ${esc(shortAddress(s.base_url))}</span>`
+            + (s.provider ? `<span class="router-where">Your provider · ${esc(providerName(s))}</span>`
+                : `<span class="router-where">${esc(SERVER_NAMES[s.server] || s.server)} · ${esc(shortAddress(s.base_url))}</span>`)
             + `<span class="router-free" data-router-free="${esc(s.id)}">${esc(freeWords(s))}</span></div>`;
         if (edit) return `<article class="router-card editing" data-router-system="${esc(s.id)}">${head}${editForm(s, edit)}</article>`;
         // The card lists the models it uses; the rest are under Edit, counted here.
@@ -269,27 +301,31 @@ export function createRouter({ send, esc, switchHTML, onPaint, ui }) {
         const think = S.thinking ? ' thinking' : '';
         const models = used.length ? '<div class="router-models" role="table" aria-label="Models on ' + esc(s.name) + '">'
             + `<div class="router-model head${think}" role="row"><span role="columnheader">Model</span><span role="columnheader">Use</span><span role="columnheader">Workers</span><span role="columnheader">Context each</span>${S.thinking ? '<span role="columnheader">Thinking</span>' : ''}<span role="columnheader">Note</span></div>`
-            + used.map(m => `<div class="router-model${m.use === false ? ' unused' : ''}${think}" role="row"><span role="cell" class="router-model-name">${esc(m.name)}${sizeWords(m) ? ` <small>(${esc(sizeWords(m))})</small>` : ''}${m.subagents ? `<small class="router-warn">${esc(m.subagents)}</small>` : ''}</span>`
+            + used.map(m => `<div class="router-model${m.use === false ? ' unused' : ''}${think}" role="row"><span role="cell" class="router-model-name">${esc(m.name)}${sizeWords(m) ? ` <small>(${esc(sizeWords(m))})</small>` : ''}${price(m) ? `<small class="router-price">${esc(price(m))}</small>` : ''}${m.subagents ? `<small class="router-warn">${esc(m.subagents)}</small>` : ''}</span>`
                 + `<span role="cell" data-label="Use">${m.use === false ? '—' : '✓'}</span><span role="cell" data-label="Workers">${live && m.use !== false ? `${esc(m.free ?? m.workers)}/${esc(m.workers)} free` : esc(m.workers)}</span>`
                 + `<span role="cell" data-label="Context each">${esc(tokensShort(m.context))}</span>`
                 + (S.thinking ? `<span role="cell" data-label="Thinking"${m.thinks === true ? '' : ' class="muted"'}>${esc(thinkingWords(m))}</span>` : '')
                 + `<span role="cell"${m.note ? ' data-label="Note"' : ''}>${esc(m.note || '')}</span></div>`).join('')
             + '</div>' + (unused > 0 ? `<p class="router-line muted">${unused} more model${unused === 1 ? '' : 's'} not used (Edit to choose).</p>` : '')
-            : `<p class="router-line muted">${s.has_key === false && /key/i.test(s.discovery_error || '') ? 'It wants a key: choose Edit to add one.' : 'No models chosen yet: choose Edit to pick some.'}</p>`;
+            : `<p class="router-line muted">${!s.provider && s.has_key === false && /key/i.test(s.discovery_error || '') ? 'It wants a key: choose Edit to add one.' : 'No models chosen yet: choose Edit to pick some.'}</p>`;
         const totals = total ? `<p class="router-line">${s.one_model_at_a_time ? '<span class="router-one">One model at a time</span> · ' : ''}${esc(totalLine(total))}${room ? ` · <span class="${room.ok ? 'router-ok' : 'router-bad'}">${esc(room.text)}</span>` : ''}</p>`
             : (s.one_model_at_a_time ? '<p class="router-line"><span class="router-one">One model at a time</span></p>' : '');
         const lastAt = Math.max(0, ...tested.map(m => Number(m.speed_at) || 0));
         const lastTest = tested.length ? `<p class="router-line">Last test${lastAt ? ` (<span data-router-ago="${esc(lastAt)}">${esc(ago(lastAt))}</span>)` : ''}: ${tested.map(m => `${tested.length > 1 ? esc(m.name) + ' ' : ''}${esc(testWords(m))}`).join('; ')}</p>` : '<p class="router-line muted">Not tested yet.</p>';
         const working = leases.length ? `<p class="router-line router-leases" aria-live="polite">Working: ${leases.map(l => `${esc(l.model || '')} for ${esc(l.label || 'a helper')}`).join(' · ')}</p>` : '';
-        const removing = S.removing === s.id ? `<div class="router-confirm" role="group" aria-label="Remove ${esc(s.name)}"><span>Remove ${esc(s.name)}? Its saved key goes too.</span><button type="button" class="secondary danger" data-router-remove-yes="${esc(s.id)}">Remove</button><button type="button" class="secondary" data-router-remove-no>Keep it</button></div>` : '';
+        // A provider's system has no key of its own to lose: the provider and its key stay where they are saved.
+        const removeAsk = s.provider ? `Remove ${esc(s.name)} from DGC Router? ${esc(providerName(s))} and its key stay in Settings → Models.` : `Remove ${esc(s.name)}? Its saved key goes too.`;
+        const removing = S.removing === s.id ? `<div class="router-confirm" role="group" aria-label="Remove ${esc(s.name)}"><span>${removeAsk}</span><button type="button" class="secondary danger" data-router-remove-yes="${esc(s.id)}">Remove</button><button type="button" class="secondary" data-router-remove-no>Keep it</button></div>` : '';
         // While its removal is asked, the question holds the only Remove (and Keep it): no second Remove beside it.
         const buttons = S.removing === s.id ? '' : `<div class="actions router-buttons"><button type="button" class="secondary" data-router-test="${esc(s.id)}"${busyKey.has('test:' + s.id) ? ' disabled' : ''}>${busyKey.has('test:' + s.id) ? 'Testing…' : 'Test'}</button>`
-            + `<button type="button" class="secondary" data-router-suggest="${esc(s.id)}"${busyKey.has('suggest:' + s.id) ? ' disabled' : ''}>${busyKey.has('suggest:' + s.id) ? 'Working it out…' : 'Suggest'}</button>`
+            // Suggest fits models into a computer's memory: a provider's system has none to fit.
+            + (s.provider ? '' : `<button type="button" class="secondary" data-router-suggest="${esc(s.id)}"${busyKey.has('suggest:' + s.id) ? ' disabled' : ''}>${busyKey.has('suggest:' + s.id) ? 'Working it out…' : 'Suggest'}</button>`)
             + `<button type="button" class="secondary" data-router-edit="${esc(s.id)}">Edit</button><button type="button" class="secondary" data-router-remove="${esc(s.id)}">Remove</button></div>`;
         return `<article class="router-card" data-router-system="${esc(s.id)}">${head}<p class="router-line">Jobs: ${esc(jobs)}</p>${models}${totals}${lastTest}`
             + (hardware ? `<p class="router-line">Hardware: ${esc(hardware)}</p>` : '') + working
             + (s.warning ? `<p class="router-line muted">${esc(s.warning)}</p>` : '')
-            + (probe ? probeBlock(probe) : '') + (suggestion ? suggestBlock(s, suggestion) : '')
+            + (s.provider ? providerLines(s) : '')
+            + (probe ? probeBlock(probe, s) : '') + (suggestion ? suggestBlock(s, suggestion) : '')
             + (n ? `<p class="router-note${n.error ? ' error' : ''}" role="status">${esc(n.text)}</p>` : '') + removing + buttons + '</article>';
     }
     function hardwareWords(h) {
@@ -299,8 +335,16 @@ export function createRouter({ send, esc, switchHTML, onPaint, ui }) {
         if (h.error) return `couldn't read it: ${h.error}`;
         return 'not read yet';
     }
-    function probeBlock(probe) {
-        if (probe.state === 'testing') return '<p class="router-line" role="status">Testing… this uses a few seconds of that computer\'s model.</p>';
+    /** A provider's system has no key of its own: whose key it uses (or that none is saved), and what Test costs. */
+    function providerLines(s) {
+        const name = esc(providerName(s));
+        return (s.has_key === false ? `<p class="router-line router-need" data-router-key-line="missing">${name} has no key saved: add it in Settings → Models.</p>`
+            : `<p class="router-line muted" data-router-key-line="saved">Uses the key saved with ${name} in Settings → Models.</p>`)
+            + `<p class="router-line muted" data-router-test-line>Test sends a few short requests to ${name} (billed by them).</p>`;
+    }
+    function probeBlock(probe, s) {
+        if (probe.state === 'testing') return s?.provider ? `<p class="router-line" role="status">Testing… a few short requests to ${esc(providerName(s))}.</p>`
+            : '<p class="router-line" role="status">Testing… this uses a few seconds of that computer\'s model.</p>';
         const result = probe.result || {};
         const lines = [];
         if (result.models_error) lines.push(`Couldn't list its models: ${result.models_error}`);
@@ -331,23 +375,132 @@ export function createRouter({ send, esc, switchHTML, onPaint, ui }) {
     }
 
     // ---- + Add system ----
+    // S.adding.kind: 'choose' (a computer, or one of your providers), 'computer' (today's form), 'providers' (the
+    // saved providers, by name) or 'provider' (one provider: its models, Workers and jobs).
     function addCard() {
         const a = S.adding;
+        const open = '<article class="router-card adding" data-router-adding>';
+        const cancel = '<button type="button" class="secondary" data-router-add-cancel>Cancel</button>';
+        if (a.kind === 'choose') {
+            return `${open}<div class="router-card-head"><span class="router-name">Add a system</span></div>`
+                + '<div class="router-ways" role="group" aria-label="What to add">'
+                + '<button type="button" class="router-way" data-router-add-way="computer"><span class="router-way-name">A computer on your network</span><span class="router-way-hint">Ollama, llama.cpp, vLLM, LM Studio or another server you run.</span></button>'
+                + '<button type="button" class="router-way" data-router-add-way="providers"><span class="router-way-name">One of your providers</span><span class="router-way-hint">A provider saved in Settings → Models, with its own key.</span></button>'
+                + `</div><div class="actions">${cancel}</div></article>`;
+        }
+        if (a.kind === 'providers') {
+            const added = new Map(systems().filter(s => s.provider).map(s => [s.provider, s]));
+            const rows = offeredProviders().map(p => `<li><span><b>${esc(p.name)}</b>${p.model ? ` <small>${esc(p.model)}</small>` : ''}</span>`
+                + (added.has(p.id) ? `<span class="muted">Added as ${esc(added.get(p.id).name)}</span>`
+                    : `<button type="button" class="secondary" data-router-add-provider="${esc(p.id)}" aria-label="Choose ${esc(p.name)}">Choose</button>`) + '</li>').join('');
+            return `${open}<div class="router-card-head"><span class="router-name">Add one of your providers</span></div>`
+                + (rows ? `<ul class="router-found router-providers">${rows}</ul>` : '<p class="muted">No provider is saved now: add one in Settings → Models → Providers.</p>')
+                + '<p class="muted">Its key stays with the provider: DGC Router reads it from there each time.</p>'
+                + `<div class="actions"><button type="button" class="secondary" data-router-add-back="choose">Back</button>${cancel}</div></article>`;
+        }
+        if (a.kind === 'provider') return open + providerForm(a) + '</article>';
         const looking = a.state === 'looking';
-        return '<article class="router-card adding" data-router-adding><div class="router-card-head"><span class="router-name">Add a system</span></div>'
+        return open + '<div class="router-card-head"><span class="router-name">Add a system</span></div>'
             + '<div class="router-form">'
             + `<label class="router-field"><span>Address</span><input id="router-add-address" type="text" value="${esc(a.address)}" placeholder="gpu-box.local or 10.0.0.5:11434" autocomplete="off" spellcheck="false"${looking ? ' disabled' : ''}></label>`
             + `<label class="router-field"><span>Name <small>(optional)</small></span><input id="router-add-name" type="text" value="${esc(a.name)}" placeholder="GPU box" autocomplete="off" spellcheck="false"${looking ? ' disabled' : ''}></label>`
             + '<p class="muted">DGC finds the server on that computer and lists its models. Nothing is installed there.</p>'
             + (a.error ? `<p class="router-note error" role="alert">${esc(a.error)}</p>` : '')
-            + `<div class="actions"><button type="button" class="save" data-router-add-look${looking ? ' disabled' : ''}>${looking ? 'Looking…' : 'Find its models'}</button><button type="button" class="secondary" data-router-add-cancel>Cancel</button></div>`
+            + `<div class="actions"><button type="button" class="save" data-router-add-look${looking ? ' disabled' : ''}>${looking ? 'Looking…' : 'Find its models'}</button>`
+            + (a.chosen ? '<button type="button" class="secondary" data-router-add-back="choose">Back</button>' : '') + cancel + '</div>'
             + '</div></article>';
     }
+    /** One provider, about to become a system: the models it lists (its own ticked), how many helpers at once, its jobs. */
+    function providerForm(a) {
+        const busy = a.state === 'adding', listing = a.state === 'listing';
+        const off = busy ? ' disabled' : '';
+        const rows = a.models.map((m, i) => `<label class="router-pick" data-pick-name="${esc(m.name.toLowerCase())}"><input type="checkbox" data-pick="${i}"${m.use ? ' checked' : ''}${off}> <span>${esc(m.name)}</span></label>`).join('');
+        return `<div class="router-card-head"><span class="router-name">Add ${esc(a.providerName)}</span><span class="router-where">Your provider</span></div>`
+            + '<div class="router-form">'
+            + '<fieldset class="router-jobs router-picks"><legend>Models</legend>'
+            + (listing ? '<p class="muted" role="status">Listing its models…</p>'
+                : (a.models.length > 12 ? `<input type="text" class="router-pick-filter" data-pick-filter value="${esc(a.filter || '')}" placeholder="Filter ${a.models.length} models" aria-label="Filter its models" autocomplete="off" spellcheck="false"${off}>` : '')
+                    + (rows ? `<div class="router-pick-list">${rows}</div>` : `<p class="muted">${esc(a.providerName)} listed no model.</p>`)
+                    + (a.listError ? `<p class="muted">DGC couldn't list all its models: ${esc(a.listError)}</p>` : ''))
+            + '</fieldset>'
+            + `<div class="router-grid"><label class="router-field"><span>Workers <small>(how many helpers at once)</small></span><input type="number" min="1" max="64" step="1" id="router-add-workers" value="${esc(a.workers)}"${off}></label></div>`
+            + `<fieldset class="router-jobs"><legend>Jobs</legend>${Object.entries(JOB_NAMES).map(([id, label]) => `<label><input type="checkbox" data-add-job value="${id}"${a.jobs.includes(id) ? ' checked' : ''}${off}> ${label}</label>`).join('')}</fieldset>`
+            + `<p class="muted">Uses the key saved with ${esc(a.providerName)} in Settings → Models. Each helper's requests go to ${esc(a.providerName)} and are billed by them.</p>`
+            + (a.error ? `<p class="router-note error" role="alert">${esc(a.error)}</p>` : '')
+            + `<div class="actions"><button type="button" class="save" data-router-add-provider-go${busy || listing ? ' disabled' : ''}>${busy ? 'Adding…' : 'Add'}</button>`
+            + `<button type="button" class="secondary" data-router-add-back="providers"${off}>Back</button><button type="button" class="secondary" data-router-add-cancel${off}>Cancel</button></div></div>`;
+    }
     function startAdd(address = '', name = '') {
-        S.adding = { address, name, state: '', error: '' };
+        // From Look on my network the address is filled in: that is a computer. Otherwise, with a provider saved (and a
+        // CLI that takes one), Add asks which of the two.
+        const choose = !address && offeredProviders().length > 0;
+        S.adding = { kind: choose ? 'choose' : 'computer', chosen: false, address, name, state: '', error: '' };
         paint();
         // From Look on my network the address is filled in: name it, then Find its models.
-        queueMicrotask(() => document.getElementById(address ? 'router-add-name' : 'router-add-address')?.focus());
+        queueMicrotask(() => (choose ? document.querySelector('[data-router-add-way]') : document.getElementById(address ? 'router-add-name' : 'router-add-address'))?.focus());
+    }
+    function addWay(kind) {
+        if (!S.adding) return;
+        Object.assign(S.adding, { kind, chosen: true, error: '', state: '' });
+        paint();
+        queueMicrotask(() => (kind === 'computer' ? document.getElementById('router-add-address') : document.querySelector('[data-router-adding] button'))?.focus());
+    }
+    /** One provider chosen: its form opens at once and its models are listed as they arrive. */
+    async function chooseProvider(id) {
+        const p = offeredProviders().find(x => x.id === id);
+        if (!p || !S.adding) return;
+        const a = S.adding = { ...S.adding, kind: 'provider', chosen: true, provider: p.id, providerName: p.name, state: 'listing', error: '', listError: '',
+            filter: '', workers: 2, jobs: Object.keys(JOB_NAMES), models: p.model ? [{ name: p.model, use: true }] : [] };
+        paint();
+        const reply = await command({ type: 'router_provider_models', provider: p.id });
+        if (S.adding !== a) return;                         // cancelled, or another one chosen, while it listed
+        a.state = '';
+        const names = Array.isArray(reply.models) ? reply.models.filter(n => typeof n === 'string' && n) : [];
+        // The provider's own model first and ticked; the rest as it lists them, to tick.
+        for (const n of names) if (!a.models.some(m => m.name === n)) a.models.push({ name: n, use: false });
+        if (!reply.ok || reply.error) a.listError = String(reply.error || 'DGC didn\'t answer.');
+        paint();
+        queueMicrotask(() => document.querySelector('[data-router-adding] [data-pick-filter], [data-router-adding] [data-pick]')?.focus());
+    }
+    /** What is ticked and typed in a provider's form, kept so a live redraw never loses it. */
+    function readProviderForm() {
+        const a = S.adding, root = document.querySelector('[data-router-adding]');
+        if (!a || a.kind !== 'provider' || !root) return a;
+        root.querySelectorAll('[data-pick]').forEach(box => { const m = a.models[Number(box.dataset.pick)]; if (m) m.use = box.checked; });
+        a.workers = root.querySelector('#router-add-workers')?.value ?? a.workers;
+        a.filter = root.querySelector('[data-pick-filter]')?.value ?? a.filter;
+        if (root.querySelector('[data-add-job]')) a.jobs = [...root.querySelectorAll('[data-add-job]')].filter(b => b.checked).map(b => b.value);
+        return a;
+    }
+    function filterPicks(root) {
+        const words = String(root.querySelector('[data-pick-filter]')?.value || '').trim().toLowerCase();
+        root.querySelectorAll('[data-pick-name]').forEach(row => { row.hidden = !!words && !row.dataset.pickName.includes(words); });
+    }
+    async function addProvider() {
+        const a = readProviderForm();
+        if (!a || a.kind !== 'provider') return;
+        const models = a.models.filter(m => m.use).map(m => m.name);
+        const workers = int(a.workers, 0);
+        if (!models.length) { a.error = 'Tick at least one model.'; paint(); return; }
+        if (!workers || workers > 64) { a.error = 'Workers takes 1 to 64.'; paint(); return; }
+        a.state = 'adding'; a.error = ''; paint();
+        const before = new Set(systems().map(s => s.id));
+        // The host copies the provider to DGC first (its key never comes here). With no jobs, as for a computer: a new
+        // system must not receive work while its form is still open.
+        const reply = await command({ type: 'router_update', action: 'add_system', provider: a.provider, models, jobs: [], workers });
+        if (!reply.ok) { a.state = ''; a.error = reply.error || 'DGC couldn\'t add it.'; paint(); return; }
+        const added = systems().find(s => !before.has(s.id));
+        if (!added) { a.state = ''; a.error = 'DGC added nothing.'; paint(); return; }
+        // Not used until Save: a half set-up system never gets a helper.
+        await command({ type: 'router_update', action: 'disable_system', system: added.id });
+        // Read the provider's own model list once (no request to a model): what each model costs and how much it holds,
+        // for the form that opens. A list that can't be read now changes nothing: the system is added all the same.
+        await command({ type: 'router_probe', system: added.id, checks: ['models'] }, 'probe');
+        S.adding = null;
+        // The jobs ticked here are ticked in its form; Save sends them.
+        S.edits.set(added.id, draftFor(system(added.id) || added, { added: true, jobs: [...a.jobs] }));
+        paint();
+        queueMicrotask(() => document.querySelector(`[data-router-system="${CSS.escape(added.id)}"] [data-router-edit-save]`)?.focus());
     }
     async function look() {
         const a = S.adding;
@@ -410,7 +563,9 @@ export function createRouter({ send, esc, switchHTML, onPaint, ui }) {
         return { added: false, wantsKey: false, name: s.name, base_url: s.base_url, jobs: [...(s.jobs || [])], workers: s.workers,
             one: !!s.one_model_at_a_time, enabled: extra.added ? true : s.enabled !== false, memory: s.memory_gb ?? '',
             models: (s.models || []).map(m => ({ name: m.name, use: m.use !== false, workers: m.workers, context: m.context, note: m.note || '',
-                thinking: m.thinking || '', thinks: m.thinks, fresh: false })),
+                thinking: m.thinking || '', thinks: m.thinks, fresh: false,
+                // The person's own price only: one the provider lists is the box's placeholder, never its value.
+                priceIn: m.price_from === 'you' ? priceText(m.price_in) : '', priceOut: m.price_from === 'you' ? priceText(m.price_out) : '' })),
             key: '', hwUrl: s.hardware?.url || '', hwToken: '', state: '', ...extra };
     }
     function editForm(s, d) {
@@ -419,13 +574,21 @@ export function createRouter({ send, esc, switchHTML, onPaint, ui }) {
         const modelRows = d.models.map((m, i) => {
             const facts = (s.available || []).find(x => x.name === m.name) || (s.models || []).find(x => x.name === m.name) || {};
             const max = Number(facts.context_max) || 0;
+            // What the provider's own list says it costs: the boxes' placeholders, and the line beside the name until
+            // the person types a price of their own.
+            const mine = (s.models || []).find(x => x.name === m.name);
+            const listed = (s.available || []).find(x => x.name === m.name) || (mine?.price_from === 'provider' ? mine : {});
+            const cost = price(mine?.price_from === 'you' ? mine : listed);
+            const priceRow = S.prices ? `<span class="router-price-edit" role="cell" data-price-row><span class="router-price-label" id="router-price-${esc(s.id)}-${i}">Price <small>(per million tokens)</small>:</span>`
+                + ['In', 'Out'].map(side => `<label>${side} <input type="text" inputmode="decimal" maxlength="12" data-edit="price-${side.toLowerCase()}" data-i="${i}" value="${esc(side === 'In' ? m.priceIn ?? '' : m.priceOut ?? '')}" placeholder="${esc(priceText(side === 'In' ? listed.price_in : listed.price_out))}" aria-label="${side === 'In' ? 'Input' : 'Output'} price for ${esc(m.name)}, US dollars per million tokens" autocomplete="off" spellcheck="false"${busy ? ' disabled' : ''}></label>`).join('')
+                + (cost ? `<small class="router-price">${mine?.price_from === 'you' ? 'Your price' : 'Its list says'}: ${esc(cost)}</small>` : '') + '</span>' : '';
             return `<div class="router-model edit${S.thinking ? ' thinking' : ''}" role="row" data-model-row="${i}" data-model-name="${esc(m.name)}"><label class="router-use" role="cell"><input type="checkbox" data-edit="use" data-i="${i}"${m.use ? ' checked' : ''}${busy ? ' disabled' : ''}> <span>${esc(m.name)}${sizeWords(facts) ? ` <small>(${esc(sizeWords(facts))})</small>` : ''}${facts.tools === false ? ' <small class="router-warn">no tool calls</small>' : ''}</span></label>`
                 + `<label role="cell" data-label="Workers"><input type="number" min="1" max="64" step="1" aria-label="Workers for ${esc(m.name)}" data-edit="workers" data-i="${i}" value="${esc(m.workers)}"${busy ? ' disabled' : ''}></label>`
                 // A box you type in or pick from (src/contextCombo.js): 4K … 256K up to the model's own maximum, or any size.
                 + `<span role="cell" data-label="Context each">${contextComboHTML({ id: `router-ctx-${s.id}-${i}`, value: m.context, max,
                     label: `Context for ${m.name}`, attrs: `data-edit="context" data-i="${i}"`, disabled: busy })}</span>`
                 + (S.thinking ? thinkingCell(m, i, busy) : '')
-                + `<label role="cell" data-label="Note"><input type="text" maxlength="120" aria-label="Note for ${esc(m.name)}" data-edit="note" data-i="${i}" value="${esc(m.note)}" placeholder="Note"${busy ? ' disabled' : ''}></label></div>`;
+                + `<label role="cell" data-label="Note"><input type="text" maxlength="120" aria-label="Note for ${esc(m.name)}" data-edit="note" data-i="${i}" value="${esc(m.note)}" placeholder="Note"${busy ? ' disabled' : ''}></label>${priceRow}</div>`;
         }).join('');
         const keyRow = `<label class="router-field${d.wantsKey ? ' wants' : ''}"><span>Key${d.wantsKey ? ' <small>(this server wants one)</small>' : ' <small>(only if it needs one)</small>'}</span>`
             + `<span class="router-inline"><input type="password" data-edit="key" value="${esc(d.key)}" placeholder="${s.has_key ? 'Saved' : 'Paste its key'}" autocomplete="off" spellcheck="false"${busy ? ' disabled' : ''}>`
@@ -433,23 +596,27 @@ export function createRouter({ send, esc, switchHTML, onPaint, ui }) {
         const how = '<details class="more router-how"><summary>How to set this up</summary><p>Either point DGC at an exporter you already run on that computer (Prometheus node_exporter on :9100, NVIDIA DCGM on :9400, Glances on :61208, Netdata on :19999), or run DGC\'s own read-only stats service there:</p>'
             + '<pre><code>dgc node install-service</code></pre><p>It prints a pairing token once (on a Mac you reach only over SSH, add <code>--system</code>). Paste its address (port 8577) and that token here. It has no shell and reads no file of yours.</p></details>';
         return '<div class="router-form">'
-            + (d.added ? `<p class="router-line">Found ${esc(SERVER_NAMES[s.server] || s.server)} at ${esc(shortAddress(s.base_url))}. Choose its models and jobs, then Test and Save.</p>` : '')
+            + (d.added ? (s.provider ? `<p class="router-line">Added from ${esc(providerName(s))}. Check its models and jobs, then Test and Save.</p>`
+                : `<p class="router-line">Found ${esc(SERVER_NAMES[s.server] || s.server)} at ${esc(shortAddress(s.base_url))}. Choose its models and jobs, then Test and Save.</p>`) : '')
             + (d.choose && !d.models.some(m => m.use) ? `<p class="router-line router-choose" role="note">Nothing is loaded on ${esc(s.name)} now, so none is ticked. Tick the ones to use: using one loads it there.</p>` : '')
-            + (d.wantsKey ? keyRow : '')
+            + (d.wantsKey && !s.provider ? keyRow : '')
             + `<div class="router-grid"><label class="router-field"><span>Name</span><input type="text" data-edit="name" value="${esc(d.name)}" maxlength="64"${busy ? ' disabled' : ''}></label>`
-            + `<label class="router-field"><span>Address</span><input type="text" data-edit="base_url" value="${esc(d.base_url)}" autocomplete="off" spellcheck="false"${busy ? ' disabled' : ''}></label></div>`
+            // A provider's system has no address to type: it is the provider's, and its key goes only there.
+            + (s.provider ? '' : `<label class="router-field"><span>Address</span><input type="text" data-edit="base_url" value="${esc(d.base_url)}" autocomplete="off" spellcheck="false"${busy ? ' disabled' : ''}></label>`) + '</div>'
             + `<fieldset class="router-jobs"><legend>Jobs</legend>${Object.entries(JOB_NAMES).map(([id, label]) => `<label><input type="checkbox" data-edit="job" value="${id}"${d.jobs.includes(id) ? ' checked' : ''}${busy ? ' disabled' : ''}> ${label}</label>`).join('')}</fieldset>`
             + `<div class="router-models" role="table" aria-label="Models on ${esc(s.name)}"><div class="router-model head edit${S.thinking ? ' thinking' : ''}" role="row"><span role="columnheader">Use · model</span><span role="columnheader">Workers</span><span role="columnheader">Context each</span>${S.thinking ? '<span role="columnheader">Thinking</span>' : ''}<span role="columnheader">Note</span></div>${modelRows || '<p class="muted router-none">No models yet.</p>'}</div>`
-            + (offered.length ? `<div class="router-inline router-add-model"><select id="router-offer-${esc(s.id)}" aria-label="Another model it serves" data-edit="offer"${busy ? ' disabled' : ''}><option value="">Another model it serves…</option>${offered.map(m => `<option value="${esc(m.name)}">${esc(m.name)}${sizeWords(m) ? ` (${esc(sizeWords(m))})` : ''}</option>`).join('')}</select></div>` : '')
-            + `<div class="router-grid"><label class="router-field"><span>Workers <small>(all models together)</small></span><input type="number" min="1" max="64" data-edit="workers-total" value="${esc(d.workers)}"${busy ? ' disabled' : ''}></label>`
-            + `<label class="router-field"><span>Memory, GB <small>(for Suggest, if known)</small></span><input type="number" min="1" max="4096" step="any" data-edit="memory" value="${esc(d.memory)}"${busy ? ' disabled' : ''}></label></div>`
-            + `<label class="router-check"><input type="checkbox" data-edit="one"${d.one ? ' checked' : ''}${busy ? ' disabled' : ''}> One model at a time <small>(a computer that holds one big model in its memory)</small></label>`
+            + (offered.length ? `<div class="router-inline router-add-model"><select id="router-offer-${esc(s.id)}" aria-label="Another model it serves" data-edit="offer"${busy ? ' disabled' : ''}><option value="">Another model it serves…</option>${offered.map(m => `<option value="${esc(m.name)}">${esc(m.name)}${sizeWords(m) ? ` (${esc(sizeWords(m))})` : ''}${price(m) ? ` · ${esc(price(m))}` : ''}</option>`).join('')}</select></div>` : '')
+            + `<div class="router-grid"><label class="router-field"><span>Workers <small>(${s.provider ? 'how many helpers at once' : 'all models together'})</small></span><input type="number" min="1" max="64" data-edit="workers-total" value="${esc(d.workers)}"${busy ? ' disabled' : ''}></label>`
+            // Memory, one model at a time, its own key and its hardware are a computer's: a provider's system has none.
+            + (s.provider ? '</div>' : `<label class="router-field"><span>Memory, GB <small>(for Suggest, if known)</small></span><input type="number" min="1" max="4096" step="any" data-edit="memory" value="${esc(d.memory)}"${busy ? ' disabled' : ''}></label></div>`
+            + `<label class="router-check"><input type="checkbox" data-edit="one"${d.one ? ' checked' : ''}${busy ? ' disabled' : ''}> One model at a time <small>(a computer that holds one big model in its memory)</small></label>`)
             + `<label class="router-check"><input type="checkbox" data-edit="enabled"${d.enabled ? ' checked' : ''}${busy ? ' disabled' : ''}> Use this system</label>`
-            + (d.wantsKey ? '' : keyRow)
+            + (s.provider ? '' : (d.wantsKey ? '' : keyRow)
             + '<fieldset class="router-hardware"><legend>Hardware <small>(optional)</small></legend>'
             + `<div class="router-grid"><label class="router-field"><span>Exporter or dgc node address</span><input type="text" data-edit="hw-url" value="${esc(d.hwUrl)}" placeholder="gpu-box.local:8577" autocomplete="off" spellcheck="false"${busy ? ' disabled' : ''}></label>`
-            + `<label class="router-field"><span>Pairing token <small>(dgc node only)</small></span><input type="password" data-edit="hw-token" value="${esc(d.hwToken)}" placeholder="${s.hardware?.has_token ? 'Saved' : ''}" autocomplete="off" spellcheck="false"${busy ? ' disabled' : ''}></label></div>${how}</fieldset>`
-            + (S.probes.get(s.id) ? probeBlock(S.probes.get(s.id)) : '')
+            + `<label class="router-field"><span>Pairing token <small>(dgc node only)</small></span><input type="password" data-edit="hw-token" value="${esc(d.hwToken)}" placeholder="${s.hardware?.has_token ? 'Saved' : ''}" autocomplete="off" spellcheck="false"${busy ? ' disabled' : ''}></label></div>${how}</fieldset>`)
+            + (s.provider ? providerLines(s) : '')
+            + (S.probes.get(s.id) ? probeBlock(S.probes.get(s.id), s) : '')
             + (d.error ? `<p class="router-note error" role="alert">${esc(d.error)}</p>` : '') + (d.done ? `<p class="router-note" role="status">${esc(d.done)}</p>` : '')
             + `<div class="actions"><button type="button" class="secondary" data-router-edit-test="${esc(s.id)}"${busy ? ' disabled' : ''}>${d.state === 'testing' ? 'Testing…' : 'Test'}</button>`
             + `<button type="button" class="save" data-router-edit-save="${esc(s.id)}"${busy ? ' disabled' : ''}>${d.state === 'saving' ? 'Saving…' : 'Save'}</button>`
@@ -479,6 +646,8 @@ export function createRouter({ send, esc, switchHTML, onPaint, ui }) {
             m.context = row.querySelector('[data-edit="context"]')?.value ?? m.context;
             m.note = row.querySelector('[data-edit="note"]')?.value ?? m.note;
             m.thinking = row.querySelector('[data-edit="thinking"]')?.value ?? m.thinking;
+            m.priceIn = row.querySelector('[data-edit="price-in"]')?.value ?? m.priceIn;
+            m.priceOut = row.querySelector('[data-edit="price-out"]')?.value ?? m.priceOut;
         });
         return d;
     }
@@ -516,6 +685,7 @@ export function createRouter({ send, esc, switchHTML, onPaint, ui }) {
             if (!was || was.workers !== mw) change.workers = mw;
             if (!was || was.context !== ctx) change.context = ctx;
             if (!was ? !!m.note.trim() : (was.note || '') !== m.note.trim()) change.note = m.note.trim();
+            if (S.prices) Object.assign(change, priceChange(m, was));
             if (Object.keys(change).length) out.push({ type: 'router_update', action: 'set_model', system: s.id, model: m.name, ...change });
             // How hard a helper on it thinks: its own command (router_thinking), from a CLI that takes it.
             if (S.thinking && m.use && (was?.thinking || '') !== (m.thinking || '') && THINKING.some(([v]) => v === (m.thinking || ''))) {
@@ -529,6 +699,22 @@ export function createRouter({ send, esc, switchHTML, onPaint, ui }) {
         }
         if (d.enabled !== (s.enabled !== false)) out.push({ type: 'router_update', action: d.enabled ? 'enable_system' : 'disable_system', system: s.id });
         return out;
+    }
+    /** The person's own price for a model, as set_model takes it (US dollars per million tokens): what was typed where
+     *  it differs from theirs before; both boxes emptied: -1 for both (back to the provider's own list). */
+    function priceChange(m, was) {
+        const typed = [m.priceIn, m.priceOut].map(v => String(v ?? '').trim().replace(/^\$/, ''));
+        const [nowIn, nowOut] = typed.map(text => {
+            if (text === '') return null;
+            const n = Number(text);
+            if (!Number.isFinite(n) || n < 0 || n > 10000) throw new Error(`Price for ${m.name} takes US dollars per million tokens, 0 to 10,000, like 0.59.`);
+            return Math.round(n * 10000) / 10000;
+        });
+        const own = was?.price_from === 'you';
+        const wasIn = own && priced(was.price_in) ? was.price_in : null, wasOut = own && priced(was.price_out) ? was.price_out : null;
+        if (nowIn === wasIn && nowOut === wasOut) return {};
+        if (nowIn === null && nowOut === null) return { price_in: -1, price_out: -1 };
+        return { ...(nowIn !== wasIn ? { price_in: nowIn ?? -1 } : {}), ...(nowOut !== wasOut ? { price_out: nowOut ?? -1 } : {}) };
     }
     async function run(list, d) {
         for (const cmd of list) {
@@ -598,7 +784,7 @@ export function createRouter({ send, esc, switchHTML, onPaint, ui }) {
         if (d) d.state = '';
         if (reply.ok) S.probes.set(id, { result: reply.probe || {} });
         else { S.probes.delete(id); note(id, reply.error || 'The test didn\'t run.', true); }
-        if (reply.ok && reply.probe?.suggest && !fromForm) S.suggestions.set(id, { suggestion: reply.probe.suggest });
+        if (reply.ok && reply.probe?.suggest && !fromForm && !system(id)?.provider) S.suggestions.set(id, { suggestion: reply.probe.suggest });
         paint();
     }
     async function suggest(id) {
@@ -661,6 +847,7 @@ export function createRouter({ send, esc, switchHTML, onPaint, ui }) {
         if (S.adding) {
             S.adding.address = document.getElementById('router-add-address')?.value ?? S.adding.address;
             S.adding.name = document.getElementById('router-add-name')?.value ?? S.adding.name;
+            readProviderForm();
         }
         const active = document.activeElement, within = root.contains(active);
         const focusKey = within ? focusOf(active) : null;
@@ -674,7 +861,7 @@ export function createRouter({ send, esc, switchHTML, onPaint, ui }) {
     }
     function focusOf(el) {
         const card = el.closest('[data-router-system]');
-        const attrs = ['data-edit', 'data-i', 'value', 'id', 'data-router-test', 'data-router-suggest', 'data-router-edit', 'data-router-remove', 'data-router-edit-save', 'data-router-edit-test'];
+        const attrs = ['data-edit', 'data-i', 'value', 'id', 'data-pick', 'data-pick-filter', 'data-add-job', 'data-router-add-way', 'data-router-add-provider', 'data-router-test', 'data-router-suggest', 'data-router-edit', 'data-router-remove', 'data-router-edit-save', 'data-router-edit-test'];
         return { card: card?.dataset.routerSystem || '', id: el.id || '', attrs: attrs.filter(a => el.hasAttribute(a)).map(a => [a, el.getAttribute(a)]),
             start: el.selectionStart ?? null, end: el.selectionEnd ?? null };
     }
@@ -726,6 +913,15 @@ export function createRouter({ send, esc, switchHTML, onPaint, ui }) {
         root.querySelectorAll('[data-router-found]').forEach(b => b.addEventListener('click', () => { const url = b.dataset.routerFound; S.find = null; startAdd(url); }));
         root.querySelector('[data-router-add-look]')?.addEventListener('click', () => void look());
         root.querySelector('[data-router-add-cancel]')?.addEventListener('click', () => { S.adding = null; paint(); });
+        root.querySelectorAll('[data-router-add-way]').forEach(b => b.addEventListener('click', () => addWay(b.dataset.routerAddWay)));
+        root.querySelectorAll('[data-router-add-back]').forEach(b => b.addEventListener('click', () => addWay(b.dataset.routerAddBack)));
+        root.querySelectorAll('[data-router-add-provider]').forEach(b => b.addEventListener('click', () => void chooseProvider(b.dataset.routerAddProvider)));
+        root.querySelector('[data-router-add-provider-go]')?.addEventListener('click', () => void addProvider());
+        const adding = root.querySelector('[data-router-adding]');
+        if (adding?.querySelector('[data-pick-filter]')) {
+            filterPicks(adding);
+            adding.querySelector('[data-pick-filter]').addEventListener('input', () => filterPicks(adding));
+        }
         for (const id of ['router-add-address', 'router-add-name']) root.querySelector('#' + id)?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); void look(); } });
         const each = (attr, fn) => root.querySelectorAll(`[${attr}]`).forEach(b => b.addEventListener('click', () => fn(b.getAttribute(attr))));
         each('data-router-test', id => void test(id, false));

@@ -431,6 +431,28 @@ body.vscode-light .mod-state[data-tone="ok"]{color:#1D7A44}
 .router-busy-label{color:var(--muted)}
 .router-busy label{display:inline-flex;align-items:center;gap:6px}
 .router-saved{margin:6px 0 0;color:var(--muted);font-size:11px}
+/* 0.52: + Add system asks which (a computer, or one of your providers); a provider's models to tick; what a model costs. */
+.router-ways{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.router-way{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;padding:10px 12px;text-align:left;font:inherit;border:1px solid var(--btn-line,var(--border-strong));border-radius:var(--r-sm);background:transparent;color:var(--text)}
+.router-way:hover{border-color:var(--btn-line-hover,var(--text));background:var(--btn-wash,var(--surface2))}
+.router-way:focus-visible{outline:var(--btn-ring,1px solid var(--vscode-focusBorder,#0078d4));outline-offset:2px}
+.router-way-name{font-weight:var(--w-semi);color:var(--text-strong);overflow-wrap:anywhere}
+.router-way-hint{font-size:12px;font-weight:400;color:var(--muted);overflow-wrap:anywhere}
+.router-providers li>span:first-child{min-width:0;overflow-wrap:anywhere}.router-providers small{color:var(--muted)}
+.router-picks{display:flex;flex-direction:column;gap:6px}
+.router-pick-filter{width:100%;height:26px}
+.router-pick-list{display:flex;flex-direction:column;gap:2px;max-height:220px;overflow-y:auto;min-width:0}
+.router-jobs .router-pick{display:flex;align-items:flex-start;gap:6px;margin:0;padding:2px 0;font-size:12px;min-width:0}
+.router-pick[hidden]{display:none}
+.router-pick>span{min-width:0;overflow-wrap:anywhere}.router-pick>input{flex:none;margin-top:2px}
+.router-model small.router-price,.router-price{display:block;color:var(--muted);font-size:11px;font-weight:400}
+.router-need{color:var(--need-text)}
+.router-use>input{flex:none}
+.router-price-edit{grid-column:1/-1;display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;min-width:0;font-size:12px;color:var(--muted)}
+.router-price-edit label{display:inline-flex;align-items:center;gap:6px;color:var(--text)}
+.router-model.edit .router-price-edit input:not([type=checkbox]){width:72px;height:26px}
+.router-price-edit small.router-price{display:inline}
+@media(max-width:520px){.router-ways{grid-template-columns:1fr}}
 input[type=checkbox],input[type=radio]{height:auto;padding:0;accent-color:var(--accent-fill)}
 /* Settings -> Models -> Images (settingsImages.js): a generator's card, its state in words, its "Asks before each image"
    switch, and the one screen where a ComfyUI workflow's inputs are confirmed. Built on the Router's card. */

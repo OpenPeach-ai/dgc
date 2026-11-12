@@ -1,7 +1,8 @@
 /** DGC Router (0.51): the router_* commands Settings may send, checked before they reach DGC. Only the fields the
  *  protocol declares for each command (dgc/editor_protocol.py COMMAND_FIELDS), each of its own type and size; anything
  *  else is dropped, and a command that isn't one of these is refused. `key` goes only with router_update set_key and
- *  `token` only with router_hardware, as the protocol says. */
+ *  `token` only with router_hardware, as the protocol says. `provider` goes only with add_system, the prices only
+ *  with set_model. */
 export type RouterCommand = { type: string; action?: string } & Record<string, unknown>;
 
 const ACTIONS = new Set(["turn_on", "turn_off", "add_system", "edit_system", "remove_system", "enable_system",
@@ -61,6 +62,16 @@ export function routerCommand(raw: any): RouterCommand | undefined {
   if (typeof raw.use === "boolean") cmd.use = raw.use;
   if (typeof raw.memory_gb === "number" && raw.memory_gb > 0 && raw.memory_gb <= 4096) cmd.memory_gb = raw.memory_gb;
   if (raw.when_busy === "wait" || raw.when_busy === "default") cmd.when_busy = raw.when_busy;
+  // One of the saved providers as a system (router.providers): its id only; the address and the key are DGC's to read.
+  const provider = typeof raw.provider === "string" && /^provider_[0-9a-f]{32}$/.test(raw.provider) ? raw.provider : undefined;
+  if (action === "add_system" && provider) { cmd.provider = provider; delete cmd.base_url; }   // its address is the provider's
+  // What a model costs, US dollars per million tokens (router.prices): 0 to 10,000, or -1 for "not mine any more".
+  if (action === "set_model") {
+    for (const key of ["price_in", "price_out"]) {
+      const price = raw[key];
+      if (typeof price === "number" && Number.isFinite(price) && (price === -1 || (price >= 0 && price <= 10000))) cmd[key] = price;
+    }
+  }
   if (action === "set_key") {
     const key = text(raw.key, 16384);
     if (key === undefined || !system) return undefined;
@@ -68,6 +79,6 @@ export function routerCommand(raw: any): RouterCommand | undefined {
   }
   const needsSystem = !["turn_on", "turn_off", "add_system", "set_when_busy"].includes(action);
   if (needsSystem && !system) return undefined;
-  if (action === "add_system" && !base) return undefined;
+  if (action === "add_system" && !base && !cmd.provider) return undefined;
   return cmd;
 }
