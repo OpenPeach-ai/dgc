@@ -149,6 +149,10 @@ const STATES = [
   ["plugin-page", "plugins", async (p) => { await p.click("#browse-directory"); await p.click('.directory-open[data-open="airtable"]'); }],
   ["plugin-review", "plugins", async (p) => { await p.click("#browse-directory"); await p.click('[data-install="granola"]'); await p.waitForSelector("#confirm-plugin"); }],
   ["mcp"], ["mcp-form", "mcp", async (p) => { await p.waitForSelector('[data-mcp-edit="local-files"]'); await p.click('[data-mcp-edit="local-files"]'); }],
+  // MCP servers -> Add server (pips-09): the paste box, empty; filled from a claude mcp add command; and a paste it can't read.
+  ["mcp-add", "mcp", async (p) => { await p.click("#add-mcp"); await p.waitForSelector("#mcp-paste"); }],
+  ["mcp-add-filled", "mcp", async (p) => { await p.click("#add-mcp"); await p.fill("#mcp-paste", 'claude mcp add --transport http notion https://mcp.notion.com/mcp --header "X-Workspace: studio"'); await p.click("#mcp-paste-fill"); await p.waitForSelector("#mcp-paste-says:not([hidden])"); }],
+  ["mcp-add-unread", "mcp", async (p) => { await p.click("#add-mcp"); await p.fill("#mcp-paste", "claude mcp add --frobnicate notion https://mcp.notion.com/mcp"); await p.click("#mcp-paste-fill"); await p.waitForSelector("#mcp-paste-says.error"); }],
 ];
 async function open(width, theme) {
   const context = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });

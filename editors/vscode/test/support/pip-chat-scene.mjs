@@ -249,6 +249,64 @@ export const host = (opts) => `(${function (PIP, opts) {
         trigger: { kind: "schedule", schedule: { type: "daily", time: "09:00", timezone: "Asia/Kolkata" } }, label: "every day at 09:00", next_due_at: "2036-11-07T03:30:00Z" }] }),
     });
   }
+  // opts.apps: "Apps it can use" on its page (pips-09, Pips API 88; pass api: 88, and settings: true for the whole page):
+  // Airtable (a plugin, on), Stripe (a plugin, switched off), Gmail (an app with two addresses) and Google Calendar (an
+  // app with one). "one": Gmail has one address too. "refuse": a switch is refused. What is switched, added and
+  // disconnected changes what the next read answers, as DGC would (window.__apps).
+  // opts.allow: an email this Pip wrote waits as an Allow card ("event": a calendar event it drafted waits too).
+  if (opts.apps && !project) {
+    const alink = (c, toolkit, app, label, account) => ({ ...link, id: "applink_" + c.repeat(32), toolkit, app, status: "connected", label, server: "composio", account, reason: `To use your ${app}.` });
+    const state = window.__apps = { off: new Set(["stripe"]), next: 0, links: [alink("1", "gmail", "Gmail", "pitch@studio.example", "ca_pitch000"),
+      ...(opts.apps === "one" ? [] : [alink("2", "gmail", "Gmail", "dev@studio.example", "ca_dev00000")]), alink("3", "googlecalendar", "Google Calendar", "pitch@studio.example", "ca_cal00000"),
+      ...(opts.allow === "event" ? [alink("4", "googlecalendar", "Google Calendar", "family@home.example", "ca_family00")] : [])] };
+    const plugins = [["airtable", "Airtable"], ["stripe", "Stripe"]], names = { gmail: "Gmail", googlecalendar: "Google Calendar" };
+    const find = (r) => { const found = state.links.find((l) => l.id === r.link_id); if (!found) throw Error("That app connection card no longer exists."); return found; };
+    Object.assign(answers, {
+      // (As dgc/pip_app_switches.py lists them: the plugins, then each linked app with its accounts, then any other app switched off.)
+      get_pip_apps: () => { const out = plugins.map(([id, n]) => ({ id, name: n, kind: "plugin", on: !state.off.has(id) }));
+        for (const l of state.links.filter((v) => v.status === "connected")) { let row = out.find((a) => a.id === l.toolkit);
+          if (!row) out.push(row = { id: l.toolkit, name: l.app, kind: "app", on: !state.off.has(l.toolkit), accounts: [] }); row.accounts?.push(l.label); }
+        for (const id of [...state.off].sort()) if (!out.some((a) => a.id === id)) out.push({ id, name: names[id] || id, kind: "app", on: false });
+        return { pip_id: PIP, apps: out }; },
+      set_pip_app: (r) => { if (opts.apps === "refuse") throw Error("Only you can choose a Pip's apps, on this computer."); if (r.on) state.off.delete(r.app); else state.off.add(r.app); return { app: r.app, on: r.on }; },
+      add_pip_app_account: (r) => { if (state.off.has(r.app)) throw Error(`${names[r.app] || r.app} is switched off for this Pip on its page, so nothing ran.`);
+        let card = state.links.find((l) => l.toolkit === r.app && l.status === "requested");
+        if (!card) state.links.push(card = { ...link, id: "applink_" + String(++state.next).padStart(32, "0"), toolkit: r.app, app: names[r.app] || r.app, status: "requested", label: null,
+          reason: `One more ${names[r.app] || r.app} address for this Pip.`, updated_at: new Date().toISOString() });
+        return { link: { ...card, another: true } }; },
+      list_pip_app_links: () => ({ pip_id: PIP, composio: true, links: state.links.filter((l) => l.status !== "declined").map((l) => (l.status === "connected" ? { ...l } : { ...l, another: true })) }),
+      disconnect_pip_app_link: (r) => { const found = find(r); Object.assign(found, { status: "declined", label: null }); delete found.account; delete found.server; return { link: { ...found } }; },
+      decline_pip_app_link: (r) => { const found = find(r); found.status = "declined"; return { link: { ...found } }; },
+      // Connect on the card for one more address: Composio's accounts that aren't this Pip's yet, then the one chosen.
+      start_pip_app_link: (r) => { const found = find(r), spare = [{ id: "ca_hello0000", label: "hello@studio.example" }, { id: "ca_books0000", label: "books@studio.example" }];
+        if (!r.account) return { link: { ...found, another: true }, redirect_url: null, accounts: spare, wanted: "" };
+        const chosen = spare.find((a) => a.id === r.account); if (!chosen) throw Error("That account isn't in Composio now. Choose another.");
+        Object.assign(found, { status: "connected", label: chosen.label, server: "composio", account: chosen.id }); return { link: { ...found }, connected: true }; },
+    });
+    if (opts.allow) {
+      const source = { run_id: run("2"), pip_id: PIP, workspace_id: W, job_version: 2, lifecycle_revision: 0, result_digest: "e".repeat(64) };
+      const waiting = (prefix, c, field, value) => ({ id: prefix + c.repeat(32), pip_id: PIP, workspace_id: W, source_run_id: run("2"), status: "pending", digest: "c".repeat(64), expired: false, expires_at: "2099-10-05T06:00:00Z", action_id: null,
+        payload: { schema_version: 1, source, [field]: value } });
+      const mail = waiting("maildraft_", "3", "message", { recipient_email: "priya@client.example", subject: "The cover for Friday's launch", body: "Hi Priya,\n\nThe cover is attached. Tell me if the date should move.\n\nThanks" });
+      const meet = waiting("caldraft_", "4", "event", { summary: "Launch review with Priya", description: "Thirty minutes on the cover.", start_datetime: "2026-12-01T11:00:00+05:30", end_datetime: "2026-12-01T11:30:00+05:30", timezone: "Asia/Kolkata" });
+      const row = (d, subject) => ({ id: d.id, pip_id: PIP, workspace_id: W, status: d.status, expired: false, subject, digest: d.digest, source_run_id: d.source_run_id, expires_at: d.expires_at, action_id: null });
+      const accounts = () => ({ server: "composio", connection_digest: "a".repeat(64), accounts: state.links.filter((l) => l.status === "connected").map((l) => ({ id: l.account, label: l.label, toolkit: l.toolkit })) });
+      const prepared = (r, kind, field, schema) => ({ id: "appaction_" + "2".repeat(32), pip_id: PIP, workspace_id: W, source_run_id: run("2"), status: "pending", digest: "d".repeat(64), expires_at: "2099-10-05T06:00:00Z", receipt: null,
+        payload: { schema_version: schema, kind, source, server: r.server, connection_digest: r.connection_digest, schema_digest: r.schema_digest, account: r.account, [field]: r[field] } });
+      let made = null;
+      Object.assign(answers, {
+        list_pip_message_drafts: () => ({ drafts: mail.status === "pending" ? [row(mail, mail.payload.message.subject)] : [], next_cursor: null }), get_pip_message_draft: () => ({ draft: mail }),
+        ...(opts.allow === "event" ? { list_pip_calendar_drafts: () => ({ drafts: meet.status === "pending" ? [row(meet, meet.payload.event.summary)] : [], next_cursor: null }), get_pip_calendar_draft: () => ({ draft: meet }) } : {}),
+        list_pip_accounts: accounts,
+        inspect_pip_send_connection: () => ({ server: "composio", connection_digest: "a".repeat(64), tool: "GMAIL_SEND_EMAIL", schema_digest: "b".repeat(64), account_required: true }),
+        inspect_pip_calendar_connection: () => ({ server: "composio", connection_digest: "a".repeat(64), tool: "GOOGLECALENDAR_CREATE_EVENT", schema_digest: "b".repeat(64), account_required: true }),
+        prepare_pip_message_draft: (r) => ({ action: made = prepared(r, "gmail_send", "message", 1) }), prepare_pip_calendar_draft: (r) => ({ action: made = prepared(r, "calendar_create", "event", 2) }),
+        accept_pip_app_action: () => { (made.payload.kind === "gmail_send" ? mail : meet).status = "prepared";
+          return { action: { ...made, status: "succeeded", receipt: made.payload.kind === "gmail_send" ? { provider: "Gmail", message_id: "mail_123", meaning: "Provider accepted the message; delivery to the recipient is not confirmed." }
+            : { provider: "Google Calendar", event_id: "abcde12345", meaning: "Provider confirmed creation of this calendar event." } } }; },
+      });
+    }
+  }
   // opts.keys: a plugin this Pip asked for needs a key (pips-10, Pips API 81): one card, with one box (or, "two", two).
   if (opts.keys) {
     const KEYCARD = "pipplugin_" + "a".repeat(32), needs = [{ name: "AIRTABLE_TOKEN", label: "Airtable token", server: "airtable" }, ...(opts.keys === "two" ? [{ name: "AIRTABLE_BASE", label: "Base ID", server: "airtable" }] : [])];

@@ -19,7 +19,7 @@ export function appLink(value, pip) {
 }
 
 export function appLinksPage(value, pip) {
-  if (!value || value.pip_id !== pip || !Array.isArray(value.links) || value.links.length > 16 || typeof value.composio !== 'boolean') {
+  if (!value || value.pip_id !== pip || !Array.isArray(value.links) || value.links.length > 24 || typeof value.composio !== 'boolean') {
     throw new Error('These cards didn’t load. Refresh to try again.');
   }
   return { links: value.links.map(link => appLink(link, pip)), composio: value.composio };
@@ -79,6 +79,10 @@ export function appLinkMarkup(link, { esc, busy = false, composio = true, host =
     body = head(`Couldn’t connect ${app}`, esc(link.error || 'Try again.'))
       + `<div class="dgc-card-actions app-link-actions"><button type="button" class="primary" data-app-link-settings="${id}" data-app-link-app="${app}">Browse plugins</button>`
       + `<button type="button" class="quiet" data-app-link-start="${id}"${off}>Try again</button>${no}</div>`;
+  } else if (link.another === true) {
+    // One more address of an app it already has (pips-09): asked on its page, or by the Pip. Chosen as any other.
+    body = head(`Add another ${app} address to ${esc(pipName)}`, esc(link.reason))
+      + `<div class="dgc-card-actions app-link-actions"><button type="button" class="primary" data-app-link-start="${id}"${off}>${busy ? 'Opening…' : 'Choose one'}</button>${no}</div>`;
   } else {
     body = head(link.toolkit === 'gmail' ? `Link Gmail to ${esc(pipName)}` : `Connect ${app}`, esc(link.reason))
       + (link.toolkit === 'gmail' ? '<p class="app-link-note">Linking Gmail to this Pip also lets its email-trigger routines run. If Composio already has Gmail accounts, you choose which one; this does not require the Google Workspace plugin.</p>' : '')
@@ -89,12 +93,16 @@ export function appLinkMarkup(link, { esc, busy = false, composio = true, host =
 
 /** A Pip's email draft as Grok's Allow card: what it would send, and the user's Send / Always allow.
  * Edit changes it right here (`edit` holds the fields as typed); Send sends what the card shows. */
-export function allowCardMarkup(draft, { esc, link = null, busy = false, pipName = 'Your Pip', edit = null }) {
-  const m = draft.payload.message, id = esc(draft.id), off = busy ? ' disabled' : '', editing = Boolean(link && edit);
-  const from = link ? `From ${esc(link.label || 'your Gmail')}` : 'No Gmail connected to it yet';
-  const actions = link
-    ? `<button type="button" class="primary" data-allow-send="${id}"${off}>${busy ? 'Sending…' : 'Send'}</button>`
-      + `<button type="button" class="quiet" data-allow-always="${id}"${off} title="Send this, and let ${esc(pipName)} send emails from this account without asking; take it back in its Settings">Always allow</button>`
+export function allowCardMarkup(draft, { esc, link = null, links = null, fromOpen = false, busy = false, pipName = 'Your Pip', edit = null }) {
+  const several = Array.isArray(links) && links.length > 1, has = several || link;
+  const m = draft.payload.message, id = esc(draft.id), off = busy ? ' disabled' : '', editing = Boolean(has && edit);
+  // With several addresses nothing is chosen for you: Send and Always allow wait until you pick one (pips-09).
+  const wait = several && !link ? ' disabled title="Choose which address sends it first"' : '';
+  const from = several ? (link ? 'Sends from the address you chose.' : `${esc(pipName)} has ${links.length} Gmail addresses. Choose which one sends this.`)
+    : link ? `From ${esc(link.label || 'your Gmail')}` : 'No Gmail connected to it yet';
+  const actions = has
+    ? `<button type="button" class="primary" data-allow-send="${id}"${wait || off}>${busy ? 'Sending…' : 'Send'}</button>`
+      + `<button type="button" class="quiet" data-allow-always="${id}"${wait || `${off} title="Send this, and let ${esc(pipName)} send emails from this account without asking; take it back in its Settings"`}>Always allow</button>`
       + editButton(id, editing, off)
     : `<button type="button" class="primary" data-email-draft="${id}"${off}>Choose account…</button>`;
   const shown = editing
@@ -104,8 +112,24 @@ export function allowCardMarkup(draft, { esc, link = null, busy = false, pipName
       + `<dl class="allow-meta"><dt>To</dt><dd>${esc(m.recipient_email)}</dd><dt>Subject</dt><dd>${esc(m.subject)}</dd></dl><div class="allow-body">${esc(m.body)}</div></details>`;
   return `<div class="dgc-card allow-card" data-allow-card="${id}"${editing ? ' data-editing' : ''} role="group" aria-label="Send this email?">`
     + `<div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">@</span><div class="dgc-card-words app-link-words"><strong>Send email to ${esc(m.recipient_email)}?</strong><small>${from}</small></div></div>`
+    + (several ? fromMenu(esc, draft.id, links, link, { label: 'From', none: 'Choose an address', menu: 'Send from', open: fromOpen, busy }) : '')
     + askedAgainLine(esc, draft) + shown + editError(esc, edit)
     + `<div class="dgc-card-actions app-link-actions">${actions}<button type="button" class="quiet" data-allow-dismiss="${id}"${off}>Don’t send</button></div></div>`;
+}
+
+const CHECK = '<svg class="dgc-menu-check" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const CHEVRON = '<svg class="allow-from-chevron" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+/** Which of the Pip's addresses an Allow card uses, when it has two or more for that app: a button that opens the shared
+ * menu (media/shared/menu.css), one row an address, a check on the one picked. None is picked until the user picks. */
+export function fromMenu(esc, draftId, links, picked, { label, none, menu, open = false, busy = false }) {
+  const id = esc(draftId), off = busy ? ' disabled' : '';
+  const rows = links.map(l => { const on = Boolean(picked && picked.account === l.account);
+    return `<button type="button" role="menuitemradio" class="dgc-menu-row${on ? ' is-selected' : ''}" aria-checked="${on}" data-allow-from-pick="${esc(l.account)}" data-allow-from-for="${id}"${off}>`
+      + `<span class="dgc-menu-label">${esc(l.label || l.account)}</span>${CHECK}</button>`; }).join('');
+  return `<div class="allow-from" data-allow-from-row="${id}"><span class="allow-from-label" id="allow-from-label-${id}">${esc(label)}</span>`
+    + `<button type="button" class="allow-from-btn${picked ? '' : ' is-empty'}" id="allow-from-${id}" data-allow-from="${id}" aria-haspopup="menu" aria-expanded="${open}" aria-labelledby="allow-from-label-${id} allow-from-${id}"${off}>`
+    + `<span class="allow-from-value">${esc(picked ? picked.label || picked.account : none)}</span>${CHEVRON}</button>`
+    + (open ? `<div class="dgc-menu allow-from-menu" role="menu" aria-label="${esc(menu)}" data-allow-from-menu="${id}">${rows}</div>` : '') + '</div>';
 }
 
 /** Why a card came back though you chose Always allow: its grant is pinned, and what it was pinned to changed. */
@@ -116,13 +140,16 @@ export function askedAgainLine(esc, draft) {
 }
 
 /** A Pip's calendar event as an Allow card, like the email one: Add event, Always allow, Edit, Don't add. */
-export function calendarCardMarkup(draft, { esc, link = null, busy = false, pipName = 'Your Pip', edit = null }) {
-  const e = draft.payload.event, id = esc(draft.id), off = busy ? ' disabled' : '', editing = Boolean(link && edit);
-  const to = link ? `To ${esc(link.label || 'your Google Calendar')}` : 'No Google Calendar connected to it yet';
+export function calendarCardMarkup(draft, { esc, link = null, links = null, fromOpen = false, busy = false, pipName = 'Your Pip', edit = null }) {
+  const several = Array.isArray(links) && links.length > 1, has = several || link;
+  const e = draft.payload.event, id = esc(draft.id), off = busy ? ' disabled' : '', editing = Boolean(has && edit);
+  const wait = several && !link ? ' disabled title="Choose which calendar it goes to first"' : '';
+  const to = several ? (link ? 'Goes to the calendar you chose.' : `${esc(pipName)} has ${links.length} Google Calendar addresses. Choose which one this goes to.`)
+    : link ? `To ${esc(link.label || 'your Google Calendar')}` : 'No Google Calendar connected to it yet';
   const guests = e.attendees || [], repeat = e.repeat;
-  const actions = link
-    ? `<button type="button" class="primary" data-allow-create="${id}"${off}>${busy ? 'Adding…' : (editing ? edit.values.guests.trim() : guests.length) ? 'Add and invite' : 'Add event'}</button>`
-      + `<button type="button" class="quiet" data-allow-create-always="${id}"${off} title="Add this, and let ${esc(pipName)} add events to this calendar without asking; take it back in its Settings">Always allow</button>`
+  const actions = has
+    ? `<button type="button" class="primary" data-allow-create="${id}"${wait || off}>${busy ? 'Adding…' : (editing ? edit.values.guests.trim() : guests.length) ? 'Add and invite' : 'Add event'}</button>`
+      + `<button type="button" class="quiet" data-allow-create-always="${id}"${wait || `${off} title="Add this, and let ${esc(pipName)} add events to this calendar without asking; take it back in its Settings"`}>Always allow</button>`
       + editButton(id, editing, off)
     : `<button type="button" class="primary" data-email-draft="${id}"${off}>Choose account…</button>`;
   const shown = editing
@@ -140,6 +167,7 @@ export function calendarCardMarkup(draft, { esc, link = null, busy = false, pipN
       + '</dl>' + (e.description ? `<div class="allow-body">${esc(e.description)}</div>` : '') + '</details>';
   return `<div class="dgc-card allow-card calendar-card" data-allow-card="${id}"${editing ? ' data-editing' : ''} role="group" aria-label="Add this event?">`
     + `<div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">▦</span><div class="dgc-card-words app-link-words"><strong>Add this event?</strong><small>${to}</small></div></div>`
+    + (several ? fromMenu(esc, draft.id, links, link, { label: 'To', none: 'Choose a calendar', menu: 'Add to', open: fromOpen, busy }) : '')
     + askedAgainLine(esc, draft) + shown + editError(esc, edit)
     + `<div class="dgc-card-actions app-link-actions">${actions}<button type="button" class="quiet" data-allow-dismiss="${id}"${off}>Don’t add</button></div></div>`;
 }

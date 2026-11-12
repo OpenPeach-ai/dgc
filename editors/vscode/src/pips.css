@@ -1343,3 +1343,26 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
    --glass-bottom, inherited through the shadow root); the page keeps that room, and a row that takes focus under a bar
    scrolls clear of it with room for its focus ring (--glass-clear-*). All are 0 inside a Pip, and in a Pips tab, which has neither bar. */
 .pip-app-root{padding-top:var(--glass-top,0px);padding-bottom:var(--glass-bottom,0px);scroll-padding-block:var(--glass-clear-top,0px) var(--glass-clear-bottom,0px)}
+/* Apps it can use (pips-09): one row an app with its switch; its addresses under it, each a short row with Disconnect,
+   then "Add another address". An app switched off reads muted (its name and its addresses); its switch stays as clear. */
+.pip-apps-list>.pip-app>.pip-app-addresses{border-top:1px solid var(--pip-edge)}
+.pip-app-addresses>.pip-page-row.sub{padding-left:28px}
+.pip-app-address .row-words>span{overflow-wrap:anywhere}
+.pip-app.is-off>.pip-page-row .row-words>strong,.pip-app.is-off .pip-app-address .row-words>span{color:var(--muted)}
+.pip-app-more{justify-content:flex-end}.pip-app-more>button{margin-left:auto}
+.pip-app-confirm{flex-wrap:wrap;justify-content:flex-end;color:var(--text-2)}
+.pip-apps>p.error{margin:0;padding:8px 14px 10px;font-size:12px}
+/* An Allow card when its Pip has two or more addresses for the app: "From" and a button that opens the shared menu, in
+   the card's own flow (nothing floats over the chat or is cut by the card), none picked until you pick. */
+.allow-from{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;min-width:0;font-size:12px}
+.allow-from-label{flex:none;color:var(--muted)}
+button.allow-from-btn{display:inline-flex;align-items:center;gap:6px;flex:0 1 auto;min-width:0;max-width:100%;height:var(--btn-h);min-height:0;margin:0;padding:0 8px 0 10px;border:1px solid var(--btn-line);border-radius:var(--btn-r);background:transparent;color:var(--btn-text);font:var(--w-med,500) var(--t-sm,12px)/1 var(--sans);box-shadow:none;cursor:pointer;transition:var(--btn-move)}
+button.allow-from-btn:hover:not(:disabled),button.allow-from-btn[aria-expanded=true]{border-color:var(--btn-line-hover);background:var(--btn-wash);color:var(--btn-text)}
+button.allow-from-btn:focus-visible{outline:var(--btn-ring);outline-offset:2px}
+button.allow-from-btn:disabled{opacity:.55;cursor:default}
+.allow-from-btn.is-empty .allow-from-value{color:var(--text-2)}
+.allow-from-value{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.allow-from-chevron{flex:none;color:var(--muted)}
+.allow-from-menu{flex:1 1 100%;min-width:0;box-sizing:border-box}
+.allow-from-menu .dgc-menu-row .dgc-menu-label{flex:1 1 auto}
+@media(forced-colors:active){button.allow-from-btn{border-color:ButtonText}}

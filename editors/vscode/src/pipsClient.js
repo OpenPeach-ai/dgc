@@ -51,7 +51,8 @@ let effortByKeys=false;      // the thinking slider's focus ring: see markEffort
 let effortHeld=false,effortRedraw=false;   // the thinking slider is being dragged, and a redraw waits for its release
 import {mountHomePips} from './pipHomeStrip.js';
 import {healthMarkup,failedRoutine,foldRoutineLines,failedRoutineMarkup,quietLineMarkup,noteMarkup,routineNotes,withNotes} from './pipRoutineHealth.js';
-import {appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup,appLinkSettledMarkup,allowCardMarkup,calendarCardMarkup} from './pipAppLinks.js';
+import {appLink,appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup,appLinkSettledMarkup,allowCardMarkup,calendarCardMarkup} from './pipAppLinks.js';
+import {pipAppsPage,pipAppSwitched,pipAppsMarkup} from './pipApps.js';
 import {pipKeysPage,pipKeyResult,waitingKeys,pipKeyCardMarkup,pipKeysPageMarkup,pipKeyRemovedNote} from './pipKeys.js';
 import {pluginsPage,pluginResult,keyRequests,keyCardMarkup,shownPluginCards,pluginForServer,installedForServer,pluginCardMarkup,pluginActionMarkup,pluginsPageMarkup,pluginUsesPage,pluginUsesMarkup,argumentValues,editedArguments,PLUGIN_LEVELS} from './pipPlugins.js';
 import {attentionPage,waitingOn,needWords,attentionMarkup,attentionCards,attentionSpot,setupCardMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
@@ -1649,6 +1650,48 @@ function linkedAppsMarkup(off){
  if(appsSettingsPip!==S.selected){appsSettingsPip=S.selected;void loadAppLinks();}
  const connected=(S.appLinks||[]).filter(l=>l.status==='connected');if(!connected.length)return '';
  return `<section class="pip-page-group" aria-label="Linked apps"><h3 class="pip-page-label">Linked apps${infoTip('pipLinkedSays','Linked apps',`It reads and acts only on these accounts. To change one, Disconnect, then ask ${esc(S.pip?.name||'it')} again and choose.`)}</h3>${connected.map(l=>`<div class="pip-page-row static" data-linked-app="${esc(l.id)}"><span class="row-words"><strong>${esc(l.app)}</strong><small>${esc(l.label||'Its linked account')}</small></span><button type="button" class="quiet pill" data-app-link-disconnect="${esc(l.id)}"${off||appLinkBusy?' disabled':''}>Disconnect</button></div>`).join('')}</section>`;
+}
+// "Apps it can use" on a Personal Pip's page (pips-09, Pips API 88): a switch per app (every app on until switched
+// off; its link stays), each app's addresses with Disconnect, and one more address of an app it has. Below API 88 the
+// page keeps "Linked apps", as before.
+const appsUse={pip:'',asked:'',value:null,error:'',busy:false,seq:0,confirm:''};
+function appsUseShown(){return S.apiVersion>=88&&!remoteHost&&personalPip();}
+async function loadAppsUse(){
+ if(!appsUseShown()||!usable())return;
+ const token=scope(),pip=S.selected,sequence=++appsUse.seq;appsUse.asked=pip;
+ try{const value=pipAppsPage(await send('get_pip_apps',{pip_id:pip}),pip);if(token!==scope()||sequence!==appsUse.seq||S.selected!==pip)return;
+  appsUse.pip=pip;appsUse.value=value;appsUse.error='';render();}
+ catch(error){if(token===scope()&&sequence===appsUse.seq&&S.selected===pip){if(appsUse.pip!==pip){appsUse.pip=pip;appsUse.value=null;}appsUse.error=errorText(error);render();}}
+}
+function appsUseMarkup(off){
+ if(!appsUseShown())return linkedAppsMarkup(off);
+ if(appsSettingsPip!==S.selected){appsSettingsPip=S.selected;void loadAppLinks();}
+ if(appsUse.asked!==S.selected)void loadAppsUse();
+ const mine=appsUse.pip===S.selected;
+ return pipAppsMarkup(mine?appsUse.value:null,{esc,links:S.appLinks||[],busy:off||appsUse.busy||!!appLinkBusy,error:mine?appsUse.error:'',pipName:S.pip?.name||'This Pip',confirm:appsUse.confirm,
+  waiting:shownAppLinks(S.appLinks).filter(l=>l.another===true).map(l=>l.toolkit)});
+}
+async function setAppUse(app,on){
+ const row=appsUse.pip===S.selected?(appsUse.value||[]).find(a=>a.id===app):null;
+ if(!row||appsUse.busy||!usable()||!appsUseShown()){render();return;}
+ const token=scope(),pip=S.selected,name=S.pip?.name||'this Pip';let done=false;
+ appsUse.busy=true;appsUse.error='';appsUse.confirm='';row.on=on;render();
+ try{pipAppSwitched(await send('set_pip_app',{pip_id:pip,app,on}),app,on);if(token!==scope()||S.selected!==pip)return;
+  done=true;S.notice=on?`${row.name} is on for ${name}.`:`${row.name} is off for ${name}. Its sign-in stays, so switching it back on needs nothing more.`;}
+ catch(error){if(token===scope()&&S.selected===pip){row.on=!on;appsUse.error=errorText(error);}}
+ // (Refused: the switch goes back and the reason stays in sight; the list is read again only after a change.)
+ finally{appsUse.busy=false;if(token===scope()&&S.selected===pip){render();if(done)void loadAppsUse();}}
+}
+// One more address of an app it has: DGC raises its Connect card, which shows where Connect cards show (its chat).
+async function addAppAddress(app){
+ if(appsUse.busy||!usable()||!appsUseShown())return;
+ const token=scope(),pip=S.selected;appsUse.busy=true;appsUse.error='';appsUse.confirm='';render();
+ try{const link=appLink((await send('add_pip_app_account',{pip_id:pip,app}))?.link,pip);if(token!==scope()||S.selected!==pip)return;
+  if(link.toolkit!==app||link.status==='connected')throw Error('DGC answered about another app card. Refresh the Pip.');
+  putAppLink(link);appLinkChoices.delete(link.id);
+  S.tab='chat';rememberView();void loadMessages();}
+ catch(error){if(token===scope()&&S.selected===pip)appsUse.error=errorText(error);}
+ finally{appsUse.busy=false;if(token===scope()){render();watchAppSignIn();}}
 }
 function grantsMarkup(){
  if(S.apiVersion<41||!S.pip||S.pip.source_policy?.mode!=='personal')return '';
@@ -4056,10 +4099,11 @@ async function loadEmailDrafts(calendar=false){
 function emailDraftCards(){
  if(remoteHost||S.apiVersion<32||!personalPip())return '';
  // An email it wrote is Grok's Allow card: what it would send, and Send / Always allow right here.
- const gmail=connectedLink('gmail'),calendar=connectedLink('googlecalendar'),pipName=S.pip?.name||'This Pip';
+ const gmail=connectedLinks('gmail'),calendar=connectedLinks('googlecalendar'),pipName=S.pip?.name||'This Pip';
+ const from=(d,links)=>({link:pickedLink(d.id,links),links,fromOpen:allowFromOpen===d.id});
  const full=d=>S.apiVersion>=43?draftDetails.get(d.id+':'+d.digest):null,open=d=>d.status==='pending'&&!d.expired&&full(d);
- const allow=(S.emailDrafts||[]).filter(open).map(d=>allowCardMarkup(full(d),{esc,link:gmail,busy:allowBusy===d.id||S.busy||archived(),pipName,edit:cardEdit(d)})).join('')
-  +(S.apiVersion>=35?S.calendarDrafts||[]:[]).filter(open).map(d=>calendarCardMarkup(full(d),{esc,link:calendar,busy:allowBusy===d.id||S.busy||archived(),pipName,edit:cardEdit(d)})).join('');
+ const allow=(S.emailDrafts||[]).filter(open).map(d=>allowCardMarkup(full(d),{esc,...from(d,gmail),busy:allowBusy===d.id||S.busy||archived(),pipName,edit:cardEdit(d)})).join('')
+  +(S.apiVersion>=35?S.calendarDrafts||[]:[]).filter(open).map(d=>calendarCardMarkup(full(d),{esc,...from(d,calendar),busy:allowBusy===d.id||S.busy||archived(),pipName,edit:cardEdit(d)})).join('');
  return allow+[...(S.emailDrafts||[]).filter(d=>!full(d)),...(S.apiVersion>=35?(S.calendarDrafts||[]).filter(d=>!full(d)):[]),...(S.apiVersion>=37?(S.connectorDrafts||[]).filter(d=>!pluginDraft(d)):[])].filter(d=>d.status==='pending'&&!d.expired).map(d=>{const label=d.id.startsWith('conndraft_')?'App action for you to check':d.id.startsWith('caldraft_')?'Calendar event for you to check':'Email for you to check';return `<div class="chat-setup-review" aria-label="${label}"><span class="chat-setup-label">${label} <small>${esc(d.subject)}</small></span><button type="button" data-email-draft="${esc(d.id)}"${S.busy?' disabled':''}>Review</button></div>`;}).join('')+(S.emailDraftError?errorMarkup(S.emailDraftError):'')+(S.calendarDraftError?errorMarkup(S.calendarDraftError):'')+(S.connectorDraftError?errorMarkup(S.connectorDraftError):'');
 }
 // A Personal Pip's own apps (pip_app_links): the Connect card it asks for with connect_app.
@@ -4079,7 +4123,9 @@ function appLinkCards(){
  const cards=shownAppLinks(S.appLinks).map(link=>appLinkMarkup(link,{esc,busy:appLinkBusy===link.id||S.busy||archived(),composio:S.composio!==false,host:appLinkHosts.get(link.id)||'',pipName,choice:appLinkChoices.get(link.id)||null}));
  return cards.join('')+(S.appLinksError?`<p class="app-link-note" role="alert">${esc(S.appLinksError)}</p>`:'');
 }
-function putAppLink(link){S.appLinks=[link,...(S.appLinks||[]).filter(l=>l.id!==link.id&&l.toolkit!==link.toolkit)];}
+// A card that changed takes its place in the list. A Pip can hold several accounts of one app (pips-09): its other
+// linked accounts stay; a new open or linked card replaces that app's other cards that aren't linked.
+function putAppLink(link){S.appLinks=[link,...(S.appLinks||[]).filter(l=>l.id!==link.id&&(l.toolkit!==link.toolkit||(l.status==='connected'?!(link.status==='connected'&&l.account===link.account):link.status==='declined')))];}
 // A Personal Pip's plugins (pip_plugins): it asks with use_plugin and you Allow it on its card. What it
 // would then do in a plugin is an Allow card here: Allow, Always allow (never for a plugin that can
 // move money) or Don't. The same reviewed steps as the connector dialogs, without them.
@@ -4421,7 +4467,7 @@ function routinePopoverMarkup(){
 function openPipPage(view='info'){
  const p=S.pip;if(!p)return;
  S.pipPage=view;draft.pipPageName=p.name;draft.pipPageTitle=profile(p.profile).title;pageNameDirty=false;titleEditing=false;lookDirty=false;routineEditing='';routineError='';
- void loadRoutines();void loadAppLinks();void loadPlugins();void loadNotes();void loadCareful();void loadEyes();void loadLevel();void loadPipBackup();void loadTemplate();void loadLogins();void loadArtifacts();noteConfirmAll=false;sitesAll=false;loginsState.confirm='';pipKeyConfirm='';
+ void loadRoutines();void loadAppLinks();void loadPlugins();void loadNotes();void loadCareful();void loadEyes();void loadLevel();void loadPipBackup();void loadTemplate();void loadLogins();void loadArtifacts();void loadAppsUse();noteConfirmAll=false;sitesAll=false;loginsState.confirm='';pipKeyConfirm='';appsUse.confirm='';
 }
 function putProfile(pipId,value){
  const p=profile(value);if(S.pip?.id===pipId)S.pip={...S.pip,profile:p};S.jobs=S.jobs.map(j=>j.id===pipId?{...j,profile:p}:j);
@@ -4466,7 +4512,7 @@ function pipPageMarkup(){
  const body=tab==='links'?linksMarkup(items,{esc,formatDate:shortDate,loading,error})
   :tab==='media'?mediaMarkup(items,{esc,imageSrc:messageImageSrc,loading,error})
   :tab==='files'?filesMarkup(items,mine?shared.desk:null,{esc,formatDate:shortDate,loading,error,hasComputer:computerState.pip===S.selected&&!!computerState.value?.granted})
-  :(templateShown()?templateMarkup(templateState.pip===p.id?templateState.value:null,{esc,busy:off||templateState.busy,error:templateState.pip===p.id?templateState.error:'',pipName:p.name}):'')+infoMarkup({esc,goal:p.goal,routines:routinesSectionMarkup(true),notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+linkedAppsMarkup(off)+computerRowMarkup(p,off)+(S.apiVersion>=53&&!remoteHost&&personalPip()?eyesMarkup(eyesState.pip===p.id?eyesState.value:null,{esc,busy:off||eyesState.busy,error:eyesState.error,pipName:p.name}):'')+(levelShown()?levelMarkup(levelState.pip===p.id?levelState.value:null,{esc,busy:off||levelState.busy,error:levelState.error,pipName:p.name,payLimit:payLimitFor(levelState.pip===p.id?levelState.value:null),when:at=>shortDate(at)}):'')+artifactsSectionMarkup(p,off)+(S.apiVersion>=44&&!remoteHost&&p.computer_plan?carefulMarkup(carefulState.pip===p.id?carefulState.value:null,{esc,busy:off||carefulState.busy,error:carefulState.error,pipName:p.name,showAll:sitesAll}):'')+(S.apiVersion>=56&&!remoteHost&&p.computer_plan?loginsMarkup(loginsState.pip===p.id?loginsState.value:null,{esc,busy:off||loginsState.busy,error:loginsState.error,pipId:p.id,pipName:p.name,names:pipNames(),confirm:loginsState.confirm}):'')+(pipKeysShown()?pipKeysPageMarkup(S.pipKeys,{esc,busy:off||!!pipKeyBusy,pipName:p.name,confirm:pipKeyConfirm,error:S.pipKeysError,level:levelState.pip===p.id?levelState.value?.level||'':''}):'')+(S.apiVersion>=44&&!remoteHost?notesMarkup(S.notesPip===p.id?S.notes:null,{esc,busy:off||notesBusy,error:S.notesError,pipName:p.name,adding:draft.noteAdd,confirmAll:noteConfirmAll}):'')+(workingNotesShown()?workingNotesMarkup(S.workingNotesPip===p.id?S.workingNotes:null,{esc,busy:off||workingNotesBusy,error:S.workingNotesError,pipName:p.name,editing:workingNotesEditing,text:draft.workingNotesText})+dailyLogMarkup(S.dailyLogPip===p.id?S.dailyLog:null,{esc,error:S.dailyLogError,pipName:p.name,today:localDay()}):'')+allowedMarkup()+(S.apiVersion>=44&&!remoteHost?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
+  :(templateShown()?templateMarkup(templateState.pip===p.id?templateState.value:null,{esc,busy:off||templateState.busy,error:templateState.pip===p.id?templateState.error:'',pipName:p.name}):'')+infoMarkup({esc,goal:p.goal,routines:routinesSectionMarkup(true),notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+appsUseMarkup(off)+computerRowMarkup(p,off)+(S.apiVersion>=53&&!remoteHost&&personalPip()?eyesMarkup(eyesState.pip===p.id?eyesState.value:null,{esc,busy:off||eyesState.busy,error:eyesState.error,pipName:p.name}):'')+(levelShown()?levelMarkup(levelState.pip===p.id?levelState.value:null,{esc,busy:off||levelState.busy,error:levelState.error,pipName:p.name,payLimit:payLimitFor(levelState.pip===p.id?levelState.value:null),when:at=>shortDate(at)}):'')+artifactsSectionMarkup(p,off)+(S.apiVersion>=44&&!remoteHost&&p.computer_plan?carefulMarkup(carefulState.pip===p.id?carefulState.value:null,{esc,busy:off||carefulState.busy,error:carefulState.error,pipName:p.name,showAll:sitesAll}):'')+(S.apiVersion>=56&&!remoteHost&&p.computer_plan?loginsMarkup(loginsState.pip===p.id?loginsState.value:null,{esc,busy:off||loginsState.busy,error:loginsState.error,pipId:p.id,pipName:p.name,names:pipNames(),confirm:loginsState.confirm}):'')+(pipKeysShown()?pipKeysPageMarkup(S.pipKeys,{esc,busy:off||!!pipKeyBusy,pipName:p.name,confirm:pipKeyConfirm,error:S.pipKeysError,level:levelState.pip===p.id?levelState.value?.level||'':''}):'')+(S.apiVersion>=44&&!remoteHost?notesMarkup(S.notesPip===p.id?S.notes:null,{esc,busy:off||notesBusy,error:S.notesError,pipName:p.name,adding:draft.noteAdd,confirmAll:noteConfirmAll}):'')+(workingNotesShown()?workingNotesMarkup(S.workingNotesPip===p.id?S.workingNotes:null,{esc,busy:off||workingNotesBusy,error:S.workingNotesError,pipName:p.name,editing:workingNotesEditing,text:draft.workingNotesText})+dailyLogMarkup(S.dailyLogPip===p.id?S.dailyLog:null,{esc,error:S.dailyLogError,pipName:p.name,today:localDay()}):'')+allowedMarkup()+(S.apiVersion>=44&&!remoteHost?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
  return `<div class="pip-page">${head}${healthMarkup(p.routine_health,{busy:off,canSignIn:!remoteHost})}${pageTabsMarkup(tab)}<div class="pip-page-body" data-page="${tab}">${body}</div></div>`;
 }
 // What it may do without asking (an Always allow you gave): only shown when there is one, and each
@@ -4547,6 +4593,7 @@ async function appLinkAction(type,id,quiet=false,fields={}){
   if(answer.accounts)appLinkChoices.set(id,{accounts:answer.accounts,wanted:answer.wanted});
   if(type==='start_pip_app_link'&&answer.link.status==='authorizing'){appLinkUntil=Date.now()+5*60*1000;if(!answer.opened)S.notice='DGC could not open your browser. Choose Open sign-in again.';}
   if(answer.link.status==='connected'){appLinkChoices.delete(id);appLinkSettled.add(id);void loadMessages();}
+  if(answer.link.status==='connected'||type==='disconnect_pip_app_link')void loadAppsUse();
   else if(!quiet&&answer.error)S.notice=answer.error;
  }catch(error){if(token===scope()&&!quiet)setError(error);}
  finally{if(token===scope()){if(!quiet)appLinkBusy='';render();watchAppSignIn();}}
@@ -4575,9 +4622,10 @@ async function loadDraftDetails(){
  }
 }
 async function allowSend(id,always=false){
- const summary=(S.emailDrafts||[]).find(x=>x.id===id),d=summary&&draftDetails.get(summary.id+':'+summary.digest),link=connectedLink('gmail');
+ const summary=(S.emailDrafts||[]).find(x=>x.id===id),d=summary&&draftDetails.get(summary.id+':'+summary.digest),links=connectedLinks('gmail'),link=pickedLink(id,links);
  if(!d||d.status!=='pending'||d.expired||!usable()||allowBusy)return;
- if(!link){void openEmailDraft(id);return;}
+ if(!links.length){void openEmailDraft(id);return;}
+ if(!link)return;   // several addresses and none picked: nothing is chosen for you
  const edit=cardEdit(d),token=scope(),pip=S.selected;let message;
  // What the card shows is what is sent: the fields as the user left them, checked before anything else.
  try{message=messageDraft(edit?{recipient_email:edit.values.recipient_email.trim(),subject:edit.values.subject.trim(),body:edit.values.body.trim()}:d.payload.message);}
@@ -4607,9 +4655,10 @@ async function allowSend(id,always=false){
 }
 // Add on a calendar card: the same steps as Send, for the Pip's connected Google Calendar.
 async function allowCreate(id,always=false){
- const summary=(S.calendarDrafts||[]).find(x=>x.id===id),d=summary&&draftDetails.get(summary.id+':'+summary.digest),link=connectedLink('googlecalendar');
+ const summary=(S.calendarDrafts||[]).find(x=>x.id===id),d=summary&&draftDetails.get(summary.id+':'+summary.digest),links=connectedLinks('googlecalendar'),link=pickedLink(id,links);
  if(!d||d.status!=='pending'||d.expired||!usable()||allowBusy)return;
- if(!link){void openEmailDraft(id);return;}
+ if(!links.length){void openEmailDraft(id);return;}
+ if(!link)return;
  const edit=cardEdit(d),token=scope(),pip=S.selected,saved=d.payload.event;let event;
  try{event=edit?editedEvent(saved,edit.values):calendarDraft(saved);}catch(error){cardError(edit,error);return;}
  const changed=edit&&JSON.stringify(event)!==JSON.stringify(saved);
@@ -4639,7 +4688,12 @@ async function allowCreate(id,always=false){
 const cardEdits=new Map();
 function cardEdit(d){const e=d&&cardEdits.get(d.id);return e&&e.digest===d.digest?e:null;}
 function cardError(edit,error){if(edit){edit.error=errorText(error);render();}else setError(error);}
-function connectedLink(toolkit){return (S.appLinks||[]).find(l=>l.status==='connected'&&l.toolkit===toolkit)||null;}
+// The Pip's addresses for an app. With one, a card uses it; with two or more, the one picked on that card's own menu,
+// and none until then (pips-09: nothing picks a default).
+const allowFrom=new Map();let allowFromOpen='';
+function connectedLinks(toolkit){return (S.appLinks||[]).filter(l=>l.status==='connected'&&l.toolkit===toolkit);}
+function pickedLink(id,links){return links.length>1?links.find(l=>l.account===allowFrom.get(id))||null:links[0]||null;}
+function closeAllowFrom(focus=false){const id=allowFromOpen;if(!id)return;allowFromOpen='';render();if(focus)document.querySelector(`[data-allow-from="${id}"]`)?.focus();}
 function editedEvent(saved,v){
  const attendees=v.guests.split('\n').map(x=>x.trim()).filter(Boolean);
  const base={summary:v.summary.trim(),description:v.description.trim(),start_datetime:v.start_datetime.trim(),end_datetime:v.end_datetime.trim(),timezone:v.timezone.trim()};
@@ -4837,7 +4891,7 @@ function renderReview() {
   $('review-title')?.focus({preventScroll:true});document.querySelector('[role=dialog]')?.scrollTo?.(0,0);
   picker.restore();
 }
-function clearSelection() { S.pipKeys=[];S.pipKeysError='';pipKeysSeq++;pipKeyBusy='';pipKeyConfirm='';pipKeyFilled.clear();pipKeyErrors.clear();pipKeyDone.clear();pipKeyTicked.clear();S.keyRequests=[];keyFilled.clear();keyErrors.clear();keySaved.clear();S.notes=null;S.notesPip='';S.notesError='';notesSeq++;noteConfirmAll=false;draft.noteAdd='';S.workingNotes=null;S.workingNotesPip='';S.workingNotesError='';workingNotesSeq++;workingNotesEditing=false;draft.workingNotesText='';S.dailyLog=null;S.dailyLogPip='';S.dailyLogError='';dailyLogSeq++;S.appLinks=[];S.appLinksError='';S.plugins=[];S.pluginsInstalled=[];S.pluginsError='';pluginSeq++;pluginBusy='';S.routines=null;S.routinesError='';routineSeq++;routineEditing='';routineError='';S.pipPage='info';S.legacyOpen=false;pageNameDirty=false;lookDirty=false;shared.pip='';shared.seq++;window.clearTimeout(appLinkTimer);appLinkBusy=''; S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);postsSeq++;S.posts=[];S.postsCursor=null;S.postsPip='';S.postsLoaded=false;S.fixes=new Map();S.fixesPip='';fixesSeq++;S.postsLoading=false;S.postsError='';messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.chatWaiting=[];S.routineNotes=[];S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; dropLive(); selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
+function clearSelection() { S.pipKeys=[];S.pipKeysError='';pipKeysSeq++;pipKeyBusy='';pipKeyConfirm='';pipKeyFilled.clear();pipKeyErrors.clear();pipKeyDone.clear();pipKeyTicked.clear();S.keyRequests=[];keyFilled.clear();keyErrors.clear();keySaved.clear();S.notes=null;S.notesPip='';S.notesError='';notesSeq++;noteConfirmAll=false;draft.noteAdd='';S.workingNotes=null;S.workingNotesPip='';S.workingNotesError='';workingNotesSeq++;workingNotesEditing=false;draft.workingNotesText='';S.dailyLog=null;S.dailyLogPip='';S.dailyLogError='';dailyLogSeq++;S.appLinks=[];S.appLinksError='';appsUse.pip='';appsUse.asked='';appsUse.value=null;appsUse.error='';appsUse.busy=false;appsUse.confirm='';appsUse.seq++;allowFrom.clear();allowFromOpen='';S.plugins=[];S.pluginsInstalled=[];S.pluginsError='';pluginSeq++;pluginBusy='';S.routines=null;S.routinesError='';routineSeq++;routineEditing='';routineError='';S.pipPage='info';S.legacyOpen=false;pageNameDirty=false;lookDirty=false;shared.pip='';shared.seq++;window.clearTimeout(appLinkTimer);appLinkBusy=''; S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);postsSeq++;S.posts=[];S.postsCursor=null;S.postsPip='';S.postsLoaded=false;S.fixes=new Map();S.fixesPip='';fixesSeq++;S.postsLoading=false;S.postsError='';messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.chatWaiting=[];S.routineNotes=[];S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; dropLive(); selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
 // "Report ready", "Last run failed": the Pip page's status names its latest run, so it opens that run (reported
 // 19 Oct: it read like a link and did nothing). A status that names no finished run stays words.
 // Since its runs post in its chat (API 51), the status says what the latest found and goes to that post.
@@ -5106,7 +5160,7 @@ const dropOverlay=on=>{const o=document.querySelector('#chat-form > .dgc-drop');
 document.addEventListener('dragenter',event=>{if(!canAttachImages()||!event.target?.closest?.('#chat-form')||![...(event.dataTransfer?.types||[])].includes('Files'))return;dropDepth++;dropOverlay(true);});
 document.addEventListener('dragleave',event=>{if(!event.target?.closest?.('#chat-form'))return;dropDepth=Math.max(0,dropDepth-1);if(!dropDepth)dropOverlay(false);});
 document.addEventListener('drop',event=>{dropDepth=0;dropOverlay(false);if(!canAttachImages()||!event.target?.closest?.('#chat-form'))return;const files=[...(event.dataTransfer?.files||[])];if(!files.length)return;event.preventDefault();addImageFiles(files);});
-document.addEventListener('change',event=>{if(event.target.dataset?.pluginLevel){const t=event.target,level=t.value,label=(PLUGIN_LEVELS.find(l=>l[0]===level)||[])[1]||level;void pipsSettingsCall('set_plugin_permission',{plugin:t.dataset.pluginLevel,level},`Saved. ${t.dataset.pluginName||'This plugin'}: ${label.toLowerCase()}.`);return;}if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pips-pay-limit'){void setPayLimit(event.target.value);return;}if(event.target.id==='pipEyes'){void setEyes(event.target.value);return;}if(event.target.id==='pipLevel'){void setLevel(event.target.value)}if(event.target.id==='pipPaying'){void setPaying(event.target.value);return;}if(event.target.id==='pipReportAs'){const v=event.target.value;void setArtifacts({report_as:v},value=>reportNotice(value,S.pip?.name||'It'));return;}if(event.target.id==='pipDashboardAdd'){const id=event.target.value;if(id&&artifactsState.value){const list=[...artifactsState.value.dashboards,id];void setArtifacts({dashboards:dashboardsToSave(list)},`${S.pip?.name||'It'} refreshes “${dashboardTitle(id)}” after every run it finishes.${goneNote(list)}`);}return;}if(event.target.dataset?.loginAll){const l=(loginsState.value||[]).find(x=>x.id===event.target.dataset.loginAll),all=event.target.checked;if(l)void loginCall('grant_pip_login',{login_id:l.id,pips:all?'all':[S.selected]},all?`All your Pips can use the login for ${l.site}.`:`Only ${S.pip?.name||'this Pip'} uses the login for ${l.site} now.`);return;}if(event.target.id==='pipCareful'){const on=event.target.checked;void carefulCall('set_pip_careful',{on},on?'Careful mode is on.':'Careful mode is off. Its submits still wait for you.');return;}if(event.target.id==='pipNotify'){const on=event.target.checked;void setProfile({notify:on},on?'It tells you when it finishes something on its own or needs you.':'It won’t notify you. Its chat still has everything.');return;}if(event.target.dataset?.routineToggle){const id=event.target.dataset.routineToggle,on=event.target.checked;void routineCall('update_pip_routine',{routine_id:id,changes:{status:on?'on':'off'}},id,on?'Routine on.':'Routine off. It won’t run until you turn it on.');return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
+document.addEventListener('change',event=>{if(event.target.dataset?.pluginLevel){const t=event.target,level=t.value,label=(PLUGIN_LEVELS.find(l=>l[0]===level)||[])[1]||level;void pipsSettingsCall('set_plugin_permission',{plugin:t.dataset.pluginLevel,level},`Saved. ${t.dataset.pluginName||'This plugin'}: ${label.toLowerCase()}.`);return;}if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pips-pay-limit'){void setPayLimit(event.target.value);return;}if(event.target.id==='pipEyes'){void setEyes(event.target.value);return;}if(event.target.id==='pipLevel'){void setLevel(event.target.value)}if(event.target.id==='pipPaying'){void setPaying(event.target.value);return;}if(event.target.id==='pipReportAs'){const v=event.target.value;void setArtifacts({report_as:v},value=>reportNotice(value,S.pip?.name||'It'));return;}if(event.target.id==='pipDashboardAdd'){const id=event.target.value;if(id&&artifactsState.value){const list=[...artifactsState.value.dashboards,id];void setArtifacts({dashboards:dashboardsToSave(list)},`${S.pip?.name||'It'} refreshes “${dashboardTitle(id)}” after every run it finishes.${goneNote(list)}`);}return;}if(event.target.dataset?.loginAll){const l=(loginsState.value||[]).find(x=>x.id===event.target.dataset.loginAll),all=event.target.checked;if(l)void loginCall('grant_pip_login',{login_id:l.id,pips:all?'all':[S.selected]},all?`All your Pips can use the login for ${l.site}.`:`Only ${S.pip?.name||'this Pip'} uses the login for ${l.site} now.`);return;}if(event.target.dataset?.pipAppSwitch){void setAppUse(event.target.dataset.pipAppSwitch,event.target.checked);return;}if(event.target.id==='pipCareful'){const on=event.target.checked;void carefulCall('set_pip_careful',{on},on?'Careful mode is on.':'Careful mode is off. Its submits still wait for you.');return;}if(event.target.id==='pipNotify'){const on=event.target.checked;void setProfile({notify:on},on?'It tells you when it finishes something on its own or needs you.':'It won’t notify you. Its chat still has everything.');return;}if(event.target.dataset?.routineToggle){const id=event.target.dataset.routineToggle,on=event.target.checked;void routineCall('update_pip_routine',{routine_id:id,changes:{status:on?'on':'off'}},id,on?'Routine on.':'Routine off. It won’t run until you turn it on.');return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
 document.addEventListener('submit',event=>{
   if(event.target.id==='pip-flow-form'){event.preventDefault();reviewFlow();return;}
   if(event.target.id==='login-form'){event.preventDefault();void saveLogin();return;}
@@ -5239,6 +5293,7 @@ document.addEventListener('click',event=>{
   }
   if(picker.click(event))return;
   if(DgcCard.click(event.target))return;   // a card's Details opens in place
+  if(allowFromOpen&&!event.target.closest?.('.allow-from'))closeAllowFrom();
   if(S.composerPanel&&!event.target.closest?.('.composer-model-menu,.pip-routines-popover,.composer-add-menu,.composer-level-menu,#chat-model,#chat-context-toggle,#chat-routines,#chat-attach,#chat-level')){S.composerPanel='';render();}
   // Opening Controls reads the payments switch again: how many it paid today changes as Pips pay.
   if(event.target.closest?.('#runner-controls-toggle')&&paymentsState.asked)void loadPayments();
@@ -5445,6 +5500,12 @@ document.addEventListener('click',event=>{
   }
   if(target.dataset.needsOpen){if(computerState.pip===S.selected&&computerState.value?.granted)void openComputerView();return;}
   if(target.dataset.needsDone){void finishedCheck();return;}
+  if(target.dataset.allowFrom){const id=target.dataset.allowFrom;if(allowFromOpen===id){closeAllowFrom(true);return;}allowFromOpen=id;render();const menu=document.querySelector(`[data-allow-from-menu="${id}"]`);(menu?.querySelector('[aria-checked="true"]')||menu?.querySelector('.dgc-menu-row'))?.focus();return;}
+  if(target.dataset.allowFromPick){const id=target.dataset.allowFromFor;allowFrom.set(id,target.dataset.allowFromPick);allowFromOpen='';render();document.querySelector(`[data-allow-from="${id}"]`)?.focus();return;}
+  if(target.dataset.pipAppAskDisconnect){appsUse.confirm=target.dataset.pipAppAskDisconnect;render();document.querySelector('[data-pip-app-keep]')?.focus();return;}
+  if(target.dataset.pipAppKeep!==undefined){const id=appsUse.confirm;appsUse.confirm='';render();document.querySelector(`[data-pip-app-ask-disconnect="${id}"]`)?.focus();return;}
+  if(target.dataset.pipAppDisconnect){appsUse.confirm='';void appLinkAction('disconnect_pip_app_link',target.dataset.pipAppDisconnect);return;}
+  if(target.dataset.pipAppAdd){void addAppAddress(target.dataset.pipAppAdd);return;}
   if(target.dataset.allowSend){void allowSend(target.dataset.allowSend);return;}
   if(target.dataset.allowAlways){void allowSend(target.dataset.allowAlways,true);return;}
   if(target.dataset.allowDismiss){void allowDismiss(target.dataset.allowDismiss);return;}
@@ -5802,6 +5863,10 @@ if(typeof document!=='undefined'){document.addEventListener('pointerdown',()=>ma
  root.addEventListener('wheel',onWheel,{passive:true});disposers.push(()=>root.removeEventListener('wheel',onWheel));}
 document.addEventListener('keydown',event=>{
   if(picker.keydown(event))return;
+  if(!S.review&&allowFromOpen){const row=event.target.closest?.('.allow-from'),menu=row?.querySelector('.allow-from-menu');
+   if(menu&&menu.contains(event.target)){if(globalThis.DgcMenu?.handle(menu,event,{rows:'.dgc-menu-row',close:()=>{allowFromOpen='';render();},trigger:()=>document.querySelector(`[data-allow-from="${menu.dataset.allowFromMenu}"]`)}))return;}
+   else if(row&&event.key==='Escape'){event.preventDefault();event.stopPropagation();closeAllowFrom(true);return;}
+   else if(row&&event.key==='ArrowDown'&&menu){event.preventDefault();menu.querySelector('.dgc-menu-row')?.focus();return;}}
   if(!S.review&&convKeydown(event))return;
   if(!S.review&&computerKeydown(event))return;
   if(!S.review&&DgcCard.key(event)){event.preventDefault();return;}   // Esc closes a card's open detail

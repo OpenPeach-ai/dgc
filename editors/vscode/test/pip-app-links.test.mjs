@@ -602,3 +602,79 @@ test('a linked app says which account on the Pip\u2019s page, and Disconnect is 
  x.d.querySelector(`[data-app-link-disconnect="${LINK}"]`).click();
  assert.equal(x.requests('disconnect_pip_app_link')[0].request.link_id,LINK);
 });
+
+// pips-09: a Pip can hold several addresses of one app. With one, a card uses it, as above. With two or more nothing is
+// chosen for you: the card's "From" is a small menu of them, and Send and Always allow wait until you pick.
+const SECOND='applink_'+'b'.repeat(32);
+const gmailWork=()=>link({id:SECOND,status:'connected',label:'work@example.com',server:'composio',account:'ca_work',updated_at:'2026-10-02T09:00:00.000Z'});
+const bothGmail=x=>{x.answer(x.requests('list_pip_accounts').at(-1),{server:'composio',connection_digest:'a'.repeat(64),accounts:[{id:'ca_home',label:'Home',toolkit:'gmail'},{id:'ca_work',label:'Work',toolkit:'gmail'}]});
+ x.answer(x.requests('inspect_pip_send_connection').at(-1),{server:'composio',connection_digest:'a'.repeat(64),tool:'GMAIL_SEND_EMAIL',schema_digest:'b'.repeat(64),account_required:true});};
+test('with two Gmail addresses the card asks which one sends: none chosen, Send and Always allow wait, and the one picked sends',async()=>{
+ const x=setup({links:[gmail(),gmailWork()],drafts:[draft()]});await openChat(x);
+ const card=()=>x.d.querySelector(`[data-allow-card="${DRAFT}"]`);
+ assert.match(card().textContent,/Gmail has 2 Gmail addresses\. Choose which one sends this\./);
+ const from=()=>card().querySelector(`[data-allow-from="${DRAFT}"]`);
+ assert.ok(from(),'From is a button that opens a menu');assert.equal(from().textContent.trim(),'Choose an address','no default');
+ assert.equal(from().getAttribute('aria-haspopup'),'menu');assert.equal(from().getAttribute('aria-expanded'),'false');
+ assert.equal(card().querySelector('.allow-from-menu'),null,'closed until asked');
+ for(const s of [`[data-allow-send="${DRAFT}"]`,`[data-allow-always="${DRAFT}"]`]){assert.equal(card().querySelector(s).disabled,true,s);card().querySelector(s).click();}
+ await flush();
+ assert.equal(x.requests('list_pip_accounts').length,0,'nothing is sent from an address nobody chose');assert.equal(x.requests('prepare_pip_message_draft').length,0);
+ assert.equal(card().querySelector(`[data-card-edit-start="${DRAFT}"]`).disabled,false,'Edit and Don’t send need no address');
+ from().click();
+ const menu=card().querySelector('.allow-from-menu');assert.ok(menu,'the menu opens in the card');assert.ok(menu.classList.contains('dgc-menu'),'the shared menu');
+ assert.equal(from().getAttribute('aria-expanded'),'true');
+ const rows=[...menu.querySelectorAll('[role=menuitemradio]')];
+ assert.deepEqual(rows.map(r=>[r.textContent.trim(),r.getAttribute('aria-checked')]),[['me@example.com','false'],['work@example.com','false']]);
+ rows[1].click();
+ assert.equal(card().querySelector('.allow-from-menu'),null,'picking closes it');assert.equal(from().textContent.trim(),'work@example.com');
+ assert.equal(card().querySelector(`[data-allow-send="${DRAFT}"]`).disabled,false);assert.equal(card().querySelector(`[data-allow-always="${DRAFT}"]`).disabled,false);
+ from().click();
+ assert.deepEqual([...card().querySelectorAll('[role=menuitemradio]')].map(r=>r.getAttribute('aria-checked')),['false','true'],'the menu shows the one picked');
+ from().click();assert.equal(card().querySelector('.allow-from-menu'),null,'the button closes it too');
+ x.click(`[data-allow-send="${DRAFT}"]`);await flush();bothGmail(x);await flush();
+ const prep=x.requests('prepare_pip_message_draft').at(-1);
+ assert.equal(prep.request.account,'ca_work','the address picked, not the first one');
+ x.answer(prep,{action:{...action(),payload:{...action().payload,account:'ca_work'}}});await flush();
+ assert.ok(x.requests('accept_pip_app_action').at(-1),'then it sends once');
+});
+test('a click outside the address menu closes it and picks nothing; with one address there is no menu',async()=>{
+ const x=setup({links:[gmail(),gmailWork()],drafts:[draft()]});await openChat(x);
+ x.click(`[data-allow-from="${DRAFT}"]`);assert.ok(x.d.querySelector('.allow-from-menu'));
+ x.d.getElementById('chatText').dispatchEvent(new x.w.MouseEvent('click',{bubbles:true}));
+ assert.equal(x.d.querySelector('.allow-from-menu'),null);assert.equal(x.d.querySelector(`[data-allow-from="${DRAFT}"]`).textContent.trim(),'Choose an address');
+ assert.equal(x.d.querySelector(`[data-allow-send="${DRAFT}"]`).disabled,true);
+ const one=setup({links:[gmail()],drafts:[draft()]});await openChat(one);
+ assert.equal(one.d.querySelector('[data-allow-from]'),null);assert.equal(one.d.querySelector(`[data-allow-send="${DRAFT}"]`).disabled,false);
+});
+test('a calendar event with two calendars asks which one too, and Add goes to the one picked',async()=>{
+ const other=link({id:SECOND,toolkit:'googlecalendar',app:'Google Calendar',status:'connected',label:'family@example.com',server:'composio',account:'ca_family',updated_at:'2026-10-02T09:00:00.000Z'});
+ const x=setup({links:[calendarLink(),other],events:[calDraft()]});await openChat(x);
+ const card=()=>x.d.querySelector(`[data-allow-card="${EVENT}"]`);
+ assert.match(card().textContent,/Gmail has 2 Google Calendar addresses\. Choose which one this goes to\./);
+ assert.equal(card().querySelector(`[data-allow-create="${EVENT}"]`).disabled,true);assert.equal(card().querySelector(`[data-allow-create-always="${EVENT}"]`).disabled,true);
+ x.click(`[data-allow-from="${EVENT}"]`);
+ assert.deepEqual([...card().querySelectorAll('[role=menuitemradio]')].map(r=>r.textContent.trim()),['me@example.com','family@example.com']);
+ card().querySelector('[data-allow-from-pick="ca_family"]').click();
+ x.click(`[data-allow-create="${EVENT}"]`);await flush();
+ x.answer(x.requests('list_pip_accounts').at(-1),{server:'composio',connection_digest:'a'.repeat(64),accounts:[{id:'ca_cal',label:'Home',toolkit:'googlecalendar'},{id:'ca_family',label:'Family',toolkit:'googlecalendar'}]});
+ x.answer(x.requests('inspect_pip_calendar_connection').at(-1),{server:'composio',connection_digest:'a'.repeat(64),tool:'GOOGLECALENDAR_CREATE_EVENT',schema_digest:'b'.repeat(64),account_required:true});await flush();
+ assert.equal(x.requests('prepare_pip_calendar_draft').at(-1).request.account,'ca_family');
+});
+test('linking one more address keeps the address it had: both are the Pip’s, and the next email asks which one',async()=>{
+ const more={...link({id:SECOND,reason:'One more Gmail address for this Pip.'}),another:true};
+ const x=setup({links:[gmail(),more],drafts:[draft()]});await openChat(x);
+ const card=x.d.querySelector(`[data-app-link="${SECOND}"]`);assert.ok(card,'the card for one more address is in the chat');
+ assert.match(card.textContent,/Add another Gmail address to Gmail.*One more Gmail address for this Pip\./);
+ assert.equal(x.d.querySelector('[data-allow-from]'),null,'one address so far: the email card uses it');
+ x.click(`[data-app-link-start="${SECOND}"]`);await flush();
+ x.answer(x.requests('start_pip_app_link').at(-1),{link:more,accounts:[{id:'ca_work',label:'work@example.com'}],wanted:'',redirect_url:null});await x.drain();
+ x.click('[data-app-link-account="ca_work"]');await flush();
+ const linked=gmailWork();x.setLinks([gmail(),linked]);
+ x.answer(x.requests('start_pip_app_link').at(-1),{link:linked,connected:true,redirect_url:null});await flush();
+ // (Before the list is read again: what the page holds already has both.)
+ assert.equal(x.d.querySelector(`[data-allow-card="${DRAFT}"] [data-allow-send]`).disabled,true,'two addresses now: the email card waits for a pick');
+ await x.drain();
+ x.click(`[data-allow-from="${DRAFT}"]`);
+ assert.deepEqual([...x.d.querySelectorAll('.allow-from-menu [role=menuitemradio]')].map(r=>r.textContent.trim()).sort(),['me@example.com','work@example.com'],'the first address was not dropped');
+});

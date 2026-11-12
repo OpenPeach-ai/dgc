@@ -4,6 +4,7 @@ import '../media/shared/tokens.css';
 import '../media/shared/dialog.css';   // every popover's and dialog's lift and arrival, as in Work, ChatDGC and Pips (ui-08)
 import './settings.css';
 import {watchButtons} from './buttonFit.js';
+import {parseMcpPaste} from './mcpPaste.js';
 import zapierLogo from '../media/plugin-logos/zapier.ico';
 import makeLogo from '../media/plugin-logos/make.ico';
 import n8nLogo from '../media/plugin-logos/n8n.ico';
@@ -1387,6 +1388,11 @@ function renderMcpForm(main, s) {
     main.innerHTML = `<div class="crumbs"><button id="mcp-back">${esc(detail ? items.find(r => r.name === detail)?.display_name || 'Plugin' : 'MCP servers')}</button><span>›</span><span>${esc(s.name || 'Add server')}</span></div>`
         + `<h2>${s.name ? 'Configure server' : 'Add server'}</h2><p class="sub">A server DGC connects to: a URL, or a command it starts.</p>${s.setup_note ? `<p class="note">${esc(s.setup_note)}</p>` : ''}`
         + `<form class="mcp-form" id="mcp-form">`
+        // Add server only (pips-09): paste a server's link, a `claude mcp add` command or its JSON, and the fields below
+        // are filled from it. Read here in the page (mcpPaste.js); what was pasted is never sent anywhere.
+        + (s.name ? '' : `<div class="mcp-paste"><label for="mcp-paste">Paste a link or a claude mcp add command${note('A server’s URL, a claude mcp add command, or its JSON. It fills in the fields below. Nothing is saved until you choose Save and connect.')}</label>`
+            + `<div class="mcp-paste-row"><textarea id="mcp-paste" rows="2" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="claude mcp add notion https://mcp.notion.com/mcp"></textarea><button type="button" class="secondary" id="mcp-paste-fill">Fill</button></div>`
+            + `<p class="note mcp-paste-says" id="mcp-paste-says" role="status" hidden></p></div>`)
         + `<label>Server name${note('Letters, numbers, dots, dashes.')}<input id="mcp-name" required pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,63}" value="${esc(s.name || s.suggested_name)}"></label>`
         + `<label>Connects with<select id="mcp-transport"><option value="stdio">A command on this computer</option><option value="remote"${remote ? ' selected' : ''}>A URL</option></select></label>`
         + `<label><span id="mcp-target-label">${remote ? 'Server URL' : 'Command'}</span><input id="mcp-target" required value="${esc(remote ? s.url : s.command)}"></label>`
@@ -1405,6 +1411,27 @@ function renderMcpForm(main, s) {
     const transport = () => { const remote = $('mcp-transport').value === 'remote'; $('args-label').hidden = remote; $('env-label').hidden = remote; $('token-label').hidden = !remote; $('oauth-app').hidden = !remote; $('mcp-target-label').textContent = remote ? 'Server URL' : 'Command'; };
     $('mcp-transport').onchange = transport;
     transport();
+    if ($('mcp-paste')) {
+        const box = $('mcp-paste'), says = $('mcp-paste-says');
+        const say = (text, bad) => { says.textContent = text; says.hidden = !text; says.classList.toggle('error', !!bad); says.setAttribute('role', bad ? 'alert' : 'status'); };
+        const fill = () => {
+            let found;
+            try { found = parseMcpPaste(box.value); } catch (error) { say(error instanceof Error ? error.message : 'That couldn’t be read.', true); return; }
+            const remote = found.transport === 'remote';
+            $('mcp-name').value = found.name; $('mcp-transport').value = found.transport; transport();
+            $('mcp-target').value = found.target; $('mcp-args').value = found.args.join('\n'); $('mcp-env').value = found.env.join('\n'); $('mcp-token').value = found.token;
+            // A token or a key that was pasted doesn't stay in sight: it is in its own field now.
+            const secret = !!found.token || found.env.some(line => line.includes('='));
+            if (secret) box.value = '';
+            say(`Filled in below: ${found.name}, ${remote ? 'a URL' : 'a command on this computer'}.`
+                + (found.token ? ' Its token is in the Token field.' : '') + (!remote && secret ? ' Its keys are under Environment.' : '')
+                + (found.note ? ` ${found.note}` : '') + ' Check it, then choose Save and connect.', false);
+        };
+        $('mcp-paste-fill').onclick = fill;
+        // A paste fills at once (after the box has taken the text); typing waits for Fill.
+        box.addEventListener('paste', () => setTimeout(fill, 0));
+        box.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); fill(); } });
+    }
     main.querySelector('.mcp-advanced').addEventListener('toggle', e => { if (e.currentTarget.open) INFO.add('mcp-advanced'); else INFO.delete('mcp-advanced'); });
     // What the form holds now: the save, and Forget (the same save, with the saved sign-in cleared first).
     const values = (clear) => ({ original_name: s.name || '', name: $('mcp-name').value, transport: $('mcp-transport').value, target: $('mcp-target').value, args: $('mcp-args').value, env: $('mcp-env').value, env_names: s.env_names || [], token: $('mcp-token').value, clear_secrets: clear, log_level: $('mcp-log').value, oauth_client_id: $('mcp-oauth-id').value, oauth_client_secret: $('mcp-oauth-secret').value, oauth_port: $('mcp-oauth-port').value || ($('mcp-oauth-id').value.trim() ? '3334' : '') });
