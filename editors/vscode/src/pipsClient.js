@@ -58,7 +58,7 @@ import {TEAM_MAX,pipFolder,folderName,foldersInUse,pipsByFolder,folderMarkup,pip
 import {githubLink,grokReply,importPrompt,sourceImported,sourceImportedNotice,githubImportMarkup,grokImportMarkup} from './pipImports.js';
 import {pipKeysPage,pipKeyResult,waitingKeys,pipKeyCardMarkup,pipKeysPageMarkup,pipKeyRemovedNote} from './pipKeys.js';
 import {pluginsPage,pluginResult,keyRequests,keyCardMarkup,shownPluginCards,pluginForServer,installedForServer,pluginCardMarkup,pluginActionMarkup,pluginsPageMarkup,pluginUsesPage,pluginUsesMarkup,argumentValues,editedArguments,PLUGIN_LEVELS} from './pipPlugins.js';
-import {attentionPage,waitingOn,needWords,attentionMarkup,attentionCards,attentionSpot,setupCardMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
+import {attentionPage,waitingOn,needWords,attentionMarkup,attentionAllMarkup,attentionCards,attentionSpot,setupCardMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
 import {answerFor,sendItemAnswer,readVisits} from './pipCardAnswers.js';
 import {notesPage,notesMarkup,keptMarkup} from './pipNotes.js';
 import {workingNotesPage,dailyLogPage,workingNotesMarkup,dailyLogMarkup,learnCardMarkup,learnRequest} from './pipWorkingNotes.js';
@@ -3217,10 +3217,12 @@ function answerSoon(id,yes){
    .finally(()=>{void Promise.resolve(loadAttention()).finally(()=>{sentAnswers.delete(id);render();});void refresh(false);});
  },REJECT_HOLD_MS);
  heldAnswers.set(id,{timer,said:yes?found.answer.said.yes:found.answer.said.no});S.notice='';render();
- $('attention-undo')?.focus?.({preventScroll:true});
+ $('attention-undo'+attentionTail(item))?.focus?.({preventScroll:true});
 }
-function undoAnswer(id){const held=heldAnswers.get(id);if(!held)return;window.clearTimeout(held.timer);heldAnswers.delete(id);render();($('attention-yes')||$('attention-open'))?.focus?.({preventScroll:true});}
-function attentionHomeMarkup(){
+function undoAnswer(id){const held=heldAnswers.get(id);if(!held)return;window.clearTimeout(held.timer);heldAnswers.delete(id);render();const tail=attentionTail(S.attention?.items.find(i=>i.id===id));($('attention-yes'+tail)||$('attention-open'+tail))?.focus?.({preventScroll:true});}
+// What Needs attention draws, for its one card and for the page of them all: the cards of this place and how each is
+// drawn. `all`: the page, where a new Pip just rejected keeps its place (it says so there, with Undo) until it is sent.
+function attentionScene(all=false){
  const face=i=>{if(!i.pip_id)return '<span class="attention-mark" aria-hidden="true">+</span>';
   const current=S.jobs.find(p=>p.id===i.pip_id),pip=current||{id:i.pip_id,name:i.pip_name,pip_type:i.pip_type,workspace_id:i.workspace_id};
   return pipAvatar(pip,'waiting_approval',`attn-${i.card}`,characterType(pip.pip_type));};
@@ -3228,10 +3230,58 @@ function attentionHomeMarkup(){
  const more=setupRows.length>=5?'Showing 5 new Pips. Answer one to see more.':'';
  // A new Pip you just rejected (held a moment for Undo) is out of the cards, the dots and the count at once.
  // (So is a card whose answer was just sent, until the list read after it says what became of it.)
- const held=page=>{if(!page)return page;const items=page.items.filter(i=>!(i.kind==='setup'&&heldRejects.has(i.card))&&!sentAnswers.has(i.id));return {...page,items,total:Math.max(items.length,page.total-(page.items.length-items.length))};};
- const page=projectHome()?null:held(S.attention),setups=S.apiVersion>=23?setupRows.filter(r=>!heldRejects.has(r.id)):[],expanded=attentionOpen();
- return attentionMarkup(page,{esc,face,expanded,busy:!usable(),setups,setupCard:setupCardFor,error:setupRows.length?setupError:'',more,at:attentionShowing(attentionCards(page,setups)),
-  answers:i=>attentionAnswer(i)?.answer||null,held:i=>heldAnswers.get(i.id)?.said||''});
+ const gone=id=>!all&&heldRejects.has(id);
+ const held=page=>{if(!page)return page;const items=page.items.filter(i=>!(i.kind==='setup'&&gone(i.card))&&!sentAnswers.has(i.id));return {...page,items,total:Math.max(items.length,page.total-(page.items.length-items.length))};};
+ const page=projectHome()?null:held(S.attention),setups=S.apiVersion>=23?setupRows.filter(r=>!gone(r.id)):[];
+ return {page,setups,draw:{esc,face,busy:!usable(),setups,setupCard:setupCardFor,error:setupRows.length?setupError:'',more,
+  answers:i=>attentionAnswer(i)?.answer||null,held:i=>heldAnswers.get(i.id)?.said||''}};
+}
+function attentionHomeMarkup(){
+ const {page,setups,draw}=attentionScene(),expanded=attentionOpen();
+ return attentionMarkup(page,{...draw,expanded,at:attentionShowing(attentionCards(page,setups)),viewAll:true});
+}
+// "View all" (asked 12 Nov): Needs attention on a page of its own, every card of this place (Personal or Project) one
+// under another, each with the answers its one card has. It scrolls as the view does. Back, or Escape, returns to the
+// list of Pips with Needs attention on the card you were last on here (or the one you opened it from). Kept for this
+// window only: a reload opens the list.
+const attentionAll={open:false,place:'',last:'',lastIndex:0,homeScroll:0};
+// What scrolls the view: the side bar's own root; in a tab its body, or the page itself where that is what scrolls.
+const attentionScroller=()=>{if(embedded)return shell;const page=owner.scrollingElement;return page&&page!==shell&&(page.scrollTop>0||page.scrollHeight>page.clientHeight+1)?page:shell;};
+// A row's buttons are named by its card on the page of them all, where many rows are drawn; '' for the one card.
+function attentionTail(item){return attentionAll.open&&item?'-'+item.card:'';}
+function attentionAllShown(){
+ if(attentionAll.open&&attentionAll.place!==(projectHome()?'project':'personal'))attentionAll.open=false;   // another place's cards: its list instead
+ return attentionAll.open&&(!S.selected||S.overview)&&!S.create&&!(S.projectEmpty&&scopeTabs());
+}
+function openAttentionAll(){
+ Object.assign(attentionAll,{open:true,place:projectHome()?'project':'personal',last:'',lastIndex:0,homeScroll:attentionScroller().scrollTop||0});
+ render();attentionScroller().scrollTop=0;$('attention-all-back')?.focus?.({preventScroll:true});
+}
+function closeAttentionAll(){
+ if(!attentionAll.open)return;attentionAll.open=false;
+ // The card you were last on; one answered meanwhile gives its place to the next (attentionSpot).
+ const place=attentionPlaces[attentionAll.place];if(place&&attentionAll.last){place.key=attentionAll.last;place.index=attentionAll.lastIndex;}
+ render();attentionScroller().scrollTop=attentionAll.homeScroll;($('attention-view-all')||document.querySelector('.attention-toggle'))?.focus?.({preventScroll:true});
+}
+function attentionAllPageMarkup(notes){
+ const {page,draw}=attentionScene(true),drawn=attentionAllMarkup(page,{...draw,rejected:id=>heldRejects.has(id)});
+ return `<header class="pip-topbar"><button type="button" id="attention-all-back" class="topbar-icon" data-attention-all-back="1" aria-label="Your Pips" title="Your Pips">${simpleIcon('back')}</button><div class="pip-pill settings-pill"><span>Needs attention</span>${drawn.count?`<span class="attention-all-count" aria-label="${esc(`${drawn.count.toLocaleString('en-US')} waiting for you`)}">${drawn.count.toLocaleString('en-US')}</span>`:''}</div><span></span></header>${notes}<div class="simple-content" data-view="attention-all">${drawn.html}</div>`;
+}
+// A redraw of the page keeps what you are looking at where it is: a card arriving above it (the newest come first)
+// moves nothing on screen. The first card in sight is found again after the draw and the view is put back on it; at
+// the very top the page stays at its top, where the new card shows.
+function attentionAllAnchor(){
+ const view=attentionScroller();if(!attentionAll.open||!view.scrollTop)return null;
+ const top=embedded?shell.getBoundingClientRect().top:0;
+ for(const li of document.querySelectorAll('.attention-all-list>[data-attention-key]')){const b=li.getBoundingClientRect();if(b.bottom>top)return {key:li.dataset.attentionKey,top:b.top,scroll:view.scrollTop};}
+ return null;
+}
+function keepAttentionAllScroll(anchor){
+ if(!anchor||!attentionAll.open)return;
+ const li=[...document.querySelectorAll('.attention-all-list>[data-attention-key]')].find(e=>e.dataset.attentionKey===anchor.key);
+ const view=attentionScroller();
+ if(li){const moved=li.getBoundingClientRect().top-anchor.top;if(Math.abs(moved)>=1)view.scrollTop+=moved;}
+ else if(view.scrollTop!==anchor.scroll)view.scrollTop=anchor.scroll;
 }
 // What it remembers (#6): its notes about you, on its page and under the reply that kept them.
 S.notes=null;S.notesPip='';S.notesError='';let notesSeq=0,notesBusy=false,noteConfirmAll=false;
@@ -4145,6 +4195,8 @@ function simpleMarkup(){
  const bar=`<header class="simple-bar"><h1><span class="pips-wordmark">Pips</span></h1>${runnerMarkup(true)}</header>${scopeTabsMarkup()}`;
  const notes=`${S.error?`<div class="simple-note">${errorMarkup(S.error)}</div>`:''}${S.notice?`<p class="notice simple-note" role="status">${esc(S.notice)}</p>`:''}${undoRejectMarkup()}`;
  if(pipsSettings.view&&(!S.selected||S.overview)&&!S.create)return `${pipsSettingsMarkup()}${notes}`;
+ // Needs attention's View all: a page of its own. A new Pip rejected there says so in its own place, not in a line above.
+ if(attentionAllShown())return attentionAllPageMarkup(`${S.error?`<div class="simple-note">${errorMarkup(S.error)}</div>`:''}${S.notice?`<p class="notice simple-note" role="status">${esc(S.notice)}</p>`:''}`);
  if(S.projectEmpty&&scopeTabs())return `${bar}${notes}${projectEmptyMarkup()}`;
  const project=projectHome(),back=(id,label)=>`<button type="button" id="${id}" class="topbar-icon" aria-label="${esc(label)}" title="${esc(label)}">${simpleIcon('back')}</button>`;
  // A project's describe-the-job page (DGC prepares a setup card from your words, or a common job, or a shared Pip's file),
@@ -4183,6 +4235,7 @@ function render() {
   const markup=!intro&&simpleMode()?simpleMarkup():`${header}${S.error&&!chatView?`<div style="padding:0 20px">${errorMarkup(S.error)}</div>`:''}${S.notice&&!chatView?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${chatView?'':undoRejectMarkup()}${!intro&&S.overview&&!S.create&&!(S.projectEmpty&&scopeTabs())?setupsMarkup():''}${intro?`<div class="content">${intro}</div>`:S.projectEmpty&&scopeTabs()?projectEmptyMarkup():S.switching?`<div class="pips-tab-loading"${scopePanelAttrs()}></div>`:`<div class="layout ${S.overview&&!S.create?'overview':'selected'}"${scopePanelAttrs()}><aside aria-label="Workspace Pips"><div class="aside-heading">${!remoteHost?`<button type="button" id="pin-pips-sidebar" class="sidebar-toggle" aria-label="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" title="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" aria-pressed="${S.sidebarPinned}"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M6 2v12"/></svg></button>`:''}<h2>Your Pips</h2><button type="button" id="new-pip" aria-label="New Pip" title="New Pip"${S.busy||!usable()||!S.types.length?' disabled':''}><span aria-hidden="true" class="new-pip-mark">+</span><span class="new-pip-text">New</span></button></div>${S.overview&&!S.create?`<div class="pips-overview-intro${S.jobs.length?'':' welcome'}"><span class="pips-eyebrow">${S.workspace?.kind==='personal'?'A little help, day to day':'Your project, looked after'}</span><h2>A little team. A clear purpose.</h2><p>Give each Pip a job. Stay in the conversation, and review what comes back.</p></div>`:''}<div class="job-list">${S.jobs.filter(p=>S.showArchived||p.status!=='archived').map(jobMarkup).join('')||`<div class="pips-first-job"><div class="pips-welcome-cast">${S.types.filter(t=>['scout','rook','pulse'].includes(t.id)).map(t=>avatar('idle',t,`welcome-${t.id}`)).join('')}</div><h3>What should your first Pip look after?</h3><p>Describe the job to DGC. You’ll review the scope and schedule before it starts.</p>${button('create-first','Describe a job',!usable()||!S.types.length,'primary')}<small>No Pips yet · Nothing is running for this project</small></div>`}</div>${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived Pips':`Show archived Pips (${S.jobs.filter(p=>p.status==='archived').length})`):''}${button('workspace-context','Workspace context',!usable())}${S.apiVersion>=13?button('workspace-notifications','Notifications',!usable()):''}${!embedded&&!remoteHost?`<details><summary>Local controls</summary><p class="muted">Stop all pauses every Pip on this computer and stops what they’re doing. To undo it, resume Pips here, then resume each Pip.</p>${button('disable','Turn off Pips…',S.busy||!usable())}</details>`:''}</aside><div class="content" data-view="${esc(S.tab)}">${!S.create&&(S.selected||['context','notifications'].includes(S.tab))?button('back-pips','Back to Pips',false,'back-control'):''}${S.overview&&!S.create?'':setupsMarkup()}<nav class="tabs" aria-label="Pip sections"${S.create||!S.selected?' hidden':''}>${tabsMarkup()}</nav>${detailMarkup()}</div></div>`}`;
   if(markup===lastMarkup){syncChatBox();tellInsidePip();return;}
   lastMarkup=markup;
+  const allAnchor=attentionAllAnchor();
   const previousAvatars=new Map([...document.querySelectorAll('[data-avatar-key]')].map(node=>[node.dataset.avatarKey,node]));
   avatarObserver?.disconnect();
   globalThis.DgcMcpApps?.park();          // a plugin card's live frame waits out the redraw (media/mcpApps.js)
@@ -4190,6 +4243,7 @@ function render() {
     const next=owner.createElement('template');next.innerHTML=markup;
     patchChildren($('app'),next.content);
   }else $('app').innerHTML=markup;
+  keepAttentionAllScroll(allAnchor);
   tellInsidePip();   // with the draw itself, so the side bar's dock and tab bar go and come in the same frame
   // The keyed chat patch above retains message nodes and their selection, and leaves the box in place. The other
   // takes it out, so it goes back with its caret where it was.
@@ -5581,12 +5635,14 @@ document.addEventListener('click',event=>{
   if(target.dataset.sitesAll){sitesAll=true;render();return;}
   if(target.dataset.noteForget){const n=(S.notes||[]).find(x=>x.id===target.dataset.noteForget);void noteCall('forget_pip_note',{note_id:target.dataset.noteForget},()=>n?`Forgotten: ${n.text}`:'Forgotten.');return;}
   if(target.dataset.noteForgetAll){if(target.dataset.noteForgetAll==='ask'){noteConfirmAll=true;render();}else if(target.dataset.noteForgetAll==='no'){noteConfirmAll=false;render();}else void noteCall('forget_pip_note',{all:true},()=>{noteConfirmAll=false;return 'Forgotten. It remembers nothing about you now.';});return;}
+  if(target.dataset.attentionAll){openAttentionAll();return;}
+  if(target.dataset.attentionAllBack){closeAttentionAll();return;}
   if(target.dataset.attentionGo){attentionGo(target.dataset.attentionGo,Number(target.dataset.attentionIndex),{focus:true});return;}
   if(target.dataset.attentionMore!==undefined){attentionExpanded=Number(target.dataset.attentionMore)||false;
    // Folded by you: kept folded until something new is in it. Opened: it follows the rule again.
    if(attentionExpanded){attentionUserFolded=false;attentionFolded.clear();}else{attentionUserFolded=true;attentionFolded.clear();attentionKeys().forEach(k=>attentionFolded.add(k));}
    rememberView();render();return;}
-  if(target.dataset.undoReject){undoReject(target.dataset.undoReject);return;}
+  if(target.dataset.undoReject){const id=target.dataset.undoReject;undoReject(id);if(attentionAll.open)$('setup-review-'+id)?.focus?.({preventScroll:true});return;}
   if(target.dataset.pluginUseRemove){void pipsSettingsCall('decline_pip_plugin',{pip_id:target.dataset.pluginUsePip,grant_id:target.dataset.pluginUseRemove},'Removed. That Pip no longer uses the plugin.');return;}
   if(target.dataset.openPlugins!==undefined){vscode.postMessage({type:'openSettings',section:'plugins'});return;}
   if(target.dataset.openModels!==undefined){vscode.postMessage({type:'openSettings',section:'models'});return;}
@@ -6025,6 +6081,9 @@ if(typeof document!=='undefined'){document.addEventListener('pointerdown',event=
  document.addEventListener('pointerup',releaseEffort,true);document.addEventListener('pointercancel',releaseEffort,true);
  document.addEventListener('input',event=>{const t=pathTarget(event);if(t?.id==='chat-thinking')followEffort(t);},true);}
 if(typeof document!=='undefined'){document.addEventListener('pointerdown',()=>markEffortInput(false),true);document.addEventListener('keydown',event=>{if(event.key==='Tab'||event.composedPath?.()[0]?.id==='chat-thinking')markEffortInput(true);},true);}
+// The page of them all: the card you last pressed or reached with the keyboard is the one Needs attention shows when you go back.
+{const onCard=event=>{if(!attentionAll.open)return;const li=event.target.closest?.('.attention-all-list>[data-attention-key]');if(li){attentionAll.last=li.dataset.attentionKey;attentionAll.lastIndex=Number(li.dataset.attentionIndex)||0;}};
+ document.addEventListener('focusin',onCard);document.addEventListener('pointerdown',onCard);}
 // A sideways swipe on Needs attention's card goes one card along: a finger or a pen across it, or two fingers on a
 // trackpad (one card a swipe: the rest of its glide is let pass).
 {let from=null,glide=0,passed=0,moved=false;
@@ -6052,6 +6111,8 @@ document.addEventListener('keydown',event=>{
   if(!S.review&&convKeydown(event))return;
   if(!S.review&&computerKeydown(event))return;
   if(!S.review&&DgcCard.key(event)){event.preventDefault();return;}   // Esc closes a card's open detail
+  // Needs attention's page of them all: Escape goes back, as its back button does. (A card's open detail closed first, above.)
+  if(!S.review&&event.key==='Escape'&&!event.defaultPrevented&&attentionAllShown()&&document.querySelector('.attention-all')&&!event.target.matches?.('input,textarea,select,[contenteditable]')){event.preventDefault();closeAttentionAll();return;}
   // Needs attention's one card: with the keyboard anywhere in it, an arrow goes to the next card or back, Home and
   // End to the first and the last. Not from a box you type in.
   if(!S.review&&['ArrowLeft','ArrowRight','Home','End'].includes(event.key)&&!event.altKey&&!event.ctrlKey&&!event.metaKey&&!event.target.matches?.('input,textarea,select,[contenteditable]')){
@@ -6146,7 +6207,8 @@ if(typeof ResizeObserver==='function'){const observer=new ResizeObserver(fitChat
 // One bounded polling loop for the entire tab, paused while hidden; no timers per avatar or job.
 const pollingTimer=window.setInterval(()=>{broker.expire(Date.now());if(polling||!S.visible||document.hidden||!usable()||S.busy||S.review||S.create||!['runs','chat'].includes(S.tab))return;polling=true;void refresh(false).finally(()=>{polling=false;});},4000);
 motion();render();waitForConnection();vscode.postMessage({type:'pipsReady'});
-return {async navigate(value){if(value?.overview===true){if(!S.workspace||!usable()){options.navigation=value;navigationPending=true;S.overview=true;return;}await navigateFromHost(value);return;}if(!S.workspace||!usable()){options.navigation=value;navigationPending=true;return;}try{await refresh(false);await navigateFromHost(value);}catch(error){setError(error);}},focusInside(){const box=chatBox?.el?.isConnected?chatBox.el:insidePipBack();try{box?.focus({preventScroll:true});}catch{}},setMotionPaused(paused){motionPaused=paused===true;motion();},setVisible(visible){S.visible=visible===true;motion();if(S.visible)void refresh(false);},dispose(){if(disposed)return;disposed=true;window.clearTimeout(noticeTimer);window.clearTimeout(appLinkTimer);S.epoch++;broker.reset();window.clearInterval(pollingTimer);window.clearInterval(workingClock);window.clearTimeout(streamTimer);window.clearTimeout(liveTimer);avatarObserver?.disconnect();characterCleanup?.();characterCleanup=null;for(const dispose of disposers)dispose?.();characterStyles.remove();if(embedded)shell.remove();}};
+return {async navigate(value){attentionAll.open=false;   // the host asks for another page: not Needs attention's own
+ if(value?.overview===true){if(!S.workspace||!usable()){options.navigation=value;navigationPending=true;S.overview=true;return;}await navigateFromHost(value);return;}if(!S.workspace||!usable()){options.navigation=value;navigationPending=true;return;}try{await refresh(false);await navigateFromHost(value);}catch(error){setError(error);}},focusInside(){const box=chatBox?.el?.isConnected?chatBox.el:insidePipBack();try{box?.focus({preventScroll:true});}catch{}},setMotionPaused(paused){motionPaused=paused===true;motion();},setVisible(visible){S.visible=visible===true;motion();if(S.visible)void refresh(false);},dispose(){if(disposed)return;disposed=true;window.clearTimeout(noticeTimer);window.clearTimeout(appLinkTimer);S.epoch++;broker.reset();window.clearInterval(pollingTimer);window.clearInterval(workingClock);window.clearTimeout(streamTimer);window.clearTimeout(liveTimer);avatarObserver?.disconnect();characterCleanup?.();characterCleanup=null;for(const dispose of disposers)dispose?.();characterStyles.remove();if(embedded)shell.remove();}};
 
 }
 if(typeof window!=='undefined')window.DgcPips={mount:mountPips,mountSetupCards,mountDigestBar,mountHomePips};

@@ -280,3 +280,188 @@ test('Undo on a held Reject keeps the new Pip and sends nothing',async()=>{
  assert.ok(x.d.querySelector(`[data-setup-card="${SETUP}"]`),'its card is back');
  assert.equal(x.requests('reject_pip_setup').length,0,'nothing was sent');
 });
+
+// "View all" (asked 12 Nov: "we only show one card there, let's add a clickable text there 'View all', which opens its
+// own page, where all of them gets listed vertically and scrollable"). Its page is the Pips view's own, with a back
+// button; each card there is the one-card view's card, with the same answers and Review.
+const mails=n=>Array.from({length:n},(_,i)=>item('email','maildraft_'+'abcdef0123456789'[i].repeat(32),PIP,`Email ${i+1}`,{created_at:ago(i+1)}));
+const allTitles=x=>[...x.d.querySelectorAll('.attention-all-list>li')].map(li=>li.querySelector('.attention-copy strong, .dgc-card-title')?.textContent);
+const press=(x,el,key)=>el.dispatchEvent(new x.w.KeyboardEvent('keydown',{key,bubbles:true,cancelable:true}));
+// The moment an answer is held for: kept here and fired by the test; one called off (Undo) never fires.
+const holds=x=>{const held=[],later=x.w.setTimeout.bind(x.w),clear=x.w.clearTimeout.bind(x.w);x.w.setTimeout=(fn,ms,...a)=>ms===6000?(held.push(fn),900000+held.length):later(fn,ms,...a);
+ x.w.clearTimeout=id=>{if(id>900000)held[id-900001]=null;else clear(id);};return ()=>held.splice(0).filter(Boolean).forEach(fn=>fn());};
+const reread=async(x,found,items)=>{found.items=items;found.total=items.length+(found.reviews?.length||0);x.w.dispatchEvent(new x.w.MessageEvent('message',{data:{type:'pipSetupChanged'}}));await x.drain();};
+
+test('View all: quiet words on the heading when two or more wait and it is open; not with one card, not folded',async()=>{
+ const found=page(mails(3));
+ const x=setup({found});await x.drain();
+ const link=x.d.querySelector('#attention-view-all');
+ assert.ok(link,'three waiting, open: View all is there');
+ assert.equal(link.textContent,'View all');assert.equal(link.tagName,'BUTTON');
+ assert.equal(link.getAttribute('aria-label'),'View all 3 that need you');
+ const head=link.parentElement,toggle=x.d.querySelector('.attention-toggle');
+ assert.equal(head.className,'attention-head');assert.equal(toggle.parentElement,head,'on the heading row');
+ assert.ok(toggle.compareDocumentPosition(link)&x.w.Node.DOCUMENT_POSITION_FOLLOWING,'after the heading: at its right');
+ assert.equal(link.closest('.attention-toggle'),null,'a button of its own, never inside the fold’s button');
+ assert.equal(x.d.querySelectorAll('.attention [data-attention]').length,1,'the one-card view is as it was');
+ assert.equal(x.d.querySelector('.attention-place').textContent,'1 of 3');
+ // Folded: the heading and its count only.
+ x.click('[data-attention-more="0"]');
+ assert.equal(x.d.querySelector('#attention-view-all'),null,'folded: no View all');
+ assert.equal(x.d.querySelector('.attention-head'),null);
+ x.click('[data-attention-more="1"]');
+ assert.ok(x.d.querySelector('#attention-view-all'),'opened again: it is back');
+ // One card: nothing to view all of.
+ await reread(x,found,mails(1));
+ assert.equal(x.d.querySelector('.attention-count').textContent,'1');
+ assert.equal(x.d.querySelector('#attention-view-all'),null,'one card: no View all');
+ assert.doesNotMatch(x.d.querySelector('.attention').textContent,/View all/);
+});
+
+test('View all opens a page of its own with every card, one under another; Back and Escape return to the Pips list',async()=>{
+ const found=page(mails(9));
+ const x=setup({found});await x.drain();
+ x.click('#attention-next');x.click('#attention-next');
+ assert.equal(x.d.querySelector('.attention-place').textContent,'3 of 9');
+ x.click('#attention-view-all');
+ // Its own page: no list of Pips, no tabs; a top bar with the way back, its title and its count.
+ assert.equal(x.d.querySelector('.simple-home'),null,'the list of Pips is not on this page');
+ assert.equal(x.d.querySelector('.attention-carousel,.attention-nav,.attention-dot,.attention-toggle'),null,'nor the one-card view');
+ const bar=x.d.querySelector('.pip-topbar');assert.ok(bar,'the Pips view’s own top bar');
+ const back=bar.querySelector('#attention-all-back');
+ assert.equal(back.getAttribute('aria-label'),'Your Pips');assert.equal(back.title,'Your Pips');
+ assert.equal(bar.querySelector('.pip-pill span').textContent,'Needs attention');
+ assert.equal(bar.querySelector('.attention-all-count').textContent,'9');
+ assert.equal(bar.querySelector('.attention-all-count').getAttribute('aria-label'),'9 waiting for you');
+ assert.equal(x.d.querySelector('.simple-content').dataset.view,'attention-all');
+ assert.deepEqual(allTitles(x),Array.from({length:9},(_,i)=>`Email ${i+1}`),'every card, in the order the one card walks them');
+ // Each is the one-card view's card: the row that opens it, and Review.
+ for(const li of x.d.querySelectorAll('.attention-all-list>li')){
+  assert.ok(li.querySelector('button.attention-row[data-attention]'),'the card itself opens it');
+  assert.equal(li.querySelectorAll('.dgc-ia-btn[data-attention-open]').length,1,'Review');
+ }
+ const ids=[...x.d.querySelectorAll('.simple-content [id]')].map(e=>e.id);
+ assert.equal(new Set(ids).size,ids.length,'no id is used twice on the page');
+ assert.doesNotMatch(x.d.querySelector('.pip-app-root, body').textContent,/\bAI\b/);
+ // Back: the Pips list, Needs attention on the card it was opened from.
+ back.click();
+ assert.ok(x.d.querySelector('.simple-home'),'the list of Pips');
+ assert.equal(x.d.querySelector('.attention-all'),null);
+ assert.equal(x.d.querySelector('.attention-place').textContent,'3 of 9','on the card it was opened from');
+ assert.equal(x.d.querySelector('.attention [data-attention] strong').textContent,'Email 3');
+ // Escape, with the keyboard on a card of the page: back, on the card you were last on.
+ x.click('#attention-view-all');
+ const seventh=x.d.querySelectorAll('.attention-all-list>li')[6].querySelector('button.attention-row');
+ seventh.focus();
+ assert.equal(press(x,seventh,'Escape'),false,'Escape is taken');
+ assert.equal(x.d.querySelector('.attention-all'),null,'Escape went back');
+ assert.equal(x.d.querySelector('.attention-place').textContent,'7 of 9','the card you were last on');
+ assert.equal(x.d.querySelector('.attention [data-attention] strong').textContent,'Email 7');
+ // Review on the page opens the Pip, as the card does; the fold and the count are untouched by any of it.
+ x.click('#attention-view-all');
+ x.d.querySelectorAll('.attention-all-list>li')[1].querySelector('[data-attention-open]').click();await x.drain();
+ assert.ok(x.d.querySelector('#chat-form'),'Review opened the Pip’s chat');
+});
+
+test('View all: an answer is held in its own place with Undo, then sent once, and the card leaves the list',async()=>{
+ const proposal={id:SETUP,digest:'a'.repeat(64),workspace_id:PW,project_root:'/private/pips',pip_id:null,name:'Blog writer',goal:'Draft a post for review.',pip_type:'scout',work_kind:'personal_task',source_ref:'HEAD',schedule:null,run_now:false,next_run_at:null,status:'pending',created_at:'2099-10-02T04:00:00Z',expires_at:'2099-10-02T06:00:00Z',receipt:null,reason:'Draft posts.',expected_version:null,expected_lifecycle_revision:null,permissions:'read_only',source_policy:'personal',runner_notice:'Runs only while Pips are on.',scope_notice:'Reads only what you share.',run_now_policy:null};
+ const change=item('approval','proposal_a1',PIP,'Change Ava?',{detail:'Run at 8:00 every day',created_at:ago(2)});
+ const found=page([...mails(2),item('setup',SETUP,null,'Create the Pip “Blog writer”?',{created_at:ago(3)})],{reviews:[change],total:4});
+ const x=setup({found,proposal});await x.drain();
+ const fire=holds(x);
+ x.click('#attention-view-all');
+ assert.deepEqual(allTitles(x),['Email 1','Email 2','Change Ava?','Create the Pip “Blog writer”?']);
+ assert.equal(x.d.querySelector('.attention-all-count').textContent,'4');
+ // The same answers as its one card: Apply, Not now, Review.
+ const row=()=>x.d.querySelector('.attention-all-list>li[data-attention-key="approval:proposal_a1"]');
+ assert.deepEqual([...row().querySelectorAll('.dgc-ia-btn')].map(b=>b.textContent),['Apply','Not now','Review']);
+ row().querySelector('[data-attention-answer="yes"]').click();await x.drain();
+ assert.equal(row().querySelector('[role=status]').textContent,'Applied. Ava is changed.','it says what it will do, where it was');
+ assert.equal(row().querySelector('.attention-undo').textContent,'Undo');
+ assert.equal(allTitles(x).length,4,'still four rows: nothing moved');
+ assert.equal(x.d.querySelector('.attention-all-list').children[2],row(),'in its own place');
+ assert.equal(x.requests('accept_pip_update').length,0,'nothing is sent yet');
+ // Undo: the card and its answers again.
+ row().querySelector('.attention-undo').click();await x.drain();
+ assert.deepEqual([...row().querySelectorAll('.dgc-ia-btn')].map(b=>b.textContent),['Apply','Not now','Review']);
+ assert.equal(x.requests('accept_pip_update').length,0);
+ // Answered for good: sent once, and it leaves the list in place.
+ row().querySelector('[data-attention-answer="yes"]').click();await x.drain();
+ found.reviews=[];found.total=3;
+ fire();await x.drain();
+ const sent=x.requests('accept_pip_update');assert.equal(sent.length,1,'sent once');
+ assert.deepEqual(JSON.parse(JSON.stringify(sent[0].request)),{type:'accept_pip_update',pip_id:PIP,proposal_id:'proposal_a1',expected_version:1});
+ x.answer(sent[0],{pip:pip(PIP,'Ava',{current_version:2})});await x.drain();
+ assert.equal(row(),null,'answered: the card left the list');
+ assert.deepEqual(allTitles(x),['Email 1','Email 2','Create the Pip “Blog writer”?'],'the others are where they were');
+ assert.equal(x.d.querySelector('.attention-all-count').textContent,'3');
+ assert.ok(x.d.querySelector('.attention-all'),'still on the page');
+ // A new Pip rejected: the same moment to undo, in its own place (the list of Pips has it as a line above).
+ const card=()=>x.d.querySelector('.attention-all-list>li[data-attention-key="setup:'+SETUP+'"]');
+ card().querySelector('[data-attention-dismiss]').click();await x.drain();
+ assert.equal(card().querySelector('[role=status]').textContent,'Rejected. No Pip was created.');
+ assert.equal(x.d.querySelector('.attention-all-list').children[2],card(),'in its own place');
+ assert.equal(x.d.querySelector('.undo-reject'),null,'said once, on the card');
+ assert.equal(x.d.querySelector('.attention-all-count').textContent,'2','and out of the count at once');
+ assert.equal(x.requests('reject_pip_setup').length,0,'not sent yet');
+ card().querySelector('[data-undo-reject]').click();await x.drain();
+ assert.ok(card().querySelector(`[data-setup-card="${SETUP}"]`),'Undo: its card is back');
+ assert.equal(x.requests('reject_pip_setup').length,0);
+ card().querySelector('[data-attention-dismiss]').click();await x.drain();
+ fire();await x.drain();
+ assert.deepEqual(JSON.parse(JSON.stringify(x.requests('reject_pip_setup')[0].request)),{type:'reject_pip_setup',setup_id:SETUP,expected_digest:proposal.digest});
+ assert.equal(card(),null,'rejected: it left the list');
+ assert.deepEqual(allTitles(x),['Email 1','Email 2']);
+});
+
+test('View all: a new card is added to the page; when the last is answered it says nothing needs you and offers Back',async()=>{
+ const found=page(mails(2));
+ const x=setup({found});await x.drain();
+ x.click('#attention-view-all');
+ assert.deepEqual(allTitles(x),['Email 1','Email 2']);
+ // Something new comes in: it is on the page, newest first, and the page stays open.
+ const fresh=item('app_link',LINK,PIP,'Connect Gmail?',{created_at:ago(0)});
+ await reread(x,found,[fresh,...mails(2)]);
+ assert.deepEqual(allTitles(x),['Connect Gmail?','Email 1','Email 2']);
+ assert.equal(x.d.querySelector('.attention-all-count').textContent,'3');
+ // One left: still the page (View all is not on the heading with one card, but the page you are on stays).
+ await reread(x,found,mails(1));
+ assert.deepEqual(allTitles(x),['Email 1']);
+ // The last one answered.
+ await reread(x,found,[]);
+ const empty=x.d.querySelector('.attention-all-empty');
+ assert.ok(empty,'the page says so');
+ assert.equal(empty.querySelector('[role=status]').textContent,'Nothing needs you right now.');
+ assert.equal(x.d.querySelector('.attention-all-list'),null);
+ assert.equal(x.d.querySelector('.attention-all-count'),null,'no count of nothing');
+ const done=empty.querySelector('#attention-all-done');
+ assert.equal(done.textContent,'Back to your Pips');
+ assert.ok(x.d.querySelector('#attention-all-back'),'the back button is still there too');
+ done.click();
+ assert.ok(x.d.querySelector('.simple-home'),'Back: the list of Pips');
+ assert.equal(x.d.querySelector('.attention,.attention-all'),null,'with nothing waiting');
+});
+
+test('View all: the older layout has none; another page asked for by the host leaves it',async()=>{
+ // The page's markup, from the module: every card in order, and nothing waiting is the empty page.
+ const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+ const cards=attention.attentionPage(page(mails(2)));
+ const drawn=attention.attentionAllMarkup(cards,{esc,face:()=>''});
+ assert.equal(drawn.count,2);
+ assert.deepEqual([...drawn.html.matchAll(/data-attention-key="([^"]+)" data-attention-index="(\d)"/g)].map(m=>m.slice(1)),[['email:maildraft_'+'a'.repeat(32),'0'],['email:maildraft_'+'b'.repeat(32),'1']]);
+ const none=attention.attentionAllMarkup(attention.attentionPage(page([])),{esc,face:()=>''});
+ assert.equal(none.count,0);assert.match(none.html,/Nothing needs you right now\./);
+ // attentionMarkup offers View all only where it is asked to (the Pips home), so the older layout's section is unchanged.
+ const plain=attention.attentionMarkup(cards,{esc,face:()=>'',expanded:1});
+ assert.doesNotMatch(plain,/View all|attention-head/);
+ assert.match(attention.attentionMarkup(cards,{esc,face:()=>'',expanded:1,viewAll:true}),/id="attention-view-all"/);
+ assert.doesNotMatch(attention.attentionMarkup(cards,{esc,face:()=>'',expanded:false,viewAll:true}),/View all/,'folded');
+ // The host opens a Pip (the dock, a notification): its chat, and Your Pips from there is the list, not this page.
+ const x=setup({found:page(mails(3)),embedded:true});await x.drain();
+ x.click('#attention-view-all');assert.ok(x.d.querySelector('.attention-all'));
+ const going=x.app.navigate({pip:PIP,workspace:PW,section:'chat'});await x.drain();await going;
+ assert.ok(x.d.querySelector('#chat-form'),'the Pip’s chat');
+ x.click('#simple-back');await x.drain();
+ assert.ok(x.d.querySelector('.simple-home'),'Your Pips is the list');
+ assert.equal(x.d.querySelector('.attention-all'),null);
+});

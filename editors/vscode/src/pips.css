@@ -731,6 +731,25 @@ button.attention-dot:hover{background:transparent;border:0}.attention-dot:hover 
 @keyframes attention-from-next{from{opacity:0;transform:translateX(28px)}to{opacity:1;transform:none}}
 @keyframes attention-from-prev{from{opacity:0;transform:translateX(-28px)}to{opacity:1;transform:none}}
 @media(forced-colors:active){.attention-dot i{forced-color-adjust:none;background:GrayText}.attention-dot[aria-current] i,.attention-dot[aria-current]:hover i{background:Highlight}button.attention-nav{border-color:ButtonText}.attention-carousel .attention-row{border-color:CanvasText}}
+/* "View all" (asked 12 Nov). On the heading row: quiet words at its right end, in line with the card's edge. The
+   heading's own button (the fold) takes the rest of the row and ends before them, so neither lies on the other. Grey,
+   not the accent: the count is the purple there. */
+.attention-head{display:flex;align-items:center;gap:6px}
+.attention-head>.attention-toggle{flex:1 1 0;width:auto;min-width:0}.attention-head .attention-count{flex:none}
+button.attention-all-link{flex:none;margin:0 0 8px;min-height:24px;padding:2px 0 2px 8px;border:0;border-radius:var(--btn-r,6px);background:transparent;box-shadow:none;color:var(--muted);font-size:12px;font-weight:400;line-height:18px;white-space:nowrap}
+button.attention-all-link:hover{background:transparent;color:var(--vscode-foreground);text-decoration:underline;text-underline-offset:2px}
+button.attention-all-link:focus-visible{outline:var(--btn-ring,2px solid var(--vscode-focusBorder));outline-offset:2px}
+/* Its page: every card one under another, each the card the one-card view shows. The page scrolls as the view does. */
+/* Its count beside the title is plain grey figures, kept at any width (a narrow bar drops a pill's small word). */
+.pip-pill>span.attention-all-count{flex:none;color:var(--muted);font-weight:400;font-variant-numeric:tabular-nums}
+.attention-all{margin:0}.attention-all-list{gap:8px}
+.attention-all-list .attention-item.attention-card{margin:0}
+.attention-all-list .attention-row{padding:9px 10px;border:1px solid var(--hair,var(--line));border-radius:var(--r-card,12px);background:color-mix(in srgb,var(--text,var(--vscode-foreground)) 4.5%,transparent)}
+.attention-all-list button.attention-row:hover:not(:disabled){background:color-mix(in srgb,var(--text,var(--vscode-foreground)) 7%,transparent);border-color:var(--hair-strong,var(--line))}
+.attention-all-list .attention-row:focus-visible{outline:var(--btn-ring,2px solid var(--vscode-focusBorder));outline-offset:2px}
+.attention-all .attention-cut{margin:8px 0 0}
+.attention-all-empty{display:grid;justify-items:center;gap:12px;padding:36px 12px;text-align:center}.attention-all-empty p{margin:0;color:var(--muted);font-size:13px}
+@media(forced-colors:active){.attention-all-list .attention-row{border-color:CanvasText}}
 .attention-flash{animation:attention-flash 2.4s ease-out 1}@keyframes attention-flash{0%,30%{box-shadow:0 0 0 2px var(--vscode-focusBorder)}100%{box-shadow:0 0 0 0 transparent}}@media(prefers-reduced-motion:reduce){.attention-flash{animation:none;outline:2px solid var(--vscode-focusBorder)}}
 /* What it remembers (#6): notes on its page, and "Remembered" under the reply that kept one. */
 .note-add{gap:8px}.note-add input{flex:1;min-width:0}.note-all{display:flex;justify-content:flex-end;padding:4px 2px 0}.note-confirm{display:flex;align-items:center;gap:6px;font-size:12px}
