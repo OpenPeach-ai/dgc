@@ -224,6 +224,15 @@ job with `create_pip` and a reviewed update.
 | 77 | `undo_pip_change {pip_id, change_id}`: Undo on a change a Personal Pip made about itself at once in a turn the user started (local only in DGC); a reply's `changes` lists them |
 | 78 | No new command. A run's post may carry `artifact` `{id, type, title, version}` (`type` `doc` or `sheet`): the review it kept as the Pip's document or sheet, or the Quill draft that became its document. Read it only from a runtime advertising 78 |
 | 79 | Several conversations per Pip: `list_pip_conversations {pip_id, archived?}`, `create_pip_conversation {pip_id, title?}`, `rename_pip_conversation {pip_id, conversation_id, title}`, `archive_pip_conversation {pip_id, conversation_id, archived?}` (local only in DGC); `send_pip_message`, `list_pip_messages`, `mark_pip_read` and `get_pip_chat_context` take an optional `conversation_id` (none: the Pip's first conversation, as before). Messages carry their `conversation_id`. `add_pip_computer {pip_id}`: another computer for the Pip; `get_pip_computer` gains `computers` and `computers_limit`. |
+| 80 | No new command. A Project Pip has a level too: `get_pip_level` and `set_pip_level` take a Project Pip's id, the answer carries `kind` (`personal` or `project`; a Project Pip has no `paying`), and `on_its_own` may list kind `handoff`. At Approve for me a read-only handoff, and a check whose exact commands you approved once, run by themselves; at Do it all a fix too, in its own copy. Read the new fields only from a runtime advertising 80. |
+| 81 | A plugin that needs a key it doesn't have raises one card in the Pip's chat: `list_pip_plugins` also answers `key_requests` [{id, plugin, name, reason, status, needs_key [{name, label, server}]}], and `allow_pip_plugin` takes `keys` {variable name: text} (up to 8, each 16,384 characters at most), kept where DGC keeps a plugin's key, bound to its server, and never answered. Every key it lacks must be given, or nothing is saved. Both SDKs send `keys` only to a runtime advertising 81. |
+| 82 | A Personal Pip's own API keys, each bound to one site (local only): `list_pip_keys {pip_id}` (R: its cards, `kind` `site` or `generator`, `status` requested, saved or declined; never a value), `save_pip_key {pip_id, key_id, value}`, `decline_pip_key {pip_id, key_id}` (Not now: no new card for that site for a day) and `remove_pip_key {pip_id, key_id}` (M). A key id is `pipkey_<32 hex>`. DGC adds a saved key to the Pip's reads from that site alone; a `generator` card's key is a picture or video generator's own, kept for all of DGC. |
+| 83 | `send_pip_message`'s `reply_to`: the id of one of that Pip's own messages in the same conversation (`message_<32 hex>`). The user's message quotes it; its row carries `reply_to` {id, text} (the quote, read from the store, up to 600 characters), and a reply's row carries `answers`, the id of the message it answers. |
+| 84 | No new command or field. `send_pip_message`'s photos and files are also taken while a reply is running (a runtime before 84 answers `steer_attachments`), and by a Project Pip, as reference beside the code it reads: never instructions, never run. A client gates on 84 before sending either. |
+| 85 | `save_pip_key`'s `terminal` (true or false): also let the Pip's computer Terminal use that site's key, as a variable (`list_pip_keys` rows say `terminal` and `terminal_name`). Refused below Do it all, and the level is read again at each command. The key reaches the computer through a file only it sees, never a command line, and what the Terminal prints is masked of it. |
+| 86 | A name for each of a Pip's computers, and its screen size (local only): `get_pip_computer`'s `computer` carries `names` [{number, name, named, state, doing?}] (state `closed`, `open`, `working` or `needs_you`), `screen` and `screens`; `rename_pip_computer {pip_id, number, name}` (up to 30 characters; "" gives back its first name) and `set_pip_computer_screen {pip_id, size}` (`1280x800`, `1440x900` or `1920x1080`, taken when its screen next starts) (M); `open_pip_computer` and `use_pip_computer_view` take an optional `number` (1 for the first). |
+| 87 | Big files between this computer and a Pip computer's Files, streamed, up to the Files folder's 1 GB: `copy_pip_computer_file_in {pip_id, path, source}` and `copy_pip_computer_file_out {pip_id, path, target}` (M), by absolute path on this computer. Host only: DGC takes them from its own user on this computer (the editor sends them after its file dialogs) and refuses them from an app built on the SDK. |
+| 88 | "Apps it can use", skills and team files (local only): `get_pip_apps {pip_id}` (R: `apps` [{id, name, kind `plugin` or `app`, on, accounts?}]), `set_pip_app {pip_id, app, on}` and `add_pip_app_account {pip_id, app}` (M: a Connect card for one more address of an app the Pip has; the card carries `another: true`); `get_pip_skills {pip_id}` (R: `skills` [{name, description, source, on}]) and `set_pip_skill {pip_id, skill, on}` (M); `export_pip_team {pip_ids, name}` (R: one `dgc-team` file for up to 20 Pips); `set_pip_profile`'s `changes.group` (the Pip's folder in the Personal list, one line of up to 40 characters, "" for none); `use_pip_computer_view`'s `op` `close` (its tab closed, so the computer reads closed at once). Every app and skill is on until switched off; a switched-off app is refused on every path, and a switched-off skill is never offered to the Pip's model. Both SDKs refuse `changes.group` and `op` `close` before 88. |
 | 58 | How much a Personal Pip asks: `get_pip_level {pip_id}` (R: `level`, `default`, `levels` [{level, name, says}], `on_its_own` [{at, what, level, unattended, kind}]) and `set_pip_level {pip_id, level}` (M, local only; `ask`, `approve` or `full`). What a level let through is a computer action already `sent` by `pip-level:<level>` or an app action resolved by it; a payment asks at every level. |
 | 57 | A Personal Pip's own working notes: `get_pip_working_notes {pip_id}` (R: `lines`, `text`, `revision`, `max_lines`, `max_bytes`, `bytes`, `updated_at`) and `set_pip_working_notes {pip_id, text, expected_revision}` (M, local only, never a secret); `list_pip_daily_log {pip_id, before?, limit?}` (R): what it did each day, `{days: [{day, lines, more}], next_before}`. The Pip keeps its notes itself with a `working_notes` tool and starts every run with them; the log is never given to a run. |
 
@@ -539,8 +548,8 @@ settings are display preferences outside the reviewed job; changing them grants 
 | `decide_pip_computer_action` | M | `action_id`, `expected_digest`, `approve` (bool) |
 | `always_allow_pip_computer_action` | M | `action_id`, `expected_digest`; sends it and lets its Pip send the same submit (method, site, path) without asking |
 | `stop_pip_computer` | M | `pip_id` |
-| `open_pip_computer` | M | `pip_id` |
-| `use_pip_computer_view` | M | `pip_id`, `op` (`frame`, `click`, `type`, `key`, `scroll`, `go`, `back`; `pointer` from API 53: where the Pip last acted by position, no frame), `x?`, `y?`, `text?`, `key?`, `dy?`, `url?` |
+| `open_pip_computer` | M | `pip_id`, `number?` (API 86: which of its computers, 1 for the first; none: the one at work, else the first) |
+| `use_pip_computer_view` | M | `pip_id`, `op` (`frame`, `click`, `type`, `key`, `scroll`, `go`, `back`; `pointer` from API 53: where the Pip last acted by position, no frame; `close` from API 88: its tab closed, so the computer reads closed at once), `x?`, `y?`, `text?`, `key?`, `dy?`, `url?`, `number?` (API 86) |
 | `list_pip_computer_files` | R | `pip_id`, `path?`; the computer's own Files folder (API 43) |
 | `read_pip_computer_file` | R | `pip_id`, `path`; `text` (first 64 KiB), or `data` up to 2 MB (API 43) |
 | `list_pip_computer_terminal` | R | `pip_id`; the last 200 commands and the one running (API 43) |
@@ -548,6 +557,14 @@ settings are display preferences outside the reviewed job; changing them grants 
 | `add_pip_computer_file` | M | `pip_id`, `path?`, `name`, `data` (one data URI, 2 MB at most; outside the 32 KiB budget) (API 43) |
 | `remove_pip_computer_file` | M | `pip_id`, `path` (API 43) |
 | `run_pip_computer_command` | M | `pip_id`, `command`; starts it in the computer's Terminal (no internet) and returns at once (API 43) |
+| `rename_pip_computer` | M | `pip_id`, `number` (1 for the first), `name` (up to 30 characters; "" gives back its first name) (API 86) |
+| `set_pip_computer_screen` | M | `pip_id`, `size` (`1280x800`, `1440x900` or `1920x1080`): taken when its screen next starts (API 86) |
+| `copy_pip_computer_file_in` | M | `pip_id`, `path` (its folder in Files), `source` (an absolute path on this computer): host only, refused from an app built on the SDK; up to the Files folder's 1 GB (API 87) |
+| `copy_pip_computer_file_out` | M | `pip_id`, `path` (a file in Files), `target` (an absolute path on this computer, where the user chose to save it): host only, as above (API 87) |
+| `finish_pip_computer_check` | M | `pip_id`: the user finished a check on its screen that only a person can pass, and the Pip carries on (API 43) |
+| `get_pip_computers` | R | none; every Pip computer here: its name, the disk it and its Files use, whether a reply is using it or it is being reset (API 43) |
+| `update_pip_computers` | M | none; looks for newer programs for the computers (its browser, the desktop) now, not at the next daily check (API 43) |
+| `reset_pip_computer` | M | `pip_id`: its computer starts afresh, signed out and with no history; its Files stay (API 43) |
 
 A Personal Pip's computer is its own sandboxed browser (Linux only for now). It reads public
 websites freely; anything it would submit is held as a pending action until the user decides.
@@ -646,6 +663,46 @@ proposal = session.pips.mutate("propose_pip_personal_handoff", {
 Personal results are `get_pip_run` results with `run_kind: "personal_task"` and the
 document in `result.text`. The SDK writes no files; the host decides where to show
 or save them.
+
+### A Personal Pip's page: its look, apps, keys, skills and routines
+
+All of these are local only in DGC: the user changes them on this computer, and none of them grants a Pip anything it
+couldn't do before, except a switch turned back on.
+
+| Command | | Fields |
+| --- | --- | --- |
+| `set_pip_profile` | M | `pip_id`, `changes`: any of `title` (60 characters at most), `body` (one of the eight Pip faces), `color`, `notify` (bool) and `group` (API 88: its folder in the Personal list, one line of up to 40 characters, "" for none) (API 43) |
+| `list_pip_shared` | R | `pip_id`, `kind` (`links`, `media` or `files`): what was shared in its chat, newest first (API 43) |
+| `list_pip_unread` | R | `workspace_id`: `{pips, total}`, the Pips with unread messages or run posts and how many (API 69) |
+| `set_pip_chat_options` | M | `pip_id`, `chat_options`: its prompt box's context window and thinking, for its replies and all its runs (API 47) |
+| `list_pip_sites` | R | `pip_id`: `{careful, sites}`, Careful mode's switch and the sites it may visit without asking (API 44) |
+| `get_pip_artifacts` | R | `pip_id`: `report_as` (`chat`, `doc` or `sheet`), `dashboards` (ids), and its own document and sheet with their titles and versions (API 67) |
+| `set_pip_artifacts` | M | `pip_id`, `report_as?`, `dashboards?`: with `doc` or `sheet` each finished review is also the newest version of its own document or sheet, and after every run it finishes it refreshes those dashboards (API 67) |
+| `list_pip_apps` | R | none; every app your Pips use (API 43) |
+| `list_pip_app_links` | R | `pip_id`: its own apps, every connected account of each, and at most one open card; a card asking for one more account of an app it has carries `another: true` (API 43) |
+| `start_pip_app_link` | M | `pip_id`, `link_id`, `account?` (one of the accounts it answered with; none is linked until one is named), `another?` (true: sign in to one more account; API 74) (API 43) |
+| `check_pip_app_link`, `decline_pip_app_link` | M | `pip_id`, `link_id`: whether its sign-in finished; Not now on its card (API 43) |
+| `disconnect_pip_app_link` | M | `pip_id`, `link_id`: the Pip stops using that account, and any Always allow it was given on it ends with it; the plugin stays connected for other uses (API 43) |
+| `get_pip_apps` | R | `pip_id`: `apps` [{id, name, kind (`plugin`: turned on in Settings; `app`: reached through Composio), on, accounts?}] (API 88) |
+| `set_pip_app` | M | `pip_id`, `app` (an id from `get_pip_apps`), `on` (bool): for that Pip alone; its link stays while it is off (API 88) |
+| `add_pip_app_account` | M | `pip_id`, `app`: `{link}`, a Connect card for one more address of an app it has, then the usual `start_pip_app_link` and `check_pip_app_link` (API 88) |
+| `list_pip_keys` | R | `pip_id`: its key cards, never a value (API 82) |
+| `save_pip_key` | M | `pip_id`, `key_id`, `value` (16,384 characters at most; never answered), `terminal?` (API 85) (API 82) |
+| `decline_pip_key`, `remove_pip_key` | M | `pip_id`, `key_id`: Not now (no new card for that site for a day); forget a saved key (API 82) |
+| `get_pip_skills` | R | `pip_id`: `skills` [{name, description, source, on}] (API 88) |
+| `set_pip_skill` | M | `pip_id`, `skill`, `on` (bool): a skill switched off is never offered to its model (API 88) |
+| `export_pip_team` | R | `pip_ids` (1 to 20), `name`: `{document, text}`, one `dgc-team` file holding each Pip's shareable file (no accounts, IDs, memory or history) (API 88) |
+| `delete_pip_routine` | M | `pip_id`, `routine_id` (API 43) |
+| `decide_pip_routine` | M | `pip_id`, `routine_id`, `add` (bool): the user's Add routine, or Not now, on a routine the Pip suggested in its chat (API 43) |
+
+A Pip can hold several accounts of one app. With one, DGC uses it on every call; with several, the Pip's model names one
+on each call, and nothing picks a default for the user: a host that shows an Allow card for a Pip with several accounts
+of that app lets the user choose which one sends it. Every app is on until it is switched off; an app switched off is
+refused on every path (its plugin isn't listed or callable, its reads and sends are refused, and the Pip can't ask for
+it), and switching it back on needs no new sign-in.
+
+A team file is imported in the editor, which makes one pending setup card per Pip (`list_pip_setups`); the SDK has no
+import command.
 
 ### Your own app's tools (API 61)
 
