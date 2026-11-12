@@ -64,6 +64,15 @@ class AppSwitchTests(plugin_tests.PluginWorld, unittest.TestCase):
         self.assertEqual([a for a in links.connected(self.registry, self.pip["id"]) if a["toolkit"] == "gmail"][0]["account"],
                          "ca_second", "its link stays: switching it back on needs no new sign-in")
 
+    def test_add_another_address_from_the_pips_page_raises_its_card(self):
+        self.link_second()
+        made = self.control("add_pip_app_account", pip_id=self.pip["id"], app="gmail")
+        self.assertTrue(made["ok"], made)
+        card = made["result"]["link"]
+        self.assertEqual((card["toolkit"], card["status"], card.get("another")), ("gmail", "requested", True))
+        self.assertFalse(self.control("add_pip_app_account", actor="device_1", pip_id=self.pip["id"], app="gmail")["ok"])
+        self.assertFalse(self.control("add_pip_app_account", pip_id=self.pip["id"], app="Gmail!")["ok"])
+
     def test_only_the_user_on_this_computer_and_only_real_app_names(self):
         self.assertFalse(self.control("set_pip_app", actor="device_1", pip_id=self.pip["id"], app="gmail", on=False)["ok"])
         for bad in ("", "Gmail!", "x" * 80, None):

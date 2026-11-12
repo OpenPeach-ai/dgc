@@ -487,6 +487,7 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # and every app it is linked to, with its accounts), each {id, name, kind: plugin|app, on}; set_pip_app {pip_id, app, on}
 # switches one for that Pip alone (every app on until switched off). Local only. A switched-off app is refused on every
 # path: its plugin isn't listed or callable, its reads, Composio calls and sends are refused, and it can't be asked for.
+# add_pip_app_account {pip_id, app} raises a Connect card for one more address of an app the Pip has (several allowed).
 PIPS_API_VERSION = 88
 
 

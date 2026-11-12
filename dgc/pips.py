@@ -64,7 +64,7 @@ CONTROL_COMMANDS = frozenset({
     "always_allow_pip_computer_action",
     "list_pip_computer_files", "read_pip_computer_file", "add_pip_computer_file", "remove_pip_computer_file",
     "copy_pip_computer_file_in", "copy_pip_computer_file_out",
-    "get_pip_apps", "set_pip_app",
+    "get_pip_apps", "set_pip_app", "add_pip_app_account",
     "run_pip_computer_command", "list_pip_computer_terminal", "get_pip_computer_desktop",
     "get_pips_keep_running", "set_pips_keep_running",
     "get_pips_desktop_notifications", "set_pips_desktop_notifications",
@@ -213,7 +213,7 @@ _COMMAND_ARGS = {
     "list_pip_computer_files": {"pip_id", "path"}, "read_pip_computer_file": {"pip_id", "path"},
     "add_pip_computer_file": {"pip_id", "path", "name", "data"}, "remove_pip_computer_file": {"pip_id", "path"},
     "copy_pip_computer_file_in": {"pip_id", "path", "source"}, "copy_pip_computer_file_out": {"pip_id", "path", "target"},
-    "get_pip_apps": {"pip_id"}, "set_pip_app": {"pip_id", "app", "on"},
+    "get_pip_apps": {"pip_id"}, "set_pip_app": {"pip_id", "app", "on"}, "add_pip_app_account": {"pip_id", "app"},
     "run_pip_computer_command": {"pip_id", "command"}, "list_pip_computer_terminal": {"pip_id"},
     "get_pip_computer_desktop": {"pip_id"},
     "get_pips_keep_running": set(), "set_pips_keep_running": {"enabled"},
@@ -6427,13 +6427,28 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
             elif command == "get_pip_computer_desktop":
                 from . import pip_computer
                 result = {"desktop": pip_computer.desktop_status(registry, pip_id, actor)}
-            elif command in ("get_pip_apps", "set_pip_app"):
-                # Pips API 88 (pips-09): "Apps it can use", a switch per app, every app on until switched off.
+            elif command in ("get_pip_apps", "set_pip_app", "add_pip_app_account"):
+                # Pips API 88 (pips-09): "Apps it can use", a switch per app, every app on until switched off; and from
+                # its page, one more address of an app it has (a Connect card, chosen there as any other).
                 from . import pip_app_switches
                 if actor not in ("editor-user", "local-console"):
                     raise RegistryError("local_only", "Only you can choose a Pip's apps, on this computer.")
-                result = (pip_app_switches.listing(registry, pip_id, config) if command == "get_pip_apps"
-                          else pip_app_switches.set_app(registry, pip_id, request.get("app"), request.get("on"), actor))
+                if command == "get_pip_apps":
+                    result = pip_app_switches.listing(registry, pip_id, config)
+                elif command == "set_pip_app":
+                    result = pip_app_switches.set_app(registry, pip_id, request.get("app"), request.get("on"), actor)
+                else:
+                    app = request.get("app")
+                    if not isinstance(app, str) or not pip_app_switches.NAME.fullmatch(app):
+                        raise RegistryError("invalid_request", "Choose one of the apps on this Pip's page.")
+                    pip_app_switches.require_on(registry, pip_id, app)
+                    from . import pip_app_links
+                    store._job(pip_id)                      # a Pip that exists
+                    workspace = registry.db.execute("SELECT workspace_id FROM pips WHERE id=?", (pip_id,)).fetchone()[0]
+                    card = pip_app_links.request(registry, pip_id, workspace, app,
+                                                 f"One more {pip_app_links.app_name(app)} address for this Pip.", None, another=True)
+                    found = next((item for item in pip_app_links.listing(registry, pip_id) if item["id"] == card["id"]), card)
+                    result = {"link": found}
             elif command in ("list_pip_computer_files", "read_pip_computer_file", "add_pip_computer_file",
                              "remove_pip_computer_file", "run_pip_computer_command", "list_pip_computer_terminal",
                              "copy_pip_computer_file_in", "copy_pip_computer_file_out"):
