@@ -3048,7 +3048,9 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 
 /* Thousands of sessions: the search box, the words a search found, Load more. */
 /* A field's wash with no line round it; focused, the editor's own focus line. */
-.sessions-search { box-sizing: border-box; width: 100%; height: var(--row); margin: 0 0 var(--sp-2); border: 1px solid transparent; border-radius: var(--r-lg); background: var(--field); color: var(--text-strong); padding: 0 10px; font: inherit; font-size: var(--t-sm); }
+/* (The search box has the shared button's corner and height, as New beside it and the Project Folder dropdown have:
+   one set on the row, asked 13 Nov. Its focus ring is its own line, so it follows the corner.) */
+.sessions-search { box-sizing: border-box; width: 100%; height: var(--btn-h); margin: 0 0 var(--sp-2); border: 1px solid transparent; border-radius: var(--btn-r); background: var(--field); color: var(--text-strong); padding: 0 10px; font: inherit; font-size: var(--t-sm); }
 .sessions-search:focus { outline: none; border-color: var(--vscode-focusBorder, var(--text)); }
 .sessions-search::placeholder { color: var(--muted-firm); opacity: 1; }   /* (a field is a raised ground) */
 .sessions-search[hidden], .sessions-more[hidden] { display: none; }

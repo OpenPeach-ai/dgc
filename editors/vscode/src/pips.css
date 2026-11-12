@@ -733,7 +733,8 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .reply-stats{margin-left:6px;font:500 11px/1.2 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap}
 /* Thousands of Pips: a search over names and titles, and how many are shown. */
 .pip-search{display:flex;align-items:center;gap:10px;margin:0 0 12px}
-.pip-search input{flex:1;min-width:0;height:var(--row,29px);border:1px solid transparent;border-radius:var(--r-lg,12.5px);padding:0 10px;font-size:12px;background:var(--field)}
+/* (The shared button's corner and height, as Work's and Chat's search boxes and the Project Folder dropdown: asked 13 Nov.) */
+.pip-search input{flex:1;min-width:0;height:var(--btn-h,28px);border:1px solid transparent;border-radius:var(--btn-r,6px);padding:0 10px;font-size:12px;background:var(--field)}
 .pip-search input:focus-visible{outline:1px solid var(--vscode-focusBorder,var(--accent));outline-offset:-1px}
 .pip-search input::placeholder{color:var(--muted);opacity:1}
 .pip-search-count{flex:none;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}

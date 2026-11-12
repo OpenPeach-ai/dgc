@@ -49,7 +49,8 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
       });
       assert.deepEqual(look.row, [44, "12px", "11px", look.quiet], "a session: its name in 12px words over a quiet 11px line");
       assert.deepEqual(look.heights, [44], "every row is one height");
-      assert.deepEqual(look.search, ["rgba(0, 0, 0, 0)", 29], "the search box: a field with no line round it");
+      // (13 Nov: the search box takes the New button's height, 28px, and the shared button's corner: test/search-shape.test.mjs.)
+      assert.deepEqual(look.search, ["rgba(0, 0, 0, 0)", 28], "the search box: a field with no line round it");
       assert.deepEqual(look.fresh, [28, true, true], "New: a 28px pill on the search box's row, after it");
       assert.deepEqual(look.big.filter((m) => purple(m.c)).map((m) => m.n), [], "nothing wider than a dot is filled purple");
       assert.deepEqual(await shown(x.page, "#sessions-new"), [true]);
