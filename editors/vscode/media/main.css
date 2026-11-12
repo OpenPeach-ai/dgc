@@ -7,6 +7,8 @@
 @import url("./shared/filesheet.css");
 @import url("./shared/tray.css");
 @import url("./shared/dialog.css");
+@import url("./shared/mote.css");
+@import url("./shared/voxel.css");
 @import url("./shared/blob.css");
 @import url("./shared/dock.css");
 @import url("./shared/tabs.css");
@@ -160,7 +162,7 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 #sessions-host .sessions-status { margin:0; padding:0; color:var(--muted); font:var(--w-reg) var(--t-sm)/1.5 var(--sans); }
 #sessions-host .sessions-status[data-kind="error"] { color:var(--err-text); }
 #sessions-host .sessions-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px; }
-/* A session (Work) and a chat (Chat) are the same row: its blob, its name on one line over a quiet line that says what
+/* A session (Work) and a chat (Chat) are the same row: its mark (a Voxel, a Mote), its name on one line over a quiet line that says what
    it is doing (or the words a search found, or a chat's last message), and its age at the right. While it runs, the
    accent's dot stands where the age was. Pointed at or focused, the age gives its place to the row's actions; that
    place lies over the row's end, so the name never moves. */
@@ -169,7 +171,7 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 #sessions-host .session-row:hover { background:var(--row-hover); }
 #sessions-host .session-row:focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:-1px; }
 #sessions-host .session-blob { flex:none; display:grid; place-items:center; width:24px; height:24px; line-height:0; }
-#sessions-host .session-blob .dgc-blob { --blob-size:20px; }
+#sessions-host .session-blob [data-mark] { --size:24px; }
 #sessions-host .session-main { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:1px; }
 #sessions-host .session-name { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); font:var(--w-reg) var(--t-sm)/1.35 var(--sans); }
 #sessions-host .session-sub { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-2); font:var(--w-reg) var(--t-xs)/1.4 var(--sans); font-variant-numeric:tabular-nums; }

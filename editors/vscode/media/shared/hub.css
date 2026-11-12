@@ -1,6 +1,6 @@
 /* Home, the first tab of DGC's side bar (media/shared/hub.js draws it): a Show filter, then "Needs you" and "New", each
    a column of cards of one size (two columns in a wide side bar). A card is the shared one (card.css), thin and slim, in
-   one row: who it is from (a Pip's face or a session's blob), where it came from and when in a quiet line over what it
+   one row: who it is from (a Pip's face or a session's mark), where it came from and when in a quiet line over what it
    wants in a sentence (two lines at most), and at the right its answers as a row of small icons, the main one filled
    (media/shared/iconactions.css; the one pointed at turns into the full button with its word). Every card has the
    same height whatever it holds (but a command to allow, in a narrow card: see below). Neutral greys only: nothing here is purple. */
@@ -34,7 +34,7 @@
 .dgc-hub-link:hover { background: var(--wash); color: var(--text-strong); }
 .dgc-hub-head .dgc-hub-link { align-self: center; }
 .dgc-hub-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 264px), 1fr)); gap: var(--sp-2); min-width: 0; }
-/* One size for every card, and a slim one: one row. The face or blob; the words (where it is from and how old, small,
+/* One size for every card, and a slim one: one row. The face or mark; the words (where it is from and how old, small,
    on one line, over the sentence, which takes two lines at most); the answers at the right, one over the other, the
    filled one on top. A line left free under a one-line sentence holds the chips (hub.js shows them only there: they never
    add a row). The card's parts are laid on its own grid: the two free rows, first and last, centre the words. */
@@ -47,7 +47,7 @@
 .dgc-hub-card .dgc-card-icon.dgc-card-face { grid-column: 1; grid-row: 1 / -1; align-self: center; display: grid; place-items: center; width: 30px; height: 30px; margin: 0; line-height: 0; }
 .dgc-hub-card .dgc-card-icon.dgc-card-face > * { width: 30px; height: 30px; }
 .dgc-hub-card .dgc-card-icon.dgc-card-face :is(.dgc-plush, svg) { width: 100%; height: 100%; }
-.dgc-hub-card .dgc-card-icon.dgc-card-face > .dgc-blob { --blob-size: 24px; width: 24px; height: 24px; }
+.dgc-hub-card .dgc-card-icon.dgc-card-face > [data-mark] { --size: 26px; width: 26px; height: 26px; }
 /* A thing made (a page, a document, slides): the output card's sheet of its kind (filesheet.css) in the face's place,
    at the face's size, its tab's word on the kind's colour. */
 .dgc-hub-card .dgc-card-icon.dgc-card-face:has(> .dgc-sheet) { place-items: start; height: 33px; border-radius: 0; }

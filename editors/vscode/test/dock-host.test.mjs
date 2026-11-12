@@ -1,13 +1,11 @@
-// What is pinned to the dock, each session's colour, and a session's tab icon, as the extension keeps and draws them
-// (src/dock.ts, bundled against a stub `vscode`): pins hold in global state across reloads and windows; a Work session
-// and a project's Pip show only in the folder they were pinned in; past the most, pinning asks which to take off;
-// deleting a pinned thing takes it off; the three Dock settings are read and clamped; and a tab's icon is its blob as a
-// real PNG (round for Work, a rounded square for ChatDGC), in the pair its id gets or the one chosen.
+// What is pinned to the dock and each session's colour, as the extension keeps them (src/dock.ts, bundled against a
+// stub `vscode`): pins hold in global state across reloads and windows; a Work session and a project's Pip show only in
+// the folder they were pinned in; past the most, pinning asks which to take off; deleting a pinned thing takes it off;
+// the three Dock settings are read and clamped; a session's colour is one of twelve palettes. (How a palette is given
+// out, and a tab's icon, are in session-icons-host.test.mjs.)
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { inflateSync } from "node:zlib";
-import { JSDOM } from "jsdom";
 import { build } from "esbuild";
 
 const root = new URL("..", import.meta.url).pathname;
@@ -31,7 +29,7 @@ const out = await build({ entryPoints: [root + "src/dock.ts"], bundle: true, wri
     b.onLoad({ filter: /.*/, namespace: "stub" }, () => ({ contents: "module.exports = globalThis.__DOCK_VSCODE;" })); } }] });
 const mod = { exports: {} };
 new Function("module", "exports", "require", out.outputFiles[0].text)(mod, mod.exports, (await import("node:module")).createRequire(import.meta.url));
-const { Dock, dockOf, dockSettings, setDockSetting, blobIcon, blobPixels, ownColour, png } = mod.exports;
+const { Dock, dockOf, dockSettings, setDockSetting } = mod.exports;
 
 const store = () => { const kept = new Map(); return { globalState: { get: (k) => kept.get(k), update: async (k, v) => { kept.set(k, JSON.parse(JSON.stringify(v))); } }, kept }; };
 const S = (c) => `2026110${c}-101500-a1`, CHAT = (c) => "chat_" + c.repeat(32), PIP = (c) => "pip_" + c.repeat(32);
@@ -124,32 +122,26 @@ test("past the most, pinning asks which item to take off; Escape leaves the dock
 test("deleting a pinned session or chat takes it off the dock, and its colour goes with it", async () => {
   const context = store(), dock = new Dock(context);
   await dock.pin({ kind: "work", id: S("1"), title: "One" }); await dock.pin({ kind: "chat", id: CHAT("a"), title: "Two" });
-  await dock.setColour(`work:${S("1")}`, 5);
-  assert.equal(dock.colour("work", S("1")), 5);
+  await dock.setColour(`work:${S("1")}`, "rose");
+  assert.equal(dock.colour("work", S("1")), "rose");
   let changes = 0; dock.onChange(() => changes++);
   await dock.forget("work", S("1"));
   assert.deepEqual(dock.pins().map((p) => p.title), ["Two"]);
-  assert.equal(dock.colour("work", S("1")), 0);
+  assert.equal(`work:${S("1")}` in dock.colours(), false);
   assert.ok(changes >= 1, "and the pages are told");
   await dock.forget("chat", CHAT("z"));
   assert.deepEqual(dock.pins().map((p) => p.title), ["Two"], "something never pinned: nothing changes");
 });
 
-test("a session's colour: one of seven, kept with the session's id; anything else returns it to its own", async () => {
-  const context = store(), dock = new Dock(context);
-  assert.equal(dock.colour("chat", CHAT("a")), 0);
-  dock.handle({ type: "dockColour", key: `chat:${CHAT("a")}`, colour: 1 }); await tick();
-  assert.equal(new Dock(context).colour("chat", CHAT("a")), 1, "kept across a reload");
-  assert.deepEqual(dock.state().colours, { [`chat:${CHAT("a")}`]: 1 });
-  for (const bad of [0, 8, 2.5, "3", undefined]) { await dock.setColour(`chat:${CHAT("a")}`, 4); await dock.setColour(`chat:${CHAT("a")}`, bad); assert.equal(dock.colour("chat", CHAT("a")), 0, `${bad} is not a colour: back to its own`); }
-  await dock.setColour("pip:x", 3); await dock.setColour("work:../x", 3);
-  assert.deepEqual(dock.state().colours, {}, "only a session or a chat has a colour");
-  // The colour an id gets by itself is the page's (media/shared/blob.js): 2 to 7, never the pair led by purple.
-  const dom = new JSDOM("<body></body>", { runScripts: "outside-only" });
-  dom.window.eval(readFileSync(root + "media/shared/blob.js", "utf8"));
-  const seen = new Set();
-  for (let i = 0; i < 400; i++) { const id = `2026-s${i}`; assert.equal(ownColour(id), dom.window.DgcBlob.own(id), `the host and the page agree on ${id}`); seen.add(ownColour(id)); }
-  assert.deepEqual([...seen].sort(), [2, 3, 4, 5, 6, 7]);
+test("a session's colour: one of twelve palettes, kept with the session's id; anything else changes nothing", async () => {
+  const context = store(), dock = new Dock(context), key = `chat:${CHAT("a")}`;
+  assert.equal(key in dock.colours(), false);
+  dock.handle({ type: "dockColour", key, colour: "iris" }); await tick();
+  assert.equal(new Dock(context).colour("chat", CHAT("a")), "iris", "kept across a reload");
+  assert.deepEqual(dock.state().colours, { [key]: "iris" });
+  for (const bad of ["citron", "lime", 0, 3, "Iris", "", undefined, null]) { await dock.setColour(key, bad); assert.equal(dock.colour("chat", CHAT("a")), "iris", `${bad} is not one of the twelve: nothing changes`); }
+  await dock.setColour("pip:x", "rose"); await dock.setColour("work:../x", "rose");
+  assert.deepEqual(dock.state().colours, { [key]: "iris" }, "only a session or a chat has a colour");
 });
 
 test("Settings → General → Dock: Always by default, the most from 1 to 16, the icon size from 24 to 48", async () => {
@@ -181,50 +173,6 @@ test("a window looked at again reads the dock again: another window may have pin
   assert.equal(told, 0, "another window's pin isn't told here by itself");
   for (const l of onWindow) l({ focused: true });
   assert.ok(told >= 1); assert.deepEqual(here.state().pins.map((p) => p.title), ["Goa"]);
-});
-
-// ---- a session's editor tab icon: its blob, still ---------------------------------------------------------------------
-function decode(uri) {
-  const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(String(uri.text ?? uri));
-  assert.ok(m, "a data: URI: nothing to fetch after a reload");
-  const file = Buffer.from(m[1], "base64");
-  assert.deepEqual([...file.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10], "a PNG");
-  let at = 8, width = 0, height = 0; const data = [];
-  while (at < file.length) { const n = file.readUInt32BE(at), type = file.toString("ascii", at + 4, at + 8), body = file.subarray(at + 8, at + 8 + n);
-    if (type === "IHDR") { width = body.readUInt32BE(0); height = body.readUInt32BE(4); assert.deepEqual([body[8], body[9]], [8, 6], "8-bit RGBA"); }
-    if (type === "IDAT") data.push(body); at += 12 + n; }
-  const raw = inflateSync(Buffer.concat(data)), px = (x, y) => [...raw.subarray(y * (width * 4 + 1) + 1 + x * 4, y * (width * 4 + 1) + 5 + x * 4)];
-  return { width, height, px };
-}
-const ext = { fsPath: root.replace(/\/$/, "") };
-test("a session's tab icon is its blob as a still PNG: round for Work, a rounded square for ChatDGC, in its colour", () => {
-  assert.equal(blobIcon(ext, "work", ""), undefined, "a session with no id yet keeps the plain mark");
-  const id = S("1"), work = decode(blobIcon(ext, "work", id)), chat = decode(blobIcon(ext, "chat", id));
-  assert.deepEqual([work.width, work.height], [64, 64]);
-  assert.equal(work.px(32, 32)[3], 255, "filled in the middle");
-  assert.equal(work.px(1, 1)[3], 0, "clear at the corner");
-  assert.equal(work.px(11, 11)[3], 0, "round: nothing where a square would still be filled");
-  assert.equal(chat.px(11, 11)[3], 255, "a rounded square: filled there");
-  assert.equal(chat.px(3, 3)[3], 0, "its own corner is rounded away");
-  // The pair's gradient, bottom to top: the pixel near the bottom is near the first colour, the top near the second.
-  const tokens = readFileSync(root + "media/shared/tokens.css", "utf8");
-  const rgb = (name) => { const hex = new RegExp(`--blob-${name}:#([0-9a-f]{6})`).exec(tokens)[1]; return [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16)); };
-  const near = (a, b) => Math.hypot(...a.slice(0, 3).map((v, i) => v - b[i]));
-  const pair = ownColour(id), from = rgb(`${pair}a`), to = rgb(`${pair}b`);
-  // (Below the sheen: the gradient at that height, lifted by the light wave from the bottom, 0.3 of white falling to 0.1 halfway up.)
-  const want = (y, a = from, b = to) => { const inset = 64 * 0.06, tt = (64 - inset - (y + 0.5)) / (64 - 2 * inset), wave = tt < 0.5 ? 0.3 - 0.4 * tt : 0.2 * (1 - tt);
-    return a.map((v, i) => { const c = v + (b[i] - v) * tt; return c + (255 - c) * wave; }); };
-  for (const y of [58, 44, 30]) assert.ok(near(work.px(32, y), want(y)) < 4, `the pair's gradient from bottom to top, at ${y}: ${work.px(32, y)} for ${want(y).map(Math.round)}`);
-  // A chosen colour replaces the id's own; the same picture is made once.
-  const chosen = pair === 7 ? 5 : 7, picked = decode(blobIcon(ext, "work", id, chosen));
-  assert.ok(near(picked.px(32, 56), want(56, rgb(`${chosen}a`), rgb(`${chosen}b`))) < 4, "the chosen pair's colours");
-  assert.notDeepEqual(picked.px(32, 56), work.px(32, 56));
-  assert.equal(blobIcon(ext, "work", id, chosen), blobIcon(ext, "work", "another-session", chosen), "one picture per shape and pair");
-  assert.equal(String(blobIcon(ext, "work", id).text).includes("media"), false, "nothing names the extension's folder");
-  // The raw pixels and the encoder are what they say.
-  const pixels = blobPixels("work", [255, 0, 0], [0, 0, 255], 16);
-  assert.equal(pixels.length, 16 * 16 * 4);
-  assert.deepEqual([...png(1, 1, new Uint8Array([1, 2, 3, 4])).subarray(1, 4)].map((c) => String.fromCharCode(c)).join(""), "PNG");
 });
 
 test("one dock for the whole extension", () => {

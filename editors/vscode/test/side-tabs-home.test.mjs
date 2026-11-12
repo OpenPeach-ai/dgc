@@ -278,9 +278,9 @@ for (const width of [300, 700]) {
       assert.match(by[PIP_NEW].from, /^Receipts · New Pip/); assert.equal(by[PIP_NEW].title, "Create the Pip Receipts?"); assert.deepEqual(by[PIP_NEW].chips, ["Gmail · Mondays 9:00"]);
       assert.match(by[PIP_READ_1].from, /^Morning brief · Pip/); assert.equal(by[PIP_READ_1].title, "Five bullets for this morning, each with its link.");
       assert.match(by[PIP_FAILED].from, /^Billing review · Project Pip/); assert.equal(by[PIP_FAILED].title, "1 run failed");
-      // Where each is from: a Pip's face, a session's blob (Work round, Chat a rounded square).
-      assert.deepEqual([WORK_WAITS, WORK_NO_WINDOW, WORK_DONE].map((k) => by[k].who), ["blob:round", "blob:round", "blob:round"], "a Work session's card has its round blob");
-      assert.equal(by[CHAT_DONE].who, "blob:square", "a chat's card has its square blob");
+      // Where each is from: a Pip's face, a session's mark (a Voxel for Work, a Mote for Chat).
+      assert.deepEqual([WORK_WAITS, WORK_NO_WINDOW, WORK_DONE].map((k) => by[k].who), ["mark:voxel", "mark:voxel", "mark:voxel"], "a Work session's card has its Voxel");
+      assert.equal(by[CHAT_DONE].who, "mark:mote", "a chat's card has its Mote");
       assert.deepEqual([PIP_WAITS, PIP_NEW, PIP_READ_1, PIP_READ_2, PIP_FAILED].map((k) => by[k].who), ["face", "face", "face", "face", "face"], "a Pip's card has its face");
       assert.deepEqual(hub.cards.map((c) => c.source).sort(), ["chat", "personal", "personal", "personal", "personal", "project", "work", "work", "work"]);
       // One size and one style, whatever a card holds: the shared card, thin.
@@ -483,23 +483,23 @@ test("an empty Home says so in one line", async (t) => {
 });
 
 // ---- Work, Chat, Pips, and the dock under each ------------------------------------------------------------------------
-test("Work lists this project's sessions with their blobs, a running one with the accent's dot, under its own search and New", async (t) => {
+test("Work lists this project's sessions with their marks, a running one with the accent's dot, under its own search and New", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openDock(browser, { tab: "work", width: 300, height: 700, sessions: [...DOCK_SESSIONS, WINDOWLESS] });
   try {
     assert.deepEqual(chosen(await x.tabs()), ["work"], "on the Work tab");
     const accent = await tone(x.page, "--accent-text");
-    const rows = await x.page.evaluate(() => [...document.querySelectorAll("#sessions-list .session-row")].map((r) => { const blob = r.querySelector(".session-blob .dgc-blob"), live = r.querySelector(".session-live");
-      return { id: r.dataset.id, name: r.querySelector(".session-name").textContent, sub: r.querySelector(".session-sub")?.textContent || "", blob: blob ? { shape: blob.dataset.shape, pair: Number(blob.dataset.pair), running: blob.hasAttribute("data-running"), size: blob.getBoundingClientRect().width } : null,
+    const rows = await x.page.evaluate(() => [...document.querySelectorAll("#sessions-list .session-row")].map((r) => { const blob = r.querySelector(".session-blob [data-mark]"), live = r.querySelector(".session-live");
+      return { id: r.dataset.id, name: r.querySelector(".session-name").textContent, sub: r.querySelector(".session-sub")?.textContent || "", blob: blob ? { set: blob.dataset.mark, palette: blob.dataset.palette, running: blob.hasAttribute("data-moving"), size: blob.getBoundingClientRect().width } : null,
         live: live ? { color: getComputedStyle(live).backgroundColor, size: live.getBoundingClientRect().width, words: live.textContent } : null, age: r.querySelector(".session-age").checkVisibility() ? r.querySelector(".session-age").textContent : "",
         blobLeft: blob?.getBoundingClientRect().left, nameLeft: r.querySelector(".session-name").getBoundingClientRect().left, height: r.getBoundingClientRect().height }; }));
     assert.equal(rows.length, 5);
-    assert.ok(rows.every((r) => r.blob?.shape === "round" && r.blob.size >= 18), "every session has its round blob");
-    assert.ok(rows.every((r) => r.blobLeft < r.nameLeft), "the blob is before the name");
+    assert.ok(rows.every((r) => r.blob?.set === "voxel" && r.blob.size >= 18), "every session has its Voxel");
+    assert.ok(rows.every((r) => r.blobLeft < r.nameLeft), "the mark is before the name");
     assert.equal(new Set(rows.map((r) => r.height)).size, 1, "every row is one height");
     const by = Object.fromEntries(rows.map((r) => [r.id, r]));
     const running = by[DOCK_SESSIONS[0].id], open = by[DOCK_SESSIONS[1].id], waits = by[DOCK_SESSIONS[2].id], rest = by[DOCK_SESSIONS[3].id], noWindow = by[WINDOWLESS.id];
-    assert.deepEqual([running.live?.color, running.live?.words, running.age, running.blob.running], [accent, "Running", "", true], "the running one has the accent's dot where its age was, and its blob glows");
+    assert.deepEqual([running.live?.color, running.live?.words, running.age, running.blob.running], [accent, "Running", "", true], "the running one has the accent's dot where its age was, and its mark moves");
     assert.match(running.sub, /^Running · 5 messages$/);
     assert.deepEqual([noWindow.live?.words, noWindow.sub], ["Running, no window", "Running, no window · 9 messages"]);
     for (const r of [open, waits, rest]) assert.equal(r.live, null, `${r.name}: not running, no dot`);
@@ -507,9 +507,9 @@ test("Work lists this project's sessions with their blobs, a running one with th
     assert.ok(open.age && rest.age, "a resting session says its age");
     // What needs you is listed first.
     assert.deepEqual(rows.slice(0, 2).map((r) => r.id).sort(), [DOCK_SESSIONS[2].id, WINDOWLESS.id].sort());
-    // A session's blob is the colour chosen for it, here as on the dock.
-    await x.setting({ colours: { [`work:${DOCK_SESSIONS[3].id}`]: 7 } }); await x.settle();
-    assert.equal(await x.page.evaluate((id) => Number(document.querySelector(`#sessions-list .session-row[data-id="${id}"] .dgc-blob`).dataset.pair), DOCK_SESSIONS[3].id), 7);
+    // A session's mark is the colour chosen for it, here as on the dock.
+    await x.setting({ colours: { ...(await x.page.evaluate(() => window.__dock.colours)), [`work:${DOCK_SESSIONS[3].id}`]: "rose" } }); await x.settle();
+    assert.equal(await x.page.evaluate((id) => document.querySelector(`#sessions-list .session-row[data-id="${id}"] [data-mark]`).dataset.palette, DOCK_SESSIONS[3].id), "rose");
     // Its own search, and New.
     const bar = await x.page.evaluate(() => { const s = document.getElementById("sessions-search"), n = document.getElementById("sessions-new"), a = s.getBoundingClientRect(), b = n.getBoundingClientRect();
       return { search: s.checkVisibility(), placeholder: s.placeholder, fresh: n.checkVisibility(), word: n.textContent.trim(), sameRow: Math.abs((a.top + a.bottom) / 2 - (b.top + b.bottom) / 2) < 1, searchFirst: a.right <= b.left, top: a.top, list: document.getElementById("sessions-list").getBoundingClientRect().top }; });
@@ -532,16 +532,16 @@ test("Work lists this project's sessions with their blobs, a running one with th
   } finally { await x.close(); }
 });
 
-test("Chat lists your chats the same way: square blobs, the dot while one answers, its own search and New, projects and the Library", async (t) => {
+test("Chat lists your chats the same way: their Motes, the dot while one answers, its own search and New, projects and the Library", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openDock(browser, { tab: "chat", width: 300, height: 760, answering: ["chat_2"] });
   try {
     assert.deepEqual(chosen(await x.tabs()), ["chat"], "on the Chat tab");
     const accent = await tone(x.page, "--accent-text");
-    const rows = await x.page.evaluate(() => [...document.querySelectorAll("#chats-list > .chat-row")].map((r) => { const blob = r.querySelector(".session-blob .dgc-blob"), live = r.querySelector(".session-live");
-      return { id: r.dataset.id, name: r.querySelector(".session-name").textContent, sub: [...(r.querySelector(".session-sub")?.children || [])].map((s) => s.textContent), shape: blob?.dataset.shape || "", running: !!blob?.hasAttribute("data-running"),
+    const rows = await x.page.evaluate(() => [...document.querySelectorAll("#chats-list > .chat-row")].map((r) => { const blob = r.querySelector(".session-blob [data-mark]"), live = r.querySelector(".session-live");
+      return { id: r.dataset.id, name: r.querySelector(".session-name").textContent, sub: [...(r.querySelector(".session-sub")?.children || [])].map((s) => s.textContent), shape: blob?.dataset.mark || "", running: !!blob?.hasAttribute("data-moving"),
         live: live ? getComputedStyle(live).backgroundColor : "", age: r.querySelector(".session-age").checkVisibility() ? r.querySelector(".session-age").textContent : "", height: r.getBoundingClientRect().height }; }));
-    assert.deepEqual(rows.map((r) => [r.id, r.name, r.shape]), [["chat_1", "A week in Goa in March", "square"], ["chat_2", "Rent or buy: the numbers", "square"]], "each chat has its square blob");
+    assert.deepEqual(rows.map((r) => [r.id, r.name, r.shape]), [["chat_1", "A week in Goa in March", "mote"], ["chat_2", "Rent or buy: the numbers", "mote"]], "each chat has its Mote");
     assert.deepEqual(rows[0].sub, ["Pinned", "Open in a tab", "Three beaches, two day trips and where to eat."], "Pinned, where it is open, and its last words");
     assert.deepEqual([rows[1].live, rows[1].running, rows[1].age, rows[1].sub[0]], [accent, true, "", "Answering"], "the chat that is answering has the accent's dot");
     assert.deepEqual([rows[0].live, !!rows[0].age], ["", true], "one at rest says its age");

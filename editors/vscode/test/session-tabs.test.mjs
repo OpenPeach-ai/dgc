@@ -223,7 +223,7 @@ const drawn = (uri) => {
 };
 const svg = (name) => readFileSync(join(root, "media", name), "utf8");
 
-test("a tab's icon carries its own picture, so a reload draws it before the tab is revived, and after an update: a new session DGC's mark, a saved one its blob", async () => {
+test("a tab's icon carries its own picture, so a reload draws it before the tab is revived, and after an update: a new session DGC's mark, a saved one its Voxel", async () => {
   const { tabs, made, ctx } = windowWith();
   const kept = new Map(); ctx.globalState = { get: (key) => kept.get(key), async update(key, value) { kept.set(key, value); } };
   tabs.open("");
@@ -235,22 +235,28 @@ test("a tab's icon carries its own picture, so a reload draws it before the tab 
   behind.visible = false; behind.active = false;
   await tabs.deserializeWebviewPanel(behind, { chatTab: { key: "0123456789abcdef", session: "20261006-101500-a1" } });
   assert.equal(made.at(-1).sessionId(), "20261006-101500-a1");
-  // A saved session's tab wears its blob (0.52, src/dock.ts): one still PNG, round, in the colour its id gets, inside
-  // the URI as the marks are, so nothing is fetched for it either.
+  // A saved session's tab wears its mark (0.52, src/dock.ts): its Voxel at rest, the PNG of the palette it wears
+  // (media/session-icons/), inside the URI as the plain marks are, so nothing is fetched for it either.
+  const png = (name) => `data:image/png;base64,${readFileSync(join(root, "media", "session-icons", `${name}.png`)).toString("base64")}`;
   const blob = String(behind.iconPath);
-  assert.match(blob, /^data:image\/png;base64,[A-Za-z0-9+/=]{200,}$/, "its blob, as a PNG inside the URI");
-  assert.equal(behind.iconPath.light, undefined, "one picture for both themes: a blob is its own colours");
+  assert.match(blob, /^data:image\/png;base64,[A-Za-z0-9+/=]{200,}$/, "its mark, as a PNG inside the URI");
+  // (No palette kept for it yet: the one its id alone gives, which for this id is Saffron.)
+  assert.equal(blob, png("voxel-saffron"), "a Work session's is a Voxel, in its palette");
+  assert.equal(behind.iconPath.light, undefined, "one picture for both themes: a mark is its own colours");
   assert.doesNotMatch(blob, /media|file:/, "nothing names the extension's folder");
   assert.notEqual(behind.iconPath, fresh.iconPath);
   assert.equal(drawn(fresh.iconPath.light), svg("dgc-tab-light.svg"), "a new session with nothing saved keeps DGC's mark");
-  // Its colour changed (from a list, the dock or its own header): the tab's icon follows, and goes back with it.
-  kept.set("dgc.sessionColours", { "work:20261006-101500-a1": 1 });
+  // Its palette was given or chosen (from a list, the dock or its own header): the tab's icon follows.
+  kept.set("dgc.sessionPalettes", { "work:20261006-101500-a1": "rose" });
   tabs.changed();
-  const picked = String(behind.iconPath);
-  assert.match(picked, /^data:image\/png;base64,/); assert.notEqual(picked, blob, "the chosen colour's blob");
+  assert.equal(String(behind.iconPath), png("voxel-rose"), "the palette kept for it");
+  // A colour chosen before the marks (one of seven, by number) counts as its palette: 1, purple to pink, is Lilac.
+  kept.set("dgc.sessionPalettes", {}); kept.set("dgc.sessionColours", { "work:20261006-101500-a1": 1 });
+  tabs.changed();
+  assert.equal(String(behind.iconPath), png("voxel-lilac"), "its old colour's palette");
   kept.set("dgc.sessionColours", {});
   tabs.changed();
-  assert.equal(String(behind.iconPath), blob, "Back to its own colour");
+  assert.equal(String(behind.iconPath), blob, "and with nothing kept, its id's own again");
   // A second copy of the same session closes before it is given anything (setting a disposed panel's icon throws).
   const twin = fakePanel("dgc.chatEditor", "copy");
   await tabs.deserializeWebviewPanel(twin, { chatTab: { key: "fedcba9876543210", session: "20261006-101500-a1" } });

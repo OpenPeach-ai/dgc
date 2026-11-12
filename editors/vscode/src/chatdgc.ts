@@ -12,7 +12,7 @@ import { mcpAppsHost } from "./mcpApps";
 import { ARTIFACT_ID, forwardedArtifactPage, outputChoice, type Artifacts } from "./artifacts";
 import { allowFromJobs, handleVideoMessage, VIDEO_MESSAGES } from "./videoHost";
 import { onPicturesSetting, pictureFoldsMessage, picturesFolded, rememberPictureFold } from "./pictureFolds";
-import { blobIcon, dockOf, type DockPin } from "./dock";
+import { sessionIcon, dockOf, type DockPin } from "./dock";
 import { promises as fs } from "fs";
 import { displayMentions, workspaceFiles } from "./mentionsHost";
 
@@ -336,7 +336,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <div id="cd-announce" class="sr-only" aria-live="polite"></div>
 <dialog id="cd-keys" class="cd-keys dgc-dialog" aria-labelledby="cd-keys-title"><h2 id="cd-keys-title">Keyboard shortcuts</h2><dl id="cd-keys-list"></dl>
 <button type="button" id="cd-keys-close" class="cd-edit-cancel">Close</button></dialog>
-<script src="${attr(asset("media/shared/menu.js"))}"></script><script src="${attr(asset("media/shared/composer.js"))}"></script><script src="${attr(asset("media/shared/tray.js"))}"></script><script src="${attr(asset("media/shared/card.js"))}"></script><script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/pasteclean.js"))}"></script><script src="${attr(asset("media/mentions.js"))}"></script><script src="${attr(asset("media/pips/plush.js"))}"></script><script src="${attr(asset("media/messagequeue.js"))}"></script><script src="${attr(asset("media/trace.js"))}"></script><script src="${attr(asset("media/mcpApps.js"))}"></script><script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/msgtime.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/pictureFold.js"))}"></script><script src="${attr(asset("media/pluginCalls.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/texthistory.js"))}"></script><script src="${attr(asset("media/numbered-list.js"))}"></script><script src="${attr(asset("media/promptrail.js"))}"></script><script src="${attr(asset("media/mods.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
+<script src="${attr(asset("media/shared/menu.js"))}"></script><script src="${attr(asset("media/shared/composer.js"))}"></script><script src="${attr(asset("media/shared/tray.js"))}"></script><script src="${attr(asset("media/shared/card.js"))}"></script><script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/marks.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/pasteclean.js"))}"></script><script src="${attr(asset("media/mentions.js"))}"></script><script src="${attr(asset("media/pips/plush.js"))}"></script><script src="${attr(asset("media/messagequeue.js"))}"></script><script src="${attr(asset("media/trace.js"))}"></script><script src="${attr(asset("media/mcpApps.js"))}"></script><script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/msgtime.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/pictureFold.js"))}"></script><script src="${attr(asset("media/pluginCalls.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/texthistory.js"))}"></script><script src="${attr(asset("media/numbered-list.js"))}"></script><script src="${attr(asset("media/promptrail.js"))}"></script><script src="${attr(asset("media/mods.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
 }
 
 /** The Library (ChatGPT's): every file attached in ChatDGC, in its own tab. */
@@ -355,7 +355,7 @@ export function libraryDocument(asset: (name: string) => string, cspSource: stri
 <p id="lib-status" class="lib-status" role="status"></p>
 <ul id="lib-list" class="lib-list" aria-label="Your files" role="tabpanel"></ul>
 <button type="button" id="lib-more" class="cd-edit-cancel lib-more" hidden>Show more</button></main>
-<script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/library.js"))}"></script></body></html>`;
+<script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/marks.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/library.js"))}"></script></body></html>`;
 }
 
 
@@ -1237,7 +1237,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     // Settings -> General -> Pictures in replies: this tab's pictures nobody folded or opened follow it at once.
     const pictures = onPicturesSetting((message) => this.post(tab, message));
     panel.onDidDispose(() => pictures.dispose());
-    // The dock and this chat's colour: its header's blob and its tab's icon follow a change at once.
+    // The dock and this chat's colour: its header's mark and its tab's icon follow a change at once.
     this.paintIcon(tab);
     const docked = dockOf(this.context).onChange(() => { this.paintIcon(tab); this.post(tab, dockOf(this.context).state()); });
     panel.onDidDispose(() => docked.dispose());
@@ -1245,11 +1245,11 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     panel.webview.html = chatdgcDocument(asset, panel.webview.cspSource);
   }
 
-  /** A chat's tab icon is its blob, still (a rounded square, in the chat's colour): the same blob the dock and its own
+  /** A chat's tab icon is its Mote at rest, in the palette the chat wears: the same mark the dock and its own
    *  header show. A new chat with nothing sent yet, and a project's page, keep ChatDGC's plain mark. */
   private paintIcon(tab: Tab): void {
     const id = tab.conversation || "";
-    const blob = id ? blobIcon(this.context.extensionUri, "chat", id, dockOf(this.context).colour("chat", id)) : undefined;
+    const blob = id ? sessionIcon(this.context.extensionUri, "chat", id, dockOf(this.context).colour("chat", id)) : undefined;
     const icon = blob ?? this.chatdgcIcon(), said = String((icon as any).light ?? icon);
     if (tab.iconSaid === said) return;
     tab.iconSaid = said;

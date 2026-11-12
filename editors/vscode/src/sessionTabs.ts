@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { randomBytes } from "crypto";
 import { ChatPlaces, ChatTabInit, DgcViewProvider } from "./panel";
 import { tabIcon } from "./tabIcon";
-import { blobIcon, dockOf } from "./dock";
+import { sessionIcon, dockOf } from "./dock";
 
 /** The editor-tab chat (#3 Sessions home). One tab is one session, with a `dgc serve` of its own. */
 export const CHAT_EDITOR = "dgc.chatEditor";
@@ -133,8 +133,8 @@ export class SessionTabs implements ChatPlaces, vscode.WebviewPanelSerializer, v
   private adopt(panel: vscode.WebviewPanel, key: string, session: string, restored = false, cwd = ""): DgcViewProvider {
     // Not the activity bar's dgc.svg: its currentColor is black in a tab, invisible on a dark theme. Inline, so a
     // reload draws it before the tab is revived (tabIcon.ts).
-    // Its session's blob when it opens on a saved session; DGC's plain mark until a new one has a session.
-    panel.iconPath = session ? blobIcon(this.context.extensionUri, "work", session, dockOf(this.context).colour("work", session)) ?? tabIcon(this.context.extensionUri, "dgc-tab")
+    // Its session's Voxel when it opens on a saved session; DGC's plain mark until a new one has a session.
+    panel.iconPath = session ? sessionIcon(this.context.extensionUri, "work", session, dockOf(this.context).colour("work", session)) ?? tabIcon(this.context.extensionUri, "dgc-tab")
       : tabIcon(this.context.extensionUri, "dgc-tab");
     const provider = this.make({
       key, session, places: this, host: this.sidebar, restored, ...(cwd ? { cwd } : {}),
@@ -171,11 +171,11 @@ export class SessionTabs implements ChatPlaces, vscode.WebviewPanelSerializer, v
     this.paintIcons();
   }
 
-  /** A tab's icon is its session's blob, still (round, in the session's colour): the same blob the dock and its own
+  /** A tab's icon is its session's Voxel at rest, in the palette the session wears: the same mark the dock and its own
    *  header show. A tab with no saved session yet keeps DGC's plain mark. */
   private iconOf(provider: DgcViewProvider): vscode.Uri | { light: vscode.Uri; dark: vscode.Uri } {
     const id = provider.sessionId();
-    const blob = id ? blobIcon(this.context.extensionUri, "work", id, dockOf(this.context).colour("work", id)) : undefined;
+    const blob = id ? sessionIcon(this.context.extensionUri, "work", id, dockOf(this.context).colour("work", id)) : undefined;
     return blob ?? tabIcon(this.context.extensionUri, "dgc-tab");
   }
   private readonly painted = new Map<string, string>();

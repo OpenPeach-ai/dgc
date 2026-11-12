@@ -6,14 +6,20 @@
 // Deleting a pinned session, chat, artifact, file or widget takes it off the dock (forget); a pinned Pip that is gone
 // is taken off by the side bar once its list no longer has it.
 //
-// A session's colour is one of seven (media/shared/blob.js); the one it gets from its id is not kept, only a choice.
-// Its editor tab's icon is its blob as a still picture, drawn here (blobIcon) with nothing but zlib.
+// A session's mark is the maintainer's own Voxel (a Work session) or Mote (a ChatDGC chat), in one of twelve palettes
+// (media/shared/marks.js). The palette a session wears is kept here, with the pins, from the moment it is given: a new
+// session gets the first palette not worn by the sessions around it, a session from before the marks the palette nearest
+// its old colour, and its owner may choose another of the twelve. Kept, it never changes with a reload or a new order.
+// Its editor tab's icon is its mark at rest, a PNG in media/session-icons/ (scripts/render-session-icons.mjs makes them
+// from the shipped CSS).
 import * as vscode from "vscode";
 import { readFileSync } from "fs";
-import { deflateSync } from "zlib";
+import marks from "../media/shared/marks.js";
 
 const PINS = "dgc.dock.pins";
-const COLOURS = "dgc.sessionColours";
+// The palettes ({ "work:<id>": "lagoon" }, the oldest first), when the marks arrived on this computer (ms), and the
+// choices from before the marks ({ "work:<id>": 1..7 }, read once more for each session's palette and never written).
+const PALETTES = "dgc.sessionPalettes", SINCE = "dgc.sessionPalettesSince", COLOURS = "dgc.sessionColours";
 const KEEP_PINS = 200, KEEP_COLOURS = 2000;
 export const DOCK_MOST = 16, DOCK_MOST_DEFAULT = 8, DOCK_SIZE_MIN = 24, DOCK_SIZE_MAX = 48, DOCK_SIZE_DEFAULT = 34;
 const KINDS = ["pip", "work", "chat", "artifact", "file", "widget"] as const;
@@ -25,7 +31,8 @@ const NAMES: Record<DockKind, string> = { pip: "Pip", work: "Work session", chat
  *  body, a file's kind); `where` is the folder a project's thing was pinned in ("" shows in every window). */
 export type DockPin = { key: string; kind: DockKind; id: string; title: string; sub: string; look: Record<string, string>; ref: Record<string, string>; where: string };
 export type DockShow = "always" | "hover" | "never";
-export type DockState = { type: "dock"; pins: Omit<DockPin, "where">[]; colours: Record<string, number>; show: DockShow; most: number; size: number };
+/** `colours`: the palette each session's mark wears, by "work:<id>" or "chat:<id>". `since`: when the marks arrived here. */
+export type DockState = { type: "dock"; pins: Omit<DockPin, "where">[]; colours: Record<string, string>; since: number; show: DockShow; most: number; size: number };
 
 const text = (value: unknown, most: number) => String(value ?? "").replace(/\s+/g, " ").trim().slice(0, most);
 /** A flat map of short strings, and nothing else: what a page sent is never kept as it came. */
@@ -46,8 +53,8 @@ export function dockPin(value: any, where = ""): DockPin | undefined {
   return { key: dockKey(kind, id), kind, id, title: text(value.title, 200) || NAMES[kind], sub: text(value.sub, 200), look: strings(value.look), ref: strings(value.ref),
     where: scoped ? String(typeof value.where === "string" ? value.where : where).slice(0, 1000) : "" };
 }
-const colourOf = (value: unknown) => (Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 7 ? (value as number) : 0);
 const COLOUR_KEY = /^(?:work|chat):[A-Za-z0-9_.:|-]{1,200}$/;
+export type MarkKind = "work" | "chat";
 
 /** Settings -> General -> Dock, as the editor keeps them. */
 export function dockSettings(): { show: DockShow; most: number; size: number } {
@@ -81,6 +88,7 @@ function folderNow(): string {
 export class Dock {
   private readonly listeners = new Set<() => void>();
   private watching?: vscode.Disposable;
+  private sinceNoted = 0;
   constructor(private readonly context: vscode.ExtensionContext, private readonly folder: () => string = folderNow) {}
 
   private all(): DockPin[] {
@@ -101,16 +109,47 @@ export class Dock {
     const here = this.folder();
     return this.all().filter((pin) => !pin.where || pin.where === here);
   }
-  colours(): Record<string, number> {
-    const saved = this.context?.globalState?.get?.<Record<string, unknown>>(COLOURS), out: Record<string, number> = {};
-    if (saved && typeof saved === "object") for (const [key, value] of Object.entries(saved)) if (COLOUR_KEY.test(key) && colourOf(value)) out[key] = colourOf(value);
+  /** The palette each session wears, the oldest first. A colour chosen before the marks counts as its palette. */
+  colours(): Record<string, string> {
+    const saved = this.context?.globalState?.get?.<Record<string, unknown>>(PALETTES), out: Record<string, string> = {};
+    const before = this.context?.globalState?.get?.<Record<string, unknown>>(COLOURS);
+    if (before && typeof before === "object") for (const [key, value] of Object.entries(before)) { const palette = marks.fromOld(value as number); if (COLOUR_KEY.test(key) && palette) out[key] = palette; }
+    if (saved && typeof saved === "object") for (const [key, value] of Object.entries(saved)) if (COLOUR_KEY.test(key) && marks.isPalette(value)) { delete out[key]; out[key] = value; }
     return out;
   }
-  /** A session's chosen colour, 1 to 7; 0 when it keeps the one from its id. */
-  colour(kind: "work" | "chat", id: string): number { return this.colours()[dockKey(kind, id)] || 0; }
+  /** When the marks arrived on this computer: noted the first time it is asked, and kept. A session made before then
+   *  keeps the palette of its old colour; one made after is new. */
+  since(): number {
+    const saved = Number(this.context?.globalState?.get?.<number>(SINCE));
+    if (Number.isFinite(saved) && saved > 0) return saved;
+    if (this.sinceNoted) return this.sinceNoted;
+    const now = this.sinceNoted = Date.now();
+    try { void Promise.resolve(this.context?.globalState?.update?.(SINCE, now)).catch(() => {}); } catch { /* noted again next time */ }
+    return now;
+  }
+  /** The palette a session's mark wears: the one kept, or (none given yet) the one its id alone gives. */
+  colour(kind: MarkKind, id: string): string { return this.colours()[dockKey(kind, id)] || marks.fallback(kind, id); }
+  private async keepColours(colours: Record<string, string>): Promise<void> {
+    const keys = Object.keys(colours);
+    for (const old of keys.slice(0, Math.max(0, keys.length - KEEP_COLOURS))) delete colours[old];
+    try { await this.context.globalState.update(PALETTES, colours); } catch { /* kept for this window still */ }
+    this.changed();
+  }
+  /** A page drew things with no palette yet (dockPalettes { kind, list: [{ id, born? }] }, its list in order): each is
+   *  given one and it is kept. What already has a palette keeps it, whatever the page says. */
+  async wear(kind: unknown, list: unknown): Promise<void> {
+    if (kind !== "work" && kind !== "chat") return;
+    const rows: { id: string; born?: number }[] = [];
+    for (const row of Array.isArray(list) ? list.slice(0, 200) : []) {
+      const id = String((row as any)?.id ?? ""), born = (row as any)?.born;
+      if (COLOUR_KEY.test(dockKey(kind, id))) rows.push({ id, ...(typeof born === "number" && Number.isFinite(born) ? { born } : {}) });
+    }
+    const colours = this.colours(), fresh = marks.assign({ kind, list: rows, known: colours, since: this.since() });
+    if (Object.keys(fresh).length) await this.keepColours({ ...colours, ...fresh });
+  }
 
   state(): DockState {
-    return { type: "dock", pins: this.pins().map(({ where: _where, ...pin }) => pin), colours: this.colours(), ...dockSettings() };
+    return { type: "dock", pins: this.pins().map(({ where: _where, ...pin }) => pin), colours: this.colours(), since: this.since(), ...dockSettings() };
   }
   /** Calls `listener` whenever the dock, a colour or a Dock setting changes (and when this window is looked at again:
    *  another window may have pinned something meanwhile). */
@@ -187,19 +226,22 @@ export class Dock {
   async forget(kind: DockKind, id: string): Promise<void> {
     const key = dockKey(kind, id), all = this.all(), next = all.filter((pin) => pin.key !== key);
     const colours = this.colours(), had = key in colours;
-    if (had) { delete colours[key]; try { await this.context.globalState.update(COLOURS, colours); } catch { /* next time */ } }
+    if (had) {
+      delete colours[key];
+      try { await this.context.globalState.update(PALETTES, colours); } catch { /* next time */ }
+      // (A colour chosen for it before the marks goes too, or it would come back as its palette.)
+      const before = { ...(this.context.globalState.get<Record<string, unknown>>(COLOURS) || {}) };
+      if (key in before) { delete before[key]; try { await this.context.globalState.update(COLOURS, before); } catch { /* next time */ } }
+    }
     if (next.length !== all.length) await this.keep(next); else if (had) this.changed();
   }
-  /** A session's colour: 1 to 7, or anything else for "Back to its own colour". */
+  /** A session's colour, chosen by its owner: one of the twelve palettes. Anything else changes nothing. */
   async setColour(key: string, value: unknown): Promise<void> {
-    if (!COLOUR_KEY.test(key)) return;
-    const colours = this.colours(), n = colourOf(value);
+    if (!COLOUR_KEY.test(key) || !marks.isPalette(value)) return;
+    const colours = this.colours();
     delete colours[key];
-    if (n) colours[key] = n;
-    const keys = Object.keys(colours);
-    for (const old of keys.slice(0, Math.max(0, keys.length - KEEP_COLOURS))) delete colours[old];
-    try { await this.context.globalState.update(COLOURS, colours); } catch { /* kept for this window still */ }
-    this.changed();
+    colours[key] = value;
+    await this.keepColours(colours);
   }
 
   /** A page's dock message. False when it isn't one. `reply` gets the dock's state when the page asked for it. */
@@ -216,6 +258,7 @@ export class Dock {
       case "dockMove": void this.move(String(message.key || ""), Number(message.by) < 0 ? -1 : 1); return true;
       case "dockPlace": void this.place(String(message.key || ""), message.to); return true;
       case "dockColour": void this.setColour(String(message.key || ""), message.colour); return true;
+      case "dockPalettes": void this.wear(message.kind, message.list); return true;
       case "dockSeen": void this.seen(message.items); return true;
       default: return false;
     }
@@ -230,85 +273,23 @@ export function dockOf(context: vscode.ExtensionContext): Dock {
   return dock;
 }
 
-// ---- a blob as a still picture: a session's editor tab icon --------------------------------------------------------
-/** The pair an id gets by itself (media/shared/blob.js, `own`): one of 2 to 7. */
-export function ownColour(id: string): number {
-  let h = 2166136261;
-  for (const ch of String(id || "")) { h ^= ch.codePointAt(0)!; h = Math.imul(h, 16777619); }
-  return 2 + ((h >>> 0) % 6);
-}
-let pairs: Record<string, [number, number, number]> | undefined;
-/** The seven pairs' colours, read from the one place they are written (media/shared/tokens.css: --blob-1a ...). */
-function blobColours(extensionUri: vscode.Uri): Record<string, [number, number, number]> {
-  if (pairs) return pairs;
-  const found: Record<string, [number, number, number]> = {};
-  try {
-    const css = readFileSync(vscode.Uri.joinPath(extensionUri, "media", "shared", "tokens.css").fsPath, "utf8");
-    for (const m of css.matchAll(/--blob-([1-7][abg])\s*:\s*#([0-9a-fA-F]{6})/g)) found[m[1]] = [0, 2, 4].map((i) => parseInt(m[2].slice(i, i + 2), 16)) as [number, number, number];
-  } catch { /* drawn in grey below */ }
-  if (Object.keys(found).length >= 14) pairs = found;
-  return found;
-}
-const crcTable = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
-function crc32(buf: Buffer): number { let c = 0xffffffff; for (const byte of buf) c = crcTable[(c ^ byte) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
-function chunk(type: string, data: Buffer): Buffer {
-  const head = Buffer.alloc(8); head.writeUInt32BE(data.length, 0); head.write(type, 4, "ascii");
-  const tail = Buffer.alloc(4); tail.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), data])), 0);
-  return Buffer.concat([head, data, tail]);
-}
-/** RGBA pixels as a PNG file. */
-export function png(width: number, height: number, rgba: Uint8Array): Buffer {
-  const raw = Buffer.alloc((width * 4 + 1) * height);
-  for (let y = 0; y < height; y++) Buffer.from(rgba.buffer, rgba.byteOffset + y * width * 4, width * 4).copy(raw, y * (width * 4 + 1) + 1);
-  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(width, 0); ihdr.writeUInt32BE(height, 4); ihdr[8] = 8; ihdr[9] = 6;
-  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw, { level: 9 })), chunk("IEND", Buffer.alloc(0))]);
-}
-/** A blob at rest, `size` px square: the pair's gradient from bottom to top, the light wave from below, the sheen near
- *  the top and one bubble, inside a circle (Work) or a rounded square (ChatDGC). The same picture media/shared/blob.css
- *  draws, still. */
-export function blobPixels(kind: "work" | "chat", from: [number, number, number], to: [number, number, number], size = 64): Uint8Array {
-  const out = new Uint8Array(size * size * 4), half = size / 2, inset = size * 0.06, r = half - inset, corner = (size - 2 * inset) * 0.3, SS = 3;
-  const inside = (x: number, y: number) => {
-    const dx = Math.abs(x - half), dy = Math.abs(y - half);
-    if (kind === "work") return dx * dx + dy * dy <= r * r;
-    if (dx > r || dy > r) return false;
-    const cx = dx - (r - corner), cy = dy - (r - corner);
-    return cx <= 0 || cy <= 0 || cx * cx + cy * cy <= corner * corner;
-  };
-  for (let py = 0; py < size; py++) for (let px = 0; px < size; px++) {
-    let red = 0, green = 0, blue = 0, cover = 0;
-    for (let sy = 0; sy < SS; sy++) for (let sx = 0; sx < SS; sx++) {
-      const x = px + (sx + 0.5) / SS, y = py + (sy + 0.5) / SS;
-      if (!inside(x, y)) continue;
-      const t = Math.min(1, Math.max(0, (size - inset - y) / (size - 2 * inset)));      // 0 at the bottom, 1 at the top
-      let c = [0, 1, 2].map((i) => from[i] + (to[i] - from[i]) * t);
-      const white = (a: number) => { c = c.map((v) => v + (255 - v) * a); };
-      white(t < 0.5 ? 0.3 - 0.4 * t : 0.1 * (1 - t) * 2);                               // the wave from below
-      const u = (y - inset) / (size - 2 * inset);                                       // the sheen: the top 4% to 32%
-      const sx2 = ((x - half) / (half - inset)) ** 2 + ((u - 0.18) / 0.14) ** 2;          // a pill, as the CSS draws it
-      if (sx2 <= 1) white(0.4 * (1 - (u - 0.04) / 0.28));
-      const bx = (x - size * 0.4) / (size * 0.08), by = (y - size * 0.34) / (size * 0.08);
-      if (bx * bx + by * by <= 1) white(0.22);                                          // the bubble
-      red += c[0]; green += c[1]; blue += c[2]; cover++;
-    }
-    const at = (py * size + px) * 4;
-    if (!cover) continue;
-    out[at] = Math.round(red / cover); out[at + 1] = Math.round(green / cover); out[at + 2] = Math.round(blue / cover); out[at + 3] = Math.round(255 * cover / (SS * SS));
-  }
-  return out;
-}
+// ---- a mark as a still picture: an editor tab's icon ----------------------------------------------------------------
 const icons = new Map<string, vscode.Uri>();
-/** A session's tab icon: its blob, still, as a data: URI (nothing to fetch after a reload; see tabIcon.ts). `colour`
- *  is its chosen pair (0: the one from its id). undefined for a session with no id yet: it keeps the plain mark. */
-export function blobIcon(extensionUri: vscode.Uri, kind: "work" | "chat", id: string, colour = 0): vscode.Uri | undefined {
-  if (!id) return undefined;
-  const pair = colourOf(colour) || ownColour(id), key = `${kind}:${pair}`;
+/** A mark at rest as a tab's icon: media/session-icons/<set>-<palette>.png (64 px, clear around it), carried inside the
+ *  URI (nothing to fetch after a reload; see tabIcon.ts). `set`: "mote" | "voxel". undefined when it can't be read:
+ *  the tab keeps the plain mark. */
+export function markIcon(extensionUri: vscode.Uri, set: string, palette: string): vscode.Uri | undefined {
+  if (!Object.prototype.hasOwnProperty.call(marks.SETS, set) || !marks.isPalette(palette)) return undefined;
+  const file = vscode.Uri.joinPath(extensionUri, "media", "session-icons", `${set}-${palette}.png`).fsPath, key = String(file);
   let uri = icons.get(key);
   if (!uri) {
-    const colours = blobColours(extensionUri), from = colours[`${pair}a`], to = colours[`${pair}b`];
-    if (!from || !to) return undefined;
-    try { uri = vscode.Uri.parse(`data:image/png;base64,${png(64, 64, blobPixels(kind, from, to)).toString("base64")}`); } catch { return undefined; }
+    try { uri = vscode.Uri.parse(`data:image/png;base64,${readFileSync(file).toString("base64")}`); } catch { return undefined; }
     icons.set(key, uri);
   }
   return uri;
+}
+/** A session's tab icon: its Voxel (Work) or its Mote (ChatDGC), in the palette it wears. undefined for a session with
+ *  no id yet: it keeps the plain mark. */
+export function sessionIcon(extensionUri: vscode.Uri, kind: MarkKind, id: string, palette: string): vscode.Uri | undefined {
+  return id ? markIcon(extensionUri, marks.SET_OF[kind], marks.isPalette(palette) ? palette : marks.fallback(kind, id)) : undefined;
 }

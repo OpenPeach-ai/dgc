@@ -28,7 +28,7 @@ export const inks = (page) => page.evaluate(() => {
       out.push({ what: name(e), text: t.textContent.trim().replace(/\s+/g, " ").slice(0, 48), kind: "words", size: parseFloat(style.fontSize), ...measure(fill && fill !== style.color ? fill : style.color, e) });
     }
     for (const e of root.querySelectorAll(".codicon, svg")) {
-      if (e.closest(".dgc-plush, .dgc-blob, .dgc-sheet") || !e.checkVisibility({ visibilityProperty: true, opacityProperty: true })) continue;
+      if (e.closest(".dgc-plush, [data-mark], .dgc-sheet") || !e.checkVisibility({ visibilityProperty: true, opacityProperty: true })) continue;
       const r = e.getBoundingClientRect(); if (r.width < 2 || r.height < 2) continue;
       out.push({ what: name(e), text: "", kind: "mark", size: Math.round(r.height), ...measure(getComputedStyle(e).color, e) });
     }

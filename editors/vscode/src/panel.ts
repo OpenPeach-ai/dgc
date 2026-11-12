@@ -33,7 +33,7 @@ import { PLUGIN_ID, pluginLogoData, pluginLogoSource, type PluginLogoItem } from
 import { pipsAttention, PipsAttentionState } from "./pipsAttention";
 import { settingsDocument } from "./settingsView";
 import { onPicturesSetting, pictureFoldsMessage, rememberPictureFold, setPicturesInReplies, picturesFolded } from "./pictureFolds";
-import { blobIcon, dockOf, dockSettings, setDockSetting } from "./dock";
+import { dockOf, dockSettings, setDockSetting } from "./dock";
 import { DEV_SAVED_KEY, DEV_WARNED_KEY, devLimitsTable, devLimitValues, devShown, type DevLimit } from "./devMode";
 import { homePages, homePagesAttr, homeShowAttr, noteHomePage, pipHomeDismissedAttr, rememberHomePagesDismissed, rememberHomeShow, rememberPipHomeDismissed } from "./pipHomeDismiss";
 import { addProfile, adoptWorkingRoute, defaultProfileId, firstTakesDefault, keepWorkingRoute, hasRunnableProfile, listProfiles, markDefaultProfile, profileCredential, removeProfile, startingModel } from "./providerProfiles.js";
@@ -10007,8 +10007,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const iconActionsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "iconactions.js"));
     // The small sheet of its kind on an output card and a Library row (media/shared/filesheet.js, window.DgcFileSheet).
     const sheetJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "filesheet.js"));
-    // A session's liquid blob and its colours (media/shared/blob.js, window.DgcBlob), and the dock at the foot of the
-    // side bar (media/shared/dock.js, window.DgcDock).
+    // A session's mark (media/shared/marks.js, window.DgcMarks: a Voxel for Work, a Mote for ChatDGC), the small menu
+    // with its colours (media/shared/blob.js, window.DgcBlob), and the dock at the foot of the side bar
+    // (media/shared/dock.js, window.DgcDock).
+    const marksJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "marks.js"));
     const blobJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "blob.js"));
     const dockJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "dock.js"));
     // Home, the side bar's first tab: every card that needs you or is new, under a Show filter (media/shared/hub.js, window.DgcHub).
@@ -10338,7 +10340,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${composerJs}"></script><script nonce="${nonce}" src="${trayJs}"></script>
 <script nonce="${nonce}" src="${cardJs}"></script>
 <script nonce="${nonce}" src="${sheetJs}"></script>
-<script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script>
+<script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script>
 <script nonce="${nonce}" src="${mcpAppsJs}"></script>
 <script nonce="${nonce}" src="${markdown}"></script>
 <script nonce="${nonce}" src="${breakdownScript}"></script>

@@ -1,6 +1,6 @@
-// The side bar's home with its dock (media/shared/dock.js, media/shared/blob.js), in real Chromium on the real page
-// (home-scene.mjs opens it). A small stand-in for the host keeps what is pinned and each session's colour the way
-// src/dock.ts does and answers every dock message with the dock's state, so a pin on a row, a move, a colour or a
+// The side bar's home with its dock (media/shared/dock.js, media/shared/marks.js, media/shared/blob.js), in real Chromium
+// on the real page (home-scene.mjs opens it). A small stand-in for the host keeps what is pinned and the palette each
+// session's mark wears the way src/dock.ts does (the same media/shared/marks.js gives them out) and answers every dock message with the dock's state, so a pin on a row, a move, a colour or a
 // setting shows as it would in the editor. Shared by dock.test.mjs and the pictures. Not a *.test.mjs file.
 import { openHome, pipId, SESSIONS, CHATS } from "./home-scene.mjs";
 import { host as pipHost, PIP } from "./pip-chat-scene.mjs";
@@ -37,8 +37,9 @@ export function manyPins(n) {
 }
 
 /** Opens the side bar with a dock, on its Work tab (tab: another). pins: what is pinned; pip: what the Pips view's own Pip is (pip-chat-scene's options); show: "always" | "hover" | "never"; most, size: the Dock settings;
- *  colours: {"work:<id>": 1..7}. Everything else is home-scene's (width, height, theme, state, motion, srcRoot...). */
-export async function openDock(browser, { pins = PINS, show = "always", most = 8, size = 34, colours = {}, sessions = DOCK_SESSIONS, answering = [], dock = true, tab = "work", ...home } = {}) {
+ *  colours: {"work:<id>": "<palette>"}; since: when the marks arrived (ms; now by default, so the scene's sessions are
+ *  from before them and wear their old colour's palette; 0 makes every session new). Everything else is home-scene's (width, height, theme, state, motion, srcRoot...). */
+export async function openDock(browser, { pins = PINS, show = "always", most = 8, size = 34, colours = {}, since = Date.now(), sessions = DOCK_SESSIONS, answering = [], dock = true, tab = "work", ...home } = {}) {
   // (On the Work tab unless a test says another: the rows with their pins are there.)
   const x = await openHome(browser, { sessions, tab, ...home });
   await x.page.evaluate((initial) => {
@@ -60,7 +61,8 @@ export async function openDock(browser, { pins = PINS, show = "always", most = 8
       } else if (m.type === "dockUnpin") { if (at(m.key) >= 0) state.pins.splice(at(m.key), 1); }
       else if (m.type === "dockMove") { const a = at(m.key), b = a + (m.by < 0 ? -1 : 1); if (a >= 0 && b >= 0 && b < state.pins.length) [state.pins[a], state.pins[b]] = [state.pins[b], state.pins[a]]; }
       else if (m.type === "dockPlace") { const a = at(m.key); if (a >= 0 && Number.isInteger(m.to)) { const [pin] = state.pins.splice(a, 1); state.pins.splice(Math.max(0, Math.min(state.pins.length, m.to)), 0, pin); } }
-      else if (m.type === "dockColour") { if (Number.isInteger(m.colour)) state.colours[m.key] = m.colour; else delete state.colours[m.key]; }
+      else if (m.type === "dockColour") { if (window.DgcMarks.isPalette(m.colour)) state.colours[m.key] = m.colour; }
+      else if (m.type === "dockPalettes") Object.assign(state.colours, window.DgcMarks.assign({ kind: m.kind, list: m.list, known: state.colours, since: state.since }));
       else if (m.type === "dockSeen") { for (const item of m.items || []) { const p = state.pins[at(item.key)]; if (p) p.title = item.title; } }
       say();
     };
@@ -69,7 +71,7 @@ export async function openDock(browser, { pins = PINS, show = "always", most = 8
     posted.push = function (m) { Array.prototype.push.call(this, m); try { host(m); } catch (error) { window.__dockError = String(error); } return this.length; };
     window.__dockSay = (change) => { Object.assign(state, change); say(); };
     say();
-  }, { pins, colours, show, most, size });
+  }, { pins, colours, since, show, most, size });
   // The Pips view on this page (Open Pips, a pinned Pip): its requests are answered as pip-chat-scene.mjs answers them.
   await x.page.evaluate((script) => {
     const real = window.acquireVsCodeApi;
@@ -95,8 +97,8 @@ export const dockNow = (page) => page.evaluate(() => {
   const shown = host.checkVisibility(), bar = host.querySelector(".dgc-dock-bar"), tip = host.querySelector(".dgc-dock-tip");
   const items = [...host.querySelectorAll(".dgc-dock-item")].map((b) => ({ key: b.dataset.key || "+", kind: b.dataset.kind || "add", label: b.getAttribute("aria-label"), tab: b.tabIndex,
     ...rect(b), dot: b.querySelector(".dgc-dock-dot")?.dataset.dot || "", badge: b.querySelector(".dgc-dock-badge")?.textContent || "",
-    blob: b.querySelector(".dgc-blob") ? { shape: b.querySelector(".dgc-blob").dataset.shape, pair: Number(b.querySelector(".dgc-blob").dataset.pair), running: b.querySelector(".dgc-blob").hasAttribute("data-running") } : null,
-    holds: b.querySelector(".dgc-blob") ? "blob" : b.querySelector(".dgc-cube") ? "cube" : b.querySelector(".dgc-sheet") ? "sheet" : b.querySelector(".dgc-dock-face svg, .dgc-dock-face > *") ? "face" : b.querySelector(".dgc-dock-plus") ? "plus" : "" }));
+    mark: b.querySelector("[data-mark]") ? { set: b.querySelector("[data-mark]").dataset.mark, palette: b.querySelector("[data-mark]").dataset.palette, moving: b.querySelector("[data-mark]").hasAttribute("data-moving") } : null,
+    holds: b.querySelector("[data-mark]") ? b.querySelector("[data-mark]").dataset.mark : b.querySelector(".dgc-cube") ? "cube" : b.querySelector(".dgc-sheet") ? "sheet" : b.querySelector(".dgc-dock-face svg, .dgc-dock-face > *") ? "face" : b.querySelector(".dgc-dock-plus") ? "plus" : "" }));
   const page = [...document.body.children].find((n) => n.id === "sessions-host" && n.checkVisibility()) || [...document.body.children].find((n) => n.id === "pips-host" && n.checkVisibility());
   const active = document.activeElement;
   const room = (n) => { const area = n.id === "pips-host" ? n.shadowRoot?.querySelector(".pip-app-root") || n : n, r = area.getBoundingClientRect(), cs = getComputedStyle(area);
@@ -108,7 +110,7 @@ export const dockNow = (page) => page.evaluate(() => {
     overflowX: document.documentElement.scrollWidth > innerWidth,
     focus: active?.dataset?.key || (active?.dataset?.add ? "+" : active?.dataset?.id || active?.dataset?.colour || active?.id || active?.className || ""),
     menu: [...document.querySelectorAll(".dgc-pop .dgc-menu-row")].map((r) => r.textContent.trim() + (r.disabled ? " (off)" : "")),
-    swatches: [...document.querySelectorAll(".dgc-pop .dgc-swatch")].map((s) => ({ pair: Number(s.dataset.colour), on: s.getAttribute("aria-checked") === "true", shape: s.dataset.shape })) };
+    swatches: [...document.querySelectorAll(".dgc-pop .dgc-swatch")].map((s) => ({ palette: s.dataset.colour, on: s.getAttribute("aria-checked") === "true", set: s.querySelector("[data-mark]")?.dataset.mark || "" })) };
 });
 
 /** Every word and mark of the dock, its name tip, its menu and the rows' pins, as painted: [{what, kind, ink, ground}]. */

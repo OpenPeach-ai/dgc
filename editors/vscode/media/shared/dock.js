@@ -98,7 +98,6 @@
       buttons = [...bar.querySelectorAll(".dgc-dock-item")];
       cur = buttons.map(() => size); vel = buttons.map(() => 0);
       named = null; tip.hidden = true;
-      root.DgcBlob?.watch?.(bar);
       o.onDraw?.(bar);
       if (focused) (buttons.find((b) => (keyOf(b) || "+") === focused) || buttons[Math.min(buttons.length - 1, Math.max(0, items.length - 1))])?.focus({ preventScroll: true });
     }
@@ -266,7 +265,7 @@
       pop(button, { keyboard, label: item.title,
         rows: [[{ id: "open", label: "Open", icon: "open" }, { id: "unpin", label: "Unpin", icon: "unpin" }],
           [{ id: "left", label: "Move left", icon: "left", disabled: at === 0 }, { id: "right", label: "Move right", icon: "right", disabled: at === items.length - 1 }]],
-        colour: item.colour ? { kind: item.kind, chosen: item.colour.chosen, own: item.colour.own } : null,
+        colour: item.colour ? { kind: item.kind, chosen: item.colour.chosen } : null,
         onPick: (id) => {
           if (id === "open") o.onOpen?.(item.key);
           else if (id === "unpin") o.onUnpin?.(item.key);

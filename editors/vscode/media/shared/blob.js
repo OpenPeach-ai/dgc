@@ -1,40 +1,24 @@
-// A session's liquid blob and a widget's liquid cube, in our own code (media/shared/blob.css is how they look and
-// move), and the small menu that offers a session's seven colours. A Work session's blob is round and a ChatDGC chat's a
-// rounded square. A blob's colour comes from its id, so it is the same wherever it shows, until its owner picks another
-// of the seven; "Back to its own colour" returns to the one from its id. A classic script: Work's and ChatDGC's pages
-// and the Library load it before their own script, so all share window.DgcBlob.
+// The small menu a session's "...", its header's mark and the dock open (media/shared/blob.css is how it looks), with
+// the twelve palettes a session's mark can wear, and a widget's cube. A session's mark itself is the maintainer's own
+// Mote (a ChatDGC chat) or Voxel (a Work session), drawn by media/shared/marks.js (window.DgcMarks), which the pages
+// load before this. A classic script: Work's and ChatDGC's pages and the Library load it before their own script, so
+// all share window.DgcBlob.
 (function () {
   "use strict";
   const root = typeof window !== "undefined" ? window : globalThis;
   if (root.DgcBlob) return;
 
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  // The seven pairs, in the order they are offered. Their colours are tokens (media/shared/tokens.css: --blob-1a ...).
-  const NAMES = ["Purple to pink", "Blue to purple", "Cyan to blue", "Green to cyan", "Yellow to green", "Orange to yellow", "Red to orange"];
-  const PAIRS = NAMES.length;
+  // A widget's cube still wears one of the seven colour pairs from before the marks (tokens.css: --blob-1a ...).
+  const PAIRS = 7;
   const valid = (n) => Number.isInteger(n) && n >= 1 && n <= PAIRS;
-
-  /** The pair an id gets by itself: one of 2 to 7, the same every time. Never 1, which is led by purple. */
+  /** The pair a widget's id gets by itself: one of 2 to 7, the same every time. Never 1, which is led by purple. */
   function own(id) {
     let h = 2166136261;
     for (const ch of String(id || "")) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619); }
     return 2 + ((h >>> 0) % (PAIRS - 1));
   }
-  /** The pair to draw: the one picked, or the id's own. */
   const pairOf = (id, picked) => (valid(Number(picked)) ? Number(picked) : own(id));
-  /** Where a blob starts in its motion, from its id: blobs side by side never move in step. */
-  const phase = (id) => { let h = 0; for (const ch of String(id || "")) h = (h * 31 + ch.codePointAt(0)) >>> 0; return h % 7; };
-
-  /**
-   * A blob as HTML. `kind` is "work" (round) or "chat" (a rounded square). `pair` 1 to 7 (or leave it out and give `id`).
-   * `running` adds the glow. `still` never moves (a colour to pick, a picture). `size` in px (or let the CSS say).
-   */
-  function html(kind, { id = "", pair, running = false, still = false, size } = {}) {
-    const n = pairOf(id, pair), shape = kind === "chat" ? "square" : "round";
-    const style = [size ? `--blob-size:${Number(size)}px` : "", `--blob-i:${phase(id || n)}`].filter(Boolean).join(";");
-    return `<span class="dgc-blob${still ? " is-still" : ""}" data-shape="${shape}" data-pair="${n}"${running ? " data-running" : ""} style="${style}" aria-hidden="true">`
-      + `<span class="dgc-blob-fill"><i class="w"></i><i class="s"></i><i class="h"></i><i class="b"></i></span></span>`;
-  }
 
   let cubes = 0;
   /** A widget's cube as HTML, in the pair its id gets. */
@@ -52,26 +36,7 @@
       + `<path d="M12 3 L20.5 7.6 L12 12.2 L3.5 7.6 Z" fill="url(#${k}h)" stroke="none"/></g></svg></span>`;
   }
 
-  // ---- motion only while seen: a blob off screen (scrolled away, a hidden tab) pauses ---------------------------------
-  const watchers = new WeakMap();   // a document -> its IntersectionObserver
-  /** Watch every moving blob under `node` (call again after drawing more): each pauses while it is off screen. */
-  function watch(node) {
-    const doc = node?.ownerDocument || (node?.nodeType === 9 ? node : null), view = doc?.defaultView;
-    if (!doc || !view || typeof view.IntersectionObserver !== "function") return;
-    let seen = watchers.get(doc);
-    if (!seen) {
-      seen = new view.IntersectionObserver((entries) => {
-        for (const entry of entries) entry.target.classList.toggle("is-paused", !entry.isIntersecting);
-      });
-      watchers.set(doc, seen);
-    }
-    for (const blob of node.querySelectorAll?.(".dgc-blob:not(.is-still)") || []) {
-      if (blob.__dgcWatched) continue;
-      blob.__dgcWatched = true; seen.observe(blob);
-    }
-  }
-
-  // ---- the small menu: rows, then (for a session) its seven colours ---------------------------------------------------
+  // ---- the small menu: rows, then (for a session) its twelve palettes ---------------------------------------------------
   const ICONS = {
     open: '<path d="M9 3h4v4M13 3 7.5 8.5M11.5 9.5V13H3V4.5h4"/>',
     pin: '<path d="M10.2 1.8l4 4-2.2.9-2.4 2.4.3 3.1-1.1 1.1-2.6-2.6L2.8 14l-.8-.8 3.3-3.4-2.6-2.6 1.1-1.1 3.1.3 2.4-2.4z"/>',
@@ -86,13 +51,15 @@
   };
   const icon = (name, filled = false) => `<svg viewBox="0 0 16 16" width="15" height="15" fill="${filled ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`;
 
-  /** The seven colours as a row of still blobs, the chosen one marked, then "Back to its own colour". */
-  function swatches(kind, { chosen, own: ownPair } = {}) {
-    const shape = kind === "chat" ? "square" : "round";
+  /** The twelve palettes as still marks of the session's kind (Motes for a chat, Voxels for a Work session), six to a
+   *  line, the one it wears marked. */
+  function swatches(kind, { chosen } = {}) {
+    const M = root.DgcMarks;
+    if (!M) return "";
     return `<div class="dgc-menu-head" role="presentation"><span>Colour</span></div><div class="dgc-swatches" role="group" aria-label="Colour">`
-      + NAMES.map((name, i) => `<button type="button" class="dgc-swatch" role="menuitemradio" data-shape="${shape}" data-colour="${i + 1}" aria-checked="${chosen === i + 1 ? "true" : "false"}"`
-        + ` aria-label="${esc(name)}" title="${esc(name)}" tabindex="-1">${html(kind, { pair: i + 1, still: true })}</button>`).join("")
-      + `</div><button type="button" role="menuitem" class="dgc-menu-row" data-colour="own"${chosen === ownPair ? " disabled" : ""}><span class="dgc-pop-icon">${icon("reset")}</span><span class="dgc-menu-label">Back to its own colour</span></button>`;
+      + M.PALETTES.map((name) => `<button type="button" class="dgc-swatch" role="menuitemradio" data-colour="${name}" aria-checked="${chosen === name ? "true" : "false"}"`
+        + ` aria-label="${esc(M.label(name))}" title="${esc(M.label(name))}" tabindex="-1">${M.of(kind, name)}</button>`).join("")
+      + `</div>`;
   }
 
   let open = null;
@@ -114,11 +81,11 @@
    * Open a small menu beside `anchor` (above it when there is room, as a dock's menu opens; below it otherwise).
    *   rows:   [{ id, label, icon?, danger?, disabled? }] or groups of them ([[...], [...]]: a hairline between groups)
    *   head:   a small heading over the rows
-   *   colour: { kind: "work" | "chat", chosen, own }: the seven colours and "Back to its own colour"
-   *   onPick(id), onColour(n | null)
+   *   colour: { kind: "work" | "chat", chosen }: the twelve palettes, the one it wears marked
+   *   onPick(id), onColour(palette)
    *   at:     { x, y }: open at a point (a right-click), not beside the anchor
    *   place:  "above" (the default) or "below"
-   * Keys: Up and Down between rows, Left and Right between colours, Home and End, Enter or Space to choose, Escape to
+   * Keys: Up and Down between rows (and between the colours' two lines), Left and Right between colours, Home and End, Enter or Space to choose, Escape to
    * close and go back to what opened it, Tab to close and move on.
    */
   function popup(anchor, { rows = [], head = "", colour = null, onPick, onColour, onClose, at = null, place = "above", label = "", keyboard = false } = {}) {
@@ -151,28 +118,31 @@
       if (!el || el.disabled) return;
       const picked = el.dataset.colour, id = el.dataset.id;
       close(true);
-      if (picked !== undefined) onColour?.(picked === "own" ? null : Number(picked));
+      if (picked !== undefined) onColour?.(picked);
       else onPick?.(id);
     };
     menu.addEventListener("click", (e) => choose(e.target));
     menu.addEventListener("contextmenu", (e) => e.preventDefault());
     menu.addEventListener("keydown", (e) => {
       const active = doc.activeElement, inDots = active?.classList?.contains("dgc-swatch");
-      // The colours are one stop among the rows: Up and Down pass through them, Left and Right move along them.
+      // The colours are one stop among the rows: Up and Down pass through them (line by line), Left and Right move along them.
       const list = [];
       for (const el of menu.querySelectorAll(".dgc-menu-row:not(:disabled), .dgc-swatches")) list.push(el);
       const here = list.indexOf(inDots ? active.parentElement : active);
       const go = (el) => { if (!el) return; (el.classList.contains("dgc-swatches") ? (el.querySelector('[aria-checked="true"]') || el.firstElementChild) : el).focus(); };
+      // Six colours to a line: Down from the first line is the colour below it, Up from the second the one above.
+      const all = inDots ? dots() : [], at = all.indexOf(active), line = Math.ceil(all.length / 2);
+      const below = inDots && e.key === "ArrowDown" && at < line ? all[at + line] : null, above = inDots && e.key === "ArrowUp" && at >= line ? all[at - line] : null;
       if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(true); }
       else if (e.key === "Tab") close(false);
+      else if (below || above) { e.preventDefault(); (below || above).focus(); }
       else if (e.key === "ArrowDown") { e.preventDefault(); go(list[(here + 1) % list.length]); }
       else if (e.key === "ArrowUp") { e.preventDefault(); go(list[(here - 1 + list.length) % list.length]); }
       else if (e.key === "Home") { e.preventDefault(); go(list[0]); }
       else if (e.key === "End") { e.preventDefault(); go(list[list.length - 1]); }
       else if (inDots && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
         e.preventDefault();
-        const all = dots(), i = all.indexOf(active);
-        all[(i + (e.key === "ArrowRight" ? 1 : -1) + all.length) % all.length].focus();
+        all[(at + (e.key === "ArrowRight" ? 1 : -1) + all.length) % all.length].focus();
       }
     });
     const outside = (e) => { if (!menu.contains(e.target) && !(anchor.contains?.(e.target) && e.button === 0)) close(false); };
@@ -186,5 +156,5 @@
     return menu;
   }
 
-  root.DgcBlob = Object.freeze({ NAMES, PAIRS, own, pairOf, html, cube, watch, popup, close, swatches, icon, isOpen: () => !!open, menu: () => open?.menu || null });
+  root.DgcBlob = Object.freeze({ cube, popup, close, swatches, icon, isOpen: () => !!open, menu: () => open?.menu || null });
 })();

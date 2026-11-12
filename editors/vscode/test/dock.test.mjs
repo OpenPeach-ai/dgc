@@ -1,5 +1,6 @@
-// The dock at the foot of DGC's side bar (media/shared/dock.js and dock.css) and a session's liquid blob
-// (media/shared/blob.js and blob.css), measured in real Chromium on the side bar's real page (support/dock-scene.mjs,
+// The dock at the foot of DGC's side bar (media/shared/dock.js and dock.css) and a session's mark on it (a Voxel for
+// Work, a Mote for ChatDGC: media/shared/marks.js, mote.css, voxel.css; session-icons.test.mjs holds the marks'
+// own rules), measured in real Chromium on the side bar's real page (support/dock-scene.mjs,
 // which answers the dock's messages the way src/dock.ts does). What is held here:
 //   - the dock is on every screen of the side bar (its Work tab here, the Pips view; side-tabs-home.test.mjs has it under
 //     each of the four tabs) and nothing hides behind it. A Pip's chat alone has none (dock-pip-chat.test.mjs)
@@ -10,8 +11,8 @@
 //   - tiles shrink as items are added, down to 24 px; when 24 px tiles cannot fit, the dock steps aside and keeps its pins
 //   - Settings' three choices: Always, When I point at the bottom, Never
 //   - the keyboard: Tab into the dock, arrows between items, Enter opens, the menu by Shift+F10
-//   - a blob is round for Work and a rounded square for ChatDGC, always full, glows only while its session runs, pauses
-//     off screen and under reduced motion, and its colour can be changed among seven from a row, the dock and its header
+//   - a session's mark is a Voxel for Work and a Mote for ChatDGC, moves only while its session runs and never under
+//     reduced motion, and its colour can be changed among twelve from a row, the dock and its header
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -38,6 +39,7 @@ after(async () => { await browser?.close(); });
 
 const read = (rel) => readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
 const centre = (r) => [r.left + r.width / 2, r.top + r.height / 2];
+const TWELVE = ["ember", "peach", "saffron", "fern", "mint", "lagoon", "ice", "azure", "iris", "lilac", "orchid", "rose"];
 const WORK_A = `work:${DOCK_SESSIONS[0].id}`, WORK_B = `work:${DOCK_SESSIONS[1].id}`, CHAT_A = `chat:${CHATS[0].id}`, PIP_B = `pip:${pipId("b")}`;
 const keys = (d) => d.items.map((i) => i.key);
 /** Point at a dock item and wait for the tiles to come to rest. */
@@ -125,7 +127,7 @@ test("a pin on every session and chat row: it pins, stays filled while pinned, a
     await x.page.click(`${session} .dgc-pin`); await x.settle();
     d = await dockNow(x.page);
     assert.deepEqual(keys(d), [WORK_B, "+"], "the session is on the dock");
-    assert.equal(d.items[0].holds, "blob"); assert.equal(d.items[0].blob.shape, "round", "a Work session is a round blob");
+    assert.equal(d.items[0].holds, "voxel", "a Work session is a Voxel");
     pin = await pinOf(session);
     assert.deepEqual([pin.pressed, pin.fill], ["true", "currentColor"], "filled while it is pinned");
     assert.match(pin.label, /^Unpin from the dock: /);
@@ -138,7 +140,7 @@ test("a pin on every session and chat row: it pins, stays filled while pinned, a
     await x.page.click(`${chat} .dgc-pin`); await x.settle();
     d = await dockNow(x.page);
     assert.equal(d.items[1].key, `chat:${CHATS[1].id}`);
-    assert.equal(d.items[1].blob.shape, "square", "a ChatDGC chat is a rounded square");
+    assert.equal(d.items[1].mark.set, "mote", "a ChatDGC chat is a Mote");
     await x.page.mouse.move(150, 20);
     assert.equal((await pinOf(chat)).shown, true, "a pinned chat's pin stays, filled, with the pointer away");
 
@@ -190,34 +192,34 @@ test("the Library: a file, an artifact and a widget each have a pin beside their
     await pin.click();
     const [sent] = await x.posted("dockToggle");
     assert.deepEqual([sent.item.kind, sent.item.id, sent.item.title, sent.item.look.type, sent.item.ref.chat_id], ["file", "att_" + "a".repeat(32), "Budget.xlsx", "spreadsheet", "chat_" + "b".repeat(32)]);
-    await x.send({ type: "dock", pins: [{ key: `file:${"att_" + "a".repeat(32)}` }], colours: {}, show: "always", most: 8, size: 34 });
+    await x.send({ type: "dock", pins: [{ key: `file:${"att_" + "a".repeat(32)}` }], colours: {}, since: Date.now(), show: "always", most: 8, size: 34 });
     assert.equal(await pin.getAttribute("aria-pressed"), "true", "the host says it is pinned: the pin is filled");
     assert.equal(await pin.evaluate((b) => b.querySelector("svg").getAttribute("fill")), "currentColor");
     assert.deepEqual(x.errors, []);
   } finally { await x.page.close(); }
 });
 
-test("what a pinned thing looks like: a Pip's face, a session's blob, a file's small sheet, a widget's cube", async (t) => {
+test("what a pinned thing looks like: a Pip's face, a session's mark, a file's small sheet, a widget's cube", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openDock(browser, { pins: [PINS[0], PINS[3], PINS[5], ...LIBRARY_PINS], most: 16, width: 360 });
   try {
     const d = await dockNow(x.page);
-    assert.deepEqual(d.items.map((i) => i.holds), ["face", "blob", "blob", "sheet", "sheet", "sheet", "cube", "plus"]);
+    assert.deepEqual(d.items.map((i) => i.holds), ["face", "voxel", "mote", "sheet", "sheet", "sheet", "cube", "plus"]);
     const sheet = await x.page.evaluate(() => [...document.querySelectorAll("#dgc-dock .dgc-sheet")].map((s) => { const r = s.getBoundingClientRect(), tile = s.closest(".dgc-dock-item").getBoundingClientRect();
       return { kind: s.dataset.kind, h: r.height, tile: tile.height, inside: r.top >= tile.top - 0.5 && r.bottom <= tile.bottom + 0.5 }; }));
     assert.deepEqual(sheet.map((s) => s.kind), ["page", "sheet", "pdf"], "the output cards' sheet, by kind");
     for (const s of sheet) {
       assert.ok(s.h < 56 * 0.6, `the sheet is smaller in a tile (${s.h}px of 56)`);
-      assert.ok(s.h >= s.tile * 0.55 && s.h <= s.tile * 0.8 && s.inside, `about a blob's size, inside its tile (${s.h} in ${s.tile})`);
+      assert.ok(s.h >= s.tile * 0.55 && s.h <= s.tile * 0.8 && s.inside, `about a mark's size, inside its tile (${s.h} in ${s.tile})`);
     }
-    const blob = await x.page.evaluate(() => { const b = document.querySelector('#dgc-dock [data-kind="work"] .dgc-blob').getBoundingClientRect(), tile = document.querySelector('#dgc-dock [data-kind="work"]').getBoundingClientRect(); return b.height / tile.height; });
-    assert.ok(blob > 0.6 && blob < 0.72, `a blob is about two thirds of its tile (${blob})`);
+    const mark = await x.page.evaluate(() => { const b = document.querySelector('#dgc-dock [data-kind="work"] [data-mark]').getBoundingClientRect(), tile = document.querySelector('#dgc-dock [data-kind="work"]').getBoundingClientRect(); return b.height / tile.height; });
+    assert.ok(mark > 0.66 && mark < 0.78, `a mark's box is about seven tenths of its tile: the Voxel inside it keeps its own margin (${mark})`);
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
 });
 
 // ---- the dock's own menu, and "+" ------------------------------------------------------------------------------------
-test("right-click on a dock item: Open, Unpin, Move left, Move right, and a session's seven colours", async (t) => {
+test("right-click on a dock item: Open, Unpin, Move left, Move right, and a session's twelve colours", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openDock(browser, { width: 300, height: 700 });
   try {
@@ -232,12 +234,11 @@ test("right-click on a dock item: Open, Unpin, Move left, Move right, and a sess
     assert.deepEqual((await dockNow(x.page)).menu, [], "Escape closes it");
 
     d = await open(WORK_B);
-    assert.deepEqual(d.menu, ["Open", "Unpin", "Move left", "Move right", "Back to its own colour (off)"]);
-    assert.equal(d.swatches.length, 7, "seven colours");
-    assert.deepEqual(d.swatches.map((s) => s.shape), Array(7).fill("round"), "round, as a Work session's blob is");
-    const own = d.items.find((i) => i.key === WORK_B).blob.pair;
-    assert.deepEqual(d.swatches.filter((s) => s.on).map((s) => s.pair), [own], "its own colour is the one marked");
-    assert.ok(own >= 2 && own <= 7, "a colour from an id is never the pair led by purple");
+    assert.deepEqual(d.menu, ["Open", "Unpin", "Move left", "Move right"]);
+    assert.deepEqual(d.swatches.map((s) => s.palette), TWELVE, "twelve colours, never citron or lime");
+    assert.deepEqual(d.swatches.map((s) => s.set), Array(12).fill("voxel"), "Voxels, as a Work session's mark is");
+    const own = d.items.find((i) => i.key === WORK_B).mark.palette;
+    assert.deepEqual(d.swatches.filter((s) => s.on).map((s) => s.palette), [own], "the colour it wears is the one marked");
     // Move right, then left again.
     await x.page.click('.dgc-pop [data-id="right"]'); await x.settle();
     assert.deepEqual(keys(await dockNow(x.page)).slice(3, 6), [WORK_A, CHAT_A, WORK_B]);
@@ -245,21 +246,18 @@ test("right-click on a dock item: Open, Unpin, Move left, Move right, and a sess
     assert.deepEqual(d.menu.slice(2, 4), ["Move left", "Move right (off)"], "the last item cannot move right");
     await x.page.click('.dgc-pop [data-id="left"]'); await x.settle();
     assert.deepEqual(keys(await dockNow(x.page)), [...PINS.map((p) => p.key), "+"]);
-    // A colour: the blob takes it at once, and "Back to its own colour" returns.
+    // A colour: the mark takes it at once, and it is the one marked from then on.
     await open(WORK_B);
-    const other = own === 6 ? 4 : 6;
+    const other = own === "rose" ? "mint" : "rose";
     await x.page.click(`.dgc-pop .dgc-swatch[data-colour="${other}"]`); await x.settle();
-    assert.equal((await dockNow(x.page)).items.find((i) => i.key === WORK_B).blob.pair, other);
+    assert.equal((await dockNow(x.page)).items.find((i) => i.key === WORK_B).mark.palette, other);
     assert.deepEqual((await posted(x, "dockColour")).at(-1), { type: "dockColour", key: WORK_B, colour: other });
     d = await open(WORK_B);
-    assert.deepEqual(d.swatches.filter((s) => s.on).map((s) => s.pair), [other]);
-    assert.equal(d.menu.at(-1), "Back to its own colour");
-    await x.page.click('.dgc-pop [data-colour="own"]'); await x.settle();
-    assert.equal((await dockNow(x.page)).items.find((i) => i.key === WORK_B).blob.pair, own);
-    assert.equal((await posted(x, "dockColour")).at(-1).colour, null);
-    // A chat's colours are rounded squares.
+    assert.deepEqual(d.swatches.filter((s) => s.on).map((s) => s.palette), [other]);
+    await x.page.keyboard.press("Escape");
+    // A chat's colours are Motes.
     d = await open(CHAT_A);
-    assert.deepEqual(d.swatches.map((s) => s.shape), Array(7).fill("square"));
+    assert.deepEqual(d.swatches.map((s) => s.set), Array(12).fill("mote"));
     await x.page.keyboard.press("Escape");
     // Unpin.
     await open(PIP_B);
@@ -548,15 +546,20 @@ test("the keyboard: Tab into the dock, arrows between items, Home and End, Enter
     // The menu, by the keyboard: its first row has the focus.
     await x.page.keyboard.press("Shift+F10"); await x.settle();
     d = await dockNow(x.page);
-    assert.equal(d.menu.length, 5);
+    assert.equal(d.menu.length, 4);
     assert.equal(d.focus, "open", "the menu opens with its first row focused");
     await x.page.keyboard.press("ArrowDown");
     assert.equal((await dockNow(x.page)).focus, "unpin");
     await x.page.keyboard.press("ArrowDown"); await x.page.keyboard.press("ArrowDown"); await x.page.keyboard.press("ArrowDown");
-    const own = (await dockNow(x.page)).items.find((i) => i.key === WORK_A).blob.pair;
-    assert.equal((await dockNow(x.page)).focus, String(own), "Down reaches the colours, on the one chosen");
+    const own = (await dockNow(x.page)).items.find((i) => i.key === WORK_A).mark.palette;
+    assert.equal((await dockNow(x.page)).focus, own, "Down reaches the colours, on the one it wears");
     await x.page.keyboard.press("ArrowRight");
-    assert.equal((await dockNow(x.page)).focus, String(own % 7 + 1), "Right moves along the colours");
+    assert.equal((await dockNow(x.page)).focus, TWELVE[(TWELVE.indexOf(own) + 1) % 12], "Right moves along the colours");
+    // Six to a line: Down from the first line is the colour below, Up comes back.
+    await x.page.keyboard.press("Home"); await x.page.keyboard.press("ArrowDown"); await x.page.keyboard.press("ArrowDown"); await x.page.keyboard.press("ArrowDown"); await x.page.keyboard.press("ArrowDown");
+    const line = TWELVE.indexOf((await dockNow(x.page)).focus);
+    await x.page.keyboard.press(line < 6 ? "ArrowDown" : "ArrowUp");
+    assert.equal((await dockNow(x.page)).focus, TWELVE[line < 6 ? line + 6 : line - 6], "Up and Down move between the colours' two lines");
     await x.page.keyboard.press("Escape");
     d = await dockNow(x.page);
     assert.deepEqual(d.menu, []); assert.equal(d.focus, WORK_A, "Escape closes the menu and returns to its item");
@@ -605,89 +608,60 @@ test("on an item: a quiet dot while it is open in an editor, the accent's dot wh
   try {
     let d = await dockNow(x.page);
     const of = (key) => d.items.find((i) => i.key === key);
-    assert.deepEqual([of(WORK_A).dot, of(WORK_A).blob.running], ["live", true], "running: the live dot, and its blob glows");
-    assert.deepEqual([of(WORK_B).dot, of(WORK_B).blob.running], ["open", false], "open in a tab: a quiet dot, no glow");
-    assert.deepEqual([of(CHAT_A).dot, of(CHAT_A).blob.running], ["open", false]);
+    assert.deepEqual([of(WORK_A).dot, of(WORK_A).mark.moving], ["live", true], "running: the live dot, and its mark moves");
+    assert.deepEqual([of(WORK_B).dot, of(WORK_B).mark.moving], ["open", false], "open in a tab: a quiet dot, its mark at rest");
+    assert.deepEqual([of(CHAT_A).dot, of(CHAT_A).mark.moving], ["open", false]);
     assert.deepEqual([of(PIP_B).badge, of(PIP_B).dot], ["2", ""], "a Pip that needs you: its number");
     assert.deepEqual([of(waiting.key).badge, of(waiting.key).dot], ["1", ""], "a session that wants your okay: a number");
     assert.match(of(waiting.key).label, /Wants your okay/);
     assert.equal(of(PINS[1].key).badge, "", "nothing waiting: no number");
     const look = await x.page.evaluate(([live, open]) => { const q = (key, sel) => getComputedStyle(document.querySelector(`#dgc-dock [data-key="${key}"] ${sel}`));
       const accent = (() => { const i = document.createElement("i"); i.style.color = "var(--accent)"; document.body.append(i); const c = getComputedStyle(i).color; i.remove(); return c; })();
-      return { live: q(live, ".dgc-dock-dot").backgroundColor, quiet: q(open, ".dgc-dock-dot").backgroundColor, accent, glow: q(live, ".dgc-blob").boxShadow, rest: q(open, ".dgc-blob").boxShadow,
+      return { live: q(live, ".dgc-dock-dot").backgroundColor, quiet: q(open, ".dgc-dock-dot").backgroundColor, accent, moves: q(live, "[data-mark] i:nth-child(5)").animationPlayState, rests: q(open, "[data-mark] i:nth-child(5)").animationPlayState,
         badge: q(`pip:${"pip_" + "b".repeat(32)}`, ".dgc-dock-badge").backgroundColor }; }, [WORK_A, WORK_B]);
     assert.equal(look.live, look.accent, "the running dot is the accent");
     assert.notEqual(look.quiet, look.accent, "the open dot is not");
     assert.notEqual(look.badge, look.accent, "a number is never purple");
-    assert.notEqual(look.glow, "none", "a running blob glows"); assert.equal(look.rest, "none", "a blob at rest has no glow");
+    assert.equal(look.moves, "running", "a running session's mark moves"); assert.equal(look.rests, "paused", "a mark at rest is paused");
     // A chat that is answering runs too.
     await x.send({ type: "chatdgc_list", available: true, items: CHATS, open: ["chat_1"], answering: ["chat_1"] }); await x.settle();
     d = await dockNow(x.page);
-    assert.deepEqual([of(CHAT_A).dot, of(CHAT_A).blob.running], ["live", true]);
+    assert.deepEqual([of(CHAT_A).dot, of(CHAT_A).mark.moving], ["live", true]);
     assert.match(of(CHAT_A).label, /Answering/);
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
 });
 
-// ---- the blob ----------------------------------------------------------------------------------------------------------
-test("a blob: our own markup and CSS, always full, moving on the loader's timing; paused off screen, still under reduced motion", async (t) => {
+// ---- the mark ----------------------------------------------------------------------------------------------------------
+test("a mark on the dock: his own markup and CSS, no canvas; the running one moves on his eight-second cycle, never under reduced motion", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openDock(browser, { width: 300, height: 700 });
   try {
-    const probe = () => x.page.evaluate((key) => {
-      const blob = document.querySelector(`#dgc-dock [data-key="${key}"] .dgc-blob`), fill = blob.querySelector(".dgc-blob-fill");
-      const part = (sel, pseudo) => { const s = getComputedStyle(fill.querySelector(sel), pseudo); return { names: s.animationName, state: s.animationPlayState, time: s.animationDuration }; };
-      const r = blob.getBoundingClientRect(), f = fill.getBoundingClientRect(), s = getComputedStyle(fill);
-      return { full: Math.abs(f.height - r.height) < 0.1 && Math.abs(f.width - r.width) < 0.1, bg: s.backgroundImage, blur: s.filter, radius: getComputedStyle(blob).borderRadius, paused: blob.classList.contains("is-paused"),
-        wave: part(".w"), surface: part(".s"), shimmer: part(".h"), bubble: part(".b"), dot: part(".b", "::before"),
-        canvas: document.querySelectorAll("#dgc-dock canvas").length, marks: blob.querySelectorAll("svg, img").length };
+    const b = await x.page.evaluate((key) => {
+      const mark = document.querySelector(`#dgc-dock [data-key="${key}"] [data-mark]`), part = (n) => { const st = getComputedStyle(mark.querySelector(`i:nth-child(${n})`)); return { name: st.animationName, state: st.animationPlayState, time: st.animationDuration }; };
+      return { cls: mark.className, parts: mark.children.length, tags: [...new Set([...mark.children].map((c) => c.tagName))], fold: part(4), drift: part(5), heart: part(6),
+        canvas: document.querySelectorAll("#dgc-dock canvas").length, pictures: mark.querySelectorAll("svg, img").length, hidden: mark.getAttribute("aria-hidden") };
     }, WORK_A);
-    let b = await probe();
-    assert.equal(b.full, true, "always full: the liquid fills the whole blob");
-    assert.match(b.bg, /^linear-gradient\(to top, /, "the pair's gradient, bottom to top");
-    assert.match(b.blur, /blur\(0\.3px\)/, "under a 0.3 px blur");
-    assert.equal(b.radius, "50%", "a Work session's is round");
-    assert.equal(b.marks, 0, "no mark on it"); assert.equal(b.canvas, 0, "no canvas, no shader");
-    assert.match(b.surface.names, /dgc-blob-surface/); assert.match(b.wave.names, /dgc-blob-wave/); assert.match(b.shimmer.names, /dgc-blob-shimmer/); assert.match(b.bubble.names, /dgc-blob-drift/);
-    assert.match(b.surface.time, /^6\.283s/, "the surface rides the main wave (2π seconds), with its bounce and ripple in the same keyframes");
-    for (const part of [b.wave, b.surface, b.shimmer, b.bubble, b.dot]) assert.ok(part.state.split(", ").every((s) => s === "running"), "on screen it moves");
-    assert.equal(b.paused, false);
-    // Off screen (the side bar scrolled it away, here: moved out of view): it pauses.
-    await x.page.evaluate(() => { document.getElementById("dgc-dock").style.transform = "translateY(400px)"; });
-    await x.page.waitForFunction((key) => document.querySelector(`#dgc-dock [data-key="${key}"] .dgc-blob`).classList.contains("is-paused"), WORK_A);
-    b = await probe();
-    for (const part of [b.wave, b.surface, b.shimmer, b.bubble, b.dot]) assert.ok(part.state.split(", ").every((s) => s === "paused"), "off screen every part is paused");
-    await x.page.evaluate(() => { document.getElementById("dgc-dock").style.transform = ""; });
-    await x.page.waitForFunction((key) => !document.querySelector(`#dgc-dock [data-key="${key}"] .dgc-blob`).classList.contains("is-paused"), WORK_A);
+    assert.match(b.cls, /^voxel voxel--[a-z]+$/, "span.voxel.voxel--<palette>");
+    assert.deepEqual([b.parts, b.tags, b.hidden], [6, ["I"], "true"], "six empty <i>, and nothing for a screen reader beside the session's name");
+    assert.equal(b.pictures, 0, "no picture in it"); assert.equal(b.canvas, 0, "no canvas, no shader");
+    assert.deepEqual([b.fold.name, b.drift.name, b.heart.name], ["voxel-fold", "voxel-drift", "voxel-heart"]);
+    for (const part of [b.fold, b.drift, b.heart]) assert.deepEqual([part.state, part.time], ["running", "8s"], "the running session's mark moves, eight seconds a cycle");
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
   const still = await openDock(browser, { width: 300, height: 700, motion: "reduce" });
   try {
-    const names = await still.page.evaluate((key) => { const fill = document.querySelector(`#dgc-dock [data-key="${key}"] .dgc-blob-fill`);
-      return [...fill.querySelectorAll("i")].map((i) => getComputedStyle(i).animationName).concat(getComputedStyle(fill.querySelector(".b"), "::before").animationName); }, WORK_A);
-    assert.deepEqual([...new Set(names)], ["none"], "reduced motion: nothing in a blob moves");
+    const names = await still.page.evaluate((key) => [...document.querySelectorAll(`#dgc-dock [data-key="${key}"] [data-mark] i`)].map((i) => getComputedStyle(i).animationName), WORK_A);
+    assert.deepEqual([...new Set(names)], ["none"], "reduced motion: nothing in a mark moves");
   } finally { await still.close(); }
 });
 
-test("the keyframes carry the loader's timing: a main wave, a bounce four times as fast at 0.15, a ripple eight times as fast at 0.05", () => {
-  const css = read("media/shared/blob.css");
-  const frames = css.match(/@keyframes dgc-blob-surface \{([^@]*)\}\s*@keyframes/)[1];
-  const stops = [...frames.matchAll(/([\d.]+)% \{ translate: 0 (-?[\d.]+)%; \}/g)].map((m) => [Number(m[1]) / 100, Number(m[2])]);
-  assert.ok(stops.length >= 24, "enough stops to carry the ripple");
-  const amp = 9;
-  for (const [at, y] of stops) {
-    const tt = at * 2 * Math.PI, want = amp * (Math.sin(tt) + 0.15 * Math.sin(4 * tt) + 0.05 * Math.sin(8 * tt));
-    assert.ok(Math.abs(y - want) < 0.02, `at ${at}: ${y} for ${want.toFixed(2)}`);
-  }
-  assert.match(css, /--blob-i, 0\) \* -\.8s/, "each blob starts 0.8 s further along than the one before");
-});
-
-test("our own code: no third-party shader or library, nothing to credit, and the seven pairs are the only colours", () => {
-  for (const file of ["media/shared/blob.js", "media/shared/dock.js", "media/shared/blob.css", "media/shared/dock.css", "src/dock.ts"]) {
+test("our own code: no third-party shader or library, nothing to credit, and the dock's own sheets take every colour from the tokens", () => {
+  for (const file of ["media/shared/marks.js", "media/shared/blob.js", "media/shared/dock.js", "media/shared/blob.css", "media/shared/dock.css", "media/shared/mote.css", "media/shared/voxel.css", "src/dock.ts"]) {
     const text = read(file);
     assert.doesNotMatch(text, /paper|shader|webgl|getContext|<canvas/i, `${file} draws with nothing but its own code`);
     const imports = [...text.matchAll(/^import .* from "([^"]+)";$/gm)].map((m) => m[1]);
-    assert.deepEqual(imports.filter((name) => !["vscode", "fs", "zlib"].includes(name)), [], `${file} brings in no library`);
+    assert.deepEqual(imports.filter((name) => !["vscode", "fs", "../media/shared/marks.js"].includes(name)), [], `${file} brings in no library (the host shares the pages' own marks.js)`);
     assert.doesNotMatch(text, /require\(|import\(/, `${file} loads nothing at run time`);
     assert.doesNotMatch(text, /https?:\/\//, `${file} links to nothing`);
   }
@@ -695,35 +669,36 @@ test("our own code: no third-party shader or library, nothing to credit, and the
   const tokens = read("media/shared/tokens.css");
   const pairs = [["a855f7", "ec4899"], ["3b82f6", "a855f7"], ["22d3ee", "3b82f6"], ["4ade80", "22d3ee"], ["facc15", "4ade80"], ["fb923c", "facc15"], ["ef4444", "fb923c"]];
   pairs.forEach(([from, to], i) => { assert.match(tokens, new RegExp(`--blob-${i + 1}a:#${from}; --blob-${i + 1}b:#${to};`), `pair ${i + 1}`); });
-  assert.doesNotMatch(read("media/shared/blob.css") + read("media/shared/dock.css"), /#[0-9a-f]{6}\b/i, "the blob and the dock take every colour from the tokens");
+  assert.doesNotMatch(read("media/shared/blob.css") + read("media/shared/dock.css"), /#[0-9a-f]{6}\b/i, "the menu, the cube and the dock take every colour from the tokens");
 });
 
 // ---- a session's colour, from its three places -------------------------------------------------------------------------
-test("a session's colour from its row's …: Open in editor, Pin to the dock, seven colours, and Back to its own colour", async (t) => {
+test("a session's colour from its row's …: Open in editor, Pin to the dock, and twelve colours", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openDock(browser, { pins: [], width: 300, height: 760 });
   try {
     const id = DOCK_SESSIONS[1].id, row = `#sessions-list .session-row[data-id="${id}"]`;
     await x.page.hover(row); await x.page.click(`${row} .session-more`); await x.settle();
     let d = await dockNow(x.page);
-    assert.deepEqual(d.menu, ["Open in editor", "Pin to the dock", "Back to its own colour (off)"]);
-    assert.equal(d.swatches.length, 7);
+    assert.deepEqual(d.menu, ["Open in editor", "Pin to the dock"]);
+    assert.deepEqual(d.swatches.map((s) => s.palette), TWELVE);
     assert.equal(await x.page.evaluate((sel) => document.querySelector(sel).querySelector(".session-actions").checkVisibility(), row), true, "the row keeps its actions while its menu is open");
     const menu = await x.page.evaluate(() => { const r = document.querySelector(".dgc-pop").getBoundingClientRect(); return [r.left, r.right, r.top, r.bottom]; });
     assert.ok(menu[0] >= 5.5 && menu[1] <= 300 - 5.5 && menu[2] >= 5.5 && menu[3] <= 760 - 5.5, "the menu is inside the side bar");
-    const own = d.swatches.find((s) => s.on).pair, other = own === 3 ? 5 : 3;
+    const own = d.swatches.find((s) => s.on).palette, other = own === "lagoon" ? "iris" : "lagoon";
     await x.page.click(`.dgc-pop .dgc-swatch[data-colour="${other}"]`);
     assert.deepEqual((await posted(x, "dockColour")).at(-1), { type: "dockColour", key: `work:${id}`, colour: other });
     await x.page.hover(row); await x.page.click(`${row} .session-more`); await x.settle();
     d = await dockNow(x.page);
-    assert.deepEqual(d.swatches.filter((s) => s.on).map((s) => s.pair), [other], "the chosen colour is kept and marked");
+    assert.deepEqual(d.swatches.filter((s) => s.on).map((s) => s.palette), [other], "the chosen colour is kept and marked");
+    assert.equal(await x.page.evaluate((sel) => document.querySelector(`${sel} .session-blob [data-mark]`).dataset.palette, row), other, "and its row's mark wears it");
     await x.page.click('.dgc-pop [data-id="pin"]'); await x.settle();
     d = await dockNow(x.page);
-    assert.equal(d.items[0].blob.pair, other, "pinned, its blob is the colour chosen");
+    assert.equal(d.items[0].mark.palette, other, "pinned, its mark is the colour chosen");
     await x.page.hover(row); await x.page.click(`${row} .session-more`); await x.settle();
     assert.equal((await dockNow(x.page)).menu[1], "Unpin from the dock");
-    await x.page.click('.dgc-pop [data-colour="own"]'); await x.settle();
-    assert.equal((await dockNow(x.page)).items[0].blob.pair, own, "Back to its own colour");
+    await x.page.click(`.dgc-pop .dgc-swatch[data-colour="${own}"]`); await x.settle();
+    assert.equal((await dockNow(x.page)).items[0].mark.palette, own, "and back again, by choosing it");
     // By the keyboard: the … opens with its first row focused, and Escape returns to it.
     await x.page.focus(row); for (let i = 0; i < 3; i++) await x.page.keyboard.press("Tab");
     assert.equal(await x.page.evaluate(() => document.activeElement.className), "session-more", "Tab from the row: Open in Editor, the pin, then …");
@@ -735,53 +710,55 @@ test("a session's colour from its row's …: Open in editor, Pin to the dock, se
   } finally { await x.close(); }
 });
 
-test("a Work session's tab: its blob is in its header, and a click offers the seven colours", async (t) => {
+test("a Work session's tab: its Voxel is in its header, and a click offers the twelve colours", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openWorkTab(browser, { width: 700 });
   try {
-    assert.equal(await x.page.evaluate(() => document.getElementById("session-blob")?.hidden ?? true), true, "a new session with nothing saved has no blob yet");
+    assert.equal(await x.page.evaluate(() => document.getElementById("session-blob")?.hidden ?? true), true, "a new session with nothing saved has no mark yet");
     await x.send({ type: "chat_tab", session: "20261106-101500-a1" });
-    const blob = () => x.page.evaluate(() => { const b = document.getElementById("session-blob"), inner = b.querySelector(".dgc-blob"), r = b.getBoundingClientRect(), title = document.getElementById("thread-title").getBoundingClientRect();
-      return { hidden: b.hidden, shape: inner.dataset.shape, pair: Number(inner.dataset.pair), label: b.getAttribute("aria-label"), beforeTitle: r.right <= title.left + 0.5, mid: Math.abs((r.top + r.bottom) / 2 - (title.top + title.bottom) / 2) }; });
+    const blob = () => x.page.evaluate(() => { const b = document.getElementById("session-blob"), inner = b.querySelector("[data-mark]"), r = b.getBoundingClientRect(), title = document.getElementById("thread-title").getBoundingClientRect();
+      return { hidden: b.hidden, set: inner.dataset.mark, palette: inner.dataset.palette, moving: getComputedStyle(inner.querySelector("i:nth-child(5)")).animationPlayState, label: b.getAttribute("aria-label"), beforeTitle: r.right <= title.left + 0.5, mid: Math.abs((r.top + r.bottom) / 2 - (title.top + title.bottom) / 2) }; });
     let b = await blob();
-    assert.equal(b.hidden, false); assert.equal(b.shape, "round");
+    assert.equal(b.hidden, false); assert.equal(b.set, "voxel");
+    assert.equal(b.moving, "running", "the session you are in: its mark is the one that moves");
     assert.ok(b.beforeTitle && b.mid < 1.5, "before the session's name, on its line");
     assert.match(b.label, /^This session's colour: .+\. Change it$/);
-    const own = b.pair;
+    const own = b.palette;
+    assert.match(b.label, new RegExp(`: ${own[0].toUpperCase()}${own.slice(1)}\\. Change it$`), "the palette's name, said");
     await x.page.click("#session-blob");
-    const d = await x.page.evaluate(() => ({ rows: [...document.querySelectorAll(".dgc-pop .dgc-menu-row")].map((r) => r.textContent.trim()), dots: [...document.querySelectorAll(".dgc-pop .dgc-swatch")].map((s) => [Number(s.dataset.colour), s.getAttribute("aria-checked")]),
+    const d = await x.page.evaluate(() => ({ rows: [...document.querySelectorAll(".dgc-pop .dgc-menu-row")].map((r) => r.textContent.trim()), dots: [...document.querySelectorAll(".dgc-pop .dgc-swatch")].map((s) => [s.dataset.colour, s.getAttribute("aria-checked")]),
       below: document.querySelector(".dgc-pop").getBoundingClientRect().top >= document.getElementById("session-blob").getBoundingClientRect().bottom }));
-    assert.deepEqual(d.rows, ["Back to its own colour"]); assert.equal(d.dots.length, 7); assert.equal(d.below, true, "the colours open under the blob");
+    assert.deepEqual(d.rows, []); assert.deepEqual(d.dots.map(([n]) => n), TWELVE); assert.equal(d.below, true, "the colours open under the mark");
     assert.deepEqual(d.dots.filter(([, on]) => on === "true").map(([n]) => n), [own]);
-    const other = own === 7 ? 5 : 7;
+    const other = own === "orchid" ? "mint" : "orchid";
     await x.page.click(`.dgc-pop .dgc-swatch[data-colour="${other}"]`);
     assert.deepEqual((await x.posted("dockColour")).at(-1), { type: "dockColour", key: "work:20261106-101500-a1", colour: other });
-    await x.send({ type: "dock", pins: [], colours: { "work:20261106-101500-a1": other }, show: "always", most: 8, size: 34 });
+    await x.send({ type: "dock", pins: [], colours: { "work:20261106-101500-a1": other }, since: Date.now(), show: "always", most: 8, size: 34 });
     b = await blob();
-    assert.equal(b.pair, other, "the host says the colour: the header's blob takes it");
+    assert.equal(b.palette, other, "the host says the colour: the header's mark takes it");
     assert.equal(await x.page.evaluate(() => !!document.getElementById("dgc-dock")), false, "a session's tab has no dock: it belongs to the side bar");
     assert.deepEqual(x.errors, []);
   } finally { await x.page.close(); }
 });
 
-test("a ChatDGC chat's tab: its blob is a rounded square in its header, with the same seven colours", async (t) => {
+test("a ChatDGC chat's tab: its Mote is in its header, with the same twelve colours", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openChat(browser, { width: 700 });
   try {
     const chat = conversation({ title: "A week in Goa in March" });
     await x.send({ type: "opened", conversation: chat, earlier: 0, busy: false, messages: [{ id: M(1), role: "user", text: "Plan a week in Goa.", created_at: "2026-11-10T09:30:00Z" }] });
     await x.page.waitForSelector("#cd-blob:not([hidden])");
-    const b = await x.page.evaluate(() => { const b = document.getElementById("cd-blob"), inner = b.querySelector(".dgc-blob"), r = b.getBoundingClientRect(), title = document.getElementById("cd-title").getBoundingClientRect();
-      return { shape: inner.dataset.shape, pair: Number(inner.dataset.pair), radius: getComputedStyle(inner).borderRadius, beforeTitle: r.right <= title.left + 0.5, label: b.getAttribute("aria-label") }; });
-    assert.equal(b.shape, "square"); assert.equal(b.radius, "30%"); assert.equal(b.beforeTitle, true);
+    const b = await x.page.evaluate(() => { const b = document.getElementById("cd-blob"), inner = b.querySelector("[data-mark]"), r = b.getBoundingClientRect(), title = document.getElementById("cd-title").getBoundingClientRect();
+      return { set: inner.dataset.mark, cls: inner.className, parts: inner.querySelectorAll("i").length, beforeTitle: r.right <= title.left + 0.5, label: b.getAttribute("aria-label") }; });
+    assert.equal(b.set, "mote"); assert.match(b.cls, /^mote mote--[a-z]+$/); assert.equal(b.parts, 3); assert.equal(b.beforeTitle, true);
     assert.match(b.label, /^This chat's colour: /);
     await x.page.click("#cd-blob");
-    assert.deepEqual(await x.page.evaluate(() => [...document.querySelectorAll(".dgc-pop .dgc-swatch")].map((s) => s.dataset.shape)), Array(7).fill("square"));
-    await x.page.click('.dgc-pop .dgc-swatch[data-colour="1"]');
-    assert.deepEqual((await x.posted("dockColour")).at(-1), { type: "dockColour", key: `chat:${chat.id}`, colour: 1 }, "pair 1 (purple to pink) is there to pick by hand");
-    await x.send({ type: "dock", pins: [], colours: { [`chat:${chat.id}`]: 1 }, show: "always", most: 8, size: 34 });
-    assert.equal(await x.page.evaluate(() => Number(document.querySelector("#cd-blob .dgc-blob").dataset.pair)), 1);
-    // An Incognito chat is never listed, so it has no blob.
+    assert.deepEqual(await x.page.evaluate(() => [...document.querySelectorAll(".dgc-pop .dgc-swatch")].map((s) => [s.dataset.colour, s.querySelector("[data-mark]").dataset.mark].join())), TWELVE.map((name) => `${name},mote`));
+    await x.page.click('.dgc-pop .dgc-swatch[data-colour="iris"]');
+    assert.deepEqual((await x.posted("dockColour")).at(-1), { type: "dockColour", key: `chat:${chat.id}`, colour: "iris" }, "Iris, the violet one, is there to pick by hand");
+    await x.send({ type: "dock", pins: [], colours: { [`chat:${chat.id}`]: "iris" }, since: Date.now(), show: "always", most: 8, size: 34 });
+    assert.equal(await x.page.evaluate(() => document.querySelector("#cd-blob [data-mark]").dataset.palette), "iris");
+    // An Incognito chat is never listed, so it has no mark.
     await x.send({ type: "opened", conversation: conversation({ id: "chat_" + "9".repeat(32), temporary: true, title: "" }), earlier: 0, busy: false, messages: [] });
     assert.equal(await x.page.evaluate(() => document.getElementById("cd-blob").hidden), true);
     assert.deepEqual(x.errors, []);

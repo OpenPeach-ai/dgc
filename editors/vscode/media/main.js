@@ -720,7 +720,7 @@
     return [...need, ...items.filter((item) => !sessionNeedsYou(item))].slice(0, Math.max(SESSIONS_SHOWN, need.length));
   }
   // Session names and previews are the user's own words: text nodes only, never markup.
-  // The Work tab lists six, or every one that needs you (sessionsShown), each a row: its blob, its title over what it is
+  // The Work tab lists six, or every one that needs you (sessionsShown), each a row: its mark, its title over what it is
   // doing, and its age at the right ("2h", "1w", "1mo"; a purple dot while it runs), then "View all (N)", which opens
   // every session in a popover over the list with a search field (asked for 2026-11-10, the way Codex lists its chats).
   // A search from the tab's own box still lists everything it found.
@@ -740,13 +740,13 @@
     if (days <= 365) return `${Math.floor(days / 30)}mo`;
     return `${Math.floor(days / 365)}y`;
   }
-  /** One session: its blob, its title over what it is doing, its age (the purple dot while it runs), and (pointed at or
+  /** One session: its mark (a Voxel; a chat's is a Mote), its title over what it is doing, its age (the purple dot while it runs), and (pointed at or
    *  focused) Open in Editor, the pin, its colour and Delete in the age's place. `before` is each row's state at the last
    *  paint, for the state's small motion. */
   const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
   function blobSpan(kind, id, running) {
     const span = el("span", "session-blob"); span.setAttribute("aria-hidden", "true");
-    if (window.DgcBlob) span.innerHTML = window.DgcBlob.html(kind, { id, pair: colourOf(kind, id).chosen, running });
+    span.innerHTML = markHtml(kind, id, running);
     return span;
   }
   /** The purple dot at a running row's end, with its words for a screen reader. */
@@ -813,12 +813,12 @@
     const focused = list.contains(document.activeElement) ? document.activeElement.closest(".session-row")?.dataset.id : undefined;
     const before = new Map([...list.querySelectorAll(".session-row[data-id]")].map((row) => [row.dataset.id, row.dataset.motionState]));
     list.replaceChildren();
+    wearMarks("work", items.map((item) => ({ id: item.id, born: window.DgcMarks?.born(item.id, item.when) })));
     for (const item of items) {
       const row = sessionRow(item, before, list === allSessions?.list ? closeAllSessions : null);
       list.append(row);
       if (item.id === focused) row.focus();
     }
-    window.DgcBlob?.watch(list);
   }
   function renderSessions(msg) {
     const list = $("sessions-list"), status = $("sessions-status");
@@ -910,16 +910,29 @@
     all?.setAttribute("aria-expanded", "false");
     if ((refocus || held) && all && !all.hidden) all.focus();
   }
-  // ---- the dock at the foot of the side bar (media/shared/dock.js), and each session's colour (media/shared/blob.js) ----
-  // The host keeps what is pinned and every session's chosen colour (src/dock.ts) and says so in one message, "dock".
+  // ---- the dock at the foot of the side bar (media/shared/dock.js), and each session's mark (media/shared/marks.js) ----
+  // The host keeps what is pinned and the palette every session's mark wears (src/dock.ts) and says so in one message,
+  // "dock". A Work session's mark is a Voxel and a chat's a Mote, each in one of twelve palettes.
   // The home gives each pinned thing its picture and what it is doing now, from the lists it already has: this
   // project's sessions, your chats, your Pips. Something pinned whose list isn't loaded shows with the name it was
   // pinned under.
-  let dockState = { pins: [], colours: {}, show: "always", most: 8, size: 34 }, dock = null, dockFaces = null;
+  let dockState = { pins: [], colours: {}, since: 0, show: "always", most: 8, size: 34 }, dock = null, dockFaces = null, dockSaid = false;
   let dockPips = { pips: [], complete: false, scopes: [] }, answeringChats = new Set(), chatItems = [], dockColours = "{}", lastChats = null;
   const dockKey = (kind, id) => `${kind}:${id}`;
   const isDocked = (kind, id) => dockState.pins.some((pin) => pin.key === dockKey(kind, id));
-  const colourOf = (kind, id) => { const own = window.DgcBlob?.own(id) || 0, chosen = Number(dockState.colours[dockKey(kind, id)]) || own; return { chosen, own }; };
+  // A session keeps the palette it was given. One that has none yet is given one here and the host is asked to keep it
+  // (media/shared/marks.js `keeper`): the host runs the same code on the same question, so its answer is this one.
+  // Until the host has said what it keeps, a mark wears what its id alone gives it, and nothing is asked.
+  const keeper = window.DgcMarks?.keeper((message) => vscode.postMessage(message)) || null;
+  const paletteOf = (kind, id) => keeper?.palette(kind, id) || "";
+  const colourOf = (kind, id) => ({ chosen: paletteOf(kind, id) });
+  /** The things of one kind now in view, in their list's order ([{ id, born }]): each without a palette gets one. */
+  const wearMarks = (kind, list) => keeper?.wear(kind, list);
+  /** A session's or a chat's mark as HTML. It moves only while its session is at work; else it rests. */
+  const markHtml = (kind, id, moving, more) => keeper?.mark(kind, id, { moving: !!moving, born: bornOf(kind, id), ...more }) || "";
+  /** When a session or a chat was made, from its id or the list it is in (NaN: nothing says, so it counts as new). */
+  const bornOf = (kind, id) => (kind === "work" ? window.DgcMarks?.born(id, sessionItems.find((s) => s.id === id)?.when)
+    : window.DgcMarks?.born("", (chatItems.find((c) => c.id === id) || {}).created_at || (chatItems.find((c) => c.id === id) || {}).updated_at));
   const PIN_PATH = "M10.2 1.8l4 4-2.2.9-2.4 2.4.3 3.1-1.1 1.1-2.6-2.6L2.8 14l-.8-.8 3.3-3.4-2.6-2.6 1.1-1.1 3.1.3 2.4-2.4z";
   const pinSvg = (filled) => `<svg viewBox="0 0 16 16" fill="${filled ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="${PIN_PATH}"/></svg>`;
   /** A row's pin: an outline until its thing is on the dock, then filled; a click pins or unpins. `item` is what the
@@ -940,7 +953,7 @@
     button.setAttribute("aria-label", `${on ? "Unpin from the dock" : "Pin to the dock"}: ${title}`);
     button.innerHTML = pinSvg(on);
   }
-  /** A session's or a chat's "...": Open in editor, Pin to the dock, and its seven colours. */
+  /** A session's or a chat's "...": Open in editor, Pin to the dock, and its twelve colours. */
   function rowMenu(button, kind, id, title, open, item, keyboard) {
     const pinned = isDocked(kind, id);
     window.DgcBlob?.popup(button, { keyboard, label: title, place: "below",
@@ -973,7 +986,7 @@
         item.dot = running ? "live" : live?.open ? "open" : "";
         item.state = live?.waiting === true ? "Wants your okay" : live?.windowless ? "Running, no window" : running ? "Running" : live?.open ? "Open in a tab"
           : `Work session${live ? ` · ${sessionAge(live.when)}` : ""}`;
-        item.icon = B ? B.html("work", { id: pin.id, pair: item.colour.chosen, running }) : "";
+        item.icon = markHtml("work", pin.id, running);
       } else if (pin.kind === "chat") {
         const live = chatItems.find((c) => c.id === pin.id), running = answeringChats.has(pin.id), open = openChats.has(pin.id);
         if (live?.title) item.title = String(live.title);
@@ -981,7 +994,7 @@
         item.dot = running ? "live" : open ? "open" : "";
         const when = live ? chatWhen(live.updated_at) : "";
         item.state = running ? "Answering" : open ? "Open in a tab" : `ChatDGC chat${when ? ` · ${when}` : ""}`;
-        item.icon = B ? B.html("chat", { id: pin.id, pair: item.colour.chosen, running }) : "";
+        item.icon = markHtml("chat", pin.id, running);
       } else if (pin.kind === "pip") {
         const live = dockPips.pips.find((p) => p.id === pin.id), body = live?.body || pin.look?.body || "core";
         if (live) item.title = live.name;
@@ -1008,23 +1021,26 @@
     return items;
   }
   /** The Pips view on this page shows a pin on each Pip's row: it is told what is pinned (once the host has said). */
-  let dockSaid = false;
   function tellPipsDock() { if (dockSaid) for (const listener of pipsListeners) listener({ type: "dock", pinned: dockState.pins.map((pin) => pin.key) }); }
   function paintDock() {
     for (const button of document.querySelectorAll(".dgc-pin[data-pin]")) paintPin(button);
     tellPipsDock();
     paintSessionBlob();
     if (!dock) return;
+    // A pinned session with no palette yet: the pinned ones are its neighbours.
+    for (const kind of ["work", "chat"]) wearMarks(kind, dockState.pins.filter((pin) => pin.kind === kind).map((pin) => ({ id: pin.id, born: bornOf(kind, pin.id) })));
     dock.update({ items: dockItems(), show: dockState.show, size: dockState.size, offers: { chat: chatsAvailable, pip: !!window.DgcPips?.mount } });
   }
   function onDock(msg) {
+    const first = !dockSaid;
     dockSaid = true;
     dockState = { pins: Array.isArray(msg.pins) ? msg.pins.filter((pin) => pin && typeof pin.key === "string") : [],
-      colours: msg.colours && typeof msg.colours === "object" ? msg.colours : {},
+      colours: msg.colours && typeof msg.colours === "object" ? msg.colours : {}, since: Number(msg.since) || 0,
       show: ["hover", "never"].includes(msg.show) ? msg.show : "always", most: Number(msg.most) || 8, size: Number(msg.size) || 34 };
-    // A session's colour may have changed: its row's blob and its card's follow.
+    keeper?.said(msg);
+    // A session's colour may have changed (or the host has only now said what it keeps): its row's mark and its card's follow.
     const colours = JSON.stringify(dockState.colours);
-    if (colours !== dockColours) { dockColours = colours; if (lastSessions && chatPlace === "home") { renderSessions(lastSessions); if (lastChats) renderChats(lastChats); } }
+    if (colours !== dockColours || first) { dockColours = colours; if (lastSessions && chatPlace === "home") { renderSessions(lastSessions); if (lastChats) renderChats(lastChats); } }
     paintDock();
   }
   // Frosted glass (main.css, "Frosted glass"): the tab bar lies over the top of the page and the dock's strip over its
@@ -1079,10 +1095,10 @@
     });
     paintDock();
   }
-  // ---- a session's own blob, in its tab's header: a click offers its seven colours ----
+  // ---- a session's own mark (a Voxel), in its tab's header: a click offers its twelve colours ----
   let sessionBlobId = "";
   function paintSessionBlob(id = sessionBlobId) {
-    if (chatPlace !== "tab" || !window.DgcBlob) return;
+    if (chatPlace !== "tab" || !window.DgcBlob || !window.DgcMarks) return;
     sessionBlobId = String(id || "");
     let button = $("session-blob");
     if (!button) {
@@ -1097,11 +1113,13 @@
     }
     button.hidden = !sessionBlobId;
     if (!sessionBlobId) return;
-    const { chosen } = colourOf("work", sessionBlobId), name = window.DgcBlob.NAMES[chosen - 1] || "";
+    // Alone in its tab, its neighbours are the sessions given a palette most recently.
+    wearMarks("work", [{ id: sessionBlobId, born: window.DgcMarks.born(sessionBlobId) }]);
+    const { chosen } = colourOf("work", sessionBlobId), name = window.DgcMarks.label(chosen);
     if (button.dataset.drawn !== `${sessionBlobId}:${chosen}`) {
       button.dataset.drawn = `${sessionBlobId}:${chosen}`;
-      button.innerHTML = window.DgcBlob.html("work", { id: sessionBlobId, pair: chosen });
-      window.DgcBlob.watch(button);
+      // This is the session you are in: its mark is the one that moves.
+      button.innerHTML = markHtml("work", sessionBlobId, true);
     }
     button.title = "This session's colour. Click to change it.";
     button.setAttribute("aria-label", `This session's colour: ${name}. Change it`);
@@ -1153,17 +1171,17 @@
     if (!query) { chatItems = items; chatNews(items); }
     homeQuery = query;
     list.replaceChildren();
+    wearMarks("chat", items.map((item) => ({ id: item.id, born: window.DgcMarks?.born("", item.created_at || item.updated_at) })));
     for (const item of items) {
       const row = chatRow(item);
       list.append(row);
       if (item.id === focused) row.focus();
     }
-    window.DgcBlob?.watch(list);
     renderProjects();
     if (dock) paintDock();                 // a pinned chat's name and whether it is answering
     paintHub();
   }
-  /** One chat in the list: its blob, its name over the words found (or its last message, after "Pinned", its project
+  /** One chat in the list: its mark (a Mote), its name over the words found (or its last message, after "Pinned", its project
    *  and where it's open), its age (the purple dot while it answers), and its pin, colour and Delete. A chat can be
    *  dragged onto a project to move it there, or back onto Chats to take it out. */
   function chatAge(stamp) {
@@ -1463,7 +1481,7 @@
   function hubCards() {
     hubAnswers.clear();
     for (const [token, at] of hubGone) if (Date.now() - at >= HUB_GONE_MS) hubGone.delete(token);
-    const B = window.DgcBlob, blob = (kind, id, running) => (B ? B.html(kind, { id, pair: colourOf(kind, id).chosen, running }) : "");
+    const blob = (kind, id, running) => markHtml(kind, id, running);
     const open = { id: "open", label: "Open", primary: true, title: "Open it in its editor tab" }, dismiss = { id: "dismiss", label: "Dismiss", title: "Take this off Home" };
     const needs = [], fresh = [];
     for (const item of sessionItems) {
@@ -1559,8 +1577,8 @@
     hub = window.DgcHub.create({ host: $("home-hub"), show: () => hubShow,
       onShow: (value) => { hubShow = value; vscode.postMessage({ type: "homeShow", show: value }); },
       onAct: hubAct, onClear: hubClear, onMore: () => homePips?.openAll(), onPips: () => showSideTab("pips"), onRetry: () => homePips?.retry(), onCount: paintHomeCount,
-      // The Pips' faces blink and look about as they do everywhere else; a blob off screen rests.
-      onDraw: (host) => { try { hubFaces?.(); } catch {} hubFaces = window.PipConcepts?.plush?.mount?.(host) || null; window.DgcBlob?.watch(host); } });
+      // The Pips' faces blink and look about as they do everywhere else.
+      onDraw: (host) => { try { hubFaces?.(); } catch {} hubFaces = window.PipConcepts?.plush?.mount?.(host) || null; } });
     paintHub();
   }
   $("chats-new")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcNew" }));

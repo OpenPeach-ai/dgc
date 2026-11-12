@@ -88,7 +88,7 @@ for (const theme of THEMES) {
           const hue = (c) => { const m = String(c).match(/-?[\d.]+(e-?\d+)?/g)?.map(Number) || [0, 0, 0, 0]; const [r, g, b, a = 1] = String(c).startsWith("color(srgb") ? [m[0] * 255, m[1] * 255, m[2] * 255, m[3]] : m;
             const mx = Math.max(r, g, b), mn = Math.min(r, g, b); if (a < 0.04 || mx - mn < 18) return false; const h = mx === b ? 240 + 60 * (r - g) / (mx - mn) : mx === r ? (360 + 60 * (g - b) / (mx - mn)) % 360 : 120 + 60 * (b - r) / (mx - mn); return h > 235 && h < 290; };
           // Everything on the tab's page wider than a dot that is filled in the accent's hue. (A blob is a session's own colour.)
-          const purple = [...document.querySelectorAll("#sessions-host *")].filter((n) => n.checkVisibility({ visibilityProperty: true }) && !n.closest(".dgc-blob, svg") && n.getBoundingClientRect().width > 10 && hue(getComputedStyle(n).backgroundColor))
+          const purple = [...document.querySelectorAll("#sessions-host *")].filter((n) => n.checkVisibility({ visibilityProperty: true }) && !n.closest("[data-mark], svg") && n.getBoundingClientRect().width > 10 && hue(getComputedStyle(n).backgroundColor))
             .map((n) => n.id || String(n.className));
           const card = document.querySelector("#home-hub .dgc-hub-card"), primary = card?.querySelector(".dgc-ia-btn.dgc-ia-main"), other = document.querySelector("#home-hub .dgc-ia-btn:not(.dgc-ia-main)");   // (a card's answers are icons that turn into the full button, 12 Nov: media/shared/iconactions.css)
           const fresh = [...document.querySelectorAll("#sessions-host .home-new")].find((n) => n.checkVisibility());

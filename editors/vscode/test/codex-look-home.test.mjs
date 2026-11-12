@@ -41,7 +41,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
         const css = (s) => getComputedStyle(document.querySelector(s)), probe = document.createElement("i"); document.body.append(probe);
         probe.style.color = "var(--text-2)"; const quiet = getComputedStyle(probe).color; probe.remove();
         const row = document.querySelector("#sessions-list .session-row"), r = row.getBoundingClientRect();
-        const big = [...document.querySelectorAll("#sessions-host *")].filter((n) => n.checkVisibility({ visibilityProperty: true }) && !n.closest(".dgc-blob, svg")).map((n) => { const b = n.getBoundingClientRect(); return { n: n.id || String(n.className), c: getComputedStyle(n).backgroundColor, w: b.width }; }).filter((m) => m.w > 10);
+        const big = [...document.querySelectorAll("#sessions-host *")].filter((n) => n.checkVisibility({ visibilityProperty: true }) && !n.closest("[data-mark], svg")).map((n) => { const b = n.getBoundingClientRect(); return { n: n.id || String(n.className), c: getComputedStyle(n).backgroundColor, w: b.width }; }).filter((m) => m.w > 10);
         const search = document.getElementById("sessions-search").getBoundingClientRect(), fresh = document.getElementById("sessions-new").getBoundingClientRect();
         return { quiet, row: [Math.round(r.height), css("#sessions-list .session-name").fontSize, css("#sessions-list .session-sub").fontSize, css("#sessions-list .session-sub").color],
           heights: [...new Set([...document.querySelectorAll("#sessions-list .session-row")].map((n) => Math.round(n.getBoundingClientRect().height)))],

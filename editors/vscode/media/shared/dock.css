@@ -1,6 +1,6 @@
 /* The dock at the foot of DGC's side bar (media/shared/dock.js draws and moves it): what you pinned, then "+". A raised
    neutral bar, centred, on a 12.5 px corner with a hairline of light inside its top edge and layered soft shadows. Each
-   item is a square tile holding its picture: a Pip's face, a session's liquid blob, a file's small sheet, a widget's
+   item is a square tile holding its picture: a Pip's face, a session's mark (a Voxel, a chat's Mote), a file's small sheet, a widget's
    cube. Pointed at, the tiles grow toward the pointer the way a macOS dock does (they rise out of the bar, which keeps
    its height) and the one under the pointer is named just above. Under a tile: a quiet dot while it is open in an
    editor, the accent's dot while it runs; on its corner, the number waiting for you. Tokens from tokens.css; the only
@@ -32,11 +32,11 @@
 .dgc-dock-item:hover .dgc-dock-tile, .dgc-dock-item[aria-expanded="true"] .dgc-dock-tile { background: var(--dock-tile-hover); }
 .dgc-dock-item:focus-visible .dgc-dock-tile { outline: 1.5px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1.5px; }
 /* What a tile holds, each about two thirds of it. */
-.dgc-dock-tile .dgc-blob, .dgc-dock-tile .dgc-cube { --blob-size: calc(var(--s) * .66); }
+.dgc-dock-tile [data-mark] { --size: calc(var(--s) * .72); }
 .dgc-dock-tile .dgc-cube { --blob-size: calc(var(--s) * .72); }
 .dgc-dock-face { display: block; width: 84%; height: 84%; line-height: 0; }
 .dgc-dock-face > * { width: 100%; height: 100%; }
-/* A file's sheet, the output card's (filesheet.css, 44 by 56 px), drawn smaller: about a blob's height in the tile. */
+/* A file's sheet, the output card's (filesheet.css, 44 by 56 px), drawn smaller: about a mark's height in the tile. */
 .dgc-dock-sheet { position: absolute; left: 50%; top: 50%; display: block; width: 44px; height: 56px; margin: -28px 0 0 -24px; scale: calc(var(--k) * .0125); }
 .dgc-dock-sheet .dgc-sheet-tag { font-size: 9px; right: -9px; bottom: 6px; }
 /* Keep the shared kind colour at dock size and in both editor themes. */

@@ -4285,13 +4285,19 @@
   // A reply's pictures fold away (media/pictureFold.js): a choice goes to the host, which keeps it.
   window.DgcPictureFold?.setDefault(document.body.dataset.picturesFolded === "1");
   window.DgcPictureFold?.host((message) => vscode.postMessage(message));
-  // ---- this chat's blob, in its header: the same one its tab and the dock show; a click offers its seven colours ----
-  // The host keeps a chat's chosen colour (src/dock.ts) and says every one in "dock". A project's page and an Incognito
-  // chat (which is never listed) have none.
-  let chatColours = {};
+  // ---- this chat's mark (a Mote), in its header: the same one its tab and the dock show; a click offers its twelve colours ----
+  // The host keeps the palette each chat's mark wears (src/dock.ts) and says every one in "dock". A project's page and
+  // an Incognito chat (which is never listed) have none. A chat with no palette yet is given one here, and the host is
+  // asked to keep it (media/shared/marks.js `keeper`; the host runs the same code).
+  const chatMarks = window.DgcMarks?.keeper((message) => vscode.postMessage(message)) || null;
+  function chatPalette(id) {
+    // Alone in its tab, its neighbours are the chats given a palette most recently.
+    chatMarks.wear("chat", [{ id, born: window.DgcMarks.born("", state.conversation?.created_at || state.conversation?.updated_at) }]);
+    return chatMarks.palette("chat", id);
+  }
   function paintChatBlob() {
-    const B = window.DgcBlob, title = $("cd-title");
-    if (!B || !title) return;
+    const B = window.DgcBlob, M = window.DgcMarks, title = $("cd-title");
+    if (!B || !M || !chatMarks || !title) return;
     let button = $("cd-blob");
     const id = state.conversation?.id && !state.conversation.temporary && !(state.opened && !state.messages.length && !state.earlier && isProjectPage()) ? String(state.conversation.id) : "";
     if (!button) {
@@ -4301,26 +4307,28 @@
       button.addEventListener("click", (e) => {
         const now = String(state.conversation?.id || "");
         if (button.getAttribute("aria-expanded") === "true") { B.close(true); return; }
-        const own = B.own(now), chosen = Number(chatColours[`chat:${now}`]) || own;
-        B.popup(button, { keyboard: e.detail === 0, place: "below", label: "This chat's colour", colour: { kind: "chat", chosen, own },
-          onColour: (n) => vscode.postMessage({ type: "dockColour", key: `chat:${now}`, colour: n }) });
+        B.popup(button, { keyboard: e.detail === 0, place: "below", label: "This chat's colour", colour: { kind: "chat", chosen: chatPalette(now) },
+          onColour: (palette) => vscode.postMessage({ type: "dockColour", key: `chat:${now}`, colour: palette }) });
       });
       title.before(button);
     }
     button.hidden = !id;
     if (!id) return;
-    const chosen = Number(chatColours[`chat:${id}`]) || B.own(id);
+    const chosen = chatPalette(id);
     if (button.dataset.drawn !== `${id}:${chosen}`) {
       button.dataset.drawn = `${id}:${chosen}`;
-      button.innerHTML = B.html("chat", { id, pair: chosen });
-      B.watch(button);
+      // This is the chat you are in: its mark is the one that moves.
+      button.innerHTML = M.of("chat", chosen, { id, moving: true });
     }
     button.title = "This chat's colour. Click to change it.";
-    button.setAttribute("aria-label", `This chat's colour: ${B.NAMES[chosen - 1] || ""}. Change it`);
+    button.setAttribute("aria-label", `This chat's colour: ${M.label(chosen)}. Change it`);
   }
   window.addEventListener("message", (event) => {
     const msg = event.data || {};
-    if (msg.type === "dock") { chatColours = msg.colours && typeof msg.colours === "object" ? msg.colours : {}; paintChatBlob(); return; }
+    if (msg.type === "dock") {
+      chatMarks?.said(msg);
+      paintChatBlob(); return;
+    }
     if (window.DgcVideo?.message(msg)) return;           // a video card's bytes, state or Stop (src/videoHost.ts)
     if (window.DgcPictureFold?.message(msg)) return;     // which pictures stay folded, and the setting
     if (window.DgcMcpApps?.host(msg)) return;            // a card's link, download, address or message, answered

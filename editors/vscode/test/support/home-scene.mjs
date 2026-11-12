@@ -192,7 +192,7 @@ export const hubNow = (page) => page.evaluate(() => {
   if (!hub) return { shown: false, show: null, groups: [], cards: [], notes: [], empty: null, menu: [], focus: "" };
   const show = hub.querySelector(".dgc-hub-show");
   const card = (c) => ({ key: c.dataset.key, source: c.dataset.source, group: c.dataset.group, from: c.querySelector(".dgc-card-sub")?.textContent || "", title: c.querySelector(".dgc-card-title").textContent,
-    who: c.querySelector(".dgc-card-icon .dgc-blob") ? `blob:${c.querySelector(".dgc-card-icon .dgc-blob").dataset.shape}` : c.querySelector(".dgc-card-icon .dgc-sheet") ? `sheet:${c.querySelector(".dgc-card-icon .dgc-sheet").dataset.kind}`
+    who: c.querySelector(".dgc-card-icon [data-mark]") ? `mark:${c.querySelector(".dgc-card-icon [data-mark]").dataset.mark}` : c.querySelector(".dgc-card-icon .dgc-sheet") ? `sheet:${c.querySelector(".dgc-card-icon .dgc-sheet").dataset.kind}`
       : c.querySelector(".dgc-card-icon svg, .dgc-card-icon .dgc-plush") ? "face" : "",
     // chips: what the card holds (the ones not folded into "+N"); shownChips: the ones on screen (a slim card shows them only on a free line)
     chips: [...c.querySelectorAll(".dgc-chip:not([hidden])")].map((x) => x.textContent), shownChips: [...c.querySelectorAll(".dgc-chip:not([hidden])")].filter((x) => x.checkVisibility()).map((x) => x.textContent), actions: [...c.querySelectorAll("[data-hub-act]")].map((b) => b.textContent + (b.matches(".primary, .dgc-ia-main") ? "*" : "")),   // (an icon button says its word too, and its main answer is .dgc-ia-main: media/shared/iconactions.js)
