@@ -27,8 +27,10 @@ MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_MESSAGE_BYTES = 200 * 1024 * 1024
 MAX_PASTE_CHARS = 1_000_000
 MAX_MODEL_CHARS = 200_000          # of one attachment's text, for the model
-# A project's file keeps more: a chat searches and reads it in parts when it doesn't fit (project_files, 12 Nov).
-MAX_PROJECT_CHARS = 2_000_000
+# A project's file keeps more: a chat searches and reads it in parts when it doesn't fit (project_files, 12 Nov). As
+# much as DGC's document reader gives (documents.MAX_OUTPUT_CHARS): a PDF, a Word file or text that reads as a table
+# goes through it, and it refuses more (live, 12 Nov).
+MAX_PROJECT_CHARS = 1_000_000
 ATTACHMENT_ID = re.compile(r"att_[a-f0-9]{32}\Z")
 IMAGE_TYPES = {"image/png": b"\x89PNG\r\n\x1a\n", "image/jpeg": b"\xff\xd8\xff", "image/gif": b"GIF8",
                "image/webp": b"RIFF"}

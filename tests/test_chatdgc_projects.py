@@ -466,6 +466,15 @@ class ProjectFilesThatDontFit(unittest.TestCase):
         read = str(self.world["read"][2][-1]["content"])
         self.assertIn("3001\tDecision: the caterer is Anchovy & Co.", read)
 
+    def test_a_document_or_table_like_file_is_added_too(self):
+        # Live, 12 Nov: lines with commas read as a CSV, the document path, whose reader takes at most 1,000,000
+        # characters: the 2,000,000 asked for refused the file.
+        trip = self.store.create_project("Office move")
+        notes = self.folder / "notes.txt"
+        notes.write_text("\n".join(f"Item {i}: desks, chairs and cabling, nothing decided." for i in range(2000)) + "\n")
+        project = self.engine.add_project_files(trip["id"], [{"kind": "file", "path": str(notes)}])
+        self.assertEqual([f["name"] for f in project["files"]], ["notes.txt"])
+
     def test_a_project_whose_files_fit_offers_no_more_tools(self):
         trip = self.store.create_project("Small")
         self.engine.add_project_files(trip["id"], [{"kind": "text", "text": "Hotel: Casa Anjuna", "name": "Hotel"}])
