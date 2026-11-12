@@ -9218,6 +9218,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "string"
       ],
       "required": false
+    },
+    "folder": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "delete_session": {

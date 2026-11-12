@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 
+from .workspace_registry import RegistryError
+
 KINDS = ("email", "event", "action", "app_action", "app_link", "plugin", "setup", "computer_action",
          "computer_check", "routine")
 # Reviews of a Personal Pip's work: a workflow's handoff waiting for its review, a change waiting on its Changes page. They wait
@@ -83,12 +85,20 @@ def _when(event) -> str:
 
 
 
-def collect(registry, now, *, limit=MAX_ITEMS) -> dict:
+def collect(registry, now, *, limit=MAX_ITEMS, projects=None) -> dict:
     """{as_of, total, counts, by_pip, items, reviews, truncated, in_projects} over every Personal Pip that isn't archived.
     `total` is the one number the Pips home, its rows and the editor's notice all say; `in_projects` is what waits in
-    project folders, which this list doesn't show (each project's own Pips do)."""
+    project folders, which this list doesn't show (each project's own Pips do).
+
+    ``projects`` (the Project Folder dropdown, Pips API 93): "all", or one project's workspace id: its Project Pips'
+    cards are in the list too (each item says its workspace), and `in_projects` counts only the folders left out."""
     limit = max(1, min(int(limit or MAX_ITEMS), MAX_ITEMS))
     db = registry.db
+    if projects is not None and projects != "all" and (not isinstance(projects, str) or db.execute(
+            "SELECT 1 FROM workspaces w JOIN bindings b ON b.workspace_id=w.id AND b.runner_id=? WHERE w.id=? "
+            "AND w.kind<>'personal'", (registry.runner_id, projects)).fetchone() is None):
+        raise RegistryError("not_found", "That project folder isn't one of this computer's.")
+    widen, widen_args = (" OR w.kind<>'personal'", ()) if projects == "all" else (" OR w.id=?", (projects,)) if projects else ("", ())
     db.execute("SAVEPOINT pip_attention")
     try:
         pips = {row["id"]: {"name": _text(row["name"], 120) or "Pip", "pip_type": row["pip_type"] or "scout",
@@ -96,9 +106,10 @@ def collect(registry, now, *, limit=MAX_ITEMS) -> dict:
                 for row in db.execute(
                     "SELECT p.id,p.workspace_id,json_extract(v.definition,'$.name') AS name,json_extract(v.definition,'$.pip_type') AS pip_type "
                     "FROM pips p JOIN workspaces w ON w.id=p.workspace_id JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version "
-                    "WHERE w.kind='personal' AND p.status<>'archived'")}
+                    "WHERE (w.kind='personal'" + widen + ") AND p.status<>'archived'", widen_args)}
         ids = json.dumps(sorted(pips))
         personal = [row["id"] for row in db.execute("SELECT id FROM workspaces WHERE kind='personal'")]
+        shown = personal + sorted({pip["workspace_id"] for pip in pips.values()} - set(personal))
         found = []
 
         def add(kind, origin, pip_id, created, expires, title, detail=""):
@@ -163,7 +174,7 @@ def collect(registry, now, *, limit=MAX_ITEMS) -> dict:
             add("approval", row["proposal_id"], row["pip_id"], row["created_at"], row["expires_at"],
                 f"Change {pips[row['pip_id']]['name']}?", row["action_summary"])
             found[-1]["review"] = row["action_type"]
-        for workspace_id in personal:
+        for workspace_id in shown:
             for row in rows("SELECT id,body,created_at,expires_at FROM pip_setup_proposals WHERE workspace_id=? AND status='pending' "
                             "AND expires_at>? ORDER BY created_at DESC", workspace_id, now):
                 request = _json(row["body"]).get("request") or {}
@@ -191,7 +202,15 @@ def collect(registry, now, *, limit=MAX_ITEMS) -> dict:
     items = cards[:limit]
     return {"as_of": now, "total": len(found), "counts": counts,
             "by_pip": dict(sorted(by_pip.items(), key=lambda kv: -kv[1])[:500]), "items": items, "reviews": reviews,
-            "truncated": len(found) > len(items) + len(reviews), **_in_projects(registry, now, personal)}
+            "truncated": len(found) > len(items) + len(reviews), **_left_out(_in_projects(registry, now, personal), shown)}
+
+
+def _left_out(counts: dict, shown) -> dict:
+    """What waits in project folders this list doesn't show: every project's, less those it shows (`projects` keeps
+    each project's own count for its tab and rows)."""
+    if not counts.get("projects"):
+        return counts
+    return {**counts, "in_projects": sum(place["total"] for key, place in counts["projects"].items() if key not in shown)}
 
 
 def waiting_words(total, in_projects, place="") -> str:

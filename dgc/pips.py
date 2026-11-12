@@ -71,6 +71,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_project_choices", "list_pip_project_changes", "get_pip_project_change", "apply_pip_project_change",
     "discard_pip_project_change", "undo_pip_project_change",
     "set_pip_goal", "get_pip_goal", "stop_pip_goal",
+    "list_project_folders", "add_project_folder",
     "run_pip_computer_command", "list_pip_computer_terminal", "get_pip_computer_desktop",
     "get_pips_keep_running", "set_pips_keep_running",
     "get_pips_desktop_notifications", "set_pips_desktop_notifications",
@@ -142,7 +143,7 @@ _COMMAND_ARGS = {
     "set_pip_profile": {"pip_id", "changes"}, "list_pip_shared": {"pip_id", "kind"},
     "get_pip_computers": set(), "update_pip_computers": set(), "reset_pip_computer": {"pip_id"}, "list_pip_apps": set(),
     "list_pip_plugins": {"pip_id"}, "allow_pip_plugin": {"pip_id", "grant_id", "keys"}, "decline_pip_plugin": {"pip_id", "grant_id"},
-    "list_pip_plugin_uses": set(), "list_pip_attention": {"limit"}, "list_pip_notes": {"pip_id", "shared"}, "add_pip_note": {"pip_id", "text", "shared"},
+    "list_pip_plugin_uses": set(), "list_pip_attention": {"limit", "projects"}, "list_pip_notes": {"pip_id", "shared"}, "add_pip_note": {"pip_id", "text", "shared"},
     "forget_pip_note": {"pip_id", "note_id", "all", "shared"}, "list_pip_sites": {"pip_id"}, "set_pip_careful": {"pip_id", "on"},
     # API 57: a Personal Pip's own working notes (pip_working_notes) and its daily log (pip_daily_log).
     "get_pip_working_notes": {"pip_id"}, "set_pip_working_notes": {"pip_id", "text", "expected_revision"},
@@ -234,6 +235,8 @@ _COMMAND_ARGS = {
     # A goal for a Personal Pip's conversation (pip_goals, API 92): keep going until done, needs you or blocked.
     "set_pip_goal": {"pip_id", "objective", "conversation_id"}, "get_pip_goal": {"pip_id", "conversation_id"},
     "stop_pip_goal": {"pip_id", "goal_id"},
+    # The Project Folder dropdown (project_folders, API 93): the folders with a session or a Project Pip; add one.
+    "list_project_folders": set(), "add_project_folder": {"folder"},
     "get_pip_skills": {"pip_id"}, "set_pip_skill": {"pip_id", "skill", "on"},
     "run_pip_computer_command": {"pip_id", "command"}, "list_pip_computer_terminal": {"pip_id"},
     "get_pip_computer_desktop": {"pip_id"},
@@ -257,7 +260,7 @@ _COMMAND_ARGS = {
     "list_pending_pip_reviews": {"workspace_id", "before_id", "limit"},
     "list_recent_workspace_activity": {"workspace_id", "before_seq", "limit"},
     "list_pip_adaptations": {"pip_id", "before_id", "limit"},
-    "list_workspaces": set(), "list_pips": {"workspace_id", "limit", "offset", "query", "order"}, "list_pip_types": set(),
+    "list_workspaces": set(), "list_pips": {"workspace_id", "limit", "offset", "query", "order", "scope"}, "list_pip_types": set(),
     "list_pip_models": set(),
     "list_pip_messages": {"pip_id", "before_id", "limit", "conversation_id"},
     "send_pip_message": {"pip_id", "text", "idempotency_key", "chat_options", "images", "files", "spooled_images", "spooled_files", "display_mentions", "conversation_id", "reply_to"}, "introduce_pip": {"pip_id"},
@@ -6131,7 +6134,9 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 limit = request.get('limit', pip_attention.MAX_ITEMS)
                 if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= pip_attention.MAX_ITEMS:
                     raise RegistryError('invalid_request', f'limit must be 1-{pip_attention.MAX_ITEMS}.')
-                result = pip_attention.collect(registry, timestamp(registry.clock()), limit=limit)
+                # (projects, API 93: "all" or one project's workspace id: its Project Pips' cards too.)
+                result = pip_attention.collect(registry, timestamp(registry.clock()), limit=limit,
+                                               projects=request.get('projects'))
             elif command == 'list_pip_plugin_uses':
                 from . import pip_plugins
                 if actor not in ('editor-user', 'local-console'):
@@ -6493,6 +6498,13 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 # Pips API 91 (pips-21): @ a project in a Personal Pip's chat. Applying is always the user's click.
                 from . import pip_project_copies
                 result = pip_project_copies.control(store, command, request, actor)
+            elif command in ("list_project_folders", "add_project_folder"):
+                # Pips API 93: the Project Folder dropdown. Local only: a folder is the user's to add.
+                from . import project_folders
+                if actor not in ("editor-user", "local-console"):
+                    raise RegistryError("local_only", "Choose project folders on this computer.")
+                result = (project_folders.listing(registry, config) if command == "list_project_folders"
+                          else project_folders.add(registry, request.get("folder")))
             elif command in ("set_pip_goal", "get_pip_goal", "stop_pip_goal"):
                 # Pips API 92 (pips-15): a goal for a Personal Pip's conversation, set and stopped by the user alone.
                 from . import pip_goals
@@ -6759,10 +6771,17 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                         or not isinstance(query, str) or len(query) > 120 or order not in ("created", "recent")):
                     raise RegistryError("invalid_request", "List 1–100 Pips from an offset, optionally matching up to 120 characters.")
                 query = " ".join(query.split())
-                result = {"pips": store.list(workspace_id, limit=limit, offset=offset, query=query, order=order)}
-                total = store.count(workspace_id, query)
-                result["total"] = total
-                result["next_offset"] = offset + len(result["pips"]) if offset + len(result["pips"]) < total else None
+                if request.get("scope") not in (None, "workspace", "projects"):
+                    raise RegistryError("invalid_request", "List one workspace's Pips, or scope projects for every project's.")
+                if request.get("scope") == "projects":
+                    # Every project's Pips (the Project Folder dropdown's All projects, API 93), each with its workspace.
+                    from . import project_folders
+                    result = project_folders.pips_everywhere(store, limit=limit, offset=offset, query=query, order=order)
+                else:
+                    result = {"pips": store.list(workspace_id, limit=limit, offset=offset, query=query, order=order)}
+                    total = store.count(workspace_id, query)
+                    result["total"] = total
+                    result["next_offset"] = offset + len(result["pips"]) if offset + len(result["pips"]) < total else None
                 looks = profiles(registry.db, [item["id"] for item in result["pips"]])
                 for item in result["pips"]:
                     item["goal"] = item["goal"][:240]

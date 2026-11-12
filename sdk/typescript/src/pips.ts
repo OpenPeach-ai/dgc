@@ -39,7 +39,7 @@ export type PipReadParams = {
   list_pip_apps: Record<string, never>;
   list_pip_plugins: { pip_id: string };
   list_pip_plugin_uses: Record<string, never>;
-  list_pip_attention: { limit?: number };
+  list_pip_attention: { limit?: number; projects?: string };
   list_pip_notes: { pip_id: string; shared?: true };
   list_pip_sites: { pip_id: string };
   get_pip_chat_context: { pip_id: string; context_size?: number; conversation_id?: string };
@@ -119,7 +119,7 @@ export type PipReadParams = {
   list_pip_runs: { pip_id: string };
   list_pip_types: { [key: string]: never };
   list_pip_versions: { before_version?: number; limit?: number; pip_id: string };
-  list_pips: { workspace_id: string; limit?: number; offset?: number; query?: string; order?: "created" | "recent" };
+  list_pips: { workspace_id?: string; limit?: number; offset?: number; query?: string; order?: "created" | "recent"; scope?: "workspace" | "projects" };
   list_workspace_activity: { after?: number; workspace_id: string };
   list_workspaces: { [key: string]: never };
 };
@@ -223,6 +223,8 @@ export type PipMutationParams = {
   set_pip_goal: { pip_id: string; objective: string; conversation_id?: string };
   get_pip_goal: { pip_id: string; conversation_id?: string };
   stop_pip_goal: { pip_id: string; goal_id: string };
+  list_project_folders: Record<string, never>;
+  add_project_folder: { folder: string };
   set_pips_keep_running: { enabled: boolean };
   mark_pip_digest_seen: { until: string };
   mark_pip_news_seen: { pip_ids: string[]; until: string };
@@ -332,7 +334,7 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   allow_pip_plugin: ["pip_id", "grant_id", "keys"],
   decline_pip_plugin: ["pip_id", "grant_id"],
   list_pip_plugin_uses: [],
-  list_pip_attention: ["limit"],
+  list_pip_attention: ["limit", "projects"],
   list_pip_notes: ["pip_id", "shared"],
   add_pip_note: ["pip_id", "text", "shared"],
   forget_pip_note: ["pip_id", "note_id", "all", "shared"],
@@ -428,6 +430,8 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   set_pip_goal: ["pip_id", "objective", "conversation_id"],
   get_pip_goal: ["pip_id", "conversation_id"],
   stop_pip_goal: ["pip_id", "goal_id"],
+  list_project_folders: [],
+  add_project_folder: ["folder"],
   get_pips_keep_running: [],
   set_pips_keep_running: ["enabled"],
   get_pip_digest: [],
@@ -981,6 +985,13 @@ const API92_READS = new Set(["get_pip_goal"]);
 const API92_MUTATIONS = new Set(["set_pip_goal", "stop_pip_goal"]);
 for (const command of API92_READS) READS.add(command);
 for (const command of API92_MUTATIONS) MUTATIONS.add(command);
+// API 93: the Project Folder dropdown: the folders with a Work session or a Project Pip; a folder added as a project.
+// list_pips's scope projects and list_pip_attention's projects come with it. Local only.
+const API93_READS = new Set(["list_project_folders"]);
+const API93_MUTATIONS = new Set(["add_project_folder"]);
+const API93_FIELDS: Readonly<Record<string, readonly string[]>> = { list_pips: ["scope"], list_pip_attention: ["projects"] };
+for (const command of API93_READS) READS.add(command);
+for (const command of API93_MUTATIONS) MUTATIONS.add(command);
 /** What came with API 88 inside existing commands: set_pip_profile's changes.group (a folder in the Personal list) and
  *  use_pip_computer_view's op close (its tab closed). start_pip_app_link's another is older (0.51). */
 function api88Field(command: string, values: Record<string, unknown>): boolean {
@@ -1139,7 +1150,7 @@ export class Pips {
     if (this.restricted) throw new DGCUnsupportedError("Pips cannot inherit this session's RuntimePolicy or sandbox; use a separate unrestricted, explicitly authorized control session");
     if (mutation && this.plan) throw new DGCUnsupportedError("Pip mutations are unavailable in plan mode");
     if (appEvent && this.plan) throw new DGCUnsupportedError("Sending your app's events to Pips is unavailable in plan mode");
-    const minimum = API92_READS.has(command) || API92_MUTATIONS.has(command) ? 92 : API91_READS.has(command) || API91_MUTATIONS.has(command) ? 91 : API90_READS.has(command) || API90_MUTATIONS.has(command) ? 90 : API89_READS.has(command) || API89_MUTATIONS.has(command) ? 89 : API88_READS.has(command) || API88_MUTATIONS.has(command) ? 88 : API87_MUTATIONS.has(command) ? 87 : API86_MUTATIONS.has(command) ? 86 : API82_READS.has(command) || API82_MUTATIONS.has(command) ? 82 : API79_READS.has(command) || API79_MUTATIONS.has(command) ? 79 : API77_MUTATIONS.has(command) ? 77 : API76_READS.has(command) || API76_MUTATIONS.has(command) ? 76 : API75_READS.has(command) || API75_MUTATIONS.has(command) ? 75 : API72_READS.has(command) || API72_MUTATIONS.has(command) ? 72 : API69_READS.has(command) || API69_MUTATIONS.has(command) ? 69 : API68_MUTATIONS.has(command) ? 68 : API67_READS.has(command) || API67_MUTATIONS.has(command) ? 67 : API65_READS.has(command) ? 65 : API64_READS.has(command) || API64_MUTATIONS.has(command) ? 64 : API63_READS.has(command) || API63_EVENTS.has(command) ? 63 : API62_READS.has(command) || API62_MUTATIONS.has(command) ? 62 : API61_READS.has(command) || API61_MUTATIONS.has(command) ? 61 : API59_READS.has(command) || API59_MUTATIONS.has(command) ? 59 : API58_READS.has(command) || API58_MUTATIONS.has(command) ? 58 : API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
+    const minimum = API93_READS.has(command) || API93_MUTATIONS.has(command) ? 93 : API92_READS.has(command) || API92_MUTATIONS.has(command) ? 92 : API91_READS.has(command) || API91_MUTATIONS.has(command) ? 91 : API90_READS.has(command) || API90_MUTATIONS.has(command) ? 90 : API89_READS.has(command) || API89_MUTATIONS.has(command) ? 89 : API88_READS.has(command) || API88_MUTATIONS.has(command) ? 88 : API87_MUTATIONS.has(command) ? 87 : API86_MUTATIONS.has(command) ? 86 : API82_READS.has(command) || API82_MUTATIONS.has(command) ? 82 : API79_READS.has(command) || API79_MUTATIONS.has(command) ? 79 : API77_MUTATIONS.has(command) ? 77 : API76_READS.has(command) || API76_MUTATIONS.has(command) ? 76 : API75_READS.has(command) || API75_MUTATIONS.has(command) ? 75 : API72_READS.has(command) || API72_MUTATIONS.has(command) ? 72 : API69_READS.has(command) || API69_MUTATIONS.has(command) ? 69 : API68_MUTATIONS.has(command) ? 68 : API67_READS.has(command) || API67_MUTATIONS.has(command) ? 67 : API65_READS.has(command) ? 65 : API64_READS.has(command) || API64_MUTATIONS.has(command) ? 64 : API63_READS.has(command) || API63_EVENTS.has(command) ? 63 : API62_READS.has(command) || API62_MUTATIONS.has(command) ? 62 : API61_READS.has(command) || API61_MUTATIONS.has(command) ? 61 : API59_READS.has(command) || API59_MUTATIONS.has(command) ? 59 : API58_READS.has(command) || API58_MUTATIONS.has(command) ? 58 : API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
     if (this.caps.pips_supported !== true || !Number.isSafeInteger(this.caps.pips_api_version)
       || (this.caps.pips_api_version as number) < minimum) {
       throw new DGCUnsupportedError(`This control requires a runtime advertising Pips API ${minimum} or newer`);
@@ -1247,6 +1258,9 @@ export class Pips {
         throw new DGCUnsupportedError("Routines on your app's events require a runtime advertising Pips API 63 or newer");
       }
       if (typeof values.app_events !== "boolean") throw new DGCConfigError("app_events is true or false");
+    }
+    if ((API93_FIELDS[command] || []).some((key) => Object.hasOwn(values, key)) && (this.caps.pips_api_version as number) < 93) {
+      throw new DGCUnsupportedError("Every project's Pips (scope) and Project Pips in Needs Attention (projects) require a runtime advertising Pips API 93 or newer");
     }
     if ((API90_FIELDS[command] || []).some((key) => Object.hasOwn(values, key))) {
       if ((this.caps.pips_api_version as number) < 90) {

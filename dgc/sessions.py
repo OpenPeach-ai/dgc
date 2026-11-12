@@ -1449,14 +1449,16 @@ def _bucket_project(bucket: Path) -> str | None:
     return None
 
 
-def listing_everywhere(here_root, *, limit=None, offset=0, query="", redact_secrets=()) -> list[dict]:
+def listing_everywhere(here_root, *, limit=None, offset=0, query="", redact_secrets=(), folder=None) -> list[dict]:
     """Every project's sessions, newest first (list_sessions {scope: "all"}, his call 12 Nov): each with its folder, so
     the editor shows where it belongs and opens it running there. From each project's index (session_index), searched
-    the same way. DGC's own folders (a helper's worktree, a fix's copy, all under ~/.dgc) are never a user's project."""
+    the same way. DGC's own folders (a helper's worktree, a fix's copy, all under ~/.dgc) are never a user's project.
+    ``folder``: only that folder's sessions (the Project Folder dropdown's one folder, 12 Nov)."""
     from .config import dgc_home
     from .session_index import page
     here = str(Path(here_root).expanduser().resolve(strict=False))
     own = str(dgc_home().expanduser().resolve(strict=False))
+    chosen = str(Path(folder).expanduser().resolve(strict=False)) if folder else None
     base = SESSIONS_DIR.resolve(strict=False)
     rows: list[dict] = []
     try:
@@ -1471,8 +1473,8 @@ def listing_everywhere(here_root, *, limit=None, offset=0, query="", redact_secr
         project = _bucket_project(bucket)
         if not project:
             continue
-        folder = str(Path(project).expanduser().resolve(strict=False))
-        if folder == own or folder.startswith(own + os.sep):
+        place = str(Path(project).expanduser().resolve(strict=False))
+        if place == own or place.startswith(own + os.sep) or (chosen is not None and place != chosen):
             continue
         try:
             found = page(bucket, query=query, redact_secrets=redact_secrets)
@@ -1480,8 +1482,8 @@ def listing_everywhere(here_root, *, limit=None, offset=0, query="", redact_secr
             continue
         for path, ts, preview, count, name, match in found:
             rows.append({"path": path, "updated": ts, "preview": preview, "count": count, "name": name, "match": match,
-                         "project": folder, "project_name": Path(folder).name or folder, "here": folder == here,
-                         "folder_exists": Path(folder).is_dir()})
+                         "project": place, "project_name": Path(place).name or place, "here": place == here,
+                         "folder_exists": Path(place).is_dir()})
     rows.sort(key=lambda row: -row["updated"])
     return rows[offset:None if limit is None else offset + limit]
 

@@ -61,6 +61,12 @@ class Everywhere(unittest.TestCase):
         self.assertEqual(found["path"].stem, "g1")
         self.assertIn("tomatoes", found["match"] or found["preview"])
 
+    def test_one_folder_chosen(self):
+        # The Project Folder dropdown (12 Nov): one folder's sessions, wherever this window is.
+        rows = self.rows(folder=str(self.garden))
+        self.assertEqual([r["path"].stem for r in rows], ["g1", "g2"])
+        self.assertEqual(self.rows(folder=str(self.base / "elsewhere")), [])
+
     def test_a_folder_that_is_gone_is_said(self):
         shutil.rmtree(self.notes)
         gone = next(r for r in self.rows() if r["path"].stem == "n1")
@@ -89,10 +95,11 @@ class TheCommand(unittest.TestCase):
             items = backend.events[-1]["items"]
             self.assertEqual([(i["project_name"], i["here"]) for i in items], [("garden", False), ("shop", True)])
             self.assertEqual(items[0]["project"], str(garden.resolve()))
+            backend._dispatch({"type": "list_sessions", "request_id": "r2b", "scope": "all", "folder": str(garden)})
+            self.assertEqual([i["project_name"] for i in backend.events[-1]["items"]], ["garden"])
             backend._dispatch({"type": "list_sessions", "request_id": "r3", "scope": "everything"})
             self.assertEqual(backend.events[-1]["type"], "error")
-        self.assertIn("scope", editor_protocol.COMMANDS["list_sessions"] if hasattr(editor_protocol, "COMMANDS")
-                      else editor_protocol.COMMAND_FIELDS["list_sessions"])
+        self.assertTrue({"scope", "folder"} <= set(editor_protocol.COMMAND_FIELDS["list_sessions"]))
         source = Path(headless.__file__).read_text()
         self.assertIn('"session_scopes": True', source, "the editor asks for every project's only where DGC says it can")
 

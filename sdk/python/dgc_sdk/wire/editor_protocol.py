@@ -928,7 +928,7 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # reopen only lowers the mode (an SDK app, a script).
     "resume_session": {"path": _NS(False), "latest": _B(False), "saved_mode": _B(False), "request_id": _S(False)},
     "list_sessions": {"request_id": _S(False), "limit": _I(False), "offset": _I(False), "query": _S(False),
-                      "scope": _S(False)},
+                      "scope": _S(False), "folder": _S(False)},
     "delete_session": {"path": _S(), "request_id": _S(False)},
     "list_checkpoints": {"request_id": _S(False)},
     "rewind": {"index": _I(), "request_id": _S(False)},

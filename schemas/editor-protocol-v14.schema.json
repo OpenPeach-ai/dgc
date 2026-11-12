@@ -12451,6 +12451,9 @@
             },
             "scope": {
               "type": "string"
+            },
+            "folder": {
+              "type": "string"
             }
           },
           "required": [

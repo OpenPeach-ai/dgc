@@ -523,7 +523,11 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # objective, conversation_id} (its first turn starts; a new goal replaces the one there), get_pip_goal {pip_id,
 # conversation_id} (the latest, with status active|done|needs_you|blocked|stopped, turns, max_turns, reason) and
 # stop_pip_goal {pip_id, goal_id}. Local only.
-PIPS_API_VERSION = 92
+# API 93 (0.52, the Project Folder dropdown): list_project_folders {} (the folders with a Work session or a Project Pip:
+# {folder, name, here, exists, sessions, pips, workspace_id, updated_at}), add_project_folder {folder} (a folder the user
+# picked, as a project: its workspace), list_pips {scope: "projects"} (every project's Pips), list_pip_attention
+# {projects: "all" | <workspace id>} (Project Pips' cards too). Local only.
+PIPS_API_VERSION = 93
 
 
 def attachment_limits() -> dict:
@@ -9387,17 +9391,19 @@ class Backend:
             # first message or anything said). A found session's item carries `match`, the words
             # around it. Without them, every session, as before.
             limit, offset, query = cmd.get("limit"), cmd.get("offset", 0), cmd.get("query", "")
-            scope = cmd.get("scope", "project")
+            scope, folder = cmd.get("scope", "project"), cmd.get("folder")
             if (limit is not None and (type(limit) is not int or not 1 <= limit <= 5000)) \
                     or type(offset) is not int or offset < 0 or not isinstance(query, str) or len(query) > 200 \
-                    or scope not in ("project", "all"):
+                    or scope not in ("project", "all") or (folder is not None and (not isinstance(folder, str)
+                                                                                    or not 0 < len(folder) <= 4096)):
                 self.em.emit("error", message="list_sessions takes a limit of 1–5000, an offset, a query of up to 200 characters "
                              "and a scope of project or all.", **_request_fields(request_id))
                 return
             if scope == "all":
                 # Every project's sessions (capability session_scopes, 12 Nov): each with its folder, so the editor
                 # shows where it belongs and opens it running there. Items are free-form, so no protocol field moves.
-                rows = sessions_mod.listing_everywhere(self.config.project_root, limit=limit, offset=offset, query=query)
+                rows = sessions_mod.listing_everywhere(self.config.project_root, limit=limit, offset=offset, query=query,
+                                                       folder=folder)
                 self.em.emit("sessions", items=[{
                     "path": str(r["path"]), "when": sessions_mod.when(r["updated"]), "preview": r["preview"], "count": r["count"],
                     "name": r["name"], **({"match": r["match"]} if r["match"] else {}), "project": r["project"],

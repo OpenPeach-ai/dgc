@@ -464,6 +464,13 @@ API92_READS = frozenset({'get_pip_goal'})
 API92_MUTATIONS = frozenset({'set_pip_goal', 'stop_pip_goal'})
 READ_COMMANDS |= API92_READS
 MUTATION_COMMANDS |= API92_MUTATIONS
+# API 93: the Project Folder dropdown: the folders with a Work session or a Project Pip; a folder added as a project.
+# list_pips's scope projects and list_pip_attention's projects come with it. Local only.
+API93_READS = frozenset({'list_project_folders'})
+API93_MUTATIONS = frozenset({'add_project_folder'})
+API93_FIELDS = {'list_pips': frozenset({'scope'}), 'list_pip_attention': frozenset({'projects'})}
+READ_COMMANDS |= API93_READS
+MUTATION_COMMANDS |= API93_MUTATIONS
 
 
 def _api88_field(command, values) -> bool:
@@ -527,7 +534,7 @@ COMMAND_FIELDS = {
     'allow_pip_plugin': frozenset({'pip_id', 'grant_id', 'keys'}),
     'decline_pip_plugin': frozenset({'pip_id', 'grant_id'}),
     'list_pip_plugin_uses': frozenset(),
-    'list_pip_attention': frozenset({'limit'}),
+    'list_pip_attention': frozenset({'limit', 'projects'}),
     'list_pip_notes': frozenset({'pip_id', 'shared'}),
     'add_pip_note': frozenset({'pip_id', 'text', 'shared'}),
     'forget_pip_note': frozenset({'pip_id', 'note_id', 'all', 'shared'}),
@@ -619,6 +626,8 @@ COMMAND_FIELDS = {
     'set_pip_goal': frozenset({'pip_id', 'objective', 'conversation_id'}),
     'get_pip_goal': frozenset({'pip_id', 'conversation_id'}),
     'stop_pip_goal': frozenset({'pip_id', 'goal_id'}),
+    'list_project_folders': frozenset(),
+    'add_project_folder': frozenset({'folder'}),
     'get_pips_payments': frozenset(),
     'set_pips_payments': frozenset({'limit'}),
     'set_pip_paying': frozenset({'pip_id', 'rule'}),
@@ -714,7 +723,7 @@ COMMAND_FIELDS = {
     'list_pip_runs': frozenset(['pip_id']),
     'list_pip_types': frozenset([]),
     'list_pip_versions': frozenset(['before_version', 'limit', 'pip_id']),
-    'list_pips': frozenset(['workspace_id', 'limit', 'offset', 'query', 'order']),
+    'list_pips': frozenset(['workspace_id', 'limit', 'offset', 'query', 'order', 'scope']),
     'list_workspace_activity': frozenset(['after', 'workspace_id']),
     'list_workspaces': frozenset([]),
     'pause_pip': frozenset(['pip_id', 'expected_lifecycle_revision']),
@@ -936,7 +945,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API92_READS | API92_MUTATIONS:
+        if command in API93_READS | API93_MUTATIONS:
+            minimum = 93
+        elif command in API92_READS | API92_MUTATIONS:
             minimum = 92
         elif command in API91_READS | API91_MUTATIONS:
             minimum = 91
@@ -1198,6 +1209,9 @@ class Pips:
                 raise DGCUnsupportedError("Routines on your app's events require a runtime advertising Pips API 63 or newer")
             if type(values['app_events']) is not bool:
                 raise DGCConfigError("app_events is True or False")
+        if API93_FIELDS.get(command, frozenset()) & set(values) and version < 93:
+            raise DGCUnsupportedError("Every project's Pips (scope) and Project Pips in Needs Attention (projects) require a "
+                                      "runtime advertising Pips API 93 or newer")
         if API90_FIELDS.get(command, frozenset()) & set(values):
             if version < 90:
                 raise DGCUnsupportedError("Routines a service calls (webhooks) require a runtime advertising Pips API 90 or newer")
