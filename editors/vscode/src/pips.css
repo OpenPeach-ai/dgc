@@ -1306,7 +1306,10 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 .computer-corner[data-state="needs_you"]{background:var(--warn)}
 .computer-menu{position:absolute;z-index:6;top:calc(100% - 4px);right:8px;width:min(264px,calc(100% - 16px));max-height:min(70vh,460px);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;text-align:left;font-weight:400}
 @media(prefers-reduced-motion:no-preference){.computer-menu.dgc-menu:not([hidden]){transform-origin:top right}}
+/* A computer's row is two lines (its name, then its state): its Portal and its pencil stand in the middle of both
+   (a two-line menu row otherwise starts at the top, .dgc-menu-row-sub). */
 .computer-menu .computer-row{min-height:32px}
+.computer-menu .dgc-menu-row.dgc-menu-row-sub.computer-row{align-items:center}
 .computer-menu .computer-item>.computer-row{padding-right:34px}
 .computer-menu .dgc-menu-more.computer-pencil{opacity:1}
 .computer-menu .computer-add{min-height:32px}

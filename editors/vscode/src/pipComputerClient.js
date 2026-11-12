@@ -119,7 +119,7 @@ function headerMarkup(){
  const status=!S.connected?'Connecting…':!S.computer?'Loading…':!S.computer.granted?'No computer yet':!S.computer.available?'Setup needed':using()?`${S.pip.name} is using its computer`:waiting?`${waiting} waiting for you`:'Idle';
  // The face says which Pip; then the Pip's name, this computer's Portal (in its number's palette) and the computer's name.
  // (The " · " between the names stays in the words, for the tab's name and a screen reader; the Portal stands where it was.)
- return `<header class="pc-header${waiting||screenMode()&&using()?' pc-said':''}"><span class="pc-face" aria-hidden="true">${plushFace(using()?'working':waiting?'waiting_approval':'idle')}</span><div class="pc-title"><h1 title="${esc(tabTitle())}"><span class="pc-pip-name">${esc(S.pip?.name||'Pip')}</span><span class="pc-sep"> · </span><span class="pc-portal" aria-hidden="true">${computerPortal(S.number||1,18)}</span>${esc(computerName())}</h1><p class="pc-status" role="status">${esc(status)}</p></div></header>${chipMarkup()}`;
+ return `<header class="pc-header${waiting||screenMode()&&using()?' pc-said':''}"><span class="pc-face" aria-hidden="true">${plushFace(using()?'working':waiting?'waiting_approval':'idle')}</span><div class="pc-title"><h1 title="${esc(tabTitle())}"><span class="pc-pip-name">${esc(S.pip?.name||'Pip')}</span><span class="pc-sep"> · </span><span class="pc-portal" aria-hidden="true">${computerPortal(S.number||1,18)}</span><span class="pc-computer-name">${esc(computerName())}</span></h1><p class="pc-status" role="status">${esc(status)}</p></div></header>${chipMarkup()}`;
 }
 // The bar's end: Stop computer, and "…" for what a narrow tab has no room to show (the shared menu).
 const DOTS='<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="3.5" cy="8" r="1.25" fill="currentColor"/><circle cx="8" cy="8" r="1.25" fill="currentColor"/><circle cx="12.5" cy="8" r="1.25" fill="currentColor"/></svg>';
@@ -150,7 +150,8 @@ function fitBar(force=false){
  // Still no room for the whole title: the Pip's name gives way (its face says which Pip, and the title's tooltip has
  // the name), so this computer's Portal and name stay to say which of its computers this is.
  const title=bar.querySelector('.pc-title h1');delete bar.dataset.title;
- S.tight=!!title&&tier===4&&title.scrollWidth>title.clientWidth;
+ // (The title is a row whose names give way: one of them cut short is the title not fitting.)
+ S.tight=!!title&&tier===4&&[title,...title.children].some(n=>n.scrollWidth>n.clientWidth);
  if(S.tight)bar.dataset.title='computer';
 }
 // A held submit that was not here a moment ago: the chip pulses once (pipComputer.css: never under reduced motion).
@@ -249,7 +250,7 @@ function overlayMarkup(){
  const name=esc(S.pip?.name||'The Pip');
  if(S.screen.state==='opening')return `<p class="pc-overlay-note">Opening ${name}'s screen…</p>`;
  if(S.screen.state==='restarting')return `<p class="pc-overlay-note">Restarting ${name}'s computer…</p>`;
- if(S.screen.state==='elsewhere')return `<div class="pc-overlay-card"><p>Showing ${S.screen.name?`<span class="pc-portal" aria-hidden="true">${computerPortal(S.screen.number||1,18)}</span>${esc(S.screen.name)}`:'its computer'} in another tab</p><button type="button" id="pc-show-here">Show here</button></div>`;
+ if(S.screen.state==='elsewhere')return `<div class="pc-overlay-card"><p>${S.screen.name?`<span>Showing </span><span class="pc-portal" aria-hidden="true">${computerPortal(S.screen.number||1,18)}</span><span>${esc(S.screen.name)} in another tab</span>`:'Showing its computer in another tab'}</p><button type="button" id="pc-show-here">Show here</button></div>`;
  if(S.screen.state==='closed')return `<div class="pc-overlay-card"><p>${esc(S.screen.reason||'The screen closed.')}</p><button type="button" id="pc-reconnect">Open the screen again</button></div>`;
  return using()?`<p class="pc-overlay-badge">${name} is using its computer. You can watch; it is yours again when it stops.</p>`:'';
 }
