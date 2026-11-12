@@ -3137,7 +3137,7 @@
   const md = (source) => DgcMarkdown.render(source);
   // DGC's own reply in this chat: the one place a ```dgc-ui card is live. Skills, docs, memory, goals, helpers' and
   // Pips' reports and thinking keep it as code (md above).
-  const mdReply = (source) => DgcMarkdown.render(source, { cards: true });
+  const mdReply = (source) => DgcMarkdown.render(source, { cards: true, previews: true });
   function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
   function textEl(tag, cls, value) { const e = el(tag, cls); e.textContent = String(value); return e; }
   // ---- hover labels ----
@@ -12308,6 +12308,12 @@ function permissionChoices(ev) {
     const link = event.target.closest?.(".md-link");
     if (link) {
       event.preventDefault();
+      // "Preview: <title>" under a reply's HTML or SVG block: the page opens in a tab beside (src/codePreview.ts).
+      if (link.dataset.linkKind === "preview") {
+        const view = DgcMarkdown.previewOf(link);
+        if (view) vscode.postMessage({ type: "codePreview", ...view });
+        return;
+      }
       const target = DgcMarkdown.linkOf(link.dataset);
       if (target?.kind === "external") vscode.postMessage({ type: "openExternal", url: target.target });
       else if (target?.kind === "file") vscode.postMessage({ type: "openFile", path: target.target, line: target.line, endLine: target.endLine });

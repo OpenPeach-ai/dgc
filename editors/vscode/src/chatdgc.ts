@@ -13,6 +13,7 @@ import { ARTIFACT_ID, forwardedArtifactPage, outputChoice, type Artifacts } from
 import { allowFromJobs, handleVideoMessage, VIDEO_MESSAGES } from "./videoHost";
 import { onPicturesSetting, pictureFoldsMessage, picturesFolded, rememberPictureFold } from "./pictureFolds";
 import { sessionIcon, dockOf, type DockPin } from "./dock";
+import { openCodePreview } from "./codePreview";
 import { promises as fs } from "fs";
 import { displayMentions, workspaceFiles } from "./mentionsHost";
 
@@ -2456,6 +2457,9 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         return;
       case "openModels":
         this.host?.openSettings?.("models");
+        return;
+      case "codePreview":
+        openCodePreview(message);  // a reply's HTML or SVG, drawn in a tab beside that runs nothing (src/codePreview.ts)
         return;
       case "openLink": {
         const target = typeof message.target === "string" ? message.target : "";

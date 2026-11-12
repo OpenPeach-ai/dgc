@@ -156,6 +156,8 @@ export const host = (opts) => `(${function (PIP, opts) {
     say("a1", "assistant", "It doesn't. The screenshot shows a total of 1,180.00, and `billing.py` rounds each line before it adds tax, which gives 1,179.96 for the same rate card. The rounding is on line 212.", "1", 29),
   ];
   const messages = opts.empty ? [] : opts.details ? (project ? detailsProject : detailsChat) : project ? projectChat : opts.ticks ? ticksChat : personal;
+  // opts.reply: one more prompt and the Pip's answer to it, as given (a reply with code blocks, say).
+  if (opts.reply && !opts.empty) messages.push(say("u8", "user", opts.replyTo || "Show me.", "8", 3), say("a8", "assistant", opts.reply, "8", 2));
   if (opts.running && messages.length) messages.push({ ...say("u9", "user", "Check the wire service page now.", "9", 1), status: "running" });
   const post = { pip_id: PIP, name, pip_type: "rook", kind: "audit", trigger: "schedule", text: "x", run_id: run("7"), outcome: "findings", posted_at: at(5), finished_at: at(5),
     total: 5, counts: { critical: 0, high: 2, medium: 2, low: 1 }, findings: [

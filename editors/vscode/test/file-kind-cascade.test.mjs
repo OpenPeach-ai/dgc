@@ -215,8 +215,11 @@ test("no link is identified by colour alone", () => {
     "a host with no bundled mark falls back to web — it must draw something");
   assert.ok(hasContent(":is(.md-link, .chip.made-file)[data-file-kind]::before"),
     "an extension with no rule of its own falls back to this — it must draw something");
-  // markdown.ts emits exactly these two link kinds, so those two rules cover every link there is.
+  // markdown.ts emits exactly these link kinds, so those two rules cover every link there is: a file or a site, and
+  // (0.52) the preview line under a reply's HTML or SVG block, which wears a file kind's mark as a link to a file does.
   const kinds = [...markdownSrc.matchAll(/data-link-kind="(\$\{[^}]*\}|[a-z]+)"/g)].map((m) => m[1]);
-  assert.deepEqual([...new Set(kinds)].sort(), ["${target.kind}", "external"],
+  assert.deepEqual([...new Set(kinds)].sort(), ["${target.kind}", "external", "preview"],
     "a new link kind would need its own mark before it may ship unmarked");
+  const preview = markdownSrc.match(/<button[^`]*data-link-kind="preview"[^;]*;/)?.[0] || "";
+  assert.match(preview, /data-file-kind="\$\{kind === "svg" \? "svg" : "markup"\}"/, "the preview line always carries a file kind, so the catch-all above marks it");
 });

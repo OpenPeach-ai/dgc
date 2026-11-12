@@ -264,7 +264,8 @@ parser.renderer.rules.fence = (tokens, index, _options, env) => {
     const card = renderGenerativeUi(tokens[index].content);
     if (card) return card;
   }
-  return codeBlock(tokens[index].content, tokens[index].info);
+  const block = codeBlock(tokens[index].content, tokens[index].info);
+  return env?.previews === true ? block + previewLine(tokens[index], env) : block;
 };
 parser.renderer.rules.code_block = (tokens, index) => codeBlock(tokens[index].content, "");
 
@@ -278,6 +279,75 @@ function codeBlock(content: string, info: string): string {
   }
   // Keep the source in a data attribute for exact copy, separate from syntax/presentation markup.
   return `<pre class="code" data-language="${escape(language)}"><span class="code-language">${escape(language)}</span><button type="button" class="copy" data-c="${escape(encodeURIComponent(content))}" aria-label="Copy code" title="Copy code"><span class="codicon codicon-copy" aria-hidden="true"></span></button><code>${highlighted}</code></pre>`;
+}
+
+// ---- a preview of the HTML or SVG a reply writes (0.52) ---------------------------------------------------------
+// One line of link text under the block, "Preview: <title>", looking as a link to an image does: a press opens the page
+// in an editor tab beside (src/codePreview.ts), where it can run nothing and reach nothing. Nothing is drawn here, and
+// nothing is kept: the line is made from the reply's own text each time it is rendered, so a reload has it again. Only
+// DGC's own reply in a chat asks for it (render(..., { previews: true })).
+export type PreviewKind = "html" | "svg";
+/** Which page a fenced block is, by the language it names: HTML, SVG, or XML whose root is an <svg>. */
+export function previewKind(info: string, content: string): PreviewKind | undefined {
+  const language = /^[A-Za-z0-9_+.-]+/.exec(String(info || "").trim())?.[0].toLowerCase() || "";
+  if (!String(content || "").trim()) return;
+  if (language === "html" || language === "htm" || language === "xhtml") return "html";
+  if (language === "svg") return "svg";
+  if (language === "xml" && /^\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--[\s\S]*?-->\s*|<!doctype[^>]*>\s*)*<svg[\s>]/i.test(content)) return "svg";
+  return;
+}
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " " };
+function plainText(markup: string): string {
+  return markup.replace(/<[^>]*>/g, "")
+    .replace(/&(?:#(\d{1,7})|#x([0-9a-f]{1,6})|([a-z]+));/gi, (all, dec, hex, name) => {
+      if (name) return ENTITIES[name.toLowerCase()] ?? all;
+      const code = dec ? Number(dec) : parseInt(hex, 16);
+      return code > 31 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff) ? String.fromCodePoint(code) : " ";
+    })
+    .replace(/[\u0000-\u001f\u007f\s]+/g, " ").trim();
+}
+/** A page's name for its line and its tab: its <title>, else its first heading, else plain words. Always text. */
+export function previewTitle(kind: PreviewKind, source: string): string {
+  const page = String(source || "").slice(0, 200000);
+  const found = plainText(/<title\b[^>]*>([\s\S]*?)<\/title\s*>/i.exec(page)?.[1] || "")
+    || (kind === "html" ? plainText(/<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]\s*>/i.exec(page)?.[1] || "") : "");
+  if (!found) return kind === "svg" ? "the SVG" : "the HTML";
+  return found.length > 80 ? found.slice(0, 79).trimEnd() + "\u2026" : found;
+}
+function previewLine(token: any, env: any): string {
+  const kind = previewKind(token.info, token.content);
+  if (!kind) return "";
+  // A block still being written (the reply is streaming and its fence isn't closed) is half a page: no line yet.
+  const lines = typeof env?.src === "string" && Array.isArray(token.map) ? env.src.split("\n") : null;
+  const last = lines ? String(lines[token.map[1] - 1] ?? "").replace(/^[\s>]+/, "").trimEnd() : "";
+  if (!lines || token.map[1] - token.map[0] < 2 || !token.markup || !last.startsWith(token.markup) || /[^`~]/.test(last)) return "";
+  return `<p class="code-preview-line"><button type="button" class="md-link code-preview" data-link-kind="preview" data-preview-kind="${kind}"`
+       + ` data-file-kind="${kind === "svg" ? "svg" : "markup"}" title="Open a preview in a tab beside">Preview: ${escape(previewTitle(kind, token.content))}</button></p>\n`;
+}
+/** What a preview line opens, read from the reply it is in: the block right above it, as written, and (for HTML) every
+ *  CSS block of the same reply, in order. Undefined for anything that isn't a preview line under its block. */
+export function previewOf(link: any): { kind: PreviewKind; title: string; html: string; css: string[] } | undefined {
+  const line = link?.closest?.(".code-preview-line");
+  const kind = link?.dataset?.previewKind === "svg" ? "svg" : link?.dataset?.previewKind === "html" ? "html" : undefined;
+  const source = (pre: any): string | undefined => {
+    try { return decodeURIComponent(String(pre?.querySelector?.(":scope > .copy")?.dataset?.c ?? "")); } catch { return; }
+  };
+  const block = line?.previousElementSibling;
+  if (!kind || !block?.matches?.("pre.code")) return;
+  const html = source(block);
+  if (!html || !html.trim()) return;
+  // The reply: up from the line through the lists and quotes it may be written in.
+  let reply = line.parentElement;
+  while (reply?.parentElement && /^(?:LI|UL|OL|BLOCKQUOTE)$/.test(reply.tagName)) reply = reply.parentElement;
+  const css: string[] = [];
+  if (kind === "html" && reply) {
+    for (const pre of reply.querySelectorAll("pre.code[data-language]")) {
+      if (String(pre.dataset.language).toLowerCase() !== "css") continue;
+      const sheet = source(pre);
+      if (sheet && sheet.trim()) css.push(sheet);
+    }
+  }
+  return { kind, title: previewTitle(kind, html), html, css };
 }
 
 // A table is the one block a reader reliably wants out of the panel and into a document, and it
@@ -394,11 +464,12 @@ parser.renderer.rules.math_block = (tokens, index) => {
 };
 
 /** Markdown as inert HTML. ``cards``: draw ```dgc-ui fences as interactive cards, for DGC's own reply in a chat
- *  only; everywhere else they stay code. */
-export function render(source: string, options: { cards?: boolean } = {}): string {
+ *  only; everywhere else they stay code. ``previews``: a line of link text under a reply's HTML or SVG block, which
+ *  opens it in a tab beside; also for a reply in a chat only. */
+export function render(source: string, options: { cards?: boolean; previews?: boolean } = {}): string {
   // JSON can carry lone UTF-16 surrogates; URI encoding in copy controls must not crash a turn.
   const cleaned = String(source).replace(
     /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
   // The env carries the source so a block rule can quote it back exactly (see quoteSource).
-  return parser.render(cleaned, { src: cleaned, cards: options?.cards === true });
+  return parser.render(cleaned, { src: cleaned, cards: options?.cards === true, previews: options?.previews === true });
 }

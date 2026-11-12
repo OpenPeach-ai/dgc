@@ -814,7 +814,7 @@ function noProviderMarkup(){if(!S.noProvider||!S.noProviderSaid)return '';const 
 function renderPipMarkdown(text){return window.DgcMarkdown?.render?window.DgcMarkdown.render(text):`<div class="chat-text">${esc(text)}</div>`;}
 // The Pip's own reply in its chat: the one place on this page a ```dgc-ui card is live. Its routine posts, run
 // reports and fixes keep it as code (renderPipMarkdown).
-function renderPipReply(text){return window.DgcMarkdown?.render?window.DgcMarkdown.render(text,{cards:true}):`<div class="chat-text">${esc(text)}</div>`;}
+function renderPipReply(text){return window.DgcMarkdown?.render?window.DgcMarkdown.render(text,{cards:true,previews:true}):`<div class="chat-text">${esc(text)}</div>`;}
 document.addEventListener('click',event=>{
   const button=event.target?.closest?.('button.genui-send');
   if(!button||!button.closest('.pip-app-root .pip-message.assistant:not(.routine-reply) .message-body'))return;
@@ -5646,6 +5646,8 @@ document.addEventListener('click',event=>{
   if(voiceAction==='cancel'){micCancel();return;}
   if((voiceAction==='stop'||voiceAction==='send')&&S.mic==='recording'){micShow('writing',voiceAction);render();vscode.postMessage({type:'micStop',mode:voiceAction==='send'?'send':'insert',from:'pips'});return;}
   const link=event.target.closest?.('.md-link');
+  // "Preview: <title>" under a reply's HTML or SVG block: the page opens in a tab beside (src/codePreview.ts).
+  if(link?.dataset.linkKind==='preview'){event.preventDefault();const view=window.DgcMarkdown?.previewOf?.(link);if(view)vscode.postMessage({type:'codePreview',...view});return;}
   if(link){event.preventDefault();const target=window.DgcMarkdown?.linkOf?.(link.dataset);if(target?.kind==='external')vscode.postMessage({type:'openExternal',url:target.target});else if(target?.kind==='file')vscode.postMessage({type:'openFile',path:target.target,line:target.line,endLine:target.endLine});return;}
   const copy=event.target.closest?.('button.copy[data-c]');if(copy){event.preventDefault();try{vscode.postMessage({type:'copy',text:decodeURIComponent(copy.dataset.c)});copy.classList.add('done');copy.title='Copied';copy.setAttribute('aria-label','Copied');copy.innerHTML=transcriptIcon('check');}catch{/* malformed generated data is not copied */}return;}
   // Download on a file's row in a reply (pips-08): the host asks where to save the kept file.

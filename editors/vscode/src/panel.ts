@@ -34,6 +34,7 @@ import { pipsAttention, PipsAttentionState } from "./pipsAttention";
 import { settingsDocument } from "./settingsView";
 import { onPicturesSetting, pictureFoldsMessage, rememberPictureFold, setPicturesInReplies, picturesFolded } from "./pictureFolds";
 import { dockOf, dockSettings, setDockSetting } from "./dock";
+import { openCodePreview } from "./codePreview";
 import { DEV_SAVED_KEY, DEV_WARNED_KEY, devLimitsTable, devLimitValues, devShown, type DevLimit } from "./devMode";
 import { homePages, homePagesAttr, homeShowAttr, noteHomePage, pipHomeDismissedAttr, rememberHomePagesDismissed, rememberHomeShow, rememberPipHomeDismissed } from "./pipHomeDismiss";
 import { addProfile, adoptWorkingRoute, defaultProfileId, firstTakesDefault, keepWorkingRoute, hasRunnableProfile, listProfiles, markDefaultProfile, profileCredential, removeProfile, startingModel } from "./providerProfiles.js";
@@ -5942,6 +5943,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "openExternal":
         if (msg.url) { void this.openSafeExternal(String(msg.url)); }
+        break;
+      case "codePreview":
+        openCodePreview(msg);      // a reply's HTML or SVG, drawn in a tab beside that runs nothing (src/codePreview.ts)
         break;
       case "artifactOpen":
         // A card's Open: the artifact's panel (a document in the editor over its file).

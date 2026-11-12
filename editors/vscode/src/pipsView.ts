@@ -972,7 +972,7 @@ export class PipsEditor implements vscode.Disposable {
       return;
     }
     // (Copy too: a Pip tab's Copy puts its text on the clipboard as the side bar's does.)
-    if (!computer && ['openFile', 'openExternal', 'openSettings', 'copy'].includes(String(message?.type))) { this.pageActions?.(message); return; }
+    if (!computer && ['openFile', 'openExternal', 'openSettings', 'copy', 'codePreview'].includes(String(message?.type))) { this.pageActions?.(message); return; }
     if (message?.type === 'pipsSignIn' && !computer) { openEngineSignIn(String(message.engine || '')); return; }
     if (message?.type === 'pipsOpenComputer' && !computer) {
       const pip = message.pip;

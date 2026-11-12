@@ -10,7 +10,7 @@
   const el = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
   const IMAGE_DATA = /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+$/;
   // ``cards``: a ```dgc-ui card is live only in the chat's own reply; anywhere else it stays code.
-  const md = (text, cards = false) => (window.DgcMarkdown?.render ? window.DgcMarkdown.render(String(text || ""), { cards }) : null);
+  const md = (text, cards = false) => (window.DgcMarkdown?.render ? window.DgcMarkdown.render(String(text || ""), { cards, previews: cards }) : null);
   // A link in a reply wears its site's favicon, as in Work, once dgc.linkFavicons says so (the `favicons` message); until
   // then, and with it off, no image loads from a link's site.
   window.DgcMarkdown?.setFavicons?.(false);
@@ -903,7 +903,7 @@
   /** A reply as it reads: its rendered blocks without the screen's own buttons, links as links. */
   function readable(message) {
     const node = body(message, { live: true });
-    node.querySelectorAll(".copy, .code-language, .cd-draft-tools, .cd-chart-tools, .cd-chart-legend, .cd-chart-tip").forEach((n) => n.remove());
+    node.querySelectorAll(".copy, .code-language, .code-preview-line, .cd-draft-tools, .cd-chart-tools, .cd-chart-legend, .cd-chart-tip").forEach((n) => n.remove());
     node.querySelectorAll(".cd-chart-table").forEach((t) => { t.hidden = false; });      // a chart pastes as its numbers
     node.querySelectorAll("button.md-link").forEach((b) => {
       const a = document.createElement("a");
@@ -4252,6 +4252,14 @@
   log.addEventListener("click", (e) => {
     const copy = e.target.closest?.(".copy[data-c]");
     if (copy) { vscode.postMessage({ type: "copy", text: decodeURIComponent(copy.dataset.c || "") }); return; }
+    // "Preview: <title>" under a reply's HTML or SVG block: the page opens in a tab beside (src/codePreview.ts).
+    const preview = e.target.closest?.('.md-link[data-link-kind="preview"]');
+    if (preview) {
+      e.preventDefault();
+      const view = window.DgcMarkdown?.previewOf?.(preview);
+      if (view) vscode.postMessage({ type: "codePreview", ...view });
+      return;
+    }
     const link = e.target.closest?.(".md-link[data-target]");
     if (link) {
       e.preventDefault();
