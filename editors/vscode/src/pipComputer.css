@@ -198,6 +198,12 @@ body.pc-screen-mode{padding:0}
 .pc-overlay-card{display:grid;gap:10px;justify-items:center;max-width:460px;text-align:center;color:#f3f3f5;background:rgba(20,20,24,.75);padding:16px 20px;border-radius:12px}
 .pc-overlay-card p{margin:0}
 .pc-overlay-badge{align-self:start;margin:12px 0 0;color:#fff;background:color-mix(in srgb,var(--accent) 85%,transparent);padding:6px 12px;border-radius:999px;font-size:12px;pointer-events:none}
+/* While the notification drawer shows, the banner keeps clear of it (placeBadge in pipComputerClient.js measures and
+   says where): at the screen's left, as wide as the room before the drawer, its words on as many lines as they need;
+   under the drawer where that room is too narrow; not drawn while there is no room under it either. */
+.pc-overlay-badge[data-place=left]{justify-self:start;margin-left:12px;border-radius:14px}
+.pc-overlay-badge[data-place=under]{margin-left:8px;margin-right:8px;border-radius:14px}
+.pc-overlay-badge[data-place=none]{visibility:hidden}
 .pc-setup{display:flex;flex-direction:column;gap:4px}
 .pc-setup strong{font-weight:600}
 .pc-setup-step{font-variant-numeric:tabular-nums}

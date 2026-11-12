@@ -556,7 +556,8 @@ test('with two accounts the card lists them by address and links only the one pi
  assert.match(x.d.querySelector('[data-app-link]').textContent,/Which Gmail should Gmail use\?/);
  assert.ok(x.d.querySelector(`[data-app-link-another="${LINK}"]`),'Use another account is always offered');
  assert.equal(x.d.querySelector(`[data-app-link-another="${LINK}"]`).textContent,'Use another account');
- assert.equal(x.d.querySelector(`[data-app-link-another="${LINK}"]`).className,'quiet');
+ // (Quiet, at the roomy width since 12 Nov night: at the usual one its words were cut, "Use another a…".)
+ assert.equal(x.d.querySelector(`[data-app-link-another="${LINK}"]`).className,'quiet wide');
  rows[1].click();await x.drain();
  assert.deepEqual(JSON.parse(JSON.stringify(started(x)[1].request)),{type:'start_pip_app_link',pip_id:PIP,link_id:LINK,account:'ca_dev'});
  const linked=link({status:'connected',label:'dev@example.com',server:'composio',account:'ca_dev'});x.setLinks([linked]);
@@ -579,7 +580,7 @@ test('an address no account matches is said plainly, and Use another account is 
  x.answer(started(x)[0],{link:link(),accounts:[ACCOUNTS[0]],wanted:'dev@example.com',redirect_url:null});await x.drain();
  assert.match(x.d.querySelector('.app-link-wanted').textContent,/asked for dev@example\.com\. None of your Gmail accounts in Composio is that address/);
  const another=x.d.querySelector(`[data-app-link-another="${LINK}"]`);
- assert.equal(another.className,'primary');
+ assert.equal(another.className,'primary wide');   // the main button, at the roomy width (its words are long)
  another.click();await x.drain();
  assert.deepEqual(JSON.parse(JSON.stringify(started(x)[1].request)),{type:'start_pip_app_link',pip_id:PIP,link_id:LINK,another:true});
 });

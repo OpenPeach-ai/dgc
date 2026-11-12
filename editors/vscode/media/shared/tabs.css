@@ -40,7 +40,8 @@
 .dgc-tab[aria-selected="true"] .dgc-tab-flip > span { font-weight: var(--w-semi); }
 .dgc-tab:hover .dgc-tab-front { transform: rotateX(-88deg); opacity: 0; }
 .dgc-tab:hover .dgc-tab-back { transform: rotateX(0deg); opacity: 1; }
-/* The Pips tab wears the Core Pip's face before its name (media/main.js draws it with the plush renderer): the height of
+/* The Pips tab wears the Core Pip's face after its name, as the header's Pips button does (asked 12 Nov night: it was
+   before it; media/main.js draws it with the plush renderer): the height of
    the word's line, always there, so choosing a tab moves nothing. Empty (no renderer), it takes no room. */
 .dgc-tab-face { flex: none; display: block; width: 16px; height: 16px; line-height: 0; pointer-events: none; }
 .dgc-tab-face:empty { display: none; }

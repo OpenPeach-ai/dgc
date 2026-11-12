@@ -216,11 +216,14 @@ test("/ at the start of the box offers /setup; choosing it puts /setup in the bo
     assert.equal(await p.evaluate(() => document.getElementById("chatText").innerText.replace(/ /g, " ")), "/setup ");
     await p.keyboard.type("Write sales sheets");
     assert.equal(await p.evaluate(() => getComputedStyle(document.getElementById("chat-pop")).display), "none", "the list closes as the job is typed");
-    // The @ list keeps its one fixed height, so narrowing it as you type never makes the box jump.
+    // The @ list is as tall as its rows too (asked 12 Nov night: one match had a tall empty box under it), up to its
+    // 210 px cap. It hangs over the conversation from the box's top edge, so the box never jumps as it narrows.
     await p.evaluate(() => { const box = document.getElementById("chatText"); box.focus(); document.execCommand("selectAll"); document.execCommand("delete"); });
     await p.keyboard.type("@");
     await p.waitForFunction(() => getComputedStyle(document.getElementById("chat-pop")).display !== "none");
-    assert.equal(await p.evaluate(() => Math.round(document.getElementById("chat-pop").getBoundingClientRect().height)), 210, "the @ list keeps 210px");
+    const at = await p.evaluate(() => { const pop = document.getElementById("chat-pop"), rows = [...pop.querySelectorAll(".pi")].reduce((a, r) => a + r.getBoundingClientRect().height, 0);
+      return { height: pop.getBoundingClientRect().height, rows, box: document.getElementById("chatText").getBoundingClientRect().top, bottom: pop.getBoundingClientRect().bottom }; });
+    assert.ok(at.height <= Math.min(210, at.rows + 4) + 0.5 && at.bottom <= at.box, `the @ list is ${at.height}px for ${at.rows}px of rows, above the box`);
     assert.deepEqual(errors, []);
   } finally { await close(); }
 });

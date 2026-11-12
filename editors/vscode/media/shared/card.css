@@ -79,6 +79,8 @@
 .dgc-card .dgc-card-btn.primary, .dgc-card .dgc-card-actions > button:not(.dgc-card-link).primary { border-color: transparent; background: var(--btn-fill); color: var(--btn-on-fill); }
 .dgc-card .dgc-card-btn.primary:hover:not(:disabled), .dgc-card .dgc-card-actions > button:not(.dgc-card-link).primary:hover:not(:disabled) { border-color: transparent; background: var(--btn-fill-hover); color: var(--btn-on-fill); }
 .dgc-card .dgc-card-btn:disabled, .dgc-card .dgc-card-actions > button:not(.dgc-card-link):disabled { opacity: .55; cursor: default; }
+/* An answer whose words are longer than the button ("Use another account") takes the roomy size, as .dgc-btn.wide does. */
+.dgc-card .dgc-card-btn.wide, .dgc-card .dgc-card-actions > button:not(.dgc-card-link).wide { width: var(--btn-w-wide); }
 .dgc-card .dgc-card-toggle { margin: 0 0 0 auto; }
 .dgc-card .dgc-card-btn:focus-visible, .dgc-card .dgc-card-actions > button:not(.dgc-card-link):focus-visible, .dgc-card .dgc-card-link:focus-visible { outline: var(--btn-ring); outline-offset: 2px; }
 
@@ -88,6 +90,11 @@
   .dgc-card .dgc-card-chips, .dgc-card .dgc-card-actions, .dgc-card .dgc-card-details, .dgc-card .dgc-card-note, .dgc-card .dgc-card-error,
   .dgc-card:has(.dgc-card-face) :is(.dgc-card-chips, .dgc-card-actions, .dgc-card-details, .dgc-card-note, .dgc-card-error) { margin-left: 0; }
   .dgc-card .dgc-card-actions .dgc-card-btn, .dgc-card .dgc-card-actions > button:not(.dgc-card-link) { flex: 1 1 0; min-width: 0; max-width: var(--btn-w); padding: 0 4px; overflow: hidden; text-overflow: ellipsis; }   /* (a narrow row is shared equally, never past the button's own size) */
+  /* Four answers (an Allow card's: Send, Always allow, Edit, Don't send) are too many for one narrow row: shared by
+     four their words were cut ("Alwa…"). They take two rows of two, each the same size, every word whole. */
+  .dgc-card .dgc-card-actions:has(> button:not(.dgc-card-link):nth-of-type(4)) > button:not(.dgc-card-link) { flex-basis: 34%; }
+  /* (The roomy button keeps room for its own words, and its neighbour has what is left.) */
+  .dgc-card .dgc-card-actions .dgc-card-btn.wide, .dgc-card .dgc-card-actions > button:not(.dgc-card-link).wide { min-width: min-content; max-width: var(--btn-w-wide); }
   .dgc-card .dgc-card-actions .dgc-card-toggle { flex: 1 0 100%; margin: 0; text-align: left; }
 }
 @media (forced-colors: active) {

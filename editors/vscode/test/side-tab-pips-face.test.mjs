@@ -2,7 +2,8 @@
 // media/shared/tabs.css; the face is the plush renderer's, as on the dock and Home's cards). Measured in real Chromium
 // on the side bar's real page (support/dock-scene.mjs). What is held here:
 //   - only Pips has a face; Home, Work and Chat stay names only
-//   - the face is small, beside the word and before it, about the height of the word's line, never cut
+//   - the face is small, beside the word and after it (asked 12 Nov night: it was before it; test/pixel-notes-browser.test.mjs
+//     holds the order, the gap and the centring), about the height of the word's line, never cut
 //   - it is alive (it breathes and blinks) and keeps still under reduced motion
 //   - the tab's name for a screen reader is still "Pips"; choosing tabs moves nothing; the keys work as before
 //   - the four tabs still fit at 240 px; at 170 px (icons: side-tabs-icons.test.mjs) Pips is the face alone
@@ -52,9 +53,9 @@ for (const width of [240, 300, 700]) {
       assert.equal(f.hidden, "true", "the face is decoration");
       assert.equal(pips.name, "Pips", "the tab is still named Pips");
       assert.ok(Math.abs(f.width - f.height) < 0.6 && f.height >= pips.line && f.height <= pips.wordBox.height + 0.5, `small: the height of the word's line (${f.height} for a ${pips.line}px word in a ${pips.wordBox.height}px line)`);
-      assert.ok(f.right <= pips.word.left && pips.word.left - f.right <= 8, `beside the word, before it (${f.right} then ${pips.word.left})`);
+      assert.ok(f.left >= pips.word.right && f.left - pips.wordBox.right <= 8, `beside the word, after it (${pips.word.right} then ${f.left})`);
       assert.ok(Math.abs((f.top + f.bottom) / 2 - (pips.wordBox.top + pips.wordBox.bottom) / 2) <= 1.5, "level with the word");
-      assert.ok(f.left >= pips.box.left - 0.5 && pips.word.right <= pips.box.right + 0.5, "neither the face nor the word is cut");
+      assert.ok(pips.word.left >= pips.box.left - 0.5 && f.right <= pips.box.right + 0.5, "neither the word nor the face is cut");
       assert.ok(f.moving.includes("dgc-plush-breathe") && f.moving.includes("dgc-plush-blink"), `it is alive: it breathes and blinks (${f.moving})`);
       assert.equal(f.state, "idle");
       for (const tab of tabs) assert.ok(tab.wordBox.left >= tab.box.left - 0.5 && tab.wordBox.right <= tab.box.right + 0.5, `${tab.id}: its name fits`);

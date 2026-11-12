@@ -176,6 +176,9 @@ body:is(.vscode-light, .vscode-high-contrast-light) .pip-message.user .bubble .p
 .mention-box[contenteditable="false"] { cursor: not-allowed; }
 /* Above the box, over the conversation: choosing a mark doesn't move what you are reading. */
 .pop.pop-over { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); margin: 0; z-index: 30; }
+/* A Pip's chat: the list is as tall as its rows, up to the same cap (one match had a tall empty box under its one row).
+   It hangs from the box's top edge over the conversation, so a shorter list moves nothing you are reading or typing in. */
+#chat-pop.pop.pop-over { height: auto; }
 @media (forced-colors: active) {
   .pop { border-color: CanvasText; }
   .pop .pi.sel { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; box-shadow: none; }

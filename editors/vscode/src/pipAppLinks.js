@@ -52,7 +52,8 @@ export function appLinkMarkup(link, { esc, busy = false, composio = true, host =
   const head = (title, sub) => `<div class="dgc-card-head app-link-head">${mark}<div class="dgc-card-words app-link-words"><strong>${title}</strong>${sub ? `<small>${sub}</small>` : ''}</div></div>`;
   const no = `<button type="button" class="quiet" data-app-link-decline="${id}"${off}>Not now</button>`;
   let body;
-  const another = (main, words = 'Use another account') => `<button type="button" class="${main ? 'primary' : 'quiet'}" data-app-link-another="${id}"${off}>${words}</button>`;
+  // (Its words are longer than the shared button: it takes the roomy size, so they are never cut.)
+  const another = (main, words = 'Use another account') => `<button type="button" class="${main ? 'primary' : 'quiet'} wide" data-app-link-another="${id}"${off}>${words}</button>`;
   if (link.status === 'connected') {
     body = head(`${app} connected`, link.label ? esc(link.label) : '');
   } else if (link.status === 'authorizing') {

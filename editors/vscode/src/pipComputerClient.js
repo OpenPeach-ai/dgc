@@ -229,10 +229,34 @@ function layoutDrawer(){
  list.style.setProperty('--fan-h',`${Math.min(last.offsetTop+last.offsetHeight+DRAWER_FOOT,Math.max(80,room-48-DRAWER_EDGE-DRAWER_HEAD))}px`);
 }
 function applyDrawer(){
- const drawer=$('pc-drawer');if(!drawer)return;
+ const drawer=$('pc-drawer');if(!drawer){placeBadge();return;}
  const fan=S.fan&&!drawer.classList.contains('pc-drawer-banner');
  if(!fan){const list=drawer.querySelector('.pc-drawer-list');if(list)list.scrollTop=0;}
- drawer.classList.toggle('pc-fan',fan);layoutDrawer();
+ drawer.classList.toggle('pc-fan',fan);layoutDrawer();placeBadge();
+}
+// "<name> is using its computer…" is at the screen's top centre. While the drawer shows at the top right the banner
+// keeps clear of it, measured: left where it is when it already ends before the drawer; else at the screen's left, as
+// wide as the room before the drawer (its words wrap); and where that room is too narrow to read in (a narrow tab, where
+// the drawer is nearly as wide as the screen), under the drawer, or not drawn while the drawer leaves no room under it
+// (fanned out; the bar's own words still say whose turn it is). Looked at again whenever the drawer or the screen
+// changes size.
+const BADGE_ROOM=200,BADGE_EDGE=12;
+let badgeWatch=null,badgeSeen=[];
+function placeBadge(){
+ const badge=document.querySelector('.pc-overlay-badge'),drawer=$('pc-drawer'),live=$('pc-live');
+ if(typeof ResizeObserver==='function'&&live){
+  const seen=[live,drawer].filter(Boolean);
+  if(seen.length!==badgeSeen.length||seen.some((n,i)=>n!==badgeSeen[i])){badgeWatch?.disconnect();badgeWatch=new ResizeObserver(()=>placeBadge());badgeSeen=seen;for(const n of seen)badgeWatch.observe(n);}
+ }
+ if(!badge||!live)return;
+ badge.removeAttribute('data-place');badge.style.maxWidth='';badge.style.marginTop='';
+ if(!drawer||drawer.hidden||!drawer.getClientRects().length||getComputedStyle(drawer).visibility==='hidden')return;
+ const l=live.getBoundingClientRect(),d=drawer.getBoundingClientRect(),b=badge.getBoundingClientRect();
+ if(b.right+BADGE_EDGE<=d.left||b.top>=d.bottom)return;
+ const room=d.left-l.left-2*BADGE_EDGE;
+ if(room>=BADGE_ROOM){badge.dataset.place='left';badge.style.maxWidth=`${Math.floor(room)}px`;return;}
+ badge.dataset.place='under';badge.style.marginTop=`${Math.ceil(d.bottom-l.top+8)}px`;
+ if(badge.getBoundingClientRect().bottom>l.bottom-8)badge.dataset.place='none';
 }
 function setFan(on){if(S.fan===on)return;S.fan=on;applyDrawer();}
 function foldSoon(){clearTimeout(foldTimer);foldTimer=setTimeout(()=>{const drawer=$('pc-drawer');if(drawer&&(drawer.matches(':hover')||drawer.contains(document.activeElement)))return;setFan(false);},160);}
