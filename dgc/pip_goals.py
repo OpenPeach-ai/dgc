@@ -27,7 +27,8 @@ KEY = "goal_"
 MAX_TURNS = 20
 MAX_OBJECTIVE = 4000
 STATUSES = ("active", "done", "needs_you", "blocked", "stopped")
-UPDATES = ("completed", "blocked")
+UPDATES = ("completed", "blocked", "needs_you")
+ENDED = {"completed": "done", "blocked": "blocked", "needs_you": "needs_you"}     # what each update makes the goal
 LOCAL = ("editor-user", "local-console")
 TOOL = "update_goal"
 
@@ -92,10 +93,10 @@ def _turn_key(goal_id: str, turn: int) -> str:
 def _turn_text(row) -> str:
     from .goals import cycle_prompt
     return (f"This message is from DGC, not the user: the user set this conversation a goal, and this is your turn "
-            f"{row['turns'] + 1} of at most {MAX_TURNS} toward it. Ask the user only when you can't take the next step "
-            "without something only they can give, and never to check in or confirm progress: ask with offer_choices "
-            "(the answers you expect; they can always type their own), and the goal waits for their answer. A question "
-            "asked only in your words doesn't pause it.\n\n" + cycle_prompt(row["objective"]))
+            f"{row['turns'] + 1} of at most {MAX_TURNS} toward it. Keep going: never to check in or confirm progress. Only when "
+            "you can't take the next step without something only the user can give, call update_goal(status='needs_you') "
+            "with what you need, and ask them for it in your reply: the goal waits for their answer.\n\n"
+            + cycle_prompt(row["objective"]))
 
 
 def _send_turn(store, row, config) -> dict:
@@ -197,7 +198,7 @@ def context_for(store, pip, req) -> dict | None:
     if row is not None:
         if row["pip_id"] != pip["id"] or row["status"] != "active":
             return None
-        return {"objective": row["objective"][:2000], "turn": turn, "max_turns": MAX_TURNS}
+        return {"objective": row["objective"][:2000], "turn": turn, "max_turns": MAX_TURNS, "own": True}
     from .pip_chat import DGC_KEYS, FOLLOW_UP_KEYS
     if not _has(store.db) or (str(key or "").startswith(DGC_KEYS) and not str(key or "").startswith(FOLLOW_UP_KEYS)):
         return None
@@ -216,7 +217,9 @@ def _open_goal(store, pip_id, conversation_id):
 
 
 def valid_context(value) -> bool:
-    return (isinstance(value, dict) and set(value) == {"objective", "turn", "max_turns"}
+    """``own``: the goal's own turn (DGC's), which has no choices to offer."""
+    return (isinstance(value, dict) and set(value) - {"own"} == {"objective", "turn", "max_turns"}
+            and value.get("own", True) is True
             and isinstance(value["objective"], str) and 0 < len(value["objective"]) <= 2000
             and type(value["turn"]) is int and 1 <= value["turn"] <= MAX_TURNS and value["max_turns"] == MAX_TURNS)
 
@@ -232,11 +235,13 @@ def schema() -> dict:
     """The tool a goal's turn offers: Work's update_goal, said for the goal in this conversation."""
     return {"type": "function", "function": {"name": TOOL, "description": (
         "Mark the goal you are working toward in this conversation completed or genuinely blocked, for the whole goal, "
-        "never merely this turn. completed: only when the whole objective is achieved and no required work remains, "
-        "proved requirement by requirement against current evidence. blocked: only after the same blocking condition "
-        "three goal turns running, when you cannot progress without the user or an outside change. Otherwise don't "
-        "call it: take the next concrete step, and DGC gives you another turn."),
-        "parameters": {"type": "object", "required": ["status", "summary", "evidence"],
+        "never merely this turn, or that it needs the user. completed: only when the whole objective is achieved and no "
+        "required work remains, proved requirement by requirement against current evidence. blocked: only after the "
+        "same blocking condition three goal turns running, when you cannot progress without the user or an outside "
+        "change. needs_you: only when the next step needs something only the user can give (a choice, a fact, a "
+        "permission), never to check in or confirm progress; summary says what you need, and your reply asks for it. "
+        "Otherwise don't call it: take the next concrete step, and DGC gives you another turn."),
+        "parameters": {"type": "object", "required": ["status", "summary"],
                        "properties": {"status": {"type": "string", "enum": list(UPDATES)},
                                       "summary": {"type": "string",
                                                   "description": "Outcome or observed blocker for the entire goal"},
@@ -264,9 +269,15 @@ def tool_result(arguments) -> tuple[dict | None, str]:
     args = arguments if isinstance(arguments, dict) else {}
     status = args.get("status")
     if status not in UPDATES:
-        return None, "Not recorded: status is completed or blocked. Otherwise take the next step; DGC gives you another turn."
+        return None, ("Not recorded: status is completed, blocked or needs_you. Otherwise take the next step; DGC gives "
+                      "you another turn.")
     reason = " ".join(str(args.get("summary") or args.get("reason") or "").split())[:500]
     evidence = _lines(args.get("evidence"))
+    if status == "needs_you":
+        if not reason:
+            return None, "Not recorded: needs_you says in summary what you need from the user."
+        return ({"status": status, "reason": reason, "evidence": evidence},
+                "Recorded: the goal waits for the user's answer. Ask them for it in your reply, briefly.")
     if status == "completed" and not evidence:
         return None, "Not recorded: completed needs one line of evidence per requirement."
     told = ("Recorded: the goal ends as done when your reply is saved. Say what you did, briefly."
@@ -294,7 +305,7 @@ def commit(store, run, result, choices=None) -> None:
     update = result.get("goal_update")
     status, reason, evidence = "active", None, None
     if isinstance(update, dict) and update.get("status") in UPDATES:
-        status = "done" if update["status"] == "completed" else "blocked"
+        status = ENDED[update["status"]]
         reason, evidence = update.get("reason") or None, json.dumps(update.get("evidence") or [])
     elif _needs_you(store, run, result, row, result.get("choices") if choices is None else choices):
         status, reason = "needs_you", "Waiting for your answer in the chat."
@@ -315,7 +326,7 @@ def _ended_by(store, run, result) -> bool:
     if row is None:
         return False
     store.db.execute("UPDATE pip_goals SET status=?,reason=?,evidence=?,updated_at=? WHERE id=?",
-                     ("done" if update["status"] == "completed" else "blocked", update.get("reason") or None,
+                     (ENDED[update["status"]], update.get("reason") or None,
                       json.dumps(update.get("evidence") or []), _now(store.registry), row["id"]))
     return True
 

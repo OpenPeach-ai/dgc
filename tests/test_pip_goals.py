@@ -51,7 +51,9 @@ class Starting(GoalWorld):
         self.assertIn("Plan my week", turn["text"])
         self.assertIn("update_goal", turn["text"])
         # Live, 12 Nov: asked only in words, the question didn't pause it, and the next turn said "still waiting".
-        self.assertIn("offer_choices", turn["text"], "it is told how to ask so the goal waits")
+        # Live, 12 Nov: told to ask with offer_choices, it offered choices at the end of every turn ("Yes, Day 2").
+        # A goal's own turn has no choices; the Pip pauses it on purpose, with update_goal needs_you.
+        self.assertIn("update_goal(status='needs_you')", turn["text"])
         # Live, 12 Nov: it checked in after every day ("Ready for Day 4?"), and the goal waited each time.
         self.assertIn("never to check in", turn["text"])
 
@@ -204,6 +206,19 @@ class TheTool(GoalWorld):
         self.assertIsNone(pip_goals.context_for(self.store, self.pip, {"request_key": "msg-1"}), "not once it ended")
         self.assertEqual(pip_goals.schema()["function"]["name"], "update_goal")
 
+    def test_needs_you_is_said_on_purpose_with_what_it_needs(self):
+        update, told = pip_goals.tool_result({"status": "needs_you", "summary": "Which city should the walks be in?"})
+        self.assertEqual((update["status"], update["reason"]), ("needs_you", "Which city should the walks be in?"))
+        self.assertIn("waits", told)
+        self.assertIsNone(pip_goals.tool_result({"status": "needs_you", "summary": ""})[0], "it says what it needs")
+        self.assertIn("needs_you", pip_goals.schema()["function"]["parameters"]["properties"]["status"]["enum"])
+        self.start()
+        self.finish(text="Which city should the walks be in?", goal_update={"status": "needs_you", "reason": "Which city?"})
+        goal = self.goal()
+        self.assertEqual((goal["status"], goal["reason"]), ("needs_you", "Which city?"))
+        self.tick()
+        self.assertEqual(len(self.hidden()), 1, "it waits for the answer")
+
     def test_what_the_tool_takes(self):
         update, told = pip_goals.tool_result({"status": "completed", "reason": "Done", "evidence": ["checked"]})
         self.assertEqual(update["status"], "completed")
@@ -249,6 +264,7 @@ class TheWorker(GoalWorld):
         seen, result = self.work(run, [ChatResult(content="", tool_calls=[ToolCall("g1", "update_goal", done)]),
                                        ChatResult(content="Your week is planned.")])
         self.assertIn("update_goal", seen[0][0])
+        self.assertNotIn("offer_choices", seen[0][0], "a goal's own turn has no choices: it would check in with them")
         self.assertIn(goals.CYCLE_MARKER, seen[0][1])
         self.assertIn("ends as done", seen[1][1], "it is told what its word does")
         self.assertEqual(result["goal_update"], {"status": "completed", "reason": "The week is planned",
