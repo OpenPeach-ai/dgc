@@ -1,4 +1,4 @@
-// The small menu a session's "...", its header's mark and the dock open (media/shared/blob.css is how it looks), with
+// The small menu a session's "..." and the dock open (media/shared/blob.css is how it looks), with
 // the twelve palettes a session's mark can wear. A session's mark itself is the maintainer's own
 // Mote (a ChatDGC chat) or Voxel (a Work session), drawn by media/shared/marks.js (window.DgcMarks), which the pages
 // load before this. A classic script: Work's and ChatDGC's pages and the Library load it before their own script, so

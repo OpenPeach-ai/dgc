@@ -1180,7 +1180,7 @@
   function paintDock() {
     for (const button of document.querySelectorAll(".dgc-pin[data-pin]")) paintPin(button);
     tellPipsDock();
-    paintSessionBlob();
+    wearTabSession();
     if (!dock) return;
     // A pinned session with no palette yet: the pinned ones are its neighbours.
     for (const kind of ["work", "chat", "widget"]) wearMarks(kind, dockState.pins.filter((pin) => pin.kind === kind).map((pin) => ({ id: pin.id, born: bornOf(kind, pin.id) })));
@@ -1250,34 +1250,16 @@
     });
     paintDock();
   }
-  // ---- a session's own mark (a Voxel), in its tab's header: a click offers its twelve colours ----
-  let sessionBlobId = "";
-  function paintSessionBlob(id = sessionBlobId) {
-    if (chatPlace !== "tab" || !window.DgcBlob || !window.DgcMarks) return;
-    sessionBlobId = String(id || "");
-    let button = $("session-blob");
-    if (!button) {
-      button = el("button", "dgc-blob-button"); button.id = "session-blob"; button.type = "button";
-      button.setAttribute("aria-haspopup", "menu"); button.setAttribute("aria-expanded", "false");
-      button.onclick = (e) => {
-        if (button.getAttribute("aria-expanded") === "true") { window.DgcBlob.close(true); return; }
-        window.DgcBlob.popup(button, { keyboard: e.detail === 0, place: "below", label: "This session's colour", colour: { kind: "work", ...colourOf("work", sessionBlobId) },
-          onColour: (n) => vscode.postMessage({ type: "dockColour", key: dockKey("work", sessionBlobId), colour: n }) });
-      };
-      $("thread-title").before(button);
-    }
-    button.hidden = !sessionBlobId;
-    if (!sessionBlobId) return;
+  // ---- a session in a tab of its own: its header is DGC's logo and its name, with no mark of the session (asked 12 Nov
+  // night: its editor tab wears the mark already, and the two did not sit well together). Its colour is chosen from its
+  // "…" in the lists and from the dock. The page still asks the host to keep a palette for a session that has none, so
+  // its tab's icon, its row and the dock agree. ----
+  let tabSessionId = "";
+  function wearTabSession(id = tabSessionId) {
+    if (chatPlace !== "tab" || !window.DgcMarks) return;
+    tabSessionId = String(id || "");
     // Alone in its tab, its neighbours are the sessions given a palette most recently.
-    wearMarks("work", [{ id: sessionBlobId, born: window.DgcMarks.born(sessionBlobId) }]);
-    const { chosen } = colourOf("work", sessionBlobId), name = window.DgcMarks.label(chosen);
-    if (button.dataset.drawn !== `${sessionBlobId}:${chosen}`) {
-      button.dataset.drawn = `${sessionBlobId}:${chosen}`;
-      // This is the session you are in: its mark is the one that moves.
-      button.innerHTML = markHtml("work", sessionBlobId, true);
-    }
-    button.title = "This session's colour. Click to change it.";
-    button.setAttribute("aria-label", `This session's colour: ${name}. Change it`);
+    if (tabSessionId) wearMarks("work", [{ id: tabSessionId, born: window.DgcMarks.born(tabSessionId) }]);
   }
   // ---- ChatDGC: your chats, the same in every folder, above this project's sessions (Work) ----
   // A chat opens in an editor tab of its own (src/chatdgc.ts). Titles and previews are the user's and
@@ -11350,7 +11332,7 @@ function permissionChoices(ev) {
     document.addEventListener("visibilitychange", refresh);
     window.addEventListener("focus", refresh);
   }
-  if (chatPlace === "tab") { rememberTab(document.documentElement.dataset.tabSession || ""); paintSessionBlob(document.documentElement.dataset.tabSession || ""); }
+  if (chatPlace === "tab") { rememberTab(document.documentElement.dataset.tabSession || ""); wearTabSession(document.documentElement.dataset.tabSession || ""); }
   $("btn-settings").onclick = () => vscode.postMessage({ type: "openSettings" });
 
   // ---- replay ----
@@ -12893,7 +12875,7 @@ function permissionChoices(ev) {
       });
       return;
     }
-    if (msg.type === "chat_tab") { rememberTab(msg.session); paintSessionBlob(msg.session); return; }
+    if (msg.type === "chat_tab") { rememberTab(msg.session); wearTabSession(msg.session); return; }
     // pipsModelsChanged: Settings or the Router changed, so the embedded Pips page reads its model list again.
     // pipsUnreadChanged: a Pip was marked read somewhere (its pill, its chat, a card acted on): it reads its counts again.
     // pipsProjectFolder: the Project Folder choice changed; pipsFolderPicked: the folder the editor's picker gave (Add a folder…).

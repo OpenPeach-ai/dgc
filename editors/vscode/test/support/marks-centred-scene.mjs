@@ -105,7 +105,7 @@ export async function eachSurface(browser, { width, theme }, visit) {
   x = await openDock(browser, { tab: "work", width, height: 760, theme: modern(theme), pins: LIBRARY_PINS });
   try { await x.settle(); await visit("the dock's tiles (Library pins)", x.page, "#dgc-dock", "tile"); errors.push(...x.errors); } finally { await x.close(); }
 
-  // ---- a Work session's tab: its header, and an artifact's card in the chat ---------------------------------------------
+  // ---- a Work session's tab: an artifact's card in the chat (its header has no mark since 12 Nov night: session-header-browser.test.mjs) ---------------------------------------------
   let w = await openWorkTab(browser, { width, height: 700, theme: modern(theme) });
   try {
     const event = (e) => w.send({ type: "event", event: e });
@@ -117,12 +117,11 @@ export async function eachSurface(browser, { width, theme }, visit) {
     await event({ type: "turn_end", turn_id: "t1" });
     await w.send({ type: "dock", ...DOCK }); await w.send({ type: "chat_tab", session: "s1" });
     await settle(w.page);
-    await visit("a Work tab's header", w.page, ":has(> #session-blob)", "words");
     await visit("an artifact's card in a Work chat", w.page, ".dgc-doc-card", "words");
     errors.push(...w.errors);
   } finally { await w.page.close(); }
 
-  // ---- ChatDGC: its header, a widget's card in its reply, an artifact's card, the chat's Widgets list --------------------
+  // ---- ChatDGC (its header has no mark either): a widget's card in its reply, an artifact's card, the chat's Widgets list --------------------
   let c = await openChatDgc(browser, { width, height: 760, theme: modern(theme) });
   try {
     await c.send(DOCK); await c.send({ type: "widgetsOffered", on: true });
@@ -134,7 +133,6 @@ export async function eachSurface(browser, { width, theme }, visit) {
       { id: M(13), role: "user", text: "Another widget", created_at: at(3) },
       { id: M(14), role: "assistant", text: "Done.", finish: "stop", created_at: at(4), widgets: [{ id: WG(2), title: "A widget with quite a long name that may take two lines in a narrow chat", html: "<title>Dice</title><p>x</p>", created_at: at(4) }] }] });
     await settle(c.page);
-    await visit("a ChatDGC tab's header", c.page, "header, #cd-head, .cd-head", "words");
     await visit("a widget's card in its reply", c.page, ".cd-widget-card", "words");
     await visit("an artifact's card in ChatDGC", c.page, ".dgc-doc-card", "words");
     await c.page.click("#cd-widgets"); await settle(c.page);
@@ -200,6 +198,6 @@ export async function eachSurface(browser, { width, theme }, visit) {
 }
 
 /** Every surface's name, in the order eachSurface visits them. */
-export const SURFACES = ["Work's list", "the dock's tiles (sessions)", "the colour menu", "Chat's list", "Home's session cards", "the dock's tiles (Library pins)", "a Work tab's header",
-  "an artifact's card in a Work chat", "a ChatDGC tab's header", "a widget's card in its reply", "an artifact's card in ChatDGC", "a chat's Widgets list", "the Library's Artifacts rows", "the Library's Widgets rows",
+export const SURFACES = ["Work's list", "the dock's tiles (sessions)", "the colour menu", "Chat's list", "Home's session cards", "the dock's tiles (Library pins)",
+  "an artifact's card in a Work chat", "a widget's card in its reply", "an artifact's card in ChatDGC", "a chat's Widgets list", "the Library's Artifacts rows", "the Library's Widgets rows",
   "a Pip's computer menu", "the Pip page's computer rows", "a report's card in a Pip's chat", "the computer tab's slim bar", "“Showing <name> in another tab”"];

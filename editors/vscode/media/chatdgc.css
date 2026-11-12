@@ -11,6 +11,10 @@ body { --bg: var(--vscode-editor-background, var(--fallback-bg)); --cd-col: 760p
   padding: var(--sp-2) var(--sp-3); border-bottom: 0; background: var(--bg); }
 .cd-title { flex: 1 1 auto; min-width: 0; margin: 0; padding: var(--sp-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--text); font: var(--w-med) var(--t-sm)/1.2 var(--sans); }
+/* The logo, then the chat's name, as an editor tab sets its icon and its title: 6px between them (VS Code's own
+   `.monaco-icon-label::before { padding-right: 6px }`). No mark of the chat stands between them (its tab wears it).
+   (A chat in a project has its project's name there first.) */
+.cd-head .cd-crumb[hidden] + .cd-title { margin-left: calc(6px - var(--sp-2) - var(--sp-1)); }
 .cd-head .cd-icon { width: var(--control-sm); height: var(--control-sm); margin-left: var(--sp-1); color: var(--faint); }
 .cd-head .cd-icon:hover { background: var(--surface2); color: var(--text); }
 .cd-head .cd-icon:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }

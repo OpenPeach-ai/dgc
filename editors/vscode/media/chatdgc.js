@@ -3106,7 +3106,7 @@
     if (!$("cd-empty").contains(empty)) $("cd-empty").replaceChildren(empty);      // the welcome stays put: no replayed drawing
     $("cd-title").textContent = page ? projectOf(state.conversation).name : state.conversation?.title || "New chat";
     crumb();
-    paintChatBlob();
+    wearChat();
     controls();
     widgetsChrome();
     follow();
@@ -4309,49 +4309,23 @@
   // A reply's pictures fold away (media/pictureFold.js): a choice goes to the host, which keeps it.
   window.DgcPictureFold?.setDefault(document.body.dataset.picturesFolded === "1");
   window.DgcPictureFold?.host((message) => vscode.postMessage(message));
-  // ---- this chat's mark (a Mote), in its header: the same one its tab and the dock show; a click offers its twelve colours ----
+  // ---- this chat's mark (a Mote): its editor tab and the dock show it; its header does not (asked 12 Nov night: the
+  // header is DGC's logo and the chat's name). Its colour is chosen from its "…" in the list and from the dock. ----
   // The host keeps the palette each chat's mark wears (src/dock.ts) and says every one in "dock". A project's page and
   // an Incognito chat (which is never listed) have none. A chat with no palette yet is given one here, and the host is
-  // asked to keep it (media/shared/marks.js `keeper`; the host runs the same code).
-  function chatPalette(id) {
-    // Alone in its tab, its neighbours are the chats given a palette most recently.
-    chatMarks.wear("chat", [{ id, born: window.DgcMarks.born("", state.conversation?.created_at || state.conversation?.updated_at) }]);
-    return chatMarks.palette("chat", id);
-  }
-  function paintChatBlob() {
-    const B = window.DgcBlob, M = window.DgcMarks, title = $("cd-title");
-    if (!B || !M || !chatMarks || !title) return;
-    let button = $("cd-blob");
+  // asked to keep it (media/shared/marks.js `keeper`; the host runs the same code), so its tab's icon and its row agree.
+  function wearChat() {
+    if (!window.DgcMarks || !chatMarks) return;
     const id = state.conversation?.id && !state.conversation.temporary && !(state.opened && !state.messages.length && !state.earlier && isProjectPage()) ? String(state.conversation.id) : "";
-    if (!button) {
-      if (!id) return;
-      button = el("button", "dgc-blob-button"); button.id = "cd-blob"; button.type = "button";
-      button.setAttribute("aria-haspopup", "menu"); button.setAttribute("aria-expanded", "false");
-      button.addEventListener("click", (e) => {
-        const now = String(state.conversation?.id || "");
-        if (button.getAttribute("aria-expanded") === "true") { B.close(true); return; }
-        B.popup(button, { keyboard: e.detail === 0, place: "below", label: "This chat's colour", colour: { kind: "chat", chosen: chatPalette(now) },
-          onColour: (palette) => vscode.postMessage({ type: "dockColour", key: `chat:${now}`, colour: palette }) });
-      });
-      title.before(button);
-    }
-    button.hidden = !id;
-    if (!id) return;
-    const chosen = chatPalette(id);
-    if (button.dataset.drawn !== `${id}:${chosen}`) {
-      button.dataset.drawn = `${id}:${chosen}`;
-      // This is the chat you are in: its mark is the one that moves.
-      button.innerHTML = M.of("chat", chosen, { id, moving: true });
-    }
-    button.title = "This chat's colour. Click to change it.";
-    button.setAttribute("aria-label", `This chat's colour: ${M.label(chosen)}. Change it`);
+    // Alone in its tab, its neighbours are the chats given a palette most recently.
+    if (id) chatMarks.wear("chat", [{ id, born: window.DgcMarks.born("", state.conversation?.created_at || state.conversation?.updated_at) }]);
   }
   window.addEventListener("message", (event) => {
     const msg = event.data || {};
     if (msg.type === "dock") {
       chatMarks?.said(msg);
       for (const holder of document.querySelectorAll("[data-folio]")) paintFolio(holder);      // each widget's Folio follows
-      paintChatBlob(); return;
+      wearChat(); return;
     }
     if (window.DgcVideo?.message(msg)) return;           // a video card's bytes, state or Stop (src/videoHost.ts)
     if (window.DgcPictureFold?.message(msg)) return;     // which pictures stay folded, and the setting

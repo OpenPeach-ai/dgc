@@ -78,6 +78,10 @@ body {
 }
 #phead .pm .cur, .cd-head .pm .cur { width: 5px; height: 11px; margin-left: var(--sp-1); background: var(--accent); display: inline-block; animation: blink 1.1s step-end infinite; }
 #phead .thread-title { flex: 1 1 auto; min-width: 0; border: 0; padding: var(--sp-1) var(--sp-1); background: transparent; color: var(--text); cursor: pointer; text-align: left; font: var(--w-med) var(--t-sm)/1.2 var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The logo, then the name, as an editor tab sets its icon and its title: 6px between them (VS Code's own
+   `.monaco-icon-label::before { padding-right: 6px }`), whatever the row's own gap and the name's padding are. No mark
+   of the session stands between them (its tab wears it). A helper's page has its own back button and mark there. */
+body:not([data-agent-page]) #phead .pm ~ .thread-title { margin-left: calc(6px - var(--sp-2) - var(--sp-1)); }
 #phead .thread-title:hover { color: var(--text-strong); }
 #phead .thread-title:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; border-radius: var(--r-sm); }
 #phead .pd { flex: 0 1 25%; min-width: 0; border: 0; padding: var(--sp-1) 0; background: transparent; text-align: right; font: var(--w-reg) var(--t-xs)/1 var(--sans); color: var(--faint); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

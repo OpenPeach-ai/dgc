@@ -12,7 +12,8 @@
 //   - Settings' three choices: Always, When I point at the bottom, Never
 //   - the keyboard: Tab into the dock, arrows between items, Enter opens, the menu by Shift+F10
 //   - a session's mark is a Voxel for Work and a Mote for ChatDGC, moves only while its session runs and never under
-//     reduced motion, and its colour can be changed among twelve from a row, the dock and its header
+//     reduced motion, and its colour can be changed among twelve from a row and the dock (its header shows no mark:
+//     test/session-header-browser.test.mjs)
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -709,57 +710,39 @@ test("a session's colour from its row's …: Open in editor, Pin to the dock, an
   } finally { await x.close(); }
 });
 
-test("a Work session's tab: its Voxel is in its header, and a click offers the twelve colours", async (t) => {
+// (Asked 12 Nov night: a session's header no longer shows its mark, since its editor tab wears it; the header is DGC's
+// logo and the name, test/session-header-browser.test.mjs. What is left of the mark in a tab is held here.)
+test("a Work session's tab: no mark in its header and no dock; the page asks the host to keep the session's palette, for its tab's icon", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openWorkTab(browser, { width: 700 });
   try {
-    assert.equal(await x.page.evaluate(() => document.getElementById("session-blob")?.hidden ?? true), true, "a new session with nothing saved has no mark yet");
+    await x.send({ type: "dock", pins: [], colours: {}, since: Date.now(), show: "always", most: 8, size: 34 });
     await x.send({ type: "chat_tab", session: "20261106-101500-a1" });
-    const blob = () => x.page.evaluate(() => { const b = document.getElementById("session-blob"), inner = b.querySelector("[data-mark]"), r = b.getBoundingClientRect(), title = document.getElementById("thread-title").getBoundingClientRect();
-      return { hidden: b.hidden, set: inner.dataset.mark, palette: inner.dataset.palette, moving: getComputedStyle(inner.querySelector("i:nth-child(5)")).animationPlayState, label: b.getAttribute("aria-label"), beforeTitle: r.right <= title.left + 0.5, mid: Math.abs((r.top + r.bottom) / 2 - (title.top + title.bottom) / 2) }; });
-    let b = await blob();
-    assert.equal(b.hidden, false); assert.equal(b.set, "voxel");
-    assert.equal(b.moving, "running", "the session you are in: its mark is the one that moves");
-    assert.ok(b.beforeTitle && b.mid < 1.5, "before the session's name, on its line");
-    assert.match(b.label, /^This session's colour: .+\. Change it$/);
-    const own = b.palette;
-    assert.match(b.label, new RegExp(`: ${own[0].toUpperCase()}${own.slice(1)}\\. Change it$`), "the palette's name, said");
-    await x.page.click("#session-blob");
-    const d = await x.page.evaluate(() => ({ rows: [...document.querySelectorAll(".dgc-pop .dgc-menu-row")].map((r) => r.textContent.trim()), dots: [...document.querySelectorAll(".dgc-pop .dgc-swatch")].map((s) => [s.dataset.colour, s.getAttribute("aria-checked")]),
-      below: document.querySelector(".dgc-pop").getBoundingClientRect().top >= document.getElementById("session-blob").getBoundingClientRect().bottom }));
-    assert.deepEqual(d.rows, []); assert.deepEqual(d.dots.map(([n]) => n), TWELVE); assert.equal(d.below, true, "the colours open under the mark");
-    assert.deepEqual(d.dots.filter(([, on]) => on === "true").map(([n]) => n), [own]);
-    const other = own === "orchid" ? "mint" : "orchid";
-    await x.page.click(`.dgc-pop .dgc-swatch[data-colour="${other}"]`);
-    assert.deepEqual((await x.posted("dockColour")).at(-1), { type: "dockColour", key: "work:20261106-101500-a1", colour: other });
-    await x.send({ type: "dock", pins: [], colours: { "work:20261106-101500-a1": other }, since: Date.now(), show: "always", most: 8, size: 34 });
-    b = await blob();
-    assert.equal(b.palette, other, "the host says the colour: the header's mark takes it");
+    assert.equal(await x.page.evaluate(() => document.querySelectorAll("#phead [data-mark], #session-blob").length), 0, "the header has no mark of the session");
+    assert.deepEqual((await x.posted("dockPalettes")).map((m) => [m.kind, m.list.map((r) => r.id)]), [["work", ["20261106-101500-a1"]]], "a session with no palette yet: the host is asked to keep one");
+    // The host says a colour (chosen from the list or the dock): nothing in the tab's page breaks, and nothing is asked again.
+    await x.send({ type: "dock", pins: [], colours: { "work:20261106-101500-a1": "orchid" }, since: Date.now(), show: "always", most: 8, size: 34 });
+    assert.equal((await x.posted("dockPalettes")).length, 1);
     assert.equal(await x.page.evaluate(() => !!document.getElementById("dgc-dock")), false, "a session's tab has no dock: it belongs to the side bar");
     assert.deepEqual(x.errors, []);
   } finally { await x.page.close(); }
 });
 
-test("a ChatDGC chat's tab: its Mote is in its header, with the same twelve colours", async (t) => {
+test("a ChatDGC chat's tab: no mark in its header; the host is asked to keep the chat's palette, and never an Incognito chat's", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openChat(browser, { width: 700 });
   try {
     const chat = conversation({ title: "A week in Goa in March" });
+    await x.send({ type: "dock", pins: [], colours: {}, since: Date.now(), show: "always", most: 8, size: 34 });
     await x.send({ type: "opened", conversation: chat, earlier: 0, busy: false, messages: [{ id: M(1), role: "user", text: "Plan a week in Goa.", created_at: "2026-11-10T09:30:00Z" }] });
-    await x.page.waitForSelector("#cd-blob:not([hidden])");
-    const b = await x.page.evaluate(() => { const b = document.getElementById("cd-blob"), inner = b.querySelector("[data-mark]"), r = b.getBoundingClientRect(), title = document.getElementById("cd-title").getBoundingClientRect();
-      return { set: inner.dataset.mark, cls: inner.className, parts: inner.querySelectorAll("i").length, beforeTitle: r.right <= title.left + 0.5, label: b.getAttribute("aria-label") }; });
-    assert.equal(b.set, "mote"); assert.match(b.cls, /^mote mote--[a-z]+$/); assert.equal(b.parts, 3); assert.equal(b.beforeTitle, true);
-    assert.match(b.label, /^This chat's colour: /);
-    await x.page.click("#cd-blob");
-    assert.deepEqual(await x.page.evaluate(() => [...document.querySelectorAll(".dgc-pop .dgc-swatch")].map((s) => [s.dataset.colour, s.querySelector("[data-mark]").dataset.mark].join())), TWELVE.map((name) => `${name},mote`));
-    await x.page.click('.dgc-pop .dgc-swatch[data-colour="iris"]');
-    assert.deepEqual((await x.posted("dockColour")).at(-1), { type: "dockColour", key: `chat:${chat.id}`, colour: "iris" }, "Iris, the violet one, is there to pick by hand");
+    await x.page.waitForFunction(() => window.__posted.some((m) => m.type === "dockPalettes"));
+    assert.equal(await x.page.evaluate(() => document.querySelectorAll(".cd-head [data-mark], #cd-blob").length), 0, "the header has no mark of the chat");
+    assert.deepEqual((await x.posted("dockPalettes")).map((m) => [m.kind, m.list.map((r) => r.id)]), [["chat", [chat.id]]]);
     await x.send({ type: "dock", pins: [], colours: { [`chat:${chat.id}`]: "iris" }, since: Date.now(), show: "always", most: 8, size: 34 });
-    assert.equal(await x.page.evaluate(() => document.querySelector("#cd-blob [data-mark]").dataset.palette), "iris");
-    // An Incognito chat is never listed, so it has no mark.
+    // An Incognito chat is never listed, so it has no mark and none is asked for.
     await x.send({ type: "opened", conversation: conversation({ id: "chat_" + "9".repeat(32), temporary: true, title: "" }), earlier: 0, busy: false, messages: [] });
-    assert.equal(await x.page.evaluate(() => document.getElementById("cd-blob").hidden), true);
+    await x.page.waitForTimeout(60);
+    assert.equal((await x.posted("dockPalettes")).length, 1);
     assert.deepEqual(x.errors, []);
   } finally { await x.page.close(); }
 });

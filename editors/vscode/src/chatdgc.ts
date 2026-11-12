@@ -1247,7 +1247,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     // Settings -> General -> Pictures in replies: this tab's pictures nobody folded or opened follow it at once.
     const pictures = onPicturesSetting((message) => this.post(tab, message));
     panel.onDidDispose(() => pictures.dispose());
-    // The dock and this chat's colour: its header's mark and its tab's icon follow a change at once.
+    // The dock and this chat's colour: its tab's icon follows a change at once (and the page hears what the host keeps).
     this.paintIcon(tab);
     const docked = dockOf(this.context).onChange(() => { this.paintIcon(tab); this.post(tab, dockOf(this.context).state()); });
     panel.onDidDispose(() => docked.dispose());

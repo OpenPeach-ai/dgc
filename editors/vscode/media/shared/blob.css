@@ -1,4 +1,4 @@
-/* A session's mark where it is a button, and the small menu it opens with its twelve palettes (media/shared/blob.js).
+/* The small menu a session's "..." and the dock open, with a session's twelve palettes (media/shared/blob.js).
    The marks themselves are the maintainer's own sheets, as he wrote them: Mote for a ChatDGC chat (mote.css), Voxel
    for a Work session (voxel.css) and Folio for a widget (folio.css), drawn by media/shared/marks.js. One mark moves at a time,
    the one whose session is at work (or whose own tab you are in); every other is paused at rest, and under reduced
@@ -8,14 +8,7 @@
 /* A mark is never squeezed by a line's height. */
 [data-mark] { line-height: 0; }
 
-/* A session's mark in its own header: a button, which opens its colours. */
-.dgc-blob-button { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin: 0; padding: 0;
-  border: 0; border-radius: var(--r-sm); background: transparent; cursor: pointer; transition: background-color var(--dur-hover) var(--ease-out); }
-.dgc-blob-button:hover, .dgc-blob-button[aria-expanded="true"] { background: var(--wash); }
-.dgc-blob-button:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
-.dgc-blob-button [data-mark] { --size: 18px; }
-
-/* The small menu the dock, a row's "..." and a header's mark open (blob.js popup): the shared menu's look and rows, placed
+/* The small menu the dock and a row's "..." open (blob.js popup): the shared menu's look and rows, placed
    by the page beside what opened it. */
 .dgc-pop { position: fixed; z-index: 60; box-sizing: border-box; min-width: 176px; max-width: min(248px, calc(100vw - 12px)); max-height: calc(100vh - 12px); overflow-y: auto;
   transform-origin: var(--pop-x, 50%) var(--pop-y, 100%); animation: dgc-pop-in var(--dur-menu) var(--ease-out); }

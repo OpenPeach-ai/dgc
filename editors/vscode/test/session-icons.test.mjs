@@ -41,7 +41,7 @@ const sessions = (n, from = 0) => Array.from({ length: n }, (_, i) => ({ id: `20
 /** Every mark under `sel`, as drawn: its set and palette, its classes, its parts, whether it moves, its box, and whether its row's box holds it. */
 const marksIn = (page, sel) => page.evaluate((sel) => [...document.querySelectorAll(`${sel} [data-mark]`)].map((m) => {
   const r = m.getBoundingClientRect(), part = getComputedStyle(m.querySelector("i:last-child")), body = getComputedStyle(m, "::before");
-  const holder = m.closest(".session-row, .chat-row, .dgc-hub-card, .dgc-dock-item, .dgc-swatch, .dgc-blob-button"), h = holder?.getBoundingClientRect();
+  const holder = m.closest(".session-row, .chat-row, .dgc-hub-card, .dgc-dock-item, .dgc-swatch"), h = holder?.getBoundingClientRect();
   const next = m.closest(".session-blob")?.nextElementSibling?.getBoundingClientRect();
   return { id: m.closest("[data-id]")?.dataset.id || m.closest("[data-key]")?.dataset.key || "", set: m.dataset.mark, palette: m.dataset.palette, cls: m.className, parts: [...m.children].map((c) => c.tagName).join(""), hidden: m.getAttribute("aria-hidden"),
     w: Math.round(r.width * 100) / 100, h: Math.round(r.height * 100) / 100, shown: m.checkVisibility({ visibilityProperty: true, opacityProperty: true }),
