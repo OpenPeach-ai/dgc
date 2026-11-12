@@ -69,7 +69,7 @@ def gh_signed_in() -> bool:
     if not gh:
         return False
     try:
-        return subprocess.run([gh, "auth", "status"], capture_output=True, timeout=15).returncode == 0
+        return subprocess.run([gh, "auth", "status"], stdin=subprocess.DEVNULL, capture_output=True, timeout=15).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
 
@@ -83,7 +83,7 @@ class Client:
     def get(self, path):
         if self.gh:
             done = subprocess.run(["gh", "api", "-H", "Accept: application/vnd.github+json", path],
-                                  capture_output=True, timeout=60)
+                                  stdin=subprocess.DEVNULL, capture_output=True, timeout=60)
             if done.returncode != 0:
                 said = (done.stderr or b"").decode("utf-8", "replace")
                 if "404" in said or "Not Found" in said:

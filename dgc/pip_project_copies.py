@@ -267,11 +267,19 @@ def _project(registry, workspace_id) -> tuple[dict, Path]:
 
 
 def _git(root: Path, *args, data: bytes | None = None) -> bytes | None:
+    """Git's answer, or None. Its stdin is what DGC gives it, never the editor's protocol pipe."""
     try:
-        done = subprocess.run(["git", "-C", str(root), *args], input=data, capture_output=True, timeout=60)
-    except (OSError, subprocess.TimeoutExpired):
+        proc = subprocess.Popen(["git", "-C", str(root), *args], stdin=subprocess.PIPE if data is not None else subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError:
         return None
-    return done.stdout if done.returncode == 0 else None
+    try:
+        out, _ = proc.communicate(data, timeout=60)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        return None
+    return out if proc.returncode == 0 else None
 
 
 def project_files(root: Path) -> list[str]:
