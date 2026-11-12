@@ -82,7 +82,7 @@ class SubEngine:
     def build_argv(self, binary: str, prompt: str, *, cont: bool,
                    session_id: str = "", mode: str = "default",
                    model: str = "", effort: str = "", sandboxed: bool = False,
-                   network: bool = False) -> list[str]:
+                   network: bool = False, extra: tuple | list = ()) -> list[str]:
         """Build an argv-only invocation of the vendor CLI.
 
         Permission modes are mapped explicitly instead of silently turning every delegated turn
@@ -168,6 +168,7 @@ class SubEngine:
             argv += ["--effort", effort]
         elif effort and self.effort_style == "codex":  # codex: -c model_reasoning_effort="LEVEL"
             argv += ["-c", f'model_reasoning_effort="{effort}"']
+        argv += [str(part) for part in extra or ()]    # DGC's plugins, served to it (subscription_bridge)
         if self.prompt_flag:
             argv += [self.prompt_flag, prompt]
         else:
@@ -1025,6 +1026,12 @@ class _Relay:
             name = str(event.get("name") or "tool")
             call_id = str(event.get("id") or "") or None
             args = event.get("args") if isinstance(event.get("args"), dict) else {}
+            from .subscription_bridge import is_bridge_tool
+            if is_bridge_tool(name):
+                # A call on DGC's plugins: Work's own handler draws its row (and asks, by DGC's rules).
+                if call_id:
+                    self.names[call_id] = name
+                return
             if call_id:
                 self.names[call_id] = name
                 diff = edit_diff(name, args)
@@ -1033,6 +1040,9 @@ class _Relay:
             self.ui.tool_call(name, args, call_id)
         elif kind == "tool_result":
             call_id = str(event.get("id") or "") or None
+            from .subscription_bridge import is_bridge_tool
+            if is_bridge_tool(self.names.get(call_id or "", "")):
+                return
             output = self.diffs.get(call_id or "") or str(event.get("output") or "")
             if event.get("error"):
                 output = "error: " + str(event.get("output") or "tool failed")
@@ -1110,11 +1120,15 @@ def delegate_turn(config, agent, ui, engine: SubEngine, prompt: str, *, cancel=N
             # its session is gone, it knows nothing of this chat).
             catch_up = getattr(agent, "cli_catch_up", None)
             missed = catch_up(resumed=bool(session_id)) if callable(catch_up) else ""
-        result = run_turn(engine, delegated_prompt(config, (missed + safe_prompt) if missed else safe_prompt, mode), config.project_root,
-                          cont=bool(session_id), session_id=session_id, mode=mode, timeout=budget,
-                          on_event=on_event, cancel=cancel, model=model, effort=effort,
-                          goal_request=agent._active_goal_request,
-                          redact_secrets=agent._secret_values(), sandboxed=sandboxed, network=network)
+        # pips-23: DGC's plugins reach it through the tool bridge Pips use; each call is Work's own, by DGC's rules.
+        from .subscription_bridge import Bridge
+        with Bridge(agent, engine.key) as bridge:
+            result = run_turn(engine, delegated_prompt(config, (missed + safe_prompt) if missed else safe_prompt, mode),
+                              config.project_root, cont=bool(session_id), session_id=session_id, mode=mode, timeout=budget,
+                              on_event=on_event, cancel=cancel, model=model, effort=effort,
+                              goal_request=agent._active_goal_request, env=bridge.env or None,
+                              redact_secrets=agent._secret_values(), sandboxed=sandboxed, network=network,
+                              extra_argv=bridge.argv)
         if result.get("session_id") and not result.get("cancelled") and not result.get("timeout"):
             if as_fallback:
                 own["session"] = result["session_id"]
@@ -1166,7 +1180,8 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
              env: dict | None = None, cancel: Callable[[], bool] | None = None,
              session_id: str = "", mode: str = "default",
              model: str = "", effort: str = "", goal_request: dict | None = None,
-             redact_secrets: tuple[str, ...] = (), sandboxed: bool = False, network: bool = False) -> dict:
+             redact_secrets: tuple[str, ...] = (), sandboxed: bool = False, network: bool = False,
+             extra_argv: tuple | list = ()) -> dict:
     """Delegate one turn to the engine's official CLI in ``workdir``, streaming
     normalized events to ``on_event``. Returns {rc, text, timeout, cancelled, events}.
     Raises only for a missing binary / not-authenticated engine (via preflight); a
@@ -1187,7 +1202,8 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
     if goal_request is not None:
         prompt = delegated_instruction(prompt, goal_request)
     argv = engine.build_argv(binary, prompt, cont=cont, session_id=session_id,
-                             mode=mode, model=model, effort=effort, sandboxed=sandboxed, network=network)
+                             mode=mode, model=model, effort=effort, sandboxed=sandboxed, network=network,
+                             extra=extra_argv)
     started = time.monotonic()
     if cancel is not None and cancel():
         return {"rc": None, "text": "", "timeout": False, "cancelled": True,

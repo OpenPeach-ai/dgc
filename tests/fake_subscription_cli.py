@@ -50,19 +50,25 @@ if ENGINE == "claude":
     seen["servers"] = sorted(config)
     server = config["dgc"]
     command, env = [server["command"], *server["args"]], {**server["env"], "PATH": os.environ.get("PATH", "")}
-    message = json.loads(stdin)
-    seen["prompt"] = message["message"]["content"][0]["text"]
-    seen["photos"] = [part["source"]["media_type"] for part in message["message"]["content"] if part["type"] == "image"]
-    seen["system"] = Path(argv[argv.index("--system-prompt-file") + 1]).read_text()
+    if stdin.strip():
+        message = json.loads(stdin)
+        seen["prompt"] = message["message"]["content"][0]["text"]
+        seen["photos"] = [part["source"]["media_type"] for part in message["message"]["content"] if part["type"] == "image"]
+    else:                                   # Work on a subscription: its prompt is the last argument (after --)
+        seen["prompt"], seen["photos"] = argv[argv.index("--") + 1] if "--" in argv else "", []
+    if "--system-prompt-file" in argv:
+        seen["system"] = Path(argv[argv.index("--system-prompt-file") + 1]).read_text()
 else:
     pairs = dict(argv[i + 1].split("=", 1) for i, arg in enumerate(argv) if arg == "-c")
     seen["config"] = pairs
     command = [json.loads(pairs["mcp_servers.dgc.command"]), *json.loads(pairs["mcp_servers.dgc.args"])]
     env = {name: os.environ[name] for name in json.loads(pairs["mcp_servers.dgc.env_vars"]) if name in os.environ}
     env["PATH"] = os.environ.get("PATH", "")
-    seen["prompt"] = stdin
-    seen["system"] = Path(json.loads(pairs["model_instructions_file"])).read_text()
-    seen["catalog"] = json.loads(Path(json.loads(pairs["model_catalog_json"])).read_text())
+    seen["prompt"] = stdin or (argv[argv.index("--") + 1] if "--" in argv else "")
+    if "model_instructions_file" in pairs:
+        seen["system"] = Path(json.loads(pairs["model_instructions_file"])).read_text()
+    if "model_catalog_json" in pairs:
+        seen["catalog"] = json.loads(Path(json.loads(pairs["model_catalog_json"])).read_text())
     seen["photos"] = [arg.split("=", 1)[1] for arg in argv if arg.startswith("--image=")]
 
 relay = subprocess.Popen(command, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
