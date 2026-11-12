@@ -32,7 +32,7 @@ RUN = re.compile(r"https://github\.com/([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/([A-Z
                  r"(?:/job/\d{1,15})?/?\Z")
 EVERY = (30, 900)
 TEXT = 240
-CONTROL = re.compile(r"[\x00-\x1f\x7f​-‏ -‮⁦-⁩]")
+CONTROL = re.compile(r"[\x00-\x1f\x7f\u200b-\u200f\u2028-\u202e\u2066-\u2069]")
 REVIEW_WORDS = {"APPROVED": "approved", "CHANGES_REQUESTED": "changes requested", "COMMENTED": "commented",
                 "DISMISSED": "dismissed"}
 
