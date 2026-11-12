@@ -142,7 +142,7 @@ TAB_ACTIONS = ("list", "open", "switch", "close")
 # with the eyes, on a computer whose screen this machine can show.
 from .pip_desktop_eyes import DESKTOP_OPS, DESKTOP_POINT_OPS  # noqa: E402
 OPS = TEXT_OPS + ("look",) + POINT_OPS + ("upload",) + DESKTOP_OPS
-APP_KEYS = ("images", "documents", "pdf", "files", "terminal", "browser")
+APP_KEYS = ("images", "documents", "pdf", "code", "files", "terminal", "browser")
 # Files and the Terminal: no browser, so they never wait on (or hold) the browser.
 DESK_OPS = ("files", "open_file", "run", "jobs", "stop_job")
 # A Pip answers in its conversations in parallel (pip_conversations), and its computer is one screen: the reply that has
@@ -562,8 +562,8 @@ class Host:
 
     def _dock_launch(self, what: str) -> None:
         """The dock's Browser icon: bring the browser back (a new window, or a restart if it closed). Its image
-        editor, Documents and PDF viewer: open the app in its own box."""
-        if what in ("images", "documents", "pdf"):
+        editor, Documents, PDF viewer and code editor: open the app in its own box."""
+        if what in ("images", "documents", "pdf", "code"):
             self.open_app(what)
             return
         if what != "browser":
@@ -1538,9 +1538,9 @@ class Host:
                     from .pip_apps import app_for
                     app = app_for(str(path)) or ""
                 if app not in APP_KEYS:
-                    raise ValueError("say which app: images, documents, pdf, files, terminal or browser")
+                    raise ValueError("say which app: images, documents, pdf, code, files, terminal or browser")
                 if path and app in ("files", "terminal", "browser"):
-                    raise ValueError("only images, documents and pdf open a file")
+                    raise ValueError("only images, documents, pdf and code open a file")
                 before = {w["id"] for w in eyes.windows(self.desktop)}
                 opened = self.open_app(app, path)
                 said = f"Opened {opened}."

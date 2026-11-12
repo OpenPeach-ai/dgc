@@ -9,7 +9,8 @@ every package list against its source's signing key and every package against th
 The packages are unpacked with `dpkg-deb -x` (no install scripts run) into
 ~/.dgc/desktop/<arch>/v-<stamp>/root, which the desktop box mounts read-only at /opt/desk. Only what
 the system lacks is fetched -- apt's own simulated install says which. Google's repository is
-trusted only through Google's Linux signing key, whose fingerprint is pinned here. Checked again at
+trusted only through Google's Linux signing key, whose fingerprint is pinned here; VSCodium's (the
+code editor among the apps the user may add, pip_apps) only through its signing key, pinned the same way. Checked again at
 most once a day, so the browser does not go stale; an update is unpacked beside the old one and
 switched to in one step.
 
@@ -37,6 +38,11 @@ GOOGLE_KEY_URL = "https://dl.google.com/linux/linux_signing_key.pub"
 # Google Inc. (Linux Packages Signing Authority). Its signing subkeys rotate; this primary key does not.
 GOOGLE_KEY_FINGERPRINT = "EB4C1BFD4F042F6DDDCCEC917721F63BD38B4796"
 GOOGLE_REPOSITORY = "https://dl.google.com/linux/chrome/deb/"
+# VSCodium's packages (vscodium.com's own install steps): its repository's signing key, pinned by its fingerprint.
+VSCODIUM_PACKAGE = "codium"
+VSCODIUM_KEY_URL = "https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg"
+VSCODIUM_KEY_FINGERPRINT = "1302DE60231889FE1EBACADC54678CF75A278D9C"
+VSCODIUM_REPOSITORY = "https://download.vscodium.com/debs"
 # apt's extra lists (icons, translations, command-not-found) are most of an update's download.
 QUIET_TARGETS = ("CNF", "DEP-11", "DEP-11-icons", "DEP-11-icons-hidpi", "DEP-11-icons-large",
                  "DEP-11-icons-large-hidpi", "DEP-11-icons-small", "Translations")
@@ -283,18 +289,51 @@ def _distro_sources(parts: Path) -> int:
 
 def _google_key(target: Path) -> None:
     """Google's key, checked against the pinned fingerprint before apt ever trusts it."""
-    with urllib.request.urlopen(GOOGLE_KEY_URL, timeout=30) as response:
+    _pinned_key(target, GOOGLE_KEY_URL, GOOGLE_KEY_FINGERPRINT, "Google's", "Chrome")
+
+
+def _vscodium_key(target: Path) -> None:
+    """VSCodium's key, checked against the pinned fingerprint before apt ever trusts it."""
+    _pinned_key(target, VSCODIUM_KEY_URL, VSCODIUM_KEY_FINGERPRINT, "VSCodium's", "VSCodium")
+
+
+def _extra_sources(apt: Path, needs, *, wanted_apps) -> None:
+    """The repositories besides the system's: Google's while Chrome is needed, VSCodium's while it is needed or its
+    size is still to be measured for the apps' offer (``wanted_apps``: pip_apps.wanted_packages())."""
+    machine = arch()
+    if CHROME_PACKAGE in needs:
+        _write_status(state="running", step="Checking Google's signing key", done=0, total=0)
+        _google_key(apt / "google.asc")
+        (apt / "parts" / "google-chrome.list").write_text(
+            f"deb [arch={machine} signed-by={apt / 'google.asc'}] {GOOGLE_REPOSITORY} stable main\n", encoding="utf-8")
+    if VSCODIUM_PACKAGE in needs or VSCODIUM_PACKAGE in wanted_apps:
+        try:
+            _write_status(state="running", step="Checking VSCodium's signing key", done=0, total=0)
+            _vscodium_key(apt / "vscodium.asc")
+            (apt / "parts" / "vscodium.list").write_text(
+                f"deb [arch={machine} signed-by={apt / 'vscodium.asc'}] {VSCODIUM_REPOSITORY} vscodium main\n",
+                encoding="utf-8")
+        except Exception:
+            # Asked for (the user said yes to the apps): its failure is said, as Chrome's is. Only measuring the
+            # offer: never a reason the desktop isn't set up; the offer is measured on a later check.
+            if VSCODIUM_PACKAGE in needs:
+                raise
+            (apt / "parts" / "vscodium.list").unlink(missing_ok=True)
+
+
+def _pinned_key(target: Path, url: str, fingerprint: str, whose: str, what: str) -> None:
+    with urllib.request.urlopen(url, timeout=30) as response:
         data = response.read(256 * 1024 + 1)
     if len(data) > 256 * 1024 or b"BEGIN PGP PUBLIC KEY BLOCK" not in data:
-        raise RuntimeError("Google's signing key did not look like a key.")
+        raise RuntimeError(f"{whose} signing key did not look like a key.")
     checking = target.with_suffix(".checking")
     checking.write_bytes(data)
     try:
         shown = subprocess.run(["gpg", "--batch", "--with-colons", "--show-keys", str(checking)], capture_output=True,
                                timeout=30, check=False, stdin=subprocess.DEVNULL)
         fingerprints = [l.split(b":")[9].decode() for l in shown.stdout.splitlines() if l.startswith(b"fpr:")]
-        if not fingerprints or fingerprints[0] != GOOGLE_KEY_FINGERPRINT:
-            raise RuntimeError("Google's signing key is not the one DGC trusts; Chrome was not downloaded.")
+        if not fingerprints or fingerprints[0] != fingerprint:
+            raise RuntimeError(f"{whose} signing key is not the one DGC trusts; {what} was not downloaded.")
         os.replace(checking, target)
     finally:
         checking.unlink(missing_ok=True)
@@ -325,12 +364,10 @@ def _run(needs: list[str]) -> None:
             (apt / part).mkdir(parents=True, exist_ok=True)
         if not _distro_sources(apt / "parts"):
             raise RuntimeError("This computer's package sources could not be found.")
-        machine = arch()
-        if CHROME_PACKAGE in needs:
-            _write_status(state="running", step="Checking Google's signing key", done=0, total=0)
-            _google_key(apt / "google.asc")
-            (apt / "parts" / "google-chrome.list").write_text(
-                f"deb [arch={machine} signed-by={apt / 'google.asc'}] {GOOGLE_REPOSITORY} stable main\n", encoding="utf-8")
+        from . import pip_apps
+        # Before the user answers the apps' offer, their sizes are measured (VSCodium's from its own repository).
+        asked = pip_apps._read_offer().get("answer") in ("yes", "no")
+        _extra_sources(apt, needs, wanted_apps=[] if asked else pip_apps.wanted_packages())
         options = _apt_options(apt)
         _run_step(["apt-get", *options, "update"], "Updating package lists")
         plan = _run_step(["apt-get", *options, "-s", "install", "--no-install-recommends", *needs],

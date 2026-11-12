@@ -6,6 +6,11 @@ the whole desktop"): an image editor, a document editor and a PDF viewer, on its
   or set up; GIMP and Inkscape are not here, and their downloads would be one more thing to keep working.
 - **Document editor:** LibreOffice Writer.
 - **PDF viewer:** Evince.
+- **Code editor:** VSCodium, the open-source build of VS Code (the user's choice, 9 Nov: extensions from Open VSX, no
+  Microsoft licence terms or telemetry in a Pip's box). About 143 MB, so it is never part of the desktop: it comes
+  with the others' offer, from VSCodium's own apt repository, trusted only through its signing key (pinned in
+  pip_screen_setup, the way Chrome's is). In its box Electron's own sandbox is off (DGC's box is the sandbox), and its
+  settings and extensions live in the app's private folder, with updates and telemetry off.
 
 Each app opens in a box of its own (bubblewrap, like the browser and the Terminal): the system's programs
 read-only, the computer's Files as the only folder it sees, its settings in a private folder beside Files
@@ -45,12 +50,24 @@ APPS = {
                   "packages": ["libreoffice-writer", "libreoffice-gtk3"], "icon": "documents.png"},
     "pdf": {"name": "PDF viewer", "program": "Evince", "module": None, "args": [], "packages": ["evince"],
             "icon": "pdf.png"},
+    "code": {"name": "Code editor", "program": "VSCodium", "module": None, "args": [], "packages": ["codium"],
+             "icon": "code.png"},
 }
+LIBREOFFICE_APPS = ("images", "documents")
 OPENS = {"images": (".odg", ".png", ".jpg", ".jpeg", ".svg", ".gif", ".bmp", ".webp", ".pdf"),
          "documents": (".odt", ".docx", ".doc", ".rtf", ".txt", ".html", ".htm", ".md"),
-         "pdf": (".pdf",)}
+         "pdf": (".pdf",),
+         "code": (".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".json", ".css", ".scss", ".sh", ".yml",
+                  ".yaml", ".toml", ".ini", ".cfg", ".c", ".h", ".cpp", ".rs", ".go", ".java", ".rb", ".php", ".sql",
+                  ".xml", ".vue", ".svelte", ".lua", ".kt", ".swift", ".ipynb", ".env", ".lock", ".gitignore")}
 LIBREOFFICE = Path("/usr/lib/libreoffice")
 EVINCE = Path("/usr/bin/evince")
+CODIUM = Path("/usr/share/codium/codium")          # where VSCodium's package puts its program
+CODIUM_SETTINGS = {"update.mode": "none", "update.showReleaseNotes": False, "telemetry.telemetryLevel": "off",
+                   "extensions.autoUpdate": False, "extensions.autoCheckUpdates": False,
+                   "security.workspace.trust.enabled": False, "workbench.startupEditor": "none",
+                   "workbench.colorTheme": "Default Dark Modern", "window.titleBarStyle": "custom",
+                   "window.restoreWindows": "none", "git.openRepositoryInParentFolders": "never"}
 APP_MEMORY = 2 * 1024 ** 3
 MAX_RUNNING = 6
 OFFER = "apps.json"
@@ -107,6 +124,13 @@ def find(key: str) -> dict | None:
         if root is not None and _elf(root / "usr" / "bin" / "evince"):
             return {"source": "dgc", "root": root}
         return None
+    if key == "code":
+        if _elf(CODIUM):
+            return {"source": "system"}
+        root = _downloaded_root()
+        if root is not None and _elf(root / "usr" / "share" / "codium" / "codium"):
+            return {"source": "dgc", "root": root}
+        return None
     if (LIBREOFFICE / "program" / "soffice").is_file():
         # The system's LibreOffice: this app only when its part (Draw, Writer) is installed too. A LibreOffice split
         # between the system and DGC's folder can't run from one place, so it is never mixed.
@@ -156,7 +180,7 @@ def wanted_packages(keys=None) -> list[str]:
     part when the system has LibreOffice itself."""
     out = []
     for key in (missing() if keys is None else keys):
-        if key != "pdf" and (LIBREOFFICE / "program" / "soffice").is_file():
+        if key in LIBREOFFICE_APPS and (LIBREOFFICE / "program" / "soffice").is_file():
             continue
         for name in APPS[key]["packages"]:
             if name not in out:
@@ -208,12 +232,12 @@ def offer() -> dict:
         return {**base, "state": "ready", "line": ""}
     # A part of the system's own LibreOffice (Draw, Writer) is the system's to add: never mixed with a download.
     system_lo = (LIBREOFFICE / "program" / "soffice").is_file()
-    fetchable = [k for k in lacking if k == "pdf" or not system_lo] if pip_screen_setup.supported()[0] else []
+    fetchable = [k for k in lacking if k not in LIBREOFFICE_APPS or not system_lo] if pip_screen_setup.supported()[0] else []
     if not fetchable:
         packages = " ".join(dict.fromkeys(p for k in lacking for p in APPS[k]["packages"] if p != "libreoffice-gtk3"))
         return {**base, "state": "unavailable",
                 "line": f"To add its {_what(lacking)}, install {packages} with your package manager."}
-    names = " and ".join(sorted({"LibreOffice" if k != "pdf" else "Evince" for k in fetchable}))
+    names = " and ".join(sorted({SOURCES[k] for k in fetchable}))
     saved = _read_offer()
     setup = pip_screen_setup.status()
     measured = saved.get("measured") if isinstance(saved.get("measured"), dict) else None
@@ -228,12 +252,22 @@ def offer() -> dict:
     if size is None:
         return {**base, "state": "measuring", "line": ""}
     return {**base, "state": "offer", "bytes": size,
-            "line": f"Add {_what(fetchable, article=True)} to this computer? DGC downloads {names} from your system's "
-                    f"own package servers into its own folder: {_mb(size)}, once."}
+            "line": f"Add {_what(fetchable, article=True)} to this computer? DGC downloads {_from(fetchable)} into its "
+                    f"own folder: {_mb(size)}, once."}
 
 
 WHAT = {"images": ("image editor", "an image editor"), "documents": ("document editor", "a document editor"),
-        "pdf": ("PDF viewer", "a PDF viewer")}
+        "pdf": ("PDF viewer", "a PDF viewer"), "code": ("code editor", "a code editor")}
+SOURCES = {"images": "LibreOffice", "documents": "LibreOffice", "pdf": "Evince", "code": "VSCodium"}
+
+
+def _from(keys) -> str:
+    """Where the offer's programs come from: the system's own package servers, and VSCodium's own."""
+    system = sorted({SOURCES[k] for k in keys if k != "code"})
+    said = [f"{' and '.join(system)} from your system's own package servers"] if system else []
+    if "code" in keys:
+        said.append("VSCodium from VSCodium's own, its signing key checked")
+    return " and ".join(said)
 
 
 def _what(keys, *, article=False) -> str:
@@ -284,6 +318,11 @@ def seed_settings(config: Path) -> None:
     settings_ini = gtk / "settings.ini"
     if not settings_ini.is_symlink():
         settings_ini.write_text(gtk_settings()[0], encoding="utf-8")
+    codium = config / "codium" / "User"
+    codium.mkdir(mode=0o700, parents=True, exist_ok=True)
+    codium_settings = codium / "settings.json"
+    if not codium_settings.exists() and not codium_settings.is_symlink():
+        codium_settings.write_text(json.dumps(CODIUM_SETTINGS, indent=2) + "\n", encoding="utf-8")
     user = config / "libreoffice" / "user"
     user.mkdir(mode=0o700, parents=True, exist_ok=True)
     settings = user / "registrymodifications.xcu"
@@ -314,7 +353,18 @@ def box_argv(key: str, *, x11_dir: Path, files: Path, config: Path, file: str | 
     if own:
         argv += ["--ro-bind", str(root), "/opt/desk", "--setenv", "LD_LIBRARY_PATH", _triplets("/opt/desk"),
                  "--setenv", "XDG_DATA_DIRS", "/opt/desk/usr/share:/usr/share"]
-    if key == "pdf":
+    if key == "code":
+        # Electron: its own sandbox off (it can't nest in DGC's, which is the sandbox here), no GPU, /dev/shm unused;
+        # settings and extensions in the app's private folder; its Files open as the folder it works in.
+        if own:
+            program = ["/opt/desk/usr/share/codium/codium"]
+        else:
+            argv += ["--ro-bind", str(CODIUM.parent), "/opt/apps/codium"]
+            program = ["/opt/apps/codium/codium"]
+        program += ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-workspace-trust",
+                    "--skip-welcome", "--skip-release-notes", "--user-data-dir=/home/pip/.config/codium",
+                    "--extensions-dir=/home/pip/.config/codium-extensions", "/home/pip/Files"]
+    elif key == "pdf":
         if own:
             backends = next((p for p in (root / "usr/lib").glob("*/evince/4/backends")), None)
             if backends is not None:
@@ -374,7 +424,7 @@ def inside_path(files: Path, path) -> str:
 def app_for(path: str) -> str | None:
     """The app that opens a file of this kind (a PDF in the PDF viewer, a .docx in Documents...)."""
     lower = str(path or "").lower()
-    for key in ("pdf", "documents", "images"):
+    for key in ("pdf", "documents", "images", "code"):
         if lower.endswith(OPENS[key]):
             return key
     return None
@@ -393,7 +443,7 @@ class Apps:
     def open(self, key: str, x11_dir: Path, *, file: str | None = None, launch=lambda start: start(), log: Path | None = None,
              egress: Path | None = None) -> str:
         if key not in APPS:
-            raise ValueError("open images, documents or pdf")
+            raise ValueError("open images, documents, pdf or code")
         self.config.mkdir(mode=0o700, parents=True, exist_ok=True)
         seed_settings(self.config)
         forwarder = None
@@ -451,4 +501,4 @@ def describe() -> str:
     return ", ".join(parts)
 
 
-NAMES = re.compile(r"^(images|documents|pdf|files|terminal|browser)$")
+NAMES = re.compile(r"^(images|documents|pdf|code|files|terminal|browser)$")

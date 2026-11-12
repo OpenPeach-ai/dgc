@@ -224,7 +224,7 @@ def terminal_command(mac: bool = False) -> str:
     return XTERM_COMMAND
 # The lines the dock (and only the dock) writes to DGC's control FIFO: the browser, and the apps that run in boxes
 # of their own (pip_apps), which DGC starts.
-CONTROL_LINES = frozenset({"browser", "images", "documents", "pdf"})
+CONTROL_LINES = frozenset({"browser", "images", "documents", "pdf", "code"})
 
 
 def dock_icon(index: int, count: int, screen=(WIDTH, HEIGHT)) -> tuple[int, int]:
@@ -280,7 +280,7 @@ def write_config(conf: Path, name: str, apps_shown=(), screen=(WIDTH, HEIGHT), n
     from . import pip_apps
     conf.mkdir(mode=0o700, parents=True, exist_ok=True)
     (conf / "apps").mkdir(mode=0o700, exist_ok=True)
-    for asset in ("browser.png", "files.png", "terminal.png", "images.png", "documents.png", "pdf.png"):
+    for asset in ("browser.png", "files.png", "terminal.png", "images.png", "documents.png", "pdf.png", "code.png"):
         shutil.copyfile(ASSETS / asset, conf / asset)
     wallpaper = wallpaper_for(number)
     shutil.copyfile(ASSETS / wallpaper.file, conf / "wallpaper.jpg")
@@ -545,7 +545,7 @@ class Desktop:
             os.close(fd)
 
     def _listen(self) -> None:
-        """The dock writes "browser", or an app's name (images, documents, pdf), to the control FIFO; nothing else
+        """The dock writes "browser", or an app's name (images, documents, pdf, code), to the control FIFO; nothing else
         is accepted."""
         control = self.runtime / "sock" / "control"
         while self.proc is not None and self.proc.poll() is None:
