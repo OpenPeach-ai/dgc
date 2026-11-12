@@ -4,7 +4,9 @@
 /* The marks' colours. On a dark ground these are the ones chosen in the box and the bubble. They are too pale for a light
    ground (a Page mark read 1.6:1 on white, and the bubble's grey less on its lilac), so a light theme takes the same
    effects in darker steps of the same hues. A Pip's bubble is the theme's grey too, so its marks follow the theme
-   (they were kept light from when it was deep purple, and read 1.2:1 on the light theme's grey; 12 Nov).
+   (they were kept light from when it was deep purple, and read 1.2:1 on the light theme's grey; 12 Nov). Its chat in
+   the side bar is in a shadow root, which :root and body rules don't reach: the bubble names its colours itself, and
+   :host-context carries the light theme in.
    The purple marks (--mark-word, --mark-plugin, --mark-icon and their effects) are in media/shared/tokens.css. */
 :root {
   --mark-sent: #d8d6df; --mark-sent-hover: #f4f4f7; --mark-sent-shimmer: linear-gradient(105deg,#c5c4ce,#f4f4f7,#d4d3dc,#fafaff,#c5c4ce);
@@ -12,6 +14,23 @@
 }
 body:is(.vscode-light, .vscode-high-contrast-light) {
   /* A logo drawn light (Composio's) keeps a dark edge on a light ground. */
+  --mark-logo-filter: drop-shadow(.5px 0 0 #2a2140) drop-shadow(-.5px 0 0 #2a2140) drop-shadow(0 .5px 0 #2a2140) drop-shadow(0 -.5px 0 #2a2140);
+  --mark-sent: #5c5a68; --mark-sent-hover: #2f2d3a; --mark-sent-shimmer: linear-gradient(105deg,#5c5a68,#7f7d8c,#4f4d5a,#716f7e,#5c5a68);
+  --mark-sent-glow: linear-gradient(90deg, transparent, rgba(60,52,92,.07), rgba(60,52,92,.14), rgba(60,52,92,.07), transparent);
+}
+.pip-message.user .bubble .prompt-text {
+  --mark-logo-filter: none;
+  --mark-sent: #d8d6df; --mark-sent-hover: #f4f4f7; --mark-sent-shimmer: linear-gradient(105deg,#c5c4ce,#f4f4f7,#d4d3dc,#fafaff,#c5c4ce);
+  --mark-sent-glow: linear-gradient(90deg, transparent, rgba(231,229,242,.09), rgba(250,250,255,.19), rgba(231,229,242,.09), transparent);
+}
+body:is(.vscode-light, .vscode-high-contrast-light) .pip-message.user .bubble .prompt-text {
+  --mark-logo-filter: drop-shadow(.5px 0 0 #2a2140) drop-shadow(-.5px 0 0 #2a2140) drop-shadow(0 .5px 0 #2a2140) drop-shadow(0 -.5px 0 #2a2140);
+  --mark-sent: #5c5a68; --mark-sent-hover: #2f2d3a; --mark-sent-shimmer: linear-gradient(105deg,#5c5a68,#7f7d8c,#4f4d5a,#716f7e,#5c5a68);
+  --mark-sent-glow: linear-gradient(90deg, transparent, rgba(60,52,92,.07), rgba(60,52,92,.14), rgba(60,52,92,.07), transparent);
+}
+/* (Its own rule: a browser that doesn't know :host-context drops only this one.) */
+:host-context(body.vscode-light) .pip-message.user .bubble .prompt-text,
+:host-context(body.vscode-high-contrast-light) .pip-message.user .bubble .prompt-text {
   --mark-logo-filter: drop-shadow(.5px 0 0 #2a2140) drop-shadow(-.5px 0 0 #2a2140) drop-shadow(0 .5px 0 #2a2140) drop-shadow(0 -.5px 0 #2a2140);
   --mark-sent: #5c5a68; --mark-sent-hover: #2f2d3a; --mark-sent-shimmer: linear-gradient(105deg,#5c5a68,#7f7d8c,#4f4d5a,#716f7e,#5c5a68);
   --mark-sent-glow: linear-gradient(90deg, transparent, rgba(60,52,92,.07), rgba(60,52,92,.14), rgba(60,52,92,.07), transparent);

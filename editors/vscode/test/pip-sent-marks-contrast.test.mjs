@@ -24,10 +24,11 @@ after(async () => { await browser?.close(); });
 const SAID = "garden add one line to README.md in your copy";
 const MARKS = [{ start: 0, kind: "project", label: "garden", identity: "ws_" + "5".repeat(32), wired: true }];
 
-for (const theme of ["light", "dark"]) {
-  test(`${theme}: a project named in a message you sent reads on its bubble`, async (t) => {
+// In its own tab (the document) and in the side bar (a shadow root, which :root and body rules don't reach).
+for (const [width, where] of [[700, "tab"], [300, "side"]]) for (const theme of ["light", "dark"]) {
+  test(`${theme}, ${where}: a project named in a message you sent reads on its bubble`, async (t) => {
     if (skipOrFail(t)) return;
-    const s = await openChat(browser, { width: 700, where: "tab", theme, api: 91, projects: true, reply: "Done.", replyTo: SAID, replyMarks: MARKS });
+    const s = await openChat(browser, { width, where, theme, api: 91, projects: true, reply: "Done.", replyTo: SAID, replyMarks: MARKS });
     try {
       await s.p.waitForFunction(() => !!(window.__pipsRoot || document).querySelector(".pip-message.user .bubble .sent-mention"), null, { timeout: 5000 });
       const seen = await s.p.evaluate(() => {
