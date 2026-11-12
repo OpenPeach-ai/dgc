@@ -1,40 +1,81 @@
-/* The Project Folder dropdown (media/shared/folderpick.js): a quiet button that names the folder chosen, and the shared
-   menu it opens (media/shared/menu.css) with a folder a row: its name over its path, "This window" or "Not found" at the
-   row's end. Neutral greys, never the accent (the chosen row's check is the menu's own). Tokens from
-   media/shared/tokens.css. The same over the Work sessions, in New Session's dialog and in the Pips view. */
+/* The Project Folder dropdown (media/shared/folderpick.js): a button in the shared button's shape (its corner, its
+   height, a 1 px line) that names the folder chosen, and the menu that grows out of it as one shape with it (asked
+   13 Nov): while open the button's corners next to the menu are square, its own line is put down, and one outline is
+   drawn round both by the script (.dgc-folder-shape), on the raised grey both stand on. A folder a row, rounded like
+   the button: a folder mark, its name over its path, "This window" or "Not found" and the chosen row's check at the
+   row's end. Neutral greys; only the check is in the accent. Tokens from media/shared/tokens.css. The same over the
+   Work sessions, in New Session's dialog and in the Pips view. */
 .dgc-folder {
-  display: inline-flex; align-items: center; gap: 6px; box-sizing: border-box; min-width: 0; max-width: 100%; height: 26px; margin: 0; padding: 0 9px 0 11px;
-  border: 1px solid var(--hair-strong); border-radius: var(--r-full); background: transparent; color: var(--text-2);
+  display: inline-flex; align-items: center; gap: 6px; box-sizing: border-box; min-width: 0; max-width: 100%; height: var(--btn-h); margin: 0; padding: 0 8px 0 10px;
+  border: 1px solid var(--btn-line); border-radius: var(--btn-r); background: transparent; color: var(--text-2);
   font: var(--w-reg) var(--t-sm)/1 var(--sans); white-space: nowrap; cursor: pointer;
-  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out);
+  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), transform var(--btn-press) var(--ease-out);
 }
 .dgc-folder[hidden] { display: none; }
-.dgc-folder:hover:not(:disabled), .dgc-folder[aria-expanded="true"] { background: var(--wash); color: var(--text); }
+.dgc-folder:hover:not(:disabled) { background: var(--btn-wash); color: var(--text); }
+/* A small press (never while its menu is open: the two are one shape). */
+.dgc-folder:active:not(:disabled):not([data-folder-open]) { transform: scale(.97); }
 .dgc-folder:disabled { cursor: default; opacity: .55; }
 .dgc-folder:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
 .dgc-folder-k { flex: none; }
 .dgc-folder-v { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-strong); font-weight: var(--w-med); }
-.dgc-folder-chevron { flex: none; margin-left: -1px; }
-@media (prefers-reduced-motion: reduce) { .dgc-folder { transition: none; } }
-@media (forced-colors: active) { .dgc-folder { border-color: CanvasText; } }
+/* Open (and until its menu has gone): the menu's ground, no line of its own, square where the menu joins it. */
+.dgc-folder[data-folder-open], .dgc-folder[data-folder-open]:hover:not(:disabled) { border-color: transparent; background: var(--surface2); color: var(--text); }
+.dgc-folder[data-folder-open="down"] { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.dgc-folder[data-folder-open="up"] { border-top-left-radius: 0; border-top-right-radius: 0; }
+/* The chevron, at the button's right end: two strokes that turn into an × while the menu is open, and back. */
+.dgc-folder-chevron { flex: none; margin-left: auto; overflow: visible; }
+.dgc-folder-chevron path { fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; transition: d 280ms cubic-bezier(.3, 1.45, .5, 1); }
+.dgc-folder-chevron-a { d: path("M4.5 6.5 L8 10"); }
+.dgc-folder-chevron-b { d: path("M8 10 L11.5 6.5"); }
+.dgc-folder[aria-expanded="true"] .dgc-folder-chevron-a { d: path("M4.5 4.5 L11.5 11.5"); }
+.dgc-folder[aria-expanded="true"] .dgc-folder-chevron-b { d: path("M4.5 11.5 L11.5 4.5"); }
+@media (prefers-reduced-motion: reduce) { .dgc-folder, .dgc-folder-chevron path { transition: none; } }
+@media (forced-colors: active) { .dgc-folder { border-color: CanvasText; } .dgc-folder[data-folder-open] { border-color: transparent; } }
 
-/* Its menu floats over the page, placed by the script under (or over) its button. */
+/* Its menu: a box the script puts against its button's edge (under it, or over it), with no look of its own. The shape
+   is drawn in it: the ground, the shade that falls outside the shape only, the hairline where the button ends, and the
+   one line round the button and the menu. The rows are in the list over it, which scrolls when there are many. */
 .dgc-menu.dgc-folder-menu {
-  position: fixed; z-index: 60; box-sizing: border-box; min-width: 200px; max-width: min(360px, calc(100vw - 12px)); max-height: calc(100vh - 12px); overflow-y: auto; scrollbar-width: thin;
-  transform-origin: var(--pop-x, 24px) var(--pop-y, 0%);
+  position: fixed; z-index: 60; box-sizing: border-box; min-width: 0; max-width: none; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none;
+  overflow: visible; animation: none; transform: none;
 }
-.dgc-folder-menu .dgc-menu-row { gap: 8px; }
-.dgc-folder-menu .dgc-menu-row.dgc-menu-row-sub { align-items: center; padding-block: 5px; }
+.dgc-folder-menu[data-leaving] { pointer-events: none; }
+.dgc-folder-menu:focus { outline: none; }
+.dgc-folder-shape { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.dgc-folder-ground { fill: var(--surface2); }
+.dgc-folder-line { fill: none; stroke: var(--btn-line); stroke-width: 1; }
+.dgc-folder-seam { fill: none; stroke: var(--hair); stroke-width: 1; }
+.dgc-folder-list {
+  position: relative; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; max-width: 100vw; max-height: calc(100vh - 12px); padding: 4px;
+  border: 1px solid transparent; border-top-width: 0; border-radius: 0 0 var(--btn-r) var(--btn-r); background: var(--surface2) padding-box;
+  overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
+}
+.dgc-folder-menu[data-dir="up"] .dgc-folder-list { border-top-width: 1px; border-bottom-width: 0; border-radius: var(--btn-r) var(--btn-r) 0 0; }
+.dgc-folder-menu[data-dir="down"][data-reach="left"] .dgc-folder-list { border-top-left-radius: var(--btn-r); }
+.dgc-folder-menu[data-dir="down"][data-reach="right"] .dgc-folder-list { border-top-right-radius: var(--btn-r); }
+.dgc-folder-menu[data-dir="up"][data-reach="left"] .dgc-folder-list { border-bottom-left-radius: var(--btn-r); }
+.dgc-folder-menu[data-dir="up"][data-reach="right"] .dgc-folder-list { border-bottom-right-radius: var(--btn-r); }
+/* A row: rounded like the button, its mark before its name. It arrives from the button's side. */
+.dgc-menu.dgc-folder-menu .dgc-menu-row { flex: none; gap: 8px; min-height: 30px; padding: 0 8px; border-radius: var(--btn-r); transform-origin: 50% 0; }
+.dgc-menu.dgc-folder-menu[data-dir="up"] .dgc-menu-row { transform-origin: 50% 100%; }
+.dgc-menu.dgc-folder-menu .dgc-menu-row.dgc-menu-row-sub { align-items: center; padding-block: 5px; }
+.dgc-menu.dgc-folder-menu .dgc-menu-icon, .dgc-menu.dgc-folder-menu .dgc-menu-row:is(.is-selected, [aria-checked="true"]) .dgc-menu-icon { width: 16px; height: auto; color: var(--muted); font-size: 16px; }
+.dgc-menu.dgc-folder-menu .dgc-menu-row:is(:hover:not(:disabled), :focus-visible, .is-selected, [aria-checked="true"]) .dgc-menu-icon { color: var(--text); }
+.dgc-folder-mark svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.1; stroke-linecap: round; stroke-linejoin: round; }
 .dgc-folder-menu .dgc-menu-words { gap: 1px; }
+.dgc-folder-menu .dgc-menu-div { flex: none; margin: 2px 6px; }
 /* (A row's second line and its mark are words to read on the raised grey and on the chosen row's wash: the text colour
    at 80%, which clears 4.5:1 on both; the quiet grey is 4.0:1 on the wash.) */
 .dgc-folder-menu .dgc-menu-sub { display: block; min-width: 0; color: color-mix(in srgb, var(--text) 80%, transparent); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); white-space: nowrap; }
 /* "This window", "Not found": quiet words at the row's end, never cut (the name and the path give way). */
 .dgc-folder-note { flex: none; margin-left: auto; color: color-mix(in srgb, var(--text) 80%, transparent); font: var(--w-reg) var(--t-xs)/1.2 var(--sans); white-space: nowrap; }
-.dgc-folder-menu .dgc-menu-check { order: -1; margin: 0; }
-.dgc-folder-menu .dgc-folder-add { padding-left: 32px; }
+/* The chosen row's check, at the row's end on every row (the mark has the row's start). */
+.dgc-menu.dgc-folder-menu .dgc-menu-check { margin: 0 0 0 auto; }
+.dgc-menu.dgc-folder-menu .dgc-folder-note + .dgc-menu-check { margin-left: 0; }
 .dgc-folder-menu .dgc-menu-row:disabled { opacity: 1; }
-.dgc-folder-menu .dgc-menu-row:disabled :is(.dgc-menu-label, .dgc-menu-sub) { opacity: .55; }
+.dgc-folder-menu .dgc-menu-row:disabled :is(.dgc-menu-label, .dgc-menu-sub, .dgc-menu-icon) { opacity: .55; }
+@media (forced-colors: active) { .dgc-folder-line, .dgc-folder-seam { stroke: CanvasText; } }
 
 /* On a row it shares (Library's, the search field's, the Needs attention heading's) the button is in a <dgc-folder-fit>,
    at the row's right end. It gives way before anything else on the row does, and never wraps: the element drops the

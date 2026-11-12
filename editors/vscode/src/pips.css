@@ -1578,3 +1578,5 @@ button.pip-owner-choice:hover:not(:disabled){background:var(--pip-wash)}
 .pip-row-folder-note { flex: none; }
 .pip-row-folder-note::after { content: "·"; margin: 0 5px; }
 .new-pip-folder { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); min-width: 0; margin: var(--sp-3) 0; }
+/* (The form's field: as wide as the form, so its menu opens under it at the same width, one shape.) */
+.new-pip-folder > .dgc-folder { align-self: stretch; }

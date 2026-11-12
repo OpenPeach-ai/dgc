@@ -60,7 +60,9 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
         const cut = (e) => { const r = document.createRange(); r.selectNodeContents(e); return r.getBoundingClientRect().width > e.getBoundingClientRect().width + 0.01; };
         return menu && { rows: [...menu.querySelectorAll("[data-folder]")].map((r) => [r.querySelector(".dgc-menu-label").textContent, r.querySelector(".dgc-folder-note")?.textContent || ""]),
           fits: box.left >= 0 && box.right <= innerWidth + 0.5 && box.bottom <= innerHeight + 0.5, cut: [...menu.querySelectorAll(".dgc-menu-label, .dgc-folder-note, .dgc-path-tail")].filter(cut).map((e) => e.textContent),
-          raised: getComputedStyle(menu).position === "fixed" && getComputedStyle(menu).boxShadow !== "none" && !/rgba\(.*, 0\)|transparent/.test(getComputedStyle(menu).backgroundColor) }; });
+          // (Since 13 Nov the menu and its button are one shape, drawn in the menu: its rows stand on the raised ground
+          // and its shade is the shape's own, so the box itself has no ground or shadow to read.)
+          raised: getComputedStyle(menu).position === "fixed" && !!menu.querySelector(".dgc-folder-shade[filter]") && !/rgba\(.*, 0\)|transparent/.test(getComputedStyle(menu.querySelector(".dgc-folder-list")).backgroundColor) }; });
       assert.deepEqual(menu, { rows: [["All projects", ""], ["shop", "This window"], ["garden", ""], ["checkout-service", ""], ["notes", "Not found"]], fits: true, cut: [], raised: true });
       assert.deepEqual(low(await pipsContrast(x.page, ".dgc-folder-menu")), []);
       await x.inPips((root, folder) => root.querySelector(`.dgc-folder-menu [data-folder="${folder}"]`).click(), GARDEN);

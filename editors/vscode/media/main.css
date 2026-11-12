@@ -258,7 +258,9 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 .new-session-body { display:flex; flex-direction:column; align-items:flex-start; gap:var(--sp-2); min-width:0; padding:var(--sp-5) var(--sp-5) var(--sp-4); }
 .new-session-body h2 { margin:0; color:var(--text-strong); font:var(--w-semi) var(--t-base)/1.35 var(--sans); }
 .new-session-intro { margin:0 0 var(--sp-1); color:var(--text-2); overflow-wrap:anywhere; }
-.new-session-field { display:flex; min-width:0; max-width:100%; }
+/* (The dropdown is the dialog's field: as wide as it, so its menu opens under it at the same width, one shape.) */
+.new-session-field { display:flex; align-self:stretch; min-width:0; max-width:100%; }
+.new-session-field > .dgc-folder { flex:1 1 auto; }
 .new-session-path { display:flex; min-width:0; max-width:100%; margin:0; color:var(--text-2); font:var(--w-reg) var(--t-xs)/1.4 var(--sans); }
 .new-session-path[hidden] { display:none; }
 .new-session-buttons { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:var(--sp-2); padding:0 var(--sp-5) var(--sp-5); }

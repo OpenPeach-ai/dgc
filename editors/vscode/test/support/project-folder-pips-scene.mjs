@@ -17,9 +17,9 @@ export const LONG = "/home/me/clients/northwind-traders/2026/storefront-redesign
 export const HERE = "/home/me/code/shop", GARDEN = "/home/me/code/garden", NOTES = "/home/me/code/notes";
 
 /** `choice`: the folder chosen ("" All projects). Opens the Pips view on its Project tab unless `tab` is "personal". */
-export async function openPips(browser, { width = 300, height = 640, theme = "dark-modern", choice = "", tab = "project", scale = 1 } = {}) {
+export async function openPips(browser, { width = 300, height = 640, theme = "dark-modern", choice = "", tab = "project", scale = 1, motion = "reduce" } = {}) {
   const { html, mainJs, markdownJs } = panelHtml(), pips = await pipsBundle();
-  const context = await browser.newContext({ viewport: { width, height }, reducedMotion: "reduce", deviceScaleFactor: scale });
+  const context = await browser.newContext({ viewport: { width, height }, reducedMotion: motion, deviceScaleFactor: scale });
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
