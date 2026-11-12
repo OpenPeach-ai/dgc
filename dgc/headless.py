@@ -495,6 +495,8 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # import_pip_team {document} makes one pending setup card per Pip in it (256 KiB at most). Local only.
 # get_pip_skills {pip_id} and set_pip_skill {pip_id, skill, on}: a switch per skill on each Pip (every skill on until
 # switched off; a skill switched off is never offered to its model). Local only.
+# use_pip_computer_view {pip_id, op: "close", number?}: its tab closed, so the computer reads closed at once and the
+# supervisor lets its live view go (before, it read open until the view's ten idle minutes ran out).
 PIPS_API_VERSION = 88
 
 

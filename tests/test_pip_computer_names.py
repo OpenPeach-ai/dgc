@@ -121,6 +121,33 @@ class ComputerStates(Store):
         pip_computer.Host._say_at_work(host, None)
         self.assertEqual(self.states()[1][0], "closed", "its run let it go")
 
+    def test_closing_its_tab_reads_closed_at_once_and_the_supervisor_closes_the_view(self):
+        with self.registry.transaction():
+            self.registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
+                                     (pip_computer._view_key(self.pip["id"], 2), '{"socket": "/run/v", "token": "t"}'))
+        self.assertEqual(self.states()[2], ("open", ""))
+        done = self.control("use_pip_computer_view", pip_id=self.pip["id"], op="close", number=2)
+        self.assertEqual(done["view"], {"ok": True, "closed": True})
+        self.assertEqual(self.states()[2], ("closed", ""), "no ten minutes of Open after its tab is gone")
+        key = f"computer_close_view:{self.pip['id']}:2"
+        self.assertIsNotNone(self.registry.db.execute("SELECT 1 FROM metadata WHERE key=?", (key,)).fetchone())
+        closed = []
+        class Viewer:
+            last_used = __import__("time").monotonic()
+            def endpoint(self): return {"socket": "/run/v", "token": "t"}
+            def close(self): closed.append(True)
+        class Host:
+            pass
+        host = Host()
+        host.pip_id, host.number, host.viewer = self.pip["id"], 2, Viewer()
+        from unittest.mock import patch
+        with patch.dict(pip_computer.HOSTS, {("k",): host}, clear=True):
+            pip_computer.handle_opens(self.registry)
+        self.assertEqual((closed, host.viewer), ([True], None))
+        self.assertIsNone(self.registry.db.execute("SELECT 1 FROM metadata WHERE key=?", (key,)).fetchone())
+        with self.assertRaises(pip_computer.RegistryError):
+            self.control("use_pip_computer_view", actor="device_1", pip_id=self.pip["id"], op="close", number=2)
+
     def test_a_record_left_by_a_run_that_ended_reads_as_not_working(self):
         run = self.a_run()
         self.take(2, run)

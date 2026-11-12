@@ -2647,6 +2647,7 @@ VIEW_IDLE_SECONDS = 10 * 60
 # "pointer" (Pips API 53): where the Pip last acted by position, without a new frame, so the full screen
 # (which streams itself) can draw its cursor.
 VIEW_OPS = ("frame", "click", "type", "key", "scroll", "go", "back", "reopen", "pointer")
+CLOSE_VIEW = "computer_close_view:"   # metadata: a view whose tab closed, for the supervisor to close (pip:number)
 
 
 class ViewServer:
@@ -3577,6 +3578,14 @@ def view_call(registry, pip_id: str, op: str, fields: dict, actor: str) -> dict:
     """The editor's side of the live view: one request to the supervisor's view socket."""
     if actor not in ("editor-user", "local-console"):
         raise RegistryError("local_only", "Use a Pip's computer on this computer.")
+    if op == "close":
+        # Its tab closed: the computer reads closed at once, and the supervisor closes the view on its next pass (no
+        # ten minutes of "Open" until the view idles out).
+        number = _number(registry, pip_id, (fields or {}).get("number"))
+        with registry.transaction():
+            registry.db.execute("DELETE FROM metadata WHERE key=?", (_view_key(pip_id, number),))
+            registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (f"{CLOSE_VIEW}{pip_id}:{number or ''}", "1"))
+        return {"ok": True, "closed": True}
     if op not in VIEW_OPS:
         raise RegistryError("invalid_request", "Unknown view action.")
     endpoint = view_endpoint(registry, pip_id, _number(registry, pip_id, (fields or {}).get("number")))
@@ -3625,9 +3634,19 @@ def handle_opens(registry) -> int:
             registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
                                 (_view_key(pip_id, number), json.dumps(host.viewer.endpoint())))
         opened += 1
+    closing = set()
+    for (key,) in registry.db.execute("SELECT key FROM metadata WHERE key LIKE ?", (CLOSE_VIEW + "%",)).fetchall():
+        pip_id, _, named = key[len(CLOSE_VIEW):].partition(":")
+        closing.add((pip_id, int(named) if named.isdigit() else None))
+        with registry.transaction():
+            registry.db.execute("DELETE FROM metadata WHERE key=?", (key,))
     for _key, host in list(HOSTS.items()):
         viewer = getattr(host, "viewer", None)
-        if viewer is not None and time.monotonic() - viewer.last_used > VIEW_IDLE_SECONDS:
+        if viewer is None:
+            continue
+        number = getattr(host, "number", 1)
+        if ((host.pip_id, number) in closing or (number == 1 and (host.pip_id, None) in closing)
+                or time.monotonic() - viewer.last_used > VIEW_IDLE_SECONDS):
             close_view(registry, host)
     return opened
 

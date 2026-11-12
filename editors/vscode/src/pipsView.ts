@@ -284,6 +284,14 @@ export class PipsEditor implements vscode.Disposable {
     panel.onDidDispose(() => {
       this.computers.delete(key);
       for (const [id, item] of this.pending) if (item.surface === surface) this.pending.delete(id);
+      // Pips API 88: its tab is gone, so DGC lets its live view go and the computer reads closed at once, not after
+      // the view's ten idle minutes.
+      if (this.apiVersion >= 88 && this.state.connected && this.state.supported && this.state.enabled) {
+        const requestId = 'pips-view-close-' + randomBytes(12).toString('hex');
+        this.hostReads.set(requestId, () => { this.hostReads.delete(requestId); });
+        if (!this.send({ type: 'pips_control', request: { type: 'use_pip_computer_view', pip_id: pip.id, op: 'close',
+          ...(number ? { number } : {}), request_id: requestId } }, this.backendIdentity)) this.hostReads.delete(requestId);
+      }
       // One stream per Pip: only the tab that has it closes it.
       const owner = this.desktopOwner.get(pip.id);
       if (owner !== undefined && owner !== key) return;

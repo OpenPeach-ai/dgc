@@ -236,3 +236,15 @@ test('the screen: the open names its computer, and a tab whose stream moved says
   assert.deepEqual(own(y.sent.filter(m=>m.type==='pipDesktop')),[{type:'pipDesktop',op:'open'}]);
  }
 });
+
+test('closing a computer\'s tab tells DGC, so it reads closed at once (API 88), and an older DGC is told nothing new',()=>{
+ const h=host(88,{pips_desktop:1,pips_desktop_numbers:1});h.know();
+ h.editor.receive({type:'pipsOpenComputer',pip:PIP,number:2});const tabTwo=h.panels.at(-1);tabTwo.receive({type:'pipsReady'});
+ const before=h.sent.length;tabTwo.dispose();
+ const closes=h.sent.slice(before).filter(m=>m.type==='pips_control'&&m.request.type==='use_pip_computer_view');
+ assert.deepEqual(closes.map(m=>({op:m.request.op,pip_id:m.request.pip_id,number:m.request.number})),[{op:'close',pip_id:PIP.id,number:2}]);
+ const old=host(87,{pips_desktop:1,pips_desktop_numbers:1});old.know();
+ old.editor.receive({type:'pipsOpenComputer',pip:PIP,number:2});const t=old.panels.at(-1);t.receive({type:'pipsReady'});
+ const was=old.sent.length;t.dispose();
+ assert.equal(old.sent.slice(was).some(m=>m.type==='pips_control'&&m.request.op==='close'),false);
+});
