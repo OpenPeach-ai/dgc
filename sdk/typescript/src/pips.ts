@@ -921,6 +921,15 @@ const API88_READS = new Set(["get_pip_apps", "export_pip_team", "get_pip_skills"
 const API88_MUTATIONS = new Set(["set_pip_app", "add_pip_app_account", "set_pip_skill"]);
 for (const command of API88_READS) READS.add(command);
 for (const command of API88_MUTATIONS) MUTATIONS.add(command);
+/** What came with API 88 inside existing commands: set_pip_profile's changes.group (a folder in the Personal list) and
+ *  use_pip_computer_view's op close (its tab closed). start_pip_app_link's another is older (0.51). */
+function api88Field(command: string, values: Record<string, unknown>): boolean {
+  if (command === "set_pip_profile") {
+    const changes = values.changes;
+    return typeof changes === "object" && changes !== null && !Array.isArray(changes) && Object.hasOwn(changes, "group");
+  }
+  return command === "use_pip_computer_view" && values.op === "close";
+}
 const CONVERSATION_ID = /^conv_[0-9a-f]{32}$/;
 const MAX_EVENT_PAYLOAD = 32768;
 /** What an app sends with an event: plain JSON of at most 32 KB, outside the 32 KiB request budget (the runtime checks
@@ -1268,6 +1277,9 @@ export class Pips {
         throw new DGCUnsupportedError("Photos and files through the spool, and as_file, require a runtime advertising Pips API 52 or newer");
       }
       checkApi52Fields(values);
+    }
+    if ((this.caps.pips_api_version as number) < 88 && api88Field(command, values)) {
+      throw new DGCUnsupportedError("A Pip's folder (changes.group) and a closed computer view (op close) require a runtime advertising Pips API 88 or newer");
     }
     if ((API53_FIELDS[command] || []).some((key) => Object.hasOwn(values, key)) || command === "use_pip_computer_view" && values.op === "pointer") {
       if ((this.caps.pips_api_version as number) < 53) {

@@ -439,6 +439,14 @@ API88_READS = frozenset({'get_pip_apps', 'export_pip_team', 'get_pip_skills'})
 API88_MUTATIONS = frozenset({'set_pip_app', 'add_pip_app_account', 'set_pip_skill'})
 READ_COMMANDS |= API88_READS
 MUTATION_COMMANDS |= API88_MUTATIONS
+
+
+def _api88_field(command, values) -> bool:
+    """What came with API 88 inside existing commands: set_pip_profile's changes.group (a folder in the Personal list)
+    and use_pip_computer_view's op close (its tab closed). start_pip_app_link's another is older (0.51)."""
+    if command == 'set_pip_profile':
+        return isinstance(values.get('changes'), dict) and 'group' in values['changes']
+    return command == 'use_pip_computer_view' and values.get('op') == 'close'
 PIP_KEY_ID = re.compile(r"pipkey_[a-f0-9]{32}\Z")
 PIP_REPORT_AS = frozenset({'chat', 'doc', 'sheet'})
 TEMPLATE_CHANGE_ID = re.compile(r"tmplchange_[a-f0-9]{32}\Z")
@@ -1057,6 +1065,9 @@ class Pips:
             if version < 52:
                 raise DGCUnsupportedError('Photos and files through the spool, and as_file, require a runtime advertising Pips API 52 or newer')
             _check_api52_fields(values)
+        if version < 88 and _api88_field(command, values):
+            raise DGCUnsupportedError("A Pip's folder (changes.group) and a closed computer view (op close) require a runtime "
+                                      "advertising Pips API 88 or newer")
         if API53_FIELDS.get(command, frozenset()) & set(values) or (command == 'use_pip_computer_view' and values.get('op') == 'pointer'):
             if version < 53:
                 raise DGCUnsupportedError("Where a Pip acted by position (pointers, the view's pointer) requires a runtime advertising Pips API 53 or newer")
