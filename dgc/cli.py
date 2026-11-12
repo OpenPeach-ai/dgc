@@ -3042,6 +3042,7 @@ def run_usage(argv: list[str]) -> int:
 SUBCOMMAND_USAGE: dict[str, str] = {
     "setup": "dgc setup                          configure provider, model and context interactively",
     "doctor": "dgc doctor                         check that the endpoint and model are reachable",
+    "watch-github": "dgc watch-github LINK              follow a pull request or an Actions run, one line per new thing",
     "readonly-db": "dgc readonly-db [show|set|clear|guide]  this project's read-only database, for Troupe checkers",
     "artifacts": "dgc artifacts [list|show|open|export|restore|rm]  the documents, decks, sheets, dashboards and pages DGC made",
     "mods": "dgc mods [allow|on|off|install|remove|validate|test|dev]  your mods, and the tools for writing one",
@@ -3209,6 +3210,10 @@ def main(argv: list[str] | None = None) -> int | None:
             return 0
         if raw_argv[0] == "usage":
             return run_usage(raw_argv[1:])
+        if raw_argv[0] == "watch-github":
+            # A chat watches a pull request or CI (work-watch-events): the model runs this as a monitor.
+            from .github_watch import main as watch_github
+            return watch_github(raw_argv[1:])
         if raw_argv[0] == "trust":
             from .trust import handle_trust_command
             cfg = Config()

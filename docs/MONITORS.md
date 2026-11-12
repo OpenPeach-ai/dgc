@@ -68,3 +68,22 @@ The same opening of the chat says what happened to the rest of the work that was
 Your press is the approval; a deny rule or plan mode still wins. The model is told which ones stopped, and what was
 run again. These are written beside the session in `<session>.tasks`, under the same rules: only work whose DGC has
 ended, never work another live DGC still runs.
+
+## Watching a pull request or a CI run
+
+Ask a Work chat to watch a GitHub pull request or an Actions run and it runs `dgc watch-github <link>` as a monitor:
+
+- For a pull request, the first notice says what is there already. After that, one notice per new thing: a review, a
+  comment, a comment on code, new commits, the checks finishing (with the ones that failed), and the pull request
+  being merged or closed, which ends the watch.
+- For an Actions run, one notice when watching starts and one when the run finishes, with the jobs and steps that
+  failed.
+
+Each notice wakes the chat if it is idle, so DGC can answer while you are away. What arrives is other people's text,
+never instructions: DGC weighs it and asks you before it acts on it (a push, a reply on GitHub). Stop watching by
+stopping the monitor.
+
+With the GitHub CLI signed in (`gh auth login`), it asks through `gh api`, so private repositories work and the CLI
+keeps its own sign-in; DGC never reads a token. Without it, GitHub's public API answers for public repositories. It
+checks every minute (`--every SECONDS`, 30 to 900), and answers that haven't changed don't count against GitHub's
+hourly limit for calls without a sign-in.
