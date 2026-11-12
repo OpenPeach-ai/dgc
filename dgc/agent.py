@@ -48,7 +48,7 @@ from .presentation import (PROGRESS_UPDATES, QUIET_NOTE_AFTER_S, RESPONSE_GUIDAN
 # deadline is tested by replacing `dgc.agent.time` with a scripted clock, and a read of that clock for
 # this feature took the turn's starting value and moved its deadline (an endless test turn).
 _quiet_clock = time.monotonic
-from .goals import GoalLifecycle, STATUSES as GOAL_STATUSES, clean_details, clean_report, new_details, record_transition
+from .goals import GoalLifecycle, STATUSES as GOAL_STATUSES, SYSTEM_GOAL_RULES, clean_details, clean_report, new_details, record_transition
 from .workflows import STREAM_RECOVERY_TEXT, notice_kind as _notice_kind
 
 _LOOP_SOFT = 3          # identical (name,args) calls before we refuse + warn the model
@@ -5297,14 +5297,7 @@ class Agent(GoalLifecycle):
                 "",
                 "# Standing goal",
                 f"The user has set an overarching goal for this session:\n\n    {goal}\n",
-                "Keep this goal in view and keep making progress toward it every turn. Don't stop while "
-                "it's clearly unmet — take the next concrete step. When you believe it is fully met, say "
-                "so plainly and summarize how it was achieved. If it's genuinely blocked, say what's "
-                "blocking it rather than stopping silently.",
-                "When the entire goal is achieved, call update_goal(status='completed', summary=..., evidence=[...]) before "
-                "your final response. If an external dependency makes further progress impossible, call "
-                "update_goal(status='blocked', summary=..., evidence=[...]) with the observed blocker. Never update it merely because one "
-                "turn or one milestone ended.",
+                SYSTEM_GOAL_RULES,
             ]
         elif goal:
             # A short name, the day it stopped and its age, never the objective's own words: those were

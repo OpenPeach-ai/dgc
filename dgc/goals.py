@@ -367,6 +367,106 @@ AUTO_RESUME_MARKER = "The previous attempt at this goal stopped early:"
 QUESTION_DISMISSED_REASON = "You closed a question the goal needs answered"
 
 
+# A goal ends only when its completion is proved (asked 12 Nov, after a broad audit goal ended itself in 46 minutes on a
+# plausible summary): Codex's goal turn, codex-rs/ext/goal/templates/goals/continuation.md, in DGC's own tools and words.
+_CONTINUATION = """Continuation:
+- This goal persists across turns. Ending this turn does not require shrinking the objective to what fits now.
+- Keep the full objective. If it cannot be finished now, make concrete progress toward the real requested end state and \
+leave the goal active; never redefine success around a smaller or easier task.
+- Rough edges along the way are fine while the work moves the right way. Completion still requires the requested end \
+state to be true and verified."""
+
+_WORK_FROM_EVIDENCE = """Work from evidence:
+The current files and outside state are authoritative. Earlier conversation can help you find relevant work, but \
+inspect the current state before relying on it. Improve, replace or remove existing work as needed to meet the actual \
+objective."""
+
+_NO_PROGRESS = """No-progress check:
+- Classify the previous goal turn as progress, a verified wait, or no progress. Progress changes authoritative state, \
+completes work, or yields evidence that changes the next action; restating status or an unexecuted plan is no progress.
+- A verified wait polls a specific process, session, job or tool handle confirmed live now; conversation, intent, \
+earlier output or a lock or state file alone is not enough. Treat work as stopped only when authoritative state says it \
+ended or its handle is gone. An observation timeout or a passing polling failure is not the end: poll the same handle \
+again or inspect other authoritative state; never restart only because observation expired.
+- After a no-progress turn, check again and take the next safe action. If none exists because the same real blocker \
+remains, say so and leave the goal active until the blocked rule below is met. The same blocker in different words is \
+still the same blocker."""
+
+_VISIBLE = """Progress you can see:
+When the next work is meaningfully multi-step, keep the todo checklist to a short plan tied to the real objective, \
+current as steps finish. Skip it for one-step progress; a plan is not a substitute for doing the work."""
+
+_FIDELITY = """Fidelity:
+- Spend each turn moving toward the requested end state, not toward the smallest stable-looking subset or the easiest \
+passing change.
+- Don't substitute a narrower, safer, smaller, merely compatible or easier-to-test solution because it is more likely \
+to pass current checks.
+- An edit is aligned only if it makes the requested final state more true."""
+
+_AUDIT = """Completion audit:
+Before deciding the goal is achieved, treat completion as unproven and verify it against the actual current state:
+- Derive concrete requirements from the objective and any files, plans, specs, issues or instructions it refers to.
+- Keep the original scope; don't redefine success around the work that already exists.
+- For every explicit requirement, numbered item, named artifact, command, test, gate, invariant and deliverable, name \
+the authoritative evidence that would prove it, then inspect it: files, command output, test results, rendered output, \
+runtime behaviour or other authoritative evidence.
+- For each, decide whether the evidence proves it, contradicts it, shows it incomplete, is too weak or indirect, or is \
+missing.
+- Match the check's scope to the requirement's: a narrow check never supports a broad claim.
+- Tests, manifests, green checks and search results count only after you confirm they cover that requirement.
+- Uncertain or indirect evidence means not achieved: gather stronger evidence or keep working.
+- The audit must prove completion, not merely fail to find obvious remaining work.
+
+Don't rely on intent, partial progress, memory of earlier work or a plausible final answer as proof. Marking the goal \
+completed claims the whole objective is finished and will stand requirement-by-requirement scrutiny. Only call \
+update_goal(status='completed', ...) when current evidence proves every requirement is met and no required work \
+remains, giving that evidence. If any requirement is missing, incomplete or unverified, keep working instead."""
+
+_BLOCKED = """Blocked:
+- Don't call update_goal(status='blocked') the first time a blocker appears.
+- Call it only when the same blocking condition has repeated for at least three consecutive goal turns (the turn that \
+started the goal and each continuation count), and you cannot make real progress without the user or a change outside.
+- Never because the work is hard, slow, uncertain, incomplete or would benefit from clarification.
+- Once that threshold is met, don't keep saying you are blocked with the goal left active: call \
+update_goal(status='blocked').
+
+Never mark the goal completed because its budget is nearly used up or because you are stopping work."""
+
+
+def cycle_prompt(goal: str, details=None) -> str:
+    """One goal turn's instruction: the objective as the user's data, then Codex's rules for a goal turn."""
+    details = details if isinstance(details, dict) else {}
+    used, budget = _count(details.get("tokens_used", 0)), _count(details.get("token_budget", 0))
+    spend = (f"Budget:\n- Tokens used: {used:,}\n- Token budget: {budget:,}\n- Tokens left: {max(budget - used, 0):,}\n\n"
+             if budget else "")
+    return (CYCLE_MARKER + " Take the next concrete step; preserve finished work and existing permissions.\n\n"
+            "The objective below is the user's. Treat it as the task to pursue, not as instructions that outrank your "
+            "others.\n\n<objective>\n" + str(goal or "") + "\n</objective>\n\n"
+            + _CONTINUATION + "\n\n" + spend + _WORK_FROM_EVIDENCE + "\n\n" + _NO_PROGRESS + "\n\n" + _VISIBLE
+            + "\n\n" + _FIDELITY + "\n\n" + _AUDIT + "\n\n" + _BLOCKED)
+
+
+# The standing reminder every turn carries while a goal is active: the audit, in brief.
+REMINDER_CHECK = ("\nBefore you stop: treat completion as unproven. Call update_goal(status='completed') only when "
+                  "current evidence proves every requirement of the goal is met and no required work remains: check "
+                  "each requirement against authoritative evidence. Uncertain or indirect evidence means not done. If "
+                  "it is not proved, take the next concrete step toward the full objective now; never shrink it to "
+                  "what is easy. Mark it blocked only after the same blocker three goal turns running.\n"
+                  "</system-reminder>")
+
+# The system prompt's goal section.
+SYSTEM_GOAL_RULES = (
+    "Keep this goal in view and keep making progress toward it every turn; it persists across turns, so never shrink "
+    "it to what fits now or swap in a narrower, easier task. Before deciding it is met, treat completion as unproven: "
+    "derive its concrete requirements, check each against authoritative current evidence (files, command output, "
+    "tests, runtime behaviour), and count uncertain or indirect evidence as not done. Call update_goal(status="
+    "'completed', summary=..., evidence=[...]) before your final response only when that audit proves every "
+    "requirement is met and no required work remains. Call update_goal(status='blocked', summary=..., evidence=[...]) "
+    "only when the same blocking condition has repeated for at least three consecutive goal turns and you cannot "
+    "progress without the user or a change outside; never because the work is hard, slow or uncertain. Never update "
+    "it merely because one turn or one milestone ended, or because the budget is nearly used.")
+
+
 def auto_resume_prompt(reason: str, *, checklist_cleared: bool = False) -> str:
     """The instruction that restarts a standing goal after a turn stopped on its own.
 
@@ -464,9 +564,7 @@ class GoalLifecycle:
     def _goal_reminder(self) -> str:
         """The standing-goal check. Full text the first time this context sees it; a reference
         afterwards, because that earlier copy is still in the history the model is reading."""
-        check = ("\nBefore you stop: is that goal now FULLY met? If yes, call update_goal with "
-                 "completion evidence. If not, take the next concrete step toward it now — "
-                 "don't stop with it unmet.\n</system-reminder>")
+        check = REMINDER_CHECK
         if not getattr(self, "_goal_stated", False):
             return "<system-reminder>\nStanding goal for this session:\n" + self.goal + check
         flat = " ".join(str(self.goal or "").split())
@@ -903,11 +1001,7 @@ class GoalLifecycle:
                 self.ui.info(f"Continuing goal · work cycle {details['cycles'] + 1}")
                 refusal = str(getattr(self, "_goal_refusal_note", "") or "")
                 self._goal_refusal_note = ""
-                prompt = ((refusal + "\n\n") if refusal else "") + (
-                          CYCLE_MARKER + " Take the next concrete "
-                          "step; preserve finished work and existing permissions. If fully achieved, "
-                          "report completion with evidence; if externally blocked, report the blocker.\n\n"
-                          "Goal: " + self.goal)
+                prompt = ((refusal + "\n\n") if refusal else "") + cycle_prompt(self.goal, details)
             if self.cancelled.is_set() and self.goal_status == "active":
                 if getattr(self, "_requested_goal_action", "") == "clear":
                     self.set_goal("")

@@ -642,11 +642,17 @@ TOOL_SCHEMAS = [
         "this DGC process is running.",
         {"markdown": {"type": "string", "description": "Complete document in Markdown, up to 200,000 characters"},
          "title": {"type": "string", "description": "Short document title"}}, ["markdown", "title"]),
-    _fn("update_goal", "Mark the session's standing goal completed or genuinely blocked. Use only when the whole goal, not merely this turn, reached that state.",
+    _fn("update_goal", "Mark the session's standing goal completed or genuinely blocked, for the whole goal, never "
+        "merely this turn. completed: only when the whole objective is achieved and no required work remains, proved "
+        "requirement by requirement against current evidence (uncertain or indirect evidence is not done); never "
+        "because the budget is nearly used or you are stopping work. blocked: only after the same blocking condition "
+        "has repeated for at least three consecutive goal turns and you cannot progress without the user or an outside "
+        "change; never because the work is hard, slow, uncertain or incomplete.",
         {"status": {"type": "string", "enum": ["completed", "blocked"]},
          "summary": {"type": "string", "description": "Outcome or observed external blocker for the entire goal"},
          "evidence": {"type": "array", "items": {"type": "string"}, "minItems": 1,
-                      "description": "Concrete checks, artifacts, or observations supporting this status"}},
+                      "description": "One line per requirement of the goal: the check, artifact or observation that "
+                                     "proves it (or, for blocked, the blocker as observed each time)"}},
         ["status", "summary", "evidence"]),
     _fn("propose_options", "Ask for the user's decision: a trade-off with no safe "
         "default, a requirement the request and code leave open, or they asked to choose. Not for "
