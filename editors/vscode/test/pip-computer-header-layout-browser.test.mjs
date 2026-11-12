@@ -77,7 +77,8 @@ const header = (p) => p.evaluate(() => {
   const words = { left: Math.min(...rects.map((r) => r.left)), top: Math.min(...rects.map((r) => r.top)),
     right: Math.max(...rects.map((r) => r.right)), bottom: Math.max(...rects.map((r) => r.bottom)) };
   return { text: h1.textContent, lines: new Set(rects.map((r) => Math.round(r.top))).size, words, stop: box(stop.getBoundingClientRect()),
-    spill: h1.scrollWidth - h1.clientWidth, barSpill: bar.scrollWidth - bar.clientWidth, app: document.getElementById("app").clientWidth };
+    box: box(h1.getBoundingClientRect()), bar: box(document.getElementById("pc-bar").getBoundingClientRect()), cut: getComputedStyle(h1).textOverflow, whole: h1.title,
+    more: box(document.getElementById("pc-more").getBoundingClientRect()), spill: h1.scrollWidth - h1.clientWidth, barSpill: bar.scrollWidth - bar.clientWidth, app: document.getElementById("app").clientWidth };
 });
 const meet = (a, b) => a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
 
@@ -102,8 +103,12 @@ test("a Pip whose name is one long word keeps it inside the title's column", asy
   const { p, close } = await open(270, "Supercalifragilisticexpialidocious");   // names run to 60 characters
   try {
     const h = await header(p);
-    assert.ok(!meet(h.words, h.stop), `the name (${JSON.stringify(h.words)}) runs into the button (${JSON.stringify(h.stop)})`);
-    assert.ok(h.spill <= 0, `the name spills ${h.spill}px past its column`);
+    // From 12 Nov the bar is one line: a name too long for it is cut short with "…" inside its own column (it wrapped
+    // before), the whole name is its tooltip, and Stop computer is in "…", which the name stops short of.
+    assert.equal(h.cut, "ellipsis"); assert.equal(h.whole, "Supercalifragilisticexpialidocious · Computer");
+    assert.ok(h.box.left >= h.bar.left - 0.5 && h.box.right <= h.bar.right + 0.5 && h.box.right - h.box.left >= 40, `the name's column is inside the bar: ${JSON.stringify(h.box)}`);
+    assert.ok(h.more.right - h.more.left > 20 && !meet(h.box, h.more) && !meet(h.box, h.stop), `the name (${JSON.stringify(h.box)}) stops short of the buttons (${JSON.stringify(h.more)})`);
+    assert.equal(h.lines, 1);
     assert.ok(h.barSpill <= 0, `the header spills ${h.barSpill}px sideways`);
   } finally { await close(); }
 });

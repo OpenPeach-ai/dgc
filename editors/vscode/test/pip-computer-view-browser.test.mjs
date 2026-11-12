@@ -53,6 +53,8 @@ const apart = (list, name) => { for (let i = 0; i < list.length; i++) for (let j
   assert.ok(!(a.left < b.right - 1.5 && b.left < a.right - 1.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5), `${name}: ${a.id} and ${b.id} overlap`); } };   // (Fit and 100% share one hairline)
 const PURPLE = /rgba?\((124, 92, 255|118, 84, 246|106, 75, 240|167, 139, 250)/;
 const sent = (p, type) => p.evaluate((t) => window.__sent.filter((r) => r.type === t), type);
+// A tool in the bar, or the same thing in "…" when the tab is too narrow to show it (Fit and 100% at 300 px, from 12 Nov).
+const pressTool = async (p, id) => { if (await p.isVisible(`#${id}`)) { await p.click(`#${id}`); return; } await p.click("#pc-more"); await p.click(`#pc-more-menu [data-more="${id.slice(3)}"]`); };
 const posted = (p, type) => p.evaluate((t) => window.__posted.filter((m) => m.type === t), type);
 const text = (p, selector) => p.evaluate((s) => document.querySelector(s)?.textContent ?? null, selector);
 
@@ -82,8 +84,11 @@ for (const width of WIDTHS) {
         assert.equal(l.ground.vnc, "rgba(0, 0, 0, 0)"); assert.equal(l.ground.screen, "rgba(0, 0, 0, 0)", "the viewer paints no ground of its own");
         assert.equal(l.pageScrolls, false, "the page itself does not scroll");
         inside(l.tools, l.view, "the bar");
-        for (const b of l.buttons) { inside(b, l.view, b.id); assert.ok(b.height >= 22 && b.width >= 22, `${b.id} is large enough to press`); assert.doesNotMatch(b.ground, PURPLE, `${b.id} is not purple`); }
-        apart(l.buttons, `the bar at ${width}px`);
+        // One row (12 Nov): at 300 px Fit and 100% are in "…"; every other one is in the bar.
+        const inBar = l.buttons.filter((b) => b.width > 0);
+        assert.deepEqual(l.buttons.filter((b) => !b.width).map((b) => b.id), width === 300 ? ["pc-fit", "pc-actual"] : []);
+        for (const b of inBar) { inside(b, l.view, b.id); assert.ok(b.height >= 22 && b.width >= 22, `${b.id} is large enough to press`); assert.doesNotMatch(b.ground, PURPLE, `${b.id} is not purple`); }
+        apart(inBar, `the bar at ${width}px`);
         assert.deepEqual(l.buttons.map((b) => b.id), ["pc-fit", "pc-actual", "pc-size", "pc-keys", "pc-clip", "pc-files", "pc-full"]);
         assert.deepEqual(await x.p.evaluate(() => [...document.querySelectorAll("#pc-tools button")].map((b) => b.getAttribute("aria-label") || b.textContent)), ["Fit", "100%", "Screen size", "Keyboard", "Clipboard", "Files", "Full screen"]);
         assert.deepEqual(x.errors, []);
@@ -95,7 +100,7 @@ for (const width of WIDTHS) {
     if (skipOrFail(t)) return;
     const x = await openComputer(browser, { width });
     try {
-      await x.p.click("#pc-actual");
+      await pressTool(x.p, "pc-actual");
       await x.p.waitForFunction(() => document.querySelector("#pc-vnc canvas").getBoundingClientRect().width === 1280);
       const l = await layout(x.p);
       assert.equal(await x.p.getAttribute("#pc-actual", "aria-pressed"), "true");
@@ -108,7 +113,7 @@ for (const width of WIDTHS) {
       const end = await layout(x.p);
       assert.ok(end.canvas.right <= end.live.right + 0.5 && end.canvas.right >= end.live.right - 16, `the right edge is reachable: ${end.canvas.right} in ${end.live.right}`);
       assert.equal(await x.p.evaluate(() => window.__state?.fit), false, "the choice is kept for this tab");
-      await x.p.click("#pc-fit");
+      await pressTool(x.p, "pc-fit");
       await x.p.waitForFunction(() => document.querySelector("#pc-vnc canvas").getBoundingClientRect().width < 1280);
       const back = await layout(x.p);
       assert.deepEqual(back.scrolls, [false, false]);
@@ -200,7 +205,8 @@ for (const width of WIDTHS) {
       await x.p.waitForFunction(() => !document.fullscreenElement);
       await x.p.waitForFunction(() => document.getElementById("pc-full").getAttribute("aria-label") === "Full screen");
       const back = await layout(x.p);
-      assert.ok(back.header && back.stage.top >= back.header.bottom - 0.5, "the header is back above it");
+      // (Until 12 Nov a header row sat above the stage. Now the Pip is in the one bar, and the stage is the whole tab.)
+      assert.ok(back.header && back.header.top >= back.stage.top - 0.5 && back.header.bottom <= back.live.top + 0.5, "the Pip's name is in the bar, above the screen");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   });
@@ -211,8 +217,10 @@ for (const width of WIDTHS) {
     try {
       // A VS Code webview's frame is not allowed the browser's full screen: the request is refused.
       await x.p.evaluate(() => { Element.prototype.requestFullscreen = () => Promise.reject(new TypeError("Disallowed by permissions policy")); });
+      // (Until 12 Nov a header row sat above the stage and Full screen covered it. Now there is one bar and the screen
+      // already has the rest of the tab: the page keeps its place, and the host gives it the window.)
       const before = await layout(x.p);
-      assert.ok(before.stage.top > 40, "the header is above the screen to begin with");
+      assert.ok(Math.abs(before.stage.top) < 0.5 && before.live.top <= 40, "one slim bar is all that is above the screen");
       await x.p.click("#pc-full");
       await x.p.waitForFunction(() => document.body.classList.contains("pc-fill"));
       await x.p.waitForTimeout(150);
@@ -220,7 +228,7 @@ for (const width of WIDTHS) {
       assert.equal(await x.p.getAttribute("#pc-full", "aria-label"), "Leave full screen");
       assert.ok(Math.abs(l.stage.left) < 0.5 && Math.abs(l.stage.top) < 0.5 && Math.abs(l.stage.width - l.view[0]) < 0.5 && Math.abs(l.stage.height - l.view[1]) < 0.5, `the stage is the whole tab: ${JSON.stringify(l.stage)}`);
       assert.equal(await x.p.evaluate(() => { const e = document.elementFromPoint(40, 12); return !!e?.closest("#pc-stage"); }), true, "it covers the header");
-      assert.ok(l.live.height > before.live.height + 40, "the screen has more room");
+      assert.ok(l.live.height >= before.live.height - 0.5, "the screen loses no room");
       assert.ok(Math.abs(l.canvas.width / l.canvas.height - 1.6) < 0.01);
       assert.equal(l.pageScrolls, false);
       await x.p.keyboard.press("Escape");
@@ -239,6 +247,7 @@ for (const width of WIDTHS) {
     try {
       assert.equal(await x.p.$(".pc-panel"), null, "closed until asked for");
       assert.equal(await x.p.getAttribute("#pc-keys", "aria-expanded"), "false");
+      const shut = await layout(x.p);
       await x.p.click("#pc-keys");
       await x.p.waitForSelector("#pc-keys-panel");
       assert.equal(await x.p.getAttribute("#pc-keys", "aria-expanded"), "true");
@@ -256,7 +265,9 @@ for (const width of WIDTHS) {
       assert.equal(l.pageScrolls, false);
       assert.ok(l.live.height >= 120, `the screen keeps room under the panel: ${l.live.height}`);
       assert.ok(Math.abs(l.canvas.width / l.canvas.height - 1.6) < 0.01, "and is fitted to it");
-      assert.ok(l.canvas.top >= l.panel.bottom - 0.5, "below the panel, not under it");
+      // (Until 12 Nov the panel pushed the screen down. Now it floats over it, and the screen stays where it was.)
+      assert.deepEqual([l.live.top, l.live.height, l.canvas.top, l.canvas.height], [shut.live.top, shut.live.height, shut.canvas.top, shut.canvas.height], "the screen does not move under the panel");
+      assert.ok(l.panel.top >= l.live.top - 0.5 && l.panel.bottom <= l.live.bottom + 0.5, "the panel is inside the screen's room");
       // Each key: the exact bytes, in order. KeyEvent is 04, down or up, two spare bytes, the keysym.
       const CTRL = 0xffe3, ALT = 0xffe9, TAB = 0xff09;
       const want = { esc: press(0xff1b), tab: press(TAB), "ctrl-alt-del": press(CTRL, ALT, 0xffff), "ctrl-w": press(CTRL, 0x77), "ctrl-t": press(CTRL, 0x74), "ctrl-l": press(CTRL, 0x6c),
@@ -281,6 +292,7 @@ for (const width of WIDTHS) {
     if (skipOrFail(t)) return;
     const x = await openComputer(browser, { width });
     try {
+      const shut = await layout(x.p);
       await x.p.click("#pc-clip");
       await x.p.waitForSelector("#pc-clip-panel");
       assert.deepEqual(await x.p.evaluate(() => [...document.querySelectorAll("#pc-clip-panel .pc-clip-head")].map((e) => e.textContent)), ["Paste in", "Copied there"]);
@@ -296,7 +308,7 @@ for (const width of WIDTHS) {
       for (const f of fields) { inside(f, l.view, f.id); assert.ok(f.width >= 200, `${f.id} is wide enough to read: ${f.width}`); }
       assert.equal(l.pageScrolls, false);
       assert.ok(l.live.height >= 120, `the screen keeps room under the panel: ${l.live.height}`);
-      assert.ok(l.canvas.top >= l.panel.bottom - 0.5);
+      assert.deepEqual([l.live.top, l.live.height, l.canvas.top, l.canvas.height], [shut.live.top, shut.live.height, shut.canvas.top, shut.canvas.height], "the screen does not move under the panel (it was pushed down until 12 Nov)");
       assert.equal(mine.filter((b) => !/rgba\(0, 0, 0, 0\)/.test(b.ground)).length, 1, "one filled button");
       for (const b of mine) assert.doesNotMatch(b.ground, PURPLE);
 

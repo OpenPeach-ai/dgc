@@ -2,6 +2,8 @@
 // its bar, and there was no Files at all there: no way to add or save a big file. Now the bar has a Files button beside
 // Keyboard and Clipboard, opening a panel with the same list, folder, sizes and "x used" as the Files window,
 // Add file…, and for a chosen file Save to this computer… and Remove, through the same host messages.
+// From 12 Nov the panel floats over the screen and never pushes it, and the bar is one row: at 700 px the tools are their
+// marks, and at 300 px Fit and 100% are in "…" (pip-computer-room-browser.test.mjs).
 // Real Chromium, the real client and CSS, the real noVNC viewer on a fake RFB server (support/pip-computer-scene.mjs),
 // dark and light, at a 700 px tab and a 300 px one.
 import { after, before, test } from "node:test";
@@ -63,9 +65,13 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
       const ids = m.bar.map((b) => b.id);
       assert.equal(ids[ids.indexOf("pc-clip") + 1], "pc-files", `beside Clipboard: ${ids}`);
       assert.equal(m.button.expanded, "false"); assert.equal(m.panel, null);
-      if (width === 300) assert.ok(m.label[0] <= 1.5, "its word is hidden at 300 px, as the others' are"); else assert.ok(m.label[0] > 20, "its word shows");
-      for (const b of m.bar) within(b, m.tools, `${b.id} is inside the bar`);
-      for (let i = 0; i < m.bar.length; i++) for (let j = i + 1; j < m.bar.length; j++) if (!(m.bar[i].id === "pc-fit" && m.bar[j].id === "pc-actual")) apart(m.bar[i], m.bar[j], `${m.bar[i].id} and ${m.bar[j].id}`);
+      // One row for the Pip and the tools: at these widths the tools are their marks, each with its name on hover.
+      assert.ok(m.label[0] <= 1.5, `its word is hidden at ${width} px, as the others' are`); assert.equal(m.button.title, "Files");
+      // At 300 px Fit and 100% are in "…": what is in the bar is inside it.
+      const closed = m, inBar = m.bar.filter((b) => b.width > 0);
+      assert.deepEqual(m.bar.filter((b) => !b.width).map((b) => b.id), width === 300 ? ["pc-fit", "pc-actual"] : []);
+      for (const b of inBar) within(b, m.tools, `${b.id} is inside the bar`);
+      for (let i = 0; i < inBar.length; i++) for (let j = i + 1; j < inBar.length; j++) if (!(inBar[i].id === "pc-fit" && inBar[j].id === "pc-actual")) apart(inBar[i], inBar[j], `${inBar[i].id} and ${inBar[j].id}`);
       assert.equal((await sent(x.p, "list_pip_computer_files")).length, 0, "nothing is read until it opens");
       // Open: the folder, as the Files window shows it.
       await x.p.click("#pc-files"); await x.p.waitForSelector("#pc-files-panel .pc-name");
@@ -75,7 +81,9 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
       assert.equal(m.crumbs.text, "Files"); assert.match(m.used.text, /^47\.1 KB used\./);
       assert.equal(m.add.text, "Add file…"); quiet(m.add, "Add file…"); assert.ok(!m.add.clipped && !m.add.disabled);
       across(m.panel, { left: 0, right: m.view[0] }, "the panel is inside the tab"); within(m.add, m.panel, "Add file… is inside the panel"); apart(m.add, m.crumbs, "Add file… and the folder");
-      assert.ok(m.panel.bottom <= m.live.top + 0.5 && m.panel.top >= m.tools.bottom - 0.5, "the panel sits between the bar and the screen");
+      // Over the screen, from the bar down: the screen keeps its place and size under it.
+      assert.ok(m.panel.top >= m.tools.bottom - 0.5, "the panel starts under the bar"); within(m.holder, m.live, "the panel is over the screen, inside its room");
+      assert.deepEqual([m.live.top, m.live.height, m.canvas.top, m.canvas.height], [closed.live.top, closed.live.height, closed.canvas.top, closed.canvas.height], "the screen does not move or shrink");
       assert.ok(m.canvas.height > 60 && m.canvas.bottom <= m.view[1] + 0.5, `the screen keeps its room below: ${JSON.stringify(m.canvas)}`);
       assert.ok(!m.sideways, "nothing scrolls sideways");
       // Add file…: the host is asked with the folder; the picked names show as "copying".
@@ -105,7 +113,7 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
       assert.equal(m.bytes.text, "700.0 MB");
       for (const [name, b] of [["Save to this computer…", m.save], ["Remove", m.remove], ["the file's name", m.title], ["its size", m.bytes]]) across(b, m.panel, `${name} is inside the panel`);
       apart(m.save, m.remove, "Save and Remove"); apart(m.save, m.title, "Save and the name"); apart(m.remove, m.title, "Remove and the name"); apart(m.save, m.bytes, "Save and the size"); apart(m.title, m.bytes, "the name and the size");
-      assert.ok(m.holder.bottom <= m.live.top + 0.5, "the panel does not cover the screen"); assert.ok(m.canvas.height > 60, "and the screen is still there");
+      within(m.holder, m.live, "the panel stays inside the screen's room"); assert.deepEqual([m.canvas.top, m.canvas.height], [closed.canvas.top, closed.canvas.height], "and the screen is where it was");
       assert.ok(!m.sideways, "nothing scrolls sideways");
       await x.p.click("#pc-save-as");
       assert.deepEqual(await posted(x.p, "pipComputerSaveAs"), [{ type: "pipComputerSaveAs", path: "dataset.bin" }]);
@@ -115,7 +123,7 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
       await x.p.click("#pc-remove");
       await x.p.waitForFunction(() => !document.querySelector('#pc-files-panel [data-file="dataset.bin"]'));
       assert.deepEqual((await sent(x.p, "remove_pip_computer_file")).map((r) => r.path), ["dataset.bin"]);
-      // The button closes it, and the screen takes the room back.
+      // The button closes it.
       await x.p.click("#pc-files"); await x.p.waitForFunction(() => !document.getElementById("pc-files-panel"));
       assert.equal((await measure(x.p)).button.expanded, "false");
       assert.deepEqual(x.errors, []);

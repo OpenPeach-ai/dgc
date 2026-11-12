@@ -8082,6 +8082,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /** Full screen in a Pip computer's tab hides the side bars (src/pipsView.ts, ComputerFullScreen): this is DGC's own side
+   *  bar view, so it is shown again afterwards when it was showing before. A chat in an editor tab is no side bar. */
+  private fullScreenSide(): { visible(): boolean; show(): void } {
+    return { visible: () => !this.tab && this.view?.visible === true, show: () => { if (!this.tab) this.view?.show?.(true); } };
+  }
+
   // ---- Pips in the main DGC panel ------------------------------------------
   private ensurePipsBridge(): PipsEditor {
     if (!this.pipsEditor) {
@@ -8102,6 +8108,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // A Pip's page lists the person's dashboards and opens its report and its dashboards (Pips API 67).
       this.pipsEditor.useArtifacts(() => this.artifacts);
       this.pipsEditor.videoStop = (job) => this.videosStop(job);
+      this.pipsEditor.fullScreenSide = this.fullScreenSide();
       this.pipsEditor.videoFollow = (job) => this.videosJobs(job);     // a Pip reply's video: Stop
       this.pipsEditor.useNewsDismissed((pipIds, until) => {
         for (const tab of this.tabProviders) tab.post({ type: "pipReportsHidden", pipIds, until });
@@ -8195,6 +8202,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.pipsTab.usePageActions((message) => { void this.onMessage(message); });
       this.pipsTab.useArtifacts(() => this.artifacts);
       this.pipsTab.videoStop = (job) => this.videosStop(job);
+      this.pipsTab.fullScreenSide = this.fullScreenSide();
       this.pipsTab.videoFollow = (job) => this.videosJobs(job);
       this.pipsTab.useFolds((message) => rememberPictureFold(this.context, message), () => pictureFoldsMessage(this.context));
       this.pipsTab.useDock((message, reply) => dockOf(this.context).handle(message, reply), () => dockOf(this.context).state());

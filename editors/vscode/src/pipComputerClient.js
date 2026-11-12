@@ -51,6 +51,12 @@ function computerName(){
 // What was copied on the computer is kept here and drawn only while the clipboard panel is open.
 Object.assign(S,{fit:true,full:'',panel:'',sizeMenu:false,sizeBusy:false,sizePicked:false,restart:null,
  clip:{draft:'',there:null,over:false,fresh:false,note:'',bad:false,typing:false}});
+// The screen gets the room (0.52): one slim bar, and everything else floats over the screen, which never moves. `waitOpen`:
+// the held submits' cards are on show (the bar's chip opens them); `more`: the "…" menu; `tier`: how tight the bar is
+// (0 all words ... 5 marks only), measured in fitBar().
+Object.assign(S,{waitOpen:false,more:false,tier:0});
+let seenWaiting=new Set();
+const pending=()=>(S.computer?.actions||[]).filter(a=>a.status==='pending');
 const CLIP_BYTES=1000000,TYPE_CHARS=5000;
 const tabTitle=()=>`${S.pip?.name||'Pip'} · ${computerName()}`;
 const broker=requestBroker(message=>vscode.postMessage({...message,generation:S.generation}));
@@ -97,11 +103,50 @@ function plushFace(state){
 }
 function screenMode(){return S.screenCapable&&S.apiVersion>=43&&S.desktop?.available===true&&S.computer?.granted===true;}
 function using(){return screenMode()?S.desktop?.using===true:S.view?.watching===true;}
-function headerMarkup(){
- const waiting=(S.computer?.actions||[]).filter(a=>a.status==='pending').length;
- const status=!S.connected?'Connecting…':!S.computer?'Loading…':!S.computer.granted?'No computer yet':!S.computer.available?'Setup needed':using()?`${S.pip.name} is using its computer`:waiting?`${waiting} waiting for you`:'Idle';
- return `<header class="pc-header"><span class="pc-face" aria-hidden="true">${plushFace(using()?'working':waiting?'waiting_approval':'idle')}</span><div class="pc-title"><h1>${esc(tabTitle())}</h1><p class="pc-status" role="status">${esc(status)}</p></div><button type="button" id="pc-stop" class="pc-quiet"${S.busy||!S.computer?.granted?' disabled':''}>Stop computer</button></header>`;
+// The bar's first part: the Pip's small face, "Pip · Computer" and its state in one line, then the chip for what waits.
+// While a chip or "X is using it" says the state, the state's own words are kept for a screen reader only (pipComputer.css).
+function holdTitle(a){const words=carefulWords(a.summary,S.pip?.name||'The Pip');return words?words[0]:`${isPayment(a.summary)?'Pay on':'Send a form to'} ${a.summary.host}`;}
+function chipMarkup(){
+ const waiting=pending();if(!waiting.length)return '';
+ const count=`${waiting.length} waiting`,what=holdTitle(waiting[0]),all=`${count} for you: ${what}`;
+ return `<button type="button" id="pc-chip" class="dgc-btn small pc-chip" aria-expanded="${S.waitOpen}" aria-controls="pc-wait-float" aria-label="${esc(all)}" title="${esc(all)}"><span class="pc-chip-dot" aria-hidden="true"></span><span class="pc-chip-count">${count}</span> <span class="pc-chip-what">· ${esc(what)}</span></button>`;
 }
+function headerMarkup(){
+ const waiting=pending().length;
+ const status=!S.connected?'Connecting…':!S.computer?'Loading…':!S.computer.granted?'No computer yet':!S.computer.available?'Setup needed':using()?`${S.pip.name} is using its computer`:waiting?`${waiting} waiting for you`:'Idle';
+ return `<header class="pc-header${waiting||screenMode()&&using()?' pc-said':''}"><span class="pc-face" aria-hidden="true">${plushFace(using()?'working':waiting?'waiting_approval':'idle')}</span><div class="pc-title"><h1 title="${esc(tabTitle())}">${esc(tabTitle())}</h1><p class="pc-status" role="status">${esc(status)}</p></div></header>${chipMarkup()}`;
+}
+// The bar's end: Stop computer, and "…" for what a narrow tab has no room to show (the shared menu).
+const DOTS='<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="3.5" cy="8" r="1.25" fill="currentColor"/><circle cx="8" cy="8" r="1.25" fill="currentColor"/><circle cx="12.5" cy="8" r="1.25" fill="currentColor"/></svg>';
+const CROSS='<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+const crossButton=(attr,label)=>`<button type="button" class="pc-x" ${attr} aria-label="${label}" title="${label}">${CROSS}</button>`;
+// What goes into "…", and from which tier (pipComputer.css hides the same things from the bar at the same tiers).
+const MORE=[['stop','Stop computer',3],['fit','Fit the screen to this tab',4],['actual','Real size (100%)',4],['size','Screen size',5],['keys','Keyboard',5],['clip','Clipboard',5],['files','Files',5]];
+function moreRows(){
+ const screen=screenMode(),held=screen&&!mayType();
+ return MORE.filter(([id,,tier])=>S.tier>=tier&&(id==='stop'||screen)&&(id!=='size'||screenSizes().length))
+  .map(([id,label])=>({id,label,attrs:id==='stop'&&(S.busy||!S.computer?.granted)||(id==='keys'||id==='clip')&&held?'disabled':''}));
+}
+function endMarkup(){
+ const rows=S.more?moreRows():[];
+ return `<button type="button" id="pc-stop" class="dgc-btn small pc-stop"${S.busy||!S.computer?.granted?' disabled':''}>Stop computer</button>`
+  +`<button type="button" id="pc-more" class="dgc-btn small pc-tool pc-more" aria-label="More" title="More" aria-haspopup="menu" aria-expanded="${S.more&&rows.length>0}">${DOTS}</button>`
+  +(rows.length?`<div id="pc-more-menu" class="dgc-menu pc-more-menu" role="menu" aria-label="More">${window.DgcMenu.html([{rows}],{data:'more'})}</div>`:'');
+}
+// How tight the bar is. Each tier is tried with every part at its own width (the title up to its cap): the first that
+// fits is kept, and then the title and the state may give way a little. Skipped while one of the bar's menus is open.
+let fitted='';
+function fitBar(force=false){
+ const bar=$('pc-bar');if(!bar||S.more||S.sizeMenu)return;
+ const key=`${bar.clientWidth}|${bar.textContent}`;if(!force&&key===fitted&&bar.dataset.tier===String(S.tier))return;fitted=key;
+ let tier=0;bar.classList.add('pc-measure');
+ for(;tier<5;tier++){bar.dataset.tier=String(tier);if(bar.scrollWidth<=bar.clientWidth)break;}
+ bar.classList.remove('pc-measure');bar.dataset.tier=String(tier);S.tier=tier;
+}
+// A held submit that was not here a moment ago: the chip pulses once (pipComputer.css: never under reduced motion).
+function noteWaiting(){const ids=pending().map(a=>a.id),fresh=ids.some(id=>!seenWaiting.has(id));seenWaiting=new Set(ids);if(!ids.length)S.waitOpen=false;return fresh;}
+function pulseChip(){const chip=$('pc-chip');if(!chip)return;chip.classList.remove('pc-chip-new');void chip.offsetWidth;chip.classList.add('pc-chip-new');}
+function moreKeys(){const menu=$('pc-more-menu');if(menu)window.DgcMenu.keys(menu,{close:()=>{S.more=false;render();},trigger:()=>$('pc-more')});}
 // A desktop like Grok's bots' computers: a wallpaper, a dock with three apps, apps in windows.
 const APPS={browser:'Browser',files:'Files',terminal:'Terminal'};
 function appIcon(app,size=34){
@@ -119,15 +164,16 @@ function windowMarkup(app,body){
 }
 // What a held form sends, on the card itself: a payment's bill number and amount, an order's sizes (never a hidden field).
 function sendsMarkup(summary){const line=sendsWords(summary);return line?`<span class="pc-sends">${esc(line)}</span>`:'';}
+// The held submits' cards float over the screen and never push it: shut until the bar's chip opens them.
 function waitingMarkup(){
- const waiting=(S.computer?.actions||[]).filter(a=>a.status==='pending');
+ const waiting=pending();
  if(!waiting.length)return '';
- return `<section class="pc-waiting" aria-label="Waiting for you">${waiting.map(a=>{const words=carefulWords(a.summary,S.pip?.name||'The Pip');return words
+ return `<div class="pc-float pc-wait-float" id="pc-wait-float"${S.waitOpen?'':' hidden'}><div class="pc-float-head"><strong>Waiting for you</strong>${crossButton('data-shut="wait"','Close')}</div><section class="pc-waiting" aria-label="Waiting for you">${waiting.map(a=>{const words=carefulWords(a.summary,S.pip?.name||'The Pip');return words
    // Careful mode: a new site, or something it read from your apps; no Always allow for these.
    // A login to save (API 56) is saved from its chat's card or its page: the form is there, never in this tab.
    ?a.summary.kind==='login'?`<article class="pc-hold"><div><strong>${esc(words[0])}</strong><span>${esc(words[1])} Save it from the card in its chat.</span></div><div class="pc-actions"><button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Not now</button></div></article>`
    :`<article class="pc-hold"><div><strong>${esc(words[0])}</strong><span>${esc(words[1])}</span>${a.summary.kind==='text'&&typeof a.summary.text==='string'?`<pre class="pc-held-text">${esc(a.summary.text)}</pre>`:''}</div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">${esc(words[2])}</button><button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Not now</button></div></article>`
-   :`<article class="pc-hold"><div><strong>${isPayment(a.summary)?'Pay on':'Send a form to'} ${esc(a.summary.host)}</strong>${sendsMarkup(a.summary)}<span>${a.summary.payment===true?'Sends payment card details. ':''}${esc(asksWords(a.summary))}${asksWords(a.summary)?' ':''}Nothing has been sent.${asksEveryTime(a.summary)?'':` ${esc(coversWords(a.summary))}.`}</span></div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">Send once</button>${asksEveryTime(a.summary)?'':`<button type="button" class="pc-quiet" data-always="${esc(a.id)}">Always allow</button>`}<button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Reject</button></div></article>`;}).join('')}</section>`;
+   :`<article class="pc-hold"><div><strong>${isPayment(a.summary)?'Pay on':'Send a form to'} ${esc(a.summary.host)}</strong>${sendsMarkup(a.summary)}<span>${a.summary.payment===true?'Sends payment card details. ':''}${esc(asksWords(a.summary))}${asksWords(a.summary)?' ':''}Nothing has been sent.${asksEveryTime(a.summary)?'':` ${esc(coversWords(a.summary))}.`}</span></div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">Send once</button>${asksEveryTime(a.summary)?'':`<button type="button" class="pc-quiet" data-always="${esc(a.id)}">Always allow</button>`}<button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Reject</button></div></article>`;}).join('')}</section></div>`;
 }
 function browserMarkup(){
  const v=S.view;
@@ -281,43 +327,62 @@ function panelMarkup(){
 const drawn=new Map();
 function put(id,html){const el=$(id);if(!el||drawn.get(id)===html&&(el.innerHTML!==''||html===''))return false;drawn.set(id,html);el.innerHTML=html;return true;}
 function applyFit(){if(viewer&&'scaleViewport' in viewer&&viewer.scaleViewport!==S.fit){viewer.clipViewport=false;viewer.scaleViewport=S.fit;}}
-function renderScreen(){
+// What the tab says (an error, a notice, the apps offer) floats at the foot of the screen, each with a way to put it away.
+function saysMarkup(){
+ return (S.error?`<div class="pc-note"><p class="pc-error" role="alert">${esc(S.error)}</p>${crossButton('data-dismiss="error"','Dismiss')}</div>`:'')
+  +(S.notice?`<div class="pc-note"><p class="pc-notice" role="status">${esc(S.notice)}</p>${crossButton('data-dismiss="notice"','Dismiss')}</div>`:'')+appsMarkup();
+}
+const PANELS={files:'Files',keys:'Keyboard',clip:'Clipboard'};
+function renderScreen(fresh){
  const app=document.getElementById('app');
- if(!$('pc-live')){drawn.clear();app.innerHTML=`<div id="pc-top"></div><div class="pc-stage" id="pc-stage"><div class="pc-tools" id="pc-tools" role="toolbar" aria-label="Screen"></div><div id="pc-strip"></div><div id="pc-panel"></div>`
-  +`<div class="pc-desktop pc-live" id="pc-live"><div id="pc-vnc" class="pc-vnc" aria-label="${esc(S.pip?.name||'The Pip')}'s computer screen"></div><div id="pc-overlay" class="pc-overlay"></div>${cursorMarkup()}</div></div>`;}
+ // One bar (the Pip, the screen's tools, Full screen, Stop computer), then the screen. Panels, the held submits' cards and
+ // what the tab says all sit inside the screen's own box, over it: nothing but the bar is ever above the screen.
+ if(!$('pc-live')){drawn.clear();app.innerHTML=`<div class="pc-stage" id="pc-stage"><div class="pc-topbar" id="pc-bar" data-tier="${S.tier}"><div class="pc-ident" id="pc-ident"></div><div class="pc-tools" id="pc-tools" role="toolbar" aria-label="Screen"></div><div class="pc-end" id="pc-end"></div></div>`
+  +`<div class="pc-desktop pc-live" id="pc-live"><div id="pc-vnc" class="pc-vnc" aria-label="${esc(S.pip?.name||'The Pip')}'s computer screen"></div><div id="pc-overlay" class="pc-overlay"></div>${cursorMarkup()}`
+  +`<div class="pc-notes" id="pc-notes"><div id="pc-says"></div><div id="pc-strip"></div></div><div class="pc-float" id="pc-panel"></div><div id="pc-wait"></div></div></div>`;}
  cleanupFace?.();
- $('pc-top').innerHTML=`${headerMarkup()}${S.error?`<p class="pc-error" role="alert">${esc(S.error)}</p>`:''}${S.notice?`<p class="pc-notice" role="status">${esc(S.notice)}</p>`:''}${appsMarkup()}${waitingMarkup()}`;
- $('pc-overlay').innerHTML=overlayMarkup();
  const focus=document.activeElement?.id;
+ put('pc-ident',headerMarkup());
+ $('pc-overlay').innerHTML=overlayMarkup();
  if(put('pc-tools',toolsMarkup())){
   const menu=$('pc-size-menu');
   if(menu){window.DgcMenu.keys(menu,{close:()=>{S.sizeMenu=false;render();},trigger:()=>$('pc-size')});
    // Under its button, and inside the tab however narrow it is.
-   const bar=$('pc-tools'),button=$('pc-size');menu.style.left=`${Math.max(8,Math.min(button.offsetLeft,bar.clientWidth-menu.offsetWidth-8))}px`;menu.style.top=`${button.offsetTop+button.offsetHeight+4}px`;}
-  if(focus&&$(focus)&&document.activeElement?.id!==focus)$(focus).focus();
+   const size=$('pc-size'),button=size.offsetWidth?size:$('pc-more')||size,o=$('pc-tools').getBoundingClientRect(),b=button.getBoundingClientRect(),stage=$('pc-bar').getBoundingClientRect();
+   menu.style.left=`${Math.max(stage.left+8,Math.min(b.left,stage.right-menu.offsetWidth-8))-o.left}px`;menu.style.top=`${b.bottom-o.top+4}px`;}
  }
+ if(put('pc-end',endMarkup()))moreKeys();
+ put('pc-says',saysMarkup());
+ put('pc-wait',waitingMarkup());
  put('pc-strip',stripMarkup());
  const box=$('pc-paste-text'),caret=box&&document.activeElement===box?[box.selectionStart,box.selectionEnd]:null;
- if(put('pc-panel',panelMarkup())){const now=$('pc-paste-text');if(now){now.value=S.clip.draft;if(caret){now.focus();try{now.setSelectionRange(...caret);}catch{}}}}
+ const panel=panelMarkup();
+ if(put('pc-panel',panel?`<div class="pc-float-head"><strong>${PANELS[S.panel]}</strong>${crossButton('data-shut="panel"','Close')}</div>${panel}`:'')){const now=$('pc-paste-text');if(now){now.value=S.clip.draft;if(caret){now.focus();try{now.setSelectionRange(...caret);}catch{}}}}
+ if(focus&&$(focus)&&document.activeElement?.id!==focus)$(focus).focus();
  $('pc-live').classList.toggle('pc-actual',!S.fit);
  document.body.classList.toggle('pc-fill',S.full==='tab');
+ fitBar();
+ if(fresh)pulseChip();
  applyFit();
- cleanupFace=window.PipConcepts?.plush?.mount?.($('pc-top'));
+ cleanupFace=window.PipConcepts?.plush?.mount?.($('pc-bar'));
  placeCursor();
 }
 // Full screen: the screen with its bar. The browser's own when the editor allows it; else it fills this whole tab.
+// The host hears each time Full screen goes on or off, however it ends (the button, Escape, the computer stopping; the tab
+// closing is the host's own to see): it maximizes the editor group and hides the side bars, and puts them back.
+function setFull(value){const was=!!S.full;S.full=value;if(was!==!!value)vscode.postMessage({type:'pipComputerFull',on:!!value});}
 async function enterFull(){
  const stage=$('pc-stage');if(!stage||S.full)return;
- try{if(!stage.requestFullscreen)throw Error('no full screen here');await stage.requestFullscreen();S.full='screen';}
- catch{S.full='tab';}
+ try{if(!stage.requestFullscreen)throw Error('no full screen here');await stage.requestFullscreen();setFull('screen');}
+ catch{setFull('tab');}
  render();$('pc-full')?.focus();
 }
 function leaveFull(){
  if(!S.full)return;
  if(document.fullscreenElement)void document.exitFullscreen?.().catch(()=>{});
- S.full='';render();
+ setFull('');render();
 }
-document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&S.full==='screen'){S.full='';render();}});
+document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&S.full==='screen'){setFull('');render();}});
 function pressKeys(id){
  const key=KEYBOARD.find(k=>k[0]===id);if(!key||!mayType()||!viewer?.sendKey)return;
  for(const sym of key[2])viewer.sendKey(sym,null,true);
@@ -399,15 +464,19 @@ function render(){
  if(S.pip&&document.title!==tabTitle())document.title=tabTitle();
  // With its real screen the tab has no side gutter: the screen runs edge to edge (pipComputer.css).
  document.body.classList.toggle('pc-screen-mode',screenMode());
- if(screenMode()){renderScreen();return;}
- if(S.full){if(document.fullscreenElement)void document.exitFullscreen?.().catch(()=>{});S.full='';}
+ const fresh=noteWaiting();
+ if(screenMode()){renderScreen(fresh);return;}
+ if(S.full){if(document.fullscreenElement)void document.exitFullscreen?.().catch(()=>{});setFull('');}
  document.body.classList.remove('pc-fill');
  const app=document.getElementById('app');
  const pane=!S.computer?'':!S.computer.granted?`<section class="pc-window pc-note"><p>${esc(S.pip?.name||'This Pip')} has no computer yet. Give it one with the computer button at the top of its chat.</p></section>`:!S.computer.available?`<section class="pc-window pc-note"><p>This Pip’s computer cannot start on this machine yet. Follow the setup shown above, then reopen this tab.</p></section>`:!S.app?'':windowMarkup(S.app,S.app==='files'?filesMarkup():S.app==='terminal'?terminalMarkup():browserMarkup());
  const focus=document.activeElement?.id,caret=document.activeElement?.selectionStart;
  cleanupFace?.();
- app.innerHTML=`${headerMarkup()}${S.error?`<p class="pc-error" role="alert">${esc(S.error)}</p>`:''}${S.notice?`<p class="pc-notice" role="status">${esc(S.notice)}</p>`:''}${installMarkup()}${appsMarkup()}${waitingMarkup()}<div class="pc-desktop">${pane}${S.computer?.granted&&S.computer.available?dockMarkup():''}</div>`;
+ // The same slim bar (no screen tools here), and the held submits' cards float over the desktop.
+ app.innerHTML=`<div class="pc-topbar" id="pc-bar" data-tier="${S.tier}"><div class="pc-ident" id="pc-ident">${headerMarkup()}</div><span class="pc-tools-end"></span><div class="pc-end" id="pc-end">${endMarkup()}</div></div>`
+  +`${S.error?`<p class="pc-error" role="alert">${esc(S.error)}</p>`:''}${S.notice?`<p class="pc-notice" role="status">${esc(S.notice)}</p>`:''}${installMarkup()}${appsMarkup()}<div class="pc-desktop">${pane}${S.computer?.granted&&S.computer.available?dockMarkup():''}${waitingMarkup()}</div>`;
  cleanupFace=window.PipConcepts?.plush?.mount?.(app);
+ moreKeys();fitBar();if(fresh)pulseChip();
  if(focus&&$(focus)){$(focus).focus();if(caret!=null&&$(focus).setSelectionRange)try{$(focus).setSelectionRange(caret,caret);}catch{}}
  const log=$('pc-log');if(log)log.scrollTop=log.scrollHeight;
  const img=$('pc-screen');if(img)img.addEventListener('load',placeCursor,{once:true});
@@ -517,16 +586,29 @@ function show(app,explicit=false){
  schedule();vscode.setState({app,fit:S.fit});
 }
 
+// Put away what floats over the screen (its close button, or Escape), and give focus back to the button that opened it.
+function shut(which){
+ if(which==='wait'){S.waitOpen=false;render();$('pc-chip')?.focus();return;}
+ const from={keys:'pc-keys',clip:'pc-clip',files:'pc-files'}[S.panel];S.panel='';render();const back=$(from);(back?.offsetWidth?back:$('pc-more')||back)?.focus();
+}
 document.addEventListener('click',event=>{
- // A press anywhere else closes the size menu.
- if(S.sizeMenu&&!event.target.closest?.('#pc-size-menu,#pc-size')){S.sizeMenu=false;render();}
+ // A press anywhere else closes the size menu, and "…".
+ const wasSize=S.sizeMenu&&!event.target.closest?.('#pc-size-menu,#pc-size,#pc-more-menu'),wasMore=S.more&&!event.target.closest?.('#pc-more-menu,#pc-more');
+ if(wasSize)S.sizeMenu=false;if(wasMore)S.more=false;if(wasSize||wasMore)render();
  const t=event.target.closest('button,[data-crumb],img');if(!t)return;
+ // A row in "…" is the bar's own button under another roof: the same press.
+ let id=t.id;
+ if(t.dataset.more){id=`pc-${t.dataset.more}`;S.more=false;render();}
  if(t.dataset.apps)void answerApps(t.dataset.apps);
- else if(t.id==='pc-fit'||t.id==='pc-actual'){S.fit=t.id==='pc-fit';render();vscode.setState({app:S.app,fit:S.fit});}
- else if(t.id==='pc-size'){S.sizeMenu=!S.sizeMenu;render();if(S.sizeMenu)($('pc-size-menu')?.querySelector('[aria-checked="true"]')||$('pc-size-menu')?.querySelector('.dgc-menu-row'))?.focus();}
+ else if(id==='pc-more'){S.more=!S.more;S.sizeMenu=false;render();if(S.more)$('pc-more-menu')?.querySelector('.dgc-menu-row:not(:disabled)')?.focus();}
+ else if(id==='pc-chip'){S.waitOpen=!S.waitOpen;if(S.waitOpen)S.panel='';render();}
+ else if(t.dataset.shut)shut(t.dataset.shut);
+ else if(t.dataset.dismiss){if(t.dataset.dismiss==='error'){S.error='';S.actionError=false;}else S.notice='';render();}
+ else if(id==='pc-fit'||id==='pc-actual'){S.fit=id==='pc-fit';render();vscode.setState({app:S.app,fit:S.fit});}
+ else if(id==='pc-size'){S.sizeMenu=!S.sizeMenu;render();if(S.sizeMenu)($('pc-size-menu')?.querySelector('[aria-checked="true"]')||$('pc-size-menu')?.querySelector('.dgc-menu-row'))?.focus();}
  else if(t.dataset.size)void chooseSize(t.dataset.size);
- else if(t.id==='pc-keys'||t.id==='pc-clip'){const panel=t.id==='pc-keys'?'keys':'clip';S.panel=S.panel===panel?'':panel;if(S.panel==='clip')S.clip={...S.clip,fresh:false};render();}
- else if(t.id==='pc-files'){S.panel=S.panel==='files'?'':'files';render();if(S.panel==='files')void loadFiles();}
+ else if(id==='pc-keys'||id==='pc-clip'){if(!mayType())return;const panel=id==='pc-keys'?'keys':'clip';S.panel=S.panel===panel?'':panel;if(S.panel){S.waitOpen=false;if(S.panel==='clip')S.clip={...S.clip,fresh:false};}render();}
+ else if(id==='pc-files'){S.panel=S.panel==='files'?'':'files';if(S.panel)S.waitOpen=false;render();if(S.panel==='files')void loadFiles();}
  else if(t.id==='pc-full'){if(S.full)leaveFull();else void enterFull();}
  else if(t.dataset.key)pressKeys(t.dataset.key);
  else if(t.id==='pc-paste')pasteIn();
@@ -539,7 +621,7 @@ document.addEventListener('click',event=>{
  else if(t.id==='pc-reconnect'){S.screen={state:'off',reason:''};startScreen();}
  else if(t.id==='pc-show-here'){S.screen={state:'off',reason:''};startScreen(true);}
  else if(t.id==='pc-reopen-browser')void frame('reopen',{},true);
- else if(t.id==='pc-stop')void send('stop_pip_computer',{pip_id:S.pip.id}).then(()=>{S.notice='Stopped. Its sign-ins are kept.';S.view=null;return loadComputer();},error=>{S.error=errorText(error);render();});
+ else if(id==='pc-stop')void send('stop_pip_computer',{pip_id:S.pip.id}).then(()=>{S.notice='Stopped. Its sign-ins are kept.';S.view=null;return loadComputer();},error=>{S.error=errorText(error);render();});
  else if(t.id==='pc-back')void frame('back');
  else if(t.id==='pc-screen'){const p=screenPoint(event);if(p&&!using())void frame('click',p);}
  else if(t.dataset.folder!==undefined){S.files.selected=null;S.files.preview=null;void loadFiles([S.files.path,t.dataset.folder].filter(Boolean).join('/'));}
@@ -562,7 +644,14 @@ document.addEventListener('input',event=>{if(event.target.id==='pc-command')S.te
  if(event.target.id==='pc-paste-text'){S.clip.draft=event.target.value;if(S.clip.note)clipSay('');}});
 // Escape leaves full screen. Not while the screen itself has the keys: the viewer keeps those for the computer, and the
 // keyboard panel's Esc is a button. (The size menu closes on its own Escape first.)
-document.addEventListener('keydown',event=>{if(event.key==='Escape'&&S.full&&!event.defaultPrevented&&!event.target.closest?.('#pc-size-menu,#pc-vnc')){event.preventDefault();leaveFull();$('pc-full')?.focus();}});
+// First it puts away what floats over the screen (a panel, or the held submits' cards); with nothing open, it leaves full screen.
+document.addEventListener('keydown',event=>{
+ if(event.key!=='Escape'||event.defaultPrevented||event.target.closest?.('#pc-size-menu,#pc-more-menu,#pc-vnc,.pc-screen,#pc-url'))return;
+ if(S.waitOpen){event.preventDefault();shut('wait');}
+ else if(S.panel&&$('pc-panel')?.firstChild){event.preventDefault();shut('panel');}
+ else if(S.full){event.preventDefault();leaveFull();$('pc-full')?.focus();}
+});
+window.addEventListener('resize',()=>fitBar());
 // Leaving the bar (or Escape in it) shows the page's own address again, as a browser does. A redraw
 // replaces the bar, which blurs it too: that is not leaving, so it waits for the redraw to finish.
 document.addEventListener('focusout',event=>{if(event.target.id==='pc-url')setTimeout(()=>{if(document.activeElement?.id!=='pc-url'&&S.address!==null){S.address=null;render();}},0);});

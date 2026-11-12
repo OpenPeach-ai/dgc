@@ -224,6 +224,52 @@ const filesPath = (value: unknown): value is string => typeof value === 'string'
 const COMPUTER_COPY_WAIT_MS = 30 * 60 * 1000;
 type ComputerPip = { id: string; name: string; pip_type: string };
 
+/** DGC's own side bar view, as Full screen needs it: whether it is showing, and how to show it again. */
+export type FullScreenSide = { visible(): boolean; show(): void };
+const FULL_HIDE = 'workbench.action.maximizeEditorHideSidebar', FULL_TOGGLE = 'workbench.action.toggleMaximizeEditorGroup';
+/** Full screen in a Pip computer's tab (0.52): the tab says when it goes on and off (pipComputerFull {on}), and this
+ *  gives the computer the window with VS Code's own command: "Maximize Editor Group and Hide Side Bars", or, where this
+ *  VS Code has no such command, the editor group alone. VS Code's window full screen (F11) stays the user's own.
+ *
+ *  One for the whole window, whichever Pips page opened the tab: the command runs when the first tab goes on, and things
+ *  are put back when the last one goes off (or closes), once. So two computer tabs never undo each other.
+ *
+ *  Put back is only what this changed and can tell it changed. VS Code tells an extension neither whether a side bar is
+ *  showing nor whether a group is maximized, so: the editor group is given back its size only when there was more than
+ *  one group to maximize over, and DGC's own side bar view is shown again only when it was showing before. A side bar
+ *  showing something else is the user's to open again. */
+export class ComputerFullScreen {
+  private tabs = new Set<object>();
+  private changed: { maximized: boolean; side?: FullScreenSide } | undefined;
+  private work: Promise<void> = Promise.resolve();
+  /** A tab's Full screen went on or off. Resolves when the window has followed. */
+  set(tab: object, on: boolean, side?: FullScreenSide): Promise<void> {
+    if (on === this.tabs.has(tab)) return this.work;
+    if (on) this.tabs.add(tab); else this.tabs.delete(tab);
+    return this.work = this.work.then(() => this.follow(side)).catch(() => { /* a command VS Code refused changes nothing here */ });
+  }
+  private async follow(side?: FullScreenSide): Promise<void> {
+    const want = this.tabs.size > 0, commands = vscode.commands;
+    if (want === !!this.changed || !commands) return;
+    const groups = () => vscode.window.tabGroups?.all.length ?? 1;
+    if (want) {
+      const all = await commands.getCommands(true), many = groups() > 1;
+      if (all.includes(FULL_HIDE)) {
+        this.changed = { maximized: many && all.includes(FULL_TOGGLE), ...(side?.visible() === true ? { side } : {}) };
+        await commands.executeCommand(FULL_HIDE);
+      } else if (many && all.includes(FULL_TOGGLE)) {
+        this.changed = { maximized: true };
+        await commands.executeCommand(FULL_TOGGLE);
+      } else this.changed = { maximized: false };
+      return;
+    }
+    const was = this.changed!; this.changed = undefined;
+    try { if (was.maximized && groups() > 1) await commands.executeCommand(FULL_TOGGLE); }
+    finally { if (was.side && !was.side.visible()) was.side.show(); }
+  }
+}
+export const computerFullScreen = new ComputerFullScreen();
+
 /** Local Pips control bridge. Request correlation is owned by the extension host. */
 /** Fix on a Pip whose routines can't run because its Claude Code or Codex is signed out (Pips package 2): that CLI's own
  * sign-in, in a terminal on the computer running DGC (over Remote-SSH, the remote one). DGC never touches the login. The
@@ -249,6 +295,8 @@ export class PipsEditor implements vscode.Disposable {
   private computerCopying = new Set<string>();
   /** The copies DGC has not answered yet: ended, in words, when the connection changes under them. */
   private computerCopies = new Set<(why: string) => void>();
+  /** DGC's side bar view, set by the panel: Full screen in a computer tab hides the side bars, and shows this one again after. */
+  fullScreenSide?: FullScreenSide;
   /** One screen stream per Pip: the tab (its key in `computers`) that opened it last. */
   private desktopOwner = new Map<string, string>();
   /** The CLI streams a Pip computer's full screen (ready.capabilities.pips_desktop). */
@@ -349,6 +397,7 @@ export class PipsEditor implements vscode.Disposable {
     this.computers.set(key, { panel, pip, ...(number ? { number } : {}) });
     panel.onDidDispose(() => {
       this.computers.delete(key);
+      void computerFullScreen.set(panel, false);   // a tab closed in Full screen: the window is put back
       for (const [id, item] of this.pending) if (item.surface === surface) this.pending.delete(id);
       // Pips API 88: its tab is gone, so DGC lets its live view go and the computer reads closed at once, not after
       // the view's ten idle minutes.
@@ -941,6 +990,8 @@ export class PipsEditor implements vscode.Disposable {
         () => this.post({ type: 'pipComputerCopied', ok: true }, surface), () => this.post({ type: 'pipComputerCopied', ok: false }, surface));
       return;
     }
+    // Full screen in a computer tab went on or off: the window follows (ComputerFullScreen).
+    if (message?.type === 'pipComputerFull' && computer) { void computerFullScreen.set(computer.panel, message.on === true, this.fullScreenSide); return; }
     if (message?.type === 'pipsOpenPhoto' && !computer) { void this.openPhoto(message); return; }
     if (message?.type === 'pipsOpenArtifact' && !computer) {
       // A Pip's report document or sheet, or a dashboard it refreshes: in the artifact panel (a document in the editor).

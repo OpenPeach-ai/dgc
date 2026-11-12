@@ -15,7 +15,9 @@ function host(PIP, scene) {
   window.__scene = scene; window.__sent = []; window.__posted = [];
   const post = (m) => window.postMessage(m, "*");
   const answers = {
-    get_pip_computer: () => ({ computer: { pip_id: PIP.id, granted: true, available: true, reason: "", pending: 0, actions: [] } }),
+    get_pip_computer: () => ({ computer: { pip_id: PIP.id, granted: true, available: true, reason: "", pending: (scene.actions || []).length, actions: scene.actions || [] } }),
+    // Its held submits (scene.actions): an answer settles one, and it is gone from the next look.
+    decide_pip_computer_action: (r) => { const a = scene.actions.find((x) => x.id === r.action_id); scene.actions = scene.actions.filter((x) => x !== a); return { action: { ...a, status: r.approve ? "approved" : "rejected" } }; },
     use_pip_computer_view: () => ({ view: { ok: false, error: "" } }),
     list_pip_computer_files: (r) => ({ path: r.path, entries: r.path ? [] : scene.files, more: false, total_bytes: scene.files.reduce((n, f) => n + (f.bytes || 0), 0) }),
     read_pip_computer_file: (r) => { const f = scene.files.find((x) => x.name === r.path) || { bytes: 12 }; const big = f.bytes > 2 * 1024 * 1024;
@@ -35,14 +37,14 @@ function host(PIP, scene) {
     post({ type: "pipsConnection", generation: 7, apiVersion: scene.api, connected: true, supported: true, enabled: true }); };
 }
 
-/** Open the tab on its Files. `opts`: width, height, theme, api, files. Returns the page `p`; `say(message)`, the host
+/** Open the tab on its Files. `opts`: width, height, theme, api, files, actions (its held submits). Returns the page `p`; `say(message)`, the host
  *  speaking to the page; `scene(patch)`; `posted(type)`; `sent(type)`; `errors`; `close()`. */
 export async function openFiles(browser, opts = {}) {
   const { width = 700, height = 640, theme = "dark", api = 87, files = FILES } = opts;
   const { js, css } = await bundle();
   const t = THEMES[theme];
   const page = `<!DOCTYPE html><html><head><meta charset="utf-8">${VSCODE_WEBVIEW}<style>${t.css}</style><style>${css}</style></head><body class="${t.kind}"><main id="app"></main>`
-    + `<script>(${host})(${JSON.stringify(PIP)}, ${JSON.stringify({ api, files })});</script><script type="module" src="/ext/dist/pipComputer.js"></script></body></html>`;
+    + `<script>(${host})(${JSON.stringify(PIP)}, ${JSON.stringify({ api, files, actions: opts.actions || [] })});</script><script type="module" src="/ext/dist/pipComputer.js"></script></body></html>`;
   const context = await browser.newContext({ viewport: { width, height }, reducedMotion: "reduce", colorScheme: theme });
   const p = await context.newPage();
   const errors = [];
