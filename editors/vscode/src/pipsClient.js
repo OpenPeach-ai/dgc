@@ -55,6 +55,7 @@ import {appLink,appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup,appLinkSe
 import {pipAppsPage,pipAppSwitched,pipAppsMarkup} from './pipApps.js';
 import {pipSkillsPage,pipSkillSwitched,pipSkillsMarkup} from './pipSkills.js';
 import {TEAM_MAX,pipFolder,folderName,foldersInUse,pipsByFolder,folderMarkup,pipFolderMarkup,teamPips,teamCount,teamExportMarkup,teamExportRequest,teamExported,teamImported,teamExportedNotice,teamImportedNotice} from './pipTeams.js';
+import {githubLink,grokReply,importPrompt,sourceImported,sourceImportedNotice,githubImportMarkup,grokImportMarkup} from './pipImports.js';
 import {pipKeysPage,pipKeyResult,waitingKeys,pipKeyCardMarkup,pipKeysPageMarkup,pipKeyRemovedNote} from './pipKeys.js';
 import {pluginsPage,pluginResult,keyRequests,keyCardMarkup,shownPluginCards,pluginForServer,installedForServer,pluginCardMarkup,pluginActionMarkup,pluginsPageMarkup,pluginUsesPage,pluginUsesMarkup,argumentValues,editedArguments,PLUGIN_LEVELS} from './pipPlugins.js';
 import {attentionPage,waitingOn,needWords,attentionMarkup,attentionCards,attentionSpot,setupCardMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
@@ -354,7 +355,7 @@ let commandReceipts=[],commandCursor=null,commandMore=false,commandTotal=0,comma
 let pulseCommands=[{argv:[''],cwd:'.'}],commitRules=[{kind:'exact',path:''}];
 // The Source section's Excluded folders (safe_source_v2, API 50), its size check and one run's left-out record.
 let sourceExcludeList=[],sourceExcludeProblem='',sourceCheckState={pip:'',value:null,loading:false,error:''},runSourceState={run:'',value:null,error:''};
-const draft = {pipFolderName:'',teamName:'',deletePipName:'',sourceExcludeInput:'',noteAdd:'',workingNotesText:'',pipLearnText:'',newPipName:'',newPipCharacter:'scout',quickKind:'manual',quickTime:'08:30',quickHours:'4',quickZone:defaultZone,feedbackNote:'',webReads:'',setupTask:'',verificationEnabled:false,pulseMode:'tests',liveCommands:'',statementKind:'fact',statementTitle:'',statementText:'',statementReason:'',statementExpiry:'',statementSource:'',specialistExplorer:false,specialistCritic:false,specialistWorker:false,specialistCalls:'1',memoryExpiry:'',outcomeSession:'',outcomeSourceKind:'commit',outcomeSourceValue:'',outcomeTitle:'',outcomeText:'',sourceMode:'committed_only',sourceReason:'',triggerContext:false,triggerFinding:false,triggerCommit:false,triggerSession:false,triggerPaths:false,triggerMinutes:'5',adaptationMode:'suggest_changes',adaptationName:false,adaptationSource:false,adaptationReason:'',handoffText:'',handoffTarget:'',handoffTask:'',handoffPaths:'',handoffTests:'[]',createModel:'default',pipModel:'default',modelReason:'',findingReviewReason:'',chatText:'',scheduleType:'manual',scheduleAt:'',scheduleCron:'0 9 * * 1-5',scheduleMinutes:'60',scheduleTime:'09:00',scheduleZone:defaultZone,scheduleReason:'',name:'',goal:'',source_ref:'HEAD',revisionGoal:'',revisionReason:'',contextKind:'decision',contextTitle:'',contextContent:''};
+const draft = {pipFolderName:'',teamName:'',importLink:'',importReply:'',deletePipName:'',sourceExcludeInput:'',noteAdd:'',workingNotesText:'',pipLearnText:'',newPipName:'',newPipCharacter:'scout',quickKind:'manual',quickTime:'08:30',quickHours:'4',quickZone:defaultZone,feedbackNote:'',webReads:'',setupTask:'',verificationEnabled:false,pulseMode:'tests',liveCommands:'',statementKind:'fact',statementTitle:'',statementText:'',statementReason:'',statementExpiry:'',statementSource:'',specialistExplorer:false,specialistCritic:false,specialistWorker:false,specialistCalls:'1',memoryExpiry:'',outcomeSession:'',outcomeSourceKind:'commit',outcomeSourceValue:'',outcomeTitle:'',outcomeText:'',sourceMode:'committed_only',sourceReason:'',triggerContext:false,triggerFinding:false,triggerCommit:false,triggerSession:false,triggerPaths:false,triggerMinutes:'5',adaptationMode:'suggest_changes',adaptationName:false,adaptationSource:false,adaptationReason:'',handoffText:'',handoffTarget:'',handoffTask:'',handoffPaths:'',handoffTests:'[]',createModel:'default',pipModel:'default',modelReason:'',findingReviewReason:'',chatText:'',scheduleType:'manual',scheduleAt:'',scheduleCron:'0 9 * * 1-5',scheduleMinutes:'60',scheduleTime:'09:00',scheduleZone:defaultZone,scheduleReason:'',name:'',goal:'',source_ref:'HEAD',revisionGoal:'',revisionReason:'',contextKind:'decision',contextTitle:'',contextContent:''};
 // The face-and-dropdown pickers (pipPicker.js): New Pip's job or character, and a Personal Pip's face on its page. A pick
 // redraws what it changes, the big face and what follows it, and gives the dropdown's button the focus back.
 const picker=createPicker({root:document,onPick(id,value){
@@ -1756,7 +1757,7 @@ const TEAM_FILE_WAIT=10*60*1000;   // a file dialog is open as long as the user 
 function teamsShown(){return foldersListed()&&simpleMode();}
 function teamMenuMarkup(){
  if(!teamsShown())return '';
- return `<details class="pip-menu team-menu" data-details="team-menu"><summary class="topbar-icon" aria-label="Teams" title="Teams: save Pips as one file, or add a team from a file">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${button('team-export','Export team…',S.busy||!usable()||!teamPips(S.jobs).length)}${button('team-import','Import team…',S.busy||!usable())}</div></details>`;
+ return `<details class="pip-menu team-menu" data-details="team-menu"><summary class="topbar-icon" aria-label="Teams" title="Teams: save Pips as one file, or add Pips from a file, a GitHub link or a Grok bot">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${button('team-export','Export team…',S.busy||!usable()||!teamPips(S.jobs).length)}${button('team-import','Import team…',S.busy||!usable())}${button('team-import-github','Import from GitHub…',S.busy||!usable())}${button('team-import-grok','Bring a Grok bot…',S.busy||!usable())}</div></details>`;
 }
 function teamExportBody(){
  const live=S.jobs.filter(p=>p.status!=='archived').length;
@@ -1766,7 +1767,7 @@ function openTeamExport(){
  if(S.busy||!usable()||!teamsShown())return;
  const pips=teamPips(S.jobs);if(!pips.length)return;
  teamDraft.pips=pips;teamDraft.ticked=new Set(pips.slice(0,TEAM_MAX).map(p=>p.id));draft.teamName='';
- openReview({title:'Export team',description:'Save several Pips as one file that someone else can import.',body:teamExportBody(),confirm:'Export…',teamExport:true,blocked:false,request:{type:'export_pip_team_file'}});
+ openReview({title:'Export team',description:'Save several Pips as one file that someone else can import.',body:teamExportBody(),confirm:'Export…',teamExport:true,pinned:true,blocked:false,request:{type:'export_pip_team_file'}});
  $('teamName')?.focus();
 }
 function teamTicked(box){
@@ -1795,6 +1796,58 @@ async function importTeam(){
   void loadSetups();void loadAttention();}
  catch(error){if(token===scope())setError(error);}
  finally{if(token===scope()){S.busy=false;render();}}
+}
+// Import a bot (pips-18, Pips API 88; src/pipImports.js), two more rows in the Teams menu. From GitHub: one link to a
+// team file or a Pip's file, which DGC fetches. From a Grok bot: DGC's prompt to paste into the bot, then what it wrote.
+// Either way DGC answers with setup cards, which wait with the other new Pips; DGC's refusals stay in the dialog.
+function sourceImportBody(review){
+ return review.sourceImport==='grok'?grokImportMarkup({esc,prompt:review.prompt||'',reply:draft.importReply||'',copied:review.copied===true,busy:S.busy})
+  :githubImportMarkup({esc,url:draft.importLink||'',busy:S.busy});
+}
+function openGithubImport(){
+ if(S.busy||!usable()||!teamsShown())return;
+ draft.importLink='';
+ const review={title:'Import from GitHub',description:'Add a shared team of Pips, or one Pip, from a file on GitHub.',confirm:'Import',working:'Importing…',sourceImport:'github',pinned:true,blocked:false,request:{type:'import_pip_source',source:'github'}};
+ openReview({...review,body:sourceImportBody(review)});
+ $('importLink')?.focus();
+}
+async function openGrokImport(){
+ if(S.busy||!usable()||!teamsShown())return;
+ draft.importReply='';
+ const first={title:'Bring a Grok bot',description:'Grok can’t export a bot, so your bot describes itself and DGC sets up a Pip from what it writes.',confirm:'Import',working:'Importing…',sourceImport:'grok',pinned:true,blocked:true,prompt:'',copied:false,request:{type:'import_pip_source',source:'grok'}};
+ openReview({...first,body:sourceImportBody(first)});
+ const review=S.review;
+ try{const prompt=importPrompt(await send('get_pip_import_prompt'));if(S.review!==review||review.scope!==scope())return;
+  review.prompt=prompt;review.blocked=false;review.body=sourceImportBody(review);renderReview();$('import-prompt-copy')?.focus();}
+ catch(error){if(S.review===review){review.error=errorText(error);renderReview();}}
+}
+// Typing in the link or the reply takes away what was said about the last try, in place (the box keeps the keyboard).
+function importTyped(){
+ const review=S.review;if(!review?.sourceImport||!review.error||S.busy)return;
+ review.error='';$('review-root').querySelectorAll('.notice.error,.message-failure').forEach(n=>n.remove());
+}
+function copyImportPrompt(){
+ const review=S.review;if(!review?.prompt||review.sourceImport!=='grok')return;
+ const box=$('importPrompt');box?.select?.();   // selected too, so Ctrl+C copies it where the clipboard can't be written
+ // The host's copy takes a short text (the embedded page's own limit); the page's clipboard is asked as well.
+ if(review.prompt.length<=2048)vscode.postMessage({type:'copy',text:review.prompt});
+ try{void window.navigator.clipboard?.writeText?.(review.prompt)?.catch?.(()=>{});}catch{}
+ review.copied=true;review.body=sourceImportBody(review);
+ // Said in place, so the button keeps the keyboard.
+ const button=$('import-prompt-copy'),said=$('import-copied');if(button){button.textContent='Copied';button.focus({preventScroll:true});}if(said)said.textContent='Now paste it into your Grok bot.';
+}
+async function importSource(review){
+ const grok=review.sourceImport==='grok';let request;
+ try{request=grok?{source:'grok',text:grokReply(draft.importReply)}:{source:'github',url:githubLink(draft.importLink)};}
+ catch(error){review.error=errorText(error);review.body=sourceImportBody(review);renderReview();$('review-root').querySelector('[role=alert]')?.scrollIntoView?.({block:'nearest'});$(grok?'importReply':'importLink')?.focus({preventScroll:true});return;}
+ if(S.busy||!usable()||!teamsShown())return;
+ const token=scope(),workspace=S.workspace.id;S.busy=true;review.error='';review.body=sourceImportBody(review);renderReview();
+ try{const done=sourceImported(await send('import_pip_source',request));if(token!==scope())return;
+  S.busy=false;draft.importLink='';draft.importReply='';closeReview();
+  S.notice=sourceImportedNotice(done,done.setups.filter(s=>s.workspace_id===workspace).length,request.source);S.create=false;S.overview=true;render();
+  // Its cards wait with the other new Pips, read as any are (five at a time).
+  void loadSetups();void loadAttention();}
+ catch(error){if(token===scope()){S.busy=false;review.error=errorText(error);review.body=sourceImportBody(review);render();if(S.review===review){renderReview();$('review-root').querySelector('[role=alert]')?.scrollIntoView?.({block:'nearest'});$(grok?'importReply':'importLink')?.focus({preventScroll:true});}}}
 }
 function grantsMarkup(){
  if(S.apiVersion<41||!S.pip||S.pip.source_policy?.mode!=='personal')return '';
@@ -4990,7 +5043,7 @@ function renderReview() {
   $('app').inert=true;
   if(r.loginForm){renderLoginForm(r);return;}
   // (Drawn again while it is open, as its words change: it does not arrive a second time, media/shared/dialog.css.)
-  $('review-root').innerHTML=`<div class="overlay dgc-scrim${$('review-root').querySelector('.dialog:not(.login-dialog)')?' dgc-still':''}"><section class="dialog dgc-dialog" role="dialog" aria-modal="true" aria-labelledby="review-title"><h2 id="review-title" tabindex="-1">${esc(r.title)}</h2><p>${esc(r.description)}</p>${r.body||''}${r.permanentPip?`<label>Type ${esc(S.pip?.name||'the Pip name')} to confirm<input id="deletePipName" data-draft="deletePipName" value="${esc(draft.deletePipName)}" autocomplete="off"${S.busy?' disabled':''}></label>`:''}${r.reasonRequired&&r.note?`<label>${esc(r.note)}<textarea id="findingReviewReason" data-draft="findingReviewReason"${S.busy?' disabled':''}>${esc(draft.findingReviewReason)}</textarea></label>`:''}${r.memoryRecord?`<label>Optional expiry, with time zone<input id="memoryExpiry" data-draft="memoryExpiry" value="${esc(draft.memoryExpiry)}" placeholder="2026-12-01T09:00:00Z"${S.busy?' disabled':''}></label><p class="muted">Leave empty for no automatic expiry. The source and job scope stay explicit.</p>`:''}${errorMarkup(r.error)}<div class="actions">${r.secondary?button(r.secondary.id,r.secondary.label,S.busy||!usable(),'secondary-action'):''}${button('review-cancel',r.readOnly?'Close':'Cancel',S.busy)}${r.always&&!r.readOnly&&S.apiVersion>=41?button('review-always','Always allow',S.busy||!usable()||reviewBlocked(r)):''}${r.readOnly?'':button('review-confirm',S.busy?'Applying…':r.confirm,S.busy||!usable()||reviewBlocked(r),r.danger?'danger':'primary')}</div></section></div>`;
+  $('review-root').innerHTML=`<div class="overlay dgc-scrim${$('review-root').querySelector('.dialog:not(.login-dialog)')?' dgc-still':''}"><section class="dialog dgc-dialog${r.pinned?' is-pinned':''}" role="dialog" aria-modal="true" aria-labelledby="review-title"><h2 id="review-title" tabindex="-1">${esc(r.title)}</h2><p>${esc(r.description)}</p>${r.body||''}${r.permanentPip?`<label>Type ${esc(S.pip?.name||'the Pip name')} to confirm<input id="deletePipName" data-draft="deletePipName" value="${esc(draft.deletePipName)}" autocomplete="off"${S.busy?' disabled':''}></label>`:''}${r.reasonRequired&&r.note?`<label>${esc(r.note)}<textarea id="findingReviewReason" data-draft="findingReviewReason"${S.busy?' disabled':''}>${esc(draft.findingReviewReason)}</textarea></label>`:''}${r.memoryRecord?`<label>Optional expiry, with time zone<input id="memoryExpiry" data-draft="memoryExpiry" value="${esc(draft.memoryExpiry)}" placeholder="2026-12-01T09:00:00Z"${S.busy?' disabled':''}></label><p class="muted">Leave empty for no automatic expiry. The source and job scope stay explicit.</p>`:''}${errorMarkup(r.error)}<div class="actions">${r.secondary?button(r.secondary.id,r.secondary.label,S.busy||!usable(),'secondary-action'):''}${button('review-cancel',r.readOnly?'Close':'Cancel',S.busy)}${r.always&&!r.readOnly&&S.apiVersion>=41?button('review-always','Always allow',S.busy||!usable()||reviewBlocked(r)):''}${r.readOnly?'':button('review-confirm',S.busy?(r.working||'Applying…'):r.confirm,S.busy||!usable()||reviewBlocked(r),r.danger?'danger':'primary')}</div></section></div>`;
   if(r.connectorSummary)mountConnectorSummary($('connector-review-values'),r.connectorSummary);
   if(r.connectorForm){
     const form=r.connectorForm,select=$('connector-tool');select.value=String(form.selected);select.disabled=S.busy;
@@ -5251,6 +5304,7 @@ function updateDraft(event) {
 // The chat box's undo keys and typing, for its history. The box is redrawn, so the page listens, for the box.
 for(const type of ['keydown','beforeinput','input','compositionstart','compositionend'])document.addEventListener(type,event=>{if(chatHistory&&event.target?.id==='chatText')chatHistory[type](event);});
 document.addEventListener('input',updateDraft);
+document.addEventListener('input',event=>{if(event.target?.id==='importLink'||event.target?.id==='importReply')importTyped();});
 document.addEventListener('input',event=>{
  const id=event.target.id;if(id==='flow-name')flowDraft.name=event.target.value;
  else if(/^flow-task-[0-2]$/.test(id))flowDraft.tasks[Number(id.slice(-1))]=event.target.value;
@@ -5839,6 +5893,9 @@ document.addEventListener('click',event=>{
     case 'simple-new':openNewPip();break;
     case 'team-export':target.closest('details')?.removeAttribute('open');openTeamExport();break;
     case 'team-import':target.closest('details')?.removeAttribute('open');void importTeam();break;
+    case 'team-import-github':target.closest('details')?.removeAttribute('open');openGithubImport();break;
+    case 'team-import-grok':target.closest('details')?.removeAttribute('open');void openGrokImport();break;
+    case 'import-prompt-copy':copyImportPrompt();break;
     case 'flow-new':flowDraft.name='';flowDraft.mode='reviewed';flowDraft.count=3;flowDraft.pips=['','','',''];flowDraft.tasks=['','',''];flowState.form=true;flowState.error='';render();$('flow-name')?.focus();break;
     case 'flow-cancel':flowState.form=false;flowState.error='';render();break;
     case 'create-core':void createSimplePip('core','Core');break;
@@ -5864,6 +5921,7 @@ document.addEventListener('click',event=>{
       if(review.connectorForm){prepareConnector(review);return;}
       if(review.projectPip){createProjectPip(review);return;}
       if(review.teamExport){void exportTeam(review);return;}
+      if(review.sourceImport){if(!reviewBlocked(review))void importSource(review);return;}
       if(review.newPip){void createSimplePip(draft.newPipCharacter,draft.newPipName,review);return;}
       if(review.computerGrant!==undefined){void applyComputerGrant(review);return;}
       if(review.computerAction){if(!reviewBlocked(review))void decideComputerAction(review,true);else{review.error='This action expired. Nothing was sent.';renderReview();}return;}
@@ -6035,6 +6093,7 @@ document.addEventListener('keydown',event=>{
   }
   if(!S.review)return;
   if(event.key==='Escape'&&!S.busy){event.preventDefault();closeReview();return;}
+  if(event.key==='Enter'&&!event.isComposing&&event.target.id==='importLink'&&S.review.sourceImport){event.preventDefault();$('review-confirm')?.click();return;}
   if(event.key==='Tab'){
     const items=[...$('review-root').querySelectorAll('button:not(:disabled),textarea:not(:disabled),input:not(:disabled),select:not(:disabled),[tabindex="0"]')];if(!items.length){event.preventDefault();return;}
     const first=items[0],last=items[items.length-1];if(event.shiftKey&&(document.activeElement===first||document.activeElement===$('review-title'))){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}

@@ -470,16 +470,31 @@ export const host = (opts) => `(${function (PIP, opts) {
       put(2, "Launch"); put(3, "Launch"); put(4, "Home, money and yearly renewals to watch"); put(5, "Home, money and yearly renewals to watch"); }
     for (const v of everyone()) v.profile = { ...blank, ...v.profile };
     const team = [["Researcher", "Research the market each morning and keep a list of what changed."], ["Writer", "Write the weekly post from the Researcher's list."], ["Fact check", "Check every claim in the post against its source."]];
+    // New-Pip cards as DGC makes them for an import: each waits with the other new Pips. `ids`: a hex digit a card.
+    const cards = (list, ids) => { const made = list.map(([n, goal], i) => ({ ...setupOf(i), id: "setup_" + ids[i].repeat(32), name: n, goal, pip_type: "lens", schedule: null, run_now: false, run_now_policy: null,
+        reason: "Imported from a shared Pip file.", created_at: new Date(Date.now() - i * 1000).toISOString() }));
+      for (const v of made) { setups.push(v); attentionItems.unshift({ id: `setup:${v.id}`, kind: "setup", card: v.id, pip_id: null, pip_name: "", pip_type: "", workspace_id: W, title: `Create the Pip “${v.name}”?`, detail: v.goal, created_at: v.created_at, expires_at: null }); }
+      return made; };
+    const GROK_PROMPT = "I'm moving you to another app called DGC. Describe yourself so it can set up the same assistant there. Reply with only one JSON code block, nothing before or after it, in exactly this shape:\n```json\n"
+      + '{"dgc_import": 1, "name": "your name", "job": "what you do for me, in two or three plain sentences", "kind": "scout", "skills": ["a skill you use"], "routines": [{"when": "every Monday at 9:00", "what": "what you do then"}]}\n```\n'
+      + "kind is one of: scout (finds and researches things), lens (watches something and tells me when it changes), quill (writes), rook (reviews and checks), lock (looks after security and accounts). Use an empty list when you have no skills or routines. Never include a password, key, token, account name, email address or anything private.";
     Object.assign(answers, {
       get_pip_skills: (r) => ({ pip_id: r.pip_id, skills: skills.map(([name, description, source]) => ({ name, description, source, on: !state.off.has(name) })) }),
       set_pip_skill: (r) => { if (opts.teams === "refuse") throw Error("Only you can choose a Pip's skills, on this computer."); if (r.on) state.off.delete(r.skill); else state.off.add(r.skill); return { skill: r.skill, on: r.on }; },
       set_pip_profile: (r) => { const v = everyone().find((x) => x.id === r.pip_id); v.profile = { ...blank, ...v.profile, ...r.changes }; return { pip_id: r.pip_id, profile: v.profile }; },
       export_pip_team_file: (r) => ({ saved: true, file: `${(r.name || "my team").toLowerCase().replace(/[^a-z0-9]+/g, "-")}.dgc-team.json`, name: r.name || "My team", count: r.pip_ids.length,
         left_out: ["Memory, history, findings and results stay with the original Pip."] }),
-      import_pip_team_file: () => { const made = team.map(([n, goal], i) => ({ ...setupOf(i), id: "setup_" + "abc"[i].repeat(32), name: n, goal, pip_type: "lens", schedule: null, run_now: false, run_now_policy: null,
-          reason: "Imported from a shared Pip file.", created_at: new Date(Date.now() - i * 1000).toISOString() }));
-        for (const v of made) { setups.push(v); attentionItems.unshift({ id: `setup:${v.id}`, kind: "setup", card: v.id, pip_id: null, pip_name: "", pip_type: "", workspace_id: W, title: `Create the Pip “${v.name}”?`, detail: v.goal, created_at: v.created_at, expires_at: null }); }
-        return { setups: made, name: "Launch crew", left_out: ["Reads from connected apps: they name your accounts."] }; },
+      import_pip_team_file: () => ({ setups: cards(team, "abc"), name: "Launch crew", left_out: ["Reads from connected apps: they name your accounts."] }),
+      // pips-18: import a bot (dgc/pip_import_sources.py). The prompt is DGC's own; a GitHub link gives the team's three
+      // cards (a link with "missing" in it can't be read); a Grok reply gives one card with DGC's notes (a reply
+      // without the JSON block is refused), each in DGC's own words.
+      get_pip_import_prompt: () => ({ prompt: GROK_PROMPT }),
+      import_pip_source: (r) => {
+        if (r.source === "github") { if (/missing/.test(r.url)) throw Error("DGC couldn't read that file from GitHub (HTTPError).");
+          return { setups: cards(team, "def"), name: "Launch crew", left_out: ["Reads from connected apps: they name your accounts."] }; }
+        if (!/"dgc_import"\s*:\s*1/.test(r.text)) throw Error("There is no JSON block in what you pasted. Ask your Grok bot again with the prompt DGC gave you.");
+        return { setups: cards([["Deal Finder", "Find the best deals on flights to Goa each week and tell me."]], "9"), name: "Deal Finder",
+          left_out: ["Its skills in Grok: compare prices, watch fares. Add the ones you want on its page.", "A routine it had: every Monday at 9:00: Check fares to Goa. Add it on its page.", "Imported from a Grok bot: it arrives with no keys and no app access."] }; },
     });
     if (opts.many) { const was = answers.list_pip_attention; answers.list_pip_attention = () => ({ ...was(), total: attentionItems.length, items: [...attentionItems] }); }
   }

@@ -1408,3 +1408,21 @@ label.team-pip>input[type=checkbox]{width:16px;height:16px;flex:none;margin:0}
 .team-pip-words>small{color:var(--muted);font-size:12px;overflow-wrap:anywhere}
 .team-count{margin:0;font-size:12px;color:var(--text-2)}
 .team-count.is-stop{color:var(--err-text,var(--vscode-errorForeground))}
+/* A dialog whose buttons stay in view (Export team, and the two imports): the dialog scrolls under them, so in a short
+   side bar Cancel and the button that goes ahead are never below the fold. The bar carries the dialog's bottom padding. */
+.dialog.is-pinned{padding-bottom:0;scroll-padding-bottom:72px}
+.dialog.is-pinned>.actions{position:sticky;bottom:0;z-index:1;margin-top:8px;padding:12px 0 22px;background:var(--vscode-editor-background)}
+@container (max-width:450px){.dialog.is-pinned>.actions{padding-bottom:16px}}
+.dialog.is-pinned>.actions::before{content:"";position:absolute;left:0;right:0;bottom:100%;height:8px;background:linear-gradient(to top,var(--vscode-editor-background),transparent);pointer-events:none}
+/* Import a bot (pips-18): a link for GitHub; for a Grok bot, the prompt to copy and a box for what it wrote back. */
+.import-says{margin:8px 0 0;font-size:12px;overflow-wrap:anywhere}
+.dialog #importLink{width:100%;min-width:0}
+.import-step{display:grid;gap:6px;min-width:0;margin:12px 0 0}
+.import-step>label{display:grid;gap:6px;min-width:0;margin:0}
+.import-step-says{display:flex;align-items:baseline;gap:8px;margin:0;font-weight:500;overflow-wrap:anywhere}
+.import-step-n{flex:none;display:inline-grid;place-items:center;width:18px;height:18px;border:1px solid var(--pip-edge);border-radius:50%;font-size:11px;font-weight:500;line-height:1;color:var(--text-2);font-variant-numeric:tabular-nums}
+.import-step textarea{display:block;width:100%;min-width:0;resize:vertical;font:12px/1.5 var(--vscode-editor-font-family,monospace);scrollbar-width:thin}
+.import-prompt{min-height:96px;max-height:min(30vh,200px);color:var(--text-2)}
+.import-reply{min-height:84px;max-height:min(30vh,220px)}
+.import-copy{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;min-width:0}
+.import-copy>.muted{font-size:12px;min-width:0}

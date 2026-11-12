@@ -341,7 +341,7 @@ test('Skills on a Pip’s page: a switch tells DGC about that skill on that Pip;
 
 test('Export team…: every Pip that can be shared is ticked, you name the team, and the host is asked with the Pips and the name alone',async()=>{
  const x=page({list:[job('1','Core',{pip_type:'core'}),inFolder('2','Writer','Launch',{pip_type:'quill'}),job('a','Mornings',{pip_type:'lens'}),job('4','Fixer',{pip_type:'patch'}),inFolder('5','Researcher','Launch',{pip_type:'lens'})]});await x.drain();
- assert.deepEqual([...x.d.querySelectorAll('.team-menu .tabs-menu button')].map(b=>b.textContent),['Export team…','Import team…']);
+ assert.deepEqual([...x.d.querySelectorAll('.team-menu .tabs-menu button')].map(b=>b.textContent).slice(0,2),['Export team…','Import team…']);   // (pips-18 adds two rows after them: pip-imports.test.mjs)
  assert.equal(x.d.querySelector('.team-menu summary').getAttribute('aria-label'),'Teams');
  x.click('#team-export');
  const dialog=()=>x.d.querySelector('[role=dialog]');assert.equal(dialog().querySelector('h2').textContent,'Export team');
