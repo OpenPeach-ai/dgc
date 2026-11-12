@@ -1,6 +1,6 @@
 // Files under a Pip computer's live screen (pc-background-commands, 0.52). With a live desktop the tab is the screen and
 // its bar, and there was no Files at all there: no way to add or save a big file. Now the bar has a Files button beside
-// Keyboard and Clipboard, opening a panel with the same list, folder, sizes and "x of 1 GB used" as the Files window,
+// Keyboard and Clipboard, opening a panel with the same list, folder, sizes and "x used" as the Files window,
 // Add file…, and for a chosen file Save to this computer… and Remove, through the same host messages.
 // Real Chromium, the real client and CSS, the real noVNC viewer on a fake RFB server (support/pip-computer-scene.mjs),
 // dark and light, at a 700 px tab and a 300 px one.
@@ -72,7 +72,7 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
       m = await measure(x.p);
       assert.equal(m.button.expanded, "true");
       assert.deepEqual(m.names, ["Downloads", "notes.txt", "quarterly-figures-2026.xlsx"]);
-      assert.equal(m.crumbs.text, "Files"); assert.match(m.used.text, /^47\.1 KB of 1 GB used\./);
+      assert.equal(m.crumbs.text, "Files"); assert.match(m.used.text, /^47\.1 KB used\./);
       assert.equal(m.add.text, "Add file…"); quiet(m.add, "Add file…"); assert.ok(!m.add.clipped && !m.add.disabled);
       across(m.panel, { left: 0, right: m.view[0] }, "the panel is inside the tab"); within(m.add, m.panel, "Add file… is inside the panel"); apart(m.add, m.crumbs, "Add file… and the folder");
       assert.ok(m.panel.bottom <= m.live.top + 0.5 && m.panel.top >= m.tools.bottom - 0.5, "the panel sits between the bar and the screen");
