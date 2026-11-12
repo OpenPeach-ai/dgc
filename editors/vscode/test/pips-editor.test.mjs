@@ -462,6 +462,36 @@ test('each broker mount has a distinct request namespace and ignores replies own
  second.receive({id:a[0].id,ok:true,result:'stale'});await flush();assert.equal(resolved,false);
  first.receive({id:a[0].id,ok:true,result:'old'});second.receive({id:b[0].id,ok:true,result:'current'});assert.equal(await old,'old');assert.equal(await fresh,'current');
 });
+test('a minute without an answer: time asleep never counts, a read is asked once more, then said plainly',async()=>{
+ // .111, 12 Nov: "DGC didn't answer in time. Refresh to see whether it worked before trying again." on the Project tab.
+ // Every read there takes milliseconds; the line came when the window's backend was replaced (its panel silent 15
+ // minutes, the Mac asleep) or when the page woke from sleep and timed out requests DGC had answered meanwhile.
+ const sent=[],broker=model.exports.requestBroker(m=>sent.push(m),'expiry');let t=Date.now();
+ const asleep=broker.request({type:'list_pips',workspace_id:'ws_x'});broker.expire(t);
+ broker.expire(t+=5_000);t+=10*60_000;broker.expire(t);                       // ten minutes asleep: not waiting on DGC
+ broker.receive({id:sent[0].id,ok:true,result:'woke'});assert.equal(await asleep,'woke','answered after the page woke');
+ const read=broker.request({type:'list_pips',workspace_id:'ws_x'});const id=sent.at(-1).id;
+ for(let i=0;i<13;i++)broker.expire(t+=5_000);
+ assert.equal(sent.filter(m=>m.id===id).length,2,'a read with no answer in a minute is asked once more');
+ for(let i=0;i<13;i++)broker.expire(t+=5_000);
+ await assert.rejects(read,error=>error.message==='DGC took over a minute to answer. Try again.'&&error.command==='list_pips');
+ const action=broker.request({type:'run_pip',pip_id:'pip_x'});
+ for(let i=0;i<13;i++)broker.expire(t+=5_000);
+ await assert.rejects(action,/Refresh to see whether it worked/,'an action is never sent twice');
+ assert.equal(sent.filter(m=>m.request.type==='run_pip').length,1);
+});
+test('a read DGC took over a minute to answer says so, with Try again, which asks again',async()=>{
+ const x=setup({jobs:[job('a')]});await x.drain({list_pips:()=>undefined});
+ const first=x.requests('list_pips').at(-1);
+ x.answer(first,{message:'DGC took over a minute to answer. Try again.'},false);await x.drain();
+ const box=x.d.querySelector('.notice.error');
+ assert.ok(box,'the line');assert.match(box.textContent,/DGC took over a minute to answer\./);
+ assert.ok(box.querySelector('[data-pips-retry]'),'Try again, beside it');
+ const before=x.requests('list_pips').length;
+ x.click('[data-pips-retry]');await x.drain();
+ assert.ok(x.requests('list_pips').length>before,'asked again');
+ assert.equal(x.d.querySelector('[data-pips-retry]'),null,'the line goes once the read comes back');
+});
 test('broker send failure does not retain a pending request',async()=>{
  let failed=true;const sent=[];
  const broker=model.exports.requestBroker(message=>{if(failed)throw Error('webview closed');sent.push(message);},'send-failure');

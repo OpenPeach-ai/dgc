@@ -68,7 +68,7 @@ import {notesPage,notesMarkup,keptMarkup} from './pipNotes.js';
 import {workingNotesPage,dailyLogPage,workingNotesMarkup,dailyLogMarkup,learnCardMarkup,learnRequest} from './pipWorkingNotes.js';
 import {carefulPage,carefulMarkup,carefulWords,settledWords,isPayment,asksEveryTime,asksWords,coversWords,coversDetail} from './pipCareful.js';
 import {loginsMarkup,loginFormMarkup,readLoginForm,loginFormProblem,clearLoginForm} from './pipLogins.js';
-import {pipLogins,pipLogin} from './pipsModel.js';
+import {pipLogins,pipLogin,SLOW_READ} from './pipsModel.js';
 import {mergeChatPage} from './pipsModel.js';
 import {livePlan,livePlanFromText,livePip} from './pipsModel.js';
 import {cardNumber} from './pipCards.js';
@@ -408,6 +408,8 @@ const field = (key,label,textarea=false) => `<label>${esc(label)}${textarea?`<te
 // A failed model request in a person's words, with what fixes it; its own answer one click away. Anything else as it was.
 const errorMarkup = value => {
  if(!value)return '';
+ // A read DGC took over a minute to answer (the page asked once more first): asked again with one click, no reload.
+ if(String(value)===SLOW_READ)return `<p class="notice error" role="alert">DGC took over a minute to answer. <button type="button" class="message-send-again" data-pips-retry>Try again</button></p>`;
  const failed=window.DgcMarkdown?.modelFailure?.(String(value));
  if(!failed)return `<p class="notice error" role="alert">${esc(value)}</p>`;
  return `<p class="notice error" role="alert">${esc(failed.headline)} ${esc(failed.next)}${failed.fix?` <button type="button" class="message-send-again" data-open-models>Settings → Models</button>`:''}</p><details class="message-failure"><summary>Details</summary><span>${esc(failed.detail)}</span></details>`;
@@ -6001,6 +6003,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.pluginUseRemove){void pipsSettingsCall('decline_pip_plugin',{pip_id:target.dataset.pluginUsePip,grant_id:target.dataset.pluginUseRemove},'Removed. That Pip no longer uses the plugin.');return;}
   if(target.dataset.openPlugins!==undefined){vscode.postMessage({type:'openSettings',section:'plugins'});return;}
   if(target.dataset.openModels!==undefined){vscode.postMessage({type:'openSettings',section:'models'});return;}
+  if(target.dataset.pipsRetry!==undefined){S.error='';render();refresh(true);return;}
   // Fix on a Pip whose routines can't run because its Claude Code or Codex is signed out: a terminal to sign it in.
   if(target.dataset.healthSignIn!==undefined){if(['claude','codex'].includes(target.dataset.healthSignIn)&&!remoteHost)vscode.postMessage({type:'pipsSignIn',engine:target.dataset.healthSignIn});return;}
   if(target.dataset.helloAgain!==undefined){void helloAgain();return;}

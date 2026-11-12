@@ -290,8 +290,11 @@ export function presentation(pip, runs, connected, runnerState) {
 // A refusal keeps DGC's own code beside its words ("conflict", "needs_computer"), for the few places that act on which
 // refusal it was; what is shown is always the words.
 const refusal = error => Object.assign(new Error(errorText(error)), record(error) && typeof error.code === 'string' && /^[a-z_]{1,64}$/.test(error.code) ? {code:error.code} : {});
+// A read can be asked again with no harm; an action never is (it may have run).
+const READ = /^(list|get|check|read|inspect)_/;
+export const SLOW_READ = 'DGC took over a minute to answer. Try again.';
 export function requestBroker(send, namespace=globalThis.crypto.randomUUID()) {
-  let sequence = 0;
+  let sequence = 0, lastTick = null;
   const pending = new Map();
   return {
     // `wait`: how long this one may take (a /learn draft is a model's answer, so minutes, not 60 s).
@@ -299,14 +302,26 @@ export function requestBroker(send, namespace=globalThis.crypto.randomUUID()) {
       if (pending.size >= 48) return Promise.reject(new Error('DGC is busy. Reconnect and try again.'));
       return new Promise((resolve,reject) => {
         const id = 'view-' + namespace + '-' + (++sequence);
-        pending.set(id,{resolve,reject,at:Date.now(),wait});
+        pending.set(id,{resolve,reject,at:Date.now(),wait,request,type:String(request?.type||'')});
         try { send({type:'pipsRequest',id,request}); }
         catch (error) { pending.delete(id); reject(error); }
       });
     },
     receive(message) { const item=pending.get(message.id); if (!item) return; pending.delete(message.id); message.ok === true ? item.resolve(message.result) : item.reject(refusal(message.error)); },
     reset() { for(const item of pending.values()) item.reject(new Error('The connection to DGC changed. Refresh and try again.')); pending.clear(); },
-    expire(now) { for(const [id,item] of pending) if(now-item.at > (item.wait||60000)) { pending.delete(id); item.reject(new Error('DGC didn’t answer in time. Refresh to see whether it worked before trying again.')); } }
+    // Called every few seconds while the page is awake (.111, 12 Nov: the red line came when the page woke from sleep, or
+    // when the window's backend was replaced, never from a slow read). Time the page itself was asleep (a laptop's sleep,
+    // a hidden window the editor paused) isn't time spent waiting on DGC. A read with no answer in its time is asked
+    // once more, then said plainly; an action is never sent twice.
+    expire(now) {
+      if (lastTick !== null && now-lastTick > 15000) for (const item of pending.values()) item.at += now-lastTick;
+      lastTick = now;
+      for(const [id,item] of pending) if(now-item.at > (item.wait||60000)) {
+        if (READ.test(item.type) && !item.retried) { item.retried = true; item.at = now; try { send({type:'pipsRequest',id,request:item.request}); } catch { /* the next tick fails it */ } continue; }
+        pending.delete(id);
+        item.reject(Object.assign(new Error(READ.test(item.type) ? SLOW_READ : 'DGC didn’t answer in time. Refresh to see whether it worked before trying again.'), {code:'timeout',command:item.type}));
+      }
+    }
   };
 }
 
