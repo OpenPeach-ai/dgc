@@ -538,6 +538,8 @@ test("switching chats restores their own drafts and clears the previous live tra
   send({ type: "composer_skill", name: "verify" });
   input.value += " /goal";
   input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  assert.equal(goalControl.hidden, true, "typing /goal arms nothing: Goal is chosen from the menu (12 Nov)");
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));   // Goal, in the "/" menu
   assert.equal(input.value, "Alpha draft ");
   assert.equal(goalControl.hidden, false, "Goal belongs to alpha's draft");
   send({ type: "event", event: { type: "info", message: "Alpha transcript" } });
@@ -564,6 +566,7 @@ test("reload restores an armed Goal as draft state without sending it", () => {
   const input = first.doc.getElementById("input");
   input.value = "/goal";
   input.dispatchEvent(new first.dom.window.Event("input", { bubbles: true }));
+  input.dispatchEvent(new first.dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));   // Goal, chosen from the "/" menu (12 Nov)
   input.value = "Verify the final release";
   first.dom.window.dispatchEvent(new first.dom.window.Event("pagehide"));
 
@@ -682,20 +685,24 @@ test("an image finishing after a chat switch remains with its original draft", (
 
 test("goal actions carry selected skills, templates, images and MCP snapshots with correlated draft recovery", () => {
   for (const inline of [false, true]) {
-    const original = inline ? "Verify the release /goal" : "/goal Verify the release";
+    // A goal starts only from the "/" menu's Goal (12 Nov). Inline: the draft ends in `/goal` and Goal is chosen
+    // from the menu that lists. Otherwise: a draft restored with Goal already chosen.
+    const original = inline ? "Verify the release /goal" : "Verify the release";
     const context = { type: "mcp_context", server: "docs", uri: "docs://release", text: "Snapshot reference" };
     const { dom, doc, posted, send, savedState, errors } = makeDom({ scope: "workspace", state: {
       version: 1, scope: "workspace", active: "alpha", entries: [["alpha", { text: original,
         attachments: [{ label: "$verify", skill: "verify" }, { label: "/check", template: "check" },
           { label: "Reference", resource: context }, { label: "Image", img: true, bytes: 8,
-            data: "data:image/png;base64,iVBORw0KGgo=" }], start: original.length, end: original.length }]], pending: [],
+            data: "data:image/png;base64,iVBORw0KGgo=" }], start: original.length, end: original.length, ...(inline ? {} : { goal: true }) }]], pending: [],
     } });
     send({ type: "session_ready", sessionId: "alpha" });
     const input = doc.getElementById("input");
     if (inline) {
-      // The restored draft ends in `/goal`; an input event converts it to the pinned Goal choice.
+      // The restored draft ends in `/goal`: the menu lists Goal, and Enter on it makes it the pinned Goal choice.
       // This test checks that every attachment rides through that one-message choice.
       input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+      input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      assert.equal(posted.some(message => message.type === "startGoal"), false, "choosing Goal starts nothing by itself");
     }
     input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     const command = posted.findLast(message => message.type === "startGoal");
@@ -1148,8 +1155,11 @@ test("Goal is pinned only while the current draft owns the one-message choice", 
   const input = doc.getElementById("input");
   input.value = "/goal";
   input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  assert.equal(control.hidden, true, "typing the complete token pins nothing (12 Nov)");
+  assert.equal(input.value, "/goal", "and the token stays as typed");
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));   // Goal, in the "/" menu
   assert.equal(input.value, "", "the highlighted slash token is removed from the text line");
-  assert.equal(control.hidden, false, "typing the complete token pins Goal before send");
+  assert.equal(control.hidden, false, "choosing Goal from the menu pins it before send");
   assert.equal(control.dataset.state, "draft");
   input.value = "Ship 0.46.0";
   input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -2694,7 +2704,12 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   } });
 
   const input = doc.getElementById("input");
-  input.value = "/goal ship the release";
+  // A goal starts only from the menu's Goal (12 Nov): "/goal" lists it, Enter chooses it, then the objective is sent.
+  input.value = "/goal";
+  input.selectionStart = input.selectionEnd = input.value.length;
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  input.value = "ship the release";
   input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   const goal = posted.find((m) => m.type === "startGoal");
   assert.equal(goal.text, "ship the release");
@@ -2733,8 +2748,9 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
 
   input.value = "Pause /goal";
   input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  assert.equal(posted.filter((m) => m.type === "startGoal").at(-1).text, "Pause",
-    "suffix goals must preserve objectives that coincide with a goal-state command");
+  assert.equal(posted.filter((m) => m.type === "prompt").at(-1).text, "Pause /goal",
+    "a message that ends in /goal, sent without choosing Goal from the menu, is plain text (12 Nov)");
+  assert.equal(posted.some((m) => m.type === "startGoal" && m.text === "Pause"), false);
 
   input.value = "Explain /goal syntax";
   input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -4673,7 +4689,11 @@ test('a rejected new goal retains the active turn stop control',()=>{
 test('budgeted goal echo claims its original row in either acknowledgement order', () => {
   for (const acceptedFirst of [true, false]) {
     const { dom, doc, posted, send, errors } = makeDom();
-    doc.getElementById('input').value = '/goal --tokens 9000 Prepare a weekly plan';
+    // (Goal chosen from the "/" menu, the only way a goal starts, 12 Nov; then its objective with a budget.)
+    doc.getElementById('input').value = '/goal';
+    doc.getElementById('input').dispatchEvent(new dom.window.Event('input', {bubbles:true}));
+    doc.getElementById('input').dispatchEvent(new dom.window.KeyboardEvent('keydown', {key:'Enter',bubbles:true}));
+    doc.getElementById('input').value = '--tokens 9000 Prepare a weekly plan';
     doc.getElementById('input').dispatchEvent(new dom.window.KeyboardEvent('keydown', {key:'Enter',bubbles:true}));
     const request = posted.findLast(m => m.type === 'startGoal');
     const accepted = {type:'prompt_accepted',request_id:request.requestId,state:'started'};
@@ -4697,6 +4717,7 @@ test('armed goal composer still parses a newly typed goal prefix and budget cont
     const input = doc.getElementById('input');
     input.value = 'Old draft /goal';
     input.dispatchEvent(new dom.window.Event('input', {bubbles:true}));
+    input.dispatchEvent(new dom.window.KeyboardEvent('keydown', {key:'Enter',bubbles:true}));   // Goal, chosen from the "/" menu (12 Nov)
     assert.equal(doc.getElementById('btn-goal').hidden, false);
     input.value = text;
     input.dispatchEvent(new dom.window.KeyboardEvent('keydown', {key:'Enter',bubbles:true}));

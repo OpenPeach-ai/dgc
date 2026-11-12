@@ -3240,16 +3240,18 @@ are dropped so each record is a clean, portable conversation.
     ("Standing goals", "persistent objectives with an explicit lifecycle", """
 # Standing goals
 
-`/goal <objective>` saves the objective and starts work in the terminal or editor.
-DGC continues an active goal across work cycles on native local/API and delegated
+In the terminal, `/goal <objective>` saves the objective and starts work. In VS Code/Cursor, choose Goal from the
+`/` menu, then type the objective. DGC continues an active goal across work cycles on native local/API and delegated
 subscription routes. Ordinary prompts do not create goals.
 
 In the terminal, an active goal keeps a row directly above the composer: the objective, its
 status, and the work time counted so far — so what DGC is holding you to, and how long it has
 been at it, are visible without asking.
 
-In VS Code/Cursor, entering `/goal <objective>` first saves the tagged goal and
-then immediately starts that exact objective as an agent turn. Its status, active
+In VS Code/Cursor, a goal starts only when you choose Goal from the `/` menu (click it, or press Enter or Tab on
+it): sending the objective then saves the tagged goal and immediately starts that exact objective as an agent turn.
+Typing `/goal some text` without choosing it sends that text as an ordinary prompt; `/goal pause`, `/goal resume`,
+`/goal clear` and `/goal budget N` stay commands. Its status, active
 time, review button, pause/resume button, and edit/delete controls stay above the composer.
 Editing preserves the goal's identity and accumulated work time. Reopening a saved
 session pauses its goal; time spent offline is not counted as work.

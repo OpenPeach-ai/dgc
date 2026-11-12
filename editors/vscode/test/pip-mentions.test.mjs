@@ -75,7 +75,8 @@ test('pagination is explicit and a selected Pip cannot be selected twice',()=>{
  const next=open(p);answer(p,next);key(p,'Enter');assert.equal(p.doc.querySelectorAll('#attachments .pip-reference-chip').length,1);assert.match(p.doc.getElementById('log').textContent,/already referenced/);
 });
 test('standing goal refuses reference chips without discarding draft',()=>{
- const p=panel();select(p);type(p,'/goal explain this');key(p,'Enter');assert.equal(p.posted.some(m=>m.type==='startGoal'),false);assert.equal(p.doc.getElementById('input').value,'/goal explain this');assert.match(p.doc.getElementById('attachments').textContent,/Rook/);
+ // (Goal chosen from the "/" menu, the only way a goal starts, 12 Nov; then its objective.)
+ const p=panel();select(p);type(p,'/goal');key(p,'Enter');assert.equal(p.doc.getElementById('btn-goal').hidden,false);type(p,'explain this');key(p,'Enter');assert.equal(p.posted.some(m=>m.type==='startGoal'),false);assert.equal(p.doc.getElementById('input').value,'explain this');assert.match(p.doc.getElementById('attachments').textContent,/Rook/);
 });
 test('an unregistered workspace is an honest empty state and multiline names stay inert',()=>{
  const p=panel(),r=open(p);p.send({type:'event',event:{type:'prompt_pips',request_id:r.request_id,workspace_id:'',pips:[],next_cursor:null}});assert.match(p.doc.getElementById('pop').textContent,/No Pips are registered/);key(p,'Escape');const next=open(p);answer(p,next,[{...row,name:'Rook\n\t<script>bad</script>'}]);assert.equal(p.doc.querySelector('#pop script'),null);key(p,'Enter');assert.match(p.doc.querySelector('#input .pill-pip')?.textContent||'',/Rook <script>bad<\/script>/);

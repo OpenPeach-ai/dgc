@@ -42,7 +42,15 @@ function panel(options = {}) {
   const event = (data) => h.send({ type: "event", event: data });
   const events = (list) => { for (const data of list) event(data); };
   // Enter in the composer, the way a person sends; Alt+Enter queues behind a running turn.
+  // (A goal starts only from the "/" menu's Goal, 12 Nov: `/goal X` here picks Goal there, then sends X.)
   const type = (text, { queue = false } = {}) => {
+    const objective = /^\/goal\s+([\s\S]+)$/.exec(text)?.[1];
+    if (objective) {
+      input.value = "/goal";
+      input.dispatchEvent(new win.Event("input", { bubbles: true }));
+      input.dispatchEvent(new win.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      text = objective;
+    }
     input.value = text;
     input.dispatchEvent(new win.Event("input", { bubbles: true }));
     input.dispatchEvent(new win.KeyboardEvent("keydown", { key: "Enter", altKey: queue, bubbles: true, cancelable: true }));

@@ -30,6 +30,12 @@ function panel(options = {}) {
     ...h, input,
     event: (data) => h.send({ type: "event", event: data }),
     // Enter in the composer, the path a person takes (prompt-links.test.mjs drives it the same way).
+    // Goal chosen from the "/" menu, the only way a goal starts (12 Nov): what is sent next is its objective.
+    pickGoal() {
+      input.value = "/goal";
+      input.dispatchEvent(new h.dom.window.Event("input", { bubbles: true }));
+      input.dispatchEvent(new h.dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    },
     submit(text) {
       input.value = text;
       h.doc.getElementById("send").click();
@@ -244,7 +250,8 @@ test("every builder folds: echoed, replayed, steered in history, recalled, queue
 
 test("a goal prompt is settled and folds; a live steer folds inside its turn and is not a block of its own", () => {
   const goal = panel();
-  goal.submit(`/goal ${LONG}`);
+  goal.pickGoal();
+  goal.submit(LONG);
   const block = goal.doc.querySelector(".msg.user.goal-prompt");
   assert.ok(block, "the goal prompt was drawn");
   assert.equal(block.querySelector(":scope > .bubble").dataset.fold, "folded");

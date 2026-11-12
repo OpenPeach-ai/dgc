@@ -294,7 +294,10 @@ if (process.argv.includes("--pinned")) {
   const g = await scene();
   await g.p.evaluate(() => {
     const input = document.getElementById("input");
-    input.value = "/goal Make settings sync survive a sleep mid-write"; input.dispatchEvent(new Event("input", { bubbles: true }));
+    // Goal is chosen from the "/" menu (the only way a goal starts), then its objective is sent.
+    input.value = "/goal"; input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    input.value = "Make settings sync survive a sleep mid-write"; input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
   });
   const goalId = await g.p.evaluate(() => window.__dgcPosts.filter((m) => m.type === "startGoal").at(-1)?.requestId);

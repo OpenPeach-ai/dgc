@@ -9769,10 +9769,18 @@ function permissionChoices(ev) {
     const resources = attachments.filter((a) => a.resource).map((a) => a.resource);
     const skills = attachments.filter((a) => a.skill).map((a) => a.skill);
     const templates = attachments.filter((a) => a.template).map((a) => a.template);
-    if(references.length && (goalDraftArmed || /^\/goal(?:\s|$)/i.test(text)||/\s\/goal$/i.test(text))) {sysLine("Pip references are supported in chat messages. Remove the reference before using a goal command.",true);persistDraft();return;}
+    // A goal starts only from the "/" menu's Goal (goalDraftArmed, decided 12 Nov). Typed, `/goal` is a command only
+    // alone (it shows the goal there is) and with the words that manage a goal: `/goal pause`, `/goal resume`,
+    // `/goal clear`, `/goal budget N` and the rest of goalStateCommand. `/goal fix the build` typed and sent, and a
+    // message that ends in ` /goal`, go as the plain text they are.
+    const typedGoal = /^\/goal(?:\s+([\s\S]+))?$/i.exec(text);
+    const typedGoalRest = typedGoal?.[1]?.trim() || "";
     const goalStateCommand = ["clear", "off", "none", "remove", "complete", "completed",
       "done", "blocked", "block", "pause", "paused", "resume", "active", "reactivate", "review", "status", "delete"];
     const goalManagement = value => goalStateCommand.includes(value.toLowerCase()) || /^budget(?:\s|$)/i.test(value);
+    const typedGoalCommand = !!typedGoal && (!typedGoalRest || goalManagement(typedGoalRest));
+    const typedGoalText = !!typedGoal && !typedGoalCommand;
+    if(references.length && (goalDraftArmed || typedGoalCommand)) {sysLine("Pip references are supported in chat messages. Remove the reference before using a goal command.",true);persistDraft();return;}
     if (goalDraftArmed) {
       // Restoring a cancelled goal re-arms the composer. A freshly typed /goal
       // prefix is still command syntax, not part of its objective.
@@ -9787,19 +9795,13 @@ function permissionChoices(ev) {
       }
       submitGoal(goalText, text); return;
     }
-    const goalPrefix = /^\/goal\s+([\s\S]+)$/i.exec(text)?.[1].trim();
-    if (goalPrefix && !goalManagement(goalPrefix)) {
-      submitGoal(goalPrefix, goalPrefix); return;
-    }
-    if (goalPrefix || text.toLowerCase() === "/goal") {
+    if (typedGoalCommand) {
       vscode.postMessage({ type: "slashText", text });
       clearComposer(); persistDraft(); return;
     }
-    const trailingGoal = /^([\s\S]*\S)\s+\/goal$/i.exec(text)?.[1].trim();
-    if (trailingGoal) { submitGoal(trailingGoal, trailingGoal); return; }
     const workflowPrompt = (/^\/(plan|review|init)(?:\s|$)/i.test(text)
       || /\s+\/(plan|review|init)$/i.test(text)) && !(text.toLowerCase() === "/plan" && !attachments.length);
-    if (isSlashCommandText(text) && !attachments.length && !workflowPrompt) {
+    if (isSlashCommandText(text) && !attachments.length && !workflowPrompt && !typedGoalText) {
       const name = (text.slice(1).split(/\s+/, 1)[0] || "").toLowerCase();
       // The terminals' `/todo clear` does what the Tasks row's Clear does, pending state and all.
       if (/^\/todo\s+clear$/i.test(text)) {
@@ -10311,13 +10313,10 @@ function permissionChoices(ev) {
     const query = token[2].slice(1).toLowerCase();
     if(pipPicker.active){const search=query==="pip"?"":query.startsWith("pip:")?query.slice(4):query;
       if(search!==pipPicker.query)requestPromptPips(search);else renderPipPicker();return;}
-    // Codex turns the complete `/goal` token into a pinned composer choice immediately. Requiring
-    // a second Enter or Tab leaves it as highlighted inline text and gives no visible draft state.
-    // A pasted `/goal pause` still remains a management command because its final token is `pause`.
-    if (popMode === "/" && query === "goal" && token[2].toLowerCase() === "/goal") {
-      armGoalDraft(popStart, popEnd);
-      hidePop(); input.focus(); return;
-    }
+    // A goal starts only when Goal is chosen from this menu (a click, Enter or Tab on its row), as in Codex in
+    // VS Code (decided 12 Nov). Typing the whole `/goal` token arms nothing: it lists Goal, as any command's name
+    // lists it, and sent as typed it is plain text (submit, below). `/goal pause` and the other words that manage
+    // a goal stay commands, typed or chosen.
     if (popMode === "/" || popMode === "$") {
       const skillItems = skillRows.filter((s) => s && s.enabled !== false).map((s) => ({
         label: "$" + s.name, detail: s.description || "Reusable agent instructions",

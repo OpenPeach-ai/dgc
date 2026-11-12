@@ -324,7 +324,7 @@ test("a pill-only draft does not render the placeholder over itself", async (t) 
     "is-empty laid the placeholder out as the first inline box, ahead of the pill");
 });
 
-test("typing /goal immediately pins Goal to this draft and removes the inline token", async (t) => {
+test("typing /goal lists Goal and pins nothing; choosing it there pins Goal to this draft and removes the inline token", async (t) => {
   if (skipReason()) return t.skip(skipReason());
   // The whole interaction. There is no dialog and there must not be one: a box asking for the
   // objective is a second place to type the thing you were already typing. The existing Goal
@@ -337,6 +337,13 @@ test("typing /goal immediately pins Goal to this draft and removes the inline to
     window.__posted.filter((m) => m.type === "startGoal").length,
     window.__posted.filter((m) => m.type === "prompt").length]);
   await page.keyboard.type("finish the build /goal");
+  // A goal starts only when Goal is chosen from the "/" menu (12 Nov, as Codex in VS Code): the whole token typed
+  // lists Goal first and changes nothing else.
+  assert.equal(await page.locator("#btn-goal").isVisible(), false, "typing the token pins nothing");
+  assert.equal(await value(), "finish the build /goal", "the token stays as typed");
+  assert.equal(await page.locator("#pop").evaluate((node) => getComputedStyle(node).display), "block", "the menu is open");
+  assert.match(await page.locator("#pop .pi").first().innerText(), /^goal\b/i, "with Goal first in it");
+  await page.keyboard.press("Enter");   // Goal, chosen
 
   assert.equal(await page.evaluate(() => document.getElementById("goal-editor").hidden), true,
     "no dialog -- the prompt IS the objective");
@@ -345,7 +352,7 @@ test("typing /goal immediately pins Goal to this draft and removes the inline to
   assert.equal(await page.locator("#btn-goal").isVisible(), true, "Goal is pinned inside the composer");
   assert.equal(await page.locator("#btn-goal .codicon-target").count(), 1, "the pinned choice carries the target icon");
   assert.equal(await page.locator("#pop").evaluate((node) => getComputedStyle(node).display), "none",
-    "the exact token converts without a second Enter or Tab");
+    "and the menu closes once Goal is chosen");
   assert.equal(await page.evaluate(() =>
     window.__posted.filter((m) => m.type === "startGoal").length), goalsBefore,
     "picking a menu row must never commit a standing objective on its own");
