@@ -568,7 +568,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "list_mcp_servers", "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
     "list_mcp_context", "get_mcp_context", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command", "get_history", "get_outline",
     "list_permissions", "add_permission_rule", "remove_permission_rule",
-    "get_memory", "add_memory", "list_monitors", "stop_monitor", "restart_monitor", "cancel_wakeup", "rerun_task", "list_agents", "list_troupes", "stop_troupe",
+    "get_memory", "add_memory", "list_monitors", "stop_monitor", "restart_monitor", "cancel_wakeup", "goal_runs", "rerun_task", "list_agents", "list_troupes", "stop_troupe",
     "list_background_shells", "stop_background_shell", "get_background_output",
     "composio_connection", "list_plugins", "install_plugin", "inspect_plugin", "uninstall_plugin", "list_plugin_marketplaces",
     "add_plugin_marketplace", "remove_plugin_marketplace", "refresh_plugin_marketplace", "create_plugin",
@@ -2844,7 +2844,7 @@ class Backend:
                           # The client answers with set_workspace_roots.agent_faces when it draws
                           # the registry's face slots; only then do agent frames carry face_slot.
                           "agent_faces": True,
-                          "resume_turn": True, "monitors": True, "wakeups": True, "usage_ledger": True, "pip_usage_report": True,
+                          "resume_turn": True, "monitors": True, "wakeups": True, "goal_runs": True, "usage_ledger": True, "pip_usage_report": True,
                           # get_usage / get_pip_usage_report take `system`, and each by_model row names the
                           # system it ran on (system, system_id, system_kind): Token usage by system.
                           "usage_by_system": True,
@@ -9547,6 +9547,9 @@ class Backend:
                              **_request_fields(request_id))
         elif t == "cancel_wakeup":
             self._handle_cancel_wakeup(cmd)
+        elif t == "goal_runs":
+            # A session's goal history (asked 12 Nov): every goal it ran, the current one last.
+            self.em.emit("goal_runs", runs=self.agent.goal_runs(), **_request_fields(request_id))
         elif t == "stop_monitor":
             # Never blocks the command loop: the group is signalled here and reaped by its reader,
             # which reports monitor_ended when it is gone.

@@ -224,6 +224,46 @@ def goal_name(text: str, limit: int = GOAL_NAME_CHARS) -> str:
     return name
 
 
+# Every goal a session ran (asked 12 Nov: "a history of goal runs per session ... time and token usage each took ... and
+# could use our Trace feature"): a short record per goal, kept with the session; the editor finds a goal's turns for
+# Trace by its times. A goal replaced or cleared before it finished is kept as "stopped".
+MAX_RUNS = 50
+RUN_STATUSES = ("completed", "blocked", "stopped")
+
+
+def run_summary(text: str, status: str, elapsed, details, *, now: float | None = None) -> dict:
+    """One goal's record: {id, name, status, started_at, ended_at, elapsed_seconds, tokens, cycles}. A goal still
+    active or paused is "stopped" now (it is being replaced or cleared)."""
+    details = details if isinstance(details, dict) else {}
+    history = [h for h in details.get("history", []) if isinstance(h, dict) and isinstance(h.get("at"), (int, float))]
+    started = min((float(h["at"]) for h in history), default=None)
+    final = status if status in ("completed", "blocked") else "stopped"
+    ended = (max((float(h["at"]) for h in history if h.get("status") == final), default=None)
+             if final != "stopped" else float(now if now is not None else time.time()))
+    try:
+        seconds = max(0, int(float(elapsed or 0)))
+    except (TypeError, ValueError, OverflowError):
+        seconds = 0
+    return {"id": str(details.get("id") or "")[:64], "name": goal_name(text), "status": final,
+            "started_at": started, "ended_at": ended, "elapsed_seconds": seconds,
+            "tokens": _count(details.get("tokens_used", 0)), "cycles": _count(details.get("cycles", 0))}
+
+
+def clean_runs(value) -> list:
+    """The saved records, checked: the newest MAX_RUNS that are whole."""
+    runs = []
+    for item in value if isinstance(value, list) else []:
+        if not isinstance(item, dict) or item.get("status") not in RUN_STATUSES:
+            continue
+        at = lambda key: (float(item[key]) if isinstance(item.get(key), (int, float)) and not isinstance(item.get(key), bool)
+                          and math.isfinite(float(item[key])) else None)
+        runs.append({"id": str(item.get("id") or "")[:64], "name": str(item.get("name") or "")[:GOAL_NAME_CHARS],
+                     "status": item["status"], "started_at": at("started_at"), "ended_at": at("ended_at"),
+                     "elapsed_seconds": _count(item.get("elapsed_seconds", 0)), "tokens": _count(item.get("tokens", 0)),
+                     "cycles": _count(item.get("cycles", 0))})
+    return runs[-MAX_RUNS:]
+
+
 def _stopped_at(details, status: str) -> float | None:
     """When the goal last moved to `status` (its transition history), or None when nothing says."""
     history = details.get("history") if isinstance(details, dict) else None
@@ -750,6 +790,7 @@ class GoalLifecycle:
                 return False
             previous = (self.goal, self.goal_status, self._goal_elapsed_seconds,
                         self._goal_active_since, copy.deepcopy(self._goal_details))
+            runs_before = list(getattr(self, "_goal_runs", []) or [])
             fresh = replace or not self.goal
             staged = getattr(self, "_draft_mcp_context", []) if fresh else []
             supplied = inputs is not None or bool(staged)
@@ -769,6 +810,10 @@ class GoalLifecycle:
                     return False
             else:
                 selected = {}
+            if (fresh or not clean) and previous[0]:
+                # The goal being replaced or cleared is kept in the session's goal history.
+                self._goal_runs = clean_runs(runs_before + [run_summary(
+                    previous[0], previous[1], self.goal_elapsed_seconds(), previous[4])])
             if fresh or not clean:
                 self._goal_details = new_details()
                 self._goal_elapsed_seconds = self._goal_active_since = 0.0
@@ -796,8 +841,20 @@ class GoalLifecycle:
                 return True
             (self.goal, self.goal_status, self._goal_elapsed_seconds,
              self._goal_active_since, self._goal_details) = previous
+            self._goal_runs = runs_before
             self._refresh_system()
             return False
+
+    def goal_runs(self) -> list:
+        """This session's goals, oldest first: the finished ones kept, then the current goal (ended_at None while it is
+        active or paused)."""
+        runs = list(getattr(self, "_goal_runs", []) or [])
+        if self.goal:
+            current = run_summary(self.goal, self.goal_status, self.goal_elapsed_seconds(), self._goal_details)
+            if self.goal_status not in ("completed", "blocked"):
+                current.update(status=self.goal_status, ended_at=None)
+            runs.append(current)
+        return runs
 
     def update_goal(self, status: str, *, reason: str = "", evidence: list | None = None) -> bool:
         if not self.goal or status not in STATUSES:

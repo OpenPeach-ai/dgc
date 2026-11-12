@@ -1957,6 +1957,13 @@ EVENT_FIELDS["mcp_app_resource"] = {**{key: value for key, value in EVENT_FIELDS
 EVENT_FIELDS["wakeups"] = {"items": _A(), "request_id": _S(False)}
 COMMAND_FIELDS["cancel_wakeup"] = {"id": _S(), "request_id": _S(False)}
 
+# A session's goal history (0.52, asked 12 Nov): goal_runs asks, and the goal_runs event (a new event TYPE) answers with
+# every goal it ran, oldest first, each {id, name, status (completed, blocked, stopped, or the current goal's active or
+# paused), started_at, ended_at (null while it runs), elapsed_seconds, tokens, cycles}; times are epoch seconds. Sent
+# only to a backend whose ready.capabilities.goal_runs says it takes it.
+EVENT_FIELDS["goal_runs"] = {"runs": _A(), "request_id": _S(False)}
+COMMAND_FIELDS["goal_runs"] = {"request_id": _S(False)}
+
 # Names the envelope owns. A payload field with any of these names would overwrite it on the wire
 # (Emitter.emit builds {"type", "seq"} and then applies the fields), so none may be declared.
 RESERVED_FIELD_NAMES = frozenset({"type", "seq", "chat_id"})

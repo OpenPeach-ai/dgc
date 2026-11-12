@@ -505,7 +505,7 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
          redact_secrets: tuple[str, ...] | list[str] | None = None,
          workspace_identity: dict | None = None,
          mode: str | None = None, plan_return_mode: str | None = None,
-         prompt_cache: dict | None = None) -> bool:
+         prompt_cache: dict | None = None, goal_runs: list | None = None) -> bool:
     saved = False
     try:
         path = resolve_path(project_root, path)
@@ -542,6 +542,9 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
                             if str(item.get("status", "")) in TODO_STATUSES else "pending")}
                 for item in todos[:100]
                 if isinstance(item, dict) and str(item.get("content", "")).strip()]
+        if goal_runs:                    # every goal this session ran (goals.clean_runs), kept with it
+            from .goals import clean_runs
+            data["goal_runs"] = clean_runs(goal_runs)
         if goal:
             data["goal"] = goal          # the standing /goal objective, restored on resume
             status = (goal_status if goal_status in ("active", "paused", "completed", "blocked")

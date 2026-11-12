@@ -4904,6 +4904,7 @@ class Agent(GoalLifecycle):
         self._goal_elapsed_seconds = 0.0
         self._goal_active_since = 0.0
         self._goal_details = new_details()
+        self._goal_runs = []                # a new chat has no goal history
         self._goal_running = False
         self._goal_accepts_start = False
         self._active_goal_request = None
@@ -7215,6 +7216,7 @@ class Agent(GoalLifecycle):
                         name=self.session_name, goal=self.goal, goal_status=self.goal_status,
                         goal_elapsed_seconds=self.goal_elapsed_seconds(),
                         goal_details=self._goal_details,
+                        goal_runs=getattr(self, "_goal_runs", None),
                         todos=todos_snapshot,
                         usage=usage, activity=activity, timing=timing,
                         checkpoints=checkpoint_state, chat_changes=self.chat_changes.state(),
@@ -7639,6 +7641,8 @@ class Agent(GoalLifecycle):
                 elapsed = 0.0
             self._goal_elapsed_seconds = elapsed if 0 <= elapsed < float("inf") else 0.0
             self._goal_details = clean_details(self._safe_value(record.get("goal_details")))
+            from .goals import clean_runs
+            self._goal_runs = clean_runs(self._safe_value(record.get("goal_runs")))
             # Closed editors cannot perform work. Legacy active-since timestamps must not turn
             # days spent offline into goal work time, nor silently restart a subscription process.
             self._goal_active_since = 0.0
