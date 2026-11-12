@@ -603,7 +603,9 @@ export const host = (opts) => `(${function (PIP, opts) {
     const diffs = { "app.py": `--- a/app.py\n+++ b/app.py\n@@ -1,6 +1,31 @@\n def total(items):\n-    return sum(items)\n+    return round(sum(items), 2)  # cents, as the receipts print them, so a total never shows a third decimal place on a customer's invoice\n \n def tax(items, rate):\n-    return sum(items) * rate\n-    # todo\n+    return round(total(items) * rate, 2)\n${many}\n`,
       [LONG]: `--- /dev/null\n+++ b/${LONG}\n@@ -0,0 +1,4 @@\n+from app import total\n+\n+def test_total():\n+    assert total([0.105, 0.2]) == 0.31\n`,
       "README.md": "--- a/README.md\n+++ /dev/null\n@@ -1 +0,0 @@\n-# Shop\n" };
-    const at = (min) => new Date(Date.now() - min * 60000).toISOString();
+    // On the chat's own clock (NOW, today at noon), as its messages are: before noon a change dated by the real clock
+    // came before every message of the chat, and the held-back case failed every morning (found 13 Nov, 00:50).
+    const at = (min) => new Date(NOW - min * MIN).toISOString();
     const HELD = [{ path: "README.md", why: "You changed it in the meantime; yours is kept." }];
     const decided = { applied: { status: want.held ? "partial" : "applied", result: { applied: want.held ? ["app.py", LONG] : ["app.py", LONG, "README.md"], held_back: want.held ? HELD : [] } },
       undone: { status: "undone", result: { applied: ["app.py", LONG], held_back: want.held ? HELD : [], restored: ["app.py", LONG], kept: [] } },
