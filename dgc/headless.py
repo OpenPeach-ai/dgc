@@ -2821,6 +2821,8 @@ class Backend:
                           # list_sessions takes limit, offset and query; an item found by what was said
                           # carries match (dgc/session_index).
                           "session_paging": True,
+                          # list_sessions {scope: "all"}: every project's sessions, each with its folder (12 Nov).
+                          "session_scopes": True,
                           "plugin_management": True, "plugin_keys": True,
                           # Each installed plugin's name by its servers ({"example": "MCP Apps example"}): an Allow
                           # card for a plugin's tool names the plugin as its card does, before the plugin list loads.
@@ -9385,10 +9387,22 @@ class Backend:
             # first message or anything said). A found session's item carries `match`, the words
             # around it. Without them, every session, as before.
             limit, offset, query = cmd.get("limit"), cmd.get("offset", 0), cmd.get("query", "")
+            scope = cmd.get("scope", "project")
             if (limit is not None and (type(limit) is not int or not 1 <= limit <= 5000)) \
-                    or type(offset) is not int or offset < 0 or not isinstance(query, str) or len(query) > 200:
-                self.em.emit("error", message="list_sessions takes a limit of 1–5000, an offset and a query of up to 200 characters.",
-                             **_request_fields(request_id))
+                    or type(offset) is not int or offset < 0 or not isinstance(query, str) or len(query) > 200 \
+                    or scope not in ("project", "all"):
+                self.em.emit("error", message="list_sessions takes a limit of 1–5000, an offset, a query of up to 200 characters "
+                             "and a scope of project or all.", **_request_fields(request_id))
+                return
+            if scope == "all":
+                # Every project's sessions (capability session_scopes, 12 Nov): each with its folder, so the editor
+                # shows where it belongs and opens it running there. Items are free-form, so no protocol field moves.
+                rows = sessions_mod.listing_everywhere(self.config.project_root, limit=limit, offset=offset, query=query)
+                self.em.emit("sessions", items=[{
+                    "path": str(r["path"]), "when": sessions_mod.when(r["updated"]), "preview": r["preview"], "count": r["count"],
+                    "name": r["name"], **({"match": r["match"]} if r["match"] else {}), "project": r["project"],
+                    "project_name": r["project_name"], "here": r["here"], "folder_exists": r["folder_exists"]}
+                    for r in rows], **_request_fields(request_id))
                 return
             items = [{"path": str(p), "when": sessions_mod.when(ts), "preview": pv, "count": c, "name": nm,
                       **({"match": match} if match else {})}

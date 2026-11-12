@@ -12448,6 +12448,9 @@
             },
             "query": {
               "type": "string"
+            },
+            "scope": {
+              "type": "string"
             }
           },
           "required": [

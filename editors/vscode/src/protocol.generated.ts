@@ -9212,6 +9212,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "string"
       ],
       "required": false
+    },
+    "scope": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "delete_session": {

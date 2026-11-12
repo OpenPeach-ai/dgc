@@ -1427,6 +1427,65 @@ def _listing_files(project_root, *, redact_secrets=()) -> list[tuple[Path, float
     return items
 
 
+_PROJECT_FIELD = re.compile(r'"project"\s*:\s*"((?:[^"\\]|\\.)*)"')
+
+
+def _bucket_project(bucket: Path) -> str | None:
+    """The project folder a session bucket belongs to, from the first few KB of one of its files: sessions.save writes
+    "project" near the top, so a large transcript is never read for it."""
+    files = sorted((p for p in bucket.glob("*.json") if p.is_file() and not p.is_symlink()),
+                   key=lambda p: p.stat().st_mtime, reverse=True)
+    for path in files[:3]:
+        try:
+            with path.open("rb") as handle:
+                head = handle.read(8192).decode("utf-8", "replace")
+            found = _PROJECT_FIELD.search(head)
+            if found:
+                value = json.loads('"' + found.group(1) + '"')
+                if isinstance(value, str) and value:
+                    return value
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def listing_everywhere(here_root, *, limit=None, offset=0, query="", redact_secrets=()) -> list[dict]:
+    """Every project's sessions, newest first (list_sessions {scope: "all"}, his call 12 Nov): each with its folder, so
+    the editor shows where it belongs and opens it running there. From each project's index (session_index), searched
+    the same way. DGC's own folders (a helper's worktree, a fix's copy, all under ~/.dgc) are never a user's project."""
+    from .config import dgc_home
+    from .session_index import page
+    here = str(Path(here_root).expanduser().resolve(strict=False))
+    own = str(dgc_home().expanduser().resolve(strict=False))
+    base = SESSIONS_DIR.resolve(strict=False)
+    rows: list[dict] = []
+    try:
+        buckets = [b for b in SESSIONS_DIR.iterdir() if b.is_dir() and not b.is_symlink()]
+    except OSError:
+        buckets = []
+    for bucket in buckets:
+        try:
+            bucket.resolve(strict=True).relative_to(base)
+        except (OSError, ValueError):
+            continue
+        project = _bucket_project(bucket)
+        if not project:
+            continue
+        folder = str(Path(project).expanduser().resolve(strict=False))
+        if folder == own or folder.startswith(own + os.sep):
+            continue
+        try:
+            found = page(bucket, query=query, redact_secrets=redact_secrets)
+        except Exception:                      # noqa: BLE001 - a broken index hides that project's, not the list
+            continue
+        for path, ts, preview, count, name, match in found:
+            rows.append({"path": path, "updated": ts, "preview": preview, "count": count, "name": name, "match": match,
+                         "project": folder, "project_name": Path(folder).name or folder, "here": folder == here,
+                         "folder_exists": Path(folder).is_dir()})
+    rows.sort(key=lambda row: -row["updated"])
+    return rows[offset:None if limit is None else offset + limit]
+
+
 def listing_all(*, redact_secrets=()) -> list[tuple[Path, Path, float, str, int, str]]:
     """Private global index used by protocol adapters: path, project, time, preview, count, name."""
     from .redaction import redact_text
