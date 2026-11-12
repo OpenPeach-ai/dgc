@@ -70,7 +70,7 @@ CONTROL_COMMANDS = frozenset({
     "get_pips_desktop_notifications", "set_pips_desktop_notifications",
     "get_pips_payments", "set_pips_payments", "set_pip_paying",
     "get_pips_backup", "set_pips_backup", "get_pip_backup", "set_pip_backup",
-    "get_pip_usage", "set_pip_daily_cap", "export_pip", "set_pip_feedback", "list_pip_feedback",
+    "get_pip_usage", "set_pip_daily_cap", "export_pip", "export_pip_team", "set_pip_feedback", "list_pip_feedback",
     "list_pip_app_links", "start_pip_app_link", "check_pip_app_link", "decline_pip_app_link", "disconnect_pip_app_link",
     "finish_pip_computer_check",
     "list_pip_routines", "add_pip_routine", "update_pip_routine", "delete_pip_routine", "decide_pip_routine",
@@ -221,7 +221,7 @@ _COMMAND_ARGS = {
     "get_pips_payments": set(), "set_pips_payments": {"limit"}, "set_pip_paying": {"pip_id", "rule"},
     "get_pips_backup": set(), "set_pips_backup": {"model", "provider", "engine", "router"},
     "get_pip_backup": {"pip_id"}, "set_pip_backup": {"pip_id", "model", "provider", "engine", "router"},
-    "get_pip_usage": {"pip_id"}, "set_pip_daily_cap": {"pip_id", "daily_tokens"}, "export_pip": {"pip_id"},
+    "get_pip_usage": {"pip_id"}, "set_pip_daily_cap": {"pip_id", "daily_tokens"}, "export_pip": {"pip_id"}, "export_pip_team": {"pip_ids", "name"},
     "set_pip_feedback": {"run_id", "rating", "note"}, "list_pip_feedback": {"pip_id"},
     "mark_pip_notification_read": {"workspace_id", "notification_id", "expected_revision"},
     "list_workspace_sessions": {"workspace_id", "after", "limit"},
@@ -5871,7 +5871,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 "get_workspace_session_outcome", "list_workspace_session_outcomes",
                 "accept_workspace_session_outcome", "reject_workspace_session_outcome", "get_workspace_context")
             receipt_command = command in ("list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context")
-            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("list_pip_flows", "get_pip_flow", "create_pip_flow", "set_pip_flow", "get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "list_pip_keys", "save_pip_key", "decline_pip_key", "remove_pip_key", "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret", "list_app_approvals", "decide_app_approval", "trigger_app_event", "list_app_events", "ensure_pip_template", "prune_pip_templates", "list_pip_templates", "decide_pip_template_change", "export_pip", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "add_pip_computer", "rename_pip_computer", "set_pip_computer_screen", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "delete_archived_pip", "list_pip_attention") else registry.resolve(config.project_root)
+            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("list_pip_flows", "get_pip_flow", "create_pip_flow", "set_pip_flow", "get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "list_pip_keys", "save_pip_key", "decline_pip_key", "remove_pip_key", "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret", "list_app_approvals", "decide_app_approval", "trigger_app_event", "list_app_events", "ensure_pip_template", "prune_pip_templates", "list_pip_templates", "decide_pip_template_change", "export_pip", "export_pip_team", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "add_pip_computer", "rename_pip_computer", "set_pip_computer_screen", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "delete_archived_pip", "list_pip_attention") else registry.resolve(config.project_root)
             workspace_id = request.get("workspace_id", current["id"] if current else "")
             if actor not in ('editor-user','local-console'):
                 # Personal scope is deliberately local for this milestone. Existing
@@ -6461,6 +6461,17 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     raise RegistryError("local_only", "Only you can rate a Pip's results, on this computer.")
                 result = (pip_feedback.set_feedback(registry, run_id, request.get("rating"), request.get("note"), actor)
                           if command == "set_pip_feedback" else pip_feedback.list_feedback(registry, pip_id))
+            elif command == "export_pip_team":
+                # pips-12: a whole team as one file, the shared file of each Pip under the team's name.
+                from . import pip_share
+                if actor not in ("editor-user", "local-console"):
+                    raise RegistryError("local_only", "Sharing Pips is done on this computer only.")
+                document = pip_share.export_team(store, request.get("pip_ids"), name=request.get("name") or "")
+                from .redaction import contains_secret
+                if contains_secret(document, secret_values(config)):
+                    raise RegistryError("secret_detected", "One of these Pips' jobs contains one of your configured credentials "
+                                        "(in a page address or search). Remove it from the job before sharing.")
+                result = {"document": document, "text": pip_share.dumps(document)}
             elif command == "export_pip":
                 from . import pip_share
                 if actor not in ("editor-user", "local-console"):

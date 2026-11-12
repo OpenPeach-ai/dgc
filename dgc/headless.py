@@ -131,6 +131,9 @@ def _bounded_pips_command(cmd):
     if cmd["type"] == "pips_control" and isinstance(request, dict) and request.get("type") == "send_pip_message":
         from .pips import CHAT_REQUEST_BYTES
         limit = CHAT_REQUEST_BYTES
+    if cmd["type"] == "pips_control" and isinstance(request, dict) and request.get("type") == "import_pip_team":
+        from .pip_share import MAX_TEAM_BYTES                  # a whole team's file (pips-12)
+        limit = MAX_TEAM_BYTES + 4096
     too_big = "Pips requests must fit within 32 KiB." if limit == _MAX_PIPS_REQUEST_BYTES else \
         f"A message to a Pip must fit within {limit // (1024 * 1024)} MiB with what it carries."
     # An app's tools (register_app, update_app: Pips API 61) are schemas: the SDKs' own bounds, 2,048 values and 12 levels.
@@ -488,6 +491,8 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # switches one for that Pip alone (every app on until switched off). Local only. A switched-off app is refused on every
 # path: its plugin isn't listed or callable, its reads, Composio calls and sends are refused, and it can't be asked for.
 # add_pip_app_account {pip_id, app} raises a Connect card for one more address of an app the Pip has (several allowed).
+# pips-12: export_pip_team {pip_ids, name} gives one file for a whole team (format dgc-team: each Pip's shared file);
+# import_pip_team {document} makes one pending setup card per Pip in it (256 KiB at most). Local only.
 PIPS_API_VERSION = 88
 
 
@@ -7345,6 +7350,29 @@ class Backend:
             setup = pip_setup.propose(registry, setup_request, config.project_root, origin["session_id"])
         return {"setup": setup, "left_out": [str(item)[:300] for item in pip_share.check(document).get("left_out", [])][:8]}
 
+    def _pip_team_import(self, config, request):
+        """A team file (pips-12) becomes one pending setup card per Pip, owned by this chat; nothing saved when any Pip in
+        it carries a configured secret."""
+        import uuid
+        from . import pip_setup, pip_share
+        from .redaction import contains_secret, secret_values
+        from .workspace_registry import RegistryError, WorkspaceRegistry
+        if set(request) - {"type", "request_id", "document"}:
+            raise RegistryError("invalid_request", "Send the team file's contents.")
+        document = request.get("document")
+        document = pip_share.parse_team(document) if isinstance(document, str) else pip_share.check_team(document)
+        requests = [pip_share.setup_request(item, project_root=config.project_root, request_key="import-" + uuid.uuid4().hex[:24])
+                    for item in document["pips"]]
+        if any(contains_secret(item, secret_values(config)) for item in requests):
+            raise RegistryError("secret_detected", "The team file contains a configured secret. Nothing was saved.")
+        origin = self.agent._pip_proposal_origin()
+        with WorkspaceRegistry() as registry:
+            setups = [pip_setup.propose(registry, item, config.project_root, origin["session_id"]) for item in requests]
+        left = []
+        for item in document["pips"]:
+            left += [str(note)[:300] for note in item.get("left_out", []) if str(note)[:300] not in left]
+        return {"setups": setups, "name": document["name"], "left_out": left[:8]}
+
     def _pips_failure(self, cmd, code, message):
         from .redaction import redact_text
         message = redact_text(str(message), secret_values(self.config))[:1500]
@@ -7504,9 +7532,10 @@ class Backend:
                     self.em.emit("pips_result", request_id=cmd["request"].get("request_id", ""),
                                  command="get_pip_digest", ok=True, result={"digest": None})
                     return
-            if cmd["request"].get("type") in ("list_pip_starters", "propose_starter_pip", "import_pip_document"):
+            if cmd["request"].get("type") in ("list_pip_starters", "propose_starter_pip", "import_pip_document", "import_pip_team"):
                 kind = cmd["request"]["type"]
                 value = (self._pip_import(config, cmd["request"]) if kind == "import_pip_document"
+                         else self._pip_team_import(config, cmd["request"]) if kind == "import_pip_team"
                          else self._pip_starter(config, cmd["request"]))
                 self.em.emit("pips_result", request_id=cmd["request"].get("request_id", ""),
                              command=kind, ok=True, result=value)

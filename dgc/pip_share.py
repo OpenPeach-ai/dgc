@@ -124,3 +124,55 @@ def setup_request(document, *, project_root, request_key) -> dict:
         return validate_request(request)
     except RegistryError as exc:
         raise RegistryError("invalid_pip_file", "The shared Pip cannot become a setup card here: " + str(exc)) from None
+
+
+# A whole team as one file (pips-12): the Pips' shared files, one per Pip, under the team's name. The same rules as one
+# Pip's file hold for each; importing makes one pending setup card per Pip.
+TEAM_FORMAT = "dgc-team"
+TEAM_VERSION = 1
+MAX_TEAM_PIPS = 20
+MAX_TEAM_BYTES = 256 * 1024
+
+
+def _team_name(name) -> str:
+    text = " ".join(str(name or "").split())[:80]
+    return text or "My team"
+
+
+def export_team(store, pip_ids, *, name="") -> dict:
+    """One file for several Pips' jobs, in the order given."""
+    if (not isinstance(pip_ids, list) or not 1 <= len(pip_ids) <= MAX_TEAM_PIPS
+            or not all(isinstance(p, str) for p in pip_ids) or len(set(pip_ids)) != len(pip_ids)):
+        _fail(f"Choose 1 to {MAX_TEAM_PIPS} different Pips to share as a team.", "invalid_request")
+    return {"format": TEAM_FORMAT, "version": TEAM_VERSION, "name": _team_name(name),
+            "pips": [export(store, pip_id) for pip_id in pip_ids]}
+
+
+def check_team(document) -> dict:
+    if (not isinstance(document, dict) or document.get("format") != TEAM_FORMAT or document.get("version") != TEAM_VERSION
+            or set(document) != {"format", "version", "name", "pips"} or not isinstance(document.get("name"), str)
+            or len(document["name"]) > 80):
+        _fail("This is not a team file DGC can read (format dgc-team, version 1).")
+    pips = document["pips"]
+    if not isinstance(pips, list) or not 1 <= len(pips) <= MAX_TEAM_PIPS:
+        _fail(f"A team file holds 1 to {MAX_TEAM_PIPS} Pips.")
+    for item in pips:
+        check(item)
+    return document
+
+
+def parse_team(text) -> dict:
+    """A team file's text, checked for shape and size; never trusted as instructions."""
+    if not isinstance(text, str):
+        _fail(f"A team file is at most {MAX_TEAM_BYTES // 1024} KiB.")
+    try:
+        size = len(text.encode("utf-8"))
+    except UnicodeError:
+        _fail("The team file must be valid UTF-8 text.")
+    if size > MAX_TEAM_BYTES:
+        _fail(f"A team file is at most {MAX_TEAM_BYTES // 1024} KiB.")
+    try:
+        document = json.loads(text)
+    except ValueError:
+        _fail("This is not a team file (it is not JSON).")
+    return check_team(document)
