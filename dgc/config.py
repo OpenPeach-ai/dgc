@@ -1396,6 +1396,16 @@ def context_for_model(model: str) -> int | None:
     return None
 
 
+def _account_home() -> Path | None:
+    """The account's own home folder, from the system's record of the user rather than $HOME (which a test, a sandbox
+    or an SDK child may point elsewhere). None where the system keeps no such record."""
+    try:
+        import pwd
+        return Path(pwd.getpwuid(os.getuid()).pw_dir)
+    except (ImportError, KeyError, OSError, AttributeError):
+        return None
+
+
 def find_project_root(start: Path | None = None) -> Path:
     """Walk up from `start` looking for a project marker (.git, DGC.md, .dgc).
 
@@ -1419,6 +1429,11 @@ def find_project_root(start: Path | None = None) -> Path:
     # a project marker. Otherwise a non-Git child directory silently widens to
     # the account home whenever DGC_HOME points at a separate private instance.
     global_dgc_dirs = {USER_HOME.resolve(), (Path.home() / ".dgc").resolve()}
+    # Nor does the account's own ~/.dgc when HOME points somewhere else inside the account's home (12 Nov, seen live: a
+    # test home's non-Git folder widened to the whole account home, which became its session's project).
+    account = _account_home()
+    if account is not None:
+        global_dgc_dirs.add((account / ".dgc").resolve())
     for d in (p, *p.parents):
         dgc_dir = d / ".dgc"
         # a project's own .dgc counts, but NOT the global ~/.dgc config dir — otherwise every

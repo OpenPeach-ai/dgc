@@ -32,6 +32,18 @@ class ProjectRootIsolationTests(unittest.TestCase):
         inside=self.state/'work';inside.mkdir()
         self.assertEqual(config.find_project_root(inside),inside)
 
+    def test_the_accounts_own_dgc_is_no_marker_when_home_points_elsewhere(self):
+        # Seen live (12 Nov): HOME set to a folder inside the account's home (a test home); a non-Git folder under it
+        # walked up to the account's own ~/.dgc, took it for a project's, and its session's project became the whole
+        # account home. The account's home is the system's record of it, not $HOME.
+        with patch.dict(os.environ,{'HOME':str(self.state),'DGC_HOME':''}), \
+             patch.object(config,'_account_home',return_value=self.home,create=True):
+            self.assertEqual(config.find_project_root(self.root),self.root)
+            inside=self.state/'orchard';inside.mkdir()
+            self.assertEqual(config.find_project_root(inside),inside)
+            (self.home/'.git').mkdir()
+            self.assertEqual(config.find_project_root(self.root),self.home,'a home that is a Git project still is one')
+
     def test_genuine_project_markers_and_explicit_pins_keep_their_precedence(self):
         project=self.root/'project';project.mkdir()
         child=project/'child';child.mkdir()
