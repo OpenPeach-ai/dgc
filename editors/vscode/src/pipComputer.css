@@ -29,6 +29,13 @@ input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-
 .pc-actions{display:flex;gap:6px;flex-wrap:wrap}
 .pc-crumbs{display:flex;align-items:center;gap:4px;flex:1;min-width:0;overflow:hidden}.pc-crumb{color:var(--vscode-foreground);background:transparent;padding:3px 5px}
 .pc-add{cursor:pointer;border:1px solid var(--line);border-radius:6px;padding:6px 12px}
+/* Big files (Pips API 87): Add file… and Save to this computer… are the shared button, as wide as their words; a copy
+   under way is a quiet row in the list. */
+.dgc-btn.small.pc-add-big,.dgc-btn.small.pc-save-big,.dgc-btn.small.pc-remove-big{width:auto;flex:none}
+.pc-preview>.pc-bar:has(.pc-save-big)>strong{flex:1 1 120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pc-files .pc-error{overflow-wrap:anywhere}
+li.pc-copying{box-sizing:border-box;color:var(--muted)}li.pc-copying:hover{background:transparent}
+li.pc-copying .pc-size{font-style:italic}
 .pc-split{display:grid;grid-template-columns:minmax(180px,280px) minmax(0,1fr);gap:12px;flex:1;min-height:0}
 .pc-list{list-style:none;margin:0;padding:0;overflow:auto;border:1px solid var(--line);border-radius:8px}
 .pc-file{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:6px;width:100%;text-align:left;color:var(--vscode-foreground);background:transparent;border-radius:0;padding:6px 8px}

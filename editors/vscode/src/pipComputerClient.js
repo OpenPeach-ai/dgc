@@ -32,6 +32,12 @@ const S={connected:false,apiVersion:0,generation:0,pip:null,app:'',open:[],compu
 // Which of the Pip's computers this tab is (pips-17d, Pips API 86): its number, said with every open and view, and its
 // name for the header. S.number is 0 for a Pip's one tab, as before; `numbers`: the CLI's screen stream takes a number.
 Object.assign(S,{number:0,name:'',numbers:false});
+// Big files (pc-background-commands, Pips API 87): Add file… and Save to this computer… ask the host, which shows VS Code's
+// own dialog and has DGC copy the file itself, up to 1 GB. This page never knows a path on this computer: it says only
+// which folder or file in Files. `adding`: {folder, names} while an Add is under way (names once the files are picked);
+// `saving`: the file in Files being saved.
+Object.assign(S.files,{adding:null,saving:''});
+const bigFiles=()=>S.apiVersion>=87;
 const which=()=>S.number&&S.apiVersion>=86?{number:S.number}:{};
 function computerName(){
  if(!S.number||S.apiVersion<86)return 'Computer';
@@ -129,11 +135,13 @@ function browserMarkup(){
 }
 function filesMarkup(){
  const f=S.files,crumbs=['Files',...(f.path?f.path.split('/'):[])];
- const size=n=>n==null?'':n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:`${(n/1048576).toFixed(1)} MB`;
+ const size=n=>n==null?'':n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:n<1073741824?`${(n/1048576).toFixed(1)} MB`:`${(n/1073741824).toFixed(1)} GB`;
  const rows=f.entries.map(e=>`<li><button type="button" class="pc-file${f.selected===e.name?' active':''}" data-${e.kind==='folder'?'folder':'file'}="${esc(e.name)}"><span class="pc-icon" aria-hidden="true">${e.kind==='folder'?'▸':'·'}</span><span class="pc-name">${esc(e.name)}</span><span class="pc-size">${size(e.bytes)}</span></button></li>`).join('');
  const p=f.preview;
+ // A copy under way: the file's name with "copying" (one command each, so no made-up progress bar).
+ const copying=f.adding&&f.adding.folder===f.path?f.adding.names.map(name=>`<li class="pc-file pc-copying" role="status"><span class="pc-icon" aria-hidden="true">·</span><span class="pc-name">${esc(name)}</span><span class="pc-size">copying</span></li>`).join(''):'';
  const preview=!p?'<p class="pc-muted">Select a file to see it.</p>':p.text!=null?`<pre class="pc-text">${esc(p.text)}</pre>${p.truncated?'<p class="pc-muted">Showing the first 64 KB.</p>':''}`:p.data&&p.mime.startsWith('image/')?`<img class="pc-image" alt="${esc(p.name)}" src="${p.data}">`:`<p class="pc-muted">${p.too_large?'This file is over 2 MB, too large to show here.':'No preview for this kind of file.'}</p>`;
- return `<section class="pc-pane pc-files" aria-label="Files"><div class="pc-bar"><nav class="pc-crumbs" aria-label="Folder">${crumbs.map((c,i)=>`<button type="button" class="pc-crumb" data-crumb="${i}">${esc(c)}</button>`).join('<span aria-hidden="true">/</span>')}</nav><label class="pc-add"><input type="file" id="pc-add-input" multiple hidden>Add files…</label></div>${f.error?`<p class="pc-error" role="alert">${esc(f.error)}</p>`:''}<div class="pc-split"><ul class="pc-list" aria-label="Files in this folder">${rows||'<li class="pc-muted">Nothing here yet. Downloads from the browser land in Downloads.</li>'}</ul><div class="pc-preview">${p?`<div class="pc-bar"><strong>${esc(p.name)}</strong><span class="pc-muted">${size(p.bytes)}</span><button type="button" id="pc-save" class="pc-quiet"${p.data||p.text!=null&&!p.truncated?'':' disabled'}>Save to…</button><button type="button" id="pc-remove" class="pc-quiet">Remove</button></div>`:''}${preview}</div></div><p class="pc-muted">${size(f.total)} of 1 GB used. Only this computer's files: never your own.</p></section>`;
+ return `<section class="pc-pane pc-files" aria-label="Files"><div class="pc-bar"><nav class="pc-crumbs" aria-label="Folder">${crumbs.map((c,i)=>`<button type="button" class="pc-crumb" data-crumb="${i}">${esc(c)}</button>`).join('<span aria-hidden="true">/</span>')}</nav>${bigFiles()?`<button type="button" id="pc-add" class="dgc-btn small pc-add-big"${f.adding||f.saving?' disabled':''}>${f.adding?'Adding…':'Add file…'}</button>`:'<label class="pc-add"><input type="file" id="pc-add-input" multiple hidden>Add files…</label>'}</div>${f.error?`<p class="pc-error" role="alert">${esc(f.error)}</p>`:''}<div class="pc-split"><ul class="pc-list" aria-label="Files in this folder">${copying}${rows||(copying?'':'<li class="pc-muted">Nothing here yet. Downloads from the browser land in Downloads.</li>')}</ul><div class="pc-preview">${p?`<div class="pc-bar"><strong>${esc(p.name)}</strong><span class="pc-muted">${size(p.bytes)}</span>${bigFiles()?`<button type="button" id="pc-save-as" class="dgc-btn small pc-save-big"${f.saving||f.adding?' disabled':''}>${f.saving===p.path?'Saving…':'Save to this computer…'}</button>`:`<button type="button" id="pc-save" class="pc-quiet"${p.data||p.text!=null&&!p.truncated?'':' disabled'}>Save to…</button>`}<button type="button" id="pc-remove" class="${bigFiles()?'dgc-btn small pc-remove-big':'pc-quiet'}">Remove</button></div>`:''}${preview}</div></div><p class="pc-muted">${size(f.total)} of 1 GB used. Only this computer's files: never your own.</p></section>`;
 }
 function terminalMarkup(){
  const t=S.terminal;
@@ -528,6 +536,8 @@ document.addEventListener('click',event=>{
  else if(t.dataset.folder!==undefined){S.files.selected=null;S.files.preview=null;void loadFiles([S.files.path,t.dataset.folder].filter(Boolean).join('/'));}
  else if(t.dataset.file!==undefined)void openFile(t.dataset.file);
  else if(t.dataset.crumb!==undefined){const i=Number(t.dataset.crumb);S.files.selected=null;S.files.preview=null;void loadFiles(S.files.path.split('/').filter(Boolean).slice(0,i).join('/'));}
+ else if(t.id==='pc-add'&&bigFiles()&&!S.files.adding&&!S.files.saving){S.files.adding={folder:S.files.path,names:[]};S.files.error='';render();vscode.postMessage({type:'pipComputerAddFiles',folder:S.files.path});}
+ else if(t.id==='pc-save-as'&&bigFiles()&&S.files.preview&&!S.files.adding&&!S.files.saving){S.files.saving=S.files.preview.path;S.files.error='';S.notice='';render();vscode.postMessage({type:'pipComputerSaveAs',path:S.files.preview.path});}
  else if(t.id==='pc-save'&&S.files.preview)vscode.postMessage({type:'pipComputerSave',name:S.files.preview.name,data:S.files.preview.data||null,text:S.files.preview.data?null:S.files.preview.text});
  else if(t.id==='pc-remove'&&S.files.preview){const path=S.files.preview.path;void send('remove_pip_computer_file',{pip_id:S.pip.id,path}).then(()=>{S.files.selected=null;S.files.preview=null;return loadFiles();},error=>{S.files.error=errorText(error);render();});}
  else if(t.dataset.send)void decide(t.dataset.send,'send');
@@ -561,14 +571,18 @@ document.addEventListener('change',event=>{if(event.target.id==='pc-add-input'){
 document.addEventListener('dragover',event=>{if(S.app==='files'&&[...(event.dataTransfer?.types||[])].includes('Files'))event.preventDefault();});
 document.addEventListener('drop',event=>{if(S.app!=='files')return;const files=[...(event.dataTransfer?.files||[])];if(!files.length)return;event.preventDefault();void addFiles(files);});
 async function addFiles(files){
+ let said='';
  for(const file of files){
-  if(file.size>2*1024*1024){S.files.error=`${file.name} is over 2 MB.`;render();continue;}
+  // A dropped file has no path in a webview, so it travels as before, 2 MB at most; a bigger one goes by Add file….
+  if(file.size>2*1024*1024){S.files.error=bigFiles()?'Use Add file… for files over 2 MB (up to 1 GB).':`${file.name} is over 2 MB.`;said=S.files.error;render();continue;}
   const data=await new Promise(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>resolve(null);reader.readAsDataURL(file);});
   if(typeof data!=='string')continue;
   try{await send('add_pip_computer_file',{pip_id:S.pip.id,path:S.files.path,name:file.name,data});}
-  catch(error){S.files.error=errorText(error);}
+  catch(error){S.files.error=said=errorText(error);}
  }
  await loadFiles();
+ // Reading the list again clears the panel's message: what was refused stays said.
+ if(said&&!S.files.error){S.files.error=said;render();}
 }
 document.addEventListener('visibilitychange',schedule);
 window.addEventListener('message',event=>{
@@ -588,6 +602,13 @@ window.addEventListener('message',event=>{
  else if(m.type==='pipDesktopClosed'&&S.restart&&S.restart.tries<5){const old=channel;channel=null;S.screen={state:'restarting',reason:''};old?.end('');render();reopenSoon(700+400*S.restart.tries);}
  else if(m.type==='pipDesktopClosed'){S.restart=null;S.screen={state:'closed',reason:typeof m.reason==='string'&&m.reason?m.reason:'The screen closed.'};channel?.end(S.screen.reason);render();}
  else if(m.type==='pipComputerCopied'){clipSay(m.ok===true?'Copied.':'Could not copy here.',m.ok!==true);}
+ // Add file…: the files are picked (their names show as "copying", fewer as each lands), then what DGC said of each.
+ else if(m.type==='pipComputerAdding'&&S.files.adding&&Array.isArray(m.names)){S.files.adding={...S.files.adding,names:m.names.filter(n=>typeof n==='string').slice(0,200).map(n=>n.slice(0,255))};render();if(m.refresh===true)void loadFiles();}
+ else if(m.type==='pipComputerAdded'){S.files.adding=null;const errors=Array.isArray(m.errors)?m.errors.filter(e=>typeof e==='string'&&e).slice(0,5).map(e=>e.slice(0,500)):[];
+  const say=()=>{if(errors.length)S.files.error=errors.join(' ');render();};
+  // The list is read again first (a read clears the panel's message), then DGC's words for what it refused are shown.
+  if(m.cancelled!==true&&S.pip&&S.connected)void loadFiles().then(say);else say();}
+ else if(m.type==='pipComputerSavedAs'){S.files.saving='';if(m.ok===true)S.notice=`Saved to ${typeof m.name==='string'&&m.name?m.name.slice(0,255):'this computer'}.`;else if(m.cancelled!==true)S.files.error=typeof m.error==='string'&&m.error?m.error.slice(0,500):'Not saved.';render();}
  else if(m.type==='pipComputerSaved'){S.notice=m.ok?`Saved ${m.name}.`:m.error||'Not saved.';render();}
 });
 setInterval(()=>broker.expire(Date.now()),5000);

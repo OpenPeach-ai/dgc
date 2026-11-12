@@ -143,6 +143,19 @@ export function computerDocument(scriptUri = '', styleUri = '', cspSource = '', 
 /** What a computer tab may ask for: its own Pip's computer, nothing else. */
 const COMPUTER_COMMANDS = new Set(['get_pip_computer','open_pip_computer','use_pip_computer_view','stop_pip_computer','list_pip_computer_actions','decide_pip_computer_action','always_allow_pip_computer_action','list_pip_computer_files','read_pip_computer_file','add_pip_computer_file','remove_pip_computer_file','run_pip_computer_command','list_pip_computer_terminal','get_pip_computer_desktop','get_pip_computer_apps','set_pip_computer_apps','set_pip_computer_screen']);
 const PIP_TYPES = ['core','scout','lens','patch','rook','pulse','lock','quill'];
+/** Big files into and out of a Pip computer's Files (pc-background-commands, Pips API 87): copy_pip_computer_file_in
+ *  {pip_id, path, source} and copy_pip_computer_file_out {pip_id, path, target}. `source` and `target` are paths on the
+ *  computer running DGC, so no page ever sends these commands: a computer tab says only which folder or file in Files
+ *  (pipComputerAddFiles {folder}, pipComputerSaveAs {path}) and this host shows VS Code's own dialog and sends the path
+ *  the user picked there. In a remote window that dialog shows the remote machine's files, which is where DGC runs:
+ *  one more reason the host, not the page, picks the paths. */
+const COMPUTER_COPY_COMMANDS = new Set(['copy_pip_computer_file_in', 'copy_pip_computer_file_out']);
+const COMPUTER_COPY_API = 87;
+/** A folder or file in a Pip computer's Files, as a page may name it: DGC checks it again (dgc/pip_computer_files.py). */
+const filesPath = (value: unknown): value is string => typeof value === 'string' && value.length <= 4096 && !value.includes('\0')
+  && !value.startsWith('/') && !value.split('/').some(part => part === '..' || part === '.');
+/** A copy can take minutes (1 GB): it waits this long for DGC's answer, not a read's 20 seconds. */
+const COMPUTER_COPY_WAIT_MS = 30 * 60 * 1000;
 type ComputerPip = { id: string; name: string; pip_type: string };
 
 /** Local Pips control bridge. Request correlation is owned by the extension host. */
@@ -166,6 +179,10 @@ export class PipsEditor implements vscode.Disposable {
   private computers = new Map<string, { panel: vscode.WebviewPanel; pip: ComputerPip; number?: number }>();
   /** Each Pip's computers by name, as DGC last said them (get_pip_computer, rename_pip_computer, add_pip_computer). */
   private computerNames = new Map<string, { number: number; name: string }[]>();
+  /** The computer tabs with an Add file… or Save to this computer… under way (a dialog open, or a copy running): one at a time each. */
+  private computerCopying = new Set<string>();
+  /** The copies DGC has not answered yet: ended, in words, when the connection changes under them. */
+  private computerCopies = new Set<(why: string) => void>();
   /** One screen stream per Pip: the tab (its key in `computers`) that opened it last. */
   private desktopOwner = new Map<string, string>();
   /** The CLI streams a Pip computer's full screen (ready.capabilities.pips_desktop). */
@@ -298,6 +315,75 @@ export class PipsEditor implements vscode.Disposable {
       this.post({ type: 'pipComputerNames', names }, 'computer:' + key);
     }
   }
+  /** One copy command, sent by this host alone, answered with DGC's result or refused in DGC's own words. */
+  private computerCopy(type: 'copy_pip_computer_file_in' | 'copy_pip_computer_file_out', fields: Record<string, unknown>): Promise<any> {
+    return new Promise((resolve, reject) => {
+      if (!this.state.connected || !this.state.supported || !this.state.enabled) { reject(new Error('DGC is not connected. Nothing was copied.')); return; }
+      const requestId = 'pips-copy-' + randomBytes(12).toString('hex');
+      const end = (why: string) => { clearTimeout(timer); this.hostReads.delete(requestId); this.computerCopies.delete(end); reject(new Error(why)); };
+      const timer = setTimeout(() => end('DGC didn’t answer in time. Look in Files to see whether it was copied.'), COMPUTER_COPY_WAIT_MS);
+      (timer as any).unref?.();
+      this.computerCopies.add(end);
+      this.hostReads.set(requestId, (event) => {
+        if (event.type === 'pips_result' && event.ok === true && event.command === type && event.result && typeof event.result === 'object') {
+          clearTimeout(timer); this.hostReads.delete(requestId); this.computerCopies.delete(end); resolve(event.result); return;
+        }
+        const words = event.type === 'command_rejected' ? event.message : event.error?.message;
+        end(typeof words === 'string' && words ? words.slice(0, 500) : 'DGC could not copy that file.');
+      });
+      if (!this.send({ type: 'pips_control', request: { ...fields, type, request_id: requestId } }, this.backendIdentity)) end('DGC is not connected. Nothing was copied.');
+    });
+  }
+  /** A path on the computer running DGC, from a place the user picked in VS Code's own dialog ('' for one that is not a file there). */
+  private pickedPath(uri: vscode.Uri | undefined): string {
+    const path = uri && (uri.scheme === 'file' || uri.scheme === 'vscode-remote') ? uri.fsPath : '';
+    return typeof path === 'string' ? path : '';
+  }
+  /** Add file… in a computer tab's Files (Pips API 87): the user picks files in VS Code's own dialog, and each is copied
+   *  into the folder the tab is showing. The page says the folder in Files and nothing else; every path on this computer
+   *  comes from the dialog. */
+  private async addComputerFiles(surface: string, computer: { pip: ComputerPip }, message: any): Promise<void> {
+    const done = (added: string[], errors: string[], extra: Record<string, unknown> = {}) => this.post({ type: 'pipComputerAdded', added, errors, ...extra }, surface);
+    if (this.apiVersion < COMPUTER_COPY_API) { done([], ['Update DGC to add files over 2 MB.']); return; }
+    if (!filesPath(message.folder)) { done([], ['Choose a folder in this computer’s Files.']); return; }
+    if (this.computerCopying.has(surface)) return;
+    this.computerCopying.add(surface);
+    const added: string[] = [], errors: string[] = [];
+    try {
+      const picked = await vscode.window.showOpenDialog({ canSelectMany: true, canSelectFiles: true, canSelectFolders: false, openLabel: 'Add', title: `Add files to ${computer.pip.name}’s computer` });
+      if (!picked?.length) { done([], [], { cancelled: true }); return; }
+      const files = picked.map(uri => { const path = this.pickedPath(uri); return { path, name: (path || uri.path).split(/[\\/]/).pop() || 'file' }; });
+      for (const [index, file] of files.entries()) {
+        this.post({ type: 'pipComputerAdding', names: files.slice(index).map(f => f.name), ...(index ? { refresh: true } : {}) }, surface);
+        if (!file.path) { errors.push(`${file.name}: choose a file on the computer running DGC.`); continue; }
+        try {
+          const result = await this.computerCopy('copy_pip_computer_file_in', { pip_id: computer.pip.id, path: message.folder, source: file.path });
+          added.push(typeof result.name === 'string' && result.name ? result.name.slice(0, 255) : file.name);
+        } catch (error) { errors.push(error instanceof Error && error.message ? error.message : 'DGC could not copy that file.'); }
+      }
+      done(added, errors);
+    } catch (error) {
+      done(added, [...errors, error instanceof Error && error.message ? error.message : 'DGC could not add those files.']);
+    } finally { this.computerCopying.delete(surface); }
+  }
+  /** Save to this computer… on a file in a computer tab's Files (Pips API 87): the user picks the place in VS Code's own
+   *  save dialog and DGC copies the file there, whatever its size. The page says which file in Files and nothing else. */
+  private async saveComputerFileAs(surface: string, computer: { pip: ComputerPip }, message: any): Promise<void> {
+    const done = (ok: boolean, extra: Record<string, unknown> = {}) => this.post({ type: 'pipComputerSavedAs', ok, ...extra }, surface);
+    if (this.apiVersion < COMPUTER_COPY_API) { done(false, { error: 'Update DGC to save files over 2 MB.' }); return; }
+    if (!filesPath(message.path) || !message.path) { done(false, { error: 'Choose a file in this computer’s Files.' }); return; }
+    if (this.computerCopying.has(surface)) return;
+    this.computerCopying.add(surface);
+    try {
+      const last = message.path.split('/').pop() || '', name = /^[^/\\\0]{1,255}$/.test(last) ? last : 'file';
+      const target = this.pickedPath(await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir()), name), saveLabel: 'Save' }) ?? undefined);
+      if (!target) { done(false, { cancelled: true }); return; }
+      const result = await this.computerCopy('copy_pip_computer_file_out', { pip_id: computer.pip.id, path: message.path, target });
+      done(true, { name: (typeof result.target === 'string' && result.target ? result.target : target).split(/[\\/]/).pop()!.slice(0, 255) });
+    } catch (error) {
+      done(false, { error: error instanceof Error && error.message ? error.message : 'Not saved.' });
+    } finally { this.computerCopying.delete(surface); }
+  }
   /** Save a file from a Pip's computer where the user chooses. The bytes came from its own read. */
   private async saveComputerFile(surface: string, message: any): Promise<void> {
     const name = typeof message.name === 'string' && /^[^/\\\0]{1,255}$/.test(message.name) ? message.name : 'file';
@@ -356,6 +442,7 @@ export class PipsEditor implements vscode.Disposable {
     this.spoolDir = capabilities?.image_spool === true && typeof capabilities?.image_spool_dir === 'string' ? capabilities.image_spool_dir : '';
     this.generation++;
     this.pending.clear();
+    this.endComputerCopies();
     this.connectFailed = false;
     this.state = { connected: true, supported: capabilities?.pips_supported === true && capabilities?.pips_api_version >= 9, enabled: capabilities?.pips_enabled === true };
     this.publish();
@@ -364,8 +451,10 @@ export class PipsEditor implements vscode.Disposable {
    *  (starting, a chat switching, a restart under way) the page only waits. */
   offline(failed = false): void {
     if (!this.state.connected && failed === this.connectFailed) return;
-    this.generation++; this.pending.clear(); this.state.connected = false; this.connectFailed = failed; this.publish();
+    this.generation++; this.pending.clear(); this.endComputerCopies(); this.state.connected = false; this.connectFailed = failed; this.publish();
   }
+  /** The connection to DGC changed: a copy it was making is not waited for any longer. */
+  private endComputerCopies(): void { for (const end of [...this.computerCopies]) end('The connection to DGC changed. Look in Files to see whether it was copied.'); }
   private publish(): void {
     // Whether a folder is open in this window: with none, the Pips view's Project tab says to open one rather than show
     // the Pips of wherever DGC happened to start. Left out where the editor doesn't say.
@@ -725,6 +814,9 @@ export class PipsEditor implements vscode.Disposable {
     if (MIC_MESSAGES.includes(message?.type) && !computer) { if (this.dictation) void this.dictation().handle(this.mic, message); return; }
     if (SPEAK_MESSAGES.includes(message?.type) && !computer) { if (this.readAloud) void this.readAloud().handle(this.mic, message); return; }
     if (message?.type === 'pipComputerSave' && computer) { void this.saveComputerFile(surface, message); return; }
+    // Big files (Pips API 87): the tab says a folder or a file in Files; the dialogs and every path here are the host's.
+    if (message?.type === 'pipComputerAddFiles' && computer) { void this.addComputerFiles(surface, computer, message); return; }
+    if (message?.type === 'pipComputerSaveAs' && computer) { void this.saveComputerFileAs(surface, computer, message); return; }
     if (message?.type === 'pipComputerCopy' && computer) {
       // The clipboard panel's Copy: text the Pip's computer copied, put on this computer's clipboard by the host.
       const text = message.text;
@@ -790,6 +882,8 @@ export class PipsEditor implements vscode.Disposable {
     if (message?.type === 'pipsReconnect') { this.pending.clear(); this.generation++; this.connectFailed = false; this.connect(); this.publish(); return; }
     if (message?.type !== 'pipsRequest' || typeof message.id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(message.id)) return;
     const fail = (text: string) => this.post({ type: 'pipsReply', id: message.id, ok: false, error: { message: text } }, surface);
+    // The copy commands carry a path on this computer: no page sends one, whichever page it is.
+    if (COMPUTER_COPY_COMMANDS.has(message.request?.type)) { fail(this.apiVersion < COMPUTER_COPY_API ? 'Update DGC to copy files over 2 MB.' : 'Use Add file… or Save to this computer… in the computer’s Files.'); return; }
     // A computer tab is pinned to its own Pip and to the computer's commands.
     if (computer && (!COMPUTER_COMMANDS.has(message.request?.type) || (Object.prototype.hasOwnProperty.call(message.request, 'pip_id') && message.request.pip_id !== computer.pip.id))) { fail('This tab only uses this Pip\'s computer.'); return; }
     // And to its own one of them: a tab says no other computer's number.
