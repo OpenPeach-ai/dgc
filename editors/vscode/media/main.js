@@ -733,7 +733,7 @@
   // chosen and the folders to choose from with each list; a DGC that lists none has no dropdown (projectFolders null).
   // On All projects each session says its folder under its name; one folder's path shows once, above the list.
   // Another folder's session opens in a tab here that runs there, and offers only Open.
-  let projectFolders = null;
+  let projectFolders = null, folderChoiceSeen = null;
   const chooseFolder = (folder) => { if (projectFolders && folder !== projectFolders.choice) vscode.postMessage({ type: "projectFolderChoose", folder }); };
   function folderMenu(button, keyboard) {
     const Pick = window.DgcFolderPick;
@@ -977,6 +977,9 @@
       window: offered.window && typeof offered.window.folder === "string" && offered.window.folder ? offered.window : null } : null;
     if (!projectFolders) closeNewSession(false);
     paintFolderBar(msg);
+    // Home's Pip cards follow the choice: read again when it changes.
+    const choiceNow = projectFolders ? projectFolders.choice : null;
+    if (choiceNow !== folderChoiceSeen) { folderChoiceSeen = choiceNow; homePips?.refresh(); }
     const chosen = projectFolders?.choice ? window.DgcFolderPick?.valueOf(projectFolders.rows, projectFolders.choice) || "this folder" : "";
     // Thousands of sessions: a search over names, first messages and everything said, and Load more.
     const search = $("sessions-search"), more = $("sessions-more");
@@ -1675,7 +1678,8 @@
     for (const c of pipModel?.cards || []) {
       const age = chatAge(c.at), review = c.kind === "setup" || c.kind === "waiting";
       const card = { key: c.key, source: c.scope, group: c.group, at: Date.parse(c.at) || 0, who: { html: hubFace(c) },
-        from: [c.kind === "setup" && c.name === "New Pip" ? "" : c.name, c.kind === "setup" ? "New Pip" : c.scope === "project" ? "Project Pip" : "Pip", age].filter(Boolean).join(" · "), title: c.title, chips: c.chips,
+        // (A Project Pip's card names its project, when the list says it: the Project Folder dropdown shows every folder's.)
+        from: [c.kind === "setup" && c.name === "New Pip" ? "" : c.name, c.kind === "setup" ? "New Pip" : c.scope === "project" ? "Project Pip" : "Pip", c.scope === "project" && projectFolders && c.project ? c.project : "", age].filter(Boolean).join(" · "), title: c.title, chips: c.chips,
         actions: [{ id: "open", label: review ? "Review" : "Open", primary: true, title: review ? "Open what waits for you, in Pips" : `Open ${c.name} in Pips` },
           c.canRead ? { id: "read", label: "Mark read", title: "Mark as read, without opening its chat" }
           : c.canDismiss ? { id: "dismiss", label: "Dismiss", title: `Dismiss: ${c.line}. It comes back if ${c.name} has something new.` } : null] };
@@ -11347,6 +11351,9 @@ function permissionChoices(ev) {
         onDismissed: (change) => vscode.postMessage({ type: "pipHomeDismissed", set: change.set, drop: change.drop }),
         // The dock shows a pinned Pip's face and what waits on it.
         onPips: (said) => { dockPips = said; if (dock) paintDock(); },
+        // The Project Folder choice: Home's Project Pip cards are those of every project, or of the one folder (null
+        // where this DGC offers no dropdown: this window's project, as before).
+        projectFolder: () => (projectFolders ? projectFolders.choice : null),
       });
     }
     mountDock();
@@ -12895,7 +12902,8 @@ function permissionChoices(ev) {
     if (msg.type === "chat_tab") { rememberTab(msg.session); paintSessionBlob(msg.session); return; }
     // pipsModelsChanged: Settings or the Router changed, so the embedded Pips page reads its model list again.
     // pipsUnreadChanged: a Pip was marked read somewhere (its pill, its chat, a card acted on): it reads its counts again.
-    if (["pipsPluginLogos", "pipsAppLogos", "pipsFiles", "pipsModelsChanged", "pipsUnreadChanged"].includes(msg.type)) { for (const listener of pipsListeners) listener(msg); return; }
+    // pipsProjectFolder: the Project Folder choice changed; pipsFolderPicked: the folder the editor's picker gave (Add a folder…).
+    if (["pipsPluginLogos", "pipsAppLogos", "pipsFiles", "pipsModelsChanged", "pipsUnreadChanged", "pipsProjectFolder", "pipsFolderPicked"].includes(msg.type)) { for (const listener of pipsListeners) listener(msg); return; }
     // pipSetupChanged: a new-Pip card was created or turned down somewhere else; this chat's copy and the Pips page read it again.
     if (msg.type === "pipSetupChanged") { pipSetupCards?.receive(msg); for (const listener of pipsListeners) listener(msg); return; }
     if (["pipsConnection","pipsReply","pipsVisibility"].includes(msg.type)) {

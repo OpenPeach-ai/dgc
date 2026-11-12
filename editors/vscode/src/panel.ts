@@ -1527,11 +1527,68 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.projectFolderChanged();
   }
 
-  /** The choice changed (here, or in the Pips view): the Work sessions and Home follow it. */
+  /** The choice changed (here, or in the Pips view): the Work sessions, Home, and every open Pips view follow it. */
   projectFolderChanged(): void {
+    this.pipsEditor?.projectFolderChanged();
+    this.pipsTab?.projectFolderChanged();
     if (!this.home) { return; }
     this.sessionsShown = 200;
     void this.postSessions();
+  }
+
+  /** What a Pips view needs of the choice: what is kept, and keeping one made on its Project tab. */
+  private projectFolderHook(): { choice: () => string; choose: (folder: string) => void } {
+    return {
+      choice: () => projectFolder(this.context),
+      choose: (folder) => {
+        if (folder === projectFolder(this.context)) { return; }
+        keepProjectFolder(this.context, folder);
+        (this.tab?.host ?? this).projectFolderChanged();
+      },
+    };
+  }
+
+  /** Needs attention's `projects` for the choice: every project's ("all"), one folder's workspace, or nothing (a folder
+   *  with no workspace, or a DGC that lists no folders: asked as before). */
+  private async attentionProjects(): Promise<{ projects?: string }> {
+    if (!this.projectFoldersOffered()) { return {}; }
+    let rows = this.folderRowsShown;
+    if (!rows) { try { rows = folderRows(await this.readProjectFolders()); } catch { return {}; } }
+    const choice = this.folderChoice(rows);
+    if (!choice) { return { projects: "all" }; }
+    const workspace = rows.find((row) => row.folder === choice)?.workspace_id;
+    return workspace ? { projects: workspace } : {};
+  }
+
+  /** The project a Pip belongs to, by its workspace (read from DGC, never from a page). */
+  private pipWorkspace(pipId: string): Promise<string> {
+    return (this.tab?.host ?? this).ensurePipsBridge().pipWorkspace(pipId);
+  }
+
+  /** The folder a Project Pip of another folder works in: "" for this window's own, a Personal Pip, or one DGC can't
+   *  place (then Work opens in this window's folder, as before). */
+  private async pipFolderElsewhere(pipId: string): Promise<string> {
+    if (!this.projectFoldersOffered() || !/^pip_[0-9a-f]{32}$/.test(pipId)) { return ""; }
+    try {
+      const workspace = await this.pipWorkspace(pipId);
+      const row = workspace ? folderRows(await this.readProjectFolders()).find((item) => item.workspace_id === workspace) : undefined;
+      return row && !row.here && row.exists && !this.sameFolder(row.folder, this.cwd()) ? row.folder : "";
+    } catch { return ""; }
+  }
+
+  /** Ask DGC to fix, from a Pip's own chat: the session the Pip reports to (a new one when it has none) opens in its
+   *  tab and is asked about the run. A Project Pip of another folder gets its session in a tab that runs in the Pip's
+   *  own folder (asked about first when it is outside the window's), the folder named on the tab. */
+  private async askDgcFromPips(report: any, session: string): Promise<void> {
+    const places = this.places;
+    if (!places) { return; }
+    const folder = session && places.openSessions().has(session) ? "" : await this.pipFolderElsewhere(String(report.pip_id || ""));
+    if (!folder) { places.open(session).askFromPips(report); return; }
+    if (!(await this.mayOpenChatIn(folder))) { return; }
+    this.rememberWorkFolder(folder);
+    const tab = places.open(session, folderLabel(folder), { cwd: folder });
+    if (!session) { tab.namedByFirstPrompt(); }
+    tab.askFromPips(report);
   }
 
   private postSessionItems(items: any[], error = ""): void {
@@ -1713,6 +1770,21 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       return workSessionTitles((Array.isArray(response.items) ? response.items : []).map((item: any) => ({
         id: path.basename(String(item?.path || "")).replace(/\.json$/i, ""),
         title: String(item?.name || item?.preview || ""), ...(item?.count === 0 ? { empty: true } : {}) }))).filter((item) => item.id !== id).slice(0, 200);
+    } catch { return []; }
+  }
+
+  /** The sessions a Project Pip can report to, by the titles the Work list shows: its own folder's. For a Pip of
+   *  another folder (the Project Folder dropdown opens it here) those are that folder's sessions, never this
+   *  window's; for this window's own, and where DGC lists no folders, this project's, as before. */
+  private async sessionsForPip(pipId?: string): Promise<Array<{ id: string; title: string; empty?: true }>> {
+    const folder = pipId ? await this.pipFolderElsewhere(pipId) : "";
+    if (!folder) { return this.otherSessions(""); }
+    try {
+      const response = await this.requestState(this.ensureBackend(), "sessions", { type: "list_sessions", ...this.sessionsOf(folder), limit: 500 }, "sessions", 10000);
+      return workSessionTitles((Array.isArray(response.items) ? response.items : []).filter((item: any) => item?.project === folder).map((item: any) => ({
+        id: path.basename(String(item?.path || "")).replace(/\.json$/i, ""),
+        // (Said empty as this window's are: the owner picker offers a session that has something in it.)
+        title: String(item?.name || item?.preview || ""), ...(item?.count === 0 ? { empty: true } : {}) }))).slice(0, 200);
     } catch { return []; }
   }
 
@@ -2506,7 +2578,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       let waiting: number | undefined, elsewhere = 0;
       if (Number(caps?.pips_api_version) >= 44) {
         try {
-          const list = await bridge.hostRead("list_pip_attention", { limit: 1 });
+          // (Project Pips' cards follow the Project Folder choice.)
+          const list = await bridge.hostRead("list_pip_attention", { limit: 1, ...(await this.attentionProjects()) });
           if (Number.isSafeInteger(list?.total)) waiting = list.total;
           if (Number.isSafeInteger(list?.in_projects)) elsewhere = list.in_projects;
         } catch { /* the digest alone still counts reviews and drafts */ }
@@ -5738,7 +5811,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         const report = msg.report;
         if (!report || typeof report !== "object" || !/^run_[0-9a-f]{32}$/.test(String(report.run_id || ""))) return;
         const session = /^[A-Za-z0-9_-]{1,128}$/.test(String(msg.session || "")) ? String(msg.session) : "";
-        this.places.open(session).askFromPips(report);
+        await this.askDgcFromPips(report, session);
         return;
       }
       case "pipOpenFix": {
@@ -8442,8 +8515,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.pipsEditor.useArtifacts(() => this.artifacts);
       // Continue in Work on what a Pip changed in its copy of a project (Pips API 91).
       this.pipsEditor.useProjectWork((work) => this.continueProjectInWork(work));
+      // The Project Folder dropdown on its Project tab: the same kept choice as the Work sessions'.
+      this.pipsEditor.useProjectFolder(this.projectFolderHook());
       // The Work list's titles, for a Project Pip's owner session picker (Pips API 89).
-      this.pipsEditor.useWorkSessions(() => this.otherSessions(""));
+      this.pipsEditor.useWorkSessions((pipId) => this.sessionsForPip(pipId));
       this.pipsEditor.videoStop = (job) => this.videosStop(job);
       this.pipsEditor.fullScreenSide = this.fullScreenSide();
       this.pipsEditor.videoFollow = (job) => this.videosJobs(job);     // a Pip reply's video: Stop
@@ -8539,6 +8614,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.pipsTab.usePageActions((message) => { void this.onMessage(message); });
       this.pipsTab.useArtifacts(() => this.artifacts);
       this.pipsTab.useProjectWork((work) => this.continueProjectInWork(work));
+      this.pipsTab.useProjectFolder(this.projectFolderHook());
       this.pipsTab.videoStop = (job) => this.videosStop(job);
       this.pipsTab.fullScreenSide = this.fullScreenSide();
       this.pipsTab.videoFollow = (job) => this.videosJobs(job);

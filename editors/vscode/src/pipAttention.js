@@ -127,12 +127,14 @@ export function attentionDots(count, at, most = 7) {
  *  answered here, then Review: the way to all of it, the card's own click). After an answer it says what the answer
  *  will do, with Undo as a plain word button (alone, and against the clock); nothing is sent yet. `key` is the card's
  *  key; `tail` ends each button's id where more than one row is drawn (the page of them all), '' for the one card. */
-function rowMarkup(i, key, {esc, face, now, busy, answers, held, tail = '', attrs = ''}) {
+function rowMarkup(i, key, {esc, face, now, busy, answers, held, tail = '', attrs = '', place = null}) {
   const icons = globalThis.DgcIconActions;
   const iconRow = () => { const a = answers?.(i) || null, act = (way, label, primary, title) => ({label, primary, title, disabled: busy, attrs: {id: `attention-${way}${tail}`, [way === 'open' ? 'data-attention-open' : 'data-attention-answer']: way === 'open' ? i.id : way, 'data-attention-item': i.id}});
    const list = [...(a ? [act('yes', a.yes, true), act('no', a.no, false)] : []), act('open', 'Review', !a, `See all of it${i.pip_name ? `, with ${i.pip_name}` : ''}`)];
    return {n: list.length, html: icons.html(list, {label: `Answers: ${i.title}`})}; };
-  const small = `<small>${esc(i.pip_name || 'DGC')} · ${LABELS[i.kind]} · ${esc(ago(i.created_at, now))}</small>`;
+  // A Project Pip's card names its project (`place`: a card's project, '' for a Personal Pip's).
+  const where = place?.(i) || '';
+  const small = `<small>${esc(i.pip_name || 'DGC')}${where ? ` · ${esc(where)}` : ''} · ${LABELS[i.kind]} · ${esc(ago(i.created_at, now))}</small>`;
   const said = i.kind !== 'setup' && held?.(i) || '', answered = !said && icons && i.kind !== 'setup' ? iconRow() : null;
   if (said) return `<li class="attention-item attention-held" data-attention-key="${esc(key)}"${attrs}><div class="attention-row">${face(i)}<span class="attention-copy"><strong role="status">${esc(said)}</strong>${small}</span></div>`
     + `<button type="button" class="dgc-btn small attention-undo" id="attention-undo${tail}" data-attention-undo="${esc(i.id)}" aria-label="${esc(`Undo: ${said}`)}" title="Take that back. Nothing was sent yet.">Undo</button></li>`;
@@ -152,12 +154,12 @@ const ARROW = {prev: 'M10 3 5 8l5 5', next: 'M6 3l5 5-5 5'};
  *  by `setupCard` ({setup} or {item}); the cards are theirs alone when `page` is null (a project's home, which shows
  *  none of the Personal Pips' rows). `answers(item)` is what the card can answer by itself ({yes, no}, src/pipCardAnswers.js)
  *  or null; `held(item)` is what an answer just given says ("Applied. …") while it can still be undone, or ''. */
-export function attentionMarkup(page, {esc, face, expanded = false, now = Date.now(), busy = false, setups = [], setupCard = null, error = '', more = '', at = 0, answers = null, held = null, viewAll = false}) {
+export function attentionMarkup(page, {esc, face, expanded = false, now = Date.now(), busy = false, setups = [], setupCard = null, error = '', more = '', at = 0, answers = null, held = null, viewAll = false, place = null}) {
   const all = attentionCards(page, setups, !!setupCard), listed = page?.items || [];
   const total = (page?.total || 0) + all.length - listed.length;
   if (!total) return '';
   const count = all.length, index = Math.max(0, Math.min(at, count - 1)), shown = expanded ? all[index] : null, n = v => v.toLocaleString('en-US');
-  const row = i => rowMarkup(i, shown.key, {esc, face, now, busy, answers, held});
+  const row = i => rowMarkup(i, shown.key, {esc, face, now, busy, answers, held, place});
   const card = shown && (({setup, item: i}) => setup !== undefined
     ? `<li class="attention-item attention-card" data-attention-key="${esc(shown.key)}">${setupCard({setup, item: i})}</li>`
     : row(i))(shown);
@@ -187,7 +189,7 @@ export function attentionMarkup(page, {esc, face, expanded = false, now = Date.n
  *  Pip was just rejected and can still be taken back: its card says so in its own place, with Undo, as an answered row
  *  does. Returns {count, html}: how many wait (the page's title says it) and the list, or, with nothing left, a line
  *  saying so and the way back. */
-export function attentionAllMarkup(page, {esc, face, now = Date.now(), busy = false, setups = [], setupCard = null, error = '', more = '', answers = null, held = null, rejected = null}) {
+export function attentionAllMarkup(page, {esc, face, now = Date.now(), busy = false, setups = [], setupCard = null, error = '', more = '', answers = null, held = null, rejected = null, place = null}) {
   const all = attentionCards(page, setups, !!setupCard), listed = page?.items || [], n = v => v.toLocaleString('en-US');
   const gone = c => c.setup !== undefined && !!rejected?.(c.setup ? c.setup.id : c.item.card);
   const count = Math.max(0, (page?.total || 0) + all.length - listed.length - all.filter(gone).length);
@@ -195,7 +197,7 @@ export function attentionAllMarkup(page, {esc, face, now = Date.now(), busy = fa
   if (!all.length) return {count: 0, html: `<section class="attention attention-all" aria-label="Needs attention, all of it">${said}<div class="attention-all-empty"><p role="status">Nothing needs you right now.</p>`
     + `<button type="button" class="dgc-btn wide" id="attention-all-done" data-attention-all-back="1">Back to your Pips</button></div></section>`};
   const rows = all.map((c, index) => { const attrs = ` data-attention-index="${index}"`;
-    if (c.setup === undefined) return rowMarkup(c.item, c.key, {esc, face, now, busy, answers, held, tail: `-${c.item.card}`, attrs});
+    if (c.setup === undefined) return rowMarkup(c.item, c.key, {esc, face, now, busy, answers, held, tail: `-${c.item.card}`, attrs, place});
     const id = c.setup ? c.setup.id : c.item.card;
     if (gone(c)) return `<li class="attention-item attention-held" data-attention-key="${esc(c.key)}"${attrs}><div class="attention-row"><span class="attention-mark" aria-hidden="true">+</span><span class="attention-copy"><strong role="status">Rejected. No Pip was created.</strong><small>${esc(c.title)}</small></span></div>`
       + `<button type="button" class="dgc-btn small attention-undo" id="attention-undo-${esc(id)}" data-undo-reject="${esc(id)}" aria-label="Undo: rejected ${esc(c.title)}" title="Take that back. Nothing was sent yet.">Undo</button></li>`;

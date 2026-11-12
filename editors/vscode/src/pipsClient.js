@@ -5,6 +5,9 @@ import '../media/shared/tokens.css';
 // One menu for every "+" and picker, as in Work and ChatDGC (window.DgcMenu).
 import '../media/shared/menu.css';
 import '../media/shared/menu.js';
+// The Project Folder dropdown, as over the Work sessions (window.DgcFolderPick).
+import '../media/shared/folderpick.css';
+import '../media/shared/folderpick.js';
 // A computer's own mark, the maintainer's Portal, as he wrote it (src/pipComputerNames.js draws it).
 import '../media/shared/portal.css';
 // One card for everything that asks or reports, as in Work and ChatDGC (window.DgcCard).
@@ -551,8 +554,12 @@ function createMarkup() {
   return `<form id="create-form" class="form"><p class="step">Step 2 of 2 · Configure the job</p><div class="create-hero">${avatar('idle',type,`configure-${type.id}`)}<div><h2>Your ${esc(type.name)}</h2><p class="muted">${esc(type.role)} · ${executionPip(type)?'You approve each run':documentationPip(type)?'Private drafts':'Reads only'}</p></div></div><p>${esc(type.description)}</p><p class="muted">It runs when you ask, in ${esc(S.workspace?.name || 'this project')}. ${pulsePip(type)?'It can’t run any commands yet. After you create it, you can give it a command plan and a schedule.':executionPip(type)?'It runs only on a handoff you approve, never on a schedule.':documentationPip(type)?(S.apiVersion>=20?'After you create it, you can give it a schedule or have it run on events. It doesn’t take handoffs.':'Update DGC to give Quill a schedule or run it on events. It doesn’t take handoffs.'):'After you create it, you can give it a schedule.'} It reads only committed code from the branch or commit you choose.</p>${field('name','Name')}${field('goal','What it does',true)}${field('source_ref','Branch or commit')}${modelPicker('createModel','Model',draft.createModel,S.workspace?.kind==='personal')}<p class="muted">Use HEAD, a branch name or a commit. Uncommitted edits aren’t included. ${executionPip(type)?'Chatting with it never changes files. You approve every fix or test run separately; creating it allows neither.':documentationPip(type)?'Quill writes drafts with the model and quotes the exact code it used. It never changes or publishes your files.':'All of these read the code the same way; the character you pick doesn’t give it more access.'}</p><div class="actions">${button('back-types','Back',S.busy)}<button class="primary" type="submit"${S.busy||!usable()?' disabled':''}>${executionPip(type)?'Review what it can do…':'Create Pip'}</button>${button('cancel-create','Cancel',S.busy)}</div></form>`;
 }
 async function finishCreate(result){
-  if(!record(result.pip)||typeof result.pip.id!=='string'||result.pip.workspace_id!==S.workspace.id)throw new Error('Created Pip does not match this workspace.');
-  creationDrafts.delete(S.createType);draft.name='';draft.goal='';draft.source_ref='HEAD';S.createType='';S.createStep='type';S.busy=false;await select(result.pip.id);await refresh(true);
+  // (With the Project Folder dropdown a Pip may be made in another folder's project: it opens here, in its own.)
+  const elsewhere=record(result.pip)&&typeof result.pip.workspace_id==='string'&&result.pip.workspace_id!==S.workspace.id&&foldersOn();
+  if(!record(result.pip)||typeof result.pip.id!=='string'||result.pip.workspace_id!==S.workspace.id&&!elsewhere)throw new Error('Created Pip does not match this workspace.');
+  creationDrafts.delete(S.createType);draft.name='';draft.goal='';draft.source_ref='HEAD';S.createType='';S.createStep='type';S.busy=false;
+  if(elsewhere){projectsAll.read=false;void loadFolders();await navigateFromHost({pip:result.pip.id});return;}
+  await select(result.pip.id);await refresh(true);
 }
 function rememberCreationDraft(){if(S.createType)creationDrafts.set(S.createType,{name:draft.name,goal:draft.goal,source_ref:draft.source_ref,createModel:draft.createModel});}
 // The signed-in CLI is only the model transport. Project and Personal Pip
@@ -2392,7 +2399,7 @@ const ownerState={pip:'',asked:'',value:null,error:'',busy:false,seq:0,picker:nu
 function ownerShown(){return S.apiVersion>=OWNERS_API&&!remoteHost&&!!S.pip&&!personalPip()&&!archived();}
 function resetOwner(){ownerState.pip='';ownerState.asked='';ownerState.value=null;ownerState.error='';ownerState.busy=false;ownerState.picker=null;ownerState.seq++;}
 // The titles the editor's Work list shows (the host's own answer): a session it has none for says when it is from.
-async function loadWorkTitles(){try{ownerState.titles=workTitles(await send('list_work_session_titles',{}));}catch{/* the sessions still say when they are from */}}
+async function loadWorkTitles(){try{ownerState.titles=workTitles(await send('list_work_session_titles',foldersOn()&&S.selected?{pip_id:S.selected}:{}));}catch{/* the sessions still say when they are from */}}
 async function loadOwner(){
  if(!ownerShown()||!usable())return;
  const token=scope(),pip=S.selected,sequence=++ownerState.seq;ownerState.asked=pip;
@@ -3169,11 +3176,116 @@ function chatStyle(){return S.apiVersion>=43&&!remoteHost;}
 // project's DGC to look after ("the user might ask this project's DGC to fix another project's Pips"). No folder
 // open, the Project tab says so in one line. A remote view, and a CLI with no Personal Pips, have no tabs, as before.
 function personalSpace(){return S.workspaces.find(w=>w?.kind==='personal')||null;}
-function projectSpace(){return S.folderOpen&&S.currentWorkspaceId?S.workspaces.find(w=>w?.id===S.currentWorkspaceId&&w.kind!=='personal')||null:null;}
+function windowSpace(){return S.folderOpen&&S.currentWorkspaceId?S.workspaces.find(w=>w?.id===S.currentWorkspaceId&&w.kind!=='personal')||null:null;}
+// The Project Folder dropdown (0.52, 12 Nov; Pips API 93; media/shared/folderpick.js): his call reverses "Project is this
+// window's folder and nothing else". The Project tab has the dropdown the Work sessions have, on the same choice, which
+// the extension keeps for every window (S.projectFolder: '' is All projects, the default; null where there is no
+// dropdown: an older DGC, a remote view). All projects lists every project's Pips, each with its folder; a folder shows
+// that folder's Pips, or says it has none. A Project Pip of any folder opens here. Needs attention asks for the Project
+// Pips' cards of the choice. Personal Pips are never filtered.
+S.projectFolder=null;S.folders=null;S.homeDir='';S.windowFolder=null;
+let projectsAll={pips:[],read:false,busy:false,error:'',seq:0};
+const addedFolders=new Map(),folderPicks=new Map();let folderPickSeq=0;
+const folderLeaf=folder=>String(folder||'').replace(/[\\/]+$/,'').split(/[\\/]/).pop()||String(folder||'');
+// A folder as the lists show it: the home folder as ~ (the whole path is its tooltip).
+function tildePath(folder){const base=String(S.homeDir||'').replace(/[\\/]+$/,'');return !base?folder:folder===base?'~':folder.startsWith(base+'/')||folder.startsWith(base+'\\')?'~'+folder.slice(base.length):folder;}
+function foldersOn(){return !remoteHost&&S.apiVersion>=93&&typeof S.projectFolder==='string'&&Array.isArray(S.folders)&&scopeTabs();}
+function folderRows(){return S.folders||[];}
+function chosenFolder(){return foldersOn()&&S.projectFolder?folderRows().find(r=>r.folder===S.projectFolder)||null:null;}
+function folderOfSpace(id){return folderRows().find(r=>r.workspace_id===id)||[...addedFolders.values()].find(r=>r.workspace_id===id)||null;}
+function spaceName(id){return S.workspaces.find(w=>w?.id===id)?.name||folderOfSpace(id)?.name||'';}
+async function loadFolders(){
+ if(remoteHost||S.apiVersion<93||typeof S.projectFolder!=='string')return;
+ try{const value=await send('list_project_folders');
+  S.folders=(Array.isArray(value?.folders)?value.folders:[]).filter(r=>record(r)&&typeof r.folder==='string'&&r.folder&&r.folder.length<=4096).slice(0,200)
+   .map(r=>({folder:r.folder,shown:tildePath(r.folder),name:typeof r.name==='string'&&r.name?r.name.slice(0,200):folderLeaf(r.folder),here:r.here===true,exists:r.exists!==false,workspace_id:typeof r.workspace_id==='string'&&/^ws_[a-f0-9]{32}$/.test(r.workspace_id)?r.workspace_id:null}));}
+ catch{/* no folders read: the tab is this window's project, as before, until they are */}
+}
+// Needs attention's `projects` for the choice: every project's, one folder's workspace, or nothing (a folder with none).
+function attentionProjects(){if(!foldersOn())return {};const row=chosenFolder();return row?(row.workspace_id?{projects:row.workspace_id}:{}):{projects:'all'};}
+// Whether this place is the Project tab's (its cards, its count, its View all).
+function projectPlace(){return foldersOn()?scopeTab()==='project':projectHome();}
+async function loadProjectsAll(){
+ if(!foldersOn()||projectsAll.busy)return;const sequence=++projectsAll.seq;projectsAll.busy=true;
+ try{const value=await send('list_pips',{scope:'projects',order:'recent',limit:100});if(sequence!==projectsAll.seq)return;
+  projectsAll.pips=(Array.isArray(value?.pips)?value.pips:[]).filter(p=>record(p)&&typeof p.id==='string'&&/^pip_[a-f0-9]{32}$/.test(p.id)&&typeof p.name==='string'&&p.name&&typeof p.workspace_id==='string');projectsAll.error='';}
+ catch(error){if(sequence!==projectsAll.seq)return;projectsAll.error=errorText(error);}
+ projectsAll.read=true;projectsAll.busy=false;render();
+}
+// What the Project tab shows follows the choice, whatever was open before (a Pip opened from another folder, a choice
+// made over the Work sessions): at the list of Pips, one folder's own list, or the page of All projects (or of a folder
+// with no Pips) over whatever is loaded underneath. Looked at on every draw; a Pip that is open is left alone.
+function settleProjectTab(){
+ if(!foldersOn()||!S.workspace||S.switching||S.loading||S.review||S.busy||navigating)return;
+ if(!((!S.selected||S.overview)&&!S.create)||!projectHome()&&!S.projectEmpty)return;
+ const space=projectSpace();
+ if(!space){S.projectEmpty=true;if(!chosenFolder()&&!projectsAll.read&&!projectsAll.busy)void loadProjectsAll();return;}
+ if(S.workspace.id===space.id&&!S.projectEmpty)return;
+ queueMicrotask(()=>{
+  if(!foldersOn()||S.switching||S.review||S.busy||navigating||projectSpace()?.id!==space.id||S.workspace?.id===space.id&&!S.projectEmpty||!projectHome()&&!S.projectEmpty)return;
+  const loading=enterWorkspace(space),epoch=S.epoch;S.switching=true;render();
+  void loading.finally(()=>{if(epoch===S.epoch&&S.switching){S.switching=false;render();}});
+ });
+}
+function folderBarMarkup(){
+ const Pick=globalThis.DgcFolderPick,row=chosenFolder();if(!Pick)return '';
+ return `<div class="pips-folder-bar">${Pick.buttonHtml({id:'pips-folder-pick',rows:folderRows(),choice:row?row.folder:'',title:row?`Project Pips in ${row.folder}. Choose another folder, or All projects.`:'Project Pips from every project. Choose one folder to see only its Pips.'})}${row?`<p class="pips-folder-once" title="${esc(row.folder)}">${Pick.pathHtml(row.shown,row.folder)}</p>`:''}</div>`;
+}
+// All projects: every project's Pips, each with its folder under its name. A row opens that Pip here.
+function projectsAllMarkup(){
+ if(!projectsAll.read)return loadingMark();
+ const Pick=globalThis.DgcFolderPick,rows=projectsAll.pips.filter(p=>p.status!=='archived');
+ const row=p=>{const type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,[],usable(),S.runner),waiting=waitingOn(S.attention,p.id,pendingReviews(p)),place=folderOfSpace(p.workspace_id),name=place?.name||spaceName(p.workspace_id);
+  return `<button type="button" class="pip-row pip-row-project${waiting?' pip-row-marked':''}" data-project-pip="${esc(p.id)}" data-state="${esc(pose.state)}" title="${esc(name?`${p.name} · ${name}`:p.name)}">${pipAvatar(p,pose.state,`all-${p.id}`,type)}<span class="pip-row-copy"><strong><span class="pip-row-name">${esc(p.name)}</span></strong><small class="pip-row-folder">${place&&Pick?`${place.exists?'':'<span class="pip-row-folder-note">Folder not found</span>'}${Pick.pathHtml(place.shown,place.folder)}`:esc(name||'A project on this computer')}</small></span>${waiting?`<span class="pip-row-marks"><span class="pip-row-count" role="img" aria-label="${waiting} waiting for you">${waiting}</span></span>`:''}</button>`;};
+ return `<section class="simple-home pips-projects-all" aria-label="Every project’s Pips"><div class="simple-home-head"><h2>Project Pips</h2><span class="simple-home-actions">${windowSpace()?button('projects-new','New Pip',S.busy||!usable(),'primary pill'):''}</span></div>${projectsAll.error?`<p class="notice error" role="alert">${esc(projectsAll.error)}</p>`:''}${rows.length?`<div class="pip-rows pips-projects-list">${rows.map(row).join('')}</div>`:projectsAll.error?'':'<p class="muted">No Project Pips in any folder yet.</p>'}</section>`;
+}
+function openFolderMenu(button,keyboard){
+ const Pick=globalThis.DgcFolderPick;if(!Pick||!foldersOn())return;
+ if(button.getAttribute('aria-expanded')==='true'){Pick.close(true);return;}
+ // Create a Project Pip: the form's own folder (never the list's choice), with Add a folder… at the end.
+ if(button.id==='new-pip-folder'){
+  Pick.open(button,{rows:createFolderRows(),choice:draft.createFolder||'',all:false,add:true,goneOff:true,keyboard,trigger:()=>$('new-pip-folder'),
+   onChoose:folder=>{draft.createFolder=folder;if(S.review?.projectPip){S.review.error='';Object.assign(S.review,newProjectPipReview());renderReview();}$('new-pip-folder')?.focus({preventScroll:true});},
+   onAdd:()=>void addCreateFolder()});
+  return;
+ }
+ // The Project tab: the choice is the extension's to keep (every window, the Work sessions too); it says it back.
+ const now=chosenFolder()?.folder||'';
+ Pick.open(button,{rows:folderRows(),choice:now,all:true,keyboard,trigger:()=>$('pips-folder-pick'),onChoose:folder=>{if(folder!==now)options.postMessage({type:'pipsProjectFolderChoose',folder});}});
+}
+// The folders a new Project Pip can work in: this window's folder (listed or not), the ones DGC lists, the ones added here.
+function createFolderRows(){
+ const listed=folderRows(),own=S.windowFolder&&!listed.some(r=>r.folder===S.windowFolder.folder)?[{folder:S.windowFolder.folder,shown:tildePath(S.windowFolder.folder),name:S.windowFolder.name||folderLeaf(S.windowFolder.folder),here:true,exists:true,workspace_id:windowSpace()?.id||null}]:[];
+ return [...own,...listed,...[...addedFolders.values()].filter(r=>!listed.some(x=>x.folder===r.folder)&&!own.some(x=>x.folder===r.folder))];
+}
+function newPipFolderField(){
+ const Pick=globalThis.DgcFolderPick;if(!foldersOn()||!Pick)return '';
+ const rows=createFolderRows(),row=rows.find(r=>r.folder===draft.createFolder);
+ return `<div class="new-pip-folder">${Pick.buttonHtml({id:'new-pip-folder',rows,choice:row?row.folder:'',empty:'Choose a folder',title:row?row.folder:'Choose the folder this Pip works in'})}${row?`<p class="new-pip-folder-path" title="${esc(row.folder)}">${Pick.pathHtml(row.shown,row.folder)}</p>`:''}</div>`;
+}
+// Add a folder…: the editor's own folder picker (only a folder that exists), then DGC makes it a project
+// (add_project_folder) and it is the form's folder. DGC's refusal (the home folder, DGC's own) shows in the form.
+function pickFolder(){return new Promise(resolve=>{const id=`pick-${Date.now().toString(36)}-${++folderPickSeq}`;folderPicks.set(id,resolve);options.postMessage({type:'pipsPickFolder',id});});}
+async function addCreateFolder(){
+ const review=S.review;if(!review?.projectPip||!usable())return;
+ const folder=await pickFolder();if(!folder||S.review!==review)return;
+ try{const added=await send('add_project_folder',{folder}),space=added?.workspace;
+  if(!record(space)||typeof space.id!=='string'||!/^ws_[a-f0-9]{32}$/.test(space.id))throw Error('DGC didn’t say which project that folder is. Try again.');
+  if(!S.workspaces.some(w=>w?.id===space.id))S.workspaces=[...S.workspaces,space];
+  addedFolders.set(folder,{folder,shown:tildePath(folder),name:typeof space.name==='string'&&space.name?space.name.slice(0,200):folderLeaf(folder),here:false,exists:true,workspace_id:space.id});
+  draft.createFolder=folder;review.error='';}
+ catch(error){review.error=errorText(error);}
+ if(S.review===review){Object.assign(review,newProjectPipReview());renderReview();$('new-pip-folder')?.focus({preventScroll:true});}
+}
+function projectSpace(){
+ if(!foldersOn())return windowSpace();
+ const row=chosenFolder();return row?.workspace_id?S.workspaces.find(w=>w?.id===row.workspace_id&&w.kind!=='personal')||null:null;
+}
 function scopeTabs(){return !remoteHost&&!!personalSpace();}
 function scopeTab(){return S.projectEmpty||S.workspace?.kind!=='personal'?'project':'personal';}
-// The workspaces this view may open: with tabs, Personal and this folder's project; without, every one, as before.
-function openableSpaces(){return scopeTabs()?[personalSpace(),projectSpace()].filter(Boolean):S.workspaces;}
+// The workspaces this view may open: with tabs, Personal and this folder's project (with the Project Folder dropdown,
+// any project's: a Project Pip from another folder opens here); without, every one, as before.
+function openableSpaces(){return scopeTabs()&&!foldersOn()?[personalSpace(),projectSpace()].filter(Boolean):S.workspaces;}
 // A number means something needs you, and it's the number Needs attention says; a dot means there's something new to read.
 // With neither, nothing. An older DGC has no such number, so it never gets one here. Nothing shows until that list has been
 // read, so a dot never stands in for a number that is on its way.
@@ -3184,11 +3296,20 @@ function scopeTabsMarkup(){
   const fresh=attentionRead&&workspace?unreadTotals.get(workspace.id)||0:0,count=attentionRead?need:0,said=needWords(count,fresh);
   const mark=count?`<span class="pip-tab-count" aria-hidden="true">${count.toLocaleString('en-US')}</span>`:fresh?'<span class="pip-tab-new" aria-hidden="true"></span>':'';
   return `<button type="button" role="tab" id="pips-tab-${key}" class="pips-tab" data-pips-tab="${key}" aria-controls="pips-tabpanel" aria-selected="${chosen===key}"${chosen===key?'':' tabindex="-1"'} title="${esc(said?`${said}\n${title}`:title)}"${said?` aria-label="${esc(`${label}, ${said}`)}"`:''}>${label}${mark}</button>`;};
+ // With the Project Folder dropdown the list holds the chosen projects' cards too: each tab counts its own.
+ if(foldersOn()){const mine=personalSpace()?.id,theirs=(S.attention?.items||[]).filter(i=>i.workspace_id!==mine).length,row=chosenFolder();
+  return `<div class="pips-tabs" role="tablist" aria-label="Your Pips, or your projects’ Pips">${tab('personal','Personal','Your Pips: the same in every folder',personalSpace(),Math.max(0,(S.attention?.total||0)-theirs))}${tab('project','Project',row?`${row.name}: this folder’s Pips`:'Every project’s Pips',project,theirs)}</div>`;}
  return `<div class="pips-tabs" role="tablist" aria-label="Your Pips, or this project’s Pips">${tab('personal','Personal','Your Pips: the same in every folder',personalSpace(),S.attention?.total||0)}${tab('project','Project',project?`${project.name}: this project’s Pips`:'Open a project folder to see its Pips',project,project&&S.attention?.projects?.[project.id]?.total||0)}</div>`;
 }
 // What the chosen tab shows is its panel (the list, or a Pip open in it).
 function scopePanelAttrs(){return scopeTabs()?` id="pips-tabpanel" role="tabpanel" aria-labelledby="pips-tab-${scopeTab()}"${S.switching?' aria-busy="true"':''}`:'';}
-function projectEmptyMarkup(){return `<div class="pips-tab-empty"${scopePanelAttrs()}><p class="muted">Open a project folder to see its Pips.</p></div>`;}
+function projectEmptyMarkup(){
+ if(!foldersOn())return `<div class="pips-tab-empty"${scopePanelAttrs()}><p class="muted">Open a project folder to see its Pips.</p></div>`;
+ const row=chosenFolder();
+ // One folder with no Pips says so; All projects is every project's Pips, under what waits on them.
+ if(row)return `<div class="simple-content pips-folder-page"${scopePanelAttrs()}>${folderBarMarkup()}<div class="pips-tab-empty"><p class="muted">No Project Pips in ${esc(row.name)} yet.</p></div></div>`;
+ return `<div class="simple-content pips-folder-page"${scopePanelAttrs()}>${folderBarMarkup()}${attentionHomeMarkup()}${projectsAllMarkup()}</div>`;
+}
 /** Shows another workspace's Pips from the top: what the old dropdown did, and what opening a Pip elsewhere does. */
 // Its list starts at its first page: the pages read and the search typed were the other tab's (both tabs are paged now).
 function enterWorkspace(target){S.epoch++;clearSelection();S.selected='';S.jobs=[];S.jobsRead=false;jobsExtra=[];S.jobsNext=null;S.jobsTotal=null;window.clearTimeout(pipSearchTimer);S.pipSearch='';draft.pipSearch='';S.context=null;S.create=false;S.overview=true;S.workspace=target;S.projectEmpty=false;S.switching=false;setupRows=[];setupError='';S.error='';rememberView();return refresh(true);}
@@ -3229,7 +3350,14 @@ function mergePage(first,value){
 S.attention=null;let attentionSeq=0,attentionExpanded=false,attentionRead=false;
 // Needs attention opens when something is in it; folded by you, it stays folded until something new arrives (his call,
 // 11 Nov). What was in it when you folded it is kept, here and in the saved view.
-function attentionKeys(){return [...(projectHome()?[]:(S.attention?.items||[]).map(i=>i.id)),...setupRows.filter(r=>!heldRejects.has(r.id)).map(r=>'setup:'+r.id)];}
+// With the Project Folder dropdown the list holds Project Pips' cards too: Personal's on the Personal tab, the chosen
+// projects' on the Project tab. Without it a project's home shows none of the list, as before.
+function attentionPart(page){
+ if(!foldersOn())return projectHome()?null:page;if(!page)return page;
+ const mine=personalSpace()?.id,project=scopeTab()==='project',items=page.items.filter(i=>(i.workspace_id!==mine)===project);
+ return {...page,items,total:Math.max(items.length,page.total-(page.items.length-items.length))};
+}
+function attentionKeys(){return [...(attentionPart(S.attention)?.items||[]).map(i=>i.id),...setupRows.filter(r=>!heldRejects.has(r.id)).map(r=>'setup:'+r.id)];}
 function attentionOpen(){
  const keys=attentionKeys();if(!keys.length)return attentionExpanded;
  // What came in while it was folded is what it opens on.
@@ -3239,7 +3367,7 @@ function attentionOpen(){
 // One card in view (asked 11 Nov: the list "gets too long"): the card you are on, kept by what it is, so a new card
 // arriving moves nothing, and an answered one gives its place to the next. Personal and Project each keep their own.
 const attentionPlaces={personal:{key:'',index:0},project:{key:'',index:0}};
-function attentionPlace(){return attentionPlaces[projectHome()?'project':'personal'];}
+function attentionPlace(){return attentionPlaces[projectPlace()?'project':'personal'];}
 function attentionShowing(cards){
  const place=attentionPlace(),keys=cards.map(c=>c.key);if(!keys.length)return 0;
  place.index=attentionSpot(keys,place.key,place.index);place.key=keys[place.index];return place.index;
@@ -3285,7 +3413,7 @@ async function loadAttention(){
  // Its list is Personal Pips' cards, and a project's home shows none of it, but both tabs say their number from this page.
  if(remoteHost||S.apiVersion<44||!simpleMode()||!usable()){attentionRead=true;return;}
  const token=scope(),sequence=++attentionSeq,first=!attentionRead;
- try{const page=attentionPage(await send('list_pip_attention',{limit:100}));if(token!==scope()||sequence!==attentionSeq)return;
+ try{const page=attentionPage(await send('list_pip_attention',{limit:100,...attentionProjects()}));if(token!==scope()||sequence!==attentionSeq)return;
   const before=JSON.stringify(S.attention),fresh=first||JSON.stringify(page)!==before;S.attention=page;attentionRead=true;if(fresh){render();void loadAttentionVisits(page,token);}}
  catch{/* the home still lists every Pip; the next refresh tries again */if(token===scope()&&!attentionRead){attentionRead=true;render();}}
 }
@@ -3332,8 +3460,12 @@ function attentionScene(all=false){
  // (So is a card whose answer was just sent, until the list read after it says what became of it.)
  const gone=id=>!all&&heldRejects.has(id);
  const held=page=>{if(!page)return page;const items=page.items.filter(i=>!(i.kind==='setup'&&gone(i.card))&&!sentAnswers.has(i.id));return {...page,items,total:Math.max(items.length,page.total-(page.items.length-items.length))};};
- const page=projectHome()?null:held(S.attention),setups=S.apiVersion>=23?setupRows.filter(r=>!gone(r.id)):[];
+ // (Over the page of All projects the new Pips read are those of whatever is loaded underneath: not this place's.)
+ const page=held(attentionPart(S.attention)),setups=S.apiVersion>=23&&!(foldersOn()&&S.projectEmpty)?setupRows.filter(r=>!gone(r.id)):[];
+ const mine=personalSpace()?.id;
  return {page,setups,draw:{esc,face,busy:!usable(),setups,setupCard:setupCardFor,error:setupRows.length?setupError:'',more,
+  // A Project Pip's card names its project.
+  place:i=>foldersOn()&&i.workspace_id!==mine?spaceName(i.workspace_id):'',
   answers:i=>attentionAnswer(i)?.answer||null,held:i=>heldAnswers.get(i.id)?.said||''}};
 }
 function attentionHomeMarkup(){
@@ -3350,11 +3482,11 @@ const attentionScroller=()=>{if(embedded)return shell;const page=owner.scrolling
 // A row's buttons are named by its card on the page of them all, where many rows are drawn; '' for the one card.
 function attentionTail(item){return attentionAll.open&&item?'-'+item.card:'';}
 function attentionAllShown(){
- if(attentionAll.open&&attentionAll.place!==(projectHome()?'project':'personal'))attentionAll.open=false;   // another place's cards: its list instead
- return attentionAll.open&&(!S.selected||S.overview)&&!S.create&&!(S.projectEmpty&&scopeTabs());
+ if(attentionAll.open&&attentionAll.place!==(projectPlace()?'project':'personal'))attentionAll.open=false;   // another place's cards: its list instead
+ return attentionAll.open&&(!S.selected||S.overview)&&!S.create&&!(S.projectEmpty&&scopeTabs()&&!foldersOn());
 }
 function openAttentionAll(){
- Object.assign(attentionAll,{open:true,place:projectHome()?'project':'personal',last:'',lastIndex:0,homeScroll:attentionScroller().scrollTop||0});
+ Object.assign(attentionAll,{open:true,place:projectPlace()?'project':'personal',last:'',lastIndex:0,homeScroll:attentionScroller().scrollTop||0});
  render();attentionScroller().scrollTop=0;$('attention-all-back')?.focus?.({preventScroll:true});
 }
 function closeAttentionAll(){
@@ -3659,7 +3791,8 @@ async function navigateAttention(value){
  const {attention:_a,setup,card,cardKind,computer,...rest}=value;
  // Personal Pips live in the Personal workspace; open it first when another is showing.
  if(typeof value.workspace==='string'&&value.workspace!==S.workspace?.id){
-  const target=S.workspaces.find(w=>w.id===value.workspace&&w.kind==='personal');
+  // (With the Project Folder dropdown a card may be a Project Pip's, of any folder: its own project opens.)
+  const target=S.workspaces.find(w=>w.id===value.workspace&&(w.kind==='personal'||foldersOn()));
   if(!target)throw Error('Your Personal Pips are unavailable here. Refresh the dashboard.');
   await enterWorkspace(target);
  }
@@ -3842,10 +3975,12 @@ function newProjectPipBody(){
  const chooser=pickerMarkup({id:'new-pip-kind',label:'What should it do?',value:type?.id||'',placeholder:'Choose what it should do',face:avatar('idle',type||null,'new-face'),
   options:kinds.map(t=>({value:t.id,label:PROJECT_JOBS[t.id]||t.role||t.name,aside:t.name,disabled:!t.available,reason:t.available?'':t.unavailable_reason||'Not available yet',face:avatar(t.available?'idle':'offline',t,`new-${t.id}`)}))});
  const other=`<p class="new-pip-other">${S.apiVersion>=23?button('new-pip-describe','Describe the job to DGC instead',S.busy,'link'):''}${S.apiVersion>=41&&!remoteHost?button('import-pip-file','Import a shared Pip…',S.busy||!usable(),'link'):''}</p>`;
- if(!type)return `${chooser}<p class="muted">Pick what it should do.</p>${other}`;
+ // The folder it works in (the Project Folder dropdown, Pips API 93): this window's folder first.
+ const where=foldersOn()?createFolderRows().find(r=>r.folder===draft.createFolder)?.name||'the folder you choose':S.workspace?.name||'this project';
+ if(!type)return `${chooser}${newPipFolderField()}<p class="muted">Pick what it should do.</p>${other}`;
  const when=pulsePip(type)?'It can’t run any commands yet. After you create it, you can give it a command plan and a schedule.':executionPip(type)?'It runs only on a handoff you approve, never on a schedule.':documentationPip(type)?(S.apiVersion>=20?'After you create it, you can give it a schedule or have it run on events. It doesn’t take handoffs.':'Update DGC to give Quill a schedule or run it on events. It doesn’t take handoffs.'):'After you create it, you can give it a schedule.';
  const reads=executionPip(type)?'Chatting with it never changes files. You approve every fix or test run separately; creating it allows neither.':documentationPip(type)?'Quill writes drafts with the model and quotes the exact code it used. It never changes or publishes your files.':'All of these read the code the same way; the character you pick doesn’t give it more access.';
- return `${chooser}<div class="new-pip-kind"><p class="type-role"><strong>${esc(type.name)}</strong> · ${esc(type.role)} · ${executionPip(type)?'You approve each run':documentationPip(type)?'Private drafts':'Reads only'}</p><p class="muted">${esc(type.description)}</p><p class="muted">It runs when you ask, in ${esc(S.workspace?.name||'this project')}. ${esc(when)}</p></div><div class="form new-pip-form">${field('name','Name')}${field('goal','What it does',true)}${field('source_ref','Branch or commit')}<p class="muted">It reads only committed code from the branch or commit you choose: HEAD, a branch name or a commit. Uncommitted edits aren’t included. ${esc(reads)}</p><div id="new-pip-model">${newProjectPipModel()}</div></div>${other}`;
+ return `${chooser}<div class="new-pip-kind"><p class="type-role"><strong>${esc(type.name)}</strong> · ${esc(type.role)} · ${executionPip(type)?'You approve each run':documentationPip(type)?'Private drafts':'Reads only'}</p><p class="muted">${esc(type.description)}</p><p class="muted">It runs when you ask, in ${esc(where)}. ${esc(when)}</p></div>${newPipFolderField()}<div class="form new-pip-form">${field('name','Name')}${field('goal','What it does',true)}${field('source_ref','Branch or commit')}<p class="muted">It reads only committed code from the branch or commit you choose: HEAD, a branch name or a commit. Uncommitted edits aren’t included. ${esc(reads)}</p><div id="new-pip-model">${newProjectPipModel()}</div></div>${other}`;
 }
 function newProjectPipReview(){
  const type=S.types.find(t=>t.id===S.createType&&t.available);
@@ -3854,6 +3989,8 @@ function newProjectPipReview(){
 function openNewProjectPip(){
  if(S.busy||!usable())return;
  setupEditing=false;
+ // Its folder: this window's by default; with none open, the folder whose list this is.
+ if(foldersOn()){const rows=createFolderRows();draft.createFolder=(rows.find(r=>r.here&&r.exists)||rows.find(r=>r.workspace_id===S.workspace?.id&&r.exists)||{}).folder||'';}
  if(!pickProjectKind(S.createType))['scout','rook','lens','lock','quill','pulse','patch'].some(id=>pickProjectKind(id));
  openReview(newProjectPipReview());
  newPipModelKey='';if(!S.modelsLoading)void loadModels();
@@ -3876,9 +4013,28 @@ function createProjectPip(review){
  if(!type?.available||type.id==='core'){review.error='Pick a character for the job.';renderReview();return;}
  if(!draft.name.trim()||!draft.goal.trim()||!draft.source_ref.trim()){review.error='Give it a name, say what it does, and choose a branch or commit.';renderReview();return;}
  let choice;try{choice=modelChoice(draft.createModel,S.models,subscriptionChoices(false),routerOffer(),savedProviders());}catch(error){review.error=errorText(error);renderReview();return;}
- const request={type:'create_pip',workspace_id:S.workspace.id,pip_type:type.id,model_choice:choice,name:draft.name.trim(),goal:draft.goal.trim(),source_ref:draft.source_ref.trim()};
- if(executionPip(type)){openReview({...executionCreateReview(type,request,choice),secondary:{id:'new-pip-back',label:'Back'}});return;}
- void mutate(request,finishCreate);
+ const proceed=workspaceId=>{
+  const request={type:'create_pip',workspace_id:workspaceId,pip_type:type.id,model_choice:choice,name:draft.name.trim(),goal:draft.goal.trim(),source_ref:draft.source_ref.trim()};
+  if(executionPip(type)){openReview({...executionCreateReview(type,request,choice),secondary:{id:'new-pip-back',label:'Back'}});return;}
+  void mutate(request,finishCreate);
+ };
+ if(!foldersOn()){proceed(S.workspace.id);return;}
+ // In the folder its form chose: made in that folder's project (added as one first, when it isn't yet), and opened
+ // here (finishCreate). DGC's refusal shows in the form.
+ const row=createFolderRows().find(r=>r.folder===draft.createFolder);
+ if(!row||!row.exists){review.error='Choose the folder this Pip works in.';renderReview();return;}
+ if(row.workspace_id){proceed(row.workspace_id);return;}
+ if(S.busy)return;
+ void (async()=>{
+  S.busy=true;review.error='';renderReview();
+  try{const added=await send('add_project_folder',{folder:row.folder}),space=added?.workspace;
+   if(!record(space)||typeof space.id!=='string'||!/^ws_[a-f0-9]{32}$/.test(space.id))throw Error('DGC didn’t say which project that folder is. Try again.');
+   if(!S.workspaces.some(w=>w?.id===space.id))S.workspaces=[...S.workspaces,space];
+   row.workspace_id=space.id;
+  }catch(error){S.busy=false;if(S.review===review){review.error=errorText(error);renderReview();}else setError(error);return;}
+  S.busy=false;
+  if(S.review===review)proceed(row.workspace_id);
+ })();
 }
 // A Pip you meet should answer: creating one starts this computer's runner when it is off. A global
 // stop is the user's own emergency brake, so it is shown, never lifted here.
@@ -4299,14 +4455,15 @@ function simpleMarkup(){
  if(pipsSettings.view&&(!S.selected||S.overview)&&!S.create)return `${pipsSettingsMarkup()}${notes}`;
  // Needs attention's View all: a page of its own. A new Pip rejected there says so in its own place, not in a line above.
  if(attentionAllShown())return attentionAllPageMarkup(`${S.error?`<div class="simple-note">${errorMarkup(S.error)}</div>`:''}${S.notice?`<p class="notice simple-note" role="status">${esc(S.notice)}</p>`:''}`);
- if(S.projectEmpty&&scopeTabs())return `${bar}${notes}${projectEmptyMarkup()}`;
+ // (With the Project Folder dropdown that page is the Project tab's list: a Pip that is open shows over it.)
+ if(S.projectEmpty&&scopeTabs()&&(!foldersOn()||(!S.selected||S.overview)&&!S.create))return `${bar}${notes}${projectEmptyMarkup()}`;
  const project=projectHome(),back=(id,label)=>`<button type="button" id="${id}" class="topbar-icon" aria-label="${esc(label)}" title="${esc(label)}">${simpleIcon('back')}</button>`;
  // A project's describe-the-job page (DGC prepares a setup card from your words, or a common job, or a shared Pip's file),
  // and "Change in chat" from a Project Pip's Settings: the old page's, under the same top bar.
  if(project&&S.create)return `<header class="pip-topbar">${back('create-back',setupEditing&&S.pip?`Back to ${S.pip.name}`:'Your Pips')}<div class="pip-pill settings-pill"><span>${setupEditing&&S.pip?`Change ${esc(S.pip.name)}`:'New Pip'}</span></div><span></span></header>${notes}<div class="simple-content" data-view="create">${createMarkup()}</div>`;
  // The project's context and notifications, opened from its home's menu (the old side bar's two buttons).
  if(project&&!S.selected&&!S.overview&&['context','notifications'].includes(S.tab))return `<header class="pip-topbar">${back('workspace-back','Your Pips')}<div class="pip-pill settings-pill"><span>${S.tab==='context'?'Workspace context':'Notifications'}</span></div><span></span></header><div class="simple-content" data-view="${esc(S.tab)}">${notes}${S.tab==='context'?contextMarkup():notificationsMarkup()}</div>`;
- if(!S.selected||S.overview||S.create)return `${bar}${notes}<div class="simple-content"${scopePanelAttrs()}>${S.switching?'':simpleHomeMarkup()}</div>`;
+ if(!S.selected||S.overview||S.create)return `${bar}${notes}<div class="simple-content"${scopePanelAttrs()}>${project&&foldersOn()?folderBarMarkup():''}${S.switching?'':simpleHomeMarkup()}</div>`;
  if(!S.pip)return `${bar}${loadingMark()}`;
  return `${convColumnMarkup()}${simplePipHeader()}${pipSetupNotes()}<div class="simple-content${S.tab==='chat'?' chat':''}" data-view="${esc(S.tab)}">${S.tab==='chat'?chatMarkup():`${notes}${waitingMarkup()}${simpleTabContent()}`}</div>`;
 }
@@ -4324,6 +4481,7 @@ function render() {
   // A redraw replaces the slider under a pointer that is dragging it, and the drag ends where it was (final check,
   // 2026-11-07): the page's own refreshes wait until the slider is let go.
   if(effortHeld){effortRedraw=true;return;}
+  settleProjectTab();
   noticeFades();syncNewPipModel();
   const focus=document.activeElement; const focusId=focus?.id; const focusActivity=focus?.dataset?.chatActivity; const focusData=focus?.getAttribute?.('data-run')||focus?.getAttribute?.('data-job')||focus?.getAttribute?.('data-pip-type'); const inBox=!!chatBox&&focus===chatBox.el;const selection=focus&&typeof focus.selectionStart==='number'&&!inBox?[focus.selectionStart,focus.selectionEnd]:null;const boxAt=inBox?Mentions.selectedOffsets(chatBox.el):null;
   const oldLog=document.querySelector('.conversation-log'),oldScroll=oldLog?.scrollTop||0,oldHeight=oldLog?.scrollHeight||0,oldFirst=oldLog?.querySelector('[data-message]')?.dataset.message;
@@ -5482,6 +5640,8 @@ function refresh(includeContext=false) {
 }
 async function refreshNow(includeContext=false) {
   if(!usable()||!S.workspace)return;const token=scope(),epoch=S.epoch,sequence=++refreshSeq;S.refreshing=true;void loadSetups();void loadAttention();void loadUnread();
+  // The dropdown's folders, and (while it shows) the list of every project's Pips, are read again with the rest.
+  if(typeof S.projectFolder==='string'&&S.folders){void loadFolders();if(S.projectEmpty&&foldersOn()&&!chosenFolder())void loadProjectsAll();}
   try {
     const paged=pipsPaged();
     const results=await Promise.allSettled([send('list_pips',{workspace_id:S.workspace.id,...(paged?{order:'recent',limit:100,...(S.pipSearch?{query:S.pipSearch}:{})}:{})}),send('get_pip_runner'),...(includeContext?[send('get_workspace_context',{workspace_id:S.workspace.id})]:[])]);
@@ -5497,7 +5657,7 @@ async function refreshNow(includeContext=false) {
 }
 async function initialize() {
   const epoch=S.epoch;S.loading=true;render();
-  try {const [result,catalog]=await Promise.all([send('list_workspaces'),send('list_pip_types')]);if(epoch!==S.epoch)return;S.types=pipTypes(catalog);S.workspaces=result.workspaces||[];S.currentWorkspaceId=typeof result.current_workspace_id==='string'?result.current_workspace_id:null;S.projectEmpty=false;S.switching=false;const personalHome=S.apiVersion>=43&&!remoteHost?result.workspaces?.find(w=>w.kind==='personal')?.id:null;let workspace;
+  try {const [result,catalog]=await Promise.all([send('list_workspaces'),send('list_pip_types'),loadFolders()]);if(epoch!==S.epoch)return;S.types=pipTypes(catalog);S.workspaces=result.workspaces||[];S.currentWorkspaceId=typeof result.current_workspace_id==='string'?result.current_workspace_id:null;S.projectEmpty=false;S.switching=false;const personalHome=S.apiVersion>=43&&!remoteHost?result.workspaces?.find(w=>w.kind==='personal')?.id:null;let workspace;
    if(!options.workspaceId&&scopeTabs()){
     // The tab chosen last in this window; else Personal (Pips API 43), else this folder's project. Only ever these two.
     const personal=personalSpace(),project=projectSpace(),saved=record(savedView)?savedView:{};
@@ -5508,7 +5668,10 @@ async function initialize() {
    if(!workspace)throw new Error('DGC could not resolve the selected registered workspace.');S.workspace=workspace;S.loading=false;await refresh(true);if(epoch===S.epoch&&navigationPending){navigationPending=false;await navigateFromHost(options.navigation);}}
   catch(error){if(epoch===S.epoch){S.loading=false;setError(error);}}
 }
-async function navigateFromHost(value) {
+// (While it goes somewhere, the Project tab is not put back on the Project Folder choice: settleProjectTab waits.)
+let navigating=0;
+async function navigateFromHost(value){navigating++;try{return await navigateFromHostNow(value);}finally{navigating--;if(!navigating&&foldersOn())render();}}
+async function navigateFromHostNow(value) {
   if(!record(value))return;
   if(value.overview===true){if(S.selected)chatDrafts.set(S.selected,draft.chatText);S.overview=true;S.tab='chat';rememberView();render();return;}
   // The dock's "+" > New Personal Pip: Your Pips, with New Pip open on a name and a character.
@@ -5538,7 +5701,8 @@ async function navigateFromHost(value) {
    const found=(await send('get_pip',{pip_id:value.pip})).pip;
    if(!record(found)||found.id!==value.pip||typeof found.workspace_id!=='string')throw Error('That Pip isn’t on this computer any more. It may have been deleted.');
    if(found.workspace_id!==S.workspace.id){
-    // Only Personal and this folder's project (reported 2026-10-21): another project's Pip is not opened here.
+    // Only Personal and this folder's project (reported 2026-10-21): another project's Pip is not opened here. With
+    // the Project Folder dropdown (12 Nov) a Project Pip of any folder opens here (openableSpaces).
     let target=openableSpaces().find(w=>w.id===found.workspace_id);
     if(!target){const listed=await send('list_workspaces');if(Array.isArray(listed?.workspaces)){S.workspaces=listed.workspaces;if(typeof listed.current_workspace_id==='string')S.currentWorkspaceId=listed.current_workspace_id;}target=openableSpaces().find(w=>w.id===found.workspace_id);}
     const name=typeof found.name==='string'&&found.name?found.name:'This Pip';
@@ -5872,6 +6036,9 @@ document.addEventListener('click',event=>{
   if(photo&&S.apiVersion>=43&&!remoteHost){openMessageImage(photo.dataset.messageImage);return;}
   const target=event.target.closest('button');if(!target||target.disabled)return;
   if(target.dataset.pipsTab){chooseScopeTab(target.dataset.pipsTab);return;}
+  // The Project Folder dropdown (the Project tab's, and Create a Project Pip's), and a Pip in the list of every project's.
+  if(target.dataset.folderPick){openFolderMenu(target,event.detail===0);return;}
+  if(target.dataset.projectPip){void navigateFromHost({pip:target.dataset.projectPip}).catch(error=>setError(error));return;}
   if(target.dataset.workingNotes){if(target.dataset.workingNotes==='edit'&&S.workingNotes){workingNotesEditing=true;draft.workingNotesText=S.workingNotes.lines.join('\n');render();$('workingNotesText')?.focus();}else if(target.dataset.workingNotes==='cancel'){workingNotesEditing=false;draft.workingNotesText='';S.workingNotesError='';render();void loadWorkingNotes();}return;}
   if(target.dataset.pipLearn){const l=S.learn,a=target.dataset.pipLearn;if(a==='save')void saveLearn();else if(a==='edit'&&l?.status==='draft'){if(l.editing)l.text=draft.pipLearnText;else draft.pipLearnText=l.text;l.editing=!l.editing;render();if(l.editing)$('pipLearnText')?.focus();}else if(a==='cancel'&&l){S.learn={pip:l.pip,status:'cancelled',name:l.name};render();}else if(a==='dismiss'){S.learn=null;render();$('chatText')?.focus();}return;}
   if(target.id==='chat-level'){S.composerPanel=S.composerPanel==='level'?'':'level';render();if(S.composerPanel==='level'){focusLevelMenu();void loadLevel().then(()=>{if(S.composerPanel==='level')focusLevelMenu();});}return;}
@@ -6315,6 +6482,8 @@ document.addEventListener('click',event=>{
       break;
     }
     case 'simple-new':openNewPip();break;
+    // New Pip over the list of every project's: in this window's project, with its form's folder field to change it.
+    case 'projects-new':{const space=windowSpace();if(space&&!S.busy&&usable())void enterWorkspace(space).then(()=>{if(S.workspace?.id===space.id)openNewProjectPip();});break;}
     case 'team-export':target.closest('details')?.removeAttribute('open');openTeamExport();break;
     case 'team-import':target.closest('details')?.removeAttribute('open');void importTeam();break;
     case 'team-import-github':target.closest('details')?.removeAttribute('open');openGithubImport();break;
@@ -6557,7 +6726,15 @@ const stopMessages=options.onMessage(message=>{
   // A Pip was marked read somewhere else (its pill on the home, a card in a Work chat): the counts are read again.
   if(message.type==='pipsUnreadChanged'){lastUnreadAt=0;void loadUnread(true);return;}
   if(message.type==='pipsProfileChanged'){void refresh(false);return;}
-  if(message.type==='pipSetupChanged'){void refresh(false);return;}   // a new-Pip card decided in a chat: Needs attention follows
+  if(message.type==='pipSetupChanged'){void refresh(false);return;}
+  // The Project Folder choice changed (here, over the Work sessions, in another window): the Project tab and Needs
+  // attention follow it. And the folder the editor's picker gave for Add a folder… (null: closed without one).
+  if(message.type==='pipsProjectFolder'){
+   if(typeof S.projectFolder==='string'&&typeof message.folder==='string'&&message.folder!==S.projectFolder){
+    S.projectFolder=message.folder;projectsAll.read=false;globalThis.DgcFolderPick?.close();render();
+    void loadFolders().then(()=>{void loadAttention();render();});}
+   return;}
+  if(message.type==='pipsFolderPicked'){const done=folderPicks.get(message.id);if(done){folderPicks.delete(message.id);done(typeof message.folder==='string'&&message.folder?message.folder:null);}return;}   // a new-Pip card decided in a chat: Needs attention follows
   if(message.type==='pipsModelsChanged'){if(usable()&&(S.models.length||S.defaultModel||S.router)&&!S.modelsLoading)void loadModels();return;}
   if(message.type==='pipsVisibility'){S.visible=message.visible===true;motion();if(S.visible)void refresh(false);return;}
   if(message.type==='pipsConnection'){
@@ -6565,6 +6742,10 @@ const stopMessages=options.onMessage(message=>{
     S.generation=message.generation ?? null;S.displayMentions=message.displayMentions===true;
     S.connectFailed=message.connected!==true&&message.failed===true;S.jobsRead=false;
     savedView=options.getState?.()||savedView;S.epoch++;broker.reset();clearSelection();S.selected='';S.overview=true;restoreView=true;convShown.clear();convStash.clear();convDrafts.clear();convState.pip='';convState.list=null;chatDrafts.clear();chatMarks.clear();chatRequests.clear();chatPreferences.clear();draft.chatText='';chatHistory?.reset();S.workspace=null;S.projectEmpty=false;S.switching=false;S.currentWorkspaceId=null;S.folderOpen=message.folder!==false;S.jobs=[];S.jobsRead=false;setupSeq++;setupDetailSeq++;setupRows=[];setupLoading=false;setupError='';draft.setupTask='';S.types=[];S.models=[];S.defaultModel='';S.subscriptions=[];S.defaultEngine=null;S.router=null;S.modelsError='';S.modelsLoading=false;S.executionCapability=null;S.executionLoading=false;S.executionError='';draft.createModel='default';S.create=false;S.createStep='type';S.createType='';creationDrafts.clear();avatarIds.clear();S.runner=null;S.context=null;S.refreshing=false;S.busy=false;S.loading=false;S.error='';S.notice='';S.apiVersion=Number.isSafeInteger(message.apiVersion)?message.apiVersion:9;S.connected=message.connected===true;S.supported=message.supported===true;S.enabled=message.enabled===true;
+    // The Project Folder dropdown, where the extension says what is chosen (a DGC that lists folders, Pips API 93).
+    S.projectFolder=S.apiVersion>=93&&typeof message.projectFolder==='string'?message.projectFolder:null;S.folders=null;S.homeDir=typeof message.home==='string'?message.home:'';
+    S.windowFolder=record(message.windowFolder)&&typeof message.windowFolder.folder==='string'&&message.windowFolder.folder?{folder:message.windowFolder.folder,name:typeof message.windowFolder.name==='string'?message.windowFolder.name:''}:null;
+    projectsAll={pips:[],read:false,busy:false,error:'',seq:projectsAll.seq+1};addedFolders.clear();for(const done of folderPicks.values())done(null);folderPicks.clear();draft.createFolder='';globalThis.DgcFolderPick?.close();
     waitForConnection();render();if(usable())void initialize();
   }
 });

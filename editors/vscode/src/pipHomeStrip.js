@@ -61,6 +61,8 @@ export function mountHomePips(options) {
  // held visit to a new site (its digest and address) by its action's id.
  let setups = new Map(), visits = new Map();
  let pips = null, digest = null, attention = null, unread = [], unreadFailure = false, apiVersion = 0, personal = null, current = null, partial = false, failure = '';
+ // Each project's name, for a Project Pip's card; and whether the Project Folder choice says which projects show.
+ let names = new Map(), chosenProjects = false;
  // Dismissed here: pip id → the request number after which a digest already leaves its news out.
  const hidden = new Map();
  // Unread dismissed here (Dismiss all): pip id → its snapshot. Read with its pill: pip id → the request number after which
@@ -208,6 +210,8 @@ export function mountHomePips(options) {
  function cards() {
   const rows = needing(), fresh = shownUnread(), byUnread = new Map(fresh.map(item => [item.pip_id, item]));
   const scopeOf = space => space && personal && space !== personal ? 'project' : 'personal';
+  // A Project Pip's card names its project.
+  const projectOf = space => (scopeOf(space) === 'project' && names.get(space) ? {project: names.get(space)} : {});
   const out = [];
   const card = (pip, row, unreadItem) => {
    const waits = (attention?.items || []).filter(i => i.pip_id === pip.id), needs = !!row && (!!pip.waiting || !!pip.blocked);
@@ -220,7 +224,7 @@ export function mountHomePips(options) {
    if (unreadItem) chips.push(`${unreadItem.count} new`);
    const line = row ? row.line : unreadItem.latest;
    const answer = one ? answerFor(one, pip) : null;
-   out.push({...(answer ? {answer} : {}), key: `pip:${pip.id}`, pip: pip.id, name: pip.name, body: (pip.profile || profile(null)).body || pip.type, scope: scopeOf(pip.workspace),
+   out.push({...(answer ? {answer} : {}), key: `pip:${pip.id}`, pip: pip.id, name: pip.name, body: (pip.profile || profile(null)).body || pip.type, scope: scopeOf(pip.workspace), ...projectOf(pip.workspace),
     group: needs ? 'needs' : 'new', kind: pip.blocked ? 'blocked' : pip.waiting ? 'waiting' : row ? 'news' : 'unread',
     line, title: one ? one.title : pip.waiting && !pip.blocked ? `${pip.waiting} ${pip.waiting === 1 ? 'thing is' : 'things are'} waiting for you` : line,
     latest: unreadItem ? unreadItem.latest : '', chips, waiting: pip.waiting || 0, unread: unreadItem ? unreadItem.count : 0,
@@ -231,7 +235,7 @@ export function mountHomePips(options) {
   for (const item of fresh) if (!rows.some(row => row.pip.id === item.pip_id)) { const pip = pips.find(p => p.id === item.pip_id); if (pip) card(pip, null, item); }
   // A new Pip that waits for you has no Pip yet: its own card, in the project it would live in.
   for (const item of attention?.items || []) if (item.kind === 'setup' && !item.pip_id) out.push({...(answerFor(item, null) ? {answer: answerFor(item, null)} : {}), key: `setup:${item.card}`, pip: null, name: item.pip_name || 'New Pip',
-   body: TYPES.includes(item.pip_type) ? item.pip_type : 'core', scope: scopeOf(item.workspace_id), group: 'needs', kind: 'setup', line: item.title, title: item.title,
+   body: TYPES.includes(item.pip_type) ? item.pip_type : 'core', scope: scopeOf(item.workspace_id), ...projectOf(item.workspace_id), group: 'needs', kind: 'setup', line: item.title, title: item.title,
    latest: '', chips: item.detail ? [item.detail] : [], waiting: 1, unread: 0, canRead: false, canDismiss: false, at: item.created_at});
   return {rows, fresh, out};
  }
@@ -242,7 +246,8 @@ export function mountHomePips(options) {
   const {rows, fresh, out} = cards();
   const unreadCount = fresh.reduce((n, item) => n + item.count, 0);
   // Needs attention's number and this project's, as its two tabs say them. A DGC with no such list has no number here.
-  const need = attention ? attention.total + (attention.projects[current]?.total || 0) : rows.reduce((n, row) => n + row.pip.waiting, 0);
+  // (With the Project Folder choice, the list itself holds the chosen projects' cards: its total is the number.)
+  const need = attention ? attention.total + (chosenProjects ? 0 : attention.projects[current]?.total || 0) : rows.reduce((n, row) => n + row.pip.waiting, 0);
   // What waits that no card here shows (past the 100 the list names): the hub says how many, and leads to Needs attention.
   const shownWaiting = out.reduce((n, c) => n + (c.group === 'needs' ? c.waiting : 0), 0);
   last = {ready: true, pips: pips.map(pip => ({id: pip.id, name: pip.name, body: (pip.profile || profile(null)).body || pip.type})), cards: out, need, fresh: unreadCount,
@@ -283,7 +288,21 @@ export function mountHomePips(options) {
   try {
    const spaces = await request('list_workspaces');
    const workspaces = Array.isArray(spaces?.workspaces) ? spaces.workspaces : [];
-   const wanted = workspaces.filter(w => w && (w.kind === 'personal' || w.id === spaces.current_workspace_id)).slice(0, 4);
+   // The Project Folder choice (Pips API 93; options.projectFolder says it: "" All projects, a folder, or null where
+   // there is no dropdown): Project Pips' cards are those of every project, or of the one folder's workspace (a folder
+   // without one adds nothing). Personal Pips' always show. With no dropdown: this window's project, as before.
+   const choice = apiVersion >= 93 && typeof options.projectFolder === 'function' ? options.projectFolder() : null;
+   let shown = null, projects;
+   if (choice === '') { shown = workspaces.filter(w => w && w.kind !== 'personal' && WORKSPACE_ID.test(w.id)).map(w => w.id); projects = 'all'; }
+   else if (typeof choice === 'string') {
+    let row = null;
+    try { const listed = await request('list_project_folders'); row = (Array.isArray(listed?.folders) ? listed.folders : []).find(r => r && r.folder === choice) || null; } catch { row = null; }
+    const id = row && typeof row.workspace_id === 'string' && WORKSPACE_ID.test(row.workspace_id) ? row.workspace_id : '';
+    shown = id ? [id] : []; projects = id || undefined;
+   }
+   if (token !== epoch) return;
+   names = new Map(workspaces.filter(w => w && typeof w.id === 'string' && typeof w.name === 'string').map(w => [w.id, w.name.slice(0, 120)]));
+   const wanted = workspaces.filter(w => w && (w.kind === 'personal' || (shown ? shown.includes(w.id) : w.id === spaces.current_workspace_id))).slice(0, shown ? 13 : 4);
    const lists = await Promise.all(wanted.map(w => request('list_pips', {workspace_id: w.id}).catch(() => null)));
    // Every Pip of these projects was listed (none failed, none cut at a page): only then is a pinned Pip missing here gone.
    const whole = lists.every(list => list && Array.isArray(list.pips) && (list.next_offset === null || list.next_offset === undefined));
@@ -295,7 +314,7 @@ export function mountHomePips(options) {
    let value = null, waiting = null;
    const asked = sequence + 1;
    try { value = pipDigest((await request('get_pip_digest')).digest); } catch { value = null; }
-   if (apiVersion >= 44) { try { waiting = attentionPage(await request('list_pip_attention', {limit: 100})); } catch { waiting = null; } }
+   if (apiVersion >= 44) { try { waiting = attentionPage(await request('list_pip_attention', {limit: 100, ...(projects ? {projects} : {})})); } catch { waiting = null; } }
    const unseen = apiVersion >= 69 ? await Promise.all(wanted.map(w => request('list_pip_unread', {workspace_id: w.id}).catch(() => null))) : [];
    if (token !== epoch) return;
    // A Pip past list_pips' first 100 that has news or a card waiting still gets its row, by its name there.
@@ -311,7 +330,7 @@ export function mountHomePips(options) {
    // Core first, then the rest as the Pips view orders them.
    pips = [...found.filter(p => p.type === 'core'), ...found.filter(p => p.type !== 'core')];
    listedAll = whole; listedScopes = wanted.map(w => w.id);
-   digest = value; attention = waiting; current = spaces.current_workspace_id;
+   digest = value; attention = waiting; current = spaces.current_workspace_id; chosenProjects = !!shown;
    void readAnswered(waiting, token);
    personal = workspaces.find(w => w?.kind === 'personal' && typeof w.id === 'string')?.id || null;
    // A digest asked for after a dismiss was kept already leaves that news out, or it is new news.

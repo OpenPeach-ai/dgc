@@ -9,7 +9,7 @@ import { displayMentions, workspaceFiles } from './mentionsHost';
 import { APP_ID, appLogoData } from './pluginLogos';
 import { markIcon } from './dock';
 import marks from '../media/shared/marks.js';
-import { FOLDERS_API } from './projectFolder';
+import { FOLDERS_API, foldersOffered, fullFolder } from './projectFolder';
 import { PROJECTS_API, PROJECT_COMMANDS, PROJECT_WORK_COMMAND, patchFileName, pipProjectsRefusal, projectChange, projectWorkBrief, projectWorkRequest } from './pipProjects.js';
 
 /** What a Pip's page uses of the artifacts (artifacts.ts): the person's dashboards, and opening one. */
@@ -32,6 +32,22 @@ export function pipGoalsRefusal(request: any, apiVersion: number): string {
  *  {pip_id}, set_pip_owner {pip_id, session_id (null: no session)} and list_session_pips {session_id} are DGC's;
  *  list_work_session_titles is the editor's own answer (the titles its Work list shows), never a Pip control. */
 export const OWNERS_API = 89;
+/** The Project Folder dropdown (Pips API 93, dgc/project_folders.py): list_project_folders {} lists the folders with a
+ *  Work session or a Project Pip, add_project_folder {folder} makes a picked folder a project, list_pips takes scope
+ *  "projects" (every project's Pips) and list_pip_attention takes projects ("all" or one project's workspace id). Why a
+ *  request is refused, or '' when it may go: an older DGC is never sent any of them, and a folder is added only when
+ *  the editor's own folder picker gave it (Add a folder…) or DGC listed it: never one a page names by itself. */
+const FOLDER_COMMANDS = ['list_project_folders', 'add_project_folder'];
+export function projectFoldersRefusal(request: any, apiVersion: number, mayAdd: (folder: string) => boolean): string {
+  const own = (key: string) => Object.prototype.hasOwnProperty.call(request || {}, key);
+  const scoped = request?.type === 'list_pips' && own('scope') || request?.type === 'list_pip_attention' && own('projects');
+  if (!FOLDER_COMMANDS.includes(request?.type) && !scoped) return '';
+  if (apiVersion < FOLDERS_API) return 'Update DGC to choose a project folder.';
+  if (request.type === 'list_pips' && request.scope !== 'projects') return 'List one project’s Pips, or every project’s.';
+  if (request.type === 'list_pip_attention' && request.projects !== 'all' && !(typeof request.projects === 'string' && /^ws_[a-f0-9]{32}$/.test(request.projects))) return 'Choose All projects or one project folder.';
+  if (request.type === 'add_project_folder' && !(fullFolder(request.folder) && mayAdd(request.folder))) return 'Choose the folder with Add a folder… first.';
+  return '';
+}
 const OWNER_COMMANDS = ['get_pip_owner', 'set_pip_owner', 'list_session_pips'];
 export const WORK_SESSIONS_COMMAND = 'list_work_session_titles';
 const SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -57,7 +73,7 @@ export function workSessionTitles(list: unknown): Array<{ id: string; title: str
 }
 /** A Project Pip a session owns, as list_session_pips lists it. */
 export interface OwnedPip { id: string; name: string; pip_type: string; status: string }
-const commands = new Set(['get_pip_import_prompt','import_pip_source','get_pip_skills','set_pip_skill','get_pip_apps','set_pip_app','add_pip_app_account','list_pip_conversations','create_pip_conversation','rename_pip_conversation','archive_pip_conversation','add_pip_computer','list_pip_keys','save_pip_key','decline_pip_key','remove_pip_key','list_pip_flows','get_pip_flow','create_pip_flow','set_pip_flow','get_pip_artifacts','set_pip_artifacts','list_pip_run_fixes','list_pip_templates','decide_pip_template_change','list_app_events','list_apps','accept_app_update','list_pip_borrows','allow_pip_borrow','decline_pip_borrow','stop_pip_borrow','get_pip_level','set_pip_level','get_pip_working_notes','set_pip_working_notes','list_pip_daily_log','list_pip_logins','save_pip_login','remove_pip_login','grant_pip_login','get_pip_computer_apps','set_pip_computer_apps','get_pip_eyes','set_pip_eyes','list_pip_run_posts','list_pip_unread','mark_pip_read','check_pip_source','get_pip_run_source','mark_pip_news_seen','set_pip_chat_options','set_plugin_permission','list_pip_sites','set_pip_careful','forget_pip_site','list_pip_notes','add_pip_note','forget_pip_note','list_pip_attention','get_pips_limit','set_pips_limit','list_pip_reply_stats','get_pip_chat_context','list_pip_plugins','allow_pip_plugin','decline_pip_plugin','list_pip_plugin_uses','list_pip_routines','add_pip_routine','update_pip_routine','delete_pip_routine','decide_pip_routine','set_pip_profile','list_pip_shared','get_pip_computers','update_pip_computers','reset_pip_computer','list_pip_apps','finish_pip_computer_check','list_pip_app_links','start_pip_app_link','check_pip_app_link','decline_pip_app_link','disconnect_pip_app_link','get_pip_computer_desktop','list_pip_computer_files','read_pip_computer_file','add_pip_computer_file','remove_pip_computer_file','run_pip_computer_command','list_pip_computer_terminal','get_pip_message_image','introduce_pip','always_allow_pip_computer_action','get_pip_computer','list_pip_computer_actions','decide_pip_computer_action','get_pip_computer_frame','list_pip_computer_frames','stop_pip_computer','open_pip_computer','use_pip_computer_view','always_allow_pip_app_action','list_pip_action_grants','revoke_pip_action_grant','set_pip_feedback','list_pip_feedback','export_pip','get_pip_usage','get_pips_backup','set_pips_backup','get_pip_backup','set_pip_backup','undo_pip_change','get_pips_payments','set_pips_payments','set_pip_paying','get_pips_desktop_notifications','set_pips_desktop_notifications','get_pips_keep_running','set_pips_keep_running','list_pip_starters','propose_starter_pip','get_pip_digest','mark_pip_digest_seen','get_pip_notify_settings','set_pip_notify_settings','get_pip_outcomes','get_pip_connector_draft','list_pip_connector_drafts','prepare_pip_connector_draft','dismiss_pip_connector_draft','inspect_pip_connector_actions','propose_pip_connector_action','get_pip_calendar_draft','list_pip_calendar_drafts','prepare_pip_calendar_draft','dismiss_pip_calendar_draft','inspect_pip_calendar_connection','propose_pip_calendar_action','get_pip_message_draft','list_pip_message_drafts','prepare_pip_message_draft','dismiss_pip_message_draft','inspect_pip_send_connection', 'propose_pip_app_action', 'get_pip_app_action', 'list_pip_app_actions', 'accept_pip_app_action', 'reject_pip_app_action', 'propose_pip_personal_handoff', 'list_pip_accounts', 'list_pip_connections', 'inspect_pip_connection', 'notify_pip_setup', 'revise_pip_setup', 'list_pip_setups', 'get_pip_setup', 'accept_pip_setup', 'reject_pip_setup', 'get_pip_statement_anchor', 'record_pip_statement', 'revoke_pip_statement', 'list_pip_statements', 'list_workspace_execution_receipts', 'get_workspace_execution_receipt', 'record_workspace_execution_context', 'archive_pip', 'restore_pip', 'delete_archived_pip', 'get_pip_exception_source', 'record_pip_exception', 'revoke_pip_exception', 'list_pip_memories', 'list_pip_notifications', 'mark_pip_notification_read', 'list_workspace_sessions', 'inspect_workspace_session_outcome', 'propose_workspace_session_outcome', 'get_workspace_session_outcome', 'list_workspace_session_outcomes', 'accept_workspace_session_outcome', 'reject_workspace_session_outcome', 'list_pip_types', 'list_pip_models', 'list_pip_messages', 'send_pip_message', 'list_workspaces', 'list_pips', 'create_pip', 'get_pip', 'get_pip_proposal', 'list_pip_adaptations', 'run_pip', 'list_pip_runs', 'get_pip_run', 'list_pip_run_activity', 'pause_pip', 'resume_pip', 'cancel_pip_run', 'propose_pip_update', 'accept_pip_update', 'reject_pip_update', 'list_pip_versions', 'list_pip_approvals', 'list_pip_checkpoints', 'review_pip_finding', 'review_pip_execution', 'get_pip_execution', 'propose_pip_handoff', 'propose_pip_artifact_handoff', 'get_pip_handoff', 'list_pip_handoffs', 'accept_pip_handoff', 'reject_pip_handoff', 'get_pip_runner', 'stop_pips', 'get_workspace_context', 'record_workspace_context', 'archive_workspace_context', 'accept_pip_finding', 'accept_pip_execution_context', 'rename_pip_computer', 'set_pip_computer_screen', 'get_pip_webhook', 'replace_pip_webhook_address', 'set_pip_webhook_signing', 'send_pip_webhook_test', 'get_webhook_reach', 'set_webhook_reach', ...OWNER_COMMANDS, ...GOAL_COMMANDS, ...PROJECT_COMMANDS]);
+const commands = new Set(['get_pip_import_prompt','import_pip_source','get_pip_skills','set_pip_skill','get_pip_apps','set_pip_app','add_pip_app_account','list_pip_conversations','create_pip_conversation','rename_pip_conversation','archive_pip_conversation','add_pip_computer','list_pip_keys','save_pip_key','decline_pip_key','remove_pip_key','list_pip_flows','get_pip_flow','create_pip_flow','set_pip_flow','get_pip_artifacts','set_pip_artifacts','list_pip_run_fixes','list_pip_templates','decide_pip_template_change','list_app_events','list_apps','accept_app_update','list_pip_borrows','allow_pip_borrow','decline_pip_borrow','stop_pip_borrow','get_pip_level','set_pip_level','get_pip_working_notes','set_pip_working_notes','list_pip_daily_log','list_pip_logins','save_pip_login','remove_pip_login','grant_pip_login','get_pip_computer_apps','set_pip_computer_apps','get_pip_eyes','set_pip_eyes','list_pip_run_posts','list_pip_unread','mark_pip_read','check_pip_source','get_pip_run_source','mark_pip_news_seen','set_pip_chat_options','set_plugin_permission','list_pip_sites','set_pip_careful','forget_pip_site','list_pip_notes','add_pip_note','forget_pip_note','list_pip_attention','get_pips_limit','set_pips_limit','list_pip_reply_stats','get_pip_chat_context','list_pip_plugins','allow_pip_plugin','decline_pip_plugin','list_pip_plugin_uses','list_pip_routines','add_pip_routine','update_pip_routine','delete_pip_routine','decide_pip_routine','set_pip_profile','list_pip_shared','get_pip_computers','update_pip_computers','reset_pip_computer','list_pip_apps','finish_pip_computer_check','list_pip_app_links','start_pip_app_link','check_pip_app_link','decline_pip_app_link','disconnect_pip_app_link','get_pip_computer_desktop','list_pip_computer_files','read_pip_computer_file','add_pip_computer_file','remove_pip_computer_file','run_pip_computer_command','list_pip_computer_terminal','get_pip_message_image','introduce_pip','always_allow_pip_computer_action','get_pip_computer','list_pip_computer_actions','decide_pip_computer_action','get_pip_computer_frame','list_pip_computer_frames','stop_pip_computer','open_pip_computer','use_pip_computer_view','always_allow_pip_app_action','list_pip_action_grants','revoke_pip_action_grant','set_pip_feedback','list_pip_feedback','export_pip','get_pip_usage','get_pips_backup','set_pips_backup','get_pip_backup','set_pip_backup','undo_pip_change','get_pips_payments','set_pips_payments','set_pip_paying','get_pips_desktop_notifications','set_pips_desktop_notifications','get_pips_keep_running','set_pips_keep_running','list_pip_starters','propose_starter_pip','get_pip_digest','mark_pip_digest_seen','get_pip_notify_settings','set_pip_notify_settings','get_pip_outcomes','get_pip_connector_draft','list_pip_connector_drafts','prepare_pip_connector_draft','dismiss_pip_connector_draft','inspect_pip_connector_actions','propose_pip_connector_action','get_pip_calendar_draft','list_pip_calendar_drafts','prepare_pip_calendar_draft','dismiss_pip_calendar_draft','inspect_pip_calendar_connection','propose_pip_calendar_action','get_pip_message_draft','list_pip_message_drafts','prepare_pip_message_draft','dismiss_pip_message_draft','inspect_pip_send_connection', 'propose_pip_app_action', 'get_pip_app_action', 'list_pip_app_actions', 'accept_pip_app_action', 'reject_pip_app_action', 'propose_pip_personal_handoff', 'list_pip_accounts', 'list_pip_connections', 'inspect_pip_connection', 'notify_pip_setup', 'revise_pip_setup', 'list_pip_setups', 'get_pip_setup', 'accept_pip_setup', 'reject_pip_setup', 'get_pip_statement_anchor', 'record_pip_statement', 'revoke_pip_statement', 'list_pip_statements', 'list_workspace_execution_receipts', 'get_workspace_execution_receipt', 'record_workspace_execution_context', 'archive_pip', 'restore_pip', 'delete_archived_pip', 'get_pip_exception_source', 'record_pip_exception', 'revoke_pip_exception', 'list_pip_memories', 'list_pip_notifications', 'mark_pip_notification_read', 'list_workspace_sessions', 'inspect_workspace_session_outcome', 'propose_workspace_session_outcome', 'get_workspace_session_outcome', 'list_workspace_session_outcomes', 'accept_workspace_session_outcome', 'reject_workspace_session_outcome', 'list_pip_types', 'list_pip_models', 'list_pip_messages', 'send_pip_message', 'list_workspaces', 'list_pips', 'create_pip', 'get_pip', 'get_pip_proposal', 'list_pip_adaptations', 'run_pip', 'list_pip_runs', 'get_pip_run', 'list_pip_run_activity', 'pause_pip', 'resume_pip', 'cancel_pip_run', 'propose_pip_update', 'accept_pip_update', 'reject_pip_update', 'list_pip_versions', 'list_pip_approvals', 'list_pip_checkpoints', 'review_pip_finding', 'review_pip_execution', 'get_pip_execution', 'propose_pip_handoff', 'propose_pip_artifact_handoff', 'get_pip_handoff', 'list_pip_handoffs', 'accept_pip_handoff', 'reject_pip_handoff', 'get_pip_runner', 'stop_pips', 'get_workspace_context', 'record_workspace_context', 'archive_workspace_context', 'accept_pip_finding', 'accept_pip_execution_context', 'rename_pip_computer', 'set_pip_computer_screen', 'get_pip_webhook', 'replace_pip_webhook_address', 'set_pip_webhook_signing', 'send_pip_webhook_test', 'get_webhook_reach', 'set_webhook_reach', ...OWNER_COMMANDS, ...GOAL_COMMANDS, ...PROJECT_COMMANDS, ...FOLDER_COMMANDS]);
 /** Images sent with a Pip message, as data URIs: 2 MiB of image, base64, plus headers. */
 const MAX_IMAGE_URI_CHARS = 2_800_000;
 /** Pips API 52: photos and files go the Work chat's way. The host writes them into the backend's spool
@@ -415,9 +431,38 @@ export class PipsEditor implements vscode.Disposable {
    *  folder, `brief` in its box and the patch beside it as a file. False when no chat opened. Set by the panel. */
   private projectWork?: (work: ProjectWork) => Promise<boolean>;
   useProjectWork(open: (work: ProjectWork) => Promise<boolean>): void { this.projectWork = open; }
-  private workSessions?: () => Promise<Array<{ id: string; title: string; empty?: true }>>;
+  /** The Project Folder dropdown's choice ("" is All projects), kept by the extension for every window, and how one
+   *  made here is kept. Set by the panel. The view is told the choice as it connects and whenever it changes. */
+  private projectFolderHook?: { choice: () => string; choose: (folder: string) => void };
+  useProjectFolder(hook: { choice: () => string; choose: (folder: string) => void }): void { this.projectFolderHook = hook; }
+  projectFolderChanged(): void { if (this.foldersOn && this.projectFolderHook) this.post({ type: 'pipsProjectFolder', folder: this.projectFolderHook.choice() }); }
+  /** This DGC offers the dropdown (it lists folders and every project's sessions). */
+  private foldersOn = false;
+  /** The folders DGC listed and the ones the editor's folder picker gave: what can be chosen, and added as a project. */
+  private readonly listedFolders = new Set<string>();
+  private readonly pickedFolders = new Set<string>();
+  /** A Pip's workspace, read from DGC: which project it belongs to (Ask DGC to fix opens Work in that project's folder). */
+  async pipWorkspace(pipId: string): Promise<string> {
+    if (!/^pip_[0-9a-f]{32}$/.test(pipId)) return '';
+    const got = await this.hostAsk('get_pip', { pip_id: pipId });
+    return got?.pip?.id === pipId && typeof got.pip.workspace_id === 'string' ? got.pip.workspace_id : '';
+  }
+  /** Add a folder…: the editor's own folder picker, so only a folder that exists. What it gave may be added as a project. */
+  private async pickFolder(id: string, surface: string): Promise<void> {
+    let folder: string | null = null;
+    try {
+      const picked = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, canSelectMany: false,
+        openLabel: 'Add folder', title: 'Add a folder: a Project Pip works in it' });
+      folder = fullFolder(picked?.[0]?.fsPath) || null;
+    } catch { folder = null; }
+    if (folder) { if (this.pickedFolders.size >= 64) this.pickedFolders.clear(); this.pickedFolders.add(folder); }
+    this.post({ type: 'pipsFolderPicked', id, folder }, surface);
+  }
+  private workSessions?: (pipId?: string) => Promise<Array<{ id: string; title: string; empty?: true }>>;
   /** The Work sessions of the folder this window has open, by the titles its list shows (for a Project Pip's owner). */
-  useWorkSessions(list: () => Promise<Array<{ id: string; title: string; empty?: true }>>): void { this.workSessions = list; }
+  /** (With the Project Folder dropdown the page says which Pip: a Project Pip of another folder reports to a session
+   *  of its own folder, so the titles are that folder's.) */
+  useWorkSessions(list: (pipId?: string) => Promise<Array<{ id: string; title: string; empty?: true }>>): void { this.workSessions = list; }
   /** The Project Pips a Work session is the owner of: what deleting or archiving it asks about. None on a DGC before
    *  Pips API 89 (it keeps no owner), or while Pips are off. */
   async sessionPips(sessionId: string): Promise<OwnedPip[]> {
@@ -658,6 +703,8 @@ export class PipsEditor implements vscode.Disposable {
     this.desktopNumbers = this.desktopStream && capabilities?.pips_desktop_numbers === 1 && this.apiVersion >= 86;
     this.desktopOwner.clear();
     this.learn = Number(capabilities?.learn?.version) >= 1;
+    this.foldersOn = foldersOffered(capabilities);
+    this.listedFolders.clear();
     this.spoolDir = capabilities?.image_spool === true && typeof capabilities?.image_spool_dir === 'string' ? capabilities.image_spool_dir : '';
     this.generation++;
     this.pending.clear();
@@ -678,7 +725,12 @@ export class PipsEditor implements vscode.Disposable {
     // Whether a folder is open in this window: with none, the Pips view's Project tab says to open one rather than show
     // the Pips of wherever DGC happened to start. Left out where the editor doesn't say.
     const folder = vscode.workspace ? (vscode.workspace.workspaceFolders?.length ?? 0) > 0 : undefined;
-    const connection = { type: 'pipsConnection', generation: this.generation, apiVersion: this.apiVersion, backgroundSetup:this.backgroundSetup, displayMentions:this.displayMentions, ...(folder === undefined ? {} : { folder }), ...(this.connectFailed ? { failed: true } : {}), ...this.state };
+    // The Project Folder dropdown (Pips API 93): what is chosen, the home folder (a path shows it as ~) and this
+    // window's folder (Create a Project Pip opens on it). Left out for a DGC that lists no folders.
+    const own = vscode.workspace?.workspaceFolders?.[0]?.uri?.fsPath;
+    const folders = this.foldersOn && this.projectFolderHook
+      ? { projectFolder: this.projectFolderHook.choice(), home: homedir(), ...(typeof own === 'string' && own ? { windowFolder: { folder: own, name: own.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || own } } : {}) } : {};
+    const connection = { type: 'pipsConnection', generation: this.generation, apiVersion: this.apiVersion, backgroundSetup:this.backgroundSetup, displayMentions:this.displayMentions, ...(folder === undefined ? {} : { folder }), ...folders, ...(this.connectFailed ? { failed: true } : {}), ...this.state };
     this.post(connection);
     for (const id of this.computers.keys()) this.post(connection, 'computer:' + id);
   }
@@ -762,6 +814,11 @@ export class PipsEditor implements vscode.Disposable {
     }
   }
   event(event: any): boolean {
+    // The folders DGC lists are the ones the dropdown offers: one of them may be chosen, or added as a project.
+    if (event?.type === 'pips_result' && event.ok === true && event.command === 'list_project_folders' && Array.isArray(event.result?.folders)) {
+      this.listedFolders.clear();
+      for (const row of event.result.folders.slice(0, 200)) { const folder = fullFolder(row?.folder); if (folder) this.listedFolders.add(folder); }
+    }
     if ((event.type === 'skill_draft' || event.type === 'skill_saved') && this.pending.has(event.request_id)) {
       // A Pip chat's /learn: the draft (or where Save put it) goes back to the page that asked.
       const owner = this.pending.get(event.request_id)!;
@@ -1201,8 +1258,22 @@ export class PipsEditor implements vscode.Disposable {
       return;
     }
     if (message?.type === 'pipsReconnect') { this.pending.clear(); this.generation++; this.connectFailed = false; this.connect(); this.publish(); return; }
+    // The Project Folder dropdown in the Pips view: a choice made there is the extension's to keep (All projects, or a
+    // folder DGC listed), and Add a folder… is the editor's own folder picker.
+    if (message?.type === 'pipsProjectFolderChoose') {
+      if (computer || !this.foldersOn || !this.projectFolderHook) return;
+      const folder = message.folder === '' ? '' : fullFolder(message.folder);
+      if (message.folder === '' || folder && this.listedFolders.has(folder)) this.projectFolderHook.choose(folder);
+      return;
+    }
+    if (message?.type === 'pipsPickFolder') {
+      if (computer || !this.foldersOn || typeof message.id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(message.id)) return;
+      void this.pickFolder(message.id, surface);
+      return;
+    }
     if (message?.type !== 'pipsRequest' || typeof message.id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(message.id)) return;
     const fail = (text: string) => this.post({ type: 'pipsReply', id: message.id, ok: false, error: { message: text } }, surface);
+    { const refused = projectFoldersRefusal(message.request, this.apiVersion, (folder) => this.pickedFolders.has(folder) || this.listedFolders.has(folder)); if (refused) { fail(refused); return; } }
     // The copy commands carry a path on this computer: no page sends one, whichever page it is.
     if (COMPUTER_COPY_COMMANDS.has(message.request?.type)) { fail(this.apiVersion < COMPUTER_COPY_API ? 'Update DGC to copy files over 2 MB.' : 'Use Add file… or Save to this computer… in the computer’s Files.'); return; }
     // A computer tab is pinned to its own Pip and to the computer's commands.
@@ -1260,7 +1331,8 @@ export class PipsEditor implements vscode.Disposable {
     if (request.type === WORK_SESSIONS_COMMAND) {
       // The titles the editor's Work list shows, for the owner picker: the editor's own answer, never a Pip control.
       if (computer) { fail('This tab only uses this Pip\'s computer.'); return; }
-      void Promise.resolve().then(() => this.workSessions ? this.workSessions() : []).then(
+      const forPip = this.foldersOn && typeof request.pip_id === 'string' && /^pip_[0-9a-f]{32}$/.test(request.pip_id) ? request.pip_id : undefined;
+      void Promise.resolve().then(() => this.workSessions ? this.workSessions(forPip) : []).then(
         list => this.post({ type: 'pipsReply', id: message.id, ok: true, result: { sessions: workSessionTitles(list) } }, surface),
         () => this.post({ type: 'pipsReply', id: message.id, ok: true, result: { sessions: [] } }, surface));
       return;

@@ -834,3 +834,65 @@ test("a tab's session picker follows the Project Folder choice: every project's 
     assert.equal(made[1].sessionId(), "g1");
   } finally { vs.createQuickPick = kept; }
 });
+
+test("the editor's \"N waiting\" notice counts the Project Pips of the Project Folder choice", async () => {
+  const BILLING_WS = "ws_" + "9".repeat(32);
+  const folders = [...folderRows(), { folder: join(HOME, "code", "billing"), name: "billing", here: false, exists: true, sessions: 0, pips: 1, workspace_id: BILLING_WS, updated_at: "2026-11-11T03:30:00.000Z" }];
+  const asked = [];
+  const notice = async (capabilities, choice) => {
+    world.globalState.clear(); if (choice) world.globalState.set(CHOICE_KEY, choice);
+    const { sidebar } = folderWindow({ folders, capabilities });
+    asked.length = 0;
+    sidebar.sessionReady = true;
+    sidebar.ensurePipsBridge = () => ({ hostRead: async (type, fields) => { asked.push({ type, ...fields }); return type === "get_pip_digest" ? { digest: null } : { total: 0, in_projects: 0 }; } });
+    await sidebar.checkPipsAttention(); await settled();
+    return asked.find((r) => r.type === "list_pip_attention");
+  };
+  assert.deepEqual(await notice(FOLDER_CAPS, ""), { type: "list_pip_attention", limit: 1, projects: "all" }, "All projects: every project's");
+  assert.deepEqual(await notice(FOLDER_CAPS, join(HOME, "code", "billing")), { type: "list_pip_attention", limit: 1, projects: BILLING_WS }, "one folder: its workspace");
+  assert.deepEqual(await notice(FOLDER_CAPS, GARDEN), { type: "list_pip_attention", limit: 1 }, "a folder with no workspace adds nothing");
+  assert.deepEqual(await notice({ ...FOLDER_CAPS, pips_api_version: 92 }, ""), { type: "list_pip_attention", limit: 1 }, "an older DGC is asked as before");
+});
+
+test("Ask DGC to fix, for a Project Pip of another folder, opens its session in a tab here that runs in the Pip's own folder", async () => {
+  const garden = join(scratch, "garden-fix"), GARDEN_WS = "ws_" + "5".repeat(32), PIP = "pip_" + "a".repeat(32), MINE = "pip_" + "b".repeat(32);
+  mkdirSync(garden, { recursive: true });
+  const folders = folderRows(garden).map((row) => (row.folder === garden ? { ...row, pips: 1, workspace_id: GARDEN_WS } : row));
+  const { sidebar, made } = folderWindow({ rows: everywhereRows(garden), folders });
+  sidebar.pipWorkspace = async (id) => (id === PIP ? GARDEN_WS : HERE_WS);
+  const report = (pip_id) => ({ run_id: "run_" + "1".repeat(32), pip_id, pip_type: "rook", outcome: "findings", name: "Bed checker", kind: "report" });
+  await sidebar.onMessage({ type: "pipAskDgc", report: report(PIP), session: "g1" }); await settled();
+  assert.equal(world.panels.length, 1);
+  assert.equal(made[0].activeSlot().cwd, garden, "the Work session runs in the Pip's own folder, never this window's");
+  assert.equal(made[0].sessionId(), "g1", "its owner session");
+  assert.match(world.panels[0].title, /^garden-fix/, "the folder named on the tab");
+  // (Its page isn't up yet in this harness: what it is to be told waits for it, and is told once it is.)
+  for (const told of made[0].pendingWebviewActions.splice(0)) told();
+  assert.deepEqual(made[0].posted.filter((m) => m.type === "pipAskDgc").map((m) => m.report.pip_id), [PIP], "and is asked about the run");
+  // No owner session: a new Work session, in that folder too.
+  await sidebar.onMessage({ type: "pipAskDgc", report: report(PIP), session: "" }); await settled();
+  assert.deepEqual([world.panels.length, made[1].activeSlot().cwd, made[1].sessionId()], [2, garden, ""]);
+  // This window's own Project Pip: as before, in the window's folder.
+  await sidebar.onMessage({ type: "pipAskDgc", report: report(MINE), session: "s1" }); await settled();
+  assert.deepEqual([world.panels.length, made[2].activeSlot().cwd, made[2].sessionId()], [3, undefined, "s1"]);
+});
+
+test("a Project Pip of another folder reports to a session of its own folder: its picker lists that folder's sessions, never this window's", async () => {
+  const garden = join(scratch, "garden-owner"), GARDEN_WS = "ws_" + "5".repeat(32), PIP = "pip_" + "a".repeat(32), MINE = "pip_" + "b".repeat(32);
+  mkdirSync(garden, { recursive: true });
+  const folders = folderRows(garden).map((row) => (row.folder === garden ? { ...row, pips: 1, workspace_id: GARDEN_WS } : row));
+  const { sidebar, backend, lists } = folderWindow({ rows: everywhereRows(garden), folders });
+  sidebar.pipWorkspace = async (id) => (id === PIP ? GARDEN_WS : HERE_WS);
+  assert.deepEqual(await sidebar.sessionsForPip(PIP), [{ id: "g1", title: "Water the tomatoes on Fridays" }], "that folder's sessions, by the titles its list shows");
+  assert.deepEqual(lists(), [{ scope: "all", folder: garden, limit: 500 }], "asked for by its folder");
+  backend.requested.length = 0;
+  assert.deepEqual(await sidebar.sessionsForPip(MINE), [{ id: "s1", title: "Checkout" }], "this window's own Pip: this project's sessions, as before");
+  assert.deepEqual(lists(), [{}]);
+  backend.requested.length = 0;
+  assert.deepEqual(await sidebar.sessionsForPip(), [{ id: "s1", title: "Checkout" }]);
+  // An older DGC is never asked by folder.
+  const old = folderWindow({ capabilities: { session_paging: true } });
+  old.sidebar.pipWorkspace = async () => GARDEN_WS;
+  await old.sidebar.sessionsForPip(PIP);
+  assert.deepEqual(old.lists(), [{}]);
+});

@@ -1555,3 +1555,15 @@ button.pip-owner-choice:hover:not(:disabled){background:var(--pip-wash)}
    Pip's name keeps the room it had, and a Project Pip's status beside its name (two letters of it were left) goes: its
    last run is in History, in the menu. (Last in the file: the chat's own top bar rules above are as specific.) */
 @container(max-width:340px){.simple-pips .pip-topbar:has(.pip-switch){gap:4px;padding-right:8px}.simple-pips .pip-topbar:has(.pip-switch) .topbar-actions{gap:2px}.simple-pips .pip-topbar:has(.pip-switch) .pip-pill{gap:6px;padding-right:2px}.simple-pips .pip-topbar:has(.pip-switch) .pip-pill small.pip-status{display:none}}
+
+/* The Project Folder dropdown on the Project tab (media/shared/folderpick.css): the button, then one folder's path, once,
+   in the quiet tone. On All projects each Pip says its folder under its name (.dgc-path: cut in the middle). In Create a
+   Project Pip the same button is the form's folder field, its path under it. */
+.pips-folder-bar { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); min-width: 0; margin: 0 0 var(--sp-3); }
+.pips-folder-once, .new-pip-folder-path { display: flex; min-width: 0; max-width: 100%; margin: 0; color: var(--dgc-quiet, var(--text-2)); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+.pips-folder-page .pips-tab-empty { padding-inline: 0; }
+.pip-row .pip-row-folder { display: flex; min-width: 0; max-width: 100%; }
+.pip-row .pip-row-folder .dgc-path { flex: 0 1 auto; }
+.pip-row-folder-note { flex: none; }
+.pip-row-folder-note::after { content: "·"; margin: 0 5px; }
+.new-pip-folder { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); min-width: 0; margin: var(--sp-3) 0; }
