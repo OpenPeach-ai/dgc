@@ -178,6 +178,15 @@ class TheTool(GoalWorld):
         bad, told = pip_goals.tool_result({"status": "paused"})
         self.assertIsNone(bad)
 
+    def test_evidence_sent_as_text_is_still_its_lines(self):
+        # deepseek-v4.1-flash:cloud, live 12 Nov: evidence came as a JSON string, and was kept one character a line.
+        update, _ = pip_goals.tool_result({"status": "completed", "summary": "Plan written",
+                                           "evidence": '["Day 1 written: greetings", "Day 2 written: numbers"]'})
+        self.assertEqual(update["evidence"], ["Day 1 written: greetings", "Day 2 written: numbers"])
+        update, _ = pip_goals.tool_result({"status": "completed", "summary": "Plan written",
+                                           "evidence": "All five days written\nEvery day has three tasks"})
+        self.assertEqual(update["evidence"], ["All five days written", "Every day has three tasks"])
+
 
 class TheWorker(GoalWorld):
     def work(self, run, replies):

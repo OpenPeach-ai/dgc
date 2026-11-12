@@ -224,6 +224,20 @@ def schema() -> dict:
                                                                   "blocked, the blocker as observed each time)"}}}}}
 
 
+def _lines(value) -> list:
+    """The evidence lines, however the model sent them: a list, a list written as JSON text (deepseek-v4.1-flash:cloud,
+    live 12 Nov), or plain text a line each."""
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            parsed = None
+        value = parsed if isinstance(parsed, list) else value.splitlines()
+    if not isinstance(value, list):
+        return []
+    return [" ".join(str(e).split())[:300] for e in value if str(e).strip()][:20]
+
+
 def tool_result(arguments) -> tuple[dict | None, str]:
     """In the worker: (the update, what the model is told)."""
     args = arguments if isinstance(arguments, dict) else {}
@@ -231,7 +245,7 @@ def tool_result(arguments) -> tuple[dict | None, str]:
     if status not in UPDATES:
         return None, "Not recorded: status is completed or blocked. Otherwise take the next step; DGC gives you another turn."
     reason = " ".join(str(args.get("summary") or args.get("reason") or "").split())[:500]
-    evidence = [" ".join(str(e).split())[:300] for e in (args.get("evidence") or []) if str(e).strip()][:20]
+    evidence = _lines(args.get("evidence"))
     if status == "completed" and not evidence:
         return None, "Not recorded: completed needs one line of evidence per requirement."
     told = ("Recorded: the goal ends as done when your reply is saved. Say what you did, briefly."
