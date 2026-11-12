@@ -131,14 +131,17 @@ def _bounded_pips_command(cmd):
     if cmd["type"] == "pips_control" and isinstance(request, dict) and request.get("type") == "send_pip_message":
         from .pips import CHAT_REQUEST_BYTES
         limit = CHAT_REQUEST_BYTES
+    too_big = None
+    # A team's file (pips-12) or what a Grok bot wrote (pips-18) arrives as one string; its quotes and line ends are
+    # escaped on the way, up to twice its size. The file's own checks (pip_share.parse_team, parse_grok) keep its limit.
     if cmd["type"] == "pips_control" and isinstance(request, dict) and request.get("type") == "import_pip_team":
-        from .pip_share import MAX_TEAM_BYTES                  # a whole team's file (pips-12)
-        limit = MAX_TEAM_BYTES + 4096
+        from .pip_share import MAX_TEAM_BYTES
+        limit, too_big = 2 * MAX_TEAM_BYTES + 4096, f"A team file must fit within {MAX_TEAM_BYTES // 1024} KiB."
     if cmd["type"] == "pips_control" and isinstance(request, dict) and request.get("type") == "import_pip_source":
-        from .pip_import_sources import MAX_ANSWER             # what a Grok bot wrote for DGC's prompt (pips-18)
-        limit = MAX_ANSWER + 4096
-    too_big = "Pips requests must fit within 32 KiB." if limit == _MAX_PIPS_REQUEST_BYTES else \
-        f"A message to a Pip must fit within {limit // (1024 * 1024)} MiB with what it carries."
+        from .pip_import_sources import MAX_ANSWER
+        limit, too_big = 2 * MAX_ANSWER + 4096, f"What a Grok bot wrote must fit within {MAX_ANSWER // 1024} KiB."
+    too_big = too_big or ("Pips requests must fit within 32 KiB." if limit == _MAX_PIPS_REQUEST_BYTES else
+                          f"A message to a Pip must fit within {limit // (1024 * 1024)} MiB with what it carries.")
     # An app's tools (register_app, update_app: Pips API 61) are schemas: the SDKs' own bounds, 2,048 values and 12 levels.
     tools = cmd["type"] == "pips_control" and isinstance(request, dict) and request.get("type") in (
         "register_app", "update_app", "ensure_pip_template", "prune_pip_templates")   # a Pip template (API 64) too
@@ -7408,8 +7411,12 @@ class Backend:
                 documents, name = [single], single["pip"]["name"]
             for item in documents:
                 notes += [str(n)[:300] for n in item.get("left_out", []) if str(n)[:300] not in notes]
-        requests = [pip_share.setup_request(item, project_root=config.project_root, request_key="import-" + uuid.uuid4().hex[:24])
-                    for item in documents]
+        # A Grok bot's skills and routines are on its card, for the user to add on its page (its notes, the last of which
+        # says it arrives with no keys and no app access).
+        reason = (" ".join(["Imported from a Grok bot."] + [n for n in notes if not n.startswith("Imported from a Grok bot")])
+                  if source == "grok" else "Imported from a shared Pip file.")
+        requests = [pip_share.setup_request(item, project_root=config.project_root, request_key="import-" + uuid.uuid4().hex[:24],
+                                            reason=reason) for item in documents]
         if any(contains_secret(item, secret_values(config)) for item in requests):
             raise RegistryError("secret_detected", "What you imported contains a configured secret. Nothing was saved.")
         origin = self.agent._pip_proposal_origin()

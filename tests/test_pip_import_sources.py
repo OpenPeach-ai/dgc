@@ -91,6 +91,19 @@ class ImportSourceTests(unittest.TestCase):
         with self.assertRaises(RegistryError):
             self.importing({"source": "ftp", "url": "x"})
 
+    def test_a_grok_bots_skills_and_routines_are_on_its_card(self):
+        card = json.dumps(self.importing({"source": "grok", "text": GROK_ANSWER})["setups"][0])
+        for words in ("Imported from a Grok bot", "compare prices", "watch fares", "Check fares to Goa"):
+            with self.subTest(words=words):
+                self.assertIn(words, card)
+
+    def test_a_github_file_keeps_the_shared_file_reason(self):
+        one = {"format": "dgc-pip", "version": 1, "left_out": [], "pip": {"name": "A", "goal": "Do A.", "pip_type": "lens",
+                                                                        "scope": "personal", "schedule": None}}
+        with patch.object(sources, "fetch", return_value=json.dumps(one)):
+            card = json.dumps(self.importing({"source": "github", "url": "https://github.com/acme/pips/blob/main/a.json"})["setups"][0])
+        self.assertIn("Imported from a shared Pip file.", card)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -94,8 +94,9 @@ def check(document) -> dict:
     return document
 
 
-def setup_request(document, *, project_root, request_key) -> dict:
-    """The setup card request for an imported Pip, checked by the same rules as any setup card."""
+def setup_request(document, *, project_root, request_key, reason="Imported from a shared Pip file.") -> dict:
+    """The setup card request for an imported Pip, checked by the same rules as any setup card. `reason` is the card's
+    line: a Grok bot's skills and routines go there (pips-18), for the user to add on its page."""
     from .pip_setup import validate_request
     pip = check(document)["pip"]
     personal = pip["scope"] == "personal"
@@ -114,7 +115,7 @@ def setup_request(document, *, project_root, request_key) -> dict:
         work_kind = "source_review"
     request = {"target_root": str(project_root), "name": pip["name"], "goal": pip["goal"], "pip_type": pip["pip_type"],
                "work_kind": work_kind, "scope": pip["scope"], "schedule": pip["schedule"], "run_now": False,
-               "request_key": request_key, "reason": "Imported from a shared Pip file."}
+               "request_key": request_key, "reason": str(reason)[:1000]}
     for key in ("event_trigger", "model_choice", "web_plan", "verification_plan", "live_plan"):
         if key in pip:
             request[key] = pip[key]
