@@ -162,7 +162,8 @@ test("both bars are translucent and blur what is behind them, in dark and in lig
       for (const [what, paint] of [["the tab bar", s.tabsPaint], ["the dock's strip", s.dockPaint]]) {
         assert.ok(paint.blur >= 12 && paint.blur <= 30, `${name}, ${view}: ${what} blurs what is behind it (${paint.filter})`);
         assert.ok(paint.alpha >= 0.45 && paint.alpha <= 0.85, `${name}, ${view}: ${what} is a translucent tint (${paint.ground})`);
-        assert.notEqual(paint.shadow, "none", `${name}, ${view}: ${what} has its hairline`);
+        // (Asked 13 Nov: no hairline along either bar's edge; each is flush with the page under it. test/glass-flush.test.mjs holds that.)
+        assert.equal(paint.shadow, "none", `${name}, ${view}: ${what} draws no line along its edge`);
       }
       // The pill and the raised bar are not glass: the same grounds and shadows as ever, with no filter of their own.
       assert.match(s.pill.image, /gradient/, `${name}: the tab bar's pill keeps its gradient`);

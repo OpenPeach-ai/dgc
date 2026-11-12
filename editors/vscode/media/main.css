@@ -136,9 +136,10 @@ html[data-chat-place="home"] body.pips-active.inside-pip { --glass-top: 0px; --g
 html[data-chat-place="home"] body:is(.sessions-active, .pips-active) > #phead { grid-area: 1 / 1; }
 html[data-chat-place="home"] body:is(.sessions-active, .pips-active) > :is(#sessions-host, #pips-host, #side-tabs, #dgc-dock[data-show="always"]) { grid-area: 2 / 1; }
 /* Both bars take the pointer, so a click on the glass never lands on a row that is blurred under it; the wheel over
-   either is passed on to the page (main.js, glassWheel). */
-html[data-chat-place="home"] body:is(.sessions-active, .pips-active) > #side-tabs { align-self: start; z-index: 31; background: var(--glass-ground); box-shadow: 0 .5px 0 var(--glass-edge); }
-html[data-chat-place="home"] body:is(.sessions-active, .pips-active) > #dgc-dock[data-show="always"] { align-self: end; pointer-events: auto; background: var(--glass-ground); box-shadow: 0 -.5px 0 var(--glass-edge); }
+   either is passed on to the page (main.js, glassWheel). Neither draws a line along its edge (asked 13 Nov: flush with
+   the page that scrolls under it, "so it doesn't look separate"); only a theme that asks for lines keeps one (below). */
+html[data-chat-place="home"] body:is(.sessions-active, .pips-active) > #side-tabs { align-self: start; z-index: 31; background: var(--glass-ground); }
+html[data-chat-place="home"] body:is(.sessions-active, .pips-active) > #dgc-dock[data-show="always"] { align-self: end; pointer-events: auto; background: var(--glass-ground); }
 /* The page's room: its first thing starts clear below the tab bar and its last ends clear above the strip, and what
    takes focus under either scrolls clear of it with room for its focus ring (--glass-clear-*). */
 html[data-chat-place="home"] #sessions-host { padding-top: calc(var(--sp-1) + var(--glass-top)); padding-bottom: calc(var(--sp-5) + var(--glass-bottom)); scroll-padding-block: var(--glass-clear-top, 0px) var(--glass-clear-bottom, 0px); }
@@ -146,10 +147,16 @@ html[data-chat-place="home"] #sessions-host { padding-top: calc(var(--sp-1) + va
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   html[data-chat-place="home"] body:is(.sessions-active, .pips-active) > :is(#side-tabs, #dgc-dock[data-show="always"]) { background: color-mix(in srgb, var(--glass-ground) var(--glass-tint), transparent); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); }
 }
-/* Solid where glass is not wanted: a high contrast theme, forced colours, and "reduce transparency". */
+/* Solid where glass is not wanted: a high contrast theme, forced colours, and "reduce transparency". A high contrast
+   theme and forced colours part every surface with a line, and with no glass nothing else says where a bar ends: there
+   each bar keeps a real 1 px line of the theme's own border on its edge (drawn outside it, so the page's room is the same). */
 html[data-chat-place="home"] body:is(.vscode-high-contrast, .vscode-high-contrast-light):is(.sessions-active, .pips-active) > :is(#side-tabs, #dgc-dock[data-show="always"]) { background: var(--glass-ground); -webkit-backdrop-filter: none; backdrop-filter: none; }
+html[data-chat-place="home"] body:is(.vscode-high-contrast, .vscode-high-contrast-light):is(.sessions-active, .pips-active) > #side-tabs { box-shadow: 0 1px 0 var(--hair); }
+html[data-chat-place="home"] body:is(.vscode-high-contrast, .vscode-high-contrast-light):is(.sessions-active, .pips-active) > #dgc-dock[data-show="always"] { box-shadow: 0 -1px 0 var(--hair); }
 @media (prefers-reduced-transparency: reduce) { html[data-chat-place="home"] body:is(.sessions-active, .pips-active) > :is(#side-tabs, #dgc-dock[data-show="always"]) { background: var(--glass-ground); -webkit-backdrop-filter: none; backdrop-filter: none; } }
-@media (forced-colors: active) { html[data-chat-place="home"] body:is(.sessions-active, .pips-active) > :is(#side-tabs, #dgc-dock[data-show="always"]) { background: Canvas; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; border: 0 solid CanvasText; } html[data-chat-place="home"] body:is(.sessions-active, .pips-active) > #side-tabs { border-bottom-width: 1px; } html[data-chat-place="home"] body:is(.sessions-active, .pips-active) > #dgc-dock[data-show="always"] { border-top-width: 1px; } }
+@media (forced-colors: active) { html[data-chat-place="home"] body:is(.sessions-active, .pips-active) > :is(#side-tabs, #dgc-dock[data-show="always"]) { background: Canvas; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
+  /* (Each bar's border in its own rule: written on both at once, the pair's weight is the dock's, and the tab bar's 1 px lost to it.) */
+  html[data-chat-place="home"] body:is(.sessions-active, .pips-active) > #side-tabs { border: 0 solid CanvasText; border-bottom-width: 1px; } html[data-chat-place="home"] body:is(.sessions-active, .pips-active) > #dgc-dock[data-show="always"] { border: 0 solid CanvasText; border-top-width: 1px; } }
 /* A session's own tab: its Pips stay in the side bar, and a chat in another folder is a side bar thing. */
 html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:none !important; }
 /* One 12px gutter (0.52): every block's words, boxes and icons start 12px in and end 12px from the other side. A row's

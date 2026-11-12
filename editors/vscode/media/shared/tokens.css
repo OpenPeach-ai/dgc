@@ -173,10 +173,10 @@
   --dock-lift: inset 0 .5px 0 rgba(255,255,255,.09), 0 0 0 .5px var(--hair-strong), 0 1px 2px rgba(0,0,0,.20), 0 6px 14px -4px rgba(0,0,0,.30), 0 14px 28px -12px rgba(0,0,0,.34);
   /* Frosted glass (media/main.css, "Frosted glass"): the tab bar and the strip behind the dock lie over the page, which
      scrolls under them. The glass is a tint of the page's own ground (this much of it, the rest clear) over a blur of
-     what is behind, and its edge is the quiet hairline. No colour of its own. */
+     what is behind, with no line along its edge (flush with the page; a high contrast theme draws its own border
+     there, main.css). No colour of its own. */
   --glass-tint: 62%;
   --glass-filter: blur(18px) saturate(1.6);
-  --glass-edge: var(--hair);
   /* The tabs at the top of the side bar (media/shared/tabs.css): a rounded bar on a soft gradient of the side bar's own
      grey, a hairline and a low shadow. The tab pointed at and the tab you are on are lit in the accent: the name in the
      accent's text tone over a soft radial glow of the accent. The glow is a light, never a fill: at its heart it is a
