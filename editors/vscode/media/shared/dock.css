@@ -39,9 +39,9 @@
 /* A file's sheet, the output card's (filesheet.css, 44 by 56 px), drawn smaller: about a blob's height in the tile. */
 .dgc-dock-sheet { position: absolute; left: 50%; top: 50%; display: block; width: 44px; height: 56px; margin: -28px 0 0 -24px; scale: calc(var(--k) * .0125); }
 .dgc-dock-sheet .dgc-sheet-tag { font-size: 9px; right: -9px; bottom: 6px; }
-/* So small, on a tile, the sheet's page needs to be a clear step off its ground (a light theme's is white already). */
-.dgc-dock-sheet .dgc-sheet-page { background: color-mix(in srgb, var(--text) 20%, var(--surface)); }
-body.vscode-light .dgc-dock-sheet .dgc-sheet-page, body.vscode-high-contrast-light .dgc-dock-sheet .dgc-sheet-page { background: var(--surface); }
+/* Keep the shared kind colour at dock size and in both editor themes. */
+.dgc-dock-sheet .dgc-sheet-page { background: var(--sheet-body); }
+@media (forced-colors: active) { .dgc-dock-sheet .dgc-sheet-page { background: Canvas; } }
 .dgc-dock-plus { display: block; width: 46%; height: 46%; }
 /* The number waiting for you, on the tile's corner: the text colour, never the accent. */
 .dgc-dock-badge {

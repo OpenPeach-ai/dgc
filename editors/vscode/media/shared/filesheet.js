@@ -1,4 +1,4 @@
-// A small sheet of a thing DGC made or shows, with its kind's name on a coloured tab: a page has a browser bar, slides a
+// A softly layered, kind-coloured sheet with its name on a tab: a page has a browser bar, slides a
 // frame, a sheet a grid, a dashboard tiles and bars. One piece for the output card in Work, ChatDGC and a Pip's chat
 // and for the Library's rows (media/shared/filesheet.css is how it looks). The colour marks the kind only. A classic
 // script: Work's and ChatDGC's pages load it before their own script, and the Pips bundle imports it, so all share
@@ -37,7 +37,7 @@
 
   const l = (w, cls = "") => `<i class="l w${w}${cls ? ` ${cls}` : ""}"></i>`;
   const times = (n, s) => Array.from({ length: n }, (_, i) => (typeof s === "function" ? s(i) : s)).join("");
-  // What each kind's sheet shows: a hint of its shape, drawn in the text colour (and the kind's colour where it has one).
+  // Each kind keeps its miniature layout; CSS supplies the coloured paper and contrasting content marks.
   const BODY = {
     page: () => `<span class="dots"><i></i><i></i><i></i></span><i class="box hero"></i>${l(70, "h")}${l(90, "s")}${l(55, "s")}<span class="rw fill"><i class="box"></i><i class="box"></i></span>`,
     doc: () => `${l(60, "h")}${l(90)}${l(80)}${l(90)}${l(45)}<i class="gap"></i>${l(85)}${l(70)}${l(90)}${l(30)}`,
