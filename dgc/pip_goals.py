@@ -92,8 +92,9 @@ def _turn_key(goal_id: str, turn: int) -> str:
 def _turn_text(row) -> str:
     from .goals import cycle_prompt
     return (f"This message is from DGC, not the user: the user set this conversation a goal, and this is your turn "
-            f"{row['turns'] + 1} of at most {MAX_TURNS} toward it. When you need the user, ask them in your reply: the goal "
-            "waits for their answer.\n\n" + cycle_prompt(row["objective"]))
+            f"{row['turns'] + 1} of at most {MAX_TURNS} toward it. When you need something from the user to go on, ask them "
+            "with offer_choices (the answers you expect; they can always type their own): the goal then waits for "
+            "their answer. A question asked only in your words doesn't pause it.\n\n" + cycle_prompt(row["objective"]))
 
 
 def _send_turn(store, row, config) -> dict:

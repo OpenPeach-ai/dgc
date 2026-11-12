@@ -50,6 +50,8 @@ class Starting(GoalWorld):
         self.assertIn(goals.CYCLE_MARKER, turn["text"])
         self.assertIn("Plan my week", turn["text"])
         self.assertIn("update_goal", turn["text"])
+        # Live, 12 Nov: asked only in words, the question didn't pause it, and the next turn said "still waiting".
+        self.assertIn("offer_choices", turn["text"], "it is told how to ask so the goal waits")
 
     def test_only_a_personal_pip_and_a_real_objective(self):
         with self.assertRaises(RegistryError):
