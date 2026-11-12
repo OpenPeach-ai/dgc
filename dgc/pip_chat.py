@@ -1618,6 +1618,8 @@ def insert_reply(store, run, result, now):
     commit_core_setup(store, run, result)
     from .pip_routines import commit as commit_routines      # routines it suggested: cards to Add
     commit_routines(store, run, result)
+    from .pip_core_daily import offer as offer_core_day      # Core's day routine, offered once (pips-19)
+    offer_core_day(store, run)
     from .pip_notes import commit as commit_notes            # notes it kept about you: on its page
     commit_notes(store, run, result)
     text = validate_text(result.get("text"), reply=True)
