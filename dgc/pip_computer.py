@@ -2485,7 +2485,8 @@ def status(registry, pip_id: str) -> dict:
     waiting_rows = [projection(r) for r in registry.db.execute(
         "SELECT * FROM pip_computer_actions WHERE pip_id=? AND status='pending' ORDER BY created_at DESC LIMIT 5", (pip_id,))]
     others = [a for a in list_actions(registry, pip_id, limit=5) if a["status"] != "pending"]
-    return {"pip_id": pip_id, "granted": job.get("computer_plan") is not None,
+    from .pips import has_box                   # (a folder Pip has its own box too: pips-sandbox-design §10)
+    return {"pip_id": pip_id, "granted": has_box(job),
             "available": machine["available"], "reason": machine["reason"], "pending": pending,
             "actions": (waiting_rows + others)[:5],
             # Several computers per Pip (API 79): how many it has, and how many it may have; (API 86) each one's name.
@@ -3515,7 +3516,8 @@ def desk(registry, command: str, pip_id: str, request: dict, actor: str) -> dict
         raise RegistryError("local_only", "Use a Pip's computer on this computer.")
     from .pips import PipStore
     from . import pip_computer_files as files
-    if PipStore(registry)._job(pip_id).get("computer_plan") is None:
+    from .pips import has_box
+    if not has_box(PipStore(registry)._job(pip_id)):
         raise RegistryError("no_computer", "This Pip has no computer. Give it one first.")
     root = computer_root(registry.directory, pip_id)
     folder = files.files_root(root)
@@ -3558,7 +3560,8 @@ def request_open(registry, pip_id: str, actor: str, number=None) -> dict:
         raise RegistryError("local_only", "Open a Pip's computer on this computer.")
     from .pips import PipStore
     job = PipStore(registry)._job(pip_id)
-    if job.get("computer_plan") is None:
+    from .pips import has_box
+    if not has_box(job):
         raise RegistryError("no_computer", "This Pip has no computer. Give it one first.")
     number = _number(registry, pip_id, number)
     key = "computer_open:" + pip_id if number is None else f"computer_open:{pip_id}:{number}"

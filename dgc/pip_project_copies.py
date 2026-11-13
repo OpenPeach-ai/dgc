@@ -412,26 +412,33 @@ def prepare(store, pip_id, marks, request_key) -> list:
     return told
 
 
-def _make_copy(store, pip_id, workspace, root: Path, folder: str, copy_id) -> dict:
+def _make_copy(store, pip_id, workspace, root: Path, folder: str, copy_id, *, fit: bool = False) -> dict:
     registry, db = store.registry, store.db
     rels = project_files(root)
-    if len(rels) > MAX_FILES:
+    if len(rels) > MAX_FILES and not fit:
         raise RegistryError("project_too_big", f"{workspace['name']} has {len(rels):,} files; a copy holds at most "
                                                f"{MAX_FILES:,}, so DGC copied nothing.")
     limit = copy_limit()
     source = os.open(root, DIR)
     try:
-        sizes, total = {}, 0
+        sizes, stamps, total = {}, {}, 0
         for rel in rels:
             if _kind_at(source, rel) != "file":
                 continue                              # a link, or gone since Git listed it: never copied
             *dirs, name = rel.split("/")
             fd = _open_dirs(source, dirs)
             try:
-                sizes[rel] = os.stat(name, dir_fd=fd, follow_symlinks=False).st_size
+                info = os.stat(name, dir_fd=fd, follow_symlinks=False)
             finally:
                 os.close(fd)
+            sizes[rel], stamps[rel] = info.st_size, [info.st_size, info.st_mtime_ns]
             total += sizes[rel]
+        left = None
+        if fit:                                       # a folder Pip's own folder: what fits, the biggest left out
+            kept = _fit(sizes, limit, MAX_FILES)
+            left = _left_out(sizes, kept)
+            sizes = {rel: size for rel, size in sizes.items() if rel in kept}
+            total = sum(sizes.values())
         if total > limit:
             raise RegistryError("project_too_big", f"{workspace['name']} is {total / 1048576:.0f} MB without what it "
                                                    f"ignores; a copy holds at most {limit // 1048576} MB, so DGC copied "
@@ -471,14 +478,164 @@ def _make_copy(store, pip_id, workspace, root: Path, folder: str, copy_id) -> di
             os.close(files)
     finally:
         os.close(source)
-    _save_snapshot(registry, copy_id, {"folder": folder, "files": snapshot})
+    # ("source": each project file's size and time as copied, so a folder Pip's next turn copies only what changed.)
+    _save_snapshot(registry, copy_id, {"folder": folder, "files": snapshot,
+                                       "source": {rel: stamps[rel] for rel in snapshot},
+                                       **({"left_out": left["names"]} if left else {})})
     at = _now(registry)
     with registry.transaction():
         db.execute("INSERT INTO pip_project_copies(id,pip_id,workspace_id,name,files,bytes,made_at) VALUES(?,?,?,?,?,?,?) "
                    "ON CONFLICT(pip_id,workspace_id) DO UPDATE SET files=excluded.files,bytes=excluded.bytes,"
                    "made_at=excluded.made_at,name=excluded.name",
                    (copy_id, pip_id, workspace["id"], workspace["name"][:80], len(snapshot), total, at))
-    return {"copy_id": copy_id, "files": len(snapshot), "bytes": total}
+    return {"copy_id": copy_id, "files": len(snapshot), "bytes": total, "left_out": left}
+
+
+LEFT_LISTED = 5000                       # left-out names a copy remembers (for Apply's reason); the count is exact
+
+
+def _fit(sizes: dict, limit: int, most: int) -> set:
+    """What a folder Pip's copy holds when its folder is bigger than a copy may be (never all or nothing): past the
+    file count, the deepest paths are left out; past the size, the biggest files, until what is left fits."""
+    kept = dict(sizes)
+    if len(kept) > most:
+        for rel in sorted(kept, key=lambda r: (r.count("/"), r))[most:]:
+            kept.pop(rel)
+    total = sum(kept.values())
+    for rel in sorted(kept, key=lambda r: (-kept[r], r)):
+        if total <= limit:
+            break
+        total -= kept.pop(rel)
+    return set(kept)
+
+
+def _left_out(sizes: dict, kept: set) -> dict | None:
+    left = sorted((r for r in sizes if r not in kept), key=lambda r: (-sizes[r], r))
+    if not left:
+        return None
+    return {"files": len(left), "bytes": sum(sizes[r] for r in left), "examples": left[:5], "names": left[:LEFT_LISTED]}
+
+
+def own_folder(store, pip_id) -> dict | None:
+    """A folder Pip's own folder in its box's Files, at the start of each turn of its chat (0.52: every Pip has its
+    own box). Copied the first time; after that only what changed in the folder since is copied again (a chat turn is
+    a run, and a whole copy can be 200 MB); kept exactly as it is while something the Pip changed in it waits for the
+    user (Apply, Discard). None for a Personal Pip. A folder DGC can't copy (too big, gone) is said, never raised: the
+    turn goes on without it, and the Pip is told why."""
+    job = store._job(pip_id)
+    if job["source_policy"] == {"mode": "personal"}:
+        return None
+    registry, db = store.registry, store.db
+    workspace_id = db.execute("SELECT workspace_id FROM pips WHERE id=?", (pip_id,)).fetchone()[0]
+    try:
+        workspace, root = _project(registry, workspace_id)
+    except RegistryError as exc:
+        return {"name": "its folder", "folder": None, "error": str(exc)}
+    folder = "projects/" + _folder_name(workspace["name"])
+    name = workspace["name"][:80]
+    try:
+        refresh(store, pip_id)        # what the Pip changed so far is known before deciding to keep or bring it up to date
+        row = db.execute("SELECT * FROM pip_project_copies WHERE pip_id=? AND workspace_id=?",
+                         (pip_id, workspace["id"])).fetchone()
+        if row is not None and db.execute("SELECT 1 FROM pip_project_changes WHERE copy_id=? AND status='pending'",
+                                          (row["id"],)).fetchone() is not None:
+            return {"name": name, "folder": folder, "files": row["files"], "kept": True, "updated": 0}
+        snap = _snapshot(registry, row["id"]) if row is not None else {}
+        made = None
+        if row is not None and isinstance(snap.get("source"), dict) and snap.get("folder") == folder:
+            made = _update_copy(store, pip_id, workspace, root, folder, row["id"], snap)
+        if made is None:
+            made = _make_copy(store, pip_id, workspace, root, folder, row["id"] if row is not None else None, fit=True)
+            made["updated"] = made["files"]
+    except RegistryError as exc:
+        return {"name": name, "folder": folder, "error": str(exc)}
+    left = made.get("left_out")
+    return {"name": name, "folder": folder, "files": made["files"], "kept": False, "updated": made["updated"],
+            **({"left_out": {k: left[k] for k in ("files", "bytes", "examples")}} if left else {})}
+
+
+def _update_copy(store, pip_id, workspace, root: Path, folder: str, copy_id, snap) -> dict | None:
+    """Bring a copy up to date with its folder, file by file: what the folder added or changed since (by size and time,
+    then by content) is copied, what it removed is removed. Only called while nothing the Pip changed waits, so the copy
+    is exactly what its snapshot says and each file may be the folder's again. None when the copy's folder in the box
+    is gone (the caller makes it afresh)."""
+    registry, db = store.registry, store.db
+    rels = project_files(root)
+    limit = copy_limit()
+    files_now, stamps = dict(snap.get("files") or {}), dict(snap.get("source") or {})
+    source = os.open(root, DIR)
+    try:
+        current, total = {}, 0
+        for rel in rels:
+            if _kind_at(source, rel) != "file":
+                continue
+            *dirs, leaf = rel.split("/")
+            fd = _open_dirs(source, dirs)
+            try:
+                info = os.stat(leaf, dir_fd=fd, follow_symlinks=False)
+            finally:
+                os.close(fd)
+            current[rel] = [info.st_size, info.st_mtime_ns]
+            total += info.st_size
+        sizes = {rel: stamp[0] for rel, stamp in current.items()}
+        kept = _fit(sizes, limit, MAX_FILES)          # what fits, the biggest left out (and gone from the copy)
+        left = _left_out(sizes, kept)
+        current = {rel: stamp for rel, stamp in current.items() if rel in kept}
+        total = sum(stamp[0] for stamp in current.values())
+        files = _files_fd(store, pip_id)
+        try:
+            try:
+                box = _open_dirs(files, folder.split("/"))
+            except (OSError, RegistryError):
+                return None
+            updated = 0
+            try:
+                for rel in [r for r in files_now if r not in current]:
+                    try:
+                        _remove(box, rel)
+                    except (OSError, RegistryError):
+                        pass
+                    files_now.pop(rel)
+                    stamps.pop(rel, None)
+                    try:
+                        _base_path(registry, copy_id, rel).unlink()
+                    except OSError:
+                        pass
+                    updated += 1
+                for rel, stamp in current.items():
+                    if rel in files_now and stamps.get(rel) == stamp:
+                        continue                      # the same size and time as when copied: not read again
+                    data = _read(source, rel)
+                    if data is None:
+                        continue
+                    stamps[rel] = stamp
+                    if rel in files_now and files_now[rel][2] == _digest(data):
+                        continue                      # touched, same bytes
+                    _write(box, rel, data)
+                    *dirs, leaf = rel.split("/")
+                    fd = _open_dirs(box, dirs)
+                    try:
+                        info = os.stat(leaf, dir_fd=fd, follow_symlinks=False)
+                    finally:
+                        os.close(fd)
+                    files_now[rel] = [len(data), info.st_mtime_ns, _digest(data)]
+                    _keep_base(registry, copy_id, rel, data)
+                    updated += 1
+            finally:
+                os.close(box)
+        finally:
+            os.close(files)
+    finally:
+        os.close(source)
+    saved = {**snap, "folder": folder, "files": files_now, "source": stamps}
+    saved.pop("left_out", None)
+    if left:
+        saved["left_out"] = left["names"]
+    _save_snapshot(registry, copy_id, saved)
+    with registry.transaction():
+        db.execute("UPDATE pip_project_copies SET files=?,bytes=?,name=? WHERE id=?",
+                   (len(files_now), total, workspace["name"][:80], copy_id))
+    return {"copy_id": copy_id, "files": len(files_now), "bytes": total, "updated": updated, "left_out": left}
 
 
 def context_for(store, pip, req) -> list:
@@ -715,6 +872,9 @@ def apply(store, pip_id, change_id, expected_digest) -> dict:
                     expected = was.get(rel)
                     if kind not in ("file", "missing"):
                         why = "In the project it isn't a plain file (a link or a folder)."
+                    elif expected is None and current is not None and rel in set(snap.get("left_out") or ()):
+                        why = ("DGC left this file out of the Pip's copy (the folder was bigger than a copy may be), "
+                               "so the Pip's version is never written over yours.")
                     elif expected is None and current is not None:
                         why = "You added a file with this name in the meantime."
                     elif expected is not None and (current is None or _digest(current) != expected[2]):

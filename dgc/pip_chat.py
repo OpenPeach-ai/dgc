@@ -1881,13 +1881,15 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
             job = store._job(pip_id)
             given, spooled_images = spooled_images, None
             images = store_images(store.registry.directory, pip_id, images, given)
-            if images and job.get("computer_plan") is not None:
+            from .pips import has_box               # (a folder Pip's box too: pips-sandbox-design §10)
+            if images and has_box(job):
                 _copy_photos_to_computer(store.registry.directory, pip_id, images)
         if files is not None or spooled_files is not None:
             job = store._job(pip_id)
             given, spooled_files = spooled_files, None
             files = store_files(store.registry.directory, pip_id, files, given)
-            if job.get("computer_plan") is not None:
+            from .pips import has_box
+            if has_box(job):
                 _copy_to_computer(store.registry.directory, pip_id, files)
     finally:
         # A send refused before its spooled files were read leaves none of them behind.

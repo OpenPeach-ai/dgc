@@ -53,6 +53,11 @@ class LocalPipsTests(unittest.TestCase):
         saved = patch("dgc.config.USER_CONFIG", self.base / "home" / ".dgc" / "config.json")
         saved.start()
         self.addCleanup(saved.stop)
+        # A folder Pip's own box (pips.folder_boxes, 0.52) is off unless a test turns it on: each chat a test sends
+        # would otherwise open a real computer host for it on a machine that runs boxes (tests/test_folder_pip_box.py).
+        boxes = patch.object(pips, "folder_boxes", return_value=False)
+        boxes.start()
+        self.addCleanup(boxes.stop)
         self.registry = WorkspaceRegistry(self.base / "state", clock=lambda: "2026-10-01T10:00:00.000Z")
         self.addCleanup(self.registry.close)
         self.store = pips.PipStore(self.registry)

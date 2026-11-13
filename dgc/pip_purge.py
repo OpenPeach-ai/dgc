@@ -179,12 +179,26 @@ def _journal_path(directory, pip_id):
     return Path(directory) / 'purges' / f'{pip_id}.json'
 
 
-def _write_journal(directory, pip_id, run_ids):
+_COPY = re.compile(r'(pcopy|pchange)_[0-9a-f]{32}')
+
+
+def _copy_ids(db, pip_id):
+    """Its folder copies and their changes (pip_project_copies): DGC's own records of them live on disk by these ids,
+    which the rows that name them no longer say once the rows are gone."""
+    ids = []
+    for table in ('pip_project_copies', 'pip_project_changes'):
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+            ids += [r[0] for r in db.execute(f'SELECT id FROM {table} WHERE pip_id=?', (pip_id,))]
+    return [i for i in ids if _COPY.fullmatch(i)]
+
+
+def _write_journal(directory, pip_id, run_ids, copies=()):
     path = _journal_path(directory, pip_id)
     if path.parent.is_symlink():
         raise RegistryError('unsafe_state', 'The Pip deletion journal directory is not private.')
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    value = json.dumps({'pip_id': pip_id, 'run_ids': run_ids}, separators=(',', ':')).encode()
+    value = json.dumps({'pip_id': pip_id, 'run_ids': run_ids, **({'copies': list(copies)} if copies else {})},
+                       separators=(',', ':')).encode()
     tmp = path.with_suffix(f'.{os.getpid()}.tmp')
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o600)
     try:
@@ -251,7 +265,7 @@ def _artifact_owned(folder, pip_id):
     return art.origin.get('pip') == pip_id or art.legacy.get('pip') == pip_id
 
 
-def _cleanup(registry, pip_id, run_ids):
+def _cleanup(registry, pip_id, run_ids, copies=()):
     """Erase what the deleted Pip left on disk. Every part runs even when an earlier one fails, and the first
     failure is raised after them (the journal stays, so a later Pips command finishes it). Returns the saved
     Outputs left in place because DGC couldn't tell whether they were this Pip's."""
@@ -269,6 +283,8 @@ def _cleanup(registry, pip_id, run_ids):
             _remove_private(path, root)
         for run_id in run_ids:
             _remove_private(root / 'runs' / run_id, root)
+        for copy_id in copies:                 # its folder copies' records (what each file was; a change's Undo)
+            _remove_private(root / 'project-copies' / (copy_id if copy_id.startswith('pcopy_') else copy_id + '.undo'), root)
 
     def logins():
         store = LoginStore(root)
@@ -363,8 +379,10 @@ def _finish(registry, path):
         if path.is_symlink() or not path.is_file():
             raise ValueError('unsafe purge journal')
         value = json.loads(path.read_text())
-        pip_id, run_ids = value['pip_id'], value['run_ids']
+        pip_id, run_ids, copies = value['pip_id'], value['run_ids'], value.get('copies', [])
         if not _PIP.fullmatch(pip_id) or path.name != f'{pip_id}.json' or not isinstance(run_ids, list) or not all(_RUN.fullmatch(r) for r in run_ids):
+            raise ValueError('invalid purge journal')
+        if not isinstance(copies, list) or not all(isinstance(c, str) and _COPY.fullmatch(c) for c in copies):
             raise ValueError('invalid purge journal')
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise RegistryError('unsafe_state', 'A Pip deletion journal needs repair before continuing.') from exc
@@ -377,7 +395,7 @@ def _finish(registry, path):
         # authorization to delete a still-live Pip's files.
         path.unlink()
         return pip_id, []
-    left = _cleanup(registry, pip_id, run_ids)
+    left = _cleanup(registry, pip_id, run_ids, copies)
     path.unlink()
     return pip_id, left
 
@@ -448,7 +466,7 @@ def delete(store, pip_id, *, expected_name, expected_version, expected_lifecycle
         run_ids = [r[0] for r in store.db.execute('SELECT id FROM pip_runs WHERE pip_id=?', (pip_id,))]
         if not all(_RUN.fullmatch(r) for r in run_ids):
             raise RegistryError('unsafe_state', 'A Pip run has an invalid identity.')
-        _write_journal(store.registry.directory, pip_id, run_ids)
+        _write_journal(store.registry.directory, pip_id, run_ids, _copy_ids(store.db, pip_id))
         store.db.execute('PRAGMA defer_foreign_keys=ON')
         selected = _selected_rows(store.db, pip_id, run_ids)
         _delete_rows(store.db, selected)

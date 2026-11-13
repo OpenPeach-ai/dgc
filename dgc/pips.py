@@ -311,7 +311,7 @@ READ_TOOLS = frozenset({"read_file", "glob", "grep", "repo_map", "todo"})
 CHAT_UI_TOOLS = frozenset({"offer_choices"})
 # Everything a folder Pip's chat may hold (13 Nov): reading its project copy, buttons, and drafting its own job, which
 # DGC applies after the reply and only for its name, instructions, schedule and model (pip_chat_setup.PROJECT_FIELDS).
-FOLDER_CHAT_TOOLS = READ_TOOLS | CHAT_UI_TOOLS | frozenset({"draft_pip_change"})
+FOLDER_CHAT_TOOLS = READ_TOOLS | CHAT_UI_TOOLS | frozenset({"draft_pip_change"})      # (without its box; with it, the computer tool too)
 MAX_FILES = 10000
 MAX_FILE_BYTES = 4 * 1024 * 1024
 MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
@@ -452,6 +452,44 @@ def computer_by_default() -> bool:
         return bool(supported()[0])
     except Exception:                       # noqa: BLE001 -- no computer is the safe answer
         return False
+
+
+def _own_box_words(own) -> str:
+    """What a folder Pip is told of its own box and its folder's copy there, this turn."""
+    said = ("Your read_file, glob, grep and repo_map tools read a snapshot of this project. You also have your own "
+            "computer (the computer tool), walled off from this machine: its browser reaches the web, and its Terminal "
+            "and Files are yours to use freely.")
+    if isinstance(own, dict) and own.get('folder') and not own.get('error'):
+        said += (f" Its Files hold your own copy of this project at {own['folder']} ({own.get('files', 0)} files, without"
+                 " what Git ignores): edit files and run commands and tests there. Nothing you change there reaches the "
+                 "user's real folder until the user applies it: DGC shows what you changed as a card below your reply.")
+        if own.get('kept'):
+            said += (" Your copy is as you left it, because your changes wait for the user, so edits made in the real "
+                     "folder since are not in it yet.")
+        left = own.get('left_out')
+        if isinstance(left, dict) and left.get('files'):
+            names = ", ".join(str(n)[:120] for n in (left.get('examples') or [])[:5])
+            said += (f" The project is bigger than a copy may be, so DGC left out {left['files']} of its biggest files "
+                     f"({int(left.get('bytes') or 0) // 1048576} MB; the biggest: {names}). They are in the real folder "
+                     "but not in your copy: work that needs them can't run in your computer, so say so when it matters.")
+    elif isinstance(own, dict) and own.get('error'):
+        said += (" DGC could not put a copy of this project in your computer this turn: " + str(own['error'])[:300]
+                 + " Say so if the user asks you to work on its files.")
+    return said
+
+
+def folder_boxes() -> bool:
+    """Whether this machine gives a folder Pip its own box (0.52, his call 13 Nov: "every pip gets everything"):
+    wherever it can run one, as a new Personal Pip gets its computer by default."""
+    return computer_by_default()
+
+
+def has_box(pip: dict) -> bool:
+    """A Pip with its own box: a Personal Pip while its computer is set; a Pip in a project folder wherever this machine
+    runs boxes (it needs no computer plan, so every folder Pip has one from its next chat, with no new version)."""
+    if pip.get('source_policy') == {'mode': 'personal'}:
+        return pip.get('computer_plan') is not None
+    return folder_boxes()
 
 
 def _new_computer(personal: bool, asked) -> dict | None:
@@ -1554,6 +1592,10 @@ class PipStore:
                     manifest['computer_continuation'] = computer_continuation
             elif computer_continuation is not None:
                 raise RegistryError("invalid_run", "Only Personal Pips have a computer.")
+            elif run_kind == "conversation" and folder_boxes():
+                # A folder Pip's chat has its own box too, with a copy of its folder (pips-sandbox-design §10): the
+                # runner opens it; what it reads and writes on its snapshot is as before (tools, policy).
+                manifest['computer'] = {'schema_version': 1}
             if conversation_request is not None and 'chat_options' in conversation_request:
                 manifest['chat_options'] = conversation_request['chat_options']
             if standalone:
@@ -3085,7 +3127,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     keeps_notes = (personal and conversation is not None and manifest.get('user_turn') is True
                    and isinstance(conversation.get('text'), str))
     # A Pip with a computer uses it in its tasks and in its chat, where the user can watch it work.
-    computer_pin = manifest.get('computer_socket') if personal and kind in ('personal_task', 'conversation') else None
+    computer_pin = (manifest.get('computer_socket') if (kind in ('personal_task', 'conversation') if personal
+                                                         else kind == 'conversation') else None)   # (a folder Pip's chat too)
     apps_pin = manifest.get('app_socket') if personal and kind in ('personal_task', 'conversation') else None
     # 'desktop' (optional): its computer shows a whole desktop on this machine, so a Pip that sees gets its steps.
     if computer_pin is not None and (not isinstance(computer_pin, dict) or set(computer_pin) - {'desktop'} != {'socket', 'token'}
@@ -3464,6 +3507,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 schemas = [*schemas, OFFER_CHOICES]        # a folder Pip's chat offers buttons too (13 Nov)
             if chat_setup is not None and chat_setup['allowed']:
                 schemas = [*schemas, pip_chat_setup.schema(project=True)]   # and sets itself up in its chat (13 Nov)
+            if computer_pin is not None:                                    # its own box, with its folder's copy
+                schemas = [*schemas, pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None,
+                                                         eyes['convention'], desktop=computer_pin.get('desktop') is True)]
             if specialist_pin is not None:
                 return [pip_specialists.schema(specialist_pin['grant'])
                         if item.get('function', {}).get('name') == 'task' else item for item in schemas]
@@ -3655,6 +3701,14 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                                  'job/model/schedule changes to the user\'s reviewed settings flow.',
                                  'Change your own job only with draft_pip_change, when the user asks.'))
                     base_instructions += '\n' + pip_chat_setup.notice(direct=chat_setup['direct'], project=True)
+                if computer_pin is not None:
+                    base_instructions = base_instructions.replace(
+                        "You can inspect only a committed source snapshot; you cannot edit files, run commands/tests, "
+                        "fetch the web, delegate, ", _own_box_words(manifest.get('own_folder')) + " You cannot delegate, ")
+                    base_instructions += '\n' + pip_computer.NOTICE
+                    base_instructions += {'own': '\n' + pip_computer.EYES_NOTICE, 'relay': '\n' + pip_computer.RELAY_NOTICE}.get(self._pip_eyes(), '')
+                    if computer_pin.get('desktop') is True and self._pip_eyes() in ('own', 'relay'):
+                        base_instructions += '\n' + pip_computer.DESKTOP_NOTICE
             if specialist_pin is not None:
                 base_instructions = base_instructions.replace('network, delegate, load skills', 'network, load skills')
                 if self._pip_specialist_role:
@@ -3667,6 +3721,12 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             if source['source_policy']['mode'] == 'current_tree':
                 base_instructions = base_instructions.replace('committed-source snapshot', 'captured current-tree snapshot').replace('committed source snapshot', 'captured current-tree snapshot').replace('committed snapshot', 'captured current-tree snapshot').replace('or current working-tree changes were inspected', 'or a complete live working tree was inspected')
                 role_instructions = role_instructions.replace('committed source', 'captured source')
+            if computer_pin is not None and not personal:
+                # A Pip's type is its face and its starting voice, never a limit (his call, 13 Nov): a coding preset's
+                # "never run commands" is about the user's own folder, not the Pip's own box.
+                role_instructions += ('\nThese limits are about the user\'s real folder and workspace. In your own '
+                                      'computer (its Files, its Terminal, your copy of this project) you may edit files '
+                                      'and run commands and tests freely.')
             prompt = (base_instructions + "\n\n" + role_instructions
                       + "\nSnapshot root: " + str(self.config.project_root))
             if chat_options is not None:
@@ -3891,7 +3951,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     # turn's Allow card, which the controller checks against its own record.
                     connector_candidate = reply['draft']
                 return reply['text']
-            if personal and computer_pin is not None and call.name == pip_computer.TOOL:
+            if computer_pin is not None and call.name == pip_computer.TOOL:
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
                 op = str(arguments.get('op', ''))
                 question = arguments.get('question')
@@ -4939,7 +4999,8 @@ def _execute_run(registry, row, config):
         if row['requested_by'] in pip_careful.UNATTENDED and turn_text:
             from .pip_routines import split_turn
             taint.add(split_turn(registry, row['id'], turn_text)[1])    # the app items its turn carries
-    if personal and manifest.get('computer') is not None and manifest.get('run_kind') in ('personal_task', 'conversation'):
+    if manifest.get('computer') is not None and (manifest.get('run_kind') in ('personal_task', 'conversation') if personal
+                                                 else manifest.get('run_kind') == 'conversation'):
         from . import pip_careful
         careful = pip_careful.is_on(registry, row['pip_id'])
         # Every Personal Pip has its computer and the user's plugins, a routine's run too (0.52, D3): careful mode's
@@ -4949,6 +5010,11 @@ def _execute_run(registry, row, config):
         from . import pip_computer
         # Its computers (a Pip may have several, shared by its conversations): the run takes a free one (Pool).
         computer_host = pip_computer.pool_for(registry, row['pip_id'], row['workspace_id'])
+        if not personal:
+            # A folder Pip's own folder, in its box's Files before it starts: copied, brought up to date, or kept while
+            # its changes wait (pip_project_copies.own_folder). One that can't be copied is said, and the turn goes on.
+            from . import pip_project_copies
+            manifest = {**manifest, 'own_folder': pip_project_copies.own_folder(PipStore(registry), row['pip_id'])}
         # The user's own words this turn are theirs to type; a turn DGC wrote (a hello, a routine) is not.
         said = turn_text if manifest.get('user_turn') is True else ''
         if row['requested_by'] in pip_careful.UNATTENDED and turn_text:
