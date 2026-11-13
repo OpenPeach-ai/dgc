@@ -1,13 +1,11 @@
 // A Project Pip's "Reports to" picker with sessions that share a title (seen live, 12 Nov night: six "Say hello in
 // three words." and nothing to tell them apart), in real Chromium, dark and light, at 700 and 300 px. Each choice says
 // when its session is from, muted, at the row's right end, in the Work list's own words; the time never pushes the
-// title off its one line (a long title ends in an ellipsis before it), and the delete dialog's "Move it to another
-// session" list says the same after each title.
+// title off its one line (a long title ends in an ellipsis before it). (The delete dialog's "Move it to another
+// session" list said the same until 14 Nov, when deleting a session stopped asking about Pips.)
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { openOwnerPicker as openPicker } from "./support/pip-chat-scene.mjs";
-import { openHome } from "./support/home-scene.mjs";
-import { SESSION_PIPS_ASK, askSessionPips } from "./support/session-pips-scene.mjs";
 
 let chromium;
 try { ({ chromium } = await import("@playwright/test")); } catch { chromium = null; }
@@ -80,21 +78,5 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
       if (width === 300) assert.ok(long.titleCut, "at 300 px the long title gives way, not the time");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
-  });
-
-  test(`${theme} ${width}px: the delete dialog's Move list says when each same-titled session is from, inside the dialog`, async (t) => {
-    if (skipOrFail(t)) return;
-    const home = await openHome(browser, { width, height: 760, theme: `${theme}-modern`, tab: "work" });
-    try {
-      const pad = (n) => String(n).padStart(2, "0");
-      const ago = (minutes) => { const d = new Date(Date.now() - minutes * 60000); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
-      const sessions = [150, 26 * 60, 22 * 1440].map((m, i) => ({ id: `2026110${i + 1}-091200-b${i}`, title: "Say hello in three words.", when: ago(m) }));
-      await askSessionPips(home.page, { ...SESSION_PIPS_ASK, sessions });
-      const m = await home.page.evaluate(() => { const dialog = document.querySelector(".session-pips-dialog"), d = dialog.getBoundingClientRect(), select = dialog.querySelector(".session-pips-to"), s = select.getBoundingClientRect();
-        return { options: [...select.options].map((o) => o.textContent), inside: s.left >= d.left - 0.5 && s.right <= d.right + 0.5, box: [Math.round(d.left), Math.round(d.right)] }; });
-      assert.deepEqual(m.options, ["Say hello in three words. · 2h", "Say hello in three words. · 1d", "Say hello in three words. · 3w", "No session: their reports wait in the Pips view"]);
-      assert.ok(m.inside && m.box[0] >= 0 && m.box[1] <= width, "the list stays inside the dialog, and the dialog inside the window");
-      assert.deepEqual(home.errors, []);
-    } finally { await home.page.context().close(); }
   });
 }

@@ -123,7 +123,7 @@ body.pips-active #phead .pm { display:inline-flex; flex:1; align-self:center; }
 /* The side bar opens on this project's sessions; each opens in an editor tab. Laid over the chat the
    way the Pips are: everything but the header, the list, the announcer and the hover label hides. */
 /* (The dialog a session's delete opens when it owns Project Pips is this page's own: it shows over it.) */
-body.sessions-active > :not(#phead):not(#side-tabs):not(#sessions-host):not(#announcer):not(#hover-tip):not(#dgc-dock):not(.dgc-pop):not(.session-pips-dialog):not(script) { display:none !important; }
+body.sessions-active > :not(#phead):not(#side-tabs):not(#sessions-host):not(#announcer):not(#hover-tip):not(#dgc-dock):not(.dgc-pop):not(script) { display:none !important; }
 body.sessions-active #phead :is(.thread-title,.pd,.chat-add,.agent-back,.agent-mark) { display:none !important; }
 body.sessions-active #phead .pm { display:inline-flex; flex:1; align-self:center; }
 /* The side bar's top: the header row with DGC's wordmark (its slashes breathing), then the tabs (media/shared/tabs.css):
@@ -247,6 +247,24 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
   font:var(--w-reg) var(--t-sm)/1.3 var(--sans); cursor:pointer; transition:color var(--dur-hover) var(--ease-out), background-color var(--dur-hover) var(--ease-out); }
 #sessions-host .sessions-all[hidden] { display:none; }
 #sessions-host .sessions-all:hover { color:var(--text-strong); background:var(--btn-wash); }
+/* Archive (0.52). "Archived (N)" is View all's own quiet line, after it; the archived rows are the list's rows, which
+   open nothing (no pointer hand), with Restore and Delete where a row's actions are. */
+#sessions-host .sessions-archived-toggle { align-self:flex-start; margin:0 0 0 calc(-1 * var(--sp-1)); padding:var(--sp-1); border:0; border-radius:var(--btn-r); background:transparent; color:var(--muted);
+  font:var(--w-reg) var(--t-sm)/1.3 var(--sans); cursor:pointer; transition:color var(--dur-hover) var(--ease-out), background-color var(--dur-hover) var(--ease-out); }
+#sessions-host .sessions-archived-toggle[hidden], #sessions-host .sessions-archived[hidden], #sessions-host .sessions-note[hidden] { display:none; }
+#sessions-host .sessions-archived-toggle:hover, #sessions-host .sessions-archived-toggle[aria-expanded="true"] { color:var(--text-strong); }
+#sessions-host .sessions-archived-toggle:hover { background:var(--btn-wash); }
+#sessions-host .session-archived { cursor:default; }
+#sessions-host .session-restore { flex:none; display:inline-flex; align-items:center; justify-content:center; width:var(--control-sm); height:var(--control-sm);
+  padding:0; border:0; border-radius:var(--r-sm); background:transparent; color:var(--home-quiet); cursor:pointer; }
+#sessions-host .session-restore:hover { color:var(--text-strong); background:var(--wash); }
+#sessions-host :is(.session-restore, .sessions-archived-toggle, .sessions-note-undo):focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:-1px; }
+/* "Archived “Checkout”. Undo": one quiet line above the list, for a few seconds. Undo is a small B button. */
+#sessions-host .sessions-note { display:flex; align-items:center; gap:var(--sp-2); min-width:0; margin:0; color:var(--text-2); font:var(--w-reg) var(--t-sm)/1.5 var(--sans); }
+#sessions-host .sessions-note-words { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#sessions-host .sessions-note-undo { flex:none; box-sizing:border-box; height:var(--control-sm); margin:0; padding:0 var(--sp-2); border:1px solid var(--hair); border-radius:var(--btn-r); background:transparent;
+  color:var(--text-strong); font:var(--w-med) var(--t-sm)/1 var(--sans); cursor:pointer; transition:background-color var(--dur-hover) var(--ease-out); }
+#sessions-host .sessions-note-undo:hover { background:var(--btn-wash); }
 #sessions-host .home-work { position:relative; }
 /* The Project Folder dropdown (media/shared/folderpick.css) is on the Library row, at its right end, on Library's line
    (asked 12 Nov night): Library keeps its place and its size, and the dropdown takes what is left (its element drops the
@@ -3688,31 +3706,6 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .mod-bar-part { outl
 .auto-mode-buttons button:focus-visible { outline: 2px solid var(--vscode-focusBorder, #bdcaff); outline-offset: 3px; }
 @media (max-width: 480px) { .auto-mode-body { padding: 20px; } .auto-mode-buttons { padding: 0 20px 22px; } .auto-mode-heading h2 { font-size: 20px; } }
 
-/* A Work session's delete or archive, when it owns Project Pips (media/main.js showSessionPips): the Pips by face and
-   name, what becomes of them, and the two buttons. The shared dialog lift and the shared button; no colour of its own. */
-.session-pips-dialog { box-sizing: border-box; width: min(440px, calc(100vw - 28px)); max-height: calc(100vh - 28px); padding: 0; overflow: auto;
-  background: var(--vscode-editorWidget-background, var(--surface)); color: var(--text); font: var(--t-base)/1.5 var(--sans); }
-.session-pips-body { padding: var(--sp-5) var(--sp-5) var(--sp-4); }
-.session-pips-body h2 { margin: 0 0 var(--sp-2); color: var(--text-strong); font: var(--w-semi) var(--t-base)/1.35 var(--sans); overflow-wrap: anywhere; }
-.session-pips-intro { margin: 0 0 var(--sp-3); color: var(--text-2); overflow-wrap: anywhere; }
-.session-pips-list { list-style: none; margin: 0 0 var(--sp-3); padding: var(--sp-1) var(--sp-2); border: 1px solid var(--hair); border-radius: var(--r-md); max-height: 168px; overflow-y: auto; scrollbar-width: thin; }
-.session-pips-list li { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; min-height: 30px; }
-.session-pips-face { flex: none; display: grid; place-items: center; width: 22px; height: 22px; }
-.session-pips-face .dgc-plush { width: 100%; height: 100%; }
-.session-pips-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-strong); }
-.session-pips-choices { display: grid; gap: var(--sp-2); min-width: 0; margin: 0; padding: 0; border: 0; }
-.session-pips-choices legend { padding: 0; margin-bottom: var(--sp-2); color: var(--text-strong); font-weight: var(--w-med, 500); }
-.session-pips-choice { display: flex; align-items: flex-start; gap: var(--sp-2); min-width: 0; cursor: pointer; }
-.session-pips-choice input { flex: none; width: 14px; height: 14px; margin: 3px 0 0; accent-color: var(--text-strong); }
-.session-pips-choice span { min-width: 0; overflow-wrap: anywhere; }
-.session-pips-to { box-sizing: border-box; width: calc(100% - 22px); min-width: 0; height: 28px; margin-left: 22px; padding: 0 var(--sp-2);
-  color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-sm); text-overflow: ellipsis; }
-.session-pips-to:disabled { opacity: .55; }
-/* (A delete's own red, as a menu's Delete row wears it: --del-text. Work's .danger is the error olive.) */
-.session-pips-buttons button.act.danger { color: var(--del-text); }
-body.vscode-light .session-pips-buttons button.act.danger { color: #B4232C; }   /* --del-text is lifted for dark grounds: on a light one it reads at 2.7:1 */
-.session-pips-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-2); padding: 0 var(--sp-5) var(--sp-5); }
-@media (max-width: 480px) { .session-pips-body { padding: var(--sp-4) var(--sp-4) var(--sp-3); } .session-pips-buttons { padding: 0 var(--sp-4) var(--sp-4); } }
 
 /* Small, event-driven reactions. A list refresh or a saved transcript does not replay them. */
 #sessions-host .session-row[data-motion-state="working"] .session-windowless::before {

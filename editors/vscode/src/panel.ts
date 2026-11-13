@@ -27,7 +27,7 @@ import { McpBrowserRequest, editorIsRemote, handSignInBack, openMcpBrowser } fro
 import { routerCommand } from "./routerCommands";
 import { imagesCommand, MAX_WORKFLOW_CHARS } from "./imagesCommands";
 import { allowFromJobs, handleVideoMessage, VIDEO_MESSAGES } from "./videoHost";
-import { PipsEditor, openEngineSignIn, workSessionTitles, type OwnedPip, type ProjectWork, type WorkSessionTitle } from "./pipsView";
+import { PipsEditor, openEngineSignIn, workSessionTitles, type ProjectWork, type WorkSessionTitle } from "./pipsView";
 import { mcpAppsHost } from "./mcpApps";
 import { PLUGIN_ID, pluginLogoData, pluginLogoSource, type PluginLogoItem } from "./pluginLogos";
 import { pipsAttention, PipsAttentionState } from "./pipsAttention";
@@ -1520,6 +1520,19 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       error = err?.message || (folders ? "DGC could not list your sessions." : "DGC could not list this project's sessions.");
     }
     if (request !== this.sessionsRequest) { return; }
+    // The archived ones (a DGC that archives): the same folder choice and the same search, 200 at a time. They are
+    // listed at the list's end, under "Archived (N)"; a DGC that can't say lists none.
+    let archived: any[] = [];
+    if (this.sessionArchiveCapable()) {
+      try {
+        const choice = folders ? this.folderChoice(folders) : "";
+        const response = await this.sessionArchive("list", "", { ...(folders ? this.sessionsOf(choice) : {}),
+          limit: this.archivedShown + 1, ...(this.sessionsQuery ? { query: this.sessionsQuery } : {}) }, 30000);
+        archived = Array.isArray(response.items) ? response.items : [];
+      } catch { archived = []; }
+      if (request !== this.sessionsRequest) { return; }
+    }
+    this.archivedItems = archived;
     this.folderRowsShown = folders;
     this.postSessionItems(items, error);
     // Which of them a backend is still running with no window: the list marks them, and the marks
@@ -1688,7 +1701,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const folders = this.folderRowsShown, choice = folders ? this.folderChoice(folders) : "";
     // Where each of another folder's sessions belongs: what opening one here goes by (never what the page says).
     this.sessionsElsewhere.clear();
+    // The archived sessions (a DGC that archives): each with its name, its age and, with the dropdown, its folder.
+    // This window's folder's can be restored or deleted from here; another folder's only says its name.
+    const canArchive = this.sessionArchiveCapable();
+    const archivedRows = !canArchive ? [] : this.archivedItems.slice(0, this.archivedShown).map((item) => {
+      const id = path.basename(String(item?.path || "")).replace(/\.json$/i, "");
+      const project = folders ? fullFolder(item?.project) : "", elsewhere = !!project && item?.here === false;
+      return { id, name: String(item?.name || ""), preview: String(item?.preview || ""), when: String(item?.when || ""), count: Number(item?.count) || 0,
+               ...(project ? { project: homeAsTilde(project), projectPath: project, projectName: String(item?.project_name || basename(project) || project).slice(0, 200), ...(elsewhere ? { here: false } : {}) } : {}) };
+    }).filter((item) => /^[A-Za-z0-9_-]{1,128}$/.test(item.id));
+    if (canArchive) { this.archivedHere = new Set(archivedRows.filter((item) => (item as any).here !== false).map((item) => item.id)); }
     this.post({ type: "sessions_list", error, searchable: paging, query: paging ? this.sessionsQuery : "", more: items.length > shown,
+      ...(canArchive ? { archive: true, archived: { items: archivedRows, more: this.archivedItems.length > this.archivedShown } } : {}),
       ...(this.workNews.size ? { news: [...this.workNews].map(([id, reply]) => ({ id, at: reply.at, preview: reply.preview })) } : {}),
       // The dropdown: what is chosen and the folders to choose from; one folder's path is named once, above the list.
       // (This window's folder too, listed or not: New Session's dialog opens on it.)
@@ -1790,6 +1814,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const pin = dockOf(this.context).pins().find((item) => item.key === key);
     if (!pin) { return; }
     if (pin.kind === "work") {
+      // An archived session keeps its place on the dock (it is back as it was after Restore), and opens nothing meanwhile.
+      if (this.isArchivedHere(pin.id)) {
+        void vscode.window.showInformationMessage("That session is archived. Restore it from Archived, at the end of the Work list, to open it.");
+        return;
+      }
       // Another folder's session, pinned on All projects (13 Nov): in a tab here, running in its own folder, also when
       // the list no longer shows that folder. A folder that is gone opens nothing and says so (openSessionElsewhere).
       const folder = typeof pin.ref?.folder === "string" ? pin.ref.folder : "";
@@ -1826,18 +1855,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       void vscode.window.showInformationMessage("That session is open in a tab. Close its tab first, then delete it.");
       return;
     }
-    // The Project Pips it is the owner of (Pips API 89): its dialog names them and asks what becomes of them, and is
-    // the confirmation. A session that owns none is confirmed as it always was.
-    const owned = await this.ownedPips(id);
-    if (owned.length) {
-      if (!await this.settleSessionPips(id, title, owned, "delete")) { return; }
-    } else {
-      const DELETE = "Delete";
-      const choice = await vscode.window.showWarningMessage(
-        `Delete the session “${title || id}”? Its conversation is removed from this project, and this can't be undone.`,
-        { modal: true }, DELETE);
-      if (choice !== DELETE) { return; }
-    }
+    // (It never asks about Pips: a session owns none any more, 14 Nov.)
+    const DELETE = "Delete";
+    const choice = await vscode.window.showWarningMessage(
+      `Delete the session “${title || id}”? Its conversation is removed from this project, and this can't be undone.`,
+      { modal: true }, DELETE);
+    if (choice !== DELETE) { return; }
     try {
       const response = await this.requestState(this.ensureBackend(), "sessions", { type: "delete_session", path: `${id}.json` }, "sessions", 10000);
       if ((response as any).deleted === false) {
@@ -1854,22 +1877,92 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  // ---- a session's Project Pips (their owner session, Pips API 89) --------------------------------
+  // ---- Archive (0.52, 13 Nov; DGC's capability session_archive) --------------------------------------
+  // A Work session's "…" archives it at once, with no question (it can be undone): the page then says so with Undo.
+  // It never asks about Pips, and nothing of a Pip is archived or restored with it (14 Nov: a session owns none).
 
-  /** The Project Pips this session is the owner of. None when Pips can't be read: the session is then deleted or
-   *  archived as it always was. */
-  private async ownedPips(id: string): Promise<OwnedPip[]> {
-    try { return await this.ensurePipsBridge().sessionPips(id); } catch { return []; }
+  /** This DGC archives sessions (archive_session, list_sessions {archived}, delete_session {archived}). */
+  private sessionArchiveCapable(): boolean {
+    return this.lastReadyEvent?.capabilities?.session_archive === true;
+  }
+  /** Archive's four commands, sent only to a DGC that declared session_archive (an older one would refuse them whole;
+   *  test/cli-compat.test.mjs holds this guard in place). `more`: the list's folder scope and search. */
+  private sessionArchive(what: "archive" | "restore" | "delete" | "list", id: string, more: Record<string, unknown> = {}, timeoutMs = 10000): Promise<DgcEvent> {
+    if (!this.sessionArchiveCapable()) { return Promise.reject(new Error("This DGC can't archive sessions yet. Update DGC, then try again.")); }
+    const command = what === "list" ? { type: "list_sessions", archived: true, ...more }
+      : what === "delete" ? { type: "delete_session", path: `${id}.json`, archived: true }
+      : what === "restore" ? { type: "archive_session", path: `${id}.json`, archived: false }
+      : { type: "archive_session", path: `${id}.json` };
+    return this.requestState(this.ensureBackend(), "sessions", command, what === "archive" || what === "restore" ? "session_archived" : "sessions", timeoutMs);
+  }
+  /** The archived sessions as last listed, and how many are asked for (200 at a time). */
+  private archivedItems: any[] = [];
+  private archivedShown = 200;
+  /** This window's folder's archived sessions, as DGC last listed them, and the ones archived from here (Undo comes
+   *  before the list is read again): what Restore and Delete go by, never what the page says. */
+  private archivedHere = new Set<string>();
+  private archivedFromHere = new Set<string>();
+  private isArchivedHere(id: string): boolean { return this.archivedHere.has(id) || this.archivedFromHere.has(id); }
+
+  private async archiveSessionFromHome(id: string, title: string): Promise<void> {
+    if (!this.places || !/^[A-Za-z0-9_-]{1,128}$/.test(id) || !this.sessionArchiveCapable()) { return; }
+    // As Delete: for this window's folder's sessions, and never one that is open in a tab.
+    if (this.sessionsElsewhere.has(id)) { return; }
+    if (this.places.openSessions().has(id)) {
+      void vscode.window.showInformationMessage("That session is open in a tab. Close its tab first, then archive it.");
+      return;
+    }
+    try {
+      await this.sessionArchive("archive", id);
+    } catch (err: any) {
+      void vscode.window.showWarningMessage(err?.message || "DGC could not archive that session.");
+      return;
+    }
+    this.archivedFromHere.add(id);
+    this.post({ type: "sessions_note", kind: "archived", id, title: (title || id).slice(0, 200) });
+    void this.postSessions();
   }
 
-  /** The project's other sessions, by the titles the Work list shows: where a session's Pips can be moved to. Each
-   *  with when it is from (DGC's `when`), which tells same-titled sessions apart; what is offered is unchanged. */
+  /** Undo, and Restore on an archived row: the session is back in the list as it was. */
+  private async restoreSessionFromHome(id: string): Promise<void> {
+    if (!this.places || !this.isArchivedHere(id) || !this.sessionArchiveCapable()) { return; }
+    try {
+      await this.sessionArchive("restore", id);
+    } catch (err: any) {
+      void vscode.window.showWarningMessage(err?.message || "DGC could not restore that session.");
+      return;
+    }
+    this.archivedHere.delete(id); this.archivedFromHere.delete(id);
+    void this.postSessions();
+  }
+
+  private async deleteArchivedSessionFromHome(id: string, title: string): Promise<void> {
+    if (!this.places || !this.isArchivedHere(id) || !this.sessionArchiveCapable()) { return; }
+    const DELETE = "Delete";
+    const choice = await vscode.window.showWarningMessage(
+      `Delete the archived session “${title || id}”? Its conversation is removed, and this can't be undone.`, { modal: true }, DELETE);
+    if (choice !== DELETE) { return; }
+    try {
+      const response = await this.sessionArchive("delete", id);
+      if ((response as any).deleted === false) { void vscode.window.showWarningMessage("DGC could not delete that archived session."); }
+      else { this.archivedHere.delete(id); this.archivedFromHere.delete(id); void dockOf(this.context).forget("work", id); }     // it leaves the dock, and its colour goes with it
+    } catch (err: any) {
+      void vscode.window.showErrorMessage(err?.message || "DGC could not delete that archived session.");
+    }
+    void this.postSessions();
+  }
+
+  // ---- the sessions a Project Pip can report to ---------------------------------------------------
+
+  /** The project's other sessions, by the titles the Work list shows. Each with when it is from (DGC's `when`), which
+   *  tells same-titled sessions apart. One with nothing in it and no name is said to be empty (never offered as an
+   *  owner); one that has a name and nothing in it yet is a session like any other (13 Nov). */
   private async otherSessions(id: string): Promise<WorkSessionTitle[]> {
     try {
       const response = await this.requestState(this.ensureBackend(), "sessions", { type: "list_sessions" }, "sessions", 10000);
       return workSessionTitles((Array.isArray(response.items) ? response.items : []).map((item: any) => ({
         id: path.basename(String(item?.path || "")).replace(/\.json$/i, ""),
-        title: String(item?.name || item?.preview || ""), when: item?.when, ...(item?.count === 0 ? { empty: true } : {}) }))).filter((item) => item.id !== id).slice(0, 200);
+        title: String(item?.name || item?.preview || ""), when: item?.when, ...(item?.count === 0 && !String(item?.name || "").trim() ? { empty: true } : {}) }))).filter((item) => item.id !== id).slice(0, 200);
     } catch { return []; }
   }
 
@@ -1883,93 +1976,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const response = await this.requestState(this.ensureBackend(), "sessions", { type: "list_sessions", ...this.sessionsOf(folder), limit: 500 }, "sessions", 10000);
       return workSessionTitles((Array.isArray(response.items) ? response.items : []).filter((item: any) => item?.project === folder).map((item: any) => ({
         id: path.basename(String(item?.path || "")).replace(/\.json$/i, ""),
-        // (Said empty as this window's are: the owner picker offers a session that has something in it.)
-        title: String(item?.name || item?.preview || ""), when: item?.when, ...(item?.count === 0 ? { empty: true } : {}) }))).slice(0, 200);
+        // (Said empty as this window's are: the owner picker offers a session that has something in it, or a name.)
+        title: String(item?.name || item?.preview || ""), when: item?.when, ...(item?.count === 0 && !String(item?.name || "").trim() ? { empty: true } : {}) }))).slice(0, 200);
     } catch { return []; }
-  }
-
-  private sessionPipsAsk?: { id: string; settle: (answer: { choice: string; to?: string }) => void };
-
-  /** The page's dialog for a session that owns Project Pips: what becomes of them. Resolves with its one answer
-   *  (Cancel when the page can't show it, or after five minutes). */
-  private askSessionPips(mode: "delete" | "archive", title: string, owned: OwnedPip[], sessions: Array<{ id: string; title: string }>): Promise<{ choice: string; to?: string }> {
-    this.sessionPipsAsk?.settle({ choice: "cancel" });
-    return new Promise((resolve) => {
-      const id = randomBytes(16).toString("hex");
-      const timer = setTimeout(() => settle({ choice: "cancel" }), 5 * 60_000);
-      (timer as any).unref?.();
-      const settle = (answer: { choice: string; to?: string }) => {
-        if (this.sessionPipsAsk?.id !== id) { return; }
-        this.sessionPipsAsk = undefined;
-        clearTimeout(timer);
-        this.post({ type: "sessionPipsDismiss", requestId: id });
-        resolve(answer);
-      };
-      this.sessionPipsAsk = { id, settle };
-      this.post({ type: "sessionPipsAsk", requestId: id, mode, title,
-        pips: owned.map((pip) => ({ id: pip.id, name: pip.name, pip_type: pip.pip_type })), sessions });
-    });
-  }
-
-  /** Ask, then do what was chosen for the Pips a session owns. True: the delete (or archive) goes on. False: it was
-   *  cancelled, or a Pip could not be moved or deleted, which is said and leaves the session where it is. */
-  private async settleSessionPips(id: string, title: string, owned: OwnedPip[], mode: "delete" | "archive"): Promise<boolean> {
-    const sessions = (await this.otherSessions(id)).filter((item) => !item.empty);   // never into a session with nothing in it
-    const answer = await this.askSessionPips(mode, title || id, owned, sessions);
-    return this.applySessionPips(answer, owned, sessions, mode);
-  }
-
-  private async applySessionPips(answer: { choice: string; to?: string }, owned: OwnedPip[], sessions: Array<{ id: string; title: string }>,
-    mode: "delete" | "archive"): Promise<boolean> {
-    try {
-      if (answer.choice === "keep" && mode === "archive") { return true; }
-      if (answer.choice === "move") {
-        const to = String(answer.to ?? "");
-        if (to && !sessions.some((item) => item.id === to)) { return false; }
-        await this.ensurePipsBridge().moveSessionPips(owned, to || null);
-        return true;
-      }
-      if (answer.choice === "delete" && mode === "delete") { await this.ensurePipsBridge().deleteSessionPips(owned); return true; }
-      return false;
-    } catch (err: any) {
-      void vscode.window.showWarningMessage(`The session was not ${mode === "delete" ? "deleted" : "archived"}. ${err?.message || "DGC couldn't change its Pips."}`);
-      return false;
-    }
-  }
-
-  /** Before a Work session is archived: the same question, where "Keep them here" (the default) changes nothing: they
-   *  come back when it is restored. True: archive it. (Nothing archives a Work session yet; this is its question.) */
-  async sessionPipsBeforeArchive(id: string, title: string): Promise<boolean> {
-    if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) { return false; }
-    const owned = await this.ownedPips(id);
-    return owned.length ? this.settleSessionPips(id, title, owned, "archive") : true;
-  }
-
-  /** The same question where there is no page to ask it on (a tab's list of sessions): the editor's own dialogs. */
-  private async settleSessionPipsNatively(id: string, title: string, owned: OwnedPip[]): Promise<boolean> {
-    const one = owned.length === 1, them = one ? "it" : "them";
-    const MOVE = `Move ${them} to another session`, DELETE = `Delete ${them} too`;
-    const names = owned.slice(0, 12).map((pip) => pip.name).join(", ") + (owned.length > 12 ? ` and ${owned.length - 12} more` : "");
-    const choice = await vscode.window.showWarningMessage(
-      `“${title || id}” is the owner of ${owned.length} Project ${one ? "Pip" : "Pips"}: ${names}. ${one ? "Its" : "Their"} reports come to it. What becomes of ${them} when it is deleted?`,
-      { modal: true }, MOVE, DELETE);
-    const sessions = (await this.otherSessions(id)).filter((item) => !item.empty);   // never into a session with nothing in it
-    if (choice === MOVE) {
-      const NONE = "No session";
-      const pick: any = await vscode.window.showQuickPick(
-        [...sessions.map((item) => ({ label: item.title, id: item.id })), { label: NONE, id: "", detail: `${one ? "Its" : "Their"} reports wait in the Pips view` }],
-        { placeHolder: `The session to move ${them} to` });
-      return pick ? this.applySessionPips({ choice: "move", to: String(pick.id || "") }, owned, sessions, "delete") : false;
-    }
-    if (choice === DELETE) {
-      const SURE = "Delete permanently";
-      const sure = await vscode.window.showWarningMessage(one
-        ? `Delete ${owned[0].name} permanently? This erases its chat, runs, computer files, what it kept in your memory, saved sign-ins used only by this Pip, Pip-created artifacts and audit receipts. It also removes references to this Pip from other Pips. This cannot be undone.`
-        : `Delete ${owned.length} Pips permanently? This erases each one’s chat, runs, computer files, what it kept in your memory, saved sign-ins used only by that Pip, Pip-created artifacts and audit receipts. It also removes references to them from other Pips. This cannot be undone.`,
-        { modal: true }, SURE);
-      return sure === SURE ? this.applySessionPips({ choice: "delete" }, owned, sessions, "delete") : false;
-    }
-    return false;
   }
 
   // ---- chat slots ------------------------------------------------------------------------------
@@ -5840,13 +5849,6 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     if (msg?.type === "videoJobs") { this.videosJobs(String(msg.job || "")); return; }
-    if (msg?.type === "sessionPipsAnswer") {
-      // The page's one answer to what becomes of a session's Project Pips; only the question now open is answered.
-      if (this.sessionPipsAsk && msg.requestId === this.sessionPipsAsk.id) {
-        this.sessionPipsAsk.settle({ choice: String(msg.choice || "cancel"), ...(typeof msg.to === "string" ? { to: msg.to } : {}) });
-      }
-      return;
-    }
     if (msg?.type === "autoModeAnswer") {
       if (this.autoModePrompt && msg.requestId === this.autoModePrompt.id) {
         this.autoModePrompt.settle(msg.accepted === true && !this.sessionElsewhere);
@@ -6033,12 +6035,24 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "sessionsSearch":
         if (this.home) {
           this.sessionsQuery = String(msg.query ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
-          this.sessionsShown = 200;
+          this.sessionsShown = 200; this.archivedShown = 200;
           void this.postSessions();
         }
         return;
       case "sessionsMore":
         if (this.home) { this.sessionsShown = Math.min(this.sessionsShown + 200, 4800); void this.postSessions(); }
+        return;
+      case "archiveSession":
+        if (this.home) { await this.archiveSessionFromHome(String(msg.id ?? ""), String(msg.title ?? "")); }
+        return;
+      case "restoreSession":
+        if (this.home) { await this.restoreSessionFromHome(String(msg.id ?? "")); }
+        return;
+      case "deleteArchivedSession":
+        if (this.home) { await this.deleteArchivedSessionFromHome(String(msg.id ?? ""), String(msg.title ?? "")); }
+        return;
+      case "sessionsArchivedMore":
+        if (this.home) { this.archivedShown = Math.min(this.archivedShown + 200, 4800); void this.postSessions(); }
         return;
       case "newChatInFolder": {
         void this.newChatInFolder();
@@ -7869,10 +7883,6 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     render();
     return new Promise<void>((resolve) => {
       qp.onDidTriggerItemButton(async (e) => {           // trash icon → delete + refresh the list
-        // The Project Pips it owns are asked about first (Pips API 89); Cancel keeps the session.
-        const sessionId = path.basename(String((e.item as any).path || "")).replace(/\.json$/i, "");
-        const owned = await this.ownedPips(sessionId);
-        if (owned.length && !await this.settleSessionPipsNatively(sessionId, String((e.item as any).label || ""), owned)) { return; }
         items = await listSessions({ type: "delete_session", path: (e.item as any).path });
         if (folders) { items = await listSessions(listing); }
         if (!items.length) { qp.hide(); resolve(); return; }

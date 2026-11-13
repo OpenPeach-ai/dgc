@@ -265,8 +265,9 @@ test("commands wait for a process that is starting, and an older CLI says so", a
   host.outcome = "sent";
   host.models = { ids: ["qwen3:32b", "fixture"], current: "fixture" };
   chat.backendReady();
-  assert.deepEqual(sent.map((c) => c.type), ["chatdgc_open", "chatdgc_projects", "chatdgc_list", "chatdgc_projects"],
-                   "the tab's held commands sent once it was ready, each once; then the home's list, asked afresh");
+  // (The home's refresh asks for the archived chats too, before its list, since Archive's list came to the Chat page.)
+  assert.deepEqual(sent.map((c) => [c.type, c.archived === true]), [["chatdgc_open", false], ["chatdgc_projects", false], ["chatdgc_list", true], ["chatdgc_list", false], ["chatdgc_projects", false]],
+                   "the tab's held commands sent once it was ready, each once; then the home's lists, asked afresh");
   await new Promise((r) => setImmediate(r));
   assert.deepEqual(panel.last("models"), { type: "models", ids: ["qwen3:32b", "fixture"], current: "fixture" },
                    "a tab opened before the backend was ready gets its models then, so the picker shows the model");
@@ -2167,4 +2168,45 @@ test("the home's Chat list says which chats are watched: their tab in front, in 
     assert.ok(sent.filter((c) => c.type === "chatdgc_list").length > mid, "the focus coming back refreshes the home's list");
     assert.deepEqual(listNow().watched, [ID(7)]);
   } finally { globalThis.__DGC_TEST_VSCODE.window.state.focused = true; }
+});
+
+// ---- Archive for chats, the home's side (0.52, 13 Nov): a chat's "…" on the Chat list archives it, the page is told
+// so it can offer Undo, and the archived chats are listed with the list (chatdgc_list {archived: true}), each with
+// Restore (chatdgc_update {archived: false}) and Delete (as any chat's).
+test("the home's Chat list: Archive from a row, Undo, and the archived chats with Restore and Delete", async () => {
+  chat.homeRefresh();
+  const lists = () => sent.filter((c) => c.type === "chatdgc_list");
+  const archivedAsk = lists().find((c) => c.archived === true);
+  assert.deepEqual({ ...archivedAsk, request_id: "" }, { type: "chatdgc_list", archived: true, limit: 50, request_id: "" });
+  assert.equal(last("chatdgc_list").archived, undefined, "the list itself is asked for as it was");
+  chat.onEvent({ type: "chatdgc_chats", request_id: archivedAsk.request_id, total: 61, next_offset: 50,
+    chats: [{ id: ID(3), title: "Old trip", archived: true, updated_at: "2026-10-01T09:00:00Z" }, { id: "../x", title: "bad" }] });
+  assert.deepEqual(host.home.at(-1), { type: "chatdgc_archived", total: 61, more: true, items: [{ id: ID(3), title: "Old trip", archived: true, updated_at: "2026-10-01T09:00:00Z" }] });
+  // Archive: its tab closes, DGC is told, and the page can offer Undo.
+  chat.open(ID(7));
+  world.panels[0].say({ type: "ready" }); opened(world.panels[0], { id: ID(7), title: "Open one" });
+  assert.equal(await chat.homeMessage({ type: "chatdgcArchive", id: ID(7), title: "Open one" }), true);
+  assert.deepEqual({ ...last("chatdgc_update"), request_id: "" }, { type: "chatdgc_update", conversation_id: ID(7), archived: true, request_id: "" });
+  assert.equal(world.panels[0].disposedCount, 1, "its tab closes, as the chat's own menu closes it");
+  assert.deepEqual(host.home.at(-1), { type: "chatdgc_note", kind: "archived", id: ID(7), title: "Open one" });
+  assert.deepEqual(world.warnings, [], "no question: it can be undone");
+  // Undo (the one just archived) and Restore (one DGC listed as archived).
+  await chat.homeMessage({ type: "chatdgcRestore", id: ID(7), title: "Open one" });
+  assert.deepEqual({ ...last("chatdgc_update"), request_id: "" }, { type: "chatdgc_update", conversation_id: ID(7), archived: false, request_id: "" });
+  await chat.homeMessage({ type: "chatdgcRestore", id: ID(3), title: "Old trip" });
+  assert.equal(last("chatdgc_update").conversation_id, ID(3));
+  const before = sent.filter((c) => c.type === "chatdgc_update").length;
+  await chat.homeMessage({ type: "chatdgcRestore", id: ID(9), title: "Never listed" });
+  await chat.homeMessage({ type: "chatdgcArchive", id: "../x", title: "bad" });
+  assert.equal(sent.filter((c) => c.type === "chatdgc_update").length, before, "never an id the page made up");
+  // More of them, and a search looks through them too.
+  await chat.homeMessage({ type: "chatdgcArchivedMore" });
+  assert.equal(lists().filter((c) => c.archived).at(-1).limit, 100);
+  await chat.homeMessage({ type: "chatdgcSearch", query: "trip" });
+  assert.deepEqual([lists().filter((c) => c.archived).at(-1).query, lists().filter((c) => c.archived).at(-1).limit], ["trip", 50]);
+  // Delete of an archived one asks first, as any chat's does.
+  world.answer = "Delete";
+  await chat.homeMessage({ type: "chatdgcDelete", id: ID(3), title: "Old trip" });
+  assert.deepEqual({ ...last("chatdgc_update"), request_id: "" }, { type: "chatdgc_update", conversation_id: ID(3), delete: true, request_id: "" });
+  assert.equal(world.warnings.length, 1);
 });

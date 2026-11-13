@@ -1,11 +1,9 @@
 // Pictures of a Project Pip's owner session (0.52), dark and light, at 700 and 300 px: the "Reports to" row on its
-// Settings page, the picker Change opens, and the dialog a Work session's delete (four Pips) and archive open.
+// Settings page and the picker Change opens. (The dialog a Work session's delete and archive opened is gone, 14 Nov.)
 //   node test/render-owners.mjs [OUT_DIR]
 import { mkdirSync } from "node:fs";
 import { chromium } from "@playwright/test";
 import { openChat, PIP } from "./support/pip-chat-scene.mjs";
-import { openHome } from "./support/home-scene.mjs";
-import { SESSION_PIPS_ASK, askSessionPips } from "./support/session-pips-scene.mjs";
 
 const out = process.argv[2] || "owners-shots";
 mkdirSync(out, { recursive: true });
@@ -26,18 +24,5 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
   await x.p.screenshot({ path: `${out}/reports-to-picker-${theme}-${width}.png` });
   console.log(`${out}/reports-to-${theme}-${width}.png`, x.errors.length ? x.errors : "");
   await x.close();
-  for (const mode of ["delete", "archive"]) {
-    const home = await openHome(browser, { width, height: 760, theme: `${theme}-modern`, tab: "work" });
-    await askSessionPips(home.page, { ...SESSION_PIPS_ASK, mode });
-    await home.page.screenshot({ path: `${out}/${mode}-dialog-${theme}-${width}.png` });
-    if (mode === "delete") {
-      await home.page.click('.session-pips-dialog input[value="delete"]');
-      await home.page.click(".session-pips-dialog .session-pips-confirm");
-      await settle(home.page);
-      await home.page.screenshot({ path: `${out}/delete-dialog-sure-${theme}-${width}.png` });
-    }
-    console.log(`${out}/${mode}-dialog-${theme}-${width}.png`, home.errors.length ? home.errors : "");
-    await home.close();
-  }
 }
 await browser.close();

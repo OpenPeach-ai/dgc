@@ -731,7 +731,7 @@
   // list under it showing through. Taken out 13 Nov.) The search field and the dropdown above are the only ones.
   // A search from the tab's own box still lists everything it found.
   const SESSIONS_SHOWN = 6;
-  let sessionItems = [], sessionsMoreToLoad = false, sessionsExpanded = false, lastSessions = null;
+  let sessionItems = [], sessionsMoreToLoad = false, sessionsExpanded = false, lastSessions = null, sessionsArchive = false;
   // The Project Folder dropdown (0.52, media/shared/folderpick.js): "All projects" or one folder, one choice the host
   // keeps for every window (it also filters the Pips view's Project tab and Needs attention). The host says what is
   // chosen and the folders to choose from with each list; a DGC that lists none has no dropdown (projectFolders null).
@@ -921,7 +921,9 @@
     // All projects it could not be pinned); a gone folder's, nothing.
     if (gone) { /* nothing to do with it from here */ }
     else if (elsewhere) { if (window.DgcDock) actions.append(open, pinButton(pinItem), moreButton("work", item.id, title, open_, pinItem)); else actions.append(open); }
-    else if (window.DgcDock) actions.append(open, pinButton(pinItem), moreButton("work", item.id, title, open_, pinItem), remove);
+    // Archive (in its "…") is, as Delete, for this window's folder's sessions, on a DGC that archives.
+    else if (window.DgcDock) actions.append(open, pinButton(pinItem), moreButton("work", item.id, title, open_, pinItem,
+      sessionsArchive ? () => vscode.postMessage({ type: "archiveSession", id: item.id, title }) : null), remove);
     else actions.append(open, remove);
     end.append(age);
     if (!gone) end.append(actions);
@@ -974,6 +976,7 @@
     const query = sessionsSearchable ? String(msg.query || "") : sessionsFilter, wanted = query.toLowerCase();
     const items = sessionsSearchable || !wanted ? every : every.filter((item) => sessionTitle(item).toLowerCase().includes(wanted));
     sessionItems = every; sessionsMoreToLoad = msg.more === true;
+    sessionsArchive = msg.archive === true;        // this DGC archives sessions: a row's "…" has Archive
     if (search && sessionsSearchable && document.activeElement !== search) search.value = query;
     if (search) search.setAttribute("aria-label", !projectFolders ? "Search this project's sessions: names and everything said"
       : chosen ? `Search the sessions in ${chosen}: names and everything said` : "Search every project’s sessions: names and everything said");
@@ -999,8 +1002,122 @@
     all.textContent = sessionsExpanded ? "Show fewer" : `View all (${items.length}${sessionsMoreToLoad ? "+" : ""})`;
     all.setAttribute("aria-expanded", String(sessionsExpanded));
     all.title = sessionsExpanded ? "Back to the newest six" : !projectFolders ? "Every session in this project, listed here" : chosen ? `Every session in ${chosen}, listed here` : "Every session in every project, listed here";
+    // The archived ones belong to the whole list: at its end once every session is listed (View all, a search, or a
+    // list short enough to show whole). Each says its folder on All projects; another folder's offers only its name.
+    const kept = sessionsArchive && msg.archived && Array.isArray(msg.archived.items) ? msg.archived.items.filter((item) => item && /^[A-Za-z0-9_-]{1,128}$/.test(String(item.id || ""))).slice(0, 5000) : [];
+    const everywhere = !!projectFolders && !projectFolders.choice;
+    paintArchived("work", all, { shown: !!query || sessionsExpanded || all.hidden, count: `${kept.length}${msg.archived?.more === true ? "+" : ""}`, more: msg.archived?.more === true,
+      rows: kept.map((item) => { const title = sessionTitle(item), here = !(projectFolders && item.here === false);
+        return { id: item.id, title, age: sessionAge(item.when), when: [item.when, plural(Number(item.count) || 0, "message")].filter(Boolean).join(" · "), born: window.DgcMarks?.born(item.id, item.when),
+          ...(everywhere && typeof item.project === "string" && item.project ? { path: [item.project, item.projectPath || item.project] } : {}),
+          ...(here ? { restore: () => vscode.postMessage({ type: "restoreSession", id: item.id, title }), remove: () => vscode.postMessage({ type: "deleteArchivedSession", id: item.id, title }) } : {}) }; }) });
     if (dock) paintDock();                 // a pinned session's name and what it is doing now
     paintHub();
+  }
+  // ---- Archive (0.52, 13 Nov). A session's (and a chat's) "…" archives it at once: it can be undone, so nothing is
+  // asked, and the page says so on one quiet line with Undo for a few seconds. The archived ones are at the list's end
+  // under "Archived (N)": the same rows (mark, name, its folder on All projects, age), each with Restore and Delete.
+  // Archiving or deleting a session never asks about Pips (14 Nov: a session owns none; the dialog that asked is gone).
+  const ARCHIVE_WORDS = { chat: { prefix: "chats", list: "Archived chats", restore: "Restore this chat", restoreLabel: "Restore chat", remove: "Delete this archived chat", removeLabel: "Delete archived chat", more: "Show more", moreTitle: "Show more of your archived chats", moreType: "chatdgcArchivedMore" },
+    work: { prefix: "sessions", list: "Archived sessions", restore: "Restore this session", restoreLabel: "Restore session", remove: "Delete this archived session", removeLabel: "Delete archived session", more: "Load more", moreTitle: "Show 200 more archived sessions", moreType: "sessionsArchivedMore" } };
+  const archivedOpen = { work: false, chat: false };
+  let lastArchived = {};
+  /** "Archived “Checkout”. Undo", above the list `before`; it goes after a few seconds (not while it is pointed at or
+   *  holds the keyboard), or with its Undo. */
+  function archivedNote(id, before, title, undo) {
+    let note = $(id);
+    if (!note) { note = el("p", "sessions-note"); note.id = id; note.setAttribute("role", "status"); before.before(note); }
+    clearTimeout(note._timer);
+    const words = el("span", "sessions-note-words"); words.textContent = `Archived “${title}”.`;
+    const button = el("button", "sessions-note-undo"); button.type = "button"; button.textContent = "Undo";
+    button.title = "Bring it back to the list"; button.setAttribute("aria-label", `Undo: restore “${title}”`);
+    const gone = () => { clearTimeout(note._timer); note.hidden = true; note.replaceChildren(); };
+    const later = () => { if (note.matches(":hover") || note.contains(document.activeElement)) note._timer = setTimeout(later, 2000); else gone(); };
+    button.onclick = () => { gone(); undo(); };
+    note.replaceChildren(words, " ", button); note.hidden = false;
+    note._timer = setTimeout(later, 8000);
+  }
+  function sessionArchivedNote(msg) {
+    const id = String(msg.id || ""), title = String(msg.title || "").replace(/\s+/g, " ").trim().slice(0, 200) || "Untitled session";
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(id) || !$("sessions-list")) return;
+    archivedNote("sessions-note", $("sessions-list"), title, () => vscode.postMessage({ type: "restoreSession", id, title }));
+  }
+  // Chats (ChatDGC): the same line and the same list at the Chat list's end. The host says how many there are (`total`).
+  let chatsArchived = { items: [], total: 0, more: false };
+  function chatArchivedNote(msg) {
+    const id = String(msg.id || ""), title = String(msg.title || "").replace(/\s+/g, " ").trim().slice(0, 200) || "New chat";
+    if (!id || !$("chats-list")) return;
+    archivedNote("chats-note", $("chats-status") || $("chats-list"), title, () => vscode.postMessage({ type: "chatdgcRestore", id, title }));
+  }
+  function paintChatsArchived() {
+    const after = $("chats-more") || $("chats-list");
+    if (!after) return;
+    const items = chatsArchived.items;
+    paintArchived("chat", after, { shown: chatsAvailable, count: String(Math.max(chatsArchived.total, items.length)), more: chatsArchived.more,
+      rows: items.map((item) => { const id = String(item.id), title = String(item.title || "New chat");
+        return { id, title, age: chatAge(item.updated_at), when: chatWhen(item.updated_at), born: window.DgcMarks?.born("", item.created_at || item.updated_at),
+          restore: () => vscode.postMessage({ type: "chatdgcRestore", id, title }), remove: () => vscode.postMessage({ type: "chatdgcDelete", id, title }) }; }) });
+  }
+  function renderChatsArchived(msg) {
+    chatsArchived = { items: (Array.isArray(msg.items) ? msg.items : []).filter((item) => item && typeof item.id === "string" && item.id).slice(0, 500), total: Number(msg.total) || 0, more: msg.more === true };
+    paintChatsArchived();
+  }
+  /** "Archived (N)", the list it opens and its Load more: made once, after `after` (the list's last control). */
+  function archivedParts(kind, after) {
+    const W = ARCHIVE_WORDS[kind];
+    let toggle = $(`${W.prefix}-archived-toggle`);
+    if (toggle) return { toggle, list: $(`${W.prefix}-archived`), more: $(`${W.prefix}-archived-more`) };
+    toggle = el("button", "sessions-archived-toggle"); toggle.id = `${W.prefix}-archived-toggle`; toggle.type = "button"; toggle.hidden = true;
+    toggle.setAttribute("aria-expanded", "false"); toggle.setAttribute("aria-controls", `${W.prefix}-archived`);
+    const list = el("ul", "sessions-list sessions-archived"); list.id = `${W.prefix}-archived`; list.hidden = true; list.setAttribute("aria-label", W.list);
+    const more = el("button", "sessions-more"); more.id = `${W.prefix}-archived-more`; more.type = "button"; more.hidden = true; more.title = W.moreTitle;
+    more.onclick = () => { more.disabled = true; more.textContent = "Loading…"; vscode.postMessage({ type: W.moreType }); };
+    toggle.onclick = () => { archivedOpen[kind] = !archivedOpen[kind]; if (lastArchived[kind]) paintArchived(kind, after, lastArchived[kind]); };
+    after.after(toggle, list, more);
+    return { toggle, list, more };
+  }
+  /** One archived session or chat: the list's own row, which opens nothing; Restore and Delete where it is yours to. */
+  function archivedRow(kind, item) {
+    const W = ARCHIVE_WORDS[kind];
+    const row = el("li", "session-row session-archived"); row.tabIndex = 0; row.dataset.id = item.id;
+    const main = el("div", "session-main"), name = el("span", "session-name"); name.textContent = item.title; name.title = item.title;
+    main.append(name);
+    if (item.path) main.append(pathLine("session-path", item.path[0], item.path[1]));
+    const end = el("span", "session-end"), age = el("span", "session-age"); age.textContent = item.age; age.title = item.when;
+    end.append(age);
+    let remove = null;
+    if (item.restore && item.remove) {
+      const actions = el("span", "session-actions");
+      const restore = sessionButton("session-restore", "discard", item.restore);
+      restore.title = W.restore; restore.setAttribute("aria-label", `${W.restoreLabel}: ${item.title}`);
+      remove = sessionButton("session-delete", "trash", item.remove);
+      remove.title = W.remove; remove.setAttribute("aria-label", `${W.removeLabel}: ${item.title}`);
+      actions.append(restore, remove); end.append(actions);
+    }
+    row.append(blobSpan(kind, item.id, false), main, end);
+    row.onkeydown = (e) => {
+      if (e.target !== row) return;
+      if (e.key === "Delete") { e.preventDefault(); remove?.click(); }
+      else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); (e.key === "ArrowDown" ? row.nextElementSibling : row.previousElementSibling)?.focus(); }
+    };
+    return row;
+  }
+  /** Draw "Archived (N)" and, open, its rows. state: { shown, count, more, rows: [{ id, title, age, when, born, path?, restore?, remove? }] }. */
+  function paintArchived(kind, after, state) {
+    const W = ARCHIVE_WORDS[kind], { toggle, list, more } = archivedParts(kind, after);
+    lastArchived[kind] = state;
+    const any = state.shown && state.rows.length > 0, open = any && archivedOpen[kind];
+    toggle.hidden = !any;
+    toggle.textContent = `Archived (${state.count})`;
+    toggle.title = open ? "Hide the archived ones" : "Show the archived ones: restore one, or delete it for good";
+    toggle.setAttribute("aria-expanded", String(open));
+    list.hidden = !open;
+    more.hidden = !(open && state.more); more.disabled = false; more.textContent = W.more;
+    if (!open) { list.replaceChildren(); return; }
+    const focused = list.contains(document.activeElement) ? document.activeElement.closest(".session-row")?.dataset.id : undefined;
+    wearMarks(kind, state.rows.map((row) => ({ id: row.id, born: row.born })));
+    list.replaceChildren(...state.rows.map((row) => archivedRow(kind, row)));
+    if (focused) [...list.children].find((row) => row.dataset.id === focused)?.focus();
   }
   /** "View all (N)" / "Show fewer": made once, at the list's end (after Load more). A click lists every session in
    *  place, or goes back to the six and to the list's top. The keyboard stays on the button. */
@@ -1071,21 +1188,23 @@
   const folderPinItem = (folder) => ({ kind: "folder", id: window.DgcFolderPick?.folderId(folder) || "", title: folderName(folder), ref: { folder: String(folder || "") } });
   const folderDocked = (folder) => !!folder && !!window.DgcFolderPick && isDocked("folder", window.DgcFolderPick.folderId(folder));
   function toggleFolderPin(folder) { const item = folderPinItem(folder); if (item.id && item.ref.folder) vscode.postMessage({ type: "dockToggle", item }); }
-  /** A session's or a chat's "...": Open in editor, Pin to the dock, and its twelve colours. */
-  function rowMenu(button, kind, id, title, open, item, keyboard) {
+  /** A session's or a chat's "...": Open in editor, Pin to the dock, Archive (where it can be: `archive`), and its
+   *  twelve colours. */
+  function rowMenu(button, kind, id, title, open, item, keyboard, archive) {
     const pinned = isDocked(kind, id);
     window.DgcBlob?.popup(button, { keyboard, label: title, place: "below",
-      rows: [{ id: "open", label: "Open in editor", icon: "open" }, { id: "pin", label: pinned ? "Unpin from the dock" : "Pin to the dock", icon: pinned ? "unpin" : "pin" }],
+      rows: [{ id: "open", label: "Open in editor", icon: "open" }, { id: "pin", label: pinned ? "Unpin from the dock" : "Pin to the dock", icon: pinned ? "unpin" : "pin" },
+        ...(archive ? [{ id: "archive", label: "Archive", icon: "archive" }] : [])],
       colour: { kind, ...colourOf(kind, id) },
-      onPick: (what) => { if (what === "open") open(); else vscode.postMessage({ type: "dockToggle", item }); },
+      onPick: (what) => { if (what === "open") open(); else if (what === "archive") archive?.(); else vscode.postMessage({ type: "dockToggle", item }); },
       onColour: (n) => vscode.postMessage({ type: "dockColour", key: dockKey(kind, id), colour: n }) });
   }
-  function moreButton(kind, id, title, open, item) {
+  function moreButton(kind, id, title, open, item, archive) {
     const button = el("button", "session-more"); button.type = "button";
     button.innerHTML = window.DgcMenu?.DOTS || "…";
-    button.title = "More: pin it, or change its colour"; button.setAttribute("aria-label", `More for ${title}`);
+    button.title = archive ? "More: pin it, archive it, or change its colour" : "More: pin it, or change its colour"; button.setAttribute("aria-label", `More for ${title}`);
     button.setAttribute("aria-haspopup", "menu"); button.setAttribute("aria-expanded", "false");
-    button.onclick = (e) => { e.stopPropagation(); if (button.getAttribute("aria-expanded") === "true") window.DgcBlob?.close(true); else rowMenu(button, kind, id, title, open, item, e.detail === 0); };
+    button.onclick = (e) => { e.stopPropagation(); if (button.getAttribute("aria-expanded") === "true") window.DgcBlob?.close(true); else rowMenu(button, kind, id, title, open, item, e.detail === 0, archive); };
     button.ondblclick = (e) => e.stopPropagation();
     return button;
   }
@@ -1318,6 +1437,7 @@
       if (item.id === focused) row.focus();
     }
     renderProjects();
+    paintChatsArchived();
     if (dock) paintDock();                 // a pinned chat's name and whether it is answering
     paintHub();
   }
@@ -1368,7 +1488,8 @@
     // Pin it to the dock, and "..." for its colour, beside Delete.
     const pinItem = { kind: "chat", id: String(item.id || ""), title };
     const acts = el("span", "session-actions chat-acts");
-    if (window.DgcDock) acts.append(pinButton(pinItem), moreButton("chat", pinItem.id, title, openIt, pinItem), remove); else acts.append(remove);
+    // (Archive is in its "…": the chat leaves the list, and is under "Archived (N)" at the list's end.)
+    if (window.DgcDock) acts.append(pinButton(pinItem), moreButton("chat", pinItem.id, title, openIt, pinItem, () => vscode.postMessage({ type: "chatdgcArchive", id: pinItem.id, title })), remove); else acts.append(remove);
     end.append(acts);
     row.append(blobSpan("chat", pinItem.id, answering), main, end);
     row.onclick = (e) => { if (e.detail < 2) openIt(); };
@@ -2106,84 +2227,6 @@
     // Focused here, not by an autofocus attribute: VS Code's webview is a cross-origin frame, where Chromium refuses
     // autofocus with a console error ("Blocked autofocusing on a <button> element in a cross-origin subframe.").
     dialog.querySelector(".auto-mode-cancel").focus();
-  }
-  // Deleting or archiving a Work session that is the owner of Project Pips (0.52, asked 12 Nov; Pips API 89). The host
-  // asks (sessionPipsAsk: the session's title, its Pips, the project's other sessions); this names the Pips, each with
-  // its face, and answers once (sessionPipsAnswer). Delete: move them to another session, or delete them too, behind
-  // the Pips view's own words for a permanent delete. Archive: keep them here (the default), or move them.
-  let sessionPipsDialog = null;
-  function closeSessionPips(answer) {
-    const current = sessionPipsDialog;
-    if (!current) return;
-    sessionPipsDialog = null;
-    current.dialog.remove();
-    if (current.focus?.isConnected) current.focus.focus();
-    if (answer) vscode.postMessage({ type: "sessionPipsAnswer", requestId: current.id, ...answer });
-  }
-  function showSessionPips(message) {
-    closeSessionPips({ choice: "cancel" });
-    const pips = (Array.isArray(message.pips) ? message.pips : []).filter((p) => p && typeof p.name === "string" && p.name).slice(0, 200);
-    if (typeof message.requestId !== "string" || !/^[a-f0-9]{32}$/.test(message.requestId) || !["delete", "archive"].includes(message.mode)
-      || !pips.length || pips.length !== (message.pips || []).length || pips.some((p) => !/^pip_[0-9a-f]{32}$/.test(String(p.id || "")))) return;
-    const archive = message.mode === "archive", n = pips.length, one = n === 1;
-    const sessions = (Array.isArray(message.sessions) ? message.sessions : []).filter((s) => s && /^[A-Za-z0-9_-]{1,128}$/.test(String(s.id || "")) && typeof s.title === "string").slice(0, 500);
-    const title = String(message.title || "").replace(/\s+/g, " ").trim().slice(0, 200) || "this session";
-    const dialog = document.createElement("dialog");
-    dialog.className = "session-pips-dialog dgc-dialog";
-    dialog.setAttribute("aria-labelledby", "session-pips-title");
-    dialog.setAttribute("aria-describedby", "session-pips-intro");
-    const types = window.DgcMentions?.PIP_TYPES || [];
-    const face = (p, i) => { const index = types.indexOf(p.pip_type);
-      return index >= 0 && window.PipConcepts?.plush ? window.PipConcepts.plush.markup({ index, name: p.name }, "idle", `sessionPip${i}`) : ""; };
-    const list = `<ul class="session-pips-list" aria-label="${one ? "The Project Pip it owns" : "The Project Pips it owns"}">${pips.map((p, i) =>
-      `<li><span class="session-pips-face" aria-hidden="true">${face(p, i)}</span><span class="session-pips-name" title="${esc(p.name)}">${esc(p.name)}</span></li>`).join("")}</ul>`;
-    const them = one ? "it" : "them";
-    // Sessions with the same title are told apart by when each is from (12 Nov night), in the Work list's words;
-    // only the host's own date and time is read.
-    const sessionWhen = (s) => (typeof s.when === "string" && /^\d{4}-\d\d-\d\d[ T]\d\d:\d\d/.test(s.when) ? sessionAge(s.when) : "");
-    const state = { step: "ask", choice: archive ? "keep" : "move", to: sessions[0]?.id || "" };
-    const paint = () => {
-      if (state.step === "sure") {
-        dialog.innerHTML = `<div class="session-pips-body"><h2 id="session-pips-title">${one ? `Delete ${esc(pips[0].name)} permanently?` : `Delete ${n} Pips permanently?`}</h2>
-          <p id="session-pips-intro" class="session-pips-intro">${one
-    ? "This erases its chat, runs, computer files, what it kept in your memory, saved sign-ins used only by this Pip, Pip-created artifacts and audit receipts. It also removes references to this Pip from other Pips. This cannot be undone."
-    : "This erases each one’s chat, runs, computer files, what it kept in your memory, saved sign-ins used only by that Pip, Pip-created artifacts and audit receipts. It also removes references to them from other Pips. This cannot be undone."}</p>
-          ${list}</div><div class="session-pips-buttons"><button type="button" class="act session-pips-back">Back</button><button type="button" class="act wide danger session-pips-confirm">Delete permanently</button></div>`;
-        dialog.querySelector(".session-pips-back").onclick = () => { state.step = "ask"; paint(); dialog.querySelector(".session-pips-confirm").focus(); };
-        dialog.querySelector(".session-pips-confirm").onclick = () => closeSessionPips({ choice: "delete" });
-        return;
-      }
-      const option = (value, words) => `<label class="session-pips-choice"><input type="radio" name="session-pips-choice" value="${value}"${state.choice === value ? " checked" : ""}><span>${words}</span></label>`;
-      const picker = `<select class="session-pips-to" aria-label="The session to move ${them} to"${state.choice === "move" ? "" : " disabled"}>${sessions.map((s) =>
-        `<option value="${esc(s.id)}"${s.id === state.to ? " selected" : ""}>${esc(s.title.replace(/\s+/g, " ").trim().slice(0, 200) || "Untitled session")}${sessionWhen(s) ? ` · ${esc(sessionWhen(s))}` : ""}</option>`).join("")}<option value=""${state.to ? "" : " selected"}>No session: ${one ? "its" : "their"} reports wait in the Pips view</option></select>`;
-      const move = option("move", `Move ${them} to another session`) + picker;
-      dialog.innerHTML = `<div class="session-pips-body"><h2 id="session-pips-title">${archive ? "Archive" : "Delete"} “${esc(title)}”?</h2>
-        <p id="session-pips-intro" class="session-pips-intro">This session is the owner of ${n} Project ${one ? "Pip" : "Pips"}. ${one ? "Its" : "Their"} reports come to it.${archive ? "" : " Its conversation is removed from this project, and this can’t be undone."}</p>
-        ${list}<fieldset class="session-pips-choices"><legend>What becomes of ${them}?</legend>${archive
-    ? option("keep", `Keep ${them} here; ${one ? "it comes" : "they come"} back when you restore it`) + move
-    : move + option("delete", `Delete ${them} too`)}</fieldset></div>
-        <div class="session-pips-buttons"><button type="button" class="act session-pips-cancel">Cancel</button><button type="button" class="act wide ${archive ? "primary" : "danger"} session-pips-confirm">${archive ? "Archive session" : "Delete session"}</button></div>`;
-      const to = dialog.querySelector(".session-pips-to");
-      to.onchange = () => { state.to = to.value; };
-      dialog.querySelectorAll('input[name="session-pips-choice"]').forEach((input) => { input.onchange = () => { if (!input.checked) return; state.choice = input.value; to.disabled = state.choice !== "move"; }; });
-      dialog.querySelector(".session-pips-cancel").onclick = () => closeSessionPips({ choice: "cancel" });
-      dialog.querySelector(".session-pips-confirm").onclick = () => {
-        state.to = to.value;
-        if (state.choice === "delete") { state.step = "sure"; paint(); dialog.querySelector(".session-pips-back").focus(); return; }
-        closeSessionPips(state.choice === "move" ? { choice: "move", to: state.to } : { choice: "keep" });
-      };
-    };
-    sessionPipsDialog = { dialog, id: message.requestId, focus: document.activeElement };
-    paint();
-    dialog.addEventListener("cancel", (e) => { e.preventDefault(); closeSessionPips({ choice: "cancel" }); });
-    dialog.addEventListener("keydown", (e) => {
-      e.stopPropagation();
-      if (e.key === "Escape") { e.preventDefault(); closeSessionPips({ choice: "cancel" }); }
-    });
-    document.body.appendChild(dialog);
-    if (typeof dialog.showModal === "function") dialog.showModal(); else dialog.setAttribute("open", "");
-    // (Focused here, not by autofocus: see the Auto-mode dialog.)
-    dialog.querySelector(".session-pips-cancel").focus();
   }
   function cycleMode() { setMode(MODE_ORDER[(MODE_ORDER.indexOf(curMode) + 1) % MODE_ORDER.length]); }
   function hideModeMenu() { $("modemenu").hidden = true; $("btn-mode").setAttribute("aria-expanded", "false"); }
@@ -12963,8 +13006,7 @@ function permissionChoices(ev) {
     if (window.DgcVideo?.message(msg)) return;     // a video's bytes, its state or its Stop (src/videoHost.ts)
     if (window.DgcPictureFold?.message(msg)) return;   // which pictures stay folded, and the setting
     if (msg?.type === "autoModePrompt") { showAutoModePrompt(msg); return; }
-    if (msg?.type === "sessionPipsAsk") { showSessionPips(msg); return; }
-    if (msg?.type === "sessionPipsDismiss") { if (msg.requestId === sessionPipsDialog?.id) closeSessionPips(); return; }
+    if (msg?.type === "sessions_note") { if (chatPlace === "home" && msg.kind === "archived") sessionArchivedNote(msg); return; }
     if (msg?.type === "autoModeDismiss") {
       if (msg.requestId === autoModeDialog?.id) closeAutoModePrompt();
       return;
@@ -13011,6 +13053,8 @@ function permissionChoices(ev) {
     if (msg.type === "dock") { onDock(msg); return; }
     if (msg.type === "sessions_list") { if (chatPlace === "home") renderSessions(msg); return; }
     if (msg.type === "chatdgc_list") { if (chatPlace === "home") renderChats(msg); return; }
+    if (msg.type === "chatdgc_archived") { if (chatPlace === "home") renderChatsArchived(msg); return; }
+    if (msg.type === "chatdgc_note") { if (chatPlace === "home" && msg.kind === "archived") chatArchivedNote(msg); return; }
     if (msg.type === "chatdgc_projects") {
       if (chatPlace !== "home") return;
       projects = Array.isArray(msg.projects) ? msg.projects : [];

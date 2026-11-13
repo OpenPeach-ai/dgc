@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Archive Work sessions and chats.** Archive is in a session's or chat's "…" menu; one quiet line says it with Undo for a few seconds. "Archived (N)" at the end of the list opens them, each with Restore and Delete (Delete asks first; it can't be undone). Archiving or deleting a session never asks about Pips: sessions no longer own Pips.
 - **One kind of Pip.** The Pips view is one list: Core first, then the Pip with the latest news; each row says "Personal" or its folder; search on top and a filter (All Pips, Personal, each folder) under it. **New Pip** asks for a character, a name and a folder line (pre-filled from where you are), no goal: tell it in its chat. Every Pip has the same page and chat; a Pip with a folder shows its computer and its change cards like any other.
 - **The level picker is in every Pip's chat box**, and choosing Do it all shows what it allows first, with Continue or Cancel.
 - **A Pip talks about what it found, in its own chat**: its words, then the findings (each opening its file at its line), then, at Ask me first, one Allow card to fix them ("Fix 3 things in toni_fabrics"), with "Start a helper with Work tools" in its menu. A fix in progress shows its steps; a ready fix waits as a change card (Apply, Review, Discard); an applied one says whether it is committed, with Undo and "Commit these files". What only you can do is pinned at the top of its chat. Needs attention gains Allow and Apply. (These need a DGC with Pips API 96.)

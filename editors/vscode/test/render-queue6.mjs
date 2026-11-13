@@ -5,8 +5,6 @@
 import { mkdirSync } from "node:fs";
 import { chromium } from "@playwright/test";
 import { openOwnerPicker } from "./support/pip-chat-scene.mjs";
-import { openHome } from "./support/home-scene.mjs";
-import { SESSION_PIPS_ASK, askSessionPips } from "./support/session-pips-scene.mjs";
 import { GARDEN, openPips } from "./support/project-folder-pips-scene.mjs";
 
 const out = process.argv[2] || "queue6-shots";
@@ -24,16 +22,7 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
   await x.p.screenshot({ path: `${out}/owner-picker-${theme}-${width}.png` });
   said("owner-picker", x.errors);
   await x.close();
-  // 2. The delete dialog: its Move list as it opens (closed, the first session chosen), and the same list held open
-  //    for the picture alone (a select's own popup is the system's and no screenshot has it).
-  const home = await openHome(browser, { width, height: 760, theme: `${theme}-modern`, tab: "work" });
-  await askSessionPips(home.page, { ...SESSION_PIPS_ASK, sessions: SESSIONS });
-  await home.page.screenshot({ path: `${out}/delete-move-${theme}-${width}.png` });
-  await home.page.evaluate(() => { const to = document.querySelector(".session-pips-to"); to.size = to.options.length; to.style.height = "auto"; });
-  await settle(home.page);
-  await home.page.screenshot({ path: `${out}/delete-move-list-held-open-${theme}-${width}.png` });
-  said("delete-move", home.errors);
-  await home.close();
+  // (2. was the delete dialog's Move list: deleting a session no longer asks about Pips, 14 Nov.)
   // 3. The Project tab on one folder, then 4. New Pip from it.
   const p = await openPips(browser, { theme: `${theme}-modern`, width, height: 760, choice: GARDEN });
   await settle(p.page);

@@ -20,6 +20,7 @@
     pip: '<path d="M8 2.2c2.6 2 4.7 4.3 4.7 7A4.7 4.7 0 0 1 3.3 9.2c0-2.7 2.1-5 4.7-7z"/><path d="M6.3 9.3v1M9.7 9.3v1"/>',
     settings: '<circle cx="8" cy="8" r="2"/><path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M3.6 12.4l1.2-1.2M11.2 4.8l1.2-1.2"/>',
     trash: '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/>',
+    archive: '<path d="M2 3.5h12v3H2zM3.2 6.5V13h9.6V6.5M6.5 9.2h3"/>',
     reset: '<path d="M3 8a5 5 0 1 0 1.6-3.7M3 3v2.8h2.8"/>',
   };
   const icon = (name, filled = false) => `<svg viewBox="0 0 16 16" width="15" height="15" fill="${filled ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`;

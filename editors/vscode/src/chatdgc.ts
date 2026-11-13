@@ -1487,6 +1487,14 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           else if (asker.tab) this.post(asker.tab, { type: "projectChats", project: asker.project, items, total: Number(ev.total) || 0 });
           return;
         }
+        if (asker?.kind === "archivedList") {
+          // The archived chats, for "Archived (N)" at the Chat list's end: what Restore goes by is kept here.
+          this.requests.delete(requestId);
+          const items = (Array.isArray(ev.chats) ? ev.chats : []).filter((chat: any) => CONVERSATION_ID.test(String(chat?.id || "")));
+          this.archivedListed = new Set(items.map((chat: any) => String(chat.id)));
+          this.host?.postHome({ type: "chatdgc_archived", total: Number(ev.total) || 0, more: ev.next_offset !== null && ev.next_offset !== undefined, items });
+          return;
+        }
         if (asker?.home) {
           this.requests.delete(requestId);
           const chats = Array.isArray(ev.chats) ? ev.chats : [];
@@ -2696,7 +2704,15 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
 
   // -- the home's Chat list
 
+  /** The archived chats as last listed, the ones archived from the list since (Undo comes before the next listing),
+   *  and how many are asked for. */
+  private archivedListed = new Set<string>();
+  private archivedFromHome = new Set<string>();
+  private archivedShown = HOME_PAGE;
+
   homeRefresh(): void {
+    // (The archived ones first: the list itself stays the last thing asked.)
+    this.ask({ home: true, kind: "archivedList" }, { type: "chatdgc_list", archived: true, limit: this.archivedShown, ...(this.homeQuery ? { query: this.homeQuery } : {}) });
     this.ask({ home: true, kind: "list" }, { type: "chatdgc_list", limit: this.homeShown, ...(this.homeQuery ? { query: this.homeQuery } : {}) });
     this.ask({ home: true, kind: "projects" }, { type: "chatdgc_projects" });
   }
@@ -2766,6 +2782,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "chatdgcSearch":
         this.homeQuery = String(message.query || "").slice(0, 200);
         this.homeShown = this.homeQuery ? HOME_PAGE : HOME_FIRST;
+        this.archivedShown = HOME_PAGE;
         this.homeRefresh();
         return true;
       case "chatdgcMore":
@@ -2799,6 +2816,28 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         }
         return true;
       }
+      case "chatdgcArchive": {
+        // Archive from a chat's "…" on the list: as its own menu's Archive (its tab closes). No question: Undo is offered.
+        const id = String(message.id || "");
+        if (!CONVERSATION_ID.test(id)) return true;
+        for (const tab of [...this.tabs]) { if (tab.conversation === id) tab.panel.dispose(); }
+        this.archivedFromHome.add(id);
+        this.ask({ kind: "update" }, { type: "chatdgc_update", conversation_id: id, archived: true });
+        this.host?.postHome({ type: "chatdgc_note", kind: "archived", id, title: String(message.title || "").replace(/\s+/g, " ").trim().slice(0, 200) || "New chat" });
+        return true;
+      }
+      case "chatdgcRestore": {
+        // Undo, and Restore on an archived chat's row: only one DGC listed as archived, or archived from here.
+        const id = String(message.id || "");
+        if (!CONVERSATION_ID.test(id) || !(this.archivedListed.has(id) || this.archivedFromHome.has(id))) return true;
+        this.archivedListed.delete(id); this.archivedFromHome.delete(id);
+        this.ask({ kind: "update" }, { type: "chatdgc_update", conversation_id: id, archived: false });
+        return true;
+      }
+      case "chatdgcArchivedMore":
+        this.archivedShown = Math.min(200, this.archivedShown + HOME_PAGE);
+        this.homeRefresh();
+        return true;
       case "chatdgcDelete": {
         const id = String(message.id || "");
         if (!CONVERSATION_ID.test(id)) return true;
