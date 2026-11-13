@@ -154,7 +154,9 @@ class PipCheckpointTests(unittest.TestCase):
         self.assertNotIn("resolved", json.dumps(second))
         self.assertNotIn("fixed", json.dumps(second))
         _, third = self.complete([self.finding("Different title"), self.finding(path="renamed.py"), self.finding(evidence="return changed")])
-        self.assertEqual(third["counts"]["repeated"], 0)
+        # (13 Nov: the same file and quoted code are the same finding whatever its title; a model rewords titles,
+        # and every repeat counted as new. Another file or other code is still another finding.)
+        self.assertEqual([item["comparison"] for item in third["findings"]], ["repeated", "new", "new"])
 
     def test_duplicate_prior_occurrences_are_not_silently_deduplicated(self):
         _, first = self.complete([self.finding(), self.finding()])

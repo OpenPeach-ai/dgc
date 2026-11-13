@@ -175,9 +175,35 @@ def _run(store, run_id):
 
 
 def _identity(finding):
-    # Severity and line numbers can change without changing the exact assessment.
+    # Severity and line numbers can change without changing the exact assessment. (A reworded title is matched as a
+    # repeat by _reworded below, never by dropping the title here: two different issues can quote the same line.)
     source = {key: finding[key] for key in ("path", "evidence", "title")}
     return hashlib.sha256(_encoded(source, MAX_PAYLOAD_BYTES)).hexdigest()
+
+
+def _issue(finding) -> tuple:
+    return (finding.get("path"), " ".join(str(finding.get("evidence") or "").split()))
+
+
+def _reworded(current: list, prior: list) -> dict:
+    """{current index: prior identity} for current findings that only reword a prior one (13 Nov: a model rewords its
+    titles, so every repeat counted as new and cards said "earlier: 0"). A current finding pairs with a prior one when
+    its exact identity is new, the prior one's is not reported again, and both quote the same code at the same path,
+    as the digest pairs them (pip_digest). A second issue on a line whose first issue is still reported is new."""
+    current_ids = {item["identity"] for item in current}
+    prior_ids = {item.get("identity") for item in prior}
+    missing: dict = {}
+    for item in prior:
+        if item.get("identity") not in current_ids:
+            missing.setdefault(_issue(item), []).append(item.get("identity"))
+    pairs = {}
+    for index, item in enumerate(current):
+        if item["identity"] in prior_ids:
+            continue
+        bucket = missing.get(_issue(item))
+        if bucket:
+            pairs[index] = bucket.pop(0)
+    return pairs
 
 
 def _finding_id(run_id, index):
@@ -533,6 +559,13 @@ def record_completed(store, run, result):
         occurrences.append({**finding, "finding_id": _finding_id(source["id"], index), "finding_index": index,
                             "identity": identity, "comparison": "uncompared" if version2 and not comparable
                             else "repeated" if identity in previous else "new"})
+    reworded = {}
+    if previous_occurrences and not (version2 and not comparable):
+        reworded = _reworded(occurrences, (prior or {}).get("findings") or [])
+        for index in reworded:
+            occurrences[index]["comparison"] = "repeated"          # the same issue, its title worded anew
+        previous_occurrences = [i for i in previous_occurrences if i not in set(reworded.values())] + list(
+            occurrences[index]["identity"] for index in reworded)
     repeated = sum(item["comparison"] == "repeated" for item in occurrences)
     current_identities = {item["identity"] for item in occurrences}
     value = {"run_id": source["id"], "pip_id": source["pip_id"], "workspace_id": source["workspace_id"],

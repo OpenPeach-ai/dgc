@@ -60,9 +60,12 @@ class CheckpointSourcesTests(unittest.TestCase):
             self.assertEqual(checkpoints.for_run(PipStore(reopened), run), result)
 
     def test_same_tree_policy_compares_exact_occurrences_across_snapshots(self):
-        _, first = self.complete([self.finding(), self.finding('Missing next time')], manifest_changes=self.tree_changes())
+        # (A finding is its file and quoted code since 13 Nov, never its title: different findings quote different code.)
+        _, first = self.complete([self.finding(), self.finding('Missing next time', evidence='return missing')],
+                                 manifest_changes=self.tree_changes())
         changes = self.tree_changes(); changes['source_snapshot']['sha256'] = 'c' * 64
-        _, second = self.complete([self.finding(line=12), self.finding('Another')], manifest_changes=changes)
+        _, second = self.complete([self.finding(line=12), self.finding('Another', evidence='return another')],
+                                  manifest_changes=changes)
         self.assertEqual(second['comparison'], {'status': 'compared', 'reason': None, 'previous_checkpoint_id': first['id']})
         self.assertEqual(second['baseline_checkpoint_id'], first['id'])
         self.assertEqual(second['counts'], {'total': 2, 'new': 1, 'repeated': 1, 'not_observed': 1})

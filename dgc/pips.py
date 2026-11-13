@@ -1592,9 +1592,11 @@ class PipStore:
                     manifest['computer_continuation'] = computer_continuation
             elif computer_continuation is not None:
                 raise RegistryError("invalid_run", "Only Personal Pips have a computer.")
-            elif run_kind == "conversation" and folder_boxes():
-                # A folder Pip's chat has its own box too, with a copy of its folder (pips-sandbox-design §10): the
-                # runner opens it; what it reads and writes on its snapshot is as before (tools, policy).
+            elif run_kind in ("conversation", "audit", "draft") and handoff is None and not current_tree and folder_boxes():
+                # A folder Pip has its own box, with a copy of its folder (pips-sandbox-design §10): every run of it
+                # that reads the project, scheduled ones too, reads that copy, your current files without what Git
+                # ignores (pips-findings-fixes-plan A: committed code alone re-reported fixes never committed). Its
+                # chat also gets the box's computer; its tools and policy on what it reads are as before.
                 manifest['computer'] = {'schema_version': 1}
             if conversation_request is not None and 'chat_options' in conversation_request:
                 manifest['chat_options'] = conversation_request['chat_options']
@@ -3742,6 +3744,14 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                         'All specialists share this run budget and private snapshot; no background or nested work. '
                         'Explorer/Critic are read-only; Worker has only the reviewed write paths.')
                 role_instructions += '\nExact reviewed action (no additional powers):\n' + _json(action)
+            own_copy = manifest.get('own_folder')
+            if not personal and isinstance(own_copy, dict) and own_copy.get('folder') and not own_copy.get('error'):
+                # It reads its box copy, the current files without what Git ignores (pips-findings-fixes-plan A).
+                base_instructions = (base_instructions
+                    .replace('committed-source snapshot', 'copy of the current files (without what Git ignores)')
+                    .replace('committed source snapshot', 'copy of the current files (without what Git ignores)')
+                    .replace('committed snapshot', 'copy of the current files'))
+                role_instructions = role_instructions.replace('committed source', 'current files')
             if source['source_policy']['mode'] == 'current_tree':
                 base_instructions = base_instructions.replace('committed-source snapshot', 'captured current-tree snapshot').replace('committed source snapshot', 'captured current-tree snapshot').replace('committed snapshot', 'captured current-tree snapshot').replace('or current working-tree changes were inspected', 'or a complete live working tree was inspected')
                 role_instructions = role_instructions.replace('committed source', 'captured source')
@@ -4876,7 +4886,29 @@ def _execute_run(registry, row, config):
         run_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
     snapshot = run_dir / "source"
     live = manifest.get("run_kind") == "live"
-    if personal or live:
+    boxed = (not personal and not live and action is None and not current_tree and manifest.get('computer') is not None
+             and manifest.get('run_kind') in ('conversation', 'audit', 'draft'))
+    copy_root = None
+    if boxed:
+        # Its own folder, in its box's Files: copied, brought up to date, or kept while its changes wait
+        # (pip_project_copies.own_folder). One that can't be copied is said, and the run reads committed code.
+        from . import pip_project_copies
+        own = pip_project_copies.own_folder(PipStore(registry), row['pip_id'])
+        manifest = {**manifest, 'own_folder': own}
+        if isinstance(own, dict) and own.get('folder') and not own.get('error'):
+            from .pip_computer import computer_root
+            from .pip_computer_files import files_root
+            copy_root = files_root(computer_root(registry.directory, row['pip_id'])) / own['folder']
+    if copy_root is not None:
+        # What the run reads is its copy, the current files: its findings name the lines as they are now.
+        from .workspace_registry import _private_directory
+        _private_directory(run_dir)
+        snapshot.mkdir(mode=0o700, exist_ok=False)          # (kept, empty: run cleanup removes this, never the copy)
+        snapshot = copy_root
+        snapshot_info = {'sha256': str(manifest['own_folder'].get('sha256') or hashlib.sha256(b'').hexdigest()),
+                         'files': int(manifest['own_folder'].get('files') or 0),
+                         'bytes': int(manifest['own_folder'].get('bytes') or 0)}
+    elif personal or live:
         # Nothing of the project is copied: a Personal Pip has none, and a live-data Pip's commands read the project
         # folder as it is now, in their read-only box (pip_live_data).
         from .workspace_registry import _private_directory
@@ -5038,11 +5070,6 @@ def _execute_run(registry, row, config):
         from . import pip_computer
         # Its computers (a Pip may have several, shared by its conversations): the run takes a free one (Pool).
         computer_host = pip_computer.pool_for(registry, row['pip_id'], row['workspace_id'])
-        if not personal:
-            # A folder Pip's own folder, in its box's Files before it starts: copied, brought up to date, or kept while
-            # its changes wait (pip_project_copies.own_folder). One that can't be copied is said, and the turn goes on.
-            from . import pip_project_copies
-            manifest = {**manifest, 'own_folder': pip_project_copies.own_folder(PipStore(registry), row['pip_id'])}
         # The user's own words this turn are theirs to type; a turn DGC wrote (a hello, a routine) is not.
         said = turn_text if manifest.get('user_turn') is True else ''
         if row['requested_by'] in pip_careful.UNATTENDED and turn_text:

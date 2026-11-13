@@ -539,7 +539,8 @@ def own_folder(store, pip_id) -> dict | None:
                          (pip_id, workspace["id"])).fetchone()
         if row is not None and db.execute("SELECT 1 FROM pip_project_changes WHERE copy_id=? AND status='pending'",
                                           (row["id"],)).fetchone() is not None:
-            return {"name": name, "folder": folder, "files": row["files"], "kept": True, "updated": 0}
+            return {"name": name, "folder": folder, "files": row["files"], "kept": True, "updated": 0,
+                    **_fingerprint(registry, row["id"])}
         snap = _snapshot(registry, row["id"]) if row is not None else {}
         made = None
         if row is not None and isinstance(snap.get("source"), dict) and snap.get("folder") == folder:
@@ -551,7 +552,18 @@ def own_folder(store, pip_id) -> dict | None:
         return {"name": name, "folder": folder, "error": str(exc)}
     left = made.get("left_out")
     return {"name": name, "folder": folder, "files": made["files"], "kept": False, "updated": made["updated"],
+            **_fingerprint(registry, made.get("copy_id")),
             **({"left_out": {k: left[k] for k in ("files", "bytes", "examples")}} if left else {})}
+
+
+def _fingerprint(registry, copy_id) -> dict:
+    """The copy as a run records what it read: a sha256 over its files' paths and digests, and its size."""
+    import hashlib
+    snap = _snapshot(registry, copy_id) if copy_id else {}
+    files = snap.get("files") or {}
+    digest = hashlib.sha256(json.dumps(sorted((rel, entry[2]) for rel, entry in files.items()),
+                                       separators=(",", ":")).encode()).hexdigest()
+    return {"sha256": digest, "bytes": sum(int(entry[0]) for entry in files.values())}
 
 
 def _update_copy(store, pip_id, workspace, root: Path, folder: str, copy_id, snap) -> dict | None:
