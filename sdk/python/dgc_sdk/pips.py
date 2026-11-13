@@ -469,7 +469,7 @@ READ_COMMANDS |= API93_READS
 MUTATION_COMMANDS |= API93_MUTATIONS
 # API 96: the Pips flow. What a check found and what became of it, by the Pip's level (list_pip_fixes; Allow or Not now
 # with decide_pip_fix); what only you can do (answer_pip_waiting); commit exactly a change's files. Local only.
-API96_READS = frozenset({'list_pip_fixes', 'get_pips_welcome'})
+API96_READS = frozenset({'list_pip_fixes', 'get_pips_welcome', 'list_pip_sent'})
 API96_MUTATIONS = frozenset({'decide_pip_fix', 'start_pip_work_helper', 'answer_pip_waiting', 'commit_pip_project_change'})
 READ_COMMANDS |= API96_READS
 MUTATION_COMMANDS |= API96_MUTATIONS
@@ -624,6 +624,7 @@ COMMAND_FIELDS = {
     'undo_pip_project_change': frozenset({'pip_id', 'change_id'}),
     'list_pip_fixes': frozenset({'pip_id'}),
     'get_pips_welcome': frozenset(),
+    'list_pip_sent': frozenset({'pip_id'}),
     'decide_pip_fix': frozenset({'pip_id', 'fix_id', 'expected_digest', 'allow'}),
     'start_pip_work_helper': frozenset({'pip_id', 'fix_id'}),
     'answer_pip_waiting': frozenset({'pip_id', 'waiting_id', 'answer'}),

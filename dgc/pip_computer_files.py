@@ -860,7 +860,10 @@ def _execute(files: Path, command: str, computer_root: Path | None = None, *, po
     if computer_root is not None:
         forwarder = Path(computer_root) / "forward.py"
         forwarder.write_text(FORWARDER)
-        proxy = EgressProxy(socket_dir() / f"{os.urandom(6).hex()}-term.sock", policy=policy)
+        from .leak_guard import SENT_FILE
+        from .redaction import secret_values
+        proxy = EgressProxy(socket_dir() / f"{os.urandom(6).hex()}-term.sock", policy=policy,
+                            secrets=lambda: secret_values(None), sent_log=Path(computer_root) / SENT_FILE)
         proxy.start()
     keys_r = None
     try:
@@ -894,7 +897,10 @@ def _execute_in_vm(files: Path, command: str, computer_root: Path, *, policy=Non
     from .pip_computer_box import EgressProxy
     from .pip_computer import socket_dir
     from . import pip_container
-    proxy = EgressProxy(socket_dir() / f"{os.urandom(6).hex()}-term.sock", policy=policy)
+    from .leak_guard import SENT_FILE
+    from .redaction import secret_values
+    proxy = EgressProxy(socket_dir() / f"{os.urandom(6).hex()}-term.sock", policy=policy,
+                        secrets=lambda: secret_values(None), sent_log=Path(computer_root) / SENT_FILE)
     proxy.start()
     computer = pip_container.computer_for(computer_root, proxy.path)
     computer.terminal_egress = proxy.path

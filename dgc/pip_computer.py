@@ -421,7 +421,11 @@ class Host:
         self.label = ""                                 # what the run that has it is doing, in the user's words
         self.last_used = time.monotonic()
         self.tag = pip_id[-12:] + ("" if self.number == 1 else f"-c{self.number}")    # its sockets' names
-        self.proxy = EgressProxy(socket_dir() / f"{self.tag}-egress.sock", policy=policy)
+        from .leak_guard import SENT_FILE
+        from .redaction import secret_values
+        # Leak guards 2 and 4 (0.52): plain HTTP carrying a secret DGC knows is blocked; every site it reaches is kept.
+        self.proxy = EgressProxy(socket_dir() / f"{self.tag}-egress.sock", policy=policy,
+                                 secrets=lambda: secret_values(None), sent_log=self.root / SENT_FILE)
         self.proxy.start()
         from .pip_apps import Apps
         self.apps = Apps(self.root / "home", self.files_dir)

@@ -85,7 +85,7 @@ CONTROL_COMMANDS = frozenset({
     "set_pip_profile", "list_pip_shared", "get_pip_computers", "update_pip_computers", "reset_pip_computer", "list_pip_apps",
     "list_pip_plugins", "allow_pip_plugin", "decline_pip_plugin", "list_pip_plugin_uses", "get_pip_chat_context",
     "set_pip_chat_options",
-    "list_pip_reply_stats", "get_pips_limit", "set_pips_limit", "list_pip_attention", "get_pips_welcome",
+    "list_pip_reply_stats", "get_pips_limit", "set_pips_limit", "list_pip_attention", "get_pips_welcome", "list_pip_sent",
     "list_pip_notes", "add_pip_note", "forget_pip_note", "list_pip_sites", "set_pip_careful", "forget_pip_site",
     "get_pip_working_notes", "set_pip_working_notes", "list_pip_daily_log",
     "set_plugin_permission",
@@ -143,7 +143,7 @@ _COMMAND_ARGS = {
     "set_pip_profile": {"pip_id", "changes"}, "list_pip_shared": {"pip_id", "kind"},
     "get_pip_computers": set(), "update_pip_computers": set(), "reset_pip_computer": {"pip_id"}, "list_pip_apps": set(),
     "list_pip_plugins": {"pip_id"}, "allow_pip_plugin": {"pip_id", "grant_id", "keys"}, "decline_pip_plugin": {"pip_id", "grant_id"},
-    "list_pip_plugin_uses": set(), "list_pip_attention": {"limit", "projects"}, "get_pips_welcome": set(), "list_pip_notes": {"pip_id", "shared"}, "add_pip_note": {"pip_id", "text", "shared"},
+    "list_pip_plugin_uses": set(), "list_pip_attention": {"limit", "projects"}, "get_pips_welcome": set(), "list_pip_sent": {"pip_id"}, "list_pip_notes": {"pip_id", "shared"}, "add_pip_note": {"pip_id", "text", "shared"},
     "forget_pip_note": {"pip_id", "note_id", "all", "shared"}, "list_pip_sites": {"pip_id"}, "set_pip_careful": {"pip_id", "on"},
     # API 57: a Personal Pip's own working notes (pip_working_notes) and its daily log (pip_daily_log).
     "get_pip_working_notes": {"pip_id"}, "set_pip_working_notes": {"pip_id", "text", "expected_revision"},
@@ -6674,6 +6674,15 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 # Pips API 91 (pips-21): @ a project in a Personal Pip's chat. Applying is always the user's click.
                 from . import pip_project_copies
                 result = pip_project_copies.control(store, command, request, actor)
+            elif command == "list_pip_sent":
+                # Pips API 96, leak guard 4: what this Pip sent, to which sites, out of its computers' boxes.
+                if actor not in ("editor-user", "local-console"):
+                    raise RegistryError("local_only", "See what a Pip sent on this computer.")
+                store._job(pip_id)
+                from .leak_guard import SENT_FILE, sent_summary
+                computers = registry.directory / "computers"
+                paths = [computers / pip_id / SENT_FILE, *sorted(computers.glob(pip_id + ".c*/" + SENT_FILE))]
+                result = {"pip_id": pip_id, **sent_summary(paths)}
             elif command == "get_pips_welcome":
                 # Pips API 96: the Pips tab's one-time welcome after the update, only for someone who had Pips.
                 from .pip_welcome import welcome

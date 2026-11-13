@@ -4831,6 +4831,9 @@ def _fetched_text_for_model(text: str) -> str:
 
 def web_fetch(args: dict, ctx) -> str:
     url = str(args.get("url", ""))
+    from .leak_guard import carries_secret, refusal
+    if carries_secret(url, getattr(ctx, "config", None)):
+        return refusal("address")                   # leak guard 2 (0.52): never sent
     try:
         final_url, text = _fetch_public_text(url)
     except (requests.RequestException, ValueError) as e:
@@ -4846,6 +4849,9 @@ def web_search(args: dict, ctx) -> str:
     from .search import search
     # The provider and ITS own key, read together: never a key saved for another provider.
     provider, key, url = search_settings(ctx.config)
+    from .leak_guard import carries_secret, refusal
+    if carries_secret(str(args.get("query", "")), ctx.config):
+        return refusal("search")                    # leak guard 2 (0.52): never sent
     return search(str(args.get("query", "")), provider=provider, api_key=key, url=url)
 
 

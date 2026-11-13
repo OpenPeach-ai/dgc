@@ -294,10 +294,15 @@ def public_addresses(host: str, port: int, *, resolve=socket.getaddrinfo) -> lis
 class EgressProxy:
     """The only way out of a box: CONNECT to public :443, or plain HTTP to public :80."""
 
-    def __init__(self, path: Path, *, policy=None):
+    def __init__(self, path: Path, *, policy=None, secrets=None, sent_log: Path | None = None):
         self.path = Path(path)
         self.policy = policy or public_addresses
         self.log: list[tuple[str, str]] = []           # (outcome, host) -- bounded, no URLs
+        # Leak guards 2 and 4 (0.52): plain HTTP carrying a secret is blocked (``secrets``: what DGC knows now);
+        # each connection is kept in the Pip's ``sent_log`` (when, the site, bytes out and back). HTTPS is a sealed
+        # tunnel: only its site and size are known.
+        self.secrets = secrets
+        self.sent_log = Path(sent_log) if sent_log is not None else None
         self.connections = 0
         self._server: socket.socket | None = None
         self._lock = threading.Lock()
@@ -345,6 +350,22 @@ class EgressProxy:
                 continue
             threading.Thread(target=self._handle, args=(client,), daemon=True).start()
 
+    def _sent(self, kind: str, host: str, up: int = 0, down: int = 0) -> None:
+        if self.sent_log is None:
+            return
+        from .leak_guard import record_sent
+        from .workspace_registry import utc_now
+        record_sent(self.sent_log, {"at": utc_now(), "host": (host or "?")[:255], "kind": kind, "up": up, "down": down})
+
+    def _carries_secret(self, data: bytes) -> bool:
+        if self.secrets is None:
+            return False
+        try:
+            from .redaction import contains_secret
+            return contains_secret(data.decode("utf-8", "replace"), tuple(self.secrets()))
+        except Exception:                        # noqa: BLE001 - a check that can't run blocks
+            return True
+
     def _handle(self, client: socket.socket) -> None:
         upstream = None
         try:
@@ -372,18 +393,44 @@ class EgressProxy:
                 if rest:
                     upstream.sendall(rest)
                 self._note("tunnel", host)
+                kind, sent_host, first = "tunnel", host, len(rest)
             else:
                 parsed = urlsplit(target)
                 if parsed.scheme != "http" or not parsed.hostname:
                     return self._refuse(client, parsed.hostname or "?")
+                # Plain HTTP is readable: its address, headers and a body up to 1 MiB are checked for a secret first.
+                headers, _, body = head.partition(b"\r\n\r\n")
+                length = 0
+                for header in headers.split(b"\r\n")[1:]:
+                    name, _, value = header.partition(b":")
+                    if name.strip().lower() == b"content-length" and value.strip().isdigit():
+                        length = int(value.strip())
+                if length > 1024 * 1024:
+                    return self._refuse(client, parsed.hostname)
+                while len(body) < length:
+                    chunk = client.recv(min(65536, length - len(body)))
+                    if not chunk:
+                        return
+                    body += chunk
+                if self._carries_secret(headers + b"\r\n\r\n" + body):
+                    self._note("refused", parsed.hostname)
+                    self._sent("blocked", parsed.hostname)
+                    try:
+                        client.sendall(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                    except OSError:
+                        pass
+                    return
                 upstream = self._open(parsed.hostname, parsed.port or 80)
                 if upstream is None:
                     return self._refuse(client, parsed.hostname)
                 origin_form = (parsed.path or "/") + (f"?{parsed.query}" if parsed.query else "")
-                upstream.sendall(f"{method} {origin_form} {version}".encode("latin-1")
-                                 + b"\r\n" + head.split(b"\r\n", 1)[1])
+                forwarded = (f"{method} {origin_form} {version}".encode("latin-1")
+                             + b"\r\n" + headers.split(b"\r\n", 1)[1] + b"\r\n\r\n" + body)
+                upstream.sendall(forwarded)
                 self._note("http", parsed.hostname)
-            self._pump(client, upstream)
+                kind, sent_host, first = "http", parsed.hostname, len(forwarded)
+            up, down = self._pump(client, upstream)
+            self._sent(kind, sent_host, first + up, down)
         except OSError:
             pass
         finally:
@@ -406,22 +453,29 @@ class EgressProxy:
 
     def _refuse(self, client: socket.socket, host: str) -> None:
         self._note("refused", host)
+        self._sent("refused", host)
         try:
             client.sendall(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
         except OSError:
             pass
 
     @staticmethod
-    def _pump(a: socket.socket, b: socket.socket) -> None:
+    def _pump(a: socket.socket, b: socket.socket) -> tuple[int, int]:
+        """Carry bytes both ways until either side ends; (bytes from the box out, bytes back in)."""
         a.settimeout(None); b.settimeout(None)
+        counts = [0, 0]
         while True:
             ready, _, _ = select.select([a, b], [], [], IDLE_SECONDS)
             if not ready:
-                return
+                return counts[0], counts[1]
             for s in ready:
-                data = s.recv(65536)
+                try:
+                    data = s.recv(65536)
+                except OSError:
+                    return counts[0], counts[1]
                 if not data:
-                    return
+                    return counts[0], counts[1]
+                counts[0 if s is a else 1] += len(data)
                 (b if s is a else a).sendall(data)
 
 

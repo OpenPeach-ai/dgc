@@ -15,6 +15,7 @@ Reads only what is at the project's top level; bounded; cached by each file's si
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import threading
@@ -123,3 +124,76 @@ def project_env_values(root) -> tuple[str, ...]:
             seen.add(value)
             out.append(value)
     return tuple(out[:MAX_VALUES])
+
+
+# ---- guard 2: nothing a secret leaves through DGC's own web tools ---------------------------------------------------
+HTTPS_GAP = ("A secure (HTTPS) connection from a Pip's computer is a sealed tunnel: DGC sees which site it goes to and "
+             "how much goes out, never what is inside.")
+
+
+def carries_secret(text: str, config=None) -> bool:
+    """Whether text holds a secret DGC knows (saved keys, the project's .env secrets) or one shaped like a key."""
+    from .redaction import contains_secret, secret_values
+    try:
+        return contains_secret(str(text or ""), secret_values(config))
+    except Exception:                                    # noqa: BLE001 - a check that can't run refuses
+        return True
+
+
+def refusal(what: str) -> str:
+    return (f"error: DGC didn't send this: the {what} holds a secret (a key, a password or a token) that DGC keeps from "
+            "the web. Leave the secret out. If the task truly needs it sent, ask the user to do that step themselves.")
+
+
+# ---- guard 4: what each Pip sent, and to which site ----------------------------------------------------------------
+SENT_FILE = "sent.jsonl"
+MAX_SENT_BYTES = 512 * 1024
+MAX_SITES = 200
+_SENT_LOCK = threading.Lock()
+
+
+def record_sent(path: Path, entry: dict) -> None:
+    """One connection out of a Pip's box: {at, host, kind (tunnel, http, blocked, refused), up, down}. The file keeps
+    its newest half when it grows past MAX_SENT_BYTES."""
+    line = json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n"
+    with _SENT_LOCK:
+        try:
+            with open(path, "a", encoding="utf-8") as handle:
+                handle.write(line)
+            if path.stat().st_size > MAX_SENT_BYTES:
+                kept = path.read_text(encoding="utf-8", errors="replace").splitlines()[-1000:]
+                path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+            if os.name == "posix":
+                path.chmod(0o600)
+        except OSError:
+            pass
+
+
+def sent_summary(paths) -> dict:
+    """{sites: [{host, times, sent_bytes, received_bytes, blocked, first_at, last_at}] newest first, note}."""
+    sites: dict = {}
+    for path in paths:
+        try:
+            lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(entry, dict) or not isinstance(entry.get("host"), str):
+                continue
+            host, at = entry["host"][:255], str(entry.get("at") or "")
+            site = sites.setdefault(host, {"host": host, "times": 0, "sent_bytes": 0, "received_bytes": 0,
+                                           "blocked": 0, "first_at": at, "last_at": at})
+            if entry.get("kind") in ("blocked", "refused"):
+                site["blocked"] += 1
+            else:
+                site["times"] += 1
+                site["sent_bytes"] += int(entry.get("up") or 0)
+                site["received_bytes"] += int(entry.get("down") or 0)
+            site["first_at"] = min(site["first_at"], at) if site["first_at"] else at
+            site["last_at"] = max(site["last_at"], at)
+    listed = sorted(sites.values(), key=lambda s: s["last_at"], reverse=True)[:MAX_SITES]
+    return {"sites": listed, "note": HTTPS_GAP}
