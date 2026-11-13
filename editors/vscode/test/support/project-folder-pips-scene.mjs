@@ -16,23 +16,31 @@ async function pipsBundle() {
 export const LONG = "/home/me/clients/northwind-traders/2026/storefront-redesign/packages/checkout-service";
 export const HERE = "/home/me/code/shop", GARDEN = "/home/me/code/garden", NOTES = "/home/me/code/notes";
 
-/** `choice`: the folder chosen ("" All projects). Opens the Pips view on its Project tab unless `tab` is "personal". */
-export async function openPips(browser, { width = 300, height = 640, theme = "dark-modern", choice = "", tab = "project", scale = 1, motion = "reduce" } = {}) {
+/** `choice`: the folder chosen ("" All projects). Opens the Pips view on its Project tab unless `tab` is "personal".
+ *  `where`: "side" (the side bar's real page, the view in its shadow root) or "tab" (the view as an editor tab: a page
+ *  of its own, as src/pipsView.ts writes it). `stray`: this window's project has a card waiting too, and the DGC
+ *  answers a request that names no project with that project's cards (what a folder with no Pips workspace asked). */
+export async function openPips(browser, { width = 300, height = 640, theme = "dark-modern", choice = "", tab = "project", scale = 1, motion = "reduce", where = "side", stray = false } = {}) {
   const { html, mainJs, markdownJs } = panelHtml(), pips = await pipsBundle();
   const context = await browser.newContext({ viewport: { width, height }, reducedMotion: motion, deviceScaleFactor: scale });
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
+  const tokens = `:root { --vscode-font-family: system-ui, sans-serif; --vscode-font-size: 13px; --vscode-editor-font-family: ui-monospace, monospace; ${THEMES[theme]} }`;
+  const kind = theme.startsWith("light") ? "vscode-light" : "vscode-dark";
   // An https origin: the Pips view's request ids come from crypto.randomUUID, which a secure context has.
-  await page.route("https://dgc.test/**", (r) => r.fulfill({ body: html, contentType: "text/html" }));
+  await page.route("https://dgc.test/**", (r) => r.fulfill({ contentType: "text/html", body: where === "tab"
+    ? `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${tokens}${pips.css}</style></head><body class="${kind}"><main id="app"></main><div id="review-root"></div></body></html>` : html }));
   await page.goto("https://dgc.test/panel");
-  await page.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; --vscode-font-size: 13px; --vscode-editor-font-family: ui-monospace, monospace; ${THEMES[theme]} }` });
-  await page.evaluate((t) => document.body.classList.add(t.startsWith("light") ? "vscode-light" : "vscode-dark"), theme);
-  await page.evaluate(([mjs, mdjs, pjs, pcss, folders]) => {
+  if (where !== "tab") {
+    await page.addStyleTag({ content: tokens });
+    await page.evaluate((k) => document.body.classList.add(k), kind);
+  }
+  await page.evaluate(([mjs, mdjs, pjs, pcss, folders, tabbed, stray]) => {
     const [HERE, GARDEN, LONG, NOTES] = folders;
     const root = document.documentElement;
     root.dataset.chatPlace = "home"; root.dataset.chatdgcSeen = "1"; root.dataset.pipsDocumentId = "doc";
-    document.getElementById("pips-host").dataset.styleUri = "data:text/css;base64," + btoa(unescape(encodeURIComponent(pcss)));
+    if (!tabbed) document.getElementById("pips-host").dataset.styleUri = "data:text/css;base64," + btoa(unescape(encodeURIComponent(pcss)));
     const ws = (c) => "ws_" + c.repeat(32), P = ws("1"), Q = ws("2"), R = ws("3"), T = ws("4");
     const types = ["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"].map((id, character_index) => ({ id, character_index, name: id[0].toUpperCase() + id.slice(1),
       role: id, description: "Reads the code and reports what it finds", available: id !== "core", unavailable_reason: id === "core" ? "Core is the main chat." : null, default_name: id[0].toUpperCase() + id.slice(1), default_goal: "Review the project",
@@ -49,7 +57,8 @@ export async function openPips(browser, { width = 300, height = 640, theme = "da
       { folder: NOTES, name: "notes", here: false, exists: false, sessions: 1, pips: 0, workspace_id: null, updated_at: "2026-11-01T03:30:00.000Z" }];
     const card = (c, p, title, hours) => ({ id: `email:maildraft_${c.repeat(32)}`, kind: "email", card: `maildraft_${c.repeat(32)}`, pip_id: p.id, pip_name: p.name, pip_type: p.pip_type, workspace_id: p.workspace_id,
       title, detail: "Ready to send", created_at: new Date(Date.now() - hours * 3600000).toISOString(), expires_at: null });
-    const waiting = [card("1", pips[P][1], "Send this morning's brief to the team?", 1), card("2", pips[R][0], "Email the planting plan to the allotment group?", 3)];
+    const waiting = [card("1", pips[P][1], "Send this morning's brief to the team?", 1), card("2", pips[R][0], "Email the planting plan to the allotment group?", 3),
+      ...(stray ? [card("3", pips[Q][0], "Send the checkout review to the shop team?", 2)] : [])];
     const runner = { runner_id: "r", status: "running", online: true, paused: false, counts: { queued: 0, running: 0, cancelling: 0 } };
     const every = () => Object.values(pips).flat();
     window.__requests = []; window.__posted = [];
@@ -61,7 +70,7 @@ export async function openPips(browser, { width = 300, height = 640, theme = "da
       get_pip: (r) => ({ pip: every().find((p) => p.id === r.pip_id) }),
       get_pip_runner: () => ({ runner }), get_workspace_context: (r) => ({ context: { workspace_id: r.workspace_id, revision: 0, entries: [] } }),
       list_pip_models: () => ({ default_model: "m", models: [], connection: "configured" }),
-      list_pip_attention: (r) => { const items = waiting.filter((i) => i.workspace_id === P || r.projects === "all" || r.projects === i.workspace_id);
+      list_pip_attention: (r) => { const items = waiting.filter((i) => i.workspace_id === P || r.projects === "all" || r.projects === i.workspace_id || stray && r.projects === undefined && i.workspace_id === Q);
         return { as_of: new Date().toISOString(), total: items.length, counts: { email: items.length }, by_pip: Object.fromEntries(items.map((i) => [i.pip_id, 1])), items, truncated: false, reviews: [], projects: {}, in_projects: 0 }; },
       list_pip_unread: (r) => ({ workspace_id: r.workspace_id, pips: [], total: 0 }),
       get_pips_limit: () => ({ max_pips: 100, default: 100, maximum: 100000, count: 6 }),
@@ -75,18 +84,21 @@ export async function openPips(browser, { width = 300, height = 640, theme = "da
     } });
     eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
     (0, eval)(pjs);
-    eval(mjs);
-  }, [mainJs, markdownJs, pips.js, pips.css, [HERE, GARDEN, LONG, NOTES]]);
+    if (!tabbed) eval(mjs);
+  }, [mainJs, markdownJs, pips.js, pips.css, [HERE, GARDEN, LONG, NOTES], where === "tab", stray]);
   const send = (data) => page.evaluate((d) => window.dispatchEvent(new MessageEvent("message", { data: d })), data);
-  await send({ type: "sessions_list", items: [], error: "" });
-  await page.waitForSelector("#side-tabs:not([hidden])");
-  await send({ type: "pipsOpen" });
+  if (where !== "tab") {
+    await send({ type: "sessions_list", items: [], error: "" });
+    await page.waitForSelector("#side-tabs:not([hidden])");
+    await send({ type: "pipsOpen" });
+  }
   await send({ type: "pipsConnection", apiVersion: 93, generation: 1, connected: true, supported: true, enabled: true, folder: true, projectFolder: choice, home: "/home/me", windowFolder: { folder: HERE, name: "shop" } });
-  const inPips = (fn, arg) => page.evaluate(([f, a]) => (0, eval)(`(${f})`)(document.getElementById("pips-host").shadowRoot, a), [fn.toString(), arg]);
-  await page.waitForFunction(() => document.getElementById("pips-host").shadowRoot?.querySelector("#pips-tabpanel .pip-row"), undefined, { timeout: 15000 });
+  // (The view's own root: the side bar's shadow root, or the tab's page.)
+  const inPips = (fn, arg) => page.evaluate(([f, a]) => (0, eval)(`(${f})`)(document.getElementById("pips-host")?.shadowRoot || document, a), [fn.toString(), arg]);
+  await page.waitForFunction(() => (document.getElementById("pips-host")?.shadowRoot || (document.getElementById("pips-host") ? null : document))?.querySelector("#pips-tabpanel .pip-row"), undefined, { timeout: 15000 });
   if (tab === "project") {
     await inPips((root) => root.querySelector("#pips-tab-project").click());
-    await page.waitForFunction(() => { const root = document.getElementById("pips-host").shadowRoot; return root.querySelector("#pips-folder-pick") && (root.querySelector("#pips-tabpanel .pip-row") || root.querySelector(".pips-tab-empty")); }, undefined, { timeout: 15000 });
+    await page.waitForFunction(() => { const root = document.getElementById("pips-host")?.shadowRoot || document; return root.querySelector("#pips-folder-pick") && (root.querySelector("#pips-tabpanel .pip-row") || root.querySelector(".pips-tab-empty")); }, undefined, { timeout: 15000 });
     await page.waitForTimeout(80);
   }
   return { page, errors, send, inPips, posted: (type) => page.evaluate((t) => window.__posted.filter((m) => m.type === t), type), close: () => context.close() };
@@ -101,7 +113,7 @@ export const pipsContrast = (page, selector = ".pip-app-root") => page.evaluate(
   const ground = (e) => { const layers = []; for (let n = e; n; n = up(n)) { const c = parse(getComputedStyle(n).backgroundColor); if (c[3] > 0) layers.push(c); if (c[3] >= 1) break; }
     return layers.reduceRight((under, top) => over(top, under), [255, 255, 255, 1]); };
   const lum = (c) => { const [r, g, b] = c.map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
-  const root = document.getElementById("pips-host").shadowRoot, host = root.querySelector(s), out = [];
+  const root = document.getElementById("pips-host")?.shadowRoot || document, host = root.querySelector(s), out = [];
   if (!host) return [{ text: `nothing matches ${s}`, ratio: 0 }];
   const walk = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
   for (let t = walk.nextNode(); t; t = walk.nextNode()) {

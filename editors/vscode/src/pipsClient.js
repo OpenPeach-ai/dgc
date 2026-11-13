@@ -78,6 +78,8 @@ import {livePlan,livePlanFromText,livePip} from './pipsModel.js';
 import {cardNumber} from './pipCards.js';
 import {eyesMarkup,eyesNotice} from './pipEyes.js';
 import {levelPage,levelMarkup,levelNotice,levelMenuMarkup} from './pipLevels.js';
+import {ONE_API,ALL as ONE_ALL,PERSONAL as ONE_PERSONAL,savedFilter,listRequest,attentionRequest,attentionFor,underFilter,orderPips,heldOrder,placeOf,newPipFolder} from './pipsOne.js';
+import {FLOW_API,took,fixesPage,fixAnswer,FIX_LIVE,findingsCardMarkup,fixAskMarkup,fixDecidedLine,fixingMarkup,fixEndedLine,waitingLineMarkup,waitingCardMarkup,reportRow,reportsTableMarkup} from './pipFlow.js';
 import {infoTip,wireInfoTips} from './pipInfoTip.js';
 import {watchButtons} from './buttonFit.js';
 import {pipArtifacts,dashboardList,artifactsPageMarkup,artifactsSectionsMarkup,reportNotice} from './pipArtifacts.js';
@@ -155,7 +157,7 @@ async function loadUnread(force=false){
     for(const page of pages){if(!record(page)||!Array.isArray(page.pips)||!spaces.some(w=>w.id===page.workspace_id))continue;
       unreadTotals.set(page.workspace_id,Number.isSafeInteger(page.total)?page.total:0);
       for(const item of page.pips)if(record(item)&&typeof item.pip_id==='string'&&Number.isSafeInteger(item.count)&&item.count>0&&typeof item.latest==='string'&&readFingerprints.get(item.pip_id)!==`${item.latest_message_id||''}|${item.latest_post_id||''}`)unreadByPip.set(item.pip_id,item);}
-    lastUnreadAt=Date.now();render();maybeMarkRead();
+    lastUnreadAt=Date.now();noteArrivals();render();maybeMarkRead();
   }catch{}finally{unreadLoading=false;}
 }
 // A Pip's unread pill on the Pips page: its whole chat read, up to the newest reply and run post list_pip_unread named.
@@ -364,7 +366,7 @@ const heldRejects=new Map(),REJECT_HOLD_MS=6000;
 // Show all, opened on a run's result or a routine's reply (by run or message id): for this view only.
 const shownInFull=new Set();
 S.sidebarPinned=savedView?.sidebar_pinned===true;
-function rememberView(){savedView={workspace_id:S.workspace?.id,scope_tab:S.workspace?scopeTab():undefined,selected:S.selected,tab:S.tab,overview:S.overview,sidebar_pinned:S.sidebarPinned,conversations:Object.fromEntries([...convShown].slice(-20)),conversation_drafts:Object.fromEntries([...convDrafts].slice(-40)),conversations_hidden:convState.collapsed,drafts:Object.fromEntries([...chatDrafts].slice(-20)),draft_marks:Object.fromEntries([...chatMarks].slice(-20)),chat_queues:Object.fromEntries([...chatQueues].filter(([,list])=>list.length).slice(-20)),asked:[...askedRuns].slice(-100),attention_folded:[...attentionFolded].slice(-500),folders_closed:[...foldersClosed].slice(-100),goals_dismissed:[...goalsDismissed].slice(-100)};options.setState?.(savedView);}
+function rememberView(){savedView={workspace_id:S.workspace?.id,scope_tab:S.workspace?scopeTab():undefined,...(S.apiVersion>=ONE_API?{pips_filter:one.filter}:{}),selected:S.selected,tab:S.tab,overview:S.overview,sidebar_pinned:S.sidebarPinned,conversations:Object.fromEntries([...convShown].slice(-20)),conversation_drafts:Object.fromEntries([...convDrafts].slice(-40)),conversations_hidden:convState.collapsed,drafts:Object.fromEntries([...chatDrafts].slice(-20)),draft_marks:Object.fromEntries([...chatMarks].slice(-20)),chat_queues:Object.fromEntries([...chatQueues].filter(([,list])=>list.length).slice(-20)),asked:[...askedRuns].slice(-100),attention_folded:[...attentionFolded].slice(-500),folders_closed:[...foldersClosed].slice(-100),goals_dismissed:[...goalsDismissed].slice(-100)};options.setState?.(savedView);}
 const characterStyles=document.createElement('style');characterStyles.id='pips-plush-styles';characterStyles.textContent=window.PipConcepts.plush.styles;document.head.append(characterStyles);
 let outcomeSessions=[],outcomeSessionsCursor='',outcomeSessionsMore=false,outcomeSessionsLoaded=false,outcomeSessionsLoading=false,outcomeSessionsError='',outcomeHistory=[],outcomeCursor=null,outcomeLoaded=false,outcomeLoading=false,outcomeError='',outcomeInspection=null,outcomeInspecting=false,outcomeSessionSeq=0,outcomeSeq=0,outcomeInspectSeq=0,outcomeReviewSeq=0,outcomeRetry=null;
 let notifications=null,notificationItems=[],notificationLoading=false,notificationError='',notificationSeq=0,notificationMark='';
@@ -926,7 +928,7 @@ function chatMarkup(){
   const context=chatPosts()?postContext():null;
   const settled=settledLines(shown);
   const drawPost=i=>{const p=i.streak?i.streak.at(-1):i.post,first=i.streak?i.streak[0]:p;
-    return timed({created_at:p.posted_at},false)+postMarkup(p,{...context,previous:i.previous,streak:i.streak||null,face:pipAvatar(S.pip,['failed','checks_failed'].includes(p.outcome)?'failure':'idle',`post-${first.run_id}`,context.type),...fixState(p.run_id),expanded:shownInFull.has(p.run_id),traced:replyStats.get(p.run_id)?.has_trace===true});};
+    return timed({created_at:p.posted_at},false)+postMarkup(p,{...context,previous:i.previous,streak:i.streak||null,face:pipAvatar(S.pip,['failed','checks_failed'].includes(p.outcome)?'failure':'idle',`post-${first.run_id}`,context.type),...fixState(p.run_id),expanded:shownInFull.has(p.run_id),traced:replyStats.get(p.run_id)?.has_trace===true,...(flowCards()&&!i.streak?{under:flowUnderPost(p)}:{})});};
   // Each prompt opens a box, the rest of its turn inside: the box's end is what pushes a pinned prompt off (pipsFollow.js).
   // What a Pip says by itself (a run's post, a routine's reply) isn't an answer to it, so the box ends there.
   let turnOpen=false;
@@ -943,7 +945,7 @@ function chatMarkup(){
   const live=liveMarkup(markdown);
   // A hello that failed says so, above what a new chat says about itself: nothing else has been said.
   const quietChat=S.messages.every(m=>m.role==='user'&&m.intro===true&&m.status==='failed')&&!items.some(i=>!(i.message&&failedHidden(i.message)))&&!live&&!items.some(i=>i.note||(i.message&&routineFailed(i.message)));
-  return `<section class="pip-conversation${simple?' chat-style':''}" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${noProviderMarkup()}${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(chatPosts()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`${messages}<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${quietChat?'':messages}${live}${simple?'':typing}${S.stream?.text&&!routineLive?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(replyParts(S.stream.text).join('\n\n'))}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${pipKeyCards()}${borrowCards()}${projectChangeCards()}${routineCards()}${settled.tail}${needsYouCard()}${cardRefusedCard()}${turnOpen?'</div>':''}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div><button type="button" id="pip-to-latest" class="pip-to-latest" data-dom-own="1" title="Jump to the newest message" aria-label="Jump to the newest message" hidden><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M4 9l4 4 4-4"/></svg><span data-latest-label>Latest</span></button>${simple?runnerOffMarkup():''}${pipOff(S.pip)?`<p class="pip-off-line" role="status">${PIP_OFF_SAYS}</p>`:''}<div class="pip-composer-shell">${routinePopoverMarkup()}${computerWaitingCards()}${needsComputerCard()}${goalCard()}<div id="chat-tray" class="rail-line tray-only" data-dom-own="1"></div><form id="chat-form" class="pip-composer tray-box"><div class="dgc-drop" data-dom-own hidden aria-hidden="true">Drop to attach</div>${replyChipMarkup()}${canAttachImages()?imageStripMarkup():''}${chatBox?'<div id="chat-pop" class="pop pop-over" data-dom-own="1"></div>':''}<div class="composer-input">${chatBox?'<div id="chatText" class="mention-box" data-dom-own="1"></div>':`<label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="${CHAT_MAX_CHARS}"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea>`}</div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
+  return `<section class="pip-conversation${simple?' chat-style':''}" aria-label="Pip conversation">${flowPinnedMarkup()}<div class="conversation-log" role="log" aria-live="polite">${noProviderMarkup()}${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(chatPosts()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`${messages}<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${quietChat?'':messages}${live}${simple?'':typing}${S.stream?.text&&!routineLive?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(replyParts(S.stream.text).join('\n\n'))}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${pipKeyCards()}${borrowCards()}${projectChangeCards()}${flowTailMarkup()}${routineCards()}${settled.tail}${needsYouCard()}${cardRefusedCard()}${turnOpen?'</div>':''}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div><button type="button" id="pip-to-latest" class="pip-to-latest" data-dom-own="1" title="Jump to the newest message" aria-label="Jump to the newest message" hidden><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M4 9l4 4 4-4"/></svg><span data-latest-label>Latest</span></button>${simple?runnerOffMarkup():''}${pipOff(S.pip)?`<p class="pip-off-line" role="status">${PIP_OFF_SAYS}</p>`:''}<div class="pip-composer-shell">${routinePopoverMarkup()}${computerWaitingCards()}${needsComputerCard()}${goalCard()}<div id="chat-tray" class="rail-line tray-only" data-dom-own="1"></div><form id="chat-form" class="pip-composer tray-box"><div class="dgc-drop" data-dom-own hidden aria-hidden="true">Drop to attach</div>${replyChipMarkup()}${canAttachImages()?imageStripMarkup():''}${chatBox?'<div id="chat-pop" class="pop pop-over" data-dom-own="1"></div>':''}<div class="composer-input">${chatBox?'<div id="chatText" class="mention-box" data-dom-own="1"></div>':`<label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="${CHAT_MAX_CHARS}"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea>`}</div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${pagePip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
 }
 // ---- Its runs in its chat (Pips API 51) ----
 // Each finished run is a post from the Pip, read with list_pip_run_posts and drawn among the messages; History
@@ -951,7 +953,9 @@ function chatMarkup(){
 function postsShown(){return S.apiVersion>=51&&!remoteHost;}
 function postFor(runId){return S.posts.find(p=>p.run_id===runId)||null;}
 // Ask DGC to fix goes to a Work chat, which only the host can reach: the chat the Pip reports to, else a new one.
-function canAskDgc(){return typeof options.onAskDgc==='function'&&!remoteHost&&!personalPip();}
+function canAskDgc(){return typeof options.onAskDgc==='function'&&!remoteHost&&!personalPip()&&!onePips();}
+// One Pips: a check's findings are a card under its post, with what became of them (src/pipFlow.js).
+function flowCards(){return onePips()&&!!S.pip&&!personalPip();}
 function canRunNow(){return supportedSource()&&(!executionPip(S.pip)||livePip(S.pip)&&S.apiVersion>=60)&&S.runner?.online&&!S.runner.paused&&S.pip?.status==='active'&&!!pipType(S.pip,S.types)?.available&&!S.pip.active_run&&!S.runs.some(r=>active(r.status))&&!S.busy&&usable();}
 // ---- A run while it runs: its live post (reported 24 Oct; pipRunPosts.js livePostMarkup) ----
 // From the moment a run starts, its chat has one post for it at the end: the Pip at work, what it is doing now (the run's
@@ -1083,7 +1087,7 @@ function postContext(){
 // The fix runs in a Work chat and keeps its record on disk (dgc/pip_fix.py). The post reads it each time the posts are
 // read: opening the Pip, every 4 seconds while its chat or History is on screen, and coming back into view. So it says
 // fixing, Fixed, failed or undone as the Work chat's card does, live, and the same after a reload or a restart.
-function fixesShown(){return S.apiVersion>=65&&postsShown()&&!personalPip();}
+function fixesShown(){return S.apiVersion>=65&&postsShown()&&!personalPip()&&!onePips();}
 function fixState(runId){
   if(!fixesShown())return {asked:askedRuns.has(runId)};
   const fix=S.fixesPip===S.selected?S.fixes.get(runId)||null:null,at=askingFix.get(runId);
@@ -1115,7 +1119,7 @@ async function loadPosts(more=false){
     S.posts=mergePosts(S.postsPip===id?S.posts:[],page.posts);S.postsPip=id;
     if(more||!S.postsLoaded)S.postsCursor=page.next_before_id;S.postsLoaded=true;S.postsError='';
   }catch(error){if(token===scope()&&sequence===postsSeq)S.postsError=errorText(error);}
-  finally{if(token===scope()&&sequence===postsSeq){S.postsLoading=false;if(S.live?.state==='ending'&&sequence>=S.live.endSeq)settleLive();render();maybeMarkRead();void loadFixes();void loadReplyStats();}}
+  finally{if(token===scope()&&sequence===postsSeq){S.postsLoading=false;if(S.live?.state==='ending'&&sequence>=S.live.endSeq)settleLive();render();maybeMarkRead();void loadFixes();void loadFlow();void loadReplyStats();}}
 }
 // Open full report: the run, under History, at its report.
 function openPostReport(runId){S.tab='runs';S.overview=false;rememberView();render();void loadRun(runId).then(()=>document.querySelector('section[aria-label="Run report"],section[aria-label="Pulse command receipt"],section[aria-label="Documentation draft"]')?.scrollIntoView?.({block:'start'}));}
@@ -1162,7 +1166,7 @@ async function introduceOnFirstOpen(id){
  }
 }
 async function loadMessages(more=false){
- if(!more){void loadGoal();void loadConversations();void loadEmailDrafts();void loadAppLinks();void loadPlugins();void loadBorrows();void loadRoutines();void loadLevel();void loadNotes();void loadWorkingNotes();void loadDailyLog();void refreshComputer();if(personalPip()&&!S.models.length&&!S.defaultModel)void loadModels();}
+ if(!more){void loadFlow();void loadGoal();void loadConversations();void loadEmailDrafts();void loadAppLinks();void loadPlugins();void loadBorrows();void loadRoutines();void loadLevel();void loadNotes();void loadWorkingNotes();void loadDailyLog();void refreshComputer();if(personalPip()&&!S.models.length&&!S.defaultModel)void loadModels();}
   if(!S.selected||!usable()||(more&&(!S.messageCursor||S.messagesLoading||S.messages.length>=200)))return;
   const token=scope(),id=S.selected,sequence=++messageSeq,before=more?S.messageCursor:null,optionsEpoch=chatOptionsEpoch;S.messagesLoading=true;
   if(!S.messagesLoaded)render();
@@ -1557,6 +1561,7 @@ async function sendChat(sent={}){
   // Before Pips API 84 a message sent while the Pip works carries words only; from 84 its pictures and files go with it.
   if(S.chatActiveRun&&(images.length||files.length)&&!attachesMidReply()){setError('Send attached photos or files after this reply. Mid-turn updates are text only.');return;}
   // /learn [what]: a skill drafted from this chat, shown here with Save, Edit and Cancel. It isn't a message to the Pip.
+  bumpPip(S.selected);
   const learning=personalPip()&&!images.length&&!files.length?learnRequest(text):null;if(learning){void startLearn(learning);return;}
   // /goal <what>: this conversation's goal (Pips API 92), set with DGC and never sent to the Pip as a message.
   const goaling=goalsOn()&&!images.length&&!files.length?goalRequest(text):null;if(goaling){void setGoal(goaling.objective,text);return;}
@@ -1954,7 +1959,9 @@ async function loadAdaptations(more=false){
 }
 function personalPip(pip=S.pip){return pip?.source_policy?.mode==='personal';}
 function currentTree(pip=S.pip){try{return sourcePolicy(pip?.source_policy).mode==='current_tree';}catch{return false;}}
-function supportedSource(pip=S.pip){try{const p=sourcePolicy(pip?.source_policy);return p.mode!=='current_tree'||S.apiVersion>=11&&['scout','lens','rook','lock','quill'].includes(pip?.pip_type??'rook')&&!pip.schedule&&!pip.event_trigger;}catch{return false;}}
+// (One Pips: a Pip with its own box reads its copy of your files as they are on every run, a scheduled one too: the
+// rule that current files are only read when you ask is for a Pip without one.)
+function supportedSource(pip=S.pip){if(pip&&pip===S.pip&&folderBox())return true;try{const p=sourcePolicy(pip?.source_policy);return p.mode!=='current_tree'||S.apiVersion>=11&&['scout','lens','rook','lock','quill'].includes(pip?.pip_type??'rook')&&!pip.schedule&&!pip.event_trigger;}catch{return false;}}
 function jobSourceLabel(pip){if(personalPip(pip))return 'Personal · no project access.';try{return sourcePolicy(pip.source_policy).mode==='current_tree'?'Current working tree, captured for each manual request. Stored ref '+pip.source_ref+' is dormant.':'Committed source at '+pip.source_ref+'.';}catch{return 'Unsupported source policy. Update the computer before starting work.';}}
 function pinnedSourceMarkup(value){
  try{const p=sourcePin(value);if(p.kind==='personal')return '<dt>Scope</dt><dd>Personal · no project access</dd>';return p.kind==='committed_only'?`<dt>Commit</dt><dd class="mono">${esc(p.revision)}</dd>`:`<dt>Code</dt><dd>Your saved files, copied when it started</dd><dt>Files read</dt><dd>${p.snapshot.files.toLocaleString()} files · ${p.snapshot.bytes.toLocaleString()} bytes</dd><dt>Skipped</dt><dd>${p.snapshot.excluded_entries.toLocaleString()} files · ${p.snapshot.excluded_directories.toLocaleString()} folders</dd><dt>Copy SHA-256</dt><dd class="mono">${esc(p.snapshot.sha256)}</dd>`;}catch{return '<dt>Code</dt><dd>Couldn’t be read</dd>';}
@@ -2028,7 +2035,7 @@ let computerState={pip:'',value:null,loading:false,error:''},computerViewTimer=n
 let screenSetup={pip:'',value:null,loading:false},screenSetupPoll=null;
 async function loadDesktopStatus(){
  const pip=S.selected;
- if(S.apiVersion<43||remoteHost||!usable()||!pip||!personalPip()||screenSetup.loading&&screenSetup.pip===pip)return;
+ if(S.apiVersion<43||remoteHost||!usable()||!pip||!mayHaveBox()||screenSetup.loading&&screenSetup.pip===pip)return;
  const token=scope();screenSetup={pip,value:screenSetup.pip===pip?screenSetup.value:null,loading:true};
  let value=null;
  try{value=pipComputerDesktop((await send('get_pip_computer_desktop',{pip_id:pip})).desktop,pip);}catch{value=null;}
@@ -2052,7 +2059,7 @@ async function loadComputer(){
 // While the chat is open, look again quietly (no blank button while it loads): a run may have hit a
 // site's robot check, and the chat should say so at once.
 async function refreshComputer(){
- const pip=S.selected;if(S.apiVersion<43||!personalPip()||!usable()||computerState.loading)return;
+ const pip=S.selected;if(S.apiVersion<43||!mayHaveBox()||!usable()||computerState.loading)return;
  if(computerState.pip!==pip){void loadComputer();return;}
  if(!computerState.value?.granted)return;
  // What it needs from you: a robot check, and what its computer holds (shown under its reply).
@@ -2079,7 +2086,7 @@ async function loadComputerSettled(pip,token){
 // was, after it; a run with no reply of its own, by time. {byMessage, byRun: under a run's post, tail}
 function settledLines(shown){
  const byMessage=new Map(),byRun=new Map();let tail='';
- if(S.apiVersion<43||remoteHost||!personalPip())return {byMessage,byRun,tail};
+ if(S.apiVersion<43||remoteHost||!(personalPip()||folderBox()))return {byMessage,byRun,tail};
  const add=(map,key,line)=>map.set(key,(map.get(key)||'')+line);
  const place=(run,created,line)=>{
   const reply=shown.filter(m=>m.role==='assistant'&&m.run_id===run).at(-1);
@@ -2206,7 +2213,7 @@ async function finishedCheck(){
 }
 function computerMarkup(){const inner=computerInner();return inner&&`<div class="computer">${inner}</div>`;}
 function computerInner(){
- if(S.apiVersion<42||!personalPip()||remoteHost)return '';
+ if(S.apiVersion<42||!(personalPip()||folderBox())||remoteHost)return '';
  if(computerState.pip!==S.selected){void loadComputer();return '<h3>Computer</h3><p class="muted">Loading…</p>';}
  const c=computerState.value,off=S.busy||!usable()||archived();
  if(!c)return `<h3>Computer</h3>${errorMarkup(computerState.error)||'<p class="muted">Loading…</p>'}`;
@@ -3134,7 +3141,7 @@ document.addEventListener('submit',event=>{if(event.target.id==='setup-prompt-fo
 // context, notifications) sit under More; the one open now shows beside the three.
 // Every section a Pip has: the tabs here, and a Project Pip's menu on the simple page.
 function pipSections(){
- return [['chat','Chat'],['runs',postsShown()?'History':personalPip()?'Results':'Runs'],['job','Settings'],['schedule',pulsePip(S.pip)?'Plan & schedule':'Schedule'],['handoffs','Handoffs'],['revisions','Changes'],...(S.apiVersion>=14?[['memory','Memory']]:[]),['context','Context'],...(S.apiVersion>=13?[['notifications','Notifications']]:[])]
+ return [['chat','Chat'],['runs',onePips()&&!personalPip()?'Reports':postsShown()?'History':personalPip()?'Results':'Runs'],['job','Settings'],['schedule',pulsePip(S.pip)?'Plan & schedule':'Schedule'],['handoffs','Handoffs'],['revisions','Changes'],...(S.apiVersion>=14?[['memory','Memory']]:[]),['context','Context'],...(S.apiVersion>=13?[['notifications','Notifications']]:[])]
   .filter(([key])=>personalPip()&&key==='handoffs'?S.apiVersion>=30&&!remoteHost:key==='schedule'?(!executionPip(S.pip)||pulsePip(S.pip)):key!=='handoffs'||personalPip()||!documentationPip(S.pip));
 }
 function tabsMarkup(){
@@ -3197,17 +3204,32 @@ function folderRows(){return S.folders||[];}
 function chosenFolder(){return foldersOn()&&S.projectFolder?folderRows().find(r=>r.folder===S.projectFolder)||null:null;}
 function folderOfSpace(id){return folderRows().find(r=>r.workspace_id===id)||[...addedFolders.values()].find(r=>r.workspace_id===id)||null;}
 function spaceName(id){return S.workspaces.find(w=>w?.id===id)?.name||folderOfSpace(id)?.name||'';}
+// Returns whether the chosen folder's project changed (a first Pip made there since: the folder is a project now), so
+// its caller reads that project's cards. A project this view has not heard of is read with the rest (list_workspaces),
+// or the tab could not open it until the view was opened again.
 async function loadFolders(){
- if(remoteHost||S.apiVersion<93||typeof S.projectFolder!=='string')return;
+ if(remoteHost||S.apiVersion<93||typeof S.projectFolder!=='string'&&S.apiVersion<ONE_API)return false;
+ const was=chosenFolder()?.workspace_id||null;
  try{const value=await send('list_project_folders');
   S.folders=(Array.isArray(value?.folders)?value.folders:[]).filter(r=>record(r)&&typeof r.folder==='string'&&r.folder&&r.folder.length<=4096).slice(0,200)
-   .map(r=>({folder:r.folder,shown:tildePath(r.folder),name:typeof r.name==='string'&&r.name?r.name.slice(0,200):folderLeaf(r.folder),here:r.here===true,exists:r.exists!==false,workspace_id:typeof r.workspace_id==='string'&&/^ws_[a-f0-9]{32}$/.test(r.workspace_id)?r.workspace_id:null}));}
+   .map(r=>({folder:r.folder,shown:tildePath(r.folder),name:typeof r.name==='string'&&r.name?r.name.slice(0,200):folderLeaf(r.folder),here:r.here===true,exists:r.exists!==false,workspace_id:typeof r.workspace_id==='string'&&/^ws_[a-f0-9]{32}$/.test(r.workspace_id)?r.workspace_id:null}));
+  if(S.workspaces.length&&S.folders.some(r=>r.workspace_id&&!S.workspaces.some(w=>w?.id===r.workspace_id))){
+   const listed=await send('list_workspaces');if(Array.isArray(listed?.workspaces))S.workspaces=listed.workspaces;}}
  catch{/* no folders read: the tab is this window's project, as before, until they are */}
+ return (chosenFolder()?.workspace_id||null)!==was;
 }
 // Needs attention's `projects` for the choice: every project's, one folder's workspace, or nothing (a folder with none).
 function attentionProjects(){if(!foldersOn())return {};const row=chosenFolder();return row?(row.workspace_id?{projects:row.workspace_id}:{}):{projects:'all'};}
+// The Project Pips' cards of the choice among what the list holds: every project's, or the chosen folder's own. The page
+// itself decides this, not only what was asked of DGC: a list read for the choice before, or one a DGC answers with
+// another project's cards in it, shows none of them here. A folder with no Pips workspace yet has no cards at all
+// (it used to show whatever came back for a request that named no project).
+function projectCards(page){
+ const mine=personalSpace()?.id,row=chosenFolder(),theirs=(page?.items||[]).filter(i=>i.workspace_id!==mine);
+ return row?(row.workspace_id?theirs.filter(i=>i.workspace_id===row.workspace_id):[]):theirs;
+}
 // Whether this place is the Project tab's (its cards, its count, its View all).
-function projectPlace(){return foldersOn()?scopeTab()==='project':projectHome();}
+function projectPlace(){return onePips()?false:foldersOn()?scopeTab()==='project':projectHome();}
 async function loadProjectsAll(){
  if(!foldersOn()||projectsAll.busy)return;const sequence=++projectsAll.seq;projectsAll.busy=true;
  try{const value=await send('list_pips',{scope:'projects',order:'recent',limit:100});if(sequence!==projectsAll.seq)return;
@@ -3230,18 +3252,16 @@ function settleProjectTab(){
   void loading.finally(()=>{if(epoch===S.epoch&&S.switching){S.switching=false;render();}});
  });
 }
-// The dropdown is at the right end of the Project tab's top line (asked 12 Nov night: no row of its own, and no line
-// naming one folder's path: the button's tooltip has it). That line is the Needs attention heading's when something
-// waits (attentionHomeMarkup), and a line as tall with nothing at its left when nothing does, so the dropdown is at one
-// place as cards come and go. Its element drops the "Project Folder" word when the line has no room for it.
+// The dropdown has a line of its own (asked 13 Nov), at the left, straight under the Personal | Project tabs and above
+// Needs attention, whether or not anything waits: it is the Project tab's one control, and Needs attention, its count,
+// its page of them all and the list of Project Pips all follow it. (On the Needs attention heading's line it read as
+// that heading's own filter.) No line names one folder's path: the button's tooltip has it. Its element drops the
+// "Project Folder" word when the line has no room for it with the folder's name.
 function folderPickHere(){return foldersOn()&&scopeTab()==='project'&&!!globalThis.DgcFolderPick;}
-function folderPickMarkup(){
- const row=chosenFolder();
- return `<dgc-folder-fit class="pips-folder-fit">${globalThis.DgcFolderPick.buttonHtml({id:'pips-folder-pick',rows:folderRows(),choice:row?row.folder:''})}</dgc-folder-fit>`;
-}
-function folderRowMarkup(){
+function folderLineMarkup(){
  if(!folderPickHere())return '';
- return `<div class="attention attention-none"><div class="attention-head attention-head-end pips-folder-row"><button type="button" class="attention-toggle attention-toggle-none" disabled tabindex="-1" aria-hidden="true">&nbsp;</button><span class="attention-head-gap"></span>${folderPickMarkup()}</div></div>`;
+ const row=chosenFolder();
+ return `<div class="pips-folder-line"><dgc-folder-fit class="pips-folder-fit">${globalThis.DgcFolderPick.buttonHtml({id:'pips-folder-pick',rows:folderRows(),choice:row?row.folder:''})}</dgc-folder-fit></div>`;
 }
 // All projects: every project's Pips, each with its folder under its name. A row opens that Pip here.
 function projectsAllMarkup(){
@@ -3252,7 +3272,16 @@ function projectsAllMarkup(){
  return `<section class="simple-home pips-projects-all" aria-label="Every project’s Pips"><div class="simple-home-head"><h2>Project Pips</h2><span class="simple-home-actions">${windowSpace()?button('projects-new','New Pip',S.busy||!usable(),'primary pill'):''}</span></div>${projectsAll.error?`<p class="notice error" role="alert">${esc(projectsAll.error)}</p>`:''}${rows.length?`<div class="pip-rows pips-projects-list">${rows.map(row).join('')}</div>`:projectsAll.error?'':'<p class="muted">No Project Pips in any folder yet.</p>'}</section>`;
 }
 function openFolderMenu(button,keyboard){
- const Pick=globalThis.DgcFolderPick;if(!Pick||!foldersOn())return;
+ const Pick=globalThis.DgcFolderPick;if(!Pick)return;
+ if(button.id==='pips-filter'){openOneFilter(button,keyboard);return;}
+ if(button.id==='new-pip-folder'&&S.review?.onePip){
+  if(button.getAttribute('aria-expanded')==='true'){Pick.close(true);return;}
+  Pick.open(button,{rows:createFolderRows(),choice:draft.createFolder||'',all:true,allLabel:'No folder (Personal)',add:true,goneOff:true,label:'Folder',keyboard,trigger:()=>$('new-pip-folder'),
+   onChoose:folder=>{draft.createFolder=folder;if(S.review?.onePip){S.review.error='';Object.assign(S.review,oneNewPipReview());renderReview();}$('new-pip-folder')?.focus({preventScroll:true});},
+   onAdd:()=>void addCreateFolder()});
+  return;
+ }
+ if(!foldersOn())return;
  if(button.getAttribute('aria-expanded')==='true'){Pick.close(true);return;}
  // Create a Project Pip: the form's own folder (never the list's choice), with Add a folder… at the end.
  if(button.id==='new-pip-folder'){
@@ -3279,7 +3308,7 @@ function newPipFolderField(){
 // (add_project_folder) and it is the form's folder. DGC's refusal (the home folder, DGC's own) shows in the form.
 function pickFolder(){return new Promise(resolve=>{const id=`pick-${Date.now().toString(36)}-${++folderPickSeq}`;folderPicks.set(id,resolve);options.postMessage({type:'pipsPickFolder',id});});}
 async function addCreateFolder(){
- const review=S.review;if(!review?.projectPip||!usable())return;
+ const review=S.review;if(!(review?.projectPip||review?.onePip)||!usable())return;
  const folder=await pickFolder();if(!folder||S.review!==review)return;
  try{const added=await send('add_project_folder',{folder}),space=added?.workspace;
   if(!record(space)||typeof space.id!=='string'||!/^ws_[a-f0-9]{32}$/.test(space.id))throw Error('DGC didn’t say which project that folder is. Try again.');
@@ -3287,13 +3316,122 @@ async function addCreateFolder(){
   addedFolders.set(folder,{folder,shown:tildePath(folder),name:typeof space.name==='string'&&space.name?space.name.slice(0,200):folderLeaf(folder),here:false,exists:true,workspace_id:space.id});
   draft.createFolder=folder;review.error='';}
  catch(error){review.error=errorText(error);}
- if(S.review===review){Object.assign(review,newProjectPipReview());renderReview();$('new-pip-folder')?.focus({preventScroll:true});}
+ if(S.review===review){Object.assign(review,review.onePip?oneNewPipReview():newProjectPipReview());renderReview();$('new-pip-folder')?.focus({preventScroll:true});}
 }
 function projectSpace(){
  if(!foldersOn())return windowSpace();
  const row=chosenFolder();return row?.workspace_id?S.workspaces.find(w=>w?.id===row.workspace_id&&w.kind!=='personal')||null:null;
 }
-function scopeTabs(){return !remoteHost&&!!personalSpace();}
+function scopeTabs(){return !remoteHost&&!!personalSpace()&&!onePips();}
+// ---- One Pips (0.52, his calls of 13 Nov; Pips API 94; src/pipsOne.js) ----
+// One list for every Pip, where this page had Personal | Project tabs: Core pinned first, then the Pip with the latest
+// message or report, as DGC lists them (list_pips {scope: "all"}); each row says where its Pip works. The line under
+// the search chooses which show (All Pips · Personal · each folder), and Needs attention, its count and its page of
+// them all follow it. Any Pip opens here, in the one page and chat. Personal stays loaded underneath (its settings,
+// its teams and its new Pips are the home's own); a Pip of a folder is opened in its folder's project when it is
+// chosen. An older DGC keeps the two tabs.
+function onePips(){return !remoteHost&&S.apiVersion>=ONE_API&&!!personalSpace();}
+const one={filter:ONE_ALL,pips:[],read:false,busy:false,error:'',seq:0,next:null,total:null,moreBusy:false,bumps:new Map(),held:null,drawn:null,hover:false,leave:0,asked:'',reportsSort:'new'};
+const oneSeen=new Map();let oneSeenRead=false,oneBump=0;
+function oneScope(){return {personalId:personalSpace()?.id||'',folders:S.folders||[]};}
+// A Pip this view knows of, open or only listed.
+function knownPip(id){return S.jobs.find(p=>p.id===id)||one.pips.find(p=>p.id===id)||null;}
+function onePage(value){return (Array.isArray(value?.pips)?value.pips:[]).filter(p=>record(p)&&typeof p.id==='string'&&/^pip_[a-f0-9]{32}$/.test(p.id)&&typeof p.name==='string'&&p.name&&typeof p.workspace_id==='string'&&/^ws_[a-f0-9]{32}$/.test(p.workspace_id));}
+async function loadOne(){
+ if(!onePips()||!usable())return;
+ const sequence=++one.seq,request=listRequest(one.filter,{...oneScope(),query:S.pipSearch});
+ // A folder DGC has no Pips for yet: nothing to read, and the page says so.
+ if(!request){one.pips=[];one.next=null;one.total=0;one.error='';one.read=true;one.busy=false;one.bumps.clear();render();return;}
+ one.busy=true;
+ try{const value=await send('list_pips',request);if(sequence!==one.seq)return;
+  const pips=onePage(value);
+  // DGC's order is the latest news now: what was moved up here meanwhile is in it.
+  one.pips=pips;one.next=Number.isSafeInteger(value?.next_offset)?value.next_offset:null;one.total=Number.isSafeInteger(value?.total)?value.total:pips.length;one.error='';one.bumps.clear();}
+ catch(error){if(sequence!==one.seq)return;one.error=errorText(error);}
+ one.read=true;one.busy=false;render();
+}
+async function loadOneMore(){
+ if(!onePips()||one.moreBusy||one.next===null||!usable())return;
+ const sequence=one.seq,request=listRequest(one.filter,{...oneScope(),query:S.pipSearch,offset:one.next});if(!request)return;
+ one.moreBusy=true;render();
+ try{const value=await send('list_pips',request);if(sequence!==one.seq)return;
+  const seen=new Set(one.pips.map(p=>p.id));one.pips=[...one.pips,...onePage(value).filter(p=>!seen.has(p.id))];
+  one.next=Number.isSafeInteger(value?.next_offset)?value.next_offset:null;if(Number.isSafeInteger(value?.total))one.total=value.total;}
+ catch(error){if(sequence===one.seq)setError(error);}
+ finally{one.moreBusy=false;if(sequence===one.seq)render();}
+}
+// A Pip whose new message or report arrived (the unread counts just read say so) moves to the top at once; one that
+// is not in the list yet is read with it.
+function noteArrivals(){
+ if(!onePips())return;
+ let missing=false;
+ for(const [pip,item] of unreadByPip){const mark=`${item.latest_message_id||''}|${item.latest_post_id||''}|${item.count}`;
+  if(oneSeenRead&&oneSeen.get(pip)!==mark){if(one.pips.some(p=>p.id===pip))one.bumps.set(pip,++oneBump);else if(underFilter({workspace_id:item.workspace_id},one.filter,oneScope())&&!S.pipSearch)missing=true;}
+  oneSeen.set(pip,mark);}
+ oneSeenRead=true;if(missing)void loadOne();
+}
+function bumpPip(id){if(onePips()&&id&&one.pips.some(p=>p.id===id))one.bumps.set(id,++oneBump);}
+// The list holds still while the pointer is over it or one of its rows has the keyboard.
+function oneHeld(){const list=document.querySelector('.pips-one-list');return !!list&&(one.hover||list.contains(document.activeElement));}
+function oneRelease(){if(one.held&&!oneHeld())render();}
+function chooseOneFilter(value){
+ const next=value===ONE_PERSONAL?ONE_PERSONAL:savedFilter(value,S.folders||[]);if(next===one.filter)return;
+ one.filter=next;one.read=false;one.pips=[];one.next=null;one.total=null;one.held=null;one.drawn=null;one.bumps.clear();attentionRead=false;
+ if(attentionAll.open)attentionAll.open=false;
+ rememberView();render();void loadOne();void loadAttention();
+}
+function openOneFilter(button,keyboard){
+ const Pick=globalThis.DgcFolderPick;if(!Pick||!onePips())return;
+ if(button.getAttribute('aria-expanded')==='true'){Pick.close(true);return;}
+ const now=one.filter;
+ Pick.open(button,{rows:S.folders||[],choice:now,all:true,allLabel:'All Pips',lead:[{value:ONE_PERSONAL,name:'Personal',sub:'Pips with no folder'}],label:'Show',keyboard,trigger:()=>$('pips-filter'),onChoose:value=>{chooseOneFilter(value);$('pips-filter')?.focus({preventScroll:true});}});
+}
+function oneFilterMarkup(){
+ const Pick=globalThis.DgcFolderPick;if(!Pick)return '';
+ const folder=one.filter!==ONE_ALL&&one.filter!==ONE_PERSONAL;
+ return `<div class="pips-one-filter">${Pick.buttonHtml({id:'pips-filter',cls:'pips-filter',rows:S.folders||[],choice:folder?one.filter:'',label:'Show',empty:'All Pips',said:one.filter===ONE_PERSONAL?'Personal':''})}</div>`;
+}
+// A folder as its way there and its own name: in a narrow list the way there gives way, and the name stays whole.
+function placeWords(shown){const at=Math.max(shown.lastIndexOf('/'),shown.lastIndexOf('\\'));return at>=0&&at<shown.length-1?`<span class="pip-row-place-dir">${esc(shown.slice(0,at+1))}</span><span class="pip-row-place-name">${esc(shown.slice(at+1))}</span>`:esc(shown);}
+// Where a Pip works, said first under its name: "Personal", or its folder (the whole path is its tooltip).
+function onePlaceMarkup(p){
+ const place=placeOf(p,{personalId:personalSpace()?.id||'',folderOf:folderOfSpace,nameOf:spaceName});
+ if(place.kind==='unknown')return '';
+ return `<span class="pip-row-place" data-place="${place.kind}" title="${esc(place.full)}">${place.missing?'<span class="pip-row-folder-note">Folder not found</span> ':''}${placeWords(place.shown)}</span><span class="pip-row-sep" aria-hidden="true"> · </span>`;
+}
+function oneHomeMarkup(){
+ const scopeNow=oneScope(),searching=!!S.pipSearch,folder=one.filter!==ONE_ALL&&one.filter!==ONE_PERSONAL?(S.folders||[]).find(r=>r.folder===one.filter)||null:null;
+ const shown=one.pips.filter(p=>S.showArchived||p.status!=='archived'),ordered=orderPips(shown,{personalId:scopeNow.personalId,bumps:one.bumps});
+ // Held still, the rows keep the places they were drawn in; let go, they take the latest order.
+ if(!document.querySelector('.pips-one-list'))one.hover=false;
+ if(oneHeld()){if(!one.held)one.held=one.drawn||ordered.map(p=>p.id);}else one.held=null;
+ const rows=heldOrder(ordered,one.held);one.drawn=rows.map(p=>p.id);
+ const count=one.total!==null&&(one.total>one.pips.length||searching)?`<small class="pip-search-count">${searching?`${one.total.toLocaleString('en-US')} found`:`Showing ${one.pips.length.toLocaleString('en-US')} of ${one.total.toLocaleString('en-US')}`}</small>`:'';
+ const search=`<div class="pip-search pips-one-search"><label class="sr-only" for="pip-search">Search your Pips</label><input id="pip-search" type="search" placeholder="Search your Pips" autocomplete="off" value="${esc(draft.pipSearch||'')}" maxlength="120">${count}</div>`;
+ const hasCore=one.pips.some(p=>p.pip_type==='core'&&p.workspace_id===scopeNow.personalId);
+ // With no Pips at all (and nothing typed), Core is met first, as before.
+ if(one.read&&!one.error&&!one.pips.length&&!searching&&one.filter===ONE_ALL&&S.jobsRead&&!S.jobs.length)return `${search}${oneFilterMarkup()}${attentionHomeMarkup()}${meetCoreMarkup()}`;
+ const empty=!one.read?loadingMark():one.error?'':searching?`<p class="muted pips-one-none">No Pip matches “${esc(S.pipSearch)}” in its name, instructions or chat.</p>`
+  :folder?`<p class="muted pips-one-none">No Pips in ${esc(folder.name)} yet.</p>`:one.filter===ONE_PERSONAL?'<p class="muted pips-one-none">No Pips without a folder yet.</p>':'<p class="muted pips-one-none">No Pips yet.</p>';
+ const list=rows.length?`<div class="pip-rows pips-one-list">${rows.map(p=>homeRowSlot(p,onePlaceMarkup(p))).join('')}</div>`:empty;
+ const coreOffer=one.read&&!hasCore&&!searching&&!folder&&rows.length?`<div class="core-offer">${avatar('idle',characterType('core'),'core-offer')}<p><strong>Meet Core</strong><span>Your Primary Pip, for everyday tasks.</span></p>${button('create-core','Create',S.busy||!usable(),'primary pill')}</div>`:'';
+ const more=one.next!==null?button('one-more',one.moreBusy?'Loading…':'Load more',one.moreBusy||!usable(),'link'):'';
+ const archivedCount=one.pips.filter(p=>p.status==='archived').length;
+ const head=`<div class="simple-home-head"><h2>Your Pips</h2><span class="simple-home-actions"><button type="button" id="pips-settings-open" class="topbar-icon" aria-label="Pips settings" title="Pips settings: computers, apps and plugins"${!usable()?' disabled':''}>${simpleIcon('gear')}</button>${S.workspace?.kind==='personal'?teamMenuMarkup():''}${button('simple-new','New Pip',S.busy||!usable(),'primary pill')}</span></div>`;
+ return `${search}${oneFilterMarkup()}${searching?'':attentionHomeMarkup()}<section class="simple-home pips-one-home" aria-label="Your Pips">${head}${one.error?`<p class="notice error" role="alert">${esc(one.error)}</p>`:''}${coreOffer}${list}${more}${archivedCount?button('show-archived',S.showArchived?'Hide archived':'Show archived',false,'link'):''}</section>${searching||S.workspace?.kind!=='personal'?'':flowMarkup()}`;
+}
+// A row opens its Pip, whichever folder it works in: one of the project loaded underneath at once, another's by way
+// of its own project (navigateFromHost reads it and opens it there).
+function openOnePip(id){
+ one.hover=false;
+ if(S.jobs.some(p=>p.id===id)&&!S.switching){void select(id);return;}
+ void navigateFromHost({pip:id}).catch(error=>setError(error));
+}
+// Back at the list: Personal is what is loaded under it (the home's settings, teams and new Pips are Personal's).
+function oneHomeAgain(){
+ const personal=personalSpace();void loadOne();
+ if(personal&&S.workspace&&S.workspace.id!==personal.id&&!S.busy)void enterWorkspace(personal);
+}
 function scopeTab(){return S.projectEmpty||S.workspace?.kind!=='personal'?'project':'personal';}
 // The workspaces this view may open: with tabs, Personal and this folder's project (with the Project Folder dropdown,
 // any project's: a Project Pip from another folder opens here); without, every one, as before.
@@ -3309,8 +3447,8 @@ function scopeTabsMarkup(){
   const mark=count?`<span class="pip-tab-count" aria-hidden="true">${count.toLocaleString('en-US')}</span>`:fresh?'<span class="pip-tab-new" aria-hidden="true"></span>':'';
   return `<button type="button" role="tab" id="pips-tab-${key}" class="pips-tab" data-pips-tab="${key}" aria-controls="pips-tabpanel" aria-selected="${chosen===key}"${chosen===key?'':' tabindex="-1"'} title="${esc(said?`${said}\n${title}`:title)}"${said?` aria-label="${esc(`${label}, ${said}`)}"`:''}>${label}${mark}</button>`;};
  // With the Project Folder dropdown the list holds the chosen projects' cards too: each tab counts its own.
- if(foldersOn()){const mine=personalSpace()?.id,theirs=(S.attention?.items||[]).filter(i=>i.workspace_id!==mine).length,row=chosenFolder();
-  return `<div class="pips-tabs" role="tablist" aria-label="Your Pips, or your projects’ Pips">${tab('personal','Personal','Your Pips: the same in every folder',personalSpace(),Math.max(0,(S.attention?.total||0)-theirs))}${tab('project','Project',row?`${row.name}: this folder’s Pips`:'Every project’s Pips',project,theirs)}</div>`;}
+ if(foldersOn()){const mine=personalSpace()?.id,others=(S.attention?.items||[]).filter(i=>i.workspace_id!==mine).length,theirs=projectCards(S.attention).length,row=chosenFolder();
+  return `<div class="pips-tabs" role="tablist" aria-label="Your Pips, or your projects’ Pips">${tab('personal','Personal','Your Pips: the same in every folder',personalSpace(),Math.max(0,(S.attention?.total||0)-others))}${tab('project','Project',row?`${row.name}: this folder’s Pips`:'Every project’s Pips',project,theirs)}</div>`;}
  return `<div class="pips-tabs" role="tablist" aria-label="Your Pips, or this project’s Pips">${tab('personal','Personal','Your Pips: the same in every folder',personalSpace(),S.attention?.total||0)}${tab('project','Project',project?`${project.name}: this project’s Pips`:'Open a project folder to see its Pips',project,project&&S.attention?.projects?.[project.id]?.total||0)}</div>`;
 }
 // What the chosen tab shows is its panel (the list, or a Pip open in it).
@@ -3319,8 +3457,8 @@ function projectEmptyMarkup(){
  if(!foldersOn())return `<div class="pips-tab-empty"${scopePanelAttrs()}><p class="muted">Open a project folder to see its Pips.</p></div>`;
  const row=chosenFolder();
  // One folder with no Pips says so; All projects is every project's Pips, under what waits on them.
- if(row)return `<div class="simple-content pips-folder-page"${scopePanelAttrs()}>${folderRowMarkup()}<div class="pips-tab-empty"><p class="muted">No Project Pips in ${esc(row.name)} yet.</p></div></div>`;
- return `<div class="simple-content pips-folder-page"${scopePanelAttrs()}>${attentionHomeMarkup()}${projectsAllMarkup()}</div>`;
+ if(row)return `<div class="simple-content pips-folder-page"${scopePanelAttrs()}>${folderLineMarkup()}<div class="pips-tab-empty"><p class="muted">No Project Pips in ${esc(row.name)} yet.</p></div></div>`;
+ return `<div class="simple-content pips-folder-page"${scopePanelAttrs()}>${folderLineMarkup()}${attentionHomeMarkup()}${projectsAllMarkup()}</div>`;
 }
 /** Shows another workspace's Pips from the top: what the old dropdown did, and what opening a Pip elsewhere does. */
 // Its list starts at its first page: the pages read and the search typed were the other tab's (both tabs are paged now).
@@ -3365,9 +3503,11 @@ S.attention=null;let attentionSeq=0,attentionExpanded=false,attentionRead=false;
 // With the Project Folder dropdown the list holds Project Pips' cards too: Personal's on the Personal tab, the chosen
 // projects' on the Project tab. Without it a project's home shows none of the list, as before.
 function attentionPart(page){
+ if(onePips())return attentionFor(page,one.filter,oneScope());
  if(!foldersOn())return projectHome()?null:page;if(!page)return page;
- const mine=personalSpace()?.id,project=scopeTab()==='project',items=page.items.filter(i=>(i.workspace_id!==mine)===project);
- return {...page,items,total:Math.max(items.length,page.total-(page.items.length-items.length))};
+ const project=scopeTab()==='project',items=project?projectCards(page):page.items.filter(i=>i.workspace_id===personalSpace()?.id);
+ // (A folder with no Pips workspace has nothing waiting, whatever the list holds: its number is 0.)
+ return {...page,items,total:project&&chosenFolder()&&!chosenFolder().workspace_id?0:Math.max(items.length,page.total-(page.items.length-items.length))};
 }
 function attentionKeys(){return [...(attentionPart(S.attention)?.items||[]).map(i=>i.id),...setupRows.filter(r=>!heldRejects.has(r.id)).map(r=>'setup:'+r.id)];}
 function attentionOpen(){
@@ -3425,7 +3565,7 @@ async function loadAttention(){
  // Its list is Personal Pips' cards, and a project's home shows none of it, but both tabs say their number from this page.
  if(remoteHost||S.apiVersion<44||!simpleMode()||!usable()){attentionRead=true;return;}
  const token=scope(),sequence=++attentionSeq,first=!attentionRead;
- try{const page=attentionPage(await send('list_pip_attention',{limit:100,...attentionProjects()}));if(token!==scope()||sequence!==attentionSeq)return;
+ try{const page=attentionPage(await send('list_pip_attention',{limit:100,...(onePips()?attentionRequest(one.filter,oneScope()):attentionProjects())}));if(token!==scope()||sequence!==attentionSeq)return;
   const before=JSON.stringify(S.attention),fresh=first||JSON.stringify(page)!==before;S.attention=page;attentionRead=true;if(fresh){render();void loadAttentionVisits(page,token);}}
  catch{/* the home still lists every Pip; the next refresh tries again */if(token===scope()&&!attentionRead){attentionRead=true;render();}}
 }
@@ -3443,7 +3583,7 @@ async function loadAttentionVisits(page,token){
 }
 function attentionAnswer(item){
  if(!item?.pip_id||remoteHost)return null;
- const job=S.jobs.find(p=>p.id===item.pip_id),pip={id:item.pip_id,name:job?.name||item.pip_name||'It',version:job?.current_version||0};
+ const job=knownPip(item.pip_id),pip={id:item.pip_id,name:job?.name||item.pip_name||'It',version:job?.current_version||0};
  const answer=answerFor(item,pip,{visits:attentionVisits});return answer?{answer,pip}:null;
 }
 function answerSoon(id,yes){
@@ -3464,7 +3604,7 @@ function undoAnswer(id){const held=heldAnswers.get(id);if(!held)return;window.cl
 // drawn. `all`: the page, where a new Pip just rejected keeps its place (it says so there, with Undo) until it is sent.
 function attentionScene(all=false){
  const face=i=>{if(!i.pip_id)return '<span class="attention-mark" aria-hidden="true">+</span>';
-  const current=S.jobs.find(p=>p.id===i.pip_id),pip=current||{id:i.pip_id,name:i.pip_name,pip_type:i.pip_type,workspace_id:i.workspace_id};
+  const current=knownPip(i.pip_id),pip=current||{id:i.pip_id,name:i.pip_name,pip_type:i.pip_type,workspace_id:i.workspace_id};
   return pipAvatar(pip,'waiting_approval',`attn-${i.card}`,characterType(pip.pip_type));};
  // A project's home shows none of the Personal Pips' rows: only the new Pips waiting in this project.
  const more=setupRows.length>=5?'Showing 5 new Pips. Answer one to see more.':'';
@@ -3477,13 +3617,12 @@ function attentionScene(all=false){
  const mine=personalSpace()?.id;
  return {page,setups,draw:{esc,face,busy:!usable(),setups,setupCard:setupCardFor,error:setupRows.length?setupError:'',more,
   // A Project Pip's card names its project.
-  place:i=>foldersOn()&&i.workspace_id!==mine?spaceName(i.workspace_id):'',
+  place:i=>(foldersOn()||onePips())&&i.workspace_id!==mine?spaceName(i.workspace_id):'',
   answers:i=>attentionAnswer(i)?.answer||null,held:i=>heldAnswers.get(i.id)?.said||''}};
 }
 function attentionHomeMarkup(){
- const {page,setups,draw}=attentionScene(),expanded=attentionOpen(),pick=folderPickHere();
- // The Project tab's dropdown is on this heading's line; with nothing waiting it keeps that place on a line of its own.
- return attentionMarkup(page,{...draw,expanded,at:attentionShowing(attentionCards(page,setups)),viewAll:true,end:pick?folderPickMarkup():''})||folderRowMarkup();
+ const {page,setups,draw}=attentionScene(),expanded=attentionOpen();
+ return attentionMarkup(page,{...draw,expanded,at:attentionShowing(attentionCards(page,setups)),viewAll:true});
 }
 // "View all" (asked 12 Nov): Needs attention on a page of its own, every card of this place (Personal or Project) one
 // under another, each with the answers its one card has. It scrolls as the view does. Back, or Escape, returns to the
@@ -3615,7 +3754,9 @@ function computerNamesRow(off){
  return computerNamesMarkup({esc,names,renaming:page?ui.renaming:0,renameText:ui.renameText,busy:!!off||ui.busy,error:page?ui.error:''});
 }
 function computerRowMarkup(p,off){
- if(S.apiVersion<42||remoteHost||!personalPip()||archived())return '';
+ if(S.apiVersion<42||remoteHost||!(personalPip()||folderBox())||archived())return '';
+ // A Pip with a folder has the computer DGC gave it: it is opened here, never removed.
+ if(!personalPip())return `<section class="pip-page-group" aria-label="Computer"><div class="pip-page-row static"><span class="row-words"><strong>Its own computer${infoTip('pipComputerSays','Its own computer',`A browser, a Terminal and its own copy of your folder, separate from yours. What ${esc(p.name)} changes there comes back to you as a card.`)}</strong></span><button type="button" class="quiet" data-flow-watch="page"${off?' disabled':''}>Open</button></div></section>`;
  return `<section class="pip-page-group" aria-label="Computer"><div class="pip-page-row static"><span class="row-words">${p.computer_plan
   ?`<strong>Its own computer${infoTip('pipComputerSays','Its own computer',`A browser, a Terminal and files, separate from yours. It starts when ${esc(p.name)} needs it.`)}</strong></span>${button('remove-computer','Remove…',off,'quiet')}`+computersRowMarkup(off)
   :`<strong>Computer${infoTip('pipComputerSays','Computer',`Give ${esc(p.name)} its own computer, so it can look things up and fill in forms for you.`)}</strong></span>${button('give-computer','Give it a computer…',off,'quiet')}`}</div></section>`;
@@ -3788,14 +3929,14 @@ async function saveLogin(){
  finally{if(token===scope()){S.busy=false;if(S.review===r)renderLoginForm(r);render();void loadLogins();}}
 }
 async function loadCareful(){
- if(remoteHost||S.apiVersion<44||!personalPip()||!S.pip?.computer_plan||!usable())return;
+ if(remoteHost||S.apiVersion<44||!(personalPip()&&S.pip?.computer_plan||folderBox())||!usable())return;
  const token=scope(),pip=S.selected,sequence=++carefulState.seq;
  try{const value=carefulPage(await send('list_pip_sites',{pip_id:pip}),pip);if(token!==scope()||sequence!==carefulState.seq||S.selected!==pip)return;
   carefulState.pip=pip;carefulState.value=value;carefulState.error='';render();}
  catch(error){if(token===scope()&&sequence===carefulState.seq){carefulState.error=errorText(error);render();}}
 }
 async function carefulCall(type,fields,notice){
- if(carefulState.busy||!usable()||!personalPip())return;const token=scope(),pip=S.selected;carefulState.busy=true;carefulState.error='';render();
+ if(carefulState.busy||!usable()||!(personalPip()||folderBox()))return;const token=scope(),pip=S.selected;carefulState.busy=true;carefulState.error='';render();
  try{const value=carefulPage(await send(type,{pip_id:pip,...fields}),pip);if(token!==scope()||S.selected!==pip)return;carefulState.pip=pip;carefulState.value=value;S.notice=notice;}
  catch(error){if(token===scope())carefulState.error=errorText(error);}
  finally{carefulState.busy=false;if(token===scope())render();}
@@ -3805,7 +3946,7 @@ async function navigateAttention(value){
  // Personal Pips live in the Personal workspace; open it first when another is showing.
  if(typeof value.workspace==='string'&&value.workspace!==S.workspace?.id){
   // (With the Project Folder dropdown a card may be a Project Pip's, of any folder: its own project opens.)
-  const target=S.workspaces.find(w=>w.id===value.workspace&&(w.kind==='personal'||foldersOn()));
+  const target=S.workspaces.find(w=>w.id===value.workspace&&(w.kind==='personal'||foldersOn()||onePips()));
   if(!target)throw Error('Your Personal Pips are unavailable here. Refresh the dashboard.');
   await enterWorkspace(target);
  }
@@ -3828,6 +3969,8 @@ async function navigateAttention(value){
  if(S.selected!==value.pip)return;
  if(computer){openComputerView();return;}
  if(value.reviewKind==='app_action'&&typeof value.review==='string'){await openMessageReview(value.review);return;}
+ // What only you can do is under the line at the top of its chat: it is opened first.
+ if(cardKind==='waiting'&&!flow.waitingOpen){flow.waitingOpen=true;await loadFlow();render();}
  if(typeof card==='string')await revealCard(cardSelector(cardKind,card,s=>CSS.escape(s)));
 }
 // The chat draws its cards as they load (drafts, plugins, apps): look for a few seconds, then show it.
@@ -3869,7 +4012,7 @@ async function loadMorePips(){
 }
 function searchPips(value){
  window.clearTimeout(pipSearchTimer);
- pipSearchTimer=window.setTimeout(()=>{const query=' '.concat(value).trim().replace(/\s+/g,' ').slice(0,120);if(query===S.pipSearch)return;S.pipSearch=query;jobsExtra=[];S.jobsNext=null;void refresh(false);},250);
+ pipSearchTimer=window.setTimeout(()=>{const query=' '.concat(value).trim().replace(/\s+/g,' ').slice(0,120);if(query===S.pipSearch)return;S.pipSearch=query;jobsExtra=[];S.jobsNext=null;if(onePips()){one.held=null;one.drawn=null;void loadOne();return;}void refresh(false);},250);
 }
 function flowMarkup(){
  if(S.apiVersion<72||remoteHost||!S.workspace)return '';
@@ -3912,8 +4055,8 @@ function reviewFlow(){
 function simpleHomeMarkup(){
  const all=S.jobs.filter(p=>S.showArchived||p.status!=='archived'),live=S.jobs.filter(p=>p.status!=='archived');
  // (A project's home too, while its Pips are being read: its empty home, with New Pip, flashed before the list.)
- // (The Project Folder dropdown keeps its line while they are read and while a search hides Needs attention.)
- if(projectHome())return !S.jobsRead&&!S.error&&!S.jobs.length&&!S.pipSearch?folderRowMarkup()+loadingMark():(S.pipSearch?folderRowMarkup():attentionHomeMarkup())+simpleHomeList(all,live)+(S.pipSearch?'':flowMarkup());
+ // (The Project Folder dropdown's line is there while they are read and while a search hides Needs attention.)
+ if(projectHome())return !S.jobsRead&&!S.error&&!S.jobs.length&&!S.pipSearch?folderLineMarkup()+loadingMark():folderLineMarkup()+(S.pipSearch?'':attentionHomeMarkup())+simpleHomeList(all,live)+(S.pipSearch?'':flowMarkup());
  // Only once the list has come back empty: while it's being read a Pip's owner saw Meet Core's large face, and could press Create Core.
  if(!live.length&&!S.jobs.length&&!S.pipSearch)return S.jobsRead?attentionHomeMarkup()+meetCoreMarkup():loadingMark();   // a search that finds nothing is not an empty home
  return (S.pipSearch?'':attentionHomeMarkup())+simpleHomeList(all,live)+(S.pipSearch?'':flowMarkup());
@@ -3926,9 +4069,9 @@ function projectHomeMenu(){
 function projectFirstMarkup(){
  return `<div class="project-first"><div class="pips-welcome-cast">${['scout','rook','pulse'].map(id=>avatar('idle',characterType(id),`welcome-${id}`)).join('')}</div><h3>What should your first Pip look after?</h3><p class="muted">Pick a character for the job: Scout, Lens, Rook and Lock read the code, Patch fixes it, Pulse runs its checks and Quill writes its docs. You approve anything that changes files or runs commands.</p>${button('create-first','New Pip',S.busy||!usable()||!S.types.length,'primary pill')}</div>`;
 }
-function simpleHomeList(all,live){
- const order=[...all.filter(p=>p.pip_type==='core'),...all.filter(p=>p.pip_type!=='core')];
- const row=p=>{const type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,[],usable(),S.runner),waiting=waitingOn(S.attention,p.id,pendingReviews(p)),unread=p.status==='archived'||readingPips.has(p.id)?null:unreadByPip.get(p.id),readable=!!unread&&canMarkRead(unread);
+// One row of a list of Pips: its face, its name, where it works (`place`, the one list's: "Personal" or its folder) and
+// its status; what waits on it as a number, something new to read as a dot.
+function homeRow(p,place=''){const type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,[],usable(),S.runner),waiting=waitingOn(S.attention,p.id,pendingReviews(p)),unread=p.status==='archived'||readingPips.has(p.id)?null:unreadByPip.get(p.id),readable=!!unread&&canMarkRead(unread);
   // A number is what waits on it, and it's the row's own (a click on it opens the row). A dot is something new to read, and
   // over the row's end when it can be read from here, so the row keeps its room for it.
   const count=waiting?`<span class="pip-row-count" aria-hidden="true">${waiting}</span>`:'',latest=unread?`<span class="pip-row-latest">${esc(unread.latest)}</span>`:'';
@@ -3936,21 +4079,25 @@ function simpleHomeList(all,live){
   const marks=readable?`<span class="pip-row-marks pip-row-room${both}" aria-hidden="true"><span class="pip-row-read-slot"></span>${count}</span>`
    :unread?`<span class="pip-row-marks${both}"><span class="pip-row-read-slot" role="img" aria-label="${unread.count} new"><span class="pip-new-dot"></span></span>${count}</span>`
    :count?`<span class="pip-row-marks">${count}</span>`:'';
-  const button=`<button type="button" class="pip-row${marks?' pip-row-marked':''}" data-job="${esc(p.id)}" data-state="${esc(pose.state)}" data-waiting="${waiting}" title="${esc(p.name)}">${pipAvatar(p,pose.state,`row-${p.id}`,type)}<span class="pip-row-copy"><strong><span class="pip-row-name">${esc(p.name)}</span>${p.pip_type==='core'?'<span class="primary-badge" title="Your Primary Pip. It uses Core, the character of DGC’s main chat." aria-label="Primary Pip">★</span>':''}</strong><small>${S.pipSearch&&record(p.match)&&['chat','instructions'].includes(p.match.in)&&typeof p.match.text==='string'?`<span class="pip-match">${p.match.in==='chat'?'In its chat':'In its instructions'}: ${esc(p.match.text.slice(0,200))}</span>`:p.status==='archived'?'Archived':pipOff(p)?`Off${waiting?` · ${waiting} waiting for you`:''}${unread?' · '+latest:''}`:p.routine_health?.blocked?healthMarkup(p.routine_health,{row:true})+(waiting?` · ${waiting} waiting for you`:''):waiting?`${waiting} waiting for you${unread?' · '+latest:''}`:unread?latest:p.routine_health&&pose.state!=='working'?healthMarkup(p.routine_health,{row:true}):esc(pose.label)}</small></span>${marks}</button>`;
+  const button=`<button type="button" class="pip-row${marks?' pip-row-marked':''}" data-job="${esc(p.id)}" data-state="${esc(pose.state)}" data-waiting="${waiting}" title="${esc(p.name)}">${pipAvatar(p,pose.state,`row-${p.id}`,type)}<span class="pip-row-copy"><strong><span class="pip-row-name">${esc(p.name)}</span>${p.pip_type==='core'?'<span class="primary-badge" title="Your Primary Pip. It uses Core, the character of DGC’s main chat." aria-label="Primary Pip">★</span>':''}</strong><small>${place}${S.pipSearch&&record(p.match)&&['chat','instructions'].includes(p.match.in)&&typeof p.match.text==='string'?`<span class="pip-match">${p.match.in==='chat'?'In its chat':'In its instructions'}: ${esc(p.match.text.slice(0,200))}</span>`:p.status==='archived'?'Archived':pipOff(p)?`Off${waiting?` · ${waiting} waiting for you`:''}${unread?' · '+latest:''}`:p.routine_health?.blocked?healthMarkup(p.routine_health,{row:true})+(waiting?` · ${waiting} waiting for you`:''):waiting?`${waiting} waiting for you${unread?' · '+latest:''}`:unread?latest:p.routine_health&&pose.state!=='working'?healthMarkup(p.routine_health,{row:true}):esc(pose.label)}</small></span>${marks}</button>`;
   // Its dot is its own button over the row's end (never inside the row): "Read" on hover or focus, and a click
   // marks its whole chat read without opening it.
   if(!readable)return button;
   const label=`Mark ${p.name}'s ${unread.count} new message${unread.count===1?'':'s'} as read`,dot=pose.state==='working'||pose.state==='waiting_approval'&&!waiting;
-  return `<div class="pip-row-item${dot?' pip-row-dot':''}">${button}<span class="pip-row-marks pip-row-marks-live${count?' pip-row-both':''}"><button type="button" class="pip-row-read" id="pip-read-${esc(p.id)}" data-pip-read="${esc(p.id)}" aria-label="${esc(label)}" title="Mark as read, without opening its chat"><span class="pip-new-dot" aria-hidden="true"></span><span class="pip-read-word">Read</span></button>${count}</span></div>`;};
+  return `<div class="pip-row-item${dot?' pip-row-dot':''}">${button}<span class="pip-row-marks pip-row-marks-live${count?' pip-row-both':''}"><button type="button" class="pip-row-read" id="pip-read-${esc(p.id)}" data-pip-read="${esc(p.id)}" aria-label="${esc(label)}" title="Mark as read, without opening its chat"><span class="pip-new-dot" aria-hidden="true"></span><span class="pip-read-word">Read</span></button>${count}</span></div>`;}
+function homeRowInner(p,place=''){const pin=jobPin(p),row=homeRow(p,place);return pin?`<div class="pip-row-slot${dockPins.has(`pip:${p.id}`)?' is-pinned':''}">${row}${pin}</div>`:row;}
+// Its on/off switch is beside the row, at the right end (never inside it: the row is a button). Off, the row reads black and white.
+function homeRowSlot(p,place=''){const toggle=pipSwitchMarkup(p);return toggle?`<div class="pip-row-line${pipOff(p)?' is-off':''}" data-pip-line="${esc(p.id)}">${homeRowInner(p,place)}${toggle}</div>`:homeRowInner(p,place);}
+function simpleHomeList(all,live){
+ const order=[...all.filter(p=>p.pip_type==='core'),...all.filter(p=>p.pip_type!=='core')];
  const project=projectHome();
  // One heading on the Project tab (seen live, 12 Nov night: one folder's list said "Your Pips", All projects' "Project
  // Pips"); the Personal tab keeps its own, and so does a view with no tabs.
  const heading=project&&scopeTabs()?'Project Pips':'Your Pips';
  // Folders (pips-12): Pips with no folder first, under no heading; then each folder under its heading, which folds it.
  // A search is one list of what matched. The Project list has no folders.
- const inner=p=>{const pin=jobPin(p);return pin?`<div class="pip-row-slot${dockPins.has(`pip:${p.id}`)?' is-pinned':''}">${row(p)}${pin}</div>`:row(p);};
+ const slot=p=>homeRowSlot(p);
  // Its on/off switch is beside the row, at the right end (never inside it: the row is a button). Off, the row reads black and white.
- const slot=p=>{const toggle=pipSwitchMarkup(p);return toggle?`<div class="pip-row-line${pipOff(p)?' is-off':''}" data-pip-line="${esc(p.id)}">${inner(p)}${toggle}</div>`:inner(p);};
  const held=foldersListed()&&!S.pipSearch?pipsByFolder(order):null;
  const listed=held?.folders.length?`${held.loose.length?`<div class="pip-rows">${held.loose.map(slot).join('')}</div>`:''}<div class="pip-folders">${held.folders.map((f,i)=>folderMarkup(f,i,{esc,open:!foldersClosed.has(f.name),rows:f.pips.map(slot).join('')})).join('')}</div>`
   :`<div class="pip-rows">${order.map(slot).join('')}</div>`;
@@ -3963,8 +4110,63 @@ function newPipBody(){
   options:SIMPLE_CHARACTERS.filter(id=>id!=='core').map(id=>{const t=characterType(id);return {value:id,label:t.name,face:avatar('idle',t,`new-${id}`)};})});
  return `${chooser}<label for="newPipName">Name<input id="newPipName" data-draft="newPipName" maxlength="60" autocomplete="off" placeholder="Like Gmail, Travel or Money" value="${esc(draft.newPipName)}"></label><p class="muted">It says hello and sets itself up in its chat. No job form.</p>`;
 }
-function openNewPip(){
+// One New Pip (his "perfect", 13 Nov): a character, a name, and one folder line pre-filled from where you are: the
+// filter's folder, or the folder it was asked for from (a Work session's), else "+ Give it a folder", which is a Pip
+// with no folder (Personal). One click changes it; it is decided here, at creation. No goal, no branch and no model:
+// it sets itself up in its own chat. Describing the job to DGC and a shared Pip's file are one click away.
+function oneNewPipFolderField(){
+ const Pick=globalThis.DgcFolderPick;if(!Pick)return '';
+ const rows=createFolderRows(),row=rows.find(r=>r.folder===draft.createFolder);
+ return `<div class="new-pip-folder new-pip-folder-one">${Pick.buttonHtml({id:'new-pip-folder',rows,choice:row?row.folder:'',label:'Folder',empty:'+ Give it a folder',title:row?`It works in ${row.folder}`:'It works in no folder (Personal). Give it one to work on that folder’s files.'})}${row?`<p class="new-pip-folder-path" title="${esc(row.folder)}">${Pick.pathHtml(row.shown,row.folder)}</p>`:'<p class="muted new-pip-folder-none">No folder: it is a Personal Pip.</p>'}</div>`;
+}
+function oneNewPipBody(){
+ const chooser=pickerMarkup({id:'new-pip-character',label:'Character',value:draft.newPipCharacter,face:avatar('idle',characterType(draft.newPipCharacter),'new-face'),
+  options:SIMPLE_CHARACTERS.filter(id=>id!=='core').map(id=>{const t=characterType(id);return {value:id,label:t.name,face:avatar('idle',t,`new-${id}`)};})});
+ const row=createFolderRows().find(r=>r.folder===draft.createFolder);
+ // (Both make a card to review in that folder's project: offered once a folder is chosen.)
+ const other=row?`<p class="new-pip-other">${button('new-pip-describe','Describe the job to DGC instead',S.busy,'link')}${button('import-pip-file','Import a shared Pip…',S.busy||!usable(),'link')}</p>`:'';
+ return `${chooser}<label for="newPipName">Name<input id="newPipName" data-draft="newPipName" maxlength="60" autocomplete="off" placeholder="Like Gmail, Travel or Money" value="${esc(draft.newPipName)}"></label>${oneNewPipFolderField()}<p class="muted">It says hello and sets itself up in its chat. No job form.</p>${other}`;
+}
+function oneNewPipReview(){return {title:'New Pip',description:'Pick a character and give it a name.',body:oneNewPipBody(),confirm:'Create',newPip:true,onePip:true,request:{type:'create_pip'}};}
+function openOneNewPip(asked=''){
+ draft.newPipName='';draft.newPipCharacter=draft.newPipCharacter||'scout';
+ draft.createFolder=newPipFolder(one.filter,createFolderRows(),asked||one.asked);one.asked='';
+ openReview(oneNewPipReview());$('newPipName')?.focus();
+}
+// The project of the form's folder: DGC's own for it, made one first when the folder is not a project yet.
+async function oneFolderSpace(row){
+ if(row.workspace_id)return row.workspace_id;
+ const added=await send('add_project_folder',{folder:row.folder}),space=added?.workspace;
+ if(!record(space)||typeof space.id!=='string'||!/^ws_[a-f0-9]{32}$/.test(space.id))throw Error('DGC didn’t say which project that folder is. Try again.');
+ if(!S.workspaces.some(w=>w?.id===space.id))S.workspaces=[...S.workspaces,space];
+ row.workspace_id=space.id;return space.id;
+}
+async function createOnePip(review){
+ const name=(draft.newPipName||'').trim();
+ if(!name){review.error='Give it a name.';renderReview();$('newPipName')?.focus();return;}
  if(S.busy||!usable())return;
+ let workspace=personalSpace()?.id||'';
+ if(draft.createFolder){
+  const row=createFolderRows().find(r=>r.folder===draft.createFolder);
+  if(!row||!row.exists){review.error='That folder isn’t there any more. Choose another, or none.';renderReview();return;}
+  S.busy=true;review.error='';renderReview();
+  try{workspace=await oneFolderSpace(row);}catch(error){S.busy=false;if(S.review===review){review.error=errorText(error);renderReview();}else setError(error);return;}
+  S.busy=false;if(S.review!==review)return;
+ }
+ await createSimplePip(draft.newPipCharacter,name,review,workspace);
+}
+// Describe the job to DGC, or a shared Pip's file, from New Pip: both belong to the form's folder, whose project is
+// opened underneath first.
+async function oneLeaveForFolder(then){
+ const row=createFolderRows().find(r=>r.folder===draft.createFolder);if(!row||!usable()||S.busy)return;
+ closeReview();
+ try{const id=await oneFolderSpace(row),space=S.workspaces.find(w=>w?.id===id);if(!space)throw Error('That folder’s project isn’t on this computer any more.');
+  if(S.workspace?.id!==id)await enterWorkspace(space);if(S.workspace?.id===id)then();}
+ catch(error){setError(error);}
+}
+function openNewPip(asked=''){
+ if(S.busy||!usable())return;
+ if(onePips()){openOneNewPip(typeof asked==='string'?asked:'');return;}
  if(projectHome()){openNewProjectPip();return;}
  draft.newPipName='';draft.newPipCharacter=draft.newPipCharacter||'scout';
  openReview({title:'New Pip',description:'Pick a character and give it a name.',body:newPipBody(),confirm:'Create',newPip:true,request:{type:'create_pip'}});
@@ -4066,27 +4268,189 @@ function runnerOffMarkup(){
  return S.runner?.paused?`<div class="runner-off" role="status"><span>Pips are stopped on this computer.</span>${button('resume-runner','Resume…',S.busy||!usable(),'quiet')}</div>`
   :`<div class="runner-off" role="status"><span>Your Pips aren't running on this computer, so ${esc(S.pip?.name||'this Pip')} can't answer yet.</span>${button('start-runner','Start',S.busy||!usable(),'primary pill')}</div>`;
 }
-async function createSimplePip(type,name,review=null){
+async function createSimplePip(type,name,review=null,workspaceId=''){
  name=(name||'').trim();
  if(!name){if(review){review.error='Give it a name.';renderReview();$('newPipName')?.focus();}return;}
  if(S.busy||!usable())return;const token=scope();S.busy=true;if(review)renderReview();else render();
  try{
-  const created=await send('create_pip',{workspace_id:S.workspace.id,pip_type:type,name,goal:'',source_ref:'HEAD',model_choice:{mode:'default'}});
+  const space=workspaceId||(onePips()?personalSpace()?.id:'')||S.workspace.id;
+  const created=await send('create_pip',{workspace_id:space,pip_type:type,name,goal:'',source_ref:'HEAD',model_choice:{mode:'default'}});
   if(token!==scope())return;const pip=created?.pip;
-  if(!record(pip)||typeof pip.id!=='string'||pip.workspace_id!==S.workspace.id)throw Error('The new Pip did not come back as expected. Refresh to see it.');
+  if(!record(pip)||typeof pip.id!=='string'||pip.workspace_id!==space)throw Error('The new Pip did not come back as expected. Refresh to see it.');
   // Its hello is a first turn DGC sends; the chat opens while it is being written.
   await ensureRunner();
   let introError='';
   try{const said=await send('introduce_pip',{pip_id:pip.id});if(said?.no_provider===true)S.noProvider=true;}catch(error){introError=`${pip.name} was created, but its first message could not start: ${errorText(error)}`;}
   if(token!==scope())return;if(review)closeReview();S.busy=false;
+  // A Pip of another folder than the one loaded underneath opens in its own project.
+  if(space!==S.workspace.id){void loadOne();render();await navigateFromHost({pip:pip.id});if(introError){S.error=introError;render();}return;}
   await refresh(true);if(token!==scope())return;await select(pip.id);
   if(introError){S.error=introError;render();}
  }catch(error){if(token===scope()){if(review&&S.review===review){review.error=errorText(error);renderReview();}else setError(error);}}
  finally{if(token===scope()){S.busy=false;render();if(S.review)renderReview();}}
 }
-function pageView(){return S.tab==='job'&&!!S.pip&&personalPip()&&S.apiVersion>=43&&!remoteHost;}
+// ---- What a Pip found, and what became of it, as cards in its own chat (the Pips flow design, 14 Nov; src/pipFlow.js) ----
+// Read with list_pip_fixes (Pips API 96) each time its chat and its runs are read: the fixes of its checks' findings
+// (the Allow card, the fix while it runs, its change) and what only you can do. Nothing here decides: Allow, Not now,
+// Stop, and the answers to "waiting on you" go to DGC, and what it says back is drawn.
+const flow={pip:'',value:null,error:'',seq:0,busy:null,errors:new Map(),menu:'',waitingOpen:false,stopping:'',notes:new Map()};
+function resetFlow(){flow.pip='';flow.value=null;flow.error='';flow.seq++;flow.busy=null;flow.errors.clear();flow.menu='';flow.waitingOpen=false;flow.stopping='';flow.notes.clear();}
+const flowOn=()=>S.apiVersion>=FLOW_API&&!remoteHost&&onePips()&&!!S.pip&&!archived();
+const flowNow=()=>flowOn()&&flow.pip===S.selected?flow.value:null;
+async function loadFlow(){
+ if(!flowOn()||!usable())return;
+ const token=scope(),sequence=++flow.seq,pip=S.selected;
+ try{const page=fixesPage(await send('list_pip_fixes',{pip_id:pip}),pip);if(token!==scope()||sequence!==flow.seq)return;
+  const before=flow.pip===pip?JSON.stringify(flow.value):'';flow.pip=pip;flow.value=page;flow.error='';
+  // A fix whose change is ready is drawn with its change: that list is read with it.
+  if(page.fixes.some(f=>f.change_id&&!S.projectChanges.some(c=>c.id===f.change_id)))void loadProjectChanges();
+  if(JSON.stringify(page)!==before)render();}
+ catch(error){if(token===scope()&&sequence===flow.seq){flow.error=errorText(error);render();}}
+}
+// The folder this Pip works in, by its name and whole.
+function pipFolderRow(pip=S.pip){return pip&&!personalPip(pip)?folderOfSpace(pip.workspace_id):null;}
+function pipFolderName(pip=S.pip){return pipFolderRow(pip)?.name||(pip&&!personalPip(pip)?spaceName(pip.workspace_id):'')||flowNow()?.folder||'';}
+function flowFixFor(runId){const list=(flowNow()?.fixes||[]).filter(f=>f.run_id===runId);return list.at(-1)||null;}
+// The change card of a fix: the project-change card, drawn with its fix and nowhere else in the chat.
+function flowChangeIds(){return new Set((flowNow()?.fixes||[]).map(f=>f.change_id).filter(Boolean));}
+function flowChangeCard(fix){
+ const change=fix.change_id?S.projectChanges.find(c=>c.id===fix.change_id):null;if(!change)return '';
+ const off=archived()||!usable();
+ return projectCardMarkup({...change,...(fix.tests&&!change.tests?{tests:fix.tests}:{})},{esc,open:projectOpen,diffs:projectDiffs,busy:projectBusy?.id===change.id?projectBusy.what:'',off:off||(!!projectBusy&&projectBusy.id!==change.id),
+  confirm:projectConfirm===change.id,note:projectNotes.get(change.id)||'',error:projectErrors.get(change.id)||'',one:true,canCommit:S.apiVersion>=FLOW_API});
+}
+/** Under a check's post: its findings as one card, then what became of them: the Allow card, the fix at work, its change. */
+function flowUnderPost(p){
+ const fix=flowFixFor(p.run_id),found=fix?.findings.length?fix.findings:fixesPage({pip_id:S.selected,fixes:[{id:'pipfix_'+'0'.repeat(32),state:'ask',count:0,digest:'-',findings:Array.isArray(p.findings)?p.findings.slice(0,50):[]}]},S.selected).fixes[0]?.findings||[];
+ const total=Number.isSafeInteger(p.total)&&p.total>=found.length?p.total:found.length;
+ const card=p.outcome==='findings'?findingsCardMarkup({runId:p.run_id,findings:found,total,counts:record(p.found)?p.found:null,name:S.pip.name},{esc,off:!usable()}):'';
+ return card+(fix?flowFixMarkup(fix):'');
+}
+function flowFixMarkup(fix){
+ const folder=pipFolderName(),off=archived()||!usable(),busy=flow.busy?.id===fix.id?flow.busy.what:'',error=flow.errors.get(fix.id)||'',note=flow.notes.get(fix.id)||'';
+ const said=note?`<p class="pip-found-line" role="status">${esc(note)}</p>`:'';
+ if(fix.state==='ask')return (fix.message?`<article class="pip-message assistant dgc pip-found-says"><div class="answer split"><div class="message-body text reply-part"><p>${esc(fix.message)}</p></div></div></article>`:'')
+  +fixAskMarkup(fix,{esc,folder,off:off||!!flow.busy&&!busy,busy,menu:flow.menu===fix.id,error})+said;
+ const decided=fixDecidedLine(fix,{esc,folder,clock:t=>new Date(t).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})});
+ if(fix.state==='declined')return decided+said;
+ if(FIX_LIVE.includes(fix.state))return decided+fixingMarkup(fix,{esc,off,stopping:flow.stopping===fix.fix_run_id,canWatch:computerState.pip===S.selected&&!!computerState.value?.granted})+said;
+ if(['ready','applied','held'].includes(fix.state))return decided+(flowChangeCard(fix)||(fix.state==='ready'?'<p class="pip-found-line" role="status">Its change is ready. Reading it…</p>':''))+said;
+ return decided+fixEndedLine(fix,{esc})+said;
+}
+// A fix whose check is not among the runs drawn (an older one, or another conversation) still shows, at the chat's end.
+function flowTailMarkup(){
+ const page=flowNow();if(!page)return '';
+ const drawn=new Set(chatPosts()?S.posts.map(p=>p.run_id):[]);
+ return page.fixes.filter(f=>!f.run_id||!drawn.has(f.run_id)).filter(f=>!['discarded','undone','unchanged','declined'].includes(f.state)).map(flowFixMarkup).join('')
+  +(flow.error?`<p class="app-link-note" role="alert">${esc(flow.error)}</p>`:'');
+}
+// What only you can do: one line at the top of its chat, and its cards under it when shown.
+function flowPinnedMarkup(){
+ const page=flowNow();if(!page?.waiting.length)return '';
+ const line=waitingLineMarkup(page.waiting,{esc,open:flow.waitingOpen}),off=archived()||!usable();
+ // (What was just answered keeps its line under the pinned one while it is open, with Undo where there is one.)
+ const cards=flow.waitingOpen?page.waiting.map(w=>waitingCardMarkup(w,{esc,off:off||!!flow.busy&&flow.busy.id!==w.id,busy:flow.busy?.id===w.id?flow.busy.what:'',error:flow.errors.get(w.id)||''})).join(''):'';
+ if(!line&&!cards)return '';
+ return `<div class="pip-found-pinned">${line}${cards?`<div class="pip-found-pinned-list" id="pip-waiting-list">${cards}</div>`:''}</div>`;
+}
+function flowLive(){return (flowNow()?.fixes||[]).find(f=>FIX_LIVE.includes(f.state))||null;}
+async function flowDecide(id,allow){
+ const fix=flowNow()?.fixes.find(f=>f.id===id);if(!fix||flow.busy||!usable()||archived())return;
+ const token=scope(),pip=S.selected;flow.busy={id,what:allow?'allow':'no'};flow.errors.delete(id);flow.menu='';render();
+ try{const now=fixAnswer(await send('decide_pip_fix',{pip_id:pip,fix_id:id,expected_digest:fix.digest,allow}),id);if(token!==scope())return;
+  flow.value={...flow.value,fixes:flow.value.fixes.map(f=>f.id===id?now:f)};void loadAttention();}
+ catch(error){if(token===scope())flow.errors.set(id,errorText(error));}
+ finally{if(flow.busy?.id===id)flow.busy=null;if(token===scope()){render();void loadFlow();}}
+}
+// "Start a helper with Work tools": a helper with a Work session's tools on the real folder, shown in this chat. DGC
+// asks first (an Allow card) at Ask me first and Approve for me; it says which in its answer.
+async function flowHelper(id){
+ const fix=flowNow()?.fixes.find(f=>f.id===id);if(!fix||flow.busy||!usable()||archived())return;
+ const token=scope(),pip=S.selected;flow.busy={id,what:'helper'};flow.errors.delete(id);flow.menu='';render();
+ try{const answer=await send('start_pip_work_helper',{pip_id:pip,fix_id:id});if(token!==scope())return;
+  flow.notes.set(id,answer?.asks===true?'It asks before it starts a helper on your real files. Its card is below.':'A helper with Work tools is starting on your real files.');}
+ catch(error){if(token===scope())flow.errors.set(id,errorText(error));}
+ finally{if(flow.busy?.id===id)flow.busy=null;if(token===scope()){render();void loadFlow();void refreshComputer();}}
+}
+async function flowStop(runId){
+ if(flow.stopping||!usable())return;const token=scope();flow.stopping=runId;render();
+ try{await send('cancel_pip_run',{run_id:runId});}catch(error){if(token===scope())setError(error);}
+ finally{if(token===scope()){flow.stopping='';render();void loadFlow();}}
+}
+async function flowWaitingAnswer(id,answer){
+ const waits=flowNow()?.waiting.find(w=>w.id===id);if(!waits||flow.busy||!usable()||!['done','later','not_a_problem','undo'].includes(answer))return;
+ const token=scope(),pip=S.selected;flow.busy={id,what:answer};flow.errors.delete(id);render();
+ try{const page=fixesPage({pip_id:pip,fixes:[],...(await send('answer_pip_waiting',{pip_id:pip,waiting_id:id,answer}))},pip);if(token!==scope())return;
+  flow.value={...flow.value,waiting:page.waiting};void loadAttention();}
+ catch(error){if(token===scope())flow.errors.set(id,errorText(error));}
+ finally{if(flow.busy?.id===id)flow.busy=null;if(token===scope())render();}
+}
+// A finding's file, opened in an editor tab at its line: in the Pip's own folder, wherever this window is.
+function flowOpenFile(path,line){
+ const folder=pipFolderRow()?.folder||'',whole=folder&&!/^([A-Za-z]:)?[\\/]/.test(path)?`${folder.replace(/[\\/]+$/,'')}/${path}`:path;
+ vscode.postMessage({type:'openFile',path:whole,...(Number(line)>0?{line:Number(line)}:{})});
+}
+// Review: every file of the change opened in place, the first one in view.
+function projectReview(id){
+ const change=S.projectChanges.find(c=>c.id===id);if(!change)return;
+ const files=change.files.filter(f=>f.change!=='link'),all=files.length&&files.every(f=>projectOpen.has(`${id}|${f.path}`));
+ for(const f of files){const key=`${id}|${f.path}`;if(all)projectOpen.delete(key);else if(!projectOpen.has(key)){projectOpen.add(key);void loadProjectDiff(id,f.path);}}
+ render();
+}
+async function projectCommit(id){
+ const change=S.projectChanges.find(c=>c.id===id);if(!change||!usable()||projectBusy||archived())return;
+ const token=scope(),pip=S.selected;projectBusy={id,what:'commit'};projectErrors.delete(id);render();
+ try{const decided=projectAnswer(await send('commit_pip_project_change',{pip_id:pip,change_id:id}),id);if(token!==scope()||S.selected!==pip)return;S.projectChanges=S.projectChanges.map(c=>c.id===id?decided:c);}
+ catch(error){if(token===scope()&&S.selected===pip)projectErrors.set(id,errorText(error));}
+ finally{if(projectBusy?.id===id)projectBusy=null;if(token===scope())render();}
+}
+// ---- Every Pip in the one page and chat (One Pips) ----
+// A Pip with a folder opens in the page a Personal Pip has: its header and menu, its chat, its settings page. What
+// only it has is in that page: Run now in its header's menu; where it works, what it reads, when it runs, and its
+// version history and approvals in its settings; its reports as a table. No owner session: its chat is its home.
+function pagePip(pip=S.pip){return !!pip&&(personalPip(pip)||onePips());}
+// Its own computer: a Personal Pip's as before; a Pip with a folder where DGC says it has one (get_pip_computer granted,
+// Pips API 95: the machine runs boxes). One on a machine without boxes has none, and nothing of it shows.
+function mayHaveBox(pip=S.pip){return !!pip&&(personalPip(pip)||onePips()&&S.apiVersion>=95);}
+function folderBox(){return !!S.pip&&!personalPip()&&onePips()&&computerState.pip===S.selected&&computerState.value?.granted===true;}
+function reportsName(){return onePips()&&S.pip&&!personalPip()?'Reports':historyName('Results');}
+function oneReportsMarkup(){
+ const runs=S.runs.filter(r=>(r.manifest?.run_kind||'audit')!=='conversation'),posts=S.postsPip===S.selected?S.posts:[];
+ const rows=runs.map(r=>reportRow(r,posts.find(p=>p.run_id===r.id)||null));
+ const action=runAction(),blocked=action?runBlocked():'';
+ return `<section class="section pip-reports-section"><div class="section-head"><h2>Reports</h2>${action?`<button type="button" id="pip-run-now" class="primary" title="${esc(blocked||action.title)}"${blocked?' disabled':''}>${esc(action.label)}</button>`:''}</div>`
+  +`<p class="muted">Every check, newest first. What it found is also in its chat, where you can ask about it.</p>`
+  +reportsTableMarkup(rows,{esc,sort:one.reportsSort,current:S.runId,when:t=>t?shortDate(new Date(t).toISOString()):'',off:!usable(),name:S.pip.name})+'</section>'+reportMarkup()+checkpointHistoryMarkup();
+}
+// What only a Pip with a folder has, on its settings page.
+function folderPartsMarkup(p){
+ const row=pipFolderRow(p),name=row?.name||spaceName(p.workspace_id)||'its folder',Pick=globalThis.DgcFolderPick,boxed=folderBox();
+ const branch=typeof p.source_ref==='string'&&p.source_ref&&p.source_ref!=='HEAD'&&p.source_policy?.mode!=='working_tree'?p.source_ref:'';
+ const reads=branch?`Reads branch ${branch}: its committed files. What it changes always waits for your Apply.`
+  :boxed?'Your files as they are, in its own copy. Not what Git ignores, such as .env.':currentTree()?'Your current files. It only reads them.':'The committed code. It only reads it.';
+ let runs='Only when you ask';try{runs=p.event_trigger?eventTriggerLabel(p.event_trigger):p.schedule?scheduleLabel(p.schedule):runs;}catch{runs='On a schedule';}
+ const chev='<span class="row-chevron" aria-hidden="true">›</span>';
+ return `<section class="pip-page-group pip-folder-parts" aria-label="Its folder"><h3 class="pip-page-label">Its folder</h3>`
+  +`<div class="pip-page-row static"><span class="row-words"><strong>Works in</strong><small class="pip-folder-where" title="${esc(row?.folder||name)}">${row&&row.exists===false?'<span class="pip-row-folder-note">Folder not found</span> ':''}${row&&Pick?Pick.pathHtml(row.shown,row.folder):esc(name)}</small></span></div>`
+  +`<div class="pip-page-row static"><span class="row-words"><strong>What it reads</strong><small>${esc(reads)}</small></span></div>`
+  +`<button type="button" class="pip-page-row" data-tab="schedule"><span class="row-words"><strong>When it runs</strong><small class="row-preview">${esc(runs)}</small></span>${chev}</button>`
+  +`<button type="button" class="pip-page-row" data-tab="runs"><span class="row-words"><strong>Reports</strong><small class="row-preview">What each check found, as a table</small></span>${chev}</button>`
+  +`<button type="button" class="pip-page-row" data-tab="revisions"><span class="row-words"><strong>Version history and approvals</strong><small class="row-preview">Every change to it, and who approved it</small></span>${chev}</button></section>`;
+}
+// Choosing Do it all says what it means first (his call, like Work's auto mode). Continue sets it; Cancel leaves it.
+const FULL_WARNING='A Pip on Do it all acts without asking. It can send anything it sees, including your code, to the web. It applies its fixes to your folder, and it can start a helper with full Work tools on your real files, including ones Git ignores such as .env. Payments follow the limit you set.';
+function chooseLevel(level,how={}){
+ if(levelState.pip===S.selected&&levelState.value?.level===level)return;
+ if(level==='full'&&onePips()){
+  openReview({title:`Put ${S.pip?.name||'this Pip'} on Do it all?`,description:FULL_WARNING,body:'',confirm:'Continue',fullLevel:true,refocus:how.refocus||'',request:{}});
+  return;
+ }
+ void setLevel(level,how);
+}
+function pageView(){return S.tab==='job'&&!!S.pip&&pagePip()&&S.apiVersion>=43&&!remoteHost;}
 function simpleTabContent(){
  if(pageView())return pipPageMarkup();
+ if(S.tab==='runs'&&onePips()&&S.pip&&!personalPip()&&!remoteHost)return oneReportsMarkup();
  if(S.tab==='memory')return memoriesMarkup()+statementsMarkup();
  if(S.tab==='notifications')return notificationsMarkup();
  if(S.tab==='context')return contextMarkup();
@@ -4452,13 +4816,27 @@ function computerKeydown(event){
  if(target.matches?.('input,select,textarea')&&event.key!=='Tab')return false;
  return !!globalThis.DgcMenu?.handle(holder,event,{rows:'.dgc-menu-row',close:()=>closeComputerMenu(),trigger:()=>$('pip-computer-open')});
 }
+// Beside its name on its chat: its folder (the whole path is the tooltip), or its fix while one runs.
+function folderWhereMarkup(p){
+ const live=flowLive(),row=pipFolderRow(p),name=pipFolderName(p);
+ if(live){const since=Date.parse(live.started_at);return `<small class="pip-where" data-fixing="1">Fixing${Number.isFinite(since)?` · ${esc(took(Date.now()-since,true))}`:''}</small>`;}
+ return name?`<small class="pip-where" title="${esc(row?.folder||name)}">${esc(name)}</small>`:'';
+}
+// Run now, in the header's menu (where a Personal Pip's header has no such thing): what History's button runs.
+function runNowMenuRow(){
+ const action=runAction();if(!action||activeOwnRun())return '';
+ const blocked=runBlocked();
+ return `<button type="button" id="pip-run-now" title="${esc(blocked||action.title)}"${blocked?' disabled':''}>Run now</button><hr>`;
+}
 function simplePipHeader(){
  const p=S.pip,type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,S.runs,usable(),S.runner),onChat=S.tab==='chat';
  // A Project Pip's menu is every section its old page had; a Personal Pip's, the ones it uses.
- const project=!personalPip(),every=project?pipSections():null;
- const sections=(project?every:[['chat','Chat'],['runs',historyName('Results')],['job','Settings'],...(S.apiVersion>=14&&!(S.apiVersion>=44&&personalPip())?[['memory','Memory']]:[]),['revisions','Changes'],...(S.apiVersion>=13?[['notifications','Notifications']]:[])]).filter(([key])=>key!==S.tab);
- if(S.apiVersion>=43&&!remoteHost&&personalPip()&&screenSetup.pip!==S.selected&&!screenSetup.loading)void loadDesktopStatus();
- const computer=!(S.apiVersion>=42&&personalPip())?'':settingUpComputer()
+ // One Pips: every Pip has the Personal Pip's header. A Pip with a folder keeps every section it has in its menu, with
+ // Run now there, and says its folder beside its name.
+ const project=!pagePip(),folderPip=!personalPip()&&!project,every=project||folderPip?pipSections():null;
+ const sections=(project||folderPip?every:[['chat','Chat'],['runs',historyName('Results')],['job','Settings'],...(S.apiVersion>=14&&!(S.apiVersion>=44&&personalPip())?[['memory','Memory']]:[]),['revisions','Changes'],...(S.apiVersion>=13?[['notifications','Notifications']]:[])]).filter(([key])=>key!==S.tab);
+ if(S.apiVersion>=43&&!remoteHost&&mayHaveBox()&&screenSetup.pip!==S.selected&&!screenSetup.loading)void loadDesktopStatus();
+ const computer=!(S.apiVersion>=42&&(personalPip()||folderBox()))?'':settingUpComputer()
   ?`<span class="topbar-setup" role="status" title="Getting its computer ready. This happens once."><span class="topbar-spinner" aria-hidden="true"></span>Setting up your Pip…</span>`
   :computerIconMarkup();
  if(pageView()){
@@ -4466,7 +4844,7 @@ function simplePipHeader(){
   const sub=['instructions','character'].includes(S.pipPage),share=S.apiVersion>=41&&['scout','lens','rook','lock','quill'].includes(p.pip_type)&&!archived();
   return `<header class="pip-topbar"><button type="button" id="${sub?'pip-page-back':'simple-to-chat'}" class="topbar-icon" aria-label="${sub?'Back':'Back to the chat'}" title="${sub?'Back':'Back to the chat'}">${simpleIcon('back')}</button><div class="pip-pill${pipOff(p)?' is-off':''}">${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span>${esc(p.name)}</span><small>${sub?(S.pipPage==='character'?'Face':'Instructions'):'Settings'}${pipOff(p)?' · Off':''}</small></div><div class="topbar-actions">${pipSwitchMarkup(p)}${share?`<button type="button" class="topbar-icon" data-pip-share aria-label="Share as template" title="Share as template"${S.busy||!usable()?' disabled':''}>${simpleIcon('share')}</button>`:''}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${pipPageMenu()}</div></details></div></header>`;
  }
- return `<header class="pip-topbar"><button type="button" id="${onChat?'simple-back':'simple-to-chat'}" class="topbar-icon" aria-label="${onChat?'Your Pips':'Back to the chat'}" title="${onChat?'Your Pips':'Back to the chat'}">${simpleIcon('back')}</button><div class="pip-pill${pipOff(p)?' is-off':''}"${project&&pipType(p,S.types)?` title="${esc(`${type.name} · ${type.role}`)}"`:''}>${pipAvatar(p,pose.state,`pill-${p.id}`,type)}${onChat?convNameMarkup(p):`<span>${esc(p.name)}</span>`}${onChat?(project?`<small class="pip-status">${lastRunLink(p,pose.label)}</small>`:''):`<small>${esc(project?(every.find(([key])=>key===S.tab)||[])[1]||'':sections.length&&{runs:historyName('Results'),job:'Settings',memory:'Memory',revisions:'Versions',notifications:'Notifications',schedule:'Schedule',handoffs:'Handoffs',context:'Context'}[S.tab]||'')}</small>`}</div><div class="topbar-actions">${pipSwitchMarkup(p)}${project?runNowMarkup():''}${computer}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${sections.map(([key,label])=>`<button type="button" data-tab="${key}">${label}</button>`).join('')}</div></details></div>${onChat?convMenuMarkup():''}${computerMenuMarkup()}</header>`;
+ return `<header class="pip-topbar"><button type="button" id="${onChat?'simple-back':'simple-to-chat'}" class="topbar-icon" aria-label="${onChat?'Your Pips':'Back to the chat'}" title="${onChat?'Your Pips':'Back to the chat'}">${simpleIcon('back')}</button><div class="pip-pill${pipOff(p)?' is-off':''}"${project&&pipType(p,S.types)?` title="${esc(`${type.name} · ${type.role}`)}"`:''}>${pipAvatar(p,pose.state,`pill-${p.id}`,type)}${onChat?convNameMarkup(p):`<span>${esc(p.name)}</span>`}${onChat?(project?`<small class="pip-status">${lastRunLink(p,pose.label)}</small>`:folderPip?folderWhereMarkup(p):''):`<small>${esc(project||folderPip?(every.find(([key])=>key===S.tab)||[])[1]||'':sections.length&&{runs:historyName('Results'),job:'Settings',memory:'Memory',revisions:'Versions',notifications:'Notifications',schedule:'Schedule',handoffs:'Handoffs',context:'Context'}[S.tab]||'')}</small>`}</div><div class="topbar-actions">${pipSwitchMarkup(p)}${project||folderPip&&activeOwnRun()?runNowMarkup():''}${computer}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${folderPip?runNowMenuRow():''}${sections.map(([key,label])=>`<button type="button" data-tab="${key}">${label}</button>`).join('')}</div></details></div>${onChat?convMenuMarkup():''}${computerMenuMarkup()}</header>`;
 }
 function simpleMarkup(){
  const bar=`<header class="simple-bar"><h1><span class="pips-wordmark">Pips</span></h1>${runnerMarkup(true)}</header>${scopeTabsMarkup()}`;
@@ -4482,7 +4860,9 @@ function simpleMarkup(){
  if(project&&S.create)return `<header class="pip-topbar">${back('create-back',setupEditing&&S.pip?`Back to ${S.pip.name}`:'Your Pips')}<div class="pip-pill settings-pill"><span>${setupEditing&&S.pip?`Change ${esc(S.pip.name)}`:'New Pip'}</span></div><span></span></header>${notes}<div class="simple-content" data-view="create">${createMarkup()}</div>`;
  // The project's context and notifications, opened from its home's menu (the old side bar's two buttons).
  if(project&&!S.selected&&!S.overview&&['context','notifications'].includes(S.tab))return `<header class="pip-topbar">${back('workspace-back','Your Pips')}<div class="pip-pill settings-pill"><span>${S.tab==='context'?'Workspace context':'Notifications'}</span></div><span></span></header><div class="simple-content" data-view="${esc(S.tab)}">${notes}${S.tab==='context'?contextMarkup():notificationsMarkup()}</div>`;
- if(!S.selected||S.overview||S.create)return `${bar}${notes}<div class="simple-content"${scopePanelAttrs()}>${S.switching?(project?folderRowMarkup():''):simpleHomeMarkup()}</div>`;
+ // One Pips: the one list, whatever is loaded underneath.
+ if(onePips()&&(!S.selected||S.overview)&&!S.create)return `${bar}${notes}<div class="simple-content pips-one">${oneHomeMarkup()}</div>`;
+ if(!S.selected||S.overview||S.create)return `${bar}${notes}<div class="simple-content"${scopePanelAttrs()}>${S.switching?(project?folderLineMarkup():''):simpleHomeMarkup()}</div>`;
  if(!S.pip)return `${bar}${loadingMark()}`;
  return `${convColumnMarkup()}${simplePipHeader()}${pipSetupNotes()}<div class="simple-content${S.tab==='chat'?' chat':''}" data-view="${esc(S.tab)}">${S.tab==='chat'?chatMarkup():`${notes}${waitingMarkup()}${simpleTabContent()}`}</div>`;
 }
@@ -4872,7 +5252,7 @@ function pluginNotRun(){
 S.projectChoices=[];S.projectChanges=[];S.projectsError='';
 let projectChoicesSeq=0,projectChoicesAt=0,projectChoicesBusy=false,projectChangesSeq=0,projectAsked='',projectBusy=null,projectConfirm='',projectNeedsComputer='',projectRefused=false;
 const projectOpen=new Set(),projectDiffs=new Map(),projectErrors=new Map(),projectNotes=new Map();
-const projectsOn=()=>S.apiVersion>=PROJECTS_API&&!remoteHost&&personalPip();
+const projectsOn=()=>S.apiVersion>=PROJECTS_API&&!remoteHost&&(personalPip()||folderBox()||flowCards()&&S.apiVersion>=FLOW_API);
 // A project's mark travels as a display mention, so only where DGC keeps a message's marks; an archived Pip takes no message.
 const projectMentionsOn=()=>projectsOn()&&!!Mentions&&S.displayMentions&&!archived();
 function resetProjects(){S.projectChoices=[];S.projectChanges=[];S.projectsError='';projectChoicesSeq++;projectChoicesAt=0;projectChoicesBusy=false;projectChangesSeq++;projectAsked='';projectBusy=null;projectConfirm='';projectNeedsComputer='';projectRefused=false;projectOpen.clear();projectDiffs.clear();projectErrors.clear();projectNotes.clear();}
@@ -4960,8 +5340,8 @@ async function loadProjectChanges(){
   S.projectChanges=list;S.projectsError='';
   // What is kept is only for the changes still listed, as they are now; an open file of a change that grew is read again.
   const now=new Map(list.map(c=>[c.id,c]));
-  for(const key of [...projectDiffs.keys()]){const [id,digest]=key.split('|');if(now.get(id)?.digest!==digest||now.get(id)?.status!=='pending')projectDiffs.delete(key);}
-  for(const key of [...projectOpen]){const at=key.indexOf('|'),c=now.get(key.slice(0,at)),path=key.slice(at+1);if(!c||c.status!=='pending'||!c.files.some(f=>f.path===path))projectOpen.delete(key);else void loadProjectDiff(c.id,path);}
+  for(const key of [...projectDiffs.keys()]){const [id,digest]=key.split('|');if(now.get(id)?.digest!==digest||now.get(id)?.status!=='pending'&&!onePips())projectDiffs.delete(key);}
+  for(const key of [...projectOpen]){const at=key.indexOf('|'),c=now.get(key.slice(0,at)),path=key.slice(at+1);if(!c||c.status!=='pending'&&!onePips()||!c.files.some(f=>f.path===path))projectOpen.delete(key);else void loadProjectDiff(c.id,path);}
   for(const map of [projectErrors,projectNotes])for(const id of [...map.keys()])if(!now.has(id))map.delete(id);
   if(projectConfirm&&now.get(projectConfirm)?.status!=='pending')projectConfirm='';
   render();}
@@ -4971,7 +5351,8 @@ function projectChangeCards(){
  if(!projectsOn())return '';
  const lastUserAt=Math.max(0,...(S.messages||[]).filter(m=>m.role==='user'&&m.intro!==true).map(m=>Date.parse(m.created_at)||0));
  const off=archived()||!usable();
- return shownProjectChanges(S.projectChanges,{lastUserAt}).map(c=>projectCardMarkup(c,{esc,open:projectOpen,diffs:projectDiffs,busy:projectBusy?.id===c.id?projectBusy.what:'',off:off||(!!projectBusy&&projectBusy.id!==c.id),
+ const withFix=flowChangeIds();
+ return shownProjectChanges(S.projectChanges,{lastUserAt}).filter(c=>!withFix.has(c.id)).map(c=>projectCardMarkup(c,{one:onePips(),canCommit:S.apiVersion>=FLOW_API,esc,open:projectOpen,diffs:projectDiffs,busy:projectBusy?.id===c.id?projectBusy.what:'',off:off||(!!projectBusy&&projectBusy.id!==c.id),
    confirm:projectConfirm===c.id,note:projectNotes.get(c.id)||'',error:projectErrors.get(c.id)||''})).join('')
   +(S.projectsError?`<p class="app-link-note" role="alert">${esc(S.projectsError)}</p>`:'');
 }
@@ -5283,7 +5664,7 @@ function pipPageMarkup(){
  const body=tab==='links'?linksMarkup(items,{esc,formatDate:shortDate,loading,error})
   :tab==='media'?mediaMarkup(items,{esc,imageSrc:messageImageSrc,loading,error})
   :tab==='files'?filesMarkup(items,mine?shared.desk:null,{esc,formatDate:shortDate,loading,error,hasComputer:computerState.pip===S.selected&&!!computerState.value?.granted})
-  :(templateShown()?templateMarkup(templateState.pip===p.id?templateState.value:null,{esc,busy:off||templateState.busy,error:templateState.pip===p.id?templateState.error:'',pipName:p.name}):'')+infoMarkup({esc,goal:p.goal,routines:routinesSectionMarkup(true),notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+pipFolderSetMarkup(off)+appsUseMarkup(off)+skillsUseMarkup(off)+computerRowMarkup(p,off)+(S.apiVersion>=53&&!remoteHost&&personalPip()?eyesMarkup(eyesState.pip===p.id?eyesState.value:null,{esc,busy:off||eyesState.busy,error:eyesState.error,pipName:p.name}):'')+(levelShown()?levelMarkup(levelState.pip===p.id?levelState.value:null,{esc,busy:off||levelState.busy,error:levelState.error,pipName:p.name,payLimit:payLimitFor(levelState.pip===p.id?levelState.value:null),when:at=>shortDate(at)}):'')+artifactsSectionMarkup(p,off)+(S.apiVersion>=44&&!remoteHost&&p.computer_plan?carefulMarkup(carefulState.pip===p.id?carefulState.value:null,{esc,busy:off||carefulState.busy,error:carefulState.error,pipName:p.name,showAll:sitesAll}):'')+(S.apiVersion>=56&&!remoteHost&&p.computer_plan?loginsMarkup(loginsState.pip===p.id?loginsState.value:null,{esc,busy:off||loginsState.busy,error:loginsState.error,pipId:p.id,pipName:p.name,names:pipNames(),confirm:loginsState.confirm}):'')+(pipKeysShown()?pipKeysPageMarkup(S.pipKeys,{esc,busy:off||!!pipKeyBusy,pipName:p.name,confirm:pipKeyConfirm,error:S.pipKeysError,level:levelState.pip===p.id?levelState.value?.level||'':''}):'')+(S.apiVersion>=44&&!remoteHost?notesMarkup(S.notesPip===p.id?S.notes:null,{esc,busy:off||notesBusy,error:S.notesError,pipName:p.name,adding:draft.noteAdd,confirmAll:noteConfirmAll}):'')+(workingNotesShown()?workingNotesMarkup(S.workingNotesPip===p.id?S.workingNotes:null,{esc,busy:off||workingNotesBusy,error:S.workingNotesError,pipName:p.name,editing:workingNotesEditing,text:draft.workingNotesText})+dailyLogMarkup(S.dailyLogPip===p.id?S.dailyLog:null,{esc,error:S.dailyLogError,pipName:p.name,today:localDay()}):'')+allowedMarkup()+(S.apiVersion>=44&&!remoteHost?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
+  :(templateShown()?templateMarkup(templateState.pip===p.id?templateState.value:null,{esc,busy:off||templateState.busy,error:templateState.pip===p.id?templateState.error:'',pipName:p.name}):'')+infoMarkup({esc,goal:p.goal,routines:personalPip()?routinesSectionMarkup(true):null,notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+(personalPip()?'':folderPartsMarkup(p))+pipFolderSetMarkup(off)+appsUseMarkup(off)+skillsUseMarkup(off)+computerRowMarkup(p,off)+(S.apiVersion>=53&&!remoteHost&&personalPip()?eyesMarkup(eyesState.pip===p.id?eyesState.value:null,{esc,busy:off||eyesState.busy,error:eyesState.error,pipName:p.name}):'')+(levelShown()?levelMarkup(levelState.pip===p.id?levelState.value:null,{esc,busy:off||levelState.busy,error:levelState.error,pipName:p.name,payLimit:payLimitFor(levelState.pip===p.id?levelState.value:null),when:at=>shortDate(at)}):'')+artifactsSectionMarkup(p,off)+(S.apiVersion>=44&&!remoteHost&&(personalPip()?p.computer_plan:folderBox())?carefulMarkup(carefulState.pip===p.id?carefulState.value:null,{esc,busy:off||carefulState.busy,error:carefulState.error,pipName:p.name,showAll:sitesAll}):'')+(S.apiVersion>=56&&!remoteHost&&personalPip()&&p.computer_plan?loginsMarkup(loginsState.pip===p.id?loginsState.value:null,{esc,busy:off||loginsState.busy,error:loginsState.error,pipId:p.id,pipName:p.name,names:pipNames(),confirm:loginsState.confirm}):'')+(pipKeysShown()?pipKeysPageMarkup(S.pipKeys,{esc,busy:off||!!pipKeyBusy,pipName:p.name,confirm:pipKeyConfirm,error:S.pipKeysError,level:levelState.pip===p.id?levelState.value?.level||'':''}):'')+(S.apiVersion>=44&&!remoteHost&&personalPip()?notesMarkup(S.notesPip===p.id?S.notes:null,{esc,busy:off||notesBusy,error:S.notesError,pipName:p.name,adding:draft.noteAdd,confirmAll:noteConfirmAll}):'')+(workingNotesShown()?workingNotesMarkup(S.workingNotesPip===p.id?S.workingNotes:null,{esc,busy:off||workingNotesBusy,error:S.workingNotesError,pipName:p.name,editing:workingNotesEditing,text:draft.workingNotesText})+dailyLogMarkup(S.dailyLogPip===p.id?S.dailyLog:null,{esc,error:S.dailyLogError,pipName:p.name,today:localDay()}):'')+allowedMarkup()+(S.apiVersion>=44&&!remoteHost&&personalPip()?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
  return `<div class="pip-page">${head}${healthMarkup(p.routine_health,{busy:off,canSignIn:!remoteHost})}${pageTabsMarkup(tab)}<div class="pip-page-body" data-page="${tab}">${body}</div></div>`;
 }
 // What it may do without asking (an Always allow you gave): only shown when there is one, and each
@@ -5297,7 +5678,7 @@ function allowedMarkup(){
 }
 function pipPageMenu(){
  const p=S.pip,off=S.busy||!usable();
- return `<button type="button" data-tab="runs">${historyName('Results')}</button>${S.apiVersion>=14&&!(S.apiVersion>=44&&personalPip())?'<button type="button" data-tab="memory">Memory</button>':''}<hr>`
+ return `${personalPip()?'':runNowMenuRow()}<button type="button" data-tab="runs">${reportsName()}</button>${S.apiVersion>=14&&!(S.apiVersion>=44&&personalPip())?'<button type="button" data-tab="memory">Memory</button>':''}<hr>`
   +'<button type="button" data-copy-pip-id>Copy ID</button>'
   +(archived()?'':`<button type="button" id="toggle-pip"${off||S.apiVersion>=16&&!canLifecycle()?' disabled':''}>${p.status==='paused'?'Resume':'Pause'}</button>`)
   +(S.apiVersion>=16&&canLifecycle()?(archived()?`<button type="button" id="restore-pip"${off?' disabled':''}>Restore…</button>${S.apiVersion>=68?`<button type="button" id="delete-archived-pip-menu" class="danger-text"${off?' disabled':''}>Delete permanently…</button>`:''}`:`<button type="button" id="archive-pip" class="danger-text"${off?' disabled':''}>Archive…</button>`):'');
@@ -5703,7 +6084,8 @@ function refresh(includeContext=false) {
 async function refreshNow(includeContext=false) {
   if(!usable()||!S.workspace)return;const token=scope(),epoch=S.epoch,sequence=++refreshSeq;S.refreshing=true;void loadSetups();void loadAttention();void loadUnread();
   // The dropdown's folders, and (while it shows) the list of every project's Pips, are read again with the rest.
-  if(typeof S.projectFolder==='string'&&S.folders){void loadFolders();if(S.projectEmpty&&foldersOn()&&!chosenFolder())void loadProjectsAll();}
+  if(onePips())void loadOne();
+  if((typeof S.projectFolder==='string'||onePips())&&S.folders){void loadFolders().then(changed=>{if(changed){void loadAttention();render();}});if(S.projectEmpty&&foldersOn()&&!chosenFolder())void loadProjectsAll();}
   try {
     const paged=pipsPaged();
     const results=await Promise.allSettled([send('list_pips',{workspace_id:S.workspace.id,...(paged?{order:'recent',limit:100,...(S.pipSearch?{query:S.pipSearch}:{})}:{})}),send('get_pip_runner'),...(includeContext?[send('get_workspace_context',{workspace_id:S.workspace.id})]:[])]);
@@ -5727,7 +6109,12 @@ async function initialize() {
     workspace=wantsProject?project||personal:saved.workspace_id===personal.id||personalHome?personal:project||personal;
     S.projectEmpty=wantsProject&&!project;
    }else workspace=result.workspaces?.find(w=>w.id===(options.workspaceId||(savedView?.workspace_id&&result.workspaces.some(w=>w.id===savedView.workspace_id&&w.kind==='personal')?savedView.workspace_id:personalHome||result.current_workspace_id)));
-   if(!workspace)throw new Error('DGC could not resolve the selected registered workspace.');S.workspace=workspace;S.loading=false;await refresh(true);if(epoch===S.epoch&&navigationPending){navigationPending=false;await navigateFromHost(options.navigation);}}
+   if(!workspace)throw new Error('DGC could not resolve the selected registered workspace.');S.workspace=workspace;S.loading=false;
+   // One Pips: the filter chosen last in this window; and a Pip of a folder that was open is opened again in its project.
+   const left=onePips()&&record(savedView)&&!savedView.overview&&typeof savedView.selected==='string'&&/^pip_[a-f0-9]{32}$/.test(savedView.selected)&&savedView.workspace_id!==workspace.id?savedView.selected:'';
+   if(onePips())one.filter=savedFilter(record(savedView)?savedView.pips_filter:'',S.folders||[]);
+   await refresh(true);if(epoch===S.epoch&&navigationPending){navigationPending=false;await navigateFromHost(options.navigation);}
+   else if(epoch===S.epoch&&left)await navigateFromHost({pip:left}).catch(()=>{});}
   catch(error){if(epoch===S.epoch){S.loading=false;setError(error);}}
 }
 // (While it goes somewhere, the Project tab is not put back on the Project Folder choice: settleProjectTab waits.)
@@ -5737,11 +6124,13 @@ async function navigateFromHostNow(value) {
   if(!record(value))return;
   if(value.overview===true){if(S.selected)chatDrafts.set(S.selected,draft.chatText);S.overview=true;S.tab='chat';rememberView();render();return;}
   // The dock's "+" > New Personal Pip: Your Pips, with New Pip open on a name and a character.
-  if(value.create==='personal'){
+  if(value.create==='personal'||value.create==='pip'&&onePips()){
    const personal=personalSpace();
    if(personal&&S.workspace?.id!==personal.id)await enterWorkspace(personal);
    if(S.selected)chatDrafts.set(S.selected,draft.chatText);S.projectEmpty=false;S.overview=true;S.tab='chat';rememberView();render();
-   if(!projectHome())openNewPip();
+   // (One Pips: the one New Pip, its folder line pre-filled with the folder it was asked for from, a Work session's.)
+   if(onePips())openNewPip(typeof value.folder==='string'?value.folder:'');
+   else if(!projectHome())openNewPip();
    return;
   }
   S.projectEmpty=false;   // whatever it opens is shown under its own tab
@@ -5940,7 +6329,7 @@ const dropOverlay=on=>{const o=document.querySelector('#chat-form > .dgc-drop');
 document.addEventListener('dragenter',event=>{if(!canAttachImages()||!event.target?.closest?.('#chat-form')||![...(event.dataTransfer?.types||[])].includes('Files'))return;dropDepth++;dropOverlay(true);});
 document.addEventListener('dragleave',event=>{if(!event.target?.closest?.('#chat-form'))return;dropDepth=Math.max(0,dropDepth-1);if(!dropDepth)dropOverlay(false);});
 document.addEventListener('drop',event=>{dropDepth=0;dropOverlay(false);if(!canAttachImages()||!event.target?.closest?.('#chat-form'))return;const files=[...(event.dataTransfer?.files||[])];if(!files.length)return;event.preventDefault();addImageFiles(files);});
-document.addEventListener('change',event=>{if(event.target.dataset?.pluginLevel){const t=event.target,level=t.value,label=(PLUGIN_LEVELS.find(l=>l[0]===level)||[])[1]||level;void pipsSettingsCall('set_plugin_permission',{plugin:t.dataset.pluginLevel,level},`Saved. ${t.dataset.pluginName||'This plugin'}: ${label.toLowerCase()}.`);return;}if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='hook-network'){const on=event.target.checked;void reachCall({local_network:on},'network',on?'Devices on your home network can call your routines’ addresses.':'Your home network can no longer call your routines’ addresses.');return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pips-pay-limit'){void setPayLimit(event.target.value);return;}if(event.target.id==='pipEyes'){void setEyes(event.target.value);return;}if(event.target.id==='pipLevel'){void setLevel(event.target.value)}if(event.target.id==='pipPaying'){void setPaying(event.target.value);return;}if(event.target.id==='pipReportAs'){const v=event.target.value;void setArtifacts({report_as:v},value=>reportNotice(value,S.pip?.name||'It'));return;}if(event.target.id==='pipDashboardAdd'){const id=event.target.value;if(id&&artifactsState.value){const list=[...artifactsState.value.dashboards,id];void setArtifacts({dashboards:dashboardsToSave(list)},`${S.pip?.name||'It'} refreshes “${dashboardTitle(id)}” after every run it finishes.${goneNote(list)}`);}return;}if(event.target.dataset?.loginAll){const l=(loginsState.value||[]).find(x=>x.id===event.target.dataset.loginAll),all=event.target.checked;if(l)void loginCall('grant_pip_login',{login_id:l.id,pips:all?'all':[S.selected]},all?`All your Pips can use the login for ${l.site}.`:`Only ${S.pip?.name||'this Pip'} uses the login for ${l.site} now.`);return;}if(event.target.dataset?.pipAppSwitch){void setAppUse(event.target.dataset.pipAppSwitch,event.target.checked);return;}if(event.target.dataset?.pipSkillSwitch){void setSkillUse(event.target.dataset.pipSkillSwitch,event.target.checked);return;}if(event.target.dataset?.teamPip){teamTicked(event.target);return;}if(event.target.id==='pipCareful'){const on=event.target.checked;void carefulCall('set_pip_careful',{on},on?'Careful mode is on.':'Careful mode is off. Its submits still wait for you.');return;}if(event.target.id==='pipNotify'){const on=event.target.checked;void setProfile({notify:on},on?'It tells you when it finishes something on its own or needs you.':'It won’t notify you. Its chat still has everything.');return;}if(event.target.dataset?.routineToggle){const id=event.target.dataset.routineToggle,on=event.target.checked;void routineCall('update_pip_routine',{routine_id:id,changes:{status:on?'on':'off'}},id,on?'Routine on.':'Routine off. It won’t run until you turn it on.');return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
+document.addEventListener('change',event=>{if(event.target.dataset?.pluginLevel){const t=event.target,level=t.value,label=(PLUGIN_LEVELS.find(l=>l[0]===level)||[])[1]||level;void pipsSettingsCall('set_plugin_permission',{plugin:t.dataset.pluginLevel,level},`Saved. ${t.dataset.pluginName||'This plugin'}: ${label.toLowerCase()}.`);return;}if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='hook-network'){const on=event.target.checked;void reachCall({local_network:on},'network',on?'Devices on your home network can call your routines’ addresses.':'Your home network can no longer call your routines’ addresses.');return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pips-pay-limit'){void setPayLimit(event.target.value);return;}if(event.target.id==='pipEyes'){void setEyes(event.target.value);return;}if(event.target.id==='pipLevel'){const picked=event.target.value;if(picked==='full'&&onePips()&&levelState.value?.level!=='full')event.target.value=levelState.value?.level||'ask';chooseLevel(picked,{refocus:'pipLevel'});return;}if(event.target.id==='pipPaying'){void setPaying(event.target.value);return;}if(event.target.id==='pipReportAs'){const v=event.target.value;void setArtifacts({report_as:v},value=>reportNotice(value,S.pip?.name||'It'));return;}if(event.target.id==='pipDashboardAdd'){const id=event.target.value;if(id&&artifactsState.value){const list=[...artifactsState.value.dashboards,id];void setArtifacts({dashboards:dashboardsToSave(list)},`${S.pip?.name||'It'} refreshes “${dashboardTitle(id)}” after every run it finishes.${goneNote(list)}`);}return;}if(event.target.dataset?.loginAll){const l=(loginsState.value||[]).find(x=>x.id===event.target.dataset.loginAll),all=event.target.checked;if(l)void loginCall('grant_pip_login',{login_id:l.id,pips:all?'all':[S.selected]},all?`All your Pips can use the login for ${l.site}.`:`Only ${S.pip?.name||'this Pip'} uses the login for ${l.site} now.`);return;}if(event.target.dataset?.pipAppSwitch){void setAppUse(event.target.dataset.pipAppSwitch,event.target.checked);return;}if(event.target.dataset?.pipSkillSwitch){void setSkillUse(event.target.dataset.pipSkillSwitch,event.target.checked);return;}if(event.target.dataset?.teamPip){teamTicked(event.target);return;}if(event.target.id==='pipCareful'){const on=event.target.checked;void carefulCall('set_pip_careful',{on},on?'Careful mode is on.':'Careful mode is off. Its submits still wait for you.');return;}if(event.target.id==='pipNotify'){const on=event.target.checked;void setProfile({notify:on},on?'It tells you when it finishes something on its own or needs you.':'It won’t notify you. Its chat still has everything.');return;}if(event.target.dataset?.routineToggle){const id=event.target.dataset.routineToggle,on=event.target.checked;void routineCall('update_pip_routine',{routine_id:id,changes:{status:on?'on':'off'}},id,on?'Routine on.':'Routine off. It won’t run until you turn it on.');return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
 document.addEventListener('submit',event=>{
   if(event.target.id==='pip-flow-form'){event.preventDefault();reviewFlow();return;}
   if(event.target.id==='pip-folder-form'){event.preventDefault();addPipFolder();return;}
@@ -6097,6 +6486,7 @@ document.addEventListener('click',event=>{
   const photo=event.target.closest?.('img[data-message-image]');
   if(photo&&S.apiVersion>=43&&!remoteHost){openMessageImage(photo.dataset.messageImage);return;}
   const target=event.target.closest('button');if(!target||target.disabled)return;
+  if(flow.menu&&!target.dataset.flowMenu&&!target.dataset.flowHelper){flow.menu='';render();}
   if(target.dataset.pipsTab){chooseScopeTab(target.dataset.pipsTab);return;}
   // The Project Folder dropdown (the Project tab's, and Create a Project Pip's), and a Pip in the list of every project's.
   if(target.dataset.folderPick){openFolderMenu(target,event.detail===0);return;}
@@ -6105,7 +6495,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.pipLearn){const l=S.learn,a=target.dataset.pipLearn;if(a==='save')void saveLearn();else if(a==='edit'&&l?.status==='draft'){if(l.editing)l.text=draft.pipLearnText;else draft.pipLearnText=l.text;l.editing=!l.editing;render();if(l.editing)$('pipLearnText')?.focus();}else if(a==='cancel'&&l){S.learn={pip:l.pip,status:'cancelled',name:l.name};render();}else if(a==='dismiss'){S.learn=null;render();$('chatText')?.focus();}return;}
   if(target.id==='chat-level'){S.composerPanel=S.composerPanel==='level'?'':'level';render();if(S.composerPanel==='level'){focusLevelMenu();void loadLevel().then(()=>{if(S.composerPanel==='level')focusLevelMenu();});}return;}
   if(target.dataset.pipLevelPick!==undefined){const chosen=target.dataset.pipLevelPick;S.composerPanel='';render();$('chat-level')?.focus();
-   if(!(levelState.pip===S.selected&&levelState.value?.level===chosen))void setLevel(chosen,{refocus:'chat-level'});return;}
+   chooseLevel(chosen,{refocus:'chat-level'});return;}
   if(target.dataset.pipLevelWhat!==undefined){S.composerPanel='';render();openWhatItCanDo();return;}
   if(target.id==='chat-attach'){S.composerPanel=S.composerPanel==='add'?'':'add';render();if(S.composerPanel==='add')document.querySelector('.composer-add-menu .dgc-menu-row')?.focus();return;}
   if(target.dataset.pipAdd!==undefined){const which=target.dataset.pipAdd;S.composerPanel='';render();
@@ -6238,7 +6628,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.helloAgain!==undefined){void helloAgain();return;}
   if(target.dataset.pipRead){markPipRead(target.dataset.pipRead);return;}
   if(target.dataset.pipSwitch){void switchPip(target.dataset.pipSwitch);return;}
-  if(target.dataset.job){if(event.detail>0&&!S.sidebarPinned)shell.classList.add('sidebar-dismissed');void select(target.dataset.job);return;}
+  if(target.dataset.job){if(onePips()&&(!S.selected||S.overview)&&!S.create){openOnePip(target.dataset.job);return;}if(event.detail>0&&!S.sidebarPinned)shell.classList.add('sidebar-dismissed');void select(target.dataset.job);return;}
   if(target.dataset.postOpen){openPostReport(target.dataset.postOpen);return;}
   if(target.dataset.postFix){askDgcAbout(target.dataset.postFix);return;}
   if(target.dataset.postFixOpen){openFixChat(target.dataset.postFixOpen);return;}
@@ -6251,7 +6641,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.run){void loadRun(target.dataset.run);return;}
   if(target.dataset.readNotification){void markNotification(target.dataset.readNotification);return;}
   if(target.dataset.openNotification){void openNotification(target.dataset.openNotification);return;}
-  if(target.dataset.tab){document.querySelectorAll('details[data-details="tabs-more"],details[data-details="pip-menu"]').forEach(d=>d.removeAttribute('open'));S.tab=target.dataset.tab;S.create=false;S.overview=false;if(S.tab==='job'&&personalPip())openPipPage();else if(S.tab==='job')void loadArtifacts();rememberView();render();if(S.tab==='memory'){void loadMemories();if(S.apiVersion>=19)void loadStatements();}else if(S.tab==='notifications')void loadNotifications();else if(S.tab==='chat')void loadMessages();else if(S.tab==='runs')void loadSelected(true);else if(S.tab==='job')void loadModels();else if(S.tab==='context'&&S.apiVersion>=12){if(!outcomeSessionsLoaded)void loadOutcomeSessions();if(!outcomeLoaded)void loadOutcomes();}else if(S.tab==='handoffs'&&!S.handoffsLoaded)void loadHandoffs();return;}
+  if(target.dataset.tab){document.querySelectorAll('details[data-details="tabs-more"],details[data-details="pip-menu"]').forEach(d=>d.removeAttribute('open'));S.tab=target.dataset.tab;S.create=false;S.overview=false;if(S.tab==='job'&&pagePip())openPipPage();else if(S.tab==='job')void loadArtifacts();rememberView();render();if(S.tab==='memory'){void loadMemories();if(S.apiVersion>=19)void loadStatements();}else if(S.tab==='notifications')void loadNotifications();else if(S.tab==='chat')void loadMessages();else if(S.tab==='runs')void loadSelected(true);else if(S.tab==='job')void loadModels();else if(S.tab==='context'&&S.apiVersion>=12){if(!outcomeSessionsLoaded)void loadOutcomeSessions();if(!outcomeLoaded)void loadOutcomes();}else if(S.tab==='handoffs'&&!S.handoffsLoaded)void loadHandoffs();return;}
   if(target.dataset.recordException!==undefined){void reviewException(Number(target.dataset.recordException));return;}
   if(target.dataset.revokeStatement){revokeStatementReview(target.dataset.revokeStatement);return;}
   if(target.dataset.revokeMemory){revokeMemoryReview(target.dataset.revokeMemory);return;}
@@ -6338,6 +6728,20 @@ document.addEventListener('click',event=>{
   if(target.dataset.composerMore!==undefined){S.composerNoteOpen=!S.composerNoteOpen;render();document.querySelector('[data-composer-more]')?.focus();return;}
   if(target.dataset.projectFile!==undefined&&target.dataset.projectOf){toggleProjectFile(target.dataset.projectOf,target.dataset.projectFile);return;}
   if(target.dataset.projectApply){void projectDecide('apply',target.dataset.projectApply);return;}
+  if(target.dataset.projectReview){projectReview(target.dataset.projectReview);return;}
+  if(target.dataset.projectCommit){void projectCommit(target.dataset.projectCommit);return;}
+  // What a Pip found and its fix, in its chat (src/pipFlow.js).
+  if(target.dataset.flowFile){flowOpenFile(target.dataset.flowFile,target.dataset.flowLine);return;}
+  if(target.dataset.flowAllow){void flowDecide(target.dataset.flowAllow,true);return;}
+  if(target.dataset.flowNo){void flowDecide(target.dataset.flowNo,false);return;}
+  if(target.dataset.flowMenu){flow.menu=flow.menu===target.dataset.flowMenu?'':target.dataset.flowMenu;render();if(flow.menu)document.querySelector('.pip-found-menu .dgc-menu-row')?.focus();return;}
+  if(target.dataset.flowHelper){void flowHelper(target.dataset.flowHelper);return;}
+  if(target.dataset.flowSteps){void openReplyTrace(target.dataset.flowSteps);return;}
+  if(target.dataset.flowWatch){openComputerView();return;}
+  if(target.dataset.flowStop){void flowStop(target.dataset.flowStop);return;}
+  if(target.dataset.flowWaitingToggle!==undefined){flow.waitingOpen=!flow.waitingOpen;render();$('pip-waiting-toggle')?.focus({preventScroll:true});return;}
+  if(target.dataset.flowWaitingAnswer){void flowWaitingAnswer(target.dataset.flowWaitingId,target.dataset.flowWaitingAnswer);return;}
+  if(target.dataset.reportsSort){one.reportsSort=target.dataset.reportsSort==='old'?'old':'new';render();$('pip-reports-sort')?.focus({preventScroll:true});return;}
   if(target.dataset.projectDiscard){projectConfirm=target.dataset.projectDiscard;projectErrors.delete(projectConfirm);render();document.querySelector(`[data-project-keep="${projectConfirm}"]`)?.focus();return;}
   if(target.dataset.projectKeep){const id=target.dataset.projectKeep;projectConfirm='';render();document.querySelector(`[data-project-discard="${id}"]`)?.focus();return;}
   if(target.dataset.projectDiscardYes){void projectDecide('discard',target.dataset.projectDiscardYes);return;}
@@ -6443,14 +6847,16 @@ document.addEventListener('click',event=>{
     case 'rate-up':saveFeedback('up');break;
     case 'rate-down':saveFeedback('down');break;
     case 'rate-clear':saveFeedback(null);break;
-    case 'import-pip-file':if(S.review?.projectPip)closeReview();void importPipFile();break;
+    case 'import-pip-file':if(S.review?.onePip){void oneLeaveForFolder(()=>void importPipFile());break;}if(S.review?.projectPip)closeReview();void importPipFile();break;
     case 'export-pip-file':void exportPipFile();break;
     case 'refresh-findings':outcomeState.pip='';void loadFindingOutcomes();break;
     case 'back-types':rememberCreationDraft();S.createStep='type';render();[...document.querySelectorAll('[data-pip-type]')].find(b=>b.dataset.pipType===S.createType)?.focus();break;
     case 'cancel-create':case 'create-back':rememberCreationDraft();S.create=false;
       // On the simple page a new Pip's page goes back to the list it came from; Change in chat, to its Pip.
-      S.overview=simpleMode()&&projectHome()?!(setupEditing&&S.selected):!S.selected;setupEditing=simpleMode()&&projectHome()?false:setupEditing;rememberView();render();break;
-    case 'new-pip-describe':if(S.apiVersion<23)break;closeReview();rememberCreationDraft();setupEditing=false;S.create=true;S.overview=false;S.createStep='describe';S.error='';render();$('setupTask')?.focus();break;
+      S.overview=simpleMode()&&projectHome()?!(setupEditing&&S.selected):!S.selected;setupEditing=simpleMode()&&projectHome()?false:setupEditing;rememberView();render();if(onePips()&&S.overview)oneHomeAgain();break;
+    case 'new-pip-describe':if(S.apiVersion<23)break;
+      if(S.review?.onePip){void oneLeaveForFolder(()=>{rememberCreationDraft();setupEditing=false;S.create=true;S.overview=false;S.createStep='describe';S.error='';render();$('setupTask')?.focus();});break;}
+      closeReview();rememberCreationDraft();setupEditing=false;S.create=true;S.overview=false;S.createStep='describe';S.error='';render();$('setupTask')?.focus();break;
     case 'new-pip-back':openNewProjectPip();break;
     case 'workspace-back':S.overview=true;S.tab='chat';rememberView();render();break;
     case 'pip-run-now':if(runAction()&&!runBlocked())runNow();break;
@@ -6554,7 +6960,8 @@ document.addEventListener('click',event=>{
     case 'flow-new':flowDraft.name='';flowDraft.mode='reviewed';flowDraft.count=3;flowDraft.pips=['','','',''];flowDraft.tasks=['','',''];flowState.form=true;flowState.error='';render();$('flow-name')?.focus();break;
     case 'flow-cancel':flowState.form=false;flowState.error='';render();break;
     case 'create-core':void createSimplePip('core','Core');break;
-    case 'simple-back':chatDrafts.set(S.selected,draft.chatText);S.overview=true;rememberView();render();void loadFlows();break;
+    case 'simple-back':chatDrafts.set(S.selected,draft.chatText);S.overview=true;rememberView();render();if(onePips())oneHomeAgain();void loadFlows();break;
+    case 'one-more':void loadOneMore();break;
     case 'pips-settings-open':pipsSettings.view=pipsSettings.view||'computer';pipsSettings.confirmReset='';render();void loadPipsSettings();break;
     case 'pips-settings-close':pipsSettings.view='';render();break;
     case 'pip-page-back':S.pipPage='info';lookDirty=false;render();void loadRoutines();break;
@@ -6578,6 +6985,8 @@ document.addEventListener('click',event=>{
       if(review.projectPip){createProjectPip(review);return;}
       if(review.teamExport){void exportTeam(review);return;}
       if(review.sourceImport){if(!reviewBlocked(review))void importSource(review);return;}
+      if(review.onePip){void createOnePip(review);return;}
+      if(review.fullLevel){const back=review.refocus;closeReview();void setLevel('full',{refocus:back});return;}
       if(review.newPip){void createSimplePip(draft.newPipCharacter,draft.newPipName,review);return;}
       if(review.computerGrant!==undefined){void applyComputerGrant(review);return;}
       if(review.computerAction){if(!reviewBlocked(review))void decideComputerAction(review,true);else{review.error='This action expired. Nothing was sent.';renderReview();}return;}
@@ -6760,6 +7169,13 @@ document.addEventListener('keydown',event=>{
     const first=items[0],last=items[items.length-1];if(event.shiftKey&&(document.activeElement===first||document.activeElement===$('review-title'))){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
   }
 });
+document.addEventListener('mouseover',event=>{if(event.target?.closest?.('.pips-one-list')){window.clearTimeout(one.leave);one.hover=true;}});
+document.addEventListener('mouseout',event=>{
+  if(!one.hover||!event.target?.closest?.('.pips-one-list')||event.relatedTarget?.closest?.('.pips-one-list'))return;
+  // (A redraw under the pointer takes the row away for a moment: the pointer coming back over the list keeps the hold.)
+  window.clearTimeout(one.leave);one.leave=window.setTimeout(()=>{one.hover=false;oneRelease();},120);
+});
+document.addEventListener('focusout',event=>{if(event.target?.closest?.('.pips-one-list'))window.setTimeout(oneRelease,0);});
 const stopMessages=options.onMessage(message=>{
   if(disposed||!record(message))return;
   // What is pinned to the dock (src/dock.ts): each Pip's row shows its pin filled or not.
@@ -6807,7 +7223,7 @@ const stopMessages=options.onMessage(message=>{
     // The Project Folder dropdown, where the extension says what is chosen (a DGC that lists folders, Pips API 93).
     S.projectFolder=S.apiVersion>=93&&typeof message.projectFolder==='string'?message.projectFolder:null;S.folders=null;S.homeDir=typeof message.home==='string'?message.home:'';
     S.windowFolder=record(message.windowFolder)&&typeof message.windowFolder.folder==='string'&&message.windowFolder.folder?{folder:message.windowFolder.folder,name:typeof message.windowFolder.name==='string'?message.windowFolder.name:''}:null;
-    projectsAll={pips:[],read:false,busy:false,error:'',seq:projectsAll.seq+1};addedFolders.clear();for(const done of folderPicks.values())done(null);folderPicks.clear();draft.createFolder='';globalThis.DgcFolderPick?.close();
+    projectsAll={pips:[],read:false,busy:false,error:'',seq:projectsAll.seq+1};Object.assign(one,{filter:ONE_ALL,pips:[],read:false,busy:false,error:'',seq:one.seq+1,next:null,total:null,moreBusy:false,held:null,drawn:null,hover:false,asked:''});one.bumps.clear();oneSeen.clear();oneSeenRead=false;resetFlow();addedFolders.clear();for(const done of folderPicks.values())done(null);folderPicks.clear();draft.createFolder='';globalThis.DgcFolderPick?.close();
     waitForConnection();render();if(usable())void initialize();
   }
 });

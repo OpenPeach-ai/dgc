@@ -6,13 +6,19 @@
 // as a row of icons at the card's right that turn into the full button (media/shared/iconactions.js). The card itself
 // still opens it. After an answer the card says what it will do, with Undo as a word, for a moment (src/pipsClient.js).
 
-export const KINDS = ['email', 'event', 'action', 'app_action', 'app_link', 'plugin', 'setup', 'computer_action', 'computer_check', 'routine'];
+// The Pips flow (14 Nov, Pips API 96), one row a Pip: it wants to fix what a check found (fix_ask: Allow), its fix is
+// ready (fix_ready: Apply), part of a fix was held back because you changed the file (fix_held), and something only you
+// can do (waiting). The row's card is the fix, the change, or the thing waited for.
+export const FLOW_KINDS = ['fix_ask', 'fix_ready', 'fix_held', 'waiting'];
+export const KINDS = ['email', 'event', 'action', 'app_action', 'app_link', 'plugin', 'setup', 'computer_action', 'computer_check', 'routine', ...FLOW_KINDS];
 const LABELS = {email: 'Email', event: 'Calendar', action: 'Action', app_action: 'Ready to send', app_link: 'App', plugin: 'Plugin',
-  setup: 'New Pip', computer_action: 'Its computer', computer_check: 'Its computer', routine: 'Routine', handoff: 'Handoff', approval: 'Change'};
+  setup: 'New Pip', computer_action: 'Its computer', computer_check: 'Its computer', routine: 'Routine', handoff: 'Handoff', approval: 'Change',
+  fix_ask: 'Wants to fix', fix_ready: 'Fix ready', fix_held: 'Held back', waiting: 'Only you'};
 const ID = {email: /^maildraft_[a-f0-9]{32}$/, event: /^caldraft_[a-f0-9]{32}$/, action: /^conndraft_[a-f0-9]{32}$/,
   app_action: /^appaction_[a-f0-9]{32}$/, app_link: /^applink_[a-f0-9]{32}$/, plugin: /^pipplugin_[a-f0-9]{32}$/,
   setup: /^setup_[a-f0-9]{32}$/, computer_action: /^compact_[a-f0-9]{32}$/, computer_check: /^pip_[a-f0-9]{32}$/,
-  routine: /^routine_[a-f0-9]{32}$/, handoff: /^handoff_[a-f0-9]{32}$/, approval: /^[A-Za-z0-9_-]{1,128}$/};
+  routine: /^routine_[a-f0-9]{32}$/, handoff: /^handoff_[a-f0-9]{32}$/, approval: /^[A-Za-z0-9_-]{1,128}$/,
+  fix_ask: /^pipfix_[a-f0-9]{32}$/, fix_ready: /^pchange_[0-9a-f]{32}$/, fix_held: /^pchange_[0-9a-f]{32}$/, waiting: /^pipwait_[a-f0-9]{32}$/};
 /** A kind of card in a word or two: "Email", "Its computer", "New Pip". */
 export const kindLabel = kind => LABELS[kind] || 'Card';
 const REVIEW_KINDS = ['job_update', 'schedule_update'];
@@ -130,7 +136,8 @@ export function attentionDots(count, at, most = 7) {
 function rowMarkup(i, key, {esc, face, now, busy, answers, held, tail = '', attrs = '', place = null}) {
   const icons = globalThis.DgcIconActions;
   const iconRow = () => { const a = answers?.(i) || null, act = (way, label, primary, title) => ({label, primary, title, disabled: busy, attrs: {id: `attention-${way}${tail}`, [way === 'open' ? 'data-attention-open' : 'data-attention-answer']: way === 'open' ? i.id : way, 'data-attention-item': i.id}});
-   const list = [...(a ? [act('yes', a.yes, true), act('no', a.no, false)] : []), act('open', 'Review', !a, `See all of it${i.pip_name ? `, with ${i.pip_name}` : ''}`)];
+   // (A fix that is ready has the one answer it needs, Apply; what only you can do has Open, to its Pip's chat.)
+   const list = [...(a ? [act('yes', a.yes, true), ...(a.no ? [act('no', a.no, false)] : [])] : []), act('open', ['waiting', 'fix_held'].includes(i.kind) ? 'Open' : 'Review', !a, `See all of it${i.pip_name ? `, with ${i.pip_name}` : ''}`)];
    return {n: list.length, html: icons.html(list, {label: `Answers: ${i.title}`})}; };
   // A Project Pip's card names its project (`place`: a card's project, '' for a Personal Pip's).
   const where = place?.(i) || '';
@@ -147,19 +154,13 @@ function rowMarkup(i, key, {esc, face, now, busy, answers, held, tail = '', attr
 }
 
 const ARROW = {prev: 'M10 3 5 8l5 5', next: 'M6 3l5 5-5 5'};
-// The fold's mark: our own drawing, as the tray's icons are (trayIcon in pipsClient.js), and not a glyph of the icon font
-// asked for by class. The side bar's Pips view is in a shadow root, where that font's classes are not loaded: there the
-// glyph had no size and drew nothing (found 13 Nov). One drawing, pointing up; pips.css turns it down while the button
-// says the section is folded (aria-expanded), so the mark never says otherwise than the button does.
-const FOLD_MARK = '<span class="codicon attention-fold" aria-hidden="true"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m4 10 4-4 4 4"/></svg></span>';
-
 /** The Pips home's Needs attention: one card in view, whatever waits (asked 11 Nov: the list "gets too long"), with an
  *  arrow each side and dots below to go to the next or back. `at` is the card showing (attentionSpot). `face(item)`
  *  draws the Pip's face (the home's own avatars). `setups` are the new Pips waiting in this place, each drawn as a card
  *  by `setupCard` ({setup} or {item}); the cards are theirs alone when `page` is null (a project's home, which shows
  *  none of the Personal Pips' rows). `answers(item)` is what the card can answer by itself ({yes, no}, src/pipCardAnswers.js)
  *  or null; `held(item)` is what an answer just given says ("Applied. …") while it can still be undone, or ''. */
-export function attentionMarkup(page, {esc, face, expanded = false, now = Date.now(), busy = false, setups = [], setupCard = null, error = '', more = '', at = 0, answers = null, held = null, viewAll = false, place = null, end = ''}) {
+export function attentionMarkup(page, {esc, face, expanded = false, now = Date.now(), busy = false, setups = [], setupCard = null, error = '', more = '', at = 0, answers = null, held = null, viewAll = false, place = null}) {
   const all = attentionCards(page, setups, !!setupCard), listed = page?.items || [];
   const total = (page?.total || 0) + all.length - listed.length;
   if (!total) return '';
@@ -178,16 +179,18 @@ export function attentionMarkup(page, {esc, face, expanded = false, now = Date.n
   const foot = many ? `<div class="attention-foot"><div class="attention-dots">${dots}</div><span class="attention-place muted" role="status" aria-live="polite">${n(index + 1)} of ${n(count)}</span></div>` : '';
   const cut = page?.truncated && expanded ? `<p class="muted attention-cut">The newest ${listed.length} of ${page.total.toLocaleString('en-US')}. Each Pip’s chat has the rest.</p>` : '';
   const said = expanded ? (error ? `<p class="notice error" role="alert">${esc(error)}</p>` : '') + (more ? `<p class="muted attention-cut">${esc(more)}</p>` : '') : '';
-  // The fold has a name of its own (its id): a redraw makes the button anew, and the page puts the keyboard back on it
-  // by that name (render in pipsClient.js), so Enter or Space on it leaves the focus where it was, on a button that now
-  // says the new state (aria-expanded).
-  const toggle = `<button type="button" class="attention-toggle" id="attention-toggle" data-attention-more="${expanded ? '0' : '1'}" aria-expanded="${Boolean(expanded)}" aria-controls="attention-list">Needs attention <span class="attention-count">${n(total)}</span>${FOLD_MARK}</button>`;
-  // "View all" (asked 12 Nov): quiet words at the heading row's right end, when two or more wait and the section is open. It
-  // opens the page that lists every one (attentionAllMarkup). Folded, or with one card, the heading is as it was.
+  // The heading line (asked 13 Nov): "Needs attention" and its count at the left, as words and not a button (with a mark
+  // beside it the heading read as a dropdown), and the fold as a quiet word at the line's right end: "Hide" while the
+  // cards show, "Show" while they are folded. The word is the fold's one button, and it has a name of its own (its id):
+  // a redraw makes the button anew, and the page puts the keyboard back on it by that name (render in pipsClient.js),
+  // so Enter or Space on it leaves the focus where it was, on a button that now says the new state (aria-expanded).
+  const title = `<h2 class="attention-title">Needs attention <span class="attention-count">${n(total)}</span></h2>`;
+  const toggle = `<button type="button" class="attention-toggle" id="attention-toggle" data-attention-more="${expanded ? '0' : '1'}" aria-expanded="${Boolean(expanded)}" aria-controls="attention-list"`
+    + ` aria-label="${expanded ? 'Hide' : 'Show'} the cards that need your attention">${expanded ? 'Hide' : 'Show'}</button>`;
+  // "View all" (asked 12 Nov): quiet words on the heading line, before the fold's word, when two or more wait and the
+  // section is open. It opens the page that lists every one (attentionAllMarkup).
   const link = viewAll && many ? `<button type="button" class="attention-all-link" id="attention-view-all" data-attention-all="1" aria-label="${esc(`View all ${n(count)} that need you`)}">View all</button>` : '';
-  // `end` (the caller's own markup): what the heading line holds at its right end, after View all (the Project tab's
-  // Project Folder dropdown). With it the heading, its count and its fold keep to the left, as wide as their words.
-  const head = end ? `<div class="attention-head attention-head-end">${toggle}<span class="attention-head-gap"></span>${link}${end}</div>` : link ? `<div class="attention-head">${toggle}${link}</div>` : toggle;
+  const head = `<div class="attention-head">${title}${link}${toggle}</div>`;
   return `<section class="attention" aria-label="Needs attention">${head}`
     + `<div class="attention-carousel${many ? '' : ' single'}" id="attention-list" role="group" aria-label="What needs you, one card at a time"${shown ? '' : ' hidden'}`
     + (shown ? ` data-at="${index}" data-count="${count}" data-first="${esc(all[0].key)}" data-last="${esc(all[count - 1].key)}"` : '') + '>'
@@ -222,6 +225,9 @@ export function cardSelector(kind, card, css = s => s) {
   const id = css(card);
   if (kind === 'computer_check') return '[data-state="needs"]';
   if (kind === 'plugin') return `[data-plugin-card="${id}"]`;
+  if (kind === 'fix_ask') return `[data-flow-fix="${id}"]`;
+  if (kind === 'fix_ready' || kind === 'fix_held') return `[data-project-change="${id}"]`;
+  if (kind === 'waiting') return `[data-flow-waiting="${id}"],.pip-found-waiting-line`;
   if (kind === 'app_link') return `[data-app-link="${id}"]`;
   if (kind === 'routine') return `[data-routine-card="${id}"]`;
   return `[data-allow-card="${id}"],[data-plugin-action="${id}"],.chat-setup-review [data-email-draft="${id}"]`;

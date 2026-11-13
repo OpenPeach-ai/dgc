@@ -82,7 +82,11 @@ test('the home lists what every Pip waits on, newest first, above Your Pips; eac
  const x=setup({found});await x.drain();
  const section=x.d.querySelector('.attention');assert.ok(section,'Needs attention is on the home');
  assert.ok(section.compareDocumentPosition(x.d.querySelector('.simple-home'))&x.w.Node.DOCUMENT_POSITION_FOLLOWING,'above Your Pips');
- assert.match(section.querySelector('.attention-toggle').textContent,/Needs attention\s*3/);
+ // (13 Nov: the heading is words and its count; the fold is the quiet word at the line's end, with no chevron.)
+ assert.match(section.querySelector('h2.attention-title').textContent,/^Needs attention\s*3$/);
+ assert.equal(section.querySelector('.attention-head svg, .attention-head .codicon, .attention-fold'),null,'no chevron on the heading');
+ assert.deepEqual([section.querySelector('.attention-toggle').textContent,section.querySelector('.attention-toggle').getAttribute('aria-label'),section.querySelector('.attention-toggle').id,section.querySelector('.attention-toggle').getAttribute('aria-controls')],['Hide','Hide the cards that need your attention','attention-toggle','attention-list']);
+ assert.equal(section.querySelector('.attention-head').lastElementChild,section.querySelector('.attention-toggle'),'the last thing on the heading\'s line');
  // Open when something is in it (his call, 11 Nov; it started folded).
  assert.equal(section.querySelector('.attention-toggle').getAttribute('aria-expanded'),'true','the list starts open');
  // One card in view; Next shows the one after it, newest first.
@@ -301,14 +305,17 @@ test('View all: quiet words on the heading when two or more wait and it is open;
  assert.equal(link.getAttribute('aria-label'),'View all 3 that need you');
  const head=link.parentElement,toggle=x.d.querySelector('.attention-toggle');
  assert.equal(head.className,'attention-head');assert.equal(toggle.parentElement,head,'on the heading row');
- assert.ok(toggle.compareDocumentPosition(link)&x.w.Node.DOCUMENT_POSITION_FOLLOWING,'after the heading: at its right');
+ // (13 Nov: after the heading's words, and before the fold's own word, which ends the line.)
+ assert.ok(x.d.querySelector('.attention-title').compareDocumentPosition(link)&x.w.Node.DOCUMENT_POSITION_FOLLOWING,'after the heading: at its right');
+ assert.ok(link.compareDocumentPosition(toggle)&x.w.Node.DOCUMENT_POSITION_FOLLOWING,'the fold\'s word ends the line');
  assert.equal(link.closest('.attention-toggle'),null,'a button of its own, never inside the fold’s button');
  assert.equal(x.d.querySelectorAll('.attention [data-attention]').length,1,'the one-card view is as it was');
  assert.equal(x.d.querySelector('.attention-place').textContent,'1 of 3');
- // Folded: the heading and its count only.
+ // Folded: the heading, its count and the fold's word ("Show") only.
  x.click('[data-attention-more="0"]');
  assert.equal(x.d.querySelector('#attention-view-all'),null,'folded: no View all');
- assert.equal(x.d.querySelector('.attention-head'),null);
+ assert.deepEqual([...x.d.querySelector('.attention-head').children].map(e=>e.className),['attention-title','attention-toggle']);
+ assert.deepEqual([x.d.querySelector('.attention-toggle').textContent,x.d.querySelector('.attention-toggle').getAttribute('aria-label'),x.d.querySelector('.attention-toggle').getAttribute('aria-expanded')],['Show','Show the cards that need your attention','false']);
  x.click('[data-attention-more="1"]');
  assert.ok(x.d.querySelector('#attention-view-all'),'opened again: it is back');
  // One card: nothing to view all of.
@@ -453,7 +460,7 @@ test('View all: the older layout has none; another page asked for by the host le
  assert.equal(none.count,0);assert.match(none.html,/Nothing needs you right now\./);
  // attentionMarkup offers View all only where it is asked to (the Pips home), so the older layout's section is unchanged.
  const plain=attention.attentionMarkup(cards,{esc,face:()=>'',expanded:1});
- assert.doesNotMatch(plain,/View all|attention-head/);
+ assert.doesNotMatch(plain,/View all/);
  assert.match(attention.attentionMarkup(cards,{esc,face:()=>'',expanded:1,viewAll:true}),/id="attention-view-all"/);
  assert.doesNotMatch(attention.attentionMarkup(cards,{esc,face:()=>'',expanded:false,viewAll:true}),/View all/,'folded');
  // The host opens a Pip (the dock, a notification): its chat, and Your Pips from there is the list, not this page.

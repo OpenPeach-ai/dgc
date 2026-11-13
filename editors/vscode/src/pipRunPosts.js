@@ -326,7 +326,9 @@ function fixMarkup(p,{ask,asked,asking,fix,openFix}){
  *  with a chat to send it to); `asked`: it was (before Pips API 65, kept with the view); `asking`: it was just now, and
  *  the fix hasn't been read yet; `fix`: its latest fix (Pips API 65), whose state the post says; `openFix`: a click on
  *  that goes to the Work chat it ran in; `canRun`: Run again now would start a run; `expanded`: Show all. */
-export function postMarkup(p,{name,face='',now=Date.now(),personal=false,ask=false,asked=false,asking=false,fix=null,openFix=false,canRun=false,previous=null,streak=null,expanded=false,traced=false,docs=false,renderMarkdown=s=>`<p>${esc(s)}</p>`}){
+export function postMarkup(p,{name,face='',now=Date.now(),personal=false,ask=false,asked=false,asking=false,fix=null,openFix=false,canRun=false,previous=null,streak=null,expanded=false,traced=false,docs=false,under=undefined,renderMarkdown=s=>`<p>${esc(s)}</p>`}){
+  // `under` (One Pips, src/pipFlow.js): what stands under the Pip's words in place of the report chip and Ask DGC to
+  // fix: its findings as one card, then what became of them (the Allow card, the fix at work, its change).
   const id=esc(p.run_id),runs=streak&&streak.length>1?streak:null,before=runs?runs.at(-2):previous;
   const time=globalThis.DgcTime?.markup(at(p))||'';
   let body,text;
@@ -337,17 +339,21 @@ export function postMarkup(p,{name,face='',now=Date.now(),personal=false,ask=fal
       +(cut.clipped?`<button type="button" class="link run-post-show" data-post-more="${id}" aria-expanded="${expanded}">${expanded?'Show less':'Show all'}</button>`:'');
     text=cut.text.replace(/[*_`#>|]/g,'').replace(/\s+/g,' ').slice(0,200);
   }else{
+    // What the Pip itself said about this check (`said`, the flow design: what is wrong, why it matters, how sure it
+    // is), in its own short messages; without it, the words made from the report's own numbers.
+    const own=under!==undefined&&typeof p.said==='string'&&p.said.trim()?p.said.trim().slice(0,4000):'';
     const words=pipWords(p,{previous:before,personal,now});
-    body=words.map(w=>`<p>${w.map(partHtml).join('')}</p>`).join('');
-    text=wordsText(words);
+    body=own?own.split(/\n\s*---\s*\n/).map(part=>`<div class="run-post-said">${renderMarkdown(part.trim())}</div>`).join(''):words.map(w=>`<p>${w.map(partHtml).join('')}</p>`).join('');
+    text=own?own.replace(/[*_`#>|]/g,'').replace(/\s+/g,' ').slice(0,200):wordsText(words);
   }
   const fixable=!personal&&askable(p),fixChip=fixable?fixMarkup(p,{ask,asked,asking,fix,openFix}):'';
   const attach=runs?timesMarkup(runs,now)
+    :under!==undefined&&p.outcome==='findings'?''
     :p.outcome==='findings'||p.outcome==='checks_failed'||p.outcome==='live_attention'?reportMarkup(p)+fixChip
     :p.outcome==='failed'?chip(`data-post-open="${id}"`,`${icon('warn')}<span>See what happened</span>`)+(canRun?chip(`data-post-run="${id}"`,`${icon('play')}<span>Run again now</span>`):'')+fixChip
     :chip(`data-post-open="${id}"`,`<span>${p.outcome==='draft'?'Open draft':p.kind==='result'?'Open result':'Open run'}</span>${chev}`,'quiet');
   const head=`<div class="run-post-head">${face?`<span class="run-post-face" aria-hidden="true">${face}</span>`:''}<strong class="run-post-name">${esc(name)}</strong>${time}</div>`;
-  return `<article class="pip-message assistant dgc run-post${runs?' run-post-streak':''}" data-run-post="${id}" data-outcome="${esc(p.outcome)}"${runs?` data-runs="${runs.length}"`:''} tabindex="-1" aria-label="${esc(`${name}: ${text}${runs?` ${foldWords(runs,now)}.`:''}`)}">${head}<div class="answer"><div class="message-body text final run-post-body">${body}</div></div>${docs&&!runs&&postArtifact(p)?docCardMarkup(postArtifact(p)):''}<div class="run-post-attach">${attach}${traced&&!runs?`<button type="button" class="ract ract-trace" data-post-trace="${id}" aria-label="Replay response trace" title="Replay response trace">Trace</button>`:''}</div></article>`;
+  return `<article class="pip-message assistant dgc run-post${runs?' run-post-streak':''}" data-run-post="${id}" data-outcome="${esc(p.outcome)}"${runs?` data-runs="${runs.length}"`:''} tabindex="-1" aria-label="${esc(`${name}: ${text}${runs?` ${foldWords(runs,now)}.`:''}`)}">${head}<div class="answer"><div class="message-body text final run-post-body">${body}</div></div>${docs&&!runs&&postArtifact(p)?docCardMarkup(postArtifact(p)):''}${under||''}<div class="run-post-attach">${attach}${traced&&!runs?`<button type="button" class="ract ract-trace" data-post-trace="${id}" aria-label="Replay response trace" title="Replay response trace">Trace</button>`:''}</div></article>`;
 }
 
 // ---- A run while it runs (reported 24 Oct) ----------------------------------------------------------------------

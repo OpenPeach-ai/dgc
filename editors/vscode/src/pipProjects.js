@@ -153,7 +153,7 @@ const reasons = (label, list, esc) => list.length ? `<p class="pip-project-label
  *   confirm  Discard was pressed: the card asks before the Pip's work in its copy goes
  *   note   one line said in the card (the Pip changed more since you looked); error: what went wrong
  */
-export function projectCardMarkup(change, { esc, open = new Set(), diffs = new Map(), busy = '', off = false, confirm = false, note = '', error = '' } = {}) {
+export function projectCardMarkup(change, { esc, open = new Set(), diffs = new Map(), busy = '', off = false, confirm = false, note = '', error = '', one = false, canCommit = false } = {}) {
   const id = esc(change.id), name = oneLine(change.name), hold = off || busy ? ' disabled' : '';
   const box = (state, label, inner) => `<section class="dgc-card pip-project-card" data-project-change="${id}" data-state="${state}" role="group" aria-label="${esc(label)}">${inner}</section>`;
   const wrong = error ? `<p class="dgc-card-error" role="alert">${esc(error)}</p>` : '';
@@ -169,9 +169,24 @@ export function projectCardMarkup(change, { esc, open = new Set(), diffs = new M
   }
   if (change.status !== 'pending') {
     const applied = (r.applied || []).length, held = r.held_back || [];
+    // One Pips (the Pips flow design): what a Pip put into your folder says so, with Review and Undo; a change it applied
+    // by itself at Do it all says that; and where the folder is a Git project, "not committed" with Commit these files.
+    const self = r.by === 'pip-level:full', git = record(change.git) ? change.git : null, plusAll = change.files.reduce((n, f) => n + (f.plus || 0), 0), minusAll = change.files.reduce((n, f) => n + (f.minus || 0), 0);
+    if (one && applied) {
+      const sub = [plural(applied, 'file'), plusAll || minusAll ? `+${plusAll.toLocaleString('en-US')} −${minusAll.toLocaleString('en-US')}` : '', 'in your folder', git ? (git.committed === true ? 'committed' : 'not committed') : ''].filter(Boolean).join(' · ');
+      const rows = change.files.some(f => open.has(`${change.id}|${f.path}`)) ? `<ul class="pip-project-files" aria-label="Files changed">${change.files.map(f => fileRow(change, f, { esc, open, diffs, off })).join('')}</ul>` : '';
+      return box(change.status, `Changed in ${name}`, head(`Changed in ${name}`, sub, esc)
+        + (self ? `<p class="dgc-card-note pip-project-self">Applied by itself at Do it all</p>` : '')
+        + reasons(held.length === 1 ? '1 file was held back' : `${held.length} files were held back`, held, esc) + rows + wrong
+        + `<div class="dgc-card-actions"><button type="button" class="dgc-card-btn" data-project-review="${id}"${hold}>Review</button>`
+        + `<button type="button" class="dgc-card-btn" data-project-undo="${id}"${hold} title="Put back what it changed, where you haven’t changed it since">${busy === 'undo' ? 'Undoing…' : 'Undo'}</button>`
+        + (canCommit && git && git.committed !== true ? `<span class="pip-project-gap"></span><button type="button" class="dgc-card-btn pip-project-commit" data-project-commit="${id}"${hold} title="Commit only these files to ${esc(name)}">${busy === 'commit' ? 'Committing…' : 'Commit these files'}</button>` : '')
+        + '</div>');
+    }
     const undo = applied ? `<div class="dgc-card-actions"><button type="button" class="dgc-card-btn" data-project-undo="${id}"${hold} title="Put back what Apply changed, where you haven’t changed it since">${busy === 'undo' ? 'Undoing…' : 'Undo'}</button></div>` : '';
     return box(change.status, applied ? `Applied to ${name}` : `Nothing was applied to ${name}`,
       head(applied ? `Applied ${plural(applied, 'file')}` : 'Nothing was applied', `${applied ? 'to' : 'Your files in'} ${name}${applied ? '' : ' are as they were'}`, esc)
+      + (self ? `<p class="dgc-card-note pip-project-self">Applied by itself at Do it all</p>` : '')
       + reasons(held.length === 1 ? '1 file was held back' : `${held.length} files were held back`, held, esc) + wrong + undo);
   }
   const files = change.files, total = files.length + change.more;
@@ -184,10 +199,13 @@ export function projectCardMarkup(change, { esc, open = new Set(), diffs = new M
       + `<button type="button" class="dgc-card-btn" data-project-keep="${id}"${hold}>Keep</button></div>`
     : `<p class="dgc-card-note pip-project-check">${esc(CHECK_FIRST)}</p>${note ? `<p class="dgc-card-note pip-project-moved" role="status">${esc(note)}</p>` : ''}<div class="dgc-card-actions">`
       + `<button type="button" class="dgc-card-btn primary" data-project-apply="${id}"${hold} title="Write these changes to ${esc(name)}">${busy === 'apply' ? 'Applying…' : 'Apply'}</button>`
-      + `<button type="button" class="dgc-card-btn" data-project-discard="${id}"${hold} title="Throw away what the Pip changed in its copy">Discard</button>`
-      + `<button type="button" class="dgc-card-btn pip-project-work" data-project-work="${id}"${hold} title="A new Work chat in ${esc(name)} with these changes as a patch file">${busy === 'work' ? 'Opening…' : 'Continue in Work'}</button></div>`;
-  return box('pending', `Changes to ${name}`,
-    head(`Changes to ${name}`, `${plural(total, 'file')}${plus || minus ? ` · +${plus.toLocaleString('en-US')} −${minus.toLocaleString('en-US')}` : ''}`, esc)
+      // (One Pips: Apply · Review · Discard. No way into a Work session from a Pip's card: his call, 14 Nov.)
+      + (one ? `<button type="button" class="dgc-card-btn" data-project-review="${id}"${hold} title="See what changed in each file">Review</button><span class="pip-project-gap"></span><button type="button" class="dgc-card-btn pip-project-quiet" data-project-discard="${id}"${hold} title="Throw away what the Pip changed in its copy">Discard</button></div>`
+        : `<button type="button" class="dgc-card-btn" data-project-discard="${id}"${hold} title="Throw away what the Pip changed in its copy">Discard</button>`
+      + `<button type="button" class="dgc-card-btn pip-project-work" data-project-work="${id}"${hold} title="A new Work chat in ${esc(name)} with these changes as a patch file">${busy === 'work' ? 'Opening…' : 'Continue in Work'}</button></div>`);
+  const tested = one ? [change.tests === 'passed' ? 'tests passed in its copy' : change.tests === 'failed' ? 'tests failed in its copy' : '', 'not in your folder yet'].filter(Boolean).map(w => ` · ${w}`).join('') : '';
+  return box('pending', one ? `Changes for ${name}` : `Changes to ${name}`,
+    head(one ? `Changes for ${name}` : `Changes to ${name}`, `${plural(total, 'file')}${plus || minus ? ` · +${plus.toLocaleString('en-US')} −${minus.toLocaleString('en-US')}` : ''}${tested}`, esc)
     + `<ul class="pip-project-files" aria-label="Files changed">${rows}</ul>${wrong}${actions}`);
 }
 

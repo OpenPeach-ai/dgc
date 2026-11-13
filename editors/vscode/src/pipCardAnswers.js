@@ -35,6 +35,12 @@ export function answerFor(item, pip, {setups, visits} = {}) {
    said: {yes: `Created ${s.name}.`, no: 'Rejected. No Pip was created.'}} : null;
  }
  if (!pip) return null;
+ // The Pips flow (14 Nov): a Pip that wants to fix what its check found is answered with Allow or Not now, the
+ // ordinary answers; a fix that is ready, with Apply (Review opens its change in the Pip's chat).
+ if (item.kind === 'fix_ask') return {kind: 'fix', token: item.id, yes: 'Allow', no: 'Not now', full: item.detail || item.title,
+  said: {yes: `Allowed. ${pip.name} fixes it in its own copy.`, no: `Not now. ${pip.name} leaves it as it is.`}};
+ if (item.kind === 'fix_ready') return {kind: 'apply', token: item.id, yes: 'Apply', no: '', full: item.detail || item.title,
+  said: {yes: `Applied. ${pip.name}’s fix is in your folder.`, no: ''}};
  if (item.kind === 'approval' && pip.version && item.detail && [...item.detail].length < 200) return {kind: 'change', token: item.id, yes: 'Apply', no: 'Not now', full: item.detail,
   said: {yes: `Applied. ${pip.name} is changed.`, no: `Not now. ${pip.name} stays as it was.`}};
  const v = item.kind === 'computer_action' ? visits?.get(item.card) : null;
@@ -58,6 +64,22 @@ export async function sendSetupAnswer(request, id, seen, yes) {
 export async function sendItemAnswer(request, {answer, item, pip, seen}, yes) {
  if (!answer || !item || !pip) throw changed();
  if (answer.kind === 'change') { await request(yes ? 'accept_pip_update' : 'reject_pip_update', {pip_id: pip.id, proposal_id: item.card, expected_version: pip.version}); return; }
+ // A fix is allowed, or its change applied, on what DGC lists for it now (its digest): one that moved on is refused.
+ if (answer.kind === 'fix') {
+  const now = ((await request('list_pip_fixes', {pip_id: pip.id})).fixes || []).find(f => f?.id === item.card);
+  if (!now || now.state !== 'ask' || typeof now.digest !== 'string') throw changed();
+  const done = (await request('decide_pip_fix', {pip_id: pip.id, fix_id: now.id, expected_digest: now.digest, allow: yes})).fix;
+  if (done?.id !== now.id || (done.state === 'ask') || (done.state === 'declined') === yes) throw Error('The saved answer differs from your choice. Open Pips to see it.');
+  return;
+ }
+ if (answer.kind === 'apply') {
+  if (!yes) throw changed();
+  const now = ((await request('list_pip_project_changes', {pip_id: pip.id})).changes || []).find(c => c?.id === item.card);
+  if (!now || now.status !== 'pending' || typeof now.digest !== 'string') throw changed();
+  const done = await request('apply_pip_project_change', {pip_id: pip.id, change_id: now.id, expected_digest: now.digest});
+  if (done?.id !== now.id || done.status === 'pending') throw Error('The saved answer differs from your choice. Open Pips to see it.');
+  return;
+ }
  if (answer.kind !== 'site') throw changed();
  const now = pipComputer((await request('get_pip_computer', {pip_id: pip.id})).computer, pip.id).actions.find(a => a.id === item.card);
  if (!seen || !now || now.status !== 'pending' || now.digest !== seen.digest || !visit(now)) throw changed();

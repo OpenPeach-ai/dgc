@@ -1,15 +1,14 @@
 // The Project Folder dropdown on a row that is already there (0.52, his calls on 12 Nov night), in real Chromium with
 // the real pages (test/support/home-scene.mjs, test/support/project-folder-pips-scene.mjs), at 700 and 300 px, dark and
-// light. Over the Work sessions it is on the Library row, at its right end (View all lists in place, with no dropdown of its own, since 13 Nov); on
-// the Pips view's Project tab, at the right end of the "Needs attention" heading line, and at the same place on a row
-// of the same height when nothing needs attention. One line always: when the row is too narrow for it the button drops
+// light. Over the Work sessions it is on the Library row, at its right end (View all lists in place, with no dropdown of its own, since 13 Nov).
+// (On the Pips view's Project tab it has a line of its own since 13 Nov: test/pips-folder-line-browser.test.mjs.)
+// One line always: when the row is too narrow for it the button drops
 // its "Project Folder" word (measured, never a breakpoint), then a long folder name ends in an ellipsis. No line names
 // one folder's path any more: the button's tooltip has it. And a long path is cut in the middle with its folder's own
 // name whole and no space before the name's slash. Read from the DOM, computed style, geometry and the painted pixels.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { homeContrast, openHome } from "./support/home-scene.mjs";
-import { GARDEN, HERE, LONG as PIPS_LONG, openPips, pipsContrast } from "./support/project-folder-pips-scene.mjs";
 import { FOLDERS, listOf } from "./support/folder-row-scene.mjs";
 
 let chromium;
@@ -118,77 +117,6 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
       assert.deepEqual(m, { pops: 0, fields: 1, picks: 1 }, "one search field and one Project Folder dropdown, above the list");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
-  });
-
-  test(`Pips, the Project tab: the dropdown is at the right end of the Needs attention line, and stays there when nothing needs attention (${theme}, ${width}px)`, async (t) => {
-    if (skipOrFail(t)) return;
-    const read = (x) => x.inPips((root) => {
-      const box = (e) => e.getBoundingClientRect(), panel = root.querySelector("#pips-tabpanel"), pick = root.querySelector("#pips-folder-pick"), toggle = root.querySelector(".attention-toggle:not(.attention-toggle-none)"), row = pick.closest(".attention-head, .pips-folder-row");
-      const mid = (e) => (box(e).top + box(e).bottom) / 2, value = pick.querySelector(".dgc-folder-v"), r = document.createRange(); r.selectNodeContents(value);
-      const count = toggle?.querySelector(".attention-count"), fold = toggle?.querySelector(".codicon"), words = toggle && document.createRange(); if (words) words.selectNodeContents(toggle.firstChild);
-      const content = box(panel).right - parseFloat(getComputedStyle(panel).paddingRight);
-      return { top: box(pick).top - box(panel).top, mid: mid(pick) - box(panel).top, rowHeight: row ? box(row).height : 0, rowTop: row ? box(row).top - box(panel).top : -1, rightEnd: Math.abs(box(pick).right - content), pickHeight: box(pick).height,
-        heading: toggle ? { text: toggle.textContent.replace(/\s+/g, " ").trim(), sameLine: Math.abs(mid(pick) - mid(toggle)), left: box(toggle).left - box(panel).left - parseFloat(getComputedStyle(panel).paddingLeft),
-          countAfterWords: box(count).left - words.getBoundingClientRect().right, foldAfterCount: box(fold).left - box(count).right, clear: box(pick).left - box(fold).right, wordsWhole: words.getBoundingClientRect().right <= box(count).left + 0.5,
-          viewAll: root.querySelector("#attention-view-all") ? box(pick).left - box(root.querySelector("#attention-view-all")).right : null } : null,
-        word: pick.querySelector(".dgc-folder-k").checkVisibility(), value: value.textContent, valueWhole: r.getBoundingClientRect().width <= box(value).width + 0.01, ellipsis: getComputedStyle(value).textOverflow,
-        label: pick.getAttribute("aria-label"), title: pick.title, once: [...root.querySelectorAll(".pips-folder-once, .pips-folder-bar")].filter((e) => e.checkVisibility()).length,
-        firstUnder: (() => { const next = root.querySelector("#pips-tabpanel .attention-carousel:not([hidden]), #pips-tabpanel .simple-home, #pips-tabpanel .pips-tab-empty"); return next ? box(next).top - box(pick).bottom : -99; })(),
-        sideways: root.querySelector(".pip-app-root").scrollWidth > root.querySelector(".pip-app-root").clientWidth + 1 };
-    });
-    // All projects: a Project Pip's card waits, so the heading is drawn.
-    let x = await openPips(browser, { theme, width });
-    let withHeading, alone;
-    try {
-      withHeading = await read(x);
-      assert.ok(withHeading.heading, "Needs attention is drawn");
-      assert.match(withHeading.heading.text, /^Needs attention 1$/);
-      assert.ok(withHeading.heading.sameLine <= 1, `centred on the heading's line: ${withHeading.heading.sameLine}`);
-      assert.ok(withHeading.rightEnd <= 0.5, `at the line's right end: ${withHeading.rightEnd}`);
-      assert.ok(Math.abs(withHeading.heading.left) <= 0.5 && withHeading.heading.countAfterWords >= 0 && withHeading.heading.countAfterWords <= 12 && withHeading.heading.foldAfterCount >= 0 && withHeading.heading.foldAfterCount <= 12,
-        `the heading, its count and its fold stay at the left, together: ${JSON.stringify(withHeading.heading)}`);
-      assert.ok(withHeading.heading.clear >= 6 && withHeading.heading.wordsWhole, `clear of the fold; the heading's words whole: ${JSON.stringify(withHeading.heading)}`);
-      assert.deepEqual([withHeading.once, withHeading.sideways], [0, false], "no row of its own, no path line");
-      assert.ok(withHeading.pickHeight <= 30);
-      assert.deepEqual([withHeading.value, withHeading.label, withHeading.title], ["All projects", "Project Folder: All projects", "Project Folder: All projects"]);
-      if (width === 700) assert.deepEqual([withHeading.word, withHeading.valueWhole], [true, true]);
-      else assert.equal(withHeading.word, false, "at 300 px the word goes: the heading keeps its room");
-      assert.deepEqual(low(await pipsContrast(x.page)), []);
-      // Its menu opens from there.
-      await x.inPips((root) => root.querySelector("#pips-folder-pick").click());
-      const menu = await x.inPips((root) => { const m = root.querySelector(".dgc-folder-menu")?.getBoundingClientRect(); return m && { fits: m.left >= 0 && m.right <= innerWidth + 0.5 && m.bottom <= innerHeight + 0.5 }; });
-      assert.deepEqual(menu, { fits: true });
-      assert.deepEqual(x.errors, []);
-    } finally { await x.close(); }
-    // This window's folder: nothing of it waits, so no heading; the dropdown is where it was, on a row as tall.
-    x = await openPips(browser, { theme, width, choice: HERE });
-    try {
-      alone = await read(x);
-      assert.equal(alone.heading, null, "nothing needs attention: no heading");
-      assert.ok(Math.abs(alone.top - withHeading.top) <= 0.5 && Math.abs(alone.rightEnd) <= 0.5, `the same place, top and right: ${alone.top} against ${withHeading.top}`);
-      assert.ok(Math.abs(alone.rowHeight - withHeading.rowHeight) <= 0.5 && Math.abs(alone.rowTop - withHeading.rowTop) <= 0.5, `a row of the same height at the same place: ${alone.rowHeight} against ${withHeading.rowHeight}`);
-      assert.deepEqual([alone.once, alone.sideways, alone.value, alone.valueWhole, alone.label, alone.title], [0, false, "shop", true, "Project Folder: shop", `Project Folder: shop\n${HERE}`], "its name on the button, its path in the tooltip, no path line");
-      assert.equal(alone.word, true, "alone on its row there is room for the word");
-      assert.ok(alone.firstUnder >= 0, "the list comes under that row");
-      assert.deepEqual(low(await pipsContrast(x.page)), []);
-      // A folder whose Pip waits: the heading comes, and the dropdown has not moved.
-      await x.send({ type: "pipsProjectFolder", folder: GARDEN });
-      await x.page.waitForFunction(() => { const root = document.getElementById("pips-host").shadowRoot; return root.querySelector(".attention-toggle:not(.attention-toggle-none)") && root.querySelector("#pips-folder-pick")?.getAttribute("aria-label") === "Project Folder: garden"; }, undefined, { timeout: 15000 });
-      await settle(x.page);
-      const garden = await read(x);
-      assert.ok(garden.heading && garden.heading.sameLine <= 1 && Math.abs(garden.top - alone.top) <= 0.5 && garden.rightEnd <= 0.5, `it never jumps between rows: ${JSON.stringify(garden)}`);
-      // A folder with a long path and nothing waiting: the name whole, no path line.
-      await x.send({ type: "pipsProjectFolder", folder: PIPS_LONG });
-      await x.page.waitForFunction(() => document.getElementById("pips-host").shadowRoot.querySelector("#pips-folder-pick")?.getAttribute("aria-label") === "Project Folder: checkout-service", undefined, { timeout: 15000 });
-      await settle(x.page);
-      const long = await read(x);
-      assert.deepEqual([long.once, long.valueWhole, long.title, long.sideways], [0, true, `Project Folder: checkout-service\n${PIPS_LONG}`, false]);
-      assert.ok(Math.abs(long.top - alone.top) <= 0.5 && long.rightEnd <= 0.5 && long.pickHeight <= 30, JSON.stringify(long));
-      assert.deepEqual(x.errors, []);
-    } finally { await x.close(); }
-    // The Personal tab has no dropdown.
-    x = await openPips(browser, { theme, width, tab: "personal" });
-    try { assert.equal(await x.inPips((root) => !!root.querySelector("#pips-folder-pick")), false, "Personal has no dropdown"); } finally { await x.close(); }
   });
 }
 

@@ -13,6 +13,7 @@ import { openChat as openChatTab, conversation } from "./support/chat-scene.mjs"
 import { openChat as openPip } from "./support/pip-chat-scene.mjs";
 import { openRunningTurn, openPips, openSettingsGeneral } from "./support/codex-look-scene.mjs";
 import { openSheet } from "./support/pip-cards-polish-scene.mjs";
+import { GST, openOnePips } from "./support/one-pips-scene.mjs";
 
 let chromium;
 try { ({ chromium } = await import("@playwright/test")); } catch { chromium = null; }
@@ -203,6 +204,43 @@ for (const theme of ["dark", "light"]) {
     for (const section of ["general", "models"]) {
       const s = await openSettingsGeneral(browser, { width: 900, theme, section });
       try { held(await walk(s.page || s.p, ROUND), `Settings, ${section}`); } finally { await (s.close ? s.close() : (s.page || s.p).close()); }
+    }
+    none();
+  });
+}
+// One Pips (0.52, Pips API 94 to 96): the one list with its search and filter line, the filter's menu, New Pip, a Pip's
+// chat at each step of the flow (the findings card, the Allow card and its menu, the fix at work, the change card,
+// what waits on you), its settings page, its reports table and the Do it all warning.
+for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 700]) {
+  test(`One Pips: the list, New Pip, a Pip's chat with the flow's cards, its settings and its reports (${theme}, ${width}px)`, async (t) => {
+    if (skipOrFail(t)) return;
+    const inMenu = (x, tab) => x.inPips((root, v) => [...root.querySelectorAll(".pip-topbar .pip-menu [data-tab]")].find((b) => b.dataset.tab === v).click(), tab);
+    let x = await openOnePips(browser, { width, theme, scene: { fix: "ask" } });
+    try {
+      held(await walk(x.page, ROUND), "One Pips: the list");
+      await x.click("#pips-filter"); await x.waitIn(".dgc-folder-menu"); await settle(x.page, 450);
+      held(await walk(x.page, ROUND), "One Pips: the filter's menu");
+      await x.page.keyboard.press("Escape"); await settle(x.page, 300);
+      await x.click("#simple-new"); await x.waitIn("#review-root .dialog"); await settle(x.page);
+      held(await walk(x.page, ROUND), "One Pips: New Pip");
+      await x.click("#review-cancel"); await settle(x.page);
+      await x.openPip(GST); await x.waitIn(".pip-found-ask");
+      await x.click("#pip-waiting-toggle"); await x.waitIn(".pip-found-waiting"); await x.click("[data-flow-menu]"); await x.waitIn(".pip-found-menu"); await settle(x.page);
+      held(await walk(x.page, ROUND), "One Pips: a chat with the findings card, the Allow card and what waits on you");
+      await x.click("#chat-level"); await x.waitIn(".composer-level-menu");
+      await x.inPips((root) => [...root.querySelectorAll(".composer-level-menu [data-pip-level-pick]")][2].click()); await x.waitIn("#review-root .dialog"); await settle(x.page);
+      held(await walk(x.page, ROUND), "One Pips: the Do it all warning");
+      await x.click("#review-cancel"); await settle(x.page);
+      await inMenu(x, "job"); await x.waitIn(".pip-folder-parts"); await settle(x.page);
+      held(await walk(x.page, ROUND), "One Pips: a folder Pip's settings page");
+      await x.click('.pip-folder-parts [data-tab="runs"]'); await x.waitIn("table.pip-reports"); await settle(x.page);
+      held(await walk(x.page, ROUND), "One Pips: the reports table");
+      assert.deepEqual(x.errors, []);
+    } finally { await x.close(); }
+    for (const fix of ["running", "ready", "applied"]) {
+      x = await openOnePips(browser, { width, theme, scene: { fix, level: fix === "applied" ? "full" : "ask" } });
+      try { await x.openPip(GST); await x.waitIn(fix === "running" ? ".pip-found-fixing" : "[data-project-change]"); await settle(x.page);
+        held(await walk(x.page, ROUND), `One Pips: a chat with the fix ${fix}`); assert.deepEqual(x.errors, []); } finally { await x.close(); }
     }
     none();
   });

@@ -34,7 +34,7 @@ const card=(n,pipRow,title)=>({id:`email:maildraft_${hex(String(n))}`,kind:'emai
 async function flush(){for(let i=0;i<15;i++)await Promise.resolve();}
 
 /** `choice`: what the host says is chosen ("" All projects). `api`: the DGC's Pips API. `refuse`: add_project_folder's refusal. */
-function setup({choice='',api=93,saved,refuse='',attention=[],listed=folders()}={}){
+function setup({choice='',api=93,saved,refuse='',attention=[],listed=folders(),stray=false}={}){
  const dom=new JSDOM('<!doctype html><html><body><div id="pips-host"></div></body></html>',{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);
  const sent=[],answered=new Set(),listeners=new Set(),states=[];
  w.HTMLCanvasElement.prototype.getContext=()=>null;w.TextEncoder=TextEncoder;w.CSS={escape:s=>s};
@@ -58,7 +58,7 @@ function setup({choice='',api=93,saved,refuse='',attention=[],listed=folders()}=
   list_pip_models:()=>({default_model:'m',models:[],connection:'configured'}),
   list_pip_messages:()=>({pip_id:r.pip_id,workspace_id:every().find(p=>p.id===r.pip_id)?.workspace_id||PW,messages:[],next_before_id:null,active_run:null,history_context_omitted_count:0}),
   // Project Pips' cards come only for the projects asked for.
-  list_pip_attention:()=>{const items=attention.filter(i=>i.workspace_id===PW||r.projects==='all'||r.projects===i.workspace_id);
+  list_pip_attention:()=>{const items=attention.filter(i=>i.workspace_id===PW||r.projects==='all'||r.projects===i.workspace_id||stray&&r.projects===undefined&&i.workspace_id===W);   // (stray: a DGC that answers for this window's project when none is named)
    return {as_of:new Date().toISOString(),total:items.length,counts:{email:items.length},by_pip:Object.fromEntries(items.map(i=>[i.pip_id,1])),items,truncated:false,reviews:[],projects:{},in_projects:0};},
   get_pips_limit:()=>({max_pips:100,default:100,maximum:100000,count:1}),list_pip_unread:()=>({workspace_id:r.workspace_id,pips:[],total:0}),
   list_pip_approvals:()=>({approvals:[],next_cursor:null}),list_pip_checkpoints:()=>({checkpoints:[],next_cursor:null}),get_pip_digest:()=>undefined}[r.type]?.());
@@ -71,7 +71,7 @@ function setup({choice='',api=93,saved,refuse='',attention=[],listed=folders()}=
  const posted=type=>sent.filter(m=>m.type===type).map(({documentId,...m})=>m);
  const rows=()=>[...shadow.querySelectorAll('[data-project-pip]')].map(r=>[r.dataset.projectPip,r.querySelector('.pip-row-name')?.textContent,(r.querySelector('.dgc-path-head')?.textContent||'')+(r.querySelector('.dgc-path-tail')?.textContent||''),r.querySelector('.dgc-path')?.title]);
  const menu=()=>[...shadow.querySelectorAll('.dgc-folder-menu [data-folder], .dgc-folder-menu [data-folder-add]')].map(r=>[r.dataset.folder??'add',r.querySelector('.dgc-menu-label').textContent,r.getAttribute('aria-checked'),r.disabled]);
- return {w,d:shadow,$,app,sent,message,drain,text,states,requests,click,tab,posted,rows,menu,made,chosen:()=>shadow.querySelector('[role="tab"][aria-selected="true"]')?.id||null};
+ return {w,d:shadow,$,app,sent,message,drain,text,states,requests,click,tab,posted,rows,menu,made,spaces,pips,chosen:()=>shadow.querySelector('[role="tab"][aria-selected="true"]')?.id||null};
 }
 
 test('the Project tab has the Project Folder dropdown; All projects, the default, lists every project\'s Pips, each with its folder',async()=>{
@@ -103,11 +103,14 @@ test('a folder chosen shows that folder\'s Pips, its path in the dropdown\'s too
  assert.ok(x.$(`#pips-tabpanel [data-job="${OTHER}"]`),'the chosen folder\'s Pips, though it is not this window\'s');
  assert.equal(x.$(`[data-job="${AUDIT}"]`),null,'and no other folder\'s');
  assert.equal(x.requests('list_pips').some(r=>r.workspace_id===X),true,'read from that folder\'s workspace');
- // (Asked 12 Nov night: the dropdown is on the Needs attention line, or on a line as tall when nothing waits, and no line names the path.)
+ // (Asked 12 Nov night: no line names the path.)
  assert.equal(x.$('.pips-folder-once, .pips-folder-bar'),null,'no line of its own for the path');
  assert.equal(x.$('#pips-folder-pick').title,`Project Folder: billing-app\n${BILLING}`,'its path, in the tooltip');
  assert.equal(x.$('#pips-folder-pick').getAttribute('aria-label'),'Project Folder: billing-app');
- assert.ok(x.$('#pips-folder-pick').closest('dgc-folder-fit')?.closest('.attention-head'),'on the heading\'s line');
+ // (Asked 13 Nov: a line of its own, the first thing in the tab's panel, and no part of the Needs attention heading.)
+ assert.equal(x.$('#pips-folder-pick').closest('dgc-folder-fit')?.parentElement.className,'pips-folder-line');
+ assert.equal(x.$('#pips-tabpanel').firstElementChild,x.$('.pips-folder-line'),'the first thing under the tabs');
+ assert.equal(x.$('#pips-folder-pick').closest('.attention, .attention-head'),null,'not on the heading\'s line');
  // The host says another choice (made here, or over the Work sessions): the tab follows it.
  x.message({type:'pipsProjectFolder',folder:NOTES});await x.drain();
  assert.equal(x.chosen(),'pips-tab-project','the tab stays');
@@ -159,6 +162,42 @@ test('Needs attention asks for the Project Pips of the choice, and a Project Pip
  assert.match(x.text(),/Send the weekly summary\?/,'Personal Pips\' cards always show');
  assert.doesNotMatch(x.text(),/Core · [a-z-]+ · Email/,'and name no project');
  assert.ok(cards);
+});
+
+test('the Project tab\'s cards follow the dropdown: a folder with no Pips workspace has none, whatever the list holds; a Pip made there later brings its cards in',async()=>{
+ const mine=card(1,core,'Send the weekly summary?'),here=card(2,audit,'Email the audit to finance?'),theirs=card(3,other,'Email the billing report?');
+ const attention=[mine,here,theirs],listed=folders();
+ // A DGC that answers a request naming no project with this window's project's cards.
+ const x=setup({attention,listed,stray:true});await x.drain();await x.tab('project');
+ const count=()=>x.$('.attention-count')?.textContent||'',tabCount=()=>x.$('#pips-tab-project .pip-tab-count')?.textContent||'';
+ const titles=()=>{const seen=[];for(const dot of [...x.d.querySelectorAll('.attention-dot')]){x.$('#'+dot.id).click();seen.push(x.$('.attention-list strong').textContent);}return (seen.length?seen:[...x.d.querySelectorAll('.attention-list strong')].map(e=>e.textContent)).sort();};
+ assert.deepEqual([count(),tabCount(),titles()],['2','2',['Email the audit to finance?','Email the billing report?']],'All projects: every project\'s cards');
+ // One folder, before DGC has answered for it: the list still holds every project's cards, and only that folder's show.
+ x.message({type:'pipsProjectFolder',folder:BILLING});
+ assert.deepEqual([tabCount(),x.requests('list_pip_attention').at(-1).projects],['1','all'],'at once, from the list it has: the tab\'s number is that folder\'s');
+ await x.drain();
+ assert.deepEqual([count(),tabCount(),titles()],['1','1',['Email the billing report?']],'one folder: its own');
+ // A folder with no Pips workspace. This DGC answers with this window's project's card: none of it is that folder's.
+ x.message({type:'pipsProjectFolder',folder:NOTES});
+ assert.equal(tabCount(),'','at once: no number');
+ await x.drain();
+ assert.equal('projects' in x.requests('list_pip_attention').at(-1),false);
+ assert.deepEqual([x.$('section.attention'),count(),tabCount(),titles()],[null,'','',[]],'no project cards, the count 0');
+ assert.match(x.$('#pips-tabpanel').textContent,/No Project Pips in notes yet\./);
+ assert.equal(x.$('#pips-tabpanel').firstElementChild,x.$('.pips-folder-line'),'the dropdown keeps its line');
+ await x.tab('personal');
+ assert.deepEqual([count(),titles()],['1',['Send the weekly summary?']],'Personal is as it was');
+ await x.tab('project');
+ assert.deepEqual([x.$('section.attention'),tabCount()],[null,'']);
+ // A Pip is made there (in another window, by the CLI): the folder is a project now, and its Pip waits on something.
+ const fresh=pip(MADE,N,'Notes tidier','quill');
+ x.spaces.push({id:N,name:'notes',kind:'git'});x.pips[N]=[fresh];listed.find(r=>r.folder===NOTES).workspace_id=N;listed.find(r=>r.folder===NOTES).pips=1;
+ attention.push(card(4,fresh,'Send the tidy-up plan?'));
+ x.message({type:'pipsVisibility',visible:false});x.message({type:'pipsVisibility',visible:true});await x.drain();
+ assert.equal(x.requests('list_pip_attention').at(-1).projects,N,'its cards are asked for');
+ assert.deepEqual([count(),tabCount(),titles()],['1','1',['Send the tidy-up plan?']],'its card comes in');
+ assert.ok(x.$(`#pips-tabpanel [data-job="${MADE}"]`),'and its Pip is listed');
+ assert.equal(x.$('#pips-folder-pick').textContent.replace(/\s+/g,' ').trim(),'Project Folder notes');
 });
 
 test('Create a Project Pip has the folder field: this window\'s folder first, no All projects, a gone folder can\'t be chosen, Add a folder… last',async()=>{

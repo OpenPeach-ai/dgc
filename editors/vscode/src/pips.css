@@ -747,10 +747,7 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .allow-fields{display:grid;gap:8px;font-size:12px}.allow-fields label{margin:0;gap:3px;color:var(--muted)}.allow-fields input,.allow-fields textarea{font-size:12px;color:var(--vscode-input-foreground)}.allow-fields textarea{min-height:0;resize:vertical;line-height:1.5}
 .allow-card[data-editing]{border-color:var(--vscode-focusBorder)}.allow-error{margin:0;font-size:12px;color:var(--vscode-errorForeground)}
 /* Needs attention (#8): every card your Pips wait on you for, above Your Pips on the home. */
-.attention{margin:0 0 18px}.attention-toggle{display:flex;align-items:center;gap:8px;width:100%;padding:5px 0;margin:0 0 8px;background:transparent;text-align:left;font-size:13px;font-weight:600}.attention-toggle:hover{background:transparent;color:var(--accent-text)}.attention-toggle .codicon{margin-left:auto;font-size:12px;color:var(--muted)}.attention-count{font-size:11px;font-weight:600;min-width:18px;padding:1px 6px;border-radius:9px;background:var(--pip-accent);color:#fff;text-align:center}
-/* The fold's mark (src/pipAttention.js): drawn here, not by the icon font, so it shows in the side bar's shadow root as
-   it does in a tab. It points up while the section is open and turns down while it is folded. */
-.attention-fold{display:inline-flex;flex:none}.attention-fold>svg{display:block;width:12px;height:12px}.attention-toggle[aria-expanded=false] .attention-fold>svg{transform:rotate(180deg)}
+.attention{margin:0 0 18px}.attention-title{display:flex;align-items:center;gap:8px;flex:1 1 0;min-width:0;min-height:18px;padding:5px 0;margin:0 0 8px;font-size:13px;font-weight:600;line-height:18px;letter-spacing:0;color:inherit}.attention-count{font-size:11px;font-weight:600;min-width:18px;padding:1px 6px;border-radius:9px;background:var(--pip-accent);color:#fff;text-align:center}
 .attention-list{list-style:none;margin:0;padding:0;display:grid;gap:2px}.attention-row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:transparent;border:1px solid transparent;border-radius:10px;padding:7px 8px;color:inherit}
 .attention-row:hover{background:var(--vscode-list-hoverBackground)}.attention-row .avatar,.attention-row .pip-avatar{width:34px;height:34px;flex:none}.attention-copy{display:grid;gap:1px;min-width:0}.attention-copy strong{font-size:12px;font-weight:600;overflow-wrap:anywhere}
 .attention-item{display:flex;align-items:center;gap:8px}.attention-item .attention-row{min-width:0;flex:1}.attention-dismiss{background:transparent;color:var(--accent-text);flex:none;font-size:12px;padding:2px 6px}.attention-dismiss:hover{background:color-mix(in srgb,var(--accent-fill) 14%,transparent)}
@@ -803,14 +800,14 @@ button.attention-dot:hover{background:transparent;border:0}.attention-dot:hover 
 @keyframes attention-from-next{from{opacity:0;transform:translateX(28px)}to{opacity:1;transform:none}}
 @keyframes attention-from-prev{from{opacity:0;transform:translateX(-28px)}to{opacity:1;transform:none}}
 @media(forced-colors:active){.attention-dot i{forced-color-adjust:none;background:GrayText}.attention-dot[aria-current] i,.attention-dot[aria-current]:hover i{background:Highlight}button.attention-nav{border-color:ButtonText}.attention-carousel .attention-row{border-color:CanvasText}}
-/* "View all" (asked 12 Nov). On the heading row: quiet words at its right end, in line with the card's edge. The
-   heading's own button (the fold) takes the rest of the row and ends before them, so neither lies on the other. Grey,
-   not the accent: the count is the purple there. */
-.attention-head{display:flex;align-items:center;gap:6px}
-.attention-head>.attention-toggle{flex:1 1 0;width:auto;min-width:0}.attention-head .attention-count{flex:none}
-button.attention-all-link{flex:none;margin:0 0 8px;min-height:24px;padding:2px 0 2px 8px;border:0;border-radius:var(--btn-r,6px);background:transparent;box-shadow:none;color:var(--muted);font-size:12px;font-weight:400;line-height:18px;white-space:nowrap}
-button.attention-all-link:hover{background:transparent;color:var(--vscode-foreground);text-decoration:underline;text-underline-offset:2px}
-button.attention-all-link:focus-visible{outline:var(--btn-ring,2px solid var(--vscode-focusBorder));outline-offset:2px}
+/* The heading line (asked 13 Nov): "Needs attention" and its count at the left, as words; at the right end, in line with
+   the card's edge, the quiet words that act on it: "View all" (asked 12 Nov) when two or more wait, then the fold's own
+   word, "Hide" or "Show". No mark beside the heading: with one it read as a dropdown. Grey, not the accent: the count
+   is the purple there. Under the pointer and under the keyboard both words answer as one kind of button. */
+.attention-head{display:flex;align-items:center;gap:6px}.attention-head .attention-count{flex:none}
+button.attention-all-link,button.attention-toggle{flex:none;width:auto;margin:0 0 8px;min-height:24px;padding:2px 0 2px 8px;border:0;border-radius:var(--btn-r,6px);background:transparent;box-shadow:none;color:var(--muted);font-size:12px;font-weight:400;line-height:18px;white-space:nowrap}
+button.attention-all-link:hover,button.attention-toggle:hover{background:transparent;color:var(--vscode-foreground);text-decoration:underline;text-underline-offset:2px}
+button.attention-all-link:focus-visible,button.attention-toggle:focus-visible{outline:var(--btn-ring,2px solid var(--vscode-focusBorder));outline-offset:2px}
 /* Its page: every card one under another, each the card the one-card view shows. The page scrolls as the view does. */
 /* Its count beside the title is plain grey figures, kept at any width (a narrow bar drops a pill's small word). */
 .pip-pill>span.attention-all-count{flex:none;color:var(--muted);font-weight:400;font-variant-numeric:tabular-nums}
@@ -1566,19 +1563,14 @@ button.pip-owner-choice:hover:not(:disabled){background:var(--pip-wash)}
    last run is in History, in the menu. (Last in the file: the chat's own top bar rules above are as specific.) */
 @container(max-width:340px){.simple-pips .pip-topbar:has(.pip-switch){gap:4px;padding-right:8px}.simple-pips .pip-topbar:has(.pip-switch) .topbar-actions{gap:2px}.simple-pips .pip-topbar:has(.pip-switch) .pip-pill{gap:6px;padding-right:2px}.simple-pips .pip-topbar:has(.pip-switch) .pip-pill small.pip-status{display:none}}
 
-/* The Project Folder dropdown on the Project tab (media/shared/folderpick.css) is at the right end of the Needs attention
-   heading's line (asked 12 Nov night), after View all: the heading, its count and its fold keep to the left, as wide as
-   their words, and the dropdown takes what is left (its element drops the "Project Folder" word, then cuts a long name,
-   and the line never wraps). With nothing waiting the same line is drawn with an unseen heading in it, so it is as tall
-   and the dropdown is at the same place. One folder's path is in the button's tooltip. On All projects each Pip says its
-   folder under its name (.dgc-path: cut in the middle). In Create a Project Pip the same button is the form's folder
-   field, its path under it. */
-.attention-head.attention-head-end>.attention-toggle{flex:none;width:auto}
-.attention-head.attention-head-end>.attention-toggle .codicon{margin-left:0}
-.attention-head-gap{flex:1 1 0;min-width:0}
-.attention-head.attention-head-end>dgc-folder-fit{margin:0 0 8px}
-.attention-toggle.attention-toggle-none{visibility:hidden;width:0;min-width:0;overflow:hidden}
-.attention.attention-none{margin-bottom:10px}
+/* The Project Folder dropdown on the Project tab (media/shared/folderpick.css) has a line of its own (asked 13 Nov), at
+   the left, straight under the Personal | Project tabs and above Needs attention, whether or not anything waits: the
+   tab's one control, which the cards, their count and the list of Pips all follow. The button is as wide as its words
+   and never wider than the line (its element drops the "Project Folder" word, then cuts a long name; the line never
+   wraps). One folder's path is in the button's tooltip. On All projects each Pip says its folder under its name
+   (.dgc-path: cut in the middle). In Create a Project Pip the same button is the form's folder field, its path under it. */
+.pips-folder-line{display:flex;justify-content:flex-start;align-items:center;min-width:0;margin:0 0 12px}
+.pips-folder-line>dgc-folder-fit{justify-content:flex-start;margin-left:0}
 .new-pip-folder-path { display: flex; min-width: 0; max-width: 100%; margin: 0; color: var(--dgc-quiet, var(--text-2)); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
 .pips-folder-page .pips-tab-empty { padding-inline: 0; }
 .pip-row .pip-row-folder { display: flex; min-width: 0; max-width: 100%; }
@@ -1591,3 +1583,136 @@ button.pip-owner-choice:hover:not(:disabled){background:var(--pip-wash)}
 
 /* (In the side bar the Pips view stands on the side bar's ground, above; its prompt box and its bubbles keep the grounds they had, a step off the editor's own colour, so the tray's shell is still a step off the box: as in a Work session.) */
 :host{--bubble:color-mix(in srgb,var(--vscode-foreground) 9%,var(--term));--box:color-mix(in srgb,var(--vscode-foreground) 4%,var(--term))}
+
+/* ---- One Pips (0.52, 13 Nov; Pips API 94; src/pipsOne.js) ----
+   One list for every Pip. From the top: the search (always there), the line that chooses which Pips show (All Pips ·
+   Personal · each folder; the Project Folder dropdown's own button, at the left, as wide as its words), Needs
+   attention, then the list. Every control is in the button family's shape (--btn-r, --btn-h): never a pill. Each
+   row says where its Pip works, first, under its name; a long folder is cut so the status after it still shows. */
+.pips-one .pips-one-search{margin:0 0 8px}
+.pips-one-filter{display:flex;justify-content:flex-start;align-items:center;min-width:0;margin:0 0 12px}
+.pips-one-filter>.dgc-folder{flex:0 1 auto;min-width:0;max-width:100%}
+.pips-filter .dgc-folder-k{display:none}
+.pips-one-list{container-type:inline-size}
+.pip-row-place{display:inline-block;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+@container (max-width:420px){.pip-row-place-dir{display:none}}
+.pip-row-place .pip-row-folder-note::after{content:"·";margin:0 0 0 5px}
+.pips-one-none{margin:6px 0 0}
+.new-pip-folder-one .new-pip-folder-none{margin:0;font-size:var(--t-xs)}
+
+/* ---- What a Pip found, and its fix, as cards in its chat (the Pips flow design, 14 Nov; src/pipFlow.js) ----
+   The shared card's box (media/shared/card.css); what is its own: a title line with a quiet count at its right, a
+   list with a small dot a row (amber: new or yours; grey: still there; green: fixed), a file as a link in the code
+   face, and a foot of links with the one button at its right. Purple is the links only. */
+.pip-found-card{display:flex;flex-direction:column;gap:0;padding:0;overflow:hidden}
+.pip-found-head{display:flex;align-items:baseline;gap:8px;min-width:0;padding:10px 12px;border-bottom:1px solid var(--hair)}
+.pip-found-head>.dgc-card-title{flex:1 1 auto;min-width:0}
+.pip-found-fixing .pip-found-head{align-items:center}
+.pip-found-meta{flex:0 1 auto;min-width:0;color:var(--text-2);font-size:var(--t-sm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.pip-found-list,.pip-found-steps{display:grid;gap:6px;margin:0;padding:10px 12px 4px;list-style:none}
+.pip-found-finding{display:flex;align-items:baseline;gap:8px;min-width:0}
+.pip-found-title{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.pip-found-dot{flex:none;width:6px;height:6px;border-radius:50%;background:var(--text-2);transform:translateY(-1px)}
+.pip-found-dot[data-dot="new"],.pip-found-dot[data-dot="yours"]{background:var(--warn)}
+.pip-found-dot[data-dot="fixed"]{background:var(--good)}
+.pip-found-dot[data-dot="quiet"]{opacity:.5}
+.pip-found-file{flex:0 1 auto;min-width:0;max-width:60%;height:auto;padding:0 2px;border:0;border-radius:var(--btn-r,6px);background:transparent;color:var(--link);font:var(--w-reg) var(--t-xs)/1.5 var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.pip-found-file:hover:not(:disabled){text-decoration:underline}
+.pip-found-file:focus-visible{outline:var(--btn-ring);outline-offset:1px}
+.pip-found-verdict{flex:none;color:var(--text-2);font-size:var(--t-sm)}
+.pip-found-more{margin:0;padding:2px 12px 0 26px;color:var(--text-2);font-size:var(--t-sm)}
+.pip-found-foot,.pip-found-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0;padding:8px 12px 10px}
+.pip-found-actions{border-top:1px solid var(--hair);padding-top:10px}
+.pip-found-gap{flex:1 1 0;min-width:0}
+.pip-found-card .dgc-btn{width:auto;min-width:76px;max-width:100%}
+.pip-found-card .dgc-btn.text{min-width:0;color:var(--link)}
+.pip-found-card .dgc-btn.small{min-width:56px}
+.pip-found-more-btn.dgc-btn{min-width:0;width:var(--btn-h);padding:0;border-color:transparent}
+.pip-found-words{display:grid;gap:1px;min-width:0;padding:10px 12px}
+.pip-found-words.has-dot{grid-template-columns:auto 1fr;column-gap:8px;align-items:baseline}
+.pip-found-words.has-dot>.dgc-card-sub{grid-column:2}
+.pip-found-menu{margin:0 12px 10px;align-self:flex-end;max-width:calc(100% - 24px)}
+.pip-found-menu .dgc-menu-row{width:100%;text-align:left}
+.pip-found-step{display:flex;align-items:baseline;gap:8px;min-width:0;color:var(--text-2)}
+.pip-found-step[data-step="doing"]{color:var(--text)}
+.pip-found-step>span:last-child{min-width:0;overflow-wrap:anywhere}
+.pip-found-step-mark{flex:none;width:12px;text-align:center;color:var(--good)}
+.pip-found-spin{flex:none;display:inline-block;width:11px;height:11px;border:1.5px solid color-mix(in srgb,var(--text-2) 40%,transparent);border-top-color:var(--accent-text,var(--link));border-radius:50%;animation:pip-found-turn .9s linear infinite;transform:translateY(1px)}
+@keyframes pip-found-turn{to{transform:translateY(1px) rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.pip-found-spin{animation:none}}
+body.motion-paused .pip-found-spin,.motion-paused .pip-found-spin{animation-play-state:paused}
+.pip-found-line{max-width:640px;margin:6px 0;color:var(--text-2);font-size:var(--t-sm);line-height:1.45}
+.pip-found-line .dgc-btn.text{width:auto;height:auto;padding:0;line-height:inherit;color:var(--link);vertical-align:baseline}
+.pip-found-says{margin-top:8px}
+/* What only you can do, kept at the top of the chat: one line, and its cards under it when shown. */
+.pip-found-pinned{flex:none;margin:8px 12px 0;min-width:0}
+.pip-found-waiting-line{display:flex;align-items:center;gap:8px;min-width:0;min-height:var(--btn-h,28px);padding:2px 10px;border:1px solid var(--hair);border-radius:var(--btn-r,6px);color:var(--text);font-size:var(--t-sm)}
+.pip-found-waiting-words{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pip-found-waiting-line .dgc-btn.text{flex:none;width:auto;color:var(--link)}
+.pip-found-pinned-list{display:grid;gap:0;max-height:40vh;overflow:auto}
+.pip-found-pinned-list>.dgc-card{margin:8px 0 0}
+.pip-where{color:var(--muted);font-weight:400}
+/* The change card in One Pips: Apply and Review at the left, Discard (or Commit these files) quiet at the right. */
+.pip-project-gap{flex:1 1 0;min-width:0}
+.dgc-card .dgc-card-actions>button.pip-project-quiet,.dgc-card .dgc-card-actions>button.pip-project-commit{border-color:transparent;background:transparent;color:var(--link);font-weight:var(--w-reg)}
+.pip-project-self{color:var(--text-2)}
+
+/* ---- The reports page as a table (his words, 13 Nov) ----
+   When · What · Files · Model · Time and tokens · Findings; When sorts. Where the page is narrow a table can't fit:
+   each run stacks into a row of its own, what and when on the first line, files and model under it. */
+.pip-reports-section{container-type:inline-size}
+.pip-reports-wrap{min-width:0;border:1px solid var(--pip-edge,var(--hair));border-radius:var(--r-card,8px);overflow:hidden}
+.pip-reports{width:100%;border-collapse:collapse;table-layout:auto;font-size:12px}
+.pip-reports th,.pip-reports td{padding:7px 10px;text-align:left;vertical-align:baseline;border-bottom:1px solid var(--pip-edge,var(--hair))}
+.pip-reports tbody tr:last-child td{border-bottom:0}
+.pip-reports th{color:var(--muted);font-weight:500;white-space:nowrap}
+.pip-reports-sort{display:inline-flex;align-items:center;gap:4px;height:var(--btn-h-sm,22px);padding:0 4px;margin-left:-4px;border:0;border-radius:var(--btn-r,6px);background:transparent;color:inherit;font:inherit;cursor:pointer}
+.pip-reports-sort:hover{background:var(--pip-wash)}
+.pip-report-when,.pip-report-cost,.pip-report-found{white-space:nowrap;color:var(--muted);font-variant-numeric:tabular-nums}
+.pip-report-found{color:var(--vscode-foreground)}
+.pip-report-open{display:inline;height:auto;padding:0 2px;margin-left:-2px;border:0;border-radius:var(--btn-r,6px);background:transparent;color:var(--vscode-foreground);font:inherit;font-weight:500;text-align:left;cursor:pointer}
+.pip-report-open:hover{text-decoration:underline}
+.pip-report-status{margin-left:6px;color:var(--muted)}
+.pip-report-files{min-width:0}
+.pip-report-files .pip-found-file{max-width:100%;margin-right:6px}
+.pip-report-more{color:var(--muted)}
+.pip-report-model{color:var(--muted);overflow-wrap:anywhere}
+.pip-report-row[aria-current="true"]{background:var(--pip-wash)}
+.pip-report-what,.pip-report-model{white-space:nowrap}
+.pip-report-files .pip-found-file{display:inline-block;vertical-align:baseline}
+@container (max-width:600px){
+ .pip-reports thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+ .pip-reports,.pip-reports tbody{display:block}
+ .pip-report-row{display:grid;grid-template-columns:1fr auto;column-gap:10px;row-gap:2px;padding:8px 10px;border-bottom:1px solid var(--pip-edge,var(--hair))}
+ .pip-reports tbody tr:last-child{border-bottom:0}
+ .pip-reports td{display:block;padding:0;border:0;min-width:0}
+ .pip-report-what{grid-column:1;grid-row:1}
+ .pip-report-when{grid-column:2;grid-row:1;text-align:right}
+ .pip-report-files{grid-column:1;grid-row:2}
+ .pip-report-found{grid-column:2;grid-row:2;text-align:right}
+ .pip-report-found:not(:empty)::before{content:"Findings ";color:var(--muted)}
+ .pip-report-model{grid-column:1;grid-row:3}
+ .pip-report-cost{grid-column:2;grid-row:3;text-align:right}
+ .pip-reports td:empty{display:none}
+}
+/* (The cards' titles are the heavier weight of the design's pictures; the Pip's own words about a check are
+   paragraphs of one bubble; in a narrow card a finding's file goes under its title, both whole.) */
+.pip-found-card .dgc-card-title{font-weight:var(--w-bold,600)}
+.run-post-said+.run-post-said{margin-top:8px}
+.run-post-said>:first-child{margin-top:0}.run-post-said>:last-child{margin-bottom:0}
+.pip-found-says{margin-bottom:0}
+.pip-found-says+.pip-found-card{margin-top:8px}
+.pip-found-pinned{margin-bottom:6px}
+@container (max-width:380px){
+ .pip-found-finding{flex-wrap:wrap;row-gap:0}
+ .pip-found-title{flex:1 1 calc(100% - 14px);white-space:normal;overflow:visible;overflow-wrap:anywhere}
+ .pip-found-finding>.pip-found-file,.pip-found-finding>.pip-found-verdict{margin-left:14px;max-width:calc(100% - 14px)}
+ .pip-found-head{flex-wrap:wrap}
+}
+.dgc-card .dgc-card-actions:has(.pip-project-gap){flex-wrap:wrap}
+.dgc-card .dgc-card-actions>button.pip-project-commit,.dgc-card .dgc-card-actions>button.pip-project-quiet{flex:none;width:auto;max-width:100%}
+.pip-reports-wrap{overflow-x:auto}
+.pip-reports th,.pip-reports td{padding:7px 8px}
+.pip-reports button.pip-report-open,.pip-reports button.pip-found-file,.pip-reports button.pip-reports-sort{width:auto;min-width:0;min-height:0;white-space:nowrap}
+.pip-reports button.pip-found-file{display:inline-block;margin:0 6px 0 0;line-height:1.5}
+.pip-reports th,.pip-reports td.pip-report-cost{white-space:normal}

@@ -95,7 +95,8 @@ export function pageTabsMarkup(current) {
 export function infoMarkup({ esc, goal, routines, notify, busy = false, canShare = true, pipName }) {
   const off = busy ? ' disabled' : '';
   return `<section class="pip-page-group" aria-label="Instructions"><button type="button" class="pip-page-row" data-pip-page="instructions"${off}><span class="row-words"><strong>Instructions</strong><small class="row-preview">${esc(goal || `Tell ${pipName} what it is for.`)}</small></span>${chevron}</button></section>`
-    + `<section class="pip-page-group" aria-label="Routines"><h3 class="pip-page-label">Routines${infoTip('pipRoutinesSays', 'Routines', `A routine is something ${esc(pipName)} does on its own: every morning, when an email arrives, or before a meeting.`)}</h3>${routines}</section>`
+    // (`routines` null: a Pip with a folder, whose "When it runs" is with its folder's rows.)
+    + (routines === null ? '' : `<section class="pip-page-group" aria-label="Routines"><h3 class="pip-page-label">Routines${infoTip('pipRoutinesSays', 'Routines', `A routine is something ${esc(pipName)} does on its own: every morning, when an email arrives, or before a meeting.`)}</h3>${routines}</section>`)
     + `<section class="pip-page-group"><div class="pip-page-row static"><span class="row-words"><strong>Notifications${infoTip('pipNotifySays', 'Notifications', `Get notified when ${esc(pipName)} finishes something on its own or needs you.`)}</strong></span>`
     + `<label class="switch"><input type="checkbox" role="switch" id="pipNotify" aria-label="Notifications" aria-describedby="pipNotifySays"${notify ? ' checked' : ''}${off}><span aria-hidden="true"></span></label></div>`
     // (A row that is one button can't hold the "i", a button: the row has its title and "i", and Share at its end.)

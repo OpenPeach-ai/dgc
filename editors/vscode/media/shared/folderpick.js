@@ -5,7 +5,7 @@
 // media/shared/folderpick.css is how it looks. A classic script: Work's page loads it before its own script and the Pips
 // bundle imports it, so both share window.DgcFolderPick. The page keeps the choice; this file draws and answers keys.
 // Two small elements do the fitting no stylesheet can (asked 12 Nov night): <dgc-folder-fit> holds the button on a row
-// it shares (Library's, the search field's, the Needs attention heading's) and drops its "Project Folder" word when the
+// it shares (Library's, the search field's) or has to itself (the Pips view's Project tab) and drops its "Project Folder" word when the
 // row has no room for it; <dgc-path> cuts a long path before its folder's own name, exactly at a letter, so no space
 // shows before the name's slash.
 // Its shape and motion (asked 13 Nov): the button has the shared button's corner, and the open menu grows out of it as
@@ -253,8 +253,9 @@
    *  what it says with nothing chosen where All projects is not a choice ("Choose a folder"). Its tooltip says the
    *  choice and, for one folder, its whole path (no line of its own names it), unless the page gives another.
    *  A page that draws its button again while its menu is open (or still leaving) gets it as it was: open, in one shape. */
-  function buttonHtml({ id = "", cls = "", rows = [], choice = "", label = "Project Folder", title = "", disabled = false, attrs = "", empty = ALL } = {}) {
-    const value = valueOf(rows, choice, empty), row = rowsOf(rows).find((r) => r.folder === choice);
+  function buttonHtml({ id = "", cls = "", rows = [], choice = "", label = "Project Folder", title = "", disabled = false, attrs = "", empty = ALL, said = "" } = {}) {
+    // `said`: what the button says for a choice that is no folder (the Pips view's "Personal").
+    const value = said || valueOf(rows, choice, empty), row = said ? null : rowsOf(rows).find((r) => r.folder === choice);
     const open = id && shown && shown.id === id ? shown : null, joined = open || (id && leaving && leaving.id === id ? leaving : null);
     return `<button type="button"${id ? ` id="${esc(id)}"` : ""} class="dgc-folder${cls ? ` ${esc(cls)}` : ""}" data-folder-pick="1" aria-haspopup="menu" aria-expanded="${open ? "true" : "false"}"${joined ? ` data-folder-open="${joined.g.up ? "up" : "down"}"${joined.solid ? ` style="--folder-ground: ${esc(joined.solid)}"` : ""}` : ""}`
       + ` aria-label="${esc(`${label}: ${value}`)}" title="${esc(title || `${label}: ${value}${row ? `\n${row.folder}` : ""}`)}"${disabled ? " disabled" : ""}${attrs ? ` ${attrs}` : ""}>`
@@ -324,7 +325,7 @@
    *              With one folder chosen, the menu's first line is "Pin <folder> to the dock" (or "Unpin <folder> from
    *              the dock"): a row like the others, reached by the keyboard as they are; it too leaves the menu open.
    */
-  function open(button, { rows = [], choice = "", all = true, add = false, goneOff = false, onChoose, onAdd, keyboard = false, label = "Project Folder", trigger, pin = null } = {}) {
+  function open(button, { rows = [], choice = "", all = true, add = false, goneOff = false, onChoose, onAdd, keyboard = false, label = "Project Folder", trigger, pin = null, allLabel = ALL, lead = [] } = {}) {
     close(false, true);
     const doc = button.ownerDocument, view = doc.defaultView, Menu = root.DgcMenu;
     // Inside a dialog the menu belongs to it (everything outside a modal dialog is inert); in the Pips view, to its own root.
@@ -336,9 +337,10 @@
     const pinned = (folder) => { try { return !!pin?.on?.(folder); } catch { return false; } };
     // (Inside the row's own button, so it is a span that acts as one: a pointer's way to pin. The keyboard pins from the Work page.)
     const pinHtml = (folder, name, gone) => (pin && folder && (!gone || pinned(folder)) ? ((on) => `<span class="dgc-folder-pin" role="button" data-folder-pin="${esc(folder)}" data-folder-name="${esc(name)}" aria-pressed="${on}" title="${on ? "Unpin from the dock" : "Pin to the dock"}" aria-label="${on ? "Unpin from the dock" : "Pin to the dock"}: ${esc(name)}">${PIN(on)}</span>`)(pinned(folder)) : "");
-    const line = (folder, name, sub, note, checked, off, gone) => `<button type="button" role="menuitemradio" class="dgc-menu-row dgc-folder-row${sub ? " dgc-menu-row-sub" : ""}${checked ? " is-selected" : ""}"`
-      + ` data-folder="${esc(folder)}" aria-checked="${checked ? "true" : "false"}"${off ? " disabled" : ""}>${folder ? `<span class="dgc-menu-icon dgc-folder-mark" aria-hidden="true">${folderMark(folder)}</span>` : icon("layers")}<span class="dgc-menu-words"><span class="dgc-menu-label">${esc(name)}</span>${sub ? `<span class="dgc-menu-sub">${sub}</span>` : ""}</span>`
-      + (note ? `<span class="dgc-folder-note">${esc(note)}</span>` : "") + pinHtml(folder, name, gone) + CHECK + "</button>";
+    const leading = (Array.isArray(lead) ? lead : []).filter((r) => r && typeof r.value === "string" && r.value && typeof r.name === "string" && r.name);
+    const line = (folder, name, sub, note, checked, off, gone, plain = false) => `<button type="button" role="menuitemradio" class="dgc-menu-row dgc-folder-row${sub ? " dgc-menu-row-sub" : ""}${checked ? " is-selected" : ""}"`
+      + ` data-folder="${esc(folder)}" aria-checked="${checked ? "true" : "false"}"${off ? " disabled" : ""}>${folder && !plain ? `<span class="dgc-menu-icon dgc-folder-mark" aria-hidden="true">${folderMark(folder)}</span>` : icon("layers")}<span class="dgc-menu-words"><span class="dgc-menu-label">${esc(name)}</span>${sub ? `<span class="dgc-menu-sub">${sub}</span>` : ""}</span>`
+      + (note ? `<span class="dgc-folder-note">${esc(note)}</span>` : "") + (plain ? "" : pinHtml(folder, name, gone)) + CHECK + "</button>";
     const list = rowsOf(rows), shadeId = `dgc-folder-shade-${++shades}`, finds = list.length > MANY;
     // The search field, when there are many: it stays at the list's top while the folders scroll under it.
     const findHtml = finds ? '<div class="dgc-folder-find" role="presentation"><svg class="dgc-folder-find-mark" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="m10.2 10.2 3.3 3.3"/></svg>'
@@ -349,7 +351,11 @@
     const pinWords = (on) => (on ? `Unpin ${chosenName} from the dock` : `Pin ${chosenName} to the dock`);
     const pinLine = chosen && (chosen.exists !== false || pinned(choice)) ? ((on) => `<button type="button" role="menuitem" class="dgc-menu-row dgc-folder-pin-line" data-folder-pin-line="${esc(choice)}" data-pinned="${on}"><span class="dgc-menu-icon dgc-folder-mark" aria-hidden="true">${PIN(on)}</span><span class="dgc-menu-label">${esc(pinWords(on))}</span></button><div class="dgc-menu-div" role="separator"></div>`)(pinned(choice)) : "";
     box.innerHTML = `<svg class="dgc-folder-shape" aria-hidden="true" focusable="false">${SHADE(shadeId)}<path class="dgc-folder-shade" filter="url(#${shadeId})"/><path class="dgc-folder-ground"/><path class="dgc-folder-seam"/><path class="dgc-folder-line"/></svg><div class="dgc-folder-list" role="presentation">` + findHtml + pinLine
-      + (all ? line("", ALL, "", "", !choice, false) + (list.length ? '<div class="dgc-menu-div" role="separator"></div>' : "") : "")
+      // `allLabel`: what the row for no folder says ("All Pips", "No folder"); `lead`: choices that are no folder, after it
+      // and before the folders ({value, name, sub}: the Pips view's "Personal"), each with the mark of the first row.
+      + (all ? line("", allLabel, "", "", !choice, false) : "")
+      + leading.map((r) => line(r.value, r.name, r.sub ? esc(r.sub) : "", "", r.value === choice, false, false, true)).join("")
+      + ((all || leading.length) && list.length ? '<div class="dgc-menu-div" role="separator"></div>' : "")
       + list.map((r) => line(r.folder, r.name || nameOf(r.folder), pathHtml(r.shown || r.folder, r.folder), r.exists === false ? "Not found" : r.here ? "This window" : "", r.folder === choice, goneOff && r.exists === false, r.exists === false)).join("")
       + (finds ? '<div class="dgc-folder-none" role="status" hidden></div>' : "")
       + (add ? `${all || list.length ? '<div class="dgc-menu-div" role="separator"></div>' : ""}<button type="button" role="menuitem" class="dgc-menu-row dgc-folder-add" data-folder-add="1">${icon("add")}<span class="dgc-menu-label">Add a folder…</span></button>` : "")
@@ -416,7 +422,7 @@
       let found = 0;
       for (const row of rowsBox.querySelectorAll(".dgc-folder-row")) {
         const at = list.find((r) => r.folder === row.dataset.folder);
-        const hit = !q || (at ? [at.name || nameOf(at.folder), at.folder, at.shown || ""].some((v) => String(v).toLowerCase().includes(q)) : ALL.toLowerCase().includes(q));
+        const hit = !q || (at ? [at.name || nameOf(at.folder), at.folder, at.shown || ""].some((v) => String(v).toLowerCase().includes(q)) : (row.querySelector(".dgc-menu-label")?.textContent || allLabel).toLowerCase().includes(q));
         row.hidden = !hit; if (hit && at) found++;
       }
       const firstDiv = rowsBox.querySelector(".dgc-folder-row + .dgc-menu-div"); if (firstDiv) firstDiv.hidden = !!q;

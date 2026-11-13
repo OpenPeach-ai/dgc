@@ -39,8 +39,8 @@ const SCROLLER = "(window.__pipsRoot ? window.__pipsRoot.querySelector('.pip-app
 const box = (n) => { if (!n) return null; const b = n.getBoundingClientRect(); return { left: b.left, right: b.right, top: b.top, bottom: b.bottom, width: b.width, height: b.height }; };
 /** The heading row as it is drawn. */
 const heading = `(() => { const box = ${box.toString()}; const r = window.__pipsRoot || document, s = r.querySelector(".attention"), link = s.querySelector("#attention-view-all"), toggle = s.querySelector(".attention-toggle");
-  const words = document.createRange(); words.selectNodeContents(toggle.firstChild);
-  return { section: box(s), toggle: box(toggle), words: box(words), pill: box(s.querySelector(".attention-count")), chevron: box(toggle.querySelector(".codicon")), link: link && box(link), text: link?.textContent || "",
+  const words = document.createRange(); words.selectNodeContents(s.querySelector(".attention-title").firstChild);
+  return { section: box(s), toggle: box(toggle), words: box(words), pill: box(s.querySelector(".attention-count")), marks: s.querySelectorAll(".attention-head svg, .attention-head .codicon, .attention-fold").length, link: link && box(link), text: link?.textContent || "",
     ink: link ? getComputedStyle(link).color : "", ground: link ? getComputedStyle(link).backgroundColor : "", cards: s.querySelectorAll(".attention-row, .dgc-card").length,
     sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth }; })()`;
 /** The page as it is drawn. */
@@ -75,8 +75,10 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
     assert.ok(apart(h.link, h.words) && apart(h.link, h.pill), "never on the heading's words or its count");
     assert.ok(h.link.left - h.pill.right >= 8, `with room between (${h.link.left - h.pill.right}px)`);
     assert.ok(apart(h.link, h.toggle), "the fold's own button ends before it: neither lies on the other");
-    assert.ok(h.chevron.right <= h.link.left + 0.5, "the fold's chevron stays in its button, left of the words");
-    assert.ok(Math.abs(h.link.right - h.section.right) <= 1, "at the row's right end, in line with the card's edge");
+    // (13 Nov: no chevron. The fold is its own quiet word, "Hide", which ends the row in line with the card's edge; View all is just before it.)
+    assert.equal(h.marks, 0, "no chevron on the heading");
+    assert.ok(h.toggle.left >= h.link.right - 0.5 && h.toggle.left - h.link.right <= 12, `the fold's word comes straight after it (${h.toggle.left - h.link.right}px)`);
+    assert.ok(Math.abs(h.toggle.right - h.section.right) <= 1, "which is at the row's right end, in line with the card's edge");
     assert.ok(h.link.height >= 24 && h.link.width >= 44, `big enough to hit (${h.link.width} by ${h.link.height})`);
     assert.ok(chroma(h.ink) <= 12, `quiet grey words, not the accent (${h.ink})`);
     assert.match(h.ground, /rgba\(0, 0, 0, 0\)|transparent/, "words, not a filled button");

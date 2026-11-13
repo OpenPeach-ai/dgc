@@ -2,8 +2,9 @@
 // own, which links the icon font's stylesheet) and the side bar (a shadow root inside Work's page). The font is
 // declared in Work's page, so CSS in the shadow root that names it draws; but the stylesheet's CLASSES are not in the
 // shadow root, so an element that asks for a glyph by class (codicon codicon-chevron-up) had no size and drew nothing.
-// The fold of "Needs attention" was the one such glyph the view draws: it is our own drawing now, as the tray's icons
-// are, the same in both places.
+// The fold of "Needs attention" was the one such glyph the view draws. (13 Nov: the heading has no mark at all now. A
+// chevron beside it read as a dropdown, so the fold is a quiet word at the end of its line, "Hide" or "Show": this
+// file holds that the word paints in both places, that it says the fold's state, and that no mark is left behind.)
 // Read in real Chromium from the painted pixels: the side bar's real page with the real Pips view in its shadow root
 // (test/support/project-folder-pips-scene.mjs) at 700 and 300 px, dark and light, and the view as a tab and in forced
 // colours (test/support/pip-chat-scene.mjs).
@@ -48,7 +49,7 @@ test("the Pips view's own files ask the icon font for no glyph by class", async 
 
 // ---- the painted pixels --------------------------------------------------------------------------------------------
 const ROOT = '(window.__pipsRoot || document.getElementById("pips-host")?.shadowRoot || document)';
-const FOLD = ".attention-toggle:not(.attention-toggle-none) > [aria-hidden=true]";
+const FOLD = "#attention-toggle";
 const settle = (page) => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
 /** What `selector` (in the Pips view) paints: its box, and its ink read from two pictures of that box, with it and
  *  without it. `ink`: how many pixels it changes; `top` and `bottom`: how wide the ink is in its first and last rows (a
@@ -81,14 +82,13 @@ async function painted(page, selector) {
   }, [shown, hidden]);
   return { ...box, ...m };
 }
-const points = (m) => (m.ink && m.top * 2 <= m.bottom ? "up" : m.ink && m.bottom * 2 <= m.top ? "down" : `neither (${JSON.stringify(m)})`);
-/** The fold as the page has it. */
-const fold = (page) => page.evaluate(([root, s]) => { const r = (0, eval)(root), toggle = r.querySelector(".attention-toggle:not(.attention-toggle-none)"), mark = r.querySelector(s), list = r.querySelector("#attention-list");
-  const box = (e) => e.getBoundingClientRect(), t = box(toggle), g = mark && box(mark), count = toggle.querySelector(".attention-count");
-  return { expanded: toggle.getAttribute("aria-expanded"), controls: toggle.getAttribute("aria-controls"), words: toggle.textContent.replace(/\s+/g, " ").trim(), tag: toggle.tagName, type: toggle.type,
-    hidden: mark?.getAttribute("aria-hidden") || "", inside: !!g && g.left >= t.left - 0.5 && g.right <= t.right + 0.5 && g.top >= t.top - 0.5 && g.bottom <= t.bottom + 0.5,
-    afterCount: g ? g.left - box(count).right : -99, centred: g ? Math.abs((g.top + g.bottom) / 2 - (box(count).top + box(count).bottom) / 2) : 99,
-    list: !!list && !list.hasAttribute("hidden") && box(list).height > 0, cards: r.querySelectorAll(".attention-list > li").length, twice: mark ? getComputedStyle(mark, "::before").content : "",
+/** The fold as the page has it: the heading's words, and the word at the end of its line that folds it. */
+const fold = (page) => page.evaluate(([root, s]) => { const r = (0, eval)(root), toggle = r.querySelector(s), head = toggle.closest(".attention-head"), title = head.querySelector(".attention-title"), list = r.querySelector("#attention-list");
+  const box = (e) => e.getBoundingClientRect(), t = box(toggle), count = title.querySelector(".attention-count");
+  return { expanded: toggle.getAttribute("aria-expanded"), controls: toggle.getAttribute("aria-controls"), heading: title.textContent.replace(/\s+/g, " ").trim(), word: toggle.textContent, label: toggle.getAttribute("aria-label"), tag: toggle.tagName, type: toggle.type,
+    marks: head.querySelectorAll("svg, .codicon, .attention-fold, [aria-hidden=true]").length, drawn: [title, toggle].map((e) => [getComputedStyle(e, "::before").content, getComputedStyle(e, "::after").content].join()).join(),
+    afterCount: t.left - box(count).right, centred: Math.abs((t.top + t.bottom) / 2 - (box(count).top + box(count).bottom) / 2), atEnd: Math.abs(t.right - box(head).right),
+    list: !!list && !list.hasAttribute("hidden") && box(list).height > 0, cards: r.querySelectorAll(".attention-list > li").length,
     sideways: (r.querySelector(".pip-app-root") || document.body).scrollWidth - (r.querySelector(".pip-app-root") || document.body).clientWidth }; }, [ROOT, FOLD]);
 /** Every element of the view that asks the icon font for a glyph, by class or in CSS, and has no box to draw it in. */
 const blank = (page) => page.evaluate((root) => [...(0, eval)(root).querySelectorAll("*")].filter((e) => { const cls = String(e.className?.baseVal ?? e.className ?? "");
@@ -97,67 +97,62 @@ const blank = (page) => page.evaluate((root) => [...(0, eval)(root).querySelecto
   if (/\bcodicon-[a-z]/.test(cls)) return !(font || /codicon/.test(before.fontFamily)) || b.width < 1 || b.height < 1;   // asked for by class: the class must be here
   return /\bcodicon\b/.test(cls) && !e.querySelector("svg") && getComputedStyle(e).maskImage === "none";                    // a holder with nothing in it
 }).map((e) => String(e.className)), ROOT);
-const expanded = (page, value) => page.waitForFunction(([root, v]) => (0, eval)(root).querySelector(".attention-toggle:not(.attention-toggle-none)")?.getAttribute("aria-expanded") === v, [ROOT, value]);
+const expanded = (page, value) => page.waitForFunction(([root, v]) => (0, eval)(root).querySelector("#attention-toggle")?.getAttribute("aria-expanded") === v, [ROOT, value]);
 
 async function checkFold(page, { where, colours = "themed" }) {
-  // Open, as it starts with something in it: the mark shows, in its button after the count, and points up.
+  // Open, as it starts with something in it: the heading is words and its count with no mark, and the fold's word,
+  // "Hide", paints at the end of its line.
   let f = await fold(page), m = await painted(page, FOLD);
-  assert.deepEqual([f.tag, f.type, f.expanded, f.controls, f.hidden, f.list], ["BUTTON", "button", "true", "attention-list", "true", true], `${where}: the fold is a button, open, its mark unseen by a screen reader`);
+  assert.deepEqual([f.tag, f.type, f.expanded, f.controls, f.list], ["BUTTON", "button", "true", "attention-list", true], `${where}: the fold is a button, open`);
   assert.equal(f.cards, 1, "one card in view");
-  assert.match(f.words, /^Needs attention \d+$/, "its name is its words and its count, nothing of the mark");
-  assert.ok(m.width >= 10 && m.height >= 10 && m.width <= 16 && m.height <= 16, `${where}: the mark has room to be drawn in: ${JSON.stringify(m)}`);
-  assert.ok(m.ink >= 30, `${where}: the mark paints: ${JSON.stringify(m)}`);
-  if (colours === "themed") assert.ok(m.ratio >= 3, `${where}: and can be seen against its ground (3:1): ${m.ratio}`);
-  assert.equal(points(m), "up", `${where}: open, it points up`);
-  assert.ok(f.inside && f.afterCount >= 0 && f.centred <= 1.5, `${where}: in its button, after the count, on its line: ${JSON.stringify(f)}`);
-  assert.equal(f.twice, "none", "drawn once: no glyph of the font over it");
+  assert.match(f.heading, /^Needs attention \d+$/, "the heading is its words and its count");
+  assert.deepEqual([f.marks, f.drawn], [0, "none,none,none,none"], `${where}: no chevron, no mark of any kind on the heading's line`);
+  assert.deepEqual([f.word, f.label], ["Hide", "Hide the cards that need your attention"]);
+  assert.ok(m.width >= 20 && m.height >= 16, `${where}: the word has room to be drawn in: ${JSON.stringify(m)}`);
+  assert.ok(m.ink >= 30, `${where}: the word paints: ${JSON.stringify(m)}`);
+  if (colours === "themed") assert.ok(m.ratio >= 4.5, `${where}: and can be read against its ground (4.5:1): ${m.ratio}`);
+  assert.ok(f.afterCount >= 6 && f.centred <= 1.5 && f.atEnd <= 0.5, `${where}: after the count, on its line, at the line's end: ${JSON.stringify(f)}`);
   assert.ok(f.sideways <= 1, "nothing scrolls sideways");
-  assert.deepEqual(await blank(page), [], `${where}: nothing else in the view waits on the font's classes`);
-  // Folded by the keyboard: it turns down and the card goes. (The redraw makes the button anew, so each key is given to
-  // the button as it then is, as test/pip-cards-browser.test.mjs does: where the keyboard is afterwards is as it was.)
-  const focus = () => page.evaluate((root) => (0, eval)(root).querySelector(".attention-toggle:not(.attention-toggle-none)").focus(), ROOT);
+  assert.deepEqual(await blank(page), [], `${where}: nothing in the view waits on the font's classes`);
+  // Folded by the keyboard: the word says Show and the card goes. (The redraw makes the button anew, so each key is
+  // given to the button as it then is, as test/pip-cards-browser.test.mjs does: where the keyboard is afterwards is as it was.)
+  const focus = () => page.evaluate((root) => (0, eval)(root).querySelector("#attention-toggle").focus(), ROOT);
   await focus(); await page.keyboard.press("Enter"); await expanded(page, "false");
   f = await fold(page); m = await painted(page, FOLD);
-  assert.deepEqual([f.expanded, f.list, f.cards, f.hidden, f.controls], ["false", false, 0, "true", "attention-list"], `${where}: Enter folds it`);
-  assert.ok(m.ink >= 30, `${where}: folded, the mark paints: ${JSON.stringify(m)}`);
-  assert.equal(points(m), "down", `${where}: folded, it points down`);
-  assert.match(f.words, /^Needs attention \d+$/);
-  // Open again with Space: up again.
+  assert.deepEqual([f.expanded, f.list, f.cards, f.controls, f.word, f.label, f.marks], ["false", false, 0, "attention-list", "Show", "Show the cards that need your attention", 0], `${where}: Enter folds it`);
+  assert.ok(m.ink >= 30, `${where}: folded, the word paints: ${JSON.stringify(m)}`);
+  assert.match(f.heading, /^Needs attention \d+$/);
+  // Open again with Space.
   await focus(); await page.keyboard.press("Space"); await expanded(page, "true");
-  f = await fold(page); m = await painted(page, FOLD);
-  assert.deepEqual([f.expanded, f.list, f.cards], ["true", true, 1], `${where}: Space opens it`);
-  assert.equal(points(m), "up", `${where}: open again, it points up again`);
+  f = await fold(page);
+  assert.deepEqual([f.expanded, f.list, f.cards, f.word], ["true", true, 1, "Hide"], `${where}: Space opens it`);
 }
 
 for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 300]) for (const tab of ["personal", "project"]) {
-  test(`the side bar: the fold of Needs attention shows and turns with the fold (${tab} tab, ${theme}, ${width}px)`, async (t) => {
+  test(`the side bar: the fold of Needs attention is a word that paints and says its state, with no mark (${tab} tab, ${theme}, ${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openPips(browser, { theme, width, tab, scale: 2 });
     try {
       await x.page.mouse.move(2, 2);
       await checkFold(x.page, { where: `side bar, ${tab}` });
-      if (tab === "project") {   // the Project Folder dropdown is on the same line: the mark keeps clear of it
-        const clear = await x.inPips((root) => root.querySelector("#pips-folder-pick").getBoundingClientRect().left - root.querySelector(".attention-toggle > [aria-hidden=true]").getBoundingClientRect().right);
-        assert.ok(clear >= 6, `clear of the dropdown: ${clear}`);
-      }
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   });
 }
 
 for (const theme of ["dark", "light"]) {
-  test(`an editor tab: the same mark, drawn once beside the font's own stylesheet (${theme}, 700px)`, async (t) => {
+  test(`an editor tab: the same word and no mark, beside the font's own stylesheet (${theme}, 700px)`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openChat(browser, { width: 700, height: 800, theme, where: "tab", home: true, waiting: 3, scale: 2 });
     try {
-      // The tab's page links media/codicon.css (src/pipsView.ts): with it here too, nothing of the font is drawn over the mark.
+      // The tab's page links media/codicon.css (src/pipsView.ts): with it here too, nothing of the font is drawn on the heading.
       await x.p.addStyleTag({ content: readFileSync(`${here}media/codicon.css`, "utf8").replace(/url\([^)]*codicon\.ttf[^)]*\)/, `url("data:font/ttf;base64,${readFileSync(`${here}media/codicon.ttf`).toString("base64")}")`) });
       await x.p.waitForSelector(".attention-toggle"); await x.p.mouse.move(2, 2);
       await checkFold(x.p, { where: "tab" });
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   });
-  test(`high contrast (forced colours): the mark still shows and turns, in the side bar at 300px and a tab at 700px (${theme})`, async (t) => {
+  test(`high contrast (forced colours): the word still shows and says its state, in the side bar at 300px and a tab at 700px (${theme})`, async (t) => {
     if (skipOrFail(t)) return;
     for (const [where, width] of [["side", 300], ["tab", 700]]) {
       const x = await openChat(browser, { width, height: 800, theme, where, home: true, waiting: 3, scale: 2, forced: true });

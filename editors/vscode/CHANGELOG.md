@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **One kind of Pip.** The Pips view is one list: Core first, then the Pip with the latest news; each row says "Personal" or its folder; search on top and a filter (All Pips, Personal, each folder) under it. **New Pip** asks for a character, a name and a folder line (pre-filled from where you are), no goal: tell it in its chat. Every Pip has the same page and chat; a Pip with a folder shows its computer and its change cards like any other.
+- **The level picker is in every Pip's chat box**, and choosing Do it all shows what it allows first, with Continue or Cancel.
+- **A Pip talks about what it found, in its own chat**: its words, then the findings (each opening its file at its line), then, at Ask me first, one Allow card to fix them ("Fix 3 things in toni_fabrics"), with "Start a helper with Work tools" in its menu. A fix in progress shows its steps; a ready fix waits as a change card (Apply, Review, Discard); an applied one says whether it is committed, with Undo and "Commit these files". What only you can do is pinned at the top of its chat. Needs attention gains Allow and Apply. (These need a DGC with Pips API 96.)
+- A Pip in a folder has a **reports table**: when, what, files, model, time and tokens, findings; it stacks in a narrow side bar.
 - **Weather** finds your place as you type: pick it from the suggestions (name, region, country), never a guessed name; the forecast follows its coordinates. The letters you type are sent to Open-Meteo by DGC to look it up.
 - **Clock**'s second city can be any time zone, searched by city or zone ("Kolkata", "Europe/Lisbon"), each with its offset now.
 - **Pin a Work folder to the dock**: from the first line of the Project Folder menu, a pin on each of its folders, or a Folders card tile. On the dock it is the folder's icon; a click opens Work on that folder; its menu has New session here, Open in new window and Unpin.

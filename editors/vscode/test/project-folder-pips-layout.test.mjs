@@ -44,8 +44,8 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
           apart: rows.every((r, i) => !i || box(r).top >= box(rows[i - 1]).bottom - 0.5), sideways: shell.scrollWidth > shell.clientWidth + 1 };
       });
       assert.deepEqual([m.pick, m.pickIn, m.pickFirst, m.underTabs], ["Project Folder All projects", true, true, true], "the dropdown, above the list, under the tabs");
-      // (On the Needs attention line since 12 Nov night: at 300 px its \"Project Folder\" word gives way to the heading.)
-      assert.equal(m.word, width !== 300);
+      // (On a line of its own since 13 Nov: it has room for its \"Project Folder\" word at 300 px too.)
+      assert.equal(m.word, true);
       assert.equal(m.cardTitle, "Email the planting plan to the allotment group?", "the Project Pip's card, and not the Personal Pip's");
       assert.match(m.card, /^Bed planner · garden · Email · /, "it names its project");
       assert.deepEqual(m.rows.map((r) => [r.name, r.path, r.title]), [["Checkout reviewer", "~/code/shop", HERE], ["Docs keeper", "~/code/shop", HERE], ["Bed planner", "~/code/garden", GARDEN],

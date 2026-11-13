@@ -92,7 +92,7 @@
 .dgc-folder-menu .dgc-menu-row:disabled :is(.dgc-menu-label, .dgc-menu-sub, .dgc-menu-icon) { opacity: .55; }
 @media (forced-colors: active) { .dgc-folder-line, .dgc-folder-seam { stroke: CanvasText; } }
 
-/* On a row it shares (Library's, the search field's, the Needs attention heading's) the button is in a <dgc-folder-fit>,
+/* On a row it shares (Library's, the search field's; on the Pips view's Project tab a line of its own, at the left: src/pips.css) the button is in a <dgc-folder-fit>,
    at the row's right end. It gives way before anything else on the row does, and never wraps: the element drops the
    "Project Folder" word when the name would not show whole with it (data-compact, measured by folderpick.js), and only
    then does a long name end in an ellipsis. */

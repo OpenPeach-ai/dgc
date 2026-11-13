@@ -92,9 +92,13 @@ for (const at of PLACES) test(`the fold of Needs attention keeps the keyboard th
   isFold(await where(p), "false", "Enter again");
   await press(p, "Enter"); await until(p, (r) => r.querySelector(".attention-toggle").getAttribute("aria-expanded") === "true"); await settle(p);
   isFold(await where(p), "true", "and again");
-  // Tab goes on from it to what follows it on the page (View all), as from any button.
+  // Tab goes on from it to what follows it on the page, as from any button. (13 Nov: the fold is the word at the end of
+  // the heading's line, after View all, so what follows it is the card, and View all is the stop before it.)
+  await press(p, "Shift+Tab"); w = await where(p);
+  assert.equal(w?.id, "attention-view-all", "Shift+Tab goes back from the fold to View all");
+  await press(p, "Tab"); isFold(await where(p), "true", "Tab comes back to it");
   await press(p, "Tab"); w = await where(p);
-  assert.equal(w?.id, "attention-view-all", "Tab goes on from the fold to View all");
+  assert.ok(w?.card && w.tag === "BUTTON", `Tab goes on from the fold into the card: ${JSON.stringify(w)}`);
   assert.deepEqual(x.errors, []);
 });
 
