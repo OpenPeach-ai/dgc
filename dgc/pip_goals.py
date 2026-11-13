@@ -119,9 +119,7 @@ def set_goal(store, pip_id, objective, conversation_id, actor, config) -> dict:
     """set_pip_goal: the conversation's goal, replacing one there before; its first turn starts now."""
     if actor not in LOCAL:
         raise RegistryError("local_only", "Only you give a Pip a goal, on this computer.")
-    job = store._job(pip_id)
-    if job["source_policy"] != {"mode": "personal"}:
-        raise RegistryError("invalid_request", "A goal is for a Personal Pip: Work's /goal does a project's.")
+    job = store._job(pip_id)                  # every Pip's conversation can have a goal (pips-flow-design Q8)
     text = str(objective or "").strip()
     if not text or len(text) > MAX_OBJECTIVE or re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", text):
         raise RegistryError("invalid_request", f"Say what the goal is, in up to {MAX_OBJECTIVE} characters.")

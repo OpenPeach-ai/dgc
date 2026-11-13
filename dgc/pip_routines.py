@@ -245,9 +245,7 @@ def _first_due(trigger: dict, now: datetime) -> str | None:
 # --------------------------------------------------------------------------- the user's changes
 
 def _personal(store, pip_id) -> dict:
-    job = store._job(pip_id)
-    if job["source_policy"] != {"mode": "personal"}:
-        raise RegistryError("invalid_request", "Routines are for Personal Pips.")
+    job = store._job(pip_id)                  # every Pip has routines (pips-flow-design Q8, 14 Nov)
     if job["status"] == "archived":
         raise RegistryError("archived", f"{job['name']} is archived. Restore it in Settings first.")
     return job

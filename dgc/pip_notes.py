@@ -218,10 +218,11 @@ def _insert(registry, pip_id, workspace_id, text, source, run_id=None):
 # --------------------------------------------------------------------------- you see, add and forget them
 
 def _personal(registry, pip_id):
-    row = registry.db.execute("SELECT p.workspace_id FROM pips p JOIN workspaces w ON w.id=p.workspace_id "
-                              "WHERE p.id=? AND w.kind='personal'", (pip_id,)).fetchone() if isinstance(pip_id, str) else None
+    # Every Pip keeps what you told it (pips-flow-design Q8, 14 Nov): a folder line takes nothing away.
+    row = registry.db.execute("SELECT p.workspace_id FROM pips p WHERE p.id=?", (pip_id,)).fetchone() \
+        if isinstance(pip_id, str) else None
     if row is None:
-        raise RegistryError("not_found", "Notes belong to a Personal Pip.")
+        raise RegistryError("not_found", "That Pip isn't on this computer. It may have been deleted.")
     return row["workspace_id"]
 
 

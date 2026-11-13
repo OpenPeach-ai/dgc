@@ -112,15 +112,16 @@ class NotesTests(unittest.TestCase):
             self.control("forget_pip_note", pip_id=other["id"], note_id=fact["id"], shared=True)
         self.assertEqual(len(self.facts()), 1, "one Pip can't forget another's")
 
-    def test_only_you_on_this_computer_and_only_for_a_personal_pip(self):
+    def test_only_you_on_this_computer_and_a_folder_pip_has_notes_too(self):
+        # Changed on purpose (pips-flow-design Q8, 14 Nov): it was "only for a Personal Pip"; every Pip keeps what you
+        # told it now, so a Pip with a folder lists its notes instead of refusing.
         pip = self.make()
         for command, fields in (("list_pip_notes", {}), ("add_pip_note", {"text": "Likes tea"}), ("forget_pip_note", {"all": True})):
             with self.subTest(command=command), self.assertRaises(RegistryError) as raised:
                 self.control(command, actor="device_1", pip_id=pip["id"], **fields)
             self.assertEqual(raised.exception.code, "local_only")
         project = self.store.create(self.workspace["id"], "Project", "Review", "editor-user")
-        with self.assertRaises(RegistryError):
-            pip_notes.listing(self.registry, project["id"])
+        self.assertEqual(pip_notes.listing(self.registry, project["id"])["notes"], [])
         with self.assertRaises(RegistryError):
             self.control("add_pip_note", pip_id=pip["id"], text="My password is hunter2-" + "x" * 20 + " token=ghp_" + "a" * 36)
         with self.assertRaises(RegistryError):

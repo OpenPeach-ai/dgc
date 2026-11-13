@@ -86,6 +86,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_plugins", "allow_pip_plugin", "decline_pip_plugin", "list_pip_plugin_uses", "get_pip_chat_context",
     "set_pip_chat_options",
     "list_pip_reply_stats", "get_pips_limit", "set_pips_limit", "list_pip_attention", "get_pips_welcome", "list_pip_sent",
+    "set_pip_knows_you",
     "list_pip_notes", "add_pip_note", "forget_pip_note", "list_pip_sites", "set_pip_careful", "forget_pip_site",
     "get_pip_working_notes", "set_pip_working_notes", "list_pip_daily_log",
     "set_plugin_permission",
@@ -143,7 +144,7 @@ _COMMAND_ARGS = {
     "set_pip_profile": {"pip_id", "changes"}, "list_pip_shared": {"pip_id", "kind"},
     "get_pip_computers": set(), "update_pip_computers": set(), "reset_pip_computer": {"pip_id"}, "list_pip_apps": set(),
     "list_pip_plugins": {"pip_id"}, "allow_pip_plugin": {"pip_id", "grant_id", "keys"}, "decline_pip_plugin": {"pip_id", "grant_id"},
-    "list_pip_plugin_uses": set(), "list_pip_attention": {"limit", "projects"}, "get_pips_welcome": set(), "list_pip_sent": {"pip_id"}, "list_pip_notes": {"pip_id", "shared"}, "add_pip_note": {"pip_id", "text", "shared"},
+    "list_pip_plugin_uses": set(), "list_pip_attention": {"limit", "projects"}, "get_pips_welcome": set(), "list_pip_sent": {"pip_id"}, "set_pip_knows_you": {"pip_id", "on"}, "list_pip_notes": {"pip_id", "shared"}, "add_pip_note": {"pip_id", "text", "shared"},
     "forget_pip_note": {"pip_id", "note_id", "all", "shared"}, "list_pip_sites": {"pip_id"}, "set_pip_careful": {"pip_id", "on"},
     # API 57: a Personal Pip's own working notes (pip_working_notes) and its daily log (pip_daily_log).
     "get_pip_working_notes": {"pip_id"}, "set_pip_working_notes": {"pip_id", "text", "expected_revision"},
@@ -313,7 +314,10 @@ READ_TOOLS = frozenset({"read_file", "glob", "grep", "repo_map", "todo"})
 CHAT_UI_TOOLS = frozenset({"offer_choices"})
 # Everything a folder Pip's chat may hold (13 Nov): reading its project copy, buttons, and drafting its own job, which
 # DGC applies after the reply and only for its name, instructions, schedule and model (pip_chat_setup.PROJECT_FIELDS).
-FOLDER_CHAT_TOOLS = READ_TOOLS | CHAT_UI_TOOLS | frozenset({"draft_pip_change"})      # (without its box; with it, the computer tool too)
+# What every Pip's chat has of its own (pips-flow-design Q8, 14 Nov): what you told it (remember), routines, its goal,
+# skills and its working notes. Its own, never your files or the outside world.
+OWN_CHAT_TOOLS = frozenset({"remember", "add_routine", "update_goal", "skill", "working_notes"})
+FOLDER_CHAT_TOOLS = READ_TOOLS | CHAT_UI_TOOLS | frozenset({"draft_pip_change"}) | OWN_CHAT_TOOLS   # (without its box; with it, the computer tool too)
 MAX_FILES = 10000
 MAX_FILE_BYTES = 4 * 1024 * 1024
 MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
@@ -3134,7 +3138,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     from . import pip_computer, pip_app_links, pip_plugins, pip_notes, pip_sdk_apps, pip_images, pip_videos, pip_keys
     # It keeps notes about the user only in a reply to the user's own message: never in a routine's run or
     # a turn DGC wrote, whose text can carry an email or a page (pip_notes).
-    keeps_notes = (personal and conversation is not None and manifest.get('user_turn') is True
+    keeps_notes = (conversation is not None and manifest.get('user_turn') is True      # every Pip (Q8, 14 Nov)
                    and isinstance(conversation.get('text'), str))
     # A Pip with a computer uses it in its tasks and in its chat, where the user can watch it work.
     computer_pin = (manifest.get('computer_socket') if (kind in ('personal_task', 'conversation') if personal
@@ -3153,15 +3157,15 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     eyes = {'mode': None, 'convention': 'pixels', 'seen': {}, 'card': None, 'shot': None, 'desk_shot': None, 'needs': False}
     # A Personal Pip's skills: instructions it may load, never tools or permissions.
     # A reviewed handoff stays the narrow task it was approved as: no skills there.
-    pip_skills = (personal_skills(config) if personal and kind in ('personal_task', 'conversation') and 'handoff' not in manifest
-                  else {})
+    pip_skills = (personal_skills(config) if (kind == 'conversation' or personal and kind == 'personal_task')
+                  and 'handoff' not in manifest else {})          # every Pip's chat (Q8, 14 Nov)
     if pip_skills:
         from . import pip_skill_switches                 # those switched off on its page are never offered (pips-12)
         pip_skills = pip_skill_switches.offered(pip_skills, manifest)
     # Its own working notes (pip_working_notes): read at the start, changed with its tool, saved by the supervisor.
     working_notes = None
     if 'working_notes' in manifest:
-        if not personal or kind not in ('personal_task', 'conversation') or 'handoff' in manifest:
+        if (not personal and kind != 'conversation') or kind not in ('personal_task', 'conversation') or 'handoff' in manifest:
             raise RegistryError('invalid_notes', "A Pip's working notes belong only to its chat and its tasks.")
         from . import pip_working_notes
         from .redaction import secret_values as _notes_secrets
@@ -3512,7 +3516,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
 
         def _tool_schemas(self, *args, **kwargs):
             if personal:
-                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_core_setup.schema()] if selected_type.id == 'core' and pip_core_setup.pinned(manifest) else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_keys.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None and not (conversation.get('goal') or {}).get('own') else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)], direct=bool(chat_setup and chat_setup['direct']))] if personal and conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([pip_goals.schema()] if personal and conversation is not None and conversation.get('goal') else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
+                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_core_setup.schema()] if selected_type.id == 'core' and pip_core_setup.pinned(manifest) else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_keys.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None and not (conversation.get('goal') or {}).get('own') else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)], direct=bool(chat_setup and chat_setup['direct']))] if conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([pip_goals.schema()] if conversation is not None and conversation.get('goal') else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
             schemas = super()._tool_schemas(*args, **kwargs)
             if conversation is not None and not (conversation.get('goal') or {}).get('own'):
                 schemas = [*schemas, OFFER_CHOICES]        # a folder Pip's chat offers buttons too (13 Nov)
@@ -3527,6 +3531,13 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                            *(pip_plugins.schemas(apps_pin['plugins']) if apps_pin.get('plugins') else []),
                            *(pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin.get('sdk_apps') else []),
                            *_borrow_schemas()]
+            if conversation is not None:                                    # every Pip's chat (Q8, 14 Nov)
+                own_apps = [a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)]
+                schemas = [*schemas, pip_routines.schema(own_apps, direct=bool(chat_setup and chat_setup['direct'])),
+                           *([pip_notes.schema()] if keeps_notes else []),
+                           *([pip_goals.schema()] if conversation.get('goal') else []),
+                           *([_skill_schema()] if pip_skills else []),
+                           *([pip_working_notes.schema()] if working_notes is not None else [])]
             if specialist_pin is not None:
                 return [pip_specialists.schema(specialist_pin['grant'])
                         if item.get('function', {}).get('name') == 'task' else item for item in schemas]
@@ -3720,6 +3731,12 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                                       'mention them, say they are below; never say above. Findings and reports from your '
                                       'runs show in this chat as their own cards: refer to them, never paste them whole.')
                 base_instructions += '\n' + _user_clock()
+                if keeps_notes:
+                    # Every Pip keeps what you tell it about yourself (Q8, 14 Nov), as a Personal Pip does.
+                    base_instructions += ("\nWhen the user tells you something lasting about themselves or the people in "
+                        "their life (a diet, an allergy, a dislike, a name, a birthday, a routine, how they like things "
+                        "done), keep it with remember in this turn, in their words, then answer. Don't keep what only "
+                        "matters today.")
                 if chat_setup is not None and chat_setup['allowed']:
                     base_instructions = (base_instructions.replace('change a job or schedule, ', '')
                         .replace('A chat request cannot silently change the approved job. Direct requested '
@@ -3880,7 +3897,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     return 'Proposal prepared. After your reply it appears in Personal Pips for review; only the user can create it.'
                 except RegistryError as exc:
                     return 'Invalid Personal Pip proposal: ' + str(exc)
-            if personal and pip_skills and call.name == 'skill':
+            if pip_skills and call.name == 'skill':
                 import types
                 from .tools import skill_tool
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
@@ -3894,12 +3911,12 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 if note is not None and note.casefold() not in (n.casefold() for n in note_candidates):
                     note_candidates.append(note)
                 return told
-            if personal and conversation is not None and conversation.get('goal') and call.name == pip_goals.TOOL:
+            if conversation is not None and conversation.get('goal') and call.name == pip_goals.TOOL:
                 update, told = pip_goals.tool_result(call.arguments if isinstance(call.arguments, dict) else {})
                 if update is not None:
                     goal_candidate = update
                 return told
-            if personal and conversation is not None and call.name == pip_routines.TOOL:
+            if conversation is not None and call.name == pip_routines.TOOL:
                 if len(routine_candidates) >= 2:
                     return 'Not suggested: one reply suggests at most two routines.'
                 toolkits = {a.get('toolkit') for a in (apps_pin or {}).get('apps', [])}
@@ -5038,7 +5055,8 @@ def _execute_run(registry, row, config):
         # And the user's one memory in DGC (shared with ChatDGC and Work), which the worker's own home can't see.
         if manifest.get('run_kind') in ('conversation', 'personal_task'):
             from . import shared_memory
-            about_you = shared_memory.for_run(config, saved_secrets(config))
+            from .pip_knows_you import knows_you
+            about_you = shared_memory.for_run(config, saved_secrets(config)) if knows_you(registry, row['pip_id']) else []
             if about_you:
                 manifest = {**manifest, "about_you": about_you}
             # Its own working notes (pip_working_notes), which every run of it starts with.
@@ -5053,6 +5071,18 @@ def _execute_run(registry, row, config):
                 manifest = pip_eyes.pin(registry, row, manifest, config)
             except (RegistryError, OSError, ValueError):
                 pass                        # it reads text, as before
+    elif manifest.get('run_kind') == 'conversation' and 'handoff' not in manifest:
+        # Q8 (pips-flow-design, 14 Nov): a Pip with a folder has in its chat what a Personal Pip has: what you told it,
+        # what DGC remembers about you (its "Knows about you" switch, on by default), its working notes, its skills.
+        from . import pip_notes, pip_skill_switches, pip_working_notes, shared_memory
+        from .pip_knows_you import knows_you
+        from .redaction import secret_values as saved_secrets
+        manifest = pip_notes.runtime(registry, row, manifest, saved_secrets(config))
+        about_you = shared_memory.for_run(config, saved_secrets(config)) if knows_you(registry, row['pip_id']) else []
+        if about_you:
+            manifest = {**manifest, "about_you": about_you}
+        manifest = pip_working_notes.runtime(registry, row, manifest, saved_secrets(config))
+        manifest = pip_skill_switches.runtime(registry, row, manifest)
     computer_socket = computer_host = taint = None
     # A run with the outside world (apps, plugins, the web, its level said): a Personal Pip's task or chat, or (0.52,
     # pips-sandbox-design step 2b) a folder Pip's chat with its own box.
@@ -6668,6 +6698,10 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 # Pips API 91 (pips-21): @ a project in a Personal Pip's chat. Applying is always the user's click.
                 from . import pip_project_copies
                 result = pip_project_copies.control(store, command, request, actor)
+            elif command == "set_pip_knows_you":
+                # Pips API 96 (Q8): what DGC remembers about you reaches this Pip, on by default; only you switch it.
+                from .pip_knows_you import set_knows_you
+                result = set_knows_you(store, pip_id, request.get("on"), actor)
             elif command == "list_pip_sent":
                 # Pips API 96, leak guard 4: what this Pip sent, to which sites, out of its computers' boxes.
                 if actor not in ("editor-user", "local-console"):
@@ -6987,6 +7021,8 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 # session owns a Pip (pips-flow-design Q1/Q2), so no chat gets them: 0 and null, kept for older clients.
                 result["pip"]["report_chats"] = 0
                 result["pip"]["report_session"] = None
+                from .pip_knows_you import knows_you
+                result["pip"]["knows_you"] = knows_you(registry, pip_id)        # API 96 (Q8): its switch
             elif command == "propose_pip_update":
                 changes = request.get('changes')
                 if isinstance(changes,dict):

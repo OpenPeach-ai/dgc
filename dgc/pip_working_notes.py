@@ -262,8 +262,8 @@ def runtime(registry, run, manifest, secrets=()) -> dict:
         return manifest
     personal = registry.db.execute("SELECT 1 FROM pips p JOIN workspaces w ON w.id=p.workspace_id WHERE p.id=? AND "
                                    "w.kind='personal'", (run["pip_id"],)).fetchone()
-    if personal is None:
-        return manifest
+    if personal is None and manifest.get("run_kind") != "conversation":
+        return manifest                       # a folder Pip keeps them in its chat (pips-flow-design Q8, 14 Nov)
     return {**manifest, "working_notes": pin(registry.directory, run["pip_id"], secrets)}
 
 

@@ -262,6 +262,8 @@ class ItsChatUsesItsBox(FolderPipWorld, unittest.TestCase):
         self.assertIn("data/train.bin", seen["system"])
 
     def test_without_its_box_its_chat_is_as_it_was(self):
+        # (Q8, 14 Nov: its own tools, remember, routines, its goal, skills and working notes, are in FOLDER_CHAT_TOOLS;
+        # without its box it still has no computer, apps or web.)
         seen = self.turn(None)
         self.assertNotIn("computer", seen["tools"])
         self.assertTrue(seen["tools"] <= pips.FOLDER_CHAT_TOOLS)

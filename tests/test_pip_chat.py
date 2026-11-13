@@ -491,7 +491,9 @@ from dgc.pips import _worker_main
 
 def chat(self, messages, tools=None, on_text=None, **kwargs):
     assert self.model == "fixture", self.model
-    assert {t["function"]["name"] for t in tools} <= {"read_file", "glob", "grep", "repo_map", "todo", "offer_choices", "draft_pip_change"}
+    # (+ every Pip's own tools since Q8, 14 Nov: remember, add_routine, update_goal, skill, working_notes)
+    assert {t["function"]["name"] for t in tools} <= {"read_file", "glob", "grep", "repo_map", "todo", "offer_choices", "draft_pip_change",
+                                                      "remember", "add_routine", "update_goal", "skill", "working_notes"}
     reply = "The queued model answered this Pip."
     if on_text:
         for character in reply:

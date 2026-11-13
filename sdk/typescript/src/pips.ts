@@ -220,6 +220,7 @@ export type PipMutationParams = {
   list_pip_fixes: { pip_id: string };
   get_pips_welcome: Record<string, never>;
   list_pip_sent: { pip_id: string };
+  set_pip_knows_you: { pip_id: string; on: boolean };
   decide_pip_fix: { pip_id: string; fix_id: string; expected_digest: string; allow: boolean };
   start_pip_work_helper: { pip_id: string; fix_id: string };
   answer_pip_waiting: { pip_id: string; waiting_id: string; answer: "done" | "later" | "not_a_problem" | "undo" };
@@ -431,6 +432,7 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   list_pip_fixes: ["pip_id"],
   get_pips_welcome: [],
   list_pip_sent: ["pip_id"],
+  set_pip_knows_you: ["pip_id", "on"],
   decide_pip_fix: ["pip_id", "fix_id", "expected_digest", "allow"],
   start_pip_work_helper: ["pip_id", "fix_id"],
   answer_pip_waiting: ["pip_id", "waiting_id", "answer"],
@@ -999,7 +1001,7 @@ for (const command of API93_MUTATIONS) MUTATIONS.add(command);
 // API 96: the Pips flow. What a check found and what became of it, by the Pip's level (list_pip_fixes; Allow or Not now
 // with decide_pip_fix); what only you can do (answer_pip_waiting); commit exactly a change's files. Local only.
 const API96_READS = new Set(["list_pip_fixes", "get_pips_welcome", "list_pip_sent"]);
-const API96_MUTATIONS = new Set(["decide_pip_fix", "start_pip_work_helper", "answer_pip_waiting", "commit_pip_project_change"]);
+const API96_MUTATIONS = new Set(["decide_pip_fix", "start_pip_work_helper", "answer_pip_waiting", "commit_pip_project_change", "set_pip_knows_you"]);
 for (const command of API96_READS) READS.add(command);
 for (const command of API96_MUTATIONS) MUTATIONS.add(command);
 /** What came with API 88 inside existing commands: set_pip_profile's changes.group (a folder in the Personal list) and
