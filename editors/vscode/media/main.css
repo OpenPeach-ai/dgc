@@ -3173,9 +3173,9 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 /* A finding's severity in Apple's system colours (asked 8 Nov): systemRed and systemYellow on a dark theme; on a light
    one Apple's own Increase Contrast values, since its standard red (3.2:1) and yellow (1.4:1) don't read as small text on
    white. #D70015 is 4.9:1 and #B25000 4.7:1 on the lightest grounds; the old amber was 2.4:1 there. */
-.pip-report, .pip-report-group, .pips-digest-severity { --sev-high: #FF453A; --sev-medium: #FFD60A; }
+.pip-report, .pip-report-group, .pips-digest-severity { --sev-high: #FF453A; --sev-medium: #FFD60A; --sev-good: #30D158; }
 body.vscode-light :is(.pip-report, .pip-report-group, .pips-digest-severity),
-body.vscode-high-contrast-light :is(.pip-report, .pip-report-group, .pips-digest-severity) { --sev-high: #D70015; --sev-medium: #B25000; }
+body.vscode-high-contrast-light :is(.pip-report, .pip-report-group, .pips-digest-severity) { --sev-high: #D70015; --sev-medium: #B25000; --sev-good: #248A3D; }
 /* One size for a Pip's face wherever a report shows it, the size of the faces stacked on a group's line (reported 8 Nov:
    a clean run's face was smaller than the rest, a full card's larger). */
 .pip-report-face, .pip-report-face .dgc-plush { display: block; flex: none; width: var(--pip-report-face); height: var(--pip-report-face); }
@@ -3192,17 +3192,32 @@ body.vscode-high-contrast-light :is(.pip-report, .pip-report-group, .pips-digest
   overflow-wrap: anywhere; }
 /* A live-data Pip's summary (Pips API 60) is a sentence, not a saved error: the chat's text, not code. */
 .pip-report-detail.pip-report-summary { color: var(--text); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
-.pip-report-findings { display: grid; gap: 2px; margin: var(--sp-2) 0 0; padding: 0; list-style: none; }
-.pip-report-findings li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); min-width: 0;
-  font: var(--w-reg) var(--t-xs)/1.5 var(--sans); color: var(--text); }
-.pip-report-sev { flex: none; min-width: 4.5em; color: var(--muted); font-weight: var(--w-semi); }   /* "High": sentence case (ui-04) */
-.pip-report-sev[data-severity="critical"], .pip-report-sev[data-severity="high"],
-.pip-report-sev[data-severity="failed"] { color: var(--sev-high); }
-.pip-report-sev[data-severity="medium"] { color: var(--sev-medium); }
-.pip-report-title { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; }
-/* Where, in words ("gst.py, line 88") in the card's own font; the exact place is under Show the code. --muted, not
-   --faint: --faint is VS Code's disabled colour, too pale to read in the light themes. */
-.pip-report-where { flex: 0 1 auto; min-width: 0; color: var(--muted); font-family: var(--sans); overflow-wrap: anywhere; }
+/* The findings, a short list to read (asked 13 Nov: "they do not look good, make it better and cleaner"): each is its
+   severity as a small quiet mark, what was found, and where. In a card with room that is one row; in a narrow one the
+   finding reads first and its mark and place sit under it, so nothing is squeezed into a column of three words. */
+.pip-report-findings { display: grid; gap: var(--sp-1); margin: var(--sp-2) 0 0; padding: 0; list-style: none; }
+.pip-report-findings li { display: grid; grid-template-columns: 5.75em minmax(0, 1fr) auto; align-items: baseline; column-gap: var(--sp-2); min-width: 0;
+  font: var(--w-reg) var(--t-sm)/1.45 var(--sans); color: var(--text); }
+.pip-report-findings li[hidden] { display: none; }
+/* Severity is a dot and a quiet word ("High", sentence case: ui-04), never a coloured slab: the colour is the dot's alone. */
+.pip-report-sev { flex: none; display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font-weight: var(--w-reg); white-space: nowrap; }
+.pip-report-sev::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+.pip-report-sev[data-severity=""] { display: none; }
+.pip-report-sev[data-severity="critical"]::before, .pip-report-sev[data-severity="high"]::before,
+.pip-report-sev[data-severity="failed"]::before { background: var(--sev-high); }
+.pip-report-sev[data-severity="medium"]::before { background: var(--sev-medium); }
+.pip-report-sev[data-severity="low"]::before { background: transparent; box-shadow: inset 0 0 0 1px var(--muted); }
+@media (forced-colors: active) { .pip-report .pip-report-sev[data-severity]::before { forced-color-adjust: none; background: CanvasText; box-shadow: none; } }
+.pip-report-title { min-width: 0; overflow-wrap: anywhere; }
+/* Where, in words ("gst.py, line 88") in the card's own font: a link that opens the file at that line, drawn as the
+   quiet links of a fix's row are (an underline, no purple). The whole path is its title. --muted, not --faint:
+   --faint is VS Code's disabled colour, too pale to read in the light themes. */
+.pip-report-where { flex: 0 1 auto; min-width: 0; color: var(--muted); font-family: var(--sans); overflow-wrap: anywhere; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--btn-line); border-radius: 2px; }
+.pip-report-where:hover { color: var(--text); text-decoration-color: currentColor; }
+.pip-report-where:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+/* "Show all 7": the small outline button at the width of its words (button.link), under the first three findings. */
+.pip-report-main > button.link.pip-report-all { display: block; margin: var(--sp-2) 0 0; }
 /* The code and the technical words, one quiet click away: a failure's detail and the findings' exact places. */
 .pip-report-code { margin: var(--sp-1) 0 0; }
 .pip-report-code > summary { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); cursor: pointer; list-style: none; border-radius: var(--r-sm); }
@@ -3211,9 +3226,8 @@ body.vscode-high-contrast-light :is(.pip-report, .pip-report-group, .pips-digest
 .pip-report-code[open] > summary::before { transform: rotate(90deg); }
 .pip-report-code > summary:hover { color: var(--text); }
 .pip-report-code > summary:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
-.pip-report-places { display: grid; gap: 2px; margin: var(--sp-1) 0 0; padding: 0; list-style: none; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--mono); overflow-wrap: anywhere; }
 .pip-report-more { margin: var(--sp-1) 0 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
-.pip-report-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }
+.pip-report-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-3); }
 .pip-report-actions button.act.pip-report-fix { border-color: transparent; background: transparent; color: var(--accent-text); font-weight: var(--w-semi); }
 .pip-report-actions button.act.pip-report-fix:hover { background: var(--surface2); }
 .pip-report.quiet .pip-report-actions { margin-top: 0; gap: var(--sp-1); }
@@ -3241,10 +3255,12 @@ body.vscode-high-contrast-light :is(.pip-report, .pip-report-group, .pips-digest
    like 100 still took a fraction of a pixel from it, enough for an ellipsis. */
 .pip-report-line-name { flex: 0 9999 auto; min-width: 4em; overflow: hidden; text-overflow: ellipsis; color: var(--text-strong); font-weight: var(--w-semi); }
 .pip-report-line-state { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }   /* shortens before a button leaves the card */
-.pip-report-line-state[data-bad] { color: var(--sev-high); font-weight: var(--w-semi); }
-.pip-report-line-state[data-good] { color: var(--good); font-weight: var(--w-semi); }   /* "fixed · nothing found" */
-body.vscode-light .pip-report-line-state[data-good] { color: #1D7A44; }   /* --good is 2.1:1 on light; this is 5.4:1 */
-/* "failed", "failed again" and the "why" label: --del-text is 2.8:1 on a light side bar; this red is 6.5:1. */
+/* What it found is said in the card's own ink, never in red bold (asked 13 Nov: calm): a run that needs you reads in the
+   text colour, a clean one in the quiet grey, and the one colour on the card is the dot before its worst finding. "fixed"
+   keeps a small green dot (a mark, 3:1 on every ground: Apple's own greens, as the severities are Apple's reds). */
+.pip-report-line-state[data-bad] { color: var(--text); }
+.pip-report-line-state[data-good]::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--sev-good); vertical-align: 1px; }
+@media (forced-colors: active) { .pip-report-line-state[data-good]::before { forced-color-adjust: none; background: CanvasText; } }
 
 .pip-report-fill { flex: 1 1 0; min-width: 0; }
 .pip-report-line-when { flex: none; color: var(--muted); font-size: var(--t-xs); font-variant-numeric: tabular-nums; }
@@ -3253,24 +3269,29 @@ body.vscode-light .pip-report-line-state[data-good] { color: #1D7A44; }   /* --g
 .pip-report-group[data-shown="open"] > .pip-report-group-head .pip-report-chevron { transform: rotate(90deg); }
 .pip-report-line2 { margin-top: 1px; font: var(--w-reg) var(--t-xs)/1.5 var(--sans); }
 .pip-report-line2 .pip-report-sev { min-width: 0; }
+/* A failure's line says why after its dot; the word "Why" is for a screen reader. */
+.pip-report-line2 .pip-report-sev[data-severity="failed"] { align-self: center; font-size: 0; gap: 0; }
 .pip-report-line-what { flex: 0 1 auto; min-width: 3em; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
-.pip-report-line2 .pip-report-where { flex: 0 10 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
-.pip-report-slim-actions { flex: none; display: inline-flex; align-items: center; gap: 2px; }
-/* Open and ✕ are 22 px outline chips; Fix is the one accent on the card, as text (ui-04, U10). */
-.pip-report-slim-actions button { min-height: 0; height: 22px; padding: 0 7px; border: 1px solid var(--border); border-radius: var(--r-sm);
-  background: transparent; color: var(--text); font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer;
-  display: inline-flex; align-items: center; }
-.pip-report-slim-actions :is(.pip-report-fix-slim, .pip-report-signin-slim) { border-color: transparent; color: var(--accent-text); font-weight: var(--w-semi); }
-.pip-report-slim-actions button:hover { border-color: var(--border-strong); background: var(--surface2); }
-.pip-report-slim-actions button:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
-.pip-report-slim-actions .pip-report-dismiss-slim { width: 22px; padding: 0; justify-content: center; color: var(--muted); }
-.pip-report-slim-actions .pip-report-dismiss-slim .codicon { font-size: 12px; }
-.pip-report-slim-actions .asked { color: var(--muted); font-weight: var(--w-reg); cursor: default; }
-.pip-report-slim-actions .asked:hover { border-color: transparent; background: transparent; }
+/* (The place keeps its words, up to two fifths of the line: the finding's own words shorten first.) */
+.pip-report-line2 .pip-report-where { flex: 0 0 auto; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
+.pip-report-slim-actions { flex: none; display: inline-flex; align-items: center; gap: var(--sp-1); }
+/* Fix and Open are DGC's small button (the shared button's section, further down): Fix the one filled answer, Open an outline.
+   Dismiss is a ✕ at the end of the card's first line, closed and opened: a mark in the button's corner and height, with
+   no box until it is pointed at. */
+.pip-report-slim-actions button { font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; }
+.pip-report-dismiss-slim { flex: none; align-self: center; display: inline-grid; place-items: center; box-sizing: border-box; width: var(--btn-h-sm); height: var(--btn-h-sm); min-height: 0; margin: -2px 0; padding: 0;
+  border: 1px solid transparent; border-radius: var(--btn-r); background: transparent; color: var(--muted); cursor: pointer; transition: var(--btn-move); }
+.pip-report-dismiss-slim .codicon { font-size: 12px; }
+.pip-report-dismiss-slim:hover { border-color: var(--btn-line); background: var(--btn-wash); color: var(--text); }
+.pip-report-dismiss-slim:focus-visible { outline: var(--btn-ring); outline-offset: 1px; }
+/* Asked: the card says so in one quiet line where Fix was (asked 13 Nov), not as a greyed-out filled button. */
+.pip-report .pip-report-slim-actions button.pip-report-fix-slim.asked, .pip-report .pip-report-actions button.act.pip-report-fix.asked,
+.pip-report .pip-report-slim-actions button.pip-report-fix-slim.asked:hover, .pip-report .pip-report-actions button.act.pip-report-fix.asked:hover {
+  width: auto; padding: 0 2px; border-color: transparent; background: transparent; color: var(--muted); font-weight: var(--w-reg); opacity: 1; cursor: default; transform: none; }
 /* Closed: the long parts stay out of sight. Open: line two goes, the whole card shows (its name and time are line one's). */
 .pip-report.slim[data-shown="closed"] .pip-report-head, .pip-report.slim[data-shown="closed"] .pip-report-findings,
 .pip-report.slim[data-shown="closed"] .pip-report-more, .pip-report.slim[data-shown="closed"] .pip-report-detail,
-.pip-report.slim[data-shown="closed"] .pip-report-code,
+.pip-report.slim[data-shown="closed"] .pip-report-code, .pip-report.slim[data-shown="closed"] .pip-report-main > button.link.pip-report-all,
 .pip-report.slim[data-shown="closed"] > .pip-report-main > .pip-report-actions { display: none; }
 .pip-report.slim[data-shown="open"] .pip-report-line2,
 .pip-report.slim:not(.quiet)[data-shown="open"] .pip-report-line1 .pip-report-slim-actions { display: none; }
@@ -3285,6 +3306,33 @@ body.vscode-light .pip-report-line-state[data-good] { color: #1D7A44; }   /* --g
   .pip-report-line1 .pip-report-line-when, .pip-report.slim.quiet .pip-report-open-slim { display: none; }
   .pip-report.slim[data-shown="open"] .pip-report-main .pip-report-head .pip-report-when { display: inline; }
   .pip-report.slim.quiet[data-shown="open"] > .pip-report-main > .pip-report-actions { display: flex; }
+  /* A narrow card reads down, not across (asked 13 Nov: a name cut to "GST watch…" beside red words, then four ragged
+     rows). The Pip's name has the first row to itself, whole (two lines at most), with ✕ and the chevron; what it found is
+     the row under it; then the worst finding in whole words (two lines at most) after its dot; then Fix and Open. Its
+     place is in the opened card. */
+  .pip-report-line1 { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; column-gap: 4px; white-space: normal; }
+  .pip-report-line1 > .pip-report-fill, .pip-report-line2 > .pip-report-fill, .pip-report-line2 > .pip-report-where { display: none; }
+  .pip-report-line1 > .pip-report-line-name { grid-column: 1; min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; }
+  .pip-report-line1 > .pip-report-line-state { grid-column: 1 / -1; grid-row: 2; white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+  .pip-report-line1 > .pip-report-slim-actions { display: none; }
+  .pip-report-line1 > .pip-report-dismiss-slim { grid-row: 1; grid-column: 2; margin: -3px 0 -4px; }
+  /* (and the face sits beside the name, at the top: a card that reads down has no middle line to sit on) */
+  .pip-report.slim:not(.quiet) > .pip-report-face, .pip-report.slim.quiet[data-shown="open"] > .pip-report-face { align-self: flex-start; margin-top: 0; }
+  .pip-report-line1 > .pip-report-chevron { grid-row: 1; grid-column: 3; align-self: start; margin-top: 2px; }
+  .pip-report-line2 { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 6px 0; margin-top: 3px; white-space: normal; }
+  .pip-report-line2 > .pip-report-sev, .pip-report-line2 > .pip-report-sev[data-severity="failed"] { grid-column: 1; align-self: start; height: calc(var(--t-xs) * 1.5); margin-right: 6px; font-size: 0; gap: 0; }
+  .pip-report-line2 > .pip-report-line-what { grid-column: 2; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; }
+  .pip-report-line2 > .pip-report-slim-actions { grid-column: 2; justify-self: start; gap: var(--sp-1); }
+  /* Opened, the report has the card's whole width under its first line (the face keeps its place beside the name). */
+  .pip-report.slim[data-shown="open"] > .pip-report-main > :not(.pip-report-line1):not(.pip-report-line2) { margin-left: calc(-1 * (var(--pip-report-face) + 10px)); }
+  .pip-report.slim.quiet[data-shown="open"] > .pip-report-main > .pip-report-actions { margin-top: var(--sp-2); margin-bottom: var(--sp-1); }
+  .pip-report.slim[data-shown="open"] .pip-report-main .pip-report-head .pip-report-when { margin-left: 0; }
+  .pip-report.slim[data-shown="open"] .pip-report-main > .pip-report-head { margin-top: 6px; }   /* (clear of the face and ✕ above it) */
+  .pip-report-findings { gap: var(--sp-2); }
+  .pip-report-findings li { grid-template-columns: auto minmax(0, 1fr); column-gap: var(--sp-2); row-gap: 1px; }
+  .pip-report-findings li > .pip-report-title { grid-column: 1 / -1; grid-row: 1; }
+  .pip-report-findings li > .pip-report-sev { grid-column: 1; grid-row: 2; font-size: var(--t-xs); }
+  .pip-report-findings li > .pip-report-where { grid-column: 2; grid-row: 2; justify-self: start; font-size: var(--t-xs); }
 }
 /* Opened, a card says its state once (0.51 check: an opened clean card read "nothing found" and, under it, "finished ·
    nothing found"): the first line keeps the Pip's name, and the sentence under it says what happened, whole. */
@@ -3293,15 +3341,16 @@ body.vscode-light .pip-report-line-state[data-good] { color: #1D7A44; }   /* --g
    waits in the opened card (Open report), as a clean card's does above; and narrower than that the face gives its room
    to the words and the buttons. */
 @container pip-report (max-width: 215px) { .pip-report.slim:not(.quiet) .pip-report-open-slim { display: none; } }
-@container pip-report (max-width: 165px) { .pip-report.slim > .pip-report-face { display: none; } }
+@container pip-report (max-width: 165px) { .pip-report.slim > .pip-report-face { display: none; }
+  .pip-report.slim[data-shown="open"] > .pip-report-main > :not(.pip-report-line1):not(.pip-report-line2) { margin-left: 0; } }
 /* Three or more together: one line until opened. */
 .pip-report-group { display: flex; flex-direction: column; min-width: 0; margin: 0; border: 1px solid var(--border);
-  border-radius: var(--r-md); background: var(--surface); }
+  border-radius: var(--r-card); background: var(--surface); overflow: clip; }
 .pip-report-group-head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; width: 100%; padding: 5px var(--sp-3);
-  border: 0; border-radius: var(--r-md); background: transparent; color: var(--text); font: var(--w-reg) var(--t-sm)/1.45 var(--sans);
-  text-align: left; white-space: nowrap; cursor: pointer; }
+  border: 0; border-radius: 0; background: transparent; color: var(--text); font: var(--w-reg) var(--t-sm)/1.45 var(--sans);
+  text-align: left; white-space: nowrap; cursor: pointer; }   /* (the group's own corner clips its wash: the line has none) */
 .pip-report-group-head:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
-.pip-report-group-head:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+.pip-report-group-head:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -3px; border-radius: var(--btn-r); }
 .pip-report-group-faces { flex: none; display: inline-flex; }
 .pip-report-group-faces > span { display: block; width: var(--pip-report-face); height: var(--pip-report-face); margin-left: -6px; border-radius: 50%; }
 .pip-report-group-faces > span:first-child { margin-left: 0; }
@@ -3310,8 +3359,11 @@ body.vscode-light .pip-report-line-state[data-good] { color: #1D7A44; }   /* --g
 .pip-report-group-title b { color: var(--text-strong); font-weight: var(--w-semi); }
 .pip-report-group-head .pip-report-line-when { margin-left: auto; }
 .pip-report-group[data-shown="closed"] > .pip-report { display: none; }
+/* (In a narrow side bar the line keeps its words, "2 Pip reports · 11 findings": its time is on each report under it.) */
+.pip-report-group { container: pip-report-group / inline-size; }
+@container pip-report-group (max-width: 330px) { .pip-report-group-head .pip-report-line-when { display: none; } }
 .pip-report-group > .pip-report.slim { margin: 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; }
-.pip-report-group > .pip-report.slim:last-child { border-radius: 0 0 var(--r-md) var(--r-md); }
+.pip-report-group > .pip-report.slim:last-child { border-radius: 0 0 var(--r-card) var(--r-card); }
 /* Rows of a group are stacked by their own top border. `.pip-report.slim + .pip-report.slim` pulls a standalone card up
    12px so two cards' borders meet; it outranked the `margin: 0` above, and an opened group's rows sat on top of each
    other (reported 25 Oct). */
@@ -3341,6 +3393,7 @@ body.vscode-light .pip-report-line-state[data-good] { color: #1D7A44; }   /* --g
 .pip-fix-totals, .pip-fix-counts { display: inline-flex; gap: 4px; flex: none; }
 .pip-fix-time { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
 .pip-fix-actions { flex: none; display: inline-flex; align-items: center; gap: 2px; }
+.pip-fix-end { flex: none; display: inline-flex; align-items: center; gap: 6px; }
 .pip-fix-act { min-height: 0; height: 20px; padding: 0 6px; border: 1px solid transparent; border-radius: var(--r-sm);
   background: transparent; color: var(--link, var(--accent-text)); font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; }
 .pip-fix-act:hover:not(:disabled) { border-color: var(--border-strong); background: var(--surface2); }
@@ -3754,7 +3807,6 @@ button.link:disabled, .pip-report-slim-actions button:disabled, .pip-report.quie
 .pip-fix-act:disabled { opacity: .55; cursor: default; }
 :is(.artifact, .card) .abtn:not(.dgc-doc-open):disabled { border-color: var(--btn-line); background: transparent; color: var(--btn-text); }
 .pip-fix-act { font-size: inherit; }
-.pip-report-slim-actions button.pip-report-dismiss-slim { width: var(--btn-h-sm); padding: 0; }   /* (its ✕: a mark, as wide as it is high) */
 /* ("Check sign-in" and a clean card's "Open report" do not fit the small box: the small size's wide, never an ellipsis;
    Dismiss beside Open report takes it too, so the two stay one size. In a card too narrow even for that, Check sign-in
    gives way before ✕ leaves the card.) */
@@ -3769,7 +3821,6 @@ button.link:disabled, .pip-report-slim-actions button:disabled, .pip-report.quie
   button.act.primary, :is(.artifact, .card) .abtn.primary:not(.dgc-doc-open), .ask-act.primary, .open-ask-send, #sessions-host .home-new { forced-color-adjust: none; border-color: ButtonText; background: ButtonText; color: ButtonFace; }
 }
 /* (A narrow report card: its answers keep their size and go under its words when the two do not fit on one line.) */
-@container pip-report (max-width: 330px) { .pip-report-line2 { flex-wrap: wrap; row-gap: 3px; } .pip-report-line2 .pip-report-slim-actions { margin-left: auto; } }
 /* (Under an open question in a narrow panel, Skip and Send share what is left of the row, equally.) */
 .open-ask-send, .open-ask-skip { flex: 0 1 var(--btn-w); width: auto; }
 /* (Two places keep a width of their own: the agent map card's Open transcript fills the card, and a helper row's Run in

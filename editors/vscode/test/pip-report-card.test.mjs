@@ -51,9 +51,11 @@ test("a report is a card in the transcript: the Pip, what it found, the worst fi
   assert.deepEqual([...card.querySelectorAll(".pip-report-findings li")].map((li) => li.textContent),
     ["HighGST total skips cessgst.py, line 88", "HighInvoice push retries foreverpush.py, line 40",
      "MediumRounding drops paisebilling.py, line 12"], "in words: severity in sentence case, the place as words (ui-04)");
-  assert.equal(card.querySelector(".pip-report-more").textContent, "2 more in the report · 1 earlier run not shown");
+  // (13 Nov polish: the rest of the findings are behind "Show all 5", a button; Dismiss is the ✕ on the first line.)
+  assert.equal(card.querySelector(".pip-report-all").textContent, "Show all 5");
+  assert.equal(card.querySelector(".pip-report-more").textContent, "1 earlier run not shown");
   assert.deepEqual([...card.querySelectorAll(".pip-report-actions button")].map((b) => b.textContent),
-    ["Ask DGC to fix", "Open report", "Dismiss"]);
+    ["Ask DGC to fix", "Open report"]);
   assert.match(card.getAttribute("aria-label"), /ERP daily audit: finished · 5 findings/);
   assert.deepEqual(s.errors, []);
 });
@@ -128,7 +130,7 @@ test("a clean run is one quiet line with no fix to ask for", () => {
   assert.ok(card.classList.contains("quiet"));
   assert.equal(card.querySelector(".pip-report-state").textContent, "finished · nothing found");
   assert.equal(card.querySelector(".pip-report-fix, .pip-report-fix-slim"), null, "no fix to ask for");
-  assert.deepEqual([...card.querySelectorAll(".pip-report-slim-actions button")].map((b) => b.textContent || b.getAttribute("aria-label")),
+  assert.deepEqual([...card.querySelectorAll(".pip-report-line1 button")].map((b) => b.textContent || b.getAttribute("aria-label")),
     ["Open", "Dismiss"], "its one line carries Open and ✕");
   assert.equal(card.querySelector(".pip-report-line2"), null, "one line");
 });
@@ -146,7 +148,8 @@ test("a report is two lines until opened: what it found, then the worst finding 
   assert.equal(line2.querySelector(".pip-report-line-what").textContent, "GST total skips cess");
   assert.equal(line2.querySelector(".pip-report-where").textContent, "gst.py, line 88");
   assert.equal(line2.querySelector(".pip-report-where").title, "app/gst.py:88", "the exact place in its title");
-  assert.deepEqual([...line2.querySelectorAll("button")].map((b) => b.textContent || b.getAttribute("aria-label")), ["Fix", "Open", "Dismiss"]);
+  assert.deepEqual([...line2.querySelectorAll("button")].map((b) => b.textContent || b.getAttribute("aria-label")), ["Fix", "Open"]);
+  assert.deepEqual([...line1.querySelectorAll("button")].map((b) => b.getAttribute("aria-label")), ["Dismiss"], "✕ ends the first line, closed and opened (13 Nov polish)");
   line1.click();
   assert.equal(card.dataset.shown, "open", "a click opens the whole card");
   assert.equal(line1.getAttribute("aria-expanded"), "true");
@@ -211,7 +214,7 @@ test("Open report opens the Pips view at that run", () => {
 test("Dismiss removes the card and tells the backend; the saved chat no longer has it", () => {
   const s = panel();
   s.event({ type: "pip_report", report: REPORT });
-  cards(s)[0].querySelector(".pip-report-dismiss").click();
+  cards(s)[0].querySelector(".pip-report-dismiss-slim").click();
   assert.equal(cards(s).length, 0);
   assert.equal(JSON.stringify(s.posted.filter((m) => m.type === "pipReportDismiss")), JSON.stringify([{ type: "pipReportDismiss", run_id: RUN }]));
   // The backend saves it dismissed, so a reopened chat's history leaves it out.
@@ -225,7 +228,7 @@ test("Dismiss is not sent to a backend that cannot save it", () => {
   const s = makeDom();
   s.send({ type: "event", event: { type: "ready", capabilities: {}, model: "m" } });
   s.send({ type: "event", event: { type: "pip_report", report: REPORT } });
-  s.doc.querySelector(".pip-report-dismiss").click();
+  s.doc.querySelector(".pip-report-dismiss-slim").click();
   assert.equal(s.posted.some((m) => m.type === "pipReportDismiss"), false);
 });
 
@@ -301,25 +304,97 @@ test("a report whose model said which findings are new says \"1 new · 2 still t
 
 // The plan's Pip report card (ui-04, U10): it reads in words, the code is one quiet click away under "Show the code",
 // and Fix is the card's one accent, as text.
-test("opened, a report reads in words; the code is under Show the code; Fix is accent text, not a filled button", () => {
+// 13 Nov polish: a finding's place is a link that opens the file at that line, so the list of exact paths that sat
+// under "Show the code" went (each link's title is the exact path). A failure's saved error is still under it.
+test("opened, a report reads in words: each place is a link with the exact path in its title; a failure's code is under Show the code", () => {
   const s = panel();
   s.event({ type: "pip_report", report: REPORT });
   const [card] = cards(s);
-  const code = card.querySelector("details.pip-report-code");
-  assert.ok(code, "the code is in the card");
-  assert.equal(code.open, false, "closed until asked for");
-  assert.equal(code.querySelector("summary").textContent, "Show the code");
-  assert.deepEqual([...code.querySelectorAll(".pip-report-places li")].map((li) => li.textContent),
-    ["app/gst.py:88", "app/push.py:40", "app/billing.py:12"], "the exact places, in the order of the findings");
+  assert.equal(card.querySelector("details.pip-report-code"), null, "findings have no code to fold away");
   assert.equal(card.querySelector(".pip-report-findings").textContent.includes("app/"), false, "the findings themselves read as words");
-  code.querySelector("summary").click();
-  assert.equal(code.open, true, "the summary opens it");
-  assert.equal(card.dataset.shown, "closed", "opening the code never folds or opens the card");
+  assert.deepEqual([...card.querySelectorAll(".pip-report-findings .pip-report-where")].map((a) => [a.textContent, a.title, a.getAttribute("role"), a.tabIndex]),
+    [["gst.py, line 88", "app/gst.py:88", "link", 0], ["push.py, line 40", "app/push.py:40", "link", 0], ["billing.py, line 12", "app/billing.py:12", "link", 0]]);
   const fix = card.querySelector(".pip-report-actions .pip-report-fix");
-  assert.equal(fix.classList.contains("primary"), false, "Ask DGC to fix is accent text");
+  assert.equal(fix.classList.contains("primary"), false);
   const failed = panel();
   failed.event({ type: "pip_report", report: FAILED });
-  const detail = cards(failed)[0].querySelector("details.pip-report-code .pip-report-detail");
-  assert.equal(detail?.textContent, FAILED.detail, "a failure's technical detail is under Show the code too");
+  const code = cards(failed)[0].querySelector("details.pip-report-code");
+  assert.equal(code.open, false, "closed until asked for");
+  assert.equal(code.querySelector("summary").textContent, "Show the code");
+  assert.equal(code.querySelector(".pip-report-detail")?.textContent, FAILED.detail, "a failure's technical detail is under Show the code");
+  code.querySelector("summary").click();
+  assert.equal(code.open, true, "the summary opens it");
+  assert.equal(cards(failed)[0].dataset.shown, "closed", "opening the code never folds or opens the card");
   assert.deepEqual([...s.errors, ...failed.errors], []);
+});
+
+// ---- 13 Nov polish ("the Pips cards that come in work sessions needs UI polish ... better and cleaner") ----
+test("a finding's place opens the file at that line, by a click or Enter, and never folds the card", () => {
+  const s = panel();
+  s.event({ type: "pip_report", report: REPORT });
+  const [card] = cards(s);
+  const opens = () => s.posted.filter((m) => m.type === "openFile");
+  card.querySelector(".pip-report-line2 .pip-report-where").click();
+  assert.equal(JSON.stringify(opens()), JSON.stringify([{ type: "openFile", path: "app/gst.py", line: 88 }]), "the closed card's place");
+  assert.equal(card.dataset.shown, "closed", "the click is the link's, not the card's");
+  card.querySelector(".pip-report-line1").click();
+  const second = card.querySelectorAll(".pip-report-findings .pip-report-where")[1];
+  second.dispatchEvent(new s.dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(JSON.stringify(opens()[1]), JSON.stringify({ type: "openFile", path: "app/push.py", line: 40 }), "Enter on a place in the opened card");
+  assert.equal(card.dataset.shown, "open");
+  // A finding with no line opens its file; one with no file has no link.
+  const t = panel();
+  t.event({ type: "pip_report", report: { ...REPORT, total: 2, findings: [{ title: "No line", severity: "low", path: "docs/a.md" }, { title: "No file", severity: "low" }] } });
+  const links = [...cards(t)[0].querySelectorAll(".pip-report-findings .pip-report-where")];
+  assert.deepEqual(links.map((a) => a.textContent), ["a.md"]);
+  links[0].click();
+  assert.equal(JSON.stringify(t.posted.filter((m) => m.type === "openFile")), JSON.stringify([{ type: "openFile", path: "docs/a.md" }]));
+  assert.deepEqual([...s.errors, ...t.errors], []);
+});
+
+test("long findings fold: three in sight, the rest behind Show all 7, and back", () => {
+  const seven = Array.from({ length: 7 }, (_, i) => ({ title: `Finding ${i + 1}`, severity: i < 2 ? "high" : "medium", path: `app/f${i + 1}.py`, line: i + 1 }));
+  const s = panel();
+  s.event({ type: "pip_report", report: { ...REPORT, earlier: 0, total: 7, counts: { high: 2, medium: 5 }, findings: seven } });
+  const [card] = cards(s);
+  const seen = () => [...card.querySelectorAll(".pip-report-findings li")].filter((li) => !li.hidden).map((li) => li.querySelector(".pip-report-title").textContent);
+  const all = card.querySelector(".pip-report-all");
+  assert.deepEqual(seen(), ["Finding 1", "Finding 2", "Finding 3"]);
+  assert.deepEqual([all.textContent, all.getAttribute("aria-expanded")], ["Show all 7", "false"]);
+  all.click();
+  assert.equal(seen().length, 7, "all seven, in the card");
+  assert.deepEqual([all.textContent, all.getAttribute("aria-expanded")], ["Show fewer", "true"]);
+  assert.equal(card.dataset.shown, "closed", "the button never folds or opens the card itself");
+  all.click();
+  assert.deepEqual([seen().length, all.textContent], [3, "Show all 7"]);
+  // Three or fewer: nothing to fold, no button.
+  const few = panel();
+  few.event({ type: "pip_report", report: { ...REPORT, total: 3 } });
+  assert.equal(cards(few)[0].querySelector(".pip-report-all"), null);
+  assert.deepEqual([...s.errors, ...few.errors], []);
+});
+
+test("a card that was given fewer findings than the report holds: Show all 5 opens the report, where all of them are", () => {
+  const s = panel();
+  const navigated = [];
+  s.dom.window.DgcPips = { mount: () => ({ navigate: (value) => navigated.push(value), setVisible() {} }) };
+  s.event({ type: "pip_report", report: REPORT });      // three of its five findings
+  const all = cards(s)[0].querySelector(".pip-report-all");
+  assert.equal(all.textContent, "Show all 5");
+  assert.equal(all.hasAttribute("aria-expanded"), false, "it opens the report: nothing unfolds here");
+  all.click();
+  assert.equal(JSON.stringify(navigated), JSON.stringify([{ pip: PIP, section: "runs", run: RUN }]));
+  assert.equal(cards(s)[0].querySelectorAll(".pip-report-findings li").length, 3);
+  assert.deepEqual(s.errors, []);
+});
+
+test("a card has one Dismiss, the ✕ on its first line, and at most one filled answer", () => {
+  const s = panel();
+  for (const report of [REPORT, FAILED, CLEAR]) { s.event({ type: "pip_report", report }); s.event({ type: "info", message: "between" }); }
+  for (const card of cards(s)) {
+    const dismiss = [...card.querySelectorAll("button")].filter((b) => /dismiss/i.test(`${b.textContent} ${b.getAttribute("aria-label") || ""}`));
+    assert.deepEqual(dismiss.map((b) => [b.className, b.parentElement.className]), [["pip-report-dismiss-slim", "pip-report-line1"]], card.dataset.outcome);
+    assert.ok(card.querySelectorAll(".pip-report-actions .pip-report-fix, .pip-report-actions .primary").length <= 1);
+  }
+  assert.deepEqual(s.errors, []);
 });

@@ -86,7 +86,8 @@ test("a card whose prompt was sent stays; the newer card comes in beside it", ()
   assert.equal(posted(s, "prompt").length, 1, "its prompt went to the chat");
   s.event({ type: "pip_report", report: findingsAt("c", EVENING) });
   assert.deepEqual(cards(s).map((c) => c.dataset.run), [run("a"), run("c")]);
-  assert.equal(cards(s)[1].querySelector(".pip-report-more").textContent.includes("Earlier"), false, "it replaced nothing");
+  // (the line is there only when it has something to say: "N more in the report" became the Show all button, 13 Nov polish)
+  assert.equal((cards(s)[1].querySelector(".pip-report-more")?.textContent || "").includes("Earlier"), false, "it replaced nothing");
 });
 
 test("a card with a fix started from it stays: its card is the fix's status", () => {
@@ -141,9 +142,9 @@ test("a refused key or sign-in offers Check sign-in, which opens Settings at Mod
   const [card] = cards(s);
   assert.equal(card.querySelector(".pip-report-fix, .pip-report-fix-slim"), null, "nothing in the project to fix");
   assert.deepEqual([...card.querySelectorAll(".pip-report-slim-actions button")].map((b) => b.textContent || b.getAttribute("aria-label")),
-    ["Check sign-in", "Dismiss"], "beside the wider Check sign-in only ✕: it fits a 300 px side bar");
+    ["Check sign-in"], "the line under its name keeps only Check sign-in: it fits a 300 px side bar (✕ is on the first line, 13 Nov polish)");
   assert.deepEqual([...card.querySelectorAll(".pip-report-actions button")].map((b) => b.textContent),
-    ["Check sign-in", "Open report", "Dismiss"]);
+    ["Check sign-in", "Open report"]);
   const before = s.posted.length;
   card.querySelector(".pip-report-signin-slim").click();
   assert.deepEqual(posted(s, "openSettings", before), [{ type: "openSettings", section: "models" }]);

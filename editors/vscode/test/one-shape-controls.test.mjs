@@ -12,6 +12,7 @@ import { openWorkTab } from "./support/work-tab-scene.mjs";
 import { openChat as openChatTab, conversation } from "./support/chat-scene.mjs";
 import { openChat as openPip } from "./support/pip-chat-scene.mjs";
 import { openRunningTurn, openPips, openSettingsGeneral } from "./support/codex-look-scene.mjs";
+import { openSheet } from "./support/pip-cards-polish-scene.mjs";
 
 let chromium;
 try { ({ chromium } = await import("@playwright/test")); } catch { chromium = null; }
@@ -170,6 +171,25 @@ for (const theme of ["dark-modern", "light-modern"]) {
       await c.send({ type: "opened", conversation: conversation({ title: "A week in Goa" }), earlier: 0, busy: false, messages: [] }); await settle(c.page);
       held(await walk(c.page, ROUND), "a ChatDGC chat");
     } finally { await c.page.close(); }
+    none();
+  });
+}
+// A Work chat with Pip report cards (asked 13 Nov: "the Pips cards that come in work sessions needs UI polish"): closed,
+// opened with every finding shown, two folded into one line and opened, one asked about, and a fix's row.
+for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 300]) {
+  test(`a Work chat with Pip report cards: closed, opened, grouped, asked and fixed (${theme}, ${width}px)`, async (t) => {
+    if (skipOrFail(t)) return;
+    const CONTROLS = "#log .pip-report button, #log .pip-report-group-head, #log .pip-report [role='button'], #log .pip-report [role='link']";
+    for (const sheet of ["cards", "opened", "two-opened-card", "asked", "fixed"]) {
+      const page = await openSheet(browser, sheet, { width, theme });
+      try {
+        if (sheet === "opened") { await page.click("#log .pip-report .pip-report-all"); await settle(page); }
+        const found = await walk(page, ROUND);
+        assert.ok(await page.evaluate((sel) => [...document.querySelectorAll(sel)].filter((n) => n.checkVisibility()).length >= 3, CONTROLS), `${sheet}: the cards' controls are drawn`);
+        held(found, `report cards, ${sheet}`);
+        hoverHeld(await hoverWalk(page, CONTROLS, ROUND), `report cards, ${sheet}`);
+      } finally { await page.close(); }
+    }
     none();
   });
 }

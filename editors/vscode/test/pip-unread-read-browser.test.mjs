@@ -457,7 +457,7 @@ test("a project Pip's card in a Work chat, dismissed, closed or fixed, reads its
     await x.page.click(`.pip-report[data-run="run_${"2".repeat(32)}"] .pip-report-dismiss-slim`);
     await x.send({ type: "pip_report", report: report(3) });
     await x.page.click(`.pip-report[data-run="run_${"3".repeat(32)}"] .pip-report-line1`);
-    await x.page.click(`.pip-report[data-run="run_${"3".repeat(32)}"] .pip-report-dismiss`);
+    await x.page.click(`.pip-report[data-run="run_${"3".repeat(32)}"] .pip-report-dismiss-slim`);   // (opened, Dismiss is the same ✕: 13 Nov polish)
     assert.deepEqual(await reads(), [1, 2, 3].map((n) => ({ type: "pipReportRead", pip_id: AUDIT, run_id: "run_" + String(n).repeat(32) })));
     assert.equal(await x.page.evaluate(() => window.__posted.filter((m) => m.type === "pipReportDismiss").length), 2, "Dismiss is still saved with the chat");
     assert.deepEqual(x.errors, []);
