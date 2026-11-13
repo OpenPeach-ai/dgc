@@ -117,6 +117,7 @@ class Editor(unittest.TestCase):
             harness = Harness(Path(directory.name))
             self.addCleanup(harness.close)
             harness.config.data["router"] = {"enabled": False, "systems": []}
+            harness.agent.set_mode("default", persist=False)   # (auto mode changes it with no card since 13 Nov)
             harness.answer("permission_request", {"decision": "always"})   # an older editor's Always
             out = harness.agent._handle_call(ToolCall("u1", "router_update", {"action": "turn_on"}))
         self.assertTrue(out.startswith("Done: Turn DGC Router on."), out)

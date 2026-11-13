@@ -207,6 +207,7 @@ class Wired(unittest.TestCase):
                          {"action": "set_hardware", "system": "nas", "hardware_url": fake.url + "?token=dgcn_secret"}):
                 with self.subTest(args=args), self.assertRaises(T.UpdateError):
                     T.plan_update(self.config, args)
+            self.harness.agent.set_mode("default", persist=False)   # (auto mode changes it with no card since 13 Nov)
             self.harness.answer("permission_request", {"decision": "once"})
             out = self.harness.agent._handle_call(ToolCall("h1", "router_update", {
                 "action": "set_hardware", "system": "nas", "hardware_url": fake.url}))

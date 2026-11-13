@@ -37,6 +37,9 @@ DISPLAY = {
     "pips_workflow": "PipsWorkflow",
     "pips_propose": "PipsPropose",
     "pips_settings": "PipsSettings",
+    "dgc_settings": "DGCSettings",
+    "dgc_settings_read": "DGCSettingsRead",
+    "dgc_docs": "DGCDocs",
     "pips_setup": "PipsSetup",
     "pips_adapt": "PipsAdapt",
     "run_pip_now": "PipsRun",
@@ -104,6 +107,8 @@ READ_ONLY_TOOLS = {"read_file", "view_image", "show_file", "glob", "grep", "repo
                    # An artifact is DGC's own, kept in ~/.dgc/artifacts with every version: like present_document,
                    # nothing in the project changes, so no card. A deny rule (MakeArtifact) still applies.
                    "make_artifact", "edit_artifact",
+                   # DGC's own settings read and its docs (dgc/settings_tool.py): nothing changes.
+                   "dgc_settings_read", "dgc_docs",
                    # A wake-up (dgc/wakeups.py) only brings this chat back later; its turn asks for each thing as usual.
                    "wake_later", "wake_cancel",
                    "list_tasks", "wait_tasks",
@@ -131,10 +136,41 @@ READ_ONLY_TOOLS = {"read_file", "view_image", "show_file", "glob", "grep", "repo
                    "list_video_generators"}
 # A change to the DGC Router's settings, and a look for model servers on the user's network: the user's call in
 # every mode, auto included, with the exact change on the card. A deny rule still wins; an allow rule never skips it.
-ALWAYS_ASK_TOOLS = frozenset({"router_update", "router_find", "pips_workflow"})
+# (router_update left this list on 13 Nov 2026, his call: Router follows the same rule as every setting, so auto mode
+# changes it without a card and the other modes ask; its card still has no Always.)
+ALWAYS_ASK_TOOLS = frozenset({"router_find", "pips_workflow"})
 # A card with no Always: these and every video (an Always for videos is the user's own switch in Settings, per
 # generator, never a card's button).
-NO_ALWAYS_TOOLS = ALWAYS_ASK_TOOLS | {"generate_video"}
+NO_ALWAYS_TOOLS = ALWAYS_ASK_TOOLS | {"generate_video", "router_update"}
+SETTINGS_REDIRECT = ("DGC's own settings file is changed with dgc_settings, never edited directly: dgc_settings checks "
+                     "the change and gives the user Undo (DGC rewrites this file while it runs, so a direct edit can be "
+                     "lost or break it).")
+
+
+def _own_settings_file(tool: str, args: dict) -> bool:
+    """A file tool aimed at DGC's own settings (~/.dgc/config.json, secrets.json): every mode refuses it (his calls,
+    13 Nov: changes go through dgc_settings). The shell isn't policed: auto mode is full access."""
+    if tool not in EDIT_TOOLS or not isinstance(args, dict):
+        return False
+    from .config import USER_CONFIG, USER_SECRETS
+    own = set()
+    for path in (USER_CONFIG, USER_SECRETS):
+        own.add(str(path))
+        try:
+            own.add(str(Path(path).resolve(strict=False)))
+        except (OSError, RuntimeError):
+            pass
+    if tool == "apply_patch":
+        patch = str(args.get("patch") or args.get("input") or "")
+        return any(name in patch for name in own)
+    raw = args.get("path")
+    if not isinstance(raw, str) or not raw:
+        return False
+    try:
+        target = str(Path(raw).expanduser().resolve(strict=False))
+    except (OSError, RuntimeError):
+        target = raw
+    return target in own or raw in own
 EDIT_TOOLS = {"write_file", "edit_file", "multi_edit", "apply_patch"}
 # Ending a process the agent itself started. Allowed in every mode, plan included; a deny rule
 # still wins.
@@ -639,6 +675,9 @@ class PermissionEngine:
         if deny or ext_deny:
             r = deny or ext_deny
             return DENY, f"blocked by deny rule: {r.render()}" + (f" ({r.note})" if r.note else "")
+
+        if _own_settings_file(tool, args):
+            return DENY, SETTINGS_REDIRECT
 
         if policy_tool in STOP_TOOLS:
             return ALLOW, "stopping a process this agent started"

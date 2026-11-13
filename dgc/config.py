@@ -519,6 +519,7 @@ DEFAULTS: dict = {
     # Dev Mode (dgc/dev_mode.py): off, every capacity limit is today's; on, each in dev_limits is yours, no ceiling.
     "dev_mode": False,
     "dev_limits": {},
+    "dev_mode_tools": False,          # "Let DGC change Dev Mode settings": only the user turns it on (Settings › Dev Mode)
     "pips_model": "",                          # the model every Pip on Default uses, on DGC's own connection;
                                                #   "" follows DGC (its model, or its subscription CLI)
     "model_stall_notice_s": 45,                 # say "no response from the model" after this long; 0 = never

@@ -3323,6 +3323,7 @@ class Agent(GoalLifecycle):
         schemas = (TOOL_SCHEMAS + SUPERVISION_TOOL_SCHEMAS
                    + ([TROUPE_TOOL_SCHEMA] if self._troupe_exposed() else [])
                    + (self._router_tool_schemas() if self._router_tools_exposed() else [])
+                   + (self._settings_tool_schemas() if self._router_tools_exposed() else [])
                    + (self._image_tool_schemas() if self._image_tools_exposed() else [])
                    + (self._video_tool_schemas() if self._image_tools_exposed() else [])
                    + (ARTIFACT_TOOL_SCHEMAS if self._artifacts_exposed() else [])
@@ -3981,6 +3982,15 @@ class Agent(GoalLifecycle):
             return str(candidate.resolve()) in made
         except (OSError, ValueError):
             return False
+
+    def _settings_tool_schemas(self) -> list:
+        """DGC's own settings and docs (dgc/settings_tool.py): offered as the Router tools are (the agent the user
+        talks to; never a helper, never a session a launching application's policy governs). A wake turn, with nobody
+        at the keyboard, may read but not change."""
+        from .settings_tool import SCHEMAS
+        if getattr(self, "_monitor_turn", False):
+            return [tool for tool in SCHEMAS if tool["function"]["name"] != "dgc_settings"]
+        return list(SCHEMAS)
 
     def _router_tool_schemas(self) -> list:
         from .router_tools import SCHEMAS
@@ -5216,6 +5226,13 @@ class Agent(GoalLifecycle):
                "never create it again or infer that queued work succeeded. CLI users can use dgc pips setup show/accept. Never use shell, Python, "
                "SDK or acceptance commands to approve your own setup, clear global stop or bypass review."]
               if pips_on and self.depth == 0 and mode != "plan" else []),
+            *(["- DGC's own settings: when the user asks you to change one (a timeout, the model, a permission rule), "
+               "use dgc_settings, never an edit of DGC's settings file; say what changed (the user can undo it). When a "
+               "DGC limit stops what the user asked for, read dgc_settings_read once and tell them which setting would "
+               "raise it, its value now and what raising it costs, and how (Settings › Dev Mode; or you can change it if "
+               "they turn on Dev Mode and let DGC change its settings). Only for a limit they actually hit, once; never "
+               "turn on Dev Mode yourself. Answer how-to questions about DGC from dgc_docs, never from memory."]
+              if self.depth == 0 else []),
             *(["- To change an existing Pip's name, goal, branch, model or context window, read it with pips_context "
                "definition, then use pips_propose with its expected version and a stable retry key (scope personal for a "
                "Personal Pip, which may also run on the user's own Claude Code or Codex). To change the model every Pip "
@@ -11004,6 +11021,9 @@ class Agent(GoalLifecycle):
                     elif name == "show_file" and self._already_shown_picture(args):
                         out = (f"{args.get('path')} is a picture generate_image made in this turn, and it's already "
                                "shown to the user above. There's nothing more to do: don't show it again.")
+                    elif name in ("dgc_settings_read", "dgc_settings", "dgc_docs"):
+                        from . import settings_tool
+                        out = settings_tool.run(self, name, args)
                     elif name in ("router_status", "router_probe", "router_update", "router_find"):
                         from . import router_tools
                         out = router_tools.run(self, name, args,

@@ -209,9 +209,18 @@ class Update(ToolsCase):
         self.assertTrue(out.startswith("error: no model server answered"), out)
         self.assertFalse([f for f in harness.stream.frames() if f["type"] == "permission_request"])
 
-    def test_the_card_shows_the_exact_diff_in_auto_mode_and_nothing_changes_until_allowed(self):
+    def test_in_auto_mode_it_changes_without_a_card(self):
+        # His call, 13 Nov 2026: Router follows the same rule as every setting; no card in auto mode.
         harness = self.harness({"enabled": False, "systems": []})
         self.assertEqual(harness.config.get("mode"), "auto")
+        out = harness.agent._handle_call(ToolCall("u1", "router_update", {"action": "turn_on"}))
+        self.assertTrue(out.startswith("Done: Turn DGC Router on."), out)
+        self.assertTrue(harness.config.data["router"]["enabled"])
+        self.assertEqual([f for f in harness.stream.frames() if f["type"] == "permission_request"], [])
+
+    def test_outside_auto_mode_the_card_shows_the_exact_diff_and_nothing_changes_until_allowed(self):
+        harness = self.harness({"enabled": False, "systems": []})
+        harness.agent.set_mode("default", persist=False)
         harness.answer("permission_request", {"decision": "no"})
         out = harness.agent._handle_call(ToolCall("u1", "router_update", {"action": "turn_on"}))
         self.assertIn("DENIED", out)
@@ -223,6 +232,7 @@ class Update(ToolsCase):
 
     def test_allowed_it_applies_that_plan_and_always_still_asks_next_time(self):
         harness = self.harness({"enabled": False, "systems": []})
+        harness.agent.set_mode("default", persist=False)          # (auto mode asks nothing: the test above)
         harness.answer("permission_request", {"decision": "always"})
         out = harness.agent._handle_call(ToolCall("u1", "router_update", {"action": "turn_on"}))
         self.assertTrue(out.startswith("Done: Turn DGC Router on."), out)
