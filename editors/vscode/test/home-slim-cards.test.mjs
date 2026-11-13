@@ -93,7 +93,7 @@ for (const theme of THEMES) for (const width of WIDTHS) for (const scene of ["ne
     const x = await SCENES[scene]({ theme, width });
     try {
       await settle(x.page);
-      const cards = await measure(x.page);
+      const cards = await x.everyCard(() => measure(x.page));
       assert.ok(cards.length >= 6, `the scene's cards are on Home (${cards.length})`);
       // (A command to allow keeps its line at the card's whole width: measured in its own test.)
       const usual = cards.filter((c) => !c.mono);
@@ -117,13 +117,15 @@ for (const theme of THEMES) for (const width of WIDTHS) for (const scene of ["ne
 for (const width of WIDTHS) {
   test(`${width}px: every answer on every card is reached with Tab, in the order they are read, and says what it does`, async (t) => {
     if (skipOrFail(t)) return;
-    for (const scene of ["news", "answers"]) {
+    for (const [scene, place] of [["news", "needs"], ["news", "recent"], ["answers", "needs"]]) {
       const x = await SCENES[scene]({ width });
       try {
         await settle(x.page);
-        const want = await x.page.evaluate(() => [...document.querySelectorAll("#home-hub [data-hub-act]")].map((b) => `${b.closest(".dgc-hub-card").dataset.key}/${b.dataset.hubAct}`));
-        assert.ok(want.length >= 8, `${scene}: the answers are there (${want.length})`);
-        await x.page.focus("#home-hub .dgc-hub-show");
+        // (What is new is in Recent opened since 13 Nov evening: the scene is walked there, what needs you in Needs you opened.)
+        await x.card(place);
+        const want = await x.page.evaluate(() => [...document.querySelectorAll("#home-hub [data-hub-act]")].filter((b) => b.checkVisibility()).map((b) => `${b.closest(".dgc-hub-card").dataset.key}/${b.dataset.hubAct}`));
+        assert.ok(want.length >= (scene === "news" && place === "recent" ? 8 : 1), `${scene}, ${place}: the answers are there (${want.length})`);
+        await x.page.focus("#home-hub .hc-cards-btn");
         const got = [], rings = [];
         for (let i = 0; i < want.length + 12 && got.length < want.length; i++) {
           await x.page.keyboard.press("Tab");
@@ -150,7 +152,7 @@ test("chips never add a row: they show where a line is free, and never one that 
     const x = await openDock(browser, { tab: "home", state, width, height: 1500, pages: made() });
     try {
       await settle(x.page);
-      const cards = await measure(x.page);
+      const cards = await x.everyCard(() => measure(x.page));
       const withChips = cards.filter((c) => c.chips.length), without = cards.filter((c) => !c.chips.length);
       assert.ok(withChips.length >= 1, `${width}px: some card shows its chips (${JSON.stringify(cards.map((c) => c.chips))})`);
       for (const c of withChips) {
@@ -174,7 +176,7 @@ for (const width of [300, 420, 700]) {
     const x = await SCENES.answers({ width });
     try {
       await settle(x.page);
-      let cards = await measure(x.page), by = Object.fromEntries(cards.map((c) => [c.key, c]));
+      let cards = await x.everyCard(() => measure(x.page)), by = Object.fromEntries(cards.map((c) => [c.key, c]));
       assert.deepEqual(by[K.change].answers, ["Apply", "Not now", "Review"], "a Pip's change is answered on its card, at this width too");
       assert.deepEqual(by[K.visit].answers, ["Allow", "Not now", "Review"]);
       if (width >= 420) assert.deepEqual(by[K.setup].answers, ["Create", "Reject", "Review"], "a new Pip's longer line fits from here");
@@ -184,7 +186,7 @@ for (const width of [300, 420, 700]) {
         return { text: n.textContent, whole: n.scrollWidth <= n.clientWidth && n.scrollHeight <= n.clientHeight + 1, inside: r.bottom <= c.bottom - 3 && r.right <= c.right - 3 }; }, K.change);
       assert.deepEqual(line, { text: "Run at 7:00 instead of 9:00", whole: true, inside: true }, "its line is shown whole");
       await x.page.click(`.dgc-hub-card[data-key="${K.change}"] [data-hub-act="yes"]`); await settle(x.page);
-      cards = await measure(x.page); by = Object.fromEntries(cards.map((c) => [c.key, c]));
+      cards = await x.everyCard(() => measure(x.page)); by = Object.fromEntries(cards.map((c) => [c.key, c]));
       assert.deepEqual([by[K.change].sentence, by[K.change].answers, by[K.change].height], ["Applied. Morning brief is changed.", ["Undo"], by[K.mail].height], "held with Undo, the same height");
       assert.deepEqual(by[K.change].outside.concat(by[K.change].cut, by[K.change].over), []);
       assert.deepEqual(x.errors, []);
@@ -198,7 +200,7 @@ for (const width of WIDTHS) {
     const x = await SCENES.answers({ width });
     try {
       await settle(x.page);
-      const cards = await measure(x.page), run = cards.find((c) => c.key === K.run), usual = cards.find((c) => c.key === K.mail);
+      const cards = await x.everyCard(() => measure(x.page)), run = cards.find((c) => c.key === K.run), usual = cards.find((c) => c.key === K.mail);
       assert.deepEqual(run.answers, ["Allow once", "Deny", "Open"], "answered on its card");
       const m = await x.page.evaluate((key) => { const card = document.querySelector(`.dgc-hub-card[data-key="${key}"]`), n = card.querySelector(".dgc-card-note"), c = card.getBoundingClientRect(), r = n.getBoundingClientRect(), s = getComputedStyle(card);
         return { text: n.textContent, whole: n.scrollWidth <= n.clientWidth, lines: Math.round(r.height / parseFloat(getComputedStyle(n).lineHeight)), mono: /mono|Consolas|Menlo/i.test(getComputedStyle(n).fontFamily),
@@ -219,11 +221,11 @@ test("a side bar at its narrowest (170 px): the answers stay at the card's right
   const x = await SCENES.news({ width: 170 });
   try {
     await settle(x.page);
-    const cards = await measure(x.page);
+    const cards = await x.everyCard(() => measure(x.page));
     assert.equal(new Set(cards.map((c) => c.height)).size, 1, `one height: ${[...new Set(cards.map((c) => c.height))]}`);
     assert.ok(cards[0].height <= 100, `still far under the old 138 px (${cards[0].height})`);
     for (const c of cards) assert.deepEqual(c.outside.concat(c.cut, c.over), [], `${c.key}: nothing is cut, outside it or over anything`);
-    const words = await x.page.evaluate(() => Math.min(...[...document.querySelectorAll("#home-hub .dgc-card-title")].map((n) => n.getBoundingClientRect().width)));
+    const words = await x.page.evaluate(() => Math.min(...[...document.querySelectorAll("#home-hub .dgc-card-title")].filter((n) => n.checkVisibility()).map((n) => n.getBoundingClientRect().width)));
     assert.ok(words >= 80, `the sentence keeps room to be read (${words} px)`);
   } finally { await x.close(); }
 });

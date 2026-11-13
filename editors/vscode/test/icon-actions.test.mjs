@@ -62,6 +62,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
       const keys = await x.page.evaluate(() => [...document.querySelectorAll("#home-hub .dgc-hub-card")].map((c) => c.dataset.key));
       assert.ok(keys.length >= 10, `every kind of card is on Home (${keys.length})`);
       for (const key of keys) {
+        await x.see(key);          // (a card that is new shows in Recent opened, one that needs you in Needs you opened)
         const c = await x.page.evaluate(row, HOME(key));
         assert.ok(c.row && c.icons.length >= 1 && c.icons.length <= 3, `${key}: its answers are an icon row (${c.icons.length})`);
         assert.deepEqual(c.words, [], `${key}: and no word button beside it`);
@@ -75,6 +76,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
         assert.equal(c.on, false, `${key}: at rest`);
         assert.equal(c.pill.shown, false, `${key}: no pill at rest`);
       }
+      await x.card("needs");
       const change = await x.page.evaluate(row, HOME(K.visit));
       assert.deepEqual(change.icons.map((i) => `${i.word}/${i.icon}${i.primary ? "*" : ""}`), ["Allow/check*", "Not now/x", "Review/eye"], "a visit to a new site: a tick, a cross, an eye");
       assert.equal(change.icons[2].says, "See all of it, in Pips", "the longer line is the button's description");
@@ -98,6 +100,7 @@ test("Home at its narrowest (170 and 200 px): the icons stay at the card's right
       const keys = await x.page.evaluate(() => [...document.querySelectorAll("#home-hub .dgc-hub-card")].map((c) => c.dataset.key));
       const heights = new Set();
       for (const key of keys) {
+        await x.see(key);
         const c = await x.page.evaluate(row, HOME(key)), title = await x.page.evaluate((s) => { const b = document.querySelector(`${s} .dgc-card-title`).getBoundingClientRect(); return { right: b.right, top: b.top, bottom: b.bottom, width: b.width }; }, HOME(key));
         assert.ok(c.row && c.row.right >= c.card.right - 14 && c.row.left >= c.card.left + 40, `${width}px ${key}: the icons are at the card's right`);
         assert.ok(c.row.bottom <= title.top + 1 || title.right <= c.row.left + 0.5, `${width}px ${key}: over or beside the sentence, never under it`);
@@ -149,7 +152,7 @@ test("Home: Tab shows the pill of the answer it reaches, with the ring on the pi
   if (skipOrFail(t)) return;
   const x = await openCards(browser, { width: 300 });
   try {
-    await x.page.focus("#home-hub .dgc-hub-show");
+    await x.page.focus("#home-hub .hc-cards-btn");
     const seen = [];
     for (let i = 0; i < 40 && seen.length < 3; i++) {
       await x.page.keyboard.press("Tab"); await settle(x.page, 260);
@@ -163,7 +166,7 @@ test("Home: Tab shows the pill of the answer it reaches, with the ring on the pi
       assert.equal(s.own, "none", `${s.focus}: and not a second one on the square under it`);
     }
     const first = seen[0].at;
-    await x.page.focus("#home-hub .dgc-hub-show"); await settle(x.page);
+    await x.page.focus("#home-hub .hc-cards-btn"); await settle(x.page);
     assert.equal((await x.page.evaluate(row, HOME(first))).on, false, "Tab away: the row rests");
   } finally { await x.close(); }
 });

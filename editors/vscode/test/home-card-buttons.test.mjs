@@ -55,7 +55,7 @@ for (const theme of ["dark-modern", "light-modern", "hc"]) for (const width of [
     if (skipOrFail(t)) return;
     const x = await openCards(browser, { theme, width });
     try {
-      const cards = await answers(x.page);
+      const cards = await x.everyCard(() => answers(x.page));
       assert.ok(cards.length >= 10, `every kind of card is on Home (${cards.length})`);
       const all = cards.flatMap((c) => c.buttons.map((b) => ({ ...b, key: c.key })));
       assert.deepEqual([...new Set(all.map((b) => b.kind))].sort(), ["filled", "outline"], "two kinds and never a third (the way to all of it is an icon like the others, no longer a text link)");
@@ -135,7 +135,7 @@ for (const theme of ["dark-modern", "light-modern", "hc"]) {
     if (skipOrFail(t)) return;
     const x = await openCards(browser, { theme, width: 300 });
     try {
-      await x.page.focus("#home-hub .dgc-hub-show");
+      await x.page.focus("#home-hub .hc-cards-btn");
       const seen = [];
       for (let i = 0; i < 12; i++) {
         await x.page.keyboard.press("Tab");
@@ -180,7 +180,7 @@ test("a command card's three answers stand beside its sentence at every width, o
   for (const theme of ["dark-modern", "light-modern", "hc"]) for (const width of [300, 460]) {
     const x = await openCards(browser, { theme, width });
     try {
-      const cards = await answers(x.page), run = cards.find((c) => c.key === K.run), usual = cards.find((c) => c.key === K.mail);
+      const cards = await x.everyCard(() => answers(x.page)), run = cards.find((c) => c.key === K.run), usual = cards.find((c) => c.key === K.mail);
       assert.deepEqual(run.buttons.map((b) => `${b.word}:${b.kind}`), ["Allow once:filled", "Deny:outline", "Open:outline"]);
       if (width >= 460) assert.equal(run.height, usual.height, `${theme}: the others' height (${run.height})`);
       else assert.ok(run.height >= usual.height && run.height <= 100, `${theme} ${width}px: a little taller where its sentence takes two lines (${run.height})`);
@@ -199,7 +199,7 @@ test("a side bar under 225 px: the answers stay at the card's right as icons, th
   for (const theme of ["dark-modern", "light-modern", "hc"]) for (const width of [170, 220]) {
     const x = await openCards(browser, { theme, width });
     try {
-      const cards = await answers(x.page), all = cards.flatMap((c) => c.buttons.map((b) => ({ ...b, key: c.key })));
+      const cards = await x.everyCard(() => answers(x.page)), all = cards.flatMap((c) => c.buttons.map((b) => ({ ...b, key: c.key })));
       for (const c of cards) {
         assert.equal(c.buttons.filter((b) => b.kind === "filled").length, 1, `${theme} ${width}px ${c.key}: one filled answer`);
         assert.deepEqual(c.buttons.filter((b) => !b.inside || !b.whole).map((b) => b.word), [], `${theme} ${width}px ${c.key}: every answer inside its card and whole`);

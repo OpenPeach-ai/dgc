@@ -54,7 +54,11 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
     const x = await openPicker(browser, { width, theme });
     try {
       const rows = await measure(x.p);
-      assert.deepEqual(rows.map((r) => r.when), ["5m", "47m", "2h", "1d", "6d", "1w", "3w", null], "newest first, each by how long ago; No session has no time");
+      // (The scene stamps each session to the minute and the page reads the clock a moment later: a minute may tick over
+      // between the two, so a row five minutes old may honestly read 6m. Either neighbouring minute is taken; the longer ages never sit on an edge.)
+      const whens = rows.map((r) => r.when);
+      assert.ok(["5m", "6m"].includes(whens[0]) && ["47m", "48m"].includes(whens[1]), `the two newest, by the minute (${whens.slice(0, 2)})`);
+      assert.deepEqual(whens.slice(2), ["2h", "1d", "6d", "1w", "3w", null], "newest first, each by how long ago; No session has no time");
       assert.equal(rows.filter((r) => r.title === "Say hello in three words.").length, 6);
       const timed = rows.filter((r) => r.when);
       for (const r of timed) {

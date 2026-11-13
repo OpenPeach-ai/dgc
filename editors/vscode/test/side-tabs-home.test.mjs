@@ -230,8 +230,10 @@ test("a narrow side bar: the four names fit at 240 px; under 240 px the tabs are
       }
       assert.equal(bar.overflowX, false, `${width}px: nothing scrolls sideways`);
       // Home's cards still hold everything they have: no answer is pushed out of its card.
-      const out = await x.page.evaluate(() => [...document.querySelectorAll("#home-hub .dgc-hub-card")].flatMap((c) => { const box = c.getBoundingClientRect();
+      // (Read where each card shows: what needs you in Needs you opened, then what is new in Recent opened.)
+      const outNow = () => x.page.evaluate(() => [...document.querySelectorAll("#home-hub .dgc-hub-card")].filter((c) => c.checkVisibility()).flatMap((c) => { const box = c.getBoundingClientRect();
         return [...c.querySelectorAll(".dgc-card-btn, .dgc-ia-btn, .dgc-card-title")].filter((b) => { const r = b.getBoundingClientRect(); return r.bottom > box.bottom - 4 || r.right > box.right - 4 || r.left < box.left + 4; }).map((b) => `${c.dataset.key}: ${b.textContent}`); }));
+      const out = await outNow(); await x.card("recent"); out.push(...(await outNow()));
       assert.deepEqual(out, [], `${width}px: every card's sentence and answers are inside it`);
     } finally { await x.close(); }
   }
@@ -254,6 +256,8 @@ for (const width of [300, 700]) {
     const x = await openEverything({ width });
     try {
       const hub = await x.hub();
+      // (Each card measured where it shows: what needs you in Needs you opened, what is new in Recent opened.)
+      hub.cards = await x.everyCard(async () => (await x.hub()).cards);
       assert.deepEqual(hub.groups.map((g) => [g.id, g.name]), [["needs", "Needs you"], ["new", "New"]], "two groups, what needs you first");
       const by = Object.fromEntries(hub.cards.map((c) => [c.key, c]));
       // What needs you: a session's approval, a session running with no window, a Pip with things waiting, a new Pip.
@@ -292,6 +296,7 @@ for (const width of [300, 700]) {
       const cards = hub.cards;
       for (let i = 0; i < cards.length; i++) for (let j = i + 1; j < cards.length; j++) {
         const [a, b] = [cards[i], cards[j]];
+        if (a.group !== b.group) continue;          // (they are on two pages of Home)
         assert.ok(a.right <= b.left + 0.5 || b.right <= a.left + 0.5 || a.bottom <= b.top + 0.5 || b.bottom <= a.top + 0.5, `${a.key} and ${b.key} do not overlap`);
       }
       assert.equal(new Set(cards.map((c) => Math.round(c.left))).size, width === 300 ? 1 : 2, width === 300 ? "one column in a narrow side bar" : "two columns in a wide one");
@@ -308,9 +313,10 @@ test("a card's answers: Open, Review, Mark read and Dismiss each do their one th
   try {
     const keys = async () => (await x.hub()).cards.map((c) => c.key);
     assert.equal((await keys()).length, 9);
-    const act = (key, what) => x.page.click(`.dgc-hub-card[data-key="${key}"] [data-hub-act="${what}"]`);
+    const act = async (key, what) => { await x.see(key); return x.page.click(`.dgc-hub-card[data-key="${key}"] [data-hub-act="${what}"]`); };
     // A finished session: Dismiss takes it off Home, and the keyboard goes to the card that took its place.
     const order = (await x.hub()).groups[1].cards.map((c) => c.key), at = order.indexOf(WORK_DONE);
+    await x.see(WORK_DONE);
     await x.page.focus(`.dgc-hub-card[data-key="${WORK_DONE}"] [data-hub-act="dismiss"]`);
     await x.page.keyboard.press("Enter"); await settle(x.page);
     assert.ok(!(await keys()).includes(WORK_DONE), "dismissed: gone from Home");
@@ -350,6 +356,7 @@ test("Clear, beside New, clears everything new and leaves what needs you", async
   try {
     let hub = await x.hub();
     assert.deepEqual(hub.groups.map((g) => g.clear), [false, true], "Clear is beside New only");
+    await x.card("recent");          // (what is new, and its Clear, are in Recent)
     await x.page.click("#home-hub .dgc-hub-clear");
     await x.page.waitForFunction(() => !document.querySelector('#home-hub .dgc-hub-group[data-group="new"]'));
     hub = await x.hub();
@@ -362,59 +369,9 @@ test("Clear, beside New, clears everything new and leaves what needs you", async
   } finally { await x.close(); }
 });
 
-test("the Show filter: All, Work, Chat, Personal Pips, Project Pips, each with its count; Home's number counts everything", async (t) => {
-  if (skipOrFail(t)) return;
-  const x = await openEverything({ width: 300 });
-  try {
-    let hub = await x.hub();
-    assert.ok(hub.show, "Home has a Show filter");
-    assert.deepEqual([hub.show.value, hub.show.expanded], ["All", "false"]);
-    assert.ok(hub.show.top < hub.groups[0].cards[0].top, "it is at the top of Home, over the cards");
-    await x.page.click("#home-hub .dgc-hub-show"); await settle(x.page);
-    hub = await x.hub();
-    assert.deepEqual(hub.menu, [{ name: "All", count: "9", checked: true }, { name: "Work", count: "3", checked: false }, { name: "Chat", count: "1", checked: false },
-      { name: "Personal Pips", count: "4", checked: false }, { name: "Project Pips", count: "1", checked: false }]);
-    assert.equal(hub.show.expanded, "true");
-    await x.page.click('.dgc-hub-menu [data-show="personal"]'); await settle(x.page);
-    hub = await x.hub();
-    assert.equal(hub.show.value, "Personal Pips", "the button says what is shown");
-    assert.deepEqual(hub.cards.map((c) => c.source), ["personal", "personal", "personal", "personal"], "only your Personal Pips' cards");
-    assert.deepEqual(hub.groups.map((g) => [g.name, g.count]), [["Needs you", "2"], ["New", "2"]], "the groups count what is shown");
-    assert.equal(tab(await x.tabs(), "home").count, "9", "the Home tab's number still counts everything");
-    assert.deepEqual((await x.posted("homeShow")).map((m) => m.show), ["personal"], "the host is told, to keep it");
-    assert.equal(hub.menu.length, 0, "the menu closed");
-    // Each other choice.
-    const pick = async (id) => { await x.page.click("#home-hub .dgc-hub-show"); await settle(x.page); await x.page.click(`.dgc-hub-menu [data-show="${id}"]`); await settle(x.page); return x.hub(); };
-    assert.deepEqual((await pick("work")).cards.map((c) => c.key), [WORK_WAITS, WORK_NO_WINDOW, WORK_DONE]);
-    assert.deepEqual((await pick("chat")).cards.map((c) => c.key), [CHAT_DONE]);
-    assert.deepEqual((await pick("project")).cards.map((c) => c.key), [PIP_FAILED]);
-    // A source with nothing says so, and where the rest are.
-    await x.page.click(`.dgc-hub-card[data-key="${PIP_FAILED}"] [data-hub-act="dismiss"]`);
-    await x.page.waitForFunction(() => !document.querySelector("#home-hub .dgc-hub-card"));
-    hub = await x.hub();
-    assert.equal(hub.empty, "Nothing from Project Pips right now. Show All has 8.");
-    hub = await pick("all");
-    assert.equal(hub.cards.length, 8);
-    assert.deepEqual((await x.posted("homeShow")).map((m) => m.show), ["personal", "work", "chat", "project", "all"]);
-    assert.deepEqual(x.errors, []);
-  } finally { await x.close(); }
-});
+// (Home's Show filter went on 13 Nov, when Home became cards: the cards you add are the filter. Its test went with it; test/home-cards.test.mjs holds that Show is gone.)
 
-test("the Show filter is kept until it is changed: a side bar opened again shows what it was left on", async (t) => {
-  if (skipOrFail(t)) return;
-  // What the host kept (src/pipHomeDismiss.ts) is on the page before its script runs.
-  const x = await openEverything({ width: 300, homeShow: "work" });
-  try {
-    const hub = await x.hub();
-    assert.equal(hub.show?.value, "Work", "opened on what it was left on");
-    assert.deepEqual(hub.cards.map((c) => c.source), ["work", "work", "work"]);
-    assert.equal(tab(await x.tabs(), "home").count, "9");
-    // News that comes while it is on Work does not change it.
-    await x.refresh();
-    assert.equal((await x.hub()).show.value, "Work");
-    assert.deepEqual(await x.posted("homeShow"), [], "nothing told to the host: it said so");
-  } finally { await x.close(); }
-});
+// (Home's Show filter went on 13 Nov, when Home became cards: the cards you add are the filter. Its test went with it; test/home-cards.test.mjs holds that Show is gone.)
 
 test("the host keeps Home's Show filter on this computer, and hands it to the page", async () => {
   const code = (await build({ entryPoints: [new URL("../src/pipHomeDismiss.ts", import.meta.url).pathname], bundle: true, write: false, platform: "node", format: "esm", external: ["vscode"] })).outputFiles[0].text;
@@ -433,27 +390,7 @@ test("the host keeps Home's Show filter on this computer, and hands it to the pa
   assert.deepEqual(value, {}, "All is the default: nothing is kept for it");
 });
 
-test("the Show filter by keyboard: Enter opens it on the chosen row, the arrows move, Enter chooses, Escape closes and goes back", async (t) => {
-  if (skipOrFail(t)) return;
-  const x = await openEverything({ width: 300 });
-  try {
-    assert.ok((await x.hub()).show, "Home has a Show filter");
-    await x.page.focus("#home-hub .dgc-hub-show");
-    await x.page.keyboard.press("Enter"); await settle(x.page);
-    assert.equal((await x.hub()).focus, "menu:all", "opened by the keyboard, the chosen row has the focus");
-    await x.page.keyboard.press("ArrowDown"); await x.page.keyboard.press("ArrowDown");
-    assert.equal((await x.hub()).focus, "menu:chat");
-    await x.page.keyboard.press("Escape"); await settle(x.page);
-    let hub = await x.hub();
-    assert.deepEqual([hub.menu.length, hub.show.value, hub.show.expanded], [0, "All", "false"], "Escape closes and changes nothing");
-    assert.match(hub.focus, /dgc-hub-show/, "and the focus is back on Show");
-    await x.page.keyboard.press("ArrowDown"); await settle(x.page);
-    await x.page.keyboard.press("End"); await x.page.keyboard.press("Enter"); await settle(x.page);
-    hub = await x.hub();
-    assert.equal(hub.show.value, "Project Pips", "Down opens it too; End and Enter choose the last");
-    assert.match(hub.focus, /dgc-hub-show/);
-  } finally { await x.close(); }
-});
+// (Home's Show filter went on 13 Nov, when Home became cards: the cards you add are the filter. Its test went with it; test/home-cards.test.mjs holds that Show is gone.)
 
 test("an empty Home says so in one line", async (t) => {
   if (skipOrFail(t)) return;
@@ -463,12 +400,12 @@ test("an empty Home says so in one line", async (t) => {
       const bar = await x.tabs(), hub = await x.hub();
       assert.deepEqual(chosen(bar), ["home"], `${width}px: on Home`);
       assert.deepEqual([hub.cards.length, hub.groups.length], [0, 0], "no card and no group");
-      assert.equal(hub.empty, "Nothing needs you. New things arrive here.");
+      assert.equal(hub.empty, "Nothing needs you.");
       const line = await x.page.evaluate(() => { const p = document.querySelector("#home-hub .dgc-hub-empty"), s = getComputedStyle(p); return { height: p.getBoundingClientRect().height, lineHeight: parseFloat(s.lineHeight) }; });
       assert.ok(line.height <= line.lineHeight * 1.2, `one line, in a narrow side bar too (${line.height} of ${line.lineHeight})`);
       assert.equal(tab(bar, "home").count, "", "Home has no number");
       assert.equal(tab(bar, "home").label, "Home");
-      assert.ok(hub.show, "Show is still there");
+      assert.equal(hub.show, null, "and no Show filter: the cards on Home are the filter");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   }

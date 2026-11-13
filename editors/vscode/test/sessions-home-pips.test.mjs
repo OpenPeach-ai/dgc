@@ -39,7 +39,7 @@ const digestPip = (id, name, type, extra = {}) => ({ pip_id: "pip_" + id.repeat(
   min_severity: "low", alert_severity: null, runs: { succeeded: 1, failed: 0, cancelled: 0 }, skipped_unchanged: 0, new_total: 0, below_threshold: 0,
   new_findings: [], gone_after_change: 0, alert: false, latest_run_id: null, ...extra });
 
-async function openHome({ pips, digestPips = [], place = "home", width = 380, height = 640, api = 43, waiting = null, chats = false }) {
+async function openHome({ pips, digestPips = [], place = "home", width = 380, height = 640, api = 43, waiting = null, chats = false, opened = "needs" }) {
   const { html, mainJs, markdownJs } = panelHtml();
   const page = await (await browser.newContext({ viewport: { width, height } })).newPage();
   const errors = [];
@@ -54,7 +54,7 @@ async function openHome({ pips, digestPips = [], place = "home", width = 380, he
   await page.goto("https://home.test/webview/index.html");
   await page.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; ${THEMES["dark-modern"]} }` });
   await page.evaluate(() => document.body.classList.add("vscode-dark"));
-  await page.evaluate(([mjs, mdjs, where, list, digest, apiVersion, attention, tabs]) => {
+  await page.evaluate(([mjs, mdjs, where, list, digest, apiVersion, attention, tabs, opened]) => {
     document.documentElement.dataset.chatPlace = where;
     document.documentElement.dataset.pipsDocumentId = "doc1";
     if (tabs) document.documentElement.dataset.chatdgcSeen = "1";   // ChatDGC: the Chat | Work tabs under the Pips
@@ -63,7 +63,7 @@ async function openHome({ pips, digestPips = [], place = "home", width = 380, he
       current_workspace_id: "ws_" + "2".repeat(32) }),
       list_pips: (r) => ({ pips: r.workspace_id === "ws_" + "1".repeat(32) ? list : [] }), get_pip_digest: () => ({ digest }), list_pip_attention: () => attention,
       mark_pip_news_seen: (r) => ({ seen: r.pip_ids.map((pip_id) => ({ pip_id, seen_until: r.until })) }) };
-    window.acquireVsCodeApi = () => ({ getState: () => undefined, setState() {}, postMessage(m) {
+    window.acquireVsCodeApi = () => ({ getState: () => ({ homeCards: { open: opened } }) /* Home opens with one card opened whole, its hub cards as a list: Needs you, or (opened: "recent") Recent, where what is new is */, setState() {}, postMessage(m) {
       window.__posted.push(m);
       const make = m?.type === "pipsRequest" && answers[m.request.type];
       if (make) setTimeout(() => window.dispatchEvent(new MessageEvent("message", { data: { type: "pipsReply", id: m.id, ok: true, result: make(m.request) } })), 2);
@@ -71,7 +71,7 @@ async function openHome({ pips, digestPips = [], place = "home", width = 380, he
     eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
     eval(mjs);
     window.dispatchEvent(new MessageEvent("message", { data: { type: "pipsConnection", generation: 1, apiVersion, connected: true, supported: true, enabled: true } }));
-  }, [mainJs, markdownJs, place, pips, DIGEST(digestPips), api, waiting, chats]);
+  }, [mainJs, markdownJs, place, pips, DIGEST(digestPips), api, waiting, chats, opened]);
   return { page, errors };
 }
 
@@ -79,7 +79,7 @@ async function openHome({ pips, digestPips = [], place = "home", width = 380, he
 const cards = (page) => page.evaluate(() => [...document.querySelectorAll("#home-hub .dgc-hub-card")].map((c) => ({ key: c.dataset.key, group: c.dataset.group, from: c.querySelector(".dgc-card-sub").textContent,
   title: c.querySelector(".dgc-card-title").textContent, chips: [...c.querySelectorAll(".dgc-chip:not([hidden])")].map((x) => x.textContent), answers: [...c.querySelectorAll("[data-hub-act]")].map((b) => b.textContent),   // (icons since 12 Nov, each still named by its word)
   character: c.querySelector(".dgc-plush")?.dataset.character || "", state: c.querySelector(".dgc-plush")?.dataset.state || "" })));
-const polled = (page) => page.waitForFunction(() => window.__posted.some((m) => m.type === "pipsRequest" && m.request.type === "get_pip_digest") && !!document.querySelector("#home-hub .dgc-hub-show"));
+const polled = (page) => page.waitForFunction(() => window.__posted.some((m) => m.type === "pipsRequest" && m.request.type === "get_pip_digest") && !!document.querySelector("#home-hub .hc-cards-btn"));
 
 test("the Pips that need you and the ones with news are cards on Home, each with its face and what it wants", async (t) => {
   if (skipOrFail(t)) return;
@@ -113,7 +113,7 @@ test("when nothing is waiting, Home says so in one line; your Pips are on their 
     assert.equal(await page.locator("#work-apps").count(), 0, "Apps stays out of Work while the experiment is on hold");
     const m = await page.evaluate(() => ({ text: document.querySelector("#home-hub .dgc-hub-empty").textContent, cards: document.querySelectorAll("#home-hub .dgc-hub-card").length,
       count: document.getElementById("side-tab-home-count").hidden, pips: document.getElementById("side-tab-pips").checkVisibility() }));
-    assert.deepEqual(m, { text: "Nothing needs you. New things arrive here.", cards: 0, count: true, pips: true });
+    assert.deepEqual(m, { text: "Nothing needs you.", cards: 0, count: true, pips: true });
     assert.deepEqual(errors, []);
   } finally { await page.context().close(); }
 });
@@ -167,7 +167,7 @@ const HUNDRED = { pips: hundred, digestPips: hundred.filter((p, n) => n && !p.pe
 test("a failed run's Dismiss is always in sight, sits clear of the name at 300px, and dismisses from the keyboard", async (t) => {
   if (skipOrFail(t)) return;
   const name = "ERP daily audit — data & Tally integrity, every unit";
-  const { page, errors } = await openHome({ pips: [listed(1, name), listed(2, "GST watchdog — e-invoice & e-way")], width: 300, api: 48,
+  const { page, errors } = await openHome({ opened: "recent", pips: [listed(1, name), listed(2, "GST watchdog — e-invoice & e-way")], width: 300, api: 48,
     digestPips: [failedRun(1, name), failedRun(2, "GST watchdog — e-invoice & e-way")] });
   try {
     await page.waitForSelector('#home-hub [data-hub-act="dismiss"]');

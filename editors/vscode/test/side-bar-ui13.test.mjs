@@ -526,7 +526,8 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [640, 3
   test(`8. a Work session's reply nobody was looking at is a card on Home, as a chat's new answer is (${theme}, ${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
     // A chat is answering as the side bar opens, so its card can be compared; no Work session is ever listed running.
-    const x = await openDock(browser, { tab: "home", theme, width, height: 900, sessions: quietSessions, answering: ["chat_2"], state: { list: {}, unread: {}, attention: null, digest: [] } });
+    // (A reply is news: since 13 Nov evening what is new is in Recent only, so Home opens here on Recent opened whole.)
+    const x = await openDock(browser, { tab: "home", open: "recent", theme, width, height: 900, sessions: quietSessions, answering: ["chat_2"], state: { list: {}, unread: {}, attention: null, digest: [] } });
     try {
       const p = x.page, id = quietSessions[1].id, key = `work:${id}`, said = "Tide pools matter because they are small, **rough** nurseries where the sea’s young things grow.";
       await x.send({ type: "chatdgc_list", available: true, items: CHATS, open: ["chat_1"], answering: [] });
@@ -616,7 +617,8 @@ for (const theme of ["dark-modern", "light-modern", "cursor-dark"]) for (const w
       await x.send({ type: "chatdgc_list", available: true, items: CHATS.map((c) => (c.id === "chat_2" ? { ...c, title: "New chat test", preview: long } : c)), open: ["chat_1"], answering: [] });
       await x.send({ type: "sessions_list", items: sessions, error: "", news: [{ id: sessions[1].id, at: Date.now(), preview: long }] });
       await settle(p, 150);
-      let cards = await cardBoxes(p);
+      // (Each card read where it shows: what needs you in Needs you opened, what is new in Recent opened.)
+      let cards = await x.everyCard(() => cardBoxes(p));
       const kinds = new Set(cards.map((c) => c.key.split(":")[0]));
       assert.ok(kinds.has("work") && kinds.has("chat") && (kinds.has("pip") || kinds.has("setup")), `every kind of card is on Home (${cards.map((c) => c.key)})`);
       // (The Work reply's card is held by the tests of fix 8, above; here every card that is on Home is measured.)
@@ -624,6 +626,7 @@ for (const theme of ["dark-modern", "light-modern", "cursor-dark"]) for (const w
       for (const c of cards) assert.deepEqual(overlaps(c), [], `${c.key} at rest: no answer lies on its words`);
       // Each answer of each card pointed at in turn: its pill is up, and still on no word.
       for (const c of cards) for (let i = 0; i < c.labels.length; i++) {
+        await x.see(c.key);
         const b = (await cardBoxes(p)).find((n) => n.key === c.key).answers[i];
         await p.mouse.move((b.left + b.right) / 2, (b.top + b.bottom) / 2, { steps: 2 });
         await p.waitForTimeout(330);
@@ -635,6 +638,7 @@ for (const theme of ["dark-modern", "light-modern", "cursor-dark"]) for (const w
       }
       // The keyboard's pill too.
       await p.mouse.move(width / 2, 1090);
+      await x.see("chat:chat_2");
       await p.focus(`.dgc-hub-card[data-key="chat:chat_2"] .dgc-ia-btn`);
       await p.keyboard.press("Tab"); await p.waitForTimeout(330);
       cards = await cardBoxes(p);
@@ -838,28 +842,7 @@ test("17. a project is pinned from its row, the dock shows its pinwheel and name
 });
 
 // ---- 5, again: every shared menu has a solid ground (13 Nov, later: Home's Show menu was see-through in Cursor) --------
-for (const theme of ["cursor-dark", "light-cursor", "dark-modern"]) for (const width of [640, 300]) {
-  test(`5. Home's Show menu, opened over a card, lets nothing of the card show through or over it (${theme}, ${width}px)`, async (t) => {
-    if (skipOrFail(t)) return;
-    const x = await openDock(browser, { tab: "home", theme, width, height: 700, motion: "reduce" });
-    try {
-      const p = x.page;
-      await p.click(".dgc-hub-show"); await settle(p, 250);
-      const m = await p.evaluate(() => { const menu = document.querySelector(".dgc-hub-menu"), r = menu.getBoundingClientRect(), card = document.querySelector("#home-hub .dgc-hub-card").getBoundingClientRect(), s = getComputedStyle(menu);
-        const strangers = []; for (let fx = 0.06; fx < 1; fx += 0.22) for (let fy = 0.08; fy < 1; fy += 0.14) { const top = document.elementFromPoint(r.left + r.width * fx, r.top + r.height * fy); if (!top || !menu.contains(top)) strangers.push(top ? top.className : "nothing"); }
-        return { box: { x: r.left + 16, y: r.top + 16, width: r.width - 32, height: r.height - 32 }, overCard: r.bottom > card.top + 4, ground: s.backgroundColor, strangers, rows: menu.querySelectorAll(".dgc-menu-row").length }; });
-      assert.ok(m.rows >= 3, "the menu is open");
-      assert.deepEqual(m.strangers, [], "nothing of the page is on top of it");
-      const alpha = (c) => { const v = c.match(/-?[\d.]+/g).map(Number); return c.startsWith("rgba") || c.includes("/") ? v[3] ?? 1 : 1; };
-      assert.equal(alpha(m.ground), 1, `its ground is an opaque colour (${m.ground})`);
-      const withPage = await p.screenshot({ clip: m.box });
-      await p.addStyleTag({ content: "#home-hub .dgc-hub-group, #dgc-dock > * { visibility: hidden !important; }" });
-      await settle(p);
-      assert.ok(withPage.equals(await p.screenshot({ clip: m.box })), "the cards under the menu do not show through it");
-      assert.deepEqual(x.errors, []);
-    } finally { await x.close(); }
-  });
-}
+// (Home's Show filter went on 13 Nov, when Home became cards: the cards you add are the filter. Its test went with it; test/home-cards.test.mjs holds that Show is gone.)
 
 // ---- 18. a Work folder is a directory with a folder icon of its own (13 Nov, later) --------------------------------------
 /** Every folder icon under `scope`: its palette, whether it has a label, and where its papers stand. */

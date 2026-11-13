@@ -16,6 +16,8 @@
 @import url("./shared/dock.css");
 @import url("./shared/tabs.css");
 @import url("./shared/hub.css");
+@import url("./shared/mosaic.css");
+@import url("./shared/homecards.css");
 @import url("./shared/folderpick.css");
 @import url("./pips/wordmark.css");
 /* DGC panel — Codex's quiet editor hierarchy with a restrained DGC accent. */

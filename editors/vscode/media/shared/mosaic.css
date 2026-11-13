@@ -1,0 +1,13 @@
+/* Mosaic widget icons: span.mosaic > i + i + i + i. */
+.mosaic{--size:52px;--h:177;--sat:83%;--light:43%;--cycle:8s;--phase:0s;--body:linear-gradient(145deg,hsl(var(--h) var(--sat) 72%) 0%,hsl(var(--h) var(--sat) var(--light)) 45%,hsl(var(--h) var(--sat) 28%) 100%);--fold:linear-gradient(160deg,hsl(var(--h) 90% 83% / .8),hsl(var(--h) 85% 60% / .1) 63%,hsl(var(--h) 90% 35% / .5));--glaze:linear-gradient(145deg,hsl(var(--h) 95% 85% / .68),hsl(var(--h) 90% 55% / .06));display:inline-block;position:relative;width:var(--size);height:var(--size);flex:none;isolation:isolate;vertical-align:middle}
+.mosaic i{position:absolute;display:block;box-sizing:border-box;width:36%;height:36%;border-radius:28%;background:var(--body);box-shadow:inset 0 1px 1px #ffffff45,inset -1px -2px 2px #00000018;overflow:hidden;animation-duration:var(--cycle);animation-delay:var(--phase);animation-timing-function:ease-in-out;animation-iteration-count:infinite;animation-play-state:var(--mosaic-play,running)}
+.mosaic i::before,.mosaic i::after{content:"";position:absolute;display:block;pointer-events:none}
+.mosaic i::before{inset:-15% 13% 25% -12%;border-radius:30%;background:var(--fold);transform:rotate(-30deg)}
+.mosaic i::after{inset:35% 22% 6% 21%;border-radius:28%;background:var(--glaze);transform:rotate(14deg)}
+.mosaic i:nth-child(1){left:9%;top:9%}
+.mosaic i:nth-child(2){left:55%;top:9%;background:linear-gradient(145deg,hsl(var(--h) 90% 82%),hsl(var(--h) 85% 56%) 65%,hsl(var(--h) 85% 39%))}
+.mosaic i:nth-child(3){left:9%;top:55%;background:linear-gradient(145deg,hsl(var(--h) 85% 63%),hsl(var(--h) 85% 39%) 65%,hsl(var(--h) 85% 28%))}
+.mosaic i:nth-child(4){left:55%;top:55%;animation-name:mosaic-tilt}
+.mosaic--ember{--h:3;--sat:80%;--light:58%}.mosaic--peach{--h:22;--sat:92%;--light:67%}.mosaic--saffron{--h:39;--sat:96%;--light:52%}.mosaic--citron{--h:62;--sat:76%;--light:56%}.mosaic--lime{--h:90;--sat:74%;--light:52%}.mosaic--fern{--h:133;--sat:52%;--light:42%}.mosaic--mint{--h:158;--sat:65%;--light:71%}.mosaic--lagoon{--h:177;--sat:83%;--light:43%}.mosaic--ice{--h:195;--sat:86%;--light:74%}.mosaic--azure{--h:213;--sat:91%;--light:57%}.mosaic--iris{--h:247;--sat:87%;--light:65%}.mosaic--lilac{--h:273;--sat:67%;--light:77%}.mosaic--orchid{--h:294;--sat:70%;--light:51%}.mosaic--rose{--h:331;--sat:88%;--light:64%}
+@keyframes mosaic-tilt{0%,100%{transform:rotate(0) scale(1)}50%{transform:rotate(-9deg) scale(.96)}}
+@media(prefers-reduced-motion:reduce){.mosaic i{animation:none!important}}

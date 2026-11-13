@@ -103,7 +103,7 @@ test("each list draws a Voxel for a Work session and a Mote for a chat, at its p
       assert.equal(marks.find((m) => m.id === CHATS[0].id).palette, d.items.find((i) => i.kind === "chat").mark.palette, "the same on the dock");
       // Home's cards: a session that needs you or has something new wears its mark there too.
       await x.page.click("#side-tab-home"); await x.settle();
-      marks = await marksIn(x.page, "#home-hub");
+      marks = await marksIn(x.page, "#home-hub .hc-open");          // (Needs you opened whole: Home's cards as a list)
       assert.ok(marks.length >= 1, "a card from a session");
       for (const m of marks) { assert.equal(m.set, m.id.startsWith("chat:") ? "mote" : "voxel"); assert.deepEqual([m.w, m.h], [26, 26]); assert.ok(m.inside && m.shown); if (rows[m.id]) assert.equal(m.palette, rows[m.id], "the same as in its list"); }
       assert.equal(await x.page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, "nothing wider than the side bar");

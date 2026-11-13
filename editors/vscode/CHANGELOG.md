@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Home is cards.** Home is one scrolling page of cards you choose; the width chooses each card's form: in a narrow side bar every card is a Small square, two to a row; in a wider one each is Medium; wider still, Token usage, Recent and Folders take a Large block. A Small card opens to its full form with a click (Back or Escape returns). Cards glide to their new places as you drag the side bar's edge, and keep what you chose in them.
+- **Cards** at the top right of Home (its mosaic is still until you point at it) opens the library: every card with a live preview, its name and one line, and Add or Remove; at its foot **Arrange Home** (drag a card, or Space, the arrows and Space again; × removes it; Done) and **Reset Home**. What is on Home and in what order is kept on this computer.
+- The cards: **Needs you** (what waits for your answer), **Recent** (Work sessions, chats and Pips together; what is new sits at its top in bold, with its answers and Clear), **Running now**, **Token usage** (tokens, requests and cache saved per day, with the change against the period before), **Quick start**, **Work sessions**, **Chats**, **Pips**, **Folders** (your Work folders as folder icons with their names; a click opens Work on that folder), and **Clock**, **Weather** (a city you type; the forecast comes from Open-Meteo, asked by DGC on this computer, never by the page) and **Note**. A new Home starts with Needs you, Recent, Running now, Token usage and Quick start.
+- Home's **Show** menu is gone: the cards you choose are what Home shows.
 - **One shape for every control.** Buttons, fields, dropdowns, segmented controls, the tab bar and every hover box use the same 6-pixel corners on every surface (side bar, ChatDGC, a Pip's page, Settings, the Library); none is a pill any more.
 - The **New** button reads in every theme: its words take the colour of the side bar's ground, never a see-through field colour (in Cursor it showed as a blank white button).
 - The tab bar's tabs no longer change their words on hover; the side bar's tooltips wait a moment before they show, as the editor's own do.

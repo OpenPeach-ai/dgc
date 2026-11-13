@@ -66,7 +66,7 @@ const PROJECT_CHATS = [{ id: "chat_3", title: "Packing list", updated_at: "2026-
     whole kept state, in place of `tab`. theme: "dark-modern" | "light-modern" | "hc"; tabs: ChatDGC is here (seen before);
     library: Work's Library row; srcRoot: another tree's sources; pages: the host's kept "made" cards, as its attribute's JSON. */
 export async function openHome(browser, { state = homeState(), width = 300, height = 760, theme = "dark-modern", homeShow = "", tabs = true, library = true,
-  sessions = SESSIONS, tab = "home", saved, api = 69, scale = 1, motion = "no-preference", srcRoot, video, pages = "", forced = false, touch = false } = {}) {
+  sessions = SESSIONS, tab = "home", saved, grid = false, open = "needs", api = 69, scale = 1, motion = "no-preference", srcRoot, video, pages = "", forced = false, touch = false } = {}) {
   const { html, mainJs, markdownJs, themes, pipsJs, pipsCss, sprite } = await sources(srcRoot);
   // video: a folder to record the page into (the pictures' short films), at the page's own size.
   const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale, reducedMotion: motion, forcedColors: forced ? "active" : "none", hasTouch: touch,   // (forced: Windows High Contrast; touch: a finger, no pointer)
@@ -141,7 +141,10 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
     eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
     eval(mjs);
     connect();
-  }, [mainJs, markdownJs, state, homeShow, tabs, api, [P, Q], saved || (tab === "chat" ? { sideTab: "chat", projectsOpen: [PROJECT] } : { sideTab: tab }), pages]);
+  // (grid: Home as its cards, the way it opens. Without it Home opens with one card opened whole, where the hub's cards
+  // are drawn as a list: `open: "needs"` (the default) for what needs you, `open: "recent"` for what is new, which is in
+  // Recent only. x.card(id) goes from one to the other.)
+  }, [mainJs, markdownJs, state, homeShow, tabs, api, [P, Q], { ...(saved || (tab === "chat" ? { sideTab: "chat", projectsOpen: [PROJECT] } : { sideTab: tab })), ...(grid ? {} : { homeCards: { open } }) }, pages]);
   const send = (data) => page.evaluate((d) => window.dispatchEvent(new MessageEvent("message", { data: d })), data);
   if (sessions) await send({ type: "sessions_list", items: sessions, error: "" });
   if (tabs) {
@@ -165,7 +168,21 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
   const refresh = async () => { const from = await page.evaluate(() => window.__answered.length); await send({ type: "pipNewsRefresh" }); await polled(from); };
   /** The page's kept state (what a reload hands back), and the tab bar and Home as they are on screen. */
   const kept = () => page.evaluate(() => window.__saved);
-  return { page, errors, send, posted, refresh, kept, tabs: () => tabsNow(page), hub: () => hubNow(page), close: () => context.close() };
+  /** Opens another card whole (from the one that is open): "recent" for what is new, "needs" for what needs you. */
+  const card = async (id) => { await page.evaluate((which) => { document.querySelector("#home-hub .hc-back")?.click(); const c = document.querySelector(`#home-hub .hc-grid .hc-card[data-card="${which}"]`); (c.querySelector(".hc-viewall, .dgc-hub-viewall, .dgc-hub-rest") || c).click();
+    if (!document.querySelector(`#home-hub .hc-open .hc-card[data-card="${which}"]`)) throw new Error(`${which} did not open`); }, id);
+    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(done, 60))))); };
+  /** Brings the hub card `key` into sight: Needs you opened for one that needs you, Recent opened for one that is new. */
+  const see = async (key) => { const want = await page.evaluate((k) => { const c = [...document.querySelectorAll("#home-hub .dgc-hub-card")].find((n) => n.dataset.key === k); if (!c || c.checkVisibility()) return ""; return c.dataset.group === "new" ? "recent" : "needs"; }, key); if (want) await card(want); };
+  /** `read()` gives a record for every hub card ([{ key, ... }], measured as drawn): read with Needs you opened for what
+   *  needs you, and with Recent opened for what is new. Home is left as it was. */
+  const everyCard = async (read) => { const [groups, was] = await page.evaluate(() => [Object.fromEntries([...document.querySelectorAll("#home-hub .dgc-hub-card")].map((c) => [c.dataset.key, c.dataset.group])), document.querySelector("#home-hub .hc-open .hc-card")?.dataset.card || ""]);
+    const has = (g) => Object.values(groups).includes(g), out = [];
+    if (has("needs")) { if (was !== "needs") await card("needs"); out.push(...(await read()).filter((c) => groups[c.key] !== "new")); }
+    if (has("new")) { await card("recent"); out.push(...(await read()).filter((c) => groups[c.key] === "new")); }
+    if (was && has("new")) await card(was);
+    return out; };
+  return { page, errors, send, posted, refresh, kept, card, see, everyCard, tabs: () => tabsNow(page), hub: () => hubNow(page), close: () => context.close() };
 }
 
 /** The tab bar as it is on screen: each tab's name, whether it is chosen, in the tab order, shown, its box and colour. */
@@ -200,9 +217,10 @@ export const hubNow = (page) => page.evaluate(() => {
     line: c.querySelector(".dgc-card-note")?.textContent ?? "", held: c.classList.contains("dgc-hub-held"),
     thin: c.classList.contains("dgc-card-thin"), shared: c.classList.contains("dgc-card"), radius: getComputedStyle(c).borderRadius, ground: getComputedStyle(c).backgroundColor, ...rect(c) });
   return { shown: hub.checkVisibility(), show: show ? { value: show.querySelector(".dgc-hub-show-v").textContent, expanded: show.getAttribute("aria-expanded"), label: show.getAttribute("aria-label"), ...rect(show) } : null,
-    groups: [...hub.querySelectorAll(".dgc-hub-group")].map((g) => ({ id: g.dataset.group, name: g.querySelector("h2").firstChild.textContent, count: g.querySelector(".dgc-hub-n").textContent,
+    // (What needs you first, then what is new, wherever each is drawn: Needs you's hub and Recent's are two elements.)
+    groups: [...hub.querySelectorAll(".dgc-hub-group")].sort((a, b) => (a.dataset.group === "needs" ? 0 : 1) - (b.dataset.group === "needs" ? 0 : 1)).map((g) => ({ id: g.dataset.group, name: g.querySelector("h2").firstChild.textContent, count: g.querySelector(".dgc-hub-n").textContent,
       clear: !!g.querySelector(".dgc-hub-clear"), more: g.querySelector(".dgc-hub-more")?.textContent || "", rest: g.querySelector(".dgc-hub-rest")?.textContent || "", cards: [...g.querySelectorAll(".dgc-hub-card")].map(card) })),
-    cards: [...hub.querySelectorAll(".dgc-hub-card")].map(card), notes: [...hub.querySelectorAll(".dgc-hub-note")].map((n) => n.textContent), empty: hub.querySelector(".dgc-hub-empty")?.textContent ?? null,
+    cards: [...hub.querySelectorAll(".dgc-hub-card")].sort((a, b) => (a.dataset.group === "needs" ? 0 : 1) - (b.dataset.group === "needs" ? 0 : 1)).map(card), notes: [...hub.querySelectorAll(".dgc-hub-note")].map((n) => n.textContent), empty: hub.querySelector(".dgc-hub-empty")?.textContent ?? null,
     menu: [...document.querySelectorAll(".dgc-hub-menu .dgc-menu-row")].map((r) => ({ name: r.querySelector(".dgc-menu-label").textContent, count: r.querySelector(".dgc-menu-hint")?.textContent || "", checked: r.getAttribute("aria-checked") === "true" })),
     focus: document.activeElement?.dataset?.hubAct ? `${document.activeElement.closest(".dgc-hub-card").dataset.key}/${document.activeElement.dataset.hubAct}` : document.activeElement?.dataset?.show ? `menu:${document.activeElement.dataset.show}` : document.activeElement?.className || "" };
 });

@@ -7,6 +7,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { openDock } from "./support/dock-scene.mjs";
+import { openGrid, EVERY } from "./support/home-grid-scene.mjs";
 import { openWorkTab } from "./support/work-tab-scene.mjs";
 import { openChat as openChatTab, conversation } from "./support/chat-scene.mjs";
 import { openChat as openPip } from "./support/pip-chat-scene.mjs";
@@ -110,14 +111,22 @@ const settle = (page, ms = 150) => page.evaluate((w) => new Promise((d) => reque
 for (const theme of ["dark-modern", "light-modern"]) for (const width of [640, 300]) {
   test(`the side bar: Home, Work, Chat and the Pips view, their menus and New Session's dialog (${theme}, ${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
-    const x = await openDock(browser, { tab: "home", theme, width, height: 800 });
+    // Home is cards (13 Nov): every card that there is, with what a host would say, then the card library and Arrange Home.
+    const x = await openGrid(browser, { theme, width, height: 1400, layout: EVERY, settings: { weather: { city: "Lisbon", unit: "c" }, clock: { zone: "Asia/Tokyo" } } });
     try {
       const p = x.page;
       held(await walk(p, ROUND), "Home");
-      await p.click(".dgc-hub-show"); await settle(p);
-      held(await walk(p, ROUND), "Home, Show's menu open");
-      await p.keyboard.press("Escape");
       hoverHeld(await hoverWalk(p, "#home-hub button", ROUND), "Home");
+      await p.click(".hc-cards-btn"); await settle(p, 300);
+      held(await walk(p, ROUND), "Home, the card library open");
+      await p.click(".hc-library .hc-arrange"); await settle(p, 400);
+      held(await walk(p, ROUND), "Arrange Home");
+      await p.click(".hc-done"); await settle(p, 400);
+      // Needs you opened whole: the cards with their answers, as Home listed them.
+      await p.evaluate(() => document.querySelector("#home-hub .dgc-hub-rest")?.click()); await settle(p, 300);
+      if (width === 300) { await p.click('.hc-grid .hc-card[data-card="needs"]', { position: { x: 40, y: 8 } }); await settle(p, 300); }
+      held(await walk(p, ROUND), "Home, Needs you opened");
+      hoverHeld(await hoverWalk(p, "#home-hub button", ROUND), "Home, Needs you opened");
       await p.click("#side-tab-work"); await settle(p);
       held(await walk(p, ROUND), "Work");
       hoverHeld(await hoverWalk(p, "#work-home button, #work-home input", ROUND), "Work");

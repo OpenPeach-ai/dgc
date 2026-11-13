@@ -58,7 +58,7 @@ async function openPage({ place = "home", width = 380, height = 640, theme = "da
   }, [mainJs, markdownJs, place, state]);
   const send = (data) => page.evaluate((d) => window.dispatchEvent(new MessageEvent("message", { data: d })), data);
   if (place === "home" && items) await send({ type: "sessions_list", items, error: "" });
-  const posted = () => page.evaluate(() => window.__posted.filter((m) => !["webviewReady", "editorAlive", "sessionsList"].includes(m.type)));
+  const posted = () => page.evaluate(() => window.__posted.filter((m) => !["webviewReady", "editorAlive", "sessionsList", "homeCardsReady", "homeUsageGet", "homeWeatherGet"].includes(m.type)));
   const clear = () => page.evaluate(() => { window.__posted.length = 0; });
   return { page, send, posted, clear, errors };
 }

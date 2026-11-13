@@ -58,7 +58,8 @@ const change = (n, type, title, origin, op = "made", version = 1) => ({ type: "a
   artifact: { id: AR(n), type, label: "", title, version, created: "2026-11-11T09:00:00Z", updated: "2026-11-11T09:00:00Z", origin: origin || {}, exports: ["html"] } });
 /** The host hears it and tells the page what Home holds now. */
 async function tell(x, h, message) { const out = h.hear(message); if (out) await x.send(out); await settle(x.page); return out; }
-const open = (options = {}) => openDock(browser, { tab: "home", state: homeState("quiet"), width: 300, height: 900, ...options });
+// (A thing made is news: since 13 Nov evening what is new is in Recent only, so Home opens here on Recent opened whole.)
+const open = (options = {}) => openDock(browser, { tab: "home", state: homeState("quiet"), width: 300, height: 900, open: "recent", ...options });
 const pages = (hub) => hub.cards.filter((c) => c.key.startsWith("page:"));
 const homeCount = async (x) => Number((await x.tabs()).tabs.find((t) => t.id === "home").count || 0);
 
@@ -79,7 +80,9 @@ test("a page made in a Work session and a document made in a ChatDGC chat each a
     assert.deepEqual(made.map((c) => c.source), ["chat", "work"], "each from where it was made");
     assert.deepEqual(made.map((c) => c.actions), [["Open*", "Dismiss"], ["Open*", "Dismiss"]], "Open and Dismiss");
     assert.deepEqual(made.map((c) => c.chips), [["Chat", "Just now"], ["Work", "Just now"]]);
-    const other = hub.cards.find((c) => !c.key.startsWith("page:"));
+    // (Another card, measured where it shows: one that is new beside these, else one that needs you, in Needs you opened.)
+    let other = hub.cards.find((c) => !c.key.startsWith("page:") && c.height > 0);
+    if (!other) { await x.card("needs"); other = (await x.hub()).cards.find((c) => !c.key.startsWith("page:") && c.height > 0); await x.card("recent"); }
     assert.ok(other, "another card is on Home to compare with");
     for (const c of made) {
       assert.equal(c.shared && c.thin, true, "the shared card, thin");
@@ -112,29 +115,7 @@ test("version 2 updates the card and never adds one; removed takes it off", asyn
   } finally { await x.close(); }
 });
 
-test("Show counts each one where it was made: Work, Chat, or only All when nothing says", async (t) => {
-  if (skipOrFail(t)) return;
-  const x = await open(), h = await host();
-  try {
-    const menu = async () => { await x.page.click("#home-hub .dgc-hub-show"); await settle(x.page); const rows = (await x.hub()).menu; await x.page.keyboard.press("Escape"); await settle(x.page);
-      return Object.fromEntries(rows.map((r) => [r.name, Number(r.count)])); };
-    const was = await menu();
-    await tell(x, h, change(1, "page", "Login redirect map", fromWork));
-    await tell(x, h, change(2, "dashboard", "Sales this week", fromChat));
-    await tell(x, h, change(3, "sheet", "Budget", {}));
-    const now = await menu();
-    assert.deepEqual({ All: now.All - was.All, Work: now.Work - was.Work, Chat: now.Chat - was.Chat, Personal: now["Personal Pips"] - was["Personal Pips"], Project: now["Project Pips"] - was["Project Pips"] },
-      { All: 3, Work: 1, Chat: 1, Personal: 0, Project: 0 });
-    const none = pages(await x.hub()).find((c) => c.key === KEY(3));
-    assert.equal(none.from, "Spreadsheet made · version 1", "nothing says where: the line stops at its version");
-    assert.deepEqual(none.chips, ["Just now"]);
-    const pick = async (id) => { await x.page.click("#home-hub .dgc-hub-show"); await settle(x.page); await x.page.click(`.dgc-hub-menu [data-show="${id}"]`); await settle(x.page); return pages(await x.hub()).map((c) => c.key); };
-    assert.deepEqual(await pick("work"), [KEY(1)], "Work shows the one a session made");
-    assert.deepEqual(await pick("chat"), [KEY(2)], "Chat shows the one a chat made");
-    assert.deepEqual(await pick("personal"), [], "none is a Pip's");
-    assert.deepEqual(await pick("all"), [KEY(3), KEY(2), KEY(1)]);
-  } finally { await x.close(); }
-});
+// (Home's Show filter went on 13 Nov, when Home became cards: the cards you add are the filter. Its test went with it; test/home-cards.test.mjs holds that Show is gone.)
 
 test("Open opens it as the chat's card does; Dismiss takes it off; both are kept across a reload of the side bar", async (t) => {
   if (skipOrFail(t)) return;

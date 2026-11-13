@@ -51,7 +51,8 @@ function longHome() {
 }
 /** The side bar on `view` ("home" | "work" | "chat" | "pips"), each longer than the side bar where it can be. */
 async function open(view, more = {}) {
-  const x = await openDock(browser, { height: 700, tab: view === "pips" ? "work" : view, state: longHome(), sessions: manySessions(40), pip: { many: true, rows: 9 }, ...more });
+  // (Home's long page is Recent opened whole: what is new as cards, then the rest as rows. What is new is there only since 13 Nov evening.)
+  const x = await openDock(browser, { height: 700, open: "recent", tab: view === "pips" ? "work" : view, state: longHome(), sessions: manySessions(40), pip: { many: true, rows: 9 }, ...more });
   if (view === "pips") await toList(x);
   return x;
 }
@@ -65,7 +66,7 @@ const PARTS = `(() => {
   const scroller = pips ? root.querySelector(".pip-app-root") : document.getElementById("sessions-host");
   const seen = (n) => !!n && n.checkVisibility({ visibilityProperty: true });
   const holds = pips ? [root.querySelector("#app")] : [...scroller.children].filter(seen);
-  const rows = [...(pips ? root.querySelectorAll("[data-job]") : scroller.querySelectorAll(".session-row, .dgc-hub-card"))].filter(seen);
+  const rows = [...(pips ? root.querySelectorAll("[data-job]") : scroller.querySelectorAll(".session-row, .dgc-hub-card, .hc-li"))].filter(seen);          // (.hc-li: a row of Recent opened, under its cards)
   return { host: pips ? host : scroller, root, pips, scroller, holds, rows, seen, dock: document.getElementById("dgc-dock"), tabs: document.getElementById("side-tabs"), head: document.getElementById("phead") };
 })()`;
 /** The side bar as it is on screen: the header, both bars, the page under them, what the page holds, and how each bar is painted. */

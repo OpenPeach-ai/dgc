@@ -679,6 +679,7 @@
     if (sideTab === "pips") sideTab = lastListTab;
     paintSideTabs();
     homePips?.refresh();
+    home?.shown();
   }
   function hideSessions() {
     sessionsOpen = false;
@@ -1489,7 +1490,7 @@
   function showSideTab(name, focus = false) {
     if (chatPlace !== "home") return;
     const next = SIDE_TABS.includes(name) && sideTabOffered(name) ? name : "home";
-    hub?.closeMenu(); window.DgcBlob?.close(); window.DgcFolderPick?.close();
+    home?.closeLibrary(); window.DgcBlob?.close(); window.DgcFolderPick?.close();
     // The Pips tab leads to the list of your Pips, never to the chat that was last open in it.
     if (next === "pips") openPipsAt({ overview: true });
     else { sideTab = lastListTab = next; showSessions(); }
@@ -1517,8 +1518,9 @@
   // cannot run, a new Pip wants a review (all need you); failed runs, new findings and new messages (new). A session's
   // and a chat's news is noticed here, when one that was running is no longer, and kept in the page's state until it
   // is opened, dismissed or runs again.
-  let hub = null, hubFaces = null, pipModel = null;
-  let hubShow = ["work", "chat", "personal", "project"].includes(document.documentElement.dataset.homeShow) ? document.documentElement.dataset.homeShow : "all";
+  // Since 13 Nov Home is cards (media/shared/homecards.js): what needs you is drawn inside the Needs you card and what is
+  // new at the top of Recent, each by a hub of its own, and the other cards read the lists this page already has.
+  let hub = null, hubNew = null, home = null, hubFaces = null, pipModel = null;
   const hubNews = (() => {
     const kept = pageState().hubNews, ids = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === "string").slice(0, 60) : []);
     const times = (v) => Object.fromEntries(Object.entries(v && typeof v === "object" ? v : {}).filter(([, t]) => Number.isFinite(t)).slice(-30));
@@ -1687,7 +1689,64 @@
     if (pipModel?.unreadFailure) notes.push({ text: "Couldn’t check for new Pip messages.", retry: true });
     if (pipModel?.failure) notes.push({ text: pipModel.failure });
     if (hubSaid) notes.push({ text: hubSaid });
-    hub.update({ cards: hubCards(), more: pipModel?.more || 0, partial: pipModel?.partial === true, notes });
+    const cards = hubCards(), said = { cards, more: pipModel?.more || 0, partial: pipModel?.partial === true, notes: [] };
+    homeNow = { cards, notes };
+    hub.update(said); hubNew?.update(said);
+    paintHomeCount(cards.length);
+    home?.update();
+  }
+  // ---- Home's cards: what each shows, from the lists this page has (media/shared/homecards.js draws them) ---------------
+  let homeNow = { cards: [], notes: [] }, hubForm = { first: 8, full: true };
+  const sessionStamp = (when) => { const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(String(when || "")); return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).getTime() : 0; };
+  const pipFace = (body, name, mood, id) => { try { return window.PipConcepts?.plush?.markup({ index: Math.max(0, PIP_BODIES.indexOf(body)), name }, mood, `home-${String(id).replace(/[^A-Za-z0-9_-]/g, "-")}`, { includeStyles: false }) || ""; } catch { return ""; } };
+  /** A folder's tile: the directory icon in the folder's own kept palette, at `size`, its name on the label when one is given. */
+  function folderTile(folder, size, label) {
+    const mark = window.DgcFolderPick?.folderMark ? window.DgcFolderPick.folderMark(folder) : "";
+    return mark.replace('class="folder-icon ', `style="--folder-size:${Number(size) || 64}px" class="folder-icon hc-folder `).replace(/<\/span>$/, `${label ? `<span class="folder-label">${esc(label)}</span>` : ""}</span>`);
+  }
+  function homeData() {
+    const needs = homeNow.cards.filter((c) => c.group === "needs"), fresh = homeNow.cards.filter((c) => c.group === "new");
+    const isNew = new Set(fresh.map((c) => c.key));
+    const work = sessionItems.map((item) => { const running = item.running === true || !!item.windowless, count = plural(Number(item.count) || 0, "message");
+      return { key: `work:${item.id}`, icon: markHtml("work", item.id, running), name: sessionTitle(item), at: sessionStamp(item.when), age: sessionAge(item.when), live: running, running,
+        folder: typeof item.projectName === "string" ? item.projectName : "", meta: [item.waiting === true ? "Wants your okay" : item.windowless ? "Running, no window" : running ? "Running" : item.open ? "Open in a tab" : "", count].filter(Boolean).join(" · ") }; });
+    const chats = (chatsAvailable ? chatItems : []).map((item) => { const id = String(item.id || ""), answering = answeringChats.has(id);
+      return { key: `chat:${id}`, icon: markHtml("chat", id, answering), name: String(item.title || "New chat"), at: Date.parse(item.updated_at) || 0, age: chatAge(item.updated_at), live: answering, running: answering,
+        fresh: hubNews.chat[id] !== undefined, meta: answering ? "Answering" : plainPreview(item.preview) || "" }; });
+    const pips = dockPips.pips.map((p, k) => ({ key: `pipopen:${p.id}`, icon: pipFace(p.body, p.name, p.waiting ? "waiting_approval" : "idle", p.id), name: p.name, star: p.body === "core" && k === dockPips.pips.findIndex((q) => q.body === "core"),
+      count: p.waiting || 0, waiting: p.waiting || 0, meta: p.waiting ? `${p.waiting} waiting for you` : p.line || "Ready when you are" }));
+    pips.sort((a, b) => (b.star ? 1 : 0) - (a.star ? 1 : 0) || (b.waiting ? 1 : 0) - (a.waiting ? 1 : 0));
+    const waitingPip = pips.find((p) => p.waiting), folderNow = projectFolders?.choice ? window.DgcFolderPick?.valueOf(projectFolders.rows, projectFolders.choice) || "" : projectFolders ? "All projects" : "";
+    const recent = [...work.map((r) => ({ ...r, live: false, meta: ["Work", r.folder].filter(Boolean).join(" · ") })), ...chats.map((r) => ({ ...r, live: false, fresh: false, meta: "Chat" }))]
+      .filter((r) => !isNew.has(r.key)).sort((a, b) => b.at - a.at).slice(0, 30);
+    const quickMark = (kind) => (kind === "pip" ? `<span class="hc-qface">${pipFace("core", "Core", "idle", "quick")}</span>` : window.DgcMarks?.html ? window.DgcMarks.html(kind === "work" ? "voxel" : "mote", kind === "work" ? "ember" : "peach", {}) : "");
+    return {
+      notes: homeNow.notes,
+      needs: { count: needs.length + (pipModel?.more || 0), faces: needs.map((c) => c.who?.html || "") },
+      news: fresh.map((c) => ({ key: `hub:${c.key}`, icon: c.who?.html || "", name: c.title, meta: c.from, title: `Open: ${c.title}` })),
+      recent,
+      work: { rows: [...work].sort((a, b) => (b.running ? 1 : 0) - (a.running ? 1 : 0)), total: work.length, more: sessionsMoreToLoad, running: work.filter((r) => r.running).length, folder: folderNow, empty: "No sessions yet. Start one with New." },
+      chats: { offered: chatsAvailable, why: "Chats aren’t set up in this DGC.", rows: chats, total: chats.length, fresh: chats.filter((r) => r.fresh).length, empty: "No chats yet. Start one with New chat." },
+      pips: { offered: !!window.DgcPips?.mount, why: "Pips aren’t set up in this DGC.", rows: pips, total: pips.length, waiting: pips.filter((p) => p.waiting).length, say: pips[0] ? `${pips[0].name} is ready` : "", empty: "No Pips yet." },
+      running: [...work.filter((r) => r.running).map((r) => ({ ...r, live: false, meta: ["Work", r.meta].filter(Boolean).join(" · ") })), ...chats.filter((r) => r.running).map((r) => ({ ...r, live: false, meta: "Chat · answering" }))],
+      quick: { work: quickMark("work"), chat: chatsAvailable ? quickMark("chat") : "", pip: quickMark("pip") },
+      folders: { rows: projectFolders ? projectFolders.rows : [], mark: folderTile },
+    };
+  }
+  function homeAct(what, arg) {
+    if (what === "retry") homePips?.retry();
+    else if (what === "clear") hubClear(homeNow.cards.filter((c) => c.group === "new").map((c) => c.key));
+    else if (what === "tab") showSideTab(arg);
+    else if (what === "new") { if (arg === "work") openNewSession(); else if (arg === "chat") vscode.postMessage({ type: "chatdgcNew" }); else openPipsAt({ create: "personal" }); }
+    else if (what === "here") vscode.postMessage({ type: "newSessionInEditor", folder: arg });
+    else if (what === "folder") { chooseFolder(arg); showSideTab("work"); }
+    else if (what === "open") {
+      const key = String(arg || ""), kind = key.slice(0, key.indexOf(":")), id = key.slice(key.indexOf(":") + 1);
+      if (kind === "hub") hubAct(id, "open");
+      else if (kind === "work") { const item = sessionItems.find((s) => s.id === id); if (item) openSession(item); }
+      else if (kind === "chat") { vscode.postMessage({ type: "chatdgcOpen", id }); seenNews("chat", id); }
+      else if (kind === "pipopen") openPipsAt({ pip: id });
+    }
   }
   function hubAct(key, act) {
     const [kind, id] = [key.slice(0, key.indexOf(":")), key.slice(key.indexOf(":") + 1)];
@@ -1724,11 +1783,24 @@
   }
   function mountHub() {
     if (chatPlace !== "home" || hub || !window.DgcHub || !window.DgcCard || !$("home-hub")) return;
-    hub = window.DgcHub.create({ host: $("home-hub"), show: () => hubShow,
-      onShow: (value) => { hubShow = value; vscode.postMessage({ type: "homeShow", show: value }); },
-      onAct: hubAct, onClear: hubClear, onMore: () => homePips?.openAll(), onPips: () => showSideTab("pips"), onRetry: () => homePips?.retry(), onCount: paintHomeCount,
+    const part = (name) => { const node = document.createElement("div"); node.className = "dgc-hub hc-hub"; node.dataset.hub = name; return node; };
+    // Two hubs. What needs you is drawn inside the Needs you card: a few on the card (Medium, Large), all of it with the
+    // card opened. What is new is in one place only, Recent: as rows on the card, and with Recent opened as cards with
+    // the answers Home had (Open, Mark read, Dismiss, Undo) and Clear.
+    const needsHost = part("needs"), newHost = part("new");
+    hub = window.DgcHub.create({ host: needsHost, groups: ["needs"], always: () => !hubForm.full, empty: "Nothing needs you.",
+      first: () => hubForm.first, onRest: () => { if (hubForm.full) return false; home?.open("needs"); return true; }, onViewAll: () => home?.open("needs"),
+      onAct: hubAct, onClear: hubClear, onMore: () => homePips?.openAll(), onPips: () => showSideTab("pips"), onRetry: () => homePips?.retry() });
+    hubNew = window.DgcHub.create({ host: newHost, groups: ["new"], empty: "",
+      onAct: hubAct, onClear: hubClear, onMore: () => homePips?.openAll(), onPips: () => showSideTab("pips"), onRetry: () => homePips?.retry() });
+    if (window.DgcHomeCards) home = window.DgcHomeCards.create({ host: $("home-hub"), data: homeData, act: homeAct, post: (message) => vscode.postMessage(message),
+      slot: (name) => (name === "needs" ? needsHost : name === "new" ? newHost : null),
+      // How many of its cards a hub shows follows the form of the card it is in: one on a short card, three on a Medium one, eight opened.
+      slotted: (name, form, tight) => { if (name !== "needs") return; const first = form === "full" ? 8 : tight ? 1 : 3, full = form === "full"; if (hubForm.first !== first || hubForm.full !== full) { hubForm = { first, full }; hub.redraw(); } },
+      kept: () => pageState().homeCards, keep: (value) => { try { vscode.setState({ ...(vscode.getState() || {}), homeCards: value }); } catch {} },
       // The Pips' faces blink and look about as they do everywhere else.
-      onDraw: (host) => { try { hubFaces?.(); } catch {} hubFaces = window.PipConcepts?.plush?.mount?.(host) || null; } });
+      onDraw: (node) => { if (node.id !== "home-hub") { try { window.PipConcepts?.plush?.mount?.(node); } catch {} return; } try { hubFaces?.(); } catch {} hubFaces = window.PipConcepts?.plush?.mount?.(node) || null; } });
+    else $("home-hub").append(needsHost, newHost);
     paintHub();
   }
   $("chats-new")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcNew" }));
@@ -11341,7 +11413,7 @@ function permissionChoices(ev) {
         dismissed,
         onDismissed: (change) => vscode.postMessage({ type: "pipHomeDismissed", set: change.set, drop: change.drop }),
         // The dock shows a pinned Pip's face and what waits on it.
-        onPips: (said) => { dockPips = said; if (dock) paintDock(); },
+        onPips: (said) => { dockPips = said; if (dock) paintDock(); home?.update(); },
         // The Project Folder choice: Home's Project Pip cards are those of every project, or of the one folder (null
         // where this DGC offers no dropdown: this window's project, as before).
         projectFolder: () => (projectFolders ? projectFolders.choice : null),
@@ -12892,6 +12964,9 @@ function permissionChoices(ev) {
     }
     if (msg.type === "artifactNews") { artifactNews(msg.artifact, msg.op); return; }
     if (msg.type === "homePages") { homePagesNow = homePagesFrom(msg.pages); paintHub(); return; }
+    if (msg.type === "homeCards") { home?.layout(msg); return; }
+    if (msg.type === "homeUsage") { home?.usage(msg); return; }
+    if (msg.type === "homeWeather") { home?.weather(msg); return; }
     // A command answered on Home: this session's own card settles, saying so on the card (one line, not two).
     if (msg.type === "settleCard") {
       document.querySelectorAll(".card[data-request-id]").forEach((card) => {

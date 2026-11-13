@@ -6,6 +6,8 @@
 // everywhere. Read from computed style and geometry, dark and light, at 300 and 700 px.
 // (Before the tabs this file held the Pips block's fold and its soft pills; the block is gone, and what it showed is on
 // Home: side-tabs-home.test.mjs holds the tabs, the cards and the Show filter.)
+// (Since 13 Nov evening what is new is in Recent only: Home opens here on Recent opened whole (open: "recent"), where the
+// New cards, their answers and Clear are drawn. What needs you is in Needs you opened; its cards are the same cards.)
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -44,7 +46,7 @@ const SESSIONS = [
 for (const theme of THEMES) for (const width of WIDTHS) {
   for (const tab of ["home", "work", "chat"]) test(`every block starts on one ${EDGE}px edge and ends on one (${tab} tab, ${theme}, ${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
-    const x = await openHome(browser, { theme, width, tab, height: 900, sessions: SESSIONS });
+    const x = await openHome(browser, { open: "recent", theme, width, tab, height: 900, sessions: SESSIONS });
     try {
       const m = await x.page.evaluate(() => {
         const host = document.getElementById("sessions-host"), view = host.getBoundingClientRect(), inner = { left: view.left + host.clientLeft, right: view.left + host.clientLeft + host.clientWidth };
@@ -55,7 +57,7 @@ for (const theme of THEMES) for (const width of WIDTHS) {
         // In two columns, the first column keeps the left edge and the last the right one.
         const cards = [...document.querySelectorAll("#home-hub .dgc-hub-card")].filter((c) => c.checkVisibility()).map((c) => c.getBoundingClientRect());
         const cardEdges = cards.length ? [["cards, left", Math.round((Math.min(...cards.map((c) => c.left)) - inner.left) * 10) / 10], ["cards, right", Math.round((inner.right - Math.max(...cards.map((c) => c.right))) * 10) / 10]] : [];
-        const left = [".dgc-hub-show", ".dgc-hub-head h2", "#sessions-search", "#chats-search", ".home-library .codicon", "#sessions-list .session-blob", "#chats-list > .chat-row .session-blob",
+        const left = [".hc-back", ".dgc-hub-head h2", ".hc-earlier", "#sessions-search", "#chats-search", ".home-library .codicon", "#sessions-list .session-blob", "#chats-list > .chat-row .session-blob",
           "#projects-title", "#chats-sub", "#sessions-all"].flatMap((s) => at(s, "left"));
         const right = [".dgc-hub-clear", "#sessions-new", "#chats-new", "#sessions-list .session-age", "#chats-list > .chat-row .session-age", ".project-count"].flatMap((s) => at(s, "right"));
         const bar = document.querySelector("#side-tabs .dgc-tabs-bar").getBoundingClientRect();
@@ -77,7 +79,7 @@ for (const theme of THEMES) {
   test(`neutral cards with one filled answer in the text's own colour, quiet text, and nothing filled purple (${theme})`, async (t) => {
     if (skipOrFail(t)) return;
     for (const tab of ["home", "work", "chat"]) {
-      const x = await openHome(browser, { theme, width: 300, tab, sessions: SESSIONS, motion: "reduce" });
+      const x = await openHome(browser, { open: "recent", theme, width: 300, tab, sessions: SESSIONS, motion: "reduce" });
       try {
         const look = () => x.page.evaluate(() => {
           const css = (s) => { const n = typeof s === "string" ? document.querySelector(s) : s; return n ? getComputedStyle(n) : null; };
@@ -90,14 +92,14 @@ for (const theme of THEMES) {
           // Everything on the tab's page wider than a dot that is filled in the accent's hue. (A blob is a session's own colour.)
           const purple = [...document.querySelectorAll("#sessions-host *")].filter((n) => n.checkVisibility({ visibilityProperty: true }) && !n.closest("[data-mark], svg") && n.getBoundingClientRect().width > 10 && hue(getComputedStyle(n).backgroundColor))
             .map((n) => n.id || String(n.className));
-          const card = document.querySelector("#home-hub .dgc-hub-card"), primary = card?.querySelector(".dgc-ia-btn.dgc-ia-main"), other = document.querySelector("#home-hub .dgc-ia-btn:not(.dgc-ia-main)");   // (a card's answers are icons that turn into the full button, 12 Nov: media/shared/iconactions.css)
+          const card = [...document.querySelectorAll("#home-hub .dgc-hub-card")].find((c) => c.checkVisibility()), primary = card?.querySelector(".dgc-ia-btn.dgc-ia-main"), other = [...document.querySelectorAll("#home-hub .dgc-ia-btn:not(.dgc-ia-main)")].find((c) => c.checkVisibility());   // (a card's answers are icons that turn into the full button, 12 Nov: media/shared/iconactions.css)
           const fresh = [...document.querySelectorAll("#sessions-host .home-new")].find((n) => n.checkVisibility());
           return { tokens, purple, card: card ? [css(card).borderTopWidth, css(card).boxShadow] : null, cardGround: card ? css(card).backgroundColor : null,
             primary: primary ? [css(primary).backgroundColor, css(primary).color, css(primary).height] : null, other: other ? [css(other).backgroundColor, css(other).height] : null,
             clear: css("#home-hub .dgc-hub-clear") ? [css("#home-hub .dgc-hub-clear").color, css("#home-hub .dgc-hub-clear").textDecorationLine] : null,
             fresh: fresh ? [css(fresh).backgroundColor, css(fresh).color] : null,
             row: css("#sessions-list .session-row:hover, #chats-list .session-row:hover")?.backgroundColor ?? null, live: css("#sessions-host .session-live")?.backgroundColor ?? null,
-            faces: [...document.querySelectorAll("#home-hub .dgc-card-face")].map((f) => [Math.round(f.getBoundingClientRect().width), Math.round(f.getBoundingClientRect().height), f.querySelectorAll(".dgc-plush-rig").length]) };
+            faces: [...document.querySelectorAll("#home-hub .dgc-card-face")].filter((f) => f.checkVisibility()).map((f) => [Math.round(f.getBoundingClientRect().width), Math.round(f.getBoundingClientRect().height), f.querySelectorAll(".dgc-plush-rig").length]) };
         });
         const rest = await look();
         assert.deepEqual(rest.purple, [], `${tab}: nothing on the page is filled purple`);
@@ -108,7 +110,7 @@ for (const theme of THEMES) {
           assert.deepEqual(rest.clear, [rest.tokens.quiet, "none"], "Clear is quiet text");
           assert.ok(rest.faces.length >= 3 && rest.faces.every((f) => f[0] === 30 && f[1] === 30), `each card's face or blob has one 30px place: ${JSON.stringify(rest.faces)}`);
           assert.ok(rest.faces.filter((f) => f[2] === 1).length >= 3, "a Pip's face is its real face, with its rig");
-          await x.page.hover("#home-hub .dgc-hub-card .dgc-ia-btn.dgc-ia-main");
+          await x.page.hover("#home-hub .dgc-hub-card .dgc-ia-btn.dgc-ia-main >> visible=true >> nth=0");
           assert.deepEqual((await look()).purple, [], "home: pointed at, still nothing purple");
         } else {
           assert.deepEqual(rest.fresh, [rest.tokens.solid, rest.tokens.onSolid], "New is a neutral filled pill: the text's colour");
@@ -130,25 +132,16 @@ for (const theme of THEMES) {
       // A project's folder wears the colour its owner gave it (ChatDGC's palette, shared with its own page): not this page's to set.
       .filter((m) => !/project-icon/.test(m.what));
     for (const tab of ["home", "work", "chat"]) {
-      const x = await openHome(browser, { theme, width: 300, height: 1200, tab, sessions: SESSIONS, motion: "reduce" });
+      const x = await openHome(browser, { open: "recent", theme, width: 300, height: 1200, tab, sessions: SESSIONS, motion: "reduce" });
       try {
         const rest = await homeContrast(x.page);
         assert.ok(rest.length >= 8, `${tab}: the page's words were found (${rest.length})`);
         assert.deepEqual(low(rest), [], `${tab} tab`);
         if (tab === "home") {
-          for (const quiet of ["#home-hub .dgc-hub-show", "#home-hub .dgc-hub-clear", "#home-hub .dgc-ia-btn.dgc-ia-main", "#home-hub .dgc-ia-btn:not(.dgc-ia-main)"]) {
-            await x.page.hover(`${quiet} >> nth=0`);
+          for (const quiet of ["#home-hub .hc-cards-btn", "#home-hub .hc-back", "#home-hub .dgc-hub-clear", "#home-hub .dgc-ia-btn.dgc-ia-main", "#home-hub .dgc-ia-btn:not(.dgc-ia-main)"]) {
+            await x.page.hover(`${quiet} >> visible=true >> nth=0`);
             assert.deepEqual(low(await homeContrast(x.page)), [], `home tab, ${quiet} pointed at`);
           }
-          await x.page.click("#home-hub .dgc-hub-show");
-          const menu = await x.page.evaluate(() => { const parse = (c) => { const m = c.match(/-?[\d.]+(e-?\d+)?/g).map(Number); return c.startsWith("color(srgb") ? [m[0] * 255, m[1] * 255, m[2] * 255, m[3] ?? 1] : [m[0], m[1], m[2], m[3] ?? 1]; };
-            const over = (top, under) => top.slice(0, 3).map((v, i) => v * top[3] + under[i] * (1 - top[3])).concat(1);
-            const ground = (e) => { const layers = []; for (let n = e; n; n = n.parentElement) { const c = parse(getComputedStyle(n).backgroundColor); if (c[3] > 0) layers.push(c); if (c[3] >= 1) break; } return layers.reduceRight((under, top) => over(top, under), [255, 255, 255, 1]); };
-            const lum = (c) => { const [r, g, b] = c.map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
-            return [...document.querySelectorAll(".dgc-hub-menu .dgc-menu-label, .dgc-hub-menu .dgc-menu-hint")].map((e) => { const g = ground(e), c = over(parse(getComputedStyle(e).color), g), [a, b] = [lum(c), lum(g)].sort((p, q) => q - p);
-              return { what: `Show's menu ${e.className}`, text: e.textContent, kind: "words", ratio: Math.round(((a + 0.05) / (b + 0.05)) * 100) / 100 }; }); });
-          assert.equal(menu.length, 10, "five rows, each with its count");
-          assert.deepEqual(low(menu), [], "home tab, Show's menu");
         } else {
           await x.page.hover(tab === "work" ? "#sessions-list .session-row >> nth=1" : "#chats-list > .session-row >> nth=0");
           assert.deepEqual(low(await homeContrast(x.page)), [], `${tab} tab, a row pointed at`);
@@ -166,32 +159,32 @@ for (const theme of THEMES) {
 test("hover and colour move in 120 ms on the shared curve, and not at all under reduced motion; the faces are as they were", async (t) => {
   if (skipOrFail(t)) return;
   const read = (x) => x.page.evaluate(() => { const css = (s) => getComputedStyle(document.querySelector(s)), ms = (v) => v.split(",").map((p) => Math.round(parseFloat(p) * (p.trim().endsWith("ms") ? 1 : 1000)));
-    return { show: [ms(css("#home-hub .dgc-hub-show").transitionDuration), css("#home-hub .dgc-hub-show").transitionTimingFunction.split("),")[0].replace(/\)?$/, ")")], clear: ms(css("#home-hub .dgc-hub-clear").transitionDuration),
+    return { show: [ms(css("#home-hub .hc-cards-btn").transitionDuration), css("#home-hub .hc-cards-btn").transitionTimingFunction.split("),")[0].replace(/\)?$/, ")")], clear: ms(css("#home-hub .dgc-hub-clear").transitionDuration),
       answer: ms(css("#home-hub .dgc-ia-btn").transitionDuration), flip: Math.max(...ms(css("#side-tabs .dgc-tab-front").transitionDuration)), tab: ms(css("#side-tabs .dgc-tab").transitionDuration)[0], tabMoves: css("#side-tabs .dgc-tab").transitionProperty,
-      face: [document.querySelectorAll("#home-hub .dgc-plush-rig").length, document.querySelector('#home-hub .dgc-hub-card[data-group="needs"] .dgc-plush').dataset.state, document.querySelector('#home-hub .dgc-hub-card[data-group="new"] .dgc-plush').dataset.state] }; });
-  const moving = await openHome(browser, { width: 300 });
+      face: [document.querySelectorAll("#home-hub .dgc-hub-card .dgc-plush-rig").length, document.querySelector('#home-hub .dgc-hub-card[data-group="needs"] .dgc-plush').dataset.state, document.querySelector('#home-hub .dgc-hub-card[data-group="new"] .dgc-plush').dataset.state] }; });
+  const moving = await openHome(browser, { open: "recent", width: 300 });
   try {
     const m = await read(moving);
-    assert.deepEqual(m.show, [[120, 120], "cubic-bezier(0.23, 1, 0.32, 1)"], "Show changes colour in 120 ms on the shared curve");
+    assert.deepEqual(m.show, [[120, 120, 120], "cubic-bezier(0.23, 1, 0.32, 1)"], "the Cards button changes colour in 120 ms on the shared curve");
     assert.ok(m.clear.every((d) => d === 120) && m.answer.every((d) => d === 120), `quiet text and a card's answers too: ${m.clear}, ${m.answer}`);
     // (A tab's name turned over in about half a second until 13 Nov. Now pointing at a tab only changes its colour.)
     assert.deepEqual([m.flip, m.tabMoves], [0, "color"], "a tab's name does not move; only the tab's colour changes");
     assert.ok(m.tab > 0 && m.tab <= 200, `quickly (${m.tab} ms)`);
     assert.deepEqual(m.face, [4, "waiting_approval", "success"], "the faces: their rigs and their poses (waiting for you; pleased, with news)");
   } finally { await moving.close(); }
-  const still = await openHome(browser, { width: 300, motion: "reduce" });
+  const still = await openHome(browser, { open: "recent", width: 300, motion: "reduce" });
   try {
     const m = await read(still);
-    assert.deepEqual([m.show[0], m.clear.every((d) => d === 0), m.answer.every((d) => d === 0), m.flip, m.tab], [[0, 0], true, true, 0, 0], "reduced motion: nothing moves");
+    assert.deepEqual([m.show[0], m.clear.every((d) => d === 0), m.answer.every((d) => d === 0), m.flip, m.tab], [[0], true, true, 0, 0], "reduced motion: nothing moves");
   } finally { await still.close(); }
 });
 
 test("with nothing waiting Home is one quiet line, and your Pips are a tab away", async (t) => {
   if (skipOrFail(t)) return;
-  const x = await openHome(browser, { state: homeState("quiet"), width: 300, motion: "reduce" });
+  const x = await openHome(browser, { open: "recent", state: homeState("quiet"), width: 300, motion: "reduce" });
   try {
     const hub = await x.hub();
-    assert.deepEqual([hub.cards.length, hub.empty], [0, "Nothing needs you. New things arrive here."]);
+    assert.deepEqual([hub.cards.length, hub.empty], [0, "Nothing needs you."]);
     assert.equal(await x.page.locator("#home-hub .dgc-hub-clear").count(), 0, "nothing to clear");
     assert.equal((await x.tabs()).tabs.find((b) => b.id === "pips").shown, true);
     assert.deepEqual(x.errors, []);
@@ -224,7 +217,6 @@ test("the host keeps what was cleared beside Home's Show filter, neither disturb
   assert.match(panel, /const homeShow = place === "home" \? homeShowAttr\(this\.context\) : "";/);
   assert.match(panel, /<html lang="en"[^>]*\$\{homeShow\}[^>]*>/);
   assert.match(panel, /if \(rememberHomeShow\(this\.context, msg\)\) return;/);
-  assert.match(page, /type: "homeShow", show: value/);
-  assert.match(page, /document\.documentElement\.dataset\.homeShow/);
+  assert.doesNotMatch(page, /type: "homeShow"/, "the page has no Show filter to keep since Home became cards (13 Nov); what the host kept is left as it is");
   assert.doesNotMatch(page + panel, /pipHomeCollapsed|sessionsHomeCollapsed/);
 });

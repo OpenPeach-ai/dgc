@@ -34,6 +34,7 @@ import { pipsAttention, PipsAttentionState } from "./pipsAttention";
 import { settingsDocument } from "./settingsView";
 import { onPicturesSetting, pictureFoldsMessage, rememberPictureFold, setPicturesInReplies, picturesFolded } from "./pictureFolds";
 import { dockOf, dockSettings, setDockSetting } from "./dock";
+import { homeCardsOf, usageForHome } from "./homeCards";
 import { folderLabel, folderRows, foldersOffered, fullFolder, homeAsTilde, keepProjectFolder, projectFolder, type FolderRow } from "./projectFolder";
 import { openCodePreview } from "./codePreview";
 import { DEV_SAVED_KEY, DEV_WARNED_KEY, devLimitsTable, devLimitValues, devShown, type DevLimit } from "./devMode";
@@ -1026,6 +1027,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (this.webviewReady) this.post(dockOf(this.context).state());
       if (!this.tab) this.pipsTab?.dockChanged();
     }));
+    // Home's cards (src/homeCards.ts): another window added, moved or removed one, or changed a card's setting.
+    if (this.home) { this.context.subscriptions.push(homeCardsOf(this.context).onChange(() => { if (this.webviewReady) this.post(homeCardsOf(this.context).state()); })); }
     if (tab) { return; }
     mcpAppsHost(this.context.extensionUri).logoOf = (plugin) => this.replyPluginLogo(plugin);
     // The saved default is the whole profile's: another window may have changed it while this one was in the background.
@@ -1523,6 +1526,28 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const found = new Map<string, string>();
     for (const row of this.runningRows(this.liveSessionRows)) { if (row.session) found.set(row.session, row.work || ""); }
     return found;
+  }
+
+  /** Home's Token usage card: every day DGC has counted (for a period and the one before it) and the last thirty
+   *  days' models, read from the local ledger by this side bar's own DGC. Two reports, then one message to the card. */
+  private homeUsage?: { all?: any; period?: any; timer?: ReturnType<typeof setTimeout> };
+  private askHomeUsage(): void {
+    if (!this.home || !this.webviewReady) { return; }
+    if (this.lastReadyEvent && !this.lastReadyEvent.capabilities?.usage_ledger) { this.post({ type: "homeUsage", days: [], models: [], error: "Update the DGC CLI to see token usage here." }); return; }
+    if (this.homeUsage?.timer) { return; }           // already asked: its answer is on its way
+    const be = this.ensureBackend();
+    const asked = be.send({ type: "get_usage", request_id: "home-usage-all", range: "all" }) && be.send({ type: "get_usage", request_id: "home-usage-30d", range: "30d" });
+    if (!asked) { this.post({ type: "homeUsage", days: [], models: [], error: "DGC could not read token usage just now." }); return; }
+    this.homeUsage = { timer: setTimeout(() => { const had = this.homeUsage; this.homeUsage = undefined; if (had?.all) this.post(usageForHome(had.all, had.period)); }, 20000) };
+  }
+  private homeUsageReport(ev: any): void {
+    const asked = this.homeUsage;
+    if (!asked) { return; }
+    if (ev.request_id === "home-usage-all") asked.all = ev; else asked.period = ev;
+    if (!asked.all || !asked.period) { return; }
+    if (asked.timer) clearTimeout(asked.timer);
+    this.homeUsage = undefined;
+    if (this.home && this.webviewReady) this.post(usageForHome(asked.all, asked.period));
   }
 
   /** Whether this DGC offers the Project Folder dropdown (it lists every project's sessions, and the folders). */
@@ -5092,6 +5117,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const host = this.tab?.host ?? this;
       host.pipsEditor?.modelsChanged(); host.pipsTab?.modelsChanged();
     }
+    // Home's Token usage card asked (askHomeUsage): its two reports go to the card, and to nothing else.
+    if (ev.type === "usage_report" && String((ev as any).request_id || "").startsWith("home-usage-")) { this.homeUsageReport(ev); return; }
     const settingsRejection = ev.type === "command_rejected" && SETTINGS_REJECTIONS.includes(String(ev.command || ""));
     // Voice: the page's own state and progress, and only its own errors (a chat's dictation reports its own).
     const settingsVoice = ["voice_state", "voice_progress"].includes(ev.type)
@@ -5821,6 +5848,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       msg = { ...msg, item: { ...msg.item, ref: from && from.exists ? { folder: from.project, folder_name: from.name } : {} } };
     }
     if (dockOf(this.context).handle(msg, (state) => this.post(state))) return;
+    // Home's cards (src/homeCards.ts): which are on Home and in what order, a card's setting, the weather. Kept for this computer.
+    if (this.home && homeCardsOf(this.context).handle(msg, (said) => this.post(said))) return;
+    if (this.home && msg?.type === "homeUsageGet") { this.askHomeUsage(); return; }
     if (msg?.type === "dockOpen") { this.openFromDock(String(msg.key || "")); return; }
     if (msg?.type === "dockNew") { this.newFromDock(String(msg.what || "")); return; }
     // The home's Pips row: unread its Dismiss all cleared from there, kept so a reload holds it (src/pipHomeDismiss.ts).
@@ -5905,6 +5935,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.webviewReady = true;
         this.post(pictureFoldsMessage(this.context));     // which pictures stay folded, and the setting
         this.post(dockOf(this.context).state());          // what is pinned, each session's colour, and the Dock settings
+        if (this.home) this.post(homeCardsOf(this.context).state());   // Home's cards, in their order, and their settings
         if (this.home) this.post({ type: "homePages", pages: homePages(this.context) });   // what was made while the page was being built
         // The home's chats, asked for now its page can hear the answer (one that came before was dropped).
         if (this.home) this.chatdgc?.homeRefresh();
@@ -10511,6 +10542,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const dockJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "dock.js"));
     // Home, the side bar's first tab: every card that needs you or is new, under a Show filter (media/shared/hub.js, window.DgcHub).
     const hubJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "hub.js"));
+    // Home as cards: the grid, the card library and each card (media/shared/homecards.js, window.DgcHomeCards).
+    const homeCardsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "homecards.js"));
     // The Project Folder dropdown over the Work sessions and in New Session's dialog (media/shared/folderpick.js, window.DgcFolderPick).
     const folderPickJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "folderpick.js"));
     // How long ago a Work session is from, in the Work list's words (media/shared/age.js, window.DgcAge).
@@ -10840,7 +10873,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${composerJs}"></script><script nonce="${nonce}" src="${trayJs}"></script>
 <script nonce="${nonce}" src="${cardJs}"></script>
 <script nonce="${nonce}" src="${sheetJs}"></script>
-<script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script><script nonce="${nonce}" src="${folderPickJs}"></script><script nonce="${nonce}" src="${ageJs}"></script>
+<script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script><script nonce="${nonce}" src="${folderPickJs}"></script><script nonce="${nonce}" src="${ageJs}"></script><script nonce="${nonce}" src="${homeCardsJs}"></script>
 <script nonce="${nonce}" src="${mcpAppsJs}"></script>
 <script nonce="${nonce}" src="${markdown}"></script>
 <script nonce="${nonce}" src="${breakdownScript}"></script>
