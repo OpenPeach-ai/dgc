@@ -131,3 +131,76 @@ class RestoreBefore052(Registry051):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheWelcome(unittest.TestCase):
+    """get_pips_welcome (Pips API 96): the Pips tab's one-time pop-up names what moved, only for someone who had Pips."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory(prefix="dgc-welcome-052-")
+        self.addCleanup(temp.cleanup)
+        self.base = Path(temp.name)
+        self.directory = self.base / "pips"
+        env = patch.dict(os.environ, {"DGC_HOME": str(self.base / "home")})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def made_in_051(self, make):
+        from dgc import pips
+        with WorkspaceRegistry(self.directory) as registry:
+            store = pips.PipStore(registry)
+            made = make(registry, store)
+        db = sqlite3.connect(self.directory / "registry.sqlite3")
+        db.execute("PRAGMA user_version=51")
+        db.commit()
+        db.close()
+        return made
+
+    def welcome(self):
+        from dgc.pip_welcome import welcome
+        with WorkspaceRegistry(self.directory) as registry:
+            return welcome(registry)
+
+    def test_it_names_what_moved_by_folder_the_personal_ones_and_those_on_do_it_all(self):
+        from dgc import pip_levels
+        shop = self.base / "toni_fabrics"
+        shop.mkdir()
+
+        def make(registry, store):
+            folder = registry.resolve(shop)
+            gst = store.create(folder["id"], "GST watchdog", "Check GST.", "editor-user", pip_type="rook")
+            erp = store.create(folder["id"], "ERP daily audit", "Check ERP.", "editor-user", pip_type="scout")
+            home = registry.personal()["id"]
+            core = store.create(home, "Core", None, "editor-user", pip_type="core")
+            mornings = store.create(home, "Mornings", None, "editor-user", pip_type="quill")
+            garden = store.create(home, "Garden notes", None, "editor-user", pip_type="lens")
+            with registry.transaction():
+                pip_levels.start(registry, mornings["id"])
+            pip_levels.set_level(registry, mornings["id"], pip_levels.FULL, "editor-user")
+            return gst, erp, core, mornings, garden
+        gst, erp, core, mornings, garden = self.made_in_051(make)
+        said = self.welcome()
+        self.assertTrue(said["had_pips"])
+        [folder] = said["folders"]
+        self.assertEqual((folder["folder"], [p["name"] for p in folder["pips"]]), ("toni_fabrics", ["GST watchdog", "ERP daily audit"]))
+        self.assertEqual([p["name"] for p in said["personal"]], ["Mornings", "Garden notes"], "Core is not news")
+        self.assertEqual([p["name"] for p in said["do_it_all"]], ["Mornings"])
+
+    def test_a_new_user_and_core_alone_are_not_welcomed(self):
+        self.assertFalse(self.welcome()["had_pips"], "a new database: nothing moved")
+        self.made_in_051(lambda registry, store: store.create(registry.personal()["id"], "Core", None, "editor-user",
+                                                              pip_type="core"))
+        self.assertFalse(self.welcome()["had_pips"], "Core alone")
+
+    def test_a_pip_made_after_the_update_is_not_named(self):
+        self.made_in_051(lambda registry, store: store.create(registry.personal()["id"], "Mornings", None, "editor-user",
+                                                              pip_type="quill"))
+        from dgc import pips
+        with WorkspaceRegistry(self.directory) as registry:
+            registry.clock = lambda: "2999-01-01T00:00:00.000Z"
+            pips.PipStore(registry).create(registry.personal()["id"], "Later", None, "editor-user", pip_type="lens")
+        self.assertEqual([p["name"] for p in self.welcome()["personal"]], ["Mornings"])
+
+    def test_it_is_a_pips_control_read(self):
+        from dgc import pips
+        self.assertIn("get_pips_welcome", pips.CONTROL_COMMANDS)
