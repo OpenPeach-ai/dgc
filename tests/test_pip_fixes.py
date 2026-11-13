@@ -63,7 +63,7 @@ class FixWorld(WithABox):
             self.edit_its_copy()
         if levels.effective(self.registry, self.helper["id"]) == levels.FULL:
             copies.auto_apply(self.store, self.helper["id"])         # as the runner does when the turn ends
-        self.store.finish(row["id"], result={"text": text})
+        self.store.finish(row["id"], result={"text": text, "usage": {"input_tokens": 1200, "output_tokens": 340}})
         return row["id"]
 
 
@@ -139,6 +139,7 @@ class TheFixTurn(FixWorld, unittest.TestCase):
         run = self.fix_turn_ends()
         fix = self.one()
         self.assertEqual((fix["state"], fix["fix_run_id"], fix["tests"]), ("ready", run, "passed"))
+        self.assertEqual(fix["tokens"], 1540, "what the fix cost (his answer 1: cost shown)")
         self.assertEqual((fix["findings"][0]["verdict"], fix["findings"][0]["why"]),
                          ("fixed", "total now subtracts the discount"))
         self.assertTrue(fixes.CHANGE.match(fix["change_id"]))

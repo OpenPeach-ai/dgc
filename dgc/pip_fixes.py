@@ -146,8 +146,10 @@ def _turn(db, row):
     if not run_id:
         return None
     return db.execute("SELECT id,status,started_at,created_at,finished_at,"
-                      "CASE WHEN length(CAST(error AS BLOB))<=16384 THEN error END AS error FROM pip_runs WHERE id=?",
-                      (run_id,)).fetchone()
+                      "CASE WHEN length(CAST(error AS BLOB))<=16384 THEN error END AS error,"
+                      "json_extract(CASE WHEN json_valid(result) THEN result END,'$.usage.input_tokens') AS input_tokens,"
+                      "json_extract(CASE WHEN json_valid(result) THEN result END,'$.usage.output_tokens') AS output_tokens "
+                      "FROM pip_runs WHERE id=?", (run_id,)).fetchone()
 
 
 def _table(db, name) -> bool:
@@ -203,6 +205,10 @@ def view(db, row) -> dict:
         finding.setdefault("verdict", "open")
     if row["tests"] in ("passed", "failed"):
         out["tests"] = row["tests"]
+    if run is not None:
+        used = sum(v for v in (run["input_tokens"], run["output_tokens"]) if type(v) is int and v >= 0)
+        if used:
+            out["tokens"] = used                 # what the fix cost (his answer 1, 14 Nov: cost shown)
     message = row["message"] or ("The last check no longer finds these." if row["note"] == "gone" else "")
     if message:
         out["message"] = _clip(message, 600)
