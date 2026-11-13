@@ -33,7 +33,8 @@ class Base(unittest.TestCase):
         self.base = Path(tempfile.mkdtemp(prefix="dgc-archive-"))
         self.addCleanup(shutil.rmtree, self.base, True)
         self.home = self.base / "home" / ".dgc"
-        for p in (patch.object(sessions, "SESSIONS_DIR", self.home / "sessions"), patch("dgc.config.dgc_home", lambda: self.home)):
+        for p in (patch.object(sessions, "SESSIONS_DIR", self.home / "sessions"), patch("dgc.config.dgc_home", lambda: self.home),
+                  patch.object(sessions, "_temporary_roots", lambda: ())):          # (these projects are in the temp folder)
             p.start()
             self.addCleanup(p.stop)
         self.shop = self.base / "code" / "shop"

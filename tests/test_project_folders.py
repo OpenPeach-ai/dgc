@@ -37,8 +37,10 @@ class Folders(unittest.TestCase):
         self.setUp_base()
         self.home = self.base / "home"
         self.dgc = self.home / ".dgc"
+        # (This test's projects are in the temporary folder, which a list of every project leaves out: here it isn't one.)
         for p in (mock.patch.object(sessions, "SESSIONS_DIR", self.dgc / "sessions"),
-                  mock.patch("dgc.config.dgc_home", lambda: self.dgc), mock.patch.object(project_folders, "_home", lambda: self.home)):
+                  mock.patch("dgc.config.dgc_home", lambda: self.dgc), mock.patch.object(project_folders, "_home", lambda: self.home),
+                  mock.patch.object(sessions, "_temporary_roots", lambda: ())):
             p.start()
             self.addCleanup(p.stop)
         self.shop, self.garden, self.notes = (self.base / "code" / n for n in ("shop", "garden", "notes"))
@@ -109,6 +111,39 @@ class Folders(unittest.TestCase):
             (self.shop / "file.txt").write_text("x")
             with self.subTest(folder=bad), self.assertRaises(RegistryError):
                 project_folders.add(self.registry, bad)
+
+
+class NotProjects(Folders):
+    """13 Nov, seen on a developer's machine: thousands of temporary folders (test runs) filled the list and indexing
+    them kept the backend too busy to answer. A temporary folder and one inside any DGC home are never projects in a
+    list of every project; this window's own folder always is."""
+
+    def test_temporary_and_dgc_home_folders_are_left_out(self):
+        scratch = self.base / "scratch"
+        run = scratch / "dgc-goal-test-abc"
+        run.mkdir(parents=True)
+        session(run, "t1", 1_800_000_500)
+        other_home = self.base / "elsewhere" / ".dgc" / "fix-copies" / "copy"
+        other_home.mkdir(parents=True)
+        session(other_home, "c1", 1_800_000_600)
+        with mock.patch.object(sessions, "_temporary_roots", lambda: (scratch.resolve(),)):
+            listed = [Path(r["folder"]).name for r in self.folders()]
+            self.assertNotIn("dgc-goal-test-abc", listed)
+            self.assertNotIn("copy", listed)
+            self.assertIn("garden", listed)
+            here = [r for r in self.folders(here=run) if r["here"]]
+            self.assertEqual([Path(r["folder"]).name for r in here], ["dgc-goal-test-abc"], "this window's own folder stays")
+
+    def test_a_temporary_folders_pips_are_left_out_of_every_projects_pips(self):
+        scratch = self.base / "scratch"
+        run = scratch / "dgc-pip-report-xyz"
+        run.mkdir(parents=True)
+        ws = self.registry.resolve(run)
+        self.store.create(ws["id"], "Test leftover", "Review.", "local-console", pip_type="rook")
+        with mock.patch.object(sessions, "_temporary_roots", lambda: (scratch.resolve(),)):
+            names = [p["name"] for p in project_folders.pips_everywhere(self.store)["pips"]]
+        self.assertNotIn("Test leftover", names)
+        self.assertIn("Notes watcher", names)
 
 
 class TheCommands(unittest.TestCase):

@@ -27,7 +27,8 @@ class Everywhere(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.base, True)
         self.home = self.base / "home" / ".dgc"
         patches = [patch.object(sessions, "SESSIONS_DIR", self.home / "sessions"),
-                   patch("dgc.config.dgc_home", lambda: self.home)]
+                   patch("dgc.config.dgc_home", lambda: self.home),
+                   patch.object(sessions, "_temporary_roots", lambda: ())]   # (these projects are in the temp folder)
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
@@ -67,6 +68,28 @@ class Everywhere(unittest.TestCase):
         self.assertEqual([r["path"].stem for r in rows], ["g1", "g2"])
         self.assertEqual(self.rows(folder=str(self.base / "elsewhere")), [])
 
+    def test_temporary_folders_are_not_projects_but_this_windows_is(self):
+        scratch = self.base / "scratch" / "dgc-goal-test-abc"
+        scratch.mkdir(parents=True)
+        write(scratch, "t1", "Goal test", 50)
+        with patch.object(sessions, "_temporary_roots", lambda: ((self.base / "scratch").resolve(),)):
+            self.assertNotIn("t1", [r["path"].stem for r in self.rows()])
+            self.assertIn("t1", [r["path"].stem for r in sessions.listing_everywhere(scratch)], "this window's own")
+            self.assertTrue(sessions.not_a_project(scratch))
+            self.assertTrue(sessions.not_a_project(self.base / "x" / ".dgc" / "worktrees" / "y"))
+            self.assertFalse(sessions.not_a_project(self.shop))
+
+    def test_each_buckets_project_is_read_once_until_it_changes(self):
+        sessions._BUCKET_PROJECTS.clear()
+        with patch.object(sessions, "_read_bucket_project", wraps=sessions._read_bucket_project) as read:
+            self.rows()
+            first = read.call_count
+            self.rows()
+            self.assertEqual(read.call_count, first, "nothing changed: nothing read again")
+            write(self.garden, "g3", "A new one", 60)
+            self.rows()
+            self.assertEqual(read.call_count, first + 1, "only the bucket that changed")
+
     def test_a_folder_that_is_gone_is_said(self):
         shutil.rmtree(self.notes)
         gone = next(r for r in self.rows() if r["path"].stem == "n1")
@@ -82,7 +105,8 @@ class TheCommand(unittest.TestCase):
         shop, garden = base / "shop", base / "garden"
         shop.mkdir()
         garden.mkdir()
-        with patch.object(sessions, "SESSIONS_DIR", base / ".dgc" / "sessions"), patch("dgc.config.dgc_home", lambda: base / ".dgc"):
+        with patch.object(sessions, "SESSIONS_DIR", base / ".dgc" / "sessions"), patch("dgc.config.dgc_home", lambda: base / ".dgc"), \
+                patch.object(sessions, "_temporary_roots", lambda: ()):
             write(shop, "s1", "Fix the checkout total", 10)
             write(garden, "g1", "Water the tomatoes", 30)
             backend = object.__new__(headless.Backend)

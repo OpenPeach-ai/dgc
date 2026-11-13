@@ -30,6 +30,13 @@ def _own(folder: Path) -> bool:
     return folder == own or own in folder.parents
 
 
+def _unlisted(folder: Path, here: Path) -> bool:
+    """Left out of the list: DGC's own folders, and temporary or DGC-home ones (sessions.not_a_project), except this
+    window's own folder, which is always there."""
+    from .sessions import not_a_project
+    return _own(folder) or (folder != here and not_a_project(folder))
+
+
 def _iso(seconds: float) -> str:
     return datetime.fromtimestamp(seconds, timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
@@ -58,7 +65,7 @@ def listing(registry, config) -> dict:
         if not project:
             continue
         folder = Path(project).expanduser().resolve(strict=False)
-        if _own(folder):
+        if _unlisted(folder, here):
             continue
         try:
             stamps = [p.stat().st_mtime for p in bucket.glob("*.json") if p.is_file() and not p.is_symlink()]
@@ -74,7 +81,7 @@ def listing(registry, config) -> dict:
             "JOIN bindings b ON b.workspace_id=w.id AND b.runner_id=? JOIN pips p ON p.workspace_id=w.id "
             "WHERE w.kind<>'personal' AND p.status<>'archived' GROUP BY w.id", (registry.runner_id,)):
         folder = Path(root).expanduser().resolve(strict=False)
-        if _own(folder):
+        if _unlisted(folder, here):
             continue
         place = row(folder)
         place["pips"] += count
@@ -96,9 +103,11 @@ def listing(registry, config) -> dict:
 def pips_everywhere(store, *, limit=100, offset=0, query="", order="created") -> dict:
     """list_pips {scope: "projects"}: every project's Pips (each carries its workspace_id), paged across them."""
     registry = store.registry
+    from .sessions import not_a_project
+    # (A temporary or DGC-home folder's Pips are left out too, as list_project_folders leaves out the folder.)
     spaces = [r[0] for r in registry.db.execute(
-        "SELECT w.id FROM workspaces w JOIN bindings b ON b.workspace_id=w.id AND b.runner_id=? WHERE w.kind<>'personal'",
-        (registry.runner_id,))]
+        "SELECT w.id,b.canonical_root FROM workspaces w JOIN bindings b ON b.workspace_id=w.id AND b.runner_id=? "
+        "WHERE w.kind<>'personal'", (registry.runner_id,)) if not not_a_project(r[1])]
     found = []
     for workspace_id in spaces:
         found += store.list(workspace_id, limit=100, query=query, order=order)

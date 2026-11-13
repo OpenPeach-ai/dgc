@@ -1633,7 +1633,54 @@ def _listing_files(project_root, *, redact_secrets=()) -> list[tuple[Path, float
 _PROJECT_FIELD = re.compile(r'"project"\s*:\s*"((?:[^"\\]|\\.)*)"')
 
 
+def _temporary_roots() -> tuple[Path, ...]:
+    """The temporary folders of this computer: this process's and the usual ones on Linux and macOS."""
+    import tempfile
+    roots = {tempfile.gettempdir(), "/tmp", "/var/tmp", "/private/tmp", "/private/var/tmp", "/var/folders",
+             "/private/var/folders"}
+    return tuple(sorted({Path(root).resolve(strict=False) for root in roots}))
+
+
+def not_a_project(folder) -> bool:
+    """A folder that is never one of the user's projects in a list of every project (13 Nov): one in a temporary folder
+    (shared_memory's rule too: a folder in the temporary directory isn't a project; a test's, a scratch run's) and one
+    inside any DGC home (a helper's worktree, a fix's copy). Seen on a developer's machine: thousands of such folders
+    filled "All projects" and the Project Folder list, and indexing them all kept the backend too busy to answer."""
+    place = Path(folder).expanduser().resolve(strict=False)
+    if ".dgc" in place.parts:
+        return True
+    return any(place == root or root in place.parents for root in _temporary_roots())
+
+
+_BUCKET_PROJECTS: dict[str, tuple[tuple[int, int], str | None]] = {}
+
+
 def _bucket_project(bucket: Path) -> str | None:
+    """The project a bucket belongs to, remembered while its session files are unchanged (how many, and the newest
+    one's time; not the folder's own time, which the index beside them moves on every read): a list of every project
+    then reads only what changed, not every bucket's files each time."""
+    try:
+        count, newest = 0, 0
+        with os.scandir(bucket) as entries:
+            for entry in entries:
+                if entry.name.endswith(".json") and entry.is_file(follow_symlinks=False):
+                    count += 1
+                    newest = max(newest, entry.stat(follow_symlinks=False).st_mtime_ns)
+        stamp = (count, newest)
+    except OSError:
+        return None
+    key = str(bucket)
+    known = _BUCKET_PROJECTS.get(key)
+    if known is not None and known[0] == stamp:
+        return known[1]
+    project = _read_bucket_project(bucket)
+    if len(_BUCKET_PROJECTS) > 20000:
+        _BUCKET_PROJECTS.clear()
+    _BUCKET_PROJECTS[key] = (stamp, project)
+    return project
+
+
+def _read_bucket_project(bucket: Path) -> str | None:
     """The project folder a session bucket belongs to, from the first few KB of one of its files: sessions.save writes
     "project" near the top, so a large transcript is never read for it."""
     files = sorted((p for p in bucket.glob("*.json") if p.is_file() and not p.is_symlink()),
@@ -1685,6 +1732,8 @@ def listing_everywhere(here_root, *, limit=None, offset=0, query="", redact_secr
         place = str(Path(project).expanduser().resolve(strict=False))
         if place == own or place.startswith(own + os.sep) or (chosen is not None and place != chosen):
             continue
+        if not_a_project(place) and place != here:
+            continue                           # a temporary or DGC-owned folder (this window's own is always listed)
         where = bucket / ARCHIVED_DIR if archived else bucket
         if archived and (where.is_symlink() or not where.is_dir()):
             continue
