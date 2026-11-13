@@ -5276,6 +5276,14 @@ def _execute_run(registry, row, config):
                       "tools_called": 0, "snapshot": snapshot_info}
         if computer_socket is not None:
             result["computer"] = {"calls": computer_socket.calls, "held": computer_host.waiting_for(row["id"])}
+            # The wall at Do it all (pips-sandbox-design §2): what it changed in its copies goes into the real folders
+            # when its turn ends (only a turn that ended well), file by file, never over a file the user changed
+            # meanwhile, with Undo. Below Do it all the card waits for the user (pip_project_copies.auto_apply).
+            try:
+                from . import pip_project_copies
+                pip_project_copies.auto_apply(PipStore(registry), row['pip_id'])
+            except Exception:                    # noqa: BLE001 - the reply stands; the card waits for the user
+                pass
         # The plugins a chat reply took an answer from ("Used Aave" under it): what this controller saw, never the
         # worker's word for it.
         result.pop("plugins", None)

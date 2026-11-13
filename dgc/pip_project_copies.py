@@ -836,7 +836,29 @@ def _decided(store, row, status, result) -> dict:
     return _view(row)
 
 
-def apply(store, pip_id, change_id, expected_digest) -> dict:
+def auto_apply(store, pip_id) -> list:
+    """When a turn ends at Do it all (pips-sandbox-design §2, the wall): what the Pip changed in its copies is applied
+    to the real folders by itself, as the user's Apply would be: file by file, never over a file the user changed
+    meanwhile (held back, said on its card), with Undo. Below Do it all, or a Do it all chosen before folder Pips had
+    a box, or while the fuse holds: nothing; the card waits for the user."""
+    from . import pip_levels
+    if pip_levels.effective(store.registry, pip_id) != pip_levels.FULL:
+        return []
+    db = store.db
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pip_project_changes'").fetchone() is None:
+        return []
+    refresh(store, pip_id)
+    done = []
+    for row in db.execute("SELECT id,digest FROM pip_project_changes WHERE pip_id=? AND status='pending' "
+                          "ORDER BY created_at", (pip_id,)).fetchall():
+        try:
+            done.append(apply(store, pip_id, row["id"], row["digest"], by="pip-level:full"))
+        except RegistryError:
+            continue                          # changed under it: the card waits for the user
+    return done
+
+
+def apply(store, pip_id, change_id, expected_digest, *, by=None) -> dict:
     """The user's Apply: what the Pip changed, written to the project file by file, holding back what moved."""
     refresh(store, pip_id)
     row, copy = _change(store, pip_id, change_id)
@@ -919,7 +941,7 @@ def apply(store, pip_id, change_id, expected_digest) -> dict:
     (undo_dir / "manifest.json").write_text(json.dumps(manifest))
     _save_snapshot(registry, copy["id"], {**snap, "files": was})
     status = "applied" if applied and not held else "partial" if applied else "not_applied"
-    return _decided(store, row, status, {"applied": applied, "held_back": held})
+    return _decided(store, row, status, {"applied": applied, "held_back": held, **({"by": by} if by else {})})
 
 
 def undo(store, pip_id, change_id) -> dict:

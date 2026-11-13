@@ -527,7 +527,12 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # {folder, name, here, exists, sessions, pips, workspace_id, updated_at}), add_project_folder {folder} (a folder the user
 # picked, as a project: its workspace), list_pips {scope: "projects"} (every project's Pips), list_pip_attention
 # {projects: "all" | <workspace id>} (Project Pips' cards too). Local only.
-PIPS_API_VERSION = 94
+# API 95 (0.52, every Pip has its own box): no new command; a folder Pip on a machine that runs boxes has its own
+# computer in its chat (get_pip_computer granted; its Files, Terminal and live view open as a Personal Pip's) with a copy
+# of its folder in its Files (list_pip_project_changes shows what it changed; apply/discard/undo as for an @-copy); its
+# level (set_pip_level) governs its computer when chosen with the box (get_pip_level's lines say so), and at Do it all
+# what it changed is applied when its turn ends (a change's result says "by": "pip-level:full"); set_pip_careful for it.
+PIPS_API_VERSION = 95
 
 
 def attachment_limits() -> dict:

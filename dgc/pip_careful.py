@@ -129,10 +129,15 @@ def set_on(registry, pip_id, on, actor) -> dict:
 
 
 def _personal(registry, pip_id) -> str:
-    row = registry.db.execute("SELECT p.workspace_id FROM pips p JOIN workspaces w ON w.id=p.workspace_id "
-                              "WHERE p.id=? AND w.kind='personal'", (pip_id,)).fetchone() if isinstance(pip_id, str) else None
+    """The workspace of a Pip with careful mode: a Personal Pip, or (0.52) a folder Pip with its own box."""
+    row = registry.db.execute("SELECT p.workspace_id, w.kind FROM pips p JOIN workspaces w ON w.id=p.workspace_id "
+                              "WHERE p.id=?", (pip_id,)).fetchone() if isinstance(pip_id, str) else None
+    if row is not None and row["kind"] != "personal":
+        from .pips import PipStore, has_box
+        if not has_box(PipStore(registry)._job(pip_id)):
+            row = None
     if row is None:
-        raise RegistryError("not_found", "Careful mode belongs to a Personal Pip.")
+        raise RegistryError("not_found", "Careful mode belongs to a Pip with its own computer.")
     return row["workspace_id"]
 
 

@@ -60,6 +60,17 @@ PROJECT_SAYS = {
     FULL: ("Also writes a fix in its own copy by itself; the diff waits as a card for you. Never changes your files, "
            "commits or pushes."),
 }
+# A folder Pip with its own box (0.52, pips-sandbox-design §2): the same three, about its computer and about what it
+# changed in its copy of your folder. Do it all's risk said where it is chosen, as a Personal Pip's is.
+BOX_SAYS = {
+    ASK: ("Asks before every new site, submit and send from its computer, and before every handoff. What it changed "
+          "in its copy of your folder waits for you as a card."),
+    APPROVE: ("Opens new sites, searches and saves drafts on its computer by itself, and runs reviews and checks you "
+              "approved once. Asks before it sends, posts or orders. What it changed in its copy waits for you as a card."),
+    FULL: ("Does the whole job on its computer, sends included, and applies what it changed to your folder when it "
+           "finishes: never over a file you changed meanwhile, always with Undo. A page it reads could talk it into "
+           "sending anything it sees, your code included."),
+}
 NOBODY = "nobody at the keyboard"
 # The fuse: more than this many things a Pip did on its own (sent, submitted, ran) in an hour, and it asks again until
 # the hour has passed, whatever its level. A runaway Pip, or one a page talked into a loop, stops at 25.
@@ -106,11 +117,23 @@ def project_level(registry, pip_id) -> str:
     return value if value in LEVELS and not personal else ASK
 
 
+def _boxed(registry, pip_id) -> bool:
+    """A folder Pip with its own box now (pips.has_box)."""
+    try:
+        from .pips import PipStore, has_box
+        return has_box(PipStore(registry)._job(pip_id))
+    except Exception:                       # noqa: BLE001 - can't say: no box
+        return False
+
+
 def level(registry, pip_id) -> str:
-    """The Pip's level: its own choice, else DEFAULT. A Project Pip, or a registry that can't say, is Ask."""
+    """The Pip's level: its own choice, else DEFAULT. A folder Pip's counts for its box only when it was chosen while
+    the Pip had one ("box" in what was saved): one chosen before was about its handoffs only ("never changes your
+    files"), so its box reads Ask until the level is chosen again. A registry that can't say is Ask."""
     try:
         row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (KEY + str(pip_id),)).fetchone()
-        value = json.loads(row["value"]).get("level") if row else None
+        saved = json.loads(row["value"]) if row else {}
+        value = saved.get("level")
     except Exception:                       # noqa: BLE001 - unreadable means the safe default
         return ASK
     if value not in LEVELS:
@@ -118,7 +141,7 @@ def level(registry, pip_id) -> str:
     try:
         _personal(registry, pip_id)
     except RegistryError:
-        return ASK
+        return value if saved.get("box") is True and _boxed(registry, pip_id) else ASK
     return value
 
 
@@ -327,8 +350,11 @@ def write_level(registry, pip_id, value, actor) -> None:
         raise RegistryError("invalid_request", "Choose Ask me first, Approve for me or Do it all.")
     workspace, personal = _scope(registry, pip_id)
     before = level(registry, pip_id) if personal else project_level(registry, pip_id)
+    # ("box": chosen while a folder Pip had its own box, with BOX_SAYS shown: then it governs the box too.)
+    boxed = not personal and _boxed(registry, pip_id)
     registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
-                        (KEY + pip_id, json.dumps({"level": value, "at": utc_now(), "by": actor})))
+                        (KEY + pip_id, json.dumps({"level": value, "at": utc_now(), "by": actor,
+                                                   **({"box": True} if boxed else {})})))
     registry.event(workspace, "pip_level_changed", pip_id=pip_id, payload={"level": value, "before": before, "actor": actor})
     if value != FULL:
         registry.db.execute("DELETE FROM metadata WHERE key=?", (PAYING_KEY + pip_id,))     # paying is only for Do it all
@@ -339,8 +365,9 @@ def listing(registry, pip_id) -> dict:
     (`kind` "project") are about the handoffs it is sent, with no paying rule."""
     _, personal = _scope(registry, pip_id)
     if not personal:
+        says = BOX_SAYS if _boxed(registry, pip_id) else PROJECT_SAYS
         return {"pip_id": pip_id, "kind": "project", "level": project_level(registry, pip_id), "default": DEFAULT,
-                "levels": [{"level": value, "name": NAMES[value], "says": PROJECT_SAYS[value]} for value in LEVELS],
+                "levels": [{"level": value, "name": NAMES[value], "says": says[value]} for value in LEVELS],
                 "on_its_own": on_its_own(registry, pip_id)}
     return {"pip_id": pip_id, "kind": "personal", "level": level(registry, pip_id), "default": DEFAULT,
             "paying": paying(registry, pip_id),
@@ -361,6 +388,19 @@ def on_its_own(registry, pip_id, limit=MAX_LISTED) -> list[dict]:
                          "level": row["resolved_by"].split(":", 1)[1], "unattended": summary.get("unattended") is True,
                          "kind": "site" if summary.get("kind") == "site" else "computer"})
     except Exception:                       # noqa: BLE001 - a registry without computers
+        pass
+    try:
+        for row in registry.db.execute(
+                "SELECT c.updated_at,c.status,c.result,p.name FROM pip_project_changes c JOIN pip_project_copies p "
+                "ON p.id=c.copy_id WHERE c.pip_id=? AND c.status IN ('applied','partial') AND c.result LIKE ? "
+                "ORDER BY c.updated_at DESC LIMIT ?", (pip_id, '%"by": "pip-level:%', limit)):
+            result = json.loads(row["result"])
+            count, held = len(result.get("applied") or []), len(result.get("held_back") or [])
+            what = (f"Applied {count} file{'s' if count != 1 else ''} to {row['name']}"
+                    + (f", {held} held back" if held else ""))
+            rows.append({"at": row["updated_at"], "what": what[:200], "level": str(result["by"]).split(":", 1)[1],
+                         "unattended": False, "kind": "folder"})
+    except Exception:                       # noqa: BLE001 - a registry without folder copies
         pass
     try:
         for row in registry.db.execute(
