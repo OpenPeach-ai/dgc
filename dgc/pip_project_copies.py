@@ -537,11 +537,21 @@ def own_folder(store, pip_id) -> dict | None:
         refresh(store, pip_id)        # what the Pip changed so far is known before deciding to keep or bring it up to date
         row = db.execute("SELECT * FROM pip_project_copies WHERE pip_id=? AND workspace_id=?",
                          (pip_id, workspace["id"])).fetchone()
-        if row is not None and db.execute("SELECT 1 FROM pip_project_changes WHERE copy_id=? AND status='pending'",
-                                          (row["id"],)).fetchone() is not None:
-            return {"name": name, "folder": folder, "files": row["files"], "kept": True, "updated": 0,
-                    **_fingerprint(registry, row["id"])}
+        waiting = db.execute("SELECT files FROM pip_project_changes WHERE copy_id=? AND status='pending'",
+                             (row["id"],)).fetchone() if row is not None else None
         snap = _snapshot(registry, row["id"]) if row is not None else {}
+        if waiting is not None:
+            # A change waits for the user: the files it touched stay as the Pip left them; every other file is
+            # brought up to date with the folder, so the Pip never reads stale files (14 Nov, a waiting card never
+            # pauses a Pip). A copy whose folder in the box is gone is kept as it is.
+            touched = {f["path"] for f in json.loads(waiting["files"]) if isinstance(f, dict) and f.get("path")}
+            updated = 0
+            if isinstance(snap.get("source"), dict) and snap.get("folder") == folder:
+                made = _update_copy(store, pip_id, workspace, root, folder, row["id"], snap, skip=touched)
+                updated = made["updated"] if made else 0
+            row = db.execute("SELECT * FROM pip_project_copies WHERE id=?", (row["id"],)).fetchone()
+            return {"name": name, "folder": folder, "files": row["files"], "kept": True, "updated": updated,
+                    **_fingerprint(registry, row["id"])}
         made = None
         if row is not None and isinstance(snap.get("source"), dict) and snap.get("folder") == folder:
             made = _update_copy(store, pip_id, workspace, root, folder, row["id"], snap)
@@ -566,11 +576,11 @@ def _fingerprint(registry, copy_id) -> dict:
     return {"sha256": digest, "bytes": sum(int(entry[0]) for entry in files.values())}
 
 
-def _update_copy(store, pip_id, workspace, root: Path, folder: str, copy_id, snap) -> dict | None:
+def _update_copy(store, pip_id, workspace, root: Path, folder: str, copy_id, snap, *, skip=frozenset()) -> dict | None:
     """Bring a copy up to date with its folder, file by file: what the folder added or changed since (by size and time,
-    then by content) is copied, what it removed is removed. Only called while nothing the Pip changed waits, so the copy
-    is exactly what its snapshot says and each file may be the folder's again. None when the copy's folder in the box
-    is gone (the caller makes it afresh)."""
+    then by content) is copied, what it removed is removed. ``skip``: the files a waiting change touched, never written
+    or removed (the copy matches its snapshot everywhere else, so each other file may be the folder's again). None when
+    the copy's folder in the box is gone (the caller makes it afresh)."""
     registry, db = store.registry, store.db
     rels = project_files(root)
     limit = copy_limit()
@@ -602,7 +612,7 @@ def _update_copy(store, pip_id, workspace, root: Path, folder: str, copy_id, sna
                 return None
             updated = 0
             try:
-                for rel in [r for r in files_now if r not in current]:
+                for rel in [r for r in files_now if r not in current and r not in skip]:
                     try:
                         _remove(box, rel)
                     except (OSError, RegistryError):
@@ -615,6 +625,8 @@ def _update_copy(store, pip_id, workspace, root: Path, folder: str, copy_id, sna
                         pass
                     updated += 1
                 for rel, stamp in current.items():
+                    if rel in skip:
+                        continue                      # the waiting change's file: the Pip's version stays
                     if rel in files_now and stamps.get(rel) == stamp:
                         continue                      # the same size and time as when copied: not read again
                     data = _read(source, rel)

@@ -473,8 +473,8 @@ def _own_box_words(own) -> str:
                  " what Git ignores): edit files and run commands and tests there. Nothing you change there reaches the "
                  "user's real folder until the user applies it: DGC shows what you changed as a card below your reply.")
         if own.get('kept'):
-            said += (" Your copy is as you left it, because your changes wait for the user, so edits made in the real "
-                     "folder since are not in it yet.")
+            said += (" Your changes wait for the user, so the files your waiting change touched are as you left them; "
+                     "every other file has the user's newer edits.")
         left = own.get('left_out')
         if isinstance(left, dict) and left.get('files'):
             names = ", ".join(str(n)[:120] for n in (left.get('examples') or [])[:5])

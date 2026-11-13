@@ -74,16 +74,22 @@ class ItsOwnFolder(FolderPipWorld, unittest.TestCase):
         self.assertFalse((self.home() / "README.md").exists(), "a file gone from the folder goes from the copy")
         self.assertEqual(told["files"], 5)
 
-    def test_while_its_changes_wait_the_copy_is_kept_as_it_is(self):
+    def test_while_its_changes_wait_only_the_files_they_touch_are_kept(self):
+        # Changed on purpose (pips-flow-design, "a waiting card never pauses a Pip", 14 Nov): the whole copy used to be
+        # kept while a change waited, so the Pip read stale files. Now the user's newer edits come over for every file
+        # except those the waiting change touched; the Pip's work is never overwritten.
         self.own()
         (self.home() / "app.py").write_text("def total(items):\n    return sum(items) + 0\n")    # the Pip's edit
         (self.root / "util.py").write_text("X = 2\n")                                          # the user's, meanwhile
+        (self.root / "app.py").write_text("def total(items):\n    return sum(items) * 1\n")   # the user's, same file
         told = self.own()
         self.assertTrue(told["kept"])
-        self.assertEqual((self.home() / "util.py").read_text(), "X = 1\n", "kept: the user's edit waits for the next copy")
+        self.assertEqual(told["updated"], 1)
+        self.assertEqual((self.home() / "util.py").read_text(), "X = 2\n", "a file the change didn't touch comes over")
         self.assertIn("sum(items) + 0", (self.home() / "app.py").read_text(), "the Pip's work is never overwritten")
         [change] = self.control("list_pip_project_changes", pip_id=self.helper["id"])["changes"]
-        self.assertEqual(change["status"], "pending")
+        self.assertEqual((change["status"], [f["path"] for f in change["files"]]), ("pending", ["app.py"]),
+                         "the change is still only the Pip's own edit")
 
     def test_a_folder_too_big_leaves_its_biggest_files_out_and_says_so(self):
         sizes = {rel: (self.root / rel).stat().st_size for rel in self.listed_in_project()}
@@ -250,7 +256,8 @@ class ItsChatUsesItsBox(FolderPipWorld, unittest.TestCase):
 
     def test_a_kept_copy_and_a_copy_that_failed_are_said(self):
         kept = self.turn({"name": "shop", "folder": "projects/shop", "files": 5, "kept": True, "updated": 0})
-        self.assertIn("your changes wait for the user", kept["system"])
+        self.assertIn("Your changes wait for the user", kept["system"])
+        self.assertIn("files your waiting change touched", kept["system"])
         failed = self.turn({"name": "shop", "folder": "projects/shop", "error": "shop is 900 MB without what it ignores."})
         self.assertIn("could not put a copy", failed["system"])
         self.assertIn("900 MB", failed["system"])
