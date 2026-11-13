@@ -1561,6 +1561,25 @@ def _let_go_owner(chat) -> None:
         pass
 
 
+def _busy_for_note(backend) -> bool:
+    """Is a turn in flight, for a process's note and the heartbeat that writes it: answered without waiting. A turn
+    lock held for more than a moment (a turn starting or ending, or one that is stuck) counts as working; waiting on
+    it froze the heartbeat of a process whose turn was deadlocked, and its note was then deleted (13 Nov)."""
+    try:
+        lock_of = getattr(backend, "_turn_state_lock", None)
+        if not callable(lock_of):
+            return bool(backend._busy())            # a chat with no turn lock of its own (a stand-in)
+        lock = lock_of()
+        if not lock.acquire(timeout=0.25):
+            return True
+        try:
+            return bool(backend._busy())
+        finally:
+            lock.release()
+    except Exception:
+        return False
+
+
 def _safe_busy(backend) -> bool:
     """Is a turn in flight? Never let a status read break the log line that reports it."""
     try:
@@ -7195,14 +7214,29 @@ class Backend:
         if state is None or not state.pending_write():
             return
         current = threading.current_thread()
-        with self._turn_state_lock(), getattr(self.em, "history_lock", nullcontext()):
-            worker = getattr(self, "_worker", None)
-            if self._busy() and worker is not current:
-                return                      # the turn's worker writes them when the turn ends
+        history = getattr(self.em, "history_lock", None)
+        with self._turn_state_lock():
+            held = history is not None and history.acquire()
             try:
-                state.flush(self.agent)
-            except Exception:
-                pass
+                worker = getattr(self, "_worker", None)
+                if self._busy() and worker is not current:
+                    return                      # the turn's worker writes them when the turn ends
+
+                def let_go():
+                    # The cards are in the transcript: save it without the history lock (13 Nov, a deadlock). The save
+                    # reads the helpers' records, whose lock a helper inside this chat (a Pip fix) holds while it waits
+                    # for the history lock to record a step; holding both, neither ever moved.
+                    nonlocal held
+                    if held:
+                        history.release()
+                        held = False
+                try:
+                    state.flush(self.agent, before_save=let_go)
+                except Exception:
+                    pass
+            finally:
+                if held:
+                    history.release()
 
     def _stop_pip_report_watch(self) -> None:
         stop = self.__dict__.get("_pip_report_stop")
@@ -11741,7 +11775,7 @@ class Host:
                         "cwd": root, "project_root": root,
                         "git_common_dir": (agent._git_common_dir() if agent is not None
                                            and hasattr(agent, "_git_common_dir") else ""),
-                        "status": "working" if _safe_busy(chat) else "idle"})
+                        "status": "working" if _busy_for_note(chat) else "idle"})
                 first = places[0] if places else {}
                 board = self.switchboard
                 extra = board.note_fields() if board is not None else {}

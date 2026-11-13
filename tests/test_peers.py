@@ -105,9 +105,14 @@ class PeerRegistryTest(unittest.TestCase):
         self.assertEqual(peers.liveness(rec), "gone")
         child.wait()
 
-    def test_a_note_nobody_has_refreshed_is_gone(self):
+    def test_a_note_nobody_has_refreshed_is_stuck_while_its_process_lives(self):
+        # Changed 13 Nov: it was "gone", and a reader deleted the note of a live process whose turn was deadlocked; it
+        # still held a session, and nothing could find it any more (tests/test_hidden_holder.py). A dead process's
+        # note is still gone.
         old = time.time() - peers.STALE_AFTER_S - 1
-        self.assertEqual(peers.liveness(self.note(heartbeat=old)), "gone")
+        self.assertEqual(peers.liveness(self.note(heartbeat=old)), "stuck")
+        self.assertEqual(peers.liveness(self.note(heartbeat=old, proc_start="")), "gone",
+                         "stale and its identity unprovable: never kept on a guess")
 
     def test_unprovable_identity_is_unknown_not_a_guess(self):
         # Where the process start time cannot be read, the honest answer is "I cannot tell".

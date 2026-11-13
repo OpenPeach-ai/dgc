@@ -73,7 +73,8 @@ def chat_counts(chat) -> dict:
     agent = getattr(chat, "agent", None)
     found = {"working": False, "monitors": 0, "helpers": 0, "commands": 0, "queued": 0, "waiting": 0}
     try:
-        found["working"] = bool(chat._busy())
+        from .headless import _busy_for_note       # never waits on a turn lock (a stuck turn froze the note, 13 Nov)
+        found["working"] = _busy_for_note(chat)
     except Exception:
         pass
     try:

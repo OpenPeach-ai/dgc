@@ -146,7 +146,8 @@ def _heartbeat(value) -> float | None:
 
 
 def liveness(record: dict, *, now: float | None = None) -> str:
-    """``live``, ``gone`` or ``unknown`` for one peer note.
+    """``live``, ``stuck``, ``gone`` or ``unknown`` for one peer note. ``stuck``: its process is alive (the same one)
+    but its heartbeat stopped: never deleted, because it may still hold a session.
 
     ``unknown`` is a real answer: it means the note looks current but this platform cannot prove
     the process behind the pid is the one that wrote it.
@@ -161,15 +162,18 @@ def liveness(record: dict, *, now: float | None = None) -> str:
     stamp = _heartbeat(seen)
     if seen is not None and stamp is None:
         return "gone"
-    if stamp is not None and moment - stamp > STALE_AFTER_S:
-        return "gone"
     if not _alive(pid) or _is_zombie(pid):
         return "gone"
     recorded = str(record.get("proc_start") or "")
     actual = _proc_start(pid)
+    stale = stamp is not None and moment - stamp > STALE_AFTER_S
     if recorded and actual:
-        return "live" if recorded == actual else "gone"   # the pid was recycled
-    return "unknown"
+        if recorded != actual:
+            return "gone"                                  # the pid was recycled
+        # The process that wrote it is alive but has stopped refreshing it (13 Nov: a deadlocked turn froze one's
+        # heartbeat, and deleting its note hid a process that still held a session). Kept, and said: "stuck".
+        return "stuck" if stale else "live"
+    return "gone" if stale else "unknown"
 
 
 # Fields a note's `extra` may not replace: they are what every reader trusts the note by.
@@ -485,6 +489,8 @@ def describe_holder(record: dict, session: str = "") -> str:
     line += ")"
     if record.get("liveness") == "unknown":
         return line + ", which may or may not still be running"
+    if record.get("liveness") == "stuck":
+        return line + ", which has stopped answering"
     if str(place.get("status") or record.get("status") or "") == "working":
         return line + ", which is running a turn"
     return line

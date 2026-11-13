@@ -1186,9 +1186,14 @@ def stop_process(record: dict, *, reason: str = "dgc stop", wait_s: float = 30.0
     if not _process_alive(record):
         return True, "it had already stopped"
     from . import peers
-    if peers.liveness(record) != "live":
-        # A pid alone is not identity: never signal a process we cannot prove is that DGC.
+    verdict = peers.liveness(record)
+    if verdict not in ("live", "stuck"):
+        # A pid alone is not identity: never signal a process we cannot prove is that DGC. ("stuck" is proven too: the
+        # same process, alive, that stopped refreshing its note.)
         return False, "this computer cannot confirm that process is still the DGC that left the note"
+    # One that has stopped answering can't save and stop by itself (13 Nov: a deadlocked turn kept one alive after
+    # SIGTERM): after SIGTERM's wait it is ended, as --force would.
+    force = force or verdict == "stuck"
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:

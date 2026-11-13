@@ -678,8 +678,9 @@ class ChatReports:
         with self._lock:
             return bool(self.waiting or self.quiet or self.dirty)
 
-    def flush(self, agent) -> bool:
-        """Write waiting cards into the transcript, save it, then enter them in the ledger."""
+    def flush(self, agent, before_save=None) -> bool:
+        """Write waiting cards into the transcript, save it, then enter them in the ledger. ``before_save`` runs once the
+        cards are written and before the save (the caller lets go of the history lock there)."""
         session = getattr(agent, "session_file", None)
         session_id = session.stem if session is not None else None
         with self._lock:
@@ -700,6 +701,8 @@ class ChatReports:
                         target.setdefault(KEY, []).append(dict(item["entry"]["report"], dismissed=run_id in self.dismissed))
                     written.append(item["entry"])
             saved = True
+            if callable(before_save):
+                before_save()
             if written or self.dirty:
                 persist = getattr(agent, "_persist", None)
                 saved = bool(persist()) if callable(persist) else False
