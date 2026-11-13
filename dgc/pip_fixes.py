@@ -5,8 +5,8 @@ decides what happens next, and there is no "Fix it" card and no hidden Work sess
 
   Ask me first      a fix waits at the ordinary Allow card (Allow · Not now)
   Approve for me    it starts fixing in its own copy by itself, new findings only (his yes); the change waits at Apply
-  Do it all         it fixes and applies by itself, with Undo ("Do it all applies all", his no to a fuse), except a
-                    change that is big, deletes files or whose tests failed in its copy: that waits at Apply, said why
+  Do it all         it fixes and applies by itself, with Undo, never over a file you changed ("Do it all applies all":
+                    his no to a size, delete or test fuse, 14 Nov); the card says when its tests failed in its copy
 
 A fix is an ordinary turn of that Pip in its own chat (a message from DGC under FIX_KEY, like a routine's), so it runs
 in its own computer on its own copy of the folder, with its own helpers, and its change is the copy's change card
@@ -60,7 +60,6 @@ MAX_LISTED = 100
 MAX_WAITING = 50
 REMIND_AFTER = timedelta(days=1)       # Remind me later: back tomorrow (the one-day nudge)
 UNDO_SECONDS = 10 * 60                 # an answer to a waiting item can be undone for ten minutes
-BIG_FILES, BIG_LINES = 10, 400         # Do it all's guard: a bigger change waits at Apply
 LOCAL = ("editor-user", "local-console")
 LEVEL_BY = {"approve": "pip-level:approve", "full": "pip-level:full"}
 _VERDICT_LINE = re.compile(r"^\s*FINDING\s+(\d{1,2})\s*:\s*(fixed|already fixed|not a defect|needs you)\b\s*[—–:-]?\s*(.*)$",
@@ -205,8 +204,6 @@ def view(db, row) -> dict:
     if row["tests"] in ("passed", "failed"):
         out["tests"] = row["tests"]
     message = row["message"] or ("The last check no longer finds these." if row["note"] == "gone" else "")
-    if row["note"] and row["note"].startswith("held:"):
-        message = row["note"][5:]
     if message:
         out["message"] = _clip(message, 600)
     return out
@@ -474,30 +471,6 @@ def verdicts(text: str, count: int) -> tuple[dict, str | None]:
     return found, ("passed" if word == "passed" else "failed" if word == "failed" else None)
 
 
-def guard_hold(store, pip_id, text) -> str | None:
-    """Do it all's guard, asked before the turn's change goes in by itself: why it waits at Apply instead, or None.
-    A change of more than BIG_FILES files or BIG_LINES lines, one that deletes a file, or one whose tests failed."""
-    _, tests = verdicts(text, MAX_FINDINGS)
-    if tests == "failed":
-        return "Its tests failed in its copy, so it waits for your Apply."
-    from . import pip_project_copies
-    try:
-        pip_project_copies.refresh(store, pip_id)
-    except (RegistryError, OSError):
-        return None
-    if not _table(store.db, "pip_project_changes"):
-        return None
-    row = store.db.execute("SELECT files FROM pip_project_changes WHERE pip_id=? AND status='pending' ORDER BY updated_at DESC "
-                           "LIMIT 1", (pip_id,)).fetchone()
-    files = _load(row["files"], []) if row else []
-    if any(isinstance(f, dict) and f.get("change") == "deleted" for f in files):
-        return "It deletes a file, so it waits for your Apply."
-    lines = sum((f.get("plus") or 0) + (f.get("minus") or 0) for f in files if isinstance(f, dict))
-    if len(files) > BIG_FILES or lines > BIG_LINES:
-        return f"It changes {len(files)} files and {lines} lines, so it waits for your Apply."
-    return None
-
-
 def after_fix_turn(store, run, status, result, error) -> None:
     """The fix's turn ended: its verdicts, its tests, its change, and what only you can do."""
     db, registry = store.db, store.registry
@@ -542,18 +515,6 @@ def after_fix_turn(store, run, status, result, error) -> None:
                             _clip(finding.get("why") or "", 300), now, now, now))
         registry.event(row["workspace_id"], "pip_fix_ended", pip_id=run["pip_id"], run_id=run["id"],
                        payload={"fix_id": fix_id, "status": status, "change_id": change_id})
-
-
-def note_hold(store, pip_id, why) -> None:
-    """Do it all's guard held the change at Apply: the fix says why."""
-    db = store.db
-    if not _has(db) or not why:
-        return
-    row = db.execute("SELECT id FROM pip_fixes WHERE pip_id=? AND state='queued' ORDER BY created_at DESC,rowid DESC LIMIT 1",
-                     (pip_id,)).fetchone()
-    if row is not None:
-        with store.registry.transaction():
-            db.execute("UPDATE pip_fixes SET note=? WHERE id=?", ("held:" + _clip(why, 300), row["id"]))
 
 
 def _first_words(text: str) -> str:

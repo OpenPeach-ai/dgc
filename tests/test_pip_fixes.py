@@ -62,10 +62,7 @@ class FixWorld(WithABox):
         if edit:
             self.edit_its_copy()
         if levels.effective(self.registry, self.helper["id"]) == levels.FULL:
-            held = fixes.guard_hold(self.store, self.helper["id"], text)
-            fixes.note_hold(self.store, self.helper["id"], held)
-            if held is None:
-                copies.auto_apply(self.store, self.helper["id"])
+            copies.auto_apply(self.store, self.helper["id"])         # as the runner does when the turn ends
         self.store.finish(row["id"], result={"text": text})
         return row["id"]
 
@@ -234,15 +231,17 @@ class ByLevel(FixWorld, unittest.TestCase):
         change = self.control("get_pip_project_change", pip_id=self.helper["id"], change_id=fix["change_id"])
         self.assertEqual(change["result"]["by"], "pip-level:full")
 
-    def test_at_do_it_all_a_change_whose_tests_failed_waits_at_apply_and_says_why(self):
+    def test_do_it_all_applies_all_even_when_its_tests_failed(self):
+        # His answer of 14 Nov ~02:10: "Do it all applies all" (with Undo, never over a file you changed): no size,
+        # delete or test fuse. The card says the tests failed in its copy; Undo is there.
         self.choose(levels.FULL)
         self.check([TOTAL])
         self.send()
         self.fix_turn_ends("Changed it.\nFINDING 1: fixed — done\nTESTS: failed")
         fix = self.one()
-        self.assertEqual(fix["state"], "ready")
-        self.assertIn("tests failed", fix["message"].lower())
-        self.assertNotIn("+ 0", (self.root / "app.py").read_text())
+        self.assertEqual((fix["state"], fix["tests"]), ("applied", "failed"))
+        self.assertIn("+ 0", (self.root / "app.py").read_text())
+        self.assertFalse(hasattr(fixes, "guard_hold"), "no fuse for the runner to call")
 
     def test_one_fix_at_a_time(self):
         self.choose(levels.APPROVE)

@@ -5344,14 +5344,8 @@ def _execute_run(registry, row, config):
             # when its turn ends (only a turn that ended well), file by file, never over a file the user changed
             # meanwhile, with Undo. Below Do it all the card waits for the user (pip_project_copies.auto_apply).
             try:
-                from . import pip_fixes, pip_project_copies
-                held = None
-                if pip_fixes.is_fix_turn(registry.db, row['id']):
-                    # Do it all's guard for a fix nobody watched: big, deleting or failing tests waits at Apply.
-                    held = pip_fixes.guard_hold(PipStore(registry), row['pip_id'], str(result.get('text') or ''))
-                    pip_fixes.note_hold(PipStore(registry), row['pip_id'], held)
-                if held is None:
-                    pip_project_copies.auto_apply(PipStore(registry), row['pip_id'])
+                from . import pip_project_copies
+                pip_project_copies.auto_apply(PipStore(registry), row['pip_id'])
             except Exception:                    # noqa: BLE001 - the reply stands; the card waits for the user
                 pass
         # The plugins a chat reply took an answer from ("Used Aave" under it): what this controller saw, never the
