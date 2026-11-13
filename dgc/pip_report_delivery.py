@@ -132,18 +132,6 @@ def chat_identity(session_id: str) -> str:
     return "main-chat:" + hashlib.sha256(session_id.encode()).hexdigest()[:32]
 
 
-def report_chats(registry, pip_id: str) -> int:
-    """How many chats this Pip's reports reach: its owner session, or none (the Pip page says so, or how to give it one)."""
-    return 1 if report_session(registry, pip_id) else 0
-
-
-def report_session(registry, pip_id: str) -> str | None:
-    """Its owner session, or None: where Ask DGC to fix goes from the Pip's own chat."""
-    from .pip_owners import owner
-    found = owner(registry.db, pip_id)
-    return found["session_id"] if found else None
-
-
 def _pip(db, pip_id: str) -> dict | None:
     row = db.execute("""SELECT p.status,CASE WHEN length(CAST(v.definition AS BLOB))<=24576 THEN v.definition END
         FROM pips p JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version WHERE p.id=?""", (pip_id,)).fetchone()

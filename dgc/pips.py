@@ -65,7 +65,6 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_computer_files", "read_pip_computer_file", "add_pip_computer_file", "remove_pip_computer_file",
     "copy_pip_computer_file_in", "copy_pip_computer_file_out",
     "get_pip_apps", "set_pip_app", "add_pip_app_account", "get_pip_skills", "set_pip_skill",
-    "get_pip_owner", "set_pip_owner", "list_session_pips",
     "get_pip_webhook", "replace_pip_webhook_address", "set_pip_webhook_signing", "send_pip_webhook_test",
     "get_webhook_reach", "set_webhook_reach",
     "list_pip_project_choices", "list_pip_project_changes", "get_pip_project_change", "apply_pip_project_change",
@@ -223,7 +222,6 @@ _COMMAND_ARGS = {
     "add_pip_computer_file": {"pip_id", "path", "name", "data"}, "remove_pip_computer_file": {"pip_id", "path"},
     "copy_pip_computer_file_in": {"pip_id", "path", "source"}, "copy_pip_computer_file_out": {"pip_id", "path", "target"},
     "get_pip_apps": {"pip_id"}, "set_pip_app": {"pip_id", "app", "on"}, "add_pip_app_account": {"pip_id", "app"},
-    "get_pip_owner": {"pip_id"}, "set_pip_owner": {"pip_id", "session_id"}, "list_session_pips": {"session_id"},
     # Webhooks in (pip_webhooks, API 90): a routine's own address, its signing secret, a test call; how calls reach it.
     "get_pip_webhook": {"pip_id", "routine_id"}, "replace_pip_webhook_address": {"pip_id", "routine_id"},
     "set_pip_webhook_signing": {"pip_id", "routine_id", "secret"}, "send_pip_webhook_test": {"pip_id", "routine_id"},
@@ -6698,19 +6696,6 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 # user's own tunnel. Local only.
                 from . import pip_webhooks
                 result = pip_webhooks.control(store, command, request, actor)
-            elif command in ("get_pip_owner", "set_pip_owner", "list_session_pips"):
-                # Pips API 89 (asked 12 Nov): a Project Pip's one owner session, the chat its cards reach.
-                from . import pip_owners
-                if actor not in ("editor-user", "local-console"):
-                    raise RegistryError("local_only", "Only you choose a Pip's owner session, on this computer.")
-                if command == "list_session_pips":
-                    result = pip_owners.owned(registry, request.get("session_id"))
-                elif command == "set_pip_owner":
-                    result = pip_owners.set_owner(registry, pip_id, request.get("session_id"), actor)
-                else:
-                    found = pip_owners.owner(registry.db, pip_id)
-                    result = {"pip_id": pip_id, "session_id": found["session_id"] if found else None,
-                              "chosen": bool(found and found["chosen"])}
             elif command in ("get_pip_apps", "set_pip_app", "add_pip_app_account"):
                 # Pips API 88 (pips-09): "Apps it can use", a switch per app, every app on until switched off; and from
                 # its page, one more address of an app it has (a Connect card, chosen there as any other).
@@ -6988,14 +6973,12 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                         start_level(registry, result["pip"]["id"])
             elif command == "get_pip":
                 from .pip_profile import get as profile
-                from .pip_report_delivery import report_chats
                 result = {"pip": store.get(pip_id)}
                 result["pip"]["profile"] = profile(registry.db, pip_id)
-                # How many chats its finished reports reach as a card (the Pip page says, or how to attach one).
-                result["pip"]["report_chats"] = report_chats(registry, pip_id)
-                # API 51: the chat Ask DGC to fix goes to from this Pip's own chat, the newest it reports to.
-                from .pip_report_delivery import report_session
-                result["pip"]["report_session"] = report_session(registry, pip_id)
+                # API 51's report_chats and report_session: since API 96 a Pip's reports stay in its own chat and no
+                # session owns a Pip (pips-flow-design Q1/Q2), so no chat gets them: 0 and null, kept for older clients.
+                result["pip"]["report_chats"] = 0
+                result["pip"]["report_session"] = None
             elif command == "propose_pip_update":
                 changes = request.get('changes')
                 if isinstance(changes,dict):

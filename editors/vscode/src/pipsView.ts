@@ -494,7 +494,8 @@ export class PipsEditor implements vscode.Disposable {
   /** The Project Pips a Work session is the owner of: what deleting or archiving it asks about. None on a DGC before
    *  Pips API 89 (it keeps no owner), or while Pips are off. */
   async sessionPips(sessionId: string): Promise<OwnedPip[]> {
-    if (!this.state.connected || !this.state.supported || !this.state.enabled || this.apiVersion < OWNERS_API || !SESSION_ID.test(sessionId)) return [];
+    // From Pips API 96 no session owns a Pip (pips-flow-design Q2): list_session_pips is gone.
+    if (!this.state.connected || !this.state.supported || !this.state.enabled || this.apiVersion < OWNERS_API || this.apiVersion >= 96 || !SESSION_ID.test(sessionId)) return [];
     const result = await this.hostAsk('list_session_pips', { session_id: sessionId });
     if (result?.session_id !== sessionId || !Array.isArray(result.pips)) throw new Error('DGC answered about another session. Try again.');
     return result.pips.filter((p: any) => p && typeof p.id === 'string' && /^pip_[0-9a-f]{32}$/.test(p.id) && typeof p.name === 'string' && p.name)

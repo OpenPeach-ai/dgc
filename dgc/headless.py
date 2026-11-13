@@ -307,7 +307,7 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # can't run on this computer.
 # API 50: the safe_source_v2 source rules (source_policy.exclude), check_pip_source and get_pip_run_source.
 # API 51: a finished run posts its result in its Pip's own chat; list_pip_run_posts reads them, and get_pip says
-# the chat Ask DGC to fix goes to (report_session).
+# the chat Ask DGC to fix goes to (report_session; since API 96 always null: a Pip's reports stay in its own chat).
 # API 52: send_pip_message takes `spooled_images` and `spooled_files` (files the editor put in the image spool,
 # as the Work chat's prompt does): 8 MiB a photo and 32 MiB of photos a message, documents up to 16 MiB, an iPhone
 # photo (HEIC) kept as a JPEG; get_pip_message_image takes `as_file` and answers with the kept file's path.
@@ -505,10 +505,7 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # supervisor lets its live view go (before, it read open until the view's ten idle minutes ran out).
 # pips-18: get_pip_import_prompt gives the prompt to paste into a Grok bot; import_pip_source {source: "grok", text}
 # or {source: "github", url} turns what the bot wrote, or a team or Pip file on GitHub, into setup cards.
-# API 89 (0.52, asked 12 Nov): a Project Pip's one owner session. get_pip_owner {pip_id} -> {pip_id, session_id (null:
-# none), chosen}; set_pip_owner {pip_id, session_id (null: no session)}; list_session_pips {session_id} -> {session_id,
-# pips: [{id, name, pip_type, status}]}, what archiving or deleting that session asks about. Local only. Its cards (run
-# reports) reach its owner alone; attach_pip_to_session makes that chat the owner. A Personal Pip has none.
+# API 89 (12 Nov, never released): a Project Pip's owner session. Removed in API 96 with no shim: no session owns a Pip.
 # API 90 (0.52, pips-22, decided 12 Nov): webhooks in, fully local. A Personal Pip's routine may wait for a call to its
 # own secret address ({kind: "webhook"}, added by the user, listed only with list_pip_routines webhooks: true).
 # get_pip_webhook / replace_pip_webhook_address / set_pip_webhook_signing {secret|null} / send_pip_webhook_test
@@ -532,7 +529,13 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # of its folder in its Files (list_pip_project_changes shows what it changed; apply/discard/undo as for an @-copy); its
 # level (set_pip_level) governs its computer when chosen with the box (get_pip_level's lines say so), and at Do it all
 # what it changed is applied when its turn ends (a change's result says "by": "pip-level:full"); set_pip_careful for it.
-PIPS_API_VERSION = 95
+# API 96 (0.52, the Pips flow, pips-flow-design 14 Nov): a Pip's chat is its home. list_pip_fixes {pip_id},
+# decide_pip_fix {pip_id, fix_id, expected_digest, allow}, answer_pip_waiting {pip_id, waiting_id, answer},
+# commit_pip_project_change {pip_id, change_id}, start_pip_work_helper {pip_id, fix_id} (dgc/pip_fixes.py); a check's
+# finding becomes a fix by the Pip's level; list_pip_attention kinds fix_ask, fix_ready, fix_held, waiting; a run post's
+# said, found and findings[].state; a change's tests and git. A Work chat gets a Pip's card only for a run it started;
+# get_pip's report_chats is 0 and report_session null. get_pip_owner, set_pip_owner and list_session_pips are gone.
+PIPS_API_VERSION = 96
 
 
 def attachment_limits() -> dict:

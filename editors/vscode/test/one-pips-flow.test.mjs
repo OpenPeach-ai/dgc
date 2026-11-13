@@ -297,3 +297,12 @@ test('the host passes the flow\'s commands only to a DGC that has them, and only
  assert.equal(pipFlowRefusal({type:'commit_pip_project_change',pip_id:GST,change_id:CHANGE},96),'');
  assert.match(pipFlowRefusal({type:'commit_pip_project_change',pip_id:'x',change_id:CHANGE},96),/Choose a Pip/);
 });
+
+// Pips API 96: no session owns a Pip (pips-flow-design Q2). get_pip_owner, set_pip_owner and list_session_pips are gone
+// from the DGC, so the editor never asks for them, and its History says nothing about which chats its reports reach.
+test('at API 96 nothing asks for an owner session and no line says which chats its reports reach',async()=>{
+ const x=await chat();await x.menu('job');
+ for(const t of ['get_pip_owner','set_pip_owner','list_session_pips'])assert.equal(x.requests(t).length,0,t);
+ assert.equal(x.$('.report-chats'),null);
+ assert.doesNotMatch(x.text(),/reports to|attach .* to this chat/i);
+});

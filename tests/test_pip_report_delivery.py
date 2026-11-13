@@ -179,21 +179,18 @@ class WhichChatTests(Scene):
         self.assertEqual([card["run_id"] for card in self.shown(chat)], [asked],
                          "run_pip_now's run comes back to the chat that started it, even when clean")
 
-    def test_the_pip_page_learns_how_many_chats_it_reports_to(self):
+    def test_the_pip_page_learns_no_chat_gets_its_reports(self):
+        # Changed on purpose (API 96): attaching it to a chat made report_chats 1; now no chat gets its reports.
         chat = self.chat()
-        result = pips.handle_control(self.cfg, {"type": "get_pip", "request_id": "r1", "pip_id": self.pip["id"]},
-                                     "device_1", start_worker=False)
-        self.assertEqual(result["result"]["pip"]["report_chats"], 0, result)
         self.attach(chat)
         result = pips.handle_control(self.cfg, {"type": "get_pip", "request_id": "r2", "pip_id": self.pip["id"]},
                                      "device_1", start_worker=False)
-        self.assertEqual(result["result"]["pip"]["report_chats"], 1)
+        self.assertEqual(result["result"]["pip"]["report_chats"], 0)
 
     def test_a_pip_with_no_chat_reports_nowhere_new(self):
         chat = self.chat()
         self.finished(findings=[finding("Stays in Pips")])
         self.assertEqual(self.pending(chat), [])
-        self.assertEqual(delivery.report_chats(self.registry, self.pip["id"]), 0)
 
     def test_an_attached_or_owner_chat_gets_nothing_and_the_chat_that_asked_gets_it_once(self):
         # Changed on purpose (0.52, design Q2: no session owns a Pip). It was "only its owner session gets it once"

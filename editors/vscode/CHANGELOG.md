@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Attaching a Pip to a chat no longer promises its reports there (they stay in the Pip's own chat); a Pip's page no longer says which chats its reports reach, and a DGC at Pips API 96 is never asked for an owner session.
 - **What's new in 0.52**: six slides the first time 0.52's side bar opens (a picture, the feature's name and what it does), with Skip, Next and Done and the arrow keys; it never comes back after Skip, Done or Esc, and the DGC header's ⋯ menu has "What's new" to see it again.
 - **"DGC made …" with Open**: when a Work, Chat or Pip turn makes or updates a page, document, slides, sheet, dashboard or widget, one notification says so with Open; a newer one replaces an unanswered older one, and it never repeats after a reload.
 - **A session held by a DGC that stopped answering** says so in Settings › Running sessions ("Not responding since 12:00") with Stop, and Open Here names who holds it and offers "Stop it and open here".

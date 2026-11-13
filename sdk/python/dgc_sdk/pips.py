@@ -439,11 +439,7 @@ API88_READS = frozenset({'get_pip_apps', 'export_pip_team', 'get_pip_skills'})
 API88_MUTATIONS = frozenset({'set_pip_app', 'add_pip_app_account', 'set_pip_skill'})
 READ_COMMANDS |= API88_READS
 MUTATION_COMMANDS |= API88_MUTATIONS
-# API 89 (asked 12 Nov): a Project Pip's one owner session, the chat its cards reach; and what a session owns. Local only.
-API89_READS = frozenset({'get_pip_owner', 'list_session_pips'})
-API89_MUTATIONS = frozenset({'set_pip_owner'})
-READ_COMMANDS |= API89_READS
-MUTATION_COMMANDS |= API89_MUTATIONS
+# API 89 (a Project Pip's owner session) was never released and is gone since API 96: no session owns a Pip.
 # API 90 (pips-22): webhooks in, fully local. A routine's own secret address, its signing secret and a test call; how
 # calls reach this computer (the home network switch, the user's own tunnel). list_pip_routines' webhooks lists the
 # routines a service calls. Local only.
@@ -614,9 +610,6 @@ COMMAND_FIELDS = {
     'export_pip_team': frozenset({'pip_ids', 'name'}),
     'get_pip_skills': frozenset({'pip_id'}),
     'set_pip_skill': frozenset({'pip_id', 'skill', 'on'}),
-    'get_pip_owner': frozenset({'pip_id'}),
-    'set_pip_owner': frozenset({'pip_id', 'session_id'}),
-    'list_session_pips': frozenset({'session_id'}),
     'get_pip_webhook': frozenset({'pip_id', 'routine_id'}),
     'replace_pip_webhook_address': frozenset({'pip_id', 'routine_id'}),
     'set_pip_webhook_signing': frozenset({'pip_id', 'routine_id', 'secret'}),
@@ -966,8 +959,6 @@ class Pips:
             minimum = 91
         elif command in API90_READS | API90_MUTATIONS:
             minimum = 90
-        elif command in API89_READS | API89_MUTATIONS:
-            minimum = 89
         elif command in API88_READS | API88_MUTATIONS:
             minimum = 88
         elif command in API87_MUTATIONS:

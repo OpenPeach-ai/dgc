@@ -2406,7 +2406,8 @@ async function rejectWaitingThenConfirm(review){
 // "Reports to" on a Project Pip's Settings (Pips API 89, pipOwner.js): its owner session, the one Work chat its reports
 // reach, and Change. A Personal Pip has its own chat; below API 89, and over a remote host, there is no row.
 const ownerState={pip:'',asked:'',value:null,error:'',busy:false,seq:0,picker:null,titles:new Map()};
-function ownerShown(){return S.apiVersion>=OWNERS_API&&!remoteHost&&!!S.pip&&!personalPip()&&!archived();}
+// From Pips API 96 no session owns a Pip (pips-flow-design Q2): the row and its commands are gone.
+function ownerShown(){return S.apiVersion>=OWNERS_API&&S.apiVersion<FLOW_API&&!remoteHost&&!!S.pip&&!personalPip()&&!archived();}
 function resetOwner(){ownerState.pip='';ownerState.asked='';ownerState.value=null;ownerState.error='';ownerState.busy=false;ownerState.picker=null;ownerState.seq++;}
 // The titles the editor's Work list shows (the host's own answer): a session it has none for says when it is from.
 async function loadWorkTitles(){try{ownerState.titles=workTitles(await send('list_work_session_titles',foldersOn()&&S.selected?{pip_id:S.selected}:{}));}catch{/* the sessions still say when they are from */}}
@@ -2670,7 +2671,7 @@ function pulseReportMarkup(run){
 // or, with none, how to have one. get_pip's report_chats; an older CLI sends none and this says nothing.
 function reportChatsNote(){
   const n=S.pip?.report_chats;
-  if(!Number.isSafeInteger(n)||n<0)return '';
+  if(!Number.isSafeInteger(n)||n<0||S.apiVersion>=FLOW_API)return '';   // API 96: its reports stay in its own chat
   return `<p class="muted report-chats">${n?`Its finished reports also appear as a card in ${n===1?'the chat it reports to':`the ${n} chats it reports to`}: the chat it was set up in, and any chat it is attached to. Nothing changes until you ask there.`:`${postsShown()?'Its reports post in its own chat and stay here.':'Its reports stay here.'} To have them appear in a chat as a card you can act on, ask DGC in that chat: “attach ${esc(S.pip.name)} to this chat”.`}</p>`;
 }
 // Runs became History (API 51): every run, newest first, each row saying what it found; the chat has the posts.

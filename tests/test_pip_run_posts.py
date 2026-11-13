@@ -202,15 +202,16 @@ class ReadingThemTests(PostScene):
         self.assertGreaterEqual(PIPS_API_VERSION, 51)
         self.assertIn("list_pip_run_posts", pips.CONTROL_COMMANDS)
 
-    def test_get_pip_names_the_chat_ask_dgc_to_fix_goes_to(self):
-        self.assertIsNone(self.control({"type": "get_pip", "pip_id": self.pip["id"]})["result"]["pip"]["report_session"])
+    def test_get_pip_names_no_chat_for_ask_dgc_to_fix_since_api_96(self):
+        # Changed on purpose (API 96, pips-flow-design Q1/Q2): it named the newest chat the Pip was attached to. A Pip's
+        # reports stay in its own chat and no session owns a Pip, so report_session is always null (kept for older
+        # clients) and report_chats 0.
         older, newer = self.chat("chat-old"), self.chat("chat-new")
         self.attach(older)
         self.later(3)
         self.attach(newer)
-        self.assertEqual(delivery.report_session(self.registry, self.pip["id"]), "chat-new")
-        self.assertEqual(self.control({"type": "get_pip", "pip_id": self.pip["id"]})["result"]["pip"]["report_session"],
-                         "chat-new")
+        pip = self.control({"type": "get_pip", "pip_id": self.pip["id"]})["result"]["pip"]
+        self.assertEqual((pip["report_session"], pip["report_chats"]), (None, 0))
 
 
 class ReplyPromptTests(unittest.TestCase):

@@ -7589,7 +7589,7 @@ function permissionChoices(ev) {
     const named = `<b>${esc(pip)}</b>`;
     if (name === "pause_pip") return card(`Pause ${pip}`, `Pause ${named}?`, why, "Its queued and scheduled work waits until you resume it. Its chat stays open, and a reply already running may finish.");
     if (name === "resume_pip") return card(`Resume ${pip}`, `Resume ${named}?`, why, "Work it already has, queued or on its schedule, can run again. Nothing new is approved.");
-    if (name === "attach_pip_to_session") return card(`Attach ${pip}`, `Attach ${named} to this chat?`, why, "Its finished reports show here. It gets no access to this chat, no new tools and no new permissions.");
+    if (name === "attach_pip_to_session") return card(`Attach ${pip}`, `Attach ${named} to this chat?`, why, "You can ask about it here. It gets no access to this chat, no new tools and no new permissions.");
     if (name === "run_pip_now") return card(`Run ${pip}`, `Run ${named} now?`, why, "It runs in the background under its own job and model. Its report comes back to this chat.");
     if (name === "pips_adapt") {
       const changes = a.changes && typeof a.changes === "object" ? a.changes : {};
