@@ -471,6 +471,12 @@ API93_MUTATIONS = frozenset({'add_project_folder'})
 API93_FIELDS = {'list_pips': frozenset({'scope'}), 'list_pip_attention': frozenset({'projects'})}
 READ_COMMANDS |= API93_READS
 MUTATION_COMMANDS |= API93_MUTATIONS
+# API 96: the Pips flow. What a check found and what became of it, by the Pip's level (list_pip_fixes; Allow or Not now
+# with decide_pip_fix); what only you can do (answer_pip_waiting); commit exactly a change's files. Local only.
+API96_READS = frozenset({'list_pip_fixes'})
+API96_MUTATIONS = frozenset({'decide_pip_fix', 'start_pip_work_helper', 'answer_pip_waiting', 'commit_pip_project_change'})
+READ_COMMANDS |= API96_READS
+MUTATION_COMMANDS |= API96_MUTATIONS
 
 
 def _api88_field(command, values) -> bool:
@@ -623,6 +629,11 @@ COMMAND_FIELDS = {
     'apply_pip_project_change': frozenset({'pip_id', 'change_id', 'expected_digest'}),
     'discard_pip_project_change': frozenset({'pip_id', 'change_id'}),
     'undo_pip_project_change': frozenset({'pip_id', 'change_id'}),
+    'list_pip_fixes': frozenset({'pip_id'}),
+    'decide_pip_fix': frozenset({'pip_id', 'fix_id', 'expected_digest', 'allow'}),
+    'start_pip_work_helper': frozenset({'pip_id', 'fix_id'}),
+    'answer_pip_waiting': frozenset({'pip_id', 'waiting_id', 'answer'}),
+    'commit_pip_project_change': frozenset({'pip_id', 'change_id'}),
     'set_pip_goal': frozenset({'pip_id', 'objective', 'conversation_id'}),
     'get_pip_goal': frozenset({'pip_id', 'conversation_id'}),
     'stop_pip_goal': frozenset({'pip_id', 'goal_id'}),
@@ -945,7 +956,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API93_READS | API93_MUTATIONS:
+        if command in API96_READS | API96_MUTATIONS:
+            minimum = 96
+        elif command in API93_READS | API93_MUTATIONS:
             minimum = 93
         elif command in API92_READS | API92_MUTATIONS:
             minimum = 92

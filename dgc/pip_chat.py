@@ -710,7 +710,9 @@ BORROW_NO_KEY = BORROW_KEY + "no_"
 KEYS_KEY = "keys_"
 # A goal's turn (pip_goals, pips-15): DGC carries on toward the goal the user set the conversation.
 GOAL_KEY = "goal_"
-DGC_KEYS = (INTRO_KEY, COMPUTER_KEY, APPS_KEY, CHECK_KEY, ROUTINE_KEY, PLUGINS_KEY, BORROW_KEY, KEYS_KEY, GOAL_KEY)
+# A fix's turn (pip_fixes, 0.52): DGC asks the Pip to fix what its check found, in its own copy.
+FIX_KEY = "dgcfix_"
+DGC_KEYS = (INTRO_KEY, COMPUTER_KEY, APPS_KEY, CHECK_KEY, ROUTINE_KEY, PLUGINS_KEY, BORROW_KEY, KEYS_KEY, GOAL_KEY, FIX_KEY)
 # The turns DGC writes so the Pip carries on with what the user asked: they see the photos of that ask again.
 FOLLOW_UP_KEYS = (COMPUTER_KEY, APPS_KEY, CHECK_KEY, PLUGINS_KEY, BORROW_KEY, KEYS_KEY)
 KEY_SAVED = ("This message is from DGC, not the user. The user saved the {name} for {host}. Read the API with "

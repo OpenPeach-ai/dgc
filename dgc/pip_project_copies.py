@@ -1040,6 +1040,75 @@ def discard(store, pip_id, change_id) -> dict:
     return _decided(store, row, "discarded", {"left": left})
 
 
+def _git_state(root: Path, paths) -> dict | None:
+    """{committed} for a change in your folder, where the folder is a Git project: whether every file it wrote is as
+    Git's last commit has it (nothing of it waits to be committed). None: not a Git project."""
+    if _git(root, "rev-parse", "--is-inside-work-tree") is None:
+        return None
+    paths = [p for p in paths if isinstance(p, str) and _rel_ok(p)][:MAX_LISTED]
+    if not paths:
+        return {"committed": True}
+    out = _git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", *paths)
+    return None if out is None else {"committed": not out.strip(b"\0")}
+
+
+def enrich(store, view: dict) -> dict:
+    """A change as the One Pips screens draw it (Pips API 96): the fix that made it says whether its tests passed in
+    the Pip's copy; one in your folder says whether it is committed (a Git project only)."""
+    out = dict(view)
+    db = store.db
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pip_fixes'").fetchone() is not None:
+        fix = db.execute("SELECT tests FROM pip_fixes WHERE change_id=? ORDER BY updated_at DESC LIMIT 1", (view["id"],)).fetchone()
+        if fix is not None and fix[0] in ("passed", "failed"):
+            out["tests"] = fix[0]
+    result = view.get("result") if isinstance(view.get("result"), dict) else {}
+    if view.get("status") in ("applied", "partial"):
+        try:
+            _, root = _project(store.registry, view["workspace_id"])
+            git = _git_state(root, result.get("applied") or [])
+        except (RegistryError, OSError):
+            git = None
+        if git is not None:
+            out["git"] = git
+    return out
+
+
+def commit(store, pip_id, change_id, actor) -> dict:
+    """commit_pip_project_change (Pips API 96): commit exactly the files this change put in your folder, as you, on your
+    click ("Commit these files"). Nothing else that waits in the folder is committed."""
+    if actor not in LOCAL:
+        raise RegistryError("local_only", "Only you commit to your folder, on this computer.")
+    row, copy = _change(store, pip_id, change_id)
+    if row["status"] not in ("applied", "partial"):
+        raise RegistryError("invalid_state", "Only a change that is in your folder can be committed.")
+    result = json.loads(row["result"]) if row["result"] else {}
+    paths = [p for p in result.get("applied") or [] if isinstance(p, str) and _rel_ok(p)]
+    _, root = _project(store.registry, copy["workspace_id"])
+    state = _git_state(root, paths)
+    if state is None:
+        raise RegistryError("invalid_state", "This folder isn't a Git project.")
+    if state["committed"]:
+        return enrich(store, _view(_change(store, pip_id, change_id)[0]))
+    name = store._job(pip_id)["name"]
+    fix = store.db.execute("SELECT message FROM pip_fixes WHERE change_id=? ORDER BY updated_at DESC LIMIT 1",
+                           (change_id,)).fetchone() if store.db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='pip_fixes'").fetchone() else None
+    words = " ".join(str(fix[0] if fix and fix[0] else "").split())
+    subject = f"{name}: {words}" if words else f"Changes from {name}"
+    subject = subject if len(subject) <= 72 else subject[:71] + "…"
+    if _git(root, "add", "-A", "--", *paths) is None:
+        raise RegistryError("git_failed", "Git couldn't add these files. Commit them yourself in a terminal.")
+    try:
+        proc = subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", subject, "--", *paths],
+                              stdin=subprocess.DEVNULL, capture_output=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RegistryError("git_failed", "Git didn't commit. Commit these files yourself in a terminal.") from exc
+    if proc.returncode != 0:
+        said = (proc.stderr or proc.stdout or b"").decode("utf-8", "replace").strip().splitlines()
+        raise RegistryError("git_failed", "Git didn't commit: " + (said[-1][:200] if said else "it gave no reason."))
+    return enrich(store, _view(_change(store, pip_id, change_id)[0]))
+
+
 # --------------------------------------------------------------------------------------------- the commands
 
 def control(store, command, request, actor) -> dict:
@@ -1051,9 +1120,10 @@ def control(store, command, request, actor) -> dict:
     if command == "list_pip_project_choices":
         return choices(store.registry)
     if command == "list_pip_project_changes":
-        return listing(store, pip_id)
+        found = listing(store, pip_id)
+        return {**found, "changes": [enrich(store, c) if n < 10 else c for n, c in enumerate(found["changes"])]}
     if command == "get_pip_project_change":
-        return get(store, pip_id, request.get("change_id"), request.get("path"))
+        return enrich(store, get(store, pip_id, request.get("change_id"), request.get("path")))
     if command == "apply_pip_project_change":
         return apply(store, pip_id, request.get("change_id"), request.get("expected_digest"))
     if command == "discard_pip_project_change":

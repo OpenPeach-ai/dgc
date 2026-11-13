@@ -15,7 +15,11 @@ import json
 from .workspace_registry import RegistryError
 
 KINDS = ("email", "event", "action", "app_action", "app_link", "plugin", "setup", "computer_action",
-         "computer_check", "routine")
+         "computer_check", "routine",
+         # The Pips flow (Pips API 96, pip_fixes): it wants to fix what a check found (Allow), its fix is ready (Apply),
+         # part of it was held back, and what only you can do. An editor before 96 refuses a list with a kind it
+         # doesn't know, so these ship with the editor that draws them.
+         "fix_ask", "fix_ready", "fix_held", "waiting")
 # Reviews of a Personal Pip's work: a workflow's handoff waiting for its review, a change waiting on its Changes page. They wait
 # on you like any card, so the total counts them, but they come in `reviews`, not `items`: a client from before (its list knows
 # KINDS only) would refuse the whole list over a row it doesn't know.
@@ -184,6 +188,12 @@ def collect(registry, now, *, limit=MAX_ITEMS, projects=None) -> dict:
                 add("setup", row["id"], target, row["created_at"], row["expires_at"],
                     f"Change {pips[target]['name']}?" if target else f"Create the Pip “{request.get('name', 'New Pip')}”?",
                     request.get("goal", ""))
+        try:
+            from .pip_fixes import attention_rows
+            for item in attention_rows(db, list(pips), now):
+                add(item["kind"], item["card"], item["pip_id"], item["created_at"], None, item["title"], item["detail"])
+        except Exception:       # noqa: BLE001 - a registry from before the flow: none of its rows
+            pass
     finally:
         db.execute("ROLLBACK TO pip_attention")
         db.execute("RELEASE pip_attention")
@@ -249,6 +259,12 @@ def _in_projects(registry, now, personal) -> dict:
                 f"SELECT workspace_id,count(*) FROM pip_setup_proposals WHERE status='pending' AND expires_at>? "
                 f"AND workspace_id NOT IN ({marks}) GROUP BY workspace_id", (now, *personal)):
             add(row[0], None, row[1])
+        from .pip_fixes import attention_rows
+        folder_pips = {row[0]: row[1] for row in registry.db.execute(
+            f"SELECT p.id,p.workspace_id FROM pips p WHERE p.status<>'archived' AND p.workspace_id NOT IN ({marks}) "
+            "AND p.workspace_id IN (SELECT workspace_id FROM bindings WHERE runner_id=?)", (*personal, registry.runner_id))}
+        for item in attention_rows(registry.db, list(folder_pips), now):
+            add(folder_pips[item["pip_id"]], item["pip_id"])
     except Exception:          # noqa: BLE001 - counts for a tab and one sentence
         return {"in_projects": 0, "projects": {}}
     busiest = sorted(found.items(), key=lambda kv: (-kv[1]["total"], kv[0]))[:MAX_PROJECTS]

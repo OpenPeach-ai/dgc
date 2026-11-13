@@ -2351,6 +2351,12 @@ def tick(registry, config) -> dict:
     # What the user approved while its chat was busy: its next turn, now the chat is free (pip_chat.send_owed_turns).
     from .pip_chat import send_owed_turns
     send_owed_turns(registry, config)
+    # A fix the level (or your Allow) started, whose chat is free now (pip_fixes, 0.52).
+    try:
+        from .pip_fixes import send_due
+        send_due(registry, config)
+    except Exception:                    # noqa: BLE001 - the next tick tries again
+        pass
     return done
 
 

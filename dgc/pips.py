@@ -70,6 +70,7 @@ CONTROL_COMMANDS = frozenset({
     "get_webhook_reach", "set_webhook_reach",
     "list_pip_project_choices", "list_pip_project_changes", "get_pip_project_change", "apply_pip_project_change",
     "discard_pip_project_change", "undo_pip_project_change",
+    "list_pip_fixes", "decide_pip_fix", "start_pip_work_helper", "answer_pip_waiting", "commit_pip_project_change",
     "set_pip_goal", "get_pip_goal", "stop_pip_goal",
     "list_project_folders", "add_project_folder",
     "run_pip_computer_command", "list_pip_computer_terminal", "get_pip_computer_desktop",
@@ -232,6 +233,9 @@ _COMMAND_ARGS = {
     "get_pip_project_change": {"pip_id", "change_id", "path"},
     "apply_pip_project_change": {"pip_id", "change_id", "expected_digest"},
     "discard_pip_project_change": {"pip_id", "change_id"}, "undo_pip_project_change": {"pip_id", "change_id"},
+    "list_pip_fixes": {"pip_id"}, "decide_pip_fix": {"pip_id", "fix_id", "expected_digest", "allow"},
+    "start_pip_work_helper": {"pip_id", "fix_id"}, "answer_pip_waiting": {"pip_id", "waiting_id", "answer"},
+    "commit_pip_project_change": {"pip_id", "change_id"},
     # A goal for a Personal Pip's conversation (pip_goals, API 92): keep going until done, needs you or blocked.
     "set_pip_goal": {"pip_id", "objective", "conversation_id"}, "get_pip_goal": {"pip_id", "conversation_id"},
     "stop_pip_goal": {"pip_id", "goal_id"},
@@ -2169,6 +2173,9 @@ class PipStore:
         # Its review as its own document or sheet, and the dashboards it keeps current (artifact_pips).
         from . import artifact_pips
         artifact_pips.after_run(self.db, run, status=status, result=result, config=getattr(self, "config", None))
+        # What a check found becomes a fix by the Pip's level; a fix's turn says what became of it (pip_fixes, 0.52).
+        from . import pip_fixes
+        pip_fixes.after_run(self, run, status=status, result=result, error=error)
         return self._transition_view(run_id)
 
     def _saved_secrets(self):
@@ -5338,8 +5345,14 @@ def _execute_run(registry, row, config):
             # when its turn ends (only a turn that ended well), file by file, never over a file the user changed
             # meanwhile, with Undo. Below Do it all the card waits for the user (pip_project_copies.auto_apply).
             try:
-                from . import pip_project_copies
-                pip_project_copies.auto_apply(PipStore(registry), row['pip_id'])
+                from . import pip_fixes, pip_project_copies
+                held = None
+                if pip_fixes.is_fix_turn(registry.db, row['id']):
+                    # Do it all's guard for a fix nobody watched: big, deleting or failing tests waits at Apply.
+                    held = pip_fixes.guard_hold(PipStore(registry), row['pip_id'], str(result.get('text') or ''))
+                    pip_fixes.note_hold(PipStore(registry), row['pip_id'], held)
+                if held is None:
+                    pip_project_copies.auto_apply(PipStore(registry), row['pip_id'])
             except Exception:                    # noqa: BLE001 - the reply stands; the card waits for the user
                 pass
         # The plugins a chat reply took an answer from ("Used Aave" under it): what this controller saw, never the
@@ -6662,6 +6675,12 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 # Pips API 91 (pips-21): @ a project in a Personal Pip's chat. Applying is always the user's click.
                 from . import pip_project_copies
                 result = pip_project_copies.control(store, command, request, actor)
+            elif command in ("list_pip_fixes", "decide_pip_fix", "start_pip_work_helper", "answer_pip_waiting",
+                             "commit_pip_project_change"):
+                # Pips API 96 (pips-flow-design, 14 Nov): what a check found and what became of it, by the Pip's level;
+                # what only you can do. Every answer is the user's own click, on this computer.
+                from . import pip_fixes
+                result = pip_fixes.control(store, command, request, actor, config)
             elif command in ("list_project_folders", "add_project_folder"):
                 # Pips API 93: the Project Folder dropdown. Local only: a folder is the user's to add.
                 from . import project_folders
