@@ -34,7 +34,7 @@ export const KNOWN_EVENTS: ReadonlySet<string> = new Set([
   "mcp_tools", "memory", "memory_history", "memory_learned", "memory_state", "mod_offer", "mod_result", "mod_toast", "mod_ui", "mode_changed", "model_changed", "model_defaults_changed", "model_fallback", "model_provider_saved", "model_retry", "model_wait_settings", "models", "models_at", "mods",
   "subscription_default_changed",
   "monitor_ended", "monitor_event", "monitor_restart", "monitor_started", "monitors", "moved_to_background", "options_request",
-  "wakeups", "goal_runs",
+  "wakeups", "goal_runs", "session_archived", "session_created",
   "task_interrupted",
   "options_resolved", "outline", "permission_decision", "permission_request", "permission_resolved",
   "permissions", "plan_proposal", "prompt_accepted", "queue_changed", "queued", "ready", "recall",

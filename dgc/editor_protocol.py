@@ -509,6 +509,9 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # session has the id of the turn it opens in the history snapshot ("h3", or a running turn's own id).
     "outline": {"request_id": _S(), "session_id": _S(), "prompts": _A()},
     "sessions": {"items": _A(), "deleted": _B(False), "request_id": _S(False)},
+    # archive_session's and create_session's answers (13 Nov; ready.capabilities.session_archive).
+    "session_archived": {"path": _S(), "archived": _B(), "pips": _A(False), "request_id": _S(False)},
+    "session_created": {"path": _S(), "name": _S(), "request_id": _S(False)},
     "checkpoints": {"items": _A(), "request_id": _S(False)},
     "rewound": {"ok": _B(), "files_restored": _I(), "request_id": _S(False)},
     "retained_tasks": {
@@ -928,8 +931,11 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # reopen only lowers the mode (an SDK app, a script).
     "resume_session": {"path": _NS(False), "latest": _B(False), "saved_mode": _B(False), "request_id": _S(False)},
     "list_sessions": {"request_id": _S(False), "limit": _I(False), "offset": _I(False), "query": _S(False),
-                      "scope": _S(False), "folder": _S(False)},
-    "delete_session": {"path": _S(), "request_id": _S(False)},
+                      "scope": _S(False), "folder": _S(False), "archived": _B(False)},
+    "delete_session": {"path": _S(), "archived": _B(False), "request_id": _S(False)},
+    # Archive and Restore for Work sessions, and a new named one (13 Nov; ready.capabilities.session_archive).
+    "archive_session": {"path": _S(), "archived": _B(False), "pips": _A(False), "request_id": _S(False)},
+    "create_session": {"name": _S(), "request_id": _S(False)},
     "list_checkpoints": {"request_id": _S(False)},
     "rewind": {"index": _I(), "request_id": _S(False)},
     # v12: the checklist is session state the user can drop without starting a new chat. The

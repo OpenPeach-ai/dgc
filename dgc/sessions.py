@@ -341,9 +341,212 @@ def resolve_path(project_root, path, *, must_exist: bool = False) -> Path:
     # stops legacy writers without generation CAS from recreating a second chat.
     if os.path.lexists(directory / ".session-migrations" / p.stem / "retired"):
         raise ValueError("session was moved to another workspace directory; resume it from the reviewed destination")
+    # An archived session (archive below) is out of the way: nothing resumes, wakes or writes it until it is restored.
+    if p.parent != directory and p.relative_to(directory).parts[0] == ARCHIVED_DIR:
+        raise ValueError("that session is archived: restore it first")
     if must_exist and not p.is_file():
         raise FileNotFoundError(f"no such session: {p.name}")
     return p
+
+
+# ---- archive (his call, 13 Nov), in Codex's shape -------------------------------------------------------------------
+# Codex moves an archived thread's file into an archived folder and back (codex-rs thread-store archive_thread.rs,
+# unarchive_thread.rs). A Work session is its file and the files beside it that are its own; archiving moves them all
+# into <project>/archived/, where nothing resumes, wakes or runs it, and Restore moves them back as they were. The
+# archived folder keeps its own index (session_index), so its list is searched the way the Work list is.
+ARCHIVED_DIR = "archived"
+_SESSION_STEM = re.compile(r"[A-Za-z0-9_-]{1,128}")
+# Beside an archived session only: the Project Pips that were archived with it (his call: "archive the project pips
+# also"), which Restore brings back with it.
+_ARCHIVED_PIPS = ".pips"
+_PIP_ID = re.compile(r"pip_[0-9a-f]{32}")
+MAX_ARCHIVED_PIPS = 200
+
+
+def own_suffixes() -> tuple[str, ...]:
+    """What is a session's own beside its .json: <id> plus each of these. Each module's own constant, so a new one is
+    never left behind when a session is archived (tests/test_session_archive.py pins this)."""
+    from . import helper_memory, monitor_restart, serve_detach, stopped_work, wakeups
+    return (".metrics", ".plan.md", ".workspace", _RECALL_SUFFIX, monitor_restart.SUFFIX, wakeups.SUFFIX,
+            stopped_work.SUFFIX, serve_detach.INTERRUPTED_SUFFIX, _IMAGES_SUFFIX, helper_memory.SUFFIX)
+
+
+def archived_dir(project_root, *, create: bool = False) -> Path:
+    d = project_dir(project_root) / ARCHIVED_DIR
+    if create:
+        d.mkdir(mode=0o700, exist_ok=True)
+        if d.is_symlink() or not d.is_dir():
+            raise OSError("the archived sessions folder is not a folder")
+    return d
+
+
+def _session_name(path) -> str | None:
+    """The file name of a session named by its file name ("<id>.json"; "archived/<id>.json" is the same one), or None."""
+    if not isinstance(path, (str, Path)):
+        return None
+    text = str(path)
+    name = Path(text).name
+    if text not in (name, f"{ARCHIVED_DIR}/{name}") or not name.endswith(".json"):
+        return None
+    return name if _SESSION_STEM.fullmatch(name[:-5]) else None
+
+
+def _move_family(stem: str, source: Path, target: Path, *, record_first: bool) -> None:
+    """Move a session's file and what is its own from one folder to the other. Archiving moves the record first (it
+    leaves the list at once); restoring moves it last (it reappears with everything beside it)."""
+    record = (source / f"{stem}.json", target / f"{stem}.json")
+    own = [(source / f"{stem}{suffix}", target / f"{stem}{suffix}") for suffix in own_suffixes()]
+    for src, dst in ([record, *own] if record_first else [*own, record]):
+        if not os.path.lexists(src):
+            continue
+        if os.path.lexists(dst):
+            if src == record[0]:
+                raise FileExistsError(dst.name)
+            continue                              # a straggler from an interrupted move: the one in place is kept
+        os.replace(src, dst)
+
+
+def _clean_pip_ids(pips) -> list[str] | None:
+    if not isinstance(pips, (list, tuple)) or len(pips) > MAX_ARCHIVED_PIPS:
+        return None
+    ids = []
+    for pip in pips:
+        if not isinstance(pip, str) or not _PIP_ID.fullmatch(pip):
+            return None
+        if pip not in ids:
+            ids.append(pip)
+    return ids
+
+
+def archive(path, project_root, *, pips=()) -> tuple[bool, str]:
+    """Archive one of this project's sessions: (True, "") or (False, why, in plain words). Refused while a turn runs or
+    while anything has it open (a tab, a terminal, a DGC running with no window), as Codex stops a live thread first.
+    ``pips``: the Project Pips archived with it, kept beside it until it is restored (archived_with)."""
+    name = _session_name(path)
+    if name is None or str(path) != name:
+        return False, "Choose one of this project's sessions."
+    pip_ids = _clean_pip_ids(pips)
+    if pip_ids is None:
+        return False, f"Name up to {MAX_ARCHIVED_PIPS} Pips archived with it, by their ids."
+    turn = owner = None
+    turn_held = owner_held = False
+    try:
+        p = resolve_path(project_root, name, must_exist=True)
+        turn = session_turn_lock(p, project_root)
+        turn_held = turn.acquire(blocking=False)
+        if not turn_held:
+            return False, "It is running a turn. Let it finish, or stop it, then archive it."
+        owner = session_owner_lock(p, project_root)
+        owner_held = owner.acquire(blocking=False)
+        if not owner_held:
+            return False, ("It is open somewhere: in a tab, a terminal, or a DGC running with no window. "
+                           "Close it there first, then archive it.")
+        with _lock_for(p):
+            target = archived_dir(project_root, create=True)
+            for member in (p, *(p.with_name(p.stem + suffix) for suffix in own_suffixes())):
+                _reclaim_stale_temporary(member)
+            _move_family(p.stem, p.parent, target, record_first=True)
+            kept = target / f"{p.stem}{_ARCHIVED_PIPS}"
+            if pip_ids:
+                with _lock_for(kept):
+                    _atomic_write(kept, json.dumps(pip_ids))
+            elif os.path.lexists(kept):
+                kept.unlink()                     # an older note never comes back with a later archive
+        return True, ""
+    except FileNotFoundError:
+        return False, "That session isn't here any more."
+    except FileExistsError:
+        return False, "An archived session with the same name is already here."
+    except (OSError, ValueError) as exc:
+        return False, f"DGC couldn't archive it: {exc}"
+    finally:
+        if owner_held:
+            owner.release()
+        if turn_held:
+            turn.release()
+
+
+def archived_with(path, project_root) -> list[str]:
+    """The Project Pips that were archived with this archived session (none when it has none, or it isn't archived)."""
+    name = _session_name(path)
+    if name is None:
+        return []
+    kept = archived_dir(project_root) / f"{name[:-5]}{_ARCHIVED_PIPS}"
+    try:
+        if kept.is_symlink() or not kept.is_file() or kept.stat().st_size > 64 * 1024:
+            return []
+        return _clean_pip_ids(json.loads(kept.read_text())) or []
+    except (OSError, ValueError):
+        return []
+
+
+def restore(path, project_root) -> tuple[bool, str]:
+    """Bring an archived session back into this project's list, as it was: (True, "") or (False, why)."""
+    name = _session_name(path)
+    if name is None:
+        return False, "Choose one of this project's archived sessions."
+    try:
+        away = archived_dir(project_root)
+        source = away / name
+        if source.is_symlink() or not source.is_file():
+            return False, "That session isn't archived here."
+        p = project_dir(project_root) / name
+        with _lock_for(p):
+            if os.path.lexists(p):
+                return False, "A session with the same name is already in this project."
+            _move_family(p.stem, away, p.parent, record_first=False)
+            kept = away / f"{p.stem}{_ARCHIVED_PIPS}"
+            if os.path.lexists(kept):
+                kept.unlink()                     # read first (archived_with): what it was archived with is back
+        return True, ""
+    except FileExistsError:
+        return False, "A session with the same name is already in this project."
+    except OSError as exc:
+        return False, f"DGC couldn't restore it: {exc}"
+
+
+def listing_archived(project_root, *, limit=None, offset=0, query="", redact_secrets=()):
+    """This project's archived sessions, as listing_page lists the others: newest first, paged and searched."""
+    away = archived_dir(project_root)
+    if away.is_symlink() or not away.is_dir():
+        return []
+    from .session_index import page
+    try:
+        return page(away, limit=limit, offset=offset, query=query, redact_secrets=redact_secrets)
+    except Exception:                          # noqa: BLE001 - a broken index never fails the list
+        return []
+
+
+def delete_archived(path, project_root) -> bool:
+    """Delete an archived session for good: its file and everything beside it that is its own."""
+    name = _session_name(path)
+    if name is None:
+        return False
+    try:
+        away = archived_dir(project_root)
+        p = away / name
+        if p.is_symlink() or not p.is_file():
+            return False
+        with _lock_for(p):
+            p.unlink()
+            for suffix in (*own_suffixes(), _ARCHIVED_PIPS):
+                member = p.with_name(p.stem + suffix)
+                if member.is_symlink() or member.is_file():
+                    member.unlink()
+                elif member.is_dir():
+                    import shutil
+                    shutil.rmtree(member, ignore_errors=True)
+        return True
+    except OSError:
+        return False
+
+
+def create(project_root, name: str, *, redact_secrets=None) -> Path | None:
+    """A new, named session with nothing in it yet, in this project (create_session, 13 Nov): a Project Pip's new owner
+    when the session that was its owner is archived or deleted."""
+    path = new_path(project_root)
+    return path if save(path, [], project_root, name=name, expected_exists=False, expected_revision=0,
+                        redact_secrets=redact_secrets) else None
 
 
 def migrate_workspace_session(config, session_id, *, workspace_id, source_root,
@@ -1435,6 +1638,10 @@ def _bucket_project(bucket: Path) -> str | None:
     "project" near the top, so a large transcript is never read for it."""
     files = sorted((p for p in bucket.glob("*.json") if p.is_file() and not p.is_symlink()),
                    key=lambda p: p.stat().st_mtime, reverse=True)
+    away = bucket / ARCHIVED_DIR                 # a project whose sessions are all archived is still that project
+    if len(files) < 3 and away.is_dir() and not away.is_symlink():
+        files += sorted((p for p in away.glob("*.json") if p.is_file() and not p.is_symlink()),
+                        key=lambda p: p.stat().st_mtime, reverse=True)
     for path in files[:3]:
         try:
             with path.open("rb") as handle:
@@ -1449,11 +1656,13 @@ def _bucket_project(bucket: Path) -> str | None:
     return None
 
 
-def listing_everywhere(here_root, *, limit=None, offset=0, query="", redact_secrets=(), folder=None) -> list[dict]:
+def listing_everywhere(here_root, *, limit=None, offset=0, query="", redact_secrets=(), folder=None,
+                       archived: bool = False) -> list[dict]:
     """Every project's sessions, newest first (list_sessions {scope: "all"}, his call 12 Nov): each with its folder, so
     the editor shows where it belongs and opens it running there. From each project's index (session_index), searched
     the same way. DGC's own folders (a helper's worktree, a fix's copy, all under ~/.dgc) are never a user's project.
-    ``folder``: only that folder's sessions (the Project Folder dropdown's one folder, 12 Nov)."""
+    ``folder``: only that folder's sessions (the Project Folder dropdown's one folder, 12 Nov). ``archived``: each
+    project's archived sessions instead (13 Nov)."""
     from .config import dgc_home
     from .session_index import page
     here = str(Path(here_root).expanduser().resolve(strict=False))
@@ -1476,8 +1685,11 @@ def listing_everywhere(here_root, *, limit=None, offset=0, query="", redact_secr
         place = str(Path(project).expanduser().resolve(strict=False))
         if place == own or place.startswith(own + os.sep) or (chosen is not None and place != chosen):
             continue
+        where = bucket / ARCHIVED_DIR if archived else bucket
+        if archived and (where.is_symlink() or not where.is_dir()):
+            continue
         try:
-            found = page(bucket, query=query, redact_secrets=redact_secrets)
+            found = page(where, query=query, redact_secrets=redact_secrets)
         except Exception:                      # noqa: BLE001 - a broken index hides that project's, not the list
             continue
         for path, ts, preview, count, name, match in found:

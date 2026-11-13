@@ -4678,6 +4678,77 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "session_archived"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "path": {
+              "type": "string"
+            },
+            "archived": {
+              "type": "boolean"
+            },
+            "pips": {
+              "type": "array"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "path",
+            "archived"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "session_created"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "path": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "path",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "checkpoints"
             },
             "seq": {
@@ -12454,6 +12525,9 @@
             },
             "folder": {
               "type": "string"
+            },
+            "archived": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -12475,6 +12549,9 @@
             "path": {
               "type": "string"
             },
+            "archived": {
+              "type": "boolean"
+            },
             "request_id": {
               "type": "string"
             }
@@ -12482,6 +12559,60 @@
           "required": [
             "type",
             "path"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "archive_session"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "path": {
+              "type": "string"
+            },
+            "archived": {
+              "type": "boolean"
+            },
+            "pips": {
+              "type": "array"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "create_session"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "name": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name"
           ],
           "additionalProperties": false
         },

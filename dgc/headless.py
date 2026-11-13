@@ -555,7 +555,7 @@ _BUSY_MUTATIONS = {
     # request; the next model round in this turn (or the next prompt) uses the new one. A request
     # that has produced nothing yet is re-sent on the new model at once (Agent.refresh_client).
     "clear_session", "resume_session",
-    "delete_session", "rewind", "undo_to", "compact", "set_workspace_roots",
+    "delete_session", "archive_session", "rewind", "undo_to", "compact", "set_workspace_roots",
     # set_goal validates live edits in its handler; other live state changes are refused.
     # set_skill_enabled is absent: a skill switch only changes what the next prompt may load.
     # name_session is absent: a rename joins the running turn's own session reservation and is
@@ -580,7 +580,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change",
     "set_workspace_roots", "set_mode", "set_model", "set_model_defaults", "save_model_provider", "set_subscription_default", "set_think", "set_goal", "get_goal",
     "get_plan", "new_session", "clear_session", "resume_session", "list_sessions", "get_recall",
-    "delete_session", "fork_session", "list_checkpoints", "rewind", "undo_to", "list_retained_tasks",
+    "delete_session", "archive_session", "create_session", "fork_session", "list_checkpoints", "rewind", "undo_to", "list_retained_tasks",
     "resolve_retained_task", "compact", "context_breakdown", "server_window", "list_artifacts", "stop_artifact",
     "set_config", "clear_todos", "get_config", "status", "name_session", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "get_skill", "list_docs", "get_doc",
     "list_mcp_servers", "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
@@ -2835,6 +2835,9 @@ class Backend:
                           "session_paging": True,
                           # list_sessions {scope: "all"}: every project's sessions, each with its folder (12 Nov).
                           "session_scopes": True,
+                          # Archive and Restore for Work sessions, and a new named one (13 Nov): archive_session,
+                          # list_sessions {archived}, delete_session {archived}, create_session.
+                          "session_archive": True,
                           # A goal runs one turn per cycle here (the editor's backend, Codex's shape, 12 Nov).
                           "goal_turns": self._goal_turns_wanted(),
                           "plugin_management": True, "plugin_keys": True,
@@ -9448,33 +9451,93 @@ class Backend:
             # first message or anything said). A found session's item carries `match`, the words
             # around it. Without them, every session, as before.
             limit, offset, query = cmd.get("limit"), cmd.get("offset", 0), cmd.get("query", "")
-            scope, folder = cmd.get("scope", "project"), cmd.get("folder")
+            scope, folder, archived = cmd.get("scope", "project"), cmd.get("folder"), cmd.get("archived", False)
             if (limit is not None and (type(limit) is not int or not 1 <= limit <= 5000)) \
                     or type(offset) is not int or offset < 0 or not isinstance(query, str) or len(query) > 200 \
                     or scope not in ("project", "all") or (folder is not None and (not isinstance(folder, str)
-                                                                                    or not 0 < len(folder) <= 4096)):
-                self.em.emit("error", message="list_sessions takes a limit of 1–5000, an offset, a query of up to 200 characters "
-                             "and a scope of project or all.", **_request_fields(request_id))
+                                                                                    or not 0 < len(folder) <= 4096)) \
+                    or type(archived) is not bool:
+                self.em.emit("error", message="list_sessions takes a limit of 1–5000, an offset, a query of up to 200 characters, "
+                             "a scope of project or all, and archived true or false.", **_request_fields(request_id))
                 return
+            # archived: the archived sessions instead (capability session_archive, 13 Nov), each item saying so.
+            gone = {"archived": True} if archived else {}
             if scope == "all":
                 # Every project's sessions (capability session_scopes, 12 Nov): each with its folder, so the editor
                 # shows where it belongs and opens it running there. Items are free-form, so no protocol field moves.
                 rows = sessions_mod.listing_everywhere(self.config.project_root, limit=limit, offset=offset, query=query,
-                                                       folder=folder)
+                                                       folder=folder, archived=archived)
                 self.em.emit("sessions", items=[{
                     "path": str(r["path"]), "when": sessions_mod.when(r["updated"]), "preview": r["preview"], "count": r["count"],
                     "name": r["name"], **({"match": r["match"]} if r["match"] else {}), "project": r["project"],
-                    "project_name": r["project_name"], "here": r["here"], "folder_exists": r["folder_exists"]}
+                    "project_name": r["project_name"], "here": r["here"], "folder_exists": r["folder_exists"], **gone}
                     for r in rows], **_request_fields(request_id))
                 return
+            listed = sessions_mod.listing_archived if archived else sessions_mod.listing_page
             items = [{"path": str(p), "when": sessions_mod.when(ts), "preview": pv, "count": c, "name": nm,
-                      **({"match": match} if match else {})}
-                     for (p, ts, pv, c, nm, match) in sessions_mod.listing_page(
+                      **({"match": match} if match else {}), **gone}
+                     for (p, ts, pv, c, nm, match) in listed(
                          self.config.project_root, limit=limit, offset=offset, query=query)]
             self.em.emit("sessions", items=items, **_request_fields(request_id))
+        elif t == "archive_session":
+            # Archive, or (archived: false) restore, one of this project's sessions (13 Nov, Codex's shape):
+            # sessions.archive moves it and what is its own out of the way; the answer is session_archived, a refusal
+            # command_rejected with why (a turn running, open somewhere).
+            # pips: the Project Pips the editor archived with it, kept beside it; restoring answers with them, so the
+            # editor brings them back too.
+            path, archived, pips = cmd.get("path"), cmd.get("archived", True), cmd.get("pips", [])
+            if not isinstance(path, str) or not 0 < len(path) <= 300 or type(archived) is not bool \
+                    or not isinstance(pips, list) or (pips and not archived):
+                self.em.emit("command_rejected", command=t, reason="invalid_request",
+                             message="archive_session takes a session's file name, archived true or false, and (archiving) "
+                                     "the Pips archived with it.", **_request_fields(request_id))
+                return
+            root = self.config.project_root
+            if archived:
+                ok, why = sessions_mod.archive(path, root, pips=pips)
+                with_it = []
+            else:
+                with_it = sessions_mod.archived_with(path, root)
+                ok, why = sessions_mod.restore(path, root)
+            if not ok:
+                self.em.emit("command_rejected", command=t, reason="session_archive_failed", message=why,
+                             **_request_fields(request_id))
+                return
+            self.em.emit("session_archived", path=Path(path).name, archived=archived,
+                         **({"pips": with_it} if with_it else {}), **_request_fields(request_id))
+        elif t == "create_session":
+            # A named session with nothing in it yet, in this project (13 Nov): what a Project Pip is given as its new
+            # owner when the session that was its owner is archived or deleted. It joins the project's workspace when
+            # Pips are on, so the Pip can be given it. The chat this backend has open is untouched.
+            raw = cmd.get("name")
+            name = " ".join(raw.split()) if isinstance(raw, str) else ""
+            if not name or len(name) > 200:
+                self.em.emit("command_rejected", command=t, reason="invalid_request",
+                             message="A new session needs a name of up to 200 characters.", **_request_fields(request_id))
+                return
+            created = sessions_mod.create(self.config.project_root, name, redact_secrets=secret_values(self.config))
+            if created is not None and self.config.get("pips_enabled", False) is True:
+                from .workspace_sessions import associate_current_session
+                try:
+                    associate_current_session(self.config, created)
+                except Exception as exc:                # noqa: BLE001 - said, and the empty session is taken back
+                    sessions_mod.delete(created, self.config.project_root)
+                    self.em.emit("command_rejected", command=t, reason="session_create_failed",
+                                 message=f"DGC couldn't add the new session to this project's Pips: {exc}",
+                                 **_request_fields(request_id))
+                    return
+            if created is None:
+                self.em.emit("command_rejected", command=t, reason="session_create_failed",
+                             message="DGC couldn't make the new session.", **_request_fields(request_id))
+                return
+            saved = sessions_mod.name_of(created, self.config.project_root) or name
+            self.em.emit("session_created", path=created.name, name=saved, **_request_fields(request_id))
         elif t == "delete_session":
             path = cmd.get("path")
-            ok = bool(path) and sessions_mod.delete(path, self.config.project_root)
+            if cmd.get("archived") is True:      # one of the archived ones (13 Nov), for good
+                ok = sessions_mod.delete_archived(path, self.config.project_root)
+            else:
+                ok = bool(path) and sessions_mod.delete(path, self.config.project_root)
             items = [{"path": str(p), "when": sessions_mod.when(ts), "preview": pv, "count": c,
                       "name": nm}
                      for (p, ts, pv, c, nm) in sessions_mod.listing(self.config.project_root)]
