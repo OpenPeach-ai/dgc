@@ -3129,7 +3129,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     # A Pip with a computer uses it in its tasks and in its chat, where the user can watch it work.
     computer_pin = (manifest.get('computer_socket') if (kind in ('personal_task', 'conversation') if personal
                                                          else kind == 'conversation') else None)   # (a folder Pip's chat too)
-    apps_pin = manifest.get('app_socket') if personal and kind in ('personal_task', 'conversation') else None
+    apps_pin = manifest.get('app_socket') if (kind in ('personal_task', 'conversation') if personal
+                                              else kind == 'conversation') else None   # (a folder Pip's chat too)
     # 'desktop' (optional): its computer shows a whole desktop on this machine, so a Pip that sees gets its steps.
     if computer_pin is not None and (not isinstance(computer_pin, dict) or set(computer_pin) - {'desktop'} != {'socket', 'token'}
                                      or computer_pin.get('desktop', False) not in (True, False)):
@@ -3166,7 +3167,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     def _borrow_schemas():
         """Borrowing the user's own Chrome (pip_borrow): any chat reply may ask; only the reply it was lent to uses it.
         On a server (pip_server) there is no Chrome of the user's, and the Pip isn't offered it."""
-        if not personal or conversation is None or apps_pin is None or (lent or {}).get('refused'):
+        if conversation is None or apps_pin is None or (lent or {}).get('refused'):
             return []
         return [pip_borrow.ASK_SCHEMA] + ([pip_borrow.USE_SCHEMA] if lent is not None and lent.get('id') else [])
 
@@ -3510,6 +3511,12 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             if computer_pin is not None:                                    # its own box, with its folder's copy
                 schemas = [*schemas, pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None,
                                                          eyes['convention'], desktop=computer_pin.get('desktop') is True)]
+            if apps_pin is not None:                                        # the user's apps, plugins, the web (step 2b)
+                schemas = [*schemas, *pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')),
+                           *pip_images.schemas(), *pip_videos.schemas(), *pip_keys.schemas(),
+                           *(pip_plugins.schemas(apps_pin['plugins']) if apps_pin.get('plugins') else []),
+                           *(pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin.get('sdk_apps') else []),
+                           *_borrow_schemas()]
             if specialist_pin is not None:
                 return [pip_specialists.schema(specialist_pin['grant'])
                         if item.get('function', {}).get('name') == 'task' else item for item in schemas]
@@ -3547,6 +3554,52 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 "of the edits or inspection and limitations. Do not claim tests ran or passed; they have not run yet.")
             base_instructions = instructions if execution else pip_chat.SYSTEM if conversation is not None else pip_drafts.SYSTEM if kind == "draft" else AUDIT_SYSTEM_INSTRUCTIONS
             role_instructions = selected_type.instructions
+            def _world_words():
+                """The user's apps, plugins and borrowing their Chrome, said to a Pip whose run has them (a Personal Pip,
+                or a folder Pip's chat with its box: step 2b)."""
+                said = ''
+                if apps_pin is not None and conversation is not None and not (lent or {}).get('refused'):
+                    # Borrowing the user's own Chrome (pip_borrow): how to ask, and, in the reply it was lent to, how to use it.
+                    said += '\n' + pip_borrow.NOTICE
+                    if lent is not None and lent.get('id'):
+                        said += '\n' + pip_borrow.use_notice(lent)
+                    elif lent is not None and lent.get('missed'):
+                        said += '\n' + pip_borrow.missed_notice(lent)
+                if apps_pin is not None:
+                    composio = apps_pin.get('composio')
+                    said += ("\nThe user's apps: enabled DGC plugins are listed below and use "
+                        "plugin_tools and call_plugin. Other apps connect to you through the user's Composio"
+                        + (", which is set up in DGC" if composio is True else
+                           " (not set up in DGC yet: connect_app still shows the card, and the card tells the user how to add it)"
+                           if composio is False else "")
+                        + ", so any app Composio supports can be connected (Gmail, Google Calendar, Drive, Notion, Slack, "
+                        "Figma, GitHub, Linear and more). Your tools for this are connect_app and read_app. Read an app connected "
+                        "to you with read_app. First check the enabled plugins named below: use plugin_tools and call_plugin "
+                        "when a plugin already supplies the app. Only for an app without an enabled plugin, when the user "
+                        "asks whether you can use it or asks you to connect or set it up, call connect_app in this turn: "
+                        "that call is what shows the Connect card, and "
+                        "there is no card until you make it. When the user asks about Composio itself without naming an app, say "
+                        "their apps reach you through it and call connect_app for an app they already mentioned, or ask which "
+                        "app, offering likely ones with offer_choices. Never say a Connect card is there unless connect_app said so. To "
+                        "send or change anything in an app, prepare a draft; it waits for the user's Allow. "
+                        + ("Direct app links to you now: " + ", ".join(a['app'] + ' (' + str(a['label']) + ')' for a in apps_pin['apps']) + ". "
+                           if apps_pin['apps'] else "No direct app links to you yet; enabled plugins may still provide app access. ")
+                        # A chat that began before these tools existed holds replies denying them, and a
+                        # model keeps faith with its own words (2026-10-08: "I don't have a Composio
+                        # connector", twice, after the tools were there).
+                        + "Your tools can change between replies, and what this says about them is current: if an earlier "
+                        "reply of yours in this chat said you have no app tools, that Composio is out of your reach, or that "
+                        "you can use only Zapier, Arcade, Make or n8n, it was wrong; say so in a few words and go on.")
+                    if apps_pin.get('plugins'):
+                        said += pip_plugins.instructions(apps_pin['plugins'])
+                    else:
+                        # "Enabled DGC plugins are listed below" with none below: a Pip filled the gap with one.
+                        said += "\nNo DGC plugins are turned on for you, so none is connected."
+                    if apps_pin.get('sdk_apps'):
+                        # The user's own apps (pip_sdk_apps, Pips API 61): their tools, as functions.
+                        said += pip_sdk_apps.instructions(apps_pin['sdk_apps'])
+                return said
+
             if personal:
                 # What it can reach, said plainly: a Pip without a computer claimed it could "pull public rate
                 # pages and searches", another offered a restaurant's phone number and hours (battle tests, 2026-10-09).
@@ -3581,46 +3634,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     base_instructions += ("\nWhen the user tells you something lasting about themselves or the people in their "
                         "life (a diet, an allergy, a dislike, a name, a birthday, a routine, how they like things done), keep it "
                         "with remember in this turn, in their words, then answer. Don't keep what only matters today.")
-                if apps_pin is not None and conversation is not None and not (lent or {}).get('refused'):
-                    # Borrowing the user's own Chrome (pip_borrow): how to ask, and, in the reply it was lent to, how to use it.
-                    base_instructions += '\n' + pip_borrow.NOTICE
-                    if lent is not None and lent.get('id'):
-                        base_instructions += '\n' + pip_borrow.use_notice(lent)
-                    elif lent is not None and lent.get('missed'):
-                        base_instructions += '\n' + pip_borrow.missed_notice(lent)
-                if apps_pin is not None:
-                    composio = apps_pin.get('composio')
-                    base_instructions += ("\nThe user's apps: enabled DGC plugins are listed below and use "
-                        "plugin_tools and call_plugin. Other apps connect to you through the user's Composio"
-                        + (", which is set up in DGC" if composio is True else
-                           " (not set up in DGC yet: connect_app still shows the card, and the card tells the user how to add it)"
-                           if composio is False else "")
-                        + ", so any app Composio supports can be connected (Gmail, Google Calendar, Drive, Notion, Slack, "
-                        "Figma, GitHub, Linear and more). Your tools for this are connect_app and read_app. Read an app connected "
-                        "to you with read_app. First check the enabled plugins named below: use plugin_tools and call_plugin "
-                        "when a plugin already supplies the app. Only for an app without an enabled plugin, when the user "
-                        "asks whether you can use it or asks you to connect or set it up, call connect_app in this turn: "
-                        "that call is what shows the Connect card, and "
-                        "there is no card until you make it. When the user asks about Composio itself without naming an app, say "
-                        "their apps reach you through it and call connect_app for an app they already mentioned, or ask which "
-                        "app, offering likely ones with offer_choices. Never say a Connect card is there unless connect_app said so. To "
-                        "send or change anything in an app, prepare a draft; it waits for the user's Allow. "
-                        + ("Direct app links to you now: " + ", ".join(a['app'] + ' (' + str(a['label']) + ')' for a in apps_pin['apps']) + ". "
-                           if apps_pin['apps'] else "No direct app links to you yet; enabled plugins may still provide app access. ")
-                        # A chat that began before these tools existed holds replies denying them, and a
-                        # model keeps faith with its own words (2026-10-08: "I don't have a Composio
-                        # connector", twice, after the tools were there).
-                        + "Your tools can change between replies, and what this says about them is current: if an earlier "
-                        "reply of yours in this chat said you have no app tools, that Composio is out of your reach, or that "
-                        "you can use only Zapier, Arcade, Make or n8n, it was wrong; say so in a few words and go on.")
-                    if apps_pin.get('plugins'):
-                        base_instructions += pip_plugins.instructions(apps_pin['plugins'])
-                    else:
-                        # "Enabled DGC plugins are listed below" with none below: a Pip filled the gap with one.
-                        base_instructions += "\nNo DGC plugins are turned on for you, so none is connected."
-                    if apps_pin.get('sdk_apps'):
-                        # The user's own apps (pip_sdk_apps, Pips API 61): their tools, as functions.
-                        base_instructions += pip_sdk_apps.instructions(apps_pin['sdk_apps'])
+                base_instructions += _world_words()
                 role_instructions = 'Your character is ' + selected_type.name + '. Your job is defined by the approved goal, not a coding preset.'
                 if conversation is not None:
                     # The chat shows a reply as one message, or as the short messages the Pip parts with --- lines.
@@ -3709,6 +3723,16 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     base_instructions += {'own': '\n' + pip_computer.EYES_NOTICE, 'relay': '\n' + pip_computer.RELAY_NOTICE}.get(self._pip_eyes(), '')
                     if computer_pin.get('desktop') is True and self._pip_eyes() in ('own', 'relay'):
                         base_instructions += '\n' + pip_computer.DESKTOP_NOTICE
+                if apps_pin is not None:
+                    base_instructions += ('\nFind things on the web with web_search first, and open a page on your '
+                                          'computer when you need the page itself.') + _world_words()
+                    folder_level = manifest.get('approval_level')
+                    if isinstance(folder_level, dict):
+                        from . import pip_levels
+                        said_level = pip_levels.instructions(folder_level.get('level'), unattended=folder_level.get('unattended') is True,
+                                                             pays=folder_level.get('pays') is True, drafting=False)
+                        if said_level:
+                            base_instructions += '\n' + said_level
             if specialist_pin is not None:
                 base_instructions = base_instructions.replace('network, delegate, load skills', 'network, load skills')
                 if self._pip_specialist_role:
@@ -3877,7 +3901,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 # still wrote its hello again with new choices, and the chat saved all three.
                 self._end_turn_after_batch = 'offered'
                 return 'These choices appear as buttons below your reply; the user taps one to answer. Your message is complete.'
-            if personal and apps_pin is not None and call.name in pip_videos.TOOLS:
+            if apps_pin is not None and call.name in pip_videos.TOOLS:
                 # Video generation: started by the controller (pip_videos); every video asks the user first, and a
                 # routine makes one only for a Pip the user allowed for that generator.
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
@@ -3885,7 +3909,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 if isinstance(said, str) and "card below your reply" in said and not said.startswith("error"):
                     cards_shown.append(call.name)      # its generator's key card (pip_keys)
                 return said
-            if personal and apps_pin is not None and call.name in pip_keys.TOOLS:
+            if apps_pin is not None and call.name in pip_keys.TOOLS:
                 # Its own API keys (pip_keys): asked for on a card; DGC adds the saved key to a GET on its one site, in
                 # the controller, so the key never reaches this worker.
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
@@ -3893,7 +3917,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 if isinstance(said, str) and "below your reply" in said and not said.startswith("error"):
                     cards_shown.append(call.name)
                 return said
-            if personal and apps_pin is not None and call.name in pip_images.TOOLS:
+            if apps_pin is not None and call.name in pip_images.TOOLS:
                 # Image generation: made by the controller with the user's generators (pip_images); a paid one is
                 # made only after the user said yes in their own message.
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
@@ -3901,13 +3925,13 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 if isinstance(said, str) and "card below your reply" in said and not said.startswith("error"):
                     cards_shown.append(call.name)      # its generator's key card (pip_keys)
                 return said
-            if personal and apps_pin is not None and call.name in pip_app_links.TOOLS:
+            if apps_pin is not None and call.name in pip_app_links.TOOLS:
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
                 said = pip_app_links.worker_call(apps_pin, call.name, arguments)
                 if isinstance(said, str) and "below your reply" in said and not said.startswith("error"):
                     cards_shown.append(call.name)
                 return said
-            if personal and apps_pin is not None and conversation is not None and call.name in pip_borrow.TOOLS:
+            if apps_pin is not None and conversation is not None and call.name in pip_borrow.TOOLS:
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
                 if call.name == pip_borrow.USE and not (lent is not None and lent.get('id')):
                     return pip_borrow.not_lent((lent or {}).get('missed', ''))
@@ -3915,7 +3939,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 if call.name == pip_borrow.ASK and "below your reply" in said and not said.startswith("error"):
                     cards_shown.append(call.name)
                 return said
-            own_tools = pip_sdk_apps.functions(apps_pin.get('sdk_apps')) if personal and apps_pin is not None else {}
+            own_tools = pip_sdk_apps.functions(apps_pin.get('sdk_apps')) if apps_pin is not None else {}
             if own_tools and (call.name in own_tools or call.name == pip_sdk_apps.ANSWER_TOOL):
                 # The user's own app (pip_sdk_apps): a read answers now; a change comes back as this reply's Allow card,
                 # built by the controller from the app's own tool, never from the model's description of it.
@@ -3933,7 +3957,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 if 'draft' in reply:
                     connector_candidate = reply['draft']
                 return reply['text']
-            if personal and apps_pin is not None and apps_pin.get('plugins') and call.name in pip_plugins.TOOLS:
+            if apps_pin is not None and apps_pin.get('plugins') and call.name in pip_plugins.TOOLS:
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
                 if call.name == 'call_plugin' and connector_candidate is not None:
                     return ('One action is already waiting for the user below this reply. Finish your reply; '
@@ -4242,7 +4266,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             + ("\n\nuser_notes: " + notes_notice if user_notes else "")
             + ("\n\nabout_you: " + about_notice if about_you else "")
             + ("\n\nworking_notes: " + pip_working_notes.NOTICE if working_notes is not None else "")
-            + (_app_tools_note(apps_pin) if personal and apps_pin is not None else "")
+            + (_app_tools_note(apps_pin) if apps_pin is not None else "")
             + ("\n\n" + left_out_told if left_out_told else "")
             + "\n\nCurrent user message:\n" + conversation["text"])
     elif task_history is not None:
@@ -4989,7 +5013,11 @@ def _execute_run(registry, row, config):
             except (RegistryError, OSError, ValueError):
                 pass                        # it reads text, as before
     computer_socket = computer_host = taint = None
-    if personal and manifest.get('run_kind') in ('personal_task', 'conversation'):
+    # A run with the outside world (apps, plugins, the web, its level said): a Personal Pip's task or chat, or (0.52,
+    # pips-sandbox-design step 2b) a folder Pip's chat with its own box.
+    world = (manifest.get('run_kind') in ('personal_task', 'conversation') if personal
+             else manifest.get('run_kind') == 'conversation' and manifest.get('computer') is not None)
+    if world:
         # Careful mode remembers what every run of this Pip read from apps, with or without its computer:
         # a routine's run reads mail now, and the user's next run could carry it to a page.
         from . import pip_careful
@@ -5037,7 +5065,7 @@ def _execute_run(registry, row, config):
             whole = False
         manifest = {**manifest, 'computer_socket': {**computer_socket.pin(), 'desktop': whole}}
     app_socket = None
-    if personal and manifest.get('run_kind') in ('personal_task', 'conversation'):
+    if world:
         # The Pip's own apps (connect_app, read_app): the controller holds the Composio connection;
         # the worker reaches it through a socket only this run's token opens.
         from . import pip_app_links
@@ -5073,7 +5101,7 @@ def _execute_run(registry, row, config):
                 level_now=pip_levels.follow(registry.directory, row['pip_id']),
                 taint=taint, said=app_socket.said, refused=pip_server.NO_CHROME if server else "")
         manifest = {**manifest, 'app_socket': app_socket.pin()}
-    if personal and manifest.get('run_kind') in ('personal_task', 'conversation'):
+    if world:
         # How much it asks (pip_levels): the worker is only told, for the Pip's words; the supervisor decides.
         from . import pip_levels
         from .pip_careful import UNATTENDED
