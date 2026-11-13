@@ -127,9 +127,9 @@ for (const theme of ["dark-modern", "light-modern"]) {
         assert.ok(personal.bar.box.y >= home.bottom, `under the side bar's tab bar (${personal.bar.box.y} < ${home.bottom})`);
         // Its own box, type and colours: a bordered pair on a 10px corner, 12px semibold words, the chosen one lifted.
         const tone = await page.evaluate(() => { const probe = document.createElement("i"); document.body.append(probe); const read = (name, p = "color") => { probe.style[p] = `var(${name})`; return getComputedStyle(probe)[p]; };
-          const out = { strong: read("--text-strong"), muted: read("--muted"), surface: read("--surface", "backgroundColor"), surface2: read("--surface2", "backgroundColor") }; probe.remove(); return out; });
+          const out = { strong: read("--text-strong"), muted: read("--muted"), surface: read("--bg", "backgroundColor"), surface2: read("--surface2", "backgroundColor") };   /* (surface: the side bar's own ground, which the Pips view stands on since 13 Nov; it stood on the editor's) */ probe.remove(); return out; });
         assert.deepEqual([personal.bar.style.display, personal.bar.style.gap, personal.bar.style.paddingTop, personal.bar.style.borderTopWidth, personal.bar.style.borderTopLeftRadius, personal.bar.style.backgroundColor],
-          ["flex", "2px", "2px", "1px", "10px", tone.surface], "the bar");
+          ["flex", "2px", "2px", "1px", "6px", tone.surface], "the bar");      // (the button family's corner since 13 Nov: it was 10 px)
         assert.deepEqual([personal.chosen.style.fontSize, personal.chosen.style.fontWeight, personal.chosen.style.color, personal.chosen.style.backgroundColor, personal.chosen.style.minHeight],
           ["12px", "600", tone.strong, tone.surface2, "20px"], "the chosen tab: lifted, in the strong text colour");
         assert.deepEqual([personal.other.style.fontSize, personal.other.style.fontWeight, personal.other.style.color, personal.other.style.backgroundColor],

@@ -315,7 +315,8 @@ test("light and dark come from the editor's own colours: the panel is a frosted 
       seen[theme] = { card: tone(r.cards[0].ground), solid: tone(r.buttons.find((b) => b.text === "Send once").ground), panel: r.ground };
       for (const b of r.buttons) { assert.doesNotMatch(b.ground, PURPLE, `${theme}: “${b.text}” is not purple`); assert.doesNotMatch(b.ink, PURPLE); }
       const pills = r.buttons.filter((b) => ["Send once", "Always allow", "Reject"].includes(b.text));
-      assert.ok(pills.length >= 5 && pills.every((b) => parseFloat(b.radius) >= b.height / 2 - 0.5), "the answers are pills");
+      // (They were pills until 13 Nov: one shape for every control, the button family's 6 px corner. test/one-shape-controls.test.mjs.)
+      assert.ok(pills.length >= 5 && pills.every((b) => parseFloat(b.radius) === 6), `the answers have the button family's corner (${pills.map((b) => b.radius)})`);
       assert.match(r.panel ?? r.ground, /rgba|color\(/, `${theme}: the panel lets the screen through`);
       assert.match(await x.p.evaluate(() => { const s = getComputedStyle(document.getElementById("pc-drawer")); return s.backdropFilter || s.webkitBackdropFilter; }), /blur/, "frosted");
       const bell = await x.p.evaluate(() => { const s = getComputedStyle(document.querySelector("#pc-bell .pc-bell-count")); return [s.backgroundColor, s.color]; });

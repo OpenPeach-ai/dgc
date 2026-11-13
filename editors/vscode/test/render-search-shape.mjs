@@ -27,11 +27,6 @@ for (const [tone, theme] of [["dark", "dark-modern"], ["light", "light-modern"]]
   await settle(x.page);
   await shoot(x, `search-work-focused-${tag}`, top);
   await x.page.fill("#sessions-search", "");
-  await x.page.click("#sessions-all");
-  await x.page.waitForSelector(".sessions-popover .sessions-all-search");
-  await settle(x.page);
-  await shoot(x, `search-view-all-${tag}`, { x: 0, y: 0, width, height: 420 });
-  await x.page.keyboard.press("Escape");
   await x.page.click("#side-tab-chat");
   await x.page.mouse.move(2, 400);
   await settle(x.page);

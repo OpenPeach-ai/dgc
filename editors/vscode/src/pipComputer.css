@@ -252,7 +252,7 @@ body.pc-screen-mode{padding:0}
  transition:background-color .2s ease,border-color .2s ease,box-shadow .2s ease}
 .pc-drawer.pc-fan{border-color:var(--hair-strong);background:color-mix(in srgb,color-mix(in srgb,var(--text) 7%,var(--vscode-editor-background)) 82%,transparent);
  -webkit-backdrop-filter:var(--glass-filter);backdrop-filter:var(--glass-filter);box-shadow:0 18px 40px -14px rgba(0,0,0,.5)}
-.pc-drawer button{font:inherit;color:var(--text);background:transparent;border:0;border-radius:var(--r-full);padding:0;cursor:pointer}
+.pc-drawer button{font:inherit;color:var(--text);background:transparent;border:0;border-radius: var(--btn-r, 6px);padding:0;cursor:pointer}
 .pc-drawer button:focus-visible{outline:var(--btn-ring);outline-offset:2px}
 .pc-drawer-head{flex:none;display:flex;align-items:center;gap:8px;height:0;padding:0 6px 0 12px;overflow:hidden;opacity:0;visibility:hidden;white-space:nowrap;
  transition:height .42s var(--pc-spring),opacity .2s ease,visibility 0s .2s}

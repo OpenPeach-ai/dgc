@@ -20,7 +20,8 @@
 .dgc-folder-k { flex: none; }
 .dgc-folder-v { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-strong); font-weight: var(--w-med); }
 /* Open (and until its menu has gone): the menu's ground, no line of its own, square where the menu joins it. */
-.dgc-folder[data-folder-open], .dgc-folder[data-folder-open]:hover:not(:disabled) { border-color: transparent; background: var(--surface2); color: var(--text); }
+/* (--folder-ground: the raised grey as one opaque colour, set by the script where a theme's is see-through.) */
+.dgc-folder[data-folder-open], .dgc-folder[data-folder-open]:hover:not(:disabled) { border-color: transparent; background: var(--folder-ground, var(--surface2)); color: var(--text); }
 .dgc-folder[data-folder-open="down"] { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 .dgc-folder[data-folder-open="up"] { border-top-left-radius: 0; border-top-right-radius: 0; }
 /* The chevron, at the button's right end: two strokes that turn into an × while the menu is open, and back. */
@@ -43,12 +44,12 @@
 .dgc-folder-menu[data-leaving] { pointer-events: none; }
 .dgc-folder-menu:focus { outline: none; }
 .dgc-folder-shape { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
-.dgc-folder-ground { fill: var(--surface2); }
+.dgc-folder-ground { fill: var(--folder-ground, var(--surface2)); }
 .dgc-folder-line { fill: none; stroke: var(--btn-line); stroke-width: 1; }
 .dgc-folder-seam { fill: none; stroke: var(--hair); stroke-width: 1; }
 .dgc-folder-list {
   position: relative; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; max-width: 100vw; max-height: calc(100vh - 12px); padding: 4px;
-  border: 1px solid transparent; border-top-width: 0; border-radius: 0 0 var(--btn-r) var(--btn-r); background: var(--surface2) padding-box;
+  border: 1px solid transparent; border-top-width: 0; border-radius: 0 0 var(--btn-r) var(--btn-r); background: var(--folder-ground, var(--surface2)) padding-box;
   overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
 }
 .dgc-folder-menu[data-dir="up"] .dgc-folder-list { border-top-width: 1px; border-bottom-width: 0; border-radius: var(--btn-r) var(--btn-r) 0 0; }
@@ -56,6 +57,20 @@
 .dgc-folder-menu[data-dir="down"][data-reach="right"] .dgc-folder-list { border-top-right-radius: var(--btn-r); }
 .dgc-folder-menu[data-dir="up"][data-reach="left"] .dgc-folder-list { border-bottom-left-radius: var(--btn-r); }
 .dgc-folder-menu[data-dir="up"][data-reach="right"] .dgc-folder-list { border-bottom-right-radius: var(--btn-r); }
+/* The search field of a long list (more than 8 folders): at the list's top, where it stays while the folders scroll
+   under it (its own ground covers them). A quiet field in the shared search field's shape, a glass before its words. */
+.dgc-folder-find { position: sticky; top: 0; z-index: 2; flex: none; display: flex; align-items: center; gap: 6px; box-sizing: border-box; margin: -4px -4px 0; padding: 5px 5px 4px;
+  background: var(--folder-ground, var(--surface2)); }
+.dgc-folder-menu[data-dir="up"] .dgc-folder-find { padding-top: 5px; }
+.dgc-folder-find-mark { position: absolute; left: 14px; top: 50%; translate: 0 -50%; fill: none; stroke: var(--muted); stroke-width: 1.3; stroke-linecap: round; pointer-events: none; }
+.dgc-folder-search { flex: 1 1 auto; min-width: 0; box-sizing: border-box; height: var(--btn-h); margin: 0; padding: 0 8px 0 29px; border: 1px solid transparent; border-radius: var(--btn-r);
+  background: var(--field); color: var(--text-strong); font: var(--w-reg) var(--t-sm)/1 var(--sans); }
+.dgc-folder-search:focus { outline: none; border-color: var(--vscode-focusBorder, var(--text)); }
+.dgc-folder-search::placeholder { color: var(--muted-firm); opacity: 1; }
+.dgc-folder-list:has(> .dgc-folder-find) { scroll-padding-top: calc(var(--btn-h) + 12px); }
+.dgc-menu.dgc-folder-menu .dgc-folder-list > [hidden] { display: none; }
+.dgc-folder-none { flex: none; padding: 8px; color: color-mix(in srgb, var(--text) 80%, transparent); font: var(--w-reg) var(--t-sm)/1.4 var(--sans); overflow-wrap: anywhere; }
+@media (forced-colors: active) { .dgc-folder-search { border-color: CanvasText; } }
 /* A row: rounded like the button, its mark before its name. It arrives from the button's side. */
 .dgc-menu.dgc-folder-menu .dgc-menu-row { flex: none; gap: 8px; min-height: 30px; padding: 0 8px; border-radius: var(--btn-r); transform-origin: 50% 0; }
 .dgc-menu.dgc-folder-menu[data-dir="up"] .dgc-menu-row { transform-origin: 50% 100%; }
@@ -100,3 +115,21 @@ dgc-folder-fit[data-compact] .dgc-folder-k { display: none; }
 .dgc-path-dots { display: none; flex: none; }
 .dgc-path.is-cut > .dgc-path-dots { display: block; }
 .dgc-path.is-cut > .dgc-path-head { min-width: 0; text-overflow: clip; }
+
+/* A folder's own icon (media/shared/folders.css, as its maker wrote it; the markup is folderpick.js's): the symbol
+   alone at 18 px, in its row, in the button when a folder is chosen and on New Session's line. Its papers lift by a
+   pixel while its row or its button is pointed at or has the keyboard (feedback, never a loop), and not at all with
+   reduced motion. */
+.dgc-folder-icon { --folder-size: 18px; --lift: -1.5px; --back-lift: -2px; display: block; flex: none; border-top-width: 1px; pointer-events: none; }
+.dgc-folder > .dgc-folder-icon { --folder-size: 16px; }
+.dgc-menu.dgc-folder-menu .dgc-folder-mark:has(> .dgc-folder-icon) { width: 18px; }
+:is(.dgc-menu-row, .dgc-folder, .new-session-path):is(:hover, :focus-visible):not(:disabled) .dgc-folder-icon .folder-paper--right { transform: translateY(var(--back-lift)) rotate(6deg); }
+:is(.dgc-menu-row, .dgc-folder, .new-session-path):is(:hover, :focus-visible):not(:disabled) .dgc-folder-icon .folder-paper--left { transform: translateY(var(--back-lift)) rotate(-6deg); }
+:is(.dgc-menu-row, .dgc-folder, .new-session-path):is(:hover, :focus-visible):not(:disabled) .dgc-folder-icon .folder-paper--front { transform: translateY(var(--lift)); }
+.dgc-menu-row:disabled .dgc-folder-icon { opacity: .55; filter: grayscale(.6); }
+@media (prefers-reduced-motion: reduce) {
+  :is(.dgc-menu-row, .dgc-folder, .new-session-path):is(:hover, :focus-visible):not(:disabled) .dgc-folder-icon .folder-paper--right { transform: rotate(4deg); }
+  :is(.dgc-menu-row, .dgc-folder, .new-session-path):is(:hover, :focus-visible):not(:disabled) .dgc-folder-icon .folder-paper--left { transform: rotate(-4deg); }
+  :is(.dgc-menu-row, .dgc-folder, .new-session-path):is(:hover, :focus-visible):not(:disabled) .dgc-folder-icon .folder-paper--front { transform: none; }
+}
+@media (forced-colors: active) { .dgc-folder-icon { forced-color-adjust: none; } }

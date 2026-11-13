@@ -3,6 +3,8 @@
 //   Voxel (media/shared/voxel.css)   a Work session        span.voxel.voxel--<palette> > i*6
 //   Folio (media/shared/folio.css)   a widget              span.folio.folio--<palette> > i*3
 //   Portal (media/shared/portal.css) one of a Pip's computers  span.portal.portal--<palette> > i*2
+//   Pinwheel (media/shared/pinwheel.css) a ChatDGC project (13 Nov)  span.pinwheel.pinwheel--<palette> > i*4
+//     (only a project a user makes in ChatDGC: a Work session's folder is a directory, and keeps its plain folder icon)
 // The stylesheets are his, as he wrote them; they also hold Citron and Lime, which are too bright and never used here.
 // A session, a chat or a widget keeps the palette it was given (src/dock.ts stores it on this computer); a computer's
 // palette follows its number, as the picture on its desktop does. Nothing here touches a page: the pages (window.DgcMarks) and the
@@ -18,9 +20,9 @@
   /** Each palette's hue, as his sheets set it (--h). */
   const HUES = Object.freeze({ ember: 3, peach: 22, saffron: 39, fern: 133, mint: 158, lagoon: 177, ice: 195, azure: 213, iris: 247, lilac: 273, orchid: 294, rose: 331 });
   /** A mark's set, and how many empty <i> it holds. */
-  const SETS = Object.freeze({ mote: 3, voxel: 6, folio: 3, portal: 2 });
+  const SETS = Object.freeze({ mote: 3, voxel: 6, folio: 3, portal: 2, pinwheel: 4 });
   /** What wears which set. */
-  const SET_OF = Object.freeze({ chat: "mote", work: "voxel", widget: "folio", computer: "portal" });
+  const SET_OF = Object.freeze({ chat: "mote", work: "voxel", widget: "folio", computer: "portal", project: "pinwheel" });
   const isPalette = (name) => typeof name === "string" && PALETTES.includes(name);
   /** A palette's name as it is said: "Lagoon". */
   const label = (name) => (isPalette(name) ? name[0].toUpperCase() + name.slice(1) : "");

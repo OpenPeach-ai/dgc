@@ -128,10 +128,13 @@
   /* A row pointed at takes the editor's own list hover; a search field's fill is a wash of the text. */
   --row-hover: var(--vscode-list-hoverBackground, var(--wash));
   --field: color-mix(in srgb, var(--text) 6%, transparent);
-  /* The one filled pill on a page that is not Send: the text colour, with the ground's colour for its words. */
+  /* The one filled pill on a page that is not Send: the text colour, with the ground's colour for its words. The
+     words take the side bar's own ground, which is always an opaque colour and always the far end from the text. (They
+     took --surface2, the theme's input background: Cursor's dark themes give that a see-through white, #ffffff0d, and
+     New's words were white on its white fill, 13 Nov.) Made opaque whatever a theme gives, where the editor can (below). */
   --solid: var(--text);
   --solid-hover: color-mix(in srgb, var(--text) 86%, #fff);
-  --on-solid: var(--surface2);
+  --on-solid: var(--bg);
   /* A prompt box's ground: a step off the page it sits on, in Work, ChatDGC and a Pip's chat. */
   --box: color-mix(in srgb, var(--text) 4%, var(--surface));
   /* The shell a prompt box sits in while something is going on: a faint tint of the text on the page, opaque so its
@@ -205,6 +208,7 @@ body.vscode-light {
   --fk-blue:#498ba7; --fk-yellow:#8d8d2d; --fk-orange:#cc6d2e; --fk-green:#6c9438;
   --fk-violet:#9068b0; --fk-pink:#dd4b78; --fk-red:#b8383d; --fk-neutral:#848a88;
 }
+@supports (color: rgb(from red r g b / 1)) { :root { --on-solid: rgb(from var(--bg) r g b / 1); } }
 /* High contrast light is a light ground too: the pale purple read 2.6:1 on its white. (High contrast dark keeps the
    pale one, 7.6:1 on its black.) */
 body.vscode-high-contrast-light { --link:#6D49E8; --accent-text:#6D49E8; }

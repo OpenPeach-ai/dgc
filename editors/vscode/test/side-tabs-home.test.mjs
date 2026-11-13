@@ -1,7 +1,7 @@
 // The side bar's tabs and Home, the hub (media/shared/tabs.css, media/shared/hub.js and hub.css, media/main.js), measured
 // in real Chromium on the side bar's real page (support/home-scene.mjs and dock-scene.mjs). What is held here:
 //   - one centred tab bar at the top, under the header row: Home, Work, Chat, Pips, as names only; it replaces the header's Pips button and the Pips block
-//   - pointing at a tab lights it in the accent and turns its name over; the tab you are on is lit too; one colour for all
+//   - the tab you are on is lit in the accent; pointing at another only changes its name to the text colour (13 Nov)
 //   - the keyboard: Left and Right move and choose (wrapping), Home and End jump, and the bar is one tab stop
 //   - the four names fit at 240 px; under 240 px the tabs are icons (side-tabs-icons.test.mjs), down to 170 px
 //   - Home: everything that needs you or is new is one card of one size and style, from a session (its blob) or a Pip
@@ -103,12 +103,12 @@ for (const width of [300, 700]) {
   });
 }
 
-test("pointing at a tab lights it in the accent and turns its name over; the tab you are on is lit too, in the same colour", async (t) => {
+test("the tab you are on is lit in the accent; pointing at another only changes its name from the quiet grey to the text colour (13 Nov)", async (t) => {
   if (skipOrFail(t)) return;
   for (const theme of ["dark-modern", "light-modern"]) {
     const x = await openDock(browser, { tab: "home", theme, width: 300, height: 500 });
     try {
-      const accent = await tone(x.page, "--accent-text"), quiet = await tone(x.page, "--text-2");
+      const accent = await tone(x.page, "--accent-text"), quiet = await tone(x.page, "--text-2"), text = await tone(x.page, "--text");
       let bar = await x.tabs();
       assert.equal(names(bar).length, 4, `${theme}: four tabs`);
       assert.equal(tab(bar, "home").color, accent, `${theme}: the tab you are on is in the accent's text tone`);
@@ -116,46 +116,38 @@ test("pointing at a tab lights it in the accent and turns its name over; the tab
       for (const id of ["work", "chat", "pips"]) {
         assert.equal(tab(bar, id).color, quiet, `${theme}: ${id} is quiet at rest`);
         assert.equal(tab(bar, id).glow, 0, `${theme}: ${id} has no glow at rest`);
-        assert.deepEqual([tab(bar, id).front, tab(bar, id).frontOpacity, tab(bar, id).backOpacity], ["none", 1, 0], `${theme}: ${id}'s name faces you, its copy waits unseen`);
+        assert.deepEqual([tab(bar, id).front, tab(bar, id).frontOpacity, tab(bar, id).copies], ["none", 1, 1], `${theme}: ${id}'s name faces you, and is in the tab once`);
       }
-      // Each tab pointed at in turn takes the same accent: no tab has a colour of its own.
+      // Each tab pointed at in turn takes the text colour: no accent, no glow, no turn (it lit up and turned its name
+      // over until 13 Nov; side-bar-ui13.test.mjs holds that nothing moves on the way either).
       for (const id of ["work", "chat", "pips"]) {
         await x.page.mouse.move(...centre(tab(bar, id)), { steps: 3 });
         await x.page.waitForTimeout(900);
         const now = tab(await x.tabs(), id);
-        assert.equal(now.color, accent, `${theme}: ${id} pointed at is in the accent`);
-        assert.ok(now.glow > 0.5 && now.glow < 0.95, `${theme}: with a softer glow than the tab you are on (${now.glow})`);
-        assert.equal(now.frontOpacity, 0, `${theme}: the front has tipped away`);
-        assert.match(now.front, /^matrix3d\(/, `${theme}: it turned about its foot (${now.front})`);
-        assert.equal(now.backOpacity, 1, `${theme}: and the same name has risen in its place`);
-        assert.ok(["none", "matrix(1, 0, 0, 1, 0, 0)", "matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)"].includes(now.back), `${theme}: flat and readable (${now.back})`);
+        assert.equal(now.color, text, `${theme}: ${id} pointed at is in the text colour`);
+        assert.equal(now.glow, 0, `${theme}: with no glow`);
+        assert.deepEqual([now.front, now.frontOpacity], ["none", 1], `${theme}: its name stays facing you`);
         assert.equal(now.selected, false, "pointing chooses nothing");
       }
-      // Mid-turn the two names are both on their way: the turn is a motion, not a swap.
-      await x.page.mouse.move(150, 300); await x.page.waitForTimeout(900);
-      await x.page.mouse.move(...centre(tab(bar, "work")), { steps: 2 });
-      await x.page.waitForTimeout(90);
-      const mid = tab(await x.tabs(), "work");
-      assert.ok(mid.frontOpacity < 1 || /^matrix3d\(/.test(mid.front), `${theme}: the front is turning 90 ms in (${mid.front}, ${mid.frontOpacity})`);
       await x.page.mouse.move(150, 300); await x.page.waitForTimeout(900);
       bar = await x.tabs();
-      assert.deepEqual([tab(bar, "work").color, tab(bar, "work").frontOpacity, tab(bar, "work").backOpacity], [quiet, 1, 0], `${theme}: the pointer gone, it is as it was`);
+      assert.deepEqual([tab(bar, "work").color, tab(bar, "work").frontOpacity], [quiet, 1], `${theme}: the pointer gone, it is as it was`);
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   }
 });
 
-test("reduced motion: a tab pointed at is lit, and its name does not turn", async (t) => {
+test("reduced motion: a tab pointed at takes the text colour at once", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openDock(browser, { tab: "home", width: 300, height: 500, motion: "reduce" });
   try {
-    const accent = await tone(x.page, "--accent-text");
+    const text = await tone(x.page, "--text");
     const bar = await x.tabs();
     assert.equal(names(bar).length, 4);
     await x.page.mouse.move(...centre(tab(bar, "chat")), { steps: 3 });
     await settle(x.page);
     const now = tab(await x.tabs(), "chat");
-    assert.equal(now.color, accent, "lit at once");
+    assert.equal(now.color, text, "in the text colour at once");
     assert.deepEqual([now.front, now.frontOpacity], ["none", 1], "its name stays facing you");
   } finally { await x.close(); }
 });

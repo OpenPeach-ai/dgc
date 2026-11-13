@@ -92,8 +92,8 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
         ["s-shop-2", "~/code/shop", "/home/me/code/shop"], ["s-notes-1", "~/code/notes", "/home/me/code/notes"]], "each says its folder, the home folder as ~, the whole path in its tooltip");
       for (const r of m.rows) assert.deepEqual([r.lines, r.under, r.inside, r.tailWhole], [1, true, true, true], `one line under the name, inside the row, the folder's own name whole: ${JSON.stringify(r)}`);
       if (width === 300) assert.equal(m.rows[2].headCut, true, "a long path is cut in the middle: what comes before the folder's name gives way");
-      assert.deepEqual(m.rows.map((r) => r.actions.join(" ")), ["session-open dgc-pin session-more session-delete", "session-open", "session-open", "session-open dgc-pin session-more session-delete", ""],
-        "Delete only for this window's folder's sessions; another folder's offers Open; a gone folder's nothing");
+      assert.deepEqual(m.rows.map((r) => r.actions.join(" ")), ["session-open dgc-pin session-more session-delete", "session-open dgc-pin session-more", "session-open dgc-pin session-more", "session-open dgc-pin session-more session-delete", ""],
+        "Delete only for this window's folder's sessions; another folder's offers Open, the pin and its colour (13 Nov: it had Open alone and could not be pinned); a gone folder's nothing");
       assert.deepEqual([m.rows[4].gone, m.rows[4].note, m.rows[4].disabled], [true, "Folder not found", "true"]);
       assert.equal(m.sideways, false);
       assert.deepEqual(low(await homeContrast(x.page)), []);

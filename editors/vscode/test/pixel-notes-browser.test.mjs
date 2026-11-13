@@ -212,15 +212,15 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 3
         assert.ok(Math.abs((m.face.top + m.face.bottom) / 2 - (m.word.top + m.word.bottom) / 2) <= 1, `${said}: the face is centred on the word (${(m.face.top + m.face.bottom) / 2} against ${(m.word.top + m.word.bottom) / 2})`);
         assert.ok(Math.abs((m.flip.left + m.face.right) / 2 - (m.tab.left + m.tab.right) / 2) <= 1, `${said}: the pair is centred in the tab (${(m.flip.left + m.face.right) / 2} in ${(m.tab.left + m.tab.right) / 2})`);
         assert.ok(m.flip.left >= m.tab.left - 0.5 && m.face.right <= m.tab.right + 0.5, `${said}: neither is cut by the tab`);
-        assert.deepEqual([m.name, m.sideways], ["PipsPips", false], `${said}: the tab is still named Pips (its word and the copy that rises)`);
+        assert.deepEqual([m.name, m.sideways], ["Pips", false], `${said}: the tab is still named Pips (once: the copy that rose under the pointer went on 13 Nov)`);
       };
       const rest = await pipsTab(x.page);
       held(rest, "at rest");
       assert.deepEqual(rest.order, ["dgc-tab-glow", "dgc-tab-flip", "dgc-tab-face"], "in the page too: the word, then the face");
-      // Pointed at, and chosen: the same order and place, with the glow and colour they had.
+      // Pointed at (no glow since 13 Nov: only the name's colour changes), and chosen (lit): the same order and place.
       await x.page.hover("#side-tab-pips"); await x.page.waitForTimeout(450);
       const hover = await pipsTab(x.page);
-      assert.ok(hover.glow > 0.5, "pointed at, it glows");
+      assert.equal(hover.glow, 0, "pointed at, it does not glow");
       assert.ok(Math.abs(hover.face.left - rest.face.left) <= 0.5 && Math.abs(hover.tab.left - rest.tab.left) <= 0.5, "and nothing moves");
       await x.page.click("#side-tab-pips"); await x.page.mouse.move(width / 2, 400); await x.page.waitForTimeout(450);
       const chosen = await pipsTab(x.page);

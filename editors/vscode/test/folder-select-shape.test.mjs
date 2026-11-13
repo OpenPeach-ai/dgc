@@ -210,7 +210,8 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 3
       assert.deepEqual(m.chevron, ['path("M 4.5 4.5 L 11.5 11.5")', 'path("M 4.5 11.5 L 11.5 4.5")']);
       for (const r of m.menu.rows) assert.ok(r.mark && r.markBeforeName && r.inside && r.radius === "6px", `a rounded row with its mark, drawn in this root too: ${JSON.stringify(r)}`);
       // (The mark is drawn, not a letter of a font this root has not got: it has ink.)
-      const ink = await x.inPips((root) => [...root.querySelectorAll(".dgc-folder-menu .dgc-menu-icon")].every((e) => e.querySelector("svg path") && e.getBoundingClientRect().width >= 14));
+      const ink = await x.inPips((root) => [...root.querySelectorAll(".dgc-folder-menu .dgc-menu-icon")].every((e) => { const folder = e.querySelector(".folder-icon");      // (a folder's own icon since 13 Nov, drawn by folders.css in this root too; All projects keeps its drawn stack)
+        return (folder ? folder.getBoundingClientRect().width >= 14 && getComputedStyle(folder).backgroundImage !== "none" : !!e.querySelector("svg path")) && e.getBoundingClientRect().width >= 14; }));
       assert.equal(ink, true);
       assert.deepEqual((await contrast(x.page, "pips")).filter((c) => c.ratio < 4.5), []);
       assert.deepEqual(x.errors, []);

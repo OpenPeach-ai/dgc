@@ -1,0 +1,15 @@
+/* Pinwheel: four empty i elements. Same 14-colour palette as Folio, Mosaic and Portal. */
+.pinwheel{--size:64px;--h:177;--sat:83%;--light:43%;--cycle:8s;--phase:0s;--body:linear-gradient(145deg,hsl(var(--h) var(--sat) 72%) 0%,hsl(var(--h) var(--sat) var(--light)) 45%,hsl(var(--h) var(--sat) 28%) 100%);--fold:linear-gradient(160deg,hsl(var(--h) 90% 83% / .8),hsl(var(--h) 85% 60% / .1) 63%,hsl(var(--h) 90% 35% / .5));--glaze:linear-gradient(145deg,hsl(var(--h) 95% 85% / .68),hsl(var(--h) 90% 55% / .06));display:inline-block;position:relative;width:var(--size);height:var(--size);flex:none;isolation:isolate;vertical-align:middle}
+.pinwheel i{position:absolute;display:block;box-sizing:border-box;background:var(--body);box-shadow:inset 0 1px 1px #ffffff45,inset -1px -2px 2px #00000018;overflow:hidden;animation-duration:var(--cycle);animation-delay:var(--phase);animation-timing-function:ease-in-out;animation-iteration-count:infinite;animation-play-state:var(--pinwheel-play,running)}
+.pinwheel i::before,.pinwheel i::after{content:"";position:absolute;display:block;pointer-events:none}
+.pinwheel i::before{inset:-15% 13% 25% -12%;border-radius:30%;background:var(--fold);transform:rotate(-30deg)}
+.pinwheel i::after{inset:35% 22% 6% 21%;border-radius:28%;background:var(--glaze);transform:rotate(14deg)}
+.pinwheel i{width:41%;height:52%;left:49%;top:1%;border-radius:12% 85% 12% 85%;transform-origin:2% 94%;transform:rotate(calc(var(--angle) + 15deg));animation-name:pinwheel-fold}
+.pinwheel i:nth-child(1){--angle:0deg}
+.pinwheel i:nth-child(2){--angle:90deg}
+.pinwheel i:nth-child(3){--angle:180deg}
+.pinwheel i:nth-child(4){--angle:270deg}
+.pinwheel i:nth-child(n+5){display:none}
+.pinwheel--ember{--h:3;--sat:80%;--light:58%}.pinwheel--peach{--h:22;--sat:92%;--light:67%}.pinwheel--saffron{--h:39;--sat:96%;--light:52%}.pinwheel--citron{--h:62;--sat:76%;--light:56%}.pinwheel--lime{--h:90;--sat:74%;--light:52%}.pinwheel--fern{--h:133;--sat:52%;--light:42%}.pinwheel--mint{--h:158;--sat:65%;--light:71%}.pinwheel--lagoon{--h:177;--sat:83%;--light:43%}.pinwheel--ice{--h:195;--sat:86%;--light:74%}.pinwheel--azure{--h:213;--sat:91%;--light:57%}.pinwheel--iris{--h:247;--sat:87%;--light:65%}.pinwheel--lilac{--h:273;--sat:67%;--light:77%}.pinwheel--orchid{--h:294;--sat:70%;--light:51%}.pinwheel--rose{--h:331;--sat:88%;--light:64%}
+@keyframes pinwheel-fold{0%,100%{transform:rotate(calc(var(--angle) + 15deg))}50%{transform:rotate(calc(var(--angle) + 23deg))}}
+@media(prefers-reduced-motion:reduce){.pinwheel i{animation:none!important}}

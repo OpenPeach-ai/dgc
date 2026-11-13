@@ -44,6 +44,11 @@ const TWELVE = ["ember", "peach", "saffron", "fern", "mint", "lagoon", "ice", "a
 const WORK_A = `work:${DOCK_SESSIONS[0].id}`, WORK_B = `work:${DOCK_SESSIONS[1].id}`, CHAT_A = `chat:${CHATS[0].id}`, PIP_B = `pip:${pipId("b")}`;
 const keys = (d) => d.items.map((i) => i.key);
 /** Point at a dock item and wait for the tiles to come to rest. */
+/** The dock once the tile under a resting pointer has its name (it waits about 800 ms for one, since 13 Nov). */
+async function nameShown(x) {
+  await x.page.waitForFunction(() => { const tip = document.querySelector("#dgc-dock .dgc-dock-tip"); return !!tip && !tip.hidden; }, null, { timeout: 5000 });
+  return dockNow(x.page);
+}
 async function pointAt(x, key) {
   const d = await dockNow(x.page), item = d.items.find((i) => i.key === key);
   await x.page.mouse.move(...centre(item), { steps: 4 });
@@ -321,12 +326,15 @@ for (const width of [300, 700]) {
       assert.ok(d.bar.left >= 5.5 && d.bar.right <= width - 5.5, `the grown bar stays inside the side bar (${d.bar.left} to ${d.bar.right})`);
       assert.ok(Math.abs(d.page.bottom - rest.page.bottom) < 0.1, "the page above does not move");
       for (let i = 1; i < d.items.length; i++) assert.ok(d.items[i].left >= d.items[i - 1].right - 0.5, "no tile overlaps the next");
-      // Its name: the session's full title and what it is doing.
-      assert.deepEqual([d.tip.title, d.tip.state], [DOCK_SESSIONS[0].name, "Running"]);
-      assert.ok(d.tip.bottom <= d.items[at].top - 4, "the name is just above its tile");
-      assert.ok(d.tip.left >= 5.5 && d.tip.right <= width - 5.5, "and inside the side bar");
-      assert.ok(Math.abs((d.tip.left + d.tip.right) / 2 - (d.items[at].left + d.items[at].right) / 2) < Math.max(1, d.tip.width / 2), "over its tile");
-      // A Pip: its name and what it waits on. A chat, an open session.
+      // Its name, once the pointer has rested on it (about 800 ms since 13 Nov: side-bar-ui13.test.mjs holds the wait):
+      // the session's full title and what it is doing.
+      assert.equal(d.tip, null, "not named the moment the pointer arrives");
+      const named = await nameShown(x);
+      assert.deepEqual([named.tip.title, named.tip.state], [DOCK_SESSIONS[0].name, "Running"]);
+      assert.ok(named.tip.bottom <= named.items[at].top - 4, "the name is just above its tile");
+      assert.ok(named.tip.left >= 5.5 && named.tip.right <= width - 5.5, "and inside the side bar");
+      assert.ok(Math.abs((named.tip.left + named.tip.right) / 2 - (named.items[at].left + named.items[at].right) / 2) < Math.max(1, named.tip.width / 2), "over its tile");
+      // With a name up it goes along the tiles with the pointer. A Pip: its name and what it waits on. A chat, an open session.
       let n = await pointAt(x, PIP_B);
       assert.deepEqual([n.tip.title, n.tip.state], ["Mail watch", "2 waiting for you"]);
       n = await pointAt(x, WORK_B);
@@ -377,7 +385,7 @@ test("reduced motion: nothing grows, and the name still shows", async (t) => {
     const base = (await dockNow(x.page)).items[0].width;
     const d = await pointAt(x, WORK_A);
     assert.ok(d.items.every((i) => Math.abs(i.width - base) < 0.1), "no tile changes size");
-    assert.equal(d.tip.title, DOCK_SESSIONS[0].name);
+    assert.equal((await nameShown(x)).tip.title, DOCK_SESSIONS[0].name);
   } finally { await x.close(); }
 });
 
@@ -478,7 +486,7 @@ test("Always: the dock has its own room. When I point at the bottom: it rises ov
     assert.deepEqual(keys(d), [...PINS.map((p) => p.key), "+"]);
     // On the dock, it stays, magnifies and names.
     d = await pointAt(x, WORK_A);
-    assert.equal(d.up, true); assert.equal(d.tip.title, DOCK_SESSIONS[0].name);
+    assert.equal(d.up, true); assert.equal((await nameShown(x)).tip.title, DOCK_SESSIONS[0].name);
     assert.ok(d.items.find((i) => i.key === WORK_A).width > d.items.at(-1).width);
     // The pointer leaves: still there for most of a second, then gone.
     await x.page.mouse.move(150, 300, { steps: 4 });

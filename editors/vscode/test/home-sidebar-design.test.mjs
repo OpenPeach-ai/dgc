@@ -167,20 +167,22 @@ test("hover and colour move in 120 ms on the shared curve, and not at all under 
   if (skipOrFail(t)) return;
   const read = (x) => x.page.evaluate(() => { const css = (s) => getComputedStyle(document.querySelector(s)), ms = (v) => v.split(",").map((p) => Math.round(parseFloat(p) * (p.trim().endsWith("ms") ? 1 : 1000)));
     return { show: [ms(css("#home-hub .dgc-hub-show").transitionDuration), css("#home-hub .dgc-hub-show").transitionTimingFunction.split("),")[0].replace(/\)?$/, ")")], clear: ms(css("#home-hub .dgc-hub-clear").transitionDuration),
-      answer: ms(css("#home-hub .dgc-ia-btn").transitionDuration), flip: ms(css("#side-tabs .dgc-tab-front").transitionDuration)[0],
+      answer: ms(css("#home-hub .dgc-ia-btn").transitionDuration), flip: Math.max(...ms(css("#side-tabs .dgc-tab-front").transitionDuration)), tab: ms(css("#side-tabs .dgc-tab").transitionDuration)[0], tabMoves: css("#side-tabs .dgc-tab").transitionProperty,
       face: [document.querySelectorAll("#home-hub .dgc-plush-rig").length, document.querySelector('#home-hub .dgc-hub-card[data-group="needs"] .dgc-plush').dataset.state, document.querySelector('#home-hub .dgc-hub-card[data-group="new"] .dgc-plush').dataset.state] }; });
   const moving = await openHome(browser, { width: 300 });
   try {
     const m = await read(moving);
     assert.deepEqual(m.show, [[120, 120], "cubic-bezier(0.23, 1, 0.32, 1)"], "Show changes colour in 120 ms on the shared curve");
     assert.ok(m.clear.every((d) => d === 120) && m.answer.every((d) => d === 120), `quiet text and a card's answers too: ${m.clear}, ${m.answer}`);
-    assert.equal(m.flip, 520, "a tab's name turns in about half a second");
+    // (A tab's name turned over in about half a second until 13 Nov. Now pointing at a tab only changes its colour.)
+    assert.deepEqual([m.flip, m.tabMoves], [0, "color"], "a tab's name does not move; only the tab's colour changes");
+    assert.ok(m.tab > 0 && m.tab <= 200, `quickly (${m.tab} ms)`);
     assert.deepEqual(m.face, [4, "waiting_approval", "success"], "the faces: their rigs and their poses (waiting for you; pleased, with news)");
   } finally { await moving.close(); }
   const still = await openHome(browser, { width: 300, motion: "reduce" });
   try {
     const m = await read(still);
-    assert.deepEqual([m.show[0], m.clear.every((d) => d === 0), m.answer.every((d) => d === 0), m.flip], [[0, 0], true, true, 0], "reduced motion: nothing moves");
+    assert.deepEqual([m.show[0], m.clear.every((d) => d === 0), m.answer.every((d) => d === 0), m.flip, m.tab], [[0, 0], true, true, 0, 0], "reduced motion: nothing moves");
   } finally { await still.close(); }
 });
 

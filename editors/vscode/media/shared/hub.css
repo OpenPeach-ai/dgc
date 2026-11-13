@@ -7,10 +7,11 @@
 .dgc-hub { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; container-type: inline-size; }
 .dgc-hub[hidden] { display: none; }
 .dgc-hub-bar { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--control); }
-/* Show: a quiet pill that names what is shown; it opens the shared menu. */
+/* Show: a quiet dropdown button that names what is shown, in the button family's shape (its corner and its height,
+   as the Project Folder dropdown and the search fields: it was a pill until 13 Nov); it opens the shared menu. */
 .dgc-hub-show {
-  display: inline-flex; align-items: center; gap: 6px; box-sizing: border-box; max-width: 100%; height: 26px; margin: 0; padding: 0 9px 0 11px;
-  border: 1px solid var(--hair-strong); border-radius: var(--r-full); background: transparent; color: var(--text-2);
+  display: inline-flex; align-items: center; gap: 6px; box-sizing: border-box; max-width: 100%; height: var(--btn-h); margin: 0; padding: 0 8px 0 10px;
+  border: 1px solid var(--hair-strong); border-radius: var(--btn-r, 6px); background: transparent; color: var(--text-2);
   font: var(--w-reg) var(--t-sm)/1 var(--sans); white-space: nowrap; cursor: pointer;
   transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out);
 }

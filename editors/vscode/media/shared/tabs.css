@@ -1,45 +1,43 @@
-/* The tabs at the top of DGC's side bar: Home, Work, Chat, Pips, as names only (Pips with the Core Pip's small face), in one centred bar. A rounded bar on a
-   soft gradient of the side bar's own grey, with a hairline and a low shadow. Pointing at a tab lights it in DGC's
-   purple, and so does the tab you are on: its name takes the accent's text tone and a soft radial glow sits behind it.
-   The name turns over on the way: the front tips away about its foot and the same name rises from below, on a spring.
+/* The tabs at the top of DGC's side bar: Home, Work, Chat, Pips, as names only (Pips with the Core Pip's small face), in one centred bar. A bar with the
+   button family's corner (--btn-r, as New and the search field under it; asked 13 Nov: it was a pill) on a soft gradient
+   of the side bar's own grey, with a hairline and a low shadow. The tab you are on is lit in DGC's purple: its name
+   takes the accent's text tone and a soft radial glow sits behind it. Pointing at another tab only changes its name
+   from the quiet grey to the text colour (asked 13 Nov: it lit up, glowed and turned its name over): nothing glows,
+   turns, grows or slides.
    Home shows how many things wait or are new. The four names fit a 240 px side bar. Under 240 px each tab is an icon
    alone (a house, a briefcase, speech bubbles; Pips is the Core Pip's face), with Home's number on its icon's corner,
-   down to 170 px, the narrowest the editor makes a side bar. Reduced motion lights without turning. Tokens from tokens.css (--tabs-*, --ease-spring); the page (media/main.js) answers clicks and keys. */
+   down to 170 px, the narrowest the editor makes a side bar. Tokens from tokens.css (--tabs-*, --btn-r); the page (media/main.js) answers clicks and keys. */
 .dgc-tabs { flex: none; container-type: inline-size; box-sizing: border-box; width: 100%; padding: 10px 0 6px; }
 .dgc-tabs[hidden] { display: none; }
 .dgc-tabs-bar {
   position: relative; box-sizing: border-box; display: flex; align-items: stretch; gap: 2px; width: calc(100% - 2 * var(--sp-3)); max-width: 400px; margin: 0 auto; padding: 3px;
-  border-radius: var(--r-xl); background: var(--tabs-ground); box-shadow: var(--tabs-lift); overflow: hidden; isolation: isolate;
+  border-radius: var(--btn-r); background: var(--tabs-ground); box-shadow: var(--tabs-lift); overflow: hidden; isolation: isolate;
 }
 .dgc-tab {
   position: relative; flex: 1 1 0; min-width: 0; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  height: 30px; margin: 0; padding: 0 6px; border: 0; border-radius: var(--r-lg); background: transparent; color: var(--text-2);
+  height: 30px; margin: 0; padding: 0 6px; border: 0; border-radius: max(2px, calc(var(--btn-r) - 3px)); background: transparent; color: var(--text-2);
   font: var(--w-med) var(--t-sm)/1 var(--sans); letter-spacing: .01em; white-space: nowrap; cursor: pointer; outline: 0;
   -webkit-tap-highlight-color: transparent; transition: color var(--dur-menu) var(--ease-out);
 }
 .dgc-tab[hidden] { display: none; }
-.dgc-tab:is(:hover, [aria-selected="true"]) { color: var(--accent-text); }
+.dgc-tab:hover { color: var(--text); }
+.dgc-tab[aria-selected="true"] { color: var(--accent-text); }
 .dgc-tab:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
-/* The glow behind the tab you are on, and (softer) the one pointed at. */
+/* The glow behind the tab you are on (never behind one that is only pointed at). */
 .dgc-tab-glow {
   position: absolute; z-index: -1; left: 50%; top: 50%; width: min(100%, 84px); height: 46px; translate: -50% -50%; scale: .6; opacity: 0; border-radius: 50%;
   background: radial-gradient(closest-side, var(--tabs-glow), var(--tabs-glow-far) 62%, transparent); pointer-events: none;
   transition: opacity var(--dur-dialog) var(--ease-out), scale var(--dur-flip) var(--ease-spring);
 }
-.dgc-tab:hover .dgc-tab-glow { opacity: .62; scale: 1; }
 .dgc-tab[aria-selected="true"] .dgc-tab-glow { opacity: 1; scale: 1; }
-/* The name, twice in one place: the front, and the same name waiting below it. The bolder weight of the chosen tab is
-   measured for both (the unseen ::after), so choosing a tab never moves its neighbours. */
-.dgc-tab-flip { display: inline-grid; perspective: 260px; transform-style: preserve-3d; }
+/* The name. The bolder weight of the chosen tab is measured too (the unseen ::after), so choosing a tab never moves
+   its neighbours. (The classes are from when the name turned over under the pointer: .dgc-tab-flip holds the name,
+   .dgc-tab-front is the name.) */
+.dgc-tab-flip { display: inline-grid; }
 .dgc-tab-flip > span, .dgc-tab-flip::after { grid-area: 1 / 1; }
 .dgc-tab-flip::after { content: attr(data-label); height: 0; overflow: hidden; visibility: hidden; font-weight: var(--w-semi); }
-.dgc-tab-flip > span { display: block; backface-visibility: hidden; padding: 4px 0;
-  transition: transform var(--dur-flip) var(--ease-spring), opacity calc(var(--dur-flip) * .45) ease-out; }
-.dgc-tab-front { transform-origin: 50% 100%; }
-.dgc-tab-back { transform-origin: 50% 0%; transform: rotateX(88deg); opacity: 0; }
+.dgc-tab-flip > span { display: block; padding: 4px 0; }
 .dgc-tab[aria-selected="true"] .dgc-tab-flip > span { font-weight: var(--w-semi); }
-.dgc-tab:hover .dgc-tab-front { transform: rotateX(-88deg); opacity: 0; }
-.dgc-tab:hover .dgc-tab-back { transform: rotateX(0deg); opacity: 1; }
 /* The Pips tab wears the Core Pip's face after its name, as the header's Pips button does (asked 12 Nov night: it was
    before it; media/main.js draws it with the plush renderer): the height of
    the word's line, always there, so choosing a tab moves nothing. Empty (no renderer), it takes no room. */
@@ -52,8 +50,7 @@
   font: var(--w-semi) 10px/16px var(--sans); font-variant-numeric: tabular-nums; letter-spacing: 0; text-align: center;
 }
 .dgc-tab-count[hidden] { display: none; }
-/* Each tab's icon (Home, Work, Chat) is in the page beside its word, in the front and in the copy that rises, and is
-   not drawn while the words fit. */
+/* Each tab's icon (Home, Work, Chat) is in the page beside its word, and is not drawn while the words fit. */
 .dgc-tab .dgc-tab-icon.codicon { display: none; }
 /* A narrow side bar. Under 300 px each tab is as wide as its name needs and they share what is left. */
 @container (max-width: 299px) {
@@ -63,7 +60,7 @@
 /* Under 240 px the four words would soon be cut (they need about 240 px with a one digit number, 250 with "99+"), so
    each tab is its icon alone, in four tabs of one width. The switch is on the tab bar's own width. The tab keeps its
    30 px, so the bar is as tall as before and nothing moves. The word stays in the page for a screen reader, in a 1 px
-   box; the icon turns over as the word did. Home's number sits on its icon's upper right corner and grows to the
+   box. Home's number sits on its icon's upper right corner and grows to the
    right: "99+" at 170 px reaches 6 px past Home's tab and still ends 5 px before Work's icon. */
 @container (max-width: 239px) {
   .dgc-tab { flex: 1 1 0; gap: 0; padding: 0; }
@@ -78,9 +75,7 @@
   .dgc-tabs-bar { width: calc(100% - 2 * var(--sp-2)); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .dgc-tab-flip > span, .dgc-tab-glow { transition: none; }
-  .dgc-tab:hover .dgc-tab-front { transform: none; opacity: 1; }
-  .dgc-tab-back { display: none; }
+  .dgc-tab-glow { transition: none; }
 }
 @media (forced-colors: active) {
   .dgc-tabs-bar { border: 1px solid CanvasText; box-shadow: none; background: Canvas; }

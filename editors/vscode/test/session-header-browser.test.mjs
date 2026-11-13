@@ -1,7 +1,7 @@
 // A session's header (0.52, his call on 12 Nov night), in real Chromium on the real pages: inside a Work session's tab
 // and a ChatDGC chat's tab the header holds DGC's animated logo and the session's name, and no coloured mark of the
 // session (its editor tab already wears it, and the two did not sit well together). The logo and the name are on one
-// line, centred on each other, and the gap between them is the editor tab's own gap between its icon and its title:
+// line, on one baseline (13 Nov: they were centred on each other by their boxes), and the gap between them is the editor tab's own gap between its icon and its title:
 // 6 px (VS Code's `.monaco-icon-label::before { padding-right: 6px }`, the rule a tab's icon is drawn by). Whatever else
 // is on the row keeps its place on that line. The session's colour is still chosen from its "…" in the lists and from
 // the dock, twelve colours each, for Work and for ChatDGC. Read from the DOM, computed style and geometry.
@@ -42,9 +42,14 @@ const headerNow = (page, head, name) => page.evaluate(([h, n]) => {
   const words = (e) => { const r = document.createRange(); r.selectNodeContents(e); return r.getBoundingClientRect(); };
   const logoWord = [...pm.childNodes].find((c) => c.nodeType === 3 && c.textContent.trim()), w = document.createRange(); w.selectNode(logoWord);
   const said = words(title), seen = (e) => e.checkVisibility({ visibilityProperty: true });
+  // Each one's baseline: where a zero-size inline box stands after its letters.
+  const foot = () => { const f = document.createElement("span"); f.style.cssText = "display:inline-block;width:0;height:0;vertical-align:baseline"; return f; };
+  const fa = foot(), fb = foot(), held = document.createElement("span"); title.append(fa); logoWord.before(held); held.append(logoWord, fb);
+  const baseline = { name: fa.getBoundingClientRect().bottom, word: fb.getBoundingClientRect().bottom };
+  held.before(logoWord); held.remove(); fa.remove();
   // Everything else on the row that shows: the model's name, "+", the header's buttons.
   const rest = [...header.children].filter((e) => e !== pm && e !== title && seen(e));
-  return { marks: [...header.querySelectorAll("[data-mark], .dgc-blob-button, #session-blob, #cd-blob")].filter(seen).length,
+  return { baseline, marks: [...header.querySelectorAll("[data-mark], .dgc-blob-button, #session-blob, #cd-blob")].filter(seen).length,
     logo: { mark: !!pm.querySelector("svg.mk") && seen(pm.querySelector("svg.mk")), word: logoWord.textContent, cursor: seen(pm.querySelector(".cur")), moving: getComputedStyle(pm.querySelector("svg.mk path:last-child")).animationName },
     name: title.textContent, gap: said.left - box(pm).right, lines: Math.round(said.height / parseFloat(getComputedStyle(title).lineHeight)),
     // Centres: the logo's box (its mark, its word and its cursor are centred in it) against the name's words.
@@ -57,7 +62,11 @@ const held = (h, said) => {
   assert.equal(h.marks, 0, `${said}: no coloured mark of the session in the header`);
   assert.deepEqual([h.logo.mark, h.logo.word, h.logo.cursor], [true, "DGC", true], `${said}: DGC's logo, whole`);
   assert.ok(Math.abs(h.gap - TAB_GAP) <= 0.5, `${said}: the name starts ${TAB_GAP}px after the logo, the editor tab's gap (${h.gap})`);
-  assert.ok(h.offLogo <= 1 && h.offMark <= 1 && h.offWord <= 1 && h.offCursor <= 1, `${said}: the logo and the name are centred on each other: ${JSON.stringify([h.offLogo, h.offMark, h.offWord, h.offCursor])}`);
+  // (They were centred on each other by their boxes, within 1 px, until 13 Nov: that set the name's letters about a
+  // pixel under "DGC"'s. Now the two stand on one baseline, which side-bar-ui13.test.mjs holds for several fonts; their
+  // boxes are still on one line, within 2 px.)
+  assert.ok(h.offLogo <= 2 && h.offMark <= 2 && h.offWord <= 2 && h.offCursor <= 2, `${said}: the logo and the name are on one line: ${JSON.stringify([h.offLogo, h.offMark, h.offWord, h.offCursor])}`);
+  assert.ok(Math.abs(h.baseline.name - h.baseline.word) <= 0.5, `${said}: the name stands on the wordmark's baseline (${JSON.stringify(h.baseline)})`);
   assert.equal(h.lines, 1, `${said}: one line`);
   for (const r of h.rest) assert.ok(r.off <= 1 && r.after && r.inside, `${said}: ${r.what} keeps its place on the same line: ${JSON.stringify(r)}`);
   assert.equal(h.sideways, false);

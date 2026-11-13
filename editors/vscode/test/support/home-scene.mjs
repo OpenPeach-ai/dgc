@@ -176,10 +176,11 @@ export const tabsNow = (page) => page.evaluate(() => {
   const bar = nav.querySelector(".dgc-tabs-bar");
   const tabs = [...nav.querySelectorAll('[role="tab"]')].map((t) => { const flip = t.querySelector(".dgc-tab-flip"), front = t.querySelector(".dgc-tab-front"), count = t.querySelector(".dgc-tab-count");
     return { id: t.dataset.tab, name: front?.textContent || "", selected: t.getAttribute("aria-selected") === "true", tab: t.tabIndex, shown: t.checkVisibility(), label: t.getAttribute("aria-label") || "",
-      controls: t.getAttribute("aria-controls"), icons: [...t.querySelectorAll("svg, img, .codicon")].filter((n) => n.checkVisibility({ opacityProperty: true })).length,   // (the ones seen: each tab holds its icon for a narrow side bar, and a copy that rises when pointed at)
+      controls: t.getAttribute("aria-controls"), icons: [...t.querySelectorAll("svg, img, .codicon")].filter((n) => n.checkVisibility({ opacityProperty: true })).length,   // (the ones seen: each tab holds its icon for a narrow side bar)
       color: getComputedStyle(t).color, weight: getComputedStyle(front || t).fontWeight,
-      glow: Number(getComputedStyle(t.querySelector(".dgc-tab-glow")).opacity), front: front ? getComputedStyle(front).transform : "", back: getComputedStyle(t.querySelector(".dgc-tab-back")).transform,
-      backOpacity: Number(getComputedStyle(t.querySelector(".dgc-tab-back")).opacity), frontOpacity: front ? Number(getComputedStyle(front).opacity) : 1,
+      // (front, frontOpacity: the name itself, which once turned over under the pointer; copies: how many times the name is in the tab.)
+      glow: Number(getComputedStyle(t.querySelector(".dgc-tab-glow")).opacity), front: front ? getComputedStyle(front).transform : "", copies: t.querySelectorAll(".dgc-tab-word").length,
+      frontOpacity: front ? Number(getComputedStyle(front).opacity) : 1,
       count: count && !count.hidden ? count.textContent : "", countBox: count && !count.hidden ? rect(count) : null, clipped: rect(flip).left < rect(t).left - 0.5 || (count && !count.hidden ? rect(count) : rect(flip)).right > rect(t).right + 0.5, words: rect(flip), ...rect(t) }; });
   const panel = ["home-hub", "work-home", "chats-home"].map((id) => document.getElementById(id)).find((n) => n?.checkVisibility()) || (document.getElementById("pips-host").checkVisibility() ? document.getElementById("pips-host") : null);
   return { shown: nav.checkVisibility(), role: bar.getAttribute("role"), nav: rect(nav), bar: rect(bar), tabs, panel: panel?.id || "", panelRole: panel?.getAttribute("role") || "", panelLabelledBy: panel?.getAttribute("aria-labelledby") || "",

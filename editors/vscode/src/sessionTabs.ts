@@ -83,6 +83,13 @@ export class SessionTabs implements ChatPlaces, vscode.WebviewPanelSerializer, v
     return ids;
   }
 
+  /** The sessions whose tab is the one in front in its editor group (what the user can see): a reply there is seen. */
+  watchedSessions(): Set<string> {
+    const ids = new Set<string>();
+    for (const tab of this.tabs.values()) { const id = tab.provider.sessionId(); if (id && tab.panel.visible) ids.add(id); }
+    return ids;
+  }
+
   waitingSessions(): Map<string, { count: number; ask?: { id: string; command: string } }> {
     const found = new Map<string, { count: number; ask?: { id: string; command: string } }>();
     for (const tab of this.tabs.values()) {
@@ -142,8 +149,12 @@ export class SessionTabs implements ChatPlaces, vscode.WebviewPanelSerializer, v
     });
     const tab: Tab = { key, panel, provider, seq: ++this.seq };
     this.tabs.set(key, tab);
+    let inFront = panel.visible;
     panel.onDidChangeViewState(() => {
       if (panel.active && tab.seq !== this.seq) { tab.seq = ++this.seq; this.changedCurrent(); }
+      // Brought to the front, or covered by another tab: the side bar's list says which sessions are in sight (a
+      // reply in one that is has been seen).
+      if (panel.visible !== inFront) { inFront = panel.visible; this.changed(); }
     });
     panel.onDidDispose(() => {
       if (this.tabs.get(key) !== tab) return;

@@ -204,7 +204,9 @@ test("Home, reduced motion: the pill is there at once and nothing moves", async 
     await x.page.hover(act(K.visit, "yes"));
     const now = await x.page.evaluate(row, HOME(K.visit));
     assert.deepEqual([now.pill.shown, now.pill.word, now.pill.moving], [true, "Allow", 0], "shown whole in the same frame, with no move");
-    assert.ok(Math.abs(now.pill.left - rest.row.left) <= 0.5 && Math.abs(now.pill.right - rest.row.right) <= 0.5, "already at its full size");
+    // (On a Home card the row takes the widest answer's room while a pill is up, so no pill lies on the card's words:
+    // 13 Nov, side-bar-ui13.test.mjs. The pill is the row as it is now; the row's right edge is where it was.)
+    assert.ok(Math.abs(now.pill.left - now.row.left) <= 0.5 && Math.abs(now.pill.right - rest.row.right) <= 0.5 && now.row.left <= rest.row.left + 0.5, "already at its full size");
     assert.deepEqual(now.icons.map((i) => i.iconAt), ["none", "none", "none"], "no icon slides");
     await x.page.hover(act(K.visit, "no"));
     const next = await x.page.evaluate(row, HOME(K.visit));

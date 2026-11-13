@@ -120,7 +120,7 @@ test("twelve palettes and never citron or lime: in the lists, however many sessi
     let marks = await marksIn(x.page, "#sessions-list");
     assert.deepEqual(marks.map((m) => m.palette), TWELVE.slice(0, 6), "the six in view: the first six palettes, none twice");
     await x.page.click("#sessions-all"); await x.settle();
-    marks = await marksIn(x.page, ".sessions-all-list");
+    marks = await marksIn(x.page, "#sessions-list");
     assert.equal(marks.length, 30);
     assert.deepEqual([...new Set(marks.map((m) => m.palette))].sort(), [...TWELVE].sort(), "all twelve are worn, and nothing else");
     marks.forEach((m, i) => { for (let d = 1; d <= 5; d++) if (marks[i + d]) assert.notEqual(m.palette, marks[i + d].palette, `row ${i} and the row ${d} below never share a palette`); });

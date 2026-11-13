@@ -6,7 +6,7 @@
    of them. Tokens from media/shared/tokens.css. */
 .dgc-menu {
   padding: 6px; border: 1px solid var(--hair); border-radius: var(--r-menu);
-  background: var(--surface2); color: var(--text);
+  background: var(--raised, var(--surface2)); color: var(--text);      /* (--raised: the raised grey as one opaque colour, where a theme's is see-through: menu.js) */
   box-shadow: var(--lift-1);
 }
 .dgc-menu .dgc-menu-head {

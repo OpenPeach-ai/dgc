@@ -33,7 +33,7 @@ body { margin: 0; background: var(--vscode-editor-background); color: var(--cv-t
 .cv-sep { width: 1px; height: 18px; margin: 0 6px; background: var(--cv-line); }
 .cv-spacer { flex: 1; }
 .cv-ask { display: inline-flex; align-items: center; gap: 6px; height: 28px; margin-right: 4px; padding: 0 10px;
-  border: 1px solid var(--cv-line); border-radius: 999px; background: transparent; color: var(--cv-text);
+  border: 1px solid var(--cv-line); border-radius: var(--btn-r, 6px); background: transparent; color: var(--cv-text);
   font: 500 12px/1 var(--vscode-font-family, system-ui); cursor: pointer; }
 .cv-ask:hover { background: var(--cv-hover); }
 
@@ -109,7 +109,7 @@ body { margin: 0; background: var(--vscode-editor-background); color: var(--cv-t
 .cv-raw-body th { background: var(--cv-soft); font-weight: 600; }
 .cv-raw-body p { margin: 0; }
 .cv-raw-body .cv-img { color: var(--cv-muted); font-style: italic; }
-.cv-raw-edit { position: absolute; top: -12px; right: 0; padding: 2px 8px; border: 1px solid var(--cv-line); border-radius: 999px;
+.cv-raw-edit { position: absolute; top: -12px; right: 0; padding: 2px 8px; border: 1px solid var(--cv-line); border-radius: var(--btn-r, 6px);
   background: var(--vscode-editor-background); color: var(--cv-muted); font: 500 11px/1.4 var(--vscode-font-family, system-ui);
   cursor: pointer; opacity: 0; transition: opacity .12s; }
 .cv-raw:hover .cv-raw-edit, .cv-raw-edit:focus-visible { opacity: 1; }

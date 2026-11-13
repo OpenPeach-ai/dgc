@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **One shape for every control.** Buttons, fields, dropdowns, segmented controls, the tab bar and every hover box use the same 6-pixel corners on every surface (side bar, ChatDGC, a Pip's page, Settings, the Library); none is a pill any more.
+- The **New** button reads in every theme: its words take the colour of the side bar's ground, never a see-through field colour (in Cursor it showed as a blank white button).
+- The tab bar's tabs no longer change their words on hover; the side bar's tooltips wait a moment before they show, as the editor's own do.
+- The header row's wordmark sits on the same line as its mark.
+- **Project Folder** opens a menu that stays inside the side bar, above the dock, no taller than the room it has, with a search field at its top when there are many folders; each folder has its own folder icon, in a colour of its own.
+- A double-click on a Work session or a chat opens it in an editor tab.
+- **View all** in Work lists every session in place, in the list itself, with its own scroll: no pop-over.
+- A Work session's new reply puts its card on Home, as a chat's does; a card's buttons, when they open, never cover its words.
+- A session from another folder, listed under All projects, can be pinned to the dock too.
+- The Pips tab shares the ground of Home, Work and Chat.
+- The **Library** row's hover is a 6-pixel box round the row's words, in Work and in Chat. The Library's Artifacts tab scrolls.
+- A ChatDGC project has a pinwheel of its own (still, turning only while one of its chats answers), its chats keep their marks when the project is open, and the project can be pinned to the dock. Work's folders keep folder icons.
+- A menu's ground is one solid colour, also in themes whose raised grey is see-through (Home's **Show** menu let the card under it read through).
+
 - **Chat details in a Pip's chat.** When a Pip's latest reply asks a yes-or-no question, a thumbs-up under it answers with its yes choice, in the Pip's own words ("Yes, send it"), exactly as a tap on that choice does. Other choices get no thumb.
 - Pictures and files go with a message you send while a Pip is working. It reads them with that message when it can; otherwise they are its next turn, and nothing is lost. A queued message (Alt+Enter) is still words only.
 - A Project Pip's box has the **+** too: pictures and files are reference beside the code it reads, with the same limits as a Personal Pip's.

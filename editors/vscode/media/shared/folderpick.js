@@ -14,6 +14,11 @@
 // corner at the join). The shape grows on a soft spring, each row arrives in turn from the button, and they leave in
 // reverse; the chevron's two strokes turn into an ×. All of it is this file's own: a small spring, sampled into
 // keyframes for the page's own animations. With reduced motion nothing moves: it opens and closes at once.
+// Held inside the view (asked 13 Nov): the menu ends above the dock (in a dialog, above the view's end) and shows about
+// 8 folders, then it scrolls inside; with more than 8 folders a search field stays at its top (type to narrow by name
+// or path; Down goes to the folders, Enter takes the first one found, Escape clears what was typed, then closes). Its
+// ground is always an opaque colour: a theme whose input background is see-through (Cursor's dark themes) let the page
+// under the menu show through it.
 (function () {
   "use strict";
   const root = typeof window !== "undefined" ? window : globalThis;
@@ -28,6 +33,26 @@
   const MARKS = { folder: '<path d="M1.75 4.5a1 1 0 0 1 1-1h3.2l1.5 1.5h5.8a1 1 0 0 1 1 1v5.5a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z"/>',
     layers: '<path d="M8 2.25 14 5.4 8 8.55 2 5.4z"/><path d="m2.4 8.2 5.6 2.95 5.6-2.95"/><path d="m2.4 10.9 5.6 2.95 5.6-2.95"/>', add: '<path d="M8 3.25v9.5M3.25 8h9.5"/>' };
   const ALL = "All projects";
+  // ---- a folder's own icon (media/shared/folders.css, asked 13 Nov) ----------------------------------------------------
+  // A Work folder is a directory, and wears the folder icon: the maintainer's set, built here in plain markup from its
+  // reference component (its flap of four parts, two papers behind and one in front with three lines), always the
+  // symbol alone, with no label, at the sizes it has here. Each folder has a palette of its own, one of the twelve the
+  // session marks use, given once and kept by the extension as theirs are; the page says which (setPalette), and where
+  // no page does (a Pips view in its own tab) it is the one the folder's path alone gives, the same every time. Still
+  // at rest: its papers lift only while its row or its button is pointed at or has the keyboard (folderpick.css).
+  const TWELVE = ["ember", "peach", "saffron", "fern", "mint", "lagoon", "ice", "azure", "iris", "lilac", "orchid", "rose"];
+  const hash = (text) => { let h = 2166136261; for (const ch of String(text || "")) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619); } return h >>> 0; };
+  /** What a folder is called where its palette is kept: never its path. */
+  const folderId = (folder) => `f${hash(String(folder || "").replace(/[\\/]+$/, "")).toString(36)}`;
+  let paletteFor = null;
+  /** The page's own account of each folder's palette: (folder) => one of the twelve, or "" when it has none to say. */
+  function setPalette(fn) { paletteFor = typeof fn === "function" ? fn : null; }
+  const paletteOf = (folder) => { let said = ""; try { said = paletteFor ? paletteFor(String(folder || "")) : ""; } catch { said = ""; } return TWELVE.includes(said) ? said : TWELVE[hash(folderId(folder)) % TWELVE.length]; };
+  /** A folder's icon as HTML: decoration (its row or its button says the folder's name). */
+  function folderMark(folder) {
+    return `<span class="folder-icon folder--${paletteOf(folder)} dgc-folder-icon" aria-hidden="true"><span class="folder-flap"><i class="folder-tab"></i><i class="folder-tab-round"></i><i class="folder-tab-bridge"></i><i class="folder-flap-body"></i></span>`
+      + '<i class="folder-paper folder-paper--back folder-paper--right"></i><i class="folder-paper folder-paper--back folder-paper--left"></i><span class="folder-paper folder-paper--front"><i class="folder-line"></i><i class="folder-line"></i><i class="folder-line"></i></span></span>';
+  }
   const rowsOf = (rows) => (Array.isArray(rows) ? rows : []).filter((r) => r && typeof r.folder === "string" && r.folder).slice(0, 200);
   const nameOf = (folder) => String(folder || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() || String(folder || "");
 
@@ -178,7 +203,7 @@
   }
   /** The rows (and the lines between them) that are in sight, in the order they arrive: from the button outward. */
   function inSight(m) {
-    const list = m.list, from = list.scrollTop, to = from + list.clientHeight, all = [...list.children].filter((e) => e.offsetTop + e.offsetHeight > from && e.offsetTop < to);
+    const list = m.list, from = list.scrollTop, to = from + list.clientHeight, all = [...list.children].filter((e) => !e.classList.contains("dgc-folder-find") && !e.hidden && e.offsetTop + e.offsetHeight > from && e.offsetTop < to);
     return m.g.up ? all.reverse() : all;
   }
   /** How far a row travels: from the button's edge to its own slot, at most 96 px. */
@@ -229,9 +254,9 @@
   function buttonHtml({ id = "", cls = "", rows = [], choice = "", label = "Project Folder", title = "", disabled = false, attrs = "", empty = ALL } = {}) {
     const value = valueOf(rows, choice, empty), row = rowsOf(rows).find((r) => r.folder === choice);
     const open = id && shown && shown.id === id ? shown : null, joined = open || (id && leaving && leaving.id === id ? leaving : null);
-    return `<button type="button"${id ? ` id="${esc(id)}"` : ""} class="dgc-folder${cls ? ` ${esc(cls)}` : ""}" data-folder-pick="1" aria-haspopup="menu" aria-expanded="${open ? "true" : "false"}"${joined ? ` data-folder-open="${joined.g.up ? "up" : "down"}"` : ""}`
+    return `<button type="button"${id ? ` id="${esc(id)}"` : ""} class="dgc-folder${cls ? ` ${esc(cls)}` : ""}" data-folder-pick="1" aria-haspopup="menu" aria-expanded="${open ? "true" : "false"}"${joined ? ` data-folder-open="${joined.g.up ? "up" : "down"}"${joined.solid ? ` style="--folder-ground: ${esc(joined.solid)}"` : ""}` : ""}`
       + ` aria-label="${esc(`${label}: ${value}`)}" title="${esc(title || `${label}: ${value}${row ? `\n${row.folder}` : ""}`)}"${disabled ? " disabled" : ""}${attrs ? ` ${attrs}` : ""}>`
-      + `<span class="dgc-folder-k">${esc(label)}</span> <span class="dgc-folder-v">${esc(value)}</span>${CHEVRON}</button>`;
+      + `<span class="dgc-folder-k">${esc(label)}</span> ${row ? folderMark(row.folder) : ""}<span class="dgc-folder-v">${esc(value)}</span>${CHEVRON}</button>`;
   }
 
   let shown = null, leaving = null, shades = 0;
@@ -251,7 +276,7 @@
     const button = was.trigger();
     button?.setAttribute("aria-expanded", "false");
     // The button and its menu part when the menu has gone: until then the button keeps its place in the shape.
-    const apart = () => { if (leaving === was) leaving = null; was.box.remove(); was.trigger()?.removeAttribute("data-folder-open"); if (was.first?.isConnected) was.first.removeAttribute("data-folder-open"); };
+    const apart = () => { if (leaving === was) leaving = null; was.box.remove(); for (const b of [was.trigger(), was.first]) if (b?.isConnected) { b.removeAttribute("data-folder-open"); b.style?.removeProperty("--folder-ground"); } };
     if (!now && button && was.box.isConnected && moves(was.view, was.box)) {
       // Nothing in it can be reached while it leaves.
       was.box.inert = true; was.box.setAttribute("aria-hidden", "true"); was.box.dataset.leaving = "1";
@@ -259,6 +284,28 @@
     } else apart();
     if (back) button?.focus({ preventScroll: true });
   }
+
+  /** A computed colour's red, green, blue (0 to 255) and alpha, whichever way the engine writes it. */
+  function channels(text) {
+    const n = String(text || "").match(/-?[\d.]+(e-?\d+)?%?/g)?.map((v) => (v.endsWith("%") ? parseFloat(v) / 100 : Number(v))) || [];
+    if (n.length < 3 || n.some((v) => !Number.isFinite(v))) return null;
+    return /^color\(/.test(text) ? [n[0] * 255, n[1] * 255, n[2] * 255, n[3] ?? 1] : [n[0], n[1], n[2], n[3] ?? 1];
+  }
+  /** The menu's ground as one opaque colour: the raised grey laid over the page's own ground. "" when the raised grey
+   *  is opaque already (every stock theme), or where it can't be read: then the stylesheet's own colour stands. */
+  function solidGround(view, box) {
+    try {
+      const probe = box.ownerDocument.createElement("span");
+      probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;background-color:var(--surface2);color:var(--bg)";
+      box.append(probe);
+      const css = view.getComputedStyle(probe), top = channels(css.backgroundColor), under = channels(css.color);
+      probe.remove();
+      if (!top || !under || top[3] >= 0.999) return "";
+      return `rgb(${[0, 1, 2].map((i) => Math.round(top[i] * top[3] + under[i] * (1 - top[3]))).join(", ")})`;
+    } catch { return ""; }
+  }
+  /** More folders than this and the menu has its search field; and it shows this many at a time. */
+  const MANY = 8;
 
   /**
    * Opens the menu from `button`, as one shape with it.
@@ -280,16 +327,23 @@
     box.className = "dgc-menu dgc-pop dgc-folder-menu"; box.setAttribute("role", "menu"); box.setAttribute("aria-label", label);
     const icon = (name) => `<span class="dgc-menu-icon dgc-folder-mark" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16">${MARKS[name]}</svg></span>`;
     const line = (folder, name, sub, note, checked, off) => `<button type="button" role="menuitemradio" class="dgc-menu-row dgc-folder-row${sub ? " dgc-menu-row-sub" : ""}${checked ? " is-selected" : ""}"`
-      + ` data-folder="${esc(folder)}" aria-checked="${checked ? "true" : "false"}"${off ? " disabled" : ""}>${icon(folder ? "folder" : "layers")}<span class="dgc-menu-words"><span class="dgc-menu-label">${esc(name)}</span>${sub ? `<span class="dgc-menu-sub">${sub}</span>` : ""}</span>`
+      + ` data-folder="${esc(folder)}" aria-checked="${checked ? "true" : "false"}"${off ? " disabled" : ""}>${folder ? `<span class="dgc-menu-icon dgc-folder-mark" aria-hidden="true">${folderMark(folder)}</span>` : icon("layers")}<span class="dgc-menu-words"><span class="dgc-menu-label">${esc(name)}</span>${sub ? `<span class="dgc-menu-sub">${sub}</span>` : ""}</span>`
       + (note ? `<span class="dgc-folder-note">${esc(note)}</span>` : "") + CHECK + "</button>";
-    const list = rowsOf(rows), shadeId = `dgc-folder-shade-${++shades}`;
+    const list = rowsOf(rows), shadeId = `dgc-folder-shade-${++shades}`, finds = list.length > MANY;
+    // The search field, when there are many: it stays at the list's top while the folders scroll under it.
+    const findHtml = finds ? '<div class="dgc-folder-find" role="presentation"><svg class="dgc-folder-find-mark" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="m10.2 10.2 3.3 3.3"/></svg>'
+      + '<input type="text" class="dgc-folder-search" placeholder="Search folders" aria-label="Search folders by name or path" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="200"></div>' : "";
     // The shape (its ground, its shade, its line, and the hairline where the button ends) and, over it, the rows.
-    box.innerHTML = `<svg class="dgc-folder-shape" aria-hidden="true" focusable="false">${SHADE(shadeId)}<path class="dgc-folder-shade" filter="url(#${shadeId})"/><path class="dgc-folder-ground"/><path class="dgc-folder-seam"/><path class="dgc-folder-line"/></svg><div class="dgc-folder-list" role="presentation">`
+    box.innerHTML = `<svg class="dgc-folder-shape" aria-hidden="true" focusable="false">${SHADE(shadeId)}<path class="dgc-folder-shade" filter="url(#${shadeId})"/><path class="dgc-folder-ground"/><path class="dgc-folder-seam"/><path class="dgc-folder-line"/></svg><div class="dgc-folder-list" role="presentation">` + findHtml
       + (all ? line("", ALL, "", "", !choice, false) + (list.length ? '<div class="dgc-menu-div" role="separator"></div>' : "") : "")
       + list.map((r) => line(r.folder, r.name || nameOf(r.folder), pathHtml(r.shown || r.folder, r.folder), r.exists === false ? "Not found" : r.here ? "This window" : "", r.folder === choice, goneOff && r.exists === false)).join("")
+      + (finds ? '<div class="dgc-folder-none" role="status" hidden></div>' : "")
       + (add ? `${all || list.length ? '<div class="dgc-menu-div" role="separator"></div>' : ""}<button type="button" role="menuitem" class="dgc-menu-row dgc-folder-add" data-folder-add="1">${icon("add")}<span class="dgc-menu-label">Add a folder…</span></button>` : "")
       + "</div>";
     holder.append(box);
+    // One opaque ground for the button and its menu, where the theme's raised grey is see-through.
+    const solid = solidGround(view, box);
+    if (solid) { box.style.setProperty("--folder-ground", solid); button.style.setProperty("--folder-ground", solid); }
     const rowsBox = box.querySelector(".dgc-folder-list"), shape = box.querySelector(".dgc-folder-shape");
     // Where it goes. The button's edges as they are painted (on whole device pixels), so the one line lies on them.
     const dpr = view.devicePixelRatio || 1, snap = (v) => Math.round(v * dpr) / dpr;
@@ -304,9 +358,15 @@
     if (w - bw > 0 && w - bw < 16) w = room >= bw + 16 ? bw + 16 : bw;         // never a sliver of a step beside the button
     w = snap(w);
     rowsBox.style.width = `${w}px`;
-    // Under the button; over it when there is more room there.
-    const below = vh - a.bottom - 6, above = a.top - 6, up = rowsBox.offsetHeight > below && above > below;
-    rowsBox.style.maxHeight = `${Math.max(120, Math.floor(up ? above : below))}px`;
+    // Under the button; over it when there is more room there. Its room ends above the dock (asked 13 Nov: it ran on
+    // under the dock to the view's end); a dialog is over the dock, so its menu has the view. And it shows about 8
+    // folders at a time (with what stands before them: the search field, All projects), then it scrolls inside.
+    const dockEl = holder === doc.body || home ? doc.getElementById("dgc-dock") : null, dockBox = dockEl && view.getComputedStyle(dockEl).display !== "none" ? dockEl.getBoundingClientRect() : null;
+    const floor = dockBox && dockBox.height > 0 && dockBox.top > a.bottom ? Math.min(vh, dockBox.top) : vh;
+    const folderRows = rowsBox.querySelectorAll(".dgc-folder-row[data-folder]:not([data-folder=''])"), lastShown = folderRows.length > MANY ? folderRows[MANY - 1] : null;
+    const cap = lastShown ? lastShown.offsetTop + lastShown.offsetHeight + 5 : Infinity, tall = Math.min(rowsBox.offsetHeight, cap);
+    const below = floor - a.bottom - 6, above = a.top - 6, up = tall > below && above > below;
+    rowsBox.style.maxHeight = `${Math.min(cap, Math.max(120, Math.floor(up ? above : below)))}px`;
     const h = rowsBox.offsetHeight, left = toLeft ? a.right - w : a.left;
     box.style.left = `${left}px`; box.style.top = `${up ? a.top - h : a.bottom}px`;
     box.style.width = `${w}px`; box.style.height = `${h}px`;
@@ -330,7 +390,38 @@
       close(true);
       onChoose?.(folder);
     });
-    box.addEventListener("keydown", (e) => { e.stopPropagation(); Menu?.handle(box, e, { close: (viaEscape) => close(viaEscape !== false), trigger: find }); });
+    // The search field: what is typed narrows the folders by name or path. The menu keeps its size (one shape with
+    // its button); what doesn't match is taken out of the list.
+    const field = box.querySelector(".dgc-folder-search"), none = box.querySelector(".dgc-folder-none");
+    const narrow = () => {
+      const q = field.value.trim().toLowerCase();
+      let found = 0;
+      for (const row of rowsBox.querySelectorAll(".dgc-folder-row")) {
+        const at = list.find((r) => r.folder === row.dataset.folder);
+        const hit = !q || (at ? [at.name || nameOf(at.folder), at.folder, at.shown || ""].some((v) => String(v).toLowerCase().includes(q)) : ALL.toLowerCase().includes(q));
+        row.hidden = !hit; if (hit && at) found++;
+      }
+      const firstDiv = rowsBox.querySelector(".dgc-folder-row + .dgc-menu-div"); if (firstDiv) firstDiv.hidden = !!q;
+      none.hidden = !q || found > 0; none.textContent = none.hidden ? "" : `No folder matches “${field.value.trim()}”`;
+      rowsBox.scrollTop = 0;
+    };
+    if (field) {
+      field.addEventListener("input", narrow);
+      field.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && field.value) { e.preventDefault(); e.stopPropagation(); field.value = ""; narrow(); return; }
+        if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); if (field.value.trim()) rowsBox.querySelector(".dgc-folder-row[data-folder]:not([data-folder='']):not([hidden]):not(:disabled)")?.click(); return; }
+        if (e.key === "ArrowUp") { e.preventDefault(); e.stopPropagation(); const rowsNow = [...rowsBox.querySelectorAll(".dgc-menu-row:not([hidden]):not(:disabled)")]; rowsNow[rowsNow.length - 1]?.focus(); }
+      });
+    }
+    box.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      // A letter typed on a row goes into the search field; Up from the first row goes back to it.
+      if (field && e.target !== field && !e.defaultPrevented) {
+        if (e.key.length === 1 && e.key !== " " && !e.ctrlKey && !e.metaKey && !e.altKey) { field.focus({ preventScroll: true }); return; }
+        if (e.key === "ArrowUp" && e.target === rowsBox.querySelector(".dgc-menu-row:not([hidden]):not(:disabled)")) { e.preventDefault(); field.focus({ preventScroll: true }); return; }
+      }
+      Menu?.handle(box, e, { close: (viaEscape) => close(viaEscape !== false), trigger: find });
+    });
     const inside = (e) => { const path = typeof e.composedPath === "function" ? e.composedPath() : [e.target]; return path.includes(box) || path.includes(find()); };
     const outside = (e) => { if (!inside(e)) close(false); };
     const away = () => close(false);
@@ -345,15 +436,16 @@
     doc.addEventListener("pointerdown", outside, true);
     doc.addEventListener("scroll", follow, true);
     view.addEventListener("blur", away); view.addEventListener("resize", away);
-    shown = { box, doc, view, outside, away, follow, trigger: find, id: button.id || "", first: button, g, list: rowsBox, line: lineEl, ground, shade, growing: null };
+    shown = { box, doc, view, outside, away, follow, trigger: find, id: button.id || "", first: button, g, list: rowsBox, line: lineEl, ground, shade, growing: null, solid };
     if (moves(view, box)) try { arrive(shown); } catch { /* drawn at rest */ }
     box.tabIndex = -1;
-    (keyboard ? box.querySelector('[aria-checked="true"]:not(:disabled)') || box.querySelector(".dgc-menu-row:not(:disabled)") : box)?.focus({ preventScroll: true });
+    // With a search field the keyboard starts in it, however the menu was opened: typing narrows at once.
+    (field || (keyboard ? box.querySelector('[aria-checked="true"]:not(:disabled)') || box.querySelector(".dgc-menu-row:not(:disabled)") : box))?.focus({ preventScroll: true });
     return { box, close };
   }
 
   /** The open menu's box, or null: a page that draws again leaves it where it is. */
   const opened = () => (shown ? shown.box : null);
 
-  root.DgcFolderPick = Object.freeze({ buttonHtml, pathHtml, pathNode, valueOf, open, close, opened, ALL });
+  root.DgcFolderPick = Object.freeze({ buttonHtml, pathHtml, pathNode, valueOf, open, close, opened, ALL, folderMark, folderId, setPalette });
 })();

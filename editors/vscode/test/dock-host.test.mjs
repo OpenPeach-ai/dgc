@@ -196,3 +196,23 @@ test("a drag's drop: dockPlace puts a pin at a place among what this window show
   for (const bad of [{ key: "work:nope", to: 1 }, { key: `pip:${PIP("b")}`, to: "2" }, { key: `pip:${PIP("b")}`, to: -1.5 }, { key: `pip:${PIP("b")}` }]) { dock.handle({ type: "dockPlace", ...bad }); await tick(); }
   assert.deepEqual(order(), before, "what is not a pin here, or not a place, moves nothing");
 });
+
+// ---- a ChatDGC project on the dock, and its pinwheel's palette (13 Nov) ----
+test("a ChatDGC project can be pinned, shows in every window, and keeps the palette its pinwheel was given; its owner may choose another", async () => {
+  const context = store(), dock = new Dock(context), P = (c) => "project_" + c.repeat(32);
+  assert.equal(await dock.pin({ kind: "project", id: P("a"), title: "Goa trip" }), true, "a project is something the dock holds");
+  assert.deepEqual(dock.state().pins.map((p) => [p.key, p.kind, p.title]), [[`project:${P("a")}`, "project", "Goa trip"]]);
+  folder = "/home/me/other";
+  assert.equal(new Dock(context).state().pins.length, 1, "a project is the same in every folder");
+  folder = "/home/me/shop";
+  // Its palette: given once (the first not worn by the projects beside it), kept, never given again.
+  await dock.wear("project", [{ id: P("a") }, { id: P("b") }, { id: P("c") }]);
+  const worn = ["a", "b", "c"].map((c) => dock.state().colours[`project:${P(c)}`]);
+  assert.equal(new Set(worn).size, 3, `three projects side by side wear three palettes (${worn})`);
+  await dock.wear("project", [{ id: P("c") }, { id: P("a") }]);
+  assert.deepEqual(["a", "b", "c"].map((c) => new Dock(context).state().colours[`project:${P(c)}`]), worn, "kept as given, across a reload");
+  await dock.setColour(`project:${P("a")}`, "rose");
+  assert.equal(dock.state().colours[`project:${P("a")}`], "rose", "chosen by its owner from its “…”");
+  await dock.setColour(`project:${P("a")}`, "citron");
+  assert.equal(dock.state().colours[`project:${P("a")}`], "rose", "only one of the twelve");
+});

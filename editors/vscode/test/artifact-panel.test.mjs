@@ -375,7 +375,8 @@ test("the stylesheet holds in the browser: filled primaries, hidden menus, icons
         assert.equal(look.banner, "none");
         assert.ok(look.icons.length && look.icons.every(Boolean), `codicons draw (${look.icons})`);
         // (11 Nov: DGC's one button on every surface. The filled main action is the text's own colour; purple is Send's alone.)
-        if (look.primary) assert.deepEqual(look.primary, ["rgb(204, 204, 204)", "rgb(49, 49, 49)"], "DGC's one filled button: the text's colour, the ground's colour for its words");
+        // (13 Nov: its words take the page's own ground, #181818 here, always opaque: they took the input's background, which Cursor's themes make see-through.)
+        if (look.primary) assert.deepEqual([look.primary[0], (look.primary[1].match(/[\d.]+/g) || []).slice(0, 3).map((v) => Math.round(Number(v) * (look.primary[1].startsWith("color(") ? 255 : 1)))], ["rgb(204, 204, 204)", [24, 24, 24]], "DGC's one filled button: the text's colour, the page's ground for its words");
         assert.equal(look.overflow, 0, `${kind} at ${width}: no sideways scroll`);
         assert.deepEqual(look.wide, [], `${kind} at ${width}: nothing in the header or toolbar runs off the edge`);
       } finally { await s.page.close(); }

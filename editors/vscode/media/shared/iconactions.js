@@ -71,6 +71,19 @@
     const state = rows.get(row) || {}, was = state.hot && row.classList.contains("dgc-ia-on") ? state.hot : null;
     row.classList.toggle("dgc-ia-kbd", !!kbd);
     if (was === button) return;
+    // On a Home card the words stand beside the row, and a pill wider than the row grew to the left over the end of
+    // their lines (13 Nov). There the row takes the widest answer's room while a pill is up, so the words wrap or end
+    // before it; at rest it is the icons' own width again (the words have the room back). Its boxes keep their place:
+    // the row grows to the left.
+    if (!was && row.closest(".dgc-hub-card")) {
+      const word = pill.querySelector(".dgc-ia-pill-word"), kept = word.textContent;
+      row.style.minWidth = ""; pill.style.left = "auto"; pill.style.width = "auto";
+      let most = 0;
+      for (const b of buttonsOf(row)) { word.textContent = b.querySelector(".dgc-ia-word")?.textContent || ""; most = Math.max(most, Math.ceil(pill.getBoundingClientRect().width)); }
+      word.textContent = kept;
+      view.clearTimeout(state.rest); state.rest = 0;
+      if (most > row.offsetWidth) row.style.minWidth = `${most}px`;
+    }
     const from = was ? { left: `${pill.offsetLeft}px`, width: `${pill.offsetWidth}px` } : { left: `${button.offsetLeft}px`, width: `${button.offsetWidth}px` };
     for (const b of buttonsOf(row)) {
       b.classList.toggle("dgc-ia-hot", b === button);
@@ -103,6 +116,8 @@
     }
     row.classList.remove("dgc-ia-on", "dgc-ia-kbd");
     for (const b of buttonsOf(row)) b.classList.remove("dgc-ia-hot");
+    // The words have their room back once the pill has gone into its icon.
+    if (row.style.minWidth) { view.clearTimeout(state.rest); const back = () => { state.rest = 0; if (!row.classList.contains("dgc-ia-on")) row.style.minWidth = ""; }; if (state.anim) state.rest = view.setTimeout(back, 190); else back(); }
   }
   const focusShown = (node) => { try { return node.matches(":focus-visible"); } catch { return true; } };
   /** The keyboard's own answer in this row, when it is on one and shows a ring. */

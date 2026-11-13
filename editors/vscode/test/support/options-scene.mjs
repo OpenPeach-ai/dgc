@@ -22,6 +22,16 @@ export const THEMES = {
     --vscode-panel-border:#6FC3DF; --vscode-widget-border:#6FC3DF; --vscode-input-border:#6FC3DF;
     --vscode-foreground:#FFFFFF; --vscode-editor-foreground:#FFFFFF; --vscode-descriptionForeground:#FFFFFF;
     --vscode-disabledForeground:#A5A5A5; --vscode-list-activeSelectionBackground:#000000; --vscode-focusBorder:#F38518;`,
+  // Cursor's own dark and light themes, as far as they matter here: the input's background is a see-through white (or
+  // black), not a colour of its own, and the buttons' colours are left to the theme (none given).
+  "cursor-dark": `--vscode-sideBar-background:#141414; --vscode-editor-background:#181818; --vscode-input-background:#ffffff0d;
+    --vscode-panel-border:#ffffff14; --vscode-widget-border:#ffffff14; --vscode-input-border:#ffffff1f;
+    --vscode-foreground:#F0F0F0; --vscode-editor-foreground:#F0F0F0; --vscode-descriptionForeground:#A3A3A3;
+    --vscode-disabledForeground:rgba(240,240,240,.5); --vscode-list-activeSelectionBackground:#ffffff14; --vscode-focusBorder:#ffffff40;`,
+  "light-cursor": `--vscode-sideBar-background:#F3F3F3; --vscode-editor-background:#FCFCFC; --vscode-input-background:#0000000d;
+    --vscode-panel-border:#00000014; --vscode-widget-border:#00000014; --vscode-input-border:#0000001f;
+    --vscode-foreground:#141414; --vscode-editor-foreground:#141414; --vscode-descriptionForeground:#5C5C5C;
+    --vscode-disabledForeground:rgba(20,20,20,.5); --vscode-list-activeSelectionBackground:#00000014; --vscode-focusBorder:#00000040;`,
 };
 
 // The heaviest request the normaliser lets through: a 2000-character question and six options with

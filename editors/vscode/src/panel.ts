@@ -549,6 +549,8 @@ export interface ChatPlaces {
   openSessions(): Set<string>;
   /** The sessions whose tab is running a turn now. */
   workingSessions?(): Set<string>;
+  /** The sessions whose tab is the one in front in its editor group: what the user can see. */
+  watchedSessions?(): Set<string>;
   /** The sessions whose tab waits on you, by id: how many decisions, and its one command when that is all it asks. */
   waitingSessions?(): Map<string, { count: number; ask?: { id: string; command: string } }>;
   /** Home's answer to a session's command (Allow once or Deny), sent to that session's own process. */
@@ -783,6 +785,41 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
   /** Is this chat's turn running now? */
   isWorking(): boolean { return this.turnConfirmed; }
+  // ---- a Work session's reply nobody was looking at (13 Nov) ----
+  // Home showed a session's reply only when its page had seen the session listed as running and then as not: a turn
+  // that ended before the first of those lists reached the page (a quick reply, a long list, a new session's first
+  // turn) was never news. Now the tab says so itself as its turn ends, and the side bar's list carries it (`news`)
+  // until it has been seen: its tab comes to the front, it is opened or dismissed on Home, or it runs again.
+  private replyText = "";
+  /** In a session's tab: keeps the words the turn is ending on (what it said after its last tool call), and tells the
+   *  side bar when the turn ends with this tab not in front. A turn the user stopped is not a reply. */
+  private noteReply(ev: any): void {
+    if (!this.tab) { return; }
+    switch (ev?.type) {
+      case "turn_start": case "tool_call": this.replyText = ""; break;
+      case "text_delta": if (this.replyText.length < 600) { this.replyText += String(ev.text ?? ""); } break;
+      case "turn_end": {
+        const said = this.replyText.replace(/\s+/g, " ").trim(), reason = String(ev.reason || "completed"), id = this.sessionId();
+        this.replyText = "";
+        if (!id || reason === "cancelled" || (reason === "error" && !said) || this.view?.visible) { break; }
+        try { this.tab.host.sessionReplied(id, said); } catch { /* the side bar is on its way out */ }
+        break;
+      }
+    }
+  }
+  private readonly workNews = new Map<string, { at: number; preview: string }>();
+  /** The side bar: a session's tab ended a turn with a reply while it was not in front. */
+  sessionReplied(id: string, said: string): void {
+    if (!this.home || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) { return; }
+    this.workNews.delete(id);                                   // the newest last
+    this.workNews.set(id, { at: Date.now(), preview: String(said || "").slice(0, 300) });
+    while (this.workNews.size > 30) { this.workNews.delete(this.workNews.keys().next().value as string); }
+    this.sessionsChanged();
+  }
+  /** Seen: opened or dismissed on Home. */
+  private sessionReplySeen(id: string): void {
+    if (this.workNews.delete(id)) { this.sessionsChanged(); }
+  }
   // The commands this chat has asked to run and still waits on, by request id: what a card on Home can show whole and
   // answer. Only a shell command with nothing else to read (no file change) and Allow once and Deny among its answers.
   private pendingAsks = new Map<string, { id: string; command: string }>();
@@ -1603,6 +1640,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     const open = this.places?.openSessions() ?? new Set<string>();
     const working = this.places?.workingSessions?.() ?? new Set<string>();
+    // The sessions whose tab is in front, and the replies nobody has seen yet (one whose tab came to the front, or
+    // that runs again, is news no more).
+    const watched = this.places?.watchedSessions?.() ?? new Set<string>();
+    for (const id of [...this.workNews.keys()]) { if (watched.has(id) || working.has(id)) { this.workNews.delete(id); } }
     const waiting = this.places?.waitingSessions?.() ?? new Map<string, { count: number; ask?: { id: string; command: string } }>();
     const paging = this.lastReadyEvent?.capabilities?.session_paging === true;
     // One more than shown was asked for: its presence is what says there are more.
@@ -1611,6 +1652,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // Where each of another folder's sessions belongs: what opening one here goes by (never what the page says).
     this.sessionsElsewhere.clear();
     this.post({ type: "sessions_list", error, searchable: paging, query: paging ? this.sessionsQuery : "", more: items.length > shown,
+      ...(this.workNews.size ? { news: [...this.workNews].map(([id, reply]) => ({ id, at: reply.at, preview: reply.preview })) } : {}),
       // The dropdown: what is chosen and the folders to choose from; one folder's path is named once, above the list.
       // (This window's folder too, listed or not: New Session's dialog opens on it.)
       ...(folders ? { folders: { choice, rows: folders.map(({ workspace_id, ...row }) => row), ...this.windowFolder() }, ...(choice ? { folder: homeAsTilde(choice), folderPath: choice } : {}) } : {}),
@@ -1625,6 +1667,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                ...(project ? { project: homeAsTilde(project), projectPath: project, projectName, ...(elsewhere ? { here: false, ...(item?.folder_exists === false ? { gone: true } : {}) } : {}) } : {}),
                when: String(item?.when || ""), count: Number(item?.count) || 0, open: open.has(id),
                ...(working.has(id) ? { running: true } : {}),          // its tab is mid-turn: the dock's running dot
+               ...(watched.has(id) ? { watched: true } : {}),          // its tab is in front: what it says has been seen
                ...(windowless.has(id) && !open.has(id) ? { windowless: windowless.get(id) || "working" } : {}),
                // Its tab has a card waiting for your okay: the home lists it first, and Home shows its one command
                // whole, to answer there (Allow once or Deny go back to that tab's own process: answerSession).
@@ -1635,6 +1678,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   private openSessionInEditor(id: string, title: string): void {
     if (!this.places || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) { return; }
+    this.workNews.delete(id);                // opened: its reply is seen
     // Another folder's session: in a tab here, running in its own folder.
     const elsewhere = this.sessionsElsewhere.get(id);
     if (elsewhere && !this.places.openSessions().has(id)) { void this.openSessionElsewhere(id, title, elsewhere); return; }
@@ -1708,7 +1752,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (!this.home) { return; }
     const pin = dockOf(this.context).pins().find((item) => item.key === key);
     if (!pin) { return; }
-    if (pin.kind === "work") { this.openSessionInEditor(pin.id, pin.title); return; }
+    if (pin.kind === "work") {
+      // Another folder's session, pinned on All projects (13 Nov): in a tab here, running in its own folder, also when
+      // the list no longer shows that folder. A folder that is gone opens nothing and says so (openSessionElsewhere).
+      const folder = typeof pin.ref?.folder === "string" ? pin.ref.folder : "";
+      if (folder && !this.sessionsElsewhere.has(pin.id) && !this.places?.openSessions().has(pin.id) && !this.sameFolder(folder, this.cwd())) {
+        void this.openSessionElsewhere(pin.id, pin.title, { project: folder, name: pin.ref.folder_name || basename(folder) || folder, exists: true });
+        return;
+      }
+      this.openSessionInEditor(pin.id, pin.title); return;
+    }
     void this.chatdgc?.openFromDock(pin);
   }
   /** The dock's "+": each starts its new thing at once. */
@@ -4535,6 +4588,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // Account setup replies may contain single-use consent links. Never send them to chat.
     if (ev.type === "composio_connection") return;
     const openImageAnswer = this.noteImageEvent(ev);
+    this.noteReply(ev);
     switch (ev.type) {
       case "ready":
         this.subagentSettings = undefined;
@@ -5760,6 +5814,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // A reply's pictures folded or opened (media/pictureFold.js): kept, so it holds after a reload and a reopen.
     if (rememberPictureFold(this.context, msg)) return;
     // The dock (src/dock.ts): a pin, an unpin, a move, a session's colour. Kept for this computer.
+    // (A Work session's pin keeps the folder it runs in when that is not this window's: the host's own word for it, as
+    // it listed the session, never the page's.)
+    if ((msg?.type === "dockToggle" || msg?.type === "dockPin") && msg.item?.kind === "work") {
+      const from = this.sessionsElsewhere.get(String(msg.item.id ?? ""));
+      msg = { ...msg, item: { ...msg.item, ref: from && from.exists ? { folder: from.project, folder_name: from.name } : {} } };
+    }
     if (dockOf(this.context).handle(msg, (state) => this.post(state))) return;
     if (msg?.type === "dockOpen") { this.openFromDock(String(msg.key || "")); return; }
     if (msg?.type === "dockNew") { this.newFromDock(String(msg.what || "")); return; }
@@ -5884,6 +5944,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         return;
       case "openSessionInEditor":
         this.openSessionInEditor(String(msg.id ?? ""), String(msg.title ?? ""));
+        return;
+      case "homeSessionSeen":
+        // Home: a session's reply was opened or dismissed there. Only ever forgets what this side bar itself holds.
+        if (this.home) { this.sessionReplySeen(String(msg.id ?? "")); }
         return;
       case "homeSessionAnswer":
         // Home's Allow once or Deny on a session's command: to that session's own process, then the list again.
@@ -10526,7 +10590,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <link rel="stylesheet" href="${mcpAppsCss}">
 </head><body data-mermaid-src="${mermaid}" data-agent-marks="${agentMarks}" data-link-favicons="${favicons}" data-pictures-folded="${picturesFolded() ? "1" : ""}">
 <header id="phead"><button type="button" id="btn-pips-back" class="pips-back" title="Back to DGC chat" aria-label="Back to DGC chat" hidden><span class="codicon codicon-chevron-left" aria-hidden="true"></span>Chat</button><button type="button" id="agent-back" class="agent-back" hidden title="Back to chat" aria-label="Back to chat"><span class="codicon codicon-chevron-left" aria-hidden="true"></span></button><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur" aria-hidden="true"></span></span><span id="agent-mark" class="agent-mark" hidden aria-hidden="true"></span><button type="button" id="thread-title" class="thread-title" title="Current chat — click to rename" aria-label="Current chat: New chat. Click to rename">New chat</button><button type="button" class="pd" id="pmodel" title="Model — click to change" aria-label="Change model">dgc</button><button type="button" id="btn-pips" class="pips-nav" title="Open Pips" aria-label="Open Pips" aria-pressed="false"><span class="pips-wordmark">Pips</span><span class="pips-nav-core" aria-hidden="true"></span></button><button type="button" id="chat-add" class="chat-add" title="Open a second chat" aria-label="Open a second chat"><span class="codicon codicon-add" aria-hidden="true"></span></button><button type="button" id="chat-add-folder" class="chat-add" title="Open a chat in another folder" aria-label="Open a chat in another folder"><span class="codicon codicon-folder-opened" aria-hidden="true"></span></button></header>
-<nav id="side-tabs" class="dgc-tabs" aria-label="DGC" hidden><div class="dgc-tabs-bar" role="tablist" aria-label="Home, Work, Chat and Pips"><button type="button" role="tab" id="side-tab-home" class="dgc-tab" data-tab="home" aria-controls="home-hub" aria-selected="false" tabindex="-1" title="Home: everything that needs you or is new"><span class="dgc-tab-glow" aria-hidden="true"></span><span class="dgc-tab-flip" data-label="Home"><span class="dgc-tab-front"><span class="dgc-tab-icon codicon codicon-home" aria-hidden="true"></span><span class="dgc-tab-word">Home</span></span><span class="dgc-tab-back" aria-hidden="true"><span class="dgc-tab-icon codicon codicon-home" aria-hidden="true"></span><span class="dgc-tab-word">Home</span></span></span><span id="side-tab-home-count" class="dgc-tab-count" aria-hidden="true" hidden></span></button><button type="button" role="tab" id="side-tab-work" class="dgc-tab" data-tab="work" aria-controls="work-home" aria-selected="false" tabindex="-1" title="Work: your Work sessions"><span class="dgc-tab-glow" aria-hidden="true"></span><span class="dgc-tab-flip" data-label="Work"><span class="dgc-tab-front"><span class="dgc-tab-icon codicon codicon-briefcase" aria-hidden="true"></span><span class="dgc-tab-word">Work</span></span><span class="dgc-tab-back" aria-hidden="true"><span class="dgc-tab-icon codicon codicon-briefcase" aria-hidden="true"></span><span class="dgc-tab-word">Work</span></span></span></button><button type="button" role="tab" id="side-tab-chat" class="dgc-tab" data-tab="chat" aria-controls="chats-home" aria-selected="false" tabindex="-1" title="Chat: your ChatDGC chats, the same in every folder"><span class="dgc-tab-glow" aria-hidden="true"></span><span class="dgc-tab-flip" data-label="Chat"><span class="dgc-tab-front"><span class="dgc-tab-icon codicon codicon-comment-discussion" aria-hidden="true"></span><span class="dgc-tab-word">Chat</span></span><span class="dgc-tab-back" aria-hidden="true"><span class="dgc-tab-icon codicon codicon-comment-discussion" aria-hidden="true"></span><span class="dgc-tab-word">Chat</span></span></span></button><button type="button" role="tab" id="side-tab-pips" class="dgc-tab" data-tab="pips" aria-controls="pips-host" aria-selected="false" tabindex="-1" title="Pips: your Personal and Project Pips"><span class="dgc-tab-glow" aria-hidden="true"></span><span class="dgc-tab-flip" data-label="Pips"><span class="dgc-tab-front"><span class="dgc-tab-word">Pips</span></span><span class="dgc-tab-back" aria-hidden="true"><span class="dgc-tab-word">Pips</span></span></span><span class="dgc-tab-face" aria-hidden="true"></span></button></div></nav>
+<nav id="side-tabs" class="dgc-tabs" aria-label="DGC" hidden><div class="dgc-tabs-bar" role="tablist" aria-label="Home, Work, Chat and Pips"><button type="button" role="tab" id="side-tab-home" class="dgc-tab" data-tab="home" aria-controls="home-hub" aria-selected="false" tabindex="-1" title="Home: everything that needs you or is new"><span class="dgc-tab-glow" aria-hidden="true"></span><span class="dgc-tab-flip" data-label="Home"><span class="dgc-tab-front"><span class="dgc-tab-icon codicon codicon-home" aria-hidden="true"></span><span class="dgc-tab-word">Home</span></span></span><span id="side-tab-home-count" class="dgc-tab-count" aria-hidden="true" hidden></span></button><button type="button" role="tab" id="side-tab-work" class="dgc-tab" data-tab="work" aria-controls="work-home" aria-selected="false" tabindex="-1" title="Work: your Work sessions"><span class="dgc-tab-glow" aria-hidden="true"></span><span class="dgc-tab-flip" data-label="Work"><span class="dgc-tab-front"><span class="dgc-tab-icon codicon codicon-briefcase" aria-hidden="true"></span><span class="dgc-tab-word">Work</span></span></span></button><button type="button" role="tab" id="side-tab-chat" class="dgc-tab" data-tab="chat" aria-controls="chats-home" aria-selected="false" tabindex="-1" title="Chat: your ChatDGC chats, the same in every folder"><span class="dgc-tab-glow" aria-hidden="true"></span><span class="dgc-tab-flip" data-label="Chat"><span class="dgc-tab-front"><span class="dgc-tab-icon codicon codicon-comment-discussion" aria-hidden="true"></span><span class="dgc-tab-word">Chat</span></span></span></button><button type="button" role="tab" id="side-tab-pips" class="dgc-tab" data-tab="pips" aria-controls="pips-host" aria-selected="false" tabindex="-1" title="Pips: your Personal and Project Pips"><span class="dgc-tab-glow" aria-hidden="true"></span><span class="dgc-tab-flip" data-label="Pips"><span class="dgc-tab-front"><span class="dgc-tab-word">Pips</span></span></span><span class="dgc-tab-face" aria-hidden="true"></span></button></div></nav>
 <section id="pips-host" data-style-uri="${pipsStyle}" data-cards-style-uri="${mcpAppsCss}" aria-label="DGC Pips" hidden></section>
 <section id="sessions-host" class="sessions-home" aria-label="DGC" hidden><section id="home-hub" class="dgc-hub" role="tabpanel" aria-labelledby="side-tab-home"></section><section id="work-home" class="home-work" role="tabpanel" aria-labelledby="side-tab-work" hidden><div class="home-bar"><input id="sessions-search" class="sessions-search" type="search" placeholder="Search Work sessions" aria-label="Search this project's sessions: names and everything said" autocomplete="off" maxlength="200"><button type="button" id="sessions-new" class="home-new" title="New session: it opens in an editor tab" aria-label="New session"><span class="codicon codicon-add" aria-hidden="true"></span><span>New</span></button></div><div id="work-library-row" class="home-library-row"><button type="button" id="work-library" class="home-library" title="Library: reopen, export or remove Artifacts made in Work" hidden><span class="codicon codicon-library" aria-hidden="true"></span><span>Library</span></button></div><p id="sessions-status" class="sessions-status" role="status">Loading this project's sessions…</p><ul id="sessions-list" class="sessions-list" aria-label="Sessions in this project"></ul><button type="button" id="sessions-more" class="sessions-more" title="Show 200 more sessions" hidden>Load more</button></section><section id="chats-home" class="home-chats" role="tabpanel" aria-labelledby="side-tab-chat" hidden><div class="home-bar"><input id="chats-search" class="sessions-search" type="search" placeholder="Search chats" aria-label="Search your chats: names and everything said" autocomplete="off" maxlength="200"><button type="button" id="chats-new" class="home-new" title="New chat: it opens in an editor tab" aria-label="New chat"><span class="codicon codicon-add" aria-hidden="true"></span><span>New</span></button></div><button type="button" id="chats-library" class="home-library" title="Library: every file you attached or ChatDGC made, and every widget, in one place" hidden><span class="codicon codicon-library" aria-hidden="true"></span><span>Library</span></button><div id="projects-home" class="home-projects" hidden><div class="home-sub-head"><h3 id="projects-title" class="home-sub">Projects</h3><button type="button" id="projects-new" class="home-sub-add" title="New project: chats, files and instructions together" aria-label="New project"><span class="codicon codicon-new-folder" aria-hidden="true"></span></button></div><ul id="projects-list" class="projects-list" aria-labelledby="projects-title"></ul></div><h3 id="chats-sub" class="home-sub home-sub-chats" hidden>Chats</h3><p id="chats-status" class="sessions-status" role="status" hidden></p><ul id="chats-list" class="sessions-list" aria-label="Your chats"></ul><button type="button" id="chats-more" class="sessions-more" title="Show more of your chats" hidden>Show more</button></section></section>
 <nav id="chatbar" class="chatbar" hidden aria-label="Running chats"></nav>

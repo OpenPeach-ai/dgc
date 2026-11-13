@@ -83,10 +83,10 @@ test("the side bar opens on Home, never on a chat, and this project's sessions a
       '<img src=x onerror="window.__owned=1">', "Untitled session", "Older one", "Older two"], "the six newest: its name, else its first words; one with no name and no words is Untitled");
     assert.equal(await s.page.textContent("#sessions-all"), "View all (7)", "the seventh is behind View all");
     await s.page.click("#sessions-all");
-    assert.deepEqual((await read()).slice(6).map((r) => r.name), ["ok, so my this directory runs my Company's ERP at app.ton", "Visits page alignment",
+    assert.deepEqual((await read()).map((r) => r.name), ["ok, so my this directory runs my Company's ERP at app.ton", "Visits page alignment",
       '<img src=x onerror="window.__owned=1">', "Untitled session", "Older one", "Older two", "Older three"], "every session there");
     assert.equal(await s.page.evaluate(() => document.querySelectorAll("#sessions-host img").length + (window.__owned || 0)), 0, "there too, a name is text");
-    await s.page.keyboard.press("Escape");
+    await s.page.click("#sessions-all");      // Show fewer: the six again
     await s.page.mouse.move(2, 2);      // off View all: the page's own hover label holds a pointed-at button's title while it shows
     await s.page.waitForTimeout(150);
     assert.equal(await s.page.evaluate(() => document.querySelectorAll("#sessions-list img").length + (window.__owned || 0)), 0,
@@ -129,8 +129,8 @@ test("a click, Open in Editor and Enter open a session in a tab, as a chat opens
     await s.clear();
     await s.page.keyboard.press("Delete");
     await s.page.click("#sessions-all");                   // the fourth session is behind View all
-    await s.page.hover(".sessions-popover .session-row:nth-child(4)");
-    await s.page.click(".sessions-popover .session-row:nth-child(4) .session-delete");
+    await s.page.hover("#sessions-list .session-row:nth-child(4)");
+    await s.page.click("#sessions-list .session-row:nth-child(4) .session-delete");
     await s.page.keyboard.press("Escape");
     assert.deepEqual(await s.posted(), [{ type: "deleteSession", id: "20261006-091200-b2", title: "Visits page alignment" },
       { type: "deleteSession", id: "20261004-180000-d4", title: "Untitled session" }], "Delete and the bin ask the extension, which confirms");
@@ -255,7 +255,7 @@ test("thousands of sessions: a search over what was said, the words it found, an
     await s.page.fill("#sessions-search", "");
     await s.send({ type: "sessions_list", items: ITEMS.slice(0, 2), error: "", searchable: true, more: true, query: "" });
     assert.equal(await shown(s.page, "#sessions-search"), true);
-    assert.equal(await shown(s.page, "#sessions-more"), false, "with no search, Load more is in the View all popover");
+    assert.equal(await shown(s.page, "#sessions-more"), false, "with no search, Load more comes with View all's whole list");
     assert.equal(await s.page.textContent("#sessions-all"), "View all (2+)", "more than these two: View all says so");
     await s.clear();
     await s.page.fill("#sessions-search", "sourdough");
@@ -271,9 +271,9 @@ test("thousands of sessions: a search over what was said, the words it found, an
     await s.send({ type: "sessions_list", items: ITEMS, error: "", searchable: true, more: true, query: "" });
     await s.clear();
     await s.page.click("#sessions-all");
-    await s.page.click(".sessions-popover .sessions-all-more");
+    await s.page.click("#sessions-more");
     assert.deepEqual((await s.posted()).filter((m) => m.type === "sessionsMore"), [{ type: "sessionsMore" }]);
-    assert.equal(await s.page.locator(".sessions-popover .sessions-all-more").textContent(), "Loading…");
+    assert.equal(await s.page.locator("#sessions-more").textContent(), "Loading…");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });

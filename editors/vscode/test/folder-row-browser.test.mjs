@@ -1,6 +1,6 @@
 // The Project Folder dropdown on a row that is already there (0.52, his calls on 12 Nov night), in real Chromium with
 // the real pages (test/support/home-scene.mjs, test/support/project-folder-pips-scene.mjs), at 700 and 300 px, dark and
-// light. Over the Work sessions it is on the Library row, at its right end; in View all, on the search field's row; on
+// light. Over the Work sessions it is on the Library row, at its right end (View all lists in place, with no dropdown of its own, since 13 Nov); on
 // the Pips view's Project tab, at the right end of the "Needs attention" heading line, and at the same place on a row
 // of the same height when nothing needs attention. One line always: when the row is too narrow for it the button drops
 // its "Project Folder" word (measured, never a breakpoint), then a long folder name ends in an ellipsis. No line names
@@ -102,38 +102,20 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
     } finally { await x.close(); }
   });
 
-  test(`View all: the dropdown is on the search field's row, at its right end (${theme}, ${width}px)`, async (t) => {
+  test(`View all: the list opens in place, with no second search field or dropdown (${theme}, ${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
+    // (View all opened a popover with a search field and a dropdown of its own until 13 Nov; the ones above the list
+    // are the only ones now: test/sessions-view-all.test.mjs.)
     const x = await openHome(browser, { theme, width, tab: "work", motion: "reduce" });
     try {
       await x.send(listOf(""));
-      await x.page.click("#sessions-all");
-      await x.page.waitForSelector(".sessions-popover");
       await settle(x.page);
-      const read = () => x.page.evaluate(() => {
-        const box = (e) => e.getBoundingClientRect(), pop = document.querySelector(".sessions-popover"), field = pop.querySelector(".sessions-all-search"), pick = pop.querySelector(".dgc-folder"), list = pop.querySelector(".sessions-all-list");
-        const mid = (e) => (box(e).top + box(e).bottom) / 2, value = pick.querySelector(".dgc-folder-v"), r = document.createRange(); r.selectNodeContents(value);
-        const inner = box(pop).right - parseFloat(getComputedStyle(pop).paddingRight) - parseFloat(getComputedStyle(pop).borderRightWidth);
-        return { sameLine: Math.abs(mid(pick) - mid(field)), after: box(pick).left - box(field).right, rightEnd: Math.abs(box(pick).right - inner), field: box(field).width, pickHeight: box(pick).height,
-          listUnder: box(list).top - Math.max(box(field).bottom, box(pick).bottom), word: pick.querySelector(".dgc-folder-k").checkVisibility(), value: value.textContent, valueWhole: r.getBoundingClientRect().width <= box(value).width + 0.01,
-          label: pick.getAttribute("aria-label"), inside: box(pick).right <= box(pop).right + 0.5 && box(field).left >= box(pop).left - 0.5 };
-      });
-      const m = await read();
-      assert.ok(m.sameLine <= 1, `on the search field's line: ${m.sameLine}`);
-      assert.ok(m.after >= 4 && m.rightEnd <= 0.5 && m.inside, `after the field, at the row's right end: ${JSON.stringify(m)}`);
-      assert.ok(m.listUnder >= 0 && m.listUnder <= 8.5, `the list comes straight under that one row: ${m.listUnder}`);
-      assert.ok(m.pickHeight <= 30 && m.field >= 100, `one line, and the field keeps room to type: ${JSON.stringify(m)}`);
-      assert.deepEqual([m.value, m.valueWhole, m.label], ["All projects", true, "Project Folder: All projects"]);
-      assert.equal(m.word, width !== 300, "at 300 px the word gives its room to the search field");
-      // The choice changes what the page lists, and the page stays open with the dropdown on its row.
-      await x.page.click(".sessions-popover .dgc-folder");
-      await x.page.click(`.dgc-folder-menu [data-folder="${LONG}"]`);
-      assert.deepEqual(await x.page.evaluate(() => window.__posted.filter((p) => p.type === "projectFolderChoose")), [{ type: "projectFolderChoose", folder: LONG }]);
-      await x.send(listOf(LONG));
+      const all = await x.page.locator("#sessions-all").isVisible();
+      if (all) await x.page.click("#sessions-all");
       await settle(x.page);
-      const one = await read();
-      assert.ok(one.sameLine <= 1 && one.rightEnd <= 0.5 && one.pickHeight <= 30 && one.field >= 100 && one.inside, JSON.stringify(one));
-      assert.equal(one.label, "Project Folder: checkout-service");
+      const m = await x.page.evaluate(() => ({ pops: document.querySelectorAll(".sessions-popover").length, fields: [...document.querySelectorAll("#work-home input")].filter((n) => n.checkVisibility()).length,
+        picks: [...document.querySelectorAll("#work-home .dgc-folder")].filter((n) => n.checkVisibility()).length }));
+      assert.deepEqual(m, { pops: 0, fields: 1, picks: 1 }, "one search field and one Project Folder dropdown, above the list");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   });

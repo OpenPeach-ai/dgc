@@ -897,3 +897,102 @@ test("a Project Pip of another folder reports to a session of its own folder: it
   await old.sidebar.sessionsForPip(PIP);
   assert.deepEqual(old.lists(), [{}]);
 });
+
+// ---- a Work session's reply on Home (13 Nov) ----
+// The side bar's page used to learn of a reply only by seeing the session listed as running and then not: a turn that
+// ended before the first of those lists arrived (a quick reply, a long list, a new session's first turn) was never news.
+// Now the tab says so itself when its turn ends, and the side bar's list carries it until it has been seen.
+const lastList = async (sidebar) => { await sidebar.onMessage({ type: "sessionsList" }); return sidebar.posted.filter((m) => m.type === "sessions_list").at(-1); };
+test("a reply in a tab that is not in front is news on the side bar's list, with the reply's first words; one you are looking at is not", async () => {
+  const { sidebar, tabs, made } = windowWith(TWO);
+  tabs.open("20261006-101500-a1"); tabs.open("20261006-091200-b2");
+  const [first, second] = made, [panelA, panelB] = world.panels;
+  panelA.visible = false; panelA.active = false;                 // the second tab is in front of the first
+  assert.deepEqual((await lastList(sidebar)).news ?? [], [], "nothing is news yet");
+  assert.deepEqual((await lastList(sidebar)).items.map((item) => [item.id, item.watched]), [["20261006-101500-a1", undefined], ["20261006-091200-b2", true]], "the list says which session's tab is in front");
+  // Both turns start and end before the side bar lists anything in between: neither was ever listed as running.
+  for (const [tab, turn] of [[first, "t1"], [second, "t2"]]) {
+    tab.onEvent({ type: "turn_start", turn_id: turn, kind: "prompt", prompt: "why do tide pools matter?" });
+    tab.onEvent({ type: "text_delta", text: "Let me look at the notes first." });
+    tab.onEvent({ type: "tool_call", id: `call-${turn}`, name: "read", args: { path: "notes.md" } });
+    tab.onEvent({ type: "text_delta", text: "Tide pools matter because they are " });
+    tab.onEvent({ type: "text_delta", text: "small, rough nurseries." });
+    tab.onEvent({ type: "turn_end", turn_id: turn, reason: "completed" });
+  }
+  const list = await lastList(sidebar);
+  assert.deepEqual(list.items.map((item) => item.running), [undefined, undefined], "neither is running now");
+  assert.equal(list.news.length, 1, "one reply is news");
+  assert.deepEqual([list.news[0].id, list.news[0].preview], ["20261006-101500-a1", "Tide pools matter because they are small, rough nurseries."], "the one nobody was looking at, with the words it ended on");
+  assert.ok(Math.abs(list.news[0].at - Date.now()) < 5000, "and when");
+  assert.deepEqual((await lastList(sidebar)).news, list.news, "it stays news on every list until it is seen");
+  // A turn the user stopped is not a reply.
+  panelB.visible = false; panelA.visible = false;
+  second.onEvent({ type: "turn_start", turn_id: "t3", kind: "prompt", prompt: "and again" });
+  second.onEvent({ type: "text_delta", text: "Starting over" });
+  second.onEvent({ type: "turn_end", turn_id: "t3", reason: "cancelled" });
+  assert.deepEqual((await lastList(sidebar)).news.map((n) => n.id), ["20261006-101500-a1"], "a stopped turn is not news");
+  // Seen: its tab comes to the front.
+  panelA.visible = true; panelA.focus(true);
+  const seen = await lastList(sidebar);
+  assert.deepEqual(seen.news ?? [], [], "its tab in front: no longer news");
+  assert.equal(seen.items[0].watched, true);
+});
+
+test("news of a reply goes when Home says it was seen, when the session is opened, and when it runs again", async () => {
+  const { sidebar, tabs, made } = windowWith(TWO);
+  tabs.open("20261006-101500-a1");
+  const [first] = made, [panel] = world.panels;
+  const reply = (turn) => { first.onEvent({ type: "turn_start", turn_id: turn, kind: "prompt", prompt: "go" }); first.onEvent({ type: "text_delta", text: "Done." }); first.onEvent({ type: "turn_end", turn_id: turn, reason: "completed" }); };
+  panel.visible = false;
+  reply("t1");
+  assert.deepEqual((await lastList(sidebar)).news.map((n) => n.id), ["20261006-101500-a1"]);
+  await sidebar.onMessage({ type: "homeSessionSeen", id: "20261006-101500-a1" });
+  assert.deepEqual((await lastList(sidebar)).news ?? [], [], "dismissed on Home");
+  reply("t2");
+  assert.equal((await lastList(sidebar)).news.length, 1, "a later reply is news again");
+  await sidebar.onMessage({ type: "openSessionInEditor", id: "20261006-101500-a1", title: "Visits" });
+  assert.deepEqual((await lastList(sidebar)).news ?? [], [], "opened from the side bar");
+  reply("t3");
+  first.onEvent({ type: "turn_start", turn_id: "t4", kind: "prompt", prompt: "more" });
+  assert.deepEqual((await lastList(sidebar)).news ?? [], [], "running again: its last reply is no longer the news");
+  // Only a session id is taken from the page.
+  await sidebar.onMessage({ type: "homeSessionSeen", id: "../../etc/passwd" });
+});
+
+// ---- another folder's session pinned to the dock (13 Nov) ----
+// On All projects a session of another folder can be pinned. The pin keeps where the session runs (what the host
+// itself listed, never what the page said): from the dock it opens here in a tab running in its own folder, also when
+// the list no longer shows that folder; a pin whose folder is gone opens nothing and says so.
+test("the dock: another folder's session is pinned with its folder as the host listed it, and opens from the dock in a tab running there", async () => {
+  const garden = join(scratch, "garden-dock");
+  mkdirSync(garden, { recursive: true });
+  const { ctx, sidebar, made } = folderWindow({ rows: everywhereRows(garden), folders: folderRows(garden) });
+  await sidebar.onMessage({ type: "sessionsList" }); await settled();
+  // The page names a folder of its own: the pin takes the host's.
+  await sidebar.onMessage({ type: "dockToggle", item: { kind: "work", id: "g1", title: "Water the tomatoes on Fridays", ref: { folder: "/etc", folder_name: "etc" } } }); await settled();
+  const pinned = sidebar.posted.filter((m) => m.type === "dock").at(-1).pins.find((p) => p.key === "work:g1");
+  assert.ok(pinned, "it is pinned");
+  assert.deepEqual(pinned.ref, { folder: garden, folder_name: "garden" }, "with the folder it runs in, as the host listed it");
+  // This folder's own session: no folder on its pin.
+  await sidebar.onMessage({ type: "dockToggle", item: { kind: "work", id: "s1", title: "Checkout", ref: { folder: "/etc" } } }); await settled();
+  assert.deepEqual(sidebar.posted.filter((m) => m.type === "dock").at(-1).pins.find((p) => p.key === "work:s1").ref, {}, "this folder's own session keeps none");
+  // The list now shows this window's folder only: the pin still knows where its session runs.
+  await sidebar.onMessage({ type: "projectFolderChoose", folder: scratch }); await settled();
+  await sidebar.onMessage({ type: "dockOpen", key: "work:g1" }); await settled();
+  assert.equal(world.panels.length, 1, "one tab");
+  assert.match(world.panels[0].title, /^garden-dock · Water the tomatoes/, "named with its folder");
+  assert.equal(made[0].activeSlot().cwd, garden, "running in the session's own folder, never the window's");
+  assert.equal(made[0].sessionId(), "g1");
+});
+
+test("the dock: a pinned session whose folder is gone opens nothing and says so", async () => {
+  const garden = join(scratch, "garden-gone");
+  mkdirSync(garden, { recursive: true });
+  const { sidebar } = folderWindow({ rows: everywhereRows(garden), folders: folderRows(garden) });
+  await sidebar.onMessage({ type: "sessionsList" }); await settled();
+  await sidebar.onMessage({ type: "dockToggle", item: { kind: "work", id: "g1", title: "Water the tomatoes on Fridays" } }); await settled();
+  rmSync(garden, { recursive: true, force: true });
+  await sidebar.onMessage({ type: "dockOpen", key: "work:g1" }); await settled();
+  assert.equal(world.panels.length, 0, "no tab opens");
+  assert.match(world.infos.at(-1) || "", /Folder not found/, "and it says why");
+});

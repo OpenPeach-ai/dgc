@@ -6,6 +6,7 @@ import '../media/shared/tokens.css';
 import '../media/shared/menu.css';
 import '../media/shared/menu.js';
 // The Project Folder dropdown, as over the Work sessions (window.DgcFolderPick).
+import '../media/shared/folders.css';
 import '../media/shared/folderpick.css';
 import '../media/shared/folderpick.js';
 // A computer's own mark, the maintainer's Portal, as he wrote it (src/pipComputerNames.js draws it).

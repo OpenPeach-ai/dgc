@@ -681,7 +681,6 @@
     homePips?.refresh();
   }
   function hideSessions() {
-    closeAllSessions();
     sessionsOpen = false;
     document.body.classList.remove("sessions-active");
     $("sessions-host").hidden = true;
@@ -723,11 +722,14 @@
   }
   // Session names and previews are the user's own words: text nodes only, never markup.
   // The Work tab lists six, or every one that needs you (sessionsShown), each a row: its mark, its title over what it is
-  // doing, and its age at the right ("2h", "1w", "1mo"; a purple dot while it runs), then "View all (N)", which opens
-  // every session in a popover over the list with a search field (asked for 2026-11-10, the way Codex lists its chats).
+  // doing, and its age at the right ("2h", "1w", "1mo"; a purple dot while it runs), then "View all (N)", which lists
+  // every session in place: the same rows in the same list, the page scrolling under the tab bar and the dock, "Load
+  // more" at its end when there are more, and "Show fewer" after it, which goes back to the six. (It opened a popover
+  // over the list, Codex's way, 2026-11-10: with a second search field and a second Project Folder dropdown, and the
+  // list under it showing through. Taken out 13 Nov.) The search field and the dropdown above are the only ones.
   // A search from the tab's own box still lists everything it found.
   const SESSIONS_SHOWN = 6;
-  let sessionItems = [], sessionsMoreToLoad = false, allSessions = null, lastSessions = null;
+  let sessionItems = [], sessionsMoreToLoad = false, sessionsExpanded = false, lastSessions = null;
   // The Project Folder dropdown (0.52, media/shared/folderpick.js): "All projects" or one folder, one choice the host
   // keeps for every window (it also filters the Pips view's Project tab and Needs attention). The host says what is
   // chosen and the folders to choose from with each list; a DGC that lists none has no dropdown (projectFolders null).
@@ -756,7 +758,7 @@
   /** The button in a slot, drawn again only when what it says changed (the keyboard stays on it). Its tooltip says the
    *  choice and one folder's whole path. */
   function paintFolderSlot(slot, id) {
-    const Pick = window.DgcFolderPick, drawn = JSON.stringify(projectFolders);
+    const Pick = window.DgcFolderPick, drawn = JSON.stringify([projectFolders, dockColours]);        // (and each folder's palette)
     if (!slot || !Pick || slot.dataset.drawn === drawn) return;
     const held = slot.contains(document.activeElement);
     slot.dataset.drawn = drawn;
@@ -812,7 +814,7 @@
       const row = rows.find((r) => r.folder === state.folder), held = field.contains(document.activeElement);
       field.innerHTML = Pick.buttonHtml({ id: "new-session-folder", rows, choice: state.folder, empty: "Choose a folder", title: row ? row.folder : "Choose the folder this session works in" });
       where.hidden = !row;
-      if (row) { where.replaceChildren(pathLine("new-session-where", row.shown || row.folder, row.folder)); where.title = row.folder; }
+      if (row) { where.innerHTML = Pick.folderMark ? Pick.folderMark(row.folder) : ""; where.append(pathLine("new-session-where", row.shown || row.folder, row.folder)); where.title = row.folder; }
       start.disabled = !row;
       if (held) field.querySelector("button")?.focus({ preventScroll: true });
     };
@@ -908,10 +910,12 @@
     remove.title = item.open ? "Close its tab to delete this session" : "Delete this session";
     remove.setAttribute("aria-label", `Delete session: ${title}`);
     // Pin it to the dock, and "..." for its colour, between Open in Editor and Delete.
-    const pinItem = { kind: "work", id: item.id, title };
-    // Pin, colour and Delete are for this window's folder's sessions; another folder's offers Open; a gone folder's, nothing.
+    // (Another folder's session keeps where it runs on its pin: from the dock it opens here, running there.)
+    const pinItem = { kind: "work", id: item.id, title, ...(elsewhere && item.projectPath ? { ref: { folder: String(item.projectPath), folder_name: String(item.projectName || "") } } : {}) };
+    // Delete is for this window's folder's sessions. Another folder's has Open, the pin and its colour (asked 13 Nov: on
+    // All projects it could not be pinned); a gone folder's, nothing.
     if (gone) { /* nothing to do with it from here */ }
-    else if (elsewhere) actions.append(open);
+    else if (elsewhere) { if (window.DgcDock) actions.append(open, pinButton(pinItem), moreButton("work", item.id, title, open_, pinItem)); else actions.append(open); }
     else if (window.DgcDock) actions.append(open, pinButton(pinItem), moreButton("work", item.id, title, open_, pinItem), remove);
     else actions.append(open, remove);
     end.append(age);
@@ -926,7 +930,7 @@
       else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         const next = e.key === "ArrowDown" ? row.nextElementSibling : row.previousElementSibling;
-        if (next) next.focus(); else if (e.key === "ArrowUp") row.closest(".sessions-popover")?.querySelector("input")?.focus();
+        if (next) next.focus();
       }
     };
     return row;
@@ -937,7 +941,7 @@
     list.replaceChildren();
     wearMarks("work", items.map((item) => ({ id: item.id, born: window.DgcMarks?.born(item.id, item.when) })));
     for (const item of items) {
-      const row = sessionRow(item, before, list === allSessions?.list ? closeAllSessions : null);
+      const row = sessionRow(item, before, null);
       list.append(row);
       if (item.id === focused) row.focus();
     }
@@ -951,6 +955,8 @@
     projectFolders = offered ? { choice: typeof offered.choice === "string" ? offered.choice : "", rows: offered.rows.filter((r) => r && typeof r.folder === "string" && r.folder).slice(0, 200),
       window: offered.window && typeof offered.window.folder === "string" && offered.window.folder ? offered.window : null } : null;
     if (!projectFolders) closeNewSession(false);
+    // Each folder's icon wears a palette of its own, given once and kept (as a session's mark is): asked for here.
+    if (projectFolders && window.DgcFolderPick?.folderId) wearMarks("folder", [...new Set([...projectFolders.rows, ...(projectFolders.window ? [projectFolders.window] : [])].map((r) => window.DgcFolderPick.folderId(r.folder)))].map((id) => ({ id })));
     paintFolderBar();
     // Home's Pip cards follow the choice: read again when it changes.
     const choiceNow = projectFolders ? projectFolders.choice : null;
@@ -967,10 +973,11 @@
     if (search) search.setAttribute("aria-label", !projectFolders ? "Search this project's sessions: names and everything said"
       : chosen ? `Search the sessions in ${chosen}: names and everything said` : "Search every project’s sessions: names and everything said");
     list.setAttribute("aria-label", !projectFolders ? "Sessions in this project" : chosen ? `Sessions in ${chosen}` : "Sessions in every project");
-    // Load more belongs to a search's finds here; with no search it is in the View all popover.
-    if (more) { more.hidden = !(sessionsMoreToLoad && query); more.disabled = false; more.textContent = "Load more"; }
+    // Load more belongs to a search's finds, and to the whole list once View all has it open.
+    if (more) { more.hidden = !(sessionsMoreToLoad && (query || sessionsExpanded)); more.disabled = false; more.textContent = "Load more"; }
     // (One folder's list is not every session there is: what isn't in it keeps its news.)
     if (!query) { if (chosen) noteNews("work", every, every.filter((item) => item.running === true || !!item.windowless).map((item) => item.id), false); else sessionNews(every); }
+    workNews(msg, every);
     status.textContent = msg.error ? String(msg.error)
       : items.length ? "" : query ? `No session mentions “${query}”.`
       : chosen ? `No sessions in ${chosen} yet. Start one with New: it opens in an editor tab.`
@@ -978,83 +985,33 @@
       : "No sessions in this project yet. Start one with New: it opens in an editor tab.";
     if (msg.error) status.dataset.kind = "error"; else delete status.dataset.kind;
     status.hidden = !status.textContent;
-    const shown = query ? items : sessionsShown(items);
+    const few = sessionsShown(items), shown = query || sessionsExpanded ? items : few;
     fillSessions(list, shown);
     const all = viewAllButton();
-    all.hidden = !!query || (items.length <= shown.length && !sessionsMoreToLoad);
-    all.textContent = `View all (${items.length}${sessionsMoreToLoad ? "+" : ""})`;
-    all.title = !projectFolders ? "Every session in this project, with a search" : chosen ? `Every session in ${chosen}, with a search` : "Every session in every project, with a search";
-    // (Open with the dropdown in it, the page stays while the choice changes what it lists.)
-    if (allSessions) { if (all.hidden && !projectFolders) closeAllSessions(); else fillAllSessions(); }
+    // View all (N) while the six show; Show fewer once every one is listed (after Load more, at the list's end).
+    all.hidden = !!query || (items.length <= few.length && !sessionsMoreToLoad);
+    if (all.hidden && !query) sessionsExpanded = false;
+    all.textContent = sessionsExpanded ? "Show fewer" : `View all (${items.length}${sessionsMoreToLoad ? "+" : ""})`;
+    all.setAttribute("aria-expanded", String(sessionsExpanded));
+    all.title = sessionsExpanded ? "Back to the newest six" : !projectFolders ? "Every session in this project, listed here" : chosen ? `Every session in ${chosen}, listed here` : "Every session in every project, listed here";
     if (dock) paintDock();                 // a pinned session's name and what it is doing now
     paintHub();
   }
-  /** "View all (N)", under the three: made once, after the list. */
+  /** "View all (N)" / "Show fewer": made once, at the list's end (after Load more). A click lists every session in
+   *  place, or goes back to the six and to the list's top. The keyboard stays on the button. */
   function viewAllButton() {
     let all = $("sessions-all");
     if (all) return all;
     all = el("button", "sessions-all"); all.id = "sessions-all"; all.type = "button"; all.hidden = true;
-    all.title = "Every session in this project, with a search";
-    all.setAttribute("aria-haspopup", "dialog"); all.setAttribute("aria-expanded", "false");
-    all.onclick = () => (allSessions ? closeAllSessions(true) : openAllSessions());
-    $("sessions-list").after(all);
+    all.title = "Every session in this project, listed here";
+    all.setAttribute("aria-expanded", "false"); all.setAttribute("aria-controls", "sessions-list");
+    all.onclick = () => {
+      sessionsExpanded = !sessionsExpanded;
+      if (lastSessions) renderSessions(lastSessions);
+      if (!sessionsExpanded) { const host = $("sessions-host"); if (host) host.scrollTop = 0; all.scrollIntoView?.({ block: "nearest" }); }
+    };
+    ($("sessions-more") || $("sessions-list")).after(all);
     return all;
-  }
-  /** Every session, over the list: a search field, then the same rows in a list that scrolls and narrows as you type. */
-  function openAllSessions() {
-    const home = $("work-home"), list = $("sessions-list"), host = $("sessions-host");
-    const pop = el("div", "sessions-popover dgc-menu"); pop.setAttribute("role", "dialog"); pop.setAttribute("aria-label", "All sessions");
-    const field = el("input", "sessions-search sessions-all-search"); field.type = "search"; field.placeholder = "Search recent chats";
-    field.setAttribute("aria-label", "Search recent chats"); field.autocomplete = "off"; field.maxLength = 200;
-    const rows = el("ul", "sessions-list sessions-all-list"); rows.setAttribute("aria-label", "Every session in this project");
-    const status = el("p", "sessions-status sessions-all-status"); status.setAttribute("role", "status"); status.hidden = true;
-    const more = el("button", "sessions-more sessions-all-more"); more.type = "button"; more.title = "Show 200 more sessions"; more.hidden = true;
-    more.onclick = () => { more.disabled = true; more.textContent = "Loading…"; vscode.postMessage({ type: "sessionsMore" }); };
-    // The Project Folder dropdown, in the page of them all too: the same choice, at the right end of the search field's row.
-    const folder = folderSlot("sessions-all-folder"), head = el("div", "sessions-all-head");
-    head.append(field, folder);
-    pop.append(head, status, rows);
-    // Over the list, from its first row down to the side bar's end (never shorter than a few rows).
-    pop.style.top = `${list.offsetTop}px`;
-    const room = host.getBoundingClientRect().bottom - list.getBoundingClientRect().top - 12;
-    pop.style.maxHeight = `${Math.max(220, Math.min(440, Math.round(room)))}px`;
-    home.append(pop);
-    const outside = (e) => { if (!pop.contains(e.target) && !$("sessions-all").contains(e.target) && !e.target.closest?.(".dgc-folder-menu")) closeAllSessions(); };
-    document.addEventListener("pointerdown", outside, true);
-    pop.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeAllSessions(true); }
-      else if (e.key === "ArrowDown" && e.target === field) { e.preventDefault(); rows.querySelector(".session-row")?.focus(); }
-    });
-    field.addEventListener("input", fillAllSessions);
-    allSessions = { pop, field, list: rows, status, more, outside, folder };
-    $("sessions-all").setAttribute("aria-expanded", "true");
-    fillAllSessions();
-    pop.scrollIntoView({ block: "nearest" });
-    field.focus();
-  }
-  function fillAllSessions() {
-    if (!allSessions) return;
-    const { field, list, status, more } = allSessions, query = field.value.trim(), wanted = query.toLowerCase();
-    // (On All projects a folder's name finds its sessions too.)
-    const found = wanted ? sessionItems.filter((item) => `${sessionTitle(item)}\n${projectFolders && !projectFolders.choice ? item.project || "" : ""}`.toLowerCase().includes(wanted)) : sessionItems;
-    allSessions.folder.hidden = !projectFolders;
-    paintFolderSlot(allSessions.folder, "");
-    more.remove();
-    fillSessions(list, found);
-    // More to load, and no search narrowing what is here: the rest are asked for 200 at a time.
-    more.hidden = !sessionsMoreToLoad || !!wanted; more.disabled = false; more.textContent = "Load more";
-    const last = el("li", "sessions-all-more-row"); last.hidden = more.hidden; last.append(more); list.append(last);
-    status.textContent = found.length ? "" : `No session matches “${query}”.`;
-    status.hidden = !!found.length;
-  }
-  function closeAllSessions(refocus = false) {
-    if (!allSessions) return;
-    document.removeEventListener("pointerdown", allSessions.outside, true);
-    const held = allSessions.pop.contains(document.activeElement);
-    allSessions.pop.remove(); allSessions = null;
-    const all = $("sessions-all");
-    all?.setAttribute("aria-expanded", "false");
-    if ((refocus || held) && all && !all.hidden) all.focus();
   }
   // ---- the dock at the foot of the side bar (media/shared/dock.js), and each session's mark (media/shared/marks.js) ----
   // The host keeps what is pinned and the palette every session's mark wears (src/dock.ts) and says so in one message,
@@ -1071,6 +1028,8 @@
   // Until the host has said what it keeps, a mark wears what its id alone gives it, and nothing is asked.
   const keeper = window.DgcMarks?.keeper((message) => vscode.postMessage(message)) || null;
   const paletteOf = (kind, id) => keeper?.palette(kind, id) || "";
+  // A Work folder's icon (media/shared/folderpick.js) wears the palette kept for it, here and in the Pips view of this side bar.
+  window.DgcFolderPick?.setPalette?.((folder) => (keeper?.heard() ? paletteOf("folder", window.DgcFolderPick.folderId(folder)) : ""));
   const colourOf = (kind, id) => ({ chosen: paletteOf(kind, id) });
   /** The things of one kind now in view, in their list's order ([{ id, born }]): each without a palette gets one. */
   const wearMarks = (kind, list) => keeper?.wear(kind, list);
@@ -1132,7 +1091,19 @@
         item.dot = running ? "live" : live?.open ? "open" : "";
         item.state = live?.waiting === true ? "Wants your okay" : live?.windowless ? "Running, no window" : running ? "Running" : live?.open ? "Open in a tab"
           : `Work session${live ? ` · ${sessionAge(live.when)}` : ""}`;
+        // Another folder's session: its tile says where it runs; one whose folder is gone says so (and doesn't open).
+        const folder = pin.ref?.folder ? String(pin.ref.folder_name || live?.projectName || pin.ref.folder) : "";
+        if (live?.gone === true) item.state = `Folder not found · ${live.projectPath || pin.ref?.folder || ""}`.replace(/ · $/, "");
+        else if (folder) item.state = `${item.state} · in ${folder}`;
         item.icon = markHtml("work", pin.id, running);
+      } else if (pin.kind === "project") {
+        // A ChatDGC project: its pinwheel and name, and how many chats it has.
+        const live = projects.find((x) => String(x.id) === pin.id), running = projectAnswering(pin.id);
+        if (live?.name) item.title = String(live.name);
+        item.colour = colourOf("project", pin.id);
+        item.dot = running ? "live" : "";
+        item.state = live ? `Project · ${plural(Number(live.chats) || 0, "chat")}` : "Project";
+        item.icon = markHtml("project", pin.id, running);
       } else if (pin.kind === "chat") {
         const live = chatItems.find((c) => c.id === pin.id), running = answeringChats.has(pin.id), open = openChats.has(pin.id);
         if (live?.title) item.title = String(live.title);
@@ -1174,7 +1145,7 @@
     wearTabSession();
     if (!dock) return;
     // A pinned session with no palette yet: the pinned ones are its neighbours.
-    for (const kind of ["work", "chat", "widget"]) wearMarks(kind, dockState.pins.filter((pin) => pin.kind === kind).map((pin) => ({ id: pin.id, born: bornOf(kind, pin.id) })));
+    for (const kind of ["work", "chat", "widget", "project"]) wearMarks(kind, dockState.pins.filter((pin) => pin.kind === kind).map((pin) => ({ id: pin.id, born: bornOf(kind, pin.id) })));
     dock.update({ items: dockItems(), show: dockState.show, size: dockState.size, offers: { chat: chatsAvailable, pip: !!window.DgcPips?.mount } });
   }
   function onDock(msg) {
@@ -1339,7 +1310,9 @@
     const home = !nested && item.project ? projects.find((x) => x.id === item.project) : null;
     if (home) bit("chat-project", home.name);
     if (answering) bit("chat-state", "Answering"); else if (openChats.has(item.id)) bit("chat-state", "Open in a tab");
-    const words = nested ? "" : plainPreview(typeof item.match === "string" && item.match ? item.match : item.preview);
+    // (A chat inside a project is the same row as any chat, asked 13 Nov: its mark, its last words, its age and its
+    // actions. It had neither a mark nor its words.)
+    const words = plainPreview(typeof item.match === "string" && item.match ? item.match : item.preview);
     if (words) bit("chat-preview", words);
     main.append(name);
     if (sub.childElementCount) main.append(sub);
@@ -1356,7 +1329,7 @@
     const acts = el("span", "session-actions chat-acts");
     if (window.DgcDock) acts.append(pinButton(pinItem), moreButton("chat", pinItem.id, title, openIt, pinItem), remove); else acts.append(remove);
     end.append(acts);
-    if (nested) row.append(main, end); else row.append(blobSpan("chat", pinItem.id, answering), main, end);
+    row.append(blobSpan("chat", pinItem.id, answering), main, end);
     row.onclick = (e) => { if (e.detail < 2) openIt(); };
     row.onkeydown = (e) => {
       if (e.target !== row) return;
@@ -1393,6 +1366,8 @@
       if (chat && accepts(e.dataTransfer.types)) { e.preventDefault(); onDrop(chat); }
     });
   }
+  /** Is a chat inside this project answering now? (Its pinwheel turns while one is.) */
+  const projectAnswering = (id) => chatItems.some((c) => c.project === id && answeringChats.has(c.id)) || (projectChats.get(id) || []).some((c) => answeringChats.has(c.id));
   function toggleProject(id) {
     if (projectsOpen.has(id)) projectsOpen.delete(id); else { projectsOpen.add(id); projectChats.delete(id); }
     try { vscode.setState({ ...(vscode.getState() || {}), projectsOpen: [...projectsOpen] }); } catch {}
@@ -1407,7 +1382,7 @@
     if (box.hidden) return;
     // Drawn again only when something changed: the home refreshes after every turn, and a redraw replaces the
     // buttons under a pointer, so a click that lands mid-redraw would be lost.
-    const drawn = JSON.stringify([projects, [...projectsOpen], [...projectChats], [...openChats]]);
+    const drawn = JSON.stringify([projects, [...projectsOpen], [...projectChats], [...openChats], [...answeringChats], dockColours, dockState.pins.map((pin) => pin.key)]);
     if (drawn === lastProjects && list.childElementCount) return;
     lastProjects = drawn;
     const focused = document.activeElement?.closest?.(".project-row, .chat-row-nested")?.dataset.id;
@@ -1423,6 +1398,8 @@
       start.append(button);
       list.append(start);
     }
+    // Each project's pinwheel wears a palette of its own, given once and kept (as a session's mark is).
+    wearMarks("project", projects.map((project) => ({ id: String(project.id || "") })));
     for (const project of projects) {
       const id = String(project.id || ""), named = String(project.name || "Project");
       const item = el("li", "project-item");
@@ -1435,12 +1412,20 @@
       toggle.setAttribute("aria-expanded", String(open));
       toggle.setAttribute("aria-label", `${open ? "Hide" : "Show"} the chats in ${named}`);
       toggle.title = open ? "Hide its chats" : "Show its chats";
-      const folder = el("span", "codicon codicon-folder project-icon"); folder.setAttribute("aria-hidden", "true");
-      folder.dataset.color = String(project.color || "purple");
+      // Its pinwheel (media/shared/pinwheel.css, asked 13 Nov: it was a folder icon), still at rest; it turns only
+      // while a chat inside the project is answering.
+      const folder = el("span", "project-mark"); folder.setAttribute("aria-hidden", "true");
+      folder.innerHTML = markHtml("project", id, projectAnswering(id));
       const name = el("span", "session-name project-name"); name.textContent = named; name.title = named;
       const count = el("span", "project-count"); count.textContent = String(project.chats || 0);
-      row.append(toggle, folder, name, count);
       const openIt = () => vscode.postMessage({ type: "chatdgcProjectOpen", id });
+      // Pin it to the dock, and "…" for its colour, as a chat's row.
+      const pinItem = { kind: "project", id, title: named };
+      const acts = el("span", "session-actions project-acts");
+      if (window.DgcDock) acts.append(pinButton(pinItem), moreButton("project", id, named, openIt, pinItem));
+      // (Its count stands where a chat's age does, and gives its place to the actions the same way.)
+      const end = el("span", "session-end"); end.append(count, acts);
+      row.append(toggle, folder, name, end);
       row.onclick = (e) => { if (e.detail < 2) openIt(); };
       row.onkeydown = (e) => {
         if (e.target !== row) return;
@@ -1504,7 +1489,7 @@
   function showSideTab(name, focus = false) {
     if (chatPlace !== "home") return;
     const next = SIDE_TABS.includes(name) && sideTabOffered(name) ? name : "home";
-    closeAllSessions(); hub?.closeMenu(); window.DgcBlob?.close(); window.DgcFolderPick?.close();
+    hub?.closeMenu(); window.DgcBlob?.close(); window.DgcFolderPick?.close();
     // The Pips tab leads to the list of your Pips, never to the chat that was last open in it.
     if (next === "pips") openPipsAt({ overview: true });
     else { sideTab = lastListTab = next; showSessions(); }
@@ -1551,8 +1536,38 @@
   }
   const sessionNews = (items) => noteNews("work", items, items.filter((item) => item.running === true || !!item.windowless).map((item) => item.id), !sessionsMoreToLoad);
   const chatNews = (items) => noteNews("chat", items, items.filter((item) => answeringChats.has(item.id)).map((item) => String(item.id)), false);
+  // A Work session's reply nobody was looking at (13 Nov): the host says so with the list (`news`: the session, when,
+  // and the reply's first words), since the tab knows when its turn ends and whether it is in front. (Noticing it here,
+  // from one list that says "running" and a later one that doesn't, missed every turn that ended before the first of
+  // those lists arrived.) Each is a card under New like a chat's new answer, until it is seen: opened or dismissed
+  // here (the host is told, and stops saying it), or its tab comes to the front (the list says `watched`).
+  const workReplies = new Map(), workSeen = new Map();          // by session: { at, preview } as the host said it; the last `at` seen
+  function workNews(msg, items) {
+    const before = JSON.stringify(hubNews.work);
+    for (const item of items) if (item.running === true || item.windowless) workReplies.delete(item.id);
+    for (const n of Array.isArray(msg.news) ? msg.news.slice(0, 60) : []) {
+      const id = String(n?.id || ""), at = Number(n?.at);
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(id) || !Number.isFinite(at) || (workSeen.get(id) ?? -Infinity) >= at) continue;
+      const had = workReplies.get(id);
+      if (!had || had.at < at) { workReplies.set(id, { at, preview: typeof n.preview === "string" ? n.preview.slice(0, 300) : "" }); hubNews.work[id] = Date.now(); }
+      else if (hubNews.work[id] === undefined) hubNews.work[id] = Date.now();
+    }
+    // In front in its own tab: seen.
+    for (const item of items) if (item.watched === true && (hubNews.work[item.id] !== undefined || workReplies.has(item.id))) {
+      if (workReplies.has(item.id)) workSeen.set(item.id, workReplies.get(item.id).at);
+      workReplies.delete(item.id); delete hubNews.work[item.id];
+    }
+    if (JSON.stringify(hubNews.work) !== before) keepHubNews();
+  }
+  /** A session's reply was seen here: the host stops saying it, and a list already on its way doesn't bring it back. */
+  function workReplySeen(id) {
+    const reply = workReplies.get(id);
+    if (!reply) return;
+    workSeen.set(id, reply.at); workReplies.delete(id);
+    vscode.postMessage({ type: "homeSessionSeen", id });
+  }
   /** Opened or dismissed: no longer news. */
-  function seenNews(kind, id) { if (hubNews[kind][id] === undefined) return; delete hubNews[kind][id]; keepHubNews(); paintHub(); }
+  function seenNews(kind, id) { if (kind === "work") workReplySeen(id); if (hubNews[kind][id] === undefined) return; delete hubNews[kind][id]; keepHubNews(); paintHub(); }
   // What was made (a page, a document, slides, a spreadsheet, a dashboard) by a session or a chat is news too: one card
   // each, kept by the host (src/pipHomeDismiss.ts), which stamps them on the page and says when they change. A new
   // version changes its card; opened, dismissed or removed, it goes.
@@ -1625,7 +1640,13 @@
         if (made) needs.push(made);
       }
       else if (item.windowless) needs.push({ ...card, group: "needs", title: "Still running, with no window to watch it in", chips: [String(item.windowless).slice(0, 80), count].filter((c) => c && c !== "working"), actions: [open] });
-      else if (hubNews.work[item.id] !== undefined) fresh.push({ ...card, group: "new", at: hubNews.work[item.id], from: `${title} · Work · ${chatAge(hubNews.work[item.id])}`, title: "Finished its work", chips: [count], actions: [open, dismiss] });
+      else if (hubNews.work[item.id] !== undefined) {
+        // A reply the host told of is a card like a chat's new answer: the reply's own first words. One only noticed
+        // here (a session that ran with no window) says it has finished.
+        const reply = workReplies.get(item.id);
+        fresh.push({ ...card, group: "new", at: hubNews.work[item.id], from: `${title} · Work · ${chatAge(hubNews.work[item.id])}`,
+          title: reply ? plainPreview(reply.preview) || "Has a new reply" : "Finished its work", chips: reply ? ["New reply"] : [count], actions: [open, dismiss] });
+      }
     }
     for (const item of chatsAvailable ? chatItems : []) {
       const id = String(item.id || "");
@@ -1685,7 +1706,7 @@
   }
   /** Clear, beside "New": every card it covers. All of the Pips' news goes in one go, as Dismiss all did. */
   function hubClear(keys) {
-    for (const key of keys) { if (key.startsWith("work:")) delete hubNews.work[key.slice(5)]; else if (key.startsWith("chat:")) delete hubNews.chat[key.slice(5)]; }
+    for (const key of keys) { if (key.startsWith("work:")) { workReplySeen(key.slice(5)); delete hubNews.work[key.slice(5)]; } else if (key.startsWith("chat:")) delete hubNews.chat[key.slice(5)]; }
     keepHubNews();
     homePagesGone(keys.filter((key) => key.startsWith("page:")).map((key) => key.slice(5)));
     const mine = keys.filter((key) => key.startsWith("pip:")), every = (pipModel?.cards || []).filter((c) => c.group === "new");
@@ -3412,6 +3433,12 @@
   // pointer over a row does not summon one, and short enough that asking for one is not a chore.
   const TIP_DELAY_MS = 700;
   const TIP_WARM_MS = 300;
+  // The side bar's own page (the tab bar, Home, the Work and Chat lists, the dock): a label comes only to a pointer that
+  // has rested about 800 ms, every time (asked 13 Nov). No warm window there: going along the four tabs showed each
+  // one's label the moment the pointer arrived. A pointer that leaves first gets none; the keyboard's focus is still
+  // labelled at once.
+  const SIDE_TIP_DELAY_MS = 800;
+  const sideBarTip = (el0) => !!el0.closest?.("#side-tabs, #sessions-host, #dgc-dock");
   const hoverTip = (() => {
     const node = el("div", "tip");
     node.hidden = true; node.setAttribute("role", "tooltip"); node.id = "hover-tip";
@@ -3458,7 +3485,7 @@
       // Both numbers are Codex's, read from its shipped webview bundle (delayDuration 700,
       // skipDelayDuration 300). Ours were 380 and 500: twice as eager to appear, and staying in
       // the instant mode nearly twice as long.
-      const delay = instant || Date.now() - warm < TIP_WARM_MS ? 0 : TIP_DELAY_MS;
+      const delay = instant ? 0 : sideBarTip(el0) ? SIDE_TIP_DELAY_MS : Date.now() - warm < TIP_WARM_MS ? 0 : TIP_DELAY_MS;
       timer = setTimeout(() => {
         if (target !== el0 || !el0.isConnected) return;
         // A long name sliding in a menu shows its whole self (DgcMenu.slide): a label would only cover the row above.

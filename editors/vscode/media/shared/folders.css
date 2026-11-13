@@ -1,0 +1,26 @@
+/* The same hue, saturation and lightness tokens as the Pinwheel/Folio/Portal sets. */
+.folder-icon{--folder-size:160px;--h:213;--sat:91%;--light:57%;--paper-x:20%;--paper-top:10%;--paper-height:75%;--paper-offset:5%;--tab-width:40%;--tab-height:13.75%;--bridge:8.125%;--flap-height:40%;--lift:-4px;--back-lift:-6px;position:relative;display:block;flex:none;width:var(--folder-size);height:var(--folder-size);border-radius:25%;overflow:hidden;isolation:isolate;box-sizing:border-box;border-top:2px solid hsl(var(--h) 90% 92% / .38);background:linear-gradient(145deg,hsl(var(--h) var(--sat) 72%) 0%,hsl(var(--h) var(--sat) var(--light)) 45%,hsl(var(--h) var(--sat) 28%) 100%);box-shadow:inset 0 0 0 1px #ffffff12,inset 0 -1px 1px #00000012}
+.folder-icon *{box-sizing:border-box}
+.folder--sm{--folder-size:96px;--paper-x:20.8333%;--paper-top:8.3333%;--paper-height:66.6667%;--paper-offset:4.1667%;--tab-width:37.5%;--tab-height:12.5%;--bridge:8.3333%;--flap-height:37.5%;--lift:-3px;--back-lift:-4px}
+.folder--md{--folder-size:128px;--paper-x:18.75%;--paper-top:9.375%;--paper-height:75%;--paper-offset:4.6875%;--tab-width:37.5%;--tab-height:12.5%;--bridge:7.8125%;--flap-height:37.5%;--lift:-3px;--back-lift:-5px}
+.folder--lg{--folder-size:160px}
+.folder-icon .folder-paper{position:absolute;left:var(--paper-x);right:var(--paper-x);height:var(--paper-height);transform-origin:50% 100%;z-index:10;border-radius:calc(var(--folder-size)*.075)}
+.folder-icon .folder-paper--back{top:calc(var(--paper-top) + var(--paper-offset));background:hsl(var(--h) 65% 90% / .65);border-radius:calc(var(--folder-size)*.1)}
+.folder-icon .folder-paper--right{transform:rotate(4deg)}
+.folder-icon .folder-paper--left{transform:rotate(-4deg)}
+.folder-icon .folder-paper--front{top:var(--paper-top);background:hsl(var(--h) 65% 97%);border-top:1px solid hsl(var(--h) 65% 86%);padding:calc(var(--folder-size)*.1);box-shadow:0 1px 3px hsl(var(--h) 70% 22% / .1)}
+.folder-icon .folder-line{display:block;height:calc(var(--folder-size)*.025);margin-bottom:calc(var(--folder-size)*.0375);border-radius:99px;background:hsl(var(--h) 70% 65% / .4);width:75%}
+.folder-icon .folder-line:nth-child(2){width:50%}.folder-icon .folder-line:nth-child(3){width:66.6667%}
+.folder-icon .folder-flap{position:absolute;inset:0;z-index:20;pointer-events:none}
+.folder-icon .folder-flap-body,.folder-icon .folder-tab,.folder-icon .folder-tab-round,.folder-icon .folder-tab-bridge{position:absolute;background:hsl(var(--h) 90% 77% / .5);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
+.folder-icon .folder-flap-body{left:0;right:0;bottom:0;height:var(--flap-height);border-top-right-radius:calc(var(--folder-size)*.075)}
+.folder-icon .folder-tab{left:0;bottom:var(--flap-height);height:var(--tab-height);width:var(--tab-width);border-top-left-radius:calc(var(--folder-size)*.075)}
+.folder-icon .folder-tab-round{left:var(--tab-width);bottom:var(--flap-height);height:var(--tab-height);width:var(--bridge);border-top-right-radius:calc(var(--folder-size)*.25)}
+.folder-icon .folder-tab-bridge{left:calc(var(--tab-width) + var(--bridge));bottom:var(--flap-height);height:var(--bridge);width:var(--bridge);mask:radial-gradient(200% 200% at 100% 0%,transparent 50%,black 50%);-webkit-mask:radial-gradient(200% 200% at 100% 0%,transparent 50%,black 50%)}
+.folder-icon .folder-label{position:absolute;left:10%;bottom:10%;z-index:30;padding:2.5% 5%;border-radius:99px;background:hsl(var(--h) 55% 15% / .25);color:#fff;font:500 clamp(9px,calc(var(--folder-size)*.075),12px)/1.2 Arial,Helvetica,sans-serif;white-space:nowrap;max-width:80%;overflow:hidden;text-overflow:ellipsis}
+.folder-icon:not([data-motion="framer"]) .folder-paper{transition:transform 400ms cubic-bezier(.2,.8,.2,1)}
+.folder-icon:not([data-motion="framer"]):is(:hover,.is-open) .folder-paper--right{transform:translateY(var(--back-lift)) rotate(6deg)}
+.folder-icon:not([data-motion="framer"]):is(:hover,.is-open) .folder-paper--left{transform:translateY(var(--back-lift)) rotate(-6deg)}
+.folder-icon:not([data-motion="framer"]):is(:hover,.is-open) .folder-paper--front{transform:translateY(var(--lift))}
+.folder--ember{--h:3;--sat:80%;--light:58%}.folder--peach{--h:22;--sat:92%;--light:67%}.folder--saffron{--h:39;--sat:96%;--light:52%}.folder--citron{--h:62;--sat:76%;--light:56%}.folder--lime{--h:90;--sat:74%;--light:52%}.folder--fern{--h:133;--sat:52%;--light:42%}.folder--mint{--h:158;--sat:65%;--light:71%}.folder--lagoon{--h:177;--sat:83%;--light:43%}.folder--ice{--h:195;--sat:86%;--light:74%}.folder--azure{--h:213;--sat:91%;--light:57%}.folder--iris{--h:247;--sat:87%;--light:65%}.folder--lilac{--h:273;--sat:67%;--light:77%}.folder--orchid{--h:294;--sat:70%;--light:51%}.folder--rose{--h:331;--sat:88%;--light:64%}
+@media(prefers-reduced-motion:reduce){.folder-icon:not([data-motion="framer"]) .folder-paper{transition:none!important}.folder-icon:not([data-motion="framer"]):is(:hover,.is-open) .folder-paper--right{transform:rotate(4deg)}.folder-icon:not([data-motion="framer"]):is(:hover,.is-open) .folder-paper--left{transform:rotate(-4deg)}.folder-icon:not([data-motion="framer"]):is(:hover,.is-open) .folder-paper--front{transform:none}}

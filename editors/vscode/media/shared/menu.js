@@ -192,5 +192,38 @@
     }
   }
 
+  // ---- a menu's ground is one opaque colour ---------------------------------------------------------------------------
+  // A menu stands on the raised grey, --surface2, which is the theme's input background. Some themes give that a
+  // see-through colour (Cursor's dark themes: #ffffff0d), and a menu then let the page under it show through: Home's
+  // Show menu over a card, text on text (13 Nov). A stylesheet can't lay one colour over another into a single colour,
+  // so it is done here: the raised grey over the page's own ground, as --raised on the page's root, which every menu
+  // takes (menu.css) and the Pips view's menus inherit. Read again when the theme changes. Nothing is set where the
+  // raised grey is opaque already (every stock theme), or on a page that can't be read: the stylesheet's colour stands.
+  function raise(doc) {
+    try {
+      const view = doc.defaultView, at = doc.body || doc.documentElement;
+      if (!view || !at) return;
+      const probe = doc.createElement("span");
+      probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;background-color:var(--surface2);color:var(--bg)";
+      at.append(probe);
+      const css = view.getComputedStyle(probe), read = (text) => { const n = String(text || "").match(/-?[\d.]+(e-?\d+)?/g)?.map(Number) || []; return n.length < 3 ? null : /^color\(/.test(text) ? [n[0] * 255, n[1] * 255, n[2] * 255, n[3] ?? 1] : [n[0], n[1], n[2], n[3] ?? 1]; };
+      const top = read(css.backgroundColor), under = read(css.color);
+      probe.remove();
+      const solid = top && under && top[3] < 0.999 ? `rgb(${[0, 1, 2].map((i) => Math.round(top[i] * top[3] + under[i] * (1 - top[3]))).join(", ")})` : "";
+      const now = doc.documentElement.style.getPropertyValue("--raised");
+      if (solid !== now) { if (solid) doc.documentElement.style.setProperty("--raised", solid); else doc.documentElement.style.removeProperty("--raised"); }
+    } catch { /* the stylesheet's own colour stands */ }
+  }
+  if (root.document && typeof root.MutationObserver === "function") {
+    const doc = root.document, again = () => raise(doc);
+    const start = () => {
+      again();
+      // The editor changes its theme by the root's style and the body's class.
+      try { const watch = new root.MutationObserver(again); watch.observe(doc.documentElement, { attributes: true, attributeFilter: ["style", "class"] }); if (doc.body) watch.observe(doc.body, { attributes: true, attributeFilter: ["class"] }); } catch { /* read once */ }
+      try { root.addEventListener("load", again); } catch { /* read once */ }
+    };
+    if (doc.body) start(); else doc.addEventListener("DOMContentLoaded", start);
+  }
+
   root.DgcMenu = Object.freeze({ html, keys, handle, hintHtml, KEY, esc, CHECK, DOTS, more, pill, item, slide });
 })();

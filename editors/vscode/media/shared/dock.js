@@ -67,6 +67,7 @@
     let stop = null;                       // the key of the item Tab lands on ("+" for New); null until there is one
     let pointer = null;                    // the pointer's x over the dock, or null
     let named = null;                      // the button whose name shows
+    let nameTimer = 0, nameFor = null;     // the button a resting pointer is about to name
     let cur = [], vel = [], frame = 0, last = 0;
     let up = false, dropTimer = 0, inBand = false;
     let drag = null;                       // a press on a pinned item: { key, button, id, x0, y0, x, y, from, to, active, tx }
@@ -239,6 +240,7 @@
 
     // ---- names ---------------------------------------------------------------------------------------------------
     function name(button) {
+      if (!button && nameTimer) { view.clearTimeout(nameTimer); nameTimer = 0; nameFor = null; }
       if (button === named) { placeTip(); return; }
       if (named) named.removeAttribute("aria-describedby");
       named = button || null;
@@ -284,13 +286,26 @@
     }
 
     // ---- pointer, keys -------------------------------------------------------------------------------------------
+    // A tile's name comes to a pointer that has rested on it about 800 ms (asked 13 Nov: it was there the moment the
+    // pointer arrived), as a tab's label does. Once a name is up it goes along the tiles with the pointer; leaving the
+    // dock takes it away, and a pointer that only passes over gets none. The keyboard's focus is named at once.
+    const NAME_AFTER_MS = 800;
+    function nameSoon(button) {
+      if (named) { nameLater(null); name(button); return; }
+      if (button === nameFor) return;
+      nameLater(button);
+    }
+    function nameLater(button) {
+      view.clearTimeout(nameTimer); nameTimer = 0; nameFor = button || null;
+      if (nameFor) nameTimer = view.setTimeout(() => { const due = nameFor; nameTimer = 0; nameFor = null; if (due && due.isConnected && pointer !== null && !drag?.active) name(due); }, NAME_AFTER_MS);
+    }
     bar.addEventListener("pointermove", (e) => {
       if (e.pointerType === "touch") return;
       pointer = e.clientX; kick();
       const over = drag?.active ? null : e.target.closest?.(".dgc-dock-item");
-      if (over) name(over);
+      if (over) nameSoon(over); else nameLater(null);
     });
-    bar.addEventListener("pointerleave", () => { if (drag?.active) return; pointer = null; kick(); if (!named?.matches(":focus-visible")) name(null); });
+    bar.addEventListener("pointerleave", () => { if (drag?.active) return; pointer = null; kick(); nameLater(null); if (!named?.matches(":focus-visible")) name(null); });
     bar.addEventListener("click", (e) => {
       if (swallow) { swallow = false; e.preventDefault(); e.stopPropagation(); return; }    // a drag's release
       const button = e.target.closest(".dgc-dock-item");

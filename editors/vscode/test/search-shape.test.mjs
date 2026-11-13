@@ -37,7 +37,7 @@ const shape = (page, selector, inPips = false) => page.evaluate(([s, pips]) => {
 }, [selector, inPips]);
 
 for (const theme of ["dark-modern", "light-modern", "hc"]) for (const width of [700, 300]) {
-  test(`Work, Chat and View all: each search field has the New button's corner and height, and its focus ring follows the corner (${theme}, ${width}px)`, async (t) => {
+  test(`Work and Chat: each search field has the New button's corner and height, and its focus ring follows the corner (${theme}, ${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openHome(browser, { theme, width, tab: "work", motion: "reduce" });
     try {
@@ -61,14 +61,7 @@ for (const theme of ["dark-modern", "light-modern", "hc"]) for (const width of [
       const clear = await x.page.evaluate(() => { const e = document.getElementById("sessions-search"); return [e.value, e.scrollWidth <= e.clientWidth + 1]; });
       assert.deepEqual(clear, ["tomato", true], "what is typed, and its clear ×, are inside the field");
       await x.page.fill("#sessions-search", "");
-      // View all's search.
-      await x.page.click("#sessions-all");
-      await x.page.waitForSelector(".sessions-popover .sessions-all-search");
-      await settle(x.page);
-      const all = await shape(x.page, ".sessions-popover .sessions-all-search"), allPick = await shape(x.page, ".sessions-popover .dgc-folder");
-      assert.deepEqual([all.corners, all.height], [fresh.corners, fresh.height], "View all's search: the same corner and height");
-      assert.ok(Math.abs(all.mid - allPick.mid) <= 0.5 && allPick.height === all.height, "on one line with the dropdown beside it, the same height");
-      await x.page.keyboard.press("Escape");
+      // (View all has no search field of its own since 13 Nov: it lists every session in place, under this one.)
       // Chat.
       await x.page.click("#side-tab-chat");
       await settle(x.page);

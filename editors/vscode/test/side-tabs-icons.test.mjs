@@ -8,7 +8,7 @@
 //   - Home's number stays a number, small, on its icon's upper right corner, never near Work's icon
 //   - the bar is the same height in both forms, so the room the page keeps under the glass (--glass-top) is the same,
 //     and nothing moves up or down across the switch; the tab you are on is still lit
-//   - pointing at an icon lights it and turns it over; Left, Right, Home and End work as before
+//   - pointing at an icon only changes its colour (13 Nov: it lit and turned over); Left, Right, Home and End work as before
 //   - forced colours: the icons are in the system's colours, the tab you are on in Highlight
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
@@ -44,8 +44,8 @@ const barNow = (page) => page.evaluate(() => {
   const nav = document.getElementById("side-tabs"), bar = nav.querySelector(".dgc-tabs-bar");
   const drawn = (n) => !!n && n.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && n.getBoundingClientRect().width > 1.5 && n.getBoundingClientRect().height > 1.5;
   const tabs = [...nav.querySelectorAll('[role="tab"]')].filter((t) => t.checkVisibility()).map((t) => {
-    const front = t.querySelector(".dgc-tab-front"), back = t.querySelector(".dgc-tab-back"), flip = t.querySelector(".dgc-tab-flip");
-    const word = front.querySelector(".dgc-tab-word") || front, icon = front.querySelector(".codicon"), backIcon = back.querySelector(".codicon");
+    const front = t.querySelector(".dgc-tab-front"), flip = t.querySelector(".dgc-tab-flip");
+    const word = front.querySelector(".dgc-tab-word") || front, icon = front.querySelector(".codicon");
     const face = t.querySelector(".dgc-tab-face"), count = t.querySelector(".dgc-tab-count"), glyph = icon ? getComputedStyle(icon, "::before") : null;
     return { id: t.dataset.tab, box: rect(t), selected: t.getAttribute("aria-selected") === "true", tabIndex: t.tabIndex, title: t.getAttribute("title") || "", label: t.getAttribute("aria-label") || "",
       color: getComputedStyle(t).color, ground: getComputedStyle(t).backgroundColor, glow: Number(getComputedStyle(t.querySelector(".dgc-tab-glow")).opacity),
@@ -55,7 +55,7 @@ const barNow = (page) => page.evaluate(() => {
       flip: rect(flip),
       icon: icon ? { seen: drawn(icon), cls: [...icon.classList].filter((c) => c.startsWith("codicon-")).join(" "), hidden: icon.getAttribute("aria-hidden"), ...rect(icon),
         font: getComputedStyle(icon).fontFamily, glyph: glyph.content, color: getComputedStyle(icon).color, opacity: Number(getComputedStyle(front).opacity), turn: getComputedStyle(front).transform } : null,
-      backIcon: backIcon ? { seen: drawn(backIcon), opacity: Number(getComputedStyle(back).opacity), turn: getComputedStyle(back).transform } : null,
+      copies: t.querySelectorAll(".codicon").length,
       face: face && drawn(face) && face.querySelector(".dgc-plush") ? rect(face) : null,
       count: count && !count.hidden ? { text: count.textContent, ...rect(count), fontSize: parseFloat(getComputedStyle(count).fontSize), color: getComputedStyle(count).color, ground: getComputedStyle(count).backgroundColor,
         textFits: count.scrollWidth <= count.clientWidth + 0.5 } : null };
@@ -276,36 +276,34 @@ test("the bar is the same height in both forms, the page keeps the same room und
   }
 });
 
-test("an icon tab: the one you are on is lit in the accent, pointing at another lights it and turns its icon over", async (t) => {
+test("an icon tab: the one you are on is lit in the accent; pointing at another only changes its icon's colour (no glow, no turn: 13 Nov)", async (t) => {
   if (skipOrFail(t)) return;
   for (const theme of ["dark-modern", "light-modern"]) {
     const x = await openDock(browser, { tab: "home", theme, width: 200, height: 500 });
     try {
       const tone = (token) => x.page.evaluate((name) => { const probe = document.createElement("span"); probe.style.color = `var(${name})`; document.body.append(probe); const c = getComputedStyle(probe).color; probe.remove(); return c; }, token);
-      const accent = await tone("--accent-text"), quiet = await tone("--text-2");
+      const accent = await tone("--accent-text"), quiet = await tone("--text-2"), text = await tone("--text");
       let bar = await barNow(x.page);
       assert.equal(form(bar), "icons");
       assert.deepEqual([by(bar, "home").icon.color, by(bar, "home").glow > 0.95], [accent, true], `${theme}: Home's icon is in the accent's text tone, with the glow behind it`);
-      for (const id of ["work", "chat"]) assert.deepEqual([by(bar, id).icon.color, by(bar, id).glow, by(bar, id).icon.opacity, by(bar, id).backIcon.opacity], [quiet, 0, 1, 0], `${theme}: ${id} is quiet at rest`);
+      for (const id of ["work", "chat"]) assert.deepEqual([by(bar, id).icon.color, by(bar, id).glow, by(bar, id).icon.opacity, by(bar, id).copies], [quiet, 0, 1, 1], `${theme}: ${id} is quiet at rest, its icon in it once`);
       for (const id of ["work", "chat"]) {
         await x.page.mouse.move(...centre(by(bar, id).box), { steps: 3 });
         await x.page.waitForTimeout(900);
         const now = by(await barNow(x.page), id);
-        assert.equal(now.icon.color, accent, `${theme}: ${id} pointed at is in the accent`);
-        assert.ok(now.glow > 0.5 && now.glow < 0.95, `${theme}: with a softer glow than the tab you are on (${now.glow})`);
-        assert.equal(now.icon.opacity, 0, `${theme}: the icon has tipped away`);
-        assert.match(now.icon.turn, /^matrix3d\(/, `${theme}: it turned about its foot (${now.icon.turn})`);
-        assert.deepEqual([now.backIcon.seen, now.backIcon.opacity], [true, 1], `${theme}: and the same icon has risen in its place`);
+        assert.equal(now.icon.color, text, `${theme}: ${id} pointed at is in the text colour, not the accent`);
+        assert.equal(now.glow, 0, `${theme}: with no glow`);
+        assert.deepEqual([now.icon.opacity, now.icon.turn], [1, "none"], `${theme}: and its icon stays as it is`);
         assert.equal(now.selected, false, "pointing chooses nothing");
       }
-      // Pips: its face is lit by the same glow.
+      // Pips: its face stays, with no glow behind it.
       await x.page.mouse.move(...centre(by(bar, "pips").box), { steps: 3 });
       await x.page.waitForTimeout(900);
       const pips = by(await barNow(x.page), "pips");
-      assert.ok(pips.glow > 0.5 && pips.face, `${theme}: Pips pointed at glows behind its face (${pips.glow})`);
+      assert.ok(pips.glow === 0 && pips.face, `${theme}: Pips pointed at has its face and no glow (${pips.glow})`);
       await x.page.mouse.move(100, 300); await x.page.waitForTimeout(900);
       bar = await barNow(x.page);
-      assert.deepEqual([by(bar, "work").icon.color, by(bar, "work").icon.opacity, by(bar, "work").backIcon.opacity], [quiet, 1, 0], `${theme}: the pointer gone, it is as it was`);
+      assert.deepEqual([by(bar, "work").icon.color, by(bar, "work").icon.opacity], [quiet, 1], `${theme}: the pointer gone, it is as it was`);
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   }

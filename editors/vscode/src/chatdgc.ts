@@ -354,7 +354,7 @@ export function libraryDocument(asset: (name: string) => string, cspSource: stri
 <div id="lib-made" class="lib-kinds" role="toolbar" aria-label="Where it was made" hidden></div>
 <div id="lib-kinds" class="lib-kinds" role="toolbar" aria-label="Show"></div>
 <p id="lib-status" class="lib-status" role="status"></p>
-<ul id="lib-list" class="lib-list" aria-label="Your files" role="tabpanel"></ul>
+<ul id="lib-list" class="lib-list" aria-label="Your files" role="tabpanel" tabindex="0"></ul>
 <button type="button" id="lib-more" class="cd-edit-cancel lib-more" hidden>Show more</button></main>
 <script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/marks.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/library.js"))}"></script></body></html>`;
 }
@@ -1270,6 +1270,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
    *  Library's own row opens it. */
   async openFromDock(pin: DockPin): Promise<void> {
     if (pin.kind === "chat") { this.open(pin.id); return; }
+    // A ChatDGC project pinned to the dock (13 Nov): its own page.
+    if (pin.kind === "project") { if (PROJECT_ID.test(pin.id)) this.openProject(pin.id); return; }
     if (pin.kind === "artifact" && ARTIFACT_ID.test(pin.id)) {
       this.artifacts?.open(pin.id, { type: String(pin.look.type || ""), title: pin.title, ...(pin.ref.file ? { file: pin.ref.file } : {}) });
       return;

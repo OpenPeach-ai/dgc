@@ -23,10 +23,10 @@ const PINS = "dgc.dock.pins";
 const PALETTES = "dgc.sessionPalettes", SINCE = "dgc.sessionPalettesSince", COLOURS = "dgc.sessionColours";
 const KEEP_PINS = 200, KEEP_COLOURS = 2000;
 export const DOCK_MOST = 16, DOCK_MOST_DEFAULT = 8, DOCK_SIZE_MIN = 24, DOCK_SIZE_MAX = 48, DOCK_SIZE_DEFAULT = 34;
-const KINDS = ["pip", "work", "chat", "artifact", "file", "widget"] as const;
+const KINDS = ["pip", "work", "chat", "artifact", "file", "widget", "project"] as const;
 export type DockKind = typeof KINDS[number];
 const ID = /^[A-Za-z0-9_.:|-]{1,200}$/;
-const NAMES: Record<DockKind, string> = { pip: "Pip", work: "Work session", chat: "ChatDGC chat", artifact: "Artifact", file: "Library file", widget: "Widget" };
+const NAMES: Record<DockKind, string> = { pip: "Pip", work: "Work session", chat: "ChatDGC chat", artifact: "Artifact", file: "Library file", widget: "Widget", project: "Project" };
 
 /** One pinned thing. `ref` is what opens it (ids only); `look` is how to draw it when its list isn't loaded (a Pip's
  *  body, a file's kind); `where` is the folder a project's thing was pinned in ("" shows in every window). */
@@ -54,9 +54,9 @@ export function dockPin(value: any, where = ""): DockPin | undefined {
   return { key: dockKey(kind, id), kind, id, title: text(value.title, 200) || NAMES[kind], sub: text(value.sub, 200), look: strings(value.look), ref: strings(value.ref),
     where: scoped ? String(typeof value.where === "string" ? value.where : where).slice(0, 1000) : "" };
 }
-const COLOUR_KEY = /^(?:work|chat):[A-Za-z0-9_.:|-]{1,200}$/;
+const COLOUR_KEY = /^(?:work|chat|project):[A-Za-z0-9_.:|-]{1,200}$/;
 /** What may wear a palette: a session, a chat (their owner may also choose it), and a widget. */
-const WORN_KEY = /^(?:work|chat|widget):[A-Za-z0-9_.:|-]{1,200}$/;
+const WORN_KEY = /^(?:work|chat|widget|project|folder):[A-Za-z0-9_.:|-]{1,200}$/;
 export type MarkKind = "work" | "chat" | "widget";
 
 /** Settings -> General -> Dock, as the editor keeps them. */
@@ -142,7 +142,7 @@ export class Dock {
   /** A page drew things with no palette yet (dockPalettes { kind, list: [{ id, born? }] }, its list in order): each is
    *  given one and it is kept. What already has a palette keeps it, whatever the page says. */
   async wear(kind: unknown, list: unknown): Promise<void> {
-    if (kind !== "work" && kind !== "chat" && kind !== "widget") return;
+    if (kind !== "work" && kind !== "chat" && kind !== "widget" && kind !== "project" && kind !== "folder") return;      // (a ChatDGC project's pinwheel and a Work folder's icon, 13 Nov)
     const rows: { id: string; born?: number }[] = [];
     for (const row of Array.isArray(list) ? list.slice(0, 200) : []) {
       const id = String((row as any)?.id ?? ""), born = (row as any)?.born;

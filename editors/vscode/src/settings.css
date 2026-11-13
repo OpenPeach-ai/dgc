@@ -100,7 +100,7 @@ input[type=password]{font-family:var(--mono)}
 .field.is-off .name{color:var(--muted)}
 
 /* ---- Buttons and switches ---- */
-.save,.install,.secondary,.fbtn,.link{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:var(--control);padding:0 12px;border-radius:var(--r-full);font-size:12px;font-weight:500;white-space:nowrap}
+.save,.install,.secondary,.fbtn,.link{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:var(--control);padding:0 12px;border-radius: var(--btn-r, 6px);font-size:12px;font-weight:500;white-space:nowrap}
 .secondary,.install,.fbtn{background:var(--button2);color:var(--button2-text)}.secondary:hover,.install:hover,.fbtn:hover{background:var(--button2-hover)}
 .save{min-width:72px;background:var(--solid);color:var(--on-solid)}.save:hover{background:var(--solid-hover)}
 .link{min-height:0;padding:2px 0;background:transparent;color:var(--link);text-decoration:underline}
@@ -129,7 +129,7 @@ details.more[data-more="saved-providers"]>.rows{border-inline:0;border-bottom:0;
 
 /* ---- Lists of things: plugins, memories, voice models, sessions ---- */
 .chips{display:flex;gap:4px;margin:0 0 12px}
-.chips button{border-radius:var(--r-full);background:transparent;color:var(--muted);padding:5px 12px}
+.chips button{border-radius: var(--btn-r, 6px);background:transparent;color:var(--muted);padding:5px 12px}
 .chips button:hover{background:var(--hover);color:var(--text)}.chips button.on{background:var(--sel);color:var(--sel-text)}
 .list-toolbar{display:flex;gap:12px;align-items:center;margin:0 0 10px}.search{flex:1;max-width:340px}
 .row{position:relative;display:flex;align-items:center;gap:14px;border-top:1px solid var(--border);padding:12px 0;min-width:0}

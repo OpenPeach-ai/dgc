@@ -595,6 +595,17 @@
       const line = $("lib-status"); line.textContent = String(msg.message || "Something went wrong."); line.hidden = false;
     }
   });
+  // The list scrolls inside the tab (chatdgc.css) and takes the keyboard: the arrows, PageUp and PageDown, Home and End
+  // scroll it when the list itself has focus (a row's own button keeps its keys).
+  $("lib-list").addEventListener("keydown", (e) => {
+    const list = e.currentTarget;
+    if (e.target !== list || e.ctrlKey || e.metaKey || e.altKey) return;
+    const page = Math.max(40, list.clientHeight - 48);
+    const to = { ArrowDown: list.scrollTop + 48, ArrowUp: list.scrollTop - 48, PageDown: list.scrollTop + page, PageUp: list.scrollTop - page, " ": list.scrollTop + (e.shiftKey ? -page : page), Home: 0, End: list.scrollHeight }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    list.scrollTop = to;
+  });
   place();
   vscode.postMessage({ type: "ready", kind: state.kind });
   status();

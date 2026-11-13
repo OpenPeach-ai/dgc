@@ -4,6 +4,7 @@
 // recent chats" field, then every session in a list that scrolls and narrows as you type. Escape or a click outside
 // closes it. Read from the page's DOM, computed style, geometry and what it posts to the extension.
 import { after, before, test } from "node:test";
+import { openDock } from "./support/dock-scene.mjs";
 import assert from "node:assert/strict";
 import { homeContrast, manySessions, openHome } from "./support/home-scene.mjs";
 
@@ -74,71 +75,72 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
     } finally { await x.close(); }
   });
 
-  test(`View all opens every session over the list, searched as you type, and Escape or a click outside closes it (${theme}, ${width}px)`, async (t) => {
+  test(`View all lists every session in place: no popover, the page scrolls to the last row, Show fewer goes back (${theme}, ${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
-    const x = await openHome(browser, { theme, width, sessions: manySessions(20), tab: "work", motion: "reduce" });
+    const x = await openDock(browser, { theme, width, height: 560, sessions: manySessions(20), tab: "work", motion: "reduce" });
     try {
-      await x.page.click("#sessions-all");
-      await x.page.waitForSelector(".sessions-popover:not([hidden])");
-      const m = await x.page.evaluate(() => {
-        const host = document.getElementById("sessions-host").getBoundingClientRect(), pop = document.querySelector(".sessions-popover"), box = pop.getBoundingClientRect(), field = pop.querySelector("input");
-        const list = pop.querySelector(".sessions-all-list"), first = document.querySelector("#sessions-list .session-row").getBoundingClientRect(), at = document.elementFromPoint(first.left + 30, first.top + 8);
-        return { role: pop.getAttribute("role"), label: pop.getAttribute("aria-label"), expanded: document.getElementById("sessions-all").getAttribute("aria-expanded"),
-          field: [field.type, field.placeholder, field.getAttribute("aria-label"), document.activeElement === field], rows: list.querySelectorAll(".session-row").length,
-          over: pop.contains(at), inside: [box.left >= host.left + 4 - 0.5, box.right <= host.right - 4 + 0.5, box.bottom <= host.bottom + 0.5], scrolls: list.scrollHeight > list.clientHeight + 20 && getComputedStyle(list).overflowY === "auto",
-          fieldFirst: field.getBoundingClientRect().bottom <= list.getBoundingClientRect().top + 0.5, shadow: getComputedStyle(pop).boxShadow !== "none", opaque: !/rgba\(.*, 0\)|transparent/.test(getComputedStyle(pop).backgroundColor) };
+      const p = x.page, state = () => p.evaluate(() => {
+        const host = document.getElementById("sessions-host"), list = document.getElementById("sessions-list"), all = document.getElementById("sessions-all"), rows = [...list.querySelectorAll(".session-row")], last = rows.at(-1).getBoundingClientRect();
+        const dock = document.getElementById("dgc-dock").getBoundingClientRect(), tabs = document.getElementById("side-tabs").getBoundingClientRect(), mid = (last.top + last.bottom) / 2, at = document.elementFromPoint(last.left + 40, mid);
+        return { rows: rows.length, button: all.hidden ? "" : all.textContent, expanded: all.getAttribute("aria-expanded"), overlays: document.querySelectorAll(".sessions-popover, #work-home [role='dialog']").length,
+          searches: [...document.querySelectorAll("#work-home input")].filter((n) => n.checkVisibility()).length, folders: [...document.querySelectorAll("#work-home .dgc-folder")].filter((n) => n.checkVisibility()).length,
+          after: all.getBoundingClientRect().top >= rows.at(-1).getBoundingClientRect().bottom - 0.5, scrolls: host.scrollHeight > host.clientHeight + 20, lastSeen: last.bottom <= dock.top + 0.5 && last.top >= tabs.bottom - 0.5 && !!at && rows.at(-1).contains(at),
+          bars: [Math.round(tabs.top), Math.round(dock.top)], focus: document.activeElement?.id || "", sideways: document.documentElement.scrollWidth > innerWidth + 1 };
       });
-      assert.deepEqual(m, { role: "dialog", label: "All sessions", expanded: "true", field: ["search", "Search recent chats", "Search recent chats", true], rows: 20, over: true, inside: [true, true, true],
-        scrolls: true, fieldFirst: true, shadow: true, opaque: true });
-      assert.deepEqual((await rows(x, ".sessions-popover")).slice(0, 8).map(([, age]) => age), ["2h", "1d", "3d", "1w", "2w", "1mo", "3mo", "1y"], "the same rows, with their ages");
-      assert.deepEqual(low(await homeContrast(x.page)), []);
-      await x.page.keyboard.type("INVOICE");
-      assert.deepEqual((await rows(x, ".sessions-popover")).map(([name]) => name), ["Invoice totals round the wrong way", "Invoice totals round the wrong way (11)", "Invoice totals round the wrong way (19)"], "narrowed as you type, in any case");
-      await x.page.keyboard.type(" zebra");
-      assert.deepEqual([await x.page.locator(".sessions-popover .session-row").count(), await x.page.textContent(".sessions-popover .sessions-all-status")], [0, "No session matches “INVOICE zebra”."]);
-      await x.page.fill(".sessions-popover input", "watering");
-      // From the field the arrow goes into the list; Enter opens that session in a tab and the popover goes.
-      await x.page.keyboard.press("ArrowDown");
-      assert.equal(await x.page.evaluate(() => document.activeElement.querySelector(".session-name")?.textContent), "In one short sentence: what does nextWatering in src/app.js return?");
-      await x.page.keyboard.press("Enter");
-      assert.deepEqual(await sent(x), [{ type: "openSessionInEditor", id: "2026-s02", title: "In one short sentence: what does nextWatering in src/app.js return?" }]);
-      assert.equal(await x.page.locator(".sessions-popover:not([hidden])").count(), 0, "opening one closes it");
-      // Escape: closed, and the keyboard back on View all.
-      await x.page.click("#sessions-all");
-      assert.equal(await x.page.inputValue(".sessions-popover input"), "", "opened fresh: no old search");
-      assert.equal(await x.page.locator(".sessions-popover .session-row").count(), 20);
-      await x.page.keyboard.press("Escape");
-      assert.deepEqual([await x.page.locator(".sessions-popover:not([hidden])").count(), await x.page.evaluate(() => document.activeElement.id), await x.page.getAttribute("#sessions-all", "aria-expanded")], [0, "sessions-all", "false"]);
-      // A click outside: closed. (On View all itself: closed, not opened again.)
-      await x.page.click("#sessions-all");
-      await x.page.click("#side-tabs", { position: { x: 4, y: 2 } });
-      assert.equal(await x.page.locator(".sessions-popover:not([hidden])").count(), 0, "a click outside");
-      assert.equal(await x.page.locator("#sessions-list .session-row").count(), 6, "the six are as they were");
+      const rest = await state();
+      assert.deepEqual([rest.rows, rest.button, rest.expanded], [6, "View all (20)", "false"]);
+      // Enter on View all: every session, in the same list, with nothing over the page.
+      await p.focus("#sessions-all"); await p.keyboard.press("Enter");
+      let m = await state();
+      assert.deepEqual([m.rows, m.button, m.expanded, m.overlays], [20, "Show fewer", "true", 0], "every session in place; the button says Show fewer; no popover");
+      assert.deepEqual([m.searches, m.folders <= 1, m.after, m.focus], [1, true, true, "sessions-all"], "one search field, one dropdown at most, the button at the list's end, the keyboard still on it");
+      assert.deepEqual((await rows(x)).slice(0, 8).map(([, age]) => age), ["2h", "1d", "3d", "1w", "2w", "1mo", "3mo", "1y"], "the same rows, with their ages");
+      assert.equal(m.scrolls, true, "the page scrolls");
+      // The wheel reaches the last row, between the tab bar and the dock, which stay where they are.
+      await p.mouse.move(width / 2, 300);
+      for (let i = 0; i < 40 && !(await state()).lastSeen; i++) { await p.mouse.wheel(0, 300); await p.waitForTimeout(20); }
+      const end = await state();
+      assert.equal(end.lastSeen, true, "the last row can be scrolled into view, above the dock");
+      assert.deepEqual([end.bars, end.sideways], [m.bars, false], "the tab bar and the dock stayed");
+      assert.deepEqual(low(await homeContrast(p)), []);
+      // Escape does nothing surprising: the list stays as it is.
+      await p.keyboard.press("Escape");
+      assert.equal((await state()).rows, 20, "Escape leaves the list alone");
+      // A row opens as ever, and the list stays open.
+      await p.click('#sessions-list .session-row >> nth=12');
+      assert.equal((await sent(x)).at(-1).type, "openSessionInEditor");
+      assert.equal((await state()).rows, 20);
+      // Show fewer: the six again, the page back at its top.
+      await p.click("#sessions-all");
+      m = await state();
+      assert.deepEqual([m.rows, m.button, m.expanded], [6, "View all (20)", "false"], "Show fewer goes back to the six");
+      assert.equal(await p.evaluate(() => document.getElementById("sessions-host").scrollTop), 0, "and to the top of the list");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   });
 }
 
-test("the popover keeps your search over a refreshed list, deletes from it, and loads more when there are more", async (t) => {
+test("expanded, the list follows a refreshed list, deletes from it, loads more at its end, and the one search field covers every session", async (t) => {
   if (skipOrFail(t)) return;
   const sessions = manySessions(20), x = await openHome(browser, { width: 300, sessions, tab: "work", motion: "reduce" });
   try {
     await x.page.click("#sessions-all");
-    await x.page.fill(".sessions-popover input", "invoice");
     await x.send({ type: "sessions_list", items: sessions.filter((s) => s.id !== "2026-s03"), error: "", more: true, searchable: true });
-    assert.equal(await x.page.inputValue(".sessions-popover input"), "invoice");
-    assert.deepEqual((await rows(x, ".sessions-popover")).map(([name]) => name), ["Invoice totals round the wrong way (11)", "Invoice totals round the wrong way (19)"], "the new list, still narrowed");
-    assert.equal(await x.page.textContent("#sessions-all"), "View all (19+)", "more to load: at least 19");
-    await x.page.hover(".sessions-popover .session-row >> nth=0");
-    await x.page.click(".sessions-popover .session-row >> nth=0 >> .session-delete");
-    assert.deepEqual(await sent(x), [{ type: "deleteSession", id: "2026-s11", title: "Invoice totals round the wrong way (11)" }], "the extension confirms a delete, as before");
-    assert.equal(await x.page.locator(".sessions-popover:not([hidden])").count(), 1, "and the popover stays for the next");
-    await x.page.fill(".sessions-popover input", "");
-    await x.page.click(".sessions-popover .sessions-all-more");
+    assert.deepEqual([await x.page.locator("#sessions-list .session-row").count(), await x.page.textContent("#sessions-all")], [19, "Show fewer"], "the new list, still whole");
+    await x.page.hover("#sessions-list .session-row >> nth=10");
+    await x.page.click("#sessions-list .session-row >> nth=10 >> .session-delete");
+    assert.equal((await sent(x)).at(-1).type, "deleteSession", "the extension confirms a delete, as before");
+    // Load more is at the list's end, before Show fewer.
+    const order = await x.page.evaluate(() => ["sessions-list", "sessions-more", "sessions-all"].map((id) => Math.round(document.getElementById(id).getBoundingClientRect().top)));
+    assert.deepEqual(order, [...order].sort((a, b) => a - b), `the list, Load more, Show fewer: ${order}`);
+    await x.page.click("#sessions-more");
     assert.deepEqual((await sent(x)).at(-1), { type: "sessionsMore" });
-    assert.equal(await x.page.textContent(".sessions-popover .sessions-all-more"), "Loading…");
+    assert.equal(await x.page.textContent("#sessions-more"), "Loading…");
     await x.send({ type: "sessions_list", items: sessions, error: "", more: false, searchable: true });
-    assert.deepEqual([await x.page.locator(".sessions-popover .session-row").count(), await x.page.locator(".sessions-popover .sessions-all-more").isHidden(), await x.page.textContent("#sessions-all")], [20, true, "View all (20)"]);
+    assert.deepEqual([await x.page.locator("#sessions-list .session-row").count(), await x.page.locator("#sessions-more").isHidden(), await x.page.textContent("#sessions-all")], [20, true, "Show fewer"]);
+    // The search field above is the only one, and asks DGC to search every session.
+    await x.page.fill("#sessions-search", "invoice"); await x.page.waitForTimeout(400);
+    assert.deepEqual((await x.posted("sessionsSearch")).at(-1), { type: "sessionsSearch", query: "invoice" }, "a search goes to DGC: every session, not only the ones listed");
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
 });
@@ -169,7 +171,7 @@ test("an age is short and told from now: now, minutes, hours, days, weeks, month
   const x = await openHome(browser, { width: 300, sessions: items, tab: "work", motion: "reduce" });
   try {
     await x.page.click("#sessions-all");
-    const ages = (await rows(x, ".sessions-popover")).map(([, age]) => age);
+    const ages = (await rows(x)).map(([, age]) => age);
     assert.equal(ages.length, cases.length + 2);
     for (const [k, [, said]] of cases.entries()) { if (said instanceof RegExp) assert.match(ages[k], said, `case ${k}`); else assert.equal(ages[k], said, `case ${k}`); }
     assert.deepEqual(ages.slice(-2), ["today", ""], "not a date: as it is; no date: nothing");

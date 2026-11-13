@@ -11,6 +11,8 @@
 @import url("./shared/voxel.css");
 @import url("./shared/folio.css");
 @import url("./shared/blob.css");
+@import url("./shared/pinwheel.css");
+@import url("./shared/folders.css");
 @import url("./shared/dock.css");
 @import url("./shared/tabs.css");
 @import url("./shared/hub.css");
@@ -60,7 +62,7 @@ body {
 /* The wordmark. ChatDGC's header wears it too, around its own mark (the chat bubble with these
    slashes inside it, held still: only the slashes move), so each rule names both headers rather
    than chatdgc.css keeping a copy that drifts. */
-#phead .pm, .cd-head .pm { font: var(--w-bold) var(--t-xs)/1 var(--mono); letter-spacing: .07em; color: var(--muted); display: inline-flex; align-items: center; flex: none; }
+#phead .pm, .cd-head .pm { font: var(--w-bold) var(--t-xs)/14px var(--mono); letter-spacing: .07em; color: var(--muted); display: inline-flex; align-items: baseline; align-self: baseline; flex: none; }
 #phead .pm svg.mk, .cd-head .pm svg.mk { width: 14px; height: 14px; margin-right: var(--sp-1); color: var(--accent); flex: none; }
 /* The three slashes breathe in sequence, the same treatment the site header uses, so the panel
    and the website read as one product. Staggered so it sweeps rather than blinks together. */
@@ -77,6 +79,13 @@ body {
   #phead .pm svg.mk path, .cd-head .pm .mk-slashes path { animation: none; }
 }
 #phead .pm .cur, .cd-head .pm .cur { width: 5px; height: 11px; margin-left: var(--sp-1); background: var(--accent); display: inline-block; animation: blink 1.1s step-end infinite; }
+/* The session's name stands on the wordmark's own baseline (asked 13 Nov: each was centred in the row by its own box,
+   and two fonts of two sizes centred that way sit on two lines, the name about a pixel under "DGC"). The name fills
+   the row's height with its words in the middle, as before; the wordmark's letters are what its box is aligned by
+   (its mark and its cursor stay centred on them), and the row sets the two on one baseline whatever the fonts are.
+   Where the header has no name beside the wordmark (the side bar's own page, the Pips view) it is centred as it was.
+   (The wordmark's own part is in its one rule above: a 14 px line, the mark's height, aligned by its letters.) */
+#phead .pm :is(svg.mk, .cur), .cd-head .pm :is(svg.mk, .cur) { align-self: center; }
 #phead .thread-title { flex: 1 1 auto; min-width: 0; border: 0; padding: var(--sp-1) var(--sp-1); background: transparent; color: var(--text); cursor: pointer; text-align: left; font: var(--w-med) var(--t-sm)/1.2 var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The logo, then the name, as an editor tab sets its icon and its title: 6px between them (VS Code's own
    `.monaco-icon-label::before { padding-right: 6px }`), whatever the row's own gap and the name's padding are. No mark
@@ -84,6 +93,8 @@ body {
 body:not([data-agent-page]) #phead .pm ~ .thread-title { margin-left: calc(6px - var(--sp-2) - var(--sp-1)); }
 #phead .thread-title:hover { color: var(--text-strong); }
 #phead .thread-title:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; border-radius: var(--r-sm); }
+/* (The name fills the row's height, its words in the middle, on the wordmark's baseline: see the wordmark, above.) */
+#phead .thread-title, .cd-head .cd-title { align-self: baseline; box-sizing: border-box; min-height: calc(42px - 2 * var(--sp-2)); line-height: calc(42px - 2 * var(--sp-2) - 2 * var(--sp-1)); }
 #phead .pd { flex: 0 1 25%; min-width: 0; border: 0; padding: var(--sp-1) 0; background: transparent; text-align: right; font: var(--w-reg) var(--t-xs)/1 var(--sans); color: var(--faint); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #phead .pd:hover { color: var(--muted); }
 /* Pips has its own editor tab; its labelled entry stays outside settings and menus. ChatDGC's header buttons with
@@ -96,9 +107,8 @@ body:not([data-agent-page]) #phead .pm ~ .thread-title { margin-left: calc(6px -
 #phead .pips-back { display:inline-flex; align-items:center; gap:4px; border:0; background:transparent; color:var(--muted); padding:4px 6px 4px 0; font-size:var(--t-sm); cursor:pointer; }
 #phead .pips-back:hover { color:var(--text); }
 #pips-host { display:flex; flex:1 1 auto; min-height:0; min-width:0; overflow:hidden; width:100%; }
-/* Under the Pips view the dock stands on the Pips' own ground, so the two read as one page. */
-body.pips-active #dgc-dock[data-show="always"] { background:var(--surface); }
-body.pips-active #side-tabs { background:var(--surface); }
+/* (The Pips view stands on the side bar's own ground, as Home, Work and Chat do, 13 Nov: the tab bar and the dock keep
+   the one ground on every tab. They took the editor's ground under the Pips view, which stood on it.) */
 body.pips-active > :not(#phead):not(#side-tabs):not(#pips-host):not(#announcer):not(.dgc-trace-backdrop):not(#dgc-dock):not(.dgc-pop):not(script) { display:none !important; }
 /* A page of the Pips view with a back arrow (a Pip's chat, its Settings, History and its other pages; Pips settings,
    Needs attention's View all, a project's New Pip, Workspace context and Notifications) has the side bar to itself: no
@@ -106,20 +116,20 @@ body.pips-active > :not(#phead):not(#side-tabs):not(#pips-host):not(#announcer):
    neither can take focus. */
 body.pips-active.inside-pip > :is(#dgc-dock, #side-tabs) { display:none !important; }
 body.pips-active #phead :is(.thread-title,.pd,.chat-add,.agent-back,.agent-mark) { display:none !important; }
-body.pips-active #phead .pm { display:inline-flex; flex:1; }
+body.pips-active #phead .pm { display:inline-flex; flex:1; align-self:center; }
 /* ---- #3 Sessions home ------------------------------------------------------------------------- */
 /* The side bar opens on this project's sessions; each opens in an editor tab. Laid over the chat the
    way the Pips are: everything but the header, the list, the announcer and the hover label hides. */
 /* (The dialog a session's delete opens when it owns Project Pips is this page's own: it shows over it.) */
 body.sessions-active > :not(#phead):not(#side-tabs):not(#sessions-host):not(#announcer):not(#hover-tip):not(#dgc-dock):not(.dgc-pop):not(.session-pips-dialog):not(script) { display:none !important; }
 body.sessions-active #phead :is(.thread-title,.pd,.chat-add,.agent-back,.agent-mark) { display:none !important; }
-body.sessions-active #phead .pm { display:inline-flex; flex:1; }
+body.sessions-active #phead .pm { display:inline-flex; flex:1; align-self:center; }
 /* The side bar's top: the header row with DGC's wordmark (its slashes breathing), then the tabs (media/shared/tabs.css):
    Home, Work, Chat, Pips. The header holds the wordmark alone there: the buttons it once had are the tab bar's (Pips is
    a tab, and the tabs are Pips' way back), so nothing is offered twice. The tab bar sits close under it. */
 html[data-chat-place="home"] #phead { min-height: 34px; padding-bottom: 0; }
 html[data-chat-place="home"] #phead :is(button, .agent-mark) { display:none !important; }
-html[data-chat-place="home"] #phead .pm { display:inline-flex; flex:1; }
+html[data-chat-place="home"] #phead .pm { display:inline-flex; flex:1; align-self:center; }
 html[data-chat-place="home"] #side-tabs { padding-top: 4px; }
 /* ---- Frosted glass: the tab bar and the strip behind the dock (0.52) ----------------------------- */
 /* On Home, Work, Chat and the Pips list the page begins under DGC's header and runs to the foot of the side bar; the tab
@@ -131,7 +141,6 @@ html[data-chat-place="home"] #side-tabs { padding-top: 4px; }
 html { --glass-top: 0px; --glass-bottom: 0px; }
 html[data-chat-place="home"] body:is(.sessions-active, .pips-active) { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); --glass-ground: var(--bg);
   --glass-clear-top: calc(var(--glass-top) + var(--sp-1)); --glass-clear-bottom: calc(var(--glass-bottom) + var(--sp-1)); }
-html[data-chat-place="home"] body.pips-active { --glass-ground: var(--surface); }
 html[data-chat-place="home"] body.pips-active.inside-pip { --glass-top: 0px; --glass-bottom: 0px; --glass-clear-top: 0px; --glass-clear-bottom: 0px; }
 html[data-chat-place="home"] body:is(.sessions-active, .pips-active) > #phead { grid-area: 1 / 1; }
 html[data-chat-place="home"] body:is(.sessions-active, .pips-active) > :is(#sessions-host, #pips-host, #side-tabs, #dgc-dock[data-show="always"]) { grid-area: 2 / 1; }
@@ -169,7 +178,7 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 /* Work and Chat each open with one row: their search box, then New, the one filled pill here (neutral, never purple). */
 #sessions-host .home-bar { display:flex; align-items:center; gap:var(--sp-2); min-width:0; }
 #sessions-host .home-bar .sessions-search { flex:1 1 auto; min-width:0; margin:0; }
-#sessions-host .home-new { flex:none; display:inline-flex; align-items:center; gap:3px; box-sizing:border-box; height:var(--control); margin:0; padding:0 12px 0 8px; border:0; border-radius:var(--r-full);
+#sessions-host .home-new { flex:none; display:inline-flex; align-items:center; gap:3px; box-sizing:border-box; height:var(--control); margin:0; padding:0 12px 0 8px; border:0; border-radius: var(--btn-r, 6px);
   background:var(--solid); color:var(--on-solid); font:var(--w-med) var(--t-sm)/1 var(--sans); white-space:nowrap; cursor:pointer; transition:background-color var(--dur-hover) var(--ease-out); }
 #sessions-host .home-new:hover { background:var(--solid-hover); }
 #sessions-host .home-new .codicon { font-size:14px; }
@@ -192,7 +201,7 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 #sessions-host .session-sub { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-2); font:var(--w-reg) var(--t-xs)/1.4 var(--sans); font-variant-numeric:tabular-nums; }
 /* On a row's hover wash, and on the View all popover's raised grey, the second line is a step firmer: the quiet tone
    is 4.4:1 there. */
-#sessions-host .session-row:is(:hover, :focus-within) .session-sub, #sessions-host .sessions-popover .session-sub { color:color-mix(in srgb, var(--text) 80%, transparent); }
+#sessions-host .session-row:is(:hover, :focus-within) .session-sub { color:color-mix(in srgb, var(--text) 80%, transparent); }
 /* A session with a card waiting for you says so in the tone of something that needs you. */
 #sessions-host .session-row .session-sub.session-waiting { color:var(--need-text); }
 /* A chat's line: Pinned, its project, where it is open, then its last words, parted by a middle dot. */
@@ -216,8 +225,6 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 #sessions-host .session-actions { position:absolute; right:0; top:50%; transform:translateY(-50%); padding-left:16px; background:var(--bg);
   -webkit-mask-image:linear-gradient(to right, transparent, #000 14px); mask-image:linear-gradient(to right, transparent, #000 14px); }
 #sessions-host .session-row:hover .session-actions { background:linear-gradient(var(--row-hover), var(--row-hover)), var(--bg); }
-#sessions-host .sessions-popover .session-actions { background:var(--surface2); }
-#sessions-host .sessions-popover .session-row:hover .session-actions { background:linear-gradient(var(--row-hover), var(--row-hover)), var(--surface2); }
 /* Its "..." is open: the row keeps its actions while the menu has the pointer and the keyboard. */
 #sessions-host .session-row:has(.session-more[aria-expanded="true"]) :is(.session-age, .session-live) { visibility:hidden; }
 #sessions-host .session-row:has(.session-more[aria-expanded="true"]) .session-actions { display:inline-flex; }
@@ -234,10 +241,10 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 #sessions-host :is(.session-open, .session-delete, .sessions-all):focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:-1px; }
 /* "View all (N)": quiet text under the six. It opens every session over the list: a search field, then the same rows
    in a list that scrolls. A menu's surface and lift (media/shared/menu.css), opening in 150ms from just below. */
-#sessions-host .sessions-all { align-self:flex-start; margin:0 0 0 calc(-1 * var(--sp-1)); padding:var(--sp-1); border:0; border-radius:var(--r-sm); background:transparent; color:var(--muted);
+#sessions-host .sessions-all { align-self:flex-start; margin:0 0 0 calc(-1 * var(--sp-1)); padding:var(--sp-1); border:0; border-radius:var(--btn-r); background:transparent; color:var(--muted);
   font:var(--w-reg) var(--t-sm)/1.3 var(--sans); cursor:pointer; transition:color var(--dur-hover) var(--ease-out), background-color var(--dur-hover) var(--ease-out); }
 #sessions-host .sessions-all[hidden] { display:none; }
-#sessions-host .sessions-all:hover, #sessions-host .sessions-all[aria-expanded="true"] { color:var(--text-strong); background:var(--wash); }
+#sessions-host .sessions-all:hover { color:var(--text-strong); background:var(--btn-wash); }
 #sessions-host .home-work { position:relative; }
 /* The Project Folder dropdown (media/shared/folderpick.css) is on the Library row, at its right end, on Library's line
    (asked 12 Nov night): Library keeps its place and its size, and the dropdown takes what is left (its element drops the
@@ -247,15 +254,13 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
    tone; one whose folder is gone is dimmed and says so. One folder's path is in the button's tooltip. */
 #sessions-host .home-library-row { display:flex; align-items:center; min-width:0; min-height:var(--row); }
 #sessions-host .home-library-row:not(:has(> :not([hidden]))) { display:none; }
-#sessions-host .home-library-row > .home-library { flex:none; width:auto; margin-right:0; }
-#sessions-host .sessions-all-head { flex:none; display:flex; align-items:center; gap:var(--sp-2); min-width:0; }
-#sessions-host .sessions-popover .sessions-all-head .sessions-all-search { flex:1 1 0; min-width:120px; }
+#sessions-host .home-library-row > .home-library { flex:none; }
 #sessions-host .session-path { color:var(--text-2); font:var(--w-reg) var(--t-xs)/1.4 var(--sans); }
-#sessions-host .session-row:is(:hover, :focus-within) .session-path, #sessions-host .sessions-popover .session-path { color:color-mix(in srgb, var(--text) 80%, transparent); }
+#sessions-host .session-row:is(:hover, :focus-within) .session-path { color:color-mix(in srgb, var(--text) 80%, transparent); }
 #sessions-host .session-path-note { flex:none; }
 #sessions-host .session-path-note::after { content:"·"; margin:0 5px; }
 #sessions-host .session-gone { cursor:default; }
-#sessions-host .session-gone:hover, #sessions-host .sessions-popover .session-gone:hover { background:transparent; }
+#sessions-host .session-gone:hover { background:transparent; }
 #sessions-host .session-gone .session-name { color:var(--muted); }
 #sessions-host .session-gone .session-blob { opacity:.4; filter:grayscale(1); }
 /* New session's dialog: its title, one line of what it does, the dropdown and the folder's path, and the two buttons.
@@ -268,22 +273,10 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 /* (The dropdown is the dialog's field: as wide as it, so its menu opens under it at the same width, one shape.) */
 .new-session-field { display:flex; align-self:stretch; min-width:0; max-width:100%; }
 .new-session-field > .dgc-folder { flex:1 1 auto; }
-.new-session-path { display:flex; min-width:0; max-width:100%; margin:0; color:var(--text-2); font:var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+.new-session-path { display:flex; align-items:center; gap:6px; min-width:0; max-width:100%; margin:0; color:var(--text-2); font:var(--w-reg) var(--t-xs)/1.4 var(--sans); }
 .new-session-path[hidden] { display:none; }
 .new-session-buttons { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:var(--sp-2); padding:0 var(--sp-5) var(--sp-5); }
 @media (max-width: 480px) { .new-session-body { padding:var(--sp-4) var(--sp-4) var(--sp-3); } .new-session-buttons { padding:0 var(--sp-4) var(--sp-4); } }
-#sessions-host .sessions-popover { position:absolute; z-index:5; left:calc(-1 * var(--home-bleed)); right:calc(-1 * var(--home-bleed)); box-sizing:border-box; display:flex; flex-direction:column; gap:var(--sp-1);
-  transform-origin:50% 0; animation:home-popover-open var(--dur-menu) var(--ease-out); }
-@keyframes home-popover-open { from { opacity:0; transform:translateY(4px) scale(.98); } }
-#sessions-host .sessions-popover .sessions-all-search { flex:none; margin:0; }
-/* (The popover is a raised ground: its quiet words take the firmer grey.) */
-#sessions-host .sessions-popover { --muted: var(--muted-firm); }
-#sessions-host .sessions-popover .sessions-all-list { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; }
-#sessions-host .sessions-popover .session-row { margin:0; }
-#sessions-host .sessions-popover .session-row:hover { background:color-mix(in srgb, var(--text) 10%, transparent); }
-#sessions-host .sessions-popover .sessions-all-status { padding:var(--sp-2); }
-#sessions-host .sessions-popover .sessions-all-more-row { padding:0 var(--sp-2); }
-#sessions-host .sessions-popover .sessions-all-more-row[hidden] { display:none; }
 /* ChatDGC: your chats above this project's sessions. A chat opens with one click (a session needs
    Open in Editor: opening one starts a backend in its folder), so its row says so with the pointer. */
 #sessions-host .home-chats, #sessions-host .home-work { display:flex; flex-direction:column; gap:var(--sp-2); }
@@ -310,22 +303,31 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
   padding:0; border:0; border-radius:var(--r-sm); background:transparent; color:var(--muted); cursor:pointer; }
 #sessions-host .project-toggle:hover { background:var(--surface); color:var(--text); }
 #sessions-host .project-icon { flex:none; font-size:15px; }
+/* A ChatDGC project's pinwheel (media/shared/pinwheel.css), in its row and nowhere on Work: a directory keeps its folder icon. */
+#sessions-host .project-mark { flex:none; display:grid; place-items:center; width:20px; height:20px; line-height:0; }
+#sessions-host .project-mark [data-mark] { --size:18px; }
+#sessions-host .project-row:is(:hover, :focus-within, :has(.session-more[aria-expanded="true"])) .project-count { visibility:hidden; }
 #sessions-host .project-name { flex:1 1 auto; -webkit-line-clamp:1; }
 #sessions-host .project-count { flex:none; min-width:18px; color:var(--muted); font:var(--w-reg) var(--t-xs)/1 var(--sans);
   font-variant-numeric:tabular-nums; text-align:right; }
 #sessions-host .project-empty { padding:var(--sp-1) var(--sp-2); color:var(--muted); font:var(--w-reg) var(--t-xs)/1.4 var(--sans); }
-#sessions-host .chat-row-nested { min-height:var(--row); padding-top:var(--sp-1); padding-bottom:var(--sp-1); }
+/* (A chat inside a project is the same row as any chat: no size of its own, 13 Nov.) */
 #sessions-host .project-start { display:flex; align-items:center; gap:var(--sp-2); width:100%; padding:var(--sp-1) var(--sp-2);
   border:1px dashed var(--border-strong); border-radius:var(--r-md); background:transparent; color:var(--muted);
   font:var(--w-med) var(--t-sm)/1.35 var(--sans); text-align:left; cursor:pointer; }
 #sessions-host .project-start:hover { border-color:var(--accent); color:var(--text); }
 #sessions-host .chat-project { color:var(--text); }
 #sessions-host .drop-here { background:color-mix(in srgb, var(--accent) 16%, transparent); outline:1px dashed var(--accent); outline-offset:-1px; }
-#sessions-host .home-library { display:flex; align-items:center; gap:var(--sp-2); width:calc(100% + 2 * var(--home-bleed)); margin:0 calc(-1 * var(--home-bleed)); padding:var(--sp-1) var(--home-bleed);
-  border:0; border-radius:var(--r-full); background:transparent; color:var(--text); font:var(--w-reg) var(--t-sm)/1.35 var(--sans); text-align:left; cursor:pointer; min-height:var(--row); }
+/* Library, on Work and on Chat: one control (asked 13 Nov: Work's lit only itself, as a pill; Chat's lit its whole
+   line). A box in the button family's shape and height that hugs its icon and word, with the family's hover wash, its
+   press and its focus ring; its icon stands at the page's own left edge on both pages. */
+#sessions-host .home-library { display:flex; align-items:center; gap:var(--sp-2); box-sizing:border-box; width:fit-content; max-width:100%; height:var(--btn-h); margin:0 0 0 -8px; padding:0 8px;
+  border:0; border-radius: var(--btn-r, 6px); background:transparent; color:var(--text); font:var(--w-reg) var(--t-sm)/1.35 var(--sans); text-align:left; cursor:pointer;
+  transition: background-color var(--dur-hover) var(--ease-out), transform var(--btn-press) var(--ease-out); }
 #sessions-host .home-library[hidden] { display:none; }
-#sessions-host .home-library:hover { background:var(--row-hover); }
-#sessions-host .home-library:focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:-1px; }
+#sessions-host .home-library:hover { background:var(--btn-wash); }
+#sessions-host .home-library:active { transform: scale(.97); }
+#sessions-host .home-library:focus-visible { outline: var(--btn-ring); outline-offset: 2px; }
 #sessions-host .home-library .codicon { color:var(--muted); }
 /* A project's colour: its folder's, here and on its page (chatdgc.css). Mid tones that hold on both themes. */
 .project-icon[data-color="purple"] { color:#8B5CF6; } .project-icon[data-color="blue"] { color:#3B82F6; }
@@ -1213,7 +1215,7 @@ body.vscode-light .approval-dock > .card { box-shadow: 0 -8px 20px -14px rgba(0,
 .card.perm-card { border-color: var(--hair); border-radius: var(--r-card); }
 .card.perm-card > .q { font-weight: var(--w-med); gap: 9px; }
 .card.perm-card > .q > svg, .card.perm-card > .q > .ic { flex: none; box-sizing: border-box; width: 22px; height: 22px; padding: 4px; border-radius: 7px; background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
-.card.perm-card .btns button.act { border-radius: var(--r-full); padding: 0 12px; font-weight: var(--w-med); }
+.card.perm-card .btns button.act { border-radius: var(--btn-r, 6px); padding: 0 12px; font-weight: var(--w-med); }
 .card.perm-card pre { border-radius: var(--r-sm); }
 .card.perm-card[data-deny="1"] > .btns { grid-column: 1 / -1; grid-row: auto; margin-top: var(--sp-2); }
 @media (max-width: 420px) {
@@ -1409,7 +1411,7 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 #goal-time { flex: none; color: var(--faint); font: var(--w-reg) var(--t-xs)/1 var(--sans); font-variant-numeric: tabular-nums; }
 .goal-actions { display: flex; flex: none; align-items: center; gap: 0; }
 .rail-icon-button { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center;
-  padding: 0; border: 1px solid transparent; border-radius: var(--r-full); background: transparent; color: var(--faint); cursor: pointer; }
+  padding: 0; border: 1px solid transparent; border-radius: var(--btn-r, 6px); background: transparent; color: var(--faint); cursor: pointer; }
 .rail-icon-button:hover { border-color: var(--border); background: var(--surface2); color: var(--text); }
 .rail-icon-button .codicon { font-size: var(--t-sm); }
 /* The live queue is the rail row or chip; this status is solely for screen readers. */
@@ -1604,7 +1606,7 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
   margin: calc(-1 * (var(--control) + var(--sp-2))) 0 var(--sp-2);
   display: inline-flex; align-items: center; gap: var(--sp-1);
   height: var(--control); padding: 0 var(--sp-3); cursor: pointer;
-  border: 1px solid var(--border-strong); border-radius: var(--r-full);
+  border: 1px solid var(--border-strong); border-radius: var(--btn-r, 6px);
   background: var(--surface2); color: var(--text);
   box-shadow: var(--shadow-2); font: var(--w-med) var(--t-xs)/1 var(--sans); }
 /* A flex item of body: with the default flex-shrink it was squeezed to ~13px once the transcript
@@ -1879,7 +1881,7 @@ pre.code .fold {
   position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%);
   font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; z-index: 1;
   background: var(--surface2); color: var(--text); border: 1px solid var(--border-strong);
-  border-radius: var(--r-full); padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--btn-r, 6px); padding: var(--sp-1) var(--sp-3);
 }
 pre.code .fold:hover { border-color: var(--accent); }
 /* One copy affordance for every copyable block: an icon in the corner of the thing it copies,
@@ -2110,7 +2112,7 @@ textarea[data-held="1"], input[data-held="1"]:not([type="radio"]):not([type="che
   bottom: calc(var(--sp-2) + 26px); height: calc(1.62 * var(--t-chat)); pointer-events: none;
   background: linear-gradient(transparent, var(--bubble)); }
 .prompt-fold { display: inline-flex; align-items: center; gap: var(--sp-1); min-height: 24px; padding: 0 var(--sp-2) 0 var(--sp-3);
-  border: 1px solid var(--border-strong); border-radius: var(--r-full); background: var(--surface2); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: var(--btn-r, 6px); background: var(--surface2); color: var(--text);
   box-shadow: var(--shadow-1); font: var(--w-med) var(--t-xs)/1 var(--sans); white-space: nowrap; cursor: pointer; user-select: none; }
 .prompt-fold::before { content: attr(data-label); }
 .prompt-fold .codicon { font-size: var(--t-sm); color: var(--muted); }
@@ -2881,13 +2883,13 @@ body.ask-docked #tasks-panel { display: none; }
   font: var(--w-reg) var(--t-sm)/1.45 var(--sans); padding: 3px 0; overflow: hidden; }
 .ask-field:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; border-radius: var(--r-sm); }
 .ask-field::placeholder { color: var(--muted); }
-.ask-act { flex: none; min-height: var(--control); padding: 0 var(--sp-3); border: 1px solid var(--border-strong); border-radius: var(--r-full);
+.ask-act { flex: none; min-height: var(--control); padding: 0 var(--sp-3); border: 1px solid var(--border-strong); border-radius: var(--btn-r, 6px);
   background: transparent; color: var(--text); font: var(--w-med) var(--t-sm)/1 var(--sans); cursor: pointer; white-space: nowrap; }
 .ask-act:hover:not(:disabled) { border-color: var(--text); }
 .ask-act.primary { background: var(--solid); border-color: var(--solid); color: var(--on-solid); }
 .ask-act.primary:hover:not(:disabled) { background: var(--solid-hover); border-color: var(--solid-hover); }
 /* Skip beside Next/Submit when the question already has a pick or words: quieter, still explicit. */
-.ask-skip { flex: none; min-height: var(--control); padding: 0 var(--sp-2); border: 0; border-radius: var(--r-full); background: transparent;
+.ask-skip { flex: none; min-height: var(--control); padding: 0 var(--sp-2); border: 0; border-radius: var(--btn-r, 6px); background: transparent;
   color: var(--muted); font: var(--w-med) var(--t-sm)/1 var(--sans); cursor: pointer; white-space: nowrap; }
 .ask-skip:hover:not(:disabled) { color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); }
 .ask-foot { display: flex; align-items: center; justify-content: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2) 0;
