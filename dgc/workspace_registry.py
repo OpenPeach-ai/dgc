@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import time
 import sqlite3
 import stat
 import threading
@@ -218,6 +219,41 @@ def _connect_private_database(path):
         return db
 
 
+# The way back from 0.52 (pips-flow-design §3.4, §3.7): a 0.51 can't open a database 0.52 has upgraded, so before 0.52
+# upgrades one from 0.51 or before it is copied aside with SQLite's own backup and kept 30 days; `dgc pips
+# restore-before-0.52` puts it back.
+BACKUP_BEFORE_052 = 51
+BACKUP_KEEP_DAYS = 30
+BACKUP_FOLDER = ("backups", "before-0.52")
+KEPT_FOLDER = ("backups", "from-0.52")
+
+
+def backup_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+
+
+def copy_aside(db, folder: Path, name: str) -> Path:
+    """The whole database as it is now, as one private file in ``folder`` (SQLite's online backup)."""
+    _private_directory(folder)
+    target_path = folder / name
+    target = sqlite3.connect(target_path)
+    try:
+        db.backup(target)
+    finally:
+        target.close()
+    if os.name == "posix":
+        target_path.chmod(0o600)
+    return target_path
+
+
+def _prune(folder: Path, days: int) -> None:
+    cutoff = time.time() - days * 86400
+    for path in folder.glob("*.sqlite3"):
+        with contextlib.suppress(OSError):
+            if path.stat().st_mtime < cutoff:
+                path.unlink()
+
+
 class WorkspaceRegistry:
     def __init__(self, directory: Path | None = None, *, clock=utc_now):
         self.directory = Path(directory) if directory is not None else state_directory()
@@ -238,6 +274,8 @@ class WorkspaceRegistry:
             # needlessly competes with the worker. Recheck the version inside
             # the transaction when an actual creation/upgrade is required.
             if version != SCHEMA_VERSION:
+                if 1 <= version <= BACKUP_BEFORE_052:
+                    self._copy_before_052(version)
                 # executescript implicitly commits: execute complete statements
                 # individually so failed schema upgrades leave v1 intact.
                 with self.transaction():
@@ -247,6 +285,19 @@ class WorkspaceRegistry:
             with contextlib.suppress(sqlite3.Error):
                 self.close()
             raise
+
+    def _copy_before_052(self, version: int) -> None:
+        """Copy a database from 0.51 or before aside before upgrading it. No copy, no upgrade: a failure says so and
+        leaves the database as it was."""
+        folder = self.directory.joinpath(*BACKUP_FOLDER)
+        try:
+            _private_directory(self.directory / BACKUP_FOLDER[0])
+            _private_directory(folder)
+            _prune(folder, BACKUP_KEEP_DAYS)
+            copy_aside(self.db, folder, f"registry-v{version}-{backup_stamp()}.sqlite3")
+        except (OSError, sqlite3.Error) as exc:
+            raise RegistryError("backup_failed", "DGC couldn't keep a copy of your Pips before updating them, so it "
+                                f"left them as they were: {exc}") from exc
 
     def _initialize_schema(self):
         version = self.db.execute("PRAGMA user_version").fetchone()[0]

@@ -569,7 +569,53 @@ def parser():
     stop = command("stop", "emergency stop: pause all jobs and cancel their work")
     stop.add_argument("--yes", action="store_true", help="confirm the global emergency stop without a prompt")
     command("resume", "locally clear emergency stop; jobs stay paused")
+    back = command("restore-before-0.52", "go back to your Pips as they were before 0.52 (for 30 days after the update), "
+                                          "so DGC 0.51 can open them again; what 0.52 had is kept aside")
+    back.add_argument("--yes", action="store_true", help="confirm without a prompt")
     return value
+
+
+def restore_before_052(args) -> int:
+    """`dgc pips restore-before-0.52` (pips-flow-design §3.7): the copy 0.52 made before it upgraded the Pips database
+    goes back, after the database as 0.52 has it is copied aside too, so neither direction loses anything."""
+    import sqlite3
+    from datetime import datetime
+    from . import pip_daemon
+    from .workspace_registry import (BACKUP_FOLDER, KEPT_FOLDER, SCHEMA_VERSION, WorkspaceRegistry, backup_stamp,
+                                     copy_aside, state_directory)
+    directory = state_directory()
+    folder = directory.joinpath(*BACKUP_FOLDER)
+    copies = sorted(folder.glob("registry-v*.sqlite3"), key=lambda p: p.stat().st_mtime) if folder.is_dir() else []
+    if not copies:
+        raise RegistryError("not_found", "There is no copy of your Pips from before 0.52 to go back to. DGC keeps one "
+                                         "for 30 days after the update.")
+    newest = copies[-1]
+    with WorkspaceRegistry(directory) as registry:
+        if pip_daemon.runner_status(registry).get("online"):
+            raise RegistryError("runner_running", "Pips are running. Quit DGC (or stop `dgc pips serve`), then go back.")
+    when = datetime.fromtimestamp(newest.stat().st_mtime).strftime("%d %b %Y at %H:%M")
+    if not getattr(args, "yes", False):
+        if not sys.stdin.isatty():
+            raise RegistryError("confirmation_required", f"This puts your Pips back as they were on {when}. Repeat with "
+                                                         "--yes to confirm.")
+        answer = input(f"Put your Pips back as they were on {when}? What they did since is kept aside. [y/N] ").strip().lower()
+        if answer not in ("y", "yes"):
+            print("Cancelled. Your Pips were not changed.")
+            return 0
+    path = directory / "registry.sqlite3"
+    current = sqlite3.connect(path)
+    try:
+        kept = copy_aside(current, directory.joinpath(*KEPT_FOLDER), f"registry-v{SCHEMA_VERSION}-{backup_stamp()}.sqlite3")
+        source = sqlite3.connect(newest)
+        try:
+            source.backup(current)
+        finally:
+            source.close()
+    finally:
+        current.close()
+    print(f"Pips go back to how they were on {when}. What they did since then is kept in {kept.parent}, but DGC 0.51 "
+          "can't show it. Install DGC 0.51 now: opening this DGC again updates them once more.")
+    return 0
 
 
 def _require_supervisor():
@@ -1989,6 +2035,8 @@ def handle_command(config, argv, *, in_chat=False):
             result = pip_daemon.stop_all(config, "local-console")
         elif args.command == "resume":
             result = pip_daemon.resume_runtime(config, "local-console")
+        elif args.command == "restore-before-0.52":
+            return restore_before_052(args)
         elif args.command == "status":
             with WorkspaceRegistry() as registry:
                 result = pip_daemon.runner_status(registry)
