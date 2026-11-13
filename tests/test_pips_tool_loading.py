@@ -38,12 +38,19 @@ class PipsToolLoadingTests(unittest.TestCase):
         self.agent = Agent(config, UI())
         self.addCleanup(self.agent.mcp.stop_all)
 
-    def test_pips_are_on_by_default_but_only_the_loader_is_offered(self):
+    def test_pips_are_on_by_default_with_the_loader_and_the_reading_tool(self):
+        # (14 Nov: pips_context is offered every turn, so a session can always read its Pips; the tools that act
+        # load with use_pips.)
         self.assertIs(DEFAULTS["pips_enabled"], True)
         tools = offered(self.agent)
         self.assertIn("use_pips", tools)
-        self.assertFalse(tools & _PIPS_TOOL_NAMES)
+        self.assertEqual(tools & _PIPS_TOOL_NAMES, {"pips_context"})
         self.assertNotIn("pips_setup", self.agent.system_prompt())
+
+    def test_an_acting_tool_called_before_loading_says_to_load_first(self):
+        self.agent._offered_tool_names = offered(self.agent)        # (as during a turn: the gate knows what it offered)
+        out = self.agent._handle_call(ToolCall(id="c9", name="pips_propose", arguments={}))
+        self.assertIn("Call use_pips first", out)
 
     def test_use_pips_offers_the_tools_and_their_guidance_from_the_next_request(self):
         out = self.agent._handle_call(ToolCall(id="c1", name="use_pips", arguments={}))
@@ -69,10 +76,10 @@ class PipsToolLoadingTests(unittest.TestCase):
         self.assertFalse(out.startswith("Loaded"), out)
         self.assertFalse(offered(self.agent) & _PIPS_TOOL_NAMES)
 
-    def test_a_new_session_starts_without_the_tools(self):
+    def test_a_new_session_starts_without_the_acting_tools(self):
         self.agent._load_pips_tools()
         self.agent.reset()
-        self.assertFalse(offered(self.agent) & _PIPS_TOOL_NAMES)
+        self.assertEqual(offered(self.agent) & _PIPS_TOOL_NAMES, {"pips_context"})
         self.assertIn("use_pips", offered(self.agent))
 
     def test_pips_off_offers_neither_the_loader_nor_the_tools(self):
@@ -102,7 +109,8 @@ class PipsToolLoadingTests(unittest.TestCase):
                 _PIPS_REFERENCE_FRAME + '\n[{"id": "pip_1", "name": "Rook"}]\n</pip-references-json>\n\n'
                 "What did Rook find?"))
         self.assertIn("use_pips", seen[0])
-        self.assertFalse(seen[0] & _PIPS_TOOL_NAMES, "an ordinary turn does not carry them")
+        self.assertEqual(seen[0] & _PIPS_TOOL_NAMES, {"pips_context"},
+                         "an ordinary turn carries only the reading tool (14 Nov), not the ones that act")
         self.assertTrue(_PIPS_TOOL_NAMES <= seen[-1])
 
 

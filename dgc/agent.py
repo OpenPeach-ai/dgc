@@ -3333,8 +3333,13 @@ class Agent(GoalLifecycle):
             hidden = _PIPS_TOOL_NAMES | {"use_pips"}
         elif self._pips_loaded():
             hidden = {"use_pips"}
-        else:
+        elif self._pips_denied():
             hidden = _PIPS_TOOL_NAMES
+        else:
+            # Reading the Pips (pips_context) is offered every turn: a session can always see what its Pips found and
+            # did (14 Nov: a Work chat asked about a Pip's card couldn't read its history and guessed; 052-plan/
+            # pips-flow-design Q2). The tools that act still load with use_pips, for their tokens.
+            hidden = _PIPS_MUTATION_TOOL_NAMES
         schemas = [tool for tool in schemas if tool.get("function", {}).get("name") not in hidden]
         if getattr(self, "_turn_output", "") in ("document", "slides", "spreadsheet", "dashboard"):
             # The older page tool cannot fulfil a typed Output choice. Leave it available for
@@ -10471,6 +10476,9 @@ class Agent(GoalLifecycle):
             # An UNKNOWN name is still not a hole: `execute` answers it with "unknown tool", and
             # refusing those here would swallow a call the user should see the model make.
             self.ui.tool_denied(name, display_args, "not offered on this request", call_id)
+            if name in _PIPS_TOOL_NAMES and not self._pips_loaded():
+                return (f"error: {name} isn't loaded yet. Call use_pips first (it loads the Pips tools for this chat), "
+                        "then call it again.")
             return (f"error: {name} was not offered on this request and will not be run. "
                     "Use one of the tools you were given.")
 
