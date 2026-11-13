@@ -691,7 +691,11 @@ export class PipsEditor implements vscode.Disposable {
     });
     this.panel = panel;
     panel.onDidDispose(() => { this.panel = undefined; this.pending.clear(); this.dictation?.().release(this.mic); this.readAloud?.().release(this.mic); });
-    panel.onDidChangeViewState(() => panel.webview.postMessage({ type: 'pipsVisibility', visible: panel.visible }));
+    // (focused: this window has the focus. A Pip's chat reads what it shows only while someone can be looking at it;
+    // when the focus is back with its tab in front, it reads it then. "New" means not seen, 13 Nov.)
+    const focused = () => { try { return vscode.window.state?.focused !== false; } catch { return true; } };
+    panel.onDidChangeViewState(() => panel.webview.postMessage({ type: 'pipsVisibility', visible: panel.visible, focused: focused() }));
+    try { const watch = vscode.window.onDidChangeWindowState?.(() => { void panel.webview.postMessage({ type: 'pipsVisibility', visible: panel.visible, focused: focused() }); }); if (watch) panel.onDidDispose(() => watch.dispose()); } catch { /* an editor that does not say */ }
     panel.webview.onDidReceiveMessage(message => this.receive(message));
     const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', name)).toString();
     const media = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', name)).toString();

@@ -357,9 +357,14 @@ for (const motion of ["reduce", "no-preference"]) {
       assert.deepEqual([m.expanded, m.focus, m.menu.role, m.popup], ["true", GARDEN, "menu", "menu"], "Down opens it with the keyboard on the chosen row");
       await x.page.keyboard.press("ArrowDown"); assert.equal((await lookNow(x.page, "library")).focus, "/home/me/clients/northwind-traders/2026/storefront-redesign/packages/checkout-service");
       await x.page.keyboard.press("ArrowUp"); await x.page.keyboard.press("ArrowUp"); assert.equal((await lookNow(x.page, "library")).focus, "/home/me/code/shop");
-      await x.page.keyboard.press("Home"); assert.equal((await lookNow(x.page, "library")).focus, "", "Home: All projects");
+      // (Since 14 Nov, with one folder chosen the menu's first line is "Pin <folder> to the dock": a row like the others,
+      // so Home and the wrap land on it, and All projects is the row after it.)
+      const onPinLine = () => x.page.evaluate(() => document.activeElement?.hasAttribute("data-folder-pin-line") === true);
+      await x.page.keyboard.press("Home"); assert.equal(await onPinLine(), true, "Home: the first line, Pin to the dock");
+      await x.page.keyboard.press("ArrowDown"); assert.equal((await lookNow(x.page, "library")).focus, "", "then All projects");
+      await x.page.keyboard.press("ArrowUp");
       await x.page.keyboard.press("ArrowUp"); assert.equal((await lookNow(x.page, "library")).focus, "/home/me/code/storefront-redesign-checkout-service-next-generation", "Up from the first wraps to the last");
-      await x.page.keyboard.press("End"); await x.page.keyboard.press("ArrowDown"); assert.equal((await lookNow(x.page, "library")).focus, "", "Down from the last wraps to the first");
+      await x.page.keyboard.press("End"); await x.page.keyboard.press("ArrowDown"); assert.equal(await onPinLine(), true, "Down from the last wraps to the first");
       // A row the keyboard is on: a rounded fill.
       const focused = await x.page.evaluate(() => { const s = getComputedStyle(document.activeElement); return [document.activeElement.matches(":focus-visible"), s.backgroundColor !== "rgba(0, 0, 0, 0)", s.borderTopLeftRadius]; });
       assert.deepEqual(focused, [true, true, "6px"]);

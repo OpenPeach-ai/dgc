@@ -3,13 +3,13 @@
 // Home arranged). Usage: node test/render-home-cards.mjs <out folder>
 import { mkdirSync, renameSync, readdirSync } from "node:fs";
 import { chromium } from "@playwright/test";
-import { openGrid, EVERY } from "./support/home-grid-scene.mjs";
+import { openGrid, EVERY, LISBON, NOTES } from "./support/home-grid-scene.mjs";
 import { DOCK_SESSIONS } from "./support/dock-scene.mjs";
 
 const out = process.argv[2] || "/tmp/claude-1000/home-cards-pictures";
 mkdirSync(out, { recursive: true });
 const browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox", "--force-color-profile=srgb"] });
-const SETTINGS = { weather: { city: "Lisbon", unit: "c" }, note: { text: "Call the bank about the card\nthen book the ferry\nSeeds: tomato, basil" }, clock: { zone: "Asia/Tokyo" } };
+const SETTINGS = { weather: { place: LISBON, unit: "c" }, clock: { zone: "Asia/Tokyo" } };
 const NEWS = [{ id: DOCK_SESSIONS[3].id, at: Date.now() - 60000, preview: "The totals now round half up, and the three tests that held the old way are changed." }];
 const shot = (x, name) => x.page.screenshot({ path: `${out}/${name}.png` });
 for (const theme of ["dark-modern", "light-modern", "hc"]) {
@@ -25,14 +25,14 @@ for (const theme of ["dark-modern", "light-modern", "hc"]) {
       await x.page.keyboard.press("Space"); await x.page.click(".hc-cards-btn"); await x.rest(400); await shot(x, `arrange-library-${width}-${t}`);
     }
     await x.close();
-    x = await openGrid(browser, { width, theme, layout: EVERY, settings: SETTINGS, news: NEWS, height: width === 300 ? 1100 : width === 460 ? 2500 : 1300, scale: 2 });
+    x = await openGrid(browser, { width, theme, layout: EVERY, settings: SETTINGS, notes: NOTES, news: NEWS, height: width === 300 ? 1100 : width === 460 ? 2500 : 1300, scale: 2 });
     await x.page.mouse.move(2, 500); await x.rest(300); await shot(x, `every-card-${width}-${t}`);
     if (width === 700 && theme !== "hc") { const b = await x.page.locator('.hc-card[data-card="token"] .hc-col >> nth=24').boundingBox(); await x.page.mouse.move(b.x + 2, b.y + 40); await x.rest(300); await shot(x, `token-inked-${width}-${t}`); }
     await x.close();
   }
   if (theme === "hc") continue;
   for (const id of ["token", "needs", "recent", "weather", "folders", "note"]) {
-    const x = await openGrid(browser, { width: 300, theme, layout: EVERY, settings: SETTINGS, news: NEWS, height: 900, scale: 2 });
+    const x = await openGrid(browser, { width: 300, theme, layout: EVERY, settings: SETTINGS, notes: NOTES, news: NEWS, height: 900, scale: 2 });
     await x.page.click(`.hc-grid .hc-card[data-card="${id}"]`, { position: { x: 60, y: 12 } }); await x.rest(500);
     if (id === "token") { const b = await x.page.locator(".hc-open .hc-col >> nth=22").boundingBox(); await x.page.mouse.move(b.x + 2, b.y + 40); await x.rest(300); } else await x.page.mouse.move(2, 500);
     await shot(x, `opened-${id}-300-${t}`); await x.close();

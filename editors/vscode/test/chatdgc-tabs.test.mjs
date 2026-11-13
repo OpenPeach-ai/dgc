@@ -23,9 +23,12 @@ class Emitter {
 const world = { panels: [], serializers: [], warnings: [], answer: undefined, picks: [], pick: undefined, input: undefined, opened: [], clipboard: "",
                 chosen: undefined, sizes: {}, infos: [], saveTo: undefined, saveAsked: undefined, errors: [], tabs: [], changes: new Emitter() };
 function fakePanel(viewType, title) {
-  const disposed = new Emitter(), received = new Emitter();
+  const disposed = new Emitter(), received = new Emitter(), viewState = new Emitter();
   const panel = {
     viewType, title, revealed: 0, disposedCount: 0, icon: undefined,
+    // In front in its editor group, as a tab just opened is; focus(active) is the user clicking this tab or another.
+    visible: true, active: true, onDidChangeViewState: viewState.event,
+    focus(active) { this.active = active; viewState.fire({ webviewPanel: panel }); },
     // As VS Code's: a disposed panel throws when its icon is set.
     get iconPath() { return this.icon; },
     set iconPath(value) { if (this.disposedCount) throw new Error("Webview is disposed"); this.icon = value; },
@@ -64,6 +67,9 @@ globalThis.__DGC_TEST_VSCODE = {
   QuickPickItemKind: { Separator: -1 },
   env: { clipboard: { writeText: async (text) => { world.clipboard = text; } }, openExternal: async (uri) => { world.opened.push(uri.toString()); return true; } },
   window: {
+    // The window's own focus (13 Nov, "New" means not seen).
+    state: { focused: true },
+    onDidChangeWindowState(listener) { (world.onWindow ||= []).push(listener); return { dispose() {} }; },
     createWebviewPanel(viewType, title, show, options) { const panel = Object.assign(fakePanel(viewType, title), { show, options }); world.panels.push(panel); return panel; },
     registerWebviewPanelSerializer(viewType, serializer) { world.serializers.push({ viewType, serializer }); return { dispose() {} }; },
     showWarningMessage: async (message) => { world.warnings.push(String(message)); return world.answer; },
@@ -2134,4 +2140,31 @@ test("a widget's tab icon is its Folio's PNG, in the palette the widget wears, a
   // The chat's own tab wears its Mote, never a Folio.
   assert.equal(String(panel.iconPath), png(`mote-${marks.fallback("chat", ID(7))}`));
   c.dispose(); again.dispose();
+});
+
+// ---- "New" means not seen (13 Nov, after midnight) ----
+test("the home's Chat list says which chats are watched: their tab in front, in a window that has the focus", async () => {
+  const focus = (focused) => { globalThis.__DGC_TEST_VSCODE.window.state.focused = focused; for (const listener of [...(world.onWindow || [])]) listener({ focused }); };
+  const listNow = () => { chat.homeRefresh(); const ask = last("chatdgc_list"); chat.onEvent({ type: "chatdgc_chats", request_id: ask.request_id, total: 2, next_offset: null, chats: [{ id: ID(7), title: "One" }, { id: ID(8), title: "Two" }] }); return host.home.at(-1); };
+  try {
+    chat.open(ID(7)); world.panels[0].say({ type: "ready" }); opened(world.panels[0], { id: ID(7), title: "One" });
+    chat.open(ID(8)); world.panels[1].say({ type: "ready" }); opened(world.panels[1], { id: ID(8), title: "Two" });
+    const [one, two] = world.panels;
+    one.visible = false; one.active = false;                       // the second tab is in front of the first
+    assert.deepEqual(listNow().watched, [ID(8)], "only the chat whose tab is in front");
+    // The other tab comes to the front: the home is told by itself.
+    const before = sent.filter((c) => c.type === "chatdgc_list").length;
+    two.visible = false; two.active = false; one.visible = true; one.focus(true);
+    await new Promise((r) => setTimeout(r, 320));
+    assert.ok(sent.filter((c) => c.type === "chatdgc_list").length > before, "a tab coming to the front refreshes the home's list");
+    assert.deepEqual(listNow().watched, [ID(7)]);
+    // The window loses its focus: nothing is watched. It comes back: the tab in front is watched again, and the home is told.
+    focus(false);
+    assert.deepEqual(listNow().watched, [], "a tab in front of a window nobody is looking at is not watched");
+    const mid = sent.filter((c) => c.type === "chatdgc_list").length;
+    focus(true);
+    await new Promise((r) => setTimeout(r, 320));
+    assert.ok(sent.filter((c) => c.type === "chatdgc_list").length > mid, "the focus coming back refreshes the home's list");
+    assert.deepEqual(listNow().watched, [ID(7)]);
+  } finally { globalThis.__DGC_TEST_VSCODE.window.state.focused = true; }
 });

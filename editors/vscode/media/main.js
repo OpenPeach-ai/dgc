@@ -514,7 +514,7 @@
   const queuedEl = $("queued");
   // Pips has its own durable conversations. Hiding the main chat preserves its
   // live stream, draft, scroll position and session; it never changes that session.
-  let pipsApp = null, pipsOpen = false, pipsViewVisible = true;
+  let pipsApp = null, pipsOpen = false, pipsViewVisible = true, pipsWindowFocused = true;
   const pipsListeners = new Set();
   let pipSetupCards = null;
   function setupCards() {
@@ -639,6 +639,7 @@
     host.hidden = false;
     $("btn-pips-back").hidden = false;
     $("btn-pips").setAttribute("aria-pressed","true");
+    pipsApp.setFocused?.(pipsWindowFocused);
     pipsApp.setVisible?.(pipsViewVisible && !document.hidden);
   }
   // `back`: whether to go back to what was there before -- the side bar's Sessions home goes back to
@@ -743,7 +744,10 @@
     const Pick = window.DgcFolderPick;
     if (!Pick || !projectFolders) return;
     if (button.getAttribute("aria-expanded") === "true") { Pick.close(true); return; }
-    Pick.open(button, { rows: projectFolders.rows, choice: projectFolders.choice, all: true, keyboard, onChoose: chooseFolder });
+    Pick.open(button, { rows: projectFolders.rows, choice: projectFolders.choice, all: true, keyboard, onChoose: chooseFolder,
+      // Each folder's row has a pin (shown when the row is pointed at): it puts the folder on the dock, and chooses nothing.
+      // With one folder chosen the menu's first line pins (or unpins) that folder: the keyboard's way, and the Work page's.
+      ...(window.DgcDock ? { pin: { on: folderDocked, toggle: toggleFolderPin } } : {}) });
   }
   /** A slot that holds the dropdown's button: a click, or Down, opens its menu. A <dgc-folder-fit>: on the row it
    *  shares it drops the button's "Project Folder" word when there is no room for it (media/shared/folderpick.js). */
@@ -1021,7 +1025,7 @@
   // project's sessions, your chats, your Pips. Something pinned whose list isn't loaded shows with the name it was
   // pinned under.
   let dockState = { pins: [], colours: {}, since: 0, show: "always", most: 8, size: 34 }, dock = null, dockFaces = null, dockSaid = false;
-  let dockPips = { pips: [], complete: false, scopes: [] }, answeringChats = new Set(), chatItems = [], dockColours = "{}", lastChats = null;
+  let dockPips = { pips: [], complete: false, scopes: [] }, answeringChats = new Set(), watchedChats = new Set(), chatItems = [], dockColours = "{}", lastChats = null;
   const dockKey = (kind, id) => `${kind}:${id}`;
   const isDocked = (kind, id) => dockState.pins.some((pin) => pin.key === dockKey(kind, id));
   // A session keeps the palette it was given. One that has none yet is given one here and the host is asked to keep it
@@ -1059,6 +1063,14 @@
     button.setAttribute("aria-label", `${on ? "Unpin from the dock" : "Pin to the dock"}: ${title}`);
     button.innerHTML = pinSvg(on);
   }
+  // A Work folder on the dock (asked 13 Nov: "how can i Pin a folder directory on to the dock?"): what the host keeps for
+  // it is its name and its path, under the id its palette is kept by (never the path). Pinned from a Project Folder
+  // dropdown's row, from a Folders card's tile and from the Work page (the dropdown's first line, for the folder chosen);
+  // it shows in every window.
+  const folderName = (folder) => { const row = projectFolders?.rows?.find((r) => r.folder === folder); return row?.name || String(folder || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() || String(folder || ""); };
+  const folderPinItem = (folder) => ({ kind: "folder", id: window.DgcFolderPick?.folderId(folder) || "", title: folderName(folder), ref: { folder: String(folder || "") } });
+  const folderDocked = (folder) => !!folder && !!window.DgcFolderPick && isDocked("folder", window.DgcFolderPick.folderId(folder));
+  function toggleFolderPin(folder) { const item = folderPinItem(folder); if (item.id && item.ref.folder) vscode.postMessage({ type: "dockToggle", item }); }
   /** A session's or a chat's "...": Open in editor, Pin to the dock, and its twelve colours. */
   function rowMenu(button, kind, id, title, open, item, keyboard) {
     const pinned = isDocked(kind, id);
@@ -1077,6 +1089,7 @@
     button.ondblclick = (e) => e.stopPropagation();
     return button;
   }
+  let folderPinsSeen = "[]";
   const PIP_BODIES = ["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"];
   /** What the dock shows for each pin: its picture, its name, what it is doing, its dot and its number. */
   function dockItems() {
@@ -1105,6 +1118,18 @@
         item.dot = running ? "live" : "";
         item.state = live ? `Project · ${plural(Number(live.chats) || 0, "chat")}` : "Project";
         item.icon = markHtml("project", pin.id, running);
+      } else if (pin.kind === "folder") {
+        // A Work folder: his folder icon in the folder's own palette, its name on the label; still unless something
+        // in it runs (the running dot). One that is gone is dimmed, says so, and opens nothing.
+        const folder = String(pin.ref?.folder || ""), row = projectFolders?.rows?.find((r) => r.folder === folder), gone = pin.gone === true || row?.exists === false;
+        const inIt = sessionItems.filter((s) => (s.projectPath ? s.projectPath === folder : !!row?.here)), running = !gone && inIt.some((s) => s.running === true || !!s.windowless);
+        if (row?.name) item.title = String(row.name);
+        const counts = row ? [row.sessions ? plural(row.sessions, "session") : "", row.pips ? plural(row.pips, "Pip") : ""].filter(Boolean).join(" · ") : "";
+        item.gone = gone;
+        item.dot = running ? "live" : "";
+        item.state = gone ? `Not found · ${row?.shown || folder}` : ["Folder", counts, running ? "running" : "", row?.here ? "this window’s folder" : ""].filter(Boolean).join(" · ");
+        item.icon = `<span class="dgc-dock-folder">${folderTile(folder, 64, item.title)}</span>`;
+        item.menu = [[{ id: "here", label: "New session here", icon: "work", disabled: gone }, { id: "window", label: "Open in new window", icon: "open", disabled: gone }, { id: "unpin", label: "Unpin", icon: "unpin" }]];
       } else if (pin.kind === "chat") {
         const live = chatItems.find((c) => c.id === pin.id), running = answeringChats.has(pin.id), open = openChats.has(pin.id);
         if (live?.title) item.title = String(live.title);
@@ -1142,11 +1167,14 @@
   function tellPipsDock() { if (dockSaid) for (const listener of pipsListeners) listener({ type: "dock", pinned: dockState.pins.map((pin) => pin.key) }); }
   function paintDock() {
     for (const button of document.querySelectorAll(".dgc-pin[data-pin]")) paintPin(button);
+    window.DgcFolderPick?.repin?.();          // an open dropdown's pins say what is pinned now
+    if (home && JSON.stringify(dockState.pins.filter((pin) => pin.kind === "folder").map((pin) => pin.key)) !== folderPinsSeen) { folderPinsSeen = JSON.stringify(dockState.pins.filter((pin) => pin.kind === "folder").map((pin) => pin.key)); home.update(); }
     tellPipsDock();
     wearTabSession();
     if (!dock) return;
     // A pinned session with no palette yet: the pinned ones are its neighbours.
     for (const kind of ["work", "chat", "widget", "project"]) wearMarks(kind, dockState.pins.filter((pin) => pin.kind === kind).map((pin) => ({ id: pin.id, born: bornOf(kind, pin.id) })));
+    wearMarks("folder", dockState.pins.filter((pin) => pin.kind === "folder").map((pin) => ({ id: pin.id })));
     dock.update({ items: dockItems(), show: dockState.show, size: dockState.size, offers: { chat: chatsAvailable, pip: !!window.DgcPips?.mount } });
   }
   function onDock(msg) {
@@ -1196,7 +1224,17 @@
       onOpen: (key) => {
         const pin = dockState.pins.find((p) => p.key === key);
         if (!pin) return;
-        if (pin.kind === "pip") openPipsAt({ pip: pin.id }); else vscode.postMessage({ type: "dockOpen", key });
+        if (pin.kind === "pip") openPipsAt({ pip: pin.id });
+        // A folder: the Work tab, with the Project Folder set to it. One that is gone opens nothing.
+        else if (pin.kind === "folder") { const folder = String(pin.ref?.folder || ""), row = projectFolders?.rows?.find((r) => r.folder === folder); if (folder && pin.gone !== true && row?.exists !== false) { chooseFolder(folder); showSideTab("work"); } }
+        else vscode.postMessage({ type: "dockOpen", key });
+      },
+      // A tile's own menu rows (a folder's): New session here, Open in new window.
+      onMenu: (key, what) => {
+        const pin = dockState.pins.find((p) => p.key === key), folder = String(pin?.ref?.folder || "");
+        if (pin?.kind !== "folder" || !folder) return;
+        if (what === "here") vscode.postMessage({ type: "newSessionInEditor", folder });
+        else if (what === "window") vscode.postMessage({ type: "folderOpenWindow", folder });
       },
       onUnpin: (key) => vscode.postMessage({ type: "dockUnpin", key }),
       onMove: (key, by) => vscode.postMessage({ type: "dockMove", key, by }),
@@ -1268,7 +1306,9 @@
     const focused = document.activeElement?.closest?.(".chat-row")?.dataset.id;
     openChats = open;
     answeringChats = new Set(Array.isArray(msg.answering) ? msg.answering : []);
-    if (!query) { chatItems = items; chatNews(items); }
+    // The chats being watched: their tab in front, in a window that has the focus (the host says). A reply there is seen.
+    watchedChats = new Set(Array.isArray(msg.watched) ? msg.watched.map(String) : []);
+    if (!query) { chatItems = items; chatNews(items); } else chatsWatched();
     homeQuery = query;
     list.replaceChildren();
     wearMarks("chat", items.map((item) => ({ id: item.id, born: window.DgcMarks?.born("", item.created_at || item.updated_at) })));
@@ -1537,7 +1577,14 @@
     if (JSON.stringify(hubNews) !== before) keepHubNews();
   }
   const sessionNews = (items) => noteNews("work", items, items.filter((item) => item.running === true || !!item.windowless).map((item) => item.id), !sessionsMoreToLoad);
-  const chatNews = (items) => noteNews("chat", items, items.filter((item) => answeringChats.has(item.id)).map((item) => String(item.id)), false);
+  const chatNews = (items) => { noteNews("chat", items, items.filter((item) => answeringChats.has(item.id)).map((item) => String(item.id)), false); chatsWatched(); };
+  /** A chat whose tab the user is on (in front, in the focused window) has no news: what it said was read as it came,
+   *  or is read now that the user is back on it ("New" means not seen, asked 13 Nov). */
+  function chatsWatched() {
+    let seen = false;
+    for (const id of watchedChats) if (hubNews.chat[id] !== undefined) { delete hubNews.chat[id]; seen = true; }
+    if (seen) keepHubNews();
+  }
   // A Work session's reply nobody was looking at (13 Nov): the host says so with the list (`news`: the session, when,
   // and the reply's first words), since the tab knows when its turn ends and whether it is in front. (Noticing it here,
   // from one list that says "running" and a later one that doesn't, missed every turn that ended before the first of
@@ -1730,7 +1777,11 @@
       pips: { offered: !!window.DgcPips?.mount, why: "Pips aren’t set up in this DGC.", rows: pips, total: pips.length, waiting: pips.filter((p) => p.waiting).length, say: pips[0] ? `${pips[0].name} is ready` : "", empty: "No Pips yet." },
       running: [...work.filter((r) => r.running).map((r) => ({ ...r, live: false, meta: ["Work", r.meta].filter(Boolean).join(" · ") })), ...chats.filter((r) => r.running).map((r) => ({ ...r, live: false, meta: "Chat · answering" }))],
       quick: { work: quickMark("work"), chat: chatsAvailable ? quickMark("chat") : "", pip: quickMark("pip") },
-      folders: { rows: projectFolders ? projectFolders.rows : [], mark: folderTile },
+      // (pinned: whether a folder is on the dock; a page with no dock offers no pin.)
+      folders: { rows: projectFolders ? projectFolders.rows : [], mark: folderTile, ...(window.DgcDock ? { pinned: folderDocked } : {}) },
+      // What the Library lists: a widget's Folio in the palette it wears, an artifact's sheet by its kind (as the dock and the Library show them).
+      widgets: { mark: (id) => { wearMarks("widget", [{ id: String(id) }]); return markHtml("widget", String(id), false); } },
+      artifacts: { sheet: (type) => window.DgcFileSheet?.html?.(String(type || "file")) || "" },
     };
   }
   function homeAct(what, arg) {
@@ -1740,6 +1791,11 @@
     else if (what === "new") { if (arg === "work") openNewSession(); else if (arg === "chat") vscode.postMessage({ type: "chatdgcNew" }); else openPipsAt({ create: "personal" }); }
     else if (what === "here") vscode.postMessage({ type: "newSessionInEditor", folder: arg });
     else if (what === "folder") { chooseFolder(arg); showSideTab("work"); }
+    else if (what === "pin") toggleFolderPin(arg);
+    else if (what === "usage") vscode.postMessage({ type: "openSettings", section: "usage" });       // Settings, on its Token Usage page
+    else if (what === "library") vscode.postMessage({ type: "homeLibraryOpen", view: arg === "widgets" ? "widgets" : "artifacts" });
+    else if (what === "widget") vscode.postMessage({ type: "homeWidgetOpen", id: String(arg?.id || ""), chat_id: String(arg?.chat_id || "") });
+    else if (what === "artifact") vscode.postMessage({ type: "artifactOpen", id: String(arg?.id || ""), artifactType: String(arg?.type || ""), title: String(arg?.title || "") });
     else if (what === "open") {
       const key = String(arg || ""), kind = key.slice(0, key.indexOf(":")), id = key.slice(key.indexOf(":") + 1);
       if (kind === "hub") hubAct(id, "open");
@@ -12990,6 +13046,9 @@ function permissionChoices(ev) {
     if (msg.type === "homeCards") { home?.layout(msg); return; }
     if (msg.type === "homeUsage") { home?.usage(msg); return; }
     if (msg.type === "homeWeather") { home?.weather(msg); return; }
+    if (msg.type === "homeWeatherPlaces") { home?.places(msg); return; }
+    if (msg.type === "homeWidgets") { home?.made("widgets", msg); return; }
+    if (msg.type === "homeArtifacts") { home?.made("artifacts", msg); return; }
     // A command answered on Home: this session's own card settles, saying so on the card (one line, not two).
     if (msg.type === "settleCard") {
       document.querySelectorAll(".card[data-request-id]").forEach((card) => {
@@ -13010,6 +13069,8 @@ function permissionChoices(ev) {
       homePips?.receive(msg);
       if (msg.type === "pipsVisibility") {
         pipsViewVisible = msg.visible === true;
+        // (focused: the window has the focus. A Pip's chat reads what it shows only while someone can be looking.)
+        if (typeof msg.focused === "boolean") { pipsWindowFocused = msg.focused; pipsApp?.setFocused?.(pipsWindowFocused); }
         pipsApp?.setVisible?.(pipsOpen && pipsViewVisible && !document.hidden);
       } else for (const listener of pipsListeners) listener(msg);
       return;

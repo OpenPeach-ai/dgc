@@ -660,6 +660,12 @@ function undoPromptLine(text: string): string {
   return (atWord.length >= 40 ? atWord : cut) + "…";
 }
 
+/** Whether this window has the focus: someone can be looking at what is in front in it. (An editor that cannot say
+ *  counts as focused.) A reply is seen only where it is: "New" means not seen (13 Nov). */
+export function windowFocused(): boolean {
+  try { return vscode.window.state?.focused !== false; } catch { return true; }
+}
+
 export class DgcViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private viewType = "dgc.chat";   // the container the chat currently lives in
@@ -802,7 +808,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "turn_end": {
         const said = this.replyText.replace(/\s+/g, " ").trim(), reason = String(ev.reason || "completed"), id = this.sessionId();
         this.replyText = "";
-        if (!id || reason === "cancelled" || (reason === "error" && !said) || this.view?.visible) { break; }
+        // Watched as it arrived (its tab in front, in the window that has the focus): never news.
+        if (!id || reason === "cancelled" || (reason === "error" && !said) || (this.view?.visible && windowFocused())) { break; }
         try { this.tab.host.sessionReplied(id, said); } catch { /* the side bar is on its way out */ }
         break;
       }
@@ -1035,6 +1042,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (typeof vscode.window.onDidChangeWindowState === "function") {
       this.context.subscriptions.push(vscode.window.onDidChangeWindowState(() => {
         for (const owner of [this, ...this.tabProviders]) owner.paintStatusBar();
+        // The window gained or lost the focus: which sessions are watched changed with it (a reply in the tab in front
+        // is read when the user is back), and a Pip's chat on this page reads what it shows only while it has it.
+        this.sessionsChanged();
+        if (this.view && this.pipsEditor) this.post({ type: "pipsVisibility", visible: this.view.visible, focused: windowFocused() });
       }));
     }
     if (typeof vscode.workspace.registerTextDocumentContentProvider === "function") {
@@ -1530,24 +1541,25 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   /** Home's Token usage card: every day DGC has counted (for a period and the one before it) and the last thirty
    *  days' models, read from the local ledger by this side bar's own DGC. Two reports, then one message to the card. */
-  private homeUsage?: { all?: any; period?: any; timer?: ReturnType<typeof setTimeout> };
+  private homeUsage?: { all?: any; period?: any; today?: any; timer?: ReturnType<typeof setTimeout> };
   private askHomeUsage(): void {
     if (!this.home || !this.webviewReady) { return; }
     if (this.lastReadyEvent && !this.lastReadyEvent.capabilities?.usage_ledger) { this.post({ type: "homeUsage", days: [], models: [], error: "Update the DGC CLI to see token usage here." }); return; }
     if (this.homeUsage?.timer) { return; }           // already asked: its answer is on its way
     const be = this.ensureBackend();
-    const asked = be.send({ type: "get_usage", request_id: "home-usage-all", range: "all" }) && be.send({ type: "get_usage", request_id: "home-usage-30d", range: "30d" });
+    // (And today's own report: its models are what today's column names.)
+    const asked = be.send({ type: "get_usage", request_id: "home-usage-all", range: "all" }) && be.send({ type: "get_usage", request_id: "home-usage-30d", range: "30d" }) && be.send({ type: "get_usage", request_id: "home-usage-today", range: "today" });
     if (!asked) { this.post({ type: "homeUsage", days: [], models: [], error: "DGC could not read token usage just now." }); return; }
-    this.homeUsage = { timer: setTimeout(() => { const had = this.homeUsage; this.homeUsage = undefined; if (had?.all) this.post(usageForHome(had.all, had.period)); }, 20000) };
+    this.homeUsage = { timer: setTimeout(() => { const had = this.homeUsage; this.homeUsage = undefined; if (had?.all) this.post(usageForHome(had.all, had.period, had.today)); }, 20000) };
   }
   private homeUsageReport(ev: any): void {
     const asked = this.homeUsage;
     if (!asked) { return; }
-    if (ev.request_id === "home-usage-all") asked.all = ev; else asked.period = ev;
-    if (!asked.all || !asked.period) { return; }
+    if (ev.request_id === "home-usage-all") asked.all = ev; else if (ev.request_id === "home-usage-today") asked.today = ev; else asked.period = ev;
+    if (!asked.all || !asked.period || !asked.today) { return; }
     if (asked.timer) clearTimeout(asked.timer);
     this.homeUsage = undefined;
-    if (this.home && this.webviewReady) this.post(usageForHome(asked.all, asked.period));
+    if (this.home && this.webviewReady) this.post(usageForHome(asked.all, asked.period, asked.today));
   }
 
   /** Whether this DGC offers the Project Folder dropdown (it lists every project's sessions, and the folders). */
@@ -1788,6 +1800,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.openSessionInEditor(pin.id, pin.title); return;
     }
     void this.chatdgc?.openFromDock(pin);
+  }
+  /** Open in new window, from a pinned folder's menu on the dock: that directory as its own window. Only a folder that
+   *  is pinned on the dock opens (never whatever a page names). */
+  private openFolderWindow(value: unknown): void {
+    if (!this.home || typeof value !== "string" || !value) { return; }
+    const pin = dockOf(this.context).pins().find((item) => item.kind === "folder" && item.ref?.folder === value);
+    if (!pin) { return; }
+    if (!fs.existsSync(value)) { void vscode.window.showInformationMessage(`That folder is not there any more: ${homeAsTilde(value)}`); return; }
+    void vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(value), { forceNewWindow: true });
   }
   /** The dock's "+": each starts its new thing at once. */
   private newFromDock(what: string): void {
@@ -5681,7 +5702,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.adoptedViews.add(view);
       view.onDidChangeVisibility(() => {
         if (view.visible && this.view !== view) { this.resolveWebviewView(view); }
-        if (this.view === view && this.pipsEditor) this.post({ type: "pipsVisibility", visible: view.visible });
+        if (this.view === view && this.pipsEditor) this.post({ type: "pipsVisibility", visible: view.visible, focused: windowFocused() });
       });
       view.onDidDispose(() => {
         // The user unchecked the view: the renderer is gone, the WINDOW is not, and closing the
@@ -5852,6 +5873,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (this.home && homeCardsOf(this.context).handle(msg, (said) => this.post(said))) return;
     if (this.home && msg?.type === "homeUsageGet") { this.askHomeUsage(); return; }
     if (msg?.type === "dockOpen") { this.openFromDock(String(msg.key || "")); return; }
+    if (msg?.type === "folderOpenWindow") { this.openFolderWindow(msg.folder); return; }
+    // Home's Widgets and Artifacts cards: what the Library lists, read by ChatDGC's own host (src/chatdgc.ts).
+    if (this.home && typeof msg?.type === "string" && /^home(?:WidgetsGet|ArtifactsGet|WidgetOpen|LibraryOpen)$/.test(msg.type)) {
+      if (this.chatdgc) void this.chatdgc.homeCardsMessage(msg);
+      else if (msg.type === "homeWidgetsGet") this.post({ type: "homeWidgets", offered: false, widgets: [] });
+      else if (msg.type === "homeArtifactsGet") this.post({ type: "homeArtifacts", offered: false, items: [] });
+      return;
+    }
     if (msg?.type === "dockNew") { this.newFromDock(String(msg.what || "")); return; }
     // The home's Pips row: unread its Dismiss all cleared from there, kept so a reload holds it (src/pipHomeDismiss.ts).
     if (rememberPipHomeDismissed(this.context, msg)) return;

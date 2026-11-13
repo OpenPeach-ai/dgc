@@ -2,7 +2,9 @@
 //
 // Pins are kept on this computer, in the extension's global state, so they hold across reloads and windows. A Work
 // session and a project's Pip belong to a project: each is kept with the folder it was pinned in and shows only in that
-// folder's windows. A Personal Pip, a ChatDGC chat, an artifact, a Library file and a widget show in every window.
+// folder's windows. A Personal Pip, a ChatDGC chat, an artifact, a Library file and a widget show in every window, and
+// so does a Work folder (13 Nov): a way to reach that folder from anywhere, kept with its path (its id is the one its
+// palette is kept by, never the path), and said to be gone when the folder is not there any more.
 // Deleting a pinned session, chat, artifact, file or widget takes it off the dock (forget); a pinned Pip that is gone
 // is taken off by the side bar once its list no longer has it.
 //
@@ -14,7 +16,7 @@
 // the widget's id.) An editor tab's icon is the mark at rest, a PNG in media/session-icons/
 // (scripts/render-session-icons.mjs makes them from the shipped CSS).
 import * as vscode from "vscode";
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import marks from "../media/shared/marks.js";
 
 const PINS = "dgc.dock.pins";
@@ -23,17 +25,17 @@ const PINS = "dgc.dock.pins";
 const PALETTES = "dgc.sessionPalettes", SINCE = "dgc.sessionPalettesSince", COLOURS = "dgc.sessionColours";
 const KEEP_PINS = 200, KEEP_COLOURS = 2000;
 export const DOCK_MOST = 16, DOCK_MOST_DEFAULT = 8, DOCK_SIZE_MIN = 24, DOCK_SIZE_MAX = 48, DOCK_SIZE_DEFAULT = 34;
-const KINDS = ["pip", "work", "chat", "artifact", "file", "widget", "project"] as const;
+const KINDS = ["pip", "work", "chat", "artifact", "file", "widget", "project", "folder"] as const;
 export type DockKind = typeof KINDS[number];
 const ID = /^[A-Za-z0-9_.:|-]{1,200}$/;
-const NAMES: Record<DockKind, string> = { pip: "Pip", work: "Work session", chat: "ChatDGC chat", artifact: "Artifact", file: "Library file", widget: "Widget", project: "Project" };
+const NAMES: Record<DockKind, string> = { pip: "Pip", work: "Work session", chat: "ChatDGC chat", artifact: "Artifact", file: "Library file", widget: "Widget", project: "Project", folder: "Folder" };
 
 /** One pinned thing. `ref` is what opens it (ids only); `look` is how to draw it when its list isn't loaded (a Pip's
  *  body, a file's kind); `where` is the folder a project's thing was pinned in ("" shows in every window). */
 export type DockPin = { key: string; kind: DockKind; id: string; title: string; sub: string; look: Record<string, string>; ref: Record<string, string>; where: string };
 export type DockShow = "always" | "hover" | "never";
 /** `colours`: the palette each session's mark wears, by "work:<id>" or "chat:<id>". `since`: when the marks arrived here. */
-export type DockState = { type: "dock"; pins: Omit<DockPin, "where">[]; colours: Record<string, string>; since: number; show: DockShow; most: number; size: number };
+export type DockState = { type: "dock"; pins: (Omit<DockPin, "where"> & { gone?: true })[]; colours: Record<string, string>; since: number; show: DockShow; most: number; size: number };
 
 const text = (value: unknown, most: number) => String(value ?? "").replace(/\s+/g, " ").trim().slice(0, most);
 /** A flat map of short strings, and nothing else: what a page sent is never kept as it came. */
@@ -51,6 +53,12 @@ export function dockPin(value: any, where = ""): DockPin | undefined {
   const kind = KINDS.find((k) => k === value?.kind), id = String(value?.id ?? "");
   if (!kind || !ID.test(id)) return undefined;
   const scoped = kind === "work" || (kind === "pip" && value?.scope === "project");
+  // A Work folder is its whole path (a page's short string is not enough of one): absolute, and nothing else kept with it.
+  if (kind === "folder") {
+    const folder = typeof value?.ref?.folder === "string" ? value.ref.folder : "";
+    if (!folder || folder.length > 1000 || /[\u0000-\u001f]/.test(folder) || !(/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(folder))) return undefined;
+    return { key: dockKey(kind, id), kind, id, title: text(value.title, 200) || NAMES[kind], sub: "", look: {}, ref: { folder }, where: "" };
+  }
   return { key: dockKey(kind, id), kind, id, title: text(value.title, 200) || NAMES[kind], sub: text(value.sub, 200), look: strings(value.look), ref: strings(value.ref),
     where: scoped ? String(typeof value.where === "string" ? value.where : where).slice(0, 1000) : "" };
 }
@@ -153,7 +161,9 @@ export class Dock {
   }
 
   state(): DockState {
-    return { type: "dock", pins: this.pins().map(({ where: _where, ...pin }) => pin), colours: this.colours(), since: this.since(), ...dockSettings() };
+    // (A pinned folder that is not there any more is said to be gone: its tile is dimmed and opens nothing.)
+    const gone = (pin: DockPin) => { if (pin.kind !== "folder") return false; try { return !existsSync(pin.ref.folder); } catch { return false; } };
+    return { type: "dock", pins: this.pins().map(({ where: _where, ...pin }) => (gone(pin as DockPin) ? { ...pin, gone: true as const } : pin)), colours: this.colours(), since: this.since(), ...dockSettings() };
   }
   /** Calls `listener` whenever the dock, a colour or a Dock setting changes (and when this window is looked at again:
    *  another window may have pinned something meanwhile). */

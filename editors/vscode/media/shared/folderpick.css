@@ -133,3 +133,22 @@ dgc-folder-fit[data-compact] .dgc-folder-k { display: none; }
   :is(.dgc-menu-row, .dgc-folder, .new-session-path):is(:hover, :focus-visible):not(:disabled) .dgc-folder-icon .folder-paper--front { transform: none; }
 }
 @media (forced-colors: active) { .dgc-folder-icon { forced-color-adjust: none; } }
+
+/* A row's pin (a Work folder on the dock, asked 13 Nov): at the row's end, shown while the row is pointed at or has the
+   keyboard, and kept in sight (filled) while the folder is pinned. The button family's corner. */
+.dgc-folder-menu .dgc-folder-pin { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin: -2px 0 -2px 2px; border-radius: var(--btn-r, 6px);
+  color: var(--muted); opacity: 0; cursor: pointer; transition: opacity var(--dur-hover) ease, background-color var(--dur-hover) ease, color var(--dur-hover) ease; }
+.dgc-folder-menu .dgc-folder-row:is(:hover, :focus-visible) .dgc-folder-pin, .dgc-folder-menu .dgc-folder-pin[aria-pressed="true"] { opacity: 1; }
+.dgc-folder-menu .dgc-folder-pin:hover { background: color-mix(in srgb, var(--text) 14%, transparent); color: var(--text-strong); }
+.dgc-folder-menu .dgc-folder-pin[aria-pressed="true"] { color: var(--text); }
+.dgc-folder-menu .dgc-folder-row .dgc-folder-pin + .dgc-menu-check { margin-left: 4px; }
+@media (hover: none) { .dgc-folder-menu .dgc-folder-pin { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .dgc-folder-menu .dgc-folder-pin { transition: none; } }
+/* The menu's first line with one folder chosen: "Pin <folder> to the dock" (or Unpin), a row like the others, with the pin. */
+.dgc-folder-menu .dgc-folder-pin-line .dgc-folder-mark { color: var(--muted); }
+.dgc-folder-menu .dgc-folder-pin-line[data-pinned="true"] .dgc-folder-mark { color: var(--text); }
+.dgc-folder-menu .dgc-folder-row > .dgc-menu-words + .dgc-folder-pin { margin-left: auto; }
+.dgc-folder-menu .dgc-folder-pin-line[data-pinned="true"] .dgc-folder-mark svg { fill: currentColor; }
+/* Its words are never cut: in a narrow side bar a long folder's line takes a second line. */
+.dgc-folder-menu .dgc-folder-pin-line { height: auto; padding-block: 6px; }
+.dgc-folder-menu .dgc-folder-pin-line .dgc-menu-label { white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }

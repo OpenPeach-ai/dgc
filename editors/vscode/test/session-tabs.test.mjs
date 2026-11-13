@@ -19,7 +19,8 @@ class Emitter {
   dispose() { this.listeners = []; }
 }
 
-const world = { panels: [], serializers: [], warnings: [], infos: [], answer: undefined, statusBar: null, workspaceState: new Map(), globalState: new Map(), picked: undefined, pickers: [] };
+const world = { panels: [], serializers: [], warnings: [], infos: [], answer: undefined, statusBar: null, workspaceState: new Map(), globalState: new Map(), picked: undefined, pickers: [], onWindow: [], commands: [],
+  focus(focused) { globalThis.__DGC_TEST_VSCODE.window.state.focused = focused; for (const listener of [...this.onWindow]) listener({ focused }); } };
 function fakePanel(viewType, title) {
   const viewState = new Emitter(), disposed = new Emitter();
   const panel = {
@@ -48,9 +49,12 @@ globalThis.__DGC_TEST_VSCODE = {
   StatusBarAlignment: { Left: 1 },
   ThemeIcon: class { constructor(id) { this.id = id; } },
   env: { clipboard: { writeText: async () => {} } },
-  commands: { executeCommand: async () => undefined },
+  commands: { executeCommand: async (...args) => { world.commands.push(args); return undefined; } },
   languages: { getDiagnostics: () => [] },
   window: {
+    // The window's own focus (13 Nov, "New" means not seen): world.focus(false) is the user in another window or app.
+    state: { focused: true },
+    onDidChangeWindowState(listener) { world.onWindow.push(listener); return { dispose() {} }; },
     activeTextEditor: undefined, visibleTextEditors: [], tabGroups: { all: [] },
     createWebviewPanel(viewType, title) { const panel = fakePanel(viewType, title); world.panels.push(panel); return panel; },
     registerWebviewPanelSerializer(viewType, serializer) { world.serializers.push({ viewType, serializer }); return { dispose() {} }; },
@@ -139,6 +143,7 @@ const settle = () => new Promise((done) => setTimeout(done, 0));
 beforeEach(() => {
   world.panels.length = 0; world.serializers.length = 0; world.warnings.length = 0; world.infos.length = 0;
   world.answer = undefined; world.workspaceState.clear(); world.globalState.clear(); world.picked = undefined; world.pickers.length = 0;
+  world.commands.length = 0; globalThis.__DGC_TEST_VSCODE.window.state.focused = true;
 });
 
 test("a session opens in a tab of its own, and opening it again shows that tab", () => {
@@ -995,4 +1000,45 @@ test("the dock: a pinned session whose folder is gone opens nothing and says so"
   await sidebar.onMessage({ type: "dockOpen", key: "work:g1" }); await settled();
   assert.equal(world.panels.length, 0, "no tab opens");
   assert.match(world.infos.at(-1) || "", /Folder not found/, "and it says why");
+});
+
+// ---- "New" means not seen (13 Nov, after midnight): a tab in front counts as watched only while the window is focused ----
+test("a reply into a tab in front of a window that is not focused is news, and is read when the window has the focus again", async () => {
+  const { sidebar, tabs, made } = windowWith(TWO);
+  tabs.open("20261006-101500-a1");
+  const [first] = made, [panel] = world.panels;
+  const reply = (turn) => { first.onEvent({ type: "turn_start", turn_id: turn, kind: "prompt", prompt: "go" }); first.onEvent({ type: "text_delta", text: "Done." }); first.onEvent({ type: "turn_end", turn_id: turn, reason: "completed" }); };
+  assert.equal(panel.visible, true);
+  // Focused, its tab in front: the reply is seen as it arrives.
+  reply("t1");
+  let list = await lastList(sidebar);
+  assert.deepEqual(list.news ?? [], [], "watched as it arrived: never news"); assert.equal(list.items[0].watched, true);
+  // The user is in another window: the tab is still in front here, but nobody is looking.
+  world.focus(false);
+  assert.equal((await lastList(sidebar)).items[0].watched, undefined, "a tab in front of a window that is not focused is not watched");
+  reply("t2");
+  list = await lastList(sidebar);
+  assert.deepEqual(list.news.map((n) => n.id), ["20261006-101500-a1"], "its reply is news");
+  assert.deepEqual((await lastList(sidebar)).news.map((n) => n.id), ["20261006-101500-a1"], "and stays news while the window is away");
+  // Back: the side bar is told by itself (a list nobody asked for), and the reply is read.
+  const before = sidebar.posted.filter((m) => m.type === "sessions_list").length;
+  world.focus(true);
+  await settle(); await new Promise((done) => setTimeout(done, 350)); await settle();
+  const told = sidebar.posted.filter((m) => m.type === "sessions_list");
+  assert.ok(told.length > before, "the window's focus coming back sends the list again");
+  assert.deepEqual(told.at(-1).news ?? [], [], "read: the user is back on its tab"); assert.equal(told.at(-1).items[0].watched, true);
+});
+
+test("Open in new window, from a pinned folder on the dock: only a folder that is pinned opens, as its own window", async () => {
+  const { sidebar } = windowWith(TWO);
+  const folder = join(scratch, "garden-notes");
+  mkdirSync(folder, { recursive: true });
+  await sidebar.onMessage({ type: "folderOpenWindow", folder });
+  assert.deepEqual(world.commands.filter((c) => c[0] === "vscode.openFolder"), [], "a folder that is not on the dock opens nothing, whatever a page says");
+  await sidebar.onMessage({ type: "dockPin", item: { kind: "folder", id: "fgarden1", title: "garden-notes", ref: { folder } } });
+  await settle(); await settle();
+  await sidebar.onMessage({ type: "folderOpenWindow", folder });
+  await settle();
+  const opened = world.commands.filter((c) => c[0] === "vscode.openFolder");
+  assert.equal(opened.length, 1); assert.equal(opened[0][1].fsPath, folder); assert.deepEqual(opened[0][2], { forceNewWindow: true });
 });

@@ -723,3 +723,24 @@ test("on the Pips page a dot sits where a number's centre sits, in dark and ligh
     } finally { await x.close(); }
   }
 });
+
+// "New" means not seen (13 Nov, after midnight): a Pip's chat on screen reads what it shows only while the window has
+// the focus. The host says so with the view's visibility (pipsVisibility { visible, focused }).
+test("a Pip's chat in front of a window that is not focused reads nothing; when the focus is back, it reads what it shows", async (t) => {
+  if (skipOrFail(t)) return;
+  const x = await openHome({});
+  try {
+    const say = (data) => x.page.evaluate((d) => window.dispatchEvent(new MessageEvent("message", { data: d })), data);
+    await say({ type: "pipsVisibility", visible: true, focused: false });
+    await openPipsPage(x, "personal");
+    await x.page.evaluate(() => { window.__posted.length = 0; });
+    await x.page.click(`[data-job="${MAIL}"]`);
+    await x.page.waitForSelector("#pips-host .conversation-log, .conversation-log", { state: "attached" }).catch(() => {});
+    await x.page.waitForTimeout(700);
+    assert.deepEqual(await x.requests("mark_pip_read"), [], "nobody is looking at this window: what the chat shows is not read");
+    await say({ type: "pipsVisibility", visible: true, focused: true });
+    await x.page.waitForFunction(() => window.__posted.some((m) => m.type === "pipsRequest" && m.request.type === "mark_pip_read"), null, { timeout: 5000 });
+    assert.deepEqual((await x.requests("mark_pip_read")).map(({ request_id, ...r }) => r), [{ type: "mark_pip_read", pip_id: MAIL, message_id: M2 }], "the user is back: read up to what the chat shows");
+    assert.deepEqual(x.errors, []);
+  } finally { await x.close(); }
+});

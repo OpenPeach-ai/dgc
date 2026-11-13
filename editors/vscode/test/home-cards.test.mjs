@@ -6,7 +6,7 @@
 // every card with the host's own data in every form in a dark and a light theme, and reduced motion.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { openGrid, DEFAULT, EVERY, usageDays, WEATHER, FOLDERS } from "./support/home-grid-scene.mjs";
+import { openGrid, DEFAULT, EVERY, usageDays, WEATHER, FOLDERS, LISBON, NOTES } from "./support/home-grid-scene.mjs";
 import { DOCK_SESSIONS } from "./support/dock-scene.mjs";
 import { CHATS } from "./support/home-scene.mjs";
 
@@ -27,7 +27,9 @@ before(async () => {
 after(async () => { await browser?.close(); });
 const near = (a, b, by = 1.5) => Math.abs(a - b) <= by;
 const card = (g, id) => g.cards.find((c) => c.id === id);
-const SETTINGS = { weather: { city: "Lisbon", unit: "c" }, note: { text: "Call the bank about the card\nthen book the ferry" }, clock: { zone: "Asia/Tokyo" } };
+// (Since the second follow-up, 13 Nov late: the Weather's place is one chosen from Open-Meteo's list, kept whole; and
+// the one sticky note is Notes, many of them, kept beside the settings. test/home-cards-more.test.mjs has their own tests.)
+const SETTINGS = { weather: { place: LISBON, unit: "c" }, clock: { zone: "Asia/Tokyo" } };
 
 test("the width picks each card's form: Small squares two a row at 300 px, Medium at 460 px, Large where a card has one at 700 px", async (t) => {
   if (skipOrFail(t)) return;
@@ -60,7 +62,9 @@ test("the width picks each card's form: Small squares two a row at 300 px, Mediu
     // Dense packing: no hole a later card could have filled. Every row of the grid is full but perhaps the last.
     const rows = new Map(); for (const c of g.cards) for (let y = Math.round(c.top); y < c.bottom - 5; y += Math.round(needs.height + 10)) rows.set(y, (rows.get(y) || 0) + c.width);
     const filled = [...rows.entries()].sort((a, b) => a[0] - b[0]).map(([, w]) => w);
-    for (const w of filled.slice(0, -1)) assert.ok(w > 600, `a row of the grid is full (${Math.round(w)} px of cards)`);
+    // (Notes has a Large form since 13 Nov late, and is the last card here: a Large block at the very end has nothing after it to fill its side, so the last two rows may be half full.)
+    for (const w of filled.slice(0, -2)) assert.ok(w > 600, `a row of the grid is full (${Math.round(w)} px of cards)`);
+    assert.equal(forms.note, "l");
     assert.equal(g.overflowX, false);
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
@@ -101,7 +105,7 @@ test("a Small card opens to its full form over Home, and Back or Escape returns 
     assert.ok(near(g.open.width, 300 - 24, 2), "the full form has the side bar's width");
     assert.equal(await p.locator("#side-tabs").isVisible(), true, "the tabs stay"); assert.equal(await p.locator("#dgc-dock").isVisible(), true, "and the dock");
     const full = await p.evaluate(() => { const c = document.querySelector(".hc-open .hc-card"); return { cols: c.querySelectorAll(".hc-plot .hc-col").length, tabs: [...c.querySelectorAll('[role="tab"]')].map((b) => b.dataset.metric), ranges: [...c.querySelectorAll(".hc-seg button")].map((b) => b.textContent), models: [...c.querySelectorAll(".hc-by .hc-mn")].map((n) => n.textContent) }; });
-    assert.deepEqual(full, { cols: 30, tabs: ["tokens", "requests", "cache"], ranges: ["7d", "30d"], models: ["deepseek-v4.1-flash:cloud", "Claude Code (subscription)", "qwen3.5-coder (this computer)"] }, "everything the card does is here at 300 px: thirty days, every tab, the range, and the models");
+    assert.deepEqual(full, { cols: 30, tabs: ["tokens", "requests", "cache"], ranges: ["7d", "30d"], models: ["deepseek-v4.1-flash:cloud · Ollama", "claude-opus-4.1 · Claude Code", "qwen3.5-coder:32b · Ollama", "qwen3:8b · Ollama", "gpt-5.1-codex · Codex"] }, "everything the card does is here at 300 px: thirty days, every tab, the range, and the models with their providers");
     await p.click(".hc-open .hc-seg button[data-range='7d']"); await x.rest(300);
     assert.equal(await p.locator(".hc-open .hc-plot .hc-col").count(), 7, "7d shows a week");
     await p.click("#home-hub .hc-back"); await x.rest(300);
@@ -141,7 +145,7 @@ for (const width of [300, 700]) {
       assert.ok(g.library, "the library is a pop-up");
       if (width === 300) assert.ok(g.library.width >= 300 - 2 * 12 - 1, `full width in a narrow side bar (${g.library.width})`);
       else { assert.ok(g.library.width <= 520.5, `at most about 520 px wide (${g.library.width})`); assert.ok(near((g.library.left + g.library.right) / 2, width / 2, 2), "and centred"); }
-      assert.deepEqual(g.library.items.map((i) => i.id).sort(), [...EVERY].sort(), "every card is in the library");
+      assert.deepEqual(g.library.items.map((i) => i.id).sort(), [...EVERY, "widgets", "artifacts"].sort(), "every card is in the library");
       for (const i of g.library.items) {
         assert.ok(i.name && i.line, `${i.id} has its name and one line`);
         assert.equal(i.previewDrawn, true, `${i.id} has a preview`);
@@ -149,7 +153,7 @@ for (const width of [300, 700]) {
         assert.equal(i.add, !DEFAULT.includes(i.id)); assert.equal(i.remove, DEFAULT.includes(i.id));
       }
       // (Until 13 Nov evening each card wore a mosaic of its own here; his call: twelve cards need no icon each.)
-      assert.deepEqual(g.library.items.map((i) => i.mosaics), Array(12).fill(0), "a card in the library has no icon of its own: its preview, its name and one line");
+      assert.deepEqual(g.library.items.map((i) => i.mosaics), Array(14).fill(0), "a card in the library has no icon of its own: its preview, its name and one line");
       assert.ok(g.library.title.length === 1 && g.library.title[0].includes("mosaic--ember"), "the Ember mosaic is the Cards button's and the pop-up's title's only");
       assert.deepEqual(g.library.foot, ["Arrange Home", "Reset Home"]);
       assert.equal(g.library.items.find((i) => i.id === "token").preview.includes("M") || true, true);
@@ -181,14 +185,18 @@ test("the library adds and removes cards, and what is on Home is kept by the hos
     assert.equal(g.library.items.find((i) => i.id === "running").add, true);
     kept = await x.host();
     assert.deepEqual(kept.order, ["needs", "recent", "token", "quick", "work", "chats"], "the host was told, and keeps it");
-    // Weather asks for its city when it is added: never guessed from the machine.
+    // Weather asks for its place when it is added: never guessed from the machine, and (13 Nov, late) never typed blind:
+    // the place is taken from the list the letters typed bring up.
     await p.click('.hc-lib-item[data-card="weather"] .hc-add'); await x.rest(200);
-    assert.equal((await x.host()).order.includes("weather"), false, "Weather is not added before a city is typed");
-    assert.match(await p.locator('.hc-lib-item[data-card="weather"]').innerText(), /Open-Meteo/, "and it says where the city's name is sent");
-    await p.fill('.hc-lib-item[data-card="weather"] .hc-city', "Lisbon"); await p.keyboard.press("Enter"); await x.rest(300);
+    assert.equal((await x.host()).order.includes("weather"), false, "Weather is not added before a place is chosen");
+    assert.match(await p.locator('.hc-lib-item[data-card="weather"]').innerText(), /Open-Meteo/, "and it says where the letters typed are sent");
+    await p.fill('.hc-lib-item[data-card="weather"] .hc-city', "Lisbon"); await x.rest(450);
+    await p.keyboard.press("Enter"); await x.rest(200);
+    assert.equal((await x.host()).order.includes("weather"), false, "a name typed and Enter adds nothing: a place must be chosen");
+    await p.keyboard.press("ArrowDown"); await p.keyboard.press("Enter"); await p.keyboard.press("Enter"); await x.rest(300);
     kept = await x.host();
-    assert.equal(kept.order.at(-1), "weather"); assert.equal(kept.settings.weather.city, "Lisbon");
-    assert.deepEqual(await p.evaluate(() => window.__weatherAsked), ["Lisbon"], "the host is asked for that city's weather, once");
+    assert.equal(kept.order.at(-1), "weather"); assert.deepEqual(kept.settings.weather.place, LISBON);
+    assert.deepEqual(await p.evaluate(() => window.__weatherAsked), [LISBON], "the host is asked for that place's weather, once");
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
   const again = await openGrid(browser, { width: 460, layout: kept.order, settings: kept.settings });
@@ -280,7 +288,7 @@ const today = usageDays().at(-1), NEWS = [{ id: DOCK_SESSIONS[3].id, at: Date.no
 for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 460, 700]) {
   test(`every card shows what the host said, ${width}px ${theme}`, async (t) => {
     if (skipOrFail(t)) return;
-    const x = await openGrid(browser, { width, theme, layout: EVERY, settings: SETTINGS, news: NEWS, height: 1400 });
+    const x = await openGrid(browser, { width, theme, layout: EVERY, settings: SETTINGS, notes: NOTES, news: NEWS, height: 1400 });
     try {
       const g = await x.grid(), text = (id) => card(g, id).text, form = (id) => card(g, id).form;
       // Token usage: today's tokens Small; the period's total and its change Medium and Large.
@@ -327,8 +335,9 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 4
       assert.match(text("weather"), /24°/); assert.match(text("weather"), /Lisbon/);
       if (form("weather") !== "s") { assert.match(text("weather"), /26°/); assert.match(text("weather"), /17°/); assert.match(text("weather"), /Weather from Open-Meteo/); assert.match(text("weather"), /16:00/); }
       assert.ok(await x.page.locator('.hc-grid .hc-card[data-card="weather"] svg.hc-wx').count() >= 1, "the conditions are a drawing on the page, not a picture fetched");
-      if (form("note") === "s") { assert.match(text("note"), /Call the bank about the card/); assert.doesNotMatch(text("note"), /ferry/); }
-      else assert.equal(await x.page.locator('.hc-grid .hc-card[data-card="note"] textarea').inputValue(), SETTINGS.note.text);
+      // Notes: the newest note's first line Small; the notes by their first lines from Medium up.
+      if (form("note") === "s") { assert.match(text("note"), /Ferry to Porto/); assert.doesNotMatch(text("note"), /09:40/); assert.match(text("note"), /\+2 notes/); }
+      else { assert.match(text("note"), /Call the bank about the card/); assert.match(text("note"), /Ferry to Porto/); assert.match(text("note"), /New note/); }
       // Words are read: the quietest word on a card clears 4.5:1 on the card's own ground.
       const low = await x.page.evaluate(() => { const parse = (c) => { const m = c.match(/-?[\d.]+(e-?\d+)?/g)?.map(Number) || [0, 0, 0, 0]; return c.startsWith("color(srgb") ? [m[0] * 255, m[1] * 255, m[2] * 255, m[3] ?? 1] : [m[0], m[1], m[2], m[3] ?? 1]; };
         const over = (top, under) => top.slice(0, 3).map((v, i) => v * top[3] + under[i] * (1 - top[3])).concat(1);
@@ -357,7 +366,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 4
       const items = await x.page.evaluate(() => [...document.querySelectorAll(".hc-library .hc-lib-item")].map((i) => { const name = i.querySelector(".hc-lib-name"), foot = i.querySelector(".hc-lib-act"), r = i.getBoundingClientRect(), range = document.createRange(); range.selectNodeContents(name);
         return { id: i.dataset.card, name: name.textContent, whole: name.scrollWidth <= name.clientWidth + 0.5 && range.getBoundingClientRect().width <= name.getBoundingClientRect().width + 0.5, nameWidth: Math.round(range.getBoundingClientRect().width),
           top: Math.round(r.top), left: Math.round(r.left), bottom: Math.round(r.bottom), foot: foot ? Math.round(foot.getBoundingClientRect().top) : null, footBottom: foot ? Math.round(foot.getBoundingClientRect().bottom) : null, state: foot ? foot.innerText.replace(/\s+/g, " ").trim() : "" }; }));
-      assert.equal(items.length, 12);
+      assert.equal(items.length, 14);          // (with Widgets and Artifacts, 13 Nov late)
       for (const i of items) { assert.ok(i.whole && i.nameWidth > 15, `${i.id}: “${i.name}” shows whole (${JSON.stringify(i)})`); assert.ok(i.foot !== null, `${i.id} has its state line`); }
       assert.deepEqual(items.filter((i) => i.id === "needs" || i.id === "work").map((i) => i.state), ["On Home Remove", "Add"], "On Home with Remove, or Add, on a line of their own under the words");
       const lefts = new Set(items.map((i) => i.left));
@@ -480,7 +489,7 @@ test("Recent: a new reply sits at the top in bold with its New mark, Home's numb
 
 test("the cards act: Quick start, a session's row, New, a folder's tile and New session here, a note typed, Fahrenheit, a second clock", async (t) => {
   if (skipOrFail(t)) return;
-  const x = await openGrid(browser, { width: 700, layout: EVERY, settings: SETTINGS, height: 1400 });
+  const x = await openGrid(browser, { width: 700, layout: EVERY, settings: SETTINGS, notes: NOTES, height: 1400 });
   try {
     const p = x.page, sel = (id) => `.hc-grid .hc-card[data-card="${id}"]`;
     await p.click(`${sel("quick")} button[data-quick="chat"]`);
@@ -502,16 +511,17 @@ test("the cards act: Quick start, a session's row, New, a folder's tile and New 
     assert.equal((await x.tabs()).tabs.find((tab) => tab.selected).id, "work", "on the Work tab");
     await p.click("#side-tab-home"); await x.rest(300);
     // A note: typed on the card, kept by the host.
-    await p.fill(`${sel("note")} textarea`, "Buy tomato seeds"); await x.rest(900);
-    assert.equal((await x.host()).settings.note.text, "Buy tomato seeds");
+    await p.click(`${sel("note")} .hc-note-new`); await x.rest(200);
+    await p.fill(`${sel("note")} textarea.hc-note-edit`, "Buy tomato seeds"); await x.rest(900);
+    assert.equal((await x.host()).notes[0].text, "Buy tomato seeds");
     // Weather: Celsius by default, Fahrenheit by its toggle; where it comes from is said.
     assert.match(await p.locator(sel("weather")).innerText(), /24°/);
     await p.click(`${sel("weather")} button[data-unit="f"]`); await x.rest(300);
     assert.match(await p.locator(sel("weather")).innerText(), /76°/, "24.3 °C is 76 °F");
     assert.equal((await x.host()).settings.weather.unit, "f");
-    // Clock: another city's time beside the local one, from a list of time zones.
+    // Clock: another city's time beside the local one, from every time zone there is (found by typing).
     assert.match(await p.locator(sel("clock")).innerText(), /Tokyo/);
-    await p.selectOption(`${sel("clock")} select.hc-zone`, "Europe/London"); await x.rest(300);
+    await p.click(`${sel("clock")} input.hc-zone`); await p.keyboard.type("london"); await x.rest(150); await p.keyboard.press("ArrowDown"); await p.keyboard.press("Enter"); await x.rest(300);
     assert.equal((await x.host()).settings.clock.zone, "Europe/London");
     assert.match(await p.locator(sel("clock")).innerText(), /London/);
     assert.deepEqual(x.errors, []);
@@ -522,7 +532,7 @@ test("Weather offline says so calmly; a quiet DGC shows Nothing running and an e
   if (skipOrFail(t)) return;
   const { homeState } = await import("./support/home-scene.mjs");
   const quiet = DOCK_SESSIONS.map((s) => ({ ...s, running: false, waiting: false, open: false }));
-  const x = await openGrid(browser, { width: 460, layout: ["weather", "running", "needs", "token"], settings: { weather: { city: "Lisbon", unit: "c" } }, weather: { type: "homeWeather", ok: false, reason: "offline" }, sessions: quiet, state: homeState("quiet"), usage: { type: "homeUsage", days: [], models: [], error: "" } });
+  const x = await openGrid(browser, { width: 460, layout: ["weather", "running", "needs", "token"], settings: { weather: { place: LISBON, unit: "c" } }, weather: { type: "homeWeather", ok: false, reason: "offline" }, sessions: quiet, state: homeState("quiet"), usage: { type: "homeUsage", days: [], models: [], error: "" } });
   try {
     const g = await x.grid();
     assert.match(card(g, "weather").text, /Can’t reach the weather right now/); assert.match(card(g, "weather").text, /Lisbon/);

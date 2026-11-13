@@ -33,6 +33,8 @@
   const MARKS = { folder: '<path d="M1.75 4.5a1 1 0 0 1 1-1h3.2l1.5 1.5h5.8a1 1 0 0 1 1 1v5.5a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z"/>',
     layers: '<path d="M8 2.25 14 5.4 8 8.55 2 5.4z"/><path d="m2.4 8.2 5.6 2.95 5.6-2.95"/><path d="m2.4 10.9 5.6 2.95 5.6-2.95"/>', add: '<path d="M8 3.25v9.5M3.25 8h9.5"/>' };
   const ALL = "All projects";
+  // A pin, as the rows of the lists have it: an outline until its thing is on the dock, then filled.
+  const PIN = (on) => `<svg viewBox="0 0 16 16" width="14" height="14" fill="${on ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="M10.2 1.8l4 4-2.2.9-2.4 2.4.3 3.1-1.1 1.1-2.6-2.6L2.8 14l-.8-.8 3.3-3.4-2.6-2.6 1.1-1.1 3.1.3 2.4-2.4z"/></svg>`;
   // ---- a folder's own icon (media/shared/folders.css, asked 13 Nov) ----------------------------------------------------
   // A Work folder is a directory, and wears the folder icon: the maintainer's set, built here in plain markup from its
   // reference component (its flap of four parts, two papers behind and one in front with three lines), always the
@@ -316,8 +318,13 @@
    *   goneOff    a folder that is gone can't be chosen (a session or a Pip can't start there)
    *   onChoose(folder)   a row was chosen ("" is All projects)
    *   trigger    a function that finds the button again (a page that redraws replaces it), for the keyboard's way back
+   *   pin        { on(folder), toggle(folder) }: each folder's row has a pin, shown while the row is pointed at (and kept
+   *              in sight, filled, while the folder is on the dock). A click on it pins or unpins the folder and chooses
+   *              nothing; the page says what is pinned again with repin(). (Asked 13 Nov: a Work folder on the dock.)
+   *              With one folder chosen, the menu's first line is "Pin <folder> to the dock" (or "Unpin <folder> from
+   *              the dock"): a row like the others, reached by the keyboard as they are; it too leaves the menu open.
    */
-  function open(button, { rows = [], choice = "", all = true, add = false, goneOff = false, onChoose, onAdd, keyboard = false, label = "Project Folder", trigger } = {}) {
+  function open(button, { rows = [], choice = "", all = true, add = false, goneOff = false, onChoose, onAdd, keyboard = false, label = "Project Folder", trigger, pin = null } = {}) {
     close(false, true);
     const doc = button.ownerDocument, view = doc.defaultView, Menu = root.DgcMenu;
     // Inside a dialog the menu belongs to it (everything outside a modal dialog is inert); in the Pips view, to its own root.
@@ -326,17 +333,24 @@
     const box = doc.createElement("div");
     box.className = "dgc-menu dgc-pop dgc-folder-menu"; box.setAttribute("role", "menu"); box.setAttribute("aria-label", label);
     const icon = (name) => `<span class="dgc-menu-icon dgc-folder-mark" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16">${MARKS[name]}</svg></span>`;
-    const line = (folder, name, sub, note, checked, off) => `<button type="button" role="menuitemradio" class="dgc-menu-row dgc-folder-row${sub ? " dgc-menu-row-sub" : ""}${checked ? " is-selected" : ""}"`
+    const pinned = (folder) => { try { return !!pin?.on?.(folder); } catch { return false; } };
+    // (Inside the row's own button, so it is a span that acts as one: a pointer's way to pin. The keyboard pins from the Work page.)
+    const pinHtml = (folder, name, gone) => (pin && folder && (!gone || pinned(folder)) ? ((on) => `<span class="dgc-folder-pin" role="button" data-folder-pin="${esc(folder)}" data-folder-name="${esc(name)}" aria-pressed="${on}" title="${on ? "Unpin from the dock" : "Pin to the dock"}" aria-label="${on ? "Unpin from the dock" : "Pin to the dock"}: ${esc(name)}">${PIN(on)}</span>`)(pinned(folder)) : "");
+    const line = (folder, name, sub, note, checked, off, gone) => `<button type="button" role="menuitemradio" class="dgc-menu-row dgc-folder-row${sub ? " dgc-menu-row-sub" : ""}${checked ? " is-selected" : ""}"`
       + ` data-folder="${esc(folder)}" aria-checked="${checked ? "true" : "false"}"${off ? " disabled" : ""}>${folder ? `<span class="dgc-menu-icon dgc-folder-mark" aria-hidden="true">${folderMark(folder)}</span>` : icon("layers")}<span class="dgc-menu-words"><span class="dgc-menu-label">${esc(name)}</span>${sub ? `<span class="dgc-menu-sub">${sub}</span>` : ""}</span>`
-      + (note ? `<span class="dgc-folder-note">${esc(note)}</span>` : "") + CHECK + "</button>";
+      + (note ? `<span class="dgc-folder-note">${esc(note)}</span>` : "") + pinHtml(folder, name, gone) + CHECK + "</button>";
     const list = rowsOf(rows), shadeId = `dgc-folder-shade-${++shades}`, finds = list.length > MANY;
     // The search field, when there are many: it stays at the list's top while the folders scroll under it.
     const findHtml = finds ? '<div class="dgc-folder-find" role="presentation"><svg class="dgc-folder-find-mark" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="m10.2 10.2 3.3 3.3"/></svg>'
       + '<input type="text" class="dgc-folder-search" placeholder="Search folders" aria-label="Search folders by name or path" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="200"></div>' : "";
     // The shape (its ground, its shade, its line, and the hairline where the button ends) and, over it, the rows.
-    box.innerHTML = `<svg class="dgc-folder-shape" aria-hidden="true" focusable="false">${SHADE(shadeId)}<path class="dgc-folder-shade" filter="url(#${shadeId})"/><path class="dgc-folder-ground"/><path class="dgc-folder-seam"/><path class="dgc-folder-line"/></svg><div class="dgc-folder-list" role="presentation">` + findHtml
+    // With one folder chosen (and a page that pins): the first line pins that folder to the dock, or takes it off.
+    const chosen = pin && choice ? list.find((r) => r.folder === choice) || { folder: choice, name: nameOf(choice) } : null, chosenName = chosen ? chosen.name || nameOf(chosen.folder) : "";
+    const pinWords = (on) => (on ? `Unpin ${chosenName} from the dock` : `Pin ${chosenName} to the dock`);
+    const pinLine = chosen && (chosen.exists !== false || pinned(choice)) ? ((on) => `<button type="button" role="menuitem" class="dgc-menu-row dgc-folder-pin-line" data-folder-pin-line="${esc(choice)}" data-pinned="${on}"><span class="dgc-menu-icon dgc-folder-mark" aria-hidden="true">${PIN(on)}</span><span class="dgc-menu-label">${esc(pinWords(on))}</span></button><div class="dgc-menu-div" role="separator"></div>`)(pinned(choice)) : "";
+    box.innerHTML = `<svg class="dgc-folder-shape" aria-hidden="true" focusable="false">${SHADE(shadeId)}<path class="dgc-folder-shade" filter="url(#${shadeId})"/><path class="dgc-folder-ground"/><path class="dgc-folder-seam"/><path class="dgc-folder-line"/></svg><div class="dgc-folder-list" role="presentation">` + findHtml + pinLine
       + (all ? line("", ALL, "", "", !choice, false) + (list.length ? '<div class="dgc-menu-div" role="separator"></div>' : "") : "")
-      + list.map((r) => line(r.folder, r.name || nameOf(r.folder), pathHtml(r.shown || r.folder, r.folder), r.exists === false ? "Not found" : r.here ? "This window" : "", r.folder === choice, goneOff && r.exists === false)).join("")
+      + list.map((r) => line(r.folder, r.name || nameOf(r.folder), pathHtml(r.shown || r.folder, r.folder), r.exists === false ? "Not found" : r.here ? "This window" : "", r.folder === choice, goneOff && r.exists === false, r.exists === false)).join("")
       + (finds ? '<div class="dgc-folder-none" role="status" hidden></div>' : "")
       + (add ? `${all || list.length ? '<div class="dgc-menu-div" role="separator"></div>' : ""}<button type="button" role="menuitem" class="dgc-menu-row dgc-folder-add" data-folder-add="1">${icon("add")}<span class="dgc-menu-label">Add a folder…</span></button>` : "")
       + "</div>";
@@ -383,7 +397,11 @@
     button.setAttribute("aria-expanded", "true"); button.setAttribute("data-folder-open", up ? "up" : "down");
     const find = typeof trigger === "function" ? trigger : () => (button.isConnected ? button : button.id ? (home || doc).getElementById?.(button.id) || (home || doc).querySelector(`#${button.id}`) : null);
     box.addEventListener("click", (e) => {
-      const adding = e.target.closest("[data-folder-add]"), row = e.target.closest("[data-folder]");
+      const adding = e.target.closest("[data-folder-add]"), row = e.target.closest("[data-folder]"), pinning = e.target.closest("[data-folder-pin]"), pinningLine = e.target.closest("[data-folder-pin-line]");
+      // The first line: the folder chosen goes on the dock (or comes off it); the menu stays, and the line says what it does now.
+      if (pinningLine) { try { pin?.toggle?.(pinningLine.dataset.folderPinLine); } catch { /* the page's own trouble */ } return; }
+      // A row's pin: the folder goes on the dock (or comes off it); nothing is chosen and the menu stays.
+      if (pinning) { e.preventDefault(); e.stopPropagation(); try { pin?.toggle?.(pinning.dataset.folderPin); } catch { /* the page's own trouble */ } return; }
       if (adding) { close(true); onAdd?.(); return; }
       if (!row || row.disabled) return;
       const folder = row.dataset.folder;
@@ -436,7 +454,7 @@
     doc.addEventListener("pointerdown", outside, true);
     doc.addEventListener("scroll", follow, true);
     view.addEventListener("blur", away); view.addEventListener("resize", away);
-    shown = { box, doc, view, outside, away, follow, trigger: find, id: button.id || "", first: button, g, list: rowsBox, line: lineEl, ground, shade, growing: null, solid };
+    shown = { box, doc, view, outside, away, follow, trigger: find, id: button.id || "", first: button, g, list: rowsBox, line: lineEl, ground, shade, growing: null, solid, pinned, pinWords };
     if (moves(view, box)) try { arrive(shown); } catch { /* drawn at rest */ }
     box.tabIndex = -1;
     // With a search field the keyboard starts in it, however the menu was opened: typing narrows at once.
@@ -444,8 +462,22 @@
     return { box, close };
   }
 
+  /** What is pinned changed: the open menu's pins say so (filled while pinned). */
+  function repin() {
+    if (!shown) return;
+    for (const line of shown.box.querySelectorAll("[data-folder-pin-line]")) {
+      const on = shown.pinned(line.dataset.folderPinLine);
+      if (line.dataset.pinned === String(on)) continue;
+      line.dataset.pinned = String(on); line.querySelector(".dgc-menu-label").textContent = shown.pinWords(on); line.querySelector(".dgc-folder-mark").innerHTML = PIN(on);
+    }
+    for (const mark of shown.box.querySelectorAll("[data-folder-pin]")) {
+      const on = shown.pinned(mark.dataset.folderPin), said = on ? "Unpin from the dock" : "Pin to the dock";
+      if (mark.getAttribute("aria-pressed") === String(on)) continue;
+      mark.setAttribute("aria-pressed", String(on)); mark.title = said; mark.setAttribute("aria-label", `${said}: ${mark.dataset.folderName || ""}`); mark.innerHTML = PIN(on);
+    }
+  }
   /** The open menu's box, or null: a page that draws again leaves it where it is. */
   const opened = () => (shown ? shown.box : null);
 
-  root.DgcFolderPick = Object.freeze({ buttonHtml, pathHtml, pathNode, valueOf, open, close, opened, ALL, folderMark, folderId, setPalette });
+  root.DgcFolderPick = Object.freeze({ buttonHtml, pathHtml, pathNode, valueOf, open, close, opened, ALL, folderMark, folderId, setPalette, repin });
 })();

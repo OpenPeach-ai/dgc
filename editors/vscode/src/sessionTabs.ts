@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { randomBytes } from "crypto";
-import { ChatPlaces, ChatTabInit, DgcViewProvider } from "./panel";
+import { ChatPlaces, ChatTabInit, DgcViewProvider, windowFocused } from "./panel";
 import { tabIcon } from "./tabIcon";
 import { sessionIcon, dockOf } from "./dock";
 
@@ -83,9 +83,12 @@ export class SessionTabs implements ChatPlaces, vscode.WebviewPanelSerializer, v
     return ids;
   }
 
-  /** The sessions whose tab is the one in front in its editor group (what the user can see): a reply there is seen. */
+  /** The sessions being watched: their tab is the one in front in its editor group AND this window has the focus (what
+   *  the user is looking at). A reply there is seen. A tab in front of a window the user has left is not watched: its
+   *  reply is news until the user is back ("New" means not seen, 13 Nov). */
   watchedSessions(): Set<string> {
     const ids = new Set<string>();
+    if (!windowFocused()) return ids;
     for (const tab of this.tabs.values()) { const id = tab.provider.sessionId(); if (id && tab.panel.visible) ids.add(id); }
     return ids;
   }

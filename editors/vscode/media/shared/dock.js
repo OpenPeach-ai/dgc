@@ -18,8 +18,11 @@
 // it, and drops away a second after the pointer leaves), or Never.
 //
 // A page gives it what to show; this piece draws, sizes, moves and opens it:
-//   const dock = DgcDock.create({ host, onOpen, onUnpin, onMove, onReorder, onColour, onNew });
-//   dock.update({ items: [{ key, kind, title, state, icon, dot, badge, colour }], show, size, offers });
+//   const dock = DgcDock.create({ host, onOpen, onUnpin, onMove, onReorder, onColour, onNew, onMenu });
+//   dock.update({ items: [{ key, kind, title, state, icon, dot, badge, colour, menu, gone }], show, size, offers });
+// An item may bring its menu's first rows itself (`menu`: groups of { id, label, icon, disabled }, a Work folder's: New
+// session here, Open in new window, Unpin); "unpin" and "open" are answered here as ever, anything else by onMenu(key, id).
+// One that is `gone` (a folder that is not there any more) is dimmed.
 (function () {
   "use strict";
   const root = typeof window !== "undefined" ? window : globalThis;
@@ -86,7 +89,7 @@
       if (stop === null || (stop !== "+" && !items.some((item) => item.key === stop))) stop = items[0]?.key || null;
       bar.innerHTML = items.map((item) => {
         const said = [item.title, item.state, item.badge && !/waiting|okay/i.test(item.state || "") ? `${item.badge} waiting for you` : ""].filter(Boolean).join(". ");
-        return `<button type="button" class="dgc-dock-item" data-key="${esc(item.key)}" data-kind="${esc(item.kind)}" tabindex="${item.key === stop ? 0 : -1}"`
+        return `<button type="button" class="dgc-dock-item" data-key="${esc(item.key)}" data-kind="${esc(item.kind)}"${item.gone ? ' data-gone="1"' : ""} tabindex="${item.key === stop ? 0 : -1}"`
           + ` aria-label="${esc(said)}" aria-haspopup="menu" aria-expanded="false" aria-keyshortcuts="Shift+F10">`
           + `<span class="dgc-dock-tile">${item.icon || ""}</span>`
           + (item.badge ? `<span class="dgc-dock-badge" aria-hidden="true">${esc(item.badge > 99 ? "99+" : item.badge)}</span>` : "")
@@ -265,13 +268,14 @@
       if (!item || !pop) return;
       name(null); pointer = null; kick();
       pop(button, { keyboard, label: item.title,
-        rows: [[{ id: "open", label: "Open", icon: "open" }, { id: "unpin", label: "Unpin", icon: "unpin" }],
+        rows: [...(Array.isArray(item.menu) && item.menu.length ? item.menu : [[{ id: "open", label: "Open", icon: "open" }, { id: "unpin", label: "Unpin", icon: "unpin" }]]),
           [{ id: "left", label: "Move left", icon: "left", disabled: at === 0 }, { id: "right", label: "Move right", icon: "right", disabled: at === items.length - 1 }]],
         colour: item.colour ? { kind: item.kind, chosen: item.colour.chosen } : null,
         onPick: (id) => {
           if (id === "open") o.onOpen?.(item.key);
           else if (id === "unpin") o.onUnpin?.(item.key);
-          else { stop = item.key; o.onMove?.(item.key, id === "left" ? -1 : 1); }
+          else if (id === "left" || id === "right") { stop = item.key; o.onMove?.(item.key, id === "left" ? -1 : 1); }
+          else o.onMenu?.(item.key, id);
         },
         onColour: (n) => o.onColour?.(item.key, n), onClose: watchLeave });
     }

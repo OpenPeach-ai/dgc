@@ -183,7 +183,9 @@ function markPipRead(pip){
     .finally(()=>{readingPips.delete(pip);if(token===scope()){render();void loadUnread(true);}});
 }
 function maybeMarkRead(){
-  if(markingRead||remoteHost||S.apiVersion<69||!S.selected||S.overview||S.tab!=='chat'||!S.visible||document.hidden||
+  // (S.focused: the window has the focus, as the host says with the view's visibility. A chat in front of a window
+  // nobody is looking at reads nothing; it reads what it shows when the focus is back. "New" means not seen, 13 Nov.)
+  if(markingRead||remoteHost||S.apiVersion<69||!S.selected||S.overview||S.tab!=='chat'||!S.visible||S.focused===false||document.hidden||
       !S.messagesLoaded||postsShown()&&!S.postsLoaded||S.messagesLoading||S.postsLoading)return;
   const log=root.querySelector('.conversation-log');if(!log||log.scrollHeight-log.scrollTop-log.clientHeight>40)return;
   const current=unreadByPip.get(S.selected);
@@ -6796,7 +6798,7 @@ const stopMessages=options.onMessage(message=>{
    return;}
   if(message.type==='pipsFolderPicked'){const done=folderPicks.get(message.id);if(done){folderPicks.delete(message.id);done(typeof message.folder==='string'&&message.folder?message.folder:null);}return;}   // a new-Pip card decided in a chat: Needs attention follows
   if(message.type==='pipsModelsChanged'){if(usable()&&(S.models.length||S.defaultModel||S.router)&&!S.modelsLoading)void loadModels();return;}
-  if(message.type==='pipsVisibility'){S.visible=message.visible===true;motion();if(S.visible)void refresh(false);return;}
+  if(message.type==='pipsVisibility'){const back=S.focused===false&&message.focused!==false;if(typeof message.focused==='boolean')S.focused=message.focused;S.visible=message.visible===true;motion();if(S.visible)void refresh(false);if(back)maybeMarkRead();return;}
   if(message.type==='pipsConnection'){
     if(message.generation !== undefined && message.generation === S.generation) return;
     S.generation=message.generation ?? null;S.displayMentions=message.displayMentions===true;
@@ -6819,7 +6821,7 @@ if(typeof ResizeObserver==='function'){const observer=new ResizeObserver(fitChat
 const pollingTimer=window.setInterval(()=>{broker.expire(Date.now());if(polling||!S.visible||document.hidden||!usable()||S.busy||S.review||S.create||!['runs','chat'].includes(S.tab))return;polling=true;void refresh(false).finally(()=>{polling=false;});},4000);
 motion();render();waitForConnection();vscode.postMessage({type:'pipsReady'});
 return {async navigate(value){attentionAll.open=false;   // the host asks for another page: not Needs attention's own
- if(value?.overview===true){if(!S.workspace||!usable()){options.navigation=value;navigationPending=true;S.overview=true;return;}await navigateFromHost(value);return;}if(!S.workspace||!usable()){options.navigation=value;navigationPending=true;return;}try{await refresh(false);await navigateFromHost(value);}catch(error){setError(error);}},focusInside(){const box=chatBox?.el?.isConnected?chatBox.el:pageBack();try{box?.focus({preventScroll:true});}catch{}},setMotionPaused(paused){motionPaused=paused===true;motion();},setVisible(visible){S.visible=visible===true;motion();if(S.visible)void refresh(false);},dispose(){if(disposed)return;disposed=true;window.clearTimeout(noticeTimer);window.clearTimeout(appLinkTimer);S.epoch++;broker.reset();window.clearInterval(pollingTimer);window.clearInterval(workingClock);window.clearTimeout(streamTimer);window.clearTimeout(liveTimer);avatarObserver?.disconnect();characterCleanup?.();characterCleanup=null;for(const dispose of disposers)dispose?.();characterStyles.remove();if(embedded)shell.remove();}};
+ if(value?.overview===true){if(!S.workspace||!usable()){options.navigation=value;navigationPending=true;S.overview=true;return;}await navigateFromHost(value);return;}if(!S.workspace||!usable()){options.navigation=value;navigationPending=true;return;}try{await refresh(false);await navigateFromHost(value);}catch(error){setError(error);}},focusInside(){const box=chatBox?.el?.isConnected?chatBox.el:pageBack();try{box?.focus({preventScroll:true});}catch{}},setMotionPaused(paused){motionPaused=paused===true;motion();},setVisible(visible){S.visible=visible===true;motion();if(S.visible)void refresh(false);},setFocused(focused){const back=S.focused===false&&focused!==false;S.focused=focused!==false;if(back)maybeMarkRead();},dispose(){if(disposed)return;disposed=true;window.clearTimeout(noticeTimer);window.clearTimeout(appLinkTimer);S.epoch++;broker.reset();window.clearInterval(pollingTimer);window.clearInterval(workingClock);window.clearTimeout(streamTimer);window.clearTimeout(liveTimer);avatarObserver?.disconnect();characterCleanup?.();characterCleanup=null;for(const dispose of disposers)dispose?.();characterStyles.remove();if(embedded)shell.remove();}};
 
 }
 if(typeof window!=='undefined')window.DgcPips={mount:mountPips,mountSetupCards,mountDigestBar,mountHomePips};

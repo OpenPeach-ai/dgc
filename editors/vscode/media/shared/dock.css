@@ -38,6 +38,14 @@
 /* A file's sheet, the output card's (filesheet.css, 44 by 56 px), drawn smaller: about a mark's height in the tile. */
 .dgc-dock-sheet { position: absolute; left: 50%; top: 50%; display: block; width: 44px; height: 56px; margin: -28px 0 0 -24px; scale: calc(var(--k) * .0125); }
 .dgc-dock-sheet .dgc-sheet-tag { font-size: 9px; right: -9px; bottom: 6px; }
+/* A Work folder: his folder icon (media/shared/folders.css) drawn at 64 px and scaled to the tile as a sheet is, so its
+   sheets, its tab and its label keep their proportions at every tile size. Its label is larger than the icon's own
+   here (a dock tile is small): the start of the folder's name; the whole name is the tile's own name tip. Still: nothing
+   in it lifts on the dock. One that is gone is dimmed. */
+.dgc-dock-folder { position: absolute; left: 50%; top: 50%; display: block; width: 64px; height: 64px; margin: -32px 0 0 -32px; scale: calc(var(--k) * .0125); pointer-events: none; }
+.dgc-dock-folder .folder-icon { --folder-size: 64px; }
+.dgc-dock-folder .folder-icon .folder-label { left: 8%; bottom: 8%; max-width: 84%; padding: 2% 6%; border-radius: 6px; background: hsl(var(--h) 55% 15% / .55); font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+.dgc-dock-item[data-gone] .dgc-dock-tile { opacity: .45; filter: grayscale(.8); }
 /* Keep the shared kind colour at dock size and in both editor themes. */
 .dgc-dock-sheet .dgc-sheet-page { background: var(--sheet-body); }
 @media (forced-colors: active) { .dgc-dock-sheet .dgc-sheet-page { background: Canvas; } }

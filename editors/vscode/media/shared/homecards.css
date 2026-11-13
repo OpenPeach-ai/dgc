@@ -11,6 +11,7 @@
 body.vscode-light :is(.dgc-home, .hc-library), body.vscode-high-contrast-light :is(.dgc-home, .hc-library) { --hc-good: #1b7445; --hc-bad: #b3262d; --hc-quiet: color-mix(in srgb, var(--text) 80%, transparent); }
 body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, .hc-library { --hc-quiet: var(--text-2); --hc-card: transparent; --hc-good: var(--text); --hc-bad: var(--text); }
 .dgc-home [hidden] { display: none !important; }
+.dgc-home { position: relative; }            /* (a field's dropdown is placed inside it, and scrolls with it) */
 .hc-live { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .hc-sp { flex: 1 1 auto; min-width: 0; }
 .hc-cut { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -29,7 +30,11 @@ body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, 
 .hc-btn.hc-solid { border-color: var(--solid); background: var(--solid); color: var(--on-solid); }
 .hc-btn.hc-solid:hover { border-color: var(--solid-hover); background: var(--solid-hover); color: var(--on-solid); }
 .hc-btn.hc-icon { width: 26px; padding: 0; }
-.hc-btn:focus-visible, .hc-lnk:focus-visible, .hc-li:focus-visible, .hc-qb:focus-visible, .hc-kb:focus-visible, .hc-card:focus-visible, .hc-plot:focus-visible, .hc-seg button:focus-visible, .hc-field:focus-visible, .hc-tile-open:focus-visible, .hc-here:focus-visible, .hc-x:focus-visible {
+.hc-btn:disabled { opacity: .5; cursor: default; }
+.hc-btn:disabled:hover { background: transparent; border-color: var(--btn-line, var(--hair-strong)); color: var(--text); }
+.hc-btn.hc-solid:disabled:hover { border-color: var(--solid); background: var(--solid); color: var(--on-solid); }
+.hc-btn:focus-visible, .hc-lnk:focus-visible, .hc-li:focus-visible, .hc-qb:focus-visible, .hc-kb:focus-visible, .hc-card:focus-visible, .hc-plot:focus-visible, .hc-seg button:focus-visible, .hc-field:focus-visible, .hc-tile-open:focus-visible, .hc-here:focus-visible, .hc-x:focus-visible,
+.hc-pin:focus-visible, .hc-mtile:focus-visible, .hc-stack:focus-visible, .hc-dot:focus-visible, .hc-note-view:focus-visible {
   outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
 .hc-cards-btn, .hc-back, .hc-done { height: var(--btn-h); }
 .hc-cards-btn { gap: 6px; padding: 0 10px 0 8px; --mosaic-play: paused; }
@@ -139,7 +144,7 @@ body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, 
 .hc-plot .hc-col { gap: 3px; }
 .hc-card[data-form="l"] .hc-chart { grid-template-columns: 30px minmax(0, 1fr); }
 .hc-card[data-form="l"] .hc-chart { flex: 1 1 auto; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; }
-.hc-card[data-form="l"] :is(.hc-y, .hc-plot) { height: auto; min-height: 96px; }
+.hc-card[data-form="l"] :is(.hc-y, .hc-plot) { height: auto; min-height: 44px; }
 .hc-card[data-form="l"] .hc-plot, .hc-card[data-form="l"] .hc-plot .hc-col { gap: 2px; }
 .hc-card[data-form="full"] .hc-chart { grid-template-columns: 30px minmax(0, 1fr); gap: 0 6px; }
 .hc-card[data-form="full"] :is(.hc-y, .hc-plot) { height: 120px; }
@@ -153,6 +158,11 @@ body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, 
 .hc-line { position: absolute; top: -4px; bottom: -4px; width: 0; border-left: 1px dashed color-mix(in srgb, var(--text) 55%, transparent); pointer-events: none; }
 .hc-tip { position: absolute; z-index: 2; bottom: calc(100% + 6px); transform: translateX(-50%); padding: 6px 9px; border: 1px solid var(--hair-strong); border-radius: 8px; background: var(--surface2, var(--bg)); background: color-mix(in srgb, var(--text) 9%, var(--bg)); box-shadow: var(--lift-1); white-space: nowrap; pointer-events: none; }
 .hc-tip-d { color: var(--hc-quiet); font-size: 10.5px; }
+/* With the day's models under its number it is taller: it lies over the top of the plot, never past the card's own top. */
+.hc-tip.hc-tip-tall { bottom: auto; top: -34px; }
+.hc-card[data-form="l"] .hc-tip.hc-tip-tall { top: -50px; }
+.hc-tip-m { margin-top: 3px; color: var(--text); font-size: 10.5px; line-height: 1.25; }
+.hc-tip-m:first-of-type { margin-top: 5px; }
 .hc-tip-v { display: flex; align-items: center; gap: 5px; margin-top: 3px; color: var(--text-strong); font: var(--w-semi) 12.5px/1.1 var(--mono); }
 .hc-tip-v i { width: 7px; height: 7px; border-radius: 2px; background: var(--accent); }
 .hc-xs { grid-column: 2; position: relative; display: flex; justify-content: space-between; padding-top: 5px; color: var(--hc-quiet); font-size: 10px; line-height: 13px; }
@@ -186,6 +196,29 @@ body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, 
 .hc-mt { display: flex; align-items: baseline; gap: 6px; font-size: 11.5px; }
 .hc-mn { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
 .hc-mv { color: var(--text); font: var(--w-med) 11px/1 var(--mono); }
+.hc-mp { color: var(--hc-quiet); }
+/* The models under the chart: a name, its provider, its share; the name is the one cut short. */
+.hc-models-wrap { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.hc-models { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px 14px; min-width: 0; }
+/* Large: five of them in the 2×2 block, so each line is slimmer and the chart gives up some of its height. */
+.hc-card[data-form="l"] .hc-models { gap: 0; }
+.hc-card[data-form="l"] .hc-model { font-size: 11px; line-height: 15px; }
+.hc-card[data-form="l"] .hc-model-s { font-size: 10.5px; line-height: 15px; }
+.hc-card[data-form="l"] .hc-models-wrap { gap: 1px; margin-top: -3px; }
+.hc-card[data-form="l"] .hc-mfoot { min-height: 16px; }
+.hc-card[data-form="l"]:has(.hc-models) .hc-chart { margin-top: 0; }
+.hc-card[data-form="l"]:has(.hc-models) .hc-kb { padding: 7px 10px 8px; }
+.hc-card[data-form="l"]:has(.hc-models) .hc-kv { margin-top: 4px; }
+.hc-card[data-form="l"]:has(.hc-models) .hc-kd { margin-top: 3px; }
+.hc-model { display: flex; align-items: baseline; gap: 5px; min-width: 0; color: var(--text); font-size: 11.5px; line-height: 1.3; white-space: nowrap; }
+.hc-model-n { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.hc-model-d { flex: none; color: var(--hc-quiet); font-style: normal; }
+.hc-model-p { flex: 0 2 auto; min-width: 28px; overflow: hidden; color: var(--hc-quiet); text-overflow: ellipsis; }
+.hc-model-s { flex: none; color: var(--text); font: var(--w-med) 11px/1.3 var(--mono); font-variant-numeric: tabular-nums; }
+.hc-mfoot { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 18px; }
+.hc-models-more { flex: none; color: var(--hc-quiet); font-size: var(--t-xs); }
+.hc-usage-link { margin-right: -4px; }
+.hc-open .hc-mfoot { margin-top: -2px; }
 .hc-track { display: block; height: 5px; overflow: hidden; border-radius: 3px; background: var(--hc-cell); }
 .hc-fill { display: block; height: 100%; border-radius: 3px; background: var(--hc-on); }
 
@@ -219,11 +252,30 @@ body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, 
 .hc-here { appearance: none; position: absolute; top: 0; right: 0; display: grid; place-items: center; width: 22px; height: 22px; margin: 0; padding: 0; border: 1px solid var(--hair-strong); border-radius: var(--btn-r, 6px); background: var(--bg); color: var(--text); opacity: 0; cursor: pointer; transition: opacity var(--dur-hover) var(--ease-out); }
 .hc-tile:hover .hc-here, .hc-tile:focus-within .hc-here { opacity: 1; }
 .hc-here:hover { background: color-mix(in srgb, var(--text) 12%, var(--bg)); color: var(--text-strong); }
+/* Its pin, at the other corner: shown with New session here, and kept in sight (filled) while the folder is on the dock. */
+.hc-pin { appearance: none; position: absolute; top: 0; left: 0; display: grid; place-items: center; width: 22px; height: 22px; margin: 0; padding: 0; border: 1px solid var(--hair-strong); border-radius: var(--btn-r, 6px); background: var(--bg); color: var(--text); opacity: 0; cursor: pointer; transition: opacity var(--dur-hover) var(--ease-out); }
+.hc-tile:hover .hc-pin, .hc-tile:focus-within .hc-pin, .hc-pin[aria-pressed="true"] { opacity: 1; }
+.hc-pin:hover { background: color-mix(in srgb, var(--text) 12%, var(--bg)); color: var(--text-strong); }
 .hc-clocks { display: flex; gap: 24px; }
 .hc-clock { display: flex; flex-direction: column; gap: 3px; }
 .hc-time { color: var(--text-strong); font: var(--w-semi) 26px/1 var(--mono); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
 .hc-field { box-sizing: border-box; height: 26px; margin: 0; padding: 0 8px; border: 1px solid var(--hair-strong); border-radius: var(--btn-r, 6px); background: var(--surface2, transparent); color: var(--text); font: var(--w-reg) var(--t-sm)/1.2 var(--sans); }
-select.hc-field { max-width: 132px; padding: 0 4px; font-size: var(--t-xs); cursor: pointer; }
+.hc-field::placeholder { color: var(--hc-quiet); opacity: 1; }
+input.hc-zone { flex: 0 1 132px; width: 132px; min-width: 84px; font-size: var(--t-xs); }
+.hc-clock .hc-sub { white-space: nowrap; }
+/* The dropdown under a field (a place for Weather, a time zone for Clock): the menu's look (media/shared/menu.css) with
+   the one corner, an opaque ground, a few rows at a time and the rest by scrolling. Each row: a name over a quiet line,
+   and a small code at its end. The row the keys are on is washed. */
+.dgc-menu.hc-suggest { position: absolute; z-index: 40; box-sizing: border-box; display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 4px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
+  border: 1px solid var(--hair-strong); border-radius: var(--btn-r, 6px); background: var(--bg); background: color-mix(in srgb, var(--text) 8%, var(--bg)); box-shadow: var(--lift-1); animation: none; }
+.dgc-menu.hc-suggest .dgc-menu-row.hc-opt { flex: none; box-sizing: border-box; align-items: center; gap: 8px; min-height: 30px; padding: 4px 8px; border-radius: calc(var(--btn-r, 6px) - 2px); font-size: var(--t-sm); }
+.dgc-menu.hc-suggest .hc-opt[aria-selected="true"] { background: var(--wash); background: color-mix(in srgb, var(--text) 13%, transparent); color: var(--text-strong); }
+.hc-opt-tx { flex: 1 1 auto; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.hc-opt-name { overflow: hidden; color: var(--text); font-size: 12.5px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.hc-opt-sub { overflow: hidden; color: var(--hc-quiet, var(--muted)); font-size: var(--t-xs); line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.hc-opt-code { flex: none; padding: 1px 5px; border: 1px solid var(--hair-strong); border-radius: 4px; color: var(--hc-quiet, var(--muted)); font: var(--w-med) 10px/1.3 var(--mono); letter-spacing: .02em; white-space: nowrap; }
+.hc-suggest-note { margin: 0; padding: 7px 8px; color: var(--hc-quiet, var(--muted)); font: var(--w-reg) var(--t-sm)/1.35 var(--sans); }
+.hc-cityform button:disabled { cursor: default; }
 .hc-cityform { display: flex; gap: 6px; min-width: 0; }
 .hc-cityform .hc-city { flex: 1 1 auto; min-width: 0; }
 .hc-wx { flex: none; color: var(--text); }
@@ -238,9 +290,91 @@ select.hc-field { max-width: 132px; padding: 0 4px; font-size: var(--t-xs); curs
 .hc-grid[data-form="l"] > .hc-weather .hc-time { font-size: 20px; }
 .hc-grid[data-form="l"] > .hc-weather .hc-wnow .hc-tx { flex-direction: row; align-items: baseline; gap: 8px; }
 .hc-grid[data-form="l"] > .hc-weather .hc-wnow .hc-nm { flex: none; }
-textarea.hc-note { flex: 1 1 auto; width: 100%; height: auto; min-height: 76px; padding: 7px 8px; resize: none; line-height: 1.45; }
-.hc-open textarea.hc-note { min-height: 220px; }
 .hc-note-line { overflow-wrap: anywhere; -webkit-line-clamp: 5; }
+
+/* ---- Notes: a list of notes, the open note beside it (Large, and opened wide) or over it (opened narrow) ------------------ */
+.hc-note-new { height: 24px; padding: 0 9px 0 7px; }
+.hc-note > .hc-ch { gap: 6px; }
+.hc-note-row { min-height: 36px; }
+.hc-note-row.on { background: var(--wash); }
+.hc-note-pinmark { flex: none; display: grid; color: var(--hc-quiet); }
+.hc-notes-bar { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.hc-notes-bar .hc-note-find { flex: 1 1 auto; min-width: 0; }
+.hc-notes-bar .hc-note-new { height: 26px; }
+.hc-notes-app { flex: 1 1 auto; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 10px; min-height: 0; }
+.hc-notes-list { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.hc-card[data-form="l"] .hc-notes-list { overflow-y: auto; margin-right: -4px; padding-right: 4px; }
+.hc-card[data-form="l"] .hc-notes-app { grid-template-columns: minmax(0, 9fr) minmax(0, 11fr); }
+.hc-card[data-form="l"] .hc-note-row .hc-meta { display: none; }
+.hc-card[data-form="l"] .hc-note-row { min-height: 26px; }
+.hc-open .hc-notes-app { align-items: start; }
+.hc-note-pane { display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0; }
+.hc-notes-app > .hc-note-pane { padding-left: 10px; border-left: 1px solid var(--hair); }
+.hc-note-tools { display: flex; align-items: center; gap: 4px; min-width: 0; min-height: 24px; }
+.hc-note-tools .hc-btn { height: 22px; padding: 0 7px; font-size: 10.5px; }
+.hc-note-tools .hc-btn.hc-icon { width: 22px; padding: 0; }
+.hc-note-tools .hc-cap { min-width: 0; }
+.hc-card[data-form="l"] .hc-note-tools .hc-cap { display: none; }
+.hc-note-pin[aria-pressed="true"] { background: var(--wash); color: var(--text-strong); }
+.hc-note-all { display: inline-flex; align-items: center; gap: 2px; margin: 0 4px 0 -4px; }
+.hc-note-view { flex: 1 1 auto; display: flex; flex-direction: column; gap: 1px; min-height: 60px; overflow-y: auto; padding: 2px 0; color: var(--text); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); cursor: text; overflow-wrap: anywhere; white-space: pre-wrap; }
+.hc-note-ln { display: block; }
+.hc-note-title { color: var(--text-strong); font-weight: var(--w-semi); }
+.hc-check { display: flex; align-items: flex-start; gap: 6px; padding: 1px 0; cursor: pointer; }
+.hc-check input { flex: none; width: 13px; height: 13px; margin: 2.5px 0 0; accent-color: var(--solid); cursor: pointer; }
+.hc-check input:checked + span { color: var(--hc-quiet); text-decoration: line-through; }
+textarea.hc-note-edit { flex: 1 1 auto; width: 100%; height: auto; min-height: 96px; padding: 7px 8px; resize: none; line-height: 1.45; }
+.hc-open textarea.hc-note-edit { min-height: 240px; resize: vertical; }
+.hc-open .hc-note-view { min-height: 120px; }
+.hc-note-undo { display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 0 8px; border: 1px solid var(--hair); border-radius: var(--btn-r, 6px); background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text); font-size: var(--t-xs); }
+.hc-note-undo .hc-undo { margin-left: auto; color: var(--text-strong); }
+.hc-note-limit { color: var(--need-text, var(--warn, var(--text))); }
+
+/* ---- Widgets and Artifacts: a page of tiles, then the arrows and the dots ----------------------------------------------- */
+.hc-stack { flex: 1 1 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; min-height: 0; border-radius: var(--btn-r, 6px); outline-offset: 2px; }
+.hc-stack[data-per="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.hc-stack[data-per="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); }
+.hc-stack-all { grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); }
+.hc-mtile { appearance: none; box-sizing: border-box; display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; min-height: 0; margin: 0; padding: 8px; overflow: hidden; border: 1px solid var(--hair); border-radius: var(--btn-r, 6px); background: color-mix(in srgb, var(--text) 3%, transparent); color: inherit; font: inherit; text-align: left; }
+button.hc-mtile { cursor: pointer; transition: background-color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out); }
+button.hc-mtile:hover { border-color: var(--hair-strong); background: color-mix(in srgb, var(--text) 8%, transparent); }
+.hc-tile-pic { flex: none; display: grid; place-items: center; width: 44px; height: 44px; line-height: 0; }
+.hc-tile-pic > [data-mark] { --size: 36px; width: 36px; height: 36px; }
+.hc-tile-pic > .dgc-sheet { width: 31px; height: 40px; }
+.hc-tile-pic .dgc-sheet .dgc-sheet-tag { font-size: 7px; }
+.hc-tile-tx { flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.hc-tile-t { overflow: hidden; color: var(--text-strong); font: var(--w-semi) 12.5px/1.25 var(--sans); text-overflow: ellipsis; white-space: nowrap; }
+.hc-tile-s { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--hc-quiet); font-size: var(--t-xs); line-height: 1.3; }
+/* Two or four to a page: each a small column, its picture over its words. */
+.hc-stack:is([data-per="2"], [data-per="4"]) .hc-mtile { flex-direction: column; align-items: flex-start; gap: 6px; }
+.hc-stack:is([data-per="2"], [data-per="4"]) .hc-tile-tx, .hc-card[data-form="s"] .hc-tile-tx { flex: none; align-self: stretch; }
+.hc-stack[data-per="4"] .hc-mtile { gap: 4px; padding: 6px 8px; }
+.hc-stack[data-per="4"] .hc-tile-pic { width: 30px; height: 30px; }
+.hc-stack[data-per="4"] .hc-tile-pic > .dgc-sheet { width: 22px; height: 28px; }
+.hc-stack[data-per="4"] .hc-tile-s { -webkit-line-clamp: 1; }
+.hc-card[data-form="l"] .hc-stack[data-per="2"] .hc-tile-pic { width: 100%; height: 76px; border-radius: 4px; background: color-mix(in srgb, var(--text) 4%, transparent); }
+.hc-card[data-form="l"] .hc-stack[data-per="2"] .hc-tile-pic > [data-mark] { --size: 52px; width: 52px; height: 52px; }
+.hc-card[data-form="l"] .hc-stack[data-per="2"] .hc-tile-s { -webkit-line-clamp: 3; }
+/* Small: one, compact, in the square; the square opens the card whole. */
+.hc-card[data-form="s"] .hc-stack { gap: 0; }
+.hc-card[data-form="s"] .hc-mtile { flex-direction: column; align-items: flex-start; gap: 4px; padding: 0; border: 0; background: none; }
+.hc-card[data-form="s"] .hc-tile-pic { width: 28px; height: 28px; }
+.hc-card[data-form="s"] .hc-tile-pic > [data-mark] { --size: 26px; width: 26px; height: 26px; }
+.hc-card[data-form="s"] .hc-tile-pic > .dgc-sheet { width: 20px; height: 26px; }
+.hc-card[data-form="s"] .hc-tile-t { font-size: 11.5px; }
+.hc-card[data-form="s"] .hc-tile-s { -webkit-line-clamp: 1; }
+.hc-pager { flex: none; display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; min-height: 20px; }
+.hc-pager .hc-btn.hc-icon { width: 20px; height: 20px; }
+.hc-card[data-form="s"] .hc-pager { justify-content: space-between; min-height: 18px; margin-top: auto; }
+.hc-card[data-form="s"] .hc-pager .hc-btn.hc-icon { width: 18px; height: 18px; }
+.hc-dots { display: flex; align-items: center; justify-content: center; gap: 0; min-width: 0; overflow: hidden; }
+.hc-dot { appearance: none; flex: none; display: grid; place-items: center; width: 14px; height: 14px; margin: 0; padding: 0; border: 0; border-radius: var(--btn-r, 6px); background: transparent; cursor: pointer; }
+.hc-dot::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: color-mix(in srgb, var(--text) 28%, transparent); transition: background-color var(--dur-hover) var(--ease-out); }
+.hc-dot:hover::before { background: color-mix(in srgb, var(--text) 60%, transparent); }
+.hc-dot[aria-current="true"]::before { background: var(--text-strong); }
+.hc-card[data-form="s"] .hc-dot { width: 10px; }
+.hc-pages { color: var(--hc-quiet); font: var(--w-med) 10.5px/1 var(--mono); font-variant-numeric: tabular-nums; }
+.hc-all { margin-right: -4px; }
 
 /* ---- Arrange Home: each card a slim row with a grip and ×; the one being moved is lifted --------------------------------- */
 .hc-grid.hc-arranging { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; gap: 8px; }
@@ -286,5 +420,5 @@ dialog.hc-library:not([open]) { display: none; }
 @media (max-width: 379px) { .hc-lib-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 330px) { .hc-lib-head .hc-cap { display: none; } .hc-arr-cap { display: none; } }
 
-@media (prefers-reduced-motion: reduce) { .hc-col, .hc-li, .hc-btn, .hc-qb, .hc-kb, .hc-here, .hc-card { transition: none !important; } }
-@media (forced-colors: active) { .hc-card, .hc-lib-item, .hc-btn, .hc-qb, .hc-field { border-color: CanvasText; } .hc-cell.on, .hc-cell.cap, .hc-fill { background: CanvasText; } .hc-col.hot :is(.hc-cell.on, .hc-cell.cap) { background: Highlight; } }
+@media (prefers-reduced-motion: reduce) { .hc-col, .hc-li, .hc-btn, .hc-qb, .hc-kb, .hc-here, .hc-pin, .hc-mtile, .hc-dot::before, .hc-card { transition: none !important; } }
+@media (forced-colors: active) { .hc-card, .hc-lib-item, .hc-btn, .hc-qb, .hc-field, .hc-mtile, .dgc-menu.hc-suggest, .hc-note-undo { border-color: CanvasText; } .hc-dot[aria-current="true"]::before { background: Highlight; } .dgc-menu.hc-suggest .hc-opt[aria-selected="true"] { forced-color-adjust: none; background: Highlight; color: HighlightText; } .hc-cell.on, .hc-cell.cap, .hc-fill { background: CanvasText; } .hc-col.hot :is(.hc-cell.on, .hc-cell.cap) { background: Highlight; } }

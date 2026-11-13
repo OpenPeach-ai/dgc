@@ -1,32 +1,40 @@
-// Home as cards (media/shared/homecards.js): what the extension keeps for it, and the two things it reads for it.
+// Home as cards (media/shared/homecards.js): what the extension keeps for it, and the things it reads for it.
 //
 // Kept on this computer, in the extension's global state as the dock's pins are (src/dock.ts), so a reload and every
 // window find Home as it was left: which cards are on Home and in what order (the side bar's width picks each card's
-// size, so no size is kept), and the everyday cards' own settings: the Clock's second time zone, the Weather's
-// city and unit, the Note's words.
+// size, so no size is kept), the everyday cards' own settings (the Clock's second time zone, the Weather's place and
+// unit, which widget and which artifact their cards last showed), and the notes of the Notes card.
 //
-// Read for it: the token report, shaped for the Token usage card (the days as DGC counted them, the models by tokens;
-// never a prompt or a reply), and the weather. The Weather card's request is the only one Home makes outside this
-// computer, and the host makes it, never the page: to Open-Meteo (no account, no key), for the city the user typed when
-// adding the card, and only then. It sends the city's name to find the place, then the place's latitude and longitude
-// for the forecast; nothing else. An answer is kept for half an hour.
+// Read for it: the token report, shaped for the Token usage card (the days as DGC counted them, the models by tokens
+// with their provider and share; never a prompt or a reply), and the weather. The Weather card's requests are the only
+// ones Home makes outside this computer, and the host makes them, never the page: to Open-Meteo (no account, no key).
+// While a city is typed, the letters typed are sent to its place search and the places it finds are offered; the place
+// the user chooses is kept whole (name, region, country, latitude, longitude, time zone) and the forecast is asked by
+// its coordinates. Nothing else is sent. A forecast is kept for half an hour.
 import type * as vscode from "vscode";
 
 const KEY = "dgc.homeCards.v1";
 /** Every card there is, in the library's order. */
-export const HOME_CARD_TYPES = ["needs", "running", "recent", "work", "chats", "pips", "token", "quick", "folders", "clock", "weather", "note"] as const;
+export const HOME_CARD_TYPES = ["needs", "running", "recent", "work", "chats", "pips", "widgets", "artifacts", "token", "quick", "folders", "clock", "weather", "note"] as const;
 export type HomeCardType = typeof HOME_CARD_TYPES[number];
 /** Home for someone new. */
 export const HOME_DEFAULT: HomeCardType[] = ["needs", "recent", "running", "token", "quick"];
-const WEATHER_KEEP_MS = 30 * 60000, NOTE_MOST = 4000;
+const WEATHER_KEEP_MS = 30 * 60000;
+/** The Notes card holds at most this many notes, each at most this long. */
+export const NOTES_MOST = 500, NOTE_MOST = 20000;
 
-export type HomeSettings = { clock?: { zone?: string }; weather?: { city?: string; unit?: "c" | "f" }; note?: { text?: string } };
-export type HomeCardsState = { type: "homeCards"; order: HomeCardType[]; settings: HomeSettings };
+/** A place as Open-Meteo's search named it, kept whole: the forecast is asked by its coordinates. */
+export type HomePlace = { name: string; admin1: string; country: string; code: string; lat: number; lon: number; tz: string };
+export type HomeNote = { id: string; text: string; at: number; pinned: boolean };
+/** `weather.city`: a city typed before places were chosen from a list (found once more, then kept as a place). */
+export type HomeSettings = { clock?: { zone?: string }; weather?: { place?: HomePlace; city?: string; unit?: "c" | "f" }; widgets?: { shown?: string }; artifacts?: { shown?: string } };
+export type HomeCardsState = { type: "homeCards"; order: HomeCardType[]; settings: HomeSettings; notes: HomeNote[] };
 export type HomeWeather = { type: "homeWeather"; ok: true; place: string; at: number; now: { temp: number; code: number; day: boolean }; high: number; low: number; hours: { time: string; temp: number; code: number }[] }
   | { type: "homeWeather"; ok: false; reason: "nocity" | "offline" | "refused" | "notfound" };
+/** The places found for the letters typed (`q`, as the page sent them; `seq` is the page's own count of its asks). */
+export type HomePlaces = { type: "homeWeatherPlaces"; q: string; seq: number; ok: true; places: HomePlace[] } | { type: "homeWeatherPlaces"; q: string; seq: number; ok: false; reason: "offline" | "refused" };
 type Fetcher = (url: string, init?: { signal?: AbortSignal }) => Promise<{ ok: boolean; status: number; json(): Promise<any> }>;
-type Kept = { order?: unknown; settings?: unknown; place?: unknown };
-type Place = { city: string; name: string; lat: number; lon: number };
+type Kept = { order?: unknown; settings?: unknown; notes?: unknown };
 
 const isType = (value: unknown): value is HomeCardType => typeof value === "string" && (HOME_CARD_TYPES as readonly string[]).includes(value);
 function order(value: unknown): HomeCardType[] | undefined {
@@ -37,38 +45,88 @@ function order(value: unknown): HomeCardType[] | undefined {
 }
 function zone(value: unknown): string | undefined {
   if (value === "") return "";
-  if (typeof value !== "string" || !/^[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+){1,2}$/.test(value)) return undefined;
+  if (typeof value !== "string" || !/^(?:UTC|[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+){1,2})$/.test(value)) return undefined;
   try { new Intl.DateTimeFormat("en-US", { timeZone: value }); return value; } catch { return undefined; }
 }
 const city = (value: unknown) => (typeof value === "string" ? value.replace(/[\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 80) : undefined);
-/** The settings as kept: only what each everyday card has. */
+/** A place, checked: a name, coordinates that are on the Earth, and only short plain words beside them. Takes a place
+ *  as kept ({ lat, lon, code, tz }) or as Open-Meteo's search names one ({ latitude, longitude, country_code,
+ *  timezone }). undefined: not one. */
+export function homePlace(value: any): HomePlace | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const name = city(value.name), lat = value.lat ?? value.latitude, lon = value.lon ?? value.longitude;
+  if (!name || typeof lat !== "number" || typeof lon !== "number" || !Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return undefined;
+  const code = String(value.code ?? value.country_code ?? "").toUpperCase();
+  return { name, admin1: city(value.admin1) || "", country: city(value.country) || "", code: /^[A-Z]{2}$/.test(code) ? code : "", lat, lon, tz: zone(value.tz ?? value.timezone) || "" };
+}
+const SHOWN_ID = /^[A-Za-z0-9_.:-]{1,80}$/;
+/** The settings as kept: only what each card has. */
 function settings(value: unknown): HomeSettings {
   const from = value && typeof value === "object" ? value as Record<string, any> : {}, out: HomeSettings = {};
   const z = zone(from.clock?.zone);
   if (z) out.clock = { zone: z };
-  const c = city(from.weather?.city), unit = from.weather?.unit === "f" ? "f" : from.weather?.unit === "c" ? "c" : undefined;
-  if (c || unit) out.weather = { ...(c ? { city: c } : {}), ...(unit ? { unit } : {}) };
-  if (typeof from.note?.text === "string" && from.note.text) out.note = { text: from.note.text.slice(0, NOTE_MOST) };
+  const place = homePlace(from.weather?.place), c = place ? undefined : city(from.weather?.city), unit = from.weather?.unit === "f" ? "f" : from.weather?.unit === "c" ? "c" : undefined;
+  if (place || c || unit) out.weather = { ...(place ? { place } : {}), ...(c ? { city: c } : {}), ...(unit ? { unit } : {}) };
+  for (const card of ["widgets", "artifacts"] as const) if (typeof from[card]?.shown === "string" && SHOWN_ID.test(from[card].shown)) out[card] = { shown: from[card].shown };
+  return out;
+}
+const NOTE_ID = /^[a-z0-9]{4,24}$/;
+/** One note, checked: an id of its own, its words, when it was last changed, whether it is pinned. undefined: not one. */
+function note(entry: any): HomeNote | undefined {
+  const id = String(entry?.id ?? ""), at = Number(entry?.at);
+  if (!NOTE_ID.test(id) || typeof entry?.text !== "string") return undefined;
+  return { id, text: entry.text.slice(0, NOTE_MOST), at: Number.isFinite(at) && at > 0 ? Math.round(at) : 0, pinned: entry.pinned === true };
+}
+function notes(value: unknown): HomeNote[] {
+  const out: HomeNote[] = [], seen = new Set<string>();
+  for (const entry of Array.isArray(value) ? value.slice(0, NOTES_MOST) : []) { const one = note(entry); if (one && !seen.has(one.id)) { seen.add(one.id); out.push(one); } }
   return out;
 }
 
-/** The token report (get_usage) as the card takes it. `period`: the thirty days' own report, for its models. */
-export function usageForHome(report: any, period: any): { type: "homeUsage"; days: { date: string; input_tokens: number; output_tokens: number; cached_input_tokens: number; requests: number }[]; models: { name: string; tokens: number }[]; error: string } {
-  const n = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.round(value) : 0);
-  const days = (Array.isArray(report?.by_day) ? report.by_day : []).filter((d: any) => typeof d?.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d.date)).slice(-120)
-    .map((d: any) => ({ date: d.date as string, input_tokens: n(d.input_tokens), output_tokens: n(d.output_tokens), cached_input_tokens: n(d.cached_input_tokens), requests: n(d.requests) }));
-  const models = (Array.isArray(period?.by_model) ? period.by_model : []).slice(0, 40).map((row: any) => {
-    const model = String(row?.model || "").slice(0, 80), where = String(row?.system_name || "").slice(0, 60);
-    return { name: where && where !== model ? `${model} (${where})` : model, tokens: n(row?.input_tokens) + n(row?.output_tokens) };
-  }).filter((row: { name: string; tokens: number }) => row.name && row.tokens > 0).sort((a: { tokens: number }, b: { tokens: number }) => b.tokens - a.tokens).slice(0, 6);
-  return { type: "homeUsage", days, models, error: typeof report?.error === "string" ? report.error.slice(0, 300) : "" };
+export type HomeUsageModel = { name: string; model: string; provider: string; where: string; tokens: number; share: number };
+export type HomeUsageDay = { date: string; input_tokens: number; output_tokens: number; cached_input_tokens: number; requests: number; models?: HomeUsageModel[] };
+/** A provider as people call it ("ollama" is Ollama); one this list doesn't know keeps its own name, capitalised. */
+const PROVIDERS: Record<string, string> = { ollama: "Ollama", openai: "OpenAI", anthropic: "Anthropic", deepseek: "DeepSeek", google: "Google", gemini: "Gemini", openrouter: "OpenRouter", groq: "Groq", mistral: "Mistral",
+  xai: "xAI", moonshot: "Moonshot", kimi: "Kimi", qwen: "Qwen", lmstudio: "LM Studio", "llama.cpp": "llama.cpp", llamacpp: "llama.cpp", vllm: "vLLM", codex: "Codex", "claude-code": "Claude Code", claude_code: "Claude Code", dgc: "DGC" };
+const providerName = (value: unknown) => { const id = String(value ?? "").trim().slice(0, 60); return !id || id === "unknown" ? "" : PROVIDERS[id.toLowerCase()] || id.charAt(0).toUpperCase() + id.slice(1); };
+const count = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.round(value) : 0);
+/** get_usage's by-model rows as the card takes them: the same model on the same provider and system is one row; most
+ *  tokens first; each with its share of all the rows' tokens (whole per cent). `most`: how many are kept. */
+function usageModels(rows: unknown, most: number): { models: HomeUsageModel[]; all: number } {
+  const merged = new Map<string, HomeUsageModel>();
+  for (const row of Array.isArray(rows) ? rows.slice(0, 100) : []) {
+    const model = String((row as any)?.model || "").slice(0, 80), where = String((row as any)?.system || (row as any)?.system_name || "").slice(0, 60);
+    const provider = providerName((row as any)?.provider) || where, tokens = count((row as any)?.input_tokens) + count((row as any)?.output_tokens);
+    if (!model || !tokens) continue;
+    const key = `${model}\n${provider}\n${where}`, had = merged.get(key);
+    if (had) had.tokens += tokens; else merged.set(key, { name: where && where !== model ? `${model} (${where})` : model, model, provider, where, tokens, share: 0 });
+  }
+  const all = [...merged.values()].sort((a, b) => b.tokens - a.tokens), total = all.reduce((sum, row) => sum + row.tokens, 0);
+  for (const row of all) row.share = total ? Math.round((row.tokens / total) * 100) : 0;
+  return { models: all.slice(0, most), all: all.length };
+}
+/** The token report (get_usage) as the card takes it. `period`: the thirty days' own report, for its models. `today`:
+ *  today's own report, whose models are today's column's. A day that names its own models (`by_day[].models`, should
+ *  the ledger send them) keeps its top three. `modelCount`: how many models the thirty days had in all. */
+export function usageForHome(report: any, period: any, today?: any): { type: "homeUsage"; days: HomeUsageDay[]; models: HomeUsageModel[]; modelCount: number; error: string } {
+  const days: HomeUsageDay[] = (Array.isArray(report?.by_day) ? report.by_day : []).filter((d: any) => typeof d?.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d.date)).slice(-120)
+    .map((d: any) => { const own = Array.isArray(d.models) ? usageModels(d.models, 3).models : [];
+      return { date: d.date as string, input_tokens: count(d.input_tokens), output_tokens: count(d.output_tokens), cached_input_tokens: count(d.cached_input_tokens), requests: count(d.requests), ...(own.length ? { models: own } : {}) }; });
+  // Today's models, from today's own report: its one day is a day of the other reports too.
+  const now = Array.isArray(today?.by_day) && today.by_day.length === 1 && typeof today.by_day[0]?.date === "string" ? days.find((d) => d.date === today.by_day[0].date) : undefined;
+  if (now && !now.models) { const own = usageModels(today.by_model, 3).models; if (own.length) now.models = own; }
+  const { models, all } = usageModels(period?.by_model, 8);
+  return { type: "homeUsage", days, models, modelCount: all, error: typeof report?.error === "string" ? report.error.slice(0, 300) : "" };
 }
 
 export class HomeCards {
   private readonly listeners = new Set<() => void>();
   private readonly fetcher?: Fetcher;
   private readonly now: () => number;
-  private held?: { city: string; at: number; said: HomeWeather };
+  private held?: { where: string; at: number; said: HomeWeather };
+  /** The places found for the last few things typed, so the same letters are not asked twice. */
+  private readonly found = new Map<string, HomePlace[]>();
+  private firstNote?: HomeNote;
   constructor(private readonly context: Pick<vscode.ExtensionContext, "globalState">, options: { fetcher?: Fetcher; now?: () => number } = {}) {
     this.fetcher = options.fetcher ?? (typeof (globalThis as any).fetch === "function" ? ((url, init) => (globalThis as any).fetch(url, init)) : undefined);
     this.now = options.now ?? Date.now;
@@ -83,9 +141,19 @@ export class HomeCards {
     try { await this.context.globalState.update(KEY, { ...this.kept(), ...change }); } catch { /* kept for this window still */ }
     for (const listener of [...this.listeners]) { try { listener(); } catch { /* one page's trouble is its own */ } }
   }
+  /** The notes kept. Before there were notes there was one sticky note, a setting: where no notes are kept yet, it is
+   *  the first note (the same note every time it is asked, and written with the first change to any note). */
+  private notesNow(): HomeNote[] {
+    const kept = this.kept();
+    if (Array.isArray(kept.notes)) return notes(kept.notes);
+    const old = (kept.settings as any)?.note?.text;
+    if (typeof old !== "string" || !old.trim()) return [];
+    if (!this.firstNote || this.firstNote.text !== old.slice(0, NOTE_MOST)) this.firstNote = { id: "first1", text: old.slice(0, NOTE_MOST), at: this.now(), pinned: false };
+    return [this.firstNote];
+  }
   state(): HomeCardsState {
     const kept = this.kept();
-    return { type: "homeCards", order: order(kept.order) ?? [...HOME_DEFAULT], settings: settings(kept.settings) };
+    return { type: "homeCards", order: order(kept.order) ?? [...HOME_DEFAULT], settings: settings(kept.settings), notes: this.notesNow() };
   }
   onChange(listener: () => void): { dispose(): void } {
     this.listeners.add(listener);
@@ -93,29 +161,44 @@ export class HomeCards {
   }
   async setOrder(value: unknown): Promise<void> { const next = order(value); if (next) await this.keep({ order: next }); }
   async reset(): Promise<void> { await this.keep({ order: [...HOME_DEFAULT] }); }
-  /** One everyday card's setting. Anything that is not one changes nothing. */
+  /** One card's setting. Anything that is not one changes nothing. A Weather place is kept only whole, as the place
+   *  search named it: a page cannot save a city by its name alone. */
   async setting(card: unknown, change: unknown): Promise<void> {
-    if (card !== "clock" && card !== "weather" && card !== "note") return;
+    if (card !== "clock" && card !== "weather" && card !== "widgets" && card !== "artifacts") return;
     const now = settings(this.kept().settings), from = change && typeof change === "object" ? change as Record<string, unknown> : {};
     if (card === "clock") { const z = zone(from.zone); if (z === undefined) return; if (z) now.clock = { zone: z }; else delete now.clock; }
-    else if (card === "note") { if (typeof from.text !== "string") return; if (from.text) now.note = { text: from.text.slice(0, NOTE_MOST) }; else delete now.note; }
+    else if (card === "widgets" || card === "artifacts") { if (typeof from.shown !== "string" || (from.shown && !SHOWN_ID.test(from.shown))) return; if (from.shown) now[card] = { shown: from.shown }; else delete now[card]; }
     else {
-      const c = from.city === undefined ? now.weather?.city : city(from.city), unit = from.unit === "f" || from.unit === "c" ? from.unit : now.weather?.unit;
-      now.weather = { ...(c ? { city: c } : {}), ...(unit ? { unit } : {}) };
-      if (c !== this.held?.city) this.held = undefined;
+      const place = from.place === undefined ? now.weather?.place : homePlace(from.place), unit = from.unit === "f" || from.unit === "c" ? from.unit : now.weather?.unit;
+      if (from.place !== undefined && !place) return;
+      const legacy = place ? undefined : now.weather?.city;
+      now.weather = { ...(place ? { place } : {}), ...(legacy ? { city: legacy } : {}), ...(unit ? { unit } : {}) };
+      if (!now.weather.place && !now.weather.city && !now.weather.unit) delete now.weather;
     }
     await this.keep({ settings: now });
   }
-
-  /** The weather for the city kept, from Open-Meteo: asked at most once in half an hour. Never throws. */
-  async weather(): Promise<HomeWeather> {
-    const where = settings(this.kept().settings).weather?.city || "";
-    if (!where) return { type: "homeWeather", ok: false, reason: "nocity" };
-    if (this.held && this.held.city === where && this.now() - this.held.at < WEATHER_KEEP_MS) return this.held.said;
-    const said = await this.readWeather(where);
-    if (said.ok) this.held = { city: where, at: this.now(), said };
-    return said;
+  /** A note saved (new, or changed in place), or deleted. A new note past the most is not kept. */
+  async note(message: any): Promise<void> {
+    const all = this.notesNow();
+    if (message?.op === "delete") {
+      const id = String(message.id ?? ""), next = all.filter((n) => n.id !== id);
+      if (next.length === all.length) return;
+      await this.keepNotes(next);
+    } else if (message?.op === "save") {
+      const one = note(message.note);
+      if (!one) return;
+      const at = all.findIndex((n) => n.id === one.id);
+      if (at >= 0) all[at] = one; else if (all.length < NOTES_MOST) all.unshift(one); else return;
+      await this.keepNotes(all);
+    }
   }
+  /** The notes, and with them the old sticky note's setting taken away: it is a note now. */
+  private async keepNotes(next: HomeNote[]): Promise<void> {
+    const old = this.kept().settings, rest = old && typeof old === "object" ? { ...(old as Record<string, unknown>) } : {};
+    delete rest.note;
+    await this.keep({ notes: next, settings: rest });
+  }
+
   private async ask(url: string): Promise<any> {
     if (!this.fetcher) throw new Error("offline");
     const stop = typeof AbortController === "function" ? new AbortController() : undefined, timer = stop ? setTimeout(() => stop.abort(), 12000) : undefined;
@@ -125,15 +208,45 @@ export class HomeCards {
       return await answer.json();
     } finally { if (timer) clearTimeout(timer); }
   }
-  private async readWeather(where: string): Promise<HomeWeather> {
+  /** The places Open-Meteo's search finds for the letters typed (two or more), at most eight. Never throws. */
+  async places(typed: unknown, seq: unknown): Promise<HomePlaces> {
+    const q = typeof typed === "string" ? typed.slice(0, 200) : "", n = Number.isFinite(Number(seq)) ? Number(seq) : 0, name = city(q) || "", key = name.toLowerCase();
+    if (name.length < 2) return { type: "homeWeatherPlaces", q, seq: n, ok: true, places: [] };
+    const had = this.found.get(key);
+    if (had) return { type: "homeWeatherPlaces", q, seq: n, ok: true, places: had };
     try {
-      const saved = this.kept().place as Place | undefined;
-      let place = saved && saved.city === where && Number.isFinite(saved.lat) && Number.isFinite(saved.lon) ? saved : undefined;
+      const answer = await this.ask(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=8&language=en&format=json`);
+      const places = (Array.isArray(answer?.results) ? answer.results.slice(0, 8) : []).map(homePlace).filter(Boolean) as HomePlace[];
+      this.found.set(key, places);
+      while (this.found.size > 40) this.found.delete(this.found.keys().next().value as string);
+      return { type: "homeWeatherPlaces", q, seq: n, ok: true, places };
+    } catch (error) {
+      return { type: "homeWeatherPlaces", q, seq: n, ok: false, reason: (error as any)?.refused ? "refused" : "offline" };
+    }
+  }
+  /** What the weather kept is the weather of: the place's coordinates, or a city typed before places were chosen. */
+  private where(): { key: string; place?: HomePlace; city: string } {
+    const w = settings(this.kept().settings).weather;
+    return { key: w?.place ? `${w.place.lat},${w.place.lon}` : w?.city ? `city:${w.city}` : "", place: w?.place, city: w?.city || "" };
+  }
+  /** The weather for the place kept, from Open-Meteo: asked at most once in half an hour. Never throws. */
+  async weather(): Promise<HomeWeather> {
+    const at = this.where();
+    if (!at.key) return { type: "homeWeather", ok: false, reason: "nocity" };
+    if (this.held && this.held.where === at.key && this.now() - this.held.at < WEATHER_KEEP_MS) return this.held.said;
+    const said = await this.readWeather(at.place, at.city);
+    if (said.ok) this.held = { where: this.where().key, at: this.now(), said };      // (a typed city is a place by now)
+    return said;
+  }
+  private async readWeather(known: HomePlace | undefined, typed: string): Promise<HomeWeather> {
+    try {
+      let place = known;
       if (!place) {
-        const found = (await this.ask(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(where)}&count=1&language=en&format=json`))?.results?.[0];
-        if (!found || !Number.isFinite(found.latitude) || !Number.isFinite(found.longitude)) return { type: "homeWeather", ok: false, reason: "notfound" };
-        place = { city: where, name: [found.name, found.country].filter((part) => typeof part === "string" && part).join(", ").slice(0, 80) || where, lat: found.latitude, lon: found.longitude };
-        try { await this.context.globalState.update(KEY, { ...this.kept(), place }); } catch { /* found again next time */ }
+        // A city typed before places were chosen from a list: found once more, and kept as the place it is.
+        place = homePlace((await this.ask(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(typed)}&count=1&language=en&format=json`))?.results?.[0]);
+        if (!place) return { type: "homeWeather", ok: false, reason: "notfound" };
+        const now = settings(this.kept().settings);
+        if (now.weather?.city === typed && !now.weather.place) { now.weather = { place, ...(now.weather.unit ? { unit: now.weather.unit } : {}) }; await this.keep({ settings: { ...(this.kept().settings as object || {}), weather: now.weather } }); }
       }
       const f = await this.ask(`https://api.open-meteo.com/v1/forecast?latitude=${place.lat}&longitude=${place.lon}&current=temperature_2m,weather_code,is_day&hourly=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&forecast_days=2&timezone=auto`);
       const temp = Number(f?.current?.temperature_2m);
@@ -144,7 +257,7 @@ export class HomeCards {
         const t = Number(f.hourly.temperature_2m?.[i]);
         if (Number.isFinite(t)) hours.push({ time: String(times[i]).slice(11, 16), temp: t, code: Number(f.hourly.weather_code?.[i]) || 0 });
       }
-      return { type: "homeWeather", ok: true, place: place.name, at: this.now(), now: { temp, code: Number(f.current.weather_code) || 0, day: f.current.is_day !== 0 },
+      return { type: "homeWeather", ok: true, place: [place.name, place.country].filter(Boolean).join(", ").slice(0, 120), at: this.now(), now: { temp, code: Number(f.current.weather_code) || 0, day: f.current.is_day !== 0 },
         high: Number(f?.daily?.temperature_2m_max?.[0]), low: Number(f?.daily?.temperature_2m_min?.[0]), hours };
     } catch (error) {
       return { type: "homeWeather", ok: false, reason: (error as any)?.refused ? "refused" : "offline" };
@@ -152,7 +265,7 @@ export class HomeCards {
   }
 
   /** A page's Home-cards message. False when it isn't one. `reply` gets what the page asked for. */
-  handle(message: any, reply?: (said: HomeCardsState | HomeWeather) => void): boolean {
+  handle(message: any, reply?: (said: HomeCardsState | HomeWeather | HomePlaces) => void): boolean {
     switch (message?.type) {
       case "homeCardsReady": reply?.(this.state()); return true;
       case "homeCardsSet": void this.setOrder(message.order).then(() => reply?.(this.state())); return true;
@@ -160,9 +273,11 @@ export class HomeCards {
       case "homeCardSetting":
         void this.setting(message.card, message.settings).then(async () => {
           reply?.(this.state());
-          if (message.card === "weather" && message.settings && typeof message.settings === "object" && "city" in message.settings) reply?.(await this.weather());
+          if (message.card === "weather" && message.settings && typeof message.settings === "object" && "place" in message.settings) reply?.(await this.weather());
         });
         return true;
+      case "homeNote": void this.note(message).then(() => reply?.(this.state())); return true;
+      case "homeWeatherSuggest": void this.places(message.q, message.seq).then((said) => reply?.(said)); return true;
       case "homeWeatherGet": void this.weather().then((said) => reply?.(said)); return true;
       default: return false;
     }

@@ -1235,6 +1235,11 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     const tab: Tab = { panel, conversation, temporary, held: [], opened: false, picked: new Set(), ...(project ? { project } : {}),
                        ...(take ? { take } : {}), mic: { post: (message) => this.post(tab, message) } };
     this.tabs.add(tab);
+    // Brought to the front, or covered by another tab: the home is told which chats are watched (a reply into the tab
+    // the user is on is read as it comes; one into a tab in the background is New on Home until its tab is opened).
+    let inFront = panel.visible;
+    try { panel.onDidChangeViewState?.(() => { if (panel.visible !== inFront) { inFront = panel.visible; this.homeChanged(); } }); } catch { /* a panel that does not say */ }
+    this.watchWindow();
     panel.onDidDispose(() => {
       this.tabs.delete(tab);
       for (const [id, asker] of this.requests) { if (asker.tab === tab) this.requests.delete(id); }
@@ -1489,6 +1494,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
                                 more: ev.next_offset !== null && ev.next_offset !== undefined,
                                 open: [...this.tabs].map((tab) => tab.conversation).filter(Boolean),
                                 answering: [...this.answering],       // the chats writing a reply now (the dock's running dot)
+                                watched: this.watchedChats(),         // the chats the user is on: a reply there is seen as it comes
                                 items: chats.filter((chat: any) => CONVERSATION_ID.test(String(chat?.id || ""))) });
         }
         return;
@@ -1597,6 +1603,13 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         if (asker?.kind === "widgets") {
           void asker.libraryPanel?.webview.postMessage({ type: "widgets", widgets: Array.isArray(ev.widgets) ? ev.widgets : [],
                                                          total: Number(ev.total) || 0, next: ev.next_offset ?? null });
+          return;
+        }
+        if (asker?.kind === "homeWidgets") {
+          // Home's Widgets card: the newest sixty, each with what its tile says and what opens it.
+          const widgets = (Array.isArray(ev.widgets) ? ev.widgets : []).filter((w: any) => WIDGET_ID.test(String(w?.id || "")) && CONVERSATION_ID.test(String(w?.chat_id || "")))
+            .map((w: any) => ({ id: String(w.id), title: widgetName(w.title), chat_id: String(w.chat_id), chat_title: String(w.chat_title || "").slice(0, 200), project_name: String(w.project_name || "").slice(0, 120), created_at: String(w.created_at || "") }));
+          this.host?.postHome({ type: "homeWidgets", offered: true, widgets, more: ev.next_offset !== null && ev.next_offset !== undefined });
           return;
         }
         const w = ev.widget && typeof ev.widget === "object" ? ev.widget : null;
@@ -1846,6 +1859,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         if (asker?.kind === "libraryRecent") { this.recentWaiting.shift()?.([]); return; }
         if (asker && !asker.tab && asker.kind !== "list") { void vscode.window.showErrorMessage(message); return; }
         if (asker?.tab) { this.post(asker.tab, { type: "error", message, opening: asker.kind === "open" }); return; }
+        if (asker?.kind === "homeWidgets") { this.host?.postHome({ type: "homeWidgets", offered: true, widgets: [] }); return; }      // Home's card says none, quietly
         if (asker?.home) { this.host?.postHome({ type: "chatdgc_list", available: true, error: message, items: [], query: this.homeQuery }); return; }
         for (const tab of showing(conversation)) this.post(tab, { type: "error", message });
         return;
@@ -2692,6 +2706,54 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     this.homeTimer = setTimeout(() => { this.homeTimer = undefined; this.homeRefresh(); }, 250);
   }
 
+  /** The chats being watched: their tab is the one in front in its editor group AND this window has the focus. A reply
+   *  there is read as it arrives; one into a tab in the background (or in a window the user has left) is New on Home
+   *  until its tab is watched ("New" means not seen, 13 Nov). */
+  private watchedChats(): string[] {
+    let focused = true;
+    try { focused = vscode.window.state?.focused !== false; } catch { focused = true; }
+    if (!focused) return [];
+    return [...new Set([...this.tabs].filter((tab) => tab.panel.visible === true && CONVERSATION_ID.test(tab.conversation)).map((tab) => tab.conversation))];
+  }
+  private windowWatch?: vscode.Disposable;
+  /** The window gained or lost the focus: the home is told again which chats are watched. */
+  private watchWindow(): void {
+    if (this.windowWatch) return;
+    try { this.windowWatch = vscode.window.onDidChangeWindowState?.(() => { if (!this.closing && this.tabs.size) this.homeChanged(); }); } catch { /* an editor that does not say */ }
+  }
+
+  /** Home's Widgets and Artifacts cards (media/shared/homecards.js): what the Library lists, as the cards take it, and
+   *  what a card opens. Nothing here is the page's word for what to open: ids are checked as the Library's are. */
+  async homeCardsMessage(message: any): Promise<void> {
+    switch (message?.type) {
+      case "homeWidgetsGet":
+        if (!this.widgetLibrary()) { this.host?.postHome({ type: "homeWidgets", offered: false, widgets: [] }); return; }
+        this.ask({ kind: "homeWidgets" }, { type: "chatdgc_widgets", op: "list", limit: 60, offset: 0 });
+        return;
+      case "homeArtifactsGet": {
+        if (!this.artifacts || !this.artifactsOffer()) { this.host?.postHome({ type: "homeArtifacts", offered: false, items: [] }); return; }
+        try {
+          const items = (await this.artifacts.list()).filter((a: any) => ARTIFACT_ID.test(String(a?.id || ""))).map((a: any) => ({ id: String(a.id), type: String(a.type || ""), title: String(a.title || "").slice(0, 200),
+            version: Number(a.version) || 1, surface: String(a.origin?.surface || ""), at: String(a.updated || a.created || "") }))
+            .sort((a, b) => b.at.localeCompare(a.at));
+          this.host?.postHome({ type: "homeArtifacts", offered: true, items: items.slice(0, 60), more: items.length > 60 });
+        } catch { this.host?.postHome({ type: "homeArtifacts", offered: true, items: [] }); }
+        return;
+      }
+      case "homeWidgetOpen": {
+        const id = String(message.id || ""), chat = String(message.chat_id || "");
+        if (!WIDGET_ID.test(id) || !CONVERSATION_ID.test(chat) || !this.widgetLibrary()) return;
+        const open = this.widgetPanels.get(id);
+        if (open) open.reveal(undefined, false);
+        else this.ask({ kind: "widgetGet" }, { type: "chatdgc_widgets", op: "get", conversation_id: chat, widget_id: id });
+        return;
+      }
+      case "homeLibraryOpen":
+        this.openLibrary(message.view === "widgets" && this.widgetLibrary() ? "widgets" : message.view === "artifacts" && this.artifactsOffer() ? "artifacts" : "");
+        return;
+    }
+  }
+
   /** A message from the home's webview, if it is ChatDGC's. */
   async homeMessage(message: any): Promise<boolean> {
     switch (message?.type) {
@@ -2752,6 +2814,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
 
   dispose(): void {
     this.closing = true;
+    try { this.windowWatch?.dispose(); } catch { /* gone */ }
+    this.windowWatch = undefined;
     if (this.openedDir) try { rmSync(this.openedDir, { recursive: true, force: true }); } catch { /* the OS clears it */ }
     this.openedDir = "";
     this.openedCopies.clear();
