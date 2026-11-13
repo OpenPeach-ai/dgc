@@ -362,7 +362,7 @@ class PipChatTests(unittest.TestCase):
         seen, events = [], []
         def chat(client, messages, tools=None, on_text=None, **kwargs):
             seen.append(copy.deepcopy(messages))
-            self.assertTrue({tool["function"]["name"] for tool in tools} <= pips.READ_TOOLS)
+            self.assertTrue({tool["function"]["name"] for tool in tools} <= pips.FOLDER_CHAT_TOOLS)
             self.assertNotIn("exactly one JSON object", messages[0]["content"])
             if on_text:
                 on_text("I can explain the source. ")
@@ -491,7 +491,7 @@ from dgc.pips import _worker_main
 
 def chat(self, messages, tools=None, on_text=None, **kwargs):
     assert self.model == "fixture", self.model
-    assert {t["function"]["name"] for t in tools} <= {"read_file", "glob", "grep", "repo_map", "todo"}
+    assert {t["function"]["name"] for t in tools} <= {"read_file", "glob", "grep", "repo_map", "todo", "offer_choices", "draft_pip_change"}
     reply = "The queued model answered this Pip."
     if on_text:
         for character in reply:

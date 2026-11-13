@@ -33,9 +33,11 @@ class SimpleStartTests(unittest.TestCase):
         blank = self.store.create(self.personal_id(), "Travel", "   ", "editor-user", pip_type="scout")
         self.assertEqual(blank["goal"], pips.NAMED_GOAL)
 
-    def test_a_project_pip_still_says_what_it_reviews(self):
-        with self.assertRaises(RegistryError):
-            self.store.create(self.workspace["id"], "Reviewer", None, "editor-user", pip_type="rook")
+    def test_a_project_pip_also_needs_only_a_name(self):
+        # Reversed 13 Nov (his call, "we don't want user to define the goal while creating a Pip"): a Pip in a project
+        # folder is named, then set up by talking to it, as a Personal Pip is.
+        pip = self.store.create(self.workspace["id"], "Reviewer", None, "editor-user", pip_type="rook")
+        self.assertEqual(pip["goal"], pips.NAMED_GOAL)
 
     def test_core_is_your_primary_pip_and_only_a_personal_one(self):
         core = self.store.create(self.personal_id(), "Core", None, "editor-user", pip_type="core")
@@ -141,6 +143,43 @@ class SimpleStartTests(unittest.TestCase):
                 patch("dgc.agent.load_memories", side_effect=AssertionError("No ambient memory")):
             pips.execute_native(self.cfg, self.root, raw, lambda e: None)
         return seen[0] if isinstance(seen[0], str) else json.dumps(seen[0])
+
+    def folder_chat(self, pip):
+        """A folder Pip's chat turn: its system prompt and the tools it was offered."""
+        from dgc.llm import LLMClient, ChatResult
+        run = pip_chat.send(self.store, pip["id"], "Hi", "k-folder", "user", self.cfg)["run"]
+        raw = json.loads(self.registry.db.execute("SELECT manifest FROM pip_runs WHERE id=?", (run["id"],)).fetchone()[0])
+        seen = []
+
+        def chat(client, messages, tools=None, **kwargs):
+            seen.append((messages[0]["content"], [t.get("function", {}).get("name") for t in tools or []]))
+            return ChatResult(content="Hello.")
+        with patch.dict(os.environ, {"DGC_SESSION_POLICY": pips._json(pips.native_policy(personal=False))}), \
+                patch.object(LLMClient, "chat", chat), patch("dgc.agent.discover_skills", return_value={}), \
+                patch("dgc.agent.load_memories", side_effect=AssertionError("No ambient memory")):
+            pips.execute_native(self.cfg, self.root, raw, lambda e: None)
+        prompt, tools = seen[0]
+        return (prompt if isinstance(prompt, str) else json.dumps(prompt)), tools
+
+    def test_a_folder_pip_chats_the_way_a_personal_pip_does(self):
+        # 13 Nov, his call: "all pips now should chat the same style, as personal pip does".
+        self.commit()
+        pip = self.store.create(self.workspace["id"], "Reviewer", "Review the code", "editor-user", pip_type="rook")
+        prompt, tools = self.folder_chat(pip)
+        self.assertIn(pip_chat.BUBBLES, prompt)
+        self.assertRegex(prompt, r"It is \w+day \d\d \w+ \d{4}, \d\d:\d\d for the user \(time zone ")
+        self.assertIn("offer_choices", tools, "it offers likely answers as buttons, as a Personal Pip does")
+        self.assertIn("read_file", tools, "and keeps reading its project copy")
+
+    def test_a_folder_pips_hello_is_warm_and_offers_next_steps(self):
+        self.commit()
+        pip = self.store.create(self.workspace["id"], "Front end", None, "editor-user", pip_type="rook")
+        hello = self.control({"type": "introduce_pip", "pip_id": pip["id"]})
+        self.assertTrue(hello["ok"], hello.get("error"))
+        text = hello["result"]["message"]["text"]
+        self.assertIn("offer_choices", text)
+        self.assertNotIn("Do not run tools, make a card", text)
+        self.assertIn("without claiming that you have checked", text)
 
     def test_a_pip_chats_in_short_bubbles_and_core_knows_it_is_primary(self):
         gmail = self.store.create(self.personal_id(), "Gmail", None, "editor-user", pip_type="lens")

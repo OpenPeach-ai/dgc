@@ -264,7 +264,7 @@ class PipChatOptionsTests(unittest.TestCase):
             calls.append(kwargs['reasoning_effort'])
             self.assertEqual(client.context_size, 8192)
             self.assertLessEqual(client._request_max_tokens('xhigh'), 4096)
-            self.assertTrue({t['function']['name'] for t in tools} <= pips.READ_TOOLS)
+            self.assertTrue({t['function']['name'] for t in tools} <= pips.FOLDER_CHAT_TOOLS)
             self.assertIn('Reason deeply', messages[0]['content'])
             return ChatResult(content='Source-only reply')
         with patch.dict(os.environ, {'DGC_SESSION_POLICY': pips._json(pips.native_policy())}), \

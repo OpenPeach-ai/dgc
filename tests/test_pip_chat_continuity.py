@@ -49,7 +49,7 @@ class ContinuityTests(unittest.TestCase):
         manifest = second['manifest']; seen = []
         def chat(client, messages, tools=None, **kwargs):
             seen.append(copy.deepcopy(messages))
-            self.assertTrue({t['function']['name'] for t in tools} <= pips.READ_TOOLS)
+            self.assertTrue({t['function']['name'] for t in tools} <= pips.FOLDER_CHAT_TOOLS)
             return ChatResult(content='Lavender needs a visual review before deployment.')
         with patch.dict(os.environ, {'DGC_SESSION_POLICY': pips._json(pips.native_policy())}), \
              patch.object(LLMClient, 'chat', chat), patch('dgc.agent.discover_skills', return_value={}), \

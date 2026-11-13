@@ -1212,6 +1212,8 @@ class Pips:
         if API93_FIELDS.get(command, frozenset()) & set(values) and version < 93:
             raise DGCUnsupportedError("Every project's Pips (scope) and Project Pips in Needs Attention (projects) require a "
                                       "runtime advertising Pips API 93 or newer")
+        if command == 'list_pips' and values.get('scope') == 'all' and version < 94:
+            raise DGCUnsupportedError("Every Pip in one list (scope all) requires a runtime advertising Pips API 94 or newer")
         if API90_FIELDS.get(command, frozenset()) & set(values):
             if version < 90:
                 raise DGCUnsupportedError("Routines a service calls (webhooks) require a runtime advertising Pips API 90 or newer")

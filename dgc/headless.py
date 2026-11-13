@@ -527,7 +527,7 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # {folder, name, here, exists, sessions, pips, workspace_id, updated_at}), add_project_folder {folder} (a folder the user
 # picked, as a project: its workspace), list_pips {scope: "projects"} (every project's Pips), list_pip_attention
 # {projects: "all" | <workspace id>} (Project Pips' cards too). Local only.
-PIPS_API_VERSION = 93
+PIPS_API_VERSION = 94
 
 
 def attachment_limits() -> dict:

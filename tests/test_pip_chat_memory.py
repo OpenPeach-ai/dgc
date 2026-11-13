@@ -41,7 +41,7 @@ class PipChatMemoryTests(unittest.TestCase):
         seen = []
         def chat(client, messages, tools=None, **kwargs):
             seen.append(copy.deepcopy(messages))
-            self.assertTrue({tool['function']['name'] for tool in tools} <= pips.READ_TOOLS)
+            self.assertTrue({tool['function']['name'] for tool in tools} <= pips.FOLDER_CHAT_TOOLS)
             return provider(messages, tools) if provider else ChatResult(content='This is a historical user-recorded exception.')
         with (patch.dict(os.environ, {'DGC_SESSION_POLICY': pips._json(pips.native_policy())}),
               patch.object(LLMClient, 'chat', chat),
@@ -207,6 +207,7 @@ class PipChatMemoryTests(unittest.TestCase):
         self.assertEqual(manifest['pip_memory']['entries'], [])
         manifest['run_kind'] = 'draft'
         manifest.pop('conversation')
+        manifest.pop('chat_setup', None)    # (every chat pins its setup since 13 Nov; this test is about the memory pin)
         with (patch('dgc.agent.Agent.__init__', side_effect=AssertionError('No draft Agent for memory pin')),
               patch.dict(os.environ, {'DGC_SESSION_POLICY': pips._json(pips.native_policy())}),
               self.assertRaisesRegex(RegistryError, 'audit or conversation')):

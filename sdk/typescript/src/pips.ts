@@ -119,7 +119,7 @@ export type PipReadParams = {
   list_pip_runs: { pip_id: string };
   list_pip_types: { [key: string]: never };
   list_pip_versions: { before_version?: number; limit?: number; pip_id: string };
-  list_pips: { workspace_id?: string; limit?: number; offset?: number; query?: string; order?: "created" | "recent"; scope?: "workspace" | "projects" };
+  list_pips: { workspace_id?: string; limit?: number; offset?: number; query?: string; order?: "created" | "recent"; scope?: "workspace" | "projects" | "all" };
   list_workspace_activity: { after?: number; workspace_id: string };
   list_workspaces: { [key: string]: never };
 };
@@ -1261,6 +1261,9 @@ export class Pips {
     }
     if ((API93_FIELDS[command] || []).some((key) => Object.hasOwn(values, key)) && (this.caps.pips_api_version as number) < 93) {
       throw new DGCUnsupportedError("Every project's Pips (scope) and Project Pips in Needs Attention (projects) require a runtime advertising Pips API 93 or newer");
+    }
+    if (command === "list_pips" && (values as { scope?: unknown }).scope === "all" && (this.caps.pips_api_version as number) < 94) {
+      throw new DGCUnsupportedError("Every Pip in one list (scope all) requires a runtime advertising Pips API 94 or newer");
     }
     if ((API90_FIELDS[command] || []).some((key) => Object.hasOwn(values, key))) {
       if ((this.caps.pips_api_version as number) < 90) {

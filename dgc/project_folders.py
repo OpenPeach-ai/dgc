@@ -12,6 +12,8 @@ running in its own folder. This module answers:
 """
 from __future__ import annotations
 
+import json
+
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -117,6 +119,51 @@ def pips_everywhere(store, *, limit=100, offset=0, query="", order="created") ->
         found.sort(key=lambda p: (str(p.get("created_at") or ""), p["id"]))
     page = found[offset:offset + limit]
     return {"pips": page, "total": len(found), "next_offset": offset + limit if offset + limit < len(found) else None}
+
+
+def pips_all(store, *, limit=100, offset=0, query="") -> dict:
+    """list_pips {scope: "all"} (Pips API 94, 13 Nov): every Pip in one list -- the Personal ones and every project's
+    (temporary and DGC-owned folders left out, as list_project_folders leaves them out) -- with Core first, then the
+    Pip with the latest activity: the newest of its chat messages (either side), its run posts (reports, findings) and
+    its own last change. "Like it happens on messaging apps, latest message thread always come on top. Except of Core
+    Pip, so core always stays on top." Each carries its workspace_id, which says where it works."""
+    from .sessions import not_a_project
+    registry, db = store.registry, store.db
+    spaces = [r[0] for r in db.execute(
+        "SELECT w.id,w.kind,b.canonical_root FROM workspaces w JOIN bindings b ON b.workspace_id=w.id AND b.runner_id=?",
+        (registry.runner_id,)) if r[1] == "personal" or not not_a_project(r[2])]
+    if not spaces:
+        return {"pips": [], "total": 0, "next_offset": None}
+    have = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+                                         "('pip_chat_messages','pip_run_posts','pip_profiles')")}
+    said = ("coalesce((SELECT max(m.created_at) FROM pip_chat_messages m WHERE m.pip_id=p.id),'')"
+            if "pip_chat_messages" in have else "''")
+    posted = ("coalesce((SELECT max(r.posted_at) FROM pip_run_posts r WHERE r.pip_id=p.id),'')"
+              if "pip_run_posts" in have else "''")
+    marks = ",".join("?" * len(spaces))
+    where, params = f" WHERE p.workspace_id IN ({marks})", list(spaces)
+    if query:
+        # Name, title or instructions, any case, as one workspace's search; and what was said in its chat.
+        from .pip_search import chat_matches
+        chats: set = set()
+        for space in spaces:
+            chats.update(chat_matches(db, space, query) or {})
+        pattern = "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        title = "coalesce(f.title,'')" if "pip_profiles" in have else "''"
+        where += (" AND (json_extract(v.definition,'$.name') LIKE ? ESCAPE '\\' OR " + title + " LIKE ? ESCAPE '\\'"
+                  " OR json_extract(v.definition,'$.goal') LIKE ? ESCAPE '\\' OR p.id IN (SELECT value FROM json_each(?)))")
+        params += [pattern, pattern, pattern, json.dumps(sorted(chats))]
+    joined = ("FROM pips p JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version"
+              + (" LEFT JOIN pip_profiles f ON f.pip_id=p.id" if "pip_profiles" in have else ""))
+    total = db.execute(f"SELECT count(*) {joined}{where}", params).fetchone()[0]
+    rows = db.execute(
+        f"SELECT p.id, max(p.updated_at, {said}, {posted}) AS active {joined}{where} "
+        "ORDER BY (json_extract(v.definition,'$.pip_type')='core' AND p.workspace_id IN "
+        "(SELECT id FROM workspaces WHERE kind='personal')) DESC, active DESC, p.id DESC LIMIT ? OFFSET ?",
+        params + [limit, offset]).fetchall()
+    found = [store.get(row[0]) for row in rows]
+    return {"pips": found, "total": total,
+            "next_offset": offset + len(found) if offset + len(found) < total else None}
 
 
 def add(registry, folder) -> dict:

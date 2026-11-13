@@ -183,8 +183,11 @@ class ChatSetupTests(unittest.TestCase):
 
     def test_legacy_project_or_task_cannot_smuggle_setup_pin(self):
         job = self.job(); run = self.reply(job)
-        for extra in ({'source_policy': {'mode': 'committed_only'}}, {'run_kind': 'personal_task'}):
-            with self.assertRaises(RegistryError):setup.validate_pin({**run['manifest'], **extra})
+        # A task never carries one. (A chat in a project folder now may, 13 Nov: every Pip sets itself up in its chat;
+        # what it may change is checked against the registry when the reply is saved, test_one_pips.FolderSetsItselfUp.)
+        with self.assertRaises(RegistryError):setup.validate_pin({**run['manifest'], 'run_kind': 'personal_task'})
+        with self.assertRaises(RegistryError):
+            setup.validate({'changes': {'computer_plan': {'schema_version': 1}}, 'reason': 'r'}, project=True)
         with self.assertRaises(RegistryError):
             setup.validate_pin({**run['manifest'], 'chat_setup': {**run['manifest']['chat_setup'], 'allowed': 'yes'}})
 

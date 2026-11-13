@@ -306,6 +306,12 @@ _COMMAND_ARGS = {
     "reject_pip_handoff": {"handoff_id", "expected_revision", "reason"},
 }
 READ_TOOLS = frozenset({"read_file", "glob", "grep", "repo_map", "todo"})
+# What a chat may offer beside reading (13 Nov, one chat style for every Pip): buttons under its reply. It reads,
+# changes and reaches nothing; a folder Pip's chat is still READ_TOOLS plus only these.
+CHAT_UI_TOOLS = frozenset({"offer_choices"})
+# Everything a folder Pip's chat may hold (13 Nov): reading its project copy, buttons, and drafting its own job, which
+# DGC applies after the reply and only for its name, instructions, schedule and model (pip_chat_setup.PROJECT_FIELDS).
+FOLDER_CHAT_TOOLS = READ_TOOLS | CHAT_UI_TOOLS | frozenset({"draft_pip_change"})
 MAX_FILES = 10000
 MAX_FILE_BYTES = 4 * 1024 * 1024
 MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
@@ -924,9 +930,10 @@ class PipStore:
                computer_plan=None, source_policy=None):
         """source_policy omitted: committed source under the current rules (pip_sources.default_policy)."""
         workspace = self.registry.get(workspace_id)
-        if workspace['kind'] == 'personal' and (goal is None or (isinstance(goal, str) and not goal.strip())):
-            # Named, then set up in its own chat: the name says what it is for until then.
-            goal = PRIMARY_GOAL if pip_type == "core" else NAMED_GOAL
+        if goal is None or (isinstance(goal, str) and not goal.strip()):
+            # Named, then set up in its own chat: the name says what it is for until then. A Pip in a project folder too
+            # (13 Nov, "we don't want user to define the goal while creating a Pip"); Core stays a Personal Pip.
+            goal = PRIMARY_GOAL if pip_type == "core" and workspace['kind'] == 'personal' else NAMED_GOAL
         definition = _definition(name, goal, source_ref, pip_type=pip_type, model_choice=model_choice,
             source_policy={'mode': 'personal'} if workspace['kind'] == 'personal' else source_policy,
             computer_plan=computer_plan)
@@ -1134,8 +1141,12 @@ class PipStore:
             raise RegistryError("conflict", "This Pip changed. Refresh and try again.")
         if expected_version >= 999999:
             raise RegistryError("limit", "This Pip has reached its version limit.")
-        if self.registry.get(pip["workspace_id"])["kind"] != "personal" or pip.get("verification_plan") is not None:
-            raise RegistryError("permission_denied", "Only a Personal Pip changes itself at once.")
+        if pip.get("verification_plan") is not None:
+            raise RegistryError("permission_denied", "A Pip that runs checks or makes changes is changed by its review.")
+        if (self.registry.get(pip["workspace_id"])["kind"] != "personal"
+                and set(changes) - set(__import__("dgc.pip_chat_setup", fromlist=["PROJECT_FIELDS"]).PROJECT_FIELDS)):
+            raise RegistryError("permission_denied", "A Pip in a project folder changes only its name, instructions, "
+                                                     "schedule and model at once.")
         from .pip_archive import require_live
         require_live(self, pip["id"])
         merged = {key: changes.get(key, pip[key]) for key in self._OWN_KEYS}
@@ -1671,13 +1682,15 @@ class PipStore:
                     # Only the editor has a renderer for interactive answer cards. Terminal and SDK
                     # conversations keep the ordinary reply without card instructions or raw JSON.
                     manifest["generative_ui_supported"] = actor == "editor-user"
+                    from .pip_chat_setup import pin as pin_chat_setup
+                    # The user started this turn (their own message, not one DGC sent: a routine, a hello, a follow-up
+                    # after a page or an app): its own changes apply at once, with Undo (D6, 0.52). Every Pip sets itself
+                    # up in its own chat (13 Nov): a Pip in a project folder too, for its name, instructions, schedule and
+                    # model (pip_chat_setup.PROJECT_FIELDS).
+                    turn_key = conversation_request.get("request_key") if isinstance(conversation_request, dict) else None
+                    manifest['chat_setup'] = pin_chat_setup(latest, direct=isinstance(turn_key, str) and bool(turn_key)
+                                                            and not turn_key.startswith(pip_chat.DGC_KEYS))
                     if personal:
-                        from .pip_chat_setup import pin as pin_chat_setup
-                        # The user started this turn (their own message, not one DGC sent: a routine, a hello, a
-                        # follow-up after a page or an app): its own changes apply at once, with Undo (D6, 0.52).
-                        turn_key = conversation_request.get("request_key") if isinstance(conversation_request, dict) else None
-                        manifest['chat_setup'] = pin_chat_setup(latest, direct=isinstance(turn_key, str) and bool(turn_key)
-                                                                and not turn_key.startswith(pip_chat.DGC_KEYS))
                         manifest['email_draft'] = {'schema_version':1}
                         manifest['calendar_draft'] = {'schema_version':1}
                         manifest['connector_draft'] = connector_context
@@ -3447,6 +3460,10 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             if personal:
                 return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_core_setup.schema()] if selected_type.id == 'core' and pip_core_setup.pinned(manifest) else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_keys.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None and not (conversation.get('goal') or {}).get('own') else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)], direct=bool(chat_setup and chat_setup['direct']))] if personal and conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([pip_goals.schema()] if personal and conversation is not None and conversation.get('goal') else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
             schemas = super()._tool_schemas(*args, **kwargs)
+            if conversation is not None and not (conversation.get('goal') or {}).get('own'):
+                schemas = [*schemas, OFFER_CHOICES]        # a folder Pip's chat offers buttons too (13 Nov)
+            if chat_setup is not None and chat_setup['allowed']:
+                schemas = [*schemas, pip_chat_setup.schema(project=True)]   # and sets itself up in its chat (13 Nov)
             if specialist_pin is not None:
                 return [pip_specialists.schema(specialist_pin['grant'])
                         if item.get('function', {}).get('name') == 'task' else item for item in schemas]
@@ -3623,6 +3640,21 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                         drafting=bool(email_drafting or calendar_drafting or (connector_context is not None and connector_context.get('connections'))))
                     if said_level:
                         base_instructions += '\n' + said_level
+            elif conversation is not None:
+                # A Pip in a project folder chats as a Personal Pip does (13 Nov, his call: "all pips now should chat the
+                # same style, as personal pip does"): short messages where they read better, the user's clock, likely
+                # answers as buttons (offer_choices). What it may do is unchanged: it reads its project copy.
+                from .pip_chat import BUBBLES
+                base_instructions += ('\n' + BUBBLES + ' Never pad. Choices you offer show below your reply, so if you '
+                                      'mention them, say they are below; never say above. Findings and reports from your '
+                                      'runs show in this chat as their own cards: refer to them, never paste them whole.')
+                base_instructions += '\n' + _user_clock()
+                if chat_setup is not None and chat_setup['allowed']:
+                    base_instructions = (base_instructions.replace('change a job or schedule, ', '')
+                        .replace('A chat request cannot silently change the approved job. Direct requested '
+                                 'job/model/schedule changes to the user\'s reviewed settings flow.',
+                                 'Change your own job only with draft_pip_change, when the user asks.'))
+                    base_instructions += '\n' + pip_chat_setup.notice(direct=chat_setup['direct'], project=True)
             if specialist_pin is not None:
                 base_instructions = base_instructions.replace('network, delegate, load skills', 'network, load skills')
                 if self._pip_specialist_role:
@@ -3712,10 +3744,10 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                             "say in one sentence what you drafted. Nothing is sent until the user chooses Send.")
                 except RegistryError as exc:
                     return "Invalid email draft: " + str(exc)
-            if personal and call.name == pip_chat_setup.TOOL and chat_setup is not None and chat_setup['allowed']:
+            if call.name == pip_chat_setup.TOOL and chat_setup is not None and chat_setup['allowed']:
                 try:
                     from .redaction import secret_values
-                    candidate = pip_chat_setup.validate(call.arguments, secrets=secret_values(config))
+                    candidate = pip_chat_setup.validate(call.arguments, secrets=secret_values(config), project=not personal)
                     if setup_candidate is not None and candidate != setup_candidate:
                         return 'Draft already prepared. Explain it to the user; make another change in a later reply.'
                     setup_candidate = candidate
@@ -3774,7 +3806,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 if candidate is not None:
                     routine_candidates.append(candidate)
                 return told
-            if personal and conversation is not None and call.name == 'offer_choices':
+            if conversation is not None and call.name == 'offer_choices':
                 try:
                     labels = pip_chat.validate_choices((call.arguments or {}).get('choices') if isinstance(call.arguments, dict) else None)
                 except RegistryError as exc:
@@ -6771,9 +6803,15 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                         or not isinstance(query, str) or len(query) > 120 or order not in ("created", "recent")):
                     raise RegistryError("invalid_request", "List 1–100 Pips from an offset, optionally matching up to 120 characters.")
                 query = " ".join(query.split())
-                if request.get("scope") not in (None, "workspace", "projects"):
-                    raise RegistryError("invalid_request", "List one workspace's Pips, or scope projects for every project's.")
-                if request.get("scope") == "projects":
+                if request.get("scope") not in (None, "workspace", "projects", "all"):
+                    raise RegistryError("invalid_request", "List one workspace's Pips, scope projects for every project's, "
+                                                           "or scope all for every Pip.")
+                if request.get("scope") == "all":
+                    # Every Pip in one list (API 94, 13 Nov): Personal and every project's, Core first, then the latest
+                    # message or report; each carries its workspace_id.
+                    from . import project_folders
+                    result = project_folders.pips_all(store, limit=limit, offset=offset, query=query)
+                elif request.get("scope") == "projects":
                     # Every project's Pips (the Project Folder dropdown's All projects, API 93), each with its workspace.
                     from . import project_folders
                     result = project_folders.pips_everywhere(store, limit=limit, offset=offset, query=query, order=order)

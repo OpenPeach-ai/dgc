@@ -806,12 +806,16 @@ CORE_INTRO = ("This message is from DGC, not the user. The user has just created
               "is connected yet. End with one short question asking for the "
               "one thing on their plate today, and offer two or three likely answers with offer_choices. Two or "
               "three short paragraphs, no lists and no headings.")
-PROJECT_INTRO = ("This message is from DGC, not the user. The user has opened your chat for the first time. "
-                 "Your name is \"{name}\" and your reviewed goal is: {goal}. Introduce yourself by that name "
-                 "in one or two short sentences. Say what you can help inspect or prepare within your existing "
-                 "instructions, without claiming that you have checked the repository or run a job yet. "
-                 "Do not run tools, make a card, or change anything in this first message. "
-                 "End with one short question asking what the user wants to start with.")
+# A Pip in a project folder says hello the way a Personal Pip does (13 Nov: one chat style for every Pip): warm, its
+# name, what it can do in this project, two or three next steps as buttons. It still claims no check it hasn't made.
+PROJECT_INTRO = ("This message is from DGC, not the user. The user has just made you for their project and named you "
+                 "\"{name}\". That is your name: introduce yourself as {name}, never by your character's name. Your "
+                 "goal so far: {goal}. Write your first message to them. Say hello and who you are in one sentence. Guess "
+                 "from your name and goal what they would like help with in this project, and say what you can do for "
+                 "that, without claiming that you have checked the repository or run a job yet. Run no tools and make no "
+                 "card in this first message. End with one short question that offers the next step, and offer its two "
+                 "or three answers with offer_choices. Keep it warm and brief: two or three short paragraphs, no lists "
+                 "and no headings.")
 # How a reply reads in the chat is the Pip's to decide. The chat split every paragraph into its own bubble, so a poem
 # or an email draft came apart at each stanza (asked 2026-11-03: "leave this to the llm model to decide"). Now a reply
 # is one message, split only at a line of just --- (editors/vscode/src/pipsTranscript.js replyParts). The "short
