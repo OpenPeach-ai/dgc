@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { DgcViewProvider } from "./panel";
 import { SessionTabs } from "./sessionTabs";
 import { ChatDGC } from "./chatdgc";
-import { Artifacts } from "./artifacts";
+import { Artifacts, ArtifactNotice } from "./artifacts";
 import { checkForExtensionUpdates } from "./extensionupdate";
 import { resolveDgcExecutable } from "./configuration";
 import { heldCliTerminalOptions, updateCliWithProgress } from "./cliupdate";
@@ -22,6 +22,9 @@ export function activate(context: vscode.ExtensionContext): void | object {
   // bar's dgc serve (as ChatDGC is) whichever chat made them.
   const artifacts = new Artifacts(context);
   provider.useArtifacts(artifacts, true);
+  // The "Open" pop-up: one notification when a turn makes or updates something you keep (src/artifactNotice.ts).
+  const madeNotice = new ArtifactNotice(context, artifacts);
+  context.subscriptions.push(artifacts.listen((message) => madeNotice.heard(message)));
   // #3: the side bar is the Sessions home, and each session opens in an editor tab of its own.
   const tabs = new SessionTabs(context, provider, (init) => {
     const tab = new DgcViewProvider(context, init);
@@ -32,6 +35,10 @@ export function activate(context: vscode.ExtensionContext): void | object {
   // ChatDGC: chats of their own, in editor tabs, on the side bar's dgc serve; the home lists them.
   const chatdgc = new ChatDGC(context);
   chatdgc.useArtifacts(artifacts);
+  // A chat's document opens beside the chat that is showing it, by itself: that one needs no pop-up. A widget made
+  // while no tab shows its chat is offered there.
+  madeNotice.opensByItself = (message) => message?.surface === "chat" && message?.artifact?.type === "doc" && chatdgc.showsChat(String(message.conversation_id || ""));
+  chatdgc.useMadeNotice(madeNotice);
   provider.useChatDGC(chatdgc);
   // The chat a palette command acts on: the tab you last worked in. `chat` opens a new session's tab
   // when none is open, for commands that put something in a chat; `current` falls back to the side
@@ -163,6 +170,11 @@ export function activate(context: vscode.ExtensionContext): void | object {
       }
     }),
     vscode.commands.registerCommand("dgc.openPips", () => provider.openPips()),
+    // "What's New" (the DGC view's ⋯ menu): the side bar comes forward and shows the dialog again.
+    vscode.commands.registerCommand("dgc.whatsNew", async () => {
+      try { await vscode.commands.executeCommand("dgc.focus"); } catch { /* the view is shown as it is */ }
+      provider.showWhatsNew();
+    }),
     vscode.commands.registerCommand("dgc.settings", () => provider.openSettings()),
     // The status line's `Router 9/11`: Settings -> Models, at DGC Router.
     vscode.commands.registerCommand("dgc.routerSettings", () => provider.openSettings("router")),

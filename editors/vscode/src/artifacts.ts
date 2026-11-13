@@ -14,6 +14,8 @@ import { homedir } from "os";
 import { CANVAS_DOC_VIEW } from "./canvasDoc";
 import { tabIcon } from "./tabIcon";
 
+export { ArtifactNotice, madeWords, ARTIFACT_NOTICED_KEY, type MadeNotice } from "./artifactNotice";
+
 export const ARTIFACT_PANEL = "dgc.artifactPanel";
 export const ARTIFACT_PRESENT = "dgc.artifactPresent";
 export const ARTIFACT_ID = /^ar_[a-f0-9]{16}$/;
@@ -555,8 +557,9 @@ export class Artifacts implements vscode.Disposable {
         this.remember(view);
         const panel = this.panels.get(view.id);
         panel?.changed(view, op, !!reply);
+        // `mine`: it answers this window's own request (a panel's save), so it is no news to this window.
         this.tell({ type: "artifactChanged", artifact: view, op, surface: typeof ev.surface === "string" ? ev.surface : "",
-                    conversation_id: typeof ev.conversation_id === "string" ? ev.conversation_id : "" });
+                    conversation_id: typeof ev.conversation_id === "string" ? ev.conversation_id : "", mine: !!reply });
       }
       if (reply) { this.requests.delete(requestId); reply.ok(ev); }
       return ev.surface !== "work";
@@ -584,6 +587,20 @@ export class Artifacts implements vscode.Disposable {
     if (!id || !ARTIFACT_ID.test(id)) return undefined;
     if (!this.docFiles.has(this.key(text)) && !/[\\/]artifacts[\\/]ar_[a-f0-9]{16}[\\/]work[\\/][^\\/]+\.md$/i.test(text)) return undefined;
     return { id, title: this.titles.get(id) || text.split(/[\\/]/).pop()!.replace(/\.md$/i, "") };
+  }
+
+  /** Whether this artifact is on screen in a tab already: its panel, or a document's editor over its working file. */
+  showing(id: string): boolean {
+    if (this.panels.has(id)) return true;
+    try {
+      for (const group of vscode.window.tabGroups?.all ?? []) {
+        for (const tab of group.tabs ?? []) {
+          const path = (tab.input as any)?.uri?.fsPath;
+          if (typeof path === "string" && this.docFiles.get(this.key(path)) === id) return true;
+        }
+      }
+    } catch { /* an editor without tab groups: only the panels are known */ }
+    return false;
   }
 
   // ---- what the screens do

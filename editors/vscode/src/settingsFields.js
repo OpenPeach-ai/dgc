@@ -99,6 +99,9 @@ export function contextSizeShown(c) {
     return served && chosen > served ? served : (c?.context_size ?? "");
 }
 
+// Settings → Dev Mode: the user's own switch for DGC's Dev Mode tools (config key dev_mode_tools), and its one quiet line.
+export const DEV_TOOLS_NAME = "Let DGC change Dev Mode settings";
+export const DEV_TOOLS_LINE = "When you ask, DGC can change these limits itself (it says what it changed, with Undo). It can never turn on Dev Mode.";
 // Settings → Dev Mode → Limits: a limit's box, by DGC's own name for it.
 export const devLimitId = (name) => `dev_limit_${name}`;
 /** DGC's rows of limits as the page may draw them: a name, a label, today's default and a cost line. */
@@ -528,21 +531,31 @@ export function renderFields(section, main, config, providers, ui) {
                 + `<input id="${id}" type="number" inputmode="numeric" min="1" step="1" data-dev-limit="${escapeHtml(limit.name)}" value="${escapeHtml(mine[limit.name] ?? "")}" placeholder="Default"`
                 + ` aria-describedby="${id}-today ${id}-cost ${id}-error"${said ? ' aria-invalid="true"' : ""} autocomplete="off"></span></div>`;
         };
+        // "Let DGC change Dev Mode settings" (dev_mode_tools): the user's own switch for DGC's Dev Mode tools. Only with
+        // a DGC that takes the key, and only while Dev Mode is on. The first time, the warning carries it as a tick box;
+        // once that has been read the switch under Dev Mode is the one control for it.
+        const toolsOffered = c.dev_tools_capable === true;
+        const warned = c.dev_mode_warned === true;
+        const toolsRow = on && toolsOffered && warned ? field(DEV_TOOLS_NAME, DEV_TOOLS_LINE, bool("dev_mode_tools", c.dev_mode_tools === true)) : "";
         const warning = '<section class="dev-warning" id="dev-warning" role="alert"><svg viewBox="0 0 21 21" aria-hidden="true"><path d="M10.5 3.5 18.5 17h-16z M10.5 8.5v4 M10.5 14.6v.2"/></svg>'
             + '<div class="dev-warning-body"><strong class="dev-warning-title">Dev Mode lifts DGC\'s capacity limits</strong>'
             + '<span class="dev-warning-words">It is for a big machine: more at once, and more kept. Each limit you raise costs memory, disk or model load, and its line says which. '
-            + 'Safety limits never move: the sandbox, redaction, approvals and what a Pip may do stay as they are. Nothing changes until you save.</span></div>'
+            + 'Safety limits never move: the sandbox, redaction, approvals and what a Pip may do stay as they are. Nothing changes until you save.</span>'
+            // The same choice as the switch below, while the warning is up (his call, 14 Nov): off unless ticked.
+            + (toolsOffered ? `<label class="dev-warning-tools"><input type="checkbox" id="dev-warning-tools"${c.dev_mode_tools === true ? " checked" : ""}> <span>${DEV_TOOLS_NAME} when you ask</span></label>` : "")
+            + '</div>'
             + '<button type="button" class="secondary" id="dev-warning-ok">Got it</button></section>';
         main.innerHTML = head("Dev Mode", "For experimenting on a big machine: it lifts DGC's capacity limits.",
                 "A capacity limit is how many things run at once, or how many are kept. Each one you raise costs memory, disk or model load. Safety limits never move: the sandbox, redaction, approvals and what a Pip may do.")
-            + `<section class="group"><div class="rows">${field("Dev Mode", on ? "On: each limit below is yours to set." : "Off: every limit is today's default.", bool("dev_mode", on))}</div></section>`
-            + (on && c.dev_mode_warned !== true ? warning : "")
+            + `<section class="group"><div class="rows">${field("Dev Mode", on ? "On: each limit below is yours to set." : "Off: every limit is today's default.", bool("dev_mode", on))}${toolsRow}</div></section>`
+            + (on && !warned ? warning : "")
             + (on ? group("Limits", table.map(line).join("")
                     + `<div class="field dev-reset"><span class="words"><span class="hint">Empties every box, so each limit is today's default again.</span></span>`
                     + `<button type="button" class="secondary" id="dev-limits-reset"${table.some((l) => mine[l.name] !== undefined && mine[l.name] !== "") ? "" : " disabled"}>Reset to defaults</button></div>`,
                 "Any whole number, 1 or more. Leave a box empty to keep today's default.", "settings-dev-limits") : "")
             + saveBar;
         main.querySelector("#dev_mode")?.setAttribute("aria-label", "Dev Mode");
+        main.querySelector("#dev_mode_tools")?.setAttribute("aria-label", DEV_TOOLS_NAME);
         wire(main);
     }
     const renderers = { general: renderGeneral, models: renderModels,

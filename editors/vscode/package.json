@@ -342,6 +342,11 @@
         "title": "Open Pips",
         "category": "DGC",
         "icon": "$(beaker)"
+      },
+      {
+        "command": "dgc.whatsNew",
+        "title": "What's New",
+        "category": "DGC"
       }
     ],
     "menus": {
@@ -370,6 +375,11 @@
           "command": "dgc.openPips",
           "when": "view == dgc.chat || view == dgc.chatSecondary",
           "group": "navigation@2.5"
+        },
+        {
+          "command": "dgc.whatsNew",
+          "when": "view == dgc.chat || view == dgc.chatSecondary",
+          "group": "dgc@1"
         }
       ],
       "editor/context": [

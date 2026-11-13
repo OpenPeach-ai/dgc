@@ -145,6 +145,7 @@ details.more[data-more="saved-providers"]>.rows{border-inline:0;border-bottom:0;
 .copy{flex:1;min-width:0}.copy strong{display:block;font-size:13px;font-weight:500;color:var(--text)}
 .copy .summary{display:block;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
 .copy .description{display:block;color:var(--muted);font-size:12px;margin-top:4px;line-height:1.55}
+.row.stuck .copy .summary{white-space:normal;overflow-wrap:anywhere}
 .status{color:var(--muted);font-size:12px}
 .status.connected{color:var(--text)}.status.connected::before{content:"";display:inline-block;width:7px;height:7px;margin-right:6px;border-radius:50%;background:var(--good);vertical-align:1px}
 .empty{padding:22px 14px;color:var(--muted);font-size:13px}
@@ -314,6 +315,9 @@ body:is(.vscode-high-contrast,.vscode-high-contrast-light){--dev-error:var(--vsc
 .dev-warning-title{display:block;font-size:12px;font-weight:500;color:var(--text-strong)}
 .dev-warning-words{display:block;margin-top:2px;color:var(--muted-firm,var(--muted));font-size:12px;line-height:1.55;max-width:640px}
 .dev-warning .secondary{flex:none;align-self:center}
+.dev-warning-tools{display:flex;align-items:flex-start;gap:8px;margin-top:10px;color:var(--text-strong);font-size:12px;line-height:1.45;cursor:pointer;max-width:640px}
+.dev-warning-tools input{flex:none;width:14px;height:14px;margin:1.5px 0 0;border-radius:3px}
+.dev-warning-tools span{min-width:0;overflow-wrap:anywhere}
 @media(max-width:620px){
   .dev-control{width:100%;justify-content:space-between}
   .dev-warning{flex-wrap:wrap}.dev-warning-body{flex-basis:calc(100% - 30px)}.dev-warning .secondary{margin-left:30px}

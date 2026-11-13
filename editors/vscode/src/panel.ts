@@ -37,7 +37,9 @@ import { dockOf, dockSettings, setDockSetting } from "./dock";
 import { homeCardsOf, usageForHome } from "./homeCards";
 import { folderLabel, folderRows, foldersOffered, fullFolder, homeAsTilde, keepProjectFolder, projectFolder, type FolderRow } from "./projectFolder";
 import { openCodePreview } from "./codePreview";
-import { DEV_SAVED_KEY, DEV_WARNED_KEY, devLimitsTable, devLimitValues, devShown, type DevLimit } from "./devMode";
+import { DEV_SAVED_KEY, DEV_WARNED_KEY, devLimitsTable, devLimitValues, devShown, devToolsOffered, devToolsShown, type DevLimit } from "./devMode";
+import { INSTANCE as STUCK_INSTANCE, heartbeatOf, isStuck, stuckHolder, type StuckFacts } from "./stuckHolder";
+import { whatsNewAnswered, whatsNewDue, whatsNewMessage } from "./whatsNew";
 import { homePages, homePagesAttr, homeShowAttr, noteHomePage, pipHomeDismissedAttr, rememberHomePagesDismissed, rememberHomeShow, rememberPipHomeDismissed } from "./pipHomeDismiss";
 import { addProfile, adoptWorkingRoute, defaultProfileId, firstTakesDefault, keepWorkingRoute, hasRunnableProfile, listProfiles, markDefaultProfile, profileCredential, removeProfile, startingModel } from "./providerProfiles.js";
 
@@ -124,6 +126,8 @@ const WORK_READ_ONLY_REFUSES = new Set(["prompt", "slash", "slashText", "cancel"
 const CONFIG_EVENT_FIELDS = ["search_url", "search_api_key_set", "chatdgc_about", "chatdgc_style", "chatdgc_personality",
   "chatdgc_window", "memory", "chatdgc_web", "chatdgc_followups", "turn_token_budget", "subagent_context_size",
   "fallback_engine", "dev_mode", "dev_limits"];
+/** The same list, with "Let DGC change Dev Mode settings" for a DGC that says it has the key (ready.capabilities.dev_mode_tools). */
+const configEventFields = (capabilities: unknown): string[] => (devToolsOffered(capabilities) ? [...CONFIG_EVENT_FIELDS, "dev_mode_tools"] : CONFIG_EVENT_FIELDS);
 const HOME_BACKEND_KEY = "dgc.homeBackend.v1";
 /** The folders Continue in Work opened Work sessions in (this workspace's): a reloaded tab comes back in one unasked. */
 const WORK_FOLDERS_KEY = "dgc.workFolders.v1";
@@ -875,7 +879,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   /** This chat's session is shown in another window: "moved" (it was taken from here) or "elsewhere"
    *  (it was already there). Read-only here until the user presses "Open here". */
   private sessionElsewhere: { state: "moved" | "elsewhere"; pid?: number; reason?: string; holder?: HolderFacts;
-                              note?: HolderLine } | undefined;
+                              note?: HolderLine;
+                              /** Its holder has stopped answering (list_live_sessions says "stuck"): who that is, in
+                               *  facts the page puts into words, and that "Stop it and open here" is offered. */
+                              stuck?: StuckFacts; stop?: boolean; stopping?: boolean; stopNote?: string } | undefined;
+  /** The stuck process holding this chat's session, as the last list_live_sessions said: what Stop it and open here stops. */
+  private stuckHolderNow?: { pid: number; instance: string };
   /** Open here was pressed: the next backend's ready says whether this window has the session now. */
   private openHerePending = false;
   /** While this chat is read-only, how often its bar asks again where the session is open (session_holder). */
@@ -2858,7 +2867,71 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         shown.note = note;
         this.whenWebviewReady(() => { if (this.sessionElsewhere === shown) { this.post({ type: "session_elsewhere", ...shown }); } });
       }, () => { /* no answer: the bar keeps what it says */ });
+    this.askStuckHolder(asker, shown, id);
     return true;
+  }
+
+  /** Whether the process holding this read-only chat's session has stopped answering: read from the rows Settings ›
+   *  Running sessions lists (list_live_sessions, as they are). Such a holder can't be asked to let the session go, so
+   *  Open here can't take it: the bar names it and offers "Stop it and open here". One that answers changes nothing. */
+  private askStuckHolder(asker: DgcBackend, shown: NonNullable<DgcViewProvider["sessionElsewhere"]>, id: string): void {
+    if (!asker.detachOffer || shown.stopping) { return; }
+    void asker.request({ type: "list_live_sessions", request_id: this.nextRequestId("holder-rows") } as any, "live_sessions" as any, 10_000)
+      .then((ev: any) => {
+        if (this.sessionElsewhere !== shown || shown.stopping) { return; }
+        const found = stuckHolder(ev?.items, id);
+        const before = JSON.stringify([shown.stuck, shown.stop]);
+        this.stuckHolderNow = found ? { pid: found.pid, instance: found.instance } : undefined;
+        if (found) { shown.stuck = found.facts; shown.stop = true; }
+        else { delete shown.stuck; delete shown.stop; delete shown.stopNote; }
+        if (JSON.stringify([shown.stuck, shown.stop]) === before) { return; }
+        if (found) { this.backendNote(`[extension: session ${id} is held by pid ${found.pid}, which has stopped answering; offering Stop it and open here]`); }
+        this.whenWebviewReady(() => { if (this.sessionElsewhere === shown) { this.post({ type: "session_elsewhere", ...shown }); } });
+      }, () => { /* no answer: the bar keeps what it says */ });
+  }
+
+  /** "Stop it and open here": stop the stuck process that holds this chat's session (the stop Settings › Running
+   *  sessions sends), and once it has stopped, Open here. Not stopped: the chat stays read-only and the bar says why. */
+  private stopAndOpenHere(): void {
+    const shown = this.sessionElsewhere, holder = this.stuckHolderNow;
+    if (!shown || !shown.stop || !holder || shown.stopping) { return; }
+    const asker = this.holderProcess() ?? this.tab?.host.holderProcess();
+    if (!asker?.detachOffer) { return; }
+    shown.stopping = true;
+    delete shown.stopNote;
+    this.backendNote(`[extension: Stop it and open here — stopping pid ${holder.pid}, which holds this session and has stopped answering]`);
+    this.post({ type: "session_elsewhere", ...shown });
+    // DGC waits for it to save and stop, then ends it: up to about a minute.
+    void asker.request({ type: "stop_live_session", pid: holder.pid, instance: holder.instance, request_id: this.nextRequestId("stop-holder") } as any,
+                       "live_sessions" as any, 90_000)
+      .then((ev: any) => {
+        if (this.sessionElsewhere !== shown) { return; }
+        delete shown.stopping;
+        const said = String(ev?.message || "").slice(0, 400);
+        // DGC says which ("Stopped: …", "Not stopped: …", "That session had already stopped."); with no word, its list does.
+        const gone = /^Stopped\b/.test(said) || /already stopped/.test(said)
+          || (!said && Array.isArray(ev?.items) && !ev.items.some((row: any) => row?.pid === holder.pid));
+        if (gone) { this.stuckHolderNow = undefined; this.openSessionHere(); return; }
+        shown.stopNote = `It was not stopped: ${said.replace(/^Not stopped:\s*/, "") || "DGC didn't say why"}`.replace(/\.*$/, ".");
+        this.post({ type: "session_elsewhere", ...shown });
+      }, () => {
+        if (this.sessionElsewhere !== shown) { return; }
+        delete shown.stopping;
+        shown.stopNote = "It was not stopped: DGC didn't answer. Try again, or stop it in Settings › Running sessions.";
+        this.post({ type: "session_elsewhere", ...shown });
+      });
+  }
+
+  /** "What's new" by itself: once, when this release's side bar is first up, until Skip, Done or Esc (src/whatsNew.ts).
+   *  Only the side bar's own page, never a session's tab. */
+  offerWhatsNew(): void {
+    if (!this.home || this.tab || !whatsNewDue(this.context)) { return; }
+    this.post(whatsNewMessage(true));
+  }
+
+  /** "DGC: What's New" (the DGC view's ⋯ menu): the dialog again, whenever asked. */
+  showWhatsNew(): void {
+    this.whenWebviewReady(() => this.post(whatsNewMessage(false)));
   }
 
   /** "Open here": take this chat's session from the window that shows it, or from the backend that kept
@@ -2895,6 +2968,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const rows: any[] = [];
     const openHere = (this.tab?.host ?? this).chatdgcOpenHere();
     for (const row of items) {
+      // One that has stopped answering (liveness "stuck"): listed whether or not its note still says it has a window
+      // (the note froze with the process), each session it holds as a row that says so, with Stop and no Open.
+      if (isStuck(row)) {
+        const held = (Array.isArray(row.sessions) ? row.sessions : []).filter((s: any) => /^[A-Za-z0-9_-]{1,128}$/.test(String(s?.session_id || "")));
+        const stuck = { pid: row.pid, instance: String(row.instance || ""), version: String(row.version || ""), work: String(row.work || ""),
+                        windowless_s: Number(row.windowless_s) || 0, stuck: true, since: heartbeatOf(row.pid) };
+        for (const session of row.scope === "chatdgc" ? [] : held) {
+          rows.push({ ...stuck, session: session.session_id, name: String(session.name || ""), cwd: String(session.cwd || ""), working: session.status === "working" });
+        }
+        if (row.scope === "chatdgc" || !held.length) { rows.push({ ...stuck, session: "", name: "", cwd: "", working: row.status === "working" }); }
+        continue;
+      }
       if (!row || row.kind !== "serve" || row.attached !== false || !row.detachable) { continue; }
       const sessions = Array.isArray(row.sessions) ? row.sessions : [];
       const common = { pid: row.pid, instance: String(row.instance || ""), version: String(row.version || ""),
@@ -5187,6 +5272,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                                    // Mode page), its two settings, and whether its warning was already shown here.
                                    ...(this.devLimits().length ? { dev_limits_table: this.devLimits(),
                                                                    ...devShown(ev, this.context.globalState.get(DEV_SAVED_KEY)),
+                                                                   // "Let DGC change Dev Mode settings": only with a DGC that takes the key.
+                                                                   ...(this.devToolsCapable() ? { dev_tools_capable: true, dev_mode_tools: devToolsShown(ev, this.context.globalState.get(DEV_SAVED_KEY)) } : {}),
                                                                    dev_mode_warned: this.context.globalState.get<boolean>(DEV_WARNED_KEY) === true } : {}),
                                    // Nor this: video generation's commands (ready.capabilities.videos); without, no video models.
                                    videos_capable: this.videosCapable(),
@@ -5968,6 +6055,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.post(dockOf(this.context).state());          // what is pinned, each session's colour, and the Dock settings
         if (this.home) this.post(homeCardsOf(this.context).state());   // Home's cards, in their order, and their settings
         if (this.home) this.post({ type: "homePages", pages: homePages(this.context) });   // what was made while the page was being built
+        if (this.home) this.offerWhatsNew();              // "What's new", the first time this release's side bar is up
         // The home's chats, asked for now its page can hear the answer (one that came before was dropped).
         if (this.home) this.chatdgc?.homeRefresh();
         // A reloaded page: a recording its boxes started went with the page that showed it.
@@ -6264,6 +6352,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "openSessionHere":
         this.openSessionHere();
+        break;
+      case "stopAndOpenHere":
+        this.stopAndOpenHere();
+        break;
+      case "whatsNewSeen":
+        // Skip, Done or Esc in "What's new": never by itself again, in any window of this editor (src/whatsNew.ts).
+        await whatsNewAnswered(this.context);
         break;
       case "clear_todos":
         // The backend empties the list at once, even while a turn runs, and answers with an empty
@@ -8421,7 +8516,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // slider always belong to the same provider that will run the next prompt.
     try {
       const ev: any = await this.requestState(this.ensureBackend(), "models-route",
-        { type: "get_config", fields: CONFIG_EVENT_FIELDS }, "config", 10000);
+        { type: "get_config", fields: configEventFields(this.lastReadyEvent?.capabilities) }, "config", 10000);
       this.routeState.nativeModel = String(ev.model || this.routeState.nativeModel);
       if (typeof ev.fallback_engine === "string") this.routeState.fallbackEngine = ev.fallback_engine;
       this.routeState.nativeThink = String(ev.think || this.routeState.nativeThink);
@@ -9197,7 +9292,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const be = this.ensureBackend();
     // The web search's address and whether its key is saved are opt-in fields (CONFIG_EVENT_FIELDS).
     be.send({ type: "get_config", request_id: this.nextRequestId("config-read"),
-              fields: [...CONFIG_EVENT_FIELDS, "cache_settings", "pips_settings", "model_wait_settings",
+              fields: [...configEventFields(this.lastReadyEvent?.capabilities), "cache_settings", "pips_settings", "model_wait_settings",
                        "subagent_settings"] });
     this.sendPluginCommand({ type: "list_plugins", request_id: this.nextRequestId("plugins") });
     this.sendPluginCommand({ type: "list_plugin_marketplaces", request_id: this.nextRequestId("marketplaces") });
@@ -9398,7 +9493,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       else { this.requestLiveSessions(); }
     } else if (msg?.type === "stopRunning") {
       const pid = Number(msg.pid), instance = String(msg.instance || "");
-      if (be.ready && this.processOf(be)?.detachOffer && Number.isSafeInteger(pid) && pid > 0 && /^[a-f0-9]{1,64}$/.test(instance)) {
+      // (A stuck DGC in a terminal names no instance in its note: DGC matches the process by its pid and that.)
+      if (be.ready && this.processOf(be)?.detachOffer && Number.isSafeInteger(pid) && pid > 0 && typeof msg.instance === "string" && STUCK_INSTANCE.test(instance)) {
         be.send({ type: "stop_live_session", pid, instance, request_id: this.nextRequestId("stop-live") } as any);
       }
     } else if (msg?.type === "openRunning") {
@@ -9720,6 +9816,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return devLimitsTable(this.lastReadyEvent?.capabilities);
   }
 
+  /** Whether this DGC takes "Let DGC change Dev Mode settings" (dev_mode_tools) in set_config: it says so. */
+  private devToolsCapable(): boolean {
+    return devToolsOffered(this.lastReadyEvent?.capabilities);
+  }
+
   async saveSettings(v: any, section = ""): Promise<void> {
     if (this.settingsSaveInFlight) {
       void vscode.window.showWarningMessage("DGC is already saving settings.");
@@ -9917,6 +10018,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (this.devLimits().length) {
         values.dev_mode = v.dev_mode === true;
         values.dev_limits = devLimitValues(v.dev_limits);
+        // "Let DGC change Dev Mode settings": the user's own switch, off unless it says a real yes. Never to a DGC that
+        // doesn't take the key: it would refuse the whole save.
+        if (this.devToolsCapable()) { values.dev_mode_tools = v.dev_mode_tools === true; }
       }
 
       const saveConfig = async (prefix: string, configValues: any): Promise<void> => {
@@ -9924,7 +10028,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           be, prefix, { type: "set_config", values: configValues }, "config", 10000);
         appliedStages.push("configuration");
         if ("dev_mode" in configValues) {
-          await this.context.globalState.update(DEV_SAVED_KEY, { dev_mode: configValues.dev_mode, dev_limits: configValues.dev_limits });
+          await this.context.globalState.update(DEV_SAVED_KEY, { dev_mode: configValues.dev_mode, dev_limits: configValues.dev_limits,
+            ...("dev_mode_tools" in configValues ? { dev_mode_tools: configValues.dev_mode_tools } : {}) });
         }
       };
       const saveNativeModel = async (): Promise<void> => {
@@ -10583,6 +10688,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const hubJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "hub.js"));
     // Home as cards: the grid, the card library and each card (media/shared/homecards.js, window.DgcHomeCards).
     const homeCardsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "homecards.js"));
+    // "What's new", the dialog the side bar shows once per release (media/shared/whatsnew.js, window.DgcWhatsNew).
+    const whatsNewJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "whatsnew.js"));
     // The Project Folder dropdown over the Work sessions and in New Session's dialog (media/shared/folderpick.js, window.DgcFolderPick).
     const folderPickJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "folderpick.js"));
     // How long ago a Work session is from, in the Work list's words (media/shared/age.js, window.DgcAge).
@@ -10694,6 +10801,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   <div id="changes-review-summary" class="changes-review-summary"></div>
   <div id="changes-review-list" class="changes-review-list" tabindex="-1"></div>
 </div>
+<div id="whats-new" class="wn-layer dgc-scrim" role="dialog" aria-modal="true" hidden></div>
 <div id="goal-editor" class="modal-layer dgc-scrim" role="dialog" aria-modal="true" aria-labelledby="goal-editor-title" hidden>
   <div class="goal-dialog dgc-dialog">
     <div class="goal-dialog-mark"><span class="codicon codicon-target" aria-hidden="true"></span></div>
@@ -10753,7 +10861,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 </div>
 <div id="pop" class="pop" role="listbox" aria-label="Suggestions"></div>
 <footer>
-  <div id="elsewhere-bar" class="elsewhere-bar" role="status" hidden><span class="codicon codicon-multiple-windows" aria-hidden="true"></span><span id="elsewhere-text" class="elsewhere-text"></span><button type="button" id="elsewhere-open" class="act primary" title="Carry on with this session in this window; the other window shows it read-only">Open here</button></div>
+  <div id="elsewhere-bar" class="elsewhere-bar" role="status" hidden><span class="codicon codicon-multiple-windows" aria-hidden="true"></span><span id="elsewhere-text" class="elsewhere-text"></span><button type="button" id="elsewhere-open" class="act primary" title="Carry on with this session in this window; the other window shows it read-only">Open here</button><button type="button" id="elsewhere-stop" class="act primary wide" title="End the DGC that holds this session and has stopped answering, then open the session in this window as it was last saved" hidden>Stop it and open here</button></div>
   <!-- The user's mods (media/mods.js): each band, then one status line. Above the rail, which sits on the box. -->
   <div id="mod-strip" class="mod-strip" hidden></div>
   <!-- A waiting approval, just above the box and its rail, one at a time (media/main.js dockApproval, ui-04). -->
@@ -10912,7 +11020,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${composerJs}"></script><script nonce="${nonce}" src="${trayJs}"></script>
 <script nonce="${nonce}" src="${cardJs}"></script>
 <script nonce="${nonce}" src="${sheetJs}"></script>
-<script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script><script nonce="${nonce}" src="${folderPickJs}"></script><script nonce="${nonce}" src="${ageJs}"></script><script nonce="${nonce}" src="${homeCardsJs}"></script>
+<script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script><script nonce="${nonce}" src="${folderPickJs}"></script><script nonce="${nonce}" src="${ageJs}"></script><script nonce="${nonce}" src="${homeCardsJs}"></script><script nonce="${nonce}" src="${whatsNewJs}"></script>
 <script nonce="${nonce}" src="${mcpAppsJs}"></script>
 <script nonce="${nonce}" src="${markdown}"></script>
 <script nonce="${nonce}" src="${breakdownScript}"></script>

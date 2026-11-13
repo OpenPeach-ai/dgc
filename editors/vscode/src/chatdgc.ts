@@ -405,6 +405,15 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
 
   attach(host: ChatDGCHost): void { this.host = host; }
 
+  /** The "Open" pop-up (artifactNotice.ts): a widget a reply made while no tab shows its chat is offered there. */
+  private madeNotice?: { offer(item: { key: string; version: number; title: string; updated: boolean; open: () => void }): void };
+  useMadeNotice(notice: ChatDGC["madeNotice"]): void { this.madeNotice = notice; }
+
+  /** Whether a tab of this window shows this chat (a reply's document or widget then opens beside it by itself). */
+  showsChat(conversation: string): boolean {
+    return !!conversation && [...this.tabs].some((tab) => tab.conversation === conversation && !tab.elsewhere);
+  }
+
   /** Artifacts (artifacts.ts): a reply's cards open and export them, the Library lists them, and every one of them
    *  hears when one changes (a model's edit, the user's in its panel, a Pip's). */
   useArtifacts(hub: Artifacts): void {
@@ -1742,7 +1751,13 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         // The reply waits to hear what it shows (from its page, once open), or at once that no tab shows the chat.
         if (this.reportsWidgets() && typeof conversation === "string" && conversation) this.widgetWaiting.set(w.id, conversation);
         if (showing(conversation).length) this.showWidget(w.id, w.html, String(w.title || ""), false, conversation);
-        else this.widgetReport(w.id, { shown: false });
+        else {
+          this.widgetReport(w.id, { shown: false });
+          // Nobody is looking at that chat: the one "DGC made … · Open" notification offers it (once per page of it).
+          const page = createHash("sha256").update(w.html).digest("hex").slice(0, 12);
+          this.madeNotice?.offer({ key: `${w.id}.${page}`, version: 1, title: String(w.title || "A widget"), updated: this.widgetPages.has(w.id),
+            open: () => this.showWidget(w.id, w.html, String(w.title || ""), true, typeof conversation === "string" ? conversation : "") });
+        }
         return;
       }
       case "chatdgc_made":

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **What's new in 0.52**: six slides the first time 0.52's side bar opens (a picture, the feature's name and what it does), with Skip, Next and Done and the arrow keys; it never comes back after Skip, Done or Esc, and the DGC header's ⋯ menu has "What's new" to see it again.
+- **"DGC made …" with Open**: when a Work, Chat or Pip turn makes or updates a page, document, slides, sheet, dashboard or widget, one notification says so with Open; a newer one replaces an unanswered older one, and it never repeats after a reload.
+- **A session held by a DGC that stopped answering** says so in Settings › Running sessions ("Not responding since 12:00") with Stop, and Open Here names who holds it and offers "Stop it and open here".
+- **"Let DGC change Dev Mode settings"** (Settings › Dev Mode, and a tick box in the dialog that turns Dev Mode on), off unless you switch it on; DGC can never turn on Dev Mode. Shown by a DGC that offers it.
 - **Archive Work sessions and chats.** Archive is in a session's or chat's "…" menu; one quiet line says it with Undo for a few seconds. "Archived (N)" at the end of the list opens them, each with Restore and Delete (Delete asks first; it can't be undone). Archiving or deleting a session never asks about Pips: sessions no longer own Pips.
 - **One kind of Pip.** The Pips view is one list: Core first, then the Pip with the latest news; each row says "Personal" or its folder; search on top and a filter (All Pips, Personal, each folder) under it. **New Pip** asks for a character, a name and a folder line (pre-filled from where you are), no goal: tell it in its chat. Every Pip has the same page and chat; a Pip with a folder shows its computer and its change cards like any other.
 - **The level picker is in every Pip's chat box**, and choosing Do it all shows what it allows first, with Continue or Cancel.

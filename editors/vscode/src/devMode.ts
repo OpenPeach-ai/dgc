@@ -49,3 +49,16 @@ export function devShown(config: any, saved: any): { dev_mode: boolean; dev_limi
   return { dev_mode: typeof config?.dev_mode === "boolean" ? config.dev_mode : kept.dev_mode === true,
            dev_limits: { ...(own(config?.dev_limits) ? config.dev_limits : own(kept.dev_limits) ? kept.dev_limits : {}) } };
 }
+
+/** "Let DGC change Dev Mode settings" (config key dev_mode_tools; off unless the user turns it on): whether this DGC
+ *  takes the key in set_config. It says so (ready.capabilities.dev_mode_tools); one that doesn't refuses a whole save
+ *  for a key it doesn't know, so the switch isn't shown and the key is never sent. */
+export function devToolsOffered(capabilities: any): boolean {
+  return devLimitsTable(capabilities).length > 0 && Number(capabilities?.dev_mode_tools) >= 1;
+}
+
+/** What the switch shows: DGC's own answer where its config says it, else what this editor last saved. */
+export function devToolsShown(config: any, saved: any): boolean {
+  if (typeof config?.dev_mode_tools === "boolean") { return config.dev_mode_tools; }
+  return !!saved && typeof saved === "object" && saved.dev_mode_tools === true;
+}

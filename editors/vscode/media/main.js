@@ -13001,6 +13001,15 @@ function permissionChoices(ev) {
   // default is on the page from the start, and the host's kept choices follow.
   window.DgcPictureFold?.setDefault(document.body.dataset.picturesFolded === "1");
   window.DgcPictureFold?.host((message) => vscode.postMessage(message));
+  // "What's new" (media/shared/whatsnew.js): the dialog the side bar shows once per release, and again from the DGC
+  // view's menu. Skip, Done or Esc tells the host, which never shows it by itself again (src/whatsNew.ts).
+  let whatsNew = null;
+  function openWhatsNew(msg) {
+    const layer = $("whats-new");
+    if (!layer || !window.DgcWhatsNew || chatPlace !== "home") return;
+    whatsNew = whatsNew || window.DgcWhatsNew.mount(layer, { onSeen: () => vscode.postMessage({ type: "whatsNewSeen" }) });
+    whatsNew.open({ release: msg?.release });
+  }
   window.addEventListener("message", (e) => {
     const msg = e.data;
     if (window.DgcVideo?.message(msg)) return;     // a video's bytes, its state or its Stop (src/videoHost.ts)
@@ -13088,6 +13097,7 @@ function permissionChoices(ev) {
     if (msg.type === "artifactNews") { artifactNews(msg.artifact, msg.op); return; }
     if (msg.type === "homePages") { homePagesNow = homePagesFrom(msg.pages); paintHub(); return; }
     if (msg.type === "homeCards") { home?.layout(msg); return; }
+    if (msg.type === "whatsNew") { openWhatsNew(msg); return; }
     if (msg.type === "homeUsage") { home?.usage(msg); return; }
     if (msg.type === "homeWeather") { home?.weather(msg); return; }
     if (msg.type === "homeWeatherPlaces") { home?.places(msg); return; }
@@ -14223,12 +14233,32 @@ function permissionChoices(ev) {
     const detail = typeof note.detail === "string" ? note.detail.slice(0, 600) : "";
     node.replaceChildren(where, ...(detail ? [document.createTextNode(` ${detail}`)] : []));
   }
+  // The holder has stopped answering (the host's stuckHolder.ts read it from DGC's list of processes): who holds it, in
+  // plain words on this reader's clock, and why Open here can't take it. `facts`: {place, since, working, heartbeat},
+  // times in ms. "Held by a DGC with no window, since 11:53, running a turn." in bold, then the rest. Text only.
+  function stuckWords(facts) {
+    const clock = (ms) => { const at = Number(ms), when = new Date(at);
+      return !Number.isFinite(at) || at <= 0 || Number.isNaN(when.getTime()) ? "" : `${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")}`; };
+    const place = String(facts?.place || "another DGC").replace(/[\u0000-\u001f\u007f-\u009f]/g, "").slice(0, 80);
+    const since = clock(facts?.since), last = clock(facts?.heartbeat);
+    return { head: `Held by ${[place, since ? `since ${since}` : "", facts?.working === true ? "running a turn" : ""].filter(Boolean).join(", ")}.`,
+      detail: `${last ? `It stopped answering at ${last}` : "It has stopped answering"}, so Open here can't take it. `
+        + "Stop it and open here ends it and opens the session in this window as it was last saved." };
+  }
   // This session is shown in another window ("Open here" there), or this window stopped answering and its
   // backend kept the session running without it. Nothing stopped: the turn goes on where the session is.
   function showSessionElsewhere(msg) {
     const bar = $("elsewhere-bar"), state = String(msg?.state || "none");
     if (!bar) return;
-    const button = $("elsewhere-open");
+    const button = $("elsewhere-open"), stop = $("elsewhere-stop");
+    // "Stop it and open here" stands in for Open here only while the host says the holder is stuck and can be stopped.
+    const stuck = (state === "moved" || state === "elsewhere") && msg.stop === true && msg.stuck && typeof msg.stuck === "object";
+    if (stop) {
+      stop.hidden = !stuck;
+      stop.disabled = stuck && msg.stopping === true;
+      stop.textContent = stuck && msg.stopping === true ? "Stopping…" : "Stop it and open here";
+    }
+    if (button) button.hidden = !!stuck;
     if (state !== "moved" && state !== "elsewhere") {
       bar.hidden = true; elsewhereLock = false; if (button) button.disabled = false;
       holdWork(false);                     // each as it was, then the box works out its own again
@@ -14239,7 +14269,13 @@ function permissionChoices(ev) {
       ? "This window stopped answering, so DGC kept the session running without it."
       : state === "moved" ? "This session is open in another window now."
       : "This session is open in another window.";
-    elsewhereWords($("elsewhere-text"), msg.note, plain);
+    elsewhereWords($("elsewhere-text"), stuck ? stuckWords(msg.stuck) : msg.note, plain);
+    if (stuck && typeof msg.stopNote === "string" && msg.stopNote) {
+      const said = document.createElement("span");
+      said.className = "elsewhere-stop-note";
+      said.textContent = ` ${msg.stopNote.slice(0, 400)}`;
+      $("elsewhere-text")?.append(said);
+    }
     bar.hidden = false;
     if (button) button.disabled = false;
     if (state === "moved" && turn) { releaseHeldEvents(); endTurn("moved"); setSending(false); }
@@ -14286,6 +14322,10 @@ function permissionChoices(ev) {
   $("elsewhere-open")?.addEventListener("click", (e) => {
     e.currentTarget.disabled = true;
     vscode.postMessage({ type: "openSessionHere" });
+  });
+  $("elsewhere-stop")?.addEventListener("click", (e) => {
+    e.currentTarget.disabled = true;
+    vscode.postMessage({ type: "stopAndOpenHere" });
   });
   // `from`: the control that opened the page, which gets focus back when the chat does. `nested`:
   // opened from a nested agent's name on its parent's page, so Back returns to that page. Any other

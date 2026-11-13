@@ -983,6 +983,26 @@ test("the token cap goes only to a CLI that answered it, as a whole number of to
   }
 });
 
+test("Let DGC change Dev Mode settings is saved as dev_mode_tools, only to a CLI that says it takes the key", async () => {
+  // Settings › Dev Mode (14 Nov). set_config refuses a whole save for one key it doesn't know, so the key goes only to
+  // a DGC that offers it (ready.capabilities.dev_mode_tools), beside Dev Mode's own two settings.
+  const LIMITS = [{ name: "pips_parallel_runs", label: "Pip runs at once (all Pips)", default: 4, ceiling: 32, cost: "Memory and model load." }];
+  const sentFor = async (capabilities, values) => {
+    const { provider, commands } = harness();
+    provider.lastReadyEvent = { capabilities: { ...provider.lastReadyEvent.capabilities, ...capabilities } };
+    await provider.saveSettings(settings(values));
+    return commands.find((c) => c.type === "set_config" && "dev_mode" in (c.values || {}))?.values;
+  };
+  const offered = { dev_limits: LIMITS, dev_mode_tools: 1 };
+  assert.equal((await sentFor(offered, { dev_mode: true, dev_limits: {}, dev_mode_tools: true })).dev_mode_tools, true);
+  assert.equal((await sentFor(offered, { dev_mode: true, dev_limits: {}, dev_mode_tools: false })).dev_mode_tools, false);
+  assert.equal((await sentFor(offered, { dev_mode: true, dev_limits: {} })).dev_mode_tools, false, "unsaid is off: only the user turns it on");
+  assert.equal((await sentFor(offered, { dev_mode: true, dev_limits: {}, dev_mode_tools: "true" })).dev_mode_tools, false, "only a real yes");
+  const older = await sentFor({ dev_limits: LIMITS }, { dev_mode: true, dev_limits: {}, dev_mode_tools: true });
+  assert.equal(older.dev_mode, true);
+  assert.equal("dev_mode_tools" in older, false, "a DGC that doesn't take the key is never sent it");
+});
+
 test("the sub-agents' context window goes only to a CLI that answered it, blank or 0 as the main model's", async () => {
   // Settings -> Agents -> Sub-agents -> Context size. The host built `values` without it unless the page posted it,
   // and the page never did: Save could not write it at all.
