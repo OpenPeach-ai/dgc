@@ -1149,6 +1149,24 @@ def _read_document(p, raw: bytes, ctx, args: dict) -> str:
             f"note\t{'; '.join(note)}\n{body}")
 
 
+def hidden_mark_refusal(new_text: str, old_text: str, path) -> str | None:
+    """Leak guard 1 (0.52): DGC shows REDACTED in place of a secret it hides from the model. Writing text that holds
+    more of those marks than the file had would put the mark in the file instead of the real value: refused, with how
+    to edit around it."""
+    if REDACTED in new_text and new_text.count(REDACTED) > (old_text or "").count(REDACTED):
+        return (f"error: this change to {path} contains {REDACTED}, the mark DGC shows in place of a secret it hides "
+                f"from you. Writing it would put that mark in the file instead of the real value. Change only the "
+                f"lines around it, and leave the line with the hidden value out of your edit.")
+    return None
+
+
+def _hidden_in_old(old_string: str, path) -> str | None:
+    if REDACTED in old_string:
+        return (f"error: old_string contains {REDACTED}: DGC hides a secret there from you, and {path} holds the real "
+                f"value, so this text can't match. Edit only the lines around it.")
+    return None
+
+
 def write_file(args: dict, ctx) -> str:
     p = _resolve(str(args.get("path", "")), ctx.project_root,
                  allow_external=_allow_external(args))
@@ -1172,6 +1190,9 @@ def write_file(args: dict, ctx) -> str:
             old = captured[0].decode("utf-8")
         except UnicodeDecodeError:
             old = ""
+    refused = hidden_mark_refusal(content, old, p)
+    if refused:
+        return refused
     try:
         _atomic_write_bytes(p, content.encode("utf-8"), expected=expected)
     except (OSError, WorkspaceBoundaryError) as e:
@@ -1305,6 +1326,9 @@ def apply_patch_tool(args: dict, ctx) -> str:
         return f"error: patch rejected atomically: {e}"
     if updated == content:
         return "error: patch made no changes"
+    refused = hidden_mark_refusal(updated, content, p)
+    if refused:
+        return refused
     out = updated.replace("\n", "\r\n") if crlf and crlf * 2 >= max(1, content.count("\n")) else updated
     try:
         _atomic_write_bytes(p, out.encode("utf-8"), expected=expected_version)
@@ -1796,6 +1820,10 @@ def edit_file(args: dict, ctx) -> str:
         return f"error: {e}"
     crlf = raw.count(b"\r\n")                       # remember the file's dominant line ending
     content = text.replace("\r\n", "\n")            # match on LF; restore on write
+    refused = (hidden_mark_refusal(new_string, old_string, p) or
+               (_hidden_in_old(old_string, p) if old_string not in content else None))
+    if refused:
+        return refused
     try:
         result = _apply_edit(content, old_string.replace("\r\n", "\n"),
                              new_string.replace("\r\n", "\n"), replace_all)
@@ -1904,6 +1932,10 @@ def multi_edit(args: dict, ctx) -> str:
             continue
         old = str(e.get("old_string", "")).replace("\r\n", "\n")
         new = str(e.get("new_string", "")).replace("\r\n", "\n")
+        refused = hidden_mark_refusal(new, old, p) or (_hidden_in_old(old, p) if old not in buf else None)
+        if refused:
+            failures.append(f"#{i + 1}: {refused[len('error: '):]}")
+            continue
         try:
             res = _apply_edit(buf, old, new, bool(e.get("replace_all")))
         except _Ambiguous as a:

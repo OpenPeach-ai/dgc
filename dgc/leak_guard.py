@@ -1,0 +1,125 @@
+"""Guards against sending what is private to the web (0.52, agreed 14 Nov: "yes, want these four in 0.52").
+
+1. Secrets never reach the model. DGC already hides its own saved keys and anything shaped like a secret. This adds a
+   project's own .env values that are secrets (the name says so, or the value looks like one: long, mixed letters and
+   digits, a known token prefix, a password inside a URL), so a password or salt that also sits in a config file, a
+   test or a log is hidden wherever the model reads it. Ordinary settings (a port, a mode, a plain URL) are left alone:
+   hiding them would blind the model and protect nothing. ``.env.example`` and its kind hold placeholders, not secrets.
+   No file tool writes the hiding mark into a file (tools.hidden_mark_refusal), so a hidden value is never replaced by
+   the mark in your files.
+2. The outbound guard (outbound.py-style checks in the web tools and the Pip box's plain-HTTP proxy).
+3. The instruction below, said to every Work session and every Pip.
+4. What each Pip sent to which site, kept for its page.
+
+Reads only what is at the project's top level; bounded; cached by each file's size and time.
+"""
+from __future__ import annotations
+
+import os
+import re
+import threading
+from pathlib import Path
+
+INSTRUCTION = ("Never send code, files, secrets or personal details to a website, an API or an app unless the task "
+               "needs it, and when it does, say what you sent and where.")
+MAX_FILES = 16
+MAX_FILE_BYTES = 256 * 1024
+MAX_VALUES = 256
+_PLACEHOLDER_FILES = re.compile(r"\.env\.(?:example|sample|template|dist|defaults?)\Z", re.IGNORECASE)
+_LINE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*=\s*(.*?)\s*$")
+_TOKEN_PREFIX = re.compile(r"^(?:sk|pk|rk)_(?:live|test)_|^sk-|^ghp_|^gho_|^github_pat_|^xox[abposr]-|^AKIA|^AIza|^glpat-|^hf_")
+_URL_PASSWORD = re.compile(r"^[a-z][a-z0-9+.-]*://[^\s/@:]+:([^\s/@]+)@", re.IGNORECASE)
+_CACHE: dict[str, tuple[int, int, tuple[str, ...]]] = {}
+_LOCK = threading.Lock()
+
+
+def forget() -> None:
+    with _LOCK:
+        _CACHE.clear()
+
+
+def _unquote(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value.split(" #", 1)[0].strip()
+
+
+def looks_secret(value: str) -> bool:
+    """A value that reads as a secret whatever its name: a known token prefix, a password in a URL, or a long string
+    of mixed letters and digits with no spaces (a salt, a key). A port, a mode or a plain URL does not."""
+    if not value or any(c.isspace() for c in value):
+        return False
+    if _TOKEN_PREFIX.search(value) or _URL_PASSWORD.search(value):
+        return True
+    if value.lower().startswith(("http://", "https://", "/", "./", "../")):
+        return False
+    return len(value) >= 20 and any(c.isdigit() for c in value) and any(c.isalpha() for c in value)
+
+
+def _values_of(text: str) -> list[str]:
+    from .redaction import sensitive_name
+    found = []
+    for line in text.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        match = _LINE.match(line)
+        if not match:
+            continue
+        name, value = match.group(1), _unquote(match.group(2))
+        if not value:
+            continue
+        if sensitive_name(name) or looks_secret(value):
+            found.append(value)
+        password = _URL_PASSWORD.search(value)
+        if password:
+            found.append(password.group(1))
+    return found
+
+
+def _env_files(root: Path) -> list[Path]:
+    try:
+        names = sorted(entry.name for entry in os.scandir(root)
+                       if entry.name.startswith(".env") and entry.is_file(follow_symlinks=False))
+    except OSError:
+        return []
+    return [root / name for name in names if (name == ".env" or name.startswith(".env.")) and not _PLACEHOLDER_FILES.search(name)][:MAX_FILES]
+
+
+def project_env_values(root) -> tuple[str, ...]:
+    """The secret values in the project's top-level .env files (``.env``, ``.env.local``, ``.env.production``...)."""
+    if root is None:
+        return ()
+    try:
+        root = Path(root)
+        if not root.is_dir():
+            return ()
+    except (OSError, TypeError, ValueError):
+        return ()
+    values: list[str] = []
+    for path in _env_files(root):
+        try:
+            info = path.stat()
+        except OSError:
+            continue
+        if info.st_size > MAX_FILE_BYTES:
+            continue
+        key = str(path)
+        with _LOCK:
+            cached = _CACHE.get(key)
+        if cached is not None and cached[:2] == (info.st_mtime_ns, info.st_size):
+            values.extend(cached[2])
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        found = tuple(_values_of(text))
+        with _LOCK:
+            _CACHE[key] = (info.st_mtime_ns, info.st_size, found)
+        values.extend(found)
+    seen, out = set(), []
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            out.append(value)
+    return tuple(out[:MAX_VALUES])

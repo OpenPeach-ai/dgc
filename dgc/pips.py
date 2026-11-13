@@ -3567,7 +3567,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             def _world_words():
                 """The user's apps, plugins and borrowing their Chrome, said to a Pip whose run has them (a Personal Pip,
                 or a folder Pip's chat with its box: step 2b)."""
-                said = ''
+                from .leak_guard import INSTRUCTION as LEAK_WORDS
+                said = '\n' + LEAK_WORDS                 # leak guard 3 (0.52): every Pip with a world hears it
                 if apps_pin is not None and conversation is not None and not (lent or {}).get('refused'):
                     # Borrowing the user's own Chrome (pip_borrow): how to ask, and, in the reply it was lent to, how to use it.
                     said += '\n' + pip_borrow.NOTICE

@@ -200,6 +200,13 @@ def secret_values(config=None) -> tuple[str, ...]:
             for pair in list(image_keys.values())[:64]:
                 if isinstance(pair, tuple) and pair:
                     add(pair[0])
+        # The project's own .env secrets (leak_guard, 0.52 guard 1): hidden wherever the model reads them.
+        try:
+            from .leak_guard import project_env_values
+            for value in project_env_values(getattr(config, "project_root", None)):
+                add(value)
+        except Exception:                       # noqa: BLE001 -- redaction never fails on a file it can't read
+            pass
         try:
             from .image_providers import ENV_KEYS
             for names in ENV_KEYS.values():
