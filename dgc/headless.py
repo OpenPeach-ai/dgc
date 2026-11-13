@@ -609,11 +609,12 @@ _EDITOR_CONTEXT_LIMIT = 64_000
 _CONFIG_OPT_IN_FIELDS = frozenset({"subagent_context_size", "search_url", "search_api_key_set",
                                    "chatdgc_about", "chatdgc_style", "chatdgc_personality", "chatdgc_window",
                                    "memory", "chatdgc_web", "chatdgc_followups", "turn_token_budget",
-                                   "fallback_engine", "dev_mode", "dev_limits"})
+                                   "fallback_engine", "dev_mode", "dev_limits", "dev_mode_tools"})
 _CONFIG_BOOLEAN_KEYS = frozenset({
     "prompt_cache", "sandbox", "sandbox_network", "show_reasoning", "preserve_thinking",
     "code_action", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
     "ultra_mode", "monitor_wake", "dev_mode",
+    "dev_mode_tools",                 # "Let DGC change Dev Mode settings": the user's own switch (Settings › Dev Mode)
     "thinking_inline", "memory", "chatdgc_web", "chatdgc_followups",
 })
 _CONFIG_STRING_LIMITS = {
@@ -3020,6 +3021,7 @@ class Backend:
                           "attachment_limits": attachment_limits(),
                           # Dev Mode's capacity limits (dgc/dev_mode.py), for Settings → Dev Mode's Limits group.
                           "dev_limits": dev_mode_limits(),
+                          "dev_mode_tools": 1,          # set_config takes dev_mode_tools (the editor shows its switch)
                           # A spooled `image/heic` or `image/heif` (an iPhone photo) is taken and sent on as
                           # a JPEG (photos.heic_to_jpeg), or refused with one sentence saying what to install.
                           "heic_images": True,
@@ -6282,6 +6284,8 @@ class Backend:
         if "dev_limits" in self._config_fields:
             from .dev_mode import clean_limits
             out["dev_limits"] = clean_limits(get("dev_limits", {}) or {})[0]
+        if "dev_mode_tools" in self._config_fields:
+            out["dev_mode_tools"] = get("dev_mode_tools", False) is True
         return out
 
     def _emit_config(self, request_id: str | None = None) -> None:

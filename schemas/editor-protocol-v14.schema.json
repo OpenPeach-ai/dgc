@@ -2447,6 +2447,9 @@
             "dev_limits": {
               "type": "object"
             },
+            "dev_mode_tools": {
+              "type": "boolean"
+            },
             "sandbox": {
               "type": "boolean"
             },

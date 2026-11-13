@@ -256,6 +256,34 @@ class ConfigEventTests(unittest.TestCase):
         self.assertEqual(headless.Backend._config_opt_in_dev(backend), {"dev_mode": True, "dev_limits": {"pip_computers": 8}})
 
 
+class DevModeToolsSwitchTests(unittest.TestCase):
+    """"Let DGC change Dev Mode settings" (his call, 14 Nov): only the user sets it, from Settings › Dev Mode; the
+    settings tool reads it (dgc/settings_tool.dev_limit). The editor shows the switch only to a DGC that offers it."""
+
+    def test_settings_take_the_switch_as_a_true_or_false(self):
+        from dgc.config import DEFAULTS
+        from dgc.headless import _validated_config_values
+        self.assertIs(DEFAULTS["dev_mode_tools"], False, "off by default")
+        values, error = _validated_config_values({"dev_mode": True, "dev_mode_tools": True}, ())
+        self.assertIsNone(error)
+        self.assertIs(values["dev_mode_tools"], True)
+        self.assertEqual(_validated_config_values({"dev_mode_tools": "yes"}, ())[1], "dev_mode_tools must be true or false")
+
+    def test_a_client_that_asks_is_told_it_and_ready_offers_it(self):
+        import inspect
+        from dgc import editor_protocol as ep, headless
+        self.assertIn("dev_mode_tools", headless._CONFIG_OPT_IN_FIELDS)
+        base = {"seq": 1, "type": "config", "model": "m", "mode": "default", "think": "off", "base_url": "u",
+                "project_root": "/p", "goal": {}}
+        self.assertIsNone(ep.event_error({**base, "dev_mode_tools": True}))
+        self.assertIsNotNone(ep.event_error({**base, "dev_mode_tools": "yes"}))
+        backend = object.__new__(headless.Backend)
+        backend.config = Settings(model="m", mode="default", dev_mode=True, dev_mode_tools=True)
+        backend._config_fields = frozenset({"dev_mode_tools"})
+        self.assertEqual(headless.Backend._config_opt_in_dev(backend), {"dev_mode_tools": True})
+        self.assertIn('"dev_mode_tools": 1', inspect.getsource(headless), "ready.capabilities offers it")
+
+
 class DefaultsTests(unittest.TestCase):
     def test_off_each_limit_is_its_modules_own_constant_read_when_asked(self):
         # The full suite found it: tests (and anyone) patching pips.MAX_QUEUE saw no effect once the check read the
