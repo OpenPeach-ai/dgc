@@ -49,6 +49,8 @@ MAX_AGE = timedelta(days=7)         # an older run is history, not news
 MAX_CANDIDATES = 200
 MAX_SHOWN = 16                      # cards per look
 TOP_FINDINGS = 3
+POST_FINDINGS = 8                   # a check's findings card in the Pip's own chat lists up to 8 (pipFlow.js)
+SAID_CHARS = 4000
 MAX_LEDGER = 20000
 _RUN = re.compile(r"run_[0-9a-f]{32}\Z")
 _PIP = re.compile(r"pip_[0-9a-f]{32}\Z")
@@ -225,23 +227,48 @@ def continuity_of(db, run_id, count) -> list | None:
     return value if isinstance(value, list) and len(value) == count else None
 
 
-def _audit(row, result, db=None) -> tuple[str, str, dict]:
+def _compared(db, run_id, count) -> list | None:
+    """DGC's own word on each of a checked audit's findings against its last checkpoint (pip_checkpoints): "new" or
+    "still", in order; None when the run has no checkpoint or it was not compared (a change of rules or folders)."""
+    try:
+        row = db.execute("SELECT CASE WHEN length(CAST(payload AS BLOB))<=1048576 THEN payload END FROM pip_checkpoints"
+                         " WHERE run_id=?", (run_id,)).fetchone()
+        value = json.loads(row[0]) if row and row[0] else None
+    except (sqlite3.Error, TypeError, ValueError, RecursionError):
+        return None
+    items = value.get("findings") if isinstance(value, dict) else None
+    if not isinstance(items, list) or len(items) != count:
+        return None
+    words = {"new": "new", "repeated": "still"}
+    states = [words.get(item.get("comparison")) if isinstance(item, dict) else None for item in items]
+    return None if None in states else states
+
+
+def _audit(row, result, db=None, top_findings=TOP_FINDINGS) -> tuple[str, str, dict]:
     findings = [f for f in (result.get("findings") or []) if isinstance(f, dict)][:16] if isinstance(result, dict) else []
     counts = {level: 0 for level in SEVERITIES}
     for finding in findings:
         if finding.get("severity") in counts:
             counts[finding["severity"]] += 1
-    # New or still there (its model said, by same_as): the new ones first, worst first, so the card names a new one.
+    # New or still there: its model's word (same_as) when it gave one, else DGC's comparison with the last checkpoint.
+    # The new ones first, worst first, so the card names a new one.
     raw = result.get("findings") if isinstance(result, dict) else []
     said = continuity_of(db, row["id"], len(raw)) if db is not None and isinstance(raw, list) and findings else None
-    fresh = {id(f): (said[i] is None) for i, f in enumerate(raw[:16]) if isinstance(f, dict)} if said is not None else {}
+    if said is not None:
+        states = ["new" if same is None else "still" for same in said]
+    else:
+        states = _compared(db, row["id"], len(raw)) if db is not None and isinstance(raw, list) and findings else None
+    state = {id(f): states[i] for i, f in enumerate(raw[:16]) if isinstance(f, dict)} if states is not None else {}
+    fresh = {key: value == "new" for key, value in state.items()}
     ranked = sorted(findings, key=lambda f: (0 if fresh.get(id(f), True) else 1,
                                              SEVERITIES.index(f["severity"]) if f.get("severity") in SEVERITIES else 9))
     top = []
-    for finding in ranked[:TOP_FINDINGS]:
+    for finding in ranked[:top_findings]:
         item = {"title": _text(finding.get("title"), 200), "severity": finding.get("severity") if finding.get("severity") in SEVERITIES else "low"}
         if said is not None:
             item["new"] = fresh.get(id(finding), True)
+        if id(finding) in state:
+            item["state"] = state[id(finding)]       # new | still (| back, once a fix's verdict says so: step 2)
         path = finding.get("path")
         if isinstance(path, str) and path.strip():
             item["path"] = _text(path, 300)
@@ -249,6 +276,11 @@ def _audit(row, result, db=None) -> tuple[str, str, dict]:
                 item["line"] = finding["line"]
         top.append(item)
     fields = {"total": len(findings), "counts": counts, "findings": top}
+    if not findings:
+        fields["found"] = {"new": 0, "back": 0, "still": 0}
+    elif states is not None:
+        new_count = sum(1 for f in findings if fresh.get(id(f), True))
+        fields["found"] = {"new": new_count, "back": 0, "still": len(findings) - new_count}
     if said is not None:
         new = [f for f in findings if fresh.get(id(f), True)]
         fields.update(new=len(new), still=len(findings) - len(new))
@@ -275,8 +307,9 @@ def _pulse(registry, row) -> tuple[str, str, dict] | None:
     return outcome, "checks:" + ",".join(map(str, failing)) if failing else "checks:ok", {"checks": checks, "failed_checks": labels}
 
 
-def _candidate(registry, row, pip) -> dict | None:
-    """The card for one terminal run, with its ledger outcome and signature; None: not a report."""
+def _candidate(registry, row, pip, *, post: bool = False) -> dict | None:
+    """The card for one terminal run, with its ledger outcome and signature; None: not a report. ``post``: for its
+    Pip's own chat (pip_run_posts): up to POST_FINDINGS findings, and the Pip's own words about them (``said``)."""
     try:
         manifest = json.loads(row["manifest"]) if row["manifest"] else {}
     except (ValueError, RecursionError):
@@ -319,7 +352,13 @@ def _candidate(registry, row, pip) -> dict | None:
             result = json.loads(row["result"]) if row["result"] else {}
         except (ValueError, RecursionError):
             result = {}
-        outcome, signature, fields = _audit(row, result, registry.db)
+        outcome, signature, fields = _audit(row, result, registry.db, POST_FINDINGS if post else TOP_FINDINGS)
+        summary = result.get("summary") if isinstance(result, dict) else None
+        if post and outcome == "findings" and isinstance(summary, str) and summary.strip():
+            # The Pip's own words about what it found (its report's summary, asked for as its message to you), for
+            # its chat; never a saved key.
+            said = summary.replace("\x00", "").strip()
+            fields["said"] = redact_value(said if len(said) <= SAID_CHARS else said[:SAID_CHARS - 1] + "…", secret_values())
     report.update(outcome=outcome, **fields)
     return {"report": report, "outcome": outcome, "signature": signature}
 

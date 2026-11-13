@@ -137,7 +137,7 @@ def _build(registry, run_id: str) -> tuple[dict | None, str | None]:
     if pip is None:
         return None, None
     if kind in ("audit", "live") or kind == "test" and "pulse_verification" in manifest:
-        candidate = delivery._candidate(registry, row, pip)
+        candidate = delivery._candidate(registry, row, pip, post=True)
         if candidate is None:
             return None, None
         post = dict(candidate["report"])

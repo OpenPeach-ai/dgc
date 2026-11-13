@@ -67,8 +67,11 @@ class PostedOnceTests(PostScene):
         self.assertEqual([(f["severity"], f["title"], f["path"], f["line"]) for f in post["findings"]],
                          [("high", "E-way bill number is never written back", "erp/tally/push.py", 214),
                           ("high", "GST total skips cess", "erp/gst/totals.py", 88),
-                          ("medium", "Rounding drops paise", "erp/billing/notes.py", 41)],
-                         "the top three, worst first, each with its file and line")
+                          ("medium", "Rounding drops paise", "erp/billing/notes.py", 41),
+                          ("medium", "Stock export drops the last row", "app/billing.py", 12),
+                          ("low", "Typo in log", "app/billing.py", 12)],
+                         # 0.52: up to eight (the One Pips findings card lists eight); it was the top three.
+                         "worst first, each with its file and line")
         self.assertEqual(post["posted_at"], self.now)
         self.assertEqual(post["text"], "Pip 'ERP daily audit' finished: 5 findings (2 high, 2 medium, 1 low)")
 

@@ -374,6 +374,9 @@ AUDIT_SYSTEM_INSTRUCTIONS = (
     "Inspect at least one text source file with read_file. Assess the approved job, then return "
     "exactly one JSON object, with no introduction, Markdown fences or trailing commentary. "
     "The object has exactly summary (string), findings (array), limitations (array of strings). "
+    "When you found something, summary is your own short message to the user, shown in your chat above the findings: "
+    "in plain words, what is wrong, why it matters, how sure you are, and anything only they can do (data, money, "
+    "an account); put a line with only --- between separate messages; no headings. "
     "Each finding has exactly title, severity (low/medium/high/critical), path (relative file), "
     "line (1-based integer), evidence (exact source excerpt starting at that line). "
     'JSON shape: {"summary":"Inspection summary","findings":[{"title":"Issue title",'
