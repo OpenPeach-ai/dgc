@@ -690,6 +690,59 @@ def _alive(pgid) -> bool:
         return False
 
 
+def _end_box(pgid: int) -> None:
+    """End a boxed command for good: its process group and the box's inside.
+
+    bwrap starts the box's inside in a session of its own, which a signal to bwrap's group never reaches. The inside is
+    meant to die with bwrap (--die-with-parent), but a bwrap ended in its first moments (a Stop right after the start,
+    on a busy computer) can be gone before the inside armed that: the inside then ran on for good, its egress forwarder
+    keeping the box alive. So the group is held still first (a process in the middle of starting a child finishes that,
+    then stops, so its children are all known), what its leader started is ended (the box's first process: ending it
+    ends everything in the box's own process space), then the group. (The inside never had a gentler end: it was
+    killed when bwrap went.)"""
+    try:
+        os.killpg(pgid, signal.SIGSTOP)
+    except OSError:
+        return
+    deadline = time.monotonic() + 2
+    while _state(pgid) not in ("T", "t", "Z", "X", "") and time.monotonic() < deadline:
+        time.sleep(0.01)
+    for kid in _children(pgid):
+        try:
+            os.kill(kid, signal.SIGKILL)
+        except OSError:
+            pass
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except OSError:
+        pass
+
+
+def _proc_stat(pid: int) -> list[bytes]:
+    """/proc/<pid>/stat's fields after its name (state, parent, ...); [] where there is no such process or no /proc."""
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as f:
+            stat = f.read()
+    except OSError:
+        return []
+    return stat[stat.rfind(b")") + 2:].split()          # (its name may hold spaces and brackets: read after the last)
+
+
+def _state(pid: int) -> str:
+    fields = _proc_stat(pid)
+    return fields[0].decode("ascii", "replace") if fields else ""
+
+
+def _children(pid: int) -> list[int]:
+    """The processes whose parent is ``pid`` ([] without /proc: a Mac, whose box is a VM ended through its group)."""
+    try:
+        names = os.listdir("/proc")
+    except OSError:
+        return []
+    want = str(pid).encode()
+    return [int(name) for name in names if name.isdigit() and _proc_stat(int(name))[1:2] == [want]]
+
+
 _JOB_THREADS: dict = {}               # job id -> its waiting thread, in this process
 
 
@@ -783,18 +836,10 @@ def stop_job(computer_root: Path, job_id) -> dict:
     _job_write(computer_root, {**job, "state": "stopping"})
     pgid = job.get("pgid")
     if _alive(pgid):
-        try:
-            os.killpg(pgid, signal.SIGTERM)
-        except OSError:
-            pass
+        _end_box(pgid)
         deadline = time.monotonic() + 3
         while _alive(pgid) and time.monotonic() < deadline:
             time.sleep(0.1)
-        if _alive(pgid):
-            try:
-                os.killpg(pgid, signal.SIGKILL)
-            except OSError:
-                pass
     thread = _JOB_THREADS.get(job_id)
     if thread is not None:
         thread.join(timeout=5)
@@ -894,13 +939,13 @@ def _run_boxed(argv: list[str], *, limits: bool = True, pass_fds=(), seconds: in
         code = proc.wait(timeout=seconds)
     except subprocess.TimeoutExpired:
         timed_out = True
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except OSError:
-            pass
+        _end_box(proc.pid)
         code = proc.wait()
     reader.join(timeout=5)
-    proc.stdout.close()
+    if not reader.is_alive():
+        # (Never while it still reads: closing a stream another thread is reading waits for that read, which a process
+        # still holding the pipe could keep for good, and the job would never be recorded as ended.)
+        proc.stdout.close()
     if tail:
         cut = len(output) > MAX_OUTPUT_BYTES or getattr(output, "cut", False)
         text = ("… only the end of its output is kept.\n" if cut else "") + bytes(output[-MAX_OUTPUT_BYTES:]).decode("utf-8", "replace")

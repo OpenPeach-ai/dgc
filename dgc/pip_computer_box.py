@@ -677,10 +677,8 @@ class Box:
 
     def stop(self) -> None:
         if self.proc is not None and self.proc.poll() is None:
-            try:
-                os.killpg(self.proc.pid, 9)
-            except OSError:
-                pass
+            from .pip_computer_files import _end_box        # its group, and its inside (in a session of its own)
+            _end_box(self.proc.pid)
             try:
                 self.proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
