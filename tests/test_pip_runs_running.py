@@ -1,4 +1,8 @@
-"""A Pip that reports to a chat is seen running there: `pip_runs_running`, the chip above the box.
+"""A Pip run a chat started is seen running there: `pip_runs_running`, the chip above the box.
+
+0.52 (pips-flow-design Q1): only runs this chat started (run_pip_now); a Pip attached to it or set up in it no longer
+shows its scheduled runs here (they are in the Pip's own chat). Tests that used an attached chat now start the run
+from the chat.
 
 Reported 24 Oct: a Work chat said nothing while a Pip that reports to it ran, until its card arrived. Pip
 runs happen in the Pips runner, not in the chat's session, so the chat reads which of ITS Pips are running from the
@@ -27,9 +31,10 @@ from tests.test_pip_report_delivery import Scene, Wire, finding
 class Runs(Scene):
     """A Scene with runs that are still going."""
 
-    def started(self, *, pip=None, kind="audit", requested_by="fixture", trigger="manual", key=None,
+    def started(self, *, pip=None, kind="audit", requested_by=None, trigger="manual", key=None,
                 status="running", extra=None):
         pip = pip or self.pip
+        requested_by = requested_by or self.asker or "fixture"
         binding = self.registry.binding(self.workspace["id"])
         run_id = identifier("run")
         manifest = {"pip_id": pip["id"], "workspace_id": self.workspace["id"], "job_version": pip["current_version"],
@@ -55,20 +60,23 @@ class Runs(Scene):
 
 
 class WhichRunsTests(Runs):
-    def test_a_running_audit_of_a_pip_attached_here_is_named_with_when_and_how_it_started(self):
+    def test_a_running_audit_this_chat_started_is_named_with_when_and_how_it_started(self):
+        # Was "of a Pip attached here" (0.51): changed on purpose, the chat that started it is the one that sees it.
         chat = self.chat()
-        self.attach(chat)
+        self.asker = delivery.chat_identity(chat)
         self.later(1)
-        run = self.started(trigger="schedule")
+        run = self.started(trigger="main_chat")
         self.assertEqual(self.running(chat), [{"run_id": run, "pip_id": self.pip["id"], "name": "ERP daily audit",
-                                               "pip_type": "scout", "started_at": self.now, "trigger": "schedule"}])
+                                               "pip_type": "scout", "started_at": self.now, "trigger": "chat"}])
 
-    def test_a_pip_that_reports_to_another_chat_shows_nothing_here(self):
+    def test_a_chat_the_pip_is_attached_to_no_longer_shows_its_scheduled_runs(self):
+        # Changed on purpose (0.52, design Q1): it was "a Pip that reports to another chat shows nothing here", and
+        # the attached chat showed it. Now neither does; its runs are in its own chat.
         here, there = self.chat("chat-here"), self.chat("chat-there")
         self.attach(there)
-        self.started()
+        self.started(trigger="schedule")
         self.assertEqual(self.running(here), [])
-        self.assertEqual(len(self.running(there)), 1)
+        self.assertEqual(self.running(there), [])
 
     def test_the_run_this_chat_started_is_listed_and_one_another_chat_started_is_not(self):
         here, there = self.chat("chat-here"), self.chat("chat-there")
@@ -78,7 +86,7 @@ class WhichRunsTests(Runs):
 
     def test_only_runs_whose_end_is_a_card_here_and_only_while_they_run(self):
         chat = self.chat()
-        self.attach(chat)
+        self.asker = delivery.chat_identity(chat)              # 0.52: this chat started them (was attached)
         self.started(kind="conversation")                      # a reply in the Pip's own chat
         self.started(kind="draft")                             # a Quill draft stays in Pips
         self.started(kind="test")                              # a handoff's test run: reviewed where it was handed
@@ -95,7 +103,7 @@ class WhichRunsTests(Runs):
 
     def test_how_it_started_in_the_words_the_editor_uses(self):
         chat = self.chat()
-        self.attach(chat)
+        self.asker = delivery.chat_identity(chat)              # 0.52: listed only when this chat asked (was attached)
         cases = {"schedule": self.started(trigger="schedule"), "event": self.started(trigger="event"),
                  "you": self.started(trigger="manual"), "handoff": self.started(trigger="handoff"),
                  "setup": self.started(trigger="manual", key="setup-" + identifier("setup"))}
@@ -104,7 +112,7 @@ class WhichRunsTests(Runs):
 
     def test_an_archived_pip_and_a_chat_with_no_project_say_nothing(self):
         chat = self.chat()
-        self.attach(chat)
+        self.asker = delivery.chat_identity(chat)              # 0.52: this chat started it (was attached)
         self.started()
         self.assertEqual(self.running("chat-never-opened"), [])
         self.registry.db.execute("UPDATE pips SET status='archived' WHERE id=?", (self.pip["id"],))
@@ -121,7 +129,7 @@ class BackendTests(Runs):
                                   {"role": "assistant", "content": "Done."}]
         self.assertTrue(backend.agent._persist(), backend.agent._last_persist_error)
         self.session = backend.agent.session_file.stem
-        self.attach(self.session)
+        self.asker = delivery.chat_identity(self.session)      # 0.52: this chat starts the runs (was attached)
         self.later(1)
         if watch:
             backend.dispatch({"type": "watch_pip_runs", "request_id": "w1"})
@@ -146,12 +154,12 @@ class BackendTests(Runs):
         backend = self.make()
         [first] = self.told()
         self.assertEqual((first["items"], first["request_id"]), ([], "w1"), "none running: an empty list, answered")
-        run = self.started(trigger="schedule")
+        run = self.started(trigger="main_chat")
         self.assertTrue(backend._look_for_pip_runs())
         frame = self.told()[-1]
         self.assertNotIn("request_id", frame, "unasked, as it changed")
         self.assertEqual([(i["run_id"], i["name"], i["trigger"], i["started_at"]) for i in frame["items"]],
-                         [(run, "ERP daily audit", "schedule", self.now)])
+                         [(run, "ERP daily audit", "chat", self.now)])
         self.assertFalse(backend._look_for_pip_runs(force=True), "nothing changed: nothing said again")
         self.end(run, [finding("Rounding drops paise")])
         self.assertTrue(backend._look_for_pip_runs())
@@ -175,7 +183,7 @@ class BackendTests(Runs):
         backend = self.make()
         other = self.store.create(self.workspace["id"], "Billing audit", "Inspect billing.", "fixture", pip_type="rook")
         self.attach(self.chat("chat-elsewhere"), other)
-        self.started(pip=other)
+        self.started(pip=other, requested_by="pip-schedule")
         backend._look_for_pip_runs(force=True)
         self.assertEqual(self.told()[-1]["items"], [])
 

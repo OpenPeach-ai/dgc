@@ -25,7 +25,8 @@ from tests.test_pip_report_delivery import Scene, finding
 
 
 class PostScene(Scene):
-    def ran(self, *, pip=None, findings=None, error=None, kind="audit", trigger="schedule", result=None):
+    def ran(self, *, pip=None, findings=None, error=None, kind="audit", trigger="schedule", result=None,
+            requested_by=None):
         """A run the runner finished: queued, claimed, then PipStore.finish (no editor, no chat open)."""
         pip = pip or self.pip
         binding = self.registry.binding(pip["workspace_id"])
@@ -36,7 +37,8 @@ class PostScene(Scene):
         self.registry.db.execute("""INSERT INTO pip_runs
             (id,pip_id,workspace_id,binding_id,idempotency_key,requested_by,manifest,status,created_at,started_at)
             VALUES(?,?,?,?,?,?,?,?,?,?)""", (run_id, pip["id"], pip["workspace_id"], binding["id"], run_id,
-                                              "pip-schedule", json.dumps(manifest), "running", self.now, self.now))
+                                              requested_by or "pip-schedule", json.dumps(manifest), "running", self.now,
+                                              self.now))
         if error is not None:
             self.store.finish(run_id, error=error)
         else:
@@ -146,9 +148,8 @@ class WhatItSaysTests(PostScene):
 
     def test_it_says_what_the_work_chat_card_says(self):
         chat = self.chat()
-        self.attach(chat)
         self.later(1)
-        run = self.ran(findings=[finding("Same words", "high")])
+        run = self.ran(findings=[finding("Same words", "high")], requested_by=delivery.chat_identity(chat))
         [card] = self.deliver(chat)
         [post] = self.page()["posts"]
         self.assertEqual(card["run_id"], run, "the Work chat still gets its card for the same run")

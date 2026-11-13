@@ -31,9 +31,11 @@ class OwnerSessions(Scene):
                          "of the chats it reported to, the newest link stands as its owner until one is chosen")
         pip_owners.set_owner(self.registry, self.pip["id"], mine, "editor-user")
         self.later(1)
-        run = self.finished(findings=[finding("Unchecked total")])
-        self.assertEqual([c["run_id"] for c in self.shown(mine)], [run])
-        self.assertEqual(self.shown(other), [], "only the owner session hears from it")
+        self.finished(findings=[finding("Unchecked total")])
+        # Changed on purpose (0.52, pips-flow-design Q1/Q2): the owner no longer hears its scheduled runs either; a
+        # Pip's reports stay in its own chat. API 89 (this file) retires with Pips API 96.
+        self.assertEqual(self.shown(mine), [])
+        self.assertEqual(self.shown(other), [])
         self.assertEqual(delivery.report_chats(self.registry, self.pip["id"]), 1)
         self.assertEqual(delivery.report_session(self.registry, self.pip["id"]), mine)
 
@@ -49,9 +51,9 @@ class OwnerSessions(Scene):
         result = pip_owners.set_owner(self.registry, self.pip["id"], b, "editor-user")
         self.assertEqual(result, {"pip_id": self.pip["id"], "session_id": b})
         self.later(1)
-        run = self.finished(findings=[finding("Late invoices")])
+        self.finished(findings=[finding("Late invoices")])
         self.assertEqual(self.shown(a), [])
-        self.assertEqual([c["run_id"] for c in self.shown(b)], [run])
+        self.assertEqual(self.shown(b), [], "0.52: no owner hears a scheduled run (changed on purpose, design Q1)")
 
     def test_no_session_its_reports_wait_in_the_pips_view(self):
         a = self.chat("chat-a")

@@ -1,4 +1,4 @@
-"""A finished Pip's report reaches the chat it reports to, as an item the user acts on.
+"""A finished Pip run a chat started comes back to that chat, as an item the user acts on.
 
 "Pips detect, the chat fixes" had no path: nothing a Pip found ever reached a chat, so a model built
 a polling monitor that woke a long chat on every run and applied fixes unattended. Now a finished
@@ -8,16 +8,15 @@ report / Dismiss. It never starts a turn and never reaches the model by itself (
 model reads a report only when the user sends a prompt that asks it to: the card's prepared prompt
 names the run, and ``pips_context`` reads it.
 
-Which chat. Its owner session (pip_owners: the chat it was set up in, unless you chose another; attaching
-it to a chat with ``attach_pip_to_session`` makes that chat its owner), and, for that one run, the chat that ran it
-(``run_pip_now``). A Pip with no chat reports where it
-always has: the Pips view, Needs attention and the home strip.
+Which chat. Only the chat that ran it (``run_pip_now``: its ``requested_by`` is that chat's identity), for that
+run, whichever folder the Pip works on. 0.52 (pips-flow-design Q1/Q2): a Pip's reports live in its own chat
+(``pip_run_posts``) and are noticed on Home, the Pips page's Needs attention and the dock; no session owns a Pip, so
+a chat it was attached to, set up in or "owned" by (API 89, never released) is no longer sent its scheduled runs.
 
-Which runs. A finished source review (Scout, Lens, Rook, Lock), Pulse check or live-data run
-(pip_live_data), and a failed run of any of them, said when it changes: a clean run after a clean run, the same findings again or the same
-failure again is entered in the ledger but not shown. A run the chat asked for is always shown.
-Older runs of one Pip that waited together fold into the newest ("2 earlier runs"). Conversation
-replies, drafts and Patch work are not reports and stay in Pips.
+Which runs. A finished source review (Scout, Lens, Rook, Lock), Pulse check or live-data run (pip_live_data), and a
+failed run of any of them: each one the chat asked for is shown, clean or the same as last time, never folded (the
+quiet rules were for scheduled runs reaching an attached chat). Conversation replies, drafts and Patch work are not
+reports and stay in Pips.
 
 Exactly once per chat. The ledger (``pip_report_deliveries``, keyed by chat and run) says a run
 reached a chat; the chat's transcript says where. A run is entered in the ledger only after the
@@ -48,13 +47,7 @@ OUTCOMES = ("findings", "clear", "failed", "checks_failed", "checks_passed", "li
 SEVERITIES = ("critical", "high", "medium", "low")
 MAX_AGE = timedelta(days=7)         # an older run is history, not news
 MAX_CANDIDATES = 200
-# The same failure again is said again once the last card about that Pip is this old (reported 7 Nov: a routine that
-# fails the same way at 8 AM and 8 PM kept showing the morning's card as if the evening run never happened). The chat
-# draws one card per Pip, so the evening's takes the morning's place ("failed again"); a check failing every half hour
-# says so at most every six hours. The same findings again stay quiet: nothing new to say.
-REMIND_AFTER = timedelta(hours=6)
-STILL_BROKEN = ("failed", "checks_failed")
-MAX_SHOWN = 16                      # cards per look; one per Pip, and a chat has at most 16 attached
+MAX_SHOWN = 16                      # cards per look
 TOP_FINDINGS = 3
 MAX_LEDGER = 20000
 _RUN = re.compile(r"run_[0-9a-f]{32}\Z")
@@ -88,14 +81,6 @@ _REASONS = {
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _since(earlier: str, later: str) -> timedelta:
-    """How long between two saved times; nothing (0) when either doesn't read."""
-    try:
-        return datetime.fromisoformat(str(later).replace("Z", "+00:00")) - datetime.fromisoformat(str(earlier).replace("Z", "+00:00"))
-    except (TypeError, ValueError):
-        return timedelta(0)
 
 
 def _iso(value: datetime) -> str:
@@ -143,13 +128,6 @@ def _has_ledger(db) -> bool:
 def chat_identity(session_id: str) -> str:
     """What `run_pip_now` writes in `requested_by` for a run this chat started."""
     return "main-chat:" + hashlib.sha256(session_id.encode()).hexdigest()[:32]
-
-
-def _links(db, session_id: str, workspace_id: str) -> dict[str, str]:
-    """pip_id -> since when this chat hears from it: the Pips this chat is the owner session of (pip_owners, asked
-    12 Nov: one owner per Project Pip, its cards there alone)."""
-    from .pip_owners import links
-    return {pip: since for pip, since in links(db, session_id, workspace_id).items() if isinstance(pip, str) and _PIP.match(pip)}
 
 
 def report_chats(registry, pip_id: str) -> int:
@@ -245,12 +223,6 @@ def continuity_of(db, run_id, count) -> list | None:
     except (sqlite3.Error, TypeError, ValueError):
         return None
     return value if isinstance(value, list) and len(value) == count else None
-
-
-def _nothing_new(entry) -> bool:
-    """A run whose model said every finding is still there from last time: not a change to tell the chat about."""
-    report = entry.get("report") or {}
-    return entry.get("outcome") == "findings" and report.get("new") == 0 and isinstance(report.get("still"), int)
 
 
 def _audit(row, result, db=None) -> tuple[str, str, dict]:
@@ -354,73 +326,41 @@ def _candidate(registry, row, pip) -> dict | None:
 
 def pending(registry, session_id: str, *, exclude=(), now: datetime | None = None, secrets=()) -> list[dict]:
     """What this chat has not been told yet, oldest first: ``{"report", "outcome", "signature",
-    "run_id", "pip_id", "finished_at", "shown"}`` for every run to enter in the ledger, with
-    ``shown`` False for the runs that are recorded without a card. Reads only."""
+    "run_id", "pip_id", "finished_at", "shown"}`` for every run this chat started, with ``shown`` False
+    for the runs that are recorded without a card (a reply, a draft). Reads only."""
     if not isinstance(session_id, str) or not session_id:
         return []
-    identity = registry.session_identity(session_id)
-    if identity is None:
+    if registry.session_identity(session_id) is None:
         return []
-    workspace_id = identity["workspace_id"]
-    links = _links(registry.db, session_id, workspace_id)
     requester = chat_identity(session_id)
     floor = _iso((now or _now()) - MAX_AGE)
     ledger = _has_ledger(registry.db)
-    marks = ",".join("?" for _ in links) or "NULL"
     rows = registry.db.execute(f"""SELECT id,pip_id,workspace_id,status,finished_at,
-            CASE WHEN length(CAST(requested_by AS BLOB))<=128 THEN requested_by END AS requested_by,
             CASE WHEN length(CAST(manifest AS BLOB))<=131072 THEN manifest END AS manifest,
             CASE WHEN length(CAST(result AS BLOB))<=131072 THEN result END AS result,
             CASE WHEN length(CAST(error AS BLOB))<=16384 THEN error END AS error
-        FROM pip_runs WHERE workspace_id=? AND status IN ('succeeded','failed') AND finished_at>=?
+        FROM pip_runs WHERE requested_by=? AND status IN ('succeeded','failed') AND finished_at>=?
           AND id NOT IN (SELECT run_id FROM pip_news_run_seen)
           AND NOT EXISTS (SELECT 1 FROM pip_news_seen s WHERE s.pip_id=pip_runs.pip_id
                           AND pip_runs.finished_at<=s.seen_until)
-          AND (pip_id IN ({marks}) OR requested_by=?)
           {"AND id NOT IN (SELECT run_id FROM pip_report_deliveries WHERE session_id=?)" if ledger else ""}
         ORDER BY finished_at,id LIMIT ?""",
-        (workspace_id, floor, *links, requester, *([session_id] if ledger else []), MAX_CANDIDATES)).fetchall()
+        (requester, floor, *([session_id] if ledger else []), MAX_CANDIDATES)).fetchall()
     skip = set(exclude)
-    by_pip: dict[str, list] = {}
-    for row in rows:
-        if row["id"] in skip or not _RUN.match(row["id"] or ""):
-            continue
-        asked = row["requested_by"] == requester
-        if not asked and not (row["pip_id"] in links and row["finished_at"] >= links[row["pip_id"]]):
-            continue                                     # finished before this chat heard from the Pip
-        by_pip.setdefault(row["pip_id"], []).append((row, asked))
+    pips: dict[str, dict | None] = {}
     out = []
-    for pip_id, runs in by_pip.items():
-        pip = _pip(registry.db, pip_id)
-        made = []
-        for row, asked in runs:
-            candidate = _candidate(registry, row, pip) if pip else None
-            entry = {"run_id": row["id"], "pip_id": pip_id, "finished_at": row["finished_at"], "asked": asked,
-                     "outcome": candidate["outcome"] if candidate else "clear",
-                     "signature": candidate["signature"] if candidate else "none",
-                     "report": candidate["report"] if candidate else None, "shown": False}
-            made.append(entry)
-        reports = [entry for entry in made if entry["report"] is not None]
-        previous = registry.db.execute("""SELECT signature FROM pip_report_deliveries WHERE session_id=? AND pip_id=?
-            AND signature!='none' ORDER BY finished_at DESC,run_id DESC LIMIT 1""", (session_id, pip_id)).fetchone() if ledger else None
-        newest = reports[-1] if reports else None
-        told = registry.db.execute("""SELECT finished_at FROM pip_report_deliveries WHERE session_id=? AND pip_id=?
-            AND shown=1 ORDER BY finished_at DESC,run_id DESC LIMIT 1""", (session_id, pip_id)).fetchone() if ledger else None
-        if newest is not None:
-            # Say it when it changes (any run since the last one told differs), when this chat asked, or when it is
-            # still broken and the last card about it is REMIND_AFTER old.
-            if (newest["asked"] or previous is None
-                    or any(entry["signature"] != previous[0] and not _nothing_new(entry) for entry in reports)
-                    or (newest["outcome"] in STILL_BROKEN and told is not None and _since(told[0], newest["finished_at"]) >= REMIND_AFTER)):
-                newest["shown"] = True
-                newest["report"]["earlier"] = len(reports) - 1
-            for entry in reports[:-1]:
-                if entry["asked"]:                       # a run this chat asked for is never folded
-                    entry["shown"] = True
-                    if newest["shown"]:
-                        newest["report"]["earlier"] -= 1
-        out.extend(made)
-    out.sort(key=lambda entry: (entry["finished_at"], entry["run_id"]))
+    for row in rows:
+        if row["id"] in skip or not _RUN.match(row["id"] or "") or not _PIP.match(row["pip_id"] or ""):
+            continue
+        if row["pip_id"] not in pips:
+            pips[row["pip_id"]] = _pip(registry.db, row["pip_id"])
+        pip = pips[row["pip_id"]]
+        candidate = _candidate(registry, row, pip) if pip else None
+        out.append({"run_id": row["id"], "pip_id": row["pip_id"], "finished_at": row["finished_at"], "asked": True,
+                    "outcome": candidate["outcome"] if candidate else "clear",
+                    "signature": candidate["signature"] if candidate else "none",
+                    "report": candidate["report"] if candidate else None,
+                    "shown": candidate is not None})
     shown = [entry for entry in out if entry["shown"]]
     for entry in shown[:-MAX_SHOWN] if len(shown) > MAX_SHOWN else ():
         entry["shown"] = False
@@ -431,11 +371,11 @@ def pending(registry, session_id: str, *, exclude=(), now: datetime | None = Non
 
 
 # ---- which of this chat's Pips are running now (pip_runs_running) ---------------------------------
-# The chat a Pip reports to learns that it is at work before its card arrives: a one-line chip above the box ("Billing
+# A chat learns that a run it started is at work before its card arrives: a one-line chip above the box ("Billing
 # audit running · 0:42"). Pip runs happen in the Pips runner, not in the chat's session, so the chat reads the registry
-# as it does for cards: the runs going now of the Pips that report here (attached, or set up here) and the runs this
-# chat started (run_pip_now), and only those whose end is a card here (a source review, a Pulse check, a live-data
-# run). A chat reply in a Pip's own chat, a draft and Patch work are not reports, and say nothing here.
+# as it does for cards: the runs this chat started (run_pip_now), and only those whose end is a card here (a source
+# review, a Pulse check, a live-data run). 0.52: no longer the runs of Pips attached to or set up in it (design Q1).
+# A chat reply in a Pip's own chat, a draft and Patch work are not reports, and say nothing here.
 MAX_RUNNING = 16
 RUNNING_TRIGGERS = ("schedule", "event", "you", "chat", "handoff", "setup")
 
@@ -457,18 +397,14 @@ def running(registry, session_id: str) -> list[dict]:
     identity = registry.session_identity(session_id)
     if identity is None:
         return []
-    workspace_id = identity["workspace_id"]
-    links = _links(registry.db, session_id, workspace_id)
     requester = chat_identity(session_id)
-    marks = ",".join("?" for _ in links) or "NULL"
-    rows = registry.db.execute(f"""SELECT id,pip_id,
+    rows = registry.db.execute("""SELECT id,pip_id,
             CASE WHEN length(CAST(started_at AS BLOB))<=40 THEN started_at END AS started_at,
             CASE WHEN length(CAST(created_at AS BLOB))<=40 THEN created_at END AS created_at,
             CASE WHEN length(CAST(idempotency_key AS BLOB))<=512 THEN idempotency_key END AS idempotency_key,
             CASE WHEN length(CAST(manifest AS BLOB))<=131072 THEN manifest END AS manifest
-        FROM pip_runs WHERE workspace_id=? AND status IN ('running','cancelling')
-          AND (pip_id IN ({marks}) OR requested_by=?)
-        ORDER BY started_at,id LIMIT ?""", (workspace_id, *links, requester, MAX_RUNNING)).fetchall()
+        FROM pip_runs WHERE requested_by=? AND status IN ('running','cancelling')
+        ORDER BY started_at,id LIMIT ?""", (requester, MAX_RUNNING)).fetchall()
     out = []
     for row in rows:
         if not _RUN.match(row["id"] or "") or not _PIP.match(row["pip_id"] or ""):

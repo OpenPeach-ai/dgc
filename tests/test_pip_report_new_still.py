@@ -29,18 +29,21 @@ class NewOrStillThere(Scene):
         with patch.object(self.store, "finish", finish):
             return self.finished(findings=findings)
 
-    def test_the_same_findings_reworded_make_no_new_card(self):
+    def test_the_same_findings_reworded_say_none_new_and_two_still_there(self):
+        # Changed on purpose (0.52): it was "make no new card" in an attached chat. Scheduled runs no longer reach a
+        # chat (pips-flow-design Q1); a run a chat asks for is always answered, and says nothing is new.
         chat = self.chat()
-        self.attach(chat)
+        self.asker = delivery.chat_identity(chat)
         self.audit([finding("Discount not applied to invoice total", "high"), finding("GST number missing in Tally export")])
         self.assertEqual(len(self.deliver(chat)), 1, "the first report is news")
         self.later(60)
         self.audit(REWORDED, [1, 2])
-        self.assertEqual(self.deliver(chat), [], "reworded, all still there: no new card")
+        [card] = self.deliver(chat)
+        self.assertEqual((card["new"], card["still"], card["total"]), (0, 2, 2))
 
     def test_one_new_finding_says_one_new_and_names_it(self):
         chat = self.chat()
-        self.attach(chat)
+        self.asker = delivery.chat_identity(chat)      # 0.52: the chat that ran it (was an attached chat)
         self.audit([finding("Discount not applied to invoice total", "high"), finding("GST number missing in Tally export")])
         self.deliver(chat)
         self.later(60)
@@ -53,7 +56,7 @@ class NewOrStillThere(Scene):
 
     def test_without_its_word_the_card_counts_as_before(self):
         chat = self.chat()
-        self.attach(chat)
+        self.asker = delivery.chat_identity(chat)      # 0.52: the chat that ran it (was an attached chat)
         self.audit([finding("Discount not applied to invoice total", "high")])
         self.deliver(chat)
         self.later(60)

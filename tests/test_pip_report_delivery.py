@@ -1,4 +1,9 @@
-"""Pip reports reach the chat: a finished run is a card in the chats it reports to, never a turn.
+"""Pip reports reach the chat that asked: a run a chat started is a card in that chat, never a turn.
+
+0.52 (pips-flow-design Q1/Q2): a Pip's reports live in its own chat (pip_run_posts). A Work session or ChatDGC chat
+gets a card only for a run it started itself (run_pip_now); attaching a Pip, setting it up there or being its "owner"
+no longer sends its scheduled runs into that chat. Tests that used an attached chat to see the card mechanics now
+use a run the chat asked for, and each changed rule says so where it is tested.
 
 A user's ERP chat (ERP_SESSION_REVIEW_2026-10-18 §7): no Pip could hand its findings to the chat,
 so the model built a monitor that woke a 1,276-message chat on every run and applied "AUTO-OK" fixes
@@ -92,8 +97,11 @@ class Scene(unittest.TestCase):
         self.registry.db.execute("INSERT INTO session_pip_attachments VALUES(?,?,?,?,?,?)",
                                  (session_id, pip["id"], self.workspace["id"], 1, self.now, "fixture"))
 
-    def finished(self, *, pip=None, findings=None, error=None, requested_by="fixture", kind="audit"):
+    asker = None          # a class whose chat started its runs sets this (chat_identity), else the runs are scheduled
+
+    def finished(self, *, pip=None, findings=None, error=None, requested_by=None, kind="audit"):
         pip = pip or self.pip
+        requested_by = requested_by or self.asker or "fixture"
         binding = self.registry.binding(self.workspace["id"])
         run_id = identifier("run")
         manifest = {"pip_id": pip["id"], "workspace_id": self.workspace["id"], "job_version": pip["current_version"],
@@ -131,11 +139,12 @@ class Scene(unittest.TestCase):
 
 
 class WhichChatTests(Scene):
-    def test_a_finished_report_reaches_the_chat_it_is_attached_to_with_its_findings(self):
+    def test_a_run_this_chat_started_comes_back_with_its_findings(self):
+        # Was "reaches the chat it is attached to" (0.51): changed on purpose in 0.52, the chat that asked is the one
+        # that hears; the card's fields are the same.
         chat = self.chat()
-        self.attach(chat)
         self.later(5)
-        run = self.finished(findings=[finding("Rounding drops paise", "medium"),
+        run = self.finished(requested_by=delivery.chat_identity(chat), findings=[finding("Rounding drops paise", "medium"),
                                  finding("GST total skips cess", "high", "app/gst.py", 88),
                                  finding("Typo in log", "low", "app/log.py", 3),
                                  finding("Invoice push retries forever", "high", "app/push.py", 40)])
@@ -150,7 +159,9 @@ class WhichChatTests(Scene):
                                                "path": "app/gst.py", "line": 88})
         self.assertIsNone(ep.event_error({"type": "pip_report", "seq": 1, "report": card}))
 
-    def test_the_chat_a_pip_was_set_up_in_hears_from_it(self):
+    def test_the_chat_a_pip_was_set_up_in_does_not_get_its_scheduled_runs(self):
+        # Changed on purpose (0.52, design Q1): it used to hear every run of a Pip set up there. A Pip's runs are
+        # posts in its own chat; a Work session is told only about runs it asked for.
         chat = self.chat()
         receipt = {"setup_id": identifier("setup"), "pip_id": self.pip["id"], "job_version": 1, "run_id": None,
                    "next_run_at": None, "accepted": True, "actor": "editor-user", "resolved_at": self.now}
@@ -158,9 +169,8 @@ class WhichChatTests(Scene):
             (receipt["setup_id"], self.workspace["id"], chat, "key", "digest", "{}", "digest", "accepted",
              json.dumps(receipt), self.now, self.now))
         self.later(1)
-        run = self.finished(findings=[finding("Unchecked total")])
-        self.assertEqual([card["run_id"] for card in self.shown(chat)], [run])
-        self.assertEqual(delivery.report_chats(self.registry, self.pip["id"]), 1)
+        self.finished(findings=[finding("Unchecked total")])
+        self.assertEqual(self.pending(chat), [], "not even entered: the chat never looks at a run it did not ask for")
 
     def test_the_chat_that_ran_it_hears_about_that_run_only(self):
         chat = self.chat()
@@ -185,25 +195,19 @@ class WhichChatTests(Scene):
         self.assertEqual(self.pending(chat), [])
         self.assertEqual(delivery.report_chats(self.registry, self.pip["id"]), 0)
 
-    def test_runs_that_finished_before_the_chat_heard_from_the_pip_stay_history(self):
-        chat = self.chat()
-        self.finished(findings=[finding("Old news")])
-        self.later(10)
-        self.attach(chat)
-        self.later(1)
-        fresh = self.finished(findings=[finding("New since attaching")])
-        self.assertEqual([card["run_id"] for card in self.shown(chat)], [fresh])
-
-    def test_only_its_owner_session_gets_it_once(self):
-        # One owner per Project Pip (asked 12 Nov): of two chats it was attached to, the newest is its owner and the
-        # only one its cards reach (before, every attached chat got each card).
-        first, second = self.chat("chat-a"), self.chat("chat-b")
+    def test_an_attached_or_owner_chat_gets_nothing_and_the_chat_that_asked_gets_it_once(self):
+        # Changed on purpose (0.52, design Q2: no session owns a Pip). It was "only its owner session gets it once"
+        # (12 Nov): of two attached chats, the newest heard. Now neither does; the one that ran it hears, once.
+        first, second, asker = self.chat("chat-a"), self.chat("chat-b"), self.chat("chat-c")
         self.attach(first)
         self.later(1)
         self.attach(second)
         self.later(1)
-        run = self.finished(findings=[finding("Shared")])
-        self.assertEqual(self.deliver(first), [], "not its owner")
+        self.finished(findings=[finding("Scheduled")])
+        run = self.finished(findings=[finding("Shared")], requested_by=delivery.chat_identity(asker))
+        self.assertEqual(self.deliver(first), [], "attached: nothing")
+        self.assertEqual(self.deliver(second), [], "its 0.51 owner: nothing")
+        second = asker
         self.assertEqual([c["run_id"] for c in self.deliver(second)], [run])
         self.assertEqual(self.deliver(second), [], "exactly once")
         self.assertEqual(delivery.record(self.registry, second, [{"run_id": run, "pip_id": self.pip["id"],
@@ -212,20 +216,40 @@ class WhichChatTests(Scene):
 
     def test_conversation_runs_and_drafts_are_not_reports(self):
         chat = self.chat()
-        self.attach(chat)
         self.later(1)
-        self.registry.db.execute("UPDATE pip_runs SET status='failed' WHERE 0")
-        draft = self.finished(kind="draft", error={"code": "worker_failed", "message": "x"})
+        draft = self.finished(kind="draft", error={"code": "worker_failed", "message": "x"},
+                              requested_by=delivery.chat_identity(chat))
         entries = self.pending(chat)
         self.assertEqual([(e["run_id"], e["shown"]) for e in entries], [(draft, False)],
                          "entered in the ledger so it is never read again, but no card")
+
+    def test_a_run_this_chat_started_on_a_pip_of_another_folder_comes_back(self):
+        # New in 0.52 (design Q4: every session reaches every Pip): the run is in the Pip's folder, not the chat's.
+        chat = self.chat()
+        other = self.base / "other"
+        other.mkdir()
+        workspace = self.registry.resolve(other)
+        pip = self.store.create(workspace["id"], "Site check", "Check the site.", "fixture", pip_type="scout")
+        binding = self.registry.binding(workspace["id"])
+        run_id = identifier("run")
+        manifest = {"pip_id": pip["id"], "workspace_id": workspace["id"], "job_version": pip["current_version"],
+                    "source_revision": "a" * 40, "model": "fixture-model", "run_kind": "audit",
+                    "workspace_context": ContextStore(self.registry).snapshot(workspace["id"])}
+        self.registry.db.execute("""INSERT INTO pip_runs
+            (id,pip_id,workspace_id,binding_id,idempotency_key,requested_by,manifest,status,created_at,started_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?)""", (run_id, pip["id"], workspace["id"], binding["id"], run_id,
+                                              delivery.chat_identity(chat), json.dumps(manifest), "running",
+                                              self.now, self.now))
+        self.store.finish(run_id, result={"summary": "Site", "findings": [finding("Broken link")], "limitations": [],
+                                          "tests_executed": False})
+        self.assertEqual([card["run_id"] for card in self.shown(chat)], [run_id])
 
 
 class WhatIsSaidTests(Scene):
     def setUp(self):
         super().setUp()
         self.session = self.chat()
-        self.attach(self.session)
+        self.asker = delivery.chat_identity(self.session)   # 0.52: was an attached chat; a chat hears runs it asked for
         self.later(1)
 
     def test_malformed_saved_report_fields_do_not_break_delivery(self):
@@ -275,68 +299,33 @@ class WhatIsSaidTests(Scene):
                 self.assertEqual(delivery._reason(error)[0], reason)
                 self.assertIs(delivery._sign_in(error), sign_in)
 
-    def test_a_clean_run_is_a_quiet_line_the_first_time_and_silent_while_nothing_changes(self):
+    def test_every_run_this_chat_asked_for_is_said_clean_or_the_same_again(self):
+        # Changed on purpose (0.52). The quiet rules (a clean run after a clean run, the same findings or failure
+        # again, re-said after 6 h) were for scheduled runs reaching an attached chat; those no longer reach a
+        # chat at all. A run this chat asked for always answered; now that is the only kind, so each is said.
         first = self.finished(findings=[])
         [card] = self.deliver(self.session)
         self.assertEqual((card["run_id"], card["outcome"], card["total"]), (first, "clear", 0))
         self.later(30)
-        quiet = self.finished(findings=[])
+        again = self.finished(findings=[])
+        self.assertEqual([c["run_id"] for c in self.deliver(self.session)], [again])
+        self.later(30)
+        failed = self.finished(error={"code": "invalid_report", "message": "bad JSON"})
+        self.later(30)
+        failed_again = self.finished(error={"code": "invalid_report", "message": "bad JSON again"})
+        self.assertEqual([c["run_id"] for c in self.deliver(self.session)], [failed, failed_again])
+
+    def test_runs_this_chat_asked_for_are_never_folded(self):
+        # Was "runs that waited together fold into the newest": folding was for scheduled runs (gone from chats).
+        runs = [self.finished(findings=[finding("One")])]
+        self.later(30)
+        runs.append(self.finished(findings=[finding("One"), finding("Two", line=20)]))
         entries = self.pending(self.session)
-        self.assertEqual([(e["run_id"], e["shown"]) for e in entries], [(quiet, False)])
-        delivery.record(self.registry, self.session, entries)
-        self.later(30)
-        broken = self.finished(findings=[finding("Now broken", "critical")])
-        self.assertEqual([c["run_id"] for c in self.deliver(self.session)], [broken], "a change is said")
-        self.later(30)
-        fixed = self.finished(findings=[])
-        [card] = self.deliver(self.session)
-        self.assertEqual((card["run_id"], card["outcome"]), (fixed, "clear"), "and so is the all clear")
-
-    def test_the_same_findings_again_are_not_said_twice_and_the_same_failure_neither(self):
-        self.finished(findings=[finding("Same issue")])
-        self.assertEqual(len(self.deliver(self.session)), 1)
-        self.later(60)
-        self.finished(findings=[finding("Same issue")])
-        self.assertEqual(self.deliver(self.session), [])
-        self.later(60)
-        self.finished(error={"code": "invalid_report", "message": "bad JSON"})
-        self.assertEqual(len(self.deliver(self.session)), 1)
-        self.later(60)
-        self.finished(error={"code": "invalid_report", "message": "bad JSON again"})
-        self.assertEqual(self.deliver(self.session), [])
-
-    def test_a_pip_still_failing_the_same_way_is_said_again_once_its_card_is_six_hours_old(self):
-        # Reported 7 Nov: the same failure at 8 AM and 8 PM left the morning's card as if the evening run never happened.
-        # The chat draws one card per Pip, so the evening's takes its place; a half-hourly check says it at most every 6 h.
-        error = {"code": "model_failed", "message": "HTTP 401 from Responses API: {}"}
-        self.finished(error=error)
-        self.assertEqual(len(self.deliver(self.session)), 1)
-        # 10:00 told; 10:30 and 15:30 quiet; 16:30 (6 h 30 on) told; 17:00 and 22:00 quiet; 22:30 (6 h on) told.
-        for minutes, said in ((30, 0), (300, 0), (60, 1), (30, 0), (300, 0), (30, 1)):
-            self.later(minutes)
-            self.finished(error=error)
-            self.assertEqual(len(self.deliver(self.session)), said, f"at {self.now}")
-
-    def test_the_same_findings_stay_quiet_however_long(self):
-        self.finished(findings=[finding("Same issue")])
-        self.assertEqual(len(self.deliver(self.session)), 1)
-        self.later(600)
-        self.finished(findings=[finding("Same issue")])
-        self.assertEqual(self.deliver(self.session), [], "nothing new to say")
-
-    def test_runs_that_waited_together_fold_into_the_newest(self):
-        self.finished(findings=[finding("One")])
-        self.later(30)
-        self.finished(findings=[finding("One"), finding("Two", line=20)])
-        self.later(30)
-        newest = self.finished(findings=[finding("One"), finding("Two", line=20), finding("Three", line=30)])
-        entries = self.pending(self.session)
-        self.assertEqual([e["shown"] for e in entries], [False, False, True])
-        self.assertEqual((entries[-1]["run_id"], entries[-1]["report"]["earlier"]), (newest, 2))
+        self.assertEqual([(e["run_id"], e["shown"], e["report"]["earlier"]) for e in entries],
+                         [(runs[0], True, 0), (runs[1], True, 0)])
 
     def test_a_week_old_run_is_history_not_news(self):
         self.now = "2026-10-01T10:00:00.000Z"
-        self.registry.db.execute("UPDATE session_pip_attachments SET created_at=?", (self.now,))
         self.finished(findings=[finding("Old")])
         self.assertEqual(self.pending(self.session), [])
 
@@ -380,7 +369,7 @@ class BackendTests(Scene):
                                   {"role": "assistant", "content": "Done: ERP daily audit runs at 18:30."}]
         self.assertTrue(backend.agent._persist(), backend.agent._last_persist_error)
         self.session = backend.agent.session_file.stem
-        self.attach(self.session)
+        self.asker = delivery.chat_identity(self.session)   # 0.52: was an attached chat; this chat runs the Pip
         self.later(1)
         backend.dispatch({"type": "watch_pip_reports"})          # the panel draws them
         return backend
@@ -566,7 +555,7 @@ class TerminalTests(Scene):
         agent.session_file = sessions.new_path(self.root)
         agent.messages += [{"role": "user", "content": "Set up the audit"}, {"role": "assistant", "content": "Done."}]
         self.assertTrue(agent._persist(), agent._last_persist_error)
-        self.attach(agent.session_file.stem)
+        self.asker = delivery.chat_identity(agent.session_file.stem)   # 0.52: was attached; this chat ran it
         self.later(1)
         run = self.finished(findings=[finding("GST total skips cess", "high"), finding("Typo", "low", line=2)])
         stack = contextlib.ExitStack()
@@ -615,7 +604,9 @@ class ReadToolTests(Scene):
         described = {tool["function"]["name"]: tool["function"]["description"] for tool in TOOL_SCHEMAS}
         self.assertIn("appears in this chat by itself", described["run_pip_now"])
         self.assertIn("never poll", described["run_pip_now"])
-        self.assertIn("finished reports appear in this chat", described["attach_pip_to_session"])
+        # 0.52: attaching no longer brings a Pip's reports into the chat (they stay in the Pip's own chat).
+        self.assertNotIn("reports appear in this chat", described["attach_pip_to_session"])
+        self.assertIn("pips_context", described["attach_pip_to_session"])
         self.assertIn("not a request", described["pips_context"])
         self.assertIn("Do not use a monitor to watch Pips", described["monitor"])
 

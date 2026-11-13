@@ -465,7 +465,7 @@ class ReportTests(unittest.TestCase):
         self.pip = s.store.create(s.workspace["id"], "ERP live check", "Tell me when invoices miss GST.", "fixture",
                                   pip_type="pulse")
 
-    def finished(self, commands, summary="3 invoices have no GST.", attention=True):
+    def finished(self, commands, summary="3 invoices have no GST.", attention=True, by="local-scheduler"):
         s = self.scene
         binding = s.registry.binding(s.workspace["id"])
         from dgc.workspace_registry import identifier
@@ -475,7 +475,7 @@ class ReportTests(unittest.TestCase):
                     "run_kind": "live", "trigger": "schedule", "live_plan": PLAN}
         s.registry.db.execute("""INSERT INTO pip_runs (id,pip_id,workspace_id,binding_id,idempotency_key,requested_by,
             manifest,status,created_at,started_at) VALUES(?,?,?,?,?,?,?,?,?,?)""",
-            (run_id, self.pip["id"], s.workspace["id"], binding["id"], run_id, "local-scheduler", json.dumps(manifest),
+            (run_id, self.pip["id"], s.workspace["id"], binding["id"], run_id, by, json.dumps(manifest),
              "running", s.now, s.now))
         s.store.finish(run_id, result={"live": live.record(commands, {"live_summary": {
             "summary": summary, "attention": attention, "by": "model", "notes": []}})})
@@ -484,11 +484,13 @@ class ReportTests(unittest.TestCase):
     COMMANDS = [{"index": 0, "command": "sqlite3 -readonly erp.db 'SELECT id, total FROM invoices WHERE gst IS NULL'",
                  "status": "ok", "exit_code": 0, "output": "41|1200\n42|980\n43|75\n3 rows\n", "output_truncated": False, "seconds": 0.1}]
 
-    def test_a_card_reaches_the_chat_it_was_attached_to_and_a_repeat_all_clear_is_quiet(self):
+    def test_a_card_reaches_the_chat_that_ran_it_and_says_each_run_it_asked_for(self):
+        # Changed on purpose (0.52, pips-flow-design Q1): it was the chat it was attached to, where a repeat all clear
+        # stayed quiet. Only the chat that ran it hears now, and each run it asked for is answered.
         s = self.scene
         session = s.chat()
-        s.attach(session, self.pip)
-        run = self.finished(self.COMMANDS)
+        asker = delivery.chat_identity(session)
+        run = self.finished(self.COMMANDS, by=asker)
         [entry] = s.pending(session)
         report = entry["report"]
         self.assertEqual((report["kind"], report["outcome"], report["summary"]), ("live", "live_attention", "3 invoices have no GST."))
@@ -497,12 +499,13 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(delivery.summary_line(report), "Pip 'ERP live check' needs you: 3 invoices have no GST.")
         delivery.record(s.registry, session, [entry])
         s.later(60)
-        self.finished([dict(self.COMMANDS[0], output="")], summary="No invoice is missing GST.", attention=False)
+        self.finished([dict(self.COMMANDS[0], output="")], summary="No invoice is missing GST.", attention=False, by=asker)
         s.later(60)
-        self.finished([dict(self.COMMANDS[0], output="")], summary="Still no invoice without GST.", attention=False)
+        self.finished([dict(self.COMMANDS[0], output="")], summary="Still no invoice without GST.", attention=False, by=asker)
+        self.finished(self.COMMANDS)                     # its schedule's run: in its own chat, not this one
         cards = s.pending(session)
         self.assertEqual([c["outcome"] for c in cards], ["live_clear", "live_clear"])
-        self.assertEqual([c["shown"] for c in cards], [False, True], "the all clear after a problem is said once")
+        self.assertEqual([c["shown"] for c in cards], [True, True])
         self.assertTrue(delivery.valid_report(cards[-1]["report"]))
         self.assertEqual(run[:4], "run_")
 

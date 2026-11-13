@@ -28,6 +28,7 @@ from unittest.mock import patch
 
 from dgc import editor_protocol as ep
 from dgc import pip_fix
+from dgc import pip_report_delivery as delivery
 from dgc.config import Config
 from dgc.headless import Backend
 from dgc.llm import ChatResult, LLMClient, ToolCall
@@ -99,7 +100,8 @@ class FixScene(Scene):
         self.assertTrue(backend.agent._persist(), backend.agent._last_persist_error)
         self.session = backend.agent.session_file.stem
         self.chat(self.session)
-        self.attach(self.session)
+        # 0.52: a chat gets a card only for a run it started, so this chat ran the Pip (it was attached before).
+        self.asker = delivery.chat_identity(self.session)
         self.later(1)
         backend.dispatch({"type": "watch_pip_reports"})
         return backend
