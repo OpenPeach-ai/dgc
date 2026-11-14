@@ -53,7 +53,7 @@ import '../media/mentions.css';
 import {messageMarkup,replyParts,executionCardMarkup,transcriptIcon} from './pipsTranscript.js';
 import {patchChildren} from './pipsDomPatch.js';
 import {runPostsPage,mergePosts,postMarkup,postShort,postStatus,timeline,shortReply,routineTitle as postRoutineTitle,runFixesPage,askable,FIX_ACTIVE,livePostMarkup} from './pipRunPosts.js';
-import {latestActivity,activityEnded,startedWords,routineStartedWords,elapsed} from './pipRunActivity.js';
+import {latestActivity,activityEnded,activityParts,activityText,startedWords,routineStartedWords,elapsed} from './pipRunActivity.js';
 import {mountSetupCards} from './pipSetupCards.js';
 import {mountDigestBar} from './pipDigestBar.js';
 let effortByKeys=false;      // the thinking slider's focus ring: see markEffortInput
@@ -84,6 +84,8 @@ import {levelPage,levelMarkup,levelNotice,levelMenuMarkup} from './pipLevels.js'
 import {ONE_API,ALL as ONE_ALL,PERSONAL as ONE_PERSONAL,savedFilter,listRequest,attentionRequest,attentionFor,underFilter,orderPips,heldOrder,placeOf,newPipFolder} from './pipsOne.js';
 import {payLimits,payDraft,payRequest,payNotice,payingNotice,payLimitsMarkup,payTotalMarkup,readUsd,dollars} from './pipPay.js';
 import {sentPage,sentMarkup} from './pipSent.js';
+import {CHAT_API,agentsPage,foundListMarkup,saidMarkup,askCardMarkup,answeredMarkup,handedMarkup,agentRowMarkup,retryAskMarkup,pillMarkup,agentMapMarkup,agentCardMarkup,mapMeta,cardMeta} from './pipChat.js';
+import {AGENT_LIVE} from './pipFlow.js';
 import {FLOW_API,took,fixesPage,fixAnswer,FIX_LIVE,findingsCardMarkup,fixAskMarkup,fixDecidedLine,fixingMarkup,fixEndedLine,waitingLineMarkup,waitingCardMarkup,reportRow,reportsTableMarkup} from './pipFlow.js';
 import {infoTip,wireInfoTips} from './pipInfoTip.js';
 import {watchButtons} from './buttonFit.js';
@@ -92,6 +94,7 @@ import {templatePage,templateMarkup} from './pipTemplates.js';
 import {borrowsPage,borrowResult,shownBorrows,borrowActive,borrowMarkup} from './pipBorrow.js';
 import {PROJECTS_API,PROJECT_WORK_COMMAND,MOVED_ON,FOLDER_ICON,projectChoices,projectChanges,projectAnswer,shownProjectChanges,projectCardMarkup,needsComputerMarkup} from './pipProjects.js';
 import './pipProjects.css';
+import './pipChat.css';   // its chat as a conversation, with its sub-agents (Pips API 97): Work's parts, to Work's measures
 import {routinesPage,routineDraft,routineFromDraft,shownRoutineCards,routineCardMarkup,routinesMarkup,routineFormMarkup,shortDate} from './pipRoutines.js';
 import {webhook,reach as webhookReach,webhooksOffered,testLine as webhookTestLine,webhookPanelMarkup,reachMarkup} from './pipWebhooks.js';
 import {pickerMarkup,createPicker} from './pipPicker.js';
@@ -796,7 +799,7 @@ function chatControlsMarkup(canSend,busy){
  const levelMenu=S.composerPanel==='level'&&levelShown()?`<div class="composer-level-menu dgc-menu" role="menu" aria-label="Before ${esc(S.pip.name)} acts">${levelMenuMarkup(lv,{esc,pipName:S.pip.name,busy:levelState.busy,error:levelState.error})}</div>`:'';
  // "+": the same menu as Work's and ChatDGC's (media/shared/menu.js), in place of the picture chip (U3, 7 Nov).
  const addMenu=S.composerPanel==='add'&&canAttachImages()?`<div class="composer-add-menu dgc-menu" role="menu" aria-label="Add">${globalThis.DgcMenu?.html([{name:'Add to the message',rows:[{id:'upload',label:'Pictures and files',hint:'From this computer'},{id:'mention',label:personalPip()?'A Pip or an app':'A file in this project',hint:'@'}]},...(goalsOn()?[{name:'This chat',rows:[{id:'goal',label:'Set a goal',hint:'It keeps going until it is done'}]}]:[])],{data:'pip-add'})||''}</div>`:'';
- return `${modelMenu}${contextMenu}${addMenu}${levelMenu}${providerRemoved()?'<p class="composer-unavailable" role="alert">The provider this Pip runs on was removed from Settings. Choose another model for it.</p>':''}<div class="composer-controls"><div class="composer-left">${canAttachImages()?`<button type="button" id="chat-attach" class="composer-chip" title="Add pictures, files and more" aria-label="Add pictures, files and more" aria-haspopup="menu" aria-expanded="${S.composerPanel==='add'}"${S.busy||archived()?' disabled':''}>${composerIcon('add')}</button><input type="file" id="chat-attach-input" accept="${[...PIP_IMAGE_TYPES,...(spoolsPhotos()?[...PIP_HEIC_TYPES,'.heic','.heif']:[]),...PIP_FILE_EXTENSIONS].join(',')}" multiple hidden>`:''}${S.noProvider?'':`<button type="button" id="chat-context-toggle" class="composer-chip${pct===null?'':' with-text'}" title="${cliName?`${esc(cliName)} manages its own context window`:`Context window${o?' · '+o.context_size.toLocaleString()+' tokens':''}${pct===null?'':' · '+pct+'% used'}`}" aria-label="Context window${cliName?`: ${esc(cliName)} manages its own`:pct===null?'':': '+pct+' percent used'}" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='context'}">${composerIcon('context')}${pct===null?'':`<span class="composer-ctx-pct">${pct}%</span>`}</button>`}${routineChip}${levelChip}</div><div class="composer-right"><button type="button" id="chat-model" class="model-control${onFallback?' on-fallback':''}" aria-label="Change model and thinking${onFallback?`. ${esc(onFallback.model)}, its fallback, is answering`:''}" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='model'}" title="${esc(onFallback?`${chip.text} didn’t answer, so its fallback ${onFallback.model} is answering. It tries ${chip.text} again with your next message.`:chip.title)}${o?' · '+esc(effortLabel):''} — change model and thinking"${locked?' disabled':''}><span class="composer-model-icon" aria-hidden="true">${composerIcon('zap')}</span><span class="model-copy"><span class="composer-model-name">${esc(onFallback?onFallback.model:shownModel)}</span>${onFallback?'<span class="composer-fallback-word">fallback</span>':''}${o?`<span class="composer-effort-name">${esc(effortLabel)}</span>`:''}</span><span class="composer-chevron">${composerIcon('chevron')}</span></button>${voiceBar?`<button type="button" id="chat-mic" class="composer-chip" title="Dictate" aria-label="Dictate"${!usable()||archived()||busy?' disabled':''}>${composerIcon('mic')}</button>`:''}${action}</div></div>`;
+ return `${modelMenu}${contextMenu}${addMenu}${levelMenu}${providerRemoved()?'<p class="composer-unavailable" role="alert">The provider this Pip runs on was removed from Settings. Choose another model for it.</p>':''}<div class="composer-controls"><div class="composer-left">${canAttachImages()?`<button type="button" id="chat-attach" class="composer-chip" title="Add pictures, files and more" aria-label="Add pictures, files and more" aria-haspopup="menu" aria-expanded="${S.composerPanel==='add'}"${S.busy||archived()?' disabled':''}>${composerIcon('add')}</button><input type="file" id="chat-attach-input" accept="${[...PIP_IMAGE_TYPES,...(spoolsPhotos()?[...PIP_HEIC_TYPES,'.heic','.heif']:[]),...PIP_FILE_EXTENSIONS].join(',')}" multiple hidden>`:''}${S.noProvider?'':`<button type="button" id="chat-context-toggle" class="composer-chip${pct===null?'':' with-text'}" title="${cliName?`${esc(cliName)} manages its own context window`:`Context window${o?' · '+o.context_size.toLocaleString()+' tokens':''}${pct===null?'':' · '+pct+'% used'}`}" aria-label="Context window${cliName?`: ${esc(cliName)} manages its own`:pct===null?'':': '+pct+' percent used'}" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='context'}">${composerIcon('context')}${pct===null?'':`<span class="composer-ctx-pct">${pct}%</span>`}</button>`}${routineChip}${levelChip}</div><div class="composer-right">${convOn()?pillMarkup(agentsNow(),{esc,open:agentsUi.map}):''}<button type="button" id="chat-model" class="model-control${onFallback?' on-fallback':''}" aria-label="Change model and thinking${onFallback?`. ${esc(onFallback.model)}, its fallback, is answering`:''}" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='model'}" title="${esc(onFallback?`${chip.text} didn’t answer, so its fallback ${onFallback.model} is answering. It tries ${chip.text} again with your next message.`:chip.title)}${o?' · '+esc(effortLabel):''} — change model and thinking"${locked?' disabled':''}><span class="composer-model-icon" aria-hidden="true">${composerIcon('zap')}</span><span class="model-copy"><span class="composer-model-name">${esc(onFallback?onFallback.model:shownModel)}</span>${onFallback?'<span class="composer-fallback-word">fallback</span>':''}${o?`<span class="composer-effort-name">${esc(effortLabel)}</span>`:''}</span><span class="composer-chevron">${composerIcon('chevron')}</span></button>${voiceBar?`<button type="button" id="chat-mic" class="composer-chip" title="Dictate" aria-label="Dictate"${!usable()||archived()||busy?' disabled':''}>${composerIcon('mic')}</button>`:''}${action}</div></div>`;
 }
 function fitChatInput(){const input=$('chatText');if(!input)return;const sendButton=document.querySelector('.chat-send');sendButton?.classList.toggle('ready',!sendButton.disabled&&!!draft.chatText.trim()||!sendButton.disabled&&canAttachImages()&&(pendingImages().length>0||pendingFiles().length>0));if(!input.isConnected||input.clientWidth<40||document.hidden)return;input.style.height='auto';const content=input.scrollHeight,capped=content>=160;input.style.overflowY=capped?'auto':'hidden';input.style.height=(capped?160:content+1)+'px';}
 // What the prompt box's choices are for: since API 47 they are this Pip's own (its replies and the work it does on
@@ -961,7 +964,8 @@ function chatMarkup(){
   const sending=S.sending&&S.sending.pip===S.selected&&(S.sending.conv||'')===S.conv&&!S.chatWaiting.some(m=>m.text===S.sending.text)&&!S.messages.some(m=>m.role==='user'&&m.text===S.sending.text&&Date.parse(m.created_at)>=Date.parse(S.sending.at)-60000)?S.sending:null;
   // A routine's failed run keeps its line where it fell, and the same line again is one line with a count (Pips package 2).
   const routineFailed=m=>failedRoutine(m,S.messages,S.posts,postRoutineTitle);
-  const shown=[...foldRoutineLines(S.messages.filter(m=>!(m.role==='user'&&m.intro===true)||failedHidden(m)||routineFailed(m)),S.messages,postRoutineTitle),...(sending?[{id:'sending',pip_id:S.selected,workspace_id:S.workspace?.id,role:'user',text:sending.text,status:'sending',created_at:sending.at,...(sending.marks?.length?{display_mentions:sending.marks}:{}),...(sending.reply?{reply_to:sending.reply}:{})}]:[])];
+  const conv=convOn(),checking=conv&&!!S.chatActiveRun&&S.messages.some(m=>m.role==='user'&&m.intro===true&&m.run_id===S.chatActiveRun.id&&AGENT_CHECK.test(m.text||''));
+  const shown=[...foldRoutineLines(S.messages.filter(m=>!agentCheckReply(m)).filter(m=>!(m.role==='user'&&m.intro===true)||failedHidden(m)||routineFailed(m)),S.messages,postRoutineTitle),...(sending?[{id:'sending',pip_id:S.selected,workspace_id:S.workspace?.id,role:'user',text:sending.text,status:'sending',created_at:sending.at,...(sending.marks?.length?{display_mentions:sending.marks}:{}),...(sending.reply?{reply_to:sending.reply}:{})}]:[])];
   // While it answers, the Pip itself is in the chat, at work, with its name: the reply replaces it.
   // A routine's run is its live post (liveMarkup), not the working row: what it is doing, its clock, Stop, how it started.
   const routineLive=!!(S.live?.routine&&S.chatActiveRun&&S.live.runId===S.chatActiveRun.id);
@@ -989,11 +993,17 @@ function chatMarkup(){
     return timed({created_at:p.posted_at},false)+postMarkup(p,{...context,previous:i.previous,streak:i.streak||null,face:pipAvatar(S.pip,['failed','checks_failed'].includes(p.outcome)?'failure':'idle',`post-${first.run_id}`,context.type),...fixState(p.run_id),expanded:shownInFull.has(p.run_id),traced:replyStats.get(p.run_id)?.has_trace===true,...(flowCards()&&!i.streak?{under:flowUnderPost(p)}:{})});};
   // Each prompt opens a box, the rest of its turn inside: the box's end is what pushes a pinned prompt off (pipsFollow.js).
   // What a Pip says by itself (a run's post, a routine's reply) isn't an answer to it, so the box ends there.
-  let turnOpen=false;
+  let turnOpen=false,pipRun=false;
+  // A conversation (Pips API 97): the Pip's reply is Work's prose, with its face, name and time once per run of its messages.
+  const plainReply=(html,m,lead)=>{const open=`class="pip-message msg assistant dgc`;if(!html.includes(open))return html;
+   const led=lead&&!html.includes('run-post-head'),head=led?`<div class="run-post-head"><span class="run-post-face" aria-hidden="true">${pipAvatar(S.pip,'idle',`said-${m.id}`,type||characterType(S.pip.pip_type))}</span><strong class="run-post-name">${esc(S.pip.name)}</strong>${globalThis.DgcTime?.markup(Date.parse(m.created_at))||''}</div>`:'';
+   const out=html.replace(open,`${open} pip-plain${led?' pip-led':''}`);return led?out.replace(`data-message="${esc(m.id)}">`,`data-message="${esc(m.id)}">${head}`):out;};
   const unasked=i=>!i.message||(i.message.role==='assistant'&&S.messages.find(p=>p.role==='user'&&p.run_id===i.message.run_id)?.intro===true&&!!postRoutineTitle(S.messages.find(p=>p.role==='user'&&p.run_id===i.message.run_id).text));
   const messages=items.map(i=>{
    if(i.note){const closes=turnOpen?'</div>':'';turnOpen=false;return closes+timed({created_at:i.note.at},false)+noteMarkup(i.note);}
-   const piece=(i.message?drawMessage(i.message):drawPost(i))+(i.message?settled.byMessage.get(i.message.id)||'':settled.byRun.get((i.streak?i.streak.at(-1):i.post)?.run_id)||'');
+   const own=i.message?.role==='assistant'&&!failedHidden(i.message)&&!routineFailed(i.message);
+   const piece=(i.message?(conv&&own?plainReply(drawMessage(i.message),i.message,!pipRun):drawMessage(i.message)):drawPost(i))+(i.message?settled.byMessage.get(i.message.id)||'':settled.byRun.get((i.streak?i.streak.at(-1):i.post)?.run_id)||'');
+   pipRun=own||!i.message;
    if(i.message&&(failedHidden(i.message)||routineFailed(i.message))){const closes=turnOpen?'</div>':'';turnOpen=false;return closes+piece;}
    if(i.message?.role==='user'){const opens=`${turnOpen?'</div>':''}<div class="pip-turn" data-turn="${esc(i.message.id)}">`;turnOpen=true;return opens+piece;}
    if(turnOpen&&unasked(i)){turnOpen=false;return '</div>'+piece;}
@@ -1003,7 +1013,7 @@ function chatMarkup(){
   const live=liveMarkup(markdown);
   // A hello that failed says so, above what a new chat says about itself: nothing else has been said.
   const quietChat=S.messages.every(m=>m.role==='user'&&m.intro===true&&m.status==='failed')&&!items.some(i=>!(i.message&&failedHidden(i.message)))&&!live&&!items.some(i=>i.note||(i.message&&routineFailed(i.message)));
-  return `<section class="pip-conversation${simple?' chat-style':''}" aria-label="Pip conversation">${flowPinnedMarkup()}<div class="conversation-log" role="log" aria-live="polite">${noProviderMarkup()}${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(chatPosts()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`${messages}<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${quietChat?'':messages}${live}${simple?'':typing}${S.stream?.text&&!routineLive?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(replyParts(S.stream.text).join('\n\n'))}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${pipKeyCards()}${borrowCards()}${projectChangeCards()}${flowTailMarkup()}${routineCards()}${settled.tail}${needsYouCard()}${cardRefusedCard()}${turnOpen?'</div>':''}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div><button type="button" id="pip-to-latest" class="pip-to-latest" data-dom-own="1" title="Jump to the newest message" aria-label="Jump to the newest message" hidden><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M4 9l4 4 4-4"/></svg><span data-latest-label>Latest</span></button>${simple?runnerOffMarkup():''}${pipOff(S.pip)?`<p class="pip-off-line" role="status">${PIP_OFF_SAYS}</p>`:''}<div class="pip-composer-shell">${routinePopoverMarkup()}${computerWaitingCards()}${needsComputerCard()}${goalCard()}<div id="chat-tray" class="rail-line tray-only" data-dom-own="1"></div><form id="chat-form" class="pip-composer tray-box"><div class="dgc-drop" data-dom-own hidden aria-hidden="true">Drop to attach</div>${replyChipMarkup()}${canAttachImages()?imageStripMarkup():''}${chatBox?'<div id="chat-pop" class="pop pop-over" data-dom-own="1"></div>':''}<div class="composer-input">${chatBox?'<div id="chatText" class="mention-box" data-dom-own="1"></div>':`<label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="${CHAT_MAX_CHARS}"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea>`}</div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${pagePip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
+  return `<section class="pip-conversation${simple?' chat-style':''}${conv?' conv-look':''}" aria-label="Pip conversation">${flowPinnedMarkup()}<div class="conversation-log" role="log" aria-live="polite">${noProviderMarkup()}${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(chatPosts()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`${messages}<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${quietChat?'':messages}${live}${simple?'':typing}${S.stream?.text&&!routineLive&&!checking?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(replyParts(S.stream.text).join('\n\n'))}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${pipKeyCards()}${borrowCards()}${projectChangeCards()}${flowTailMarkup()}${routineCards()}${settled.tail}${needsYouCard()}${cardRefusedCard()}${turnOpen?'</div>':''}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div><button type="button" id="pip-to-latest" class="pip-to-latest" data-dom-own="1" title="Jump to the newest message" aria-label="Jump to the newest message" hidden><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M4 9l4 4 4-4"/></svg><span data-latest-label>Latest</span></button>${simple?runnerOffMarkup():''}${pipOff(S.pip)?`<p class="pip-off-line" role="status">${PIP_OFF_SAYS}</p>`:''}<div class="pip-composer-shell">${routinePopoverMarkup()}${computerWaitingCards()}${needsComputerCard()}${goalCard()}<div id="chat-tray" class="rail-line tray-only" data-dom-own="1"></div><form id="chat-form" class="pip-composer tray-box"><div class="dgc-drop" data-dom-own hidden aria-hidden="true">Drop to attach</div>${replyChipMarkup()}${canAttachImages()?imageStripMarkup():''}${chatBox?'<div id="chat-pop" class="pop pop-over" data-dom-own="1"></div>':''}<div class="composer-input">${chatBox?'<div id="chatText" class="mention-box" data-dom-own="1"></div>':`<label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="${CHAT_MAX_CHARS}"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea>`}</div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${pagePip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
 }
 // ---- Its runs in its chat (Pips API 51) ----
 // Each finished run is a post from the Pip, read with list_pip_run_posts and drawn among the messages; History
@@ -4385,9 +4395,164 @@ async function createSimplePip(type,name,review=null,workspaceId=''){
 // (the Allow card, the fix while it runs, its change) and what only you can do. Nothing here decides: Allow, Not now,
 // Stop, and the answers to "waiting on you" go to DGC, and what it says back is drawn.
 const flow={pip:'',value:null,error:'',seq:0,busy:null,errors:new Map(),menu:'',waitingOpen:false,stopping:'',notes:new Map()};
-function resetFlow(){flow.pip='';flow.value=null;flow.error='';flow.seq++;flow.busy=null;flow.errors.clear();flow.menu='';flow.waitingOpen=false;flow.stopping='';flow.notes.clear();}
+function resetFlow(){resetAgents();flow.pip='';flow.value=null;flow.error='';flow.seq++;flow.busy=null;flow.errors.clear();flow.menu='';flow.waitingOpen=false;flow.stopping='';flow.notes.clear();}
 const flowOn=()=>S.apiVersion>=FLOW_API&&!remoteHost&&onePips()&&!!S.pip&&!archived();
 const flowNow=()=>flowOn()&&flow.pip===S.selected?flow.value:null;
+// ---- Its chat as a conversation, with its sub-agents (Pips API 97; src/pipChat.js) ----
+// From Pips API 97 a fix is a sub-agent's job, and the Pip's chat reads as a conversation: its words as Work's prose
+// with its face and name once per run of messages, what a check found as a list in its message, Work's permission
+// card, its sub-agent's row, Work's changed-files card, and in the prompt box the sub-agents pill that opens the agent
+// map for this Pip. Its sub-agents are read with list_pip_agents each time its fixes are, and every three seconds
+// while one works; what one is doing and its steps come from its run's activity (list_pip_run_activity).
+const convOn=()=>flowOn()&&S.apiVersion>=CHAT_API;
+const AGENT_CHECK=/^This message is from DGC, not the user\. A sub-agent you handed a job to has finished try /;
+// The Pip's reply to DGC's "check your sub-agent's work" is not a second message: the fix says its words (`message`),
+// without the FINDING and RESULT lines the reply ends with.
+function agentCheckReply(m){
+ if(!convOn()||m.role!=='assistant')return false;
+ const asked=S.messages.find(p=>p.role==='user'&&p.intro===true&&p.run_id===m.run_id);
+ return !!asked&&AGENT_CHECK.test(asked.text||'');
+}
+// Focus the map moves by itself after a click is quiet (no ring); the keyboard's always shows.
+let agentsByPointer=false;
+const amFocus=el=>{if(!el)return;el.classList.toggle('quiet-focus',agentsByPointer);el.focus({preventScroll:true});};
+const agentsUi={pip:'',list:[],seq:0,doing:new Map(),steps:new Map(),stepsOpen:new Set(),map:false,card:'',earlier:false,stopping:'',timer:0,drawn:''};
+const changeUi={folded:new Set(),menu:''};const askedWords=new Map();
+function resetAgents(){window.clearTimeout(agentsUi.timer);Object.assign(agentsUi,{pip:'',list:[],seq:agentsUi.seq+1,map:false,card:'',earlier:false,stopping:'',timer:0});agentsUi.doing.clear();agentsUi.steps.clear();agentsUi.stepsOpen.clear();changeUi.folded.clear();changeUi.menu='';renderAgentMap();}
+const agentsNow=()=>convOn()&&agentsUi.pip===S.selected?agentsUi.list:[];
+const fixAgents=()=>convOn()?(flowNow()?.fixes||[]).map(f=>f.agent).filter(Boolean):[];
+const agentOf=id=>agentsNow().find(a=>a.id===id)||fixAgents().find(a=>a.id===id)||null;
+async function loadAgents(){
+ if(!convOn()||!usable())return;
+ const token=scope(),sequence=++agentsUi.seq,pip=S.selected;
+ try{const page=agentsPage(await send('list_pip_agents',{pip_id:pip}),pip);if(token!==scope()||sequence!==agentsUi.seq)return;
+  const before=agentsUi.pip===pip?JSON.stringify(agentsUi.list):'';agentsUi.pip=pip;agentsUi.list=page.agents;
+  for(const a of page.agents)if(a.run_id&&(AGENT_LIVE.includes(a.state)||agentsUi.stepsOpen.has(a.id)||agentsUi.card===a.id))void loadAgentSteps(a);
+  if(JSON.stringify(page.agents)!==before)render();else renderAgentMap();}
+ catch{/* the pill and the map keep what they had */}
+ finally{if(token===scope())agentsTick();}
+}
+// While one of its sub-agents works the fixes and the sub-agents are read again every three seconds: the row, the
+// pill and the map follow it without a click, and stop asking once nothing works.
+function agentsTick(){
+ window.clearTimeout(agentsUi.timer);agentsUi.timer=0;
+ if(disposed||!convOn()||![...agentsNow(),...fixAgents()].some(a=>AGENT_LIVE.includes(a.state)))return;
+ agentsUi.timer=window.setTimeout(()=>{agentsUi.timer=0;if(disposed||!convOn())return;if(!S.visible||document.hidden||S.tab!=='chat'){agentsTick();return;}void loadFlow();},3000);
+}
+// A sub-agent's steps, from its run's activity: each thing it did, in words; the newest is what it is doing now.
+async function loadAgentSteps(a){
+ if(!a?.run_id||!usable())return;
+ let st=agentsUi.steps.get(a.id);
+ if(!st||st.run!==a.run_id){st={run:a.run_id,cursor:0,lines:[],loading:false,error:''};agentsUi.steps.set(a.id,st);}
+ if(st.loading)return;
+ const token=scope(),identity={id:a.run_id,pip_id:S.selected,workspace_id:S.pip?.workspace_id};st.loading=true;let changed=false;
+ try{for(let n=0;n<6;n++){
+   const after=st.cursor,page=activityPage(await send('list_pip_run_activity',{run_id:a.run_id,after}),identity,after);
+   if(token!==scope()||agentsUi.steps.get(a.id)!==st)return;
+   st.cursor=page.next_cursor;
+   for(const event of page.events){const line=activityText(activityParts(event));if(line&&st.lines.at(-1)!==line){st.lines.push(line);changed=true;}}
+   if(st.lines.length>200)st.lines.splice(0,st.lines.length-200);
+   if(!page.has_more)break;}
+  st.error='';}
+ catch{if(token===scope()&&!st.lines.length){st.error='Its steps couldn’t be read.';changed=true;}}
+ finally{st.loading=false;
+  if(token===scope()&&agentsUi.steps.get(a.id)===st){const now=st.lines.at(-1)||'';if(now&&agentsUi.doing.get(a.id)!==now){agentsUi.doing.set(a.id,now);changed=true;}if(changed||agentsUi.stepsOpen.has(a.id)||agentsUi.card===a.id)render();}}
+}
+const agentSteps=a=>{const st=agentsUi.steps.get(a.id);return {lines:st?.lines||[],loading:!st||st.loading&&!st.lines.length,error:st?.error||''};};
+function toggleAgentSteps(id){
+ const a=agentOf(id);if(!a)return;
+ if(agentsUi.stepsOpen.has(id))agentsUi.stepsOpen.delete(id);else{agentsUi.stepsOpen.add(id);void loadAgentSteps(a);}
+ render();document.querySelector(`.pip-agent-row [data-agent-steps="${id}"]`)?.focus({preventScroll:true});
+}
+async function stopAgent(id){
+ if(agentsUi.stopping||!usable()||archived())return;const token=scope(),pip=S.selected;agentsUi.stopping=id;render();
+ try{await send('stop_pip_agent',{pip_id:pip,agent_id:id});}catch(error){if(token===scope())setError(error);}
+ finally{if(token===scope()){agentsUi.stopping='';render();await loadFlow();}}
+}
+// After the last try: Try again (a fresh sub-agent job for what isn't fixed) or Leave it (never asked again).
+async function retryFix(id,again){
+ const fix=flowNow()?.fixes.find(f=>f.id===id);if(!fix||flow.busy||!usable()||archived())return;
+ const token=scope(),pip=S.selected;flow.busy={id,what:again?'again':'leave'};flow.errors.delete(id);render();
+ try{const said=await send('retry_pip_fix',{pip_id:pip,fix_id:id,again});if(token!==scope())return;
+  try{const now=fixAnswer(said,id);flow.value={...flow.value,fixes:flow.value.fixes.map(f=>f.id===id?now:f)};}catch{/* read again below */}
+  void loadAttention();}
+ catch(error){if(token===scope())flow.errors.set(id,errorText(error));}
+ finally{if(flow.busy?.id===id)flow.busy=null;if(token===scope()){render();void loadFlow();}}
+}
+// The agent map for this Pip, drawn in a layer of its own over the view (so a redraw of the chat never disturbs it).
+function agentMapPip(){return {name:S.pip.name,folder:pipFolderName(),model:(t=>t==='Default'?'Default model':t)(chipModel(S.pip.model_choice,S.pip.model_choice?.mode==='model'?S.pip.model_choice.model:'').text||''),busy:!!S.chatActiveRun};}
+function renderAgentMap(){
+ let host=document.getElementById('agent-map-root');
+ const open=agentsUi.map&&!disposed&&convOn()&&S.tab==='chat'&&!S.review&&agentsUi.pip===S.selected;
+ const app=document.getElementById('app');
+ if(!open){agentsUi.map=false;agentsUi.card='';if(app?.inert)app.inert=false;if(host?.firstChild){host.replaceChildren();agentsUi.drawn='';}return;}
+ if(!host){host=document.createElement('div');host.id='agent-map-root';shell.append(host);}
+ const card=agentsUi.card?agentsUi.list.find(a=>a.id===agentsUi.card)||null:null;if(!card)agentsUi.card='';
+ const off=archived()||!usable(),pip=agentMapPip(),doingOf=id=>agentsUi.doing.get(id)||'';
+ const sig=JSON.stringify([agentsUi.list.map(a=>[a.id,a.state,a.try,a.notes,a.model,a.held,doingOf(a.id)]),agentsUi.earlier,agentsUi.card,card?agentSteps(card):0,agentsUi.stopping,off,pip]);
+ if(sig===agentsUi.drawn)return;
+ const still=!!agentsUi.drawn,active=document.activeElement,key=host.contains(active)?['agentCard','agentStop','agentMapClose','agentCardBack','agentEarlier'].map(k=>active.dataset?.[k]!==undefined?`[data-${k.replace(/[A-Z]/g,c=>'-'+c.toLowerCase())}${active.dataset[k]?`="${active.dataset[k]}"`:''}]`:'').find(Boolean)||'':null;
+ const face=pipAvatar(S.pip,'idle','agent-map',pipType(S.pip,S.types)||characterType(S.pip.pip_type));
+ host.innerHTML=agentMapMarkup(agentsUi.list,{esc,pip,face,doingOf,earlierOpen:agentsUi.earlier,still})
+  +(card?agentCardMarkup(card,{esc,pip,doing:doingOf(card.id),steps:agentSteps(card),stopping:agentsUi.stopping===card.id,off,still:still&&agentsUi.cardDrawn===card.id}):'');
+ agentsUi.drawn=sig;agentsUi.cardDrawn=card?.id||'';
+ if(app)app.inert=true;
+ const map=host.querySelector('.pip-agent-map');if(map)map.inert=!!card;
+ const top=host.querySelector(card?'.pip-agent-card':'.pip-agent-map');
+ if(key!==null||!still)amFocus(key&&top.querySelector(key)||top.querySelector('.agent-map'));   // (the window itself at first, then Tab and the arrows)
+}
+function openAgentMap(){
+ if(!convOn()||!agentsNow().length)return;
+ S.composerPanel='';agentsUi.map=true;agentsUi.card='';agentsUi.drawn='';render();void loadAgents();
+}
+function closeAgentMap(){
+ if(!agentsUi.map)return;agentsUi.map=false;agentsUi.card='';render();document.getElementById('chat-agents')?.focus({preventScroll:true});
+}
+function openAgentCard(id){const a=agentsUi.list.find(x=>x.id===id);if(!a)return;agentsUi.card=id;void loadAgentSteps(a);renderAgentMap();}
+function closeAgentCard(){const id=agentsUi.card;if(!id)return;agentsUi.card='';renderAgentMap();amFocus(document.querySelector(`.pip-agent-map [data-agent-card="${id}"]`));}
+// Times in a sub-agent's row, its line in the map and its card move on each second, in place.
+const agentsClock=window.setInterval(()=>{
+ if(disposed||document.hidden)return;const now=Date.now();
+ for(const el of document.querySelectorAll('[data-agent-since]')){const text=took(now-Number(el.dataset.agentSince));if(el.textContent!==text)el.textContent=text;}
+ for(const el of document.querySelectorAll('[data-agent-meta]')){const a=agentsUi.list.find(x=>x.id===el.dataset.agentMeta);if(!a)continue;const text=mapMeta(a,{doing:agentsUi.doing.get(a.id)||'',pip:S.pip?.name,now}).join(' · ');if(el.textContent!==text)el.textContent=text;}
+ for(const el of document.querySelectorAll('[data-agent-card-meta]')){const a=agentsUi.list.find(x=>x.id===el.dataset.agentCardMeta);if(!a)continue;const text=cardMeta(a,{doing:agentsUi.doing.get(a.id)||'',pip:S.pip?.name,now});if(el.textContent!==text)el.textContent=text;}
+},1000);
+disposers.push(()=>{window.clearInterval(agentsClock);window.clearTimeout(agentsUi.timer);});
+document.addEventListener('click',event=>{
+ const at=sel=>event.target.closest?.(sel);
+ let n;
+ if(changeUi.menu&&!at('[data-change-menu],.pip-change-menu')){changeUi.menu='';render();}
+ // (A file in what it found is Work's file link; it opens in the Pip's folder, at its line.)
+ if((n=at('.pip-said [data-flow-file]'))){event.preventDefault();event.stopImmediatePropagation();flowOpenFile(n.dataset.flowFile,n.dataset.flowLine);return;}
+ if((n=at('#chat-agents'))){if(agentsUi.map)closeAgentMap();else openAgentMap();return;}
+ if((n=at('[data-agent-steps]'))){toggleAgentSteps(n.dataset.agentSteps);return;}
+ if((n=at('[data-agent-stop]'))){void stopAgent(n.dataset.agentStop);return;}
+ if((n=at('[data-retry-again]'))){void retryFix(n.dataset.retryAgain,true);return;}
+ if((n=at('[data-retry-leave]'))){void retryFix(n.dataset.retryLeave,false);return;}
+ if((n=at('[data-change-fold]'))){const id=n.dataset.changeFold;if(changeUi.folded.has(id))changeUi.folded.delete(id);else changeUi.folded.add(id);render();document.querySelector(`[data-change-fold="${id}"]`)?.focus({preventScroll:true});return;}
+ if((n=at('[data-change-menu]'))){const id=n.dataset.changeMenu;changeUi.menu=changeUi.menu===id?'':id;render();(changeUi.menu?document.querySelector('.pip-change-menu .dgc-menu-row'):document.querySelector(`[data-change-menu="${id}"]`))?.focus({preventScroll:true});return;}
+ if(at('.pip-change-menu [data-project-discard]')){changeUi.menu='';return;}
+ if(at('[data-agent-map-close]')){closeAgentMap();return;}
+ if(at('[data-agent-card-back]')){closeAgentCard();return;}
+ if(at('[data-agent-earlier]')){agentsUi.earlier=!agentsUi.earlier;renderAgentMap();amFocus(document.querySelector('.pip-agent-map [data-agent-earlier]'));return;}
+ if((n=at('.pip-agent-map [data-agent-card]'))){openAgentCard(n.dataset.agentCard);return;}
+ // A click on the dimmed chat beside the map closes what is on top.
+ if(event.target.classList?.contains('pip-agent-card')){closeAgentCard();return;}
+ if(event.target.classList?.contains('pip-agent-map')){closeAgentMap();return;}
+});
+{const pointed=()=>{agentsByPointer=true;};root.addEventListener('pointerdown',pointed,true);disposers.push(()=>root.removeEventListener('pointerdown',pointed,true));
+const keys=event=>{
+ agentsByPointer=false;
+ if(changeUi.menu&&event.key==='Escape'){const id=changeUi.menu;event.preventDefault();event.stopPropagation();changeUi.menu='';render();document.querySelector(`[data-change-menu="${id}"]`)?.focus({preventScroll:true});return;}
+ if(!agentsUi.map)return;
+ const top=document.querySelector(agentsUi.card?'.pip-agent-card':'.pip-agent-map');if(!top)return;
+ if(event.key==='Escape'){event.preventDefault();event.stopPropagation();if(agentsUi.card)closeAgentCard();else closeAgentMap();return;}
+ const active=document.activeElement;
+ if(event.key==='Tab'){const stops=[...top.querySelectorAll('button:not(:disabled),summary,[tabindex="0"]')].filter(b=>b.tabIndex>=0);if(!stops.length)return;
+  const i=stops.indexOf(active),next=event.shiftKey?(i<=0?stops.at(-1):stops[i-1]):(i<0||i===stops.length-1?stops[0]:stops[i+1]);event.preventDefault();event.stopPropagation();next.focus();return;}
+ if((event.key==='ArrowDown'||event.key==='ArrowUp')&&(active?.classList?.contains('am-row')||active?.classList?.contains('agent-map'))&&!agentsUi.card){const rows=[...top.querySelectorAll('button.am-row')],i=rows.indexOf(active),next=i<0?rows[0]:rows[i+(event.key==='ArrowDown'?1:-1)];
+  event.preventDefault();event.stopPropagation();if(next){for(const r of rows)r.tabIndex=r===next?0:-1;next.focus();}}
+};root.addEventListener('keydown',keys,true);disposers.push(()=>root.removeEventListener('keydown',keys,true));}
 async function loadFlow(){
  if(!flowOn()||!usable())return;
  const token=scope(),sequence=++flow.seq,pip=S.selected;
@@ -4395,8 +4560,9 @@ async function loadFlow(){
   const before=flow.pip===pip?JSON.stringify(flow.value):'';flow.pip=pip;flow.value=page;flow.error='';
   // A fix whose change is ready is drawn with its change: that list is read with it.
   if(page.fixes.some(f=>f.change_id&&!S.projectChanges.some(c=>c.id===f.change_id)))void loadProjectChanges();
+  if(convOn()){for(const f of page.fixes)if(f.agent?.run_id&&AGENT_LIVE.includes(f.agent.state))void loadAgentSteps(f.agent);void loadAgents();}
   if(JSON.stringify(page)!==before)render();}
- catch(error){if(token===scope()&&sequence===flow.seq){flow.error=errorText(error);render();}}
+ catch(error){if(token===scope()&&sequence===flow.seq){flow.error=errorText(error);render();agentsTick();}}   // (one failed read doesn't end the watch on a working sub-agent)
 }
 // The folder this Pip works in, by its name and whole.
 function pipFolderRow(pip=S.pip){return pip&&!personalPip(pip)?folderOfSpace(pip.workspace_id):null;}
@@ -4408,16 +4574,39 @@ function flowChangeCard(fix){
  const change=fix.change_id?S.projectChanges.find(c=>c.id===fix.change_id):null;if(!change)return '';
  const off=archived()||!usable();
  return projectCardMarkup({...change,...(fix.tests&&!change.tests?{tests:fix.tests}:{})},{esc,open:projectOpen,diffs:projectDiffs,busy:projectBusy?.id===change.id?projectBusy.what:'',off:off||(!!projectBusy&&projectBusy.id!==change.id),
-  confirm:projectConfirm===change.id,note:projectNotes.get(change.id)||'',error:projectErrors.get(change.id)||'',one:true,canCommit:S.apiVersion>=FLOW_API});
+  confirm:projectConfirm===change.id,note:projectNotes.get(change.id)||'',error:projectErrors.get(change.id)||'',one:true,canCommit:S.apiVersion>=FLOW_API,
+  ...(convOn()?{look:'work',folded:changeUi.folded.has(change.id),menu:changeUi.menu===change.id}:{})});
 }
 /** Under a check's post: its findings as one card, then what became of them: the Allow card, the fix at work, its change. */
 function flowUnderPost(p){
  const fix=flowFixFor(p.run_id),found=fix?.findings.length?fix.findings:fixesPage({pip_id:S.selected,fixes:[{id:'pipfix_'+'0'.repeat(32),state:'ask',count:0,digest:'-',findings:Array.isArray(p.findings)?p.findings.slice(0,50):[]}]},S.selected).fixes[0]?.findings||[];
  const total=Number.isSafeInteger(p.total)&&p.total>=found.length?p.total:found.length;
+ if(convOn())return (p.outcome==='findings'?foundListMarkup({runId:p.run_id,findings:found,total},{esc,off:!usable()}):'')+(fix?flowFixMarkup(fix):'');
  const card=p.outcome==='findings'?findingsCardMarkup({runId:p.run_id,findings:found,total,counts:record(p.found)?p.found:null,name:S.pip.name},{esc,off:!usable()}):'';
  return card+(fix?flowFixMarkup(fix):'');
 }
+const ENDED_SAYS={unchanged:'I looked and found nothing to change.',failed:'The fix didn’t finish.',stopped:'The fix was stopped. Nothing in your folder was changed.',interrupted:'The fix was interrupted. Nothing in your folder was changed.',undone:'The fix was undone.',discarded:'You discarded the fix.'};
+/** One fix in the conversation (Pips API 97): the Pip's question and the permission card; then the answered line, its
+ *  one line that it handed the job over, its sub-agent's row, its words from its check, and the change. */
+function convFixMarkup(fix){
+ const folder=pipFolderName(),off=archived()||!usable(),busy=flow.busy?.id===fix.id?flow.busy.what:'',error=flow.errors.get(fix.id)||'',hold=off||!!flow.busy&&!busy;
+ // (Its question stays above the answered line while this view remembers it: DGC says it only while it asks.)
+ if(fix.state==='ask'){if(fix.message)askedWords.set(fix.id,fix.message);return saidMarkup(fix.message,{esc})+askCardMarkup(fix,{esc,folder,off:hold,busy,error});}
+ const answered=(fix.by.startsWith('pip-level:')?'':saidMarkup(askedWords.get(fix.id)||'',{esc}))+answeredMarkup(fix,{esc,folder,clock:t=>new Date(t).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})});
+ if(fix.state==='declined')return answered+(error?`<p class="dgc-card-error" role="alert">${esc(error)}</p>`:'');
+ const a=fix.agent,type=pipType(S.pip,S.types)||characterType(S.pip.pip_type);
+ const row=a?agentRowMarkup(a,{esc,face:pipAvatar(S.pip,'idle',`agent-${a.id}`,type),doing:agentsUi.doing.get(a.id)||'',pip:S.pip.name,canWatch:computerState.pip===S.selected&&!!computerState.value?.granted,
+  stopping:agentsUi.stopping===a.id,off,steps:agentsUi.stepsOpen.has(a.id)?agentSteps(a):null,watchOf:fix.id}):'';
+ const handed=handedMarkup(fix,{esc,waits:!S.runner?.online||!!S.runner?.paused});
+ if(FIX_LIVE.includes(fix.state))return answered+handed+row;
+ const words=saidMarkup(fix.message||ENDED_SAYS[fix.state]||'',{esc,of:fix.id});
+ const change=['ready','applied','held'].includes(fix.state)?flowChangeCard(fix)||(fix.state==='ready'?'<p class="pip-answered-line" role="status">Its change is ready. Reading it…</p>':''):'';
+ const asks=a?.state==='asked'?retryAskMarkup(fix,{esc,off:hold,busy,error}):'';
+ const again=!asks&&['failed','stopped','interrupted'].includes(fix.state)?`<p class="pip-answered-line"><button type="button" class="pip-link pip-quiet-link" data-flow-allow="${esc(fix.id)}"${hold?' disabled':''}>Allow it again</button></p>`:'';
+ return answered+handed+row+words+change+asks+again+(error&&!asks?`<p class="dgc-card-error" role="alert">${esc(error)}</p>`:'');
+}
 function flowFixMarkup(fix){
+ if(convOn())return convFixMarkup(fix);
  const folder=pipFolderName(),off=archived()||!usable(),busy=flow.busy?.id===fix.id?flow.busy.what:'',error=flow.errors.get(fix.id)||'',note=flow.notes.get(fix.id)||'';
  const said=note?`<p class="pip-found-line" role="status">${esc(note)}</p>`:'';
  if(fix.state==='ask')return (fix.message?`<article class="pip-message assistant dgc pip-found-says"><div class="answer split"><div class="message-body text reply-part"><p>${esc(fix.message)}</p></div></div></article>`:'')
@@ -4972,6 +5161,7 @@ function render() {
   // 2026-11-07): the page's own refreshes wait until the slider is let go.
   if(effortHeld){effortRedraw=true;return;}
   settleProjectTab();
+  renderAgentMap();
   noticeFades();syncNewPipModel();
   const focus=document.activeElement; const focusId=focus?.id; const focusActivity=focus?.dataset?.chatActivity; const focusData=focus?.getAttribute?.('data-run')||focus?.getAttribute?.('data-job')||focus?.getAttribute?.('data-pip-type'); const inBox=!!chatBox&&focus===chatBox.el;const selection=focus&&typeof focus.selectionStart==='number'&&!inBox?[focus.selectionStart,focus.selectionEnd]:null;const boxAt=inBox?Mentions.selectedOffsets(chatBox.el):null;
   const focusPlace=focusMark(focus)||focusStillOwed();
@@ -7296,7 +7486,7 @@ const stopMessages=options.onMessage(message=>{
   if(message.type==='pipsFiles'){projectFiles=(Array.isArray(message.files)?message.files:[]).filter(f=>record(f)&&typeof f.label==='string').slice(0,600);chatPicker?.refresh();return;}
   // Settings or the Router changed: Default may run somewhere else now. A list already read is read again.
   // A Pip was marked read somewhere else (its pill on the home, a card in a Work chat): the counts are read again.
-  if(message.type==='pipsUnreadChanged'){lastUnreadAt=0;void loadUnread(true);return;}
+  if(message.type==='pipsUnreadChanged'){lastUnreadAt=0;void loadUnread(true);if(convOn()&&S.tab==='chat'&&S.selected)void loadFlow();return;}   // (a Pips event: its fixes and sub-agents are read again)
   if(message.type==='pipsProfileChanged'){void refresh(false);return;}
   if(message.type==='pipSetupChanged'){void refresh(false);return;}
   // The Project Folder choice changed (here, over the Work sessions, in another window): the Project tab and Needs

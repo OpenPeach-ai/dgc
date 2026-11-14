@@ -257,6 +257,17 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
       try { await x.openPip(GST); await x.waitIn(fix === "running" ? ".pip-found-fixing" : "[data-project-change]"); await settle(x.page);
         held(await walk(x.page, ROUND), `One Pips: a chat with the fix ${fix}`); assert.deepEqual(x.errors, []); } finally { await x.close(); }
     }
+    // Pips API 97: its chat as a conversation (the permission card, its sub-agent's row, the sub-agents pill, the agent
+    // map and a sub-agent's card, the changed-files card and its menu, Try again · Leave it).
+    for (const fix of ["ask", "running", "ready", "applied", "asked"]) {
+      x = await openOnePips(browser, { width, theme, api: 97, scene: { sub: true, fix, earlier: 2, level: fix === "applied" ? "full" : "ask" } });
+      try { await x.openPip(GST); await x.waitIn({ ask: ".pip-ask-card", running: ".pip-agent-row", asked: ".pip-retry" }[fix] || ".pip-change"); await settle(x.page);
+        held(await walk(x.page, ROUND), `One Pips: a conversation with the fix ${fix}`);
+        if (fix === "ready") { await x.click("[data-change-menu]"); await x.waitIn(".pip-change-menu"); await settle(x.page); held(await walk(x.page, ROUND), "One Pips: the changed-files card's menu"); }
+        if (fix === "running") { await x.click("#chat-agents"); await x.waitIn(".pip-agent-map"); await settle(x.page); held(await walk(x.page, ROUND), "One Pips: the agent map for a Pip");
+          await x.click(".pip-agent-map .am-agent"); await x.waitIn(".pip-agent-card"); await settle(x.page); held(await walk(x.page, ROUND), "One Pips: a sub-agent's card"); }
+        assert.deepEqual(x.errors, []); } finally { await x.close(); }
+    }
     none();
   });
 }

@@ -1,0 +1,166 @@
+/* ---- A Pip's chat as a conversation, with its sub-agents (0.52, Pips API 97; src/pipChat.js) ----
+   The parts are Work's, to Work's measures (media/main.css): its reply prose (.text.final), its permission card
+   (.card.perm-card), its answered line (.permission-receipt), its sub-agent row (.pip-fix-line), its changed-files
+   card (.turn-summary), its sub-agents pill (.agents-pill) and its agent map (.agent-map). The Pips view draws them
+   itself, so they are the same in the side bar's shadow root and in an editor tab; the Chromium test measures them
+   against Work's own nodes in the same page. One design language: the 6 px family and the button heights. */
+.pip-app-root{--agent-run:#89D185;--agent-idle:var(--faint);--agent-fail:var(--del)}
+:host-context(body.vscode-light) .pip-app-root,:host-context(body.vscode-high-contrast-light) .pip-app-root,body.vscode-light.pip-app-root,body.vscode-high-contrast-light.pip-app-root{--agent-run:#1E7F46}
+/* The Pip's words: no bubble, Work's 13px / 1.62 prose, its face and name once per run of its messages. */
+.pip-conversation.conv-look .pip-message.assistant :is(.answer.split .reply-part,.answer:not(.split)),
+.simple-pips.chat-open .pip-conversation.chat-style.conv-look .pip-message.assistant :is(.answer.split .reply-part,.answer:not(.split)){max-width:none;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none}
+.pip-conversation.conv-look .pip-message.assistant .message-body,
+.simple-pips.chat-open .pip-conversation.chat-style.conv-look .pip-message.assistant .message-body{font-size:var(--t-chat);line-height:1.62;color:var(--text);font-family:var(--sans)}
+.pip-conversation.conv-look .pip-message.assistant .message-body p,
+.simple-pips.chat-open .pip-conversation.chat-style.conv-look .pip-message.assistant .message-body p{margin:0 0 var(--sp-3)}
+.pip-conversation.conv-look .pip-message.assistant .message-body>:last-child,
+.simple-pips.chat-open .pip-conversation.chat-style.conv-look .pip-message.assistant .message-body>:last-child{margin-bottom:0}
+.pip-conversation.conv-look .pip-message.assistant .answer.split{display:flex;flex-direction:column;gap:var(--sp-3)}
+.pip-conversation.conv-look .chat-time{display:none}
+.pip-conversation.conv-look .pip-message.assistant{gap:var(--sp-1)}
+.pip-conversation.conv-look .pip-message.assistant>.run-post-head{margin-bottom:var(--sp-1)}
+.pip-conversation.conv-look .pip-led .response-actions>.msg-time{display:none}
+.pip-conversation.conv-look .run-post>.pip-said{margin-top:var(--sp-3)}
+.pip-conversation.conv-look .run-post>.answer+.pip-said{margin-top:var(--sp-1)}
+.pip-conversation.conv-look .run-post>.run-post-attach:empty{display:none}
+/* What a check found: Work's list, each file Work's link; "Open report" quiet (muted, underlined). */
+.pip-said-found{margin:var(--sp-1) 0 var(--sp-3);padding-left:var(--sp-6)}
+.pip-said-found>li{overflow-wrap:anywhere}.pip-said-found>li+li{margin-top:var(--sp-1)}
+.pip-said :is(.md-link,.pip-link){display:inline;min-height:0;height:auto;margin:0;padding:0;border:0;border-radius:3px;background:transparent;color:var(--link);font:inherit;cursor:pointer;text-align:inherit;text-decoration:none;text-underline-offset:3px;overflow-wrap:anywhere}
+.pip-said :is(.md-link,.pip-link):hover:not(:disabled),.pip-said :is(.md-link,.pip-link):focus-visible{background:transparent;text-decoration:underline}
+.pip-said :is(.md-link,.pip-link):focus-visible,.pip-answered-line .pip-link:focus-visible{outline:var(--btn-ring);outline-offset:2px}
+.pip-said-found .md-link{margin-left:var(--sp-1);white-space:nowrap}
+.pip-said-verdict,.pip-said-more{color:var(--muted)}.pip-said-verdict{white-space:nowrap}
+.pip-said .pip-quiet-link,.pip-answered-line .pip-quiet-link{color:var(--muted);text-decoration:underline}
+.pip-said .pip-quiet-link:hover:not(:disabled),.pip-answered-line .pip-quiet-link:hover:not(:disabled){color:var(--text)}
+/* Work's permission card: what it would do and Not now · Allow in its head, the note under. */
+.pip-ask-card{margin-top:var(--sp-2);border:1px solid var(--border);border-radius:var(--r-lg);padding:var(--sp-3);background:var(--surface);min-width:0}
+.pip-ask-head{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2) var(--sp-2);min-width:0}
+.pip-ask-icon{flex:none;display:grid;place-items:center;width:22px;height:22px;border-radius:var(--r-sm);background:var(--surface2);color:var(--text)}
+.pip-ask-title{flex:1 1 96px;min-width:0;color:var(--text-strong);font:var(--w-reg) var(--t-chat)/1.4 var(--sans);overflow-wrap:anywhere}
+.pip-ask-btns{flex:0 0 auto;display:flex;gap:var(--sp-2);margin-left:auto}
+.pip-ask-note{margin:var(--sp-3) 0 0;color:var(--text);font:var(--w-reg) var(--t-chat)/1.62 var(--sans)}
+.pip-ask-card .dgc-card-error{margin:var(--sp-2) 0 0}
+@container (max-width:340px){.pip-ask-btns{flex:1 1 100%;margin-left:0}.pip-ask-btns>.dgc-btn{flex:1 1 0;width:auto}}
+/* Answered: Work's folded line. */
+.pip-answered{margin-top:var(--sp-2);padding:0 0 0 var(--sp-2);color:var(--muted);font:var(--w-reg) var(--t-sm)/1.45 var(--sans);min-width:0}
+.pip-answered>summary{cursor:pointer;overflow-wrap:anywhere}.pip-answered>summary:hover{color:var(--text)}
+.pip-answered>summary:focus-visible{outline:var(--btn-ring);outline-offset:3px}
+.pip-answered-more{margin:var(--sp-1) 0 0 var(--sp-3)}
+.pip-answered-line{margin:var(--sp-2) 0 0;color:var(--muted);font:var(--w-reg) var(--t-sm)/1.45 var(--sans);overflow-wrap:anywhere}
+.pip-answered-line .pip-link{display:inline;min-height:0;height:auto;padding:0;border:0;background:transparent;font:inherit;cursor:pointer}
+/* Its sub-agent's row: Work's row for a background agent. The Pip's own face, in black and white. */
+.pip-agent-row{margin-top:var(--sp-3);min-width:0;font:var(--w-reg) var(--t-sm)/1.45 var(--sans);color:var(--text)}
+.pip-agent-line{display:flex;flex-wrap:wrap;align-items:center;gap:2px 6px;min-width:0}
+.pip-agent-face{flex:none;display:inline-flex;width:18px;height:18px}
+.pip-agent-face.is-bw,.am-pip-face.is-bw{filter:grayscale(1) contrast(1.08)}
+.pip-agent-face :is(.avatar,.dgc-plush),.am-pip-face :is(.avatar,.dgc-plush){display:block;width:100%;height:100%}
+.pip-agent-face.is-live{animation:pip-agent-breathe 2.6s ease-in-out infinite}
+@keyframes pip-agent-breathe{0%,100%{filter:grayscale(1) contrast(1.08) drop-shadow(0 0 1.5px color-mix(in srgb,var(--text) 35%,transparent));opacity:.9}50%{filter:grayscale(1) contrast(1.08) drop-shadow(0 0 3.5px color-mix(in srgb,var(--text) 60%,transparent));opacity:1}}
+@media(prefers-reduced-motion:reduce){.pip-agent-face.is-live{animation:none;filter:grayscale(1) contrast(1.08) drop-shadow(0 0 2px color-mix(in srgb,var(--text) 50%,transparent))}}
+.pip-agent-name{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+.pip-agent-text{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pip-agent-time{flex:none;margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums}
+.pip-agent-actions{display:flex;flex-wrap:wrap;align-items:center;gap:2px var(--sp-1);margin:2px 0 0 18px}
+.pip-agent-act{min-height:0;height:20px;padding:0 6px;border:1px solid transparent;border-radius:var(--btn-r);background:transparent;color:var(--text);font:inherit;line-height:18px;white-space:nowrap;cursor:pointer;text-decoration:underline;text-decoration-color:var(--border-strong);text-underline-offset:3px}
+.pip-agent-act:hover:not(:disabled){border-color:var(--border-strong);background:var(--surface2)}
+.pip-agent-act:focus-visible{outline:var(--btn-ring);outline-offset:1px}
+.pip-agent-act:disabled{color:var(--muted);cursor:default}
+.pip-agent-line>.pip-agent-act{margin-right:-6px}
+@media(hover:none){.pip-agent-act{height:24px;line-height:22px}}
+.pip-agent-steps{margin:var(--sp-1) 0 0 24px;padding:0 0 0 var(--sp-3);border-left:1px solid var(--border);color:var(--muted);font:var(--w-reg) var(--t-xs)/1.5 var(--sans);list-style:none;max-height:180px;overflow:auto}
+p.pip-agent-steps{padding-block:2px}
+.pip-agent-steps>li{overflow-wrap:anywhere}.pip-agent-steps>li:last-child{color:var(--text)}
+/* After the last try: Leave it · Try again. */
+.pip-retry{display:flex;flex-wrap:wrap;gap:var(--sp-2);margin-top:var(--sp-2)}
+.pip-retry>.dgc-card-error{flex:1 1 100%;margin:0}
+/* Work's changed-files card. */
+.pip-project-card.pip-change{position:relative;margin:var(--sp-3) 0 0;padding:0;border:1px solid var(--border);border-radius:var(--r-card);background:var(--surface);overflow:visible;min-width:0;max-width:none}
+.pip-change-head{position:relative;display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2) var(--sp-3);padding:var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3);border-radius:calc(var(--r-card) - 1px) calc(var(--r-card) - 1px) 0 0;background:color-mix(in srgb,var(--surface2) 45%,transparent);color:var(--text-strong);font:var(--w-semi) var(--t-sm)/1 var(--sans)}
+.pip-change-heading{flex:1 1 auto;min-width:0;display:flex;align-items:baseline;gap:var(--sp-2)}
+.pip-change-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:inherit;line-height:1.45}
+.pip-change-totals{flex:none;display:flex;gap:6px;font:var(--w-med) var(--t-xs)/1 var(--mono);font-variant-numeric:tabular-nums}
+.pip-change-totals .add-stat{color:var(--add-text,var(--good))}
+.pip-change-actions{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-1);margin-left:auto;min-width:0}
+.pip-change-actions>.dgc-btn{width:auto;min-width:72px;padding:0 var(--sp-3);display:inline-flex;align-items:center;justify-content:center;gap:5px}
+.pip-change-actions>.dgc-btn svg{flex:none}
+.pip-change-icon{flex:none;display:inline-grid;place-items:center;width:var(--btn-h);height:var(--btn-h);min-height:0;padding:0;border:0;border-radius:var(--btn-r);background:transparent;color:var(--muted);cursor:pointer}
+.pip-change-icon:hover:not(:disabled){background:var(--surface2);color:var(--text)}
+.pip-change-icon:focus-visible{outline:var(--btn-ring);outline-offset:1px}
+.pip-change-chev{display:inline-grid;place-items:center;transition:transform var(--dur-hover) var(--ease-out)}
+.pip-change-icon[aria-expanded="false"] .pip-change-chev{transform:rotate(-90deg)}
+@media(prefers-reduced-motion:reduce){.pip-change-chev{transition:none}}
+.pip-change-menu{position:absolute;z-index:5;top:calc(100% - 4px);right:var(--sp-2);min-width:140px}
+.pip-project-card.pip-change>.pip-project-files{display:flex;flex-direction:column;gap:0;margin:0;padding:var(--sp-1) 0;border-top:1px solid var(--border);list-style:none}
+.pip-project-card.pip-change .diff{border:0;border-radius:0;background:transparent}
+.pip-project-card.pip-change .diff .diff-toggle{min-height:30px;padding:0 var(--sp-3);font-weight:var(--w-reg)}
+.pip-project-card.pip-change .diff.open .dhead{border-bottom:0}
+.pip-project-card.pip-change .diff.open>pre{margin:0 var(--sp-3) var(--sp-2);border:1px solid var(--border);border-radius:var(--r-md);background:var(--term)}
+.pip-project-card.pip-change .diff .diff-stat{font-weight:var(--w-med)}
+.pip-project-card.pip-change .diff .del-stat,.pip-change-totals .del-stat{color:var(--del-ink,var(--del-text,var(--del)))}
+.pip-project-card.pip-change>.pip-project-files[hidden]{display:none}
+.pip-change>:is(.pip-project-label,.pip-project-held,.pip-change-says,.dgc-card-error){margin:var(--sp-2) var(--sp-3)}
+.pip-change-says{color:var(--muted);font:var(--w-reg) var(--t-xs)/1.45 var(--sans)}
+.pip-change-confirm{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2);padding:var(--sp-2) var(--sp-3);border-top:1px solid var(--border);font:var(--w-reg) var(--t-sm)/1.45 var(--sans)}
+.pip-change-confirm>p{flex:1 1 180px;margin:0}.pip-change-confirm-btns{display:flex;gap:var(--sp-2);margin-left:auto}
+/* Work's sub-agents pill, in the Pip's prompt box before the model. */
+.composer-chip.agents-pill{width:auto;flex:none;display:inline-flex;align-items:center;gap:6px;padding:0 6px;border-radius:var(--btn-r);color:var(--muted);font:var(--w-reg) var(--t-sm)/1 var(--sans);font-variant-numeric:tabular-nums;white-space:nowrap}
+.composer-chip.agents-pill:hover{color:var(--text)}
+.agents-pill .agents-short{display:none}
+.agents-pill .agents-dot{box-sizing:border-box;flex:none;width:7px;height:7px;border-radius:var(--r-full);background:var(--agent-run)}
+.agents-pill[data-state="idle"] .agents-dot{background:transparent;border:1px solid var(--agent-idle)}
+@container (max-width:639px){.agents-pill .agents-text{display:none}.agents-pill .agents-short{display:inline}}
+/* Work's agent map, for this Pip: a dialog over the chat. The Pip in colour at the root; its sub-agents in black and white. */
+#agent-map-root:empty{display:none}
+.pip-agent-map,.pip-agent-card{position:fixed;inset:0;z-index:50;display:grid;place-items:center;padding:clamp(var(--sp-2),3vw,var(--sp-4))}
+.pip-agent-card{z-index:51}
+:is(.pip-agent-map,.pip-agent-card) .agent-map{--am-ground:var(--vscode-editorWidget-background,var(--surface));--am-line:var(--border-strong);--am-row-h:calc((var(--t-sm) + var(--t-xs)) * 1.35 + 16px);--am-indent:20px;
+ position:relative;display:flex;flex-direction:column;width:min(1200px,100%);min-width:0;max-height:100%;overflow:hidden;background:var(--am-ground);outline:0}
+.pip-agent-card .agent-map{width:min(560px,100%)}
+.pip-agent-map .agent-map{width:min(620px,100%)}
+.agent-map-head{flex:none;display:flex;align-items:flex-start;gap:var(--sp-2);padding:var(--sp-3) var(--sp-2) var(--sp-2) clamp(var(--sp-3),3vw,var(--sp-4))}
+.agent-map-btn{flex:none;display:inline-grid;place-items:center;width:var(--btn-h);height:var(--btn-h);min-height:0;margin-top:-4px;padding:0;border:0;border-radius:var(--btn-r);background:transparent;color:var(--muted);cursor:pointer}
+.agent-map-btn:hover{background:var(--surface2);color:var(--text)}.agent-map-btn:focus-visible{outline:var(--btn-ring);outline-offset:1px}
+.agent-map-back{margin-left:calc(-1 * var(--sp-2))}
+.agent-map-titles{flex:1 1 auto;min-width:0}
+.agent-map h2{margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-strong);font:var(--w-semi) var(--t-base)/1.35 var(--sans)}
+.agent-map-subtitle{margin:2px 0 0;color:var(--muted);font:var(--w-reg) var(--t-xs)/1.45 var(--sans);overflow-wrap:anywhere}
+.agent-map-body{flex:1 1 auto;min-height:0;overflow:auto;scrollbar-gutter:stable;padding:var(--sp-1) clamp(var(--sp-2),3vw,var(--sp-4)) var(--sp-4)}
+.agent-map .agent-dot{box-sizing:border-box;flex:none;width:7px;height:7px;border-radius:var(--r-full);background:var(--agent-idle)}
+.agent-map .agent-dot[data-state="running"]{background:var(--agent-run)}
+.agent-map .agent-dot[data-state="queued"]{background:transparent;border:1px solid var(--agent-idle)}
+.agent-map .agent-dot[data-state="failed"],.agent-map .agent-dot[data-state="stopped"]{background:var(--del)}
+.agent-map-head-dot{margin-top:6px}
+.am-tree{min-width:0;max-width:560px}.am-node,.am-self{position:relative;min-width:0}
+.agent-map .quiet-focus:focus-visible{outline:0}
+.am-children{position:relative;display:flex;flex-direction:column;gap:var(--sp-2);margin:var(--sp-2) 0 0;padding:0 0 0 var(--am-indent);list-style:none}
+.am-children>.am-node::before{content:"";position:absolute;left:calc(var(--am-indent) / -2);width:calc(var(--am-indent) / 2);top:calc(var(--am-row-h) / 2);border-top:1px solid var(--am-line)}
+.am-children>.am-node::after{content:"";position:absolute;left:calc(var(--am-indent) / -2);top:calc(-1 * var(--sp-2));bottom:0;border-left:1px solid var(--am-line)}
+.am-children>.am-node:last-child::after{bottom:auto;height:calc(var(--sp-2) + var(--am-row-h) / 2)}
+.am-row{box-sizing:border-box;display:flex;align-items:center;gap:var(--sp-2);width:100%;min-width:0;min-height:0;height:var(--am-row-h);position:relative;padding:0 var(--sp-3) 0 var(--sp-2);border:1px solid var(--border-strong);border-radius:var(--r-md);background:var(--am-ground);color:var(--text);text-align:left;font:var(--w-reg) var(--t-sm)/1.35 var(--sans)}
+button.am-row{cursor:pointer}button.am-row:hover{background:var(--surface2)}button.am-row:hover .am-meta{color:var(--muted-firm)}
+button.am-row:focus-visible{outline:var(--btn-ring);outline-offset:1px}
+.am-pip-face{flex:none;display:inline-flex;width:22px;height:22px}
+.am-text{flex:1 1 auto;min-width:0;display:grid;gap:2px}
+.am-desc,.am-meta{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.am-desc{color:var(--text)}.am-meta{color:var(--muted);font-size:var(--t-xs);font-variant-numeric:tabular-nums}
+.am-root .am-desc{color:var(--text-strong);font-weight:var(--w-semi)}
+.am-row.am-earlier{border-color:transparent;background:transparent;color:var(--muted)}
+.am-row.am-earlier:hover{background:var(--surface2);color:var(--text)}.am-earlier .am-desc{color:inherit}
+.am-earlier-chevron{flex:none;display:inline-grid;place-items:center;width:16px;transition:transform .12s ease-out}
+.am-earlier[aria-expanded="true"] .am-earlier-chevron{transform:rotate(90deg)}
+@media(prefers-reduced-motion:reduce){.am-earlier-chevron{transition:none}}
+.am-earlier-groups{margin-top:var(--sp-2);min-width:0}
+.am-earlier-groups .am-children.am-group-list{margin-top:0;padding-left:0}
+.am-earlier-groups .am-children.am-group-list>.am-node::before,.am-earlier-groups .am-children.am-group-list>.am-node::after{display:none}
+.am-card{display:flex;flex-direction:column;gap:var(--sp-3)}
+.am-card-line{margin:0;color:var(--text);font:var(--w-reg) var(--t-sm)/1.45 var(--sans);overflow-wrap:anywhere}
+.am-card-line.am-quiet{color:var(--muted)}
+.am-facts{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:var(--sp-1) var(--sp-3);margin:0;font:var(--w-reg) var(--t-xs)/1.45 var(--sans)}
+.am-facts dt{color:var(--muted)}.am-facts dd{margin:0;min-width:0;color:var(--text);overflow-wrap:anywhere}
+.am-fold{min-width:0;padding-top:var(--sp-2);border-top:1px solid var(--border)}
+.am-fold>summary{cursor:pointer;color:var(--text-strong);font:var(--w-med) var(--t-sm)/1.45 var(--sans)}
+.am-calls{display:grid;gap:var(--sp-1);margin:var(--sp-2) 0 0;padding:0;list-style:none;color:var(--text);font:var(--w-reg) var(--t-xs)/1.45 var(--sans);max-height:260px;overflow:auto}
+.am-calls>li{min-width:0;overflow-wrap:anywhere}p.am-calls{color:var(--muted)}
+.am-actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2)}
+@media(forced-colors:active){:is(.pip-agent-map,.pip-agent-card) .agent-map,.am-row,.pip-ask-card,.pip-project-card.pip-change{border-color:CanvasText}.agents-pill .agents-dot,.agent-map .agent-dot{forced-color-adjust:none;background:CanvasText;border:1px solid CanvasText}.pip-agent-face.is-bw,.am-pip-face.is-bw{filter:grayscale(1)}}

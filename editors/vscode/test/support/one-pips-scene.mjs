@@ -5,6 +5,7 @@
 // asked, fixing, ready to apply, applied by itself. The flow's fields and commands are the ones the editor expects of
 // DGC (src/pipFlow.js); DGC's side is being built, so this is what stands in for it. Not a *.test.mjs file.
 import { build } from "esbuild";
+import { readFileSync } from "node:fs";
 import { THEMES, panelHtml } from "./options-scene.mjs";
 
 const hex = (c) => c.repeat(32);
@@ -29,15 +30,20 @@ export const CHECK = "run_" + hex("1"), FIXRUN = "run_" + hex("2"), OLDER = "run
  *    sent     list_pip_sent's sites (none by default)
  *    boxes    get_pip_runner's runner.boxes ({available: true, why: ""} by default)
  *    notes    a Pip's notes (list_pip_notes; none by default)
+ *    sub      Pips API 97: a fix is a sub-agent's job (dgc/pip_agents.py). The Pip is "Tile checker" with neutral
+ *             findings; `fix` also takes "checking" (the Pip checks its work), "retry" (sent back, try 2 of 3),
+ *             "held", "asked" (after the last try), "failed" and "stopped"; fixes carry `agent`; list_pip_agents,
+ *             stop_pip_agent and retry_pip_fix answer; `earlier`: that many finished sub-agents from before
  *  Returns {answer(request) → result | undefined | {error}, state}. */
 export function makeBackend(o = {}) {
   const hex = (c) => c.repeat(32), ws = (c) => "ws_" + hex(c), pid = (c) => "pip_" + hex(c);
   const P = ws("1"), SHOP = ws("2"), GARDEN = ws("3"), LIME = ws("4");
   const CORE = pid("a"), MORNINGS = pid("b"), GST = pid("c"), ERP = pid("d"), BEDS = pid("e");
   const CHECK = "run_" + hex("1"), FIXRUN = "run_" + hex("2"), OLDER = "run_" + hex("3"), FIX = "pipfix_" + hex("1"), CHANGE = "pchange_" + hex("1"), WAIT = "pipwait_" + hex("1");
+  const sub = !!o.sub, AGENT = "pipagent_" + hex("1"), NAME = sub ? "Tile checker" : "GST watchdog";
   const now = Date.now(), ago = (minutes) => new Date(now - minutes * 60000).toISOString();
   const state = { fix: o.fix || "none", waiting: o.waiting === false ? "none" : "waiting", level: o.level || "ask", change: o.fix === "applied" ? "applied" : "pending", committed: false,
-    order: o.order || [GST, ERP, MORNINGS, BEDS], requests: [], unread: o.unread || {}, made: [], helper: 0,
+    order: o.order || [GST, ERP, MORNINGS, BEDS], requests: [], unread: o.unread || {}, made: [], helper: 0, left: false, again: 0,
     paying: o.paying || "ask", limits: o.limits === false ? null : { usd_per_day: null, max_count: null, sites: null, ...(o.limits || {}) }, spent: o.spent || 0,
     total: { usd_per_day: null, spent_today: 0, ...(o.total || {}) }, knows: {}, notes: (o.notes || []).slice() };
   const said = () => o.limits === false ? {} : { pay_limits: { ...state.limits }, spent_today: state.spent };
@@ -48,7 +54,7 @@ export function makeBackend(o = {}) {
     goal: "Help with what I ask in this chat", source_ref: "HEAD", source_policy: space === P ? { mode: "personal" } : { mode: "current_tree", exclusions: "safe_source_v1" }, schedule: null, proposals: [], pending_review_count: 0,
     model_choice: { mode: "default" }, created_at: "2026-11-01T09:00:00Z", updated_at: "2026-11-01T09:00:00Z", ...extra });
   const pips = o.empty ? [] : [pip(CORE, P, "Core", "core"), pip(MORNINGS, P, "Mornings", "quill"),
-    pip(GST, LIME, "GST watchdog", "rook", { goal: "Check the GST code every evening at 8", schedule: { type: "daily", time: "20:00", timezone: "Asia/Kolkata" }, ...(o.branch ? { source_ref: o.branch, source_policy: { mode: "committed_only" } } : {}) }),
+    pip(GST, LIME, NAME, "rook", { goal: sub ? "Check the tile shop's totals every evening at 8" : "Check the GST code every evening at 8", schedule: { type: "daily", time: "20:00", timezone: "Asia/Kolkata" }, ...(o.branch ? { source_ref: o.branch, source_policy: { mode: "committed_only" } } : {}) }),
     pip(ERP, LIME, "ERP daily audit", "scout"), pip(BEDS, GARDEN, "Bed planner", "scout")];
   const folders = [
     { folder: "/home/me/code/shop", name: "shop", here: true, exists: true, sessions: 2, pips: 0, workspace_id: SHOP, updated_at: ago(30) },
@@ -58,20 +64,51 @@ export function makeBackend(o = {}) {
   const runner = { runner_id: "r", status: "running", online: true, paused: false, counts: { queued: 0, running: 0, cancelling: 0 }, boxes: { available: true, why: "", ...(o.boxes || {}) } };
   const controls = { version: 1, mode: "read_only", options: { context_size: 8192, thinking: "off" }, options_source: "last_message", inherited_context_size: 1048576, effective_context_size: 8192,
     context_min: 2048, context_max: 32768, thinking_levels: ["off", "low", "medium", "high", "xhigh"], reasoning_control: "provider_dependent", reasoning_note: "n", context_note: "n" };
-  const findings = [
+  const findings = sub ? [
+    { id: "f1", title: "Order total ignores the discount", severity: "high", path: "totals.py", line: 3, state: "new" },
+    { id: "f2", title: "Tax is rounded to one decimal place", severity: "medium", path: "tax.py", line: 4, state: "new" },
+    { id: "f3", title: "Adding the same tile twice makes two cart rows", severity: "medium", path: "cart.py", line: 2, state: "new" }] : [
     { id: "f1", title: "E-way bill sent without transporter ID", severity: "high", path: "billing/eway.py", line: 212, state: "new" },
     { id: "f2", title: "Round-off differs from the invoice PDF", severity: "medium", path: "billing/billing_routes.py", line: 88, state: "new" },
     { id: "f3", title: "Retry never stops on error 4012", severity: "medium", path: "gst/gst_client.py", line: 140, state: "back" }];
-  const post = { run_id: CHECK, pip_id: GST, name: "GST watchdog", pip_type: "rook", kind: "audit", trigger: "schedule", text: "x", outcome: "findings", posted_at: ago(9), finished_at: ago(9),
-    total: 3, counts: { critical: 0, high: 1, medium: 2, low: 0 }, found: { new: 2, back: 1, still: 0 }, findings, title: "Evening check",
-    said: o.fix === "applied"
+  const post = { run_id: CHECK, pip_id: GST, name: NAME, pip_type: "rook", kind: "audit", trigger: "schedule", text: "x", outcome: "findings", posted_at: ago(9), finished_at: ago(9),
+    total: 3, counts: { critical: 0, high: 1, medium: 2, low: 0 }, found: sub ? { new: 3, back: 0, still: 0 } : { new: 2, back: 1, still: 0 }, findings, title: "Evening check",
+    said: sub ? "Tonight's check found 3 things in billing and the cart." : o.fix === "applied"
       ? "Tonight's check found 3 things and I fixed 2 of them in your folder.\n\n---\n\nE-way bills over ₹50,000 were created without the transporter ID, so the portal rejected them: that is why 4 were stuck. They carry it now. The round-off also matches the PDF. Tests for both pass.\n\n---\n\nI left the retry loop alone: that one is your call (it would also stop the nightly re-send)."
       : "Tonight's check found 3 things. Two are new, and one is back from Tuesday.\n\n---\n\nThe one that matters: e-way bills over ₹50,000 are created without the transporter ID, so the portal rejects them. That is why 4 are stuck since Monday. I'm sure of this one." };
-  const older = { run_id: OLDER, pip_id: GST, name: "GST watchdog", pip_type: "rook", kind: "audit", trigger: "schedule", text: "x", outcome: "clear", posted_at: ago(1449), finished_at: ago(1449), total: 0, counts: {}, findings: [], title: "Evening check" };
+  const older = { run_id: OLDER, pip_id: GST, name: NAME, pip_type: "rook", kind: "audit", trigger: "schedule", text: "x", outcome: "clear", posted_at: ago(1449), finished_at: ago(1449), total: 0, counts: {}, findings: [], title: "Evening check" };
   const run = (id, at, extra = {}) => ({ id, pip_id: GST, workspace_id: LIME, status: "succeeded", created_at: at, started_at: at, finished_at: new Date(Date.parse(at) + 134000).toISOString(),
     manifest: { run_kind: "audit", job_version: 1, trigger: "schedule", model: "qwen3-coder:480b" }, result: { usage: { input_tokens: 41200, output_tokens: 3100 } }, ...extra });
   const runs = [run(CHECK, ago(11)), run(OLDER, ago(1451), { manifest: { run_kind: "audit", job_version: 1, trigger: "schedule" }, result: null, started_at: null, finished_at: null })];
+  // ---- Pips API 97: its sub-agent (dgc/pip_agents.py view) ----
+  const AGENT_STATE = { running: "working", checking: "checking", retry: "working", ready: "merged", applied: "merged", held: "held", asked: "asked", failed: "failed", stopped: "stopped" };
+  const NOTES = "an empty cart still breaks the total";
+  const agentNow = () => {
+    const st = state.fix === "asked" && state.left ? "left" : AGENT_STATE[state.fix];
+    if (!st) return null;
+    const tries = state.fix === "asked" ? 3 : state.fix === "retry" || o.tries === 2 ? 2 : 1, live = ["working", "checking"].includes(st);
+    return { id: AGENT, pip_id: GST, kind: "fix", fix_id: FIX, title: "Fix 3 things in lime_tiles", state: st, try: tries, tries: 3, run_id: FIXRUN, run_status: st === "working" ? "running" : st === "failed" ? "failed" : st === "stopped" ? "cancelled" : "succeeded",
+      started_at: new Date(now - 42000).toISOString(), model: "qwen3-coder:480b", held: st === "held" ? ["cart.py"] : [], notes: tries > 1 ? NOTES : "",
+      created_at: new Date(now - (live ? 42000 : 132000)).toISOString(), updated_at: new Date(now - (live ? 1000 : 0)).toISOString() };
+  };
+  const earlierAgents = () => Array.from({ length: o.earlier || 0 }, (_, i) => ({ id: "pipagent_" + String(i + 2).repeat(32).slice(0, 32), pip_id: GST, kind: "fix", fix_id: "pipfix_" + String(i + 2).repeat(32).slice(0, 32),
+    title: i ? "Fix 1 thing in lime_tiles" : "Fix the stock count in lime_tiles", state: "merged", try: 1, tries: 3, run_id: "run_" + String(i + 5).repeat(32).slice(0, 32), run_status: "succeeded", started_at: ago(1500 + i * 60),
+    model: "qwen3-coder:480b", held: [], notes: "", created_at: ago(1500 + i * 60), updated_at: ago(1498 + i * 60) }));
+  const SUB_SAID = { ready: "Done. I checked the sub-agent's change: the discount and the cart are fixed and the tests pass. I left tax rounding alone; your tests expect one decimal.",
+    applied: "Done. I checked the sub-agent's change and applied it to your folder: the discount and the cart are fixed and the tests pass. I left tax rounding alone; your tests expect one decimal.",
+    held: "Your copy of cart.py changed while its sub-agent worked, so it didn't overwrite them.", asked: "It tried 3 times and it isn't right yet: " + NOTES,
+    failed: "Its sub-agent stopped with an error: the model stopped answering", stopped: "Its sub-agent was stopped. Nothing reached your copy." };
+  const subFix = () => {
+    if (state.fix === "none") return [];
+    const agent = agentNow(), live = ["running", "checking", "retry"].includes(state.fix), done = ["ready", "applied"].includes(state.fix);
+    return [{ id: FIX, run_id: CHECK, state: live ? "running" : state.fix === "asked" ? "unchanged" : state.fix, count: 3, digest: "d1-" + state.fix, asked_at: ago(8),
+      ...(state.fix === "ask" ? { message: "Want me to fix these three?" } : { decided_at: ago(7) }), by: o.level === "full" ? "pip-level:full" : o.level === "approve" ? "pip-level:approve" : "you",
+      ...(agent ? { fix_run_id: FIXRUN, started_at: agent.started_at, agent } : {}), helpers: live ? 1 : 0, steps: [],
+      ...(SUB_SAID[state.fix] ? { message: SUB_SAID[state.fix] } : {}),
+      ...(done ? { change_id: CHANGE, tests: "passed", findings: [{ ...findings[0], verdict: "fixed" }, { ...findings[1], verdict: "not_a_defect", why: "Your tests expect one decimal." }, { ...findings[2], verdict: "fixed" }] } : {}) }];
+  };
   const fixNow = () => {
+    if (sub) return subFix();
     if (state.fix === "none") return [];
     const live = state.fix === "running";
     const done = ["ready", "applied"].includes(state.fix);
@@ -83,9 +120,9 @@ export function makeBackend(o = {}) {
   };
   const waitingNow = () => state.waiting === "none" ? [] : [{ id: WAIT, title: "GSP wallet is empty", blocks: "filings are blocked", since: ago(4400), state: state.waiting, can_undo: state.waiting === "dismissed" }];
   const change = () => ({ id: CHANGE, workspace_id: LIME, name: "lime_tiles", status: state.change, digest: "c1", more: 0, created_at: ago(3), updated_at: ago(2), tests: "passed",
-    files: [{ path: "billing/eway.py", change: "modified", plus: 12, minus: 1 }, { path: "billing/billing_routes.py", change: "modified", plus: 5, minus: 3 }],
-    result: state.change === "applied" ? { applied: ["billing/eway.py", "billing/billing_routes.py"], held_back: [], ...(state.fix === "applied" ? { by: "pip-level:full" } : {}) }
-      : state.change === "undone" ? { restored: ["billing/eway.py", "billing/billing_routes.py"], kept: [] } : null,
+    files: sub ? [{ path: "totals.py", change: "modified", plus: 6, minus: 2 }, { path: "cart.py", change: "modified", plus: 9, minus: 3 }] : [{ path: "billing/eway.py", change: "modified", plus: 12, minus: 1 }, { path: "billing/billing_routes.py", change: "modified", plus: 5, minus: 3 }],
+    result: state.change === "applied" ? { applied: sub ? ["totals.py", "cart.py"] : ["billing/eway.py", "billing/billing_routes.py"], held_back: [], ...(state.fix === "applied" ? { by: "pip-level:full" } : {}) }
+      : state.change === "undone" ? { restored: sub ? ["totals.py", "cart.py"] : ["billing/eway.py", "billing/billing_routes.py"], kept: [] } : null,
     ...(state.change === "applied" ? { git: { committed: state.committed } } : {}) });
   const NAMES = { ask: "Ask me first", approve: "Approve for me", full: "Do it all" };
   const SAYS = { ask: "Asks before every new site, submit and send from its computer, and before every handoff. What it changed in its copy of your folder waits for you as a card.",
@@ -106,7 +143,14 @@ export function makeBackend(o = {}) {
     const list = id === GST && o.own ? [
       { id: "msg_" + hex("1"), pip_id: GST, workspace_id: LIME, role: "user", text: "check the GST code every evening at 8", run_id: "run_" + hex("8"), model: "m", created_at: ago(2000), status: "succeeded" },
       { id: "msg_" + hex("2"), pip_id: GST, workspace_id: LIME, role: "assistant", text: "Done. I'll check the GST code every evening at 8.", run_id: "run_" + hex("8"), model: "m", created_at: ago(1999), status: "succeeded",
-        changes: [{ id: "own_" + hex("1"), kind: "job", fields: ["schedule"], after: { schedule: { type: "daily", time: "20:00" } }, status: "applied" }] }] : [];
+        changes: [{ id: "own_" + hex("1"), kind: "job", fields: ["schedule"], after: { schedule: { type: "daily", time: "20:00" } }, status: "applied" }] }]
+      // `talk`: you wrote to it while its sub-agent worked, and it answered. `checkTurn`: its check of the sub-agent's
+      // work, as DGC keeps it: DGC's message (no bubble) and the Pip's reply with its FINDING and RESULT lines.
+      : id === GST && sub ? [
+        ...(o.checkTurn ? [{ id: "msg_" + hex("5"), pip_id: GST, workspace_id: LIME, role: "user", intro: true, text: "This message is from DGC, not the user. A sub-agent you handed a job to has finished try 1 of 3. Check its work before anything reaches your copy.", run_id: "run_" + hex("7"), model: "m", created_at: ago(4), status: "succeeded" },
+          { id: "msg_" + hex("6"), pip_id: GST, workspace_id: LIME, role: "assistant", text: "Done. I checked the sub-agent's change.\nFINDING 1: fixed — the discount is applied\nRESULT: PASS", run_id: "run_" + hex("7"), model: "m", created_at: ago(3), status: "succeeded" }] : []),
+        ...(o.talk ? [{ id: "msg_" + hex("3"), pip_id: GST, workspace_id: LIME, role: "user", text: "Also look at the shipping rules tomorrow", run_id: "run_" + hex("9"), model: "m", created_at: ago(2), status: "succeeded" },
+          { id: "msg_" + hex("4"), pip_id: GST, workspace_id: LIME, role: "assistant", text: "Will do. I'll go through the shipping rules after tomorrow evening's check and tell you here.", run_id: "run_" + hex("9"), model: "m", created_at: ago(1), status: "succeeded" }] : [])] : [];
     return { pip_id: id, workspace_id: space, messages: list, next_before_id: null, active_run: null, history_context_omitted_count: 0, chat_controls: controls };
   };
   const listed = (list, r) => { const q = (r.query || "").toLowerCase(), hit = q ? list.filter((x) => x.name.toLowerCase().includes(q)) : list; return { pips: hit, total: hit.length, next_offset: null }; };
@@ -171,6 +215,13 @@ export function makeBackend(o = {}) {
     decide_pip_fix: (r) => { state.fix = r.allow ? "running" : "declined"; return { fix: fixNow()[0] }; },
     start_pip_work_helper: () => { state.helper++; return { asks: state.level !== "full" }; },
     answer_pip_waiting: (r) => { state.waiting = { done: "done", later: "later", not_a_problem: "dismissed", undo: "waiting" }[r.answer]; return { waiting: waitingNow() }; },
+    // ---- its sub-agents (Pips API 97), and the one command still to come from DGC (retry_pip_fix) ----
+    list_pip_agents: (r) => ({ agents: r.pip_id === GST && sub ? [agentNow(), ...earlierAgents()].filter(Boolean) : [], slots: 1 }),
+    stop_pip_agent: () => { state.fix = "stopped"; return { agent: agentNow() }; },
+    retry_pip_fix: (r) => { if (r.again) { state.fix = "running"; state.again++; } else state.left = true; return { fix: fixNow()[0] }; },
+    list_pip_run_activity: (r) => r.run_id !== FIXRUN ? undefined : { run_id: FIXRUN, pip_id: GST, workspace_id: LIME, next_cursor: Math.max(r.after || 0, 3), has_more: false, history_may_be_truncated: false, retention_limit: 500, retention_scope: "workspace",
+      events: [{ seq: 1, event_type: "pip_run_started", payload: {} }, { seq: 2, event_type: "pip_run_progress", payload: { kind: "tool_call", tool: "edit_file", path: "totals.py" } },
+        { seq: 3, event_type: "pip_run_progress", payload: { kind: "progress", state: "tool", message: "Running the tests" } }].filter((e) => e.seq > (r.after || 0)).map((e) => ({ ...e, run_id: FIXRUN, pip_id: GST, workspace_id: LIME, created_at: ago(0) })) },
     cancel_pip_run: () => { state.fix = "stopped"; return { run: { id: FIXRUN, status: "cancelling" } }; },
     list_pip_reply_stats: () => ({ stats: [] }), get_pip_chat_context: () => undefined,
   };
@@ -188,9 +239,9 @@ export async function pipsBundle() {
 
 /** The Pips view in real Chromium, on the stand-in DGC. `where`: "side" (the side bar's real page, the view in its
  *  shadow root) or "tab" (the view as an editor tab). `scene`: makeBackend's options. `api`: the Pips API it says. */
-export async function openOnePips(browser, { width = 300, height = 760, theme = "dark-modern", where = "side", scene = {}, api = 96, scale = 1, saved = undefined } = {}) {
+export async function openOnePips(browser, { width = 300, height = 760, theme = "dark-modern", where = "side", scene = {}, api = 96, scale = 1, saved = undefined, touch = false, faces = false } = {}) {
   const { html, mainJs, markdownJs } = panelHtml(), pips = await pipsBundle();
-  const context = await browser.newContext({ viewport: { width, height }, reducedMotion: "reduce", deviceScaleFactor: scale });
+  const context = await browser.newContext({ viewport: { width, height }, reducedMotion: "reduce", deviceScaleFactor: scale, ...(touch ? { hasTouch: true } : {}) });
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
@@ -198,6 +249,8 @@ export async function openOnePips(browser, { width = 300, height = 760, theme = 
   const kind = theme.startsWith("light") ? "vscode-light" : "vscode-dark";
   await page.route("https://dgc.test/**", (r) => r.fulfill({ contentType: "text/html", body: where === "tab"
     ? `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${tokens}${pips.css}</style></head><body class="${kind}"><main id="app"></main><div id="review-root"></div></body></html>` : html }));
+  // `faces`: the Pips' plush bodies are served (pictures, and a test that reads a face), as the extension serves them.
+  if (faces) await page.route("**/plush-bodies.webp", (r) => r.fulfill({ contentType: "image/webp", body: readFileSync(new URL("../../media/pips/plush-bodies.webp", import.meta.url)) }));
   await page.goto("https://dgc.test/panel");
   if (where !== "tab") { await page.addStyleTag({ content: tokens }); await page.evaluate((k) => document.body.classList.add(k), kind); }
   await page.evaluate(([mjs, mdjs, pjs, pcss, tabbed, source, scene, saved]) => {

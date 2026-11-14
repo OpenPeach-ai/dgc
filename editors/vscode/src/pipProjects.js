@@ -153,8 +153,12 @@ const reasons = (label, list, esc) => list.length ? `<p class="pip-project-label
  *   confirm  Discard was pressed: the card asks before the Pip's work in its copy goes
  *   note   one line said in the card (the Pip changed more since you looked); error: what went wrong
  */
-export function projectCardMarkup(change, { esc, open = new Set(), diffs = new Map(), busy = '', off = false, confirm = false, note = '', error = '', one = false, canCommit = false } = {}) {
+export function projectCardMarkup(change, { esc, open = new Set(), diffs = new Map(), busy = '', off = false, confirm = false, note = '', error = '', one = false, canCommit = false, look = '', folded = false, menu = false } = {}) {
   const id = esc(change.id), name = oneLine(change.name), hold = off || busy ? ' disabled' : '';
+  // `look: "work"` (a Pip's chat as a conversation, Pips API 97): a change that waits, or is in your folder, is drawn
+  // as Work's changed-files card; what was undone, discarded or not applied keeps its own words below.
+  if (look === 'work' && (change.status === 'pending' || (!['discarded', 'undone'].includes(change.status) && ((change.result || {}).applied || []).length)))
+    return workCardMarkup(change, { esc, open, diffs, busy, off, confirm, note, error, canCommit, folded, menu });
   const box = (state, label, inner) => `<section class="dgc-card pip-project-card" data-project-change="${id}" data-state="${state}" role="group" aria-label="${esc(label)}">${inner}</section>`;
   const wrong = error ? `<p class="dgc-card-error" role="alert">${esc(error)}</p>` : '';
   const r = change.result || {};
@@ -207,6 +211,43 @@ export function projectCardMarkup(change, { esc, open = new Set(), diffs = new M
   return box('pending', one ? `Changes for ${name}` : `Changes to ${name}`,
     head(one ? `Changes for ${name}` : `Changes to ${name}`, `${plural(total, 'file')}${plus || minus ? ` · +${plus.toLocaleString('en-US')} −${minus.toLocaleString('en-US')}` : ''}${tested}`, esc)
     + `<ul class="pip-project-files" aria-label="Files changed">${rows}</ul>${wrong}${actions}`);
+}
+
+const WORK_ICON = {
+  more: '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1.1"/><circle cx="8" cy="8" r="1.1"/><circle cx="12.5" cy="8" r="1.1"/></svg>',
+  fold: '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3.5 6 4.5 4.5L12.5 6"/></svg>',
+  review: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M4 1.8h5.5L12.5 5v9.2H4Z M9.3 1.8V5h3.2M6 8h4.5M6 10.5h4.5"/></svg>',
+};
+/** Work's changed-files card for a Pip's change (media/main.js turnSummaryCard): "Edited 2 files" +15 −5, its files,
+ *  and in its head More (Discard) · the fold · Review · Apply; once in your folder, "Applied to your folder" with
+ *  Review · Undo (and Commit these files in a Git project). `folded`: its files are folded away; `menu`: More is open. */
+function workCardMarkup(change, { esc, open, diffs, busy, off, confirm, note, error, canCommit, folded, menu }) {
+  const id = esc(change.id), name = oneLine(change.name), hold = off || busy ? ' disabled' : '', r = change.result || {}, pending = change.status === 'pending';
+  const files = change.files, total = files.length + (change.more || 0), applied = (r.applied || []).length, held = r.held_back || [];
+  const plus = files.reduce((n, f) => n + (f.plus || 0), 0), minus = files.reduce((n, f) => n + (f.minus || 0), 0);
+  const git = record(change.git) ? change.git : null, self = r.by === 'pip-level:full';
+  const title = pending ? `Edited ${plural(total, 'file')}` : 'Applied to your folder', listId = `pip-change-files-${domId(change.id)}`;
+  const rows = files.map(f => fileRow(change, f, { esc, open, diffs, off })).join('')
+    + (change.more ? `<li class="pip-project-more">and ${esc(plural(change.more, 'more file'))}.</li>` : '');
+  const says = pending ? [change.tests === 'passed' ? 'Tests passed in its copy' : change.tests === 'failed' ? 'Tests failed in its copy' : '', 'Not in your folder yet'].filter(Boolean).join(' · ')
+    : [plural(applied, 'file'), self ? 'applied by itself at Do it all' : '', git ? (git.committed === true ? 'committed' : 'not committed') : ''].filter(Boolean).join(' · ');
+  const fold = `<button type="button" class="pip-change-icon" data-change-fold="${id}" aria-expanded="${!folded}" aria-controls="${listId}" aria-label="${folded ? 'Show the files' : 'Hide the files'}" title="${folded ? 'Show the files' : 'Hide the files'}"><span class="pip-change-chev" aria-hidden="true">${WORK_ICON.fold}</span></button>`;
+  const review = `<button type="button" class="dgc-btn pip-change-review" data-project-review="${id}"${hold} title="See what changed in each file">${WORK_ICON.review}<span>Review</span></button>`;
+  const actions = pending
+    ? `<button type="button" class="pip-change-icon" id="pip-change-menu-${id}" data-change-menu="${id}" aria-haspopup="menu" aria-expanded="${menu}" aria-label="More" title="More: Discard"${hold}>${WORK_ICON.more}</button>${fold}${review}`
+      + `<button type="button" class="dgc-btn primary" data-project-apply="${id}"${hold} title="Put these changes in ${esc(name)}">${busy === 'apply' ? 'Applying…' : 'Apply'}</button>`
+    : `${fold}${review}<button type="button" class="dgc-btn" data-project-undo="${id}"${hold} title="Put back what it changed, where you haven’t changed it since">${busy === 'undo' ? 'Undoing…' : 'Undo'}</button>`
+      + (canCommit && git && git.committed !== true ? `<button type="button" class="dgc-btn pip-project-commit" data-project-commit="${id}"${hold} title="Commit only these files to ${esc(name)}">${busy === 'commit' ? 'Committing…' : 'Commit these files'}</button>` : '');
+  const more = menu && pending ? `<div class="dgc-menu pip-change-menu" role="menu" aria-label="More"><button type="button" role="menuitem" class="dgc-menu-row" data-project-discard="${id}"${hold}><span class="dgc-menu-words"><span class="dgc-menu-label">Discard</span></span></button></div>` : '';
+  const asks = confirm && pending ? `<div class="pip-change-confirm" role="alert"><p>${esc(DISCARD_ASKS)}</p><div class="pip-change-confirm-btns"><button type="button" class="dgc-btn" data-project-keep="${id}"${hold}>Keep</button>`
+    + `<button type="button" class="dgc-btn danger" data-project-discard-yes="${id}"${hold}>${busy === 'discard' ? 'Discarding…' : 'Discard'}</button></div></div>` : '';
+  return `<section class="pip-project-card pip-change" data-project-change="${id}" data-state="${esc(change.status)}" role="group" aria-label="${esc(pending ? `Changes for ${name}` : `Changed in ${name}`)}">`
+    + `<div class="pip-change-head"><div class="pip-change-heading"><strong class="pip-change-title">${esc(title)}</strong>`
+    + (plus || minus ? `<span class="pip-change-totals"><span class="add-stat">+${plus.toLocaleString('en-US')}</span> <span class="del-stat">−${minus.toLocaleString('en-US')}</span></span>` : '') + '</div>'
+    + `<div class="pip-change-actions">${actions}</div>${more}</div>`
+    + `<ul class="pip-project-files" id="${listId}" aria-label="Files changed"${folded ? ' hidden' : ''}>${rows}</ul>`
+    + reasons(held.length === 1 ? '1 file was held back' : `${held.length} files were held back`, held, esc)
+    + `<p class="pip-change-says">${esc(says)}</p>${note ? `<p class="pip-change-says" role="status">${esc(note)}</p>` : ''}${error ? `<p class="dgc-card-error" role="alert">${esc(error)}</p>` : ''}${asks}</section>`;
 }
 
 /** A Pip without a computer was given a project: it is told to get one first, with the button that adds it. */

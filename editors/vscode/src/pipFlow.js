@@ -45,6 +45,30 @@ function finding(f) {
     found: FOUND.includes(f.state) ? f.state : '', verdict: VERDICTS.includes(f.verdict) ? f.verdict : 'open', why: text(f.why, 400) ? f.why : '',
     severity: ['critical', 'high', 'medium', 'low'].includes(f.severity) ? f.severity : ''};
 }
+/** A Pip's sub-agent as DGC lists it (Pips API 97, dgc/pip_agents.py view), checked; null for one this editor can't read.
+ *  queued, working: it works · check_due, checking: its Pip checks its work · retry_due: sent back · merged: its change
+ *  is the Pip's now · held: the Pip's copy changed the same files · asked: after the last try, the Pip asks · left:
+ *  you said leave it · failed · stopped. */
+export const AGENT_API = 97;
+export const AGENT_STATES = ['queued', 'working', 'check_due', 'checking', 'retry_due', 'merged', 'held', 'asked', 'left', 'failed', 'stopped'];
+export const AGENT_LIVE = ['queued', 'working', 'check_due', 'checking', 'retry_due'];
+const AGENT = /^pipagent_[a-f0-9]{32}$/, PIP = /^pip_[a-f0-9]{32}$/;
+export function agentView(a, pip = '') {
+  if (!record(a) || !AGENT.test(String(a.id || '')) || !AGENT_STATES.includes(a.state) || !words(a.title, 200)
+    || (pip && a.pip_id !== pip) || (a.pip_id !== undefined && !PIP.test(String(a.pip_id)))
+    || (a.fix_id !== undefined && a.fix_id !== null && !FIX.test(String(a.fix_id)))
+    || (a.run_id !== undefined && a.run_id !== null && !RUN.test(String(a.run_id)))) return null;
+  const n = v => Number.isSafeInteger(v) && v >= 0 && v <= 99 ? v : 0;
+  return {id: a.id, kind: text(a.kind, 40) ? a.kind : '', fix_id: a.fix_id || '', title: a.title.trim(), state: a.state, try: Math.max(1, n(a.try)), tries: Math.max(1, n(a.tries) || 3),
+    run_id: a.run_id || '', started_at: time(a.started_at) ? a.started_at : '', created_at: time(a.created_at) ? a.created_at : '', updated_at: time(a.updated_at) ? a.updated_at : '',
+    model: text(a.model, 200) ? a.model : '', notes: text(a.notes, 2000) ? a.notes.trim() : '',
+    held: Array.isArray(a.held) ? a.held.filter(h => words(h, 4096)).slice(0, 50) : []};
+}
+/** list_pip_agents, checked: {agents (newest first), slots}. */
+export function agentsPage(value, pip) {
+  if (!record(value) || !Array.isArray(value.agents) || value.agents.length > 200) throw new Error('This Pip’s sub-agents didn’t load. Open the chat again.');
+  return {agents: value.agents.map(a => agentView(a, pip)).filter(Boolean), slots: Number.isSafeInteger(value.slots) && value.slots > 0 ? value.slots : 1};
+}
 function fix(f) {
   if (!record(f) || !FIX.test(String(f.id || '')) || !FIX_STATES.includes(f.state) || !count(f.count) || !words(f.digest, 128)
     || (f.run_id !== undefined && f.run_id !== null && !RUN.test(String(f.run_id)))
@@ -55,7 +79,7 @@ function fix(f) {
   return {id: f.id, state: f.state, count: f.count, digest: f.digest, run_id: f.run_id || '', fix_run_id: f.fix_run_id || '', change_id: f.change_id || '',
     asked_at: time(f.asked_at) ? f.asked_at : '', decided_at: time(f.decided_at) ? f.decided_at : '', started_at: time(f.started_at) ? f.started_at : '',
     by: text(f.by, 40) ? f.by : '', helpers: count(f.helpers) ? f.helpers : 0, tests: ['passed', 'failed'].includes(f.tests) ? f.tests : '',
-    message: text(f.message, 600) ? f.message : '', helper: ['asks', 'running', 'done'].includes(f.helper) ? f.helper : '',
+    message: text(f.message, 600) ? f.message : '', agent: f.agent === undefined || f.agent === null ? null : agentView(f.agent), helper: ['asks', 'running', 'done'].includes(f.helper) ? f.helper : '',
     findings: (f.findings || []).map(finding).filter(Boolean),
     steps: (f.steps || []).filter(s => record(s) && words(s.text, 200) && STEP_STATES.includes(s.state)).map(s => ({text: s.text.trim(), state: s.state}))};
 }
