@@ -522,8 +522,9 @@ test("the cards act: Quick start, a session's row, New, a folder's tile and New 
     // Clock: another city's time beside the local one, from every time zone there is (found by typing).
     assert.match(await p.locator(sel("clock")).innerText(), /Tokyo/);
     await p.click(`${sel("clock")} input.hc-zone`); await p.keyboard.type("london"); await x.rest(150); await p.keyboard.press("ArrowDown"); await p.keyboard.press("Enter"); await x.rest(300);
-    assert.equal((await x.host()).settings.clock.zone, "Europe/London");
-    assert.match(await p.locator(sel("clock")).innerText(), /London/);
+    // (Since 14 Nov the field adds a zone beside the ones there: Tokyo stays, London joins it.)
+    assert.deepEqual((await x.host()).settings.clock.zones, ["Asia/Tokyo", "Europe/London"]);
+    assert.match(await p.locator(sel("clock")).innerText(), /Tokyo[\s\S]*London/);
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
 });

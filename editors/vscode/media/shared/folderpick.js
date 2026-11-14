@@ -19,6 +19,10 @@
 // or path; Down goes to the folders, Enter takes the first one found, Escape clears what was typed, then closes). Its
 // ground is always an opaque colour: a theme whose input background is see-through (Cursor's dark themes) let the page
 // under the menu show through it.
+// A row's pin (a Work folder on the dock, 13 Nov; a button of its own since 14 Nov): beside its row, never inside it (a
+// button can't hold a button), over the room the row keeps for it. Right from a row goes to its pin, Left back; Up and
+// Down from a pin move on from its row. (The menu's first line that pinned the chosen folder went on 14 Nov: each
+// row's own pin does it.)
 (function () {
   "use strict";
   const root = typeof window !== "undefined" ? window : globalThis;
@@ -322,8 +326,8 @@
    *   pin        { on(folder), toggle(folder) }: each folder's row has a pin, shown while the row is pointed at (and kept
    *              in sight, filled, while the folder is on the dock). A click on it pins or unpins the folder and chooses
    *              nothing; the page says what is pinned again with repin(). (Asked 13 Nov: a Work folder on the dock.)
-   *              With one folder chosen, the menu's first line is "Pin <folder> to the dock" (or "Unpin <folder> from
-   *              the dock"): a row like the others, reached by the keyboard as they are; it too leaves the menu open.
+   *              By the keyboard: Right from a folder's row goes to its pin (a button, named for the folder), Enter or
+   *              Space presses it, Left goes back to the row.
    */
   function open(button, { rows = [], choice = "", all = true, add = false, goneOff = false, onChoose, onAdd, keyboard = false, label = "Project Folder", trigger, pin = null, allLabel = ALL, lead = [] } = {}) {
     close(false, true);
@@ -335,22 +339,22 @@
     box.className = "dgc-menu dgc-pop dgc-folder-menu"; box.setAttribute("role", "menu"); box.setAttribute("aria-label", label);
     const icon = (name) => `<span class="dgc-menu-icon dgc-folder-mark" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16">${MARKS[name]}</svg></span>`;
     const pinned = (folder) => { try { return !!pin?.on?.(folder); } catch { return false; } };
-    // (Inside the row's own button, so it is a span that acts as one: a pointer's way to pin. The keyboard pins from the Work page.)
-    const pinHtml = (folder, name, gone) => (pin && folder && (!gone || pinned(folder)) ? ((on) => `<span class="dgc-folder-pin" role="button" data-folder-pin="${esc(folder)}" data-folder-name="${esc(name)}" aria-pressed="${on}" title="${on ? "Unpin from the dock" : "Pin to the dock"}" aria-label="${on ? "Unpin from the dock" : "Pin to the dock"}: ${esc(name)}">${PIN(on)}</span>`)(pinned(folder)) : "");
+    // A button beside the row's own (a button can't hold a button), drawn over the room the row keeps for it at its end.
+    // The keyboard reaches it with Right from its row (the menu's rows are one Tab stop, so it is out of the Tab order).
+    const pins = (folder, gone) => !!(pin && folder && (!gone || pinned(folder)));
+    const pinHtml = (folder, name) => ((on) => `<button type="button" class="dgc-folder-pin" tabindex="-1" data-folder-pin="${esc(folder)}" data-folder-name="${esc(name)}" aria-pressed="${on}" title="${on ? "Unpin from the dock" : "Pin to the dock"}" aria-label="${on ? "Unpin from the dock" : "Pin to the dock"}: ${esc(name)}">${PIN(on)}</button>`)(pinned(folder));
     const leading = (Array.isArray(lead) ? lead : []).filter((r) => r && typeof r.value === "string" && r.value && typeof r.name === "string" && r.name);
-    const line = (folder, name, sub, note, checked, off, gone, plain = false) => `<button type="button" role="menuitemradio" class="dgc-menu-row dgc-folder-row${sub ? " dgc-menu-row-sub" : ""}${checked ? " is-selected" : ""}"`
-      + ` data-folder="${esc(folder)}" aria-checked="${checked ? "true" : "false"}"${off ? " disabled" : ""}>${folder && !plain ? `<span class="dgc-menu-icon dgc-folder-mark" aria-hidden="true">${folderMark(folder)}</span>` : icon("layers")}<span class="dgc-menu-words"><span class="dgc-menu-label">${esc(name)}</span>${sub ? `<span class="dgc-menu-sub">${sub}</span>` : ""}</span>`
-      + (note ? `<span class="dgc-folder-note">${esc(note)}</span>` : "") + (plain ? "" : pinHtml(folder, name, gone)) + CHECK + "</button>";
+    const line = (folder, name, sub, note, checked, off, gone, plain = false) => { const pinning = !plain && pins(folder, gone);
+      const row = `<button type="button" role="menuitemradio" class="dgc-menu-row dgc-folder-row${sub ? " dgc-menu-row-sub" : ""}${checked ? " is-selected" : ""}"`
+        + ` data-folder="${esc(folder)}" aria-checked="${checked ? "true" : "false"}"${off ? " disabled" : ""}${pinning ? ' aria-keyshortcuts="ArrowRight"' : ""}>${folder && !plain ? `<span class="dgc-menu-icon dgc-folder-mark" aria-hidden="true">${folderMark(folder)}</span>` : icon("layers")}<span class="dgc-menu-words"><span class="dgc-menu-label">${esc(name)}</span>${sub ? `<span class="dgc-menu-sub">${sub}</span>` : ""}</span>`
+        + (note ? `<span class="dgc-folder-note">${esc(note)}</span>` : "") + (pinning ? '<span class="dgc-folder-pin-room" aria-hidden="true"></span>' : "") + CHECK + "</button>";
+      return pinning ? `<div class="dgc-folder-item" role="presentation">${row}${pinHtml(folder, name)}</div>` : row; };
     const list = rowsOf(rows), shadeId = `dgc-folder-shade-${++shades}`, finds = list.length > MANY;
     // The search field, when there are many: it stays at the list's top while the folders scroll under it.
     const findHtml = finds ? '<div class="dgc-folder-find" role="presentation"><svg class="dgc-folder-find-mark" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="m10.2 10.2 3.3 3.3"/></svg>'
       + '<input type="text" class="dgc-folder-search" placeholder="Search folders" aria-label="Search folders by name or path" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="200"></div>' : "";
     // The shape (its ground, its shade, its line, and the hairline where the button ends) and, over it, the rows.
-    // With one folder chosen (and a page that pins): the first line pins that folder to the dock, or takes it off.
-    const chosen = pin && choice ? list.find((r) => r.folder === choice) || { folder: choice, name: nameOf(choice) } : null, chosenName = chosen ? chosen.name || nameOf(chosen.folder) : "";
-    const pinWords = (on) => (on ? `Unpin ${chosenName} from the dock` : `Pin ${chosenName} to the dock`);
-    const pinLine = chosen && (chosen.exists !== false || pinned(choice)) ? ((on) => `<button type="button" role="menuitem" class="dgc-menu-row dgc-folder-pin-line" data-folder-pin-line="${esc(choice)}" data-pinned="${on}"><span class="dgc-menu-icon dgc-folder-mark" aria-hidden="true">${PIN(on)}</span><span class="dgc-menu-label">${esc(pinWords(on))}</span></button><div class="dgc-menu-div" role="separator"></div>`)(pinned(choice)) : "";
-    box.innerHTML = `<svg class="dgc-folder-shape" aria-hidden="true" focusable="false">${SHADE(shadeId)}<path class="dgc-folder-shade" filter="url(#${shadeId})"/><path class="dgc-folder-ground"/><path class="dgc-folder-seam"/><path class="dgc-folder-line"/></svg><div class="dgc-folder-list" role="presentation">` + findHtml + pinLine
+    box.innerHTML = `<svg class="dgc-folder-shape" aria-hidden="true" focusable="false">${SHADE(shadeId)}<path class="dgc-folder-shade" filter="url(#${shadeId})"/><path class="dgc-folder-ground"/><path class="dgc-folder-seam"/><path class="dgc-folder-line"/></svg><div class="dgc-folder-list" role="presentation"${finds ? ' data-find="1"' : ""}>` + findHtml
       // `allLabel`: what the row for no folder says ("All Pips", "No folder"); `lead`: choices that are no folder, after it
       // and before the folders ({value, name, sub}: the Pips view's "Personal"), each with the mark of the first row.
       + (all ? line("", allLabel, "", "", !choice, false) : "")
@@ -384,7 +388,8 @@
     const dockEl = holder === doc.body || home ? doc.getElementById("dgc-dock") : null, dockBox = dockEl && view.getComputedStyle(dockEl).display !== "none" ? dockEl.getBoundingClientRect() : null;
     const floor = dockBox && dockBox.height > 0 && dockBox.top > a.bottom ? Math.min(vh, dockBox.top) : vh;
     const folderRows = rowsBox.querySelectorAll(".dgc-folder-row[data-folder]:not([data-folder=''])"), lastShown = folderRows.length > MANY ? folderRows[MANY - 1] : null;
-    const cap = lastShown ? lastShown.offsetTop + lastShown.offsetHeight + 5 : Infinity, tall = Math.min(rowsBox.offsetHeight, cap);
+    const slotOf = (row) => row.closest(".dgc-folder-item") || row;          // (a row with a pin is in an item with it)
+    const cap = lastShown ? slotOf(lastShown).offsetTop + slotOf(lastShown).offsetHeight + 5 : Infinity, tall = Math.min(rowsBox.offsetHeight, cap);
     const below = floor - a.bottom - 6, above = a.top - 6, up = tall > below && above > below;
     rowsBox.style.maxHeight = `${Math.min(cap, Math.max(120, Math.floor(up ? above : below)))}px`;
     const h = rowsBox.offsetHeight, left = toLeft ? a.right - w : a.left;
@@ -403,9 +408,7 @@
     button.setAttribute("aria-expanded", "true"); button.setAttribute("data-folder-open", up ? "up" : "down");
     const find = typeof trigger === "function" ? trigger : () => (button.isConnected ? button : button.id ? (home || doc).getElementById?.(button.id) || (home || doc).querySelector(`#${button.id}`) : null);
     box.addEventListener("click", (e) => {
-      const adding = e.target.closest("[data-folder-add]"), row = e.target.closest("[data-folder]"), pinning = e.target.closest("[data-folder-pin]"), pinningLine = e.target.closest("[data-folder-pin-line]");
-      // The first line: the folder chosen goes on the dock (or comes off it); the menu stays, and the line says what it does now.
-      if (pinningLine) { try { pin?.toggle?.(pinningLine.dataset.folderPinLine); } catch { /* the page's own trouble */ } return; }
+      const adding = e.target.closest("[data-folder-add]"), row = e.target.closest("[data-folder]"), pinning = e.target.closest("[data-folder-pin]");
       // A row's pin: the folder goes on the dock (or comes off it); nothing is chosen and the menu stays.
       if (pinning) { e.preventDefault(); e.stopPropagation(); try { pin?.toggle?.(pinning.dataset.folderPin); } catch { /* the page's own trouble */ } return; }
       if (adding) { close(true); onAdd?.(); return; }
@@ -423,7 +426,7 @@
       for (const row of rowsBox.querySelectorAll(".dgc-folder-row")) {
         const at = list.find((r) => r.folder === row.dataset.folder);
         const hit = !q || (at ? [at.name || nameOf(at.folder), at.folder, at.shown || ""].some((v) => String(v).toLowerCase().includes(q)) : (row.querySelector(".dgc-menu-label")?.textContent || allLabel).toLowerCase().includes(q));
-        row.hidden = !hit; if (hit && at) found++;
+        row.hidden = slotOf(row).hidden = !hit; if (hit && at) found++;
       }
       const firstDiv = rowsBox.querySelector(".dgc-folder-row + .dgc-menu-div"); if (firstDiv) firstDiv.hidden = !!q;
       none.hidden = !q || found > 0; none.textContent = none.hidden ? "" : `No folder matches “${field.value.trim()}”`;
@@ -439,11 +442,19 @@
     }
     box.addEventListener("keydown", (e) => {
       e.stopPropagation();
+      // A row's pin: Right from its row goes to it, Left goes back; Enter and Space press it (it is a button); Up, Down,
+      // Home and End move on from its row.
+      const onPin = e.target.closest?.(".dgc-folder-pin"), own = onPin ? onPin.parentElement.querySelector(":scope > .dgc-folder-row") : null;
+      if (onPin && (e.key === "Enter" || e.key === " ")) return;
+      if (onPin && e.key === "ArrowLeft") { e.preventDefault(); own?.focus({ preventScroll: true }); return; }
+      if (!onPin && e.key === "ArrowRight" && e.target.matches?.(".dgc-folder-row")) { const beside = e.target.parentElement.querySelector(":scope > .dgc-folder-pin"); if (beside) { e.preventDefault(); beside.focus({ preventScroll: true }); } return; }
+      const from = own || e.target;
       // A letter typed on a row goes into the search field; Up from the first row goes back to it.
       if (field && e.target !== field && !e.defaultPrevented) {
         if (e.key.length === 1 && e.key !== " " && !e.ctrlKey && !e.metaKey && !e.altKey) { field.focus({ preventScroll: true }); return; }
-        if (e.key === "ArrowUp" && e.target === rowsBox.querySelector(".dgc-menu-row:not([hidden]):not(:disabled)")) { e.preventDefault(); field.focus({ preventScroll: true }); return; }
+        if (e.key === "ArrowUp" && from === rowsBox.querySelector(".dgc-menu-row:not([hidden]):not(:disabled)")) { e.preventDefault(); field.focus({ preventScroll: true }); return; }
       }
+      if (own && ["ArrowUp", "ArrowDown", "Home", "End"].includes(e.key)) own.focus({ preventScroll: true });
       Menu?.handle(box, e, { close: (viaEscape) => close(viaEscape !== false), trigger: find });
     });
     const inside = (e) => { const path = typeof e.composedPath === "function" ? e.composedPath() : [e.target]; return path.includes(box) || path.includes(find()); };
@@ -460,7 +471,7 @@
     doc.addEventListener("pointerdown", outside, true);
     doc.addEventListener("scroll", follow, true);
     view.addEventListener("blur", away); view.addEventListener("resize", away);
-    shown = { box, doc, view, outside, away, follow, trigger: find, id: button.id || "", first: button, g, list: rowsBox, line: lineEl, ground, shade, growing: null, solid, pinned, pinWords };
+    shown = { box, doc, view, outside, away, follow, trigger: find, id: button.id || "", first: button, g, list: rowsBox, line: lineEl, ground, shade, growing: null, solid, pinned };
     if (moves(view, box)) try { arrive(shown); } catch { /* drawn at rest */ }
     box.tabIndex = -1;
     // With a search field the keyboard starts in it, however the menu was opened: typing narrows at once.
@@ -471,11 +482,6 @@
   /** What is pinned changed: the open menu's pins say so (filled while pinned). */
   function repin() {
     if (!shown) return;
-    for (const line of shown.box.querySelectorAll("[data-folder-pin-line]")) {
-      const on = shown.pinned(line.dataset.folderPinLine);
-      if (line.dataset.pinned === String(on)) continue;
-      line.dataset.pinned = String(on); line.querySelector(".dgc-menu-label").textContent = shown.pinWords(on); line.querySelector(".dgc-folder-mark").innerHTML = PIN(on);
-    }
     for (const mark of shown.box.querySelectorAll("[data-folder-pin]")) {
       const on = shown.pinned(mark.dataset.folderPin), said = on ? "Unpin from the dock" : "Pin to the dock";
       if (mark.getAttribute("aria-pressed") === String(on)) continue;

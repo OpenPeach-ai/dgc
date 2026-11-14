@@ -58,8 +58,12 @@
 .dgc-folder-menu[data-dir="up"][data-reach="left"] .dgc-folder-list { border-bottom-left-radius: var(--btn-r); }
 .dgc-folder-menu[data-dir="up"][data-reach="right"] .dgc-folder-list { border-bottom-right-radius: var(--btn-r); }
 /* The search field of a long list (more than 8 folders): at the list's top, where it stays while the folders scroll
-   under it (its own ground covers them). A quiet field in the shared search field's shape, a glass before its words. */
-.dgc-folder-find { position: sticky; top: 0; z-index: 2; flex: none; display: flex; align-items: center; gap: 6px; box-sizing: border-box; margin: -4px -4px 0; padding: 5px 5px 4px;
+   under it (its own ground covers them). A quiet field in the shared search field's shape, a glass before its words.
+   (14 Nov: rows showed above it as they scrolled. A sticky box stops at the list's padding, not at its edge, so the
+   list's 4 px of top padding stayed open over the field. With a search field the list has no top padding: the field's
+   own box is the list's top, edge to edge, opaque, and over every row.) */
+.dgc-folder-list[data-find] { padding-top: 0; }
+.dgc-folder-find { position: sticky; top: 0; z-index: 3; flex: none; display: flex; align-items: center; gap: 6px; box-sizing: border-box; margin: 0 -4px; padding: 6px 5px 4px;
   background: var(--folder-ground, var(--surface2)); }
 .dgc-folder-menu[data-dir="up"] .dgc-folder-find { padding-top: 5px; }
 .dgc-folder-find-mark { position: absolute; left: 14px; top: 50%; translate: 0 -50%; fill: none; stroke: var(--muted); stroke-width: 1.3; stroke-linecap: round; pointer-events: none; }
@@ -67,7 +71,7 @@
   background: var(--field); color: var(--text-strong); font: var(--w-reg) var(--t-sm)/1 var(--sans); }
 .dgc-folder-search:focus { outline: none; border-color: var(--vscode-focusBorder, var(--text)); }
 .dgc-folder-search::placeholder { color: var(--muted-firm); opacity: 1; }
-.dgc-folder-list:has(> .dgc-folder-find) { scroll-padding-top: calc(var(--btn-h) + 12px); }
+.dgc-folder-list[data-find] { scroll-padding-top: calc(var(--btn-h) + 14px); }
 .dgc-menu.dgc-folder-menu .dgc-folder-list > [hidden] { display: none; }
 .dgc-folder-none { flex: none; padding: 8px; color: color-mix(in srgb, var(--text) 80%, transparent); font: var(--w-reg) var(--t-sm)/1.4 var(--sans); overflow-wrap: anywhere; }
 @media (forced-colors: active) { .dgc-folder-search { border-color: CanvasText; } }
@@ -135,20 +139,23 @@ dgc-folder-fit[data-compact] .dgc-folder-k { display: none; }
 @media (forced-colors: active) { .dgc-folder-icon { forced-color-adjust: none; } }
 
 /* A row's pin (a Work folder on the dock, asked 13 Nov): at the row's end, shown while the row is pointed at or has the
-   keyboard, and kept in sight (filled) while the folder is pinned. The button family's corner. */
-.dgc-folder-menu .dgc-folder-pin { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin: -2px 0 -2px 2px; border-radius: var(--btn-r, 6px);
-  color: var(--muted); opacity: 0; cursor: pointer; transition: opacity var(--dur-hover) ease, background-color var(--dur-hover) ease, color var(--dur-hover) ease; }
-.dgc-folder-menu .dgc-folder-row:is(:hover, :focus-visible) .dgc-folder-pin, .dgc-folder-menu .dgc-folder-pin[aria-pressed="true"] { opacity: 1; }
-.dgc-folder-menu .dgc-folder-pin:hover { background: color-mix(in srgb, var(--text) 14%, transparent); color: var(--text-strong); }
+   keyboard, and kept in sight (filled) while the folder is pinned. The button family's corner. Since 14 Nov a button of
+   its own beside the row's (a button can't hold a button): the row and its pin are in a .dgc-folder-item, the row keeps
+   the pin's room at its end (.dgc-folder-pin-room, before the check), and the pin is drawn over that room. Right from
+   the row reaches it; pointing at the pin keeps its row lit. */
+.dgc-folder-item { position: relative; flex: none; display: flex; min-width: 0; transform-origin: 50% 0; }
+.dgc-folder-menu[data-dir="up"] .dgc-folder-item { transform-origin: 50% 100%; }
+.dgc-menu.dgc-folder-menu .dgc-folder-item > .dgc-folder-row { flex: 1 1 auto; min-width: 0; }
+.dgc-menu.dgc-folder-menu .dgc-folder-item:hover > .dgc-folder-row:not(:disabled) { background: var(--wash); }
+.dgc-folder-pin-room { flex: none; width: 22px; height: 18px; margin-left: 2px; }
+.dgc-folder-menu .dgc-folder-pin { appearance: none; position: absolute; top: 50%; right: 34px; translate: 0 -50%; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 22px; height: 22px; margin: 0; padding: 0;
+  border: 0; border-radius: var(--btn-r, 6px); background: transparent; color: var(--muted); opacity: 0; cursor: pointer; transition: opacity var(--dur-hover) ease, background-color var(--dur-hover) ease, color var(--dur-hover) ease; }
+.dgc-folder-menu .dgc-folder-item:is(:hover, :focus-within) > .dgc-folder-pin, .dgc-folder-menu .dgc-folder-pin[aria-pressed="true"] { opacity: 1; }
+.dgc-folder-menu .dgc-folder-pin:is(:hover, :focus-visible) { background: color-mix(in srgb, var(--text) 14%, transparent); color: var(--text-strong); }
+.dgc-folder-menu .dgc-folder-pin:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
 .dgc-folder-menu .dgc-folder-pin[aria-pressed="true"] { color: var(--text); }
-.dgc-folder-menu .dgc-folder-row .dgc-folder-pin + .dgc-menu-check { margin-left: 4px; }
+.dgc-folder-menu .dgc-folder-row .dgc-folder-pin-room + .dgc-menu-check { margin-left: 4px; }
+.dgc-folder-menu .dgc-folder-row > .dgc-menu-words + .dgc-folder-pin-room { margin-left: auto; }
 @media (hover: none) { .dgc-folder-menu .dgc-folder-pin { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .dgc-folder-menu .dgc-folder-pin { transition: none; } }
-/* The menu's first line with one folder chosen: "Pin <folder> to the dock" (or Unpin), a row like the others, with the pin. */
-.dgc-folder-menu .dgc-folder-pin-line .dgc-folder-mark { color: var(--muted); }
-.dgc-folder-menu .dgc-folder-pin-line[data-pinned="true"] .dgc-folder-mark { color: var(--text); }
-.dgc-folder-menu .dgc-folder-row > .dgc-menu-words + .dgc-folder-pin { margin-left: auto; }
-.dgc-folder-menu .dgc-folder-pin-line[data-pinned="true"] .dgc-folder-mark svg { fill: currentColor; }
-/* Its words are never cut: in a narrow side bar a long folder's line takes a second line. */
-.dgc-folder-menu .dgc-folder-pin-line { height: auto; padding-block: 6px; }
-.dgc-folder-menu .dgc-folder-pin-line .dgc-menu-label { white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
+@media (forced-colors: active) { .dgc-folder-menu .dgc-folder-pin { color: ButtonText; } }

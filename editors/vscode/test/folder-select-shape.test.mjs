@@ -256,7 +256,8 @@ const hold = (page, ms) => page.evaluate((t) => {
 }, ms);
 const finishAll = (page) => page.evaluate(() => { for (const a of document.getAnimations()) if (a.effect?.target?.closest?.(".dgc-folder-menu, .dgc-folder")) a.finish(); });
 const shapeNow = (page) => page.evaluate(() => { const menu = document.querySelector(".dgc-folder-menu"), line = menu.querySelector(".dgc-folder-line").getBoundingClientRect(), list = menu.querySelector(".dgc-folder-list");
-  return { height: line.height, width: line.width, rows: [...list.querySelectorAll(".dgc-menu-row")].map((r) => { const s = getComputedStyle(r), m = new DOMMatrix(s.transform === "none" ? "" : s.transform); return { opacity: Number(s.opacity), y: m.f, scale: m.a, top: r.getBoundingClientRect().top }; }) }; });
+  return { height: line.height, width: line.width, rows: [...list.querySelectorAll(".dgc-menu-row")].map((r) => { const s = getComputedStyle(r.closest(".dgc-folder-item") || r), m = new DOMMatrix(s.transform === "none" ? "" : s.transform); return { opacity: Number(s.opacity), y: m.f, scale: m.a, top: r.getBoundingClientRect().top }; }) }; });
+// (Since 14 Nov a folder's row and its pin are one item, .dgc-folder-item, and move as one: a row's motion is its item's.)
 
 for (const [theme, width] of [["dark-modern", 700], ["light-modern", 300]]) {
   test(`it grows out of the button; rows arrive in order and end at rest in their slots; they leave in reverse (${theme}, ${width}px)`, async (t) => {
@@ -357,14 +358,12 @@ for (const motion of ["reduce", "no-preference"]) {
       assert.deepEqual([m.expanded, m.focus, m.menu.role, m.popup], ["true", GARDEN, "menu", "menu"], "Down opens it with the keyboard on the chosen row");
       await x.page.keyboard.press("ArrowDown"); assert.equal((await lookNow(x.page, "library")).focus, "/home/me/clients/northwind-traders/2026/storefront-redesign/packages/checkout-service");
       await x.page.keyboard.press("ArrowUp"); await x.page.keyboard.press("ArrowUp"); assert.equal((await lookNow(x.page, "library")).focus, "/home/me/code/shop");
-      // (Since 14 Nov, with one folder chosen the menu's first line is "Pin <folder> to the dock": a row like the others,
-      // so Home and the wrap land on it, and All projects is the row after it.)
-      const onPinLine = () => x.page.evaluate(() => document.activeElement?.hasAttribute("data-folder-pin-line") === true);
-      await x.page.keyboard.press("Home"); assert.equal(await onPinLine(), true, "Home: the first line, Pin to the dock");
-      await x.page.keyboard.press("ArrowDown"); assert.equal((await lookNow(x.page, "library")).focus, "", "then All projects");
-      await x.page.keyboard.press("ArrowUp");
+      // (For a few hours on 14 Nov the menu's first line was "Pin <folder> to the dock"; he asked for it out the same
+      // day: All projects is the first row again, and no line pins the chosen folder.)
+      assert.equal(await x.page.locator(".dgc-folder-menu [data-folder-pin-line]").count(), 0, "no line that pins the chosen folder");
+      await x.page.keyboard.press("Home"); assert.equal((await lookNow(x.page, "library")).focus, "", "Home: the first row, All projects");
       await x.page.keyboard.press("ArrowUp"); assert.equal((await lookNow(x.page, "library")).focus, "/home/me/code/storefront-redesign-checkout-service-next-generation", "Up from the first wraps to the last");
-      await x.page.keyboard.press("End"); await x.page.keyboard.press("ArrowDown"); assert.equal(await onPinLine(), true, "Down from the last wraps to the first");
+      await x.page.keyboard.press("End"); await x.page.keyboard.press("ArrowDown"); assert.equal((await lookNow(x.page, "library")).focus, "", "Down from the last wraps to the first");
       // A row the keyboard is on: a rounded fill.
       const focused = await x.page.evaluate(() => { const s = getComputedStyle(document.activeElement); return [document.activeElement.matches(":focus-visible"), s.backgroundColor !== "rgba(0, 0, 0, 0)", s.borderTopLeftRadius]; });
       assert.deepEqual(focused, [true, true, "6px"]);

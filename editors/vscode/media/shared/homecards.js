@@ -14,8 +14,13 @@
 // Home. The host keeps the layout for this computer (src/homeCards.ts); this file never touches a network.
 //
 // Since the second follow-up (13 Nov, late): Weather's place is chosen from the places Open-Meteo's search finds for the
-// letters typed (the host asks; Save waits for a choice); Clock's second city is any time zone there is, found by
+// letters typed (the host asks; Save waits for a choice); a Clock's city is any time zone there is, found by
 // typing; both use one small dropdown under their field (Up, Down, Enter, Escape; the menu's look, the one corner).
+// Since 14 Nov: the Clock is Here and up to three more time zones (four in all), each added one with an × (shown when
+// its clock is pointed at or has the keyboard); its Small card is Here alone; with three or four clocks it is a Large
+// card in a wide side bar. Adding Weather always asks for the place (the saved one is in the field); Change place is on
+// every size (a card with no room for the field opens whole at it); a weather that could not be read offers Try again
+// and is asked again after a minute.
 // Token usage names the models with their provider and share, and links to Settings. Notes is many notes: a list, a
 // note open beside it or over it, search, pins, tick boxes, Undo. Widgets and Artifacts page through what the Library lists.
 //
@@ -43,12 +48,12 @@
     token: { name: "Token usage", line: "Tokens, requests and cache, day by day", group: "Usage and start", large: true },
     quick: { name: "Quick start", line: "New session, chat or Pip", group: "Usage and start" },
     folders: { name: "Folders", line: "Your Work folders, each a tile", group: "Usage and start", large: true },
-    clock: { name: "Clock", line: "The time here, and in a second city", group: "Everyday" },
+    clock: { name: "Clock", line: "The time here, and in up to three more cities", group: "Everyday" },
     weather: { name: "Weather", line: "Now and the next hours, for a place you choose", group: "Everyday" },
     note: { name: "Notes", line: "Your notes, kept on this computer", group: "Everyday", large: true },
   };
   const TYPES = Object.keys(CARDS);
-  // Every time zone there is (IANA), for the Clock's second city: the engine's own list where it has one, else this one,
+  // Every time zone there is (IANA), for the Clock's added cities: the engine's own list where it has one, else this one,
   // shipped with the card ("Region:City,City|Region:..."). A zone's city is its last part; a few are better known by a
   // newer name than the one the engine keeps ("Asia/Calcutta" is Kolkata), and a few big cities share another's zone.
   const ZONE_LIST = "Africa:Abidjan,Accra,Addis_Ababa,Algiers,Asmera,Bamako,Bangui,Banjul,Bissau,Blantyre,Brazzaville,Bujumbura,Cairo,Casablanca,Ceuta,Conakry,Dakar,Dar_es_Salaam,Djibouti,Douala,El_Aaiun,Freetown,Gaborone,Harare,Johannesburg,Juba,Kampala,Khartoum,Kigali,Kinshasa,Lagos,Libreville,Lome,Luanda,Lubumbashi,Lusaka,Malabo,Maputo,Maseru,Mbabane,Mogadishu,Monrovia,Nairobi,Ndjamena,Niamey,Nouakchott,Ouagadougou,Porto-Novo,Sao_Tome,Tripoli,Tunis,Windhoek|America:Adak,Anchorage,Anguilla,Antigua,Araguaina,Argentina/La_Rioja,Argentina/Rio_Gallegos,Argentina/Salta,Argentina/San_Juan,Argentina/San_Luis,Argentina/Tucuman,Argentina/Ushuaia,Aruba,Asuncion,Bahia,Bahia_Banderas,Barbados,Belem,Belize,Blanc-Sablon,Boa_Vista,Bogota,Boise,Buenos_Aires,Cambridge_Bay,Campo_Grande,Cancun,Caracas,Catamarca,Cayenne,Cayman,Chicago,Chihuahua,Ciudad_Juarez,Coral_Harbour,Cordoba,Costa_Rica,Coyhaique,Creston,Cuiaba,Curacao,Danmarkshavn,Dawson,Dawson_Creek,Denver,Detroit,Dominica,Edmonton,Eirunepe,El_Salvador,Fort_Nelson,Fortaleza,Glace_Bay,Godthab,Goose_Bay,Grand_Turk,Grenada,Guadeloupe,Guatemala,Guayaquil,Guyana,Halifax,Havana,Hermosillo,Indiana/Knox,Indiana/Marengo,Indiana/Petersburg,Indiana/Tell_City,Indiana/Vevay,Indiana/Vincennes,Indiana/Winamac,Indianapolis,Inuvik,Iqaluit,Jamaica,Jujuy,Juneau,Kentucky/Monticello,Kralendijk,La_Paz,Lima,Los_Angeles,Louisville,Lower_Princes,Maceio,Managua,Manaus,Marigot,Martinique,Matamoros,Mazatlan,Mendoza,Menominee,Merida,Metlakatla,Mexico_City,Miquelon,Moncton,Monterrey,Montevideo,Montserrat,Nassau,New_York,Nome,Noronha,North_Dakota/Beulah,North_Dakota/Center,North_Dakota/New_Salem,Ojinaga,Panama,Paramaribo,Phoenix,Port-au-Prince,Port_of_Spain,Porto_Velho,Puerto_Rico,Punta_Arenas,Rankin_Inlet,Recife,Regina,Resolute,Rio_Branco,Santarem,Santiago,Santo_Domingo,Sao_Paulo,Scoresbysund,Sitka,St_Barthelemy,St_Johns,St_Kitts,St_Lucia,St_Thomas,St_Vincent,Swift_Current,Tegucigalpa,Thule,Tijuana,Toronto,Tortola,Vancouver,Whitehorse,Winnipeg,Yakutat|Antarctica:Casey,Davis,DumontDUrville,Macquarie,Mawson,McMurdo,Palmer,Rothera,Syowa,Troll,Vostok|Arctic:Longyearbyen|Asia:Aden,Almaty,Amman,Anadyr,Aqtau,Aqtobe,Ashgabat,Atyrau,Baghdad,Bahrain,Baku,Bangkok,Barnaul,Beirut,Bishkek,Brunei,Calcutta,Chita,Colombo,Damascus,Dhaka,Dili,Dubai,Dushanbe,Famagusta,Gaza,Hebron,Hong_Kong,Hovd,Irkutsk,Jakarta,Jayapura,Jerusalem,Kabul,Kamchatka,Karachi,Katmandu,Khandyga,Krasnoyarsk,Kuala_Lumpur,Kuching,Kuwait,Macau,Magadan,Makassar,Manila,Muscat,Nicosia,Novokuznetsk,Novosibirsk,Omsk,Oral,Phnom_Penh,Pontianak,Pyongyang,Qatar,Qostanay,Qyzylorda,Rangoon,Riyadh,Saigon,Sakhalin,Samarkand,Seoul,Shanghai,Singapore,Srednekolymsk,Taipei,Tashkent,Tbilisi,Tehran,Thimphu,Tokyo,Tomsk,Ulaanbaatar,Urumqi,Ust-Nera,Vientiane,Vladivostok,Yakutsk,Yekaterinburg,Yerevan|Atlantic:Azores,Bermuda,Canary,Cape_Verde,Faeroe,Madeira,Reykjavik,South_Georgia,St_Helena,Stanley|Australia:Adelaide,Brisbane,Broken_Hill,Darwin,Eucla,Hobart,Lindeman,Lord_Howe,Melbourne,Perth,Sydney|Europe:Amsterdam,Andorra,Astrakhan,Athens,Belgrade,Berlin,Bratislava,Brussels,Bucharest,Budapest,Busingen,Chisinau,Copenhagen,Dublin,Gibraltar,Guernsey,Helsinki,Isle_of_Man,Istanbul,Jersey,Kaliningrad,Kiev,Kirov,Lisbon,Ljubljana,London,Luxembourg,Madrid,Malta,Mariehamn,Minsk,Monaco,Moscow,Oslo,Paris,Podgorica,Prague,Riga,Rome,Samara,San_Marino,Sarajevo,Saratov,Simferopol,Skopje,Sofia,Stockholm,Tallinn,Tirane,Ulyanovsk,Vaduz,Vatican,Vienna,Vilnius,Volgograd,Warsaw,Zagreb,Zurich|Indian:Antananarivo,Chagos,Christmas,Cocos,Comoro,Kerguelen,Mahe,Maldives,Mauritius,Mayotte,Reunion|Pacific:Apia,Auckland,Bougainville,Chatham,Easter,Efate,Enderbury,Fakaofo,Fiji,Funafuti,Galapagos,Gambier,Guadalcanal,Guam,Honolulu,Kiritimati,Kosrae,Kwajalein,Majuro,Marquesas,Midway,Nauru,Niue,Norfolk,Noumea,Pago_Pago,Palau,Pitcairn,Ponape,Port_Moresby,Rarotonga,Saipan,Tahiti,Tarawa,Tongatapu,Truk,Wake,Wallis";
@@ -87,6 +92,8 @@
   const PLUS = svg('<path d="M12 5v14M5 12h14"/>', 11, 2.6), CROSS = svg('<path d="M6 6l12 12M18 6L6 18"/>', 10, 2.8), BACK = svg('<path d="M15 18l-6-6 6-6"/>', 12, 2.4), TICK = svg('<path d="M5 12l5 5L20 7"/>', 11, 3);
   const GRIP = '<svg class="hc-grip" width="12" height="16" viewBox="0 0 12 16" aria-hidden="true"><g fill="currentColor"><circle cx="3" cy="3" r="1.4"/><circle cx="9" cy="3" r="1.4"/><circle cx="3" cy="8" r="1.4"/><circle cx="9" cy="8" r="1.4"/><circle cx="3" cy="13" r="1.4"/><circle cx="9" cy="13" r="1.4"/></g></svg>';
   const plural = (n, word, many) => `${n} ${n === 1 ? word : many || word + "s"}`;
+  // The Clock: Here and at most this many added time zones (the host's own bound, src/homeCards.ts).
+  const ZONES_MOST = 3;
   // What the Notes card holds at most (the host's own bounds, src/homeCards.ts).
   const NOTES_MOST = 500, NOTE_MOST = 20000;
   /** A place as words: its name, its region when that says more, its country. */
@@ -166,7 +173,7 @@
     const doc = host.ownerDocument, view = doc.defaultView;
     const still = () => !!view.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     let layout = { order: [...DEFAULT], settings: {}, notes: [] }, heard = false;
-    let usage = null, usageAt = 0, weather = null, weatherAt = 0, weatherAsked = 0;
+    let usage = null, usageAt = 0, weather = null, weatherAt = 0, weatherAsked = 0, weatherWait = 30 * 60000, weatherRetried = "";
     // What the Library lists, for the Widgets and Artifacts cards: null until the host has said; when each was asked.
     const made = { widgets: null, artifacts: null }, madeAt = { widgets: 0, artifacts: 0 };
     const ui = { open: TYPES.includes(kept?.()?.open) ? kept().open : "", arranging: false, lifted: "", token: { metric: "tokens", hot: "", range: "30d" }, weatherEdit: false,
@@ -185,7 +192,11 @@
     // ---- the form the width picks -------------------------------------------------------------------------------------
     const widthNow = () => host.clientWidth || view.innerWidth;
     const gridForm = (w = widthNow()) => (w < 380 ? "s" : w < 620 ? "m" : "l");
-    const formOf = (id, g) => (g === "l" ? (CARDS[id].large ? "l" : "m") : g);
+    /** The time zones added to the Clock, in their order: the list, or (kept before 14 Nov) the one second city. */
+    const zonesNow = () => { const c = layout.settings?.clock, all = Array.isArray(c?.zones) ? c.zones : c?.zone ? [c.zone] : []; return all.filter((z, i) => typeof z === "string" && z && all.indexOf(z) === i).slice(0, ZONES_MOST); };
+    // (A Clock of three or four is a Large card where there are Large cards: two rows of two, nothing cut.)
+    const large = (id) => (id === "clock" ? zonesNow().length >= 2 : !!CARDS[id].large);
+    const formOf = (id, g) => (g === "l" ? (large(id) ? "l" : "m") : g);
 
     // ---- what each card draws -----------------------------------------------------------------------------------------
     const li = (r, more = "") => `<button type="button" class="hc-li${r.fresh ? " hc-new" : ""}" data-open="${esc(r.key)}" title="${esc(r.title || `Open ${r.name}`)}"><span class="hc-ico">${r.icon || ""}</span><span class="hc-tx"><span class="hc-nm">${esc(r.name)}${r.star ? ' <span class="hc-star" title="Core, your main Pip">★</span>' : ""}</span>${r.meta ? `<span class="hc-meta">${esc(r.meta)}</span>` : ""}</span>${more || (r.fresh ? '<span class="hc-newmark">New</span>' : r.live ? '<span class="hc-livedot" title="Running"></span>' : r.count ? `<span class="hc-cnt">${r.count}</span>` : r.age ? `<span class="hc-age">${esc(r.age)}</span>` : "")}</button>`;
@@ -307,35 +318,49 @@
       return `${headOf("Folders", "", rest > 0 ? `<span class="hc-cap">+${rest} more</span>` : "")}<div class="hc-tiles">${shown.map(tile).join("")}</div>`;
     }
     function clockCard(form) {
-      const now = new Date(), z = layout.settings?.clock?.zone || "", city = z ? zoneCity(z) : "";
+      const now = new Date(), zs = zonesNow();
       const time = (zone) => { try { return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", ...(zone ? { timeZone: zone } : {}) }).format(now); } catch { return "--:--"; } };
       const date = DAY.format(now);
-      if (form === "s") return `<span class="hc-lbl">Clock</span><span class="hc-big">${time("")}</span><span class="hc-grow"></span>${z ? `<span class="hc-sub">${esc(city)} ${time(z)}</span>` : ""}<span class="hc-sub">${date}</span>`;
-      // The second city: a field that offers every time zone there is, narrowed by what is typed (its words are set
-      // after the draw, so typing in it never draws the card again).
-      const pick = '<input class="hc-zone hc-field" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-haspopup="listbox" data-fk="zone" placeholder="Second city" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="60" aria-label="A second city’s time: type a city or a time zone">';
-      return `${headOf("Clock", `<span class="hc-cap hc-cut">${date}</span>`, pick)}<div class="hc-clocks"><span class="hc-clock"><span class="hc-time">${time("")}</span><span class="hc-sub">Here</span></span>${z ? `<span class="hc-clock"><span class="hc-time">${time(z)}</span><span class="hc-sub">${esc(city)}${zoneOffset(z) ? ` · ${esc(zoneOffset(z))}` : ""}</span></span>` : ""}</div>`;
+      // Small: the home zone alone, its time and its date (asked 14 Nov: never the others on a single cube).
+      if (form === "s") return `<span class="hc-lbl">Clock</span><span class="hc-big">${time("")}</span><span class="hc-grow"></span><span class="hc-sub">${date}</span>`;
+      // The day there, when it is not today's here.
+      const dayThere = (zone) => { try { const key = (z) => new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", ...(z ? { timeZone: z } : {}) }).format(now), here = key(""), there = key(zone); return there > here ? "tomorrow" : there < here ? "yesterday" : ""; } catch { return ""; } };
+      // The field that adds a city, while there are fewer than four clocks: it offers every time zone there is, narrowed
+      // by what is typed (it holds no words of its own, so typing in it never draws the card again).
+      const pick = zs.length < ZONES_MOST ? '<input class="hc-zone hc-field" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-haspopup="listbox" data-fk="zone" placeholder="Add a city" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="60" aria-label="Add a city’s time: type a city or a time zone">' : "";
+      // An added zone: its time, its city (never cut: its offset and its day go to a second line first), and its ×.
+      const one = (z) => { const city = zoneCity(z), off = zoneOffset(z), day = dayThere(z);
+        return `<span class="hc-clock" data-zone="${esc(z)}"><span class="hc-time">${time(z)}</span><span class="hc-sub"><span class="hc-zc">${esc(city)}</span>${off ? ` <span class="hc-zo">· ${esc(off)}</span>` : ""}${day ? ` <span class="hc-zo">· ${day}</span>` : ""}</span>`
+          + `<button type="button" class="hc-zone-x" data-zone-x="${esc(z)}" data-fk="zone-x:${esc(z)}" aria-label="Remove ${esc(city)}" title="Remove ${esc(city)} from the Clock">${CROSS}</button></span>`; };
+      return `${headOf("Clock", `<span class="hc-cap hc-cut">${date}</span>`, pick)}<div class="hc-clocks" data-n="${zs.length + 1}"><span class="hc-clock"><span class="hc-time">${time("")}</span><span class="hc-sub">Here</span></span>${zs.map(one).join("")}</div>`;
     }
     const SENT = "The letters you type are sent to Open-Meteo to look the place up. Nothing else is sent.";
     /** The place the Weather card is set to: one chosen from the list, or (kept from before the list) a city typed. */
     const placeOf = (w = layout.settings?.weather) => (w?.place?.name ? w.place : w?.city ? { name: w.city, admin1: "", country: "" } : null);
     /** The field a place is chosen in: Save is off until a place from the list is taken. */
-    const placeForm = (label, cls = "hc-save") => `<form class="hc-cityform"><input class="hc-city hc-field" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-haspopup="listbox" data-fk="city" maxlength="80" placeholder="City" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="City: type a few letters, then choose a place from the list"><button type="submit" class="hc-btn hc-solid ${cls}" disabled title="Choose a place from the list first">${label}</button></form>`;
-    function weatherCard(form) {
+    const placeForm = (label, cls = "hc-save", cancel = false) => `<form class="hc-cityform"><input class="hc-city hc-field" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-haspopup="listbox" data-fk="city" maxlength="80" placeholder="City" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="City: type a few letters, then choose a place from the list"><button type="submit" class="hc-btn hc-solid ${cls}" disabled title="Choose a place from the list first">${label}</button>${cancel ? '<button type="button" class="hc-btn hc-city-cancel" title="Keep the place as it is (Escape)">Cancel</button>' : ""}</form>`;
+    function weatherCard(form, tight) {
       const w = layout.settings?.weather || {}, at = placeOf(w), f = w.unit === "f", deg = (c) => (Number.isFinite(c) ? `${Math.round(f ? (c * 9) / 5 + 32 : c)}°` : "–");
-      const field = (label) => `${placeForm(label)}<p class="hc-fine">${SENT}</p>`;
+      const field = (label, cancel = false) => `${placeForm(label, "hc-save", cancel)}<p class="hc-fine">${SENT}</p>`;
       if (!at) return form === "s" ? '<span class="hc-lbl">Weather</span><span class="hc-grow"></span><span class="hc-mid">Choose a place</span><span class="hc-sub">Open to choose one</span>' : `${headOf("Weather")}${field("Save")}`;
       const said = placeWords({ ...at, admin1: "" });
       const bad = weather && weather.ok === false ? (weather.reason === "notfound" ? `Couldn’t find “${at.name}”. Choose a place from the list.` : weather.reason === "refused" ? "The weather service isn’t answering right now." : "Can’t reach the weather right now.") : "";
       const unit = `<span class="hc-seg" role="group" aria-label="Unit">${[["c", "°C"], ["f", "°F"]].map(([id, name]) => `<button type="button" data-unit="${id}" aria-pressed="${(f ? "f" : "c") === id}"${(f ? "f" : "c") === id ? ' class="on"' : ""}>${name}</button>`).join("")}</span>`;
-      const edit = form === "full" ? (ui.weatherEdit ? field("Save") : `<button type="button" class="hc-lnk hc-city-edit" title="Choose another place">Change place</button><p class="hc-fine">${SENT}</p>`) : "";
+      // Change place, on every size (asked 14 Nov): the field shows in a card that has the room for it (the card opened,
+      // and a Medium card that is as tall as it needs); from a Small card, and a Medium one of a fixed height, it opens
+      // the card whole at the field. Try again: the weather is asked for now.
+      const change = '<button type="button" class="hc-lnk hc-city-edit" data-fk="city-edit" title="Choose another place">Change place</button>';
+      const retry = bad && weather.reason !== "notfound" ? '<button type="button" class="hc-lnk hc-wx-retry" data-fk="wx-retry" title="Ask for the weather again">Try again</button>' : "";
+      const roomy = form === "full" || (form === "m" && !tight), editing = roomy && ui.weatherEdit;
+      const foot = (credit) => (editing ? `${credit ? '<span class="hc-fine">Weather from Open-Meteo</span>' : ""}${field("Save", true)}`
+        : `<div class="hc-wfoot">${credit ? '<span class="hc-fine">Weather from Open-Meteo</span>' : retry}<span class="hc-sp"></span>${change}</div>${form === "full" ? `<p class="hc-fine">${SENT}</p>` : ""}`);
       if (!weather || bad) {
-        if (form === "s") return `<span class="hc-lbl">Weather</span><span class="hc-grow"></span><span class="hc-mid">${esc(bad || "Looking…")}</span><span class="hc-sub hc-cut">${esc(at.name)}</span>`;
-        return `${headOf("Weather", `<span class="hc-cap hc-cut">${esc(said)}</span>`, unit)}<p class="hc-quiet">${esc(bad || "Looking up the weather…")}</p>${edit}`;
+        if (form === "s") return `<span class="hc-lbl">Weather<span class="hc-wplace hc-cut">${esc(at.name)}</span></span><span class="hc-mid hc-wbad">${esc(bad ? (weather.reason === "notfound" ? "Place not found" : weather.reason === "refused" ? "The weather service isn’t answering" : "Can’t reach the weather") : "Looking…")}</span><span class="hc-grow"></span><span class="hc-wfoot hc-wfoot-s">${retry}${change}</span>`;
+        return `${headOf("Weather", `<span class="hc-cap hc-cut">${esc(said)}</span>`, unit)}<p class="hc-quiet">${esc(bad || "Looking up the weather…")}</p>${foot(false)}`;
       }
-      if (form === "s") return `<span class="hc-lbl">Weather${wx(weather.now.code, weather.now.day, 18)}</span><span class="hc-big">${deg(weather.now.temp)}</span><span class="hc-grow"></span><span class="hc-sub">${wxWord(weather.now.code)}</span><span class="hc-sub hc-cut">${esc(weather.place)}</span>`;
+      if (form === "s") return `<span class="hc-lbl">Weather${wx(weather.now.code, weather.now.day, 18)}</span><span class="hc-big">${deg(weather.now.temp)}</span><span class="hc-grow"></span><span class="hc-sub">${wxWord(weather.now.code)}</span><span class="hc-sub hc-cut">${esc(weather.place)}</span><span class="hc-wfoot hc-wfoot-s">${change}</span>`;
       return `${headOf("Weather", `<span class="hc-cap hc-cut">${esc(weather.place)}</span>`, unit)}<div class="hc-wnow">${wx(weather.now.code, weather.now.day, 30)}<span class="hc-time">${deg(weather.now.temp)}</span><span class="hc-tx"><span class="hc-nm">${wxWord(weather.now.code)}</span><span class="hc-meta">High ${deg(weather.high)} · Low ${deg(weather.low)}</span></span></div>`
-        + `<div class="hc-hours">${(weather.hours || []).slice(0, 5).map((h) => `<span class="hc-hour"><span class="hc-sub">${esc(h.time)}</span><span class="hc-hrow">${wx(h.code, true, 15)}<span class="hc-hv">${deg(h.temp)}</span></span></span>`).join("")}</div><span class="hc-fine">Weather from Open-Meteo</span>${edit}`;
+        + `<div class="hc-hours">${(weather.hours || []).slice(0, 5).map((h) => `<span class="hc-hour"><span class="hc-sub">${esc(h.time)}</span><span class="hc-hrow">${wx(h.code, true, 15)}<span class="hc-hv">${deg(h.temp)}</span></span></span>`).join("")}</div>${foot(true)}`;
     }
 
     // ---- Notes: many notes, each named by its first line ------------------------------------------------------------------
@@ -422,7 +447,7 @@
       return (form === "s" ? `<span class="hc-lbl">${name}<span class="hc-cnt">${rows.length}${said.more ? "+" : ""}</span></span>` : headOf(name, "", link)) + stack + pager;
     }
     const render = (id, form, d, tight) => (id === "token" ? tokenCard(form) : id === "recent" ? recentCard(form, d, tight) : id === "needs" ? needsCard(form, d) : id === "running" ? runningCard(form, d, tight)
-      : id === "quick" ? quickCard(form, d) : id === "folders" ? foldersCard(form, d) : id === "clock" ? clockCard(form) : id === "weather" ? weatherCard(form) : id === "note" ? noteCard(form)
+      : id === "quick" ? quickCard(form, d) : id === "folders" ? foldersCard(form, d) : id === "clock" ? clockCard(form) : id === "weather" ? weatherCard(form, tight) : id === "note" ? noteCard(form)
       : id === "widgets" || id === "artifacts" ? stackCard(id, form, d) : listCard(id, form, d, tight));
     /** A card's one line while Home is arranged, and its small preview in the library. */
     function caption(id, d) {
@@ -484,14 +509,14 @@
       else if (key) { try { section.querySelector(key)?.focus({ preventScroll: true }); } catch { /* it is gone */ } }
     }
     /** What a draw leaves to be set by hand: a note's words and what is searched for (never while they are typed), the
-     *  second city's name in its field, the inked day. */
+     *  inked day; the Clock's field is emptied. */
     function after(section, id, form) {
       if (id === "note") {
         const box = section.querySelector("textarea.hc-note-edit"), find = section.querySelector("input.hc-note-find");
         if (box) { const n = noteOf(box.dataset.note); if (n && doc.activeElement !== box && box.value !== n.text) box.value = n.text; const limit = section.querySelector(".hc-note-limit"); if (limit) limit.hidden = box.value.length < NOTE_MOST; }
         if (find && doc.activeElement !== find && find.value !== ui.notes.q) find.value = ui.notes.q;
       }
-      if (id === "clock") { const field = section.querySelector("input.hc-zone"); if (field && doc.activeElement !== field) field.value = layout.settings?.clock?.zone ? zoneCity(layout.settings.clock.zone) : ""; }
+      if (id === "clock") { const field = section.querySelector("input.hc-zone"); if (field && doc.activeElement !== field && field.value) field.value = ""; }
       if (id === "token" && form !== "s") inkHot(section);
     }
     function section(id) { const s = doc.createElement("section"); s.className = `hc-card hc-${id}`; s.dataset.card = id; return s; }
@@ -602,12 +627,14 @@
       if (!heard || !host.checkVisibility?.()) return;
       const now = Date.now(), on = (id) => layout.order.includes(id) || !!library;
       if (on("token") && now - usageAt > 5 * 60000) { usageAt = now; post?.({ type: "homeUsageGet" }); }
-      if (layout.order.includes("weather") && placeOf() && now - Math.max(weatherAt, weatherAsked) > 30 * 60000) { weatherAsked = now; post?.({ type: "homeWeatherGet" }); }
+      // The weather: every half hour; after a miss, again after a minute (five when the service refused): one miss as
+      // the editor started, or while it was busy, left "Can't reach the weather" on the card for half an hour.
+      if (layout.order.includes("weather") && placeOf() && now - Math.max(weatherAt, weatherAsked) > weatherWait) { weatherAsked = now; post?.({ type: "homeWeatherGet" }); }
       // What the Library lists: asked when its card is on Home (or the library is open, for its preview), and again when it is old.
       for (const kind of ["widgets", "artifacts"]) if (on(kind) && now - madeAt[kind] > 5 * 60000) { madeAt[kind] = now; post?.({ type: kind === "widgets" ? "homeWidgetsGet" : "homeArtifactsGet" }); }
     }
 
-    // ---- a field that offers what may be chosen: Weather's place, Clock's second city --------------------------------------
+    // ---- a field that offers what may be chosen: Weather's place, a city for the Clock -------------------------------------
     // One dropdown under the field (the menu's look, the one corner): Down and Up move through it, Enter takes the row the
     // keys are on, Escape closes it, a click takes a row. The keyboard never leaves the field.
     let pick = null, placeTimer = 0, placeSeq = 0, placeFor = null;
@@ -669,10 +696,15 @@
         input.focus({ preventScroll: true });
         say(`${input.value} chosen. ${save ? save.textContent : "Save"} keeps it.`);
       } else {
-        setting("clock", { zone: row.zone });
-        say(row.zone ? `${row.name} is the second city.` : "No second city.");
-        input.blur();
-        cancelAnimationFrame(pending); drawNow();
+        const zs = zonesNow();
+        if (!row.zone || zs.includes(row.zone) || zs.length >= ZONES_MOST) return;
+        const scope = input.closest(".hc-open") ? ".hc-open" : ".hc-grid";
+        setting("clock", { zones: [...zs, row.zone] });
+        say(`${row.name} added to the Clock.${zs.length + 1 >= ZONES_MOST ? " Four clocks is the most." : ""}`);
+        input.value = ""; input.blur();
+        // With four clocks the field is gone: the keyboard goes to the clock just added.
+        if (zs.length + 1 >= ZONES_MOST) focusNext = `${scope} .hc-clock .hc-zone-x[data-zone-x="${row.zone}"]`;
+        redraw();
       }
     }
     /** The letters typed into a city's field: with two or more, the host is asked for the places by that name once the
@@ -691,16 +723,16 @@
         post?.({ type: "homeWeatherSuggest", q, seq: ++placeSeq });
       }, 250);
     }
-    /** What is typed into the second city's field narrows every time zone there is, by city or by zone. */
+    /** What is typed into the Clock's field narrows every time zone there is (but the ones on the Clock), by city or by zone. */
     function zoneTyped(input, all = false) {
       const q = all ? "" : input.value.trim().toLowerCase(), spaced = q.replace(/_/g, " ");
-      const found = q ? zones().filter((z) => z.find.includes(q) || z.find.includes(spaced)) : zones();
+      const have = zonesNow(), rest = zones().filter((z) => !have.includes(z.zone));
+      const found = q ? rest.filter((z) => z.find.includes(q) || z.find.includes(spaced)) : rest;
       if (q) found.sort((a, b) => (b.city.toLowerCase().startsWith(spaced) ? 1 : 0) - (a.city.toLowerCase().startsWith(spaced) ? 1 : 0));
       const rows = found.map((z) => ({ name: z.city, sub: z.region ? `${z.region} · ${z.zone}` : z.zone, code: zoneOffset(z.zone), zone: z.zone }));
-      if (!q) rows.unshift({ name: "No second city", sub: "", code: "", zone: "" });
       pickShow(input, "zone", rows, rows.length ? "" : "No time zone by that name.");
     }
-    const zoneBack = (input) => { input.value = layout.settings?.clock?.zone ? zoneCity(layout.settings.clock.zone) : ""; };
+    const zoneBack = (input) => { input.value = ""; };
     /** The two fields' keys and pointer, wherever they are drawn (a card on Home, the Cards pop-up). */
     function wireFields(el) {
       el.addEventListener("input", (e) => { const t = e.target; if (t.matches?.("input.hc-city")) cityTyped(t); else if (t.matches?.("input.hc-zone")) zoneTyped(t); });
@@ -717,11 +749,17 @@
           else if (zone || !t.__place) e.preventDefault();
         }
         else if (e.key === "Escape" && mine) { e.preventDefault(); e.stopImmediatePropagation(); pickClose(); if (zone) { zoneBack(t); t.select(); } }
-        else if (e.key === "Escape" && zone && t.value !== (layout.settings?.clock?.zone ? zoneCity(layout.settings.clock.zone) : "")) { e.preventDefault(); e.stopImmediatePropagation(); zoneBack(t); t.select(); }
+        else if (e.key === "Escape" && zone && t.value !== "") { e.preventDefault(); e.stopImmediatePropagation(); zoneBack(t); }
+        // Escape in the field Change place showed puts it away (and closes nothing else).
+        else if (e.key === "Escape" && !zone && ui.weatherEdit && t.closest(".hc-card")) { e.preventDefault(); e.stopImmediatePropagation(); weatherEditEnd(t.closest(".hc-card")); }
       });
     }
     wireFields(host);
     const onResize = () => pickClose();
+    /** Draws now; when the grid may change (a Clock that becomes Large), the cards glide to their places. */
+    function redraw() { cancelAnimationFrame(pending); pending = 0; if (!ui.open && !still()) flip(drawNow); else drawNow(); }
+    /** The field Change place showed is put away; the keyboard goes back to Change place. */
+    function weatherEditEnd(card) { pickClose(); ui.weatherEdit = false; focusNext = `${card.parentNode === grid ? ".hc-grid" : ".hc-open"} .hc-weather .hc-city-edit`; cancelAnimationFrame(pending); drawNow(); }
     view.addEventListener("resize", onResize);
 
     // ---- Notes: what is done to a note -----------------------------------------------------------------------------------------
@@ -894,7 +932,13 @@
         if (item.__html === html) continue;
         const had = item.contains(doc.activeElement) ? (doc.activeElement.classList.contains("hc-add") ? ".hc-remove" : doc.activeElement.classList.contains("hc-remove") ? ".hc-add" : "") : "";
         item.__html = html; item.innerHTML = html;
-        if (adding) item.querySelector(".hc-city")?.focus(); else if (had) item.querySelector(had)?.focus();
+        if (adding) {
+          // The place kept (asked 14 Nov: adding always asks, with the saved place in the field): chosen already, so Add is
+          // on; its words are selected, so typing replaces them.
+          const field = item.querySelector(".hc-city"), kept = layout.settings?.weather?.place;
+          if (field && kept?.name && Number.isFinite(kept.lat) && Number.isFinite(kept.lon)) { field.value = placeWords(kept); field.__place = kept; const save = saveOf(field); if (save) { save.disabled = false; save.title = `${save.textContent}: ${field.value}`; } }
+          field?.focus(); field?.select();
+        } else if (had) item.querySelector(had)?.focus();
       }
       try { onDraw?.(library); } catch { /* the faces are the page's */ }
     }
@@ -923,7 +967,7 @@
         if (t.closest(".hc-lib-close")) closeLibrary();
         else if (t.closest(".hc-arrange")) { closeLibrary(false); arrange(true, ".hc-done"); }
         else if (t.closest(".hc-reset")) { layout = { ...layout, order: [...DEFAULT] }; post?.({ type: "homeCardsReset" }); say("Home has its usual cards again."); draw(true); }
-        else if (t.closest(".hc-add") && id) { if (id === "weather" && !placeOf()) { libraryAdding = id; drawLibrary(data?.() || {}); } else add(id); }
+        else if (t.closest(".hc-add") && id) { if (id === "weather") { libraryAdding = id; drawLibrary(data?.() || {}); } else add(id); }
         else if (t.closest(".hc-remove") && id) remove(id);
       });
       dialog.addEventListener("submit", (e) => {
@@ -953,7 +997,26 @@
       if (metric) { chooseMetric(metric.dataset.metric, false); return; }
       if (range) { ui.token.range = range.dataset.range; focusNext = `.hc-open [data-range="${range.dataset.range}"]`; cancelAnimationFrame(pending); drawNow(); return; }
       if (unit) { setting("weather", { unit: unit.dataset.unit }); focusNext = `${ui.open ? ".hc-open" : ".hc-grid"} .hc-weather [data-unit="${unit.dataset.unit}"]`; draw(); return; }
-      if (t.closest(".hc-city-edit")) { ui.weatherEdit = true; cancelAnimationFrame(pending); drawNow(); opened.querySelector(".hc-city")?.focus(); return; }
+      if (t.closest(".hc-city-edit")) {
+        // The field in this card when it has the room (opened, or a Medium card as tall as it needs); else the card opens whole at it.
+        const here = card.parentNode !== grid || (card.dataset.form === "m" && grid.dataset.form === "m");
+        ui.weatherEdit = true;
+        if (here) { cancelAnimationFrame(pending); drawNow(); card.querySelector(".hc-city")?.focus(); } else { open("weather"); opened.querySelector(".hc-city")?.focus(); }
+        return;
+      }
+      if (t.closest(".hc-city-cancel")) { weatherEditEnd(card); return; }
+      if (t.closest(".hc-wx-retry")) { weatherRetried = card.parentNode === grid ? ".hc-grid" : ".hc-open"; weather = null; weatherAsked = Date.now(); post?.({ type: "homeWeatherGet" }); say("Asking for the weather again."); cancelAnimationFrame(pending); drawNow(); return; }
+      const cross = t.closest(".hc-zone-x");
+      if (cross) {
+        // An added zone's ×: it goes; the keyboard stays on the clocks (the next one's ×, else the one before, else the field).
+        const zs = zonesNow(), at = zs.indexOf(cross.dataset.zoneX), scope = card.parentNode === grid ? ".hc-grid" : ".hc-open"; if (at < 0) return;
+        const next = zs.filter((z) => z !== zs[at]), to = next[at] || next[at - 1] || "";
+        setting("clock", { zones: next });
+        say(`${zoneCity(zs[at])} removed from the Clock.`);
+        focusNext = to ? `${scope} .hc-clock .hc-zone-x[data-zone-x="${to}"]` : `${scope} .hc-card[data-card="clock"] input.hc-zone`;
+        redraw();
+        return;
+      }
       if (t.closest(".hc-clear")) { act?.("clear"); return; }
       if (t.closest(".hc-usage-link")) { act?.("usage"); return; }
       if (t.closest("[data-pin-folder]")) { act?.("pin", t.closest("[data-pin-folder]").dataset.pinFolder); return; }
@@ -992,7 +1055,9 @@
       // Only a place taken from the list is saved: never whatever was typed.
       const place = form.querySelector(".hc-city")?.__place;
       if (!place) return;
+      const scope = form.closest(".hc-open") ? ".hc-open" : ".hc-grid", was = ui.weatherEdit;
       pickClose(); ui.weatherEdit = false; weather = null; weatherAsked = Date.now();
+      if (was) focusNext = `${scope} .hc-weather .hc-city-edit`;
       setting("weather", { place, city: undefined }); draw();
     });
     // A tick box in a note: its line is written "- [x]" or "- [ ]", and kept.
@@ -1076,8 +1141,8 @@
 
     // The side bar's edge dragged: a new form, and the cards glide to their places.
     let width = widthNow(), was = gridForm(width), sized = null;
-    if (view.ResizeObserver) { sized = new view.ResizeObserver(() => { const w = widthNow(); if (!w || w === width) return; width = w; const g = gridForm(w); if (g !== was || g === "l") { was = g; draw(true); } }); sized.observe(host); }
-    const tick = view.setInterval(() => { if (host.checkVisibility?.() && (layout.order.includes("clock") || layout.order.includes("recent") || layout.order.includes("note"))) draw(); }, 20000);
+    if (view.ResizeObserver) { sized = new view.ResizeObserver(() => { const w = widthNow(); if (!w || w === width) return; width = w; const g = gridForm(w); if (g !== was || g === "l") { if (g !== was && !ui.open) ui.weatherEdit = false; was = g; draw(true); } }); sized.observe(host); }
+    const tick = view.setInterval(() => { if (host.checkVisibility?.() && (layout.order.includes("clock") || layout.order.includes("recent") || layout.order.includes("note") || (layout.order.includes("weather") && weather && weather.ok === false))) draw(); }, 20000);
     post?.({ type: "homeCardsReady" });
     drawNow();
 
@@ -1102,7 +1167,13 @@
         draw(changed);
       },
       usage(report) { usage = { days: Array.isArray(report?.days) ? report.days : [], models: Array.isArray(report?.models) ? report.models : [], modelCount: Number(report?.modelCount) || 0, error: String(report?.error || "") }; usageAt = Date.now(); draw(); },
-      weather(said) { weather = said && typeof said === "object" ? said : null; weatherAt = Date.now(); draw(); },
+      weather(said) {
+        weather = said && typeof said === "object" ? said : null; weatherAt = Date.now();
+        weatherWait = weather && weather.ok === false && weather.reason !== "notfound" ? (weather.reason === "refused" ? 5 : 1) * 60000 : 30 * 60000;
+        // Try again was pressed: the keyboard goes back to it if the weather is still out of reach.
+        if (weatherRetried) { if (weather && weather.ok === false) focusNext = `${weatherRetried} .hc-wx-retry`; weatherRetried = ""; }
+        draw();
+      },
       /** The host's { type: "homeWeatherPlaces", q, seq, ok, places | reason }: the places found for the letters typed. */
       places(said) {
         const input = placeFor;

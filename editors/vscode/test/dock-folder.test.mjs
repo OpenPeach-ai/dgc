@@ -1,5 +1,5 @@
 // A Work folder on the dock (asked 13 Nov: "how can i Pin a folder directory on to the dock?"). A folder is pinned from
-// a Project Folder dropdown's row, from a Folders card's tile and from the Work page (the dropdown's first line); on the dock it is his folder icon
+// a Project Folder dropdown's row and from a Folders card's tile (the dropdown's first line that pinned the chosen folder went on 14 Nov: each row's own pin does it); on the dock it is his folder icon
 // in the folder's own kept palette with the folder's name on its label, still unless something in it runs; a click
 // opens Work on that folder; its menu has New session here, Open in new window and Unpin; it shows in every window; a
 // folder that is gone is dimmed and says "Not found". The host's side (src/dock.ts, bundled against a stub `vscode`)
@@ -83,8 +83,10 @@ test("pin from the Project Folder dropdown: a pin shows on a folder's row when i
     const p = x.page;
     await withFolders(x);
     await p.click("#sessions-folder-pick"); await x.settle();
-    const row = p.locator(`.dgc-folder-menu .dgc-folder-row[data-folder="${GARDEN}"]`), pin = row.locator(".dgc-folder-pin");
-    assert.equal(await p.locator('.dgc-folder-menu .dgc-folder-row[data-folder=""] .dgc-folder-pin').count(), 0, "All projects is not a folder: no pin");
+    // (Since 14 Nov a row's pin is a button of its own beside the row's, not a span inside it: the keyboard reaches it.)
+    const row = p.locator(`.dgc-folder-menu .dgc-folder-row[data-folder="${GARDEN}"]`), pin = p.locator(`.dgc-folder-menu .dgc-folder-pin[data-folder-pin="${GARDEN}"]`);
+    assert.equal(await p.locator('.dgc-folder-menu .dgc-folder-pin[data-folder-pin=""]').count(), 0, "All projects is not a folder: no pin");
+    assert.equal(await p.locator(".dgc-folder-menu .dgc-folder-pin").count(), 4, "one for each folder that is there");
     assert.equal(Number(await pin.evaluate((n) => getComputedStyle(n).opacity)), 0, "at rest the row is as it was");
     await row.hover(); await x.settle();
     assert.equal(await shown(pin), 1, "pointed at: its pin shows");
@@ -105,7 +107,7 @@ test("pin from the Project Folder dropdown: a pin shows on a folder's row when i
   } finally { await x.close(); }
 });
 
-test("pin from a Folders card tile, and from the Work page: the Project Folder menu's first line", async (t) => {
+test("pin from a Folders card tile; on the Work page the Project Folder menu has no line of its own to pin the chosen folder", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openGrid(browser, { width: 460, layout: ["folders"], pins: [] });
   try {
@@ -119,28 +121,23 @@ test("pin from a Folders card tile, and from the Work page: the Project Folder m
     assert.equal(await pin.getAttribute("aria-pressed"), "true");
     assert.equal((await x.posted("projectFolderChoose")).length, 0, "the tile was not opened");
     assert.equal(await p.locator('.hc-card[data-card="folders"] .hc-tile.hc-gone .hc-pin').count(), 0, "a folder that is gone has no pin to offer");
-    // The Work page: with one folder chosen, the Project Folder menu's first line pins that folder (the row's layout is
-    // as it was: no button of its own beside the dropdown).
+    // The Work page (changed 14 Nov: the menu's first line that pinned the chosen folder is gone; each row's own pin does
+    // it, and the keyboard reaches that pin with Right from its row): no button of its own beside the dropdown either.
     await p.click("#side-tab-work"); await x.rest(200);
     assert.equal(await p.locator("#sessions-folder-pin").count(), 0, "no pin button on the Library row: the dropdown ends it, as before");
-    await p.click("#sessions-folder-pick"); await x.rest(700);
-    assert.equal(await p.locator(".dgc-folder-menu [data-folder-pin-line]").count(), 0, "All projects is not a folder: no line to pin it");
-    await p.keyboard.press("Escape"); await x.rest(500);
     await x.send({ type: "sessions_list", items: DOCK_SESSIONS, error: "", folders: { ...FOLDERS, choice: GARDEN } }); await x.rest(200);
-    // By the keyboard: Down opens the menu on the folder chosen; Home goes to its first line; Enter pins.
     await p.focus("#sessions-folder-pick"); await p.keyboard.press("ArrowDown"); await x.rest(700);
-    const line = p.locator(".dgc-folder-menu [data-folder-pin-line]");
-    assert.equal(await p.evaluate(() => document.querySelector(".dgc-folder-menu .dgc-menu-row") === document.querySelector(".dgc-folder-menu [data-folder-pin-line]")), true, "it is the menu's first line");
-    assert.equal((await line.innerText()).trim(), "Pin garden-notes to the dock"); assert.equal(await line.locator("svg").count(), 1, "with the dock's pin");
-    await p.keyboard.press("Home"); await x.rest(80);
-    assert.equal(await p.evaluate(() => document.activeElement?.hasAttribute("data-folder-pin-line")), true, "the keyboard reaches it like any row");
+    assert.equal(await p.locator(".dgc-folder-menu [data-folder-pin-line]").count(), 0, "no first line to pin the chosen folder");
+    assert.equal(await p.evaluate(() => document.querySelector(".dgc-folder-menu .dgc-menu-row")?.dataset.folder), "", "the menu starts with All projects");
+    // By the keyboard: Down opened the menu on the folder chosen; Right goes to its pin; Enter pins, and again unpins.
+    await p.keyboard.press("ArrowRight"); await x.rest(80);
+    assert.equal(await p.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Pin to the dock: garden-notes", "the keyboard reaches the row's pin");
     await p.keyboard.press("Enter"); await x.rest(300);
     assert.deepEqual(await folderPins(x), [["rust_ire", "/home/me/rust_ire"], ["garden-notes", GARDEN]]);
     assert.equal((await x.posted("projectFolderChoose")).length, 0, "pinning chooses nothing");
-    assert.equal((await line.innerText()).trim(), "Unpin garden-notes from the dock", "the line says what it does now, and the menu is still open");
-    await line.click(); await x.rest(300);
+    assert.equal(await p.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Unpin from the dock: garden-notes", "the pin says what it does now, and the menu is still open");
+    await p.keyboard.press("Enter"); await x.rest(300);
     assert.deepEqual(await folderPins(x), [["rust_ire", "/home/me/rust_ire"]], "and it unpins");
-    assert.equal((await line.innerText()).trim(), "Pin garden-notes to the dock");
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
 });

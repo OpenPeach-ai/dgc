@@ -150,9 +150,11 @@ test("Weather opened: Change place offers the list again, and a place kept befor
   } finally { await x.close(); }
 });
 
-// ---- 2. Clock: every time zone for the second city -------------------------------------------------------------------
+// ---- 2. Clock: every time zone, for a city added beside Here ------------------------------------------------------------
+// (Changed 14 Nov: the field adds a city, up to three beside Here, where it set the one second city; "No second city" and
+// the city's name in the field went with that, and an added city leaves by its ×. test/home-batch.test.mjs has the rest.)
 for (const [theme, width] of [["dark-modern", 300], ["dark-modern", 460], ["light-modern", 300], ["light-modern", 460]]) {
-  test(`Clock, ${width}px ${theme}: the second city is any time zone there is, found by its city or its zone`, async (t) => {
+  test(`Clock, ${width}px ${theme}: a city added is any time zone there is, found by its city or its zone`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openGrid(browser, { width, theme, layout: ["clock", "weather"] });
     try {
@@ -165,7 +167,7 @@ for (const [theme, width] of [["dark-modern", 300], ["dark-modern", 460], ["ligh
       const all = await p.evaluate(() => ({ n: document.querySelectorAll('.hc-suggest [role="option"]').length, supported: Intl.supportedValuesOf("timeZone").length }));
       assert.ok(all.supported > 300 && all.n >= all.supported, `every time zone is offered (${all.n} rows for ${all.supported} zones)`);
       let m = await menu(p);
-      assert.equal(m.rows[0].name, "No second city", "and none, first");
+      assert.notEqual(m.rows[0].name, "No second city", "only zones: a city leaves by its ×");
       assert.equal(m.radius, "6px"); assert.ok(m.left >= 0 && m.right <= width + 0.5, "inside the side bar");
       assert.ok(m.bottom - m.top <= 330, `it shows a few and scrolls (${Math.round(m.bottom - m.top)} px tall)`);
       // By city.
@@ -186,17 +188,16 @@ for (const [theme, width] of [["dark-modern", 300], ["dark-modern", 460], ["ligh
       // The same keys as Weather's: Down, Enter.
       await p.fill(field, "tok"); await x.rest(120);
       await p.keyboard.press("ArrowDown"); await p.keyboard.press("Enter"); await x.rest(300);
-      assert.deepEqual((await x.host()).settings.clock, { zone: "Asia/Tokyo" });
+      assert.deepEqual((await x.host()).settings.clock, { zones: ["Asia/Tokyo"] });
       assert.equal(await closed(p), true);
       assert.match(await p.locator(card).innerText(), /Tokyo/);
       assert.equal(await p.locator(`${card} .hc-clock`).count(), 2, "both clocks");
-      // Escape while looking leaves the city as it was; and "No second city" takes it away.
+      // Escape while looking adds nothing and empties the field; the city's × takes it away.
       await p.click(field); await p.keyboard.type("par"); await x.rest(120); await p.keyboard.press("Escape"); await x.rest(80);
-      assert.equal(await closed(p), true); assert.deepEqual((await x.host()).settings.clock, { zone: "Asia/Tokyo" });
-      assert.equal(await p.inputValue(field), "Tokyo", "the field says the city again");
-      await p.click(field); await x.rest(120);
-      await p.locator('.hc-suggest [role="option"]').first().click(); await x.rest(300);
-      assert.equal((await x.host()).settings.clock?.zone || "", "");
+      assert.equal(await closed(p), true); assert.deepEqual((await x.host()).settings.clock, { zones: ["Asia/Tokyo"] });
+      assert.equal(await p.inputValue(field), "", "the field is empty again: it adds, it names no city");
+      await p.locator(`${card} .hc-clock`).nth(1).hover(); await p.click(`${card} .hc-zone-x`); await x.rest(300);
+      assert.deepEqual((await x.host()).settings.clock?.zones || [], []);
       assert.equal(await p.locator(`${card} .hc-clock`).count(), 1);
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }

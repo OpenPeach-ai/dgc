@@ -2,7 +2,7 @@
 //
 // Kept on this computer, in the extension's global state as the dock's pins are (src/dock.ts), so a reload and every
 // window find Home as it was left: which cards are on Home and in what order (the side bar's width picks each card's
-// size, so no size is kept), the everyday cards' own settings (the Clock's second time zone, the Weather's place and
+// size, so no size is kept), the everyday cards' own settings (the Clock's added time zones, the Weather's place and
 // unit, which widget and which artifact their cards last showed), and the notes of the Notes card.
 //
 // Read for it: the token report, shaped for the Token usage card (the days as DGC counted them, the models by tokens
@@ -22,12 +22,15 @@ export const HOME_DEFAULT: HomeCardType[] = ["needs", "recent", "running", "toke
 const WEATHER_KEEP_MS = 30 * 60000;
 /** The Notes card holds at most this many notes, each at most this long. */
 export const NOTES_MOST = 500, NOTE_MOST = 20000;
+/** The Clock shows Here and at most this many added time zones (four in all). */
+export const CLOCK_ZONES_MOST = 3;
 
 /** A place as Open-Meteo's search named it, kept whole: the forecast is asked by its coordinates. */
 export type HomePlace = { name: string; admin1: string; country: string; code: string; lat: number; lon: number; tz: string };
 export type HomeNote = { id: string; text: string; at: number; pinned: boolean };
-/** `weather.city`: a city typed before places were chosen from a list (found once more, then kept as a place). */
-export type HomeSettings = { clock?: { zone?: string }; weather?: { place?: HomePlace; city?: string; unit?: "c" | "f" }; widgets?: { shown?: string }; artifacts?: { shown?: string } };
+/** `clock.zones`: the time zones added beside Here, in the order they were added. `weather.city`: a city typed before
+ *  places were chosen from a list (found once more, then kept as a place). */
+export type HomeSettings = { clock?: { zones: string[] }; weather?: { place?: HomePlace; city?: string; unit?: "c" | "f" }; widgets?: { shown?: string }; artifacts?: { shown?: string } };
 export type HomeCardsState = { type: "homeCards"; order: HomeCardType[]; settings: HomeSettings; notes: HomeNote[] };
 export type HomeWeather = { type: "homeWeather"; ok: true; place: string; at: number; now: { temp: number; code: number; day: boolean }; high: number; low: number; hours: { time: string; temp: number; code: number }[] }
   | { type: "homeWeather"; ok: false; reason: "nocity" | "offline" | "refused" | "notfound" };
@@ -48,6 +51,15 @@ function zone(value: unknown): string | undefined {
   if (typeof value !== "string" || !/^(?:UTC|[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+){1,2})$/.test(value)) return undefined;
   try { new Intl.DateTimeFormat("en-US", { timeZone: value }); return value; } catch { return undefined; }
 }
+/** The Clock's added zones, checked: each a real time zone, each once, three at most. undefined: not a list of them. */
+function zones(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out: string[] = [];
+  for (const entry of value.slice(0, 32)) { const z = zone(entry); if (!z) return undefined; if (!out.includes(z)) out.push(z); }
+  return out.slice(0, CLOCK_ZONES_MOST);
+}
+/** The zones kept: the list, or (kept before 14 Nov, when the Clock had one second city) that one zone as the first. */
+const zonesKept = (clock: any): string[] => zones(clock?.zones) ?? ((z) => (z ? [z] : []))(zone(clock?.zone));
 const city = (value: unknown) => (typeof value === "string" ? value.replace(/[\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 80) : undefined);
 /** A place, checked: a name, coordinates that are on the Earth, and only short plain words beside them. Takes a place
  *  as kept ({ lat, lon, code, tz }) or as Open-Meteo's search names one ({ latitude, longitude, country_code,
@@ -63,8 +75,8 @@ const SHOWN_ID = /^[A-Za-z0-9_.:-]{1,80}$/;
 /** The settings as kept: only what each card has. */
 function settings(value: unknown): HomeSettings {
   const from = value && typeof value === "object" ? value as Record<string, any> : {}, out: HomeSettings = {};
-  const z = zone(from.clock?.zone);
-  if (z) out.clock = { zone: z };
+  const zs = zonesKept(from.clock);
+  if (zs.length) out.clock = { zones: zs };
   const place = homePlace(from.weather?.place), c = place ? undefined : city(from.weather?.city), unit = from.weather?.unit === "f" ? "f" : from.weather?.unit === "c" ? "c" : undefined;
   if (place || c || unit) out.weather = { ...(place ? { place } : {}), ...(c ? { city: c } : {}), ...(unit ? { unit } : {}) };
   for (const card of ["widgets", "artifacts"] as const) if (typeof from[card]?.shown === "string" && SHOWN_ID.test(from[card].shown)) out[card] = { shown: from[card].shown };
@@ -166,7 +178,16 @@ export class HomeCards {
   async setting(card: unknown, change: unknown): Promise<void> {
     if (card !== "clock" && card !== "weather" && card !== "widgets" && card !== "artifacts") return;
     const now = settings(this.kept().settings), from = change && typeof change === "object" ? change as Record<string, unknown> : {};
-    if (card === "clock") { const z = zone(from.zone); if (z === undefined) return; if (z) now.clock = { zone: z }; else delete now.clock; }
+    if (card === "clock") {
+      // The zones whole, as the page has them now; or (a page from before 14 Nov) the one zone: it is the first added
+      // zone, and "" takes the first away.
+      const had = now.clock?.zones ?? [];
+      let next: string[] | undefined;
+      if (from.zones !== undefined) next = zones(from.zones);
+      else { const z = zone(from.zone); next = z === undefined ? undefined : z ? [z, ...had.slice(1).filter((x) => x !== z)] : had.slice(1); }
+      if (!next) return;
+      if (next.length) now.clock = { zones: next }; else delete now.clock;
+    }
     else if (card === "widgets" || card === "artifacts") { if (typeof from.shown !== "string" || (from.shown && !SHOWN_ID.test(from.shown))) return; if (from.shown) now[card] = { shown: from.shown }; else delete now[card]; }
     else {
       const place = from.place === undefined ? now.weather?.place : homePlace(from.place), unit = from.unit === "f" || from.unit === "c" ? from.unit : now.weather?.unit;

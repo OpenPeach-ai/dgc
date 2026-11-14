@@ -90,7 +90,7 @@ for (const theme of ["dark-modern", "light-modern"]) {
     await x.setting({ pins: pins.slice(0, 1) }); await x.settle();
     await p.click("#sessions-folder-pick"); await x.settle(); await p.waitForTimeout(700);
     await p.hover('.dgc-folder-menu .dgc-folder-row[data-folder="/home/me/rust_ire"]'); await p.waitForTimeout(300); await shot(x, `3-folder-dropdown-pin-${width}-${t}`);
-    await p.mouse.move(2, 200); await p.waitForTimeout(300); await shot(x, `3-folder-menu-pin-line-${width}-${t}`);
+    await p.mouse.move(2, 200); await p.waitForTimeout(300); await shot(x, `3-folder-menu-at-rest-${width}-${t}`);
     await p.keyboard.press("Escape"); await p.waitForTimeout(500);
     await x.setting({ pins }); await x.settle(); await p.mouse.move(2, 200); await p.waitForTimeout(300); await shot(x, `3-folder-work-page-and-dock-${width}-${t}`);
     const tile = p.locator(`#dgc-dock .dgc-dock-item[data-key="${pins[0].key}"]`);

@@ -51,6 +51,11 @@ export const FOLDERS = { choice: "", window: { folder: "/home/me/shop", shown: "
   { folder: "/home/me/old-site", shown: "~/old-site", name: "old-site", here: false, exists: false, sessions: 1, pips: 0, workspace_id: null },
   { folder: "/home/me/invoices", shown: "~/invoices", name: "invoices", here: false, exists: true, sessions: 2, pips: 0, workspace_id: null }] };
 
+/** Thirty folders (neutral names), for a long Project Folder list: the eighth is gone, the first is this window's. */
+export const THIRTY_FOLDERS = ["shop", "garden-notes", "invoices", "recipes", "tide-tables", "ferry-plan", "book-club", "field-guide", "weather-log", "bike-routes", "seed-list", "boat-shed", "print-queue", "photo-sort", "tax-2026",
+  "newsletter", "kitchen-plan", "map-tiles", "bird-count", "choir-site", "loan-sheet", "quiz-night", "allotment", "bakery-orders", "trail-notes", "reading-list", "market-stall", "school-run", "lighthouse", "harbour-cam"]
+  .map((name, k) => ({ folder: `/home/me/projects/${name}`, shown: `~/projects/${name}`, name, here: k === 0, exists: k !== 7, sessions: 1 + (k % 5), pips: k % 3 === 0 ? 1 : 0, workspace_id: null }));
+
 /** Opens Home with its cards. layout: the cards on Home, in order; settings: { clock, weather, note } as the host keeps
  *  them; usage: the token report (null: none yet); weather: what the stand-in service says (or { ok: false, reason });
  *  folders: the Project Folder rows (null: a DGC that lists none); news: Work replies nobody saw ([{ id, at, preview }]).

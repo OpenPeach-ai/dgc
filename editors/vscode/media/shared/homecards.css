@@ -33,7 +33,7 @@ body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, 
 .hc-btn:disabled { opacity: .5; cursor: default; }
 .hc-btn:disabled:hover { background: transparent; border-color: var(--btn-line, var(--hair-strong)); color: var(--text); }
 .hc-btn.hc-solid:disabled:hover { border-color: var(--solid); background: var(--solid); color: var(--on-solid); }
-.hc-btn:focus-visible, .hc-lnk:focus-visible, .hc-li:focus-visible, .hc-qb:focus-visible, .hc-kb:focus-visible, .hc-card:focus-visible, .hc-plot:focus-visible, .hc-seg button:focus-visible, .hc-field:focus-visible, .hc-tile-open:focus-visible, .hc-here:focus-visible, .hc-x:focus-visible,
+.hc-btn:focus-visible, .hc-lnk:focus-visible, .hc-li:focus-visible, .hc-qb:focus-visible, .hc-kb:focus-visible, .hc-card:focus-visible, .hc-plot:focus-visible, .hc-seg button:focus-visible, .hc-field:focus-visible, .hc-tile-open:focus-visible, .hc-here:focus-visible, .hc-x:focus-visible, .hc-zone-x:focus-visible,
 .hc-pin:focus-visible, .hc-mtile:focus-visible, .hc-stack:focus-visible, .hc-dot:focus-visible, .hc-note-view:focus-visible {
   outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
 .hc-cards-btn, .hc-back, .hc-done { height: var(--btn-h); }
@@ -256,13 +256,33 @@ body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, 
 .hc-pin { appearance: none; position: absolute; top: 0; left: 0; display: grid; place-items: center; width: 22px; height: 22px; margin: 0; padding: 0; border: 1px solid var(--hair-strong); border-radius: var(--btn-r, 6px); background: var(--bg); color: var(--text); opacity: 0; cursor: pointer; transition: opacity var(--dur-hover) var(--ease-out); }
 .hc-tile:hover .hc-pin, .hc-tile:focus-within .hc-pin, .hc-pin[aria-pressed="true"] { opacity: 1; }
 .hc-pin:hover { background: color-mix(in srgb, var(--text) 12%, var(--bg)); color: var(--text-strong); }
-.hc-clocks { display: flex; gap: 24px; }
-.hc-clock { display: flex; flex-direction: column; gap: 3px; }
+/* The Clock (14 Nov): Here and up to three more. Two to a row (one where a row has no room for two; four across in the
+   card opened in a wide side bar), so four are two rows of two. A city's name is never cut: its offset and its day go to
+   a second line first. An added zone's × is at its clock's top right, in sight while the clock is pointed at or has the
+   keyboard (always where nothing can point). */
+.hc-clocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(max(104px, calc(50% - 8px)), 1fr)); gap: 12px 16px; min-width: 0; }
+.hc-clocks[data-n="1"] { grid-template-columns: minmax(0, 1fr); }
+.hc-grid[data-form="l"] ~ .hc-open .hc-clocks:not([data-n="1"]) { grid-template-columns: repeat(auto-fit, minmax(max(104px, calc(25% - 12px)), 1fr)); }
+/* (.hc-clocks > .hc-clock: one clock. The Clock card itself is .hc-card.hc-clock.) */
+.hc-clocks > .hc-clock { position: relative; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.hc-clocks > .hc-clock .hc-sub { overflow-wrap: anywhere; }
+.hc-zc { color: var(--text); }
+.hc-zo { white-space: nowrap; }
+.hc-zone-x { appearance: none; position: absolute; top: 2px; right: 0; display: grid; place-items: center; width: 20px; height: 20px; margin: 0; padding: 0; border: 1px solid var(--btn-line, var(--hair-strong)); border-radius: var(--btn-r, 6px);
+  background: transparent; color: var(--hc-quiet); opacity: 0; cursor: pointer; transition: opacity var(--dur-hover) var(--ease-out), background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out); }
+.hc-clocks > .hc-clock:hover .hc-zone-x, .hc-zone-x:focus-visible { opacity: 1; }
+.hc-zone-x:hover { background: var(--wash); color: var(--text-strong); }
+@media (hover: none) { .hc-zone-x { opacity: 1; } }
+/* Three or four clocks in a wide side bar: a Large card, two rows of two that share its height. */
+.hc-grid > .hc-card[data-card="clock"][data-form="l"] .hc-clocks { flex: 1 1 auto; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 1fr; gap: 8px; min-height: 0; }
+.hc-grid > .hc-card[data-card="clock"][data-form="l"] .hc-clock { justify-content: center; gap: 5px; padding: 10px 12px; border: 1px solid var(--hair); border-radius: var(--btn-r, 6px); background: color-mix(in srgb, var(--text) 3%, transparent); }
+.hc-grid > .hc-card[data-card="clock"][data-form="l"] .hc-time { font-size: 30px; }
+.hc-grid > .hc-card[data-card="clock"][data-form="l"] .hc-clocks[data-n="3"] > .hc-clock:last-child { grid-column: 1 / -1; }      /* (three: the third has the second row whole, no empty quarter) */
+.hc-grid > .hc-card[data-card="clock"][data-form="l"] .hc-zone-x { top: 6px; right: 6px; }
 .hc-time { color: var(--text-strong); font: var(--w-semi) 26px/1 var(--mono); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
 .hc-field { box-sizing: border-box; height: 26px; margin: 0; padding: 0 8px; border: 1px solid var(--hair-strong); border-radius: var(--btn-r, 6px); background: var(--surface2, transparent); color: var(--text); font: var(--w-reg) var(--t-sm)/1.2 var(--sans); }
 .hc-field::placeholder { color: var(--hc-quiet); opacity: 1; }
 input.hc-zone { flex: 0 1 132px; width: 132px; min-width: 84px; font-size: var(--t-xs); }
-.hc-clock .hc-sub { white-space: nowrap; }
 /* The dropdown under a field (a place for Weather, a time zone for Clock): the menu's look (media/shared/menu.css) with
    the one corner, an opaque ground, a few rows at a time and the rest by scrolling. Each row: a name over a quiet line,
    and a small code at its end. The row the keys are on is washed. */
@@ -280,6 +300,16 @@ input.hc-zone { flex: 0 1 132px; width: 132px; min-width: 84px; font-size: var(-
 .hc-cityform .hc-city { flex: 1 1 auto; min-width: 0; }
 .hc-wx { flex: none; color: var(--text); }
 .hc-wnow { display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* The Weather's foot: where it comes from (or Try again) at the left, Change place at the right. On a Small card the two
+   answers are one under the other when a row has no room for both. */
+.hc-wfoot { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 20px; }
+.hc-wfoot .hc-lnk { margin-block: -2px; }
+.hc-wfoot > .hc-lnk:first-child { margin-left: -4px; }
+.hc-wfoot-s { flex-wrap: wrap; gap: 0 10px; min-height: 0; }
+.hc-wfoot-s .hc-lnk { margin: 0 -4px -3px; }
+.hc-wplace { flex: 0 1 auto; min-width: 0; }
+.hc-wbad { -webkit-line-clamp: 3; }
+.hc-cityform .hc-city-cancel { flex: none; }
 .hc-hours { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
 .hc-hour { display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .hc-hv { color: var(--text); font: var(--w-med) 11.5px/1 var(--mono); }
@@ -420,5 +450,5 @@ dialog.hc-library:not([open]) { display: none; }
 @media (max-width: 379px) { .hc-lib-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 330px) { .hc-lib-head .hc-cap { display: none; } .hc-arr-cap { display: none; } }
 
-@media (prefers-reduced-motion: reduce) { .hc-col, .hc-li, .hc-btn, .hc-qb, .hc-kb, .hc-here, .hc-pin, .hc-mtile, .hc-dot::before, .hc-card { transition: none !important; } }
-@media (forced-colors: active) { .hc-card, .hc-lib-item, .hc-btn, .hc-qb, .hc-field, .hc-mtile, .dgc-menu.hc-suggest, .hc-note-undo { border-color: CanvasText; } .hc-dot[aria-current="true"]::before { background: Highlight; } .dgc-menu.hc-suggest .hc-opt[aria-selected="true"] { forced-color-adjust: none; background: Highlight; color: HighlightText; } .hc-cell.on, .hc-cell.cap, .hc-fill { background: CanvasText; } .hc-col.hot :is(.hc-cell.on, .hc-cell.cap) { background: Highlight; } }
+@media (prefers-reduced-motion: reduce) { .hc-zone-x, .hc-col, .hc-li, .hc-btn, .hc-qb, .hc-kb, .hc-here, .hc-pin, .hc-mtile, .hc-dot::before, .hc-card { transition: none !important; } }
+@media (forced-colors: active) { .hc-card, .hc-lib-item, .hc-zone-x, .hc-btn, .hc-qb, .hc-field, .hc-mtile, .dgc-menu.hc-suggest, .hc-note-undo { border-color: CanvasText; } .hc-dot[aria-current="true"]::before { background: Highlight; } .dgc-menu.hc-suggest .hc-opt[aria-selected="true"] { forced-color-adjust: none; background: Highlight; color: HighlightText; } .hc-cell.on, .hc-cell.cap, .hc-fill { background: CanvasText; } .hc-col.hot :is(.hc-cell.on, .hc-cell.cap) { background: Highlight; } }

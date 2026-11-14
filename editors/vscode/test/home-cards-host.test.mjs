@@ -49,11 +49,12 @@ test("the everyday cards' settings are kept with the layout, and only what a car
   await home.setting("artifacts", { shown: "ar_0000000000000003" });
   await home.setting("artifacts", { shown: "../../etc" });
   const kept = new HomeCards(context).state().settings;
-  assert.deepEqual(kept.clock, { zone: "Asia/Tokyo" }, "a time zone that is not one changes nothing");
+  // (Since 14 Nov the Clock keeps a list of added zones, three at most; the one zone a page sent before is the first.)
+  assert.deepEqual(kept.clock, { zones: ["Asia/Tokyo"] }, "a time zone that is not one changes nothing");
   assert.equal(kept.weather.unit, "f"); assert.equal(kept.token, undefined);
   assert.deepEqual(kept.widgets, { shown: "wg_0000000000000002" }, "which widget the card showed"); assert.deepEqual(kept.artifacts, { shown: "ar_0000000000000003" });
-  // Every time zone there is, and UTC; "" takes the second city away.
-  for (const z of ["Europe/Lisbon", "America/Argentina/Buenos_Aires", "Asia/Kolkata", "Etc/GMT+5", "UTC"]) { await home.setting("clock", { zone: z }); assert.deepEqual(new HomeCards(context).state().settings.clock, { zone: z }, z); }
+  // Every time zone there is, and UTC; "" takes the first added zone away.
+  for (const z of ["Europe/Lisbon", "America/Argentina/Buenos_Aires", "Asia/Kolkata", "Etc/GMT+5", "UTC"]) { await home.setting("clock", { zone: z }); assert.deepEqual(new HomeCards(context).state().settings.clock, { zones: [z] }, z); }
   await home.setting("clock", { zone: "" });
   assert.equal(new HomeCards(context).state().settings.clock, undefined);
 });
@@ -70,7 +71,7 @@ test("Notes: made, changed, pinned and deleted, kept across a reload; the old si
   await home.note({ op: "save", note: { id: "n0002", text: "Second", at: 9000, pinned: true, evil: "<script>" } });
   home = new HomeCards(old);
   assert.deepEqual(home.state().notes, [{ id: "n0002", text: "Second", at: 9000, pinned: true }, notes[0]], "a reload finds both: the new one first, the old note still there");
-  assert.deepEqual(home.state().settings.clock, { zone: "Asia/Tokyo" });
+  assert.deepEqual(home.state().settings.clock, { zones: ["Asia/Tokyo"] });   // (14 Nov: the one zone kept before is the first of the added zones)
   // Changed in place; a note with words only; an id that is one.
   await home.note({ op: "save", note: { id: "n0002", text: "Second, changed", at: 9500, pinned: false } });
   await home.note({ op: "save", note: { id: "../x", text: "bad id", at: 1 } });

@@ -754,8 +754,8 @@
     if (!Pick || !projectFolders) return;
     if (button.getAttribute("aria-expanded") === "true") { Pick.close(true); return; }
     Pick.open(button, { rows: projectFolders.rows, choice: projectFolders.choice, all: true, keyboard, onChoose: chooseFolder,
-      // Each folder's row has a pin (shown when the row is pointed at): it puts the folder on the dock, and chooses nothing.
-      // With one folder chosen the menu's first line pins (or unpins) that folder: the keyboard's way, and the Work page's.
+      // Each folder's row has a pin (shown when the row is pointed at, or has the keyboard: Right from the row goes to
+      // it): it puts the folder on the dock, and chooses nothing.
       ...(window.DgcDock ? { pin: { on: folderDocked, toggle: toggleFolderPin } } : {}) });
   }
   /** A slot that holds the dropdown's button: a click, or Down, opens its menu. A <dgc-folder-fit>: on the row it
