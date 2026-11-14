@@ -971,22 +971,9 @@ class ChatEngine:
     # -- deep research (research.py): a plan to edit or start, then rounds of reading, then a checked report
 
     def _hosted(self, client) -> bool:
-        """Whether the model runs somewhere else (a :cloud model, or a server that isn't this machine or on its
-        network), so a bigger window costs none of the user's memory."""
-        import ipaddress
-        from urllib.parse import urlsplit
-        name = str(getattr(client, "model", "") or "").lower()
-        if name.endswith((":cloud", "-cloud")):
-            return True
-        host = (urlsplit(str(getattr(client, "base_url", "") or getattr(self.config, "base_url", "") or "")).hostname
-                or "").lower()
-        if "." not in host or host.endswith((".local", ".lan", ".home", ".internal")):
-            return False                          # localhost, a machine on the network by its name
-        try:
-            address = ipaddress.ip_address(host)
-        except ValueError:
-            return True                           # a provider's address
-        return not (address.is_private or address.is_loopback or address.is_link_local)
+        """Whether the model runs somewhere else, so a bigger window costs none of the user's memory: the one reading
+        ChatDGC, Work and Pips share (research.hosted)."""
+        return research.hosted(client, str(getattr(self.config, "base_url", "") or ""))
 
     def _research_room(self, client) -> int:
         """The window research works in. The model decides how deep it goes: on a hosted model, research uses up to

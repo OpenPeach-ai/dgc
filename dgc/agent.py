@@ -128,7 +128,9 @@ _DISPATCHED_OUTSIDE_EXECUTORS = frozenset({"task", "artifact", "mcp_call", "mcp_
                                            # image generation (dgc/image_tools.py)
                                            "generate_image", "list_image_generators",
                                            # video generation (dgc/video_tools.py)
-                                           "generate_video", "list_video_generators"})
+                                           "generate_video", "list_video_generators",
+                                           # deep research, the one engine every surface runs (dgc/deep_research.py)
+                                           "deep_research"})
 # Pips tools reach the model only after `use_pips` loads them (or the user points a turn at a
 # Pip). Offered on every request they cost more than every other tool together; a model that
 # needs them asks for them, the way mcp_search brings in MCP tools.
@@ -280,7 +282,7 @@ _MCP_BROKER_SCHEMA_CHARS = len(json.dumps(_MCP_BROKER_SCHEMAS, default=str))
 _OPTIONAL_TOOL_INTENT = {
     "repo_map": "repo_navigation", "code_intel": "code_navigation",
     "git_diff": "git_review",
-    "web_fetch": "web", "web_search": "web", "browser": "browser",
+    "web_fetch": "web", "web_search": "web", "deep_research": "web", "browser": "browser",
     "add_skill": "skill_install", "save_memory": "memory",
     "artifact": "artifact", "present_document": "document", "task": "delegate", "monitor": "monitor",
     "make_artifact": "artifact", "edit_artifact": "artifact",
@@ -3328,6 +3330,7 @@ class Agent(GoalLifecycle):
                    + (self._image_tool_schemas() if self._image_tools_exposed() else [])
                    + (self._video_tool_schemas() if self._image_tools_exposed() else [])
                    + (ARTIFACT_TOOL_SCHEMAS if self._artifacts_exposed() else [])
+                   + (self._deep_research_schemas() if self._deep_research_exposed() else [])
                    + (_MCP_BROKER_SCHEMAS if lazy_mcp else []) + mcp_schemas)
         from .pip_access import tools_available as pips_tools_available
         if not pips_tools_available(self.config):
@@ -4024,6 +4027,65 @@ class Agent(GoalLifecycle):
             return False
         from .permissions import session_policy
         return session_policy() is None
+
+    # ---- deep research (dgc/deep_research.py: the one engine ChatDGC, Work and Pips run) ------------------------------
+    def _deep_research_exposed(self) -> bool:
+        """deep_research: to the agent the user talks to, set up or not (the model decides). Never a sub-agent (minutes
+        of reading inside a helper) and never a session a launching application's policy governs, for
+        _artifacts_exposed' reason: its SDK could not name the tool."""
+        if self.depth != 0:
+            return False
+        from .permissions import session_policy
+        return session_policy() is None
+
+    def _deep_research_schemas(self) -> list:
+        from .deep_research import TOOL_SCHEMA
+        return [TOOL_SCHEMA]
+
+    def _deep_research_tool(self, args: dict, call_id) -> str:
+        """Run the shared engine with this session's model (each step its own connection, in the session's window),
+        the one web search set in Settings and the public-only page reader. Each step shows as the tool's progress;
+        Stop stops it. What it searches for passes DGC's leak guard, query by query."""
+        from . import deep_research
+        from .leak_guard import carries_secret, refusal
+        args = args if isinstance(args, dict) else {}
+        question = str(args.get("question") or "").strip()
+        if not question:
+            return "error: say what to research (question)."
+        if carries_secret(question, self.config):
+            return refusal("search")
+        main = self.client
+        room = deep_research.room_for(main, int(getattr(main, "context_size", 0) or self.config.get("context_size", 0) or 0))
+        config = self.config
+
+        def client_for():
+            made = self._new_client(main.base_url, main.api_key, main.model,
+                                    api_mode=getattr(main, "api_mode", None), source="research")
+            try:
+                made.context_size = room
+            except Exception:                      # noqa: BLE001 -- a client without the setting still works
+                pass
+            return made
+
+        def search(query):
+            from . import leak_guard, search as web
+            if leak_guard.carries_secret(str(query), config):
+                return []                          # leak guard: never sent
+            provider, key, url = web.shared_settings(config)
+            return web.results(str(query), provider, api_key=key, url=url, n=deep_research.RESULTS_PER_QUERY)
+
+        def progress(text):
+            notify = getattr(self.ui, "tool_progress", None)
+            if callable(notify):
+                notify("deep_research", text, call_id=call_id)
+        try:
+            result = deep_research.run_report(
+                question, client_for=client_for, room=room, search=search,
+                depth=args.get("depth") or deep_research.TOOL_DEFAULT_DEPTH, progress=progress,
+                cancel=self.cancelled, thinking=str(self.config.get("thinking", "off") or "off"))
+        except deep_research.ResearchError as exc:
+            return f"error: {exc}"
+        return deep_research.tool_text(result)
 
     def _troupe_will_wake(self) -> bool:
         """A troupe this chat started is still running and its end will wake the chat: a turn waiting on it may stop
@@ -11038,6 +11100,8 @@ class Agent(GoalLifecycle):
                         out = self._image_tool(name, args, call_id)
                     elif name in ("generate_video", "list_video_generators"):
                         out = self._video_tool(name, args, call_id)
+                    elif name == "deep_research":
+                        out = self._deep_research_tool(args, call_id)
                     elif name == "show_file" and self._already_shown_picture(args):
                         out = (f"{args.get('path')} is a picture generate_image made in this turn, and it's already "
                                "shown to the user above. There's nothing more to do: don't show it again.")

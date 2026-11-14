@@ -109,6 +109,8 @@ READ_ONLY_TOOLS = {"read_file", "view_image", "show_file", "glob", "grep", "repo
                    "make_artifact", "edit_artifact",
                    # DGC's own settings read and its docs (dgc/settings_tool.py): nothing changes.
                    "dgc_settings_read", "dgc_docs",
+                   # Deep research (dgc/deep_research.py) reads the web, as web_search does: nothing changes.
+                   "deep_research",
                    # A wake-up (dgc/wakeups.py) only brings this chat back later; its turn asks for each thing as usual.
                    "wake_later", "wake_cancel",
                    "list_tasks", "wait_tasks",
