@@ -86,7 +86,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_plugins", "allow_pip_plugin", "decline_pip_plugin", "list_pip_plugin_uses", "get_pip_chat_context",
     "set_pip_chat_options",
     "list_pip_reply_stats", "get_pips_limit", "set_pips_limit", "list_pip_attention", "get_pips_welcome", "list_pip_sent",
-    "set_pip_knows_you",
+    "set_pip_knows_you", "list_related_pips",
     "list_pip_notes", "add_pip_note", "forget_pip_note", "list_pip_sites", "set_pip_careful", "forget_pip_site",
     "get_pip_working_notes", "set_pip_working_notes", "list_pip_daily_log",
     "set_plugin_permission",
@@ -144,7 +144,7 @@ _COMMAND_ARGS = {
     "set_pip_profile": {"pip_id", "changes"}, "list_pip_shared": {"pip_id", "kind"},
     "get_pip_computers": set(), "update_pip_computers": set(), "reset_pip_computer": {"pip_id"}, "list_pip_apps": set(),
     "list_pip_plugins": {"pip_id"}, "allow_pip_plugin": {"pip_id", "grant_id", "keys"}, "decline_pip_plugin": {"pip_id", "grant_id"},
-    "list_pip_plugin_uses": set(), "list_pip_attention": {"limit", "projects"}, "get_pips_welcome": set(), "list_pip_sent": {"pip_id"}, "set_pip_knows_you": {"pip_id", "on"}, "list_pip_notes": {"pip_id", "shared"}, "add_pip_note": {"pip_id", "text", "shared"},
+    "list_pip_plugin_uses": set(), "list_pip_attention": {"limit", "projects"}, "get_pips_welcome": set(), "list_pip_sent": {"pip_id"}, "set_pip_knows_you": {"pip_id", "on"}, "list_related_pips": {"session_id"}, "list_pip_notes": {"pip_id", "shared"}, "add_pip_note": {"pip_id", "text", "shared"},
     "forget_pip_note": {"pip_id", "note_id", "all", "shared"}, "list_pip_sites": {"pip_id"}, "set_pip_careful": {"pip_id", "on"},
     # API 57: a Personal Pip's own working notes (pip_working_notes) and its daily log (pip_daily_log).
     "get_pip_working_notes": {"pip_id"}, "set_pip_working_notes": {"pip_id", "text", "expected_revision"},
@@ -6127,7 +6127,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 "get_workspace_session_outcome", "list_workspace_session_outcomes",
                 "accept_workspace_session_outcome", "reject_workspace_session_outcome", "get_workspace_context")
             receipt_command = command in ("list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context")
-            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("list_pip_flows", "get_pip_flow", "create_pip_flow", "set_pip_flow", "get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_webhook_reach", "set_webhook_reach", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "list_pip_keys", "save_pip_key", "decline_pip_key", "remove_pip_key", "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret", "list_app_approvals", "decide_app_approval", "trigger_app_event", "list_app_events", "ensure_pip_template", "prune_pip_templates", "list_pip_templates", "decide_pip_template_change", "export_pip", "export_pip_team", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "add_pip_computer", "rename_pip_computer", "set_pip_computer_screen", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "delete_archived_pip", "list_pip_attention", "get_pips_welcome") else registry.resolve(config.project_root)
+            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("list_pip_flows", "get_pip_flow", "create_pip_flow", "set_pip_flow", "get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_webhook_reach", "set_webhook_reach", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "list_pip_keys", "save_pip_key", "decline_pip_key", "remove_pip_key", "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret", "list_app_approvals", "decide_app_approval", "trigger_app_event", "list_app_events", "ensure_pip_template", "prune_pip_templates", "list_pip_templates", "decide_pip_template_change", "export_pip", "export_pip_team", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "add_pip_computer", "rename_pip_computer", "set_pip_computer_screen", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "delete_archived_pip", "list_pip_attention", "get_pips_welcome", "list_related_pips") else registry.resolve(config.project_root)
             workspace_id = request.get("workspace_id", current["id"] if current else "")
             if actor not in ('editor-user','local-console'):
                 # Personal scope is deliberately local for this milestone. Existing
@@ -6698,6 +6698,12 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 # Pips API 91 (pips-21): @ a project in a Personal Pip's chat. Applying is always the user's click.
                 from . import pip_project_copies
                 result = pip_project_copies.control(store, command, request, actor)
+            elif command == "list_related_pips":
+                # Pips API 96 (pips-flow-design Q2): which Pips a session is related to, for its agent map. Never routes.
+                if actor not in ("editor-user", "local-console"):
+                    raise RegistryError("local_only", "See a session's Pips on this computer.")
+                from .pip_relations import related
+                result = {"session_id": request.get("session_id"), "pips": related(registry, request.get("session_id"))}
             elif command == "set_pip_knows_you":
                 # Pips API 96 (Q8): what DGC remembers about you reaches this Pip, on by default; only you switch it.
                 from .pip_knows_you import set_knows_you
