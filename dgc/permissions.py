@@ -579,6 +579,25 @@ class PermissionEngine:
         self.rules = parse_rules(rules) + session_policy_rules(self.mode)
         self.project_root = Path(project_root).resolve(strict=False) if project_root else None
 
+    def _notes_refusal(self, tool: str, args: dict) -> str:
+        """The refusal when a call reaches into the editor's notes folder (a path tool, a search, or a shell command naming
+        it); "" otherwise."""
+        from . import notes_guard
+        if not isinstance(args, dict):
+            return ""
+        if tool in _PATH_TOOLS or tool in _SEARCH_PATH_TOOLS:
+            raw = args.get("path")
+            if raw not in (None, ""):
+                try:
+                    target = canonical_path(str(raw), self.project_root) if self.project_root else Path(str(raw)).expanduser()
+                except WorkspaceBoundaryError:
+                    target = Path(str(raw)).expanduser()
+                if notes_guard.is_notes_path(target) or notes_guard.is_notes_path(raw):
+                    return notes_guard.REFUSAL
+        if tool in ("bash", "python", "monitor") and notes_guard.mentions_notes(args.get("command") or args.get("code") or ""):
+            return notes_guard.REFUSAL
+        return ""
+
     def external_paths(self, tool: str, args: dict) -> list[str]:
         """Canonical paths outside the project touched by this structured tool call."""
         if self.project_root is None:
@@ -648,6 +667,10 @@ class PermissionEngine:
                 if found:
                     return found
             return verdicts[0]
+        # Home's Notes are kept from the model in every mode, whatever rule allows it (0.52, dgc/notes_guard.py).
+        kept = self._notes_refusal(tool, args)
+        if kept:
+            return DENY, kept
         external = self.external_paths(tool, args)
         ext_args = {"path": external[0]} if external else {}
         policy_tool, policy_args = _permission_subject(tool, args)

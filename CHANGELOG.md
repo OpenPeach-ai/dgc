@@ -6,6 +6,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Home's Notes are kept from DGC.** No file or search tool reaches the editor's notes folder in any mode, whatever rule allows it; a search from a folder above skips it; a shell command that names it is refused. A shell command can still reach a plain note without naming it, as it runs as you; a locked note is encrypted and its key is not on disk.
 - **A Work session can choose its own agents model.** Settings > Sub-agents stays the one every chat follows (now live, as Settings changes); a session that picks its own keeps it, reopened too, and it wins over DGC Router for that session. "Same as settings" goes back. A chat following Settings never takes an old address's key to a new one.
 - A settings change DGC made for you can be undone from the editor too (`undo_setting_change`): it puts the setting back while it still holds what DGC wrote, and says when it can't.
 - **Pips pay by themselves within a dollar limit you set.** A Pip at Do it all that you let pay needs a daily dollar limit first (the total of its payments that day); you can also cap how many payments and on which sites, and set a daily total for all Pips together. DGC reads each amount itself and converts other currencies with the day's reference rate; anything it can't read for certain, or the same site and amount twice in a day, asks. The old 3-payments-a-day count is gone.

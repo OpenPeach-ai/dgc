@@ -4111,10 +4111,17 @@ def _display_search_path(path: Path, ctx) -> str:
 
 
 def _rg_exclusions() -> list[str]:
+    from .notes_guard import RG_EXCLUDE
     out: list[str] = []
     for name in sorted(SKIP_DIRS):
         out.extend(("--glob", f"!**/{name}/**"))
+    out.extend(("--glob", RG_EXCLUDE))        # Home's Notes, kept from the model (dgc/notes_guard.py)
     return out
+
+
+def _notes_folder(path) -> bool:
+    from .notes_guard import is_notes_path
+    return is_notes_path(path)
 
 
 def _glob_heap_add(heap: list[tuple[int, str]], path: Path, info: os.stat_result, ctx) -> None:
@@ -4219,7 +4226,7 @@ def _walk_regular_files(root: Path, ctx, state: dict, *, boundary: Path | None =
             if stat.S_ISLNK(info.st_mode):
                 continue
             if stat.S_ISDIR(info.st_mode):
-                if name not in SKIP_DIRS:
+                if name not in SKIP_DIRS and not (name == "notes" and _notes_folder(path)):
                     child_directories.append(path)
                 continue
             if not stat.S_ISREG(info.st_mode):
