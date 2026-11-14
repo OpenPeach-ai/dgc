@@ -2,7 +2,8 @@
 
 "Your Pips moved into one list": shown once, the first time the Pips tab opens in 0.52, only if this user had Pips
 before the update (never for a new user: nothing moved). The registry marks the moment it upgraded a database from 0.51
-or before (``mark_upgrade``); ``welcome`` names the Pips that existed then, as the pop-up says them: the ones that were
+or before by copying it aside (workspace_registry: backups/before-0.52, the copy's name says when; nothing is written
+into the database, whose upgrade tests compare it byte for byte); ``welcome`` names the Pips that existed then, as the pop-up says them: the ones that were
 Project Pips, by folder, the Personal ones, and the Personal ones on Do it all (they keep what it meant before; the
 user chooses it again to let them do more). Core alone is not "had Pips". Reads only.
 """
@@ -10,13 +11,25 @@ from __future__ import annotations
 
 import json
 
-MARK = "pips_before_052"
+import re
+from datetime import datetime, timezone
+
 MAX_LISTED = 50
+_COPY = re.compile(r"registry-v\d+-(\d{8}T\d{6})(\d{0,6})Z\.sqlite3\Z")
 
 
-def mark_upgrade(db, now: str) -> None:
-    """In the registry's upgrade transaction, once: when this database came from 0.51 or before."""
-    db.execute("INSERT OR IGNORE INTO metadata VALUES(?,?)", (MARK, json.dumps({"at": now})))
+def upgraded_at(registry) -> str | None:
+    """When 0.52 first upgraded this database from 0.51 or before: the oldest pre-0.52 copy's own stamp. None for a
+    database that never came from 0.51 (or whose copy is gone after its 30 days)."""
+    from .workspace_registry import BACKUP_FOLDER
+    folder = registry.directory.joinpath(*BACKUP_FOLDER)
+    stamps = sorted((match.group(1), match.group(2).ljust(6, "0")) for match in (
+        _COPY.match(p.name) for p in (folder.glob("registry-v*.sqlite3") if folder.is_dir() else [])) if match)
+    if not stamps:
+        return None
+    second, micro = stamps[0]
+    moment = datetime.strptime(second, "%Y%m%dT%H%M%S").replace(microsecond=int(micro), tzinfo=timezone.utc)
+    return moment.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def welcome(registry) -> dict:
@@ -24,11 +37,7 @@ def welcome(registry) -> dict:
     do_it_all [{id, name}]}."""
     db = registry.db
     empty = {"had_pips": False, "folders": [], "personal": [], "do_it_all": []}
-    row = db.execute("SELECT value FROM metadata WHERE key=?", (MARK,)).fetchone()
-    try:
-        at = json.loads(row[0])["at"] if row else None
-    except (ValueError, TypeError, KeyError):
-        at = None
+    at = upgraded_at(registry)
     if not isinstance(at, str):
         return empty
     rows = db.execute(

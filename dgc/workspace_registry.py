@@ -280,9 +280,6 @@ class WorkspaceRegistry:
                 # individually so failed schema upgrades leave v1 intact.
                 with self.transaction():
                     self._initialize_schema()
-                    if 1 <= version <= BACKUP_BEFORE_052:
-                        from .pip_welcome import mark_upgrade     # the Pips tab's welcome: this user had Pips
-                        mark_upgrade(self.db, self.clock())
             self.runner_id = self.db.execute("SELECT value FROM metadata WHERE key='runner_id'").fetchone()[0]
         except BaseException:
             with contextlib.suppress(sqlite3.Error):

@@ -70,6 +70,11 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(later["pips"], [])
 
     def test_repeated_findings_stay_quiet_until_the_next_day(self):
+        # (0.52: on a machine that runs boxes the first check also leaves a "wants to fix" Allow card, which the digest
+        # rightly counts as waiting. This test is about repeated findings, so its Pip has no box.)
+        boxes = patch.object(pips, "folder_boxes", return_value=False)
+        boxes.start()
+        self.addCleanup(boxes.stop)
         finding = self.finding("Unchecked user id", severity="high")
         self.complete([finding])
         digest.mark_seen(self.registry, self.build()["until"], "local-console")
