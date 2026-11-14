@@ -313,13 +313,63 @@ def _exports(art, st) -> list[str]:
     return out
 
 
+def made_by(origin: dict, resolve=None) -> dict:
+    """Who made it, by name (his call 15 Nov: the Library says exactly who made each item, one click back to it): a
+    Pip, a Work session, a chat, an app, the terminal. ``resolve(kind, id)`` gives the name ("" when unknown)."""
+    o = origin if isinstance(origin, dict) else {}
+    surface = str(o.get("surface") or "")
+    kind, ident = {"pip": ("pip", o.get("pip")), "work": ("session", o.get("session")), "chat": ("chat", o.get("chat")),
+                   "sdk": ("app", o.get("app")), "cli": ("cli", "")}.get(surface, (surface or "unknown", ""))
+    ident = str(ident or "")
+    name = ""
+    if ident and callable(resolve):
+        try:
+            name = str(resolve(kind, ident) or "")[:120]
+        except Exception:                                  # noqa: BLE001 -- a name is a courtesy, never a failure
+            name = ""
+    return {"kind": kind, "id": ident, "name": name}
+
+
+_NAMES: dict = {}
+
+
+def maker_name(kind: str, ident: str) -> str:
+    """The name of what made an artifact, read from DGC's own records and kept for this process: a Pip's, a Work
+    session's, a chat's title."""
+    key = (kind, ident)
+    if key in _NAMES:
+        return _NAMES[key]
+    name = ""
+    try:
+        if kind == "pip":
+            from .pips import PipStore
+            from .workspace_registry import WorkspaceRegistry
+            with WorkspaceRegistry() as registry:
+                name = str(PipStore(registry).get(ident).get("name") or "")
+        elif kind == "session":
+            from . import sessions
+            for path in sessions.SESSIONS_DIR.rglob(f"{ident}.json") if hasattr(sessions, "SESSIONS_DIR") else []:
+                import json as _json
+                name = str((_json.loads(path.read_text(encoding="utf-8")) or {}).get("name") or "")
+                break
+        elif kind == "chat":
+            from .chatdgc.store import ChatStore
+            name = str((ChatStore().get(ident) or {}).get("title") or "")
+    except Exception:                                      # noqa: BLE001 -- unknown: the Library says the kind only
+        name = ""
+    if len(_NAMES) > 2000:
+        _NAMES.clear()
+    _NAMES[key] = name
+    return name
+
+
 def view(aid: str, *, store: Store | None = None, versions: bool = True) -> dict:
     """An artifact as the screens, the CLI and the SDK show it."""
     st = _store(store)
     art = st.get(aid)
     out = {"id": art.id, "type": art.type, "label": LABELS[art.type], "title": art.title, "version": art.version,
            "created": art.created, "updated": art.updated, "origin": dict(art.origin),
-           "exports": _exports(art, st)}
+           "made_by": made_by(art.origin, maker_name), "exports": _exports(art, st)}
     if art.link:
         out["link"] = dict(art.link)
     if art.legacy.get("canvas"):

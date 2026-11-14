@@ -2210,6 +2210,15 @@ class PipStore:
         # What a check found becomes a fix by the Pip's level; a fix's turn says what became of it (pip_fixes, 0.52).
         from . import pip_fixes
         pip_fixes.after_run(self, run, status=status, result=result, error=error)
+        # Every widget its reply draws is kept in the Library, as its own (artifact_cards; his call 15 Nov).
+        if (status == "succeeded" and run["manifest"].get("run_kind") == "conversation" and not run["manifest"].get("agent")
+                and isinstance(result, dict) and "```dgc-ui" in str(result.get("text") or "")):
+            try:
+                from . import artifact_cards
+                name = str(self.get(run["pip_id"]).get("name") or "A Pip")
+                artifact_cards.keep(str(result.get("text")), origin={"surface": "pip", "pip": run["pip_id"]}, author=name)
+            except Exception:                            # noqa: BLE001 -- never fails the finish
+                pass
         return self._transition_view(run_id)
 
     def _saved_secrets(self):

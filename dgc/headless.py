@@ -4209,6 +4209,19 @@ class Backend:
         except Exception:
             pass
 
+    def _keep_cards(self) -> None:
+        """The dgc-ui cards this turn's last reply drew, kept in the Library as this session's (artifact_cards)."""
+        try:
+            agent = getattr(self, "agent", None)
+            messages = getattr(agent, "messages", None) or []
+            last = next((m for m in reversed(messages) if isinstance(m, dict) and m.get("role") == "assistant"), None)
+            text = last.get("content") if isinstance(last, dict) else None
+            if isinstance(text, str) and "```dgc-ui" in text:
+                from . import artifact_cards
+                artifact_cards.keep(text, origin=agent._artifact_origin(), author="DGC")
+        except Exception:                        # noqa: BLE001 -- never a turn's failure
+            pass
+
     def _start_peer_heartbeat(self) -> None:
         """Refresh the note periodically, so a peer that dies stops looking live within minutes."""
         if getattr(self, "_peer_thread", None) is not None:
@@ -4689,6 +4702,8 @@ class Backend:
                         self.em.emit("reply_trace", turn_id=tid, trace=finished_trace)
                     self.em.emit("turn_end", turn_id=tid, reason=reason,
                                  token_estimate=est, final_message_id=final_message_id)
+                    if reason == "completed":
+                        self._keep_cards()          # every widget the reply drew, in the Library (his call 15 Nov)
                     self.ui.turn_id = ""        # nothing after this belongs to the finished turn
                     self._flush_held_workspace_roots()
                     self._emit_context()
