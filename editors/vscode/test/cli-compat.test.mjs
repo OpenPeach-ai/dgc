@@ -79,13 +79,19 @@ const GATED_SENDERS = [{ method: "editorState", guard: "editorStateSupported" },
                        { method: "cancelWakeup", guard: "wakeupsCapable" },
                        { method: "goalRuns", guard: "goalRunsCapable" },
                        { method: "sessionArchive", guard: "sessionArchiveCapable" },
+                       // A Work session's own agents model (0.52): asked and reset only when ready.capabilities.agents_model says so.
+                       { method: "askAgentsModel", guard: "agentsModelOffered" },
+                       { method: "readAgentsModel", guard: "agentsModelOffered" },
+                       { method: "resetSessionAgentsModel", guard: "agentsModelOffered" },
                        { method: "undoSettingChange", guard: "settingsUndoCapable" }].map(g => g.method);
 const GATED_SENDER_GUARDS = { editorState: "editorStateSupported", watchMcpApps: "mcpAppsSupported",
                               watchRouter: "routerCapable", watchImages: "imagesCapable",
                               imagesLibrary: "imagesLibraryCapable", routerThinking: "routerThinkingCapable",
                               watchVideos: "videosCapable", videosJobs: "videosCapable", videosStop: "videosCapable",
                               videosLibrary: "videosCapable", cancelWakeup: "wakeupsCapable", goalRuns: "goalRunsCapable",
-                              sessionArchive: "sessionArchiveCapable", undoSettingChange: "settingsUndoCapable" };
+                              sessionArchive: "sessionArchiveCapable", undoSettingChange: "settingsUndoCapable",
+                              askAgentsModel: "agentsModelOffered", readAgentsModel: "agentsModelOffered",
+                              resetSessionAgentsModel: "agentsModelOffered" };
 
 /** Is this node inside a method with the given name? */
 function insideMethod(node, name) {

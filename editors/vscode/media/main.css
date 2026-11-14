@@ -1677,6 +1677,19 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
 #modelmenu .model-options > .mrow, #modelmenu .model-options > .mhead { flex: none; }
 #modelmenu .model-list-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .reasoning-card { padding: 0; }
+/* This session's agents model (0.52): one row between the model's card and its list, with what the agents use under its
+   name; a hairline above sets it apart from the thinking note. Its chevron sits level with the name. */
+#modelmenu .agents-row { flex: none; margin-top: 2px; border-top: 1px solid var(--hair); border-radius: 0 0 var(--r-row) var(--r-row); }
+#modelmenu .agents-row .dgc-menu-sub { overflow-wrap: normal; min-width: 0; }
+#modelmenu .agents-part { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+#modelmenu .agents-row > .codicon-chevron-right { align-self: center; color: var(--muted); }
+#modelmenu .agents-row[aria-expanded="true"] { background: var(--wash); }
+#modelmenu .agents-row[aria-expanded="true"] > .codicon-chevron-right { transform: rotate(90deg); }
+/* In the agents list: a provider that can't run DGC's agents is shown, greyed, with why (never hidden). */
+#modelmenu .agents-unavailable { cursor: default; }
+#modelmenu .agents-unavailable:hover { background: transparent; }
+#modelmenu .agents-unavailable .dgc-menu-label { opacity: .55; }
+#modelmenu .model-list-scroll .dgc-menu-row-sub .dgc-menu-sub { overflow-wrap: anywhere; }
 .model-summary-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-summary > .codicon:first-child { color: var(--accent); }
 .effort-control { padding: var(--sp-2) var(--sp-2) var(--sp-1); }
@@ -3816,6 +3829,8 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .mod-bar-part { outl
 }
 /* A provider row's Fallback word sits before its chevron. */
 #modelmenu .mrow > .dgc-menu-pill + .codicon-chevron-right { margin-left: 6px; }
+/* A provider row's chevron sits at the row's right end, as the Sub-agents row's does (not right after its name). */
+#modelmenu .model-options .mrow > .codicon-chevron-right:last-child { margin-left: auto; }
 
 /* ---- DGC's one button, in Work (the definition: media/shared/tokens.css, "The button"). Every button the chat draws
    reads it: a command's Allow once / Always allow / Deny and a plan's answers (button.act), the listing cards' and an

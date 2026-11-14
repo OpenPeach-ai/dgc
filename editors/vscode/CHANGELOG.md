@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **A Work session can choose its own agents model**: the model menu has an Agents row that says what this session's agents use ("Same as settings · qwen3-coder", or its own). It opens the same list the main model uses, every provider and its models, to choose for agents; Same as settings goes back. Claude Code and Codex are shown greyed with the reason (they run their own tools). A session's own choice is on the model button's tooltip, and every agent row in the agent map now names its model. Shown by a DGC that offers it.
+- **Settings › Models › Sub-agents**: Model is a provider and one of its models. A model from another saved provider brings its address, API and key with it, so nobody types a host; Another host stays one click away.
+- **A Pip's prompt box stays on one line** at every width: its labels give way to their icons at the widths Work's composer changes at, instead of the model dropping to a second line in a narrow side bar.
 - **A settings change DGC made has Undo**: when DGC changes one of its own settings for you in a Work chat (a setting, a permission rule or a Dev Mode limit), one quiet line says what changed, with Undo; it then reads "Undone", or says why it couldn't be put back. Shown by a DGC that offers it.
 - **Payments in dollars** on a Pip's page at Do it all: "Allow payments up to $___ a day" (required before it pays by itself; No limit is a choice, never the default), optional "At most ___ payments a day" and "Only on these sites", with what it used today; Pips settings has "All Pips together: up to $___ a day". The 3-a-day count is gone.
 - **Knows about you**: a switch on every Pip's page (on by default); every Pip now shows what it remembers, its working notes, routines and a goal.

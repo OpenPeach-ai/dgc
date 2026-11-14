@@ -1560,3 +1560,66 @@ test('Permission mode says it is this Work chat\'s, and that a new chat never st
   assert.match(rowDetail(mode),/new chat[^.]*starts in Default/);
   assert.match(rowDetail(mode),/chat you reopen, or this one after a reload, comes back in the mode it had/);
 });
+
+// ---- Settings › Models › Sub-agents (0.52, 14 Nov): its Model is a provider-and-models choice. A model from another
+// provider fills its address and API itself (and its key, in the extension), so nobody types a host; Claude Code and
+// Codex are shown greyed with the reason; Another host stays one click away. ----
+const SPARE_ID='provider_'+'c'.repeat(32),OPEN_ID='provider_'+'d'.repeat(32);
+const AGENT_PROFILES=[{id:SPARE_ID,kind:'native',name:'Spare',base_url:'https://spare.example/v1',model:'gpt-oss:120b',api_mode:'chat_completions'},
+  {id:OPEN_ID,kind:'native',name:'Open host',base_url:'https://open.example/v1',model:'',api_mode:'auto'},
+  {id:'subscription_claude',kind:'subscription',engine:'claude',name:'Claude Code',model:''}];
+function agentsPage(extra={}){
+  const x=setup();
+  x.message({type:'event',event:{...x.config,models_at:true,subagent_base_url:'',subagent_model:'',...extra}});
+  x.message({type:'providerProfiles',profiles:AGENT_PROFILES,defaultId:''});
+  x.click('[data-nav=models]');
+  return x;
+}
+test('Sub-agents: the provider choice lists every saved provider, greys Claude Code with the reason, and keeps Another host',()=>{
+  const x=agentsPage();
+  const pick=x.d.querySelector('#subagent_from');
+  assert.ok(pick,'Sub-agents has its provider choice');
+  assert.ok(x.d.querySelector('#models-subagents').contains(pick));
+  const options=[...pick.options].map(o=>[o.value,o.textContent,o.disabled]);
+  assert.deepEqual(options,[['','Same as the main chat',false],[SPARE_ID,'Spare',false],[OPEN_ID,'Open host',false],
+    ['subscription_claude','Claude Code (can’t run DGC’s agents)',true],['custom','Another host…',false]]);
+  assert.equal(pick.value,'','nothing chosen: the main chat’s');
+  assert.match(rowSaid(pick),/Claude Code and Codex run their own tools, so they can’t run DGC’s agents/);
+  assert.equal(pick.closest('.field').querySelector('label.name').textContent,'Model');
+  assert.ok(pick.closest('.field').contains(x.d.querySelector('#subagent_model')),'the provider and its models are one Model row');
+  assert.equal(x.d.querySelector('details[data-more=subagent-host]').open,false,'Another host is closed until it is wanted');
+});
+test('Sub-agents: a model from another provider fills its address and API itself, lists that host, and saves with the provider named',()=>{
+  const x=agentsPage();
+  const pick=x.d.querySelector('#subagent_from');
+  x.input('#subagent_from',SPARE_ID);
+  assert.equal(x.d.querySelector('#subagent_base_url').value,'https://spare.example/v1','nobody types a host');
+  assert.equal(x.d.querySelector('#subagent_api_mode').value,'chat_completions');
+  assert.equal(x.d.querySelector('#subagent_model').value,'gpt-oss:120b','its own model to start from');
+  assert.equal(x.d.querySelector('details[data-more=subagent-host]').open,false,'a provider’s host is not "another host"');
+  x.input('#subagent_model','own-coder');
+  x.click('#save');
+  const saved=x.sent.filter(m=>m.type==='saveSettings').pop().values;
+  assert.deepEqual([saved.subagent_from,saved.subagent_model,saved.subagent_base_url,saved.subagent_api_mode],
+    [SPARE_ID,'own-coder','https://spare.example/v1','chat_completions']);
+  x.message({type:'settingsSaved',ok:true});
+  // Back to the main chat's: the address, API and model go.
+  x.input('#subagent_from','');
+  assert.deepEqual(['subagent_base_url','subagent_api_mode','subagent_model'].map(id=>x.d.querySelector('#'+id).value),['','','']);
+  // Another host: its rows open, and nothing is filled.
+  x.input('#subagent_from','custom');
+  assert.equal(x.d.querySelector('details[data-more=subagent-host]').open,true);
+  assert.equal(x.d.querySelector('#subagent_from').value,'custom');
+});
+test('Sub-agents: what is saved says which provider it is; an address no provider lists is Another host',()=>{
+  const spare=agentsPage({subagent_model:'own-coder',subagent_base_url:'https://spare.example/v1/',subagent_api_mode:'chat_completions'});
+  assert.equal(spare.d.querySelector('#subagent_from').value,SPARE_ID,'found by its address');
+  assert.equal(spare.d.querySelector('details[data-more=subagent-host]').open,false);
+  const other=agentsPage({subagent_model:'m1',subagent_base_url:'https://agents.example/v1'});
+  assert.equal(other.d.querySelector('#subagent_from').value,'custom');
+  assert.equal(other.d.querySelector('details[data-more=subagent-host]').open,true,'its host is shown');
+  assert.match(other.d.querySelector('details[data-more=subagent-host] summary').textContent,/Another host · agents\.example/);
+  const same=agentsPage({subagent_model:'small'});
+  assert.equal(same.d.querySelector('#subagent_from').value,'');
+  assert.equal(same.d.querySelector('#subagent_model').value,'small','a model of the main host, as before');
+});

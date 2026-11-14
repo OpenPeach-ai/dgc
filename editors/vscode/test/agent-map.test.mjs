@@ -106,15 +106,15 @@ test("the pill counts the agents working now and stays for the whole chat; a new
   assert.equal(p.pill().hidden, true, "no agent, no pill");
   p.start(sid(1)); p.start(sid(2)); p.start(sid(3));
   p.end(sid(3), "failed", { message: "boom" });
-  assert.deepEqual(p.pill(), { hidden: false, state: "running", label: "2 agents" }, "2 of 3 working");
-  assert.equal(p.$("agents-pill").title, "Agents are working · Click to open the agent map");
+  assert.deepEqual(p.pill(), { hidden: false, state: "running", label: "2 sub-agents" }, "2 of 3 working");
+  assert.equal(p.$("agents-pill").title, "Sub-agents are working · Click to open the agent map");
   p.update(sid(2), { state: "waiting", waiting_for: "permission" });
   assert.equal(p.pill().state, "waiting");
-  assert.equal(p.$("agents-pill").getAttribute("aria-label"), "2 agents · An agent is waiting for your permission · Click to open the agent map");
+  assert.equal(p.$("agents-pill").getAttribute("aria-label"), "2 sub-agents · A sub-agent is waiting for your permission · Click to open the agent map");
   p.update(sid(2), { state: "running" });
   p.end(sid(1)); p.end(sid(2));
   p.event({ type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 0 });
-  assert.deepEqual(p.pill(), { hidden: false, state: "idle", label: "0 agents" }, "after the turn: 0 agents, still there");
+  assert.deepEqual(p.pill(), { hidden: false, state: "idle", label: "0 sub-agents" }, "after the turn: 0 sub-agents, still there");
   p.open();
   assert.equal(p.$("agent-map-subtitle").textContent, "3 agents · click an agent for details", "the map counts every agent");
   p.$("agent-map-close").click();
@@ -123,7 +123,7 @@ test("the pill counts the agents working now and stays for the whole chat; a new
   // A reloaded chat whose agents all ended: the backend's snapshot brings the pill back at 0.
   p.event({ type: "agents", items: [{ id: sid(7), parent_id: null, call_id: "c", description: "old", depth: 1, state: "finished",
     tool_calls: 1, isolated: false, parallel: false, restored: true }], total: 1, active: 0 });
-  assert.deepEqual(p.pill(), { hidden: false, state: "idle", label: "0 agents" });
+  assert.deepEqual(p.pill(), { hidden: false, state: "idle", label: "0 sub-agents" });
   assert.deepEqual(p.errors, []);
 });
 
@@ -170,7 +170,8 @@ test("order in a column: working oldest first, then failed, then ended newest en
   p.open();
   assert.deepEqual(p.keys().slice(1), [5, 6, 2, 3, 4, 1].map((n) => `agent:${sid(n)}`));
   const metas = p.rows().slice(1).map((r) => r.querySelector(".am-meta").textContent);
-  assert.deepEqual(metas, ["9s", "Waiting for your answer · 1s", "5s", "Failed · 2s", "Stopped · 1m 40s", "Finished · 1s"]);
+  // (Each row names its model, always: 0.52.)
+  assert.deepEqual(metas, ["9s", "Waiting for your answer · 1s", "5s", "Failed · 2s", "Stopped · 1m 40s", "Finished · 1s"].map((line) => `${line} · qwen3.8:27b`));
   assert.equal(p.rows()[1].querySelector(".agent-dot").dataset.state, "running");
   assert.equal(p.rows()[4].querySelector(".agent-dot").dataset.state, "failed");
   assert.deepEqual(p.errors, []);
@@ -182,8 +183,11 @@ test("rows tick in place once a second: the same nodes, the focus kept, duration
   p.start(sid(1), { description: "one" });
   p.start(sid(2), { description: "two" });
   p.open();
-  const meta = (n) => p.row(`agent:${sid(n)}`).querySelector(".am-meta").textContent;
-  assert.equal(meta(1), "Working", "0s and 0 tokens are not said");
+  // Each row names its model, always (0.52); what comes before it is what this test is about.
+  const whole = (n) => p.row(`agent:${sid(n)}`).querySelector(".am-meta").textContent;
+  assert.match(whole(2), / · qwen3\.8:27b$|^qwen3\.8:27b$/);
+  const meta = (n) => whole(n).replace(/(^| · )qwen3\.8:27b$/, "");
+  assert.equal(meta(1), "", "0s and 0 tokens are not said: its model alone");
   const before = p.rows();
   before[2].focus();
   let focusins = 0, removed = 0;
@@ -483,9 +487,9 @@ test("a chat reset, a rewind, a chat switch and a backend exit each close the ma
     assert.equal(p.$("agents-pill").getAttribute("aria-expanded"), "false");
   }
   // After a backend exit the agents read stopped; the pill keeps them, none working.
-  assert.deepEqual(p.pill(), { hidden: false, state: "idle", label: "0 agents" });
+  assert.deepEqual(p.pill(), { hidden: false, state: "idle", label: "0 sub-agents" });
   p.open();
-  assert.equal(p.rows()[1].querySelector(".am-meta").textContent, "Stopped");
+  assert.equal(p.rows()[1].querySelector(".am-meta").textContent, "Stopped · qwen3.8:27b");
   assert.equal(p.rows()[1].title, "agent 01\nDGC's backend stopped");
   assert.deepEqual(p.errors, []);
 });

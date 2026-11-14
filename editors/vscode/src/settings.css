@@ -268,7 +268,9 @@ details.more[data-more="saved-providers"]>.rows{border-inline:0;border-bottom:0;
 .banner .signin-code{font-size:14px;letter-spacing:.08em;user-select:all;padding:1px 6px;border-radius:6px;background:var(--surface2)}
 
 /* ---- A Model box: the models at its card's own host in a list under the box; any name can still be typed ---- */
-.field>.model-box{position:relative;display:flex;align-items:center}
+.field>.model-box,.model-choice>.model-box{position:relative;display:flex;align-items:center}
+/* Sub-agents' Model: its provider over the model box, one row, the same width as every other control. */
+.field>.model-choice{display:flex;flex-direction:column;gap:6px;width:300px;max-width:50%;flex:none}.model-choice>select,.model-choice>input{width:100%}
 .model-box input{width:100%;padding-right:30px}
 .model-box-open{position:absolute;right:3px;top:50%;transform:translateY(-50%);width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;padding:0;border-radius:5px;background:transparent;color:var(--muted)}
 .model-box-open:hover{background:var(--vscode-toolbar-hoverBackground,var(--hover));color:var(--text)}.model-box-open svg{width:14px;height:14px}
@@ -296,6 +298,7 @@ details.more[data-more="saved-providers"]>.rows{border-inline:0;border-bottom:0;
   .meta{grid-template-columns:92px minmax(0,1fr);gap:10px}.hero{gap:12px}.hero .copy{min-width:150px}
   .list-toolbar{flex-wrap:wrap}.list-toolbar input{width:100%;max-width:none}.usage-clip{max-width:140px}
   .model-box-list{left:0;right:auto}
+  .field>.model-choice{width:100%;max-width:none}
   .voice-model{flex-wrap:wrap}.voice-model .actions{width:100%;justify-content:flex-start}
   .voice-installing{grid-template-columns:1fr auto}.voice-installing .voice-said{grid-column:1/-1;grid-row:2}
 }

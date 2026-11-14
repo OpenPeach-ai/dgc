@@ -97,9 +97,19 @@ const ui = {
     bool: (id, on) => switchHTML(on, id.replaceAll('_', ' '), `id="${id}" data-setting="${id}"`),
     card: (title, body) => `<div class="card"><h3>${title}</h3>${body}</div>`,
     // A Model box: a list of the models at its card's own host from a CLI that answers list_models_at, else text.
-    model: (id, label, hint, value) => draft.models_at ? modelBoxMarkup(id, label, hint, value)
-        : ui.field(label, hint, ui.inp(id, value))
+    // opts.before: a control over the box, in the same row (Sub-agents' provider choice); opts.more: the row's "?".
+    model: (id, label, hint, value, opts = {}) => draft.models_at
+        ? modelBoxMarkup(id, label, hint, value, { before: opts.before || '', info: opts.more ? ui.infoButton(id, label) : '', detail: opts.more ? ui.detail(id, opts.more) : '' })
+        : ui.field(label, hint, opts.before ? `<span class="model-choice">${opts.before}${ui.inp(id, value)}</span>` : ui.inp(id, value), opts.more || ''),
+    // A choice that fills other fields of the page (Sub-agents' provider): what was typed is kept, and the page drawn again.
+    redraw: () => { snapshot(); render(); }
 };
+/** Sub-agents' model from a saved provider: which one it is, found by its address, so its key can go with a Save. */
+function subagentFrom() {
+    const url = String(draft.subagent_base_url || '').trim();
+    if (!url) return '';
+    return savedProfiles.find(row => row && row.kind !== 'subscription' && /^provider_[0-9a-f]{32}$/.test(String(row.id || '')) && sameHost(String(row.base_url || ''), url))?.id || '';
+}
 // Which host each Model box lists, and the fields of its card that make it list again: [role, host, transport, key].
 // The Pips box lists DGC's main connection, which Pips use.
 const MODEL_ROUTES = { model: ['main', 'base_url', 'api_mode', 'api_key'],
@@ -505,7 +515,7 @@ function render() {
         const input = $(id);
         if (input) { input.min = String(min); input.step = String(step); if (max) input.max = String(max); }
     }
-    save.onclick = () => { if ([...main.querySelectorAll('input')].some(input => !input.reportValidity())) return; snapshot(); saving = true; save.disabled = true; save.textContent = 'Saving…'; send({ type: 'saveSettings', section, values: { ...draft } }); };
+    save.onclick = () => { if ([...main.querySelectorAll('input')].some(input => !input.reportValidity())) return; snapshot(); saving = true; save.disabled = true; save.textContent = 'Saving…'; send({ type: 'saveSettings', section, values: { ...draft, subagent_from: subagentFrom() } }); };
     // Web search -> Remove: the chosen provider's own key, cleared at once (the rest of the page waits for Save).
     const removeKey = $('search-key-remove');
     if (removeKey) removeKey.onclick = () => {

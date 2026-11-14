@@ -1118,6 +1118,46 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 .pip-key-confirm button.danger, .pip-key-confirm button.danger:hover:not(:disabled) { border-color: transparent; background: var(--btn-danger); color: var(--btn-on-danger); }
 .pip-key-confirm button.danger:hover:not(:disabled) { background: var(--btn-danger-hover); }
 @media (forced-colors: active) { .pip-key-confirm button.danger { forced-color-adjust: none; border-color: ButtonText; } }
+/* A Pip's prompt box keeps its controls on ONE line at every width, as Work's and ChatDGC's composers do (14 Nov: the
+   row wrapped, and the model picker dropped under the level chip in a narrow side bar). Nothing wraps; labels give way
+   to their icons instead, at the widths Work's composer changes at (media/main.css: 640, 560, 420, 360 and 320 px of the
+   side bar). Inside its border the box is 34px narrower than the side bar, so its own widths are those less 34: asked
+   of the box, not the window, so a chat that is narrower than its window (beside a list, in a split tab) still fits.
+   Every control that is only its icon keeps its name in its aria-label and title (pipsClient.js). */
+.pip-composer{container:pip-composer/inline-size}
+.pip-composer .composer-controls{flex-wrap:nowrap}
+.pip-composer .composer-left{flex:0 0 auto}
+.pip-composer .composer-right{flex:1 1 0;min-width:0}
+.pip-composer .composer-model-icon{display:none;flex:none;color:var(--vscode-foreground)}
+.pip-composer .composer-model-icon svg{display:block;width:16px;height:16px}
+@container pip-composer (max-width:606px){
+  /* The context meter is its ring; the model has a shorter label. */
+  .pip-composer .composer-ctx-pct{display:none}
+  .pip-composer #chat-context-toggle.with-text{width:28px;padding:0}
+  .pip-composer .model-control .composer-model-name,.pip-composer .model-control .composer-effort-name{display:none}
+  .pip-composer .model-control .model-copy::before{content:"Model";color:var(--vscode-foreground)}
+}
+@container pip-composer (max-width:526px){
+  .pip-composer .composer-controls,.pip-composer .composer-left,.pip-composer .composer-right{gap:2px}
+  .pip-composer .composer-routines>span{display:none}
+  .pip-composer .composer-routines{padding:0 5px}
+}
+@container pip-composer (max-width:386px){
+  /* The level is its shield; the model is its icon. */
+  .pip-composer .composer-level-name{display:none}
+  .pip-composer .composer-chip.composer-level{width:28px;padding:0}
+  .pip-composer .model-control{flex:0 0 auto;width:28px;max-width:28px;padding:0}
+  .pip-composer .model-control .model-copy,.pip-composer .model-control .composer-chevron{display:none}
+  .pip-composer .model-control .composer-model-icon{display:inline-flex}
+}
+@container pip-composer (max-width:326px){
+  .pip-composer .composer-controls{padding-right:4px;padding-left:4px}
+  .pip-composer .chat-send{margin-left:2px}
+}
+@container pip-composer (max-width:286px){
+  .pip-composer .composer-chip,.pip-composer .model-control,.pip-composer .composer-chip.composer-level,.pip-composer #chat-context-toggle.with-text{min-width:24px;width:24px;max-width:24px}
+  .pip-composer .composer-routines{padding:0 3px}
+}
 /* ==== Pip chat design pass (0.52, asked 5 Nov): a Personal and a Project Pip's chat, calm, clear and physical. ====
    What it holds to, each measured in test/pip-chat-design-browser.test.mjs:
    - One column. Everything the Pip says starts at one left edge and is at most one measure wide (a reply, its choices);

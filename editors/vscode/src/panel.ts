@@ -2648,6 +2648,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.offerVoiceOnce();
     }
     this.watchRouter(be);
+    this.askAgentsModel(be);
     // Image generation: asked once, so this chat's backend tells us when its model made a picture (images_made), and
     // an open Settings -> Images shows the spend, the state and an "Always allow" that turned asking off.
     this.watchImages(be);
@@ -5002,7 +5003,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           if (this.tab && (ev.kind === "new" || ev.kind === "cleared")) { this.tabTitled = false; this.tab.title(this.inTabFolder("")); }
           this.retitle();
           this.tabSessionChanged();
+          this.askAgentsModel();              // a session opened or resumed: its own agents model, or Settings' (0.52)
         }
+        break;
+      case "agents_model" as any:
+        this.noteAgentsModel(ev);
         break;
       case "session_named":
         this.currentSessionName = String(ev.name || "");
@@ -6511,6 +6516,23 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         // Work's menu, an All models provider: what its host offers, before anything moves.
         if (typeof msg.id === "string" && msg.id.startsWith("provider_")) {
           this.post(await this.providerModels(msg.id).catch(() => ({ type: "providerModels" as const, id: String(msg.id), ids: [], error: "DGC didn't answer" })));
+        }
+        break;
+      case "setAgentsModel":
+        await this.setSessionAgentsModel(String(msg.provider || ""), typeof msg.model === "string" ? msg.model.trim().slice(0, 256) : "");
+        break;
+      case "resetAgentsModel":
+        await this.resetSessionAgentsModel();
+        break;
+      case "getAgentsModel":
+        this.askAgentsModel();
+        break;
+      case "agentsModelTyped":
+        // A host that lists none, or a model it doesn't list: the agents' model by name.
+        if (typeof msg.id === "string" && msg.id.startsWith("provider_")) {
+          const typed = await vscode.window.showInputBox({ prompt: "Model name for this session’s agents", placeHolder: "The name the host knows it by",
+            validateInput: (value) => (value.trim().length > 256 ? "Use up to 256 characters." : undefined) });
+          if (typed?.trim()) await this.setSessionAgentsModel(msg.id, typed.trim());
         }
         break;
       case "setFallback":
@@ -8657,6 +8679,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.post({ type: "models", ids: [], err: true, routes: [] });
       return;
     }
+    await this.readAgentsModel();           // what this session's agents use, as the menu opens (0.52)
     const subscription = this.activeSubscription();
     const nativeLabel = Object.values(PROVIDERS).find(p => p.url === this.state.baseUrl)?.label
       || "Custom host";
@@ -8696,16 +8719,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                   label: String(subscription?.label || this.routeState.subscriptionEngine),
                   cliDefaultModel: String(subscription?.cli_default_model || ""),
                   cliDefaultListed: subscription?.cli_default_listed !== false, routes,
-                  currentRouteKey, fallback: this.fallbackView() });
+                  currentRouteKey, fallback: this.fallbackView(), agents: this.agentsView() });
       return;
     }
     const base = this.state.baseUrl || PROVIDERS.ollama.url;
     try {
       const ids = await this.fetchModels();
       this.post({ type: "models", ids, current: this.state.model, base, supportsEffort: true,
-                  routes, currentRouteKey, fallback: this.fallbackView() });
+                  routes, currentRouteKey, fallback: this.fallbackView(), agents: this.agentsView() });
     } catch {
-      this.post({ type: "models", ids: [], base, err: true, routes, currentRouteKey, fallback: this.fallbackView() });
+      this.post({ type: "models", ids: [], base, err: true, routes, currentRouteKey, fallback: this.fallbackView(), agents: this.agentsView() });
     }
   }
 
@@ -8753,6 +8776,95 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const { api_key } = await profileCredential(this.context, row.id);
       if (api_key) this.backend.send(this.stateCommand("fallback", { type: "set_config", scope: "session", values: { fallback_api_key: api_key } }));
     } catch { /* no key there: the fallback asks as any keyless host does */ }
+  }
+
+  // ---- a Work session's own agents model (0.52, ready.capabilities.agents_model) ----
+  /** What DGC last said of this session's agents model (agents_model): its own, or Settings' that it follows. */
+  private agentsModel = { own: false, model: "", baseUrl: "", settingsModel: "", settingsBaseUrl: "" };
+  /** The addresses a key was supplied for and DGC hasn't confirmed yet: a key it won't take is never sent in a loop. */
+  private agentsKeyAsked = new Set<string>();
+  private agentsModelOffered(): boolean { return (this.lastReadyEvent?.capabilities as any)?.agents_model === 1; }
+  /** For the model menu and the agent map. No address's key, and whether one is set, never reach the page. */
+  private agentsView() {
+    const host = this.tab?.host ?? this;
+    return { offered: this.agentsModelOffered(), own: this.agentsModel.own, model: this.agentsModel.model,
+             base_url: this.agentsModel.baseUrl, settings_model: this.agentsModel.settingsModel,
+             settings_base_url: this.agentsModel.settingsBaseUrl, router: host.routerStatus?.enabled === true };
+  }
+  private postAgentsModel(): void { this.post({ type: "agentsModel", ...this.agentsView() }); }
+  /** DGC's answer. A reopened session with its own agents model has no key (a session file never holds one): the one
+   *  saved for that address is supplied at once, as a session's fallback key is. */
+  private noteAgentsModel(ev: any): void {
+    this.agentsModel = { own: ev?.own === true, model: String(ev?.model || "").slice(0, 256), baseUrl: String(ev?.base_url || "").slice(0, 2048),
+                         settingsModel: String(ev?.settings_model || "").slice(0, 256), settingsBaseUrl: String(ev?.settings_base_url || "").slice(0, 2048) };
+    this.postAgentsModel();
+    const base = this.agentsModel.baseUrl;
+    if (!this.agentsModel.own || ev?.api_key_set === true) { this.agentsKeyAsked.clear(); return; }
+    if (base) void this.resupplyAgentsKey(base);
+  }
+  private async resupplyAgentsKey(baseUrl: string): Promise<void> {
+    if (!this.agentsModelOffered() || this.agentsKeyAsked.has(baseUrl) || !this.backend) return;
+    this.agentsKeyAsked.add(baseUrl);
+    // Only the key saved for this very address: never another address's.
+    const row = listProfiles(this.context).find((p: any) => p.kind !== "subscription" && endpointId(p.base_url) === endpointId(baseUrl));
+    if (!row) return;
+    try {
+      const { api_key } = await profileCredential(this.context, row.id);
+      if (api_key && this.agentsModel.own && this.agentsModel.baseUrl === baseUrl) {
+        this.backend?.send(this.stateCommand("agents-key", { type: "set_config", scope: "session", values: { subagent_api_key: api_key } }));
+      }
+    } catch { /* no key there: its host answers as any keyless host does */ }
+  }
+  /** Asks DGC which agents model this session uses (when it opens or is resumed); the answer comes as agents_model. */
+  private askAgentsModel(be = this.backend): void {
+    if (!be || !this.agentsModelOffered()) return;
+    be.send(this.stateCommand("agents-model", { type: "get_agents_model" }));
+  }
+  /** The same, waited for: the model menu opens on what DGC has now. */
+  private async readAgentsModel(): Promise<void> {
+    if (!this.agentsModelOffered()) return;
+    try {
+      this.noteAgentsModel(await this.requestState(this.ensureBackend(), "agents-model", { type: "get_agents_model" }, "agents_model" as any, 5000));
+    } catch { /* the menu shows what was last known */ }
+  }
+  /** A model chosen for this session's agents in its model menu: this session only. A saved provider's own address,
+   *  API and key go with it; a model on the session's own host needs none. Claude Code and Codex run their own tools,
+   *  so they are never an agents model (DGC's agent route is an address, a key and a model). */
+  private async setSessionAgentsModel(provider: string, model: string): Promise<void> {
+    if (!this.agentsModelOffered()) return;
+    try {
+      if (provider === "claude" || provider === "codex" || provider.startsWith("subscription_")) throw new Error("It runs its own tools, so it can’t run DGC’s agents.");
+      if (!model) throw new Error("Choose a model for this session’s agents.");
+      let values: Record<string, string> = { subagent_model: model, subagent_base_url: "", subagent_api_mode: "", subagent_api_key: "" };
+      if (provider.startsWith("provider_")) {
+        const { route, api_key } = await profileCredential(this.context, provider);
+        if (route.kind === "subscription") throw new Error("It runs its own tools, so it can’t run DGC’s agents.");
+        values = { subagent_model: model, subagent_base_url: route.base_url, subagent_api_mode: route.api_mode, subagent_api_key: api_key };
+      } else if (provider) throw new Error("Provider not found. Add it in Settings first.");
+      this.noteAgentsModel(await this.requestState(this.ensureBackend(), "agents-own", { type: "set_config", scope: "session", values }, "agents_model" as any, 10000));
+    } catch (error) {
+      void vscode.window.showWarningMessage(error instanceof Error && error.message ? error.message : "DGC could not set this session’s agents model.");
+      void this.readAgentsModel().then(() => this.postAgentsModel());      // the menu shows what DGC still has
+    }
+  }
+  /** Same as settings: this session drops its own agents model and follows Settings › Sub-agents again. */
+  private async resetSessionAgentsModel(): Promise<void> {
+    if (!this.agentsModelOffered()) return;
+    try {
+      this.noteAgentsModel(await this.requestState(this.ensureBackend(), "agents-same", { type: "reset_agents_model" }, "agents_model" as any, 10000));
+    } catch (error) {
+      void vscode.window.showWarningMessage(error instanceof Error && error.message ? error.message : "DGC could not go back to Settings’ agents model.");
+      void this.readAgentsModel().then(() => this.postAgentsModel());
+    }
+  }
+  /** Settings › Sub-agents: the key that goes with a model chosen from a saved provider. Only for that provider's own
+   *  address: a page that names a provider and another address gets none. */
+  private async agentsProviderKey(provider: string, baseUrl: string): Promise<string> {
+    if (!/^provider_[0-9a-f]{32}$/.test(provider) || !baseUrl) return "";
+    try {
+      const { route, api_key } = await profileCredential(this.context, provider);
+      return route.kind !== "subscription" && endpointId(route.base_url) === endpointId(baseUrl) ? String(api_key || "") : "";
+    } catch { return ""; }
   }
 
   private async selectSubscription(engine: string, chosenModel = ""): Promise<void> {
@@ -9386,7 +9498,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const baseUrl = typeof msg.base_url === "string" ? msg.base_url.trim().slice(0, 4096) : "";
     const mode = ["", "auto", "ollama", "anthropic", "chat_completions", "responses"].includes(String(msg.api_mode ?? ""))
       ? String(msg.api_mode ?? "") : "";
-    const typedKey = typeof msg.api_key === "string" ? msg.api_key.trim().slice(0, 16384) : "";
+    let typedKey = typeof msg.api_key === "string" ? msg.api_key.trim().slice(0, 16384) : "";
+    if (!typedKey && role === "subagent" && baseUrl) {
+      // Sub-agents' Model, a provider chosen for it (0.52): its host lists with the provider's own key, which only
+      // ever goes to that provider's address. No key reaches the page.
+      const row = listProfiles(this.context).find((p: any) => p.kind !== "subscription" && endpointId(p.base_url) === endpointId(baseUrl));
+      if (row) typedKey = await this.agentsProviderKey(row.id, baseUrl);
+    }
     try {
       const ev: any = await this.ensureBackend().request({
         type: "list_models_at", request_id: this.nextRequestId("models-at"), role: role as any, base_url: baseUrl,
@@ -9981,6 +10099,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const fallbackBaseChanged = endpointId(v.fallback_base_url)
         !== endpointId(this.routeState.fallbackBaseUrl);
       let apiKey: string | undefined = v.api_key ? String(v.api_key) : undefined;
+      // Sub-agents' model from a saved provider (0.52): its key goes with it, unless one was typed.
+      if (!v.subagent_api_key && typeof v.subagent_from === "string" && v.subagent_base_url) {
+        const key = await this.agentsProviderKey(v.subagent_from, String(v.subagent_base_url));
+        if (key) v = { ...v, subagent_api_key: key };
+      }
       let subagentKey: string | undefined = v.subagent_api_key
         ? String(v.subagent_api_key) : undefined;
       let fallbackKey: string | undefined = v.fallback_api_key

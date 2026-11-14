@@ -61,10 +61,11 @@ for (const theme of ["dark-modern", "light-modern"]) {
         if (long.whereClipped) assert.equal(long.seen, "on Basement workstation · qwen2.5-coder:14b-instruct-q8_0", "the rest gave way first");
         assert.doesNotMatch(long.seen, /^ · |\d…/);
         assert.equal(long.whereInside, true, "a clipped model name shows its ellipsis inside the row");
-        // A helper the Router didn't place keeps its one-line meta.
+        // A helper the Router didn't place names its model (always, 0.52), which stays whole the same way.
         const plain = await measure(page, sid(3));
-        assert.equal(plain.split, false);
-        assert.match(plain.text, /^Failed · 48s · 18\.2k tokens$/);
+        assert.equal(plain.split, true);
+        assert.match(plain.text, /^Failed · 48s · 18\.2k tokens · qwen3\.8:27b$/);
+        assert.equal(plain.whereClipped, false, "its model is whole");
         assert.deepEqual(errors, []);
       } finally { await page.close(); }
     });

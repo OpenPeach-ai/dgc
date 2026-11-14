@@ -92,7 +92,7 @@ const geometry = (page) => page.evaluate(() => {
   const rect = (id) => document.getElementById(id).getBoundingClientRect().toJSON();
   const footer = document.getElementById("cfooter");
   const label = document.querySelector(".agents-label");
-  const word = getComputedStyle(label.firstElementChild).display;     // the words: "2 agents", "1 agent · 2 tasks"
+  const word = getComputedStyle(label.firstElementChild).display;     // the words: "2 sub-agents", "1 sub-agent · 2 tasks"
   const short = label.querySelector(".agents-short");                  // the narrow footer's total
   const need = getComputedStyle(document.querySelector(".agents-need")).display;
   return {
@@ -124,13 +124,13 @@ for (const width of [300, 360, 460]) {
       assert.ok(!intersects(g.pill, g.model), `the pill does not overlap the model picker (${JSON.stringify([g.pill, g.model])})`);
       assert.ok(!intersects(g.model, g.queue) && !intersects(g.model, g.stop),
         `the model picker gives way rather than run under Queue or Stop (${JSON.stringify([g.model, g.queue, g.stop])})`);
-      assert.match(g.aria, /^2 agents · Agents are working · Click to open the agent map$/);
+      assert.match(g.aria, /^2 sub-agents · Sub-agents are working · Click to open the agent map$/);
       if (width <= 640) {
         assert.equal(g.word, "none");
         assert.equal(g.need, "none");
         assert.equal(g.pillText, "2", "the digit stays");
       } else {
-        assert.equal(g.pillText, "2 agents");
+        assert.equal(g.pillText, "2 sub-agents");
       }
     } finally { await page.close(); }
   });
@@ -173,7 +173,7 @@ test("at 300px a waiting pill keeps the sentence in its label and the open map s
   try {
     const g = await geometry(page);
     assert.equal(g.need, "none", "the visible 'needs you' gives way at 300px");
-    assert.match(g.aria, /^2 agents · An agent is waiting for your permission · Click to open the agent map$/);
+    assert.match(g.aria, /^2 sub-agents · A sub-agent is waiting for your permission · Click to open the agent map$/);
     await page.click("#agents-pill");
     await page.waitForTimeout(60);
     const box = await page.evaluate(() => ({ menu: document.getElementById("agent-map-box").getBoundingClientRect().toJSON(),
@@ -205,14 +205,14 @@ for (const width of [300, 360, 460]) {
     try {
       const g = await geometry(page);
       assert.deepEqual([g.hidden, g.state], [false, "running"]);
-      assert.equal(g.aria, "1 agent · 2 tasks · 1 agent working and 2 background tasks running · Click to open the agent map");
+      assert.equal(g.aria, "1 sub-agent · 2 tasks · 1 sub-agent working and 2 background tasks running · Click to open the agent map");
       fits(g);
       if (width <= 640) {
         assert.deepEqual([g.word, g.short, g.need], ["none", "inline", "none"], "the words give way to the total");
         assert.equal(g.pillText, "3", "everything running, never the agents' number alone");
       } else {
         assert.equal(g.short, "none", "the total is the narrow footer's alone");
-        assert.equal(g.pillText, "1 agent · 2 tasks");
+        assert.equal(g.pillText, "1 sub-agent · 2 tasks");
       }
       await shot(page, `pill-agent-and-tasks-${width}`);
     } finally { await page.close(); }
@@ -244,7 +244,7 @@ test("an agent waiting while a task runs: the blue dot and \"· needs you\" win,
     assert.equal(g.state, "waiting");
     assert.equal(hex(dot.bg), dot.wait.toUpperCase());
     assert.equal(g.pillText, "3");
-    assert.equal(g.aria, "2 agents · 1 task · An agent is waiting for your permission · 1 background task running · Click to open the agent map");
+    assert.equal(g.aria, "2 sub-agents · 1 task · A sub-agent is waiting for your permission · 1 background task running · Click to open the agent map");
     fits(g);
   } finally { await page.close(); }
 });
@@ -381,7 +381,7 @@ test("the pill's hover label follows its state: agents ending under the pointer 
     await page.waitForSelector("#hover-tip:not([hidden])", { timeout: 10000 });
     const during = await page.evaluate(() => ({ tip: document.getElementById("hover-tip").textContent,
       shown: !document.getElementById("hover-tip").hidden, title: document.getElementById("agents-pill").getAttribute("title") }));
-    assert.deepEqual(during, { tip: "Agents are working · Click to open the agent map", shown: true, title: null });
+    assert.deepEqual(during, { tip: "Sub-agents are working · Click to open the agent map", shown: true, title: null });
     await page.evaluate(() => {
       for (const id of ["sub-000000000001", "sub-000000000002"]) window.__event({ type: "agent_ended", id, state: "finished", duration_ms: 1000, tool_calls: 1 });
     });
@@ -389,18 +389,18 @@ test("the pill's hover label follows its state: agents ending under the pointer 
     const ended = await page.evaluate(() => ({ hidden: document.getElementById("agents-picker").hidden,
       tip: document.getElementById("hover-tip").textContent,
       state: document.getElementById("agents-pill").dataset.state }));
-    assert.deepEqual(ended, { hidden: false, tip: "No agents working · Click to open the agent map", state: "idle" },
+    assert.deepEqual(ended, { hidden: false, tip: "No sub-agents working · Click to open the agent map", state: "idle" },
       "the label on screen changes with the state");
     await page.evaluate(() => window.__event({ type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 0 }));
     await page.waitForTimeout(60);
     // Queue goes with the turn, so the footer closes up and the pill moves out from under the pointer (what is under
     // it now, the permission mode once the cache clock is always in the footer, labels itself): point at it again.
     await page.hover("#agents-pill");
-    await page.waitForFunction(() => document.getElementById("hover-tip").textContent.startsWith("No agents")
+    await page.waitForFunction(() => document.getElementById("hover-tip").textContent.startsWith("No sub-agents")
       && !document.getElementById("hover-tip").hidden, null, { timeout: 10000 });
     const after = await page.evaluate(() => ({ hidden: document.getElementById("agents-picker").hidden,
       tip: document.getElementById("hover-tip").textContent, text: document.getElementById("agents-pill").innerText.trim() }));
-    assert.deepEqual(after, { hidden: false, tip: "No agents working · Click to open the agent map", text: "0" },
+    assert.deepEqual(after, { hidden: false, tip: "No sub-agents working · Click to open the agent map", text: "0" },
       "the pill stays for the whole chat, counting none working");
   } finally { await page.close(); }
 });
@@ -440,7 +440,7 @@ for (const light of [false, true]) {
       assert.equal(facts.disabledAttr, null, "a row without a task card still opens its card");
       assert.ok(facts.desc >= 4.5, `the name clears 4.5:1 (${facts.desc.toFixed(2)})`);
       assert.ok(facts.meta >= 4.5, `the stats clear 4.5:1 (${facts.meta.toFixed(2)})`);
-      assert.equal(facts.metaText, "Failed · 1s · 18.2k tokens", "the reason is on the label and the card, never in the row");
+      assert.equal(facts.metaText, "Failed · 1s · 18.2k tokens · m", "(its model, always: 0.52) the reason is on the label and the card, never in the row");
       assert.ok(facts.metaHeight <= facts.lineHeight + 1, `the stats are one line (${facts.metaHeight} / ${facts.lineHeight})`);
       assert.equal(facts.rowHeights[0], facts.rowHeights[1], `a failed row is as tall as any other (${facts.rowHeights})`);
       assert.ok(facts.menu.left >= 0 && facts.menu.right <= facts.inner);

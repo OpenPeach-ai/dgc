@@ -2088,7 +2088,7 @@ test("a reloaded webview asks for the monitors list, so its rail and monitor ids
 
 test("a backend handshake asks for the background shells once, so the agents pill hears every start and end", async () => {
   // The CLI pushes a shell's start and end only to a client that has asked for the list; before
-  // this, the pill said "0 agents" over two running shells until the agent map was first opened.
+  // this, the pill said "0 sub-agents" over two running shells until the agent map was first opened.
   for (const version of [1, 0]) {
     const h = recoveryProvider();
     h.provider.scheduleWorkspaceChanges = () => {};
@@ -3609,4 +3609,131 @@ test("another host is saved as before: no key check, nothing for web search", as
   const { listProfiles } = await providerProfiles();
   assert.equal(listProfiles(x.provider.context).length, 1);
   assert.equal(x.seen.filter((c) => c.type === "set_config").length, 0);
+});
+
+// ---- A Work session's own agents model (0.52, 14 Nov): chosen in its model menu, as its fallback is; "Same as
+// settings" goes back; DGC's answer (agents_model) reaches the page; a reopened session's key is supplied again.
+function agentsWorld() {
+  const world = allModelsWorld();
+  const sent = [];
+  const answer = { type: "agents_model", own: false, model: "settings-coder", base_url: "", api_mode: "", api_key_set: false,
+    settings_model: "settings-coder", settings_base_url: "" };
+  const backend = { ready: true, send: (command) => { sent.push(JSON.parse(JSON.stringify(command))); return true; },
+    request: async (command) => {
+      sent.push(JSON.parse(JSON.stringify(command)));
+      if (world.reject) throw new Error(world.reject);
+      if (command.type === "set_config" && command.values.subagent_model !== undefined) {
+        Object.assign(answer, { own: true, model: command.values.subagent_model, base_url: command.values.subagent_base_url,
+          api_mode: command.values.subagent_api_mode, api_key_set: !!command.values.subagent_api_key });
+      }
+      if (command.type === "reset_agents_model") Object.assign(answer, { own: false, model: "settings-coder", base_url: "", api_mode: "", api_key_set: false });
+      return { ...answer };
+    } };
+  world.provider.backend = backend;
+  world.provider.ensureBackend = () => backend;
+  const posted = [];
+  world.provider.post = (message) => posted.push(JSON.parse(JSON.stringify(message)));
+  return Object.assign(world, { sent, posted, answer, of: (type) => sent.filter((c) => c.type === type) });
+}
+
+test("Work's agents model: a saved provider's address, API and key go with it, this session only; a model on its own host needs none; Same as settings; an older CLI is asked nothing", async () => {
+  const world = agentsWorld();
+  const row = await addProviderProfile(world, { name: "Spare", base_url: "https://spare.example/v1", model: "gpt-oss:120b",
+    api_mode: "chat_completions", api_key: "sk-spare" });
+  await world.provider.setSessionAgentsModel(row.id, "own-coder");
+  await world.provider.resetSessionAgentsModel();
+  assert.equal(world.sent.length, 0, "an older CLI keeps no agents model per session: nothing sent");
+  assert.equal(world.provider.agentsView().offered, false);
+  world.provider.lastReadyEvent.capabilities.agents_model = 1;
+  assert.equal(world.provider.agentsView().offered, true);
+  await world.provider.setSessionAgentsModel(row.id, "own-coder");
+  assert.equal(world.of("set_config").at(-1).scope, "session", "this session only");
+  assert.deepEqual(world.of("set_config").at(-1).values, { subagent_model: "own-coder", subagent_base_url: "https://spare.example/v1",
+    subagent_api_mode: "chat_completions", subagent_api_key: "sk-spare" });
+  assert.deepEqual(world.posted.filter((m) => m.type === "agentsModel").at(-1),
+    { type: "agentsModel", offered: true, own: true, model: "own-coder", base_url: "https://spare.example/v1",
+      settings_model: "settings-coder", settings_base_url: "", router: false }, "DGC's answer reaches its model menu, and no key does");
+  assert.equal(JSON.stringify(world.posted).includes("sk-spare"), false);
+  await world.provider.setSessionAgentsModel("", "glm-5.3:cloud");
+  assert.deepEqual(world.of("set_config").at(-1).values, { subagent_model: "glm-5.3:cloud", subagent_base_url: "", subagent_api_mode: "", subagent_api_key: "" });
+  // Claude Code and Codex run their own tools: never an agents model.
+  const claude = await addProviderProfile(world, { kind: "subscription", engine: "claude" });
+  const before = world.of("set_config").length;
+  await world.provider.setSessionAgentsModel(claude.id, "");
+  await world.provider.setSessionAgentsModel("codex", "");
+  await world.provider.setSessionAgentsModel(row.id, "");
+  assert.equal(world.of("set_config").length, before, "nothing sent for a subscription CLI, or for no model");
+  assert.match(notices.warnings.at(-1), /Choose a model|can’t run DGC’s agents/);
+  await world.provider.resetSessionAgentsModel();
+  assert.deepEqual({ ...world.of("reset_agents_model").at(-1), request_id: undefined }, { type: "reset_agents_model", request_id: undefined });
+  assert.equal(world.posted.filter((m) => m.type === "agentsModel").at(-1).own, false);
+  // DGC refused: it says so, and the menu is told what DGC still has.
+  world.reject = "the agents model's address must be a plain HTTP or HTTPS URL";
+  await world.provider.setSessionAgentsModel(row.id, "own-coder");
+  assert.match(notices.warnings.at(-1), /plain HTTP or HTTPS URL|could not set/);
+});
+
+test("Work's agents model: a reopened session's own has no key, so the editor supplies the one saved for that address, once, and never another address's", async () => {
+  const world = agentsWorld();
+  world.provider.lastReadyEvent.capabilities.agents_model = 1;
+  await addProviderProfile(world, { name: "Spare", base_url: "https://spare.example/v1", model: "gpt-oss:120b",
+    api_mode: "chat_completions", api_key: "sk-spare" });
+  const reopened = { type: "agents_model", own: true, model: "own-coder", base_url: "https://spare.example/v1", api_mode: "chat_completions",
+    api_key_set: false, settings_model: "settings-coder", settings_base_url: "" };
+  world.provider.onEvent(reopened);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const keys = () => world.of("set_config").filter((c) => "subagent_api_key" in c.values);
+  assert.equal(keys().length, 1);
+  assert.equal(keys()[0].scope, "session");
+  assert.deepEqual(keys()[0].values, { subagent_api_key: "sk-spare" }, "only its key: nothing else of the session moves");
+  world.provider.onEvent(reopened);                       // DGC still without it (it refused the key): not asked in a loop
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(keys().length, 1);
+  world.provider.onEvent({ ...reopened, api_key_set: true });
+  world.provider.onEvent(reopened);                       // reopened once more later: supplied again
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(keys().length, 2);
+  // An address no saved provider has: no key is sent, and never another address's.
+  world.provider.onEvent({ ...reopened, api_key_set: true });
+  world.provider.onEvent({ ...reopened, base_url: "https://elsewhere.example/v1" });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(keys().length, 2);
+  // A session following Settings is never sent a provider's key.
+  world.provider.onEvent({ ...reopened, own: false, base_url: "https://spare.example/v1" });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(keys().length, 2);
+  assert.equal(world.provider.agentsView().own, false);
+});
+
+test("Work's agents model: DGC is asked when a session opens or is resumed, only by a CLI that offers it", async () => {
+  const world = agentsWorld();
+  world.provider.context.workspaceState = { get: (key, fallback) => fallback, update: async () => {} };
+  world.provider.onEvent({ type: "session", kind: "resumed", session_id: "s-1", name: "" });
+  assert.equal(world.of("get_agents_model").length, 0, "an older CLI is never asked");
+  world.provider.lastReadyEvent.capabilities.agents_model = 1;
+  world.provider.onEvent({ type: "session", kind: "resumed", session_id: "s-2", name: "" });
+  assert.equal(world.of("get_agents_model").length, 1);
+  world.provider.onEvent({ type: "session", kind: "new", session_id: "s-3", name: "" });
+  assert.equal(world.of("get_agents_model").length, 2, "a new session follows Settings: the menu is told");
+});
+
+test("Settings › Sub-agents: a model from a saved provider is saved with that provider's key, and its host's models are listed with it; never for another address", async () => {
+  const world = agentsWorld();
+  world.provider.lastReadyEvent.capabilities.list_models_at = 1;
+  const row = await addProviderProfile(world, { name: "Spare", base_url: "https://spare.example/v1", model: "gpt-oss:120b",
+    api_mode: "chat_completions", api_key: "sk-spare" });
+  const shown = [];
+  world.provider.settingsEditor = { webview: { postMessage: (m) => shown.push(m) } };
+  await world.provider.onSettingsMessage({ type: "listModelsAt", token: "sub-1", role: "subagent", base_url: "https://spare.example/v1/", api_mode: "chat_completions" });
+  assert.equal(world.of("list_models_at").at(-1).api_key, "sk-spare", "the provider's own key lists its own host");
+  await world.provider.onSettingsMessage({ type: "listModelsAt", token: "sub-2", role: "subagent", base_url: "https://other.example/v1", api_mode: "auto" });
+  assert.equal("api_key" in world.of("list_models_at").at(-1), false, "another address gets no saved key");
+  await world.provider.onSettingsMessage({ type: "listModelsAt", token: "main-3", role: "main", base_url: "https://spare.example/v1", api_mode: "auto" });
+  assert.equal("api_key" in world.of("list_models_at").at(-1), false, "only the agents' box");
+  assert.equal(JSON.stringify(shown).includes("sk-spare"), false, "no key reaches the page");
+  // The key that goes with a save.
+  assert.equal(await world.provider.agentsProviderKey(row.id, "https://spare.example/v1"), "sk-spare");
+  assert.equal(await world.provider.agentsProviderKey(row.id, "https://other.example/v1"), "", "the page named a provider and another address: no key");
+  assert.equal(await world.provider.agentsProviderKey("provider_" + "9".repeat(32), "https://spare.example/v1"), "");
+  assert.equal(await world.provider.agentsProviderKey("", "https://spare.example/v1"), "");
 });

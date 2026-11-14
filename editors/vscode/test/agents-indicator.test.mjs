@@ -1,4 +1,4 @@
-// The agents indicator in the webview: the "● 2 agents" pill (Claude Code's counting rule: the
+// The agents indicator in the webview: the "● 2 sub-agents" pill (Claude Code's counting rule: the
 // agents working now, for the whole chat, and beside them the background tasks running now, "1 agent
 // · 2 tasks"), the agent map it opens, rows that open each agent's card and page, announcements,
 // chat boundaries and backend exits. The map itself is agent-map.test.mjs's.
@@ -49,29 +49,29 @@ test("the pill counts the agents working now and stays for the whole chat once i
   const { event, start, update, end, pill, errors } = view();
   assert.equal(pill().hidden, true, "hidden while the chat has no agents");
   start(sid(1));
-  assert.deepEqual(pill(), { hidden: false, state: "running", label: "1 agent", need: false,
-    title: `Agents are working · ${PILL_HINT}`, aria: `1 agent · Agents are working · ${PILL_HINT}` });
+  assert.deepEqual(pill(), { hidden: false, state: "running", label: "1 sub-agent", need: false,
+    title: `Sub-agents are working · ${PILL_HINT}`, aria: `1 sub-agent · Sub-agents are working · ${PILL_HINT}` });
   start(sid(2));
-  assert.equal(pill().label, "2 agents");
+  assert.equal(pill().label, "2 sub-agents");
   update(sid(2), { state: "waiting", waiting_for: "permission" });
   assert.equal(pill().state, "waiting");
   assert.equal(pill().need, true);
-  assert.equal(pill().title, `An agent is waiting for your permission · ${PILL_HINT}`);
-  assert.equal(pill().aria, `2 agents · An agent is waiting for your permission · ${PILL_HINT}`);
+  assert.equal(pill().title, `A sub-agent is waiting for your permission · ${PILL_HINT}`);
+  assert.equal(pill().aria, `2 sub-agents · A sub-agent is waiting for your permission · ${PILL_HINT}`);
   update(sid(2), { state: "running" });
   end(sid(1));
-  assert.equal(pill().label, "1 agent", "a finished agent no longer counts");
+  assert.equal(pill().label, "1 sub-agent", "a finished agent no longer counts");
   end(sid(2));
   assert.equal(pill().hidden, false, "every agent ended: the pill stays");
-  assert.equal(pill().label, "0 agents");
+  assert.equal(pill().label, "0 sub-agents");
   assert.equal(pill().state, "idle");
-  assert.equal(pill().title, `No agents working · ${PILL_HINT}`);
+  assert.equal(pill().title, `No sub-agents working · ${PILL_HINT}`);
   event({ type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 0 });
-  assert.deepEqual([pill().hidden, pill().label], [false, "0 agents"], "and stays after the turn ends");
+  assert.deepEqual([pill().hidden, pill().label], [false, "0 sub-agents"], "and stays after the turn ends");
   start(sid(3));
-  assert.equal(pill().label, "1 agent");
+  assert.equal(pill().label, "1 sub-agent");
   assert.equal(pill().state, "running");
-  assert.equal(pill().title, `Agents are working · ${PILL_HINT}`);
+  assert.equal(pill().title, `Sub-agents are working · ${PILL_HINT}`);
   assert.deepEqual(errors, []);
 });
 
@@ -79,12 +79,12 @@ test("waiting for an answer has its own tooltip; unknown ids and duplicates chan
   const { start, update, end, pill, errors } = view();
   start(sid(1));
   update(sid(1), { state: "waiting", waiting_for: "answer" });
-  assert.equal(pill().title, `An agent is waiting for your answer · ${PILL_HINT}`);
+  assert.equal(pill().title, `A sub-agent is waiting for your answer · ${PILL_HINT}`);
   start(sid(1), { description: "duplicate" });
   update(sid(9), { state: "waiting", waiting_for: "permission" });
   end(sid(9), "failed");
-  assert.equal(pill().label, "1 agent");
-  assert.equal(pill().title, `An agent is waiting for your answer · ${PILL_HINT}`);
+  assert.equal(pill().label, "1 sub-agent");
+  assert.equal(pill().title, `A sub-agent is waiting for your answer · ${PILL_HINT}`);
   assert.deepEqual(errors, []);
 });
 
@@ -102,12 +102,12 @@ test("a new chat hides the pill and closes the map; a fork keeps it; a big snaps
     description: `a${i}`, depth: 1, state: "finished", tool_calls: 1, isolated: false, parallel: false,
     restored: false, duration_ms: 1000 }));
   event({ type: "agents", items, total: 70, active: 0 });
-  assert.deepEqual([pill().hidden, pill().label, pill().state], [false, "0 agents", "idle"],
+  assert.deepEqual([pill().hidden, pill().label, pill().state], [false, "0 sub-agents", "idle"],
     "a chat whose agents all ended shows the pill at 0: the map is still worth opening");
   event({ type: "session", kind: "forked", message_count: 3, session_id: "s3" });
-  assert.equal(pill().label, "0 agents", "a fork keeps the chat's agents");
+  assert.equal(pill().label, "0 sub-agents", "a fork keeps the chat's agents");
   event({ type: "agents", items, total: 73, active: 3 });
-  assert.equal(pill().label, "3 agents", "active agents omitted from a bounded snapshot still count");
+  assert.equal(pill().label, "3 sub-agents", "active agents omitted from a bounded snapshot still count");
   $("agents-pill").click();
   assert.equal($("agent-map-subtitle").textContent, "73 agents · click an agent for details");
   assert.equal($("agent-map-more").textContent, "9 more agents not listed, 3 of them working.");
@@ -346,7 +346,7 @@ test("restored records claim replayed cards newest to newest; history alone neve
     total: 2, active: 0 });
   const cards = [...doc.querySelectorAll('.tool[data-tool-name="task"]')];
   assert.deepEqual(cards.map((card) => card.dataset.agentId), [sid(1), sid(2)]);
-  assert.deepEqual([pill().hidden, pill().label, pill().state], [false, "0 agents", "idle"],
+  assert.deepEqual([pill().hidden, pill().label, pill().state], [false, "0 sub-agents", "idle"],
     "the restored agents are the chat's: the pill is back, counting none working");
   assert.deepEqual(errors, []);
 });
@@ -391,7 +391,7 @@ test("a backend exit marks working agents stopped without a word; the new backen
     dom.window.Date.now = wallNow;
   }
   assert.equal(pill().state, "idle");
-  assert.equal(pill().label, "0 agents", "none working");
+  assert.equal(pill().label, "0 sub-agents", "none working");
   assert.equal(mapOpen(), false, "the map closes");
   $("agents-pill").click();
   assert.deepEqual(agentRows().map((row) => [row.querySelector(".am-meta").textContent, row.title]),
@@ -513,7 +513,7 @@ test("after a rewind in a chat whose task calls all share call_0, each row jumps
   const cards = [...doc.querySelectorAll('.tool[data-tool-name="task"]')];
   assert.equal(cards.length, 2);
   assert.deepEqual(cards.map((card) => card.dataset.agentId), [sid(1), sid(2)]);
-  assert.equal(pillWords($("agents-pill")), "0 agents", "the kept agents are the chat's; none is working");
+  assert.equal(pillWords($("agents-pill")), "0 sub-agents", "the kept agents are the chat's; none is working");
   for (const [index, card] of cards.entries()) {
     card.querySelector(".tool-toggle").click();
     assert.match(card.textContent, new RegExp(`turn${index}`));
@@ -616,7 +616,7 @@ test("the pill's probe answers only the host bridge's nonce, and panel.ts keeps 
   const probe = "0123456789abcdef0123456789abcdef";
   send({ type: "agentsProbe", probe });
   assert.deepEqual(JSON.parse(JSON.stringify(posted.filter((m) => m.type === "agentsProbeResult"))),
-    [{ type: "agentsProbeResult", probe, hidden: false, state: "running", label: "1 agent" }]);
+    [{ type: "agentsProbeResult", probe, hidden: false, state: "running", label: "1 sub-agent" }]);
   const onMessage = panelSrc.slice(panelSrc.indexOf("private async onMessage("));
   assert.doesNotMatch(onMessage.slice(0, onMessage.indexOf("\n  }\n")), /agentsProbe/);
   const reply = panelSrc.slice(panelSrc.indexOf("private testOnlyWebviewReply("));
@@ -637,13 +637,13 @@ test("the pill's probe answers only the host bridge's nonce, and panel.ts keeps 
 test("failed and finished agents stay on the map for the whole chat, across turns", () => {
   const { $, event, start, end, advance, pill, agentRows, errors } = view({ clock: true });
   start(sid(1)); start(sid(2)); end(sid(1)); end(sid(2), "failed");
-  assert.equal(pill().label, "0 agents");
+  assert.equal(pill().label, "0 sub-agents");
   advance(60000);
   assert.equal(pill().hidden, false, "a clock tick does not drop them");
   event({ type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 0 });
   assert.equal(pill().hidden, false, "nor does the turn ending");
   start(sid(3));
-  assert.equal(pill().label, "1 agent", "the next turn counts its working agent");
+  assert.equal(pill().label, "1 sub-agent", "the next turn counts its working agent");
   $("agents-pill").click();
   assert.deepEqual(agentRows().map((row) => row.dataset.agentId), [sid(3), sid(2), sid(1)],
     "and the map still lists the earlier turn's agents");
@@ -711,16 +711,16 @@ test("agents and tasks together read \"1 agent · 2 tasks\"; waiting beats runni
   start(sid(1));
   monitors(monitor("mon1"));
   shells(shell("bg3"));
-  assert.deepEqual(pill(), { hidden: false, state: "running", label: "1 agent · 2 tasks", need: false,
-    title: `1 agent working and 2 background tasks running · ${PILL_HINT}`,
-    aria: `1 agent · 2 tasks · 1 agent working and 2 background tasks running · ${PILL_HINT}` });
+  assert.deepEqual(pill(), { hidden: false, state: "running", label: "1 sub-agent · 2 tasks", need: false,
+    title: `1 sub-agent working and 2 background tasks running · ${PILL_HINT}`,
+    aria: `1 sub-agent · 2 tasks · 1 sub-agent working and 2 background tasks running · ${PILL_HINT}` });
   assert.equal(short(), "3", "the narrow footer's total is everything running");
   update(sid(1), { state: "waiting", waiting_for: "permission" });
-  assert.deepEqual([pill().state, pill().need, pill().label], ["waiting", true, "1 agent · 2 tasks"]);
-  assert.equal(pill().title, `An agent is waiting for your permission · 2 background tasks running · ${PILL_HINT}`);
-  assert.equal(pill().aria, `1 agent · 2 tasks · An agent is waiting for your permission · 2 background tasks running · ${PILL_HINT}`);
+  assert.deepEqual([pill().state, pill().need, pill().label], ["waiting", true, "1 sub-agent · 2 tasks"]);
+  assert.equal(pill().title, `A sub-agent is waiting for your permission · 2 background tasks running · ${PILL_HINT}`);
+  assert.equal(pill().aria, `1 sub-agent · 2 tasks · A sub-agent is waiting for your permission · 2 background tasks running · ${PILL_HINT}`);
   update(sid(1), { state: "waiting", waiting_for: "answer" });
-  assert.equal(pill().title, `An agent is waiting for your answer · 2 background tasks running · ${PILL_HINT}`);
+  assert.equal(pill().title, `A sub-agent is waiting for your answer · 2 background tasks running · ${PILL_HINT}`);
   update(sid(1), { state: "running" });
   end(sid(1));
   assert.deepEqual([pill().state, pill().label, pill().title], ["running", "2 tasks", `2 background tasks running · ${PILL_HINT}`],
@@ -728,8 +728,8 @@ test("agents and tasks together read \"1 agent · 2 tasks\"; waiting beats runni
   assert.equal(short(), "2");
   shells(shell("bg3", "killed"));
   monitors();
-  assert.deepEqual(pill(), { hidden: false, state: "idle", label: "0 agents", need: false,
-    title: `No agents working · ${PILL_HINT}`, aria: `0 agents · No agents working · ${PILL_HINT}` }, "the chat had an agent: the pill stays");
+  assert.deepEqual(pill(), { hidden: false, state: "idle", label: "0 sub-agents", need: false,
+    title: `No sub-agents working · ${PILL_HINT}`, aria: `0 sub-agents · No sub-agents working · ${PILL_HINT}` }, "the chat had an agent: the pill stays");
   assert.equal(short(), "0");
   assert.deepEqual(errors, []);
 });
@@ -788,7 +788,7 @@ test("the pill and the map count the same tasks, live while the map is open; so 
   event(troupe("done")); agree(2, "the troupe finished");
   shells(); agree(1, "the shell is gone");
   monitors(); agree(0, "the monitor is gone");
-  assert.equal(pill().label, "0 agents");
+  assert.equal(pill().label, "0 sub-agents");
   assert.deepEqual(errors, []);
 });
 

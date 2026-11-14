@@ -9,13 +9,15 @@ const SHOWN_MAX = 200;
 const escape = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 /** The markup: the field's words on the left; the box, its open button and its list on the right. */
-export function modelBoxMarkup(id, label, hint, value) {
-    return `<div class="field model-field" data-model-field="${id}"><span class="words"><span class="name-line"><label class="name" for="${id}">${label}</label></span>`
-        + `<span class="hint" id="${id}-hint"${hint ? '' : ' hidden'}>${hint}</span><span class="hint model-box-status" id="${id}-status" role="status" hidden></span></span>`
-        + `<span class="model-box"><input id="${id}" type="text" value="${escape(value)}" autocomplete="off" spellcheck="false" role="combobox"`
+/** `before`: a control that sits over the box in the same row (Sub-agents' provider choice); `info` and `detail`: the
+ *  row's "?" and the words behind it. */
+export function modelBoxMarkup(id, label, hint, value, { before = '', info = '', detail = '' } = {}) {
+    return `<div class="field model-field" data-model-field="${id}"><span class="words"><span class="name-line"><label class="name" for="${id}">${label}</label>${info}</span>`
+        + `<span class="hint" id="${id}-hint"${hint ? '' : ' hidden'}>${hint}</span><span class="hint model-box-status" id="${id}-status" role="status" hidden></span>${detail}</span>`
+        + (before ? `<span class="model-choice">${before}` : '') + `<span class="model-box"><input id="${id}" type="text" value="${escape(value)}" autocomplete="off" spellcheck="false" role="combobox"`
         + ` aria-autocomplete="list" aria-expanded="false" aria-controls="${id}-list" aria-describedby="${id}-hint ${id}-status">`
         + `<button type="button" class="model-box-open" tabindex="-1" data-model-open="${id}" aria-label="Show the models at this host" title="Show the models at this host">${CHEVRON}</button>`
-        + `<ul class="model-box-list dgc-popover" id="${id}-list" role="listbox" aria-label="Models at this host" hidden></ul></span></div>`;
+        + `<ul class="model-box-list dgc-popover" id="${id}-list" role="listbox" aria-label="Models at this host" hidden></ul></span>${before ? '</span>' : ''}</div>`;
 }
 
 /** A short, one-way fingerprint of a typed key, so the cache can tell keys apart without keeping one. */

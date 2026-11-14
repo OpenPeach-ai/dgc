@@ -25,6 +25,13 @@ export function parallelMore(c) {
 }
 // Remembered across redraws: which "Advanced" and "Another host" disclosures are open.
 const OPEN = new Set();
+// Sub-agents' provider choice is on "Another host…" (its host may still be blank), until a provider is chosen.
+let agentsAnotherHost = false;
+// Whether Another host was last drawn open because its host is no provider's: when that stops being so (the providers
+// arrived, a provider was chosen) it closes again, rather than staying open as if it had been opened by hand.
+let agentsHostShown = false;
+const AGENTS_CLI_REASON = "Claude Code and Codex run their own tools, so they can’t run DGC’s agents.";
+const sameAddress = (a, b) => String(a || "").trim().replace(/\/+$/, "").toLowerCase() === String(b || "").trim().replace(/\/+$/, "").toLowerCase();
 const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 
 // Ollama's keep_alive values Settings offers, in plain words. "" sends none (Ollama's own default, 5 minutes).
@@ -342,10 +349,26 @@ export function renderFields(section, main, config, providers, ui) {
                 "Inherit uses the main transport on the main host, and Auto on any other.")
             + field("API key", "Blank keeps the saved key.", inp(`${prefix}_api_key`, c[`${prefix}_api_key`] || "", "password"),
                 "Saved for this host only. With none here, the main key goes only to the main host.");
-        const usual = model("subagent_model", "Model", "", c.subagent_model || "")
+        // Sub-agents' Model (0.52): a provider and one of its models. A saved provider fills its address and API here
+        // (its key goes with the Save, in the extension), so nobody types a host; Claude Code and Codex are shown,
+        // greyed, with why; an address no provider lists is Another host, one click away.
+        const saved = Array.isArray(ui.providerProfiles) ? ui.providerProfiles.filter((row) => row && row.id) : [];
+        const fromProvider = subHost ? saved.find((row) => row.kind !== "subscription" && sameAddress(row.base_url, subHost)) : null;
+        const from = fromProvider && !agentsAnotherHost ? fromProvider.id : subHost || agentsAnotherHost ? "custom" : "";
+        if (agentsHostShown && from !== "custom") OPEN.delete("subagent-host");
+        agentsHostShown = from === "custom";
+        const fromChoices = [["", "Same as the main chat", false],
+            ...saved.map((row) => (row.kind === "subscription" ? [row.id, `${row.name} (can’t run DGC’s agents)`, true] : [row.id, row.name, false])),
+            ["custom", "Another host…", false]];
+        const fromSelect = `<select id="subagent_from" aria-label="Provider for sub-agents" title="Whose models sub-agents use">`
+            + fromChoices.map(([value, words, off]) => `<option value="${escapeHtml(value)}"${value === from ? " selected" : ""}${off ? " disabled" : ""}>${escapeHtml(words)}</option>`).join("") + `</select>`;
+        const agentsModel = () => model("subagent_model", "Model", "A provider, and one of its models.", c.subagent_model || "",
+            { before: fromSelect, more: `Same as the main chat uses the main chat's provider; with no model named, its model too. A model from another provider brings its address, API and key with it. ${AGENTS_CLI_REASON} Each Work session can choose its own in its model menu, for that session only.` });
+        const anotherHost = () => more("subagent-host", from === "custom" && subHost ? `Another host · ${escapeHtml(hostName(subHost))}` : "Another host", routeRows("subagent", "subagent_provider"), from === "custom");
+        const usual = agentsModel()
             + field("Context window", c.subagent_window_settable ? "Tokens each keeps before it compacts." : old,
                 subagentWindowBox(c))
-            + more("subagent-host", subHost ? `Another host · ${escapeHtml(hostName(subHost))}` : "Another host", routeRows("subagent", "subagent_provider"), !!subHost);
+            + anotherHost();
         const runAtOnce = field("Run at once", parallelHint(c), inp("max_parallel_tasks", c.max_parallel_tasks ?? 4, "number"), parallelMore(c));
         // How hard each helper thinks (subagent_thinking), from a CLI that answers it. Which level wins: a DGC Router
         // model's own choice, then the agent file's effort:, then this, then the main chat's.
@@ -357,10 +380,10 @@ export function renderFields(section, main, config, providers, ui) {
                     + `<span class="hint">DGC picks a free worker for each. <button type="button" class="link" data-router-goto>See systems</button></span></span></div>`
                 + runAtOnce + thinking
                 + more("subagent-usual", "The usual sub-agent model", usual, false), "", "models-subagents")
-            : group("Sub-agents", model("subagent_model", "Model", "", c.subagent_model || "") + runAtOnce + thinking
+            : group("Sub-agents", agentsModel() + runAtOnce + thinking
                 + field("Context window", c.subagent_window_settable ? "Tokens each keeps before it compacts." : old,
                     subagentWindowBox(c))
-                + more("subagent-host", subHost ? `Another host · ${escapeHtml(hostName(subHost))}` : "Another host", routeRows("subagent", "subagent_provider"), !!subHost), "", "models-subagents");
+                + anotherHost(), "", "models-subagents");
         const following = "Same as DGC" + (followed(c) ? ` (${followed(c)})` : "");
         const pipsValue = String(c.pips_model || "");
         const pipsOnRouter = routed && router.pipsDefault() && c.pips_settable;
@@ -387,6 +410,21 @@ export function renderFields(section, main, config, providers, ui) {
         const c = config;
         const placeholders = { subagent_model: "Same as the main model", fallback_model: "None", subagent_base_url: "Same as the main host", fallback_base_url: "Same as the main host" };
         for (const [id, text] of Object.entries(placeholders)) { const el = main.querySelector("#" + id); if (el) el.placeholder = text; }
+        // Sub-agents' provider: choosing one fills the address, API and its own model; the page is drawn again so the
+        // Model box lists that host and Another host says what it is.
+        const from = main.querySelector("#subagent_from");
+        if (from) from.addEventListener("input", (event) => {
+            event.stopPropagation();
+            const set = (id, value) => { const el = main.querySelector("#" + id); if (el) el.value = value; };
+            const row = (Array.isArray(ui.providerProfiles) ? ui.providerProfiles : []).find((item) => item && item.id === from.value && item.kind !== "subscription");
+            agentsAnotherHost = from.value === "custom";
+            if (agentsAnotherHost) OPEN.add("subagent-host"); else OPEN.delete("subagent-host");
+            if (row) { set("subagent_base_url", row.base_url || ""); set("subagent_api_mode", row.api_mode || ""); set("subagent_model", row.model || ""); set("subagent_api_key", ""); }
+            else if (!from.value) { set("subagent_base_url", ""); set("subagent_api_mode", ""); set("subagent_model", ""); set("subagent_api_key", ""); }
+            ui.redraw();
+            const next = document.getElementById(agentsAnotherHost ? "subagent_base_url" : "subagent_from");
+            next?.focus?.();
+        });
         const fallbackHint = main.querySelector("#fallback_model")?.closest(".field")?.querySelector(".hint");
         if (fallbackHint) fallbackHint.title = "If the main model fails or stalls, DGC tries this one.";
         const pipsBox = main.querySelector("#pips_model");

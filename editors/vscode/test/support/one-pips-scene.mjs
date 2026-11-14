@@ -111,7 +111,9 @@ export function makeBackend(o = {}) {
   };
   const listed = (list, r) => { const q = (r.query || "").toLowerCase(), hit = q ? list.filter((x) => x.name.toLowerCase().includes(q)) : list; return { pips: hit, total: hit.length, next_offset: null }; };
   const answers = {
-    list_workspaces: () => ({ workspaces: [{ id: P, name: "Personal", kind: "personal" }, { id: SHOP, name: "shop", kind: "git" }, { id: GARDEN, name: "garden", kind: "git" }, { id: LIME, name: "lime_tiles", kind: "git" }], current_workspace_id: SHOP }),
+    // `leftovers`: that many more workspaces with no Pips (a profile with ~190 test folders left behind, 14 Nov).
+    list_workspaces: () => ({ workspaces: [{ id: P, name: "Personal", kind: "personal" }, { id: SHOP, name: "shop", kind: "git" }, { id: GARDEN, name: "garden", kind: "git" }, { id: LIME, name: "lime_tiles", kind: "git" },
+      ...Array.from({ length: o.leftovers || 0 }, (_, i) => ({ id: "ws_" + String(i).padStart(32, "f"), name: `dgc-session-restore-${i}`, kind: "folder" }))], current_workspace_id: SHOP }),
     list_pip_types: () => ({ types }), list_pip_setups: () => ({ setups: [] }), list_pip_starters: () => ({ starters: [] }), list_project_folders: () => ({ folders }),
     list_pips: (r) => {
       if (r.scope === "all") { const order = typeof state.order === "function" ? state.order() : state.order; return listed([...pips.filter((x) => x.id === CORE), ...order.map((id) => pips.find((x) => x.id === id)).filter(Boolean), ...pips.filter((x) => x.id !== CORE && !order.includes(x.id))], r); }

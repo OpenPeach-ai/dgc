@@ -63,7 +63,7 @@ for (const theme of ["dark-modern", "light-modern"]) {
       // Two agents and the dev server's monitor: the narrow footer keeps the total running, and the
       // label says which is which.
       assert.equal(g.pillText, "3", "a 300 px panel keeps the total running");
-      assert.equal(g.pillAria, "2 agents · 1 task · 2 agents working and 1 background task running · Click to open the agent map");
+      assert.equal(g.pillAria, "2 sub-agents · 1 task · 2 sub-agents working and 1 background task running · Click to open the agent map");
       assert.ok(g.footerScroll <= g.footerClient, `the footer does not overflow (${g.footerScroll} > ${g.footerClient})`);
       assert.equal(g.pageOverflow, false, "the panel does not scroll sideways");
       assert.equal(g.sendLabel, "Stop generation", "Send is Stop while the question is docked");

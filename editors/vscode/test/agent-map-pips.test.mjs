@@ -221,7 +221,7 @@ test("the map's button shows its live mark while a Pip works for this session, a
   q.event({ type: "agent_started", id: "sub-000000000001", parent_id: null, call_id: "call_1", description: "Read the totals", depth: 1,
     state: "running", started_at: 1000, isolated: false, parallel: false });
   q.event({ type: "pip_runs_running", items: [running()] });
-  assert.deepEqual(q.pill(), { hidden: false, state: "running", label: "1 agent · 1 Pip" });
+  assert.deepEqual(q.pill(), { hidden: false, state: "running", label: "1 sub-agent · 1 Pip" });
   q.event({ type: "agent_ended", id: "sub-000000000001", state: "finished", duration_ms: 1200, tool_calls: 1 });
   assert.deepEqual(q.pill(), { hidden: false, state: "running", label: "1 Pip" }, "the helper ended; the Pip still works");
 });

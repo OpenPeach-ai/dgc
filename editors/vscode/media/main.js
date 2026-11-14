@@ -2701,7 +2701,7 @@
     const profiles = [...levels, "ultra"];
     const selected = curUltra ? "ultra" : profiles.includes(curThink) ? curThink : profiles[0];
     const index = Math.max(0, profiles.indexOf(selected));
-    return `<section class="reasoning-card${curUltra ? " is-ultra" : ""}" aria-label="Model and reasoning"><button type="button" class="mrow dgc-menu-row model-summary" aria-expanded="false"><span class="codicon codicon-zap" aria-hidden="true"></span><span class="model-summary-label">${esc(curModel || "Select model")} <span class="muted">${effortLabel(selected, subscription)}</span></span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button><div class="effort-control" style="--effort:${index / (profiles.length - 1) * 100}%"><input class="effort-slider" type="range" min="0" max="${profiles.length - 1}" step="1" value="${index}" data-profiles="${profiles.join(",")}" aria-label="Thinking effort" aria-valuetext="${effortLabel(selected, subscription)}"/><div class="effort-labels"><span>${effortLabel(profiles[0], subscription)}</span><output>${effortLabel(selected, subscription)}</output><span>Ultra</span></div></div><p class="reasoning-note clamped">${esc(subscription ? "Uses the selected CLI’s supported effort. Ultra adds DGC orchestration guidance." : reasoningNote())}</p><button type="button" class="reasoning-more" aria-expanded="false" hidden>Show more</button></section>`;
+    return agentsRowHtml(`<section class="reasoning-card${curUltra ? " is-ultra" : ""}" aria-label="Model and reasoning"><button type="button" class="mrow dgc-menu-row model-summary" aria-expanded="false"><span class="codicon codicon-zap" aria-hidden="true"></span><span class="model-summary-label">${esc(curModel || "Select model")} <span class="muted">${effortLabel(selected, subscription)}</span></span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button><div class="effort-control" style="--effort:${index / (profiles.length - 1) * 100}%"><input class="effort-slider" type="range" min="0" max="${profiles.length - 1}" step="1" value="${index}" data-profiles="${profiles.join(",")}" aria-label="Thinking effort" aria-valuetext="${effortLabel(selected, subscription)}"/><div class="effort-labels"><span>${effortLabel(profiles[0], subscription)}</span><output>${effortLabel(selected, subscription)}</output><span>Ultra</span></div></div><p class="reasoning-note clamped">${esc(subscription ? "Uses the selected CLI’s supported effort. Ultra adds DGC orchestration guidance." : reasoningNote())}</p><button type="button" class="reasoning-more" aria-expanded="false" hidden>Show more</button></section>`);
   }
   // The note under the slider is three lines at most, with Show more when there is more to read: a
   // long one (Ollama's levels) took over the menu. Measured once the menu is on screen.
@@ -2728,7 +2728,7 @@
     bindNote(card);
     const options = el("div", "model-options"); options.hidden = true;
     const list = el("div", "model-list-scroll");
-    [...mm.children].filter(node => node !== card).forEach(node => {
+    [...mm.children].filter(node => node !== card && !node.classList.contains("agents-row")).forEach(node => {
       if (node.classList.contains("mhead")) options.appendChild(node);
       else list.appendChild(node);
     });
@@ -2738,10 +2738,13 @@
     card.querySelector(".effort-control").hidden = false;
     const toggle = card.querySelector(".model-summary");
     toggle.onclick = () => {
+      // While agents are being chosen, the model's own row goes back to the session's models.
+      if (agentsStep) { leaveAgents(); return; }
       options.hidden = !options.hidden;
       toggle.setAttribute("aria-expanded", String(!options.hidden));
       if (!options.hidden) (options.querySelector(".sel") || options.querySelector("button"))?.focus();
     };
+    bindAgentsRow(mm);
     slider.onpointerdown = () => slider.classList.add("by-pointer");
     slider.onkeydown = () => slider.classList.remove("by-pointer");
     slider.oninput = () => {
@@ -2772,7 +2775,171 @@
                       cliDefaultModel, cliDefaultListed, currentRouteKey,
                       fallback: fallback && typeof fallback === "object" ? fallback : { offered: false } };
     fbOpen = "";
+    agentsStep = null;
     renderProviderModels(lastModelMenu);
+  }
+  // ---- this session's agents model (0.52) ----
+  // What this session's agents use, as DGC said it (agents_model, through the extension): Settings' agents model, or
+  // the session's own. The Agents row of the model menu says which, and opens the same list the main model uses
+  // (every provider and its models) to choose for agents. A subscription CLI is shown greyed with its reason: it runs
+  // its own tools, and DGC's agents need an address, a key and a model.
+  let agentsModel = { offered: false, own: false, model: "", base_url: "", settings_model: "", settings_base_url: "", router: false };
+  let agentsStep = null;          // null: the session's own models; {provider: null}: the agents list; {provider: row}: its models
+  const AGENTS_CLI_REASON = "Runs its own tools, so it can’t run DGC’s agents";
+  function setAgentsModel(view) {
+    const text = (value) => (typeof value === "string" ? value.slice(0, 2048) : "");
+    agentsModel = view && typeof view === "object" && view.offered === true
+      ? { offered: true, own: view.own === true, model: text(view.model).slice(0, 256), base_url: text(view.base_url),
+          settings_model: text(view.settings_model).slice(0, 256), settings_base_url: text(view.settings_base_url), router: view.router === true }
+      : { offered: false, own: false, model: "", base_url: "", settings_model: "", settings_base_url: "", router: false };
+  }
+  const agentsRoutes = () => (Array.isArray(lastModelMenu?.routes) ? lastModelMenu.routes : []).filter((row) => row && row.key);
+  const agentsHostLabel = (row) => String(row?.label || row?.key || "").replace(/^Current host · /, "");
+  /** Where a session's own agents model runs: its provider's name, this chat's own host, or the address's host. */
+  function agentsWhere() {
+    const routes = agentsRoutes();
+    if (!agentsModel.base_url) {
+      const here = routes.find((row) => row.key === lastModelMenu?.currentRouteKey && row.kind !== "subscription");
+      return here ? agentsHostLabel(here) : "this chat’s host";
+    }
+    const saved = routes.find((row) => row.kind !== "subscription" && row.base_url && row.base_url === agentsModel.base_url);
+    if (saved) return agentsHostLabel(saved);
+    try { return new URL(agentsModel.base_url).host; } catch { return agentsModel.base_url; }
+  }
+  /** What "Same as settings" is right now. */
+  const agentsSettingsWords = () => (agentsModel.router ? "DGC Router" : agentsModel.settings_model || "");
+  function agentsWords() {
+    if (agentsModel.own) return `${agentsModel.model || "its own model"} · ${agentsWhere()}`;
+    const settings = agentsSettingsWords();
+    return settings ? `Same as settings · ${settings}` : "Same as this chat’s model";
+  }
+  /** "Same as settings · qwen3-coder" with each part kept whole: a narrow menu breaks the line at a " · ", never inside
+   *  a model's name ("qwen3-" / "coder"); a part wider than the row ends in "…" (its whole text is the row's title). */
+  const agentsParts = (words) => String(words).split(" · ").map((part) => `<span class="agents-part">${esc(part)}</span>`).join(" · ");
+  function agentsRowHtml(card) {
+    if (!agentsModel.offered) return card;
+    const words = agentsWords();
+    return card + `<button type="button" role="menuitem" class="mrow dgc-menu-row dgc-menu-row-sub agents-row" data-agents-open="1" aria-expanded="${agentsStep ? "true" : "false"}" title="${esc(`Sub-agents: ${words}`)}"><span class="mi dgc-menu-icon codicon codicon-organization" aria-hidden="true"></span><span class="dgc-menu-words"><span class="agents-row-name dgc-menu-label">Sub-agents</span><span class="agents-row-value dgc-menu-sub">${agentsParts(words)}</span></span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`;
+  }
+  function paintAgentsRow() {
+    const row = $("modelmenu").querySelector("[data-agents-open]");
+    if (!row) return;
+    const words = agentsWords();
+    row.querySelector(".agents-row-value").innerHTML = agentsParts(words);      // each part escaped (esc)
+    row.title = `Sub-agents: ${words}`;
+    row.setAttribute("aria-expanded", agentsStep ? "true" : "false");
+  }
+  function bindAgentsRow(mm) {
+    const row = mm.querySelector("[data-agents-open]");
+    if (!row) return;
+    row.onclick = (event) => {
+      event.stopPropagation();
+      if (agentsStep) { leaveAgents(); return; }
+      vscode.postMessage({ type: "getAgentsModel" });       // as the list opens: what DGC has now
+      renderAgentsChoices();
+    };
+  }
+  function leaveAgents() {
+    agentsStep = null;
+    if (lastModelMenu) renderProviderModels(lastModelMenu);
+    $("modelmenu").querySelector("[data-agents-open]")?.focus();
+  }
+  /** Whether a provider row is where the session's own agents model runs. */
+  function agentsOn(row) {
+    if (!agentsModel.own) return false;
+    if (row.kind === "subscription") return false;
+    if (!agentsModel.base_url) return row.key === lastModelMenu?.currentRouteKey;
+    return !!row.base_url && row.base_url === agentsModel.base_url;
+  }
+  // The agents list: Same as settings first, then every provider the main model's list has.
+  function renderAgentsChoices(focus = "") {
+    const mm = $("modelmenu"), options = mm.querySelector(".model-options");
+    if (!options || !lastModelMenu) return;
+    agentsStep = { provider: null };
+    fbOpen = ""; allModelsStep = null;
+    const routes = agentsRoutes(), same = !agentsModel.own, settings = agentsSettingsWords();
+    const check = (on) => `<span class="mi dgc-menu-icon ${on ? "codicon codicon-check" : ""}" aria-hidden="true"></span>`;
+    // Two lines, never cut: "Same as settings", and under it what that is now (Settings' model, DGC Router, or this
+    // chat's own model when Settings names none). Found live 14 Nov: one line read "Same as settings · this chat's …".
+    const sameWhat = agentsModel.router ? "DGC Router: it picks a free worker for each sub-agent" : settings || "This chat’s model";
+    const sameRow = `<button type="button" role="menuitemradio" aria-checked="${same}" class="mrow dgc-menu-row dgc-menu-row-sub${same ? " sel" : ""}" data-agents-same="1" title="${esc(`Same as settings: ${sameWhat}`)}">${check(same)}`
+      + `<span class="dgc-menu-words"><span class="dgc-menu-label">Same as settings</span><span class="dgc-menu-sub agents-same-what">${esc(sameWhat)}</span></span></button>`;
+    options.innerHTML = `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-agents-back="1"><span class="mi dgc-menu-icon codicon codicon-arrow-left" aria-hidden="true"></span><span>Models</span></button>`
+      + `<div class="mhead dgc-menu-head"><span>Model for this session’s sub-agents</span></div><div class="model-list-scroll">` + sameRow
+      + routes.map((row, i) => {
+        const label = String(row.label || row.key);
+        if (row.kind === "subscription") {
+          // Shown, never hidden: greyed, with why. (aria-disabled, not disabled: it can still be reached and read.)
+          return `<button type="button" role="menuitemradio" aria-checked="false" aria-disabled="true" class="mrow dgc-menu-row dgc-menu-row-sub agents-unavailable" data-agents-no="${i}" title="${esc(`${label}: ${AGENTS_CLI_REASON}`)}">${check(false)}<span class="dgc-menu-words"><span class="dgc-menu-label">${esc(label)}</span><span class="dgc-menu-sub">${AGENTS_CLI_REASON}</span></span></button>`;
+        }
+        const on = agentsOn(row), name = agentsHostLabel(row);         // "Custom host", not "Current host · Custom host"
+        return `<button type="button" role="menuitemradio" aria-checked="${on}" class="mrow dgc-menu-row${on ? " sel" : ""}" data-agents-provider="${i}">${check(on)}<span class="dgc-menu-label" title="${esc(label)}">${esc(name)}</span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`;
+      }).join("")
+      + `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-manage-providers="1"><span class="mi dgc-menu-icon codicon codicon-add" aria-hidden="true"></span><span>Add provider in Settings…</span></button></div>`;
+    options.hidden = false;
+    paintAgentsRow();
+    options.querySelector("[data-agents-back]").onclick = (event) => { event.stopPropagation(); leaveAgents(); };
+    options.querySelector("[data-agents-same]").onclick = (event) => {
+      event.stopPropagation();
+      if (agentsModel.own) {
+        vscode.postMessage({ type: "resetAgentsModel" });
+        agentsModel = { ...agentsModel, own: false, model: agentsModel.settings_model, base_url: agentsModel.settings_base_url };
+        updateModelControl(); agentMapChanged();
+      }
+      renderAgentsChoices("[data-agents-same]");
+    };
+    options.querySelectorAll("[data-agents-no]").forEach((button) => button.onclick = (event) => { event.stopPropagation(); });
+    options.querySelectorAll("[data-agents-provider]").forEach((button) => button.onclick = (event) => {
+      event.stopPropagation();
+      showAgentsModels(routes[Number(button.dataset.agentsProvider)]);
+    });
+    options.querySelector("[data-manage-providers]").onclick = () => { vscode.postMessage({ type: "openSettings", section: "models" }); hideModelMenu(); };
+    (options.querySelector(focus || ".sel") || options.querySelector("button"))?.focus();
+  }
+  // One provider's models, to choose for agents: this chat's own host from the list the menu already has, any other
+  // from its host (providerModels, as an All models provider's are listed).
+  function showAgentsModels(row, listed = null) {
+    const mm = $("modelmenu"), options = mm.querySelector(".model-options");
+    if (!options || !row) return;
+    const own = row.key === "native";
+    if (own && !listed) listed = { ids: lastModelMenu.subscription || lastModelMenu.err ? [] : (lastModelMenu.ids || []), error: !!lastModelMenu.err };
+    agentsStep = { provider: row, listed };
+    if (!listed) vscode.postMessage({ type: "providerModels", id: row.key });
+    const ids = listed?.ids || [], on = agentsOn(row);
+    const wait = !listed ? `<div class="mhead dgc-menu-head"><span>Listing its models…</span></div>`
+      : !ids.length ? `<div class="mhead dgc-menu-head"><span>${listed.error ? "Couldn’t list its models" : "It lists no models"}</span></div>` : "";
+    options.innerHTML = `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-agents-providers="1"><span class="mi dgc-menu-icon codicon codicon-arrow-left" aria-hidden="true"></span><span>Sub-agents</span></button>`
+      + `<div class="mhead dgc-menu-head"><span>${esc(agentsHostLabel(row))} model for sub-agents</span></div><div class="model-list-scroll">${wait}`
+      + ids.map((id, i) => { const chosen = on && id === agentsModel.model;
+        return `<button type="button" role="menuitemradio" aria-checked="${chosen}" class="mrow dgc-menu-row${chosen ? " sel" : ""}" data-agents-model="${i}"><span class="mi dgc-menu-icon ${chosen ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span class="dgc-menu-label" title="${esc(id)}">${esc(id)}</span></button>`; }).join("")
+      + (listed && !own ? `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-agents-typed="1"><span class="mi dgc-menu-icon codicon codicon-edit" aria-hidden="true"></span><span>Enter another model…</span></button>` : "")
+      + `</div>`;
+    options.hidden = false;
+    options.querySelector("[data-agents-providers]").onclick = (event) => { event.stopPropagation(); renderAgentsChoices(); };
+    options.querySelectorAll("[data-agents-model]").forEach((button) => button.onclick = (event) => {
+      event.stopPropagation();
+      const model = ids[Number(button.dataset.agentsModel)];
+      vscode.postMessage({ type: "setAgentsModel", provider: own ? "" : row.key, model });
+      // Shown at once; DGC's answer (agentsModel) is what it says from then on.
+      agentsModel = { ...agentsModel, own: true, model, base_url: own ? "" : String(row.base_url || "") };
+      updateModelControl(); agentMapChanged();
+      showAgentsModels(row, listed);
+      paintAgentsRow();
+      options.querySelector(".sel")?.focus();
+    });
+    const typed = options.querySelector("[data-agents-typed]");
+    if (typed) typed.onclick = () => { vscode.postMessage({ type: "agentsModelTyped", id: row.key }); hideModelMenu(); };
+    (options.querySelector(".sel") || options.querySelector("[data-agents-model]") || options.querySelector("button"))?.focus();
+  }
+  /** DGC's word on this session's agents model arrived: the button, the map and an open menu follow it. */
+  function onAgentsModel(view) {
+    setAgentsModel(view);
+    updateModelControl();
+    agentMapChanged();
+    if ($("modelmenu").hidden) return;
+    if (agentsStep?.provider) showAgentsModels(agentsStep.provider, agentsStep.listed);
+    else if (agentsStep) renderAgentsChoices();
+    paintAgentsRow();
   }
   // D14: this session's fallback. A model DGC runs itself (this host's, or a saved provider's), Claude Code and Codex
   // have a ⋯ with Use as main and Use as fallback; once one is set, Main and Fallback sit at the rows' right end. DGC's
@@ -2975,6 +3142,12 @@
       $("btn-model").title = `${model} didn’t answer, so its fallback ${fallbackActive} is answering. It tries ${model} again with your next message.`;
       $("btn-model").setAttribute("aria-label", `${fallbackActive}, its fallback, is answering. Change model and reasoning.`);
     } else word?.remove();
+    // 0.52: a session that chose its own agents model says so here, quietly; one following Settings says nothing.
+    if (agentsModel.offered && agentsModel.own && agentsModel.model) {
+      $("btn-model").dataset.agentsOwn = "1";
+      $("btn-model").title += `\nSub-agents: ${agentsModel.model} (this session’s own)`;
+      $("btn-model").setAttribute("aria-label", `${$("btn-model").getAttribute("aria-label")} Sub-agents: ${agentsModel.model}, this session’s own.`);
+    } else delete $("btn-model").dataset.agentsOwn;
   }
 
   // The keys every menu answers, the same in ChatDGC and a Pip's chat (media/shared/menu.js): arrows, Home and End move,
@@ -13345,8 +13518,10 @@ function permissionChoices(ev) {
       setGoalState(msg.state.goal || { text: "", status: "none", elapsed_seconds: 0 });
       joinGoal(msg.state.goal);                 // a goal already running when this window opened: its end is said too
     }
+    else if (msg.type === "agentsModel") onAgentsModel(msg);
+    else if (msg.type === "providerModels" && agentsStep?.provider && agentsStep.provider.key === msg.id) { if (!$("modelmenu").hidden) showAgentsModels(agentsStep.provider, { ids: Array.isArray(msg.ids) ? msg.ids.filter((id) => typeof id === "string" && id) : [], error: !!msg.error }); }
     else if (msg.type === "providerModels") { if (allModelsStep && allModelsStep.key === msg.id && !$("modelmenu").hidden) showAllModels(allModelsStep, { ids: Array.isArray(msg.ids) ? msg.ids.filter((id) => typeof id === "string" && id) : [], error: msg.error }); }
-    else if (msg.type === "models" && !$("modelmenu").hidden) { renderModelMenu(msg.ids || [], msg.current, msg.err, msg.subscription, msg.label, msg.supportsEffort, msg.routes, msg.cliDefaultModel, msg.cliDefaultListed, msg.currentRouteKey, msg.fallback); }
+    else if (msg.type === "models" && !$("modelmenu").hidden) { if ("agents" in msg) { setAgentsModel(msg.agents); updateModelControl(); } renderModelMenu(msg.ids || [], msg.current, msg.err, msg.subscription, msg.label, msg.supportsEffort, msg.routes, msg.cliDefaultModel, msg.cliDefaultListed, msg.currentRouteKey, msg.fallback); }
     else if (msg.type === "fallbackActive") { fallbackActive = typeof msg.model === "string" ? msg.model.slice(0, 256) : ""; updateModelControl(); }
     else if (msg.type === "chat_changes") {
       if (!msg.sessionId || msg.sessionId === draftSession) setChatChanges(msg);
@@ -14880,14 +15055,14 @@ function permissionChoices(ev) {
     picker.hidden = false;
     const n = c.active;
     const state = c.waiting > 0 ? "waiting" : n > 0 || tasks > 0 || pips > 0 ? "running" : "idle";
-    const label = [n > 0 || !tasks && !previews && !pips ? agentPlural(n, "agent") : "",
+    const label = [n > 0 || !tasks && !previews && !pips ? agentPlural(n, "sub-agent") : "",
       tasks ? agentPlural(tasks, "task") : "", previews ? agentPlural(previews, "preview") : "", pips ? agentPlural(pips, "Pip") : ""].filter(Boolean).join(" · ");
     const inBackground = tasks > 0 ? `${agentPlural(tasks, "background task")} running` : "";
     const forSession = pips > 0 ? `${agentPlural(pips, "Pip")} working for this session` : "";
     const said = state === "waiting"
-      ? [c.waitingPermission > 0 ? "An agent is waiting for your permission" : "An agent is waiting for your answer", inBackground, forSession]
-      : state === "idle" ? ["No agents working"]
-      : [n > 0 ? (tasks > 0 ? `${agentPlural(n, "agent")} working and ${inBackground}` : "Agents are working") : inBackground, forSession];
+      ? [c.waitingPermission > 0 ? "A sub-agent is waiting for your permission" : "A sub-agent is waiting for your answer", inBackground, forSession]
+      : state === "idle" ? ["No sub-agents working"]
+      : [n > 0 ? (tasks > 0 ? `${agentPlural(n, "sub-agent")} working and ${inBackground}` : "Sub-agents are working") : inBackground, forSession];
     const title = [...said.filter(Boolean), previews ? `${agentPlural(previews, "live preview")} serving a page` : "", "Click to open the agent map"].filter(Boolean).join(" · ");
     pill.dataset.state = state;
     agentsSetText(pill.querySelector(".agents-text"), label);
@@ -15002,8 +15177,11 @@ function permissionChoices(ev) {
     if (record.state === "waiting") return record.waiting_for === "answer" ? "Waiting for your answer" : "Waiting for your permission";
     return AM_STATE_WORD[record.state] || String(record.state || "");
   }
-  // How long and how much, plus the model when it is not the chat's. A restored record that kept no
-  // numbers says none.
+  /** The model an agent runs on: what DGC named for it, else this session's agents model, else the chat's. */
+  function agentModelName(record) {
+    return String(record?.model || (agentsModel.offered && agentsModel.model) || curModel || "");
+  }
+  // How long and how much, plus its model. A restored record that kept no numbers says none.
   function amAgentStats(record) {
     const parts = [];
     if (!(record.restored && record.duration_ms == null && record.tokens == null)) {
@@ -15011,13 +15189,15 @@ function permissionChoices(ev) {
       if (time) parts.push(time);
       if (Number(record.tokens || 0) > 0) parts.push(`${amTokens(record.tokens)} tokens`);
     }
-    const where = agentWhere(record);
-    if (where) parts.push(where);
-    else {
-      if (record.model && record.model !== curModel) parts.push(String(record.model));
-      if (agentThinking(record)) parts.push(agentThinking(record));
-    }
+    // Its model, always (0.52): a session may have its own agents model, so "the chat's" is no longer a safe guess.
+    const place = amAgentPlace(record);
+    if (place) parts.push(place);
     return parts;
+  }
+  /** The end of an agent's line, which stays whole in a narrow row (amSetMeta): where DGC Router ran it, else its
+   *  model and how hard it thinks. */
+  function amAgentPlace(record) {
+    return agentWhere(record) || [agentModelName(record), agentThinking(record)].filter(Boolean).join(" · ");
   }
 
   // ---- the tree ----
@@ -15115,17 +15295,21 @@ function permissionChoices(ev) {
     }
     const head = parts.slice(0, -1).join(" · ");
     if (lead.textContent !== head) {
-      const pieces = [];
+      const texts = [];
       parts.slice(0, -1).forEach((part, i) => {
         const text = (i ? " · " : "") + part;
         const counted = /^(.*\S)( tokens?)$/.exec(text);
-        for (const piece of counted ? [counted[1], counted[2]] : [text]) {
-          const node = el("span", "am-meta-part");
-          node.textContent = piece;
-          pieces.push(node);
-        }
+        texts.push(...(counted ? [counted[1], counted[2]] : [text]));
       });
-      lead.replaceChildren(...pieces);
+      // In place: every agent's line is drawn this way since each names its model (0.52), and it changes once a
+      // second while the agent works. Only the text of a part changes; a part is added or taken away when the line
+      // gains or loses one, so the row's nodes, its focus and a long click on it are kept.
+      const have = [...lead.children];
+      texts.forEach((text, i) => {
+        const node = have[i] || lead.appendChild(el("span", "am-meta-part"));
+        if (node.textContent !== text) node.textContent = text;
+      });
+      for (const extra of have.slice(texts.length)) extra.remove();
     }
     agentsSetText(sep, head ? " · " : "");
     agentsSetText(place, where);
@@ -15250,7 +15434,7 @@ function permissionChoices(ev) {
     const stats = [amContinuedWords(record), ...amAgentStats(record)].filter(Boolean);
     agentsSetText(desc, name);
     // The word leads for every state but working, so no state rests on the dot's colour alone.
-    amSetMeta(meta, record.state === "running" ? stats : [word, ...stats], word, agentWhere(record));
+    amSetMeta(meta, record.state === "running" ? stats : [word, ...stats], word, amAgentPlace(record));
     const why = (record.state === "failed" || record.state === "stopped") && record.message ? agentFirstLine(record.message) : "";
     const forPip = fix && pipType >= 0 ? `Pip fix for ${String(fix.name || "Pip").slice(0, 120)}` : "";
     amLabel(entry, [name, word, ...stats, forPip].filter(Boolean).join(", "),
@@ -16369,7 +16553,7 @@ function permissionChoices(ev) {
   // "Finished · general-purpose · qwen3.8:27b · background": the card's and the transcript's meta line.
   function amAgentMetaLine(record) {
     return [amStateWord(record), amContinuedWords(record), record.agent_type ? String(record.agent_type) : "",
-      agentWhere(record) || [String(record.model || curModel || ""), agentThinking(record)].filter(Boolean).join(" · "),
+      agentWhere(record) || [agentModelName(record), agentThinking(record)].filter(Boolean).join(" · "),
       record.background ? "background" : "foreground"].filter(Boolean).join(" · ");
   }
   function amAgentNumbers(record) {

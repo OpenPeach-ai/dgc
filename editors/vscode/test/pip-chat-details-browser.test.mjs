@@ -96,6 +96,10 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
     if (skipOrFail(t)) return;
     const s = await open({ theme, width, where: width === 300 ? "side" : "tab" });
     try {
+      // The pointer rests where the scene last clicked (the Pip's row in the list). With the prompt box one line high
+      // (14 Nov) the made-file row sits 30px lower at 300px, right under it, and would be measured in its hover wash.
+      // This test reads the page at rest. (In its hover wash, on light, the row's quiet line is 4.4:1: reported.)
+      await s.p.mouse.move(1, 1);
       const col = await column(s.p);
       assert.ok(col.sideways <= 0 && col.page <= 0, "nothing scrolls sideways");
       // The thumb: only on the reply whose question is open, in sight without pointing at it, grey, a real target.
