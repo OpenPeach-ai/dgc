@@ -9,7 +9,7 @@
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {setup as open} from './support/one-pips-node.mjs';
-import {GST,ERP,MORNINGS,TONI_DIR,CHANGE} from './support/one-pips-scene.mjs';
+import {GST,ERP,MORNINGS,RIVERSIDE_DIR,CHANGE} from './support/one-pips-scene.mjs';
 
 const windows=[];after(()=>windows.forEach(w=>w.close()));
 const setup=options=>{const x=open(options);windows.push(x.w);return x;};
@@ -19,7 +19,7 @@ test('a Pip with a folder has the Personal Pip\'s header: back, its name, its fo
  const x=setup({api:95});await x.drain();await x.openPip(GST);
  const bar=x.$('.pip-topbar');
  assert.ok(bar.querySelector('#simple-back'),'back to the list');
- assert.equal(bar.querySelector('.pip-where').textContent,'toni_fabrics');assert.equal(bar.querySelector('.pip-where').title,TONI_DIR);
+ assert.equal(bar.querySelector('.pip-where').textContent,'riverside_shop');assert.equal(bar.querySelector('.pip-where').title,RIVERSIDE_DIR);
  assert.equal(bar.querySelector('.topbar-actions > #pip-run-now'),null,'no Run now button in the bar');
  const rows=[...bar.querySelectorAll('.pip-menu .tabs-menu > button')].map(b=>b.textContent.trim());
  assert.equal(rows[0],'Run now','Run now is the menu\'s first row');
@@ -38,7 +38,7 @@ test('its settings page is the Personal Pip\'s page, with what only it has: wher
  assert.ok(parts,'its folder\'s rows');
  const rows=[...parts.querySelectorAll('.pip-page-row')].map(r=>x.squash(r.querySelector('strong').textContent));
  assert.deepEqual(rows,['Works in','What it reads','When it runs','Reports','Version history and approvals']);
- assert.equal(parts.querySelector('.pip-folder-where').title,TONI_DIR);
+ assert.equal(parts.querySelector('.pip-folder-where').title,RIVERSIDE_DIR);
  assert.match(x.squash(parts.textContent),/Your files as they are, in its own copy\. Not what Git ignores, such as \.env\./,'what it reads, said here');
  assert.match(x.squash(parts.textContent),/When it runs.*(8:00 PM|20:00)/,'its schedule');
  assert.doesNotMatch(x.text(),/Reports to|owner|Owner session/,'no owner session');
@@ -99,7 +99,7 @@ test('a folder Pip with a box shows what it changed in its copy as the change ca
  const x=setup({api:95,scene:{fix:'ready'}});await x.drain();await x.openPip(GST);
  const card=x.$(`[data-project-change="${CHANGE}"]`);
  assert.ok(card,'the change card');
- assert.equal(card.querySelector('.dgc-card-title').textContent,'Changes for toni_fabrics');
+ assert.equal(card.querySelector('.dgc-card-title').textContent,'Changes for riverside_shop');
  assert.equal(card.querySelector('.dgc-card-sub').textContent,'2 files · +17 −4 · tests passed in its copy · not in your folder yet');
  assert.deepEqual([...card.querySelectorAll('.dgc-card-actions button')].map(b=>b.textContent.trim()),['Apply','Review','Discard']);
  assert.equal(card.querySelector('[data-project-work]'),null,'no way into a Work session from a Pip\'s card');

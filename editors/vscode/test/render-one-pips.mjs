@@ -3,7 +3,7 @@
 //   PLAYWRIGHT_BROWSERS_PATH=~/.cache/ms-playwright node test/render-one-pips.mjs <folder to write into> [only: a name's start]
 import { mkdirSync } from "node:fs";
 import { chromium } from "@playwright/test";
-import { GST, MORNINGS, TONI_DIR, openOnePips } from "./support/one-pips-scene.mjs";
+import { GST, MORNINGS, RIVERSIDE_DIR, openOnePips } from "./support/one-pips-scene.mjs";
 
 const out = process.argv[2], only = process.argv[3] || "";
 if (!out) throw new Error("say where the pictures go");
@@ -35,7 +35,7 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
     await x.click("#pips-filter"); await menuOpen(x); await shot(x, `list-filter-menu-${tag}`);
     await x.page.keyboard.press("Escape"); await x.page.waitForTimeout(300);
     await choose(x, ":personal"); await shot(x, `list-personal-${tag}`);
-    await choose(x, TONI_DIR); await shot(x, `list-folder-${tag}`);
+    await choose(x, RIVERSIDE_DIR); await shot(x, `list-folder-${tag}`);
     // New Pip with the folder pre-filled from the filter line.
     await x.click("#simple-new"); await x.waitIn("#review-root .dialog"); await x.inPips((root) => { const i = root.querySelector("#newPipName"); i.value = "Invoice checker"; i.dispatchEvent(new Event("input", { bubbles: true, composed: true })); });
     await shot(x, `new-pip-folder-${tag}`);

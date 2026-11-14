@@ -31,7 +31,7 @@ function longTrace() {
   let at = 0;
   for (let i = 0; i < 70; i++) {
     steps.push({ kind: "model", label: "model.response", start: at, end: at + 5000, tokens: 770000 + i * 400 }); at += 5000;
-    steps.push({ kind: "tool", label: "bash", detail: "cd ~/toni_fabrics && docker compose exec backend python manage.py check", start: at, end: at + 800 }); at += 800;
+    steps.push({ kind: "tool", label: "bash", detail: "cd ~/riverside_shop && docker compose exec backend python manage.py check", start: at, end: at + 800 }); at += 800;
   }
   return { v: 1, ms: at, steps };
 }

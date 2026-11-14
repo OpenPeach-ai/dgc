@@ -1,7 +1,7 @@
 // What a Pip found, and what became of it, as cards in its own chat (0.52, the Pips flow design of 14 Nov:
 // ~/dgc-work/052-plan/pips-flow-design.md). A Pip's chat is its home: everything it finds, asks, fixes and reports
 // lives there. No "Fix it" card and no card in a Work session: the level decides.
-//   Ask me first      the ordinary Allow card ("Fix 3 things in toni_fabrics" · Allow · Not now)
+//   Ask me first      the ordinary Allow card ("Fix 3 things in riverside_shop" · Allow · Not now)
 //   Approve for me    it fixes in its own copy and the change waits at Apply
 //   Do it all         fixed and applied, with Review and Undo
 // The cards: what a check found (each file opens at its line, the full report one click away), the Allow card, the fix
@@ -126,7 +126,7 @@ export function fixAskMarkup(fix, {esc = escape, folder = '', off = false, busy 
     + '</section>';
 }
 
-/** "You allowed: Fix 3 things in toni_fabrics · 8:06 PM", or what Not now left. One quiet line. */
+/** "You allowed: Fix 3 things in riverside_shop · 8:06 PM", or what Not now left. One quiet line. */
 export function fixDecidedLine(fix, {esc = escape, folder = '', clock = () => ''} = {}) {
   const what = `Fix ${plural(fix.count, 'thing')}${folder ? ` in ${folder}` : ''}`, at = fix.decided_at ? clock(Date.parse(fix.decided_at)) : '';
   if (fix.state === 'declined') return `<p class="pip-found-line" data-flow-fix="${esc(fix.id)}" data-state="declined" role="status">Not now: ${esc(what)}${at ? ` · ${esc(at)}` : ''}. <button type="button" class="dgc-btn text" data-flow-allow="${esc(fix.id)}">Allow it after all</button></p>`;

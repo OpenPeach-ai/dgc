@@ -84,10 +84,10 @@ class RequestedFeatures(unittest.TestCase):
         asks = (
             "write a design doc for the agent review workflow",
             "propose an implementation plan for the FSM",
-            "create a technical spec in docs/AGENT_TONI_WORKFLOW_PLAN.md",
+            "create a technical spec in docs/AGENT_SHOP_WORKFLOW_PLAN.md",
             "draft a report on the rollout",
             "give me a plan for the invoice sketch",
-            "docs/AGENT_TONI_WORKFLOW_PLAN.md",
+            "docs/AGENT_SHOP_WORKFLOW_PLAN.md",
         )
         for text in asks:
             self.assertIn("document", _tool_intents(text), text)

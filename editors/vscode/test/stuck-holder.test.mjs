@@ -101,7 +101,7 @@ const HOLDER_PID = 2142044, INSTANCE = "ab12cd34";
 const stuckRow = (more = {}) => ({ pid: HOLDER_PID, kind: "serve", instance: INSTANCE, version: "0.51.0", attached: false, detachable: true,
   windowless_s: Math.round((NOW - at(11, 53, 29)) / 1000), uptime_s: Math.round((NOW - at(9, 2)) / 1000), work: "running the nightly audit",
   status: "working", liveness: "stuck", here: false, scope: "", chats: [],
-  sessions: [{ session_id: SESSION, name: "toni_fabrics audit", cwd: "/home/me/toni_fabrics", status: "working" }], ...more });
+  sessions: [{ session_id: SESSION, name: "riverside_shop audit", cwd: "/home/me/riverside_shop", status: "working" }], ...more });
 const hereRow = { pid: 77, kind: "serve", instance: "ee", version: "0.52.0", attached: true, detachable: true, windowless_s: 0, uptime_s: 60,
   work: "", status: "idle", liveness: "live", here: true, scope: "", chats: [], sessions: [] };
 const heartbeat = (pid, ms) => writeFileSync(join(dgcHome, "peers", `${pid}.json`), JSON.stringify({ pid, kind: "serve", heartbeat: ms / 1000 }));
@@ -180,7 +180,7 @@ function tab(session = SESSION) {
   return { provider, posted, host };
 }
 const bars = (posted) => posted.filter((m) => m.type === "session_elsewhere");
-const HELD = { found: true, editor: "", windowless: true, folder: "~/toni_fabrics", working: true };
+const HELD = { found: true, editor: "", windowless: true, folder: "~/riverside_shop", working: true };
 const CAPS = { detach: { ...DETACH, elsewhere: { session_id: SESSION, pid: HOLDER_PID, reason: "busy" } }, session_holder: 1, session_owner: 1 };
 
 // ---- the words ---------------------------------------------------------------------------------------------------
@@ -228,7 +228,7 @@ test("Running sessions lists a stuck process, with a window or not, with its hea
   const rows = provider.runningRows([hereRow, stuckRow()]);
   assert.equal(rows.length, 1);
   assert.deepEqual({ pid: rows[0].pid, instance: rows[0].instance, session: rows[0].session, name: rows[0].name, stuck: rows[0].stuck, since: rows[0].since },
-    { pid: HOLDER_PID, instance: INSTANCE, session: SESSION, name: "toni_fabrics audit", stuck: true, since: at(12, 0, 13) });
+    { pid: HOLDER_PID, instance: INSTANCE, session: SESSION, name: "riverside_shop audit", stuck: true, since: at(12, 0, 13) });
   // Its note froze while it still had a window (the 13 Nov process never wrote that the window went): still listed.
   const attached = provider.runningRows([stuckRow({ attached: true, detachable: false, windowless_s: 0 })]);
   assert.equal(attached.length, 1);
@@ -299,7 +299,7 @@ test("a stuck holder that could not be stopped: the session stays read-only and 
 });
 
 test("a holder that answers keeps the plain Open here: no stop is offered and none is sent", async () => {
-  const live = { found: true, editor: "Cursor", windowless: false, folder: "~/toni_fabrics", working: false, idle_s: 380 };
+  const live = { found: true, editor: "Cursor", windowless: false, folder: "~/riverside_shop", working: false, idle_s: 380 };
   const fixture = fakeServe("serve-live", { caps: CAPS, holder: live, rows: [hereRow, stuckRow({ liveness: "live", attached: true, windowless_s: 0 })] });
   command = fixture.path;
   const h = tab();
@@ -309,7 +309,7 @@ test("a holder that answers keeps the plain Open here: no stop is offered and no
   assert.ok(await until(() => fixture.types().includes("list_live_sessions")), "the rows were read");
   await pause(200);
   const bar = bars(h.posted).at(-1);
-  assert.deepEqual(bar.note, { head: "Open in Cursor · ~/toni_fabrics · idle 6 min.", detail: "" });
+  assert.deepEqual(bar.note, { head: "Open in Cursor · ~/riverside_shop · idle 6 min.", detail: "" });
   assert.equal(bar.stop, undefined);
   assert.equal(bar.stuck, undefined);
   // A stray click (a page that lost track) stops nothing.
@@ -404,15 +404,15 @@ test("Settings › Running sessions: the stuck row says Not responding since 12:
   if (skipOrFail(t)) return;
   const { openRunning } = await import("./support/settings-scene.mjs");
   const live = { pid: 4242, instance: "c0ffee", session: "20261113-101500-a1", name: "Fix the narrow settings layout", cwd: "/home/me/notes-app", windowless_s: 400, working: true, work: "running the tests", version: "0.52.0" };
-  const held = { pid: HOLDER_PID, instance: INSTANCE, session: SESSION, name: "toni_fabrics audit", cwd: "/home/me/toni_fabrics", windowless_s: 4600, working: true,
+  const held = { pid: HOLDER_PID, instance: INSTANCE, session: SESSION, name: "riverside_shop audit", cwd: "/home/me/riverside_shop", windowless_s: 4600, working: true,
     work: "running the nightly audit", version: "0.51.0", stuck: true, since: at(12, 0, 13) };
   for (const width of [300, 700]) {
     const x = await openRunning(browser, { items: [live, held], width });
     const rows = await x.rows();
     assert.equal(rows.length, 2);
     assert.deepEqual(rows[0].buttons, ["Open", "Stop"], "a live one is as it was");
-    assert.equal(rows[1].title, "toni_fabrics audit");
-    assert.equal(rows[1].summary, "Not responding since 12:00 · /home/me/toni_fabrics", `the row's own line says so, first (${width})`);
+    assert.equal(rows[1].title, "riverside_shop audit");
+    assert.equal(rows[1].summary, "Not responding since 12:00 · /home/me/riverside_shop", `the row's own line says so, first (${width})`);
     assert.equal(rows[1].summaryCut, false, `and those words are never cut off (${width})`);
     assert.match(rows[1].description, /^It stopped answering while it worked/);
     assert.deepEqual(rows[1].buttons, ["Stop"], "Open can't take it, so only Stop");
@@ -431,7 +431,7 @@ test("Settings › Running sessions: the stuck row says Not responding since 12:
   }
   // No heartbeat to read: no time is made up.
   const x = await openRunning(browser, { items: [{ ...held, since: 0 }], width: 700 });
-  assert.equal((await x.rows())[0].summary, "Not responding · /home/me/toni_fabrics");
+  assert.equal((await x.rows())[0].summary, "Not responding · /home/me/riverside_shop");
   await x.close();
 });
 

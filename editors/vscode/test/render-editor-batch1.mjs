@@ -17,7 +17,7 @@ const at = (h, m, s = 0) => Date.UTC(2026, 10, 13, h, m, s);
 
 // ---- 1. the stuck holder -------------------------------------------------------------------------------------------
 const live = { pid: 4242, instance: "c0ffee", session: "20261113-101500-a1", name: "Fix the narrow settings layout", cwd: "/home/me/notes-app", windowless_s: 400, working: true, work: "running the tests", version: "0.52.0" };
-const held = { pid: 2142044, instance: "ab12cd34", session: "20260930-050447-c62af3b6", name: "toni_fabrics audit", cwd: "/home/me/toni_fabrics", windowless_s: 4600, working: true,
+const held = { pid: 2142044, instance: "ab12cd34", session: "20260930-050447-c62af3b6", name: "riverside_shop audit", cwd: "/home/me/riverside_shop", windowless_s: 4600, working: true,
   work: "running the nightly audit", version: "0.51.0", stuck: true, since: at(12, 0, 13) };
 for (const theme of ["dark", "light"]) for (const width of WIDTHS) {
   const x = await openRunning(browser, { items: [live, held], width, theme, height: 620, scale: 2 });
@@ -30,7 +30,7 @@ const here = (h, m, sec) => new Date(2026, 10, 13, h, m, sec).getTime();
 const FACTS = { place: "a DGC with no window", since: here(11, 53, 29), working: true, heartbeat: here(12, 0, 13) };
 for (const theme of ["dark-modern", "light-modern"]) for (const width of WIDTHS) {
   const t = theme.split("-")[0];
-  for (const [name, bar] of [["stop-and-open-here", { stuck: FACTS, stop: true }], ["live-holder", { note: { head: "Open in Cursor · ~/toni_fabrics · idle 6 min.", detail: "" } }],
+  for (const [name, bar] of [["stop-and-open-here", { stuck: FACTS, stop: true }], ["live-holder", { note: { head: "Open in Cursor · ~/riverside_shop · idle 6 min.", detail: "" } }],
                              ["not-stopped", { stuck: FACTS, stop: true, stopNote: "It was not stopped: this computer cannot confirm that process is still the DGC that left the note." }]]) {
     if (name === "not-stopped" && width !== 300) continue;
     const x = await openWorkTab(browser, { width, height: 420, theme });

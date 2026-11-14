@@ -18,10 +18,10 @@ const browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox",
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
 const pid = (c) => "pip_" + c.repeat(32);
-const WELCOME = { had_pips: true, folders: [{ folder: "toni_fabrics", pips: [{ id: pid("c"), name: "GST watchdog" }, { id: pid("d"), name: "ERP daily audit" }] }],
+const WELCOME = { had_pips: true, folders: [{ folder: "riverside_shop", pips: [{ id: pid("c"), name: "GST watchdog" }, { id: pid("d"), name: "ERP daily audit" }] }],
   personal: [{ id: pid("b"), name: "Mornings" }, { id: pid("e"), name: "Garden notes" }], do_it_all: [{ id: pid("b"), name: "Mornings" }] };
 const MANY = { had_pips: true, folders: [
-  { folder: "toni_fabrics", pips: ["GST watchdog", "ERP daily audit", "Night tests", "Docs check", "Lock review", "Stock count"].map((name, i) => ({ id: pid(String(i)), name })) },
+  { folder: "riverside_shop", pips: ["GST watchdog", "ERP daily audit", "Night tests", "Docs check", "Lock review", "Stock count"].map((name, i) => ({ id: pid(String(i)), name })) },
   { folder: "garden", pips: [{ id: pid("7"), name: "Bed planner" }] }, { folder: "shop-frontend-and-checkout", pips: [{ id: pid("8"), name: "Checkout smoke tests, every night at two" }, { id: pid("9"), name: "Price list export" }] }],
   personal: [{ id: pid("b"), name: "Mornings" }, { id: pid("e"), name: "Garden notes" }, { id: pid("f"), name: "Reading list" }], do_it_all: [{ id: pid("b"), name: "Mornings" }, { id: pid("e"), name: "Garden notes" }] };
 

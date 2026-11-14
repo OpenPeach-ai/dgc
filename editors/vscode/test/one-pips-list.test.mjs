@@ -11,7 +11,7 @@ import {build} from 'esbuild';
 import {fileURLToPath} from 'node:url';
 import {createRequire} from 'node:module';
 import {setup as open} from './support/one-pips-node.mjs';
-import {P,SHOP,GARDEN,TONI,CORE,MORNINGS,GST,ERP,BEDS,HERE,GARDEN_DIR,TONI_DIR,NOTES} from './support/one-pips-scene.mjs';
+import {P,SHOP,GARDEN,RIVERSIDE,CORE,MORNINGS,GST,ERP,BEDS,HERE,GARDEN_DIR,RIVERSIDE_DIR,NOTES} from './support/one-pips-scene.mjs';
 import {orderPips,heldOrder,placeOf,listRequest,attentionFor,newPipFolder,ALL,PERSONAL} from '../src/pipsOne.js';
 
 const require=createRequire(import.meta.url),src=fileURLToPath(new URL('../src/',import.meta.url));
@@ -29,7 +29,7 @@ test('one list, no Personal | Project tabs: every Pip from list_pips {scope: "al
 
 test('Core stays first even when DGC lists it later, and a Core of a folder is an ordinary Pip',()=>{
  const p=(id,ws,type='scout')=>({id,workspace_id:ws,pip_type:type});
- const listed=[p('b',TONI),p('core',P,'core'),p('c',P),p('x',TONI,'core')];
+ const listed=[p('b',RIVERSIDE),p('core',P,'core'),p('c',P),p('x',RIVERSIDE,'core')];
  assert.deepEqual(orderPips(listed,{personalId:P}).map(v=>v.id),['core','b','c','x']);
  assert.deepEqual(orderPips(listed,{personalId:P,bumps:new Map([['c',2],['x',1]])}).map(v=>v.id),['core','c','x','b'],'what just arrived goes up, newest first, under Core');
  assert.deepEqual(heldOrder(orderPips(listed,{personalId:P,bumps:new Map([['c',2]])}),['core','b','c']).map(v=>v.id),['core','b','c','x'],'held still: the places drawn stay, a new Pip goes to the end');
@@ -39,12 +39,12 @@ test('each row says where its Pip works under its name: "Personal", or its folde
  const x=setup();await x.drain();
  const place=id=>x.$(`.pips-one-list [data-job="${id}"] .pip-row-place`);
  assert.equal(place(CORE)?.textContent.trim(),'Personal');assert.equal(place(MORNINGS).textContent.trim(),'Personal');
- assert.equal(place(GST).textContent.trim(),'~/code/toni_fabrics');assert.equal(place(GST).title,TONI_DIR,'the whole path is the tooltip');
+ assert.equal(place(GST).textContent.trim(),'~/code/riverside_shop');assert.equal(place(GST).title,RIVERSIDE_DIR,'the whole path is the tooltip');
  assert.equal(place(BEDS).textContent.trim(),'~/code/garden');
  const small=x.$(`.pips-one-list [data-job="${GST}"] small`);
  assert.ok(small.firstElementChild===place(GST),'the place comes first under the name');
- assert.match(small.textContent.replace(/\s+/g,' '),/^~\/code\/toni_fabrics · \S/,'then its status, as before');
- assert.deepEqual(placeOf({workspace_id:TONI},{personalId:P,folderOf:()=>({folder:'/x/y',shown:'/x/y',exists:false})}),{kind:'folder',shown:'/x/y',full:'/x/y',name:'',missing:true});
+ assert.match(small.textContent.replace(/\s+/g,' '),/^~\/code\/riverside_shop · \S/,'then its status, as before');
+ assert.deepEqual(placeOf({workspace_id:RIVERSIDE},{personalId:P,folderOf:()=>({folder:'/x/y',shown:'/x/y',exists:false})}),{kind:'folder',shown:'/x/y',full:'/x/y',name:'',missing:true});
 });
 
 test('a Pip whose new message arrives moves to the top at once, under Core',async()=>{
@@ -97,13 +97,13 @@ test('the filter line is at the left under the search: All Pips by default, then
  assert.equal(button.querySelector('.dgc-folder-v').textContent,'All Pips');assert.equal(button.getAttribute('aria-haspopup'),'menu');
  button.click();await x.drain();
  const menu=[...x.d.querySelectorAll('.dgc-folder-menu [role="menuitemradio"]')];
- assert.deepEqual(menu.map(r=>r.querySelector('.dgc-menu-label').textContent),['All Pips','Personal','shop','garden','toni_fabrics','notes']);
+ assert.deepEqual(menu.map(r=>r.querySelector('.dgc-menu-label').textContent),['All Pips','Personal','shop','garden','riverside_shop','notes']);
  assert.equal(menu[0].getAttribute('aria-checked'),'true');
- menu.find(r=>r.dataset.folder===TONI_DIR).click();await x.drain();
- assert.equal(x.$('#pips-filter .dgc-folder-v').textContent,'toni_fabrics');
+ menu.find(r=>r.dataset.folder===RIVERSIDE_DIR).click();await x.drain();
+ assert.equal(x.$('#pips-filter .dgc-folder-v').textContent,'riverside_shop');
  assert.deepEqual(x.rows(),[GST,ERP],'only that folder\'s Pips');
- assert.deepEqual(x.requests('list_pips').at(-1),{type:'list_pips',workspace_id:TONI,order:'recent',limit:100},'read from that folder\'s project, latest first');
- assert.equal(x.states.at(-1)?.pips_filter,TONI_DIR,'and the choice is kept with the view');
+ assert.deepEqual(x.requests('list_pips').at(-1),{type:'list_pips',workspace_id:RIVERSIDE,order:'recent',limit:100},'read from that folder\'s project, latest first');
+ assert.equal(x.states.at(-1)?.pips_filter,RIVERSIDE_DIR,'and the choice is kept with the view');
 });
 
 test('Personal shows the Pips with no folder; a folder with no Pips says so; a folder DGC has no project for reads nothing',async()=>{
@@ -129,18 +129,18 @@ test('Needs attention, its count and its cards follow the filter line',async()=>
  assert.equal(count(),'3','All Pips: every Pip\'s cards (a fix to allow, what only you can do, an email)');
  assert.deepEqual(x.requests('list_pip_attention').at(-1).projects,'all');
  const choose=async value=>{x.$('#pips-filter').click();await x.drain();[...x.d.querySelectorAll('.dgc-folder-menu [role="menuitemradio"]')].find(r=>r.dataset.folder===value).click();await x.drain();};
- await choose(TONI_DIR);
- assert.equal(count(),'2','toni_fabrics: its two');
- assert.equal(x.requests('list_pip_attention').at(-1).projects,TONI);
+ await choose(RIVERSIDE_DIR);
+ assert.equal(count(),'2','riverside_shop: its two');
+ assert.equal(x.requests('list_pip_attention').at(-1).projects,RIVERSIDE);
  await choose(PERSONAL);
  assert.equal(count(),'1','Personal: the email');
  assert.ok(!('projects' in x.requests('list_pip_attention').at(-1)));
  await choose(GARDEN_DIR);
  assert.equal(x.$('.attention'),null,'garden: nothing waits, no section');
  // The page decides it too: a list read for another choice shows none of that choice's cards.
- const page={total:3,items:[{workspace_id:P},{workspace_id:TONI},{workspace_id:TONI}]};
+ const page={total:3,items:[{workspace_id:P},{workspace_id:RIVERSIDE},{workspace_id:RIVERSIDE}]};
  assert.equal(attentionFor(page,GARDEN_DIR,{personalId:P,folders:[{folder:GARDEN_DIR,workspace_id:GARDEN}]}).items.length,0);
- assert.equal(attentionFor(page,TONI_DIR,{personalId:P,folders:[{folder:TONI_DIR,workspace_id:TONI}]}).total,2);
+ assert.equal(attentionFor(page,RIVERSIDE_DIR,{personalId:P,folders:[{folder:RIVERSIDE_DIR,workspace_id:RIVERSIDE}]}).total,2);
  assert.equal(attentionFor(page,ALL).total,3);
 });
 
@@ -169,7 +169,7 @@ test('a row opens its Pip in the one page and chat, whichever folder it works in
  x.$(`.pips-one-list [data-job="${GST}"]`).click();await x.drain();
  assert.equal(x.$('.pip-topbar .pip-pill .pip-conv-name, .pip-topbar .pip-pill>span:not(.avatar)')?.textContent.trim(),'GST watchdog');
  assert.ok(x.$('#chat-form'),'its chat');
- assert.equal(x.$('.pip-topbar .pip-where')?.textContent,'toni_fabrics','its folder beside its name');
+ assert.equal(x.$('.pip-topbar .pip-where')?.textContent,'riverside_shop','its folder beside its name');
  x.$('#simple-back').click();await x.drain();
  assert.deepEqual(x.rows(),[CORE,GST,ERP,MORNINGS,BEDS],'back at the one list, all of it');
  x.$(`.pips-one-list [data-job="${MORNINGS}"]`).click();await x.drain();
@@ -198,8 +198,8 @@ test('the host lets scope "all" through to a DGC that has it, and never to an ol
 });
 
 test('New Pip\'s folder is pre-filled from where you are: the filter\'s folder, else the folder it was asked from, else none',()=>{
- const rows=[{folder:HERE,exists:true},{folder:TONI_DIR,exists:true},{folder:NOTES,exists:false}];
- assert.equal(newPipFolder(TONI_DIR,rows),TONI_DIR);
+ const rows=[{folder:HERE,exists:true},{folder:RIVERSIDE_DIR,exists:true},{folder:NOTES,exists:false}];
+ assert.equal(newPipFolder(RIVERSIDE_DIR,rows),RIVERSIDE_DIR);
  assert.equal(newPipFolder(ALL,rows,HERE),HERE,'from a Work session: its folder');
  assert.equal(newPipFolder(ALL,rows),'','else none: a Personal Pip');
  assert.equal(newPipFolder(PERSONAL,rows,HERE),'','Personal chosen: none, whatever asked');

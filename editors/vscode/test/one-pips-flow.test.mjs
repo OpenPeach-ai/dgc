@@ -1,6 +1,6 @@
 // What a Pip found, and what became of it, as cards in its own chat (the Pips flow design of 14 Nov,
 // ~/dgc-work/052-plan/pips-flow-design.md, pictures 1 to 4 and 6). A Pip's chat is its home. No "Ask DGC to fix" and no
-// "Fix it" card: the level decides. Ask me first: the ordinary Allow card ("Fix 3 things in toni_fabrics" · Allow ·
+// "Fix it" card: the level decides. Ask me first: the ordinary Allow card ("Fix 3 things in riverside_shop" · Allow ·
 // Not now). While it fixes: one live card with Steps, Watch its computer and Stop. Ready: the change card, Apply ·
 // Review · Discard. Do it all: fixed and applied, Review · Undo · Commit these files. What only you can do is kept
 // as one line at the top of its chat. Needs attention has the same things as rows, each with the one button it needs.
@@ -12,7 +12,7 @@ import {build} from 'esbuild';
 import {fileURLToPath} from 'node:url';
 import {createRequire} from 'node:module';
 import {setup as open} from './support/one-pips-node.mjs';
-import {GST,ERP,TONI,TONI_DIR,CHECK,FIXRUN,OLDER,FIX,CHANGE,WAIT} from './support/one-pips-scene.mjs';
+import {GST,ERP,RIVERSIDE,RIVERSIDE_DIR,CHECK,FIXRUN,OLDER,FIX,CHANGE,WAIT} from './support/one-pips-scene.mjs';
 import {fixesPage,findingsWords,reportRow,reportsTableMarkup,waitingLineMarkup} from '../src/pipFlow.js';
 import {attentionPage} from '../src/pipAttention.js';
 import {answerFor} from '../src/pipCardAnswers.js';
@@ -41,7 +41,7 @@ test('what a check found is one card under the Pip\'s own words: each finding, i
  assert.equal(x.$('[data-post-fix]'),null,'and no "Ask DGC to fix"');
  assert.doesNotMatch(x.text(),/Ask DGC to fix|Fix it/);
  rows[0].querySelector('.pip-found-file').click();await x.drain();
- assert.deepEqual(x.posted('openFile').at(-1),{type:'openFile',path:`${TONI_DIR}/billing/eway.py`,line:212},'a file opens in an editor tab at its line, in the Pip\'s own folder');
+ assert.deepEqual(x.posted('openFile').at(-1),{type:'openFile',path:`${RIVERSIDE_DIR}/billing/eway.py`,line:212},'a file opens in an editor tab at its line, in the Pip\'s own folder');
  card.querySelector('[data-post-open]').click();await x.drain();
  assert.equal(x.$('.simple-content').dataset.view,'runs','Open report is its report');
 });
@@ -50,7 +50,7 @@ test('at Ask me first it asks with the ordinary Allow card: Allow, Not now, and 
  const x=await chat({fix:'ask'});
  const card=x.$(`.pip-found-ask[data-flow-fix="${FIX}"]`);
  assert.ok(card,'the Allow card');
- assert.equal(card.querySelector('.dgc-card-title').textContent,'Fix 3 things in toni_fabrics');
+ assert.equal(card.querySelector('.dgc-card-title').textContent,'Fix 3 things in riverside_shop');
  assert.equal(card.querySelector('.dgc-card-sub').textContent,'It works in its own copy. Nothing in your folder changes until you apply it.');
  assert.deepEqual([...card.querySelectorAll('.pip-found-actions > button')].map(b=>b.textContent.trim()),['Allow','Not now','⋯']);
  assert.match(x.text('.pip-found-says'),/Want me to fix these three\?/,'its question is its own message, above the card');
@@ -65,7 +65,7 @@ test('Not now leaves one quiet line, with a way to allow it after all',async()=>
  x.$('[data-flow-no]').click();await x.drain();
  assert.equal(x.requests('decide_pip_fix').at(-1).allow,false);
  const line=x.$(`.pip-found-line[data-flow-fix="${FIX}"]`);
- assert.match(x.squash(line.textContent),/^Not now: Fix 3 things in toni_fabrics/);
+ assert.match(x.squash(line.textContent),/^Not now: Fix 3 things in riverside_shop/);
  assert.ok(line.querySelector('[data-flow-allow]'));assert.equal(x.$('.pip-found-ask'),null);
 });
 
@@ -91,7 +91,7 @@ test('while it fixes: one live card with what it is doing, how long, its helpers
  assert.match(card.querySelector('.pip-found-meta').textContent,/^2m \d+s · 1 helper$/);
  assert.deepEqual([...card.querySelectorAll('.pip-found-step')].map(s=>[s.dataset.step,x.squash(s.textContent)]),[['done','✓Read eway.py and the portal\'s field rules'],['done','✓Added the transporter ID to bills over ₹50,000'],['doing','Running the e-way tests in its copy'],['next','Round-off, then the retry loop']]);
  assert.deepEqual([...card.querySelectorAll('.pip-found-foot button')].map(b=>b.textContent.trim()),['Steps','Watch its computer','Stop']);
- assert.match(x.text(),/You allowed: Fix 3 things in toni_fabrics/,'what was allowed, as one line above it');
+ assert.match(x.text(),/You allowed: Fix 3 things in riverside_shop/,'what was allowed, as one line above it');
  assert.match(x.text(),/Your folder is untouched while it works\./);
  assert.match(x.$('.pip-topbar .pip-where').textContent,/^Fixing · 2m/,'and its header says it is fixing');
  card.querySelector('[data-flow-watch]').click();await x.drain();
@@ -103,7 +103,7 @@ test('while it fixes: one live card with what it is doing, how long, its helpers
 test('when the fix is ready: the change card with Apply, Review and Discard, and the findings say what became of each',async()=>{
  const x=await chat({fix:'ready'});
  const change=x.$(`[data-project-change="${CHANGE}"]`);
- assert.equal(change.querySelector('.dgc-card-title').textContent,'Changes for toni_fabrics');
+ assert.equal(change.querySelector('.dgc-card-title').textContent,'Changes for riverside_shop');
  assert.equal(x.d.querySelectorAll(`[data-project-change="${CHANGE}"]`).length,1,'drawn once, with its fix');
  const found=x.$('.pip-found-findings');
  assert.equal(found.querySelector('.pip-found-meta').textContent,'2 fixed · 1 needs your word');
@@ -119,11 +119,11 @@ test('when the fix is ready: the change card with Apply, Review and Discard, and
 test('at Do it all it is already in your folder: Review, Undo, and Commit these files',async()=>{
  const x=await chat({fix:'applied',level:'full'});
  const card=x.$(`[data-project-change="${CHANGE}"]`);
- assert.equal(card.querySelector('.dgc-card-title').textContent,'Changed in toni_fabrics');
+ assert.equal(card.querySelector('.dgc-card-title').textContent,'Changed in riverside_shop');
  assert.equal(card.querySelector('.dgc-card-sub').textContent,'2 files · +17 −4 · in your folder · not committed');
  assert.match(card.textContent,/Applied by itself at Do it all/);
  assert.deepEqual([...card.querySelectorAll('.dgc-card-actions button')].map(b=>b.textContent.trim()),['Review','Undo','Commit these files']);
- assert.match(x.text(),/Started by itself at Do it all: Fix 3 things in toni_fabrics/);
+ assert.match(x.text(),/Started by itself at Do it all: Fix 3 things in riverside_shop/);
  card.querySelector('[data-project-commit]').click();await x.drain();
  assert.deepEqual(x.requests('commit_pip_project_change').at(-1),{type:'commit_pip_project_change',pip_id:GST,change_id:CHANGE});
  const after=x.$(`[data-project-change="${CHANGE}"]`);
@@ -187,7 +187,7 @@ test('Needs attention has a row a Pip, each with the one button it needs: Allow,
  const row=title=>rows.find(r=>r.querySelector('.attention-copy strong')?.textContent===title);
  const fixRow=row('Wants to fix 3 things');
  assert.ok(fixRow,'it wants to fix');
- assert.match(fixRow.querySelector('small').textContent,/GST watchdog · toni_fabrics · Wants to fix/);
+ assert.match(fixRow.querySelector('small').textContent,/GST watchdog · riverside_shop · Wants to fix/);
  assert.deepEqual([...fixRow.querySelectorAll('[data-attention-answer]')].map(b=>b.getAttribute('aria-label')||b.textContent.trim()).map(s=>s.replace(/:.*$/,'')),['Allow','Not now']);
  const wait=row('GSP wallet is empty');
  assert.equal(wait.querySelector('[data-attention-answer]'),null,'what only you can do has no answer here');
@@ -214,7 +214,7 @@ test('Allow on a row allows that fix on what DGC lists for it now; Apply applies
 });
 
 test('the flow\'s rows read as Needs attention rows, and a kind this editor does not know still fails closed',()=>{
- const item=(kind,card)=>({id:`${kind}:${card}`,kind,card,pip_id:GST,pip_name:'GST watchdog',pip_type:'rook',workspace_id:TONI,title:'t',detail:'',created_at:new Date().toISOString(),expires_at:null});
+ const item=(kind,card)=>({id:`${kind}:${card}`,kind,card,pip_id:GST,pip_name:'GST watchdog',pip_type:'rook',workspace_id:RIVERSIDE,title:'t',detail:'',created_at:new Date().toISOString(),expires_at:null});
  const page=attentionPage({total:4,items:[item('fix_ask',FIX),item('fix_ready',CHANGE),item('fix_held',CHANGE),item('waiting',WAIT)],truncated:false,counts:{},by_pip:{[GST]:4}});
  assert.deepEqual(page.items.map(i=>i.kind).sort(),['fix_ask','fix_held','fix_ready','waiting']);
  assert.throws(()=>attentionPage({total:1,items:[item('fix_ask','not-a-fix')],truncated:false,counts:{},by_pip:{}}));
@@ -254,7 +254,7 @@ test('the reports page is a table: When, What, Files, Model, Time and tokens, Fi
  assert.deepEqual([...rows[1].children].slice(2).map(td=>x.squash(td.textContent)),['','','','None'],'what an older DGC did not record is blank');
  assert.equal(x.$('.run-row'),null,'not the old list of buttons');
  rows[0].querySelector('.pip-report-files .pip-found-file').click();await x.drain();
- assert.deepEqual(x.posted('openFile').at(-1),{type:'openFile',path:`${TONI_DIR}/billing/eway.py`,line:212},'a file opens in an editor tab at its line');
+ assert.deepEqual(x.posted('openFile').at(-1),{type:'openFile',path:`${RIVERSIDE_DIR}/billing/eway.py`,line:212},'a file opens in an editor tab at its line');
  rows[0].querySelector('[data-run]').click();await x.drain();
  assert.ok(x.requests('get_pip_run').some(r=>r.run_id===CHECK),'opening a row opens its report');
  assert.equal(x.$(`tr[data-report-row="${CHECK}"]`).getAttribute('aria-current'),'true');
