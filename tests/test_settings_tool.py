@@ -168,3 +168,25 @@ class TheAgentUsesThem(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DocsReachEverySection(unittest.TestCase):
+    """dgc_docs answered with the first 4,000 characters of the best pages, so a section far down a long page (the
+    Pips page's payments, its levels) was never seen (found by the 0.52 docs pass). It now answers with the best
+    sections, wherever they are, each under its page's title."""
+
+    def test_a_section_deep_in_a_long_page_is_found(self):
+        from dgc import settings_tool
+        from dgc.docs import DOCS
+        pips = next(page for page in DOCS if str(page[0]) == "Pips")
+        body = str(pips[2])
+        deep = body.find("## Paying by itself")
+        self.assertGreater(deep, 4000, "the section is past the old cut")
+        said = settings_tool.docs("pay by itself daily dollar limit")
+        self.assertIn("## Paying by itself", said, "the section itself, not a summary that names it")
+        self.assertIn("# Pips", said)
+        self.assertLess(len(said), 14000, "still bounded")
+
+    def test_nothing_found_still_says_so(self):
+        from dgc import settings_tool
+        self.assertIn("nothing on that", settings_tool.docs("zzqx wvvq"))

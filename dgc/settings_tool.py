@@ -278,24 +278,45 @@ def undo(config, change_id) -> str:
     return "Undone."
 
 
+def _sections(body: str) -> list[str]:
+    """A page in its ## sections (the part before the first one is its opening)."""
+    parts, current = [], []
+    for line in body.splitlines():
+        if line.startswith("## ") and current:
+            parts.append("\n".join(current))
+            current = []
+        current.append(line)
+    if current:
+        parts.append("\n".join(current))
+    return [part for part in parts if part.strip()]
+
+
 def docs(query: str) -> str:
-    """DGC's own docs (dgc/docs.py), best matches first, bounded: how DGC works, never a guess."""
+    """DGC's own docs (dgc/docs.py), the best sections first wherever they sit in a page, each under its page's title,
+    bounded: how DGC works, never a guess. (It answered with the first 4,000 characters of the best pages, so a section
+    far down a long page was never seen.)"""
     from .docs import DOCS
     words = [w for w in str(query or "").lower().split() if len(w) > 2][:12]
     scored = []
     for page in DOCS:
         title, description, body = (str(page[0]), str(page[1]), str(page[2])) if isinstance(page, (tuple, list)) else (
             str(page.get("title", "")), str(page.get("description", "")), str(page.get("markdown", page.get("body", ""))))
-        haystack = f"{title} {description} {body}".lower()
-        score = sum(haystack.count(w) + 5 * (w in title.lower()) for w in words) if words else 1
-        if score:
-            scored.append((score, title, description, body))
+        in_title = sum(3 * (w in title.lower()) + (w in description.lower()) for w in words)
+        for section in _sections(body):
+            text = section.lower()
+            score = sum(text.count(w) + 4 * (w in text.split("\n", 1)[0]) for w in words) + in_title if words else 1
+            if score:
+                scored.append((score, title, description, section))
     scored.sort(key=lambda item: -item[0])
     if not scored:
         return "DGC's docs have nothing on that. Say so rather than guess."
-    out = []
-    for _, title, description, body in scored[:3]:
-        out.append(f"# {title}\n{description}\n\n{body[:4000]}")
+    out, used = [], 0
+    for _, title, description, section in scored[:4]:
+        piece = f"# {title}\n{description}\n\n{section[:3000]}"
+        if used + len(piece) > 12000:
+            break
+        out.append(piece)
+        used += len(piece)
     return "\n\n---\n\n".join(out)
 
 
