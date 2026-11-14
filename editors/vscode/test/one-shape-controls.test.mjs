@@ -14,6 +14,7 @@ import { openChat as openPip } from "./support/pip-chat-scene.mjs";
 import { openRunningTurn, openPips, openSettingsGeneral } from "./support/codex-look-scene.mjs";
 import { openSheet } from "./support/pip-cards-polish-scene.mjs";
 import { GST, openOnePips } from "./support/one-pips-scene.mjs";
+import { openSettingsChanges } from "./support/settings-undo-scene.mjs";
 
 let chromium;
 try { ({ chromium } = await import("@playwright/test")); } catch { chromium = null; }
@@ -191,6 +192,20 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 3
         hoverHeld(await hoverWalk(page, CONTROLS, ROUND), `report cards, ${sheet}`);
       } finally { await page.close(); }
     }
+    none();
+  });
+}
+// A Work chat in which DGC changed its own settings (0.52): each change's quiet line and its Undo.
+for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 300]) {
+  test(`a Work chat with settings change lines and their Undo (${theme}, ${width}px)`, async (t) => {
+    if (skipOrFail(t)) return;
+    const CONTROLS = "#log .setting-change button";
+    const x = await openSettingsChanges(browser, { width, theme, fresh: true });
+    try {
+      assert.equal(await x.page.evaluate((sel) => [...document.querySelectorAll(sel)].filter((n) => n.checkVisibility()).length, CONTROLS), 3, "each line's Undo is drawn");
+      held(await walk(x.page, ROUND), "settings change lines");
+      hoverHeld(await hoverWalk(x.page, CONTROLS, ROUND), "settings change lines");
+    } finally { await x.close(); }
     none();
   });
 }

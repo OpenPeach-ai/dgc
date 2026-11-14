@@ -192,6 +192,19 @@ class DocsReachEverySection(unittest.TestCase):
         self.assertIn("nothing on that", settings_tool.docs("zzqx wvvq"))
 
 
+class TheWordsKeepNames(unittest.TestCase):
+    """The change line read "before dgc compacts it": a setting's description was lowercased whole (settings Undo helper,
+    14 Nov). Only its first letter is, so DGC and other names stay as written."""
+
+    setUp = TheTool.setUp
+
+    def test_dgc_stays_dgc(self):
+        from dgc import settings_tool as T
+        said = T.change(self.config, "compact_threshold", 0.7)
+        self.assertIn("DGC", said)
+        self.assertNotIn(" dgc ", said)
+
+
 class TheEditorUndoes(unittest.TestCase):
     """The editor's Undo on the line a settings change leaves in the chat: undo_setting_change {change_id, request_id},
     answered by setting_undone {request_id, change_id, ok, said}; ready says it is there (capabilities.settings_undo)."""

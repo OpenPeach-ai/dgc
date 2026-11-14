@@ -3040,6 +3040,7 @@
     "shield-plus": '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M9 12h6"/><path d="M12 9v6"/>',
     "sparkle": '<path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/>',
     "square-pen": '<path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"/>',
+    "sliders-horizontal": '<path d="M21 4h-7"/><path d="M10 4H3"/><path d="M21 12h-9"/><path d="M8 12H3"/><path d="M21 20h-5"/><path d="M12 20H3"/><path d="M14 2v4"/><path d="M8 10v4"/><path d="M16 18v4"/>',
     "square-terminal": '<path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>',
     "target": '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
     "triangle-alert": '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
@@ -7931,6 +7932,80 @@ function permissionChoices(ev) {
     appendConversationContent(box);
   }
 
+  // ---- a settings change DGC made, with Undo (dgc/settings_tool.py; ready.capabilities.settings_undo) ----
+  // When DGC changes one of its own settings for the user (dgc_settings: an ordinary setting, a permission rule, a Dev
+  // Mode limit), the result ends "Undo: setchg_…". In the chat it is one quiet line under the step: what changed, in
+  // DGC's words without the id, and Undo. Undo sends undo_setting_change; setting_undone settles the line: "Undone", or
+  // DGC's reason and no Undo. The step itself stays in its group, as any step does. A reload draws the same line from
+  // the saved result. The transcript doesn't record a click on Undo, so this page remembers the ones it undid (its
+  // own saved state) and draws those as Undone; a change DGC itself put back later in the chat (action undo) is in the
+  // transcript and reads Undone everywhere; any other line offers Undo again, and DGC's answer ("That change was
+  // already undone.") settles it without changing anything twice.
+  var settingsUndoLive = false;                  // `var`: read by the reducer, set by ready
+  const SETTING_CHANGE = /^(\S[^\n]*?)\.? Undo: (setchg_[0-9a-f]{16})\s*$/;
+  const SETTING_UNDO_WAIT_MS = 20000;            // no answer by then: Undo can be tried again
+  const settingsUndone = new Set((() => {
+    try { const kept = vscode.getState()?.settingsUndone; return Array.isArray(kept) ? kept.filter((id) => /^setchg_[0-9a-f]{16}$/.test(id)) : []; }
+    catch { return []; }
+  })());
+  function settingChangeOf(ev) {
+    if (!settingsUndoLive || ev.is_error || ev.name !== "dgc_settings") return null;
+    const told = SETTING_CHANGE.exec(String(ev.output || ""));
+    return told ? { words: told[1], id: told[2] } : null;
+  }
+  function settleSettingLine(line, ok, words) {
+    clearTimeout(line._undoWait); line._undoWait = null;
+    line.dataset.state = ok ? "undone" : "kept";
+    line.querySelector("button")?.remove();
+    const text = line.querySelector(".setting-change-text");
+    let state = text.querySelector(".setting-change-said");
+    if (!state) {
+      text.append(document.createTextNode(" · "));
+      state = text.appendChild(el("span", "setting-change-said"));
+      state.setAttribute("role", "status");
+    }
+    state.textContent = ok ? "Undone" : (String(words || "").replace(/\s+/g, " ").trim().slice(0, 400) || "It couldn't be undone.");
+  }
+  function settingChangeLine(change) {
+    const line = el("div", "sys sys-marked setting-change");
+    line.setAttribute("role", "note");
+    line.dataset.changeId = change.id;
+    line.dataset.state = "changed";
+    line.innerHTML = icon("sliders-horizontal");
+    const text = line.appendChild(el("span", "setting-change-text"));
+    text.appendChild(el("span", "setting-change-words")).textContent = change.words;
+    const undo = line.appendChild(el("button", "link setting-change-undo", "Undo"));
+    undo.type = "button";
+    undo.setAttribute("aria-label", `Undo: ${change.words}`);
+    undo.onclick = () => {
+      if (undo.disabled) return;
+      undo.disabled = true;
+      line.dataset.state = "undoing";
+      vscode.postMessage({ type: "undoSettingChange", changeId: change.id });
+      line._undoWait = setTimeout(() => {
+        if (line.dataset.state !== "undoing") return;
+        line.dataset.state = "changed"; undo.disabled = false;
+      }, SETTING_UNDO_WAIT_MS);
+    };
+    if (settingsUndone.has(change.id)) settleSettingLine(line, true);
+    appendConversationContent(line);
+    return line;
+  }
+  // DGC's answer to Undo, or a change DGC itself put back (`remember`: only a click's Undo, which no transcript holds).
+  function settingUndone(id, ok, words, remember) {
+    if (!/^setchg_[0-9a-f]{16}$/.test(String(id || ""))) return;
+    if (ok) {
+      settingsUndone.add(id);
+      if (remember) {
+        try { vscode.setState({ ...(vscode.getState() || {}), settingsUndone: [...settingsUndone].slice(-50) }); } catch { /* the line still says it */ }
+      }
+    }
+    // Its line on the page, and, while a reload is being drawn, the one on its way into it.
+    for (const root of appendTarget === log ? [log] : [log, appendTarget]) {
+      for (const line of root.querySelectorAll(`.setting-change[data-change-id="${id}"]`)) if (line.dataset.state !== "undone") settleSettingLine(line, ok, words);
+    }
+  }
+
   // /learn: the draft skill, shown before anything is written, with Save, Edit and Cancel.
   const learnCards = new Map();
   function learnCard(requestId) {
@@ -8972,6 +9047,7 @@ function permissionChoices(ev) {
         steerQueuedLive = nativeSteering && ev.capabilities?.steer_queued === true;
         queueEditLive = ev.capabilities?.queue_edit === true;
         turnFilesLive = ev.capabilities?.turn_files === 1;
+        settingsUndoLive = ev.capabilities?.settings_undo === 1;
         if (turnFilesLive) vscode.postMessage({ type: "turnFilesWatch" });
         // This panel draws Pip reports: ask for this chat's (none is sent, or taken, until it does).
         if (pipReportsLive) vscode.postMessage({ type: "pipReportsWatch" });
@@ -9257,6 +9333,8 @@ function permissionChoices(ev) {
           if (!replaying) startToolClock(same);
         } else {
           turn._tools[ev.call_id || ev.name] = toolCard(ev);
+          if (ev.name === "dgc_settings" && ev.args?.action === "undo" && typeof ev.args.change_id === "string")
+            turn._tools[ev.call_id || ev.name].dataset.settingUndo = ev.args.change_id.slice(0, 64);
           // A tool call's arguments are output the model wrote, like its prose and reasoning. A turn
           // made only of tool calls (a model that works without narrating) read "↓ 0 tok" for its
           // whole run; its arguments count once, when the call first appears.
@@ -9355,6 +9433,12 @@ function permissionChoices(ev) {
           c.querySelector(".badge").textContent = out.split("\n").length + " ln";
           if (ev.name === "generate_video" && !ev.is_error) videoStep(c, String(ev.output || ""));
           enrichToolResult(c, ev);
+          if (!childId) {
+            const changed = settingChangeOf(ev);
+            if (changed) settingChangeLine(changed);
+            // DGC put a change back itself (action undo): its line says so, live and after a reload.
+            else if (settingsUndoLive && !ev.is_error && c.dataset.settingUndo && /^(Undone\.|That change was already undone\.)\s*$/.test(out)) settingUndone(c.dataset.settingUndo, true, "", false);
+          }
           setupCards()?.toolResult(c, ev);
           if (c.classList.contains("pip-run-owned")) refreshToolGroup(c.closest(".tool-group"));
         }
@@ -9908,6 +9992,7 @@ function permissionChoices(ev) {
         break;
       }
       case "memory_learned": memoryLearnedLine(ev); break;
+      case "setting_undone": settingUndone(ev.change_id, ev.ok === true, ev.said, true); return;
       case "skill_draft": learnDraft(ev); break;
       case "skill_saved": learnSaved(ev); break;
       case "goal_changed": {

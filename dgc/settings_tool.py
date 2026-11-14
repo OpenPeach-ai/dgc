@@ -192,7 +192,9 @@ def change(config, key, value, reason: str = "") -> str:
     config.set(key, value)
     change_id = _remember(config, {"kind": "setting", "key": key, "before": before, "after": value,
                                    "reason": str(reason or "")[:300]})
-    return f"Changed {ORDINARY[key][2].lower()} ({key}): {_shown(before)} → {_shown(value)}. Undo: {change_id}"
+    label = ORDINARY[key][2]
+    label = label[:1].lower() + label[1:] if label[1:2].islower() else label      # "How full…" → "how full…"; DGC stays
+    return f"Changed {label} ({key}): {_shown(before)} → {_shown(value)}. Undo: {change_id}"
 
 
 def rule(config, action, text, remove: bool = False, reason: str = "") -> str:

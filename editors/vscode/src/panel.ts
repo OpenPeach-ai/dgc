@@ -6733,6 +6733,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (id) be.send({ type: "memory_forget", request_id: this.nextRequestId("memory-forget"), id });
         break;
       }
+      case "undoSettingChange": {
+        // Undo on the line a settings change DGC made left in the chat (dgc_settings; ready.capabilities.settings_undo):
+        // DGC answers with setting_undone, which reaches the page as any event does.
+        this.undoSettingChange(msg.changeId);
+        break;
+      }
       case "learnSave": {
         // /learn's Save: the skill as shown (maybe edited) is written now, and not before.
         const markdown = typeof msg.markdown === "string" ? msg.markdown.slice(0, 65536) : "";
@@ -9089,6 +9095,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   goalRuns(): void {
     if (!this.goalRunsCapable()) return;
     this.backend?.send({ type: "goal_runs", request_id: this.nextRequestId("goal-runs") } as any);
+  }
+  /** Undo of a settings change DGC made (dgc/settings_tool.py): only a CLI that says ready.capabilities.settings_undo
+   *  takes it, and only a change's own id is sent. */
+  settingsUndoCapable(): boolean { return (this.lastReadyEvent?.capabilities as any)?.settings_undo === 1; }
+  undoSettingChange(id: unknown): void {
+    if (!this.settingsUndoCapable()) return;
+    const changeId = typeof id === "string" && /^setchg_[0-9a-f]{16}$/.test(id) ? id : "";
+    if (changeId) this.ensureBackend().send({ type: "undo_setting_change", change_id: changeId, request_id: this.nextRequestId("setting-undo") });
   }
   videosCapable(): boolean {
     const commands = (this.lastReadyEvent?.capabilities as any)?.videos?.commands;

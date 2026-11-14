@@ -3536,6 +3536,19 @@ body.vscode-high-contrast-light :is(.pip-report, .pip-report-group, .pips-digest
 .goal-runs-foot { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); min-width: 0; padding: var(--sp-2) var(--sp-2) 2px; }
 .goal-runs-none { flex: 1 1 auto; min-width: 0; color: var(--muted-firm, var(--muted)); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 
+/* A settings change DGC made ("Changed … (thinking): low → high", dgc_settings): one quiet line under its step, in the
+   muted ink that reads at 4.5:1 (a fact to read, as a goal's end is), with Undo, the chat's small button (button.link:
+   the family's corner and small height, as wide as its word), at the line's end. Undo is taller than a row of the
+   words: it is centred on the first row and adds no height to the line, so a run of changes stays a run of lines and a
+   line that wraps in a narrow side bar keeps Undo at its top. Answered, Undo goes and the line ends "· Undone", or
+   with DGC's reason. */
+.sys.setting-change { margin: var(--sp-1) 0; color: var(--muted-firm, var(--muted)); }
+.sys.setting-change > .ic { color: inherit; }
+.setting-change-text { flex: 1 1 auto; min-width: 0; }
+/* (4 px short of the turn's edge: a turn paints nothing outside its own box (.msg, content-visibility), and Undo's
+   focus ring, 2 px wide and 2 px off, would lose its far side there.) */
+.setting-change > button.setting-change-undo { margin: calc((var(--t-xs) * 1.45 - var(--btn-h-sm)) / 2) 4px calc((var(--t-xs) * 1.45 - var(--btn-h-sm)) / 2) 0; font-size: var(--t-xs); }
+
 /* Memory that learns: the quiet "Remembered" line a look back adds, and /learn's skill card. */
 .memory-learned .memory-learned-rows { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .memory-learned .memory-learned-row { min-width: 0; overflow-wrap: anywhere; }
