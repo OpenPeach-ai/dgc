@@ -250,6 +250,18 @@ class ByLevel(FixWorld, unittest.TestCase):
         self.check([TOTAL, FLAG])
         self.assertEqual(len(self.fixes()["fixes"]), 1, "the next check after it ends asks about the rest")
 
+    def test_a_fix_whose_turn_ended_unrecorded_never_blocks_the_next(self):
+        # Self-review, 14 Nov: a fix still marked queued after its turn ended (its end not recorded) blocked every later
+        # fix of that Pip ("one at a time"). Its turn's own status decides.
+        self.choose(levels.APPROVE)
+        self.check([TOTAL])
+        self.send()
+        row = self.store.claim_next()
+        with patch.object(fixes, "after_fix_turn", lambda *a, **k: None):
+            self.store.finish(row["id"], result={"text": "Done."})
+        self.check([TOTAL, FLAG])
+        self.assertEqual(len(self.fixes()["fixes"]), 2, "the next check asks about what is new")
+
     def test_a_pip_with_no_box_gets_no_fix(self):
         with patch.object(pips, "folder_boxes", return_value=False):
             self.check([TOTAL])

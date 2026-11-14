@@ -314,7 +314,13 @@ def after_check(store, run, result) -> str | None:
         open_fix = db.execute("SELECT * FROM pip_fixes WHERE pip_id=? AND state IN ('ask','queued') ORDER BY created_at DESC,rowid DESC "
                               "LIMIT 1", (run["pip_id"],)).fetchone()
         if open_fix is not None and open_fix["state"] == "queued":
-            return None                                  # one fix at a time: the next check after it ends asks
+            turn = _turn(db, open_fix)
+            if turn is None or turn["status"] not in ("succeeded", "failed", "cancelled"):
+                return None                              # one fix at a time: the next check after it ends asks
+            # Its turn ended but its end was never recorded: settle it from the turn, so it never blocks the next.
+            db.execute("UPDATE pip_fixes SET state='ended',fix_run_id=?,revision=revision+1,updated_at=? WHERE id=?",
+                       (turn["id"], _now(registry), open_fix["id"]))
+            open_fix = None
         busy = db.execute("SELECT id,change_id FROM pip_fixes WHERE pip_id=? AND state='ended' AND change_id IS NOT NULL "
                           "ORDER BY created_at DESC,rowid DESC LIMIT 1", (run["pip_id"],)).fetchone()
         if busy is not None and _change_status(db, busy["change_id"]) == "pending":
