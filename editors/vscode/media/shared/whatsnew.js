@@ -16,7 +16,7 @@
     { id: "settings", text: "Change settings by asking." },
     { id: "fallback", text: "A fallback model on every surface." },
     { id: "browser", text: "Your Browser, where you sign in once for your Pips.", ships: false },
-    { id: "payments", text: "Daily payment limits in dollars.", ships: false },
+    { id: "payments", text: "Daily payment limits in dollars." },
     { id: "incognito", text: "Incognito chats." },
   ];
   function alsoNew(shipped) {

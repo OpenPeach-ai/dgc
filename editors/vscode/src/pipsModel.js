@@ -1274,15 +1274,14 @@ export function pipsDesktopNotifications(value) {
   return value;
 }
 
-// Pips API 75 (0.52, P1): whether a Pip at Do it all may pay by itself, at most `limit` times a day; `paid` in the last day.
-// Payments a day (Pips API 75, agreed 10 Nov): {limit, default, most, paid}. A Pip you let pay (its own rule, on its page,
-// only at Do it all) pays by itself at most `limit` times a day across your Pips; `paid` went in the last day.
+// Pips API 96 (0.52, agreed 13 Nov): all Pips together, up to $Y a day. {usd_per_day (a number, or null for none),
+// spent_today (dollars all Pips paid by themselves in the last day)}. The 10 Nov count ({limit, default, most, paid}) is
+// retired: an answer in that shape is not one. A Pip's own limits are in src/pipPay.js.
 export function pipsPayments(value) {
-  const count = (n, low) => Number.isSafeInteger(n) && n >= low && n <= 1000000;
-  if (!record(value) || Object.keys(value).sort().join() !== 'default,limit,most,paid' || !count(value.most, 1)
-    || !count(value.limit, 1) || value.limit > value.most || !count(value.default, 1) || !count(value.paid, 0))
-    throw Error('How often Pips may pay didn’t load. Refresh the Pips view.');
-  return value;
+  const money = (n, low) => typeof n === 'number' && Number.isFinite(n) && n >= low && n <= 1e12;
+  if (!record(value) || !(value.usd_per_day === null || money(value.usd_per_day, 0) && value.usd_per_day > 0) || !money(value.spent_today, 0))
+    throw Error('How much Pips may pay didn’t load. Refresh the Pips view.');
+  return {usd_per_day: value.usd_per_day, spent_today: value.spent_today};
 }
 
 // Pips API 76 (0.52, Pips package 6; D14): a Pip's fallback model, {pip_id, provider ("" DGC's own connection, or a saved

@@ -36,6 +36,10 @@
   text-align: left; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .pw-how:focus-visible { outline: var(--btn-ring); outline-offset: 2px; }
 .pw-foot .dgc-btn { width: 84px; }
+/* The Mac dialog (.pw-mac): its first sentence is its title, then one paragraph, and OK alone at the foot's right end. */
+.pw-mac .pw-title { margin-bottom: 8px; overflow-wrap: anywhere; text-wrap: balance; }
+.pw-mac .pw-lead { margin-bottom: 14px; color: var(--muted); }
+.pw-mac .pw-foot { justify-content: flex-end; }
 @media (max-width: 340px) { .pw-body { padding: 14px 14px 2px; } .pw-foot { padding: 10px 14px 14px; } .pw-foot .dgc-btn { width: 76px; } }
 
 .psn { flex: none; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: 10px; align-items: start; box-sizing: border-box; margin: var(--sp-3, 12px) var(--sp-4, 16px) 0; padding: 10px 8px 10px 12px;

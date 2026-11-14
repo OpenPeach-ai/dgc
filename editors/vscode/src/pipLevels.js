@@ -5,6 +5,7 @@
 // so they always agree. The line is DGC's own (get_pip_level's `says`), shown once more as the notice when one is chosen.
 
 import {infoTip} from './pipInfoTip.js';
+import {levelPayLimits, payingSays} from './pipPay.js';
 
 const LEVELS = ['ask', 'approve', 'full'];
 // Do it all, on a Personal Pip: what can go wrong stays in sight beside the picker, in a few words. (DGC's whole line,
@@ -29,12 +30,15 @@ export function levelPage(value, pip) {
   });
   // Its rule for payments (API 75): ask or allow; an older DGC sends none.
   if ('paying' in value && !['ask', 'allow'].includes(value.paying)) fail();
-  return {level: value.level, default: value.default, levels, done, paying: value.paying || null,
+  // Its limits for paying by itself (API 96, src/pipPay.js), where DGC says them here; null where it doesn't.
+  let pay = null;
+  try { pay = levelPayLimits(value); } catch { fail(); }
+  return {level: value.level, default: value.default, levels, done, paying: value.paying || null, pay,
           kind: value.kind === 'project' ? 'project' : 'personal'};
 }
 
 /** The section: the picker with the chosen level's line, and what its level did by itself. */
-export function levelMarkup(state, {esc, busy = false, error = '', pipName = 'It', when = at => at, payLimit = null}) {
+export function levelMarkup(state, {esc, busy = false, error = '', pipName = 'It', when = at => at, payLimits = ''}) {
   if (!state) return `<section class="pip-page-group" aria-label="How much it asks">${error ? `<p class="error" role="alert">${esc(error)}</p>` : '<p class="muted" role="status">Loading…</p>'}</section>`;
   const off = busy ? ' disabled' : '';
   const chosen = state.levels.find(l => l.level === state.level) || state.levels[0];
@@ -44,23 +48,21 @@ export function levelMarkup(state, {esc, busy = false, error = '', pipName = 'It
   return `<section class="pip-page-group" aria-label="How much it asks"><div class="pip-page-row static"><span class="row-words"><strong>Before it acts${infoTip('pipLevelSays', 'Before it acts', esc(chosen.says))}</strong>`
     + `${risk ? `<small class="pip-level-risk" id="pipLevelRisk">${FULL_RISK}</small>` : ''}</span>`
     + `<select id="pipLevel" aria-label="How much ${esc(pipName)} asks" aria-describedby="pipLevelSays${risk ? ' pipLevelRisk' : ''}"${off}>${state.levels.map(l => `<option value="${l.level}"${l.level === state.level ? ' selected' : ''}>${esc(l.name)}</option>`).join('')}</select></div>`
-    + payingMarkup(state, {esc, off, pipName, payLimit})
+    + payingMarkup(state, {esc, off, pipName, payLimits})
     + (done.length ? `<h3 class="pip-page-label">On its own${infoTip('pipOwnSays', 'On its own', `What ${esc(pipName)} did without asking, at the level it was at.`)}</h3><ul class="pip-page-list" data-on-its-own>${done.map(d =>
       `<li class="pip-page-row static sub"><span class="row-words"><span>${esc(d.what)}</span><small>${esc(when(d.at))} · ${esc(name(d.level))}${d.unattended ? ' · nobody at the keyboard' : ''}</small></span></li>`).join('')}</ul>`
       + (state.level === 'ask' ? '' : `<button type="button" class="link" data-level-ask${off}>Ask me again from now on</button>`) : '')
     + (error ? `<p class="error" role="alert">${esc(error)}</p>` : '') + '</section>';
 }
 
-/** Its rule for payments, only at Do it all (API 75): Ask me each time (the default) or Let it pay, with what that means. */
-function payingMarkup(state, {esc, off, pipName, payLimit}) {
+/** Its rule for payments, only at Do it all (API 75): Ask me each time (the default) or Let it pay. `payLimits`: the
+ *  form of its limits (src/pipPay.js), shown under the rule only while it is Let it pay. */
+function payingMarkup(state, {esc, off, pipName, payLimits}) {
   if (!state.paying || state.level !== 'full') return '';
-  const says = state.paying === 'allow'
-    ? `It pays by itself, ${payLimit ? `at most ${payLimit} times a day` : 'up to your count for the day'} across your Pips. It never types a card number.`
-    : 'Every payment waits for you on a card.';
-  return `<div class="pip-page-row static"><span class="row-words"><strong>Payments${infoTip('pipPayingSays', 'Payments', esc(says))}</strong></span>`
+  return `<div class="pip-page-row static"><span class="row-words"><strong>Payments${infoTip('pipPayingSays', 'Payments', esc(payingSays(state.paying)))}</strong></span>`
     + `<select id="pipPaying" aria-label="Payments by ${esc(pipName)}" aria-describedby="pipPayingSays"${off}>`
     + [['ask', 'Ask me each time'], ['allow', 'Let it pay']].map(([value, label]) => `<option value="${value}"${value === state.paying ? ' selected' : ''}>${label}</option>`).join('')
-    + '</select></div>';
+    + '</select></div>' + (state.paying === 'allow' ? payLimits : '');
 }
 
 /**

@@ -62,6 +62,25 @@ export function pipsWelcomeMessage(auto: boolean, welcome: PipsWelcome): { type:
 /** Someone for whom nothing moved: "How Pips work now" still says how Pips work, without a list. */
 export const NO_PIPS_MOVED: PipsWelcome = { had_pips: false, folders: [], personal: [], do_it_all: [] };
 
+// ---- the Mac dialog (pips-sandbox-design §6, agreed 13 Nov) ----------------------------------------------------------
+// Once, only on a Mac whose Pips can't have their own computer (get_pip_runner's runner.boxes.available is false):
+// "Pips' own computers need a Mac with Apple silicon on macOS 26. …" with OK. OK or Esc is remembered in the editor's
+// global state for good (not per release: it is about the machine, not the release), so every window agrees. The
+// dialog is the page's (media/shared/pipswelcome.js, macNote).
+export const MAC_NOTE_KEY = "dgc.pipsMacNoteSeen";
+/** Whether the Mac dialog has not been answered in this editor yet. */
+export function macNoteDue(context: Kept): boolean {
+  try { return context?.globalState?.get?.(MAC_NOTE_KEY) !== true; } catch { return false; }
+}
+/** OK or Esc: never again, in any window of this editor. */
+export async function macNoteAnswered(context: Kept): Promise<void> {
+  try { await context?.globalState?.update?.(MAC_NOTE_KEY, true); } catch { /* closed in this window's page still */ }
+}
+/** runner.boxes, checked: DGC's own true or false. null: not an answer (nothing is shown on a guess). */
+export function boxesOf(value: any): { available: boolean } | null {
+  return value && typeof value === "object" && typeof value.available === "boolean" ? { available: value.available } : null;
+}
+
 /** A session id as DGC writes them; anything else is not one. */
 export function noteSession(value: unknown): string { return typeof value === "string" && SESSION_ID.test(value) ? value : ""; }
 function notesGone(context: Kept): string[] {

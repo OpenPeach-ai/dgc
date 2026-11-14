@@ -82,7 +82,6 @@ function pipsPage({ apiVersion = 58, state = level("approve", DONE), actions = [
     get_pip_working_notes: () => ({ pip_id: PIP, lines: [], text: "", max_lines: 60, max_bytes: 6000, bytes: 0, revision: "r0", updated_at: null }),
     list_pip_daily_log: () => ({ pip_id: PIP, days: [], next_before: null }),
     get_pip_level: () => (typeof state === "function" ? state() : state),
-    get_pips_payments: () => ({ payments: { limit: 3, default: 3, most: 20, paid: 0 } }),
     get_pip_backup: () => ({ backup: { pip_id: PIP, ...fallback } }),
     get_pips_backup: () => ({ backup: { provider: "", model: "" } }), get_pip_computers: () => null }[r.type]?.());
   async function drain() { for (let n = 0; n < 15; n++) { await flush(); for (const m of sent.filter((m) => m.type === "pipsRequest" && !answered.has(m.id))) { const result = defaults(m.request); if (result !== undefined) answer(m, result); } } }
@@ -121,7 +120,9 @@ test("choosing a level is one change, and its line is said once as the notice; A
   assert.equal(x.requests("set_pip_level").at(-1).request.level, "ask");
 });
 
-test("at Do it all a Pip's page has its rule for payments: Ask by default, Let it pay, and the day's count (API 75)", async () => {
+// (The day's count, "at most 3 times a day across your Pips", was retired on 13 Nov: Let it pay now opens the Pip's own
+// dollar limits under the rule. test/pip-pay-limits.test.mjs has them.)
+test("at Do it all a Pip's page has its rule for payments: Ask by default, Let it pay, and then its limits (API 75)", async () => {
   const x = pipsPage({ apiVersion: 79, state: level("full", [], "ask") }); await openInfo(x);
   const select = x.d.querySelector("#pipPaying");
   assert.ok(select, "under its level");
@@ -134,9 +135,11 @@ test("at Do it all a Pip's page has its rule for payments: Ask by default, Let i
   assert.deepEqual(JSON.parse(JSON.stringify(set.request)), { type: "set_pip_paying", pip_id: PIP, rule: "allow" });
   x.answer(set, level("full", [], "allow")); await x.drain();
   assert.equal(x.d.querySelector("#pipPaying").value, "allow");
-  const says = "It pays by itself, at most 3 times a day across your Pips. It never types a card number.";
-  assert.equal(x.d.querySelector("#pipPayingSays").textContent, says, "the day's count, read from DGC");
-  assert.match(x.d.body.textContent, /Ava may now pay by itself, at most 3 times a day across your Pips\./, "said once as the notice");
+  const says = "It pays by itself within the daily limit you set here. It never types a card number.";
+  assert.equal(x.d.querySelector("#pipPayingSays").textContent, says, "no count: its own daily limit");
+  assert.match(x.d.body.textContent, /Ava may now pay by itself, within its daily limit\./, "said once as the notice");
+  assert.ok(x.d.querySelector("#pip-pay-form #payUsd"), "its limits open under the rule");
+  assert.equal(x.requests("get_pips_payments").length, 0, "the count across all Pips is not read");
   for (const [api, state, why] of [[79, level("approve", [], "ask"), "below Do it all"], [74, level("full"), "an older DGC"]]) {
     const y = pipsPage({ apiVersion: api, state }); await openInfo(y);
     assert.ok(y.d.querySelector("#pipLevel"));

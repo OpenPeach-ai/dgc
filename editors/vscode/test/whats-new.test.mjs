@@ -116,7 +116,7 @@ const SLIDES = [
   ["Pips tell you, then fix", "When a check finds something, the Pip says what is wrong and why, fixes it in its own copy, and shows you the change to apply. What only you can do is said once and kept in one place."],
   ["Home is yours", "Home is now cards: Needs you, Recent, Running now, Token usage and more. Add, remove and arrange them with Cards; they change shape with the width."],
   ["Work, tidier", "Archive and restore sessions. A goal now runs as turns you can follow. Type @ and a Pip's name to hand it a job; its answer comes back to that session."],
-  ["Also new", "Change settings by asking. A fallback model on every surface. Incognito chats."],
+  ["Also new", "Change settings by asking. A fallback model on every surface. Daily payment limits in dollars. Incognito chats."],
 ];
 /** The dialog as it is on screen, or null when it is closed. */
 const now = (page) => page.evaluate(() => {
@@ -176,13 +176,13 @@ test("the dialog: a picture on top, the name and its text below, six dots, Skip 
   } finally { await x.close(); }
 });
 
-test("slide 6 is a list: Your Browser and payments are left out until they ship, and come back in their place when they do", async (t) => {
+test("slide 6 is a list: Your Browser is left out until it ships, and comes back in its place when it does (payments shipped, 14 Nov)", async (t) => {
   if (skipOrFail(t)) return;
   const x = await open();
   try {
-    const also = await x.page.evaluate(() => ({ now: window.DgcWhatsNew.alsoNew(), all: window.DgcWhatsNew.alsoNew(["browser", "payments"]) }));
+    const also = await x.page.evaluate(() => ({ now: window.DgcWhatsNew.alsoNew(), all: window.DgcWhatsNew.alsoNew(["browser"]) }));
     assert.equal(also.now, SLIDES[5][1]);
-    assert.doesNotMatch(also.now, /Browser|payment/i);
+    assert.doesNotMatch(also.now, /Browser/i);
     assert.equal(also.all, "Change settings by asking. A fallback model on every surface. Your Browser, where you sign in once for your Pips. Daily payment limits in dollars. Incognito chats.");
   } finally { await x.close(); }
 });

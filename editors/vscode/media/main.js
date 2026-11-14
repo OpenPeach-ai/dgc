@@ -516,6 +516,7 @@
   // live stream, draft, scroll position and session; it never changes that session.
   let pipsApp = null, pipsOpen = false, pipsViewVisible = true, pipsWindowFocused = true;
   let pipsWelcome = null;                // "Your Pips moved into one list", once it has been opened (openPipsWelcome)
+  let pipsMacNote = null;                // the Mac dialog, once it has been opened (openPipsMacNote)
   const pipsListeners = new Set();
   let pipSetupCards = null;
   function setupCards() {
@@ -652,6 +653,7 @@
   function closePips(back = true) {
     if (pipsOpen) vscode.postMessage({ type: "pipsTabClosed" });
     pipsWelcome?.close(false);                 // the pop-up belongs to the tab: left unanswered, it comes again
+    pipsMacNote?.close(false);
     pipsOpen = false;
     pipsApp?.setVisible?.(false);
     document.body.classList.remove("pips-active");
@@ -13054,6 +13056,14 @@ function permissionChoices(ev) {
       onOpenPip: (pip) => openPipsAt({ pip, section: "chat" }) });
     pipsWelcome.open(msg.welcome);
   }
+  // The Mac dialog (pips-sandbox-design §6; media/shared/pipswelcome.js): once, over the Pips tab, on a Mac whose Pips
+  // can't have their own computer. OK or Esc tells the host, which never shows it again (src/pipsWelcome.ts).
+  function openPipsMacNote() {
+    const layer = $("pips-mac-note");
+    if (!layer || !window.DgcPipsWelcome?.macNote || !pipsOpen) return;
+    pipsMacNote = pipsMacNote || window.DgcPipsWelcome.macNote(layer, { onSeen: () => vscode.postMessage({ type: "pipsMacNoteSeen" }) });
+    pipsMacNote.open();
+  }
   // The quiet note above a Work session that used to get Pip cards (pips-flow-design §3.3, item 3). The session's
   // history names the Pips; the host says whether the note was ever closed (it remembers per session). It is drawn
   // above the chat, never in it: the model never sees it and nothing is sent to DGC. × or one of its Pips opened:
@@ -13174,6 +13184,7 @@ function permissionChoices(ev) {
     if (msg.type === "homeCards") { home?.layout(msg); return; }
     if (msg.type === "whatsNew") { openWhatsNew(msg); return; }
     if (msg.type === "pipsWelcome") { openPipsWelcome(msg); return; }
+    if (msg.type === "pipsMacNote") { openPipsMacNote(); return; }
     if (msg.type === "pipSessionNote") { sessionNoteShow(msg); return; }
     if (msg.type === "homeUsage") { home?.usage(msg); return; }
     if (msg.type === "homeWeather") { home?.weather(msg); return; }

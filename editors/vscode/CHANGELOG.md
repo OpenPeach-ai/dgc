@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Payments in dollars** on a Pip's page at Do it all: "Allow payments up to $___ a day" (required before it pays by itself; No limit is a choice, never the default), optional "At most ___ payments a day" and "Only on these sites", with what it used today; Pips settings has "All Pips together: up to $___ a day". The 3-a-day count is gone.
+- **Knows about you**: a switch on every Pip's page (on by default); every Pip now shows what it remembers, its working notes, routines and a goal.
+- **Sent to the web**: one row on a Pip's page lists each site its computer reached, how much went out and came back, and anything blocked for carrying a secret.
+- On a Mac whose Pips can't have their own computer, one dialog says so, once.
 - **The agent map has a Pips section**: Pips working on a job from this session (with Stop), then Pips of this folder that are running or need you (Open goes to their chat), then one quiet line ("2 more Pips in this folder are idle · 5 Pips elsewhere · All Pips"); Hide / Show; the map button shows when a Pip works for this session.
 - **Your Pips moved into one list**: the first time the Pips tab opens after the update, someone who had Pips sees what moved (by folder, the Personal ones, any on Do it all) once; Pips settings has "How Pips work now" to see it again.
 - **A Work session that used to get Pip cards** says once, quietly at its top, that Pips report in their own chats now, with a button to open each; × closes it for good.

@@ -19,15 +19,21 @@ export function notesPage(value, pip) {
 }
 
 /** Its page: "What it remembers", newest first, each with Forget; a field to add one; Forget all (asks first). */
-export function notesMarkup(notes, {esc, busy = false, error = '', pipName = 'It', adding = '', confirmAll = false}) {
+export function notesMarkup(notes, {esc, busy = false, error = '', pipName = 'It', adding = '', confirmAll = false, knows = null}) {
   const off = busy ? ' disabled' : '';
-  if (!notes) return `<section class="pip-page-group" aria-label="What it remembers"><h3 class="pip-page-label">What it remembers</h3>${error ? `<p class="error" role="alert">${esc(error)}</p>` : '<p class="muted" role="status">Loading…</p>'}</section>`;
+  // "Knows about you" (Pips API 96, pips-flow-design Q8; `knows`: {on, busy, error}, null where DGC says none): what DGC
+  // remembers about you reaches this Pip, on by default. Beside what the Pip itself remembers: both are what it knows of you.
+  const knowsRow = knows ? `<div class="pip-page-row static pip-knows-you"><span class="row-words"><strong>Knows about you${infoTip('pipKnowsYouSays', 'Knows about you', `What DGC remembers about you (you, the people in your life, how you like things done) reaches ${esc(pipName)}.`)}</strong>`
+    + `<small>Settings › Memory turns this off for every Pip.</small></span>`
+    + `<label class="switch"><input type="checkbox" role="switch" id="pipKnowsYou" aria-label="Knows about you" aria-describedby="pipKnowsYouSays"${knows.on ? ' checked' : ''}${busy || knows.busy ? ' disabled' : ''}><span aria-hidden="true"></span></label></div>`
+    + (knows.error ? `<p class="error" role="alert">${esc(knows.error)}</p>` : '') : '';
+  if (!notes) return `<section class="pip-page-group" aria-label="What it remembers"><h3 class="pip-page-label">What it remembers</h3>${knowsRow}${error ? `<p class="error" role="alert">${esc(error)}</p>` : '<p class="muted" role="status">Loading…</p>'}</section>`;
   const rows = notes.map(n => `<li class="pip-page-row static note-row"><span class="row-words"><span>${esc(n.text)}</span><small>${n.source === 'you' ? 'You added this' : everywhere(n) ? 'From your chat · in your memory everywhere in DGC' : 'From your chat'}</small></span>`
     + `<button type="button" class="quiet pill" data-note-forget="${esc(n.id)}" aria-label="Forget: ${esc(n.text)}"${off}>Forget</button></li>`).join('');
   const all = notes.length > 1 ? (confirmAll
     ? `<span class="note-confirm">Forget all ${notes.length}? <button type="button" class="quiet pill danger-text" data-note-forget-all="yes"${off}>Forget all</button><button type="button" class="quiet pill" data-note-forget-all="no"${off}>Keep them</button></span>`
     : `<button type="button" class="link" data-note-forget-all="ask"${off}>Forget all…</button>`) : '';
-  return `<section class="pip-page-group" aria-label="What it remembers"><h3 class="pip-page-label">What it remembers${infoTip('pipNotesSays', 'What it remembers', `As you chat, ${esc(pipName)} keeps short notes of what you tell it, like what you like or who people are. They show here, and you can forget any of them.`)}</h3>`
+  return `<section class="pip-page-group" aria-label="What it remembers"><h3 class="pip-page-label">What it remembers${infoTip('pipNotesSays', 'What it remembers', `As you chat, ${esc(pipName)} keeps short notes of what you tell it, like what you like or who people are. They show here, and you can forget any of them.`)}</h3>` + knowsRow
     + (notes.length ? `<ul class="pip-page-list">${rows}</ul>` : `<p class="pip-page-empty">Nothing yet.</p>`)
     + `<form id="note-add-form" class="pip-page-row static note-add"><label for="noteAdd" class="sr-only">Add something for ${esc(pipName)} to remember</label>`
     + `<input id="noteAdd" data-draft="noteAdd" maxlength="300" autocomplete="off" placeholder="Add something for ${esc(pipName)} to remember" value="${esc(adding)}"${off}>`

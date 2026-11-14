@@ -40,7 +40,7 @@ import { openCodePreview } from "./codePreview";
 import { DEV_SAVED_KEY, DEV_WARNED_KEY, devLimitsTable, devLimitValues, devShown, devToolsOffered, devToolsShown, type DevLimit } from "./devMode";
 import { INSTANCE as STUCK_INSTANCE, heartbeatOf, isStuck, stuckHolder, type StuckFacts } from "./stuckHolder";
 import { whatsNewAnswered, whatsNewDue, whatsNewMessage } from "./whatsNew";
-import { NO_PIPS_MOVED, WELCOME_API, noteSession, pipsWelcomeAnswered, pipsWelcomeDue, pipsWelcomeMessage, pipsWelcomeOf, sessionNoteClosed, sessionNoteGone } from "./pipsWelcome";
+import { NO_PIPS_MOVED, WELCOME_API, boxesOf, macNoteAnswered, macNoteDue, noteSession, pipsWelcomeAnswered, pipsWelcomeDue, pipsWelcomeMessage, pipsWelcomeOf, sessionNoteClosed, sessionNoteGone } from "./pipsWelcome";
 import { homePages, homePagesAttr, homeShowAttr, noteHomePage, pipHomeDismissedAttr, rememberHomePagesDismissed, rememberHomeShow, rememberPipHomeDismissed } from "./pipHomeDismiss";
 import { addProfile, adoptWorkingRoute, defaultProfileId, firstTakesDefault, keepWorkingRoute, hasRunnableProfile, listProfiles, markDefaultProfile, profileCredential, removeProfile, startingModel } from "./providerProfiles.js";
 
@@ -2950,7 +2950,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  whose Pips came from 0.51, until Got it, Esc or a click outside. Never in a session's tab, and never in a launch
    *  that already showed What's new. A DGC that isn't up yet is asked when it is (pipsBridgeReady). */
   async offerPipsWelcome(): Promise<void> {
-    if (this.tab || !this.pipsTabShown || this.openedByItself || this.pipsWelcomeAsking || this.pipsWelcomeNone || !pipsWelcomeDue(this.context)) { return; }
+    if (this.tab || !this.pipsTabShown || this.openedByItself || this.macNoteShown || this.pipsWelcomeAsking || this.pipsWelcomeNone || !pipsWelcomeDue(this.context)) { return; }
     const bridge = this.pipsEditor;
     if (!bridge?.flowReady()) { return; }
     this.pipsWelcomeAsking = true;
@@ -2959,12 +2959,42 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (!welcome) { return; }
       if (!welcome.had_pips) { this.pipsWelcomeNone = true; return; }
       // (Answered in another window, or the tab left, while DGC was asked: it waits for the next visit.)
-      if (this.pipsTabShown && !this.openedByItself && pipsWelcomeDue(this.context)) { this.post(pipsWelcomeMessage(true, welcome)); }
+      if (this.pipsTabShown && !this.openedByItself && !this.macNoteShown && pipsWelcomeDue(this.context)) { this.pipsWelcomeShown = true; this.post(pipsWelcomeMessage(true, welcome)); }
     } catch { /* DGC didn't answer: asked again at the next visit to the tab */ }
     finally { this.pipsWelcomeAsking = false; }
   }
   /** A DGC is connected to the Pips bridge: the welcome a tab opened too early for is offered now. */
-  async pipsBridgeReady(): Promise<void> { await this.offerPipsWelcome(); }
+  async pipsBridgeReady(): Promise<void> { await this.offerPipsWelcome(); await this.offerMacNote(); }
+
+  // ---- the Mac dialog (pips-sandbox-design §6, agreed 13 Nov; src/pipsWelcome.ts) ----
+  /** The machine DGC runs on, as the editor knows it (the extension runs beside DGC). */
+  hostPlatform: () => string = () => process.platform;
+  /** The Pips welcome, or the Mac dialog, opened by itself in this launch: the other one waits for a later launch. */
+  private pipsWelcomeShown = false;
+  private macNoteShown = false;
+  /** DGC is being asked, or said this Mac's Pips have their own computers (asked once a launch). */
+  private macNoteAsking = false;
+  private macNoteNone = false;
+  /** "Pips' own computers need a Mac with Apple silicon on macOS 26. …" by itself: once, when the Pips tab opens on a
+   *  Mac whose DGC (Pips API 96) says runner.boxes.available is false, until OK or Esc. Never on another machine, never
+   *  in a session's tab, and never in a launch that showed What's new or the Pips welcome. Left unanswered (the tab was
+   *  left), it comes again at the next visit. The backend never decides to show it. */
+  async offerMacNote(): Promise<void> {
+    if (this.tab || !this.pipsTabShown || this.openedByItself || this.pipsWelcomeShown || this.macNoteAsking || this.macNoteNone
+      || this.hostPlatform() !== "darwin" || !macNoteDue(this.context)) { return; }
+    if (this.macNoteShown) { this.post({ type: "pipsMacNote" }); return; }     // unanswered at an earlier visit: DGC already said
+    const bridge = this.pipsEditor;
+    if (!bridge?.flowReady()) { return; }
+    this.macNoteAsking = true;
+    try {
+      const boxes = boxesOf(await bridge.boxes());
+      if (!boxes) { return; }
+      if (boxes.available) { this.macNoteNone = true; return; }
+      // (Answered in another window, or the tab left, while DGC was asked: it waits for the next visit.)
+      if (this.pipsTabShown && !this.openedByItself && !this.pipsWelcomeShown && macNoteDue(this.context)) { this.macNoteShown = true; this.post({ type: "pipsMacNote" }); }
+    } catch { /* DGC didn't answer: asked again at the next visit to the tab */ }
+    finally { this.macNoteAsking = false; }
+  }
   /** Pips settings › How Pips work now: the pop-up again, whenever asked. Someone with nothing moved is told how Pips
    *  work without a list; a DGC that can't be asked right now shows that too. */
   async showPipsWelcome(): Promise<void> {
@@ -6411,7 +6441,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         await whatsNewAnswered(this.context);
         break;
       // The Pips tab's one-time welcome and the quiet note above an old Work session (src/pipsWelcome.ts).
-      case "pipsTabOpened": this.pipsTabShown = true; await this.offerPipsWelcome(); break;
+      case "pipsTabOpened": this.pipsTabShown = true; await this.offerPipsWelcome(); await this.offerMacNote(); break;
+      case "pipsMacNoteSeen": await macNoteAnswered(this.context); break;             // OK or Esc in the Mac dialog: never again
       case "pipsTabClosed": this.pipsTabShown = false; break;
       case "pipsWelcomeSeen": await pipsWelcomeAnswered(this.context); break;        // Got it, Esc, a click outside, or a Pip opened from it
       case "pipsWelcomeOpen": await this.showPipsWelcome(); break;                    // Pips settings › How Pips work now
@@ -10896,6 +10927,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 </div>
 <div id="whats-new" class="wn-layer dgc-scrim" role="dialog" aria-modal="true" hidden></div>
 <div id="pips-welcome" class="pw-layer dgc-scrim" role="dialog" aria-modal="true" hidden></div>
+<div id="pips-mac-note" class="pw-layer dgc-scrim" role="dialog" aria-modal="true" hidden></div>
 <div id="goal-editor" class="modal-layer dgc-scrim" role="dialog" aria-modal="true" aria-labelledby="goal-editor-title" hidden>
   <div class="goal-dialog dgc-dialog">
     <div class="goal-dialog-mark"><span class="codicon codicon-target" aria-hidden="true"></span></div>

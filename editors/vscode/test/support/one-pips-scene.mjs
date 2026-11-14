@@ -21,6 +21,14 @@ export const CHECK = "run_" + hex("1"), FIXRUN = "run_" + hex("2"), OLDER = "run
  *    own      its last reply changed its own schedule at once (an own-change line, with Undo)
  *    order    the ids of list_pips {scope: "all"} after Core, in DGC's order (a function reads it each time)
  *    empty    a DGC with no Pips at all
+ *    paying   a Pip's rule for payments at Do it all ("ask" by default; "allow": you let it pay)
+ *    limits   its pay limits as get_pip_level says them ({usd_per_day, max_count, sites}; none set by default);
+ *             false: a DGC that doesn't say them (it only answers set_pip_pay_limits)
+ *    spent    dollars it paid in the last day; total: all Pips together {usd_per_day, spent_today}
+ *    knows    false: "Knows about you" is off for every Pip
+ *    sent     list_pip_sent's sites (none by default)
+ *    boxes    get_pip_runner's runner.boxes ({available: true, why: ""} by default)
+ *    notes    a Pip's notes (list_pip_notes; none by default)
  *  Returns {answer(request) → result | undefined | {error}, state}. */
 export function makeBackend(o = {}) {
   const hex = (c) => c.repeat(32), ws = (c) => "ws_" + hex(c), pid = (c) => "pip_" + hex(c);
@@ -29,7 +37,10 @@ export function makeBackend(o = {}) {
   const CHECK = "run_" + hex("1"), FIXRUN = "run_" + hex("2"), OLDER = "run_" + hex("3"), FIX = "pipfix_" + hex("1"), CHANGE = "pchange_" + hex("1"), WAIT = "pipwait_" + hex("1");
   const now = Date.now(), ago = (minutes) => new Date(now - minutes * 60000).toISOString();
   const state = { fix: o.fix || "none", waiting: o.waiting === false ? "none" : "waiting", level: o.level || "ask", change: o.fix === "applied" ? "applied" : "pending", committed: false,
-    order: o.order || [GST, ERP, MORNINGS, BEDS], requests: [], unread: o.unread || {}, made: [], helper: 0 };
+    order: o.order || [GST, ERP, MORNINGS, BEDS], requests: [], unread: o.unread || {}, made: [], helper: 0,
+    paying: o.paying || "ask", limits: o.limits === false ? null : { usd_per_day: null, max_count: null, sites: null, ...(o.limits || {}) }, spent: o.spent || 0,
+    total: { usd_per_day: null, spent_today: 0, ...(o.total || {}) }, knows: {}, notes: (o.notes || []).slice() };
+  const said = () => o.limits === false ? {} : { pay_limits: { ...state.limits }, spent_today: state.spent };
   const types = ["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"].map((id, character_index) => ({ id, character_index, name: id[0].toUpperCase() + id.slice(1),
     role: id, description: "Reads the code and reports what it finds", available: id !== "core", unavailable_reason: id === "core" ? "Core is the main chat." : null, default_name: id[0].toUpperCase() + id.slice(1),
     default_goal: "Review the project", engine: id === "core" ? null : id === "patch" ? "patch" : id === "pulse" ? "test" : id === "quill" ? "documentation_draft" : "source_audit" }));
@@ -44,7 +55,7 @@ export function makeBackend(o = {}) {
     { folder: "/home/me/code/garden", name: "garden", here: false, exists: true, sessions: 1, pips: 1, workspace_id: GARDEN, updated_at: ago(90) },
     { folder: "/home/me/code/lime_tiles", name: "lime_tiles", here: false, exists: true, sessions: 3, pips: 2, workspace_id: LIME, updated_at: ago(10) },
     { folder: "/home/me/code/notes", name: "notes", here: false, exists: false, sessions: 1, pips: 0, workspace_id: null, updated_at: ago(9000) }];
-  const runner = { runner_id: "r", status: "running", online: true, paused: false, counts: { queued: 0, running: 0, cancelling: 0 } };
+  const runner = { runner_id: "r", status: "running", online: true, paused: false, counts: { queued: 0, running: 0, cancelling: 0 }, boxes: { available: true, why: "", ...(o.boxes || {}) } };
   const controls = { version: 1, mode: "read_only", options: { context_size: 8192, thinking: "off" }, options_source: "last_message", inherited_context_size: 1048576, effective_context_size: 8192,
     context_min: 2048, context_max: 32768, thinking_levels: ["off", "low", "medium", "high", "xhigh"], reasoning_control: "provider_dependent", reasoning_note: "n", context_note: "n" };
   const findings = [
@@ -107,7 +118,7 @@ export function makeBackend(o = {}) {
       if (r.scope === "projects") return listed(pips.filter((x) => x.workspace_id !== P), r);
       return listed(pips.filter((x) => x.workspace_id === r.workspace_id), r);
     },
-    get_pip: (r) => { const found = pips.find((x) => x.id === r.pip_id); return found ? { pip: { ...found, ...(found.id === GST ? { latest_run: { id: CHECK, status: "succeeded" } } : {}) } } : { error: { code: "not_found", message: "That Pip isn’t on this computer. It may have been deleted." } }; },
+    get_pip: (r) => { const found = pips.find((x) => x.id === r.pip_id); return found ? { pip: { ...found, knows_you: found.id in state.knows ? state.knows[found.id] : o.knows !== false, ...(found.id === GST ? { latest_run: { id: CHECK, status: "succeeded" } } : {}) } } : { error: { code: "not_found", message: "That Pip isn’t on this computer. It may have been deleted." } }; },
     create_pip: (r) => { const made = pip("pip_" + hex(String(state.made.length + 1)), r.workspace_id, r.name, r.pip_type, { goal: r.goal || "Help with what I ask in this chat" }); pips.push(made); state.made.push(made); state.order = [made.id, ...(typeof state.order === "function" ? state.order() : state.order)]; return { pip: made }; },
     introduce_pip: () => ({ started: true }), add_project_folder: (r) => ({ workspace: { id: ws("7"), name: r.folder.split("/").pop(), kind: "git" } }),
     get_pip_runner: () => ({ runner }), get_workspace_context: (r) => ({ context: { workspace_id: r.workspace_id, revision: 0, entries: [] } }),
@@ -127,8 +138,28 @@ export function makeBackend(o = {}) {
     list_pip_approvals: () => ({ approvals: [], next_cursor: null }), list_pip_checkpoints: () => ({ checkpoints: [], next_cursor: null }), get_pip_digest: () => undefined,
     get_pip_computer: (r) => { const has = pips.find((x) => x.id === r.pip_id)?.workspace_id === P ? false : o.box !== false && r.pip_id === GST; return { computer: { pip_id: r.pip_id, granted: has, available: has, reason: "", pending: 0, actions: [] } }; },
     get_pip_computer_desktop: (r) => ({ desktop: { pip_id: r.pip_id, available: false, reason: "No desktop here.", install: "", using: false, browser: "Chromium", chrome_install: "" } }),
-    get_pip_level: (r) => ({ pip_id: r.pip_id, kind: pips.find((x) => x.id === r.pip_id)?.workspace_id === P ? "personal" : "project", level: state.level, default: "ask", levels: ["ask", "approve", "full"].map((l) => ({ level: l, name: NAMES[l], says: SAYS[l] })), on_its_own: [] }),
-    set_pip_level: (r) => { state.level = r.level; return answers.get_pip_level(r); },
+    // (As DGC: a Pip with no folder has a rule for payments, Allow only at Do it all. Its limits ride along where this
+    //  stand-in says them: `limits: false` is a DGC that only answers set_pip_pay_limits.)
+    get_pip_level: (r) => { const personal = pips.find((x) => x.id === r.pip_id)?.workspace_id === P;
+      return { pip_id: r.pip_id, kind: personal ? "personal" : "project", level: state.level, default: "ask", levels: ["ask", "approve", "full"].map((l) => ({ level: l, name: NAMES[l], says: SAYS[l] })), on_its_own: [],
+        ...(personal ? { paying: state.level === "full" ? state.paying : "ask", ...said() } : {}) }; },
+    set_pip_level: (r) => { state.level = r.level; if (r.level !== "full") state.paying = "ask"; return answers.get_pip_level(r); },
+    set_pip_paying: (r) => { state.paying = r.rule; return answers.get_pip_level(r); },
+    set_pip_pay_limits: (r) => { if (typeof r.usd_per_day === "number" && !(r.usd_per_day > 0)) return { error: { code: "invalid_request", message: "Set a daily limit above $0, up to $1,000,000." } };
+      state.limits = { ...(state.limits || { usd_per_day: null, max_count: null, sites: null }), ...("usd_per_day" in r ? { usd_per_day: r.usd_per_day } : {}), ...("max_count" in r ? { max_count: r.max_count } : {}),
+        ...("sites" in r ? { sites: r.sites && r.sites.length ? [...new Set(r.sites.map((x) => x.toLowerCase()))].sort() : null } : {}) };
+      return { pip_id: r.pip_id, limits: { ...state.limits }, spent_today: state.spent }; },
+    get_pips_payments: () => ({ payments: { ...state.total } }),
+    set_pips_payments: (r) => { state.total = { ...state.total, usd_per_day: r.usd_per_day }; return { payments: { ...state.total } }; },
+    set_pip_knows_you: (r) => { state.knows[r.pip_id] = r.on; return { pip_id: r.pip_id, knows_you: r.on }; },
+    list_pip_sent: (r) => ({ pip_id: r.pip_id, sites: o.sent || [], note: "A secure (HTTPS) connection from a Pip's computer is a sealed tunnel: DGC sees which site it goes to and how much goes out, never what is inside." }),
+    // What every Pip keeps (Pips API 96, Q8): notes, working notes, routines and a goal, for a Pip with a folder too.
+    list_pip_notes: (r) => ({ pip_id: r.pip_id, notes: state.notes, max: 60 }),
+    list_pip_routines: (r) => ({ pip_id: r.pip_id, workspace_id: pips.find((x) => x.id === r.pip_id)?.workspace_id || P, routines: [] }),
+    get_pip_goal: (r) => ({ pip_id: r.pip_id, goal: null }),
+    get_pip_working_notes: (r) => ({ pip_id: r.pip_id, lines: [], text: "", max_lines: 60, max_bytes: 6000, bytes: 0, revision: "r0", updated_at: null }),
+    list_pip_daily_log: (r) => ({ pip_id: r.pip_id, days: [], next_before: null }),
+    list_pip_apps: () => ({ apps: [] }), list_apps: () => ({ apps: [] }),
     list_pip_project_changes: (r) => ({ pip_id: r.pip_id, changes: r.pip_id === GST && ["ready", "applied"].includes(state.fix) ? [change()] : [] }),
     get_pip_project_change: (r) => ({ id: r.change_id, path: r.path, diff: "@@ -210,3 +210,4 @@\n def make_bill(order):\n-    bill = Bill(order)\n+    bill = Bill(order)\n+    bill.transporter_id = order.transporter_id\n     return bill\n" }),
     apply_pip_project_change: () => { state.change = "applied"; return change(); }, discard_pip_project_change: () => { state.change = "discarded"; return change(); },

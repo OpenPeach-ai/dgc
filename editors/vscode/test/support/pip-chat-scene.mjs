@@ -236,7 +236,7 @@ export const host = (opts) => `(${function (PIP, opts) {
       get_pip_level: () => ({ pip_id: PIP, level, default: "ask", kind: project ? "project" : "personal", on_its_own: done, ...(project || level !== "full" ? {} : { paying: "ask" }),
         levels: [["ask", "Ask me first"], ["approve", "Approve for me"], ["full", "Do it all"]].map(([l, n]) => ({ level: l, name: n, says: says[l] })) }),
       set_pip_level: (r) => ({ ...answers.get_pip_level(), level: r.level }),
-      get_pips_payments: () => ({ payments: { limit: 3, default: 3, most: 20, paid: 0 } }),
+      get_pips_payments: () => ({ payments: { usd_per_day: null, spent_today: 0 } }),
       get_pip_eyes: () => ({ eyes: { pip_id: PIP, model: "deepseek-v4.1-flash:cloud", sees: false, choice: "ask", vision_model: "glm-5.3:cloud" } }),
       get_pip_backup: () => ({ backup: { pip_id: PIP, provider: "", model: "" } }), list_pip_templates: () => ({ templates: [] }),
       get_pip_artifacts: () => ({ artifacts: { report_as: "chat", dashboards: ["ar_" + "1".repeat(16)], report_doc: "", report_sheet: "" } }),

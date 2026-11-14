@@ -9,6 +9,11 @@
 // those cards by name, each with "Open <name>". Not a pop-up, never the focus, not in the transcript. × closes it for
 // good, and so does opening one of its Pips.
 //
+// The Mac dialog (pips-sandbox-design §6, agreed 13 Nov): once, over the Pips tab, only on a Mac whose Pips can't have
+// their own computer. Its first sentence is its title, the rest one paragraph, and one button: OK. OK and Esc close it
+// for good: the page says {type: "pipsMacNoteSeen"}. A click beside it leaves it open (a notice shown once is not lost
+// to a stray click). It draws into #pips-mac-note, in the welcome's own look.
+//
 // A classic script, loaded before the side bar's own (window.DgcPipsWelcome). The pop-up draws into #pips-welcome and
 // the note into #pip-session-note (src/panel.ts); the look is media/shared/pipswelcome.css. Everything is built with
 // textContent: no markup is ever taken from a message.
@@ -133,6 +138,48 @@
     };
   }
 
+  // ---- the Mac dialog -----------------------------------------------------------------------------------------------
+  const MAC_TITLE = "Pips’ own computers need a Mac with Apple silicon on macOS 26.";
+  const MAC_SAYS = "Until then, folder Pips can only read their folder, and Your Browser runs as a separate Chrome profile on this Mac (less walled off than a computer). A Pip can still use your own Chrome when you allow it.";
+  function macNote(layer, { onSeen } = {}) {
+    let back = null;
+    const dialog = el("div", "pw-dialog pw-mac dgc-dialog");
+    const body = el("div", "pw-body"), foot = el("div", "pw-foot");
+    const title = el("h2", "pw-title", MAC_TITLE); title.id = "pw-mac-title";
+    const ok = el("button", "pw-got dgc-btn primary", "OK"); ok.type = "button";
+    body.append(title, el("p", "pw-lead", MAC_SAYS));
+    foot.append(ok);
+    dialog.append(body, foot);
+    layer.replaceChildren(dialog);
+    layer.setAttribute("aria-labelledby", "pw-mac-title");
+    function close(seen = true) {
+      if (layer.hidden) return;
+      layer.hidden = true;
+      document.removeEventListener("keydown", keys, true);
+      if (seen && typeof onSeen === "function") onSeen();
+      try { if (back && back.isConnected) back.focus(); } catch { /* the page's own focus */ }
+      back = null;
+    }
+    function keys(e) {
+      if (layer.hidden) return;
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(true); return; }
+      // The keyboard stays on its one button while it is open.
+      if (e.key === "Tab") { e.preventDefault(); e.stopPropagation(); ok.focus(); }
+    }
+    ok.addEventListener("click", () => close(true));
+    return {
+      open() {
+        if (layer.hidden) back = document.activeElement;
+        layer.hidden = false;
+        document.removeEventListener("keydown", keys, true);
+        document.addEventListener("keydown", keys, true);
+        try { ok.focus({ preventScroll: true }); } catch { /* no focus to give */ }
+        return true;
+      },
+      close, isOpen: () => !layer.hidden,
+    };
+  }
+
   // ---- the note above an old Work session ------------------------------------------------------------------------
   /** The Pips of a history's report cards, each once, in the order their cards come. */
   function reporters(items) {
@@ -172,5 +219,5 @@
     return true;
   }
 
-  root.DgcPipsWelcome = { mount, note, reporters, sentenceNames };
+  root.DgcPipsWelcome = { mount, macNote, note, reporters, sentenceNames };
 })();

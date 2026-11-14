@@ -144,41 +144,34 @@ test('the desktop notifications switch says when this computer cannot show them'
  assert.throws(()=>model.pipsDesktopNotifications(off({last:{shown:'no',at:'x'}})),/invalid/);
 });
 
-test('payments a day: 3 by default, a number you change, its words from the reply, and none before API 75', async()=>{
- const pay=(extra={})=>({limit:3,default:3,most:20,paid:0,...extra});
- const x=setup({api:75});await x.drain({get_pips_payments:()=>({payments:pay()})});
- assert.equal(x.requests('get_pips_payments').length,1);
- const box=x.d.getElementById('pips-pay-limit');assert.ok(box,'in the runner controls');
- assert.deepEqual([box.type,box.value,box.min,box.max],['number','3','1','20']);
- assert.equal(x.d.querySelector('label[for="pips-pay-limit"]').textContent,'Payments a day');
- assert.match(x.d.body.textContent,/A Pip you let pay \(on its page, at Do it all\) pays by itself at most 3 times a day across your Pips \(0 in the last day\)\. Every other payment asks you\./);
- for(const bad of ['0','21','2.5','']){
-  const el=x.d.getElementById('pips-pay-limit');el.value=bad;el.dispatchEvent(new x.w.Event('change',{bubbles:true}));await flush();
-  assert.equal(x.requests('set_pips_payments').length,0,bad+': not sent');
-  assert.match(x.d.body.textContent,/Choose a whole number from 1 to 20\./);
+// The count of 10 Nov ("Payments a day: 3", across all Pips, in these Controls) was retired on 13 Nov: a Pip's limits are
+// dollars a day on its own page, and "All Pips together" is in Pips settings (test/pip-pay-limits.test.mjs).
+test('the runner\'s Controls hold no payments count any more, at any API; the host still gates paying by API', async()=>{
+ for(const api of [75,96]){
+  const x=setup({api});await x.drain({get_pips_payments:()=>({payments:{usd_per_day:null,spent_today:0}})});
+  assert.equal(x.d.getElementById('pips-pay-limit'),null,`API ${api}: no count in the runner controls`);
+  assert.doesNotMatch(x.d.body.textContent,/Payments a day|times a day across your Pips/);
+  x.d.getElementById('runner-controls-toggle')?.click();await x.drain({get_pips_payments:()=>({payments:{usd_per_day:null,spent_today:0}})});
+  assert.equal(x.requests('get_pips_payments').length,0,`API ${api}: Controls read no payments`);
  }
- const again=x.d.getElementById('pips-pay-limit');again.value='5';again.dispatchEvent(new x.w.Event('change',{bubbles:true}));await flush();
- const sent=x.requests('set_pips_payments')[0];assert.deepEqual(JSON.parse(JSON.stringify(sent.request)),{type:'set_pips_payments',limit:5});
- x.answer(sent,{payments:pay({limit:5,paid:1})});await x.drain();
- assert.match(x.d.body.textContent,/Pips you let pay may now pay by themselves at most 5 times a day across your Pips\./);
- assert.match(x.d.body.textContent,/at most 5 times a day across your Pips \(1 in the last day\)/);
- // Opening Controls again reads it again: a payment made since shows in its count.
- x.d.getElementById('runner-controls-toggle').click();await x.drain({get_pips_payments:()=>({payments:pay({limit:5,paid:2})})});
- assert.equal(x.requests('get_pips_payments').length,2);
- assert.match(x.d.body.textContent,/\(2 in the last day\)/);
- assert.throws(()=>model.pipsPayments({on:true,limit:3,paid:0}),/didn’t load/);
- assert.throws(()=>model.pipsPayments(pay({limit:21})),/didn’t load/);
- const old=setup({api:74});await old.drain();
- assert.equal(old.d.getElementById('pips-pay-limit'),null,'an older DGC has no count');
- assert.equal(old.requests('get_pips_payments').length,0);
+ assert.throws(()=>model.pipsPayments({limit:3,default:3,most:20,paid:0}),/didn’t load/,'the old count\'s answer is not one');
+ assert.deepEqual(model.pipsPayments({usd_per_day:null,spent_today:0}),{usd_per_day:null,spent_today:0});
  // The host refuses them below API 75.
  const view=load(viewCode,(name)=>(name==='vscode'?{}:require(name)));
- for(const api of [74,75])for(const request of [{type:'set_pips_payments',limit:5},{type:'set_pip_paying',pip_id:'pip_1',rule:'allow'}]){
+ for(const api of [74,75])for(const request of [{type:'set_pips_payments',usd_per_day:50},{type:'set_pip_paying',pip_id:'pip_1',rule:'allow'}]){
   const posted=[],forwarded=[];const editor=new view.PipsEditor({},m=>{forwarded.push(m);return true;},()=>{});
   editor.attach(m=>posted.push(m));editor.ready({pips_supported:true,pips_enabled:true,pips_api_version:api},{});
   editor.receive({type:'pipsRequest',id:'s',request});
   if(api<75){assert.equal(forwarded.length,0);assert.match(posted.find(m=>m.id==='s').error.message,/Update DGC to let Pips pay/);}
   else assert.equal(forwarded.length,1,request.type);
+ }
+ // A Pip's own limits are Pips API 96's.
+ for(const api of [95,96]){
+  const posted=[],forwarded=[];const editor=new view.PipsEditor({},m=>{forwarded.push(m);return true;},()=>{});
+  editor.attach(m=>posted.push(m));editor.ready({pips_supported:true,pips_enabled:true,pips_api_version:api},{});
+  editor.receive({type:'pipsRequest',id:'s',request:{type:'set_pip_pay_limits',pip_id:'pip_1',usd_per_day:50}});
+  if(api<96){assert.equal(forwarded.length,0);assert.match(posted.find(m=>m.id==='s').error.message,/Update DGC to set how much a Pip may pay/);}
+  else assert.equal(forwarded.length,1);
  }
 });
 
