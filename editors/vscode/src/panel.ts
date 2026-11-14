@@ -113,6 +113,8 @@ const PIPS_ATTENTION_KEY = "dgc.pipsAttention.v1";
 /** Whether the side bar's last backend offered ChatDGC: the next window shows Work | Chat at once, not when its
  *  backend has started (seconds, with the user's MCP servers and plugins starting first). */
 const CHATDGC_SEEN_KEY = "dgc.chatdgcSeen.v1";
+/** The agent map's Pips section, Hide / Show: one word, remembered for the editor (not for one chat). */
+const AGENT_MAP_PIPS_HIDDEN_KEY = "dgc.agentMapPipsHidden.v1";
 /** What a Work chat's page may not do while its session is open in another window (session_elsewhere): anything that
  *  changes the session, its turn or its settings. */
 const WORK_READ_ONLY_REFUSES = new Set(["prompt", "slash", "slashText", "cancel", "setMode", "setModel", "setReasoningProfile",
@@ -6742,6 +6744,38 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         // The chip above the box (ready.capabilities.pip_runs_running): which of this chat's Pips are running.
         if ((this.lastReadyEvent?.capabilities as any)?.pip_runs_running === 1) { be.send({ type: "watch_pip_runs" }); }
         break;
+      case "agentMapPips": {
+        // The agent map's Pips section (Pips API 96, pips-flow-design Q2): the Pips related to the session this panel
+        // shows, and how many are elsewhere. The session is the panel's own, never the page's word. It shows; it
+        // never routes. An older DGC is never asked.
+        const seq = Number.isSafeInteger(msg.seq) ? msg.seq : 0;
+        const hidden = this.context.globalState.get<boolean>(AGENT_MAP_PIPS_HIDDEN_KEY) === true;
+        const nothing = () => this.post({ type: "agentMapPips", seq, failed: true, hidden });
+        const caps = this.lastReadyEvent?.capabilities as any, sessionId = this.currentSessionId;
+        if (!this.sessionReady || !sessionId || caps?.pips_enabled !== true || !(Number(caps?.pips_api_version) >= 96)) { nothing(); break; }
+        void (async () => {
+          try {
+            const found = await this.ensurePipsBridge().relatedPips(sessionId);
+            if (sessionId !== this.currentSessionId) return;           // the panel moved to another chat meanwhile
+            if (!found) { nothing(); return; }
+            this.post({ type: "agentMapPips", seq, pips: found.pips, elsewhere: found.elsewhere, hidden });
+          } catch { if (sessionId === this.currentSessionId) nothing(); }
+        })();
+        break;
+      }
+      case "agentMapPipStop": {
+        // Stop on a Pip working for this session: the existing cancel_pip_run for that run.
+        const runId = String(msg.run_id || ""), caps = this.lastReadyEvent?.capabilities as any;
+        if (!/^run_[0-9a-f]{32}$/.test(runId) || caps?.pips_enabled !== true || !(Number(caps?.pips_api_version) >= 96)) break;
+        void this.ensurePipsBridge().stopPipRun(runId).then(
+          () => this.post({ type: "agentMapPipStopped", run_id: runId, ok: true }),
+          (error) => this.post({ type: "agentMapPipStopped", run_id: runId, ok: false,
+            message: error instanceof Error && error.message ? error.message.slice(0, 200) : "DGC couldn’t stop it." }));
+        break;
+      }
+      case "agentMapPipsHidden":
+        if (typeof msg.hidden === "boolean") await this.context.globalState.update(AGENT_MAP_PIPS_HIDDEN_KEY, msg.hidden);
+        break;
       case "steerQueued": {
         // "Steer now" / "Steer all" on queued messages (ready.capabilities.steer_queued): they move into the running
         // turn as steering; the backend answers with prompt_accepted "steered" for each, or a command_rejected.
@@ -10894,6 +10928,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <section id="agent-map-tasks" class="am-tasks" aria-labelledby="agent-map-tasks-title" hidden>
         <h3 id="agent-map-tasks-title" class="agent-map-subtitle"></h3>
         <ul id="agent-map-task-list" class="am-task-list"></ul>
+      </section>
+      <section id="agent-map-pips" class="am-pips" aria-labelledby="agent-map-pips-title" hidden>
+        <div class="am-pips-head"><h3 id="agent-map-pips-title" class="am-pips-title">Pips</h3><span id="agent-map-pips-count" class="am-pips-count" hidden></span><button type="button" id="agent-map-pips-toggle" class="am-pips-toggle" title="Hide the Pips related to this session" aria-expanded="true" aria-controls="agent-map-pips-body">Hide</button></div>
+        <div id="agent-map-pips-body" class="am-pips-body">
+          <ul id="agent-map-pip-list" class="am-pip-list"></ul>
+          <p id="agent-map-pips-more" class="am-note am-pips-more"></p>
+        </div>
       </section>
       <button type="button" id="agent-map-settings" class="link am-settings" title="Open Settings ▸ Models ▸ Sub-agents to change the sub-agent model and host">Sub-agent settings</button>
     </div>

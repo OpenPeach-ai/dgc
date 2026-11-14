@@ -51,6 +51,9 @@ export function projectFoldersRefusal(request: any, apiVersion: number, mayAdd: 
   return '';
 }
 export const ONE_PIPS_API = 94;
+/** Pips API 96: no session owns a Pip; list_related_pips says which Pips a session is related to (its agent map). */
+export const RELATED_API = 96;
+export interface RelatedPip { id: string; name: string; pip_type: string; why: Array<'asked' | 'set_up' | 'folder'>; running: boolean; needs_you: number }
 /** What a Pip found and its fix, in its own chat (the Pips flow design of 14 Nov; Pips API 96; src/pipFlow.js):
  *  list_pip_fixes {pip_id} reads its fixes and what only the user can do, decide_pip_fix {pip_id, fix_id,
  *  expected_digest, allow} is the Allow card's answer, start_pip_work_helper {pip_id, fix_id} starts a helper with Work
@@ -501,6 +504,36 @@ export class PipsEditor implements vscode.Disposable {
     return result.pips.filter((p: any) => p && typeof p.id === 'string' && /^pip_[0-9a-f]{32}$/.test(p.id) && typeof p.name === 'string' && p.name)
       .slice(0, 200).map((p: any) => ({ id: p.id, name: p.name.slice(0, 120), pip_type: String(p.pip_type || '').slice(0, 40), status: String(p.status || '').slice(0, 40) }));
   }
+  /** The Pips a session is related to (list_related_pips, Pips API 96; pips-flow-design Q2), strongest first, for its
+   *  agent map; and how many Pips are elsewhere: every Pip of list_pips scope all that is not related, the archived
+   *  ones left out (read a page at a time, five pages at most; none when it can't be read). It orders and shows, it
+   *  never routes. Null on a DGC before API 96 or while Pips are off: it is never asked. */
+  async relatedPips(sessionId: string): Promise<{ pips: RelatedPip[]; elsewhere: number } | null> {
+    if (!this.state.connected || !this.state.supported || !this.state.enabled || this.apiVersion < RELATED_API || !SESSION_ID.test(sessionId)) return null;
+    const result = await this.hostAsk('list_related_pips', { session_id: sessionId });
+    if (result?.session_id !== sessionId || !Array.isArray(result.pips)) throw new Error('DGC answered about another session. Try again.');
+    const pips: RelatedPip[] = result.pips.filter((p: any) => p && typeof p.id === 'string' && /^pip_[0-9a-f]{32}$/.test(p.id)).slice(0, 100)
+      .map((p: any) => ({ id: p.id, name: (typeof p.name === 'string' && p.name ? p.name : 'Pip').slice(0, 120), pip_type: String(p.pip_type || '').slice(0, 40),
+        why: (Array.isArray(p.why) ? p.why : []).filter((w: unknown) => w === 'asked' || w === 'set_up' || w === 'folder'),
+        running: p.running === true, needs_you: Number.isSafeInteger(p.needs_you) && p.needs_you > 0 ? p.needs_you : 0 }));
+    const related = new Set(pips.map(p => p.id));
+    let elsewhere = 0;
+    try {
+      for (let offset = 0, page = 0; page < 5; page++) {
+        const listed = await this.hostAsk('list_pips', { scope: 'all', limit: 100, offset });
+        if (!Array.isArray(listed?.pips)) break;
+        for (const pip of listed.pips) if (pip && typeof pip.id === 'string' && pip.status !== 'archived' && !related.has(pip.id)) elsewhere++;
+        if (!Number.isSafeInteger(listed.next_offset) || listed.next_offset <= offset) break;
+        offset = listed.next_offset;
+      }
+    } catch { elsewhere = 0; }
+    return { pips, elsewhere };
+  }
+  /** Stop on the agent map's Pips section: the existing cancel_pip_run for that one run. DGC's own words when it refuses. */
+  async stopPipRun(runId: string): Promise<void> {
+    if (!/^run_[0-9a-f]{32}$/.test(runId)) throw new Error('That is not a run.');
+    await this.hostAsk('cancel_pip_run', { run_id: runId });
+  }
   /** Each of them to another session of its project (null: no session, its reports wait in the Pips view), one at a
    *  time. The first DGC refuses stops it, named. */
   async moveSessionPips(pips: OwnedPip[], sessionId: string | null): Promise<void> {
@@ -800,7 +833,7 @@ export class PipsEditor implements vscode.Disposable {
     return this.hostAsk('list_project_folders');
   }
   /** One read the host makes for Continue in Work, answered in DGC's own words when it is refused. */
-  private hostAsk(type: 'get_pips_welcome' | 'list_project_folders' | 'add_project_folder' | 'list_workspaces' | 'get_pip_project_change' | 'get_pip' | 'list_session_pips' | 'set_pip_owner' | 'archive_pip' | 'delete_archived_pip', fields: Record<string, unknown> = {}): Promise<any> {
+  private hostAsk(type: 'get_pips_welcome' | 'list_project_folders' | 'add_project_folder' | 'list_workspaces' | 'get_pip_project_change' | 'get_pip' | 'list_session_pips' | 'set_pip_owner' | 'archive_pip' | 'delete_archived_pip' | 'list_related_pips' | 'list_pips' | 'cancel_pip_run', fields: Record<string, unknown> = {}): Promise<any> {
     return new Promise((resolve, reject) => {
       if (!this.state.connected || !this.state.supported || !this.state.enabled) { reject(new Error('Pips aren’t available. Reconnect, then try again.')); return; }
       const requestId = 'pips-host-' + randomBytes(12).toString('hex');

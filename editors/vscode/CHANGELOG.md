@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **The agent map has a Pips section**: Pips working on a job from this session (with Stop), then Pips of this folder that are running or need you (Open goes to their chat), then one quiet line ("2 more Pips in this folder are idle · 5 Pips elsewhere · All Pips"); Hide / Show; the map button shows when a Pip works for this session.
 - **Your Pips moved into one list**: the first time the Pips tab opens after the update, someone who had Pips sees what moved (by folder, the Personal ones, any on Do it all) once; Pips settings has "How Pips work now" to see it again.
 - **A Work session that used to get Pip cards** says once, quietly at its top, that Pips report in their own chats now, with a button to open each; × closes it for good.
 - **Pip report cards in a Work chat go quiet** (with Pips API 96): one "Open in its chat"; no Ask DGC to fix, Dismiss or Try again.

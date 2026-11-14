@@ -2552,6 +2552,35 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
 .am-task-list { display: flex; flex-direction: column; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
 .am-task-item { width: min(100%, 420px); }
 .am-settings { display: block; margin-top: var(--sp-5); }
+/* The Pips section (pips-flow-design Q2, picture 9): under the session's own helpers and tasks, the Pips related to it.
+   Rows are not buttons (nothing opens on the map): a face, the Pip's name, what it is doing, and one small outline
+   button of the family (Stop or Open). "for this session" is a label, not a control. Hide / Show is one quiet word.
+   Every corner is the button family's (--btn-r); nothing is a pill. */
+.am-pips { margin-top: var(--sp-5); max-width: 560px; min-width: 0; }
+.am-pips[hidden], .am-pips-body[hidden], .am-pips-count[hidden], .am-pip-tag[hidden] { display: none; }
+.am-pips-head { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--btn-h-sm); margin: 0 0 var(--sp-2); }
+.am-pips-title { margin: 0; color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1.45 var(--sans); }
+.am-pips-count { flex: none; box-sizing: border-box; min-width: 20px; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--btn-r); background: var(--surface2);
+  color: var(--text); font: var(--w-med) var(--t-xs)/18px var(--sans); font-variant-numeric: tabular-nums; text-align: center; }
+.am-pips-toggle { flex: none; box-sizing: border-box; height: var(--btn-h-sm); margin: 0 calc(-1 * var(--sp-2)) 0 auto; padding: 0 var(--sp-2);
+  border: 1px solid transparent; border-radius: var(--btn-r); background: transparent; color: var(--muted);
+  font: var(--w-reg) var(--t-xs)/calc(var(--btn-h-sm) - 2px) var(--sans); white-space: nowrap; cursor: pointer; }
+.am-pips-toggle:hover { background: var(--btn-wash); color: var(--text); }
+.am-pips-toggle:focus-visible { outline: var(--btn-ring); outline-offset: 2px; }
+.am-pip-list { display: flex; flex-direction: column; gap: var(--sp-3); margin: 0; padding: 0; list-style: none; }
+.am-pip { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; color: var(--text); font: var(--w-reg) var(--t-sm)/1.35 var(--sans); }
+.am-pip-face { flex: none; width: 24px; height: 24px; }
+.am-pip-face .dgc-plush { display: block; width: 100%; height: 100%; }
+.am-pip-face-plain { box-sizing: border-box; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--surface2); }
+.am-pip-text { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
+.am-pip-line { display: flex; flex-wrap: wrap; align-items: center; gap: 2px var(--sp-2); min-width: 0; }
+.am-pip-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.am-pip-tag { flex: none; box-sizing: border-box; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: var(--btn-r);
+  color: var(--muted); font: var(--w-reg) var(--t-xs)/16px var(--sans); white-space: nowrap; }
+.am-pip-meta { min-width: 0; color: var(--muted); font-size: var(--t-xs); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+button.link.am-pip-act { flex: none; min-width: 48px; }    /* Stop and Open: the small outline, the same box for either word */
+.am-pips-more { margin: var(--sp-3) 0 0; }
+.am-pips-more .am-link { font: inherit; }
 /* A card's body: an agent's, a task's or the main agent's. */
 .am-card { display: flex; flex-direction: column; gap: var(--sp-3); }
 .am-card-line { margin: 0; color: var(--text); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); overflow-wrap: anywhere; }

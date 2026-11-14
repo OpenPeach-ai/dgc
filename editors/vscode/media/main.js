@@ -2054,6 +2054,8 @@
   const PIP_FIX_ACTIVE = ["queued", "preparing", "running", "applying"];
   // ready.capabilities.pip_runs_running: which of this chat's Pips are running now, as the backend says (the chip).
   let pipRunsLive = false;
+  // Pips API 96: no session owns a Pip; the agent map says which Pips are related to this one (list_related_pips).
+  let pipsRelatedLive = false;
   const pipRunning = new Map();          // run_id -> {run_id, pip_id, name, pip_type, started_at, trigger, at (ms)}
   let steerQueuedLive = false;           // ready.capabilities.steer_queued: a queued message can be steered in now
   let queueEditLive = false;             // ready.capabilities.queue_edit: a queued message can be removed or moved
@@ -8975,7 +8977,10 @@ function permissionChoices(ev) {
         if (pipFixLive) vscode.postMessage({ type: "listPipFixes" });
         // ...and which of its Pips are running now: the chip above the box (an older CLI says nothing, so no chip).
         pipRunsLive = ev.capabilities?.pip_runs_running === 1;
+        pipsRelatedLive = ev.capabilities?.pips_supported === true && ev.capabilities?.pips_enabled === true
+          && Number(ev.capabilities?.pips_api_version) >= 96;
         setPipRunning([]);
+        amPipsReset();
         if (pipRunsLive) vscode.postMessage({ type: "pipRunsWatch" });
         agentMapCapabilities();
         imageSpool = ev.capabilities?.image_spool === true;
@@ -12589,6 +12594,9 @@ function permissionChoices(ev) {
     if (railOpenNow()?.kind === "piprunning" && pipRunning.size < 2) closeRailPop({ restore: false });
     syncComposerRail();
     if (railOpenNow()?.kind === "piprunning") paintPipRunningPanel();
+    // The agent map: its button's live mark, its Pips section's first rows, and the rest read again (a run that
+    // started or ended changed which Pips are running).
+    if (amPipsLive()) { renderAgents(); amPipsChanged(); }
   }
   function openRunningPip(run) {
     if (railOpenNow()) closeRailPop({ restore: false });
@@ -13180,6 +13188,9 @@ function permissionChoices(ev) {
       return;
     }
     if (msg.type === "chat_tab") { rememberTab(msg.session); wearTabSession(msg.session); return; }
+    // The agent map's Pips section: DGC's list of the Pips related to this session, and how a Stop went.
+    if (msg.type === "agentMapPips") { amPipsAnswer(msg); return; }
+    if (msg.type === "agentMapPipStopped") { amPipStopped(msg); return; }
     // pipsModelsChanged: Settings or the Router changed, so the embedded Pips page reads its model list again.
     // pipsUnreadChanged: a Pip was marked read somewhere (its pill, its chat, a card acted on): it reads its counts again.
     // pipsProjectFolder: the Project Folder choice changed; pipsFolderPicked: the folder the editor's picker gave (Add a folder…).
@@ -13476,6 +13487,7 @@ function permissionChoices(ev) {
     resetGoalRuns();                            // the incoming chat's goals are its own
     if (kind !== "rewound") {                   // the incoming chat's own running Pips, asked for again
       setPipRunning([]);
+      amPipsReset();
       if (pipRunsLive) vscode.postMessage({ type: "pipRunsWatch" });
     }
     railReset();                       // the prompt rail: the incoming chat's snapshot and outline say its own
@@ -14762,25 +14774,28 @@ function permissionChoices(ev) {
     const c = agentCounts(), active = amRunningTasks();
     const tasks = active.filter((task) => task.kind !== "preview").length;
     const previews = active.length - tasks;
-    if (c.total <= 0 && tasks <= 0 && previews <= 0) {
+    // Pips working on a job from this session (the map's Pips section): the button's usual live mark, and "1 Pip".
+    const pips = amSessionPipRuns().length;
+    if (c.total <= 0 && tasks <= 0 && previews <= 0 && pips <= 0) {
       hoverTip.hide();
       picker.hidden = true;
       return;
     }
     picker.hidden = false;
     const n = c.active;
-    const state = c.waiting > 0 ? "waiting" : n > 0 || tasks > 0 ? "running" : "idle";
-    const label = [n > 0 || !tasks && !previews ? agentPlural(n, "agent") : "",
-      tasks ? agentPlural(tasks, "task") : "", previews ? agentPlural(previews, "preview") : ""].filter(Boolean).join(" · ");
+    const state = c.waiting > 0 ? "waiting" : n > 0 || tasks > 0 || pips > 0 ? "running" : "idle";
+    const label = [n > 0 || !tasks && !previews && !pips ? agentPlural(n, "agent") : "",
+      tasks ? agentPlural(tasks, "task") : "", previews ? agentPlural(previews, "preview") : "", pips ? agentPlural(pips, "Pip") : ""].filter(Boolean).join(" · ");
     const inBackground = tasks > 0 ? `${agentPlural(tasks, "background task")} running` : "";
+    const forSession = pips > 0 ? `${agentPlural(pips, "Pip")} working for this session` : "";
     const said = state === "waiting"
-      ? [c.waitingPermission > 0 ? "An agent is waiting for your permission" : "An agent is waiting for your answer", inBackground]
+      ? [c.waitingPermission > 0 ? "An agent is waiting for your permission" : "An agent is waiting for your answer", inBackground, forSession]
       : state === "idle" ? ["No agents working"]
-      : [n > 0 ? (tasks > 0 ? `${agentPlural(n, "agent")} working and ${inBackground}` : "Agents are working") : inBackground];
+      : [n > 0 ? (tasks > 0 ? `${agentPlural(n, "agent")} working and ${inBackground}` : "Agents are working") : inBackground, forSession];
     const title = [...said.filter(Boolean), previews ? `${agentPlural(previews, "live preview")} serving a page` : "", "Click to open the agent map"].filter(Boolean).join(" · ");
     pill.dataset.state = state;
     agentsSetText(pill.querySelector(".agents-text"), label);
-    agentsSetText(pill.querySelector(".agents-short"), String(n + tasks + previews));
+    agentsSetText(pill.querySelector(".agents-short"), String(n + tasks + previews + pips));
     pill.querySelector(".agents-need").hidden = state !== "waiting";
     hoverTip.retitle(pill, title);
     pill.setAttribute("aria-label", `${label} · ${title}`);
@@ -15202,8 +15217,11 @@ function permissionChoices(ev) {
   // Every task this chat knows, running or not: monitors, background shells, troupes, the Pip runs it
   // started and its artifact previews, in that order.
   function amAllTasks() {
+    // (A Pip run the map's Pips section lists as working "for this session" is listed there, not here as well.)
+    const inSection = amPipsLive() ? pipRunning : null;
     return [...monitorItems.map(amMonitorTask), ...shellItems.map(amShellTask),
-      ...[...troupeRuns.values()].map(amTroupeTask), ...amPipRuns().map(amPipTask), ...[...previews.values()].map(amPreviewTask)];
+      ...[...troupeRuns.values()].map(amTroupeTask), ...amPipRuns().filter((run) => !inSection?.has(run.id)).map(amPipTask),
+      ...[...previews.values()].map(amPreviewTask)];
   }
   // The ones running now: the map's "N background tasks" list, its root card and the pill all count
   // this, so no two of them can disagree.
@@ -15234,6 +15252,195 @@ function permissionChoices(ev) {
     agentsSetText(entry.meta, (task.kind === "preview" ? " · " : "") + task.meta.join(" · "));
     amLabel(entry, [task.name, task.word, ...task.meta].join(", "), task.name);
   }
+
+  // ---- the Pips section (0.52, pips-flow-design Q2, picture 9) ----
+  // No session owns a Pip. Under the session's own helpers and tasks the map says which Pips are related to it and
+  // what they are doing, and nothing more: first the Pips working on a job this session gave them ("for this
+  // session", with Stop: the runs pip_runs_running lists), then the related Pips that are running or need you (Open:
+  // their chat in the Pips view), then one quiet line counting the rest. No report card, Allow or Apply here: those are
+  // in the Pip's chat, on Home and on the Pips page. The list is DGC's (list_related_pips, Pips API 96), read when the
+  // map opens, again when this chat's Pips change (never faster than every two seconds) and every half minute while
+  // the map stays open, for what no event of this chat says. An older DGC is never asked and has no section.
+  // (The design's "a running Pip opens to its own helpers, read-only" is left out: a Pip has no helpers yet.)
+  const AM_PIPS_GAP_MS = 2000, AM_PIPS_SLOW_MS = 30000;
+  const amPips = { seq: 0, askedAt: -Infinity, timer: 0, known: false, failed: false, pips: [], elsewhere: 0, hidden: false };
+  const amPipStops = new Map();                 // run id -> "stopping" | a sentence saying why it could not be stopped
+  const amPipRows = new Map();                  // row key -> its nodes
+  function amPipsLive() { return pipRunsLive && pipsRelatedLive; }
+  // The runs this chat started, oldest first: what "for this session" lists, and what the button's live mark follows.
+  function amSessionPipRuns() { return amPipsLive() ? pipRunningList() : []; }
+  function amPipsReset() {
+    clearTimeout(amPips.timer);
+    Object.assign(amPips, { seq: amPips.seq + 1, askedAt: -Infinity, timer: 0, known: false, failed: false, pips: [], elsewhere: 0 });
+    amPipStops.clear();
+    paintAmPips();                              // open or not: the chat before's Pips are never left drawn
+    amPipsAsk();                                // a map left open over the new chat reads that chat's
+  }
+  function amPipsAsk() {
+    clearTimeout(amPips.timer); amPips.timer = 0;
+    if (!amOpen || !amPipsLive()) return;
+    amPips.askedAt = performance.now();
+    vscode.postMessage({ type: "agentMapPips", seq: ++amPips.seq });
+    amPipsLater(AM_PIPS_SLOW_MS);
+  }
+  function amPipsLater(ms) {
+    clearTimeout(amPips.timer);
+    amPips.timer = setTimeout(() => { amPips.timer = 0; amPipsAsk(); }, ms);
+    if (typeof amPips.timer?.unref === "function") amPips.timer.unref();
+  }
+  // Something about this chat's Pips changed: read again, at once or two seconds after the last read.
+  function amPipsChanged() {
+    if (!amOpen || !amPipsLive()) return;
+    const wait = AM_PIPS_GAP_MS - (performance.now() - amPips.askedAt);
+    if (wait <= 0) amPipsAsk(); else amPipsLater(wait);
+  }
+  function amPipsAnswer(msg) {
+    if (!amPipsLive() || msg.seq !== amPips.seq) return;      // an older question's answer, or another chat's
+    amPips.known = true;
+    amPips.failed = msg.failed === true;
+    amPips.hidden = msg.hidden === true;
+    amPips.pips = amPips.failed ? [] : (Array.isArray(msg.pips) ? msg.pips : []).slice(0, 100)
+      .filter((pip) => pip && typeof pip === "object" && /^pip_[0-9a-f]{32}$/.test(String(pip.id || "")))
+      .map((pip) => ({ id: pip.id, name: String(pip.name || "Pip").slice(0, 120), pip_type: String(pip.pip_type || ""),
+        folder: Array.isArray(pip.why) && pip.why.includes("folder"), running: pip.running === true,
+        needs: Number.isSafeInteger(pip.needs_you) && pip.needs_you > 0 ? pip.needs_you : 0 }));
+    amPips.elsewhere = !amPips.failed && Number.isSafeInteger(msg.elsewhere) && msg.elsewhere > 0 ? msg.elsewhere : 0;
+    agentMapChanged();
+  }
+  function amPipStopped(msg) {
+    const id = String(msg.run_id || "");
+    if (!amPipStops.has(id)) return;
+    if (msg.ok !== true) amPipStops.set(id, `Couldn’t stop it: ${String(msg.message || "try again.").slice(0, 200)}`);
+    else amPipsChanged();
+    agentMapChanged();
+  }
+  // What the section draws, from this chat's runs and DGC's list. Every Pip is counted once: a row, idle in this
+  // folder, or elsewhere (a related Pip of another folder that is idle is elsewhere too).
+  function amPipsPlan() {
+    const runs = amSessionPipRuns(), working = new Set(runs.map((run) => run.pip_id));
+    const rows = runs.map((run) => ({ key: `run:${run.run_id}`, session: true, run, id: run.pip_id, name: run.name, pip_type: run.pip_type }));
+    let idle = 0, away = 0;
+    for (const pip of amPips.pips) {
+      if (working.has(pip.id)) continue;
+      if (pip.running || pip.needs > 0) rows.push({ key: `pip:${pip.id}`, session: false, pip, id: pip.id, name: pip.name, pip_type: pip.pip_type });
+      else if (pip.folder) idle++; else away++;
+    }
+    return { rows, idle, elsewhere: amPips.elsewhere + away };
+  }
+  function amPipMeta(item) {
+    if (item.session) {
+      const stop = amPipStops.get(item.run.run_id);
+      if (stop === "stopping") return "Stopping…";
+      const time = amDuration(Date.now() - item.run.at);
+      return stop || ["Working", time].filter(Boolean).join(" · ");
+    }
+    const needs = item.pip.needs;
+    if (item.pip.running) return needs > 0 ? "Running now · needs you in its chat" : "Running now";
+    return `Needs you · ${needs === 1 ? "1 thing waits" : `${needs} things wait`} in its chat`;
+  }
+  function amPipEntry(item) {
+    let entry = amPipRows.get(item.key);
+    if (entry) return entry;
+    const row = el("li", "am-pip"), face = el("span", "am-pip-face"), text = el("span", "am-pip-text");
+    const line = el("span", "am-pip-line"), name = el("span", "am-pip-name"), tag = el("span", "am-pip-tag"), meta = el("span", "am-pip-meta");
+    const act = el("button", "link am-pip-act");
+    act.type = "button";
+    face.setAttribute("aria-hidden", "true");
+    tag.textContent = "for this session";
+    line.append(name, tag);
+    text.append(line, meta);
+    row.append(face, text, act);
+    const key = item.key;
+    act.addEventListener("click", () => amPipAct(key));
+    entry = { row, face, name, tag, meta, act, item };
+    amPipRows.set(key, entry);
+    return entry;
+  }
+  function amPipAct(key) {
+    const item = amPipRows.get(key)?.item;
+    if (!item) return;
+    if (!item.session) {
+      closeAgentMap({ restoreFocus: false });
+      openPipsAt({ pip: item.id, section: "chat" });
+      return;
+    }
+    const id = item.run.run_id;
+    if (amPipStops.get(id) === "stopping") return;
+    amPipStops.set(id, "stopping");
+    vscode.postMessage({ type: "agentMapPipStop", run_id: id });
+    renderAgentMap();
+  }
+  function amPaintPipRow(entry, item) {
+    entry.item = item;
+    const { row, face, name, tag, meta, act } = entry;
+    const working = item.session || item.pip.running;
+    row.dataset.kind = item.session ? "session" : "related";
+    row.dataset.pipId = item.id;
+    row.dataset.state = working ? "running" : "needs";
+    const plush = window.PipConcepts?.plush, type = PIP_REPORT_TYPES.indexOf(String(item.pip_type || ""));
+    const faceKey = `${plush ? type : "none"}:${working ? "working" : "idle"}:${item.name}`;
+    if (face.dataset.key !== faceKey) {
+      face.dataset.key = faceKey;
+      let markup = "";
+      try { markup = plush && type >= 0 ? plush.markup({ index: type, name: item.name }, working ? "working" : "idle",
+        `am-pip-${item.key.replace(/[^a-z0-9]/gi, "")}`, { includeStyles: false }) || "" : ""; } catch { markup = ""; }
+      if (markup) face.innerHTML = markup; else face.replaceChildren();
+      face.classList.toggle("am-pip-face-plain", !markup);
+    }
+    agentsSetText(name, item.name);
+    if (name.title !== item.name) name.title = item.name;
+    if (tag.hidden !== !item.session) tag.hidden = !item.session;
+    agentsSetText(meta, amPipMeta(item));
+    const stopping = item.session && amPipStops.get(item.run.run_id) === "stopping";
+    agentsSetText(act, item.session ? (stopping ? "Stopping…" : "Stop") : "Open");
+    if (act.disabled !== stopping) act.disabled = stopping;
+    const label = item.session ? `Stop ${item.name}` : `Open ${item.name}’s chat`;
+    if (act.getAttribute("aria-label") !== label) act.setAttribute("aria-label", label);
+    if (act.title !== label) act.title = label;
+  }
+  function paintAmPips() {
+    const section = $("agent-map-pips");
+    if (!section) return;
+    const live = amPipsLive(), plan = live ? amPipsPlan() : { rows: [], idle: 0, elsewhere: 0 };
+    // Until DGC has answered, only the runs of this session are known; with none of anything, no section.
+    const show = live && (plan.rows.length > 0 || (amPips.known && (plan.idle > 0 || plan.elsewhere > 0)));
+    if (section.hidden !== !show) section.hidden = !show;
+    const keys = new Set(plan.rows.map((item) => item.key));
+    for (const key of [...amPipRows.keys()]) if (!keys.has(key)) amPipRows.delete(key);
+    for (const id of [...amPipStops.keys()]) if (!keys.has(`run:${id}`)) amPipStops.delete(id);
+    if (!show) { $("agent-map-pip-list").replaceChildren(); return; }
+    const count = $("agent-map-pips-count"), toggle = $("agent-map-pips-toggle"), body = $("agent-map-pips-body");
+    agentsSetText(count, String(plan.rows.length));
+    if (count.hidden !== !plan.rows.length) count.hidden = !plan.rows.length;
+    agentsSetText(toggle, amPips.hidden ? "Show" : "Hide");
+    if (toggle.getAttribute("aria-expanded") !== String(!amPips.hidden)) toggle.setAttribute("aria-expanded", String(!amPips.hidden));
+    const title = amPips.hidden ? "Show the Pips related to this session" : "Hide the Pips related to this session";
+    if (toggle.getAttribute("aria-label") !== title) toggle.setAttribute("aria-label", title);
+    if (toggle.title !== title) toggle.title = title;
+    if (body.hidden !== amPips.hidden) body.hidden = amPips.hidden;
+    agentsPlace($("agent-map-pip-list"), plan.rows.map((item) => {
+      const entry = amPipEntry(item);
+      amPaintPipRow(entry, item);
+      return entry.row;
+    }));
+    const said = [plan.idle ? `${plan.idle}${plan.rows.length ? " more" : ""} ${plan.idle === 1 ? "Pip in this folder is" : "Pips in this folder are"} idle` : "",
+      plan.elsewhere ? `${agentPlural(plan.elsewhere, "Pip")} elsewhere` : ""].filter(Boolean).join(" · ");
+    const more = $("agent-map-pips-more");
+    if (!more._words) {
+      more._words = more.appendChild(el("span", "am-pips-words"));
+      const all = more.appendChild(el("button", "am-link am-pips-all"));
+      all.type = "button"; all.textContent = "All Pips";
+      all.setAttribute("aria-label", "All Pips: open the Pips view");
+      all.title = "Open the Pips view, with every Pip";
+      all.addEventListener("click", () => { closeAgentMap({ restoreFocus: false }); openPipsAt({ overview: true }); });
+    }
+    agentsSetText(more._words, said ? `${said} · ` : "");
+  }
+  $("agent-map-pips-toggle")?.addEventListener("click", () => {
+    amPips.hidden = !amPips.hidden;
+    vscode.postMessage({ type: "agentMapPipsHidden", hidden: amPips.hidden });
+    agentMapChanged();
+  });
 
   // ---- the three levels ----
   // The map; an agent's or a task's card over it; an agent's transcript (or a task's output) over that.
@@ -15590,6 +15797,7 @@ function permissionChoices(ev) {
     agentsSetText($("agent-map-tasks-title"), [running ? agentPlural(running, "background task") : "",
       livePreviews ? agentPlural(livePreviews, "live preview") : "",
       stoppedByRestart ? `${stoppedByRestart} stopped by a restart` : "", "click a task for details"].filter(Boolean).join(" · "));
+    paintAmPips();
     // One tab stop in the tree and one in the tasks; the arrow keys move within each.
     amRove($("agent-map-tree"), focusedKey);
     amRove($("agent-map-task-list"), focusedKey);
@@ -15647,6 +15855,7 @@ function permissionChoices(ev) {
     const measured = Math.round($("agent-map-tree").clientWidth || 0);
     if (measured > 0) amWidth = measured;
     if (backgroundTasksLive) vscode.postMessage({ type: "listBackgroundShells" });
+    amPipsAsk();                              // which Pips are related to this session, read as the map opens
     renderAgentMap();
     amFocusRow(amFirstRow());
   }
@@ -15656,6 +15865,7 @@ function permissionChoices(ev) {
     amReleasePlace();
     amDropLevels();
     clearTimeout(amTick); amTick = 0;
+    clearTimeout(amPips.timer); amPips.timer = 0;
     hoverTip.hide();
     amSyncLayers();
     $("agents-pill").setAttribute("aria-expanded", "false");
