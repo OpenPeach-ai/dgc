@@ -2549,6 +2549,14 @@ const PIN_PATH='M10.2 1.8l4 4-2.2.9-2.4 2.4.3 3.1-1.1 1.1-2.6-2.6L2.8 14l-.8-.8 
 // the Pip's revision (16, as src/pipsView.ts asks): there the row is as it was. The row shows what was asked at once;
 // a refusal puts the switch back and DGC's words say why.
 const pipSwitching=new Map();   // a Pip's id -> on or off, as asked, until DGC answers
+// What DGC answered last for a switched Pip ({status, lifecycle_revision}). The one list (Pips API 94+) keeps its own copy
+// of the Pips beside the folder list, and a list read that set off before the answer lands after it: a copy whose
+// revision is older than this one shows this one, so the switch never flips back (his live report, 14 Nov: it
+// "flickers, does not react and takes multiple times").
+const pipSwitched=new Map();
+function pipFresh(p){const known=record(p)?pipSwitched.get(p.id):null,rev=lifecycleRevision(p);return known&&rev!==null&&rev<known.lifecycle_revision?{...p,...known}:p;}
+// The Pip a switch acts on, from every copy this page holds (its page, the one list, the folder list): the newest one.
+function pipNamed(id){return [S.pip,...(one.pips||[]),...(S.jobs||[])].filter(p=>record(p)&&p.id===id).map(pipFresh).sort((a,b)=>(lifecycleRevision(b)??-1)-(lifecycleRevision(a)??-1))[0];}
 function pipSwitchable(p){return !!p&&p.pip_type!=='core'&&['active','paused'].includes(p.status)&&S.apiVersion>=16&&lifecycleRevision(p)!==null&&lifecycleRevision(p)<Number.MAX_SAFE_INTEGER;}
 function pipOff(p){return pipSwitchable(p)&&(pipSwitching.has(p.id)?!pipSwitching.get(p.id):p.status==='paused');}
 function pipSwitchMarkup(p){
@@ -2558,7 +2566,7 @@ function pipSwitchMarkup(p){
 }
 const PIP_OFF_SAYS='Off: it runs nothing on its own. It still answers when you write to it.';
 async function switchPip(id){
-  const p=S.pip?.id===id?S.pip:(S.jobs||[]).find(job=>job.id===id);
+  const p=pipNamed(id);
   if(!pipSwitchable(p)||pipSwitching.has(id)||!usable())return;
   const on=p.status==='paused',epoch=S.epoch;
   pipSwitching.set(id,on);S.error='';render();
@@ -2566,8 +2574,9 @@ async function switchPip(id){
     const next=(await send(on?'resume_pip':'pause_pip',{pip_id:id,expected_lifecycle_revision:p.lifecycle_revision}))?.pip;
     if(epoch!==S.epoch)return;
     if(!record(next)||next.id!==id||!['active','paused'].includes(next.status)||lifecycleRevision(next)===null)throw Error('DGC answered about another Pip. Refresh, then try again.');
-    const now={status:next.status,lifecycle_revision:next.lifecycle_revision};
+    const now={status:next.status,lifecycle_revision:next.lifecycle_revision};pipSwitched.set(id,now);
     S.jobs=(S.jobs||[]).map(job=>job.id===id?{...job,...now}:job);if(S.pip?.id===id)S.pip={...S.pip,...now};
+    one.pips=(one.pips||[]).map(job=>job.id===id?{...job,...now}:job);
   }catch(error){if(epoch===S.epoch){S.error=errorText(error);void refresh();}}   // (refused: the list is read again, so the next try carries what DGC holds now)
   finally{pipSwitching.delete(id);if(epoch===S.epoch){render();$(`pip-switch-${id}`)?.focus?.({preventScroll:true});}}
 }
@@ -3418,7 +3427,7 @@ async function loadOne(){
  try{const value=await send('list_pips',request);if(sequence!==one.seq)return;
   const pips=onePage(value);
   // DGC's order is the latest news now: what was moved up here meanwhile is in it.
-  one.pips=pips;one.next=Number.isSafeInteger(value?.next_offset)?value.next_offset:null;one.total=Number.isSafeInteger(value?.total)?value.total:pips.length;one.error='';one.bumps.clear();}
+  one.pips=pips.map(pipFresh);one.next=Number.isSafeInteger(value?.next_offset)?value.next_offset:null;one.total=Number.isSafeInteger(value?.total)?value.total:pips.length;one.error='';one.bumps.clear();}
  catch(error){if(sequence!==one.seq)return;one.error=errorText(error);}
  one.read=true;one.busy=false;render();
 }
@@ -6374,7 +6383,7 @@ async function refreshNow(includeContext=false) {
     const paged=pipsPaged();
     const results=await Promise.allSettled([send('list_pips',{workspace_id:S.workspace.id,...(paged?{order:'recent',limit:100,...(S.pipSearch?{query:S.pipSearch}:{})}:{})}),send('get_pip_runner'),...(includeContext?[send('get_workspace_context',{workspace_id:S.workspace.id})]:[])]);
     if(token!==scope())return;
-    if(results[0].status==='fulfilled'){const jobs=results[0].value.pips;if(!Array.isArray(jobs)||!jobs.every(p=>p.workspace_id===S.workspace.id))throw new Error('Pips list does not match this workspace.');S.jobs=paged?mergePage(jobs,results[0].value):jobs;S.jobsRead=true;}else S.error=errorText(results[0].reason);
+    if(results[0].status==='fulfilled'){const jobs=results[0].value.pips;if(!Array.isArray(jobs)||!jobs.every(p=>p.workspace_id===S.workspace.id))throw new Error('Pips list does not match this workspace.');S.jobs=(paged?mergePage(jobs,results[0].value):jobs).map(pipFresh);S.jobsRead=true;}else S.error=errorText(results[0].reason);
     if(results[1].status==='fulfilled'){S.runner=null;S.runner=runner(results[1].value.runner);}else{S.runner=null;S.error=errorText(results[1].reason);}
     if(includeContext){if(results[2].status==='fulfilled'){S.context=null;S.context=context(results[2].value.context,S.workspace.id);}else{S.context=null;S.error=errorText(results[2].reason);}}
     if(S.selected&&!S.jobs.some(p=>p.id===S.selected)&&paged&&S.pip?.id===S.selected)S.jobs=[...S.jobs,S.pip];

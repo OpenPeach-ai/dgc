@@ -225,7 +225,14 @@ export function makeBackend(o = {}) {
     cancel_pip_run: () => { state.fix = "stopped"; return { run: { id: FIXRUN, status: "cancelling" } }; },
     list_pip_reply_stats: () => ({ stats: [] }), get_pip_chat_context: () => undefined,
   };
-  return { state, answer(request) { state.requests.push(JSON.parse(JSON.stringify(request))); const make = answers[request.type]; return make ? make(request) : undefined; } };
+  // A Pip's on/off switch (pause_pip / resume_pip, as dgc/pips.py: the revision must be the Pip's, and it moves on).
+  // `holdSwitch`: DGC doesn't answer until the test calls turn() itself (a list read can land first).
+  const turn = (r, on) => { const found = pips.find((p) => p.id === r.pip_id);
+    if (!found || r.expected_lifecycle_revision !== found.lifecycle_revision) return { error: "This Pip changed. Refresh, then try again." };
+    found.status = on ? "active" : "paused"; found.lifecycle_revision += 1; return { pip: { ...found } }; };
+  answers.pause_pip = (r) => (o.holdSwitch ? undefined : turn(r, false));
+  answers.resume_pip = (r) => (o.holdSwitch ? undefined : turn(r, true));
+  return { state, turn, answer(request) { state.requests.push(JSON.parse(JSON.stringify(request))); const make = answers[request.type]; return make ? make(request) : undefined; } };
 }
 
 let bundle;
