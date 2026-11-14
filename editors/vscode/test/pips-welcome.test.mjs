@@ -14,9 +14,9 @@ import { setup as openPips } from "./support/one-pips-node.mjs";
 
 const pid = (c) => "pip_" + c.repeat(32), ws = (c) => "ws_" + c.repeat(32);
 const GST = { id: pid("c"), name: "GST watchdog" }, ERP = { id: pid("d"), name: "ERP daily audit" }, MORNINGS = { id: pid("b"), name: "Mornings" }, GARDEN = { id: pid("e"), name: "Garden notes" };
-const WELCOME = { had_pips: true, folders: [{ workspace_id: ws("4"), folder: "riverside_shop", pips: [GST, ERP] }], personal: [MORNINGS, GARDEN], do_it_all: [MORNINGS] };
+const WELCOME = { had_pips: true, folders: [{ workspace_id: ws("4"), folder: "lime_tiles", pips: [GST, ERP] }], personal: [MORNINGS, GARDEN], do_it_all: [MORNINGS] };
 /** What the page is told of it: ids and names, a folder by its name. */
-const TOLD = { had_pips: true, folders: [{ folder: "riverside_shop", pips: [GST, ERP] }], personal: [MORNINGS, GARDEN], do_it_all: [MORNINGS] };
+const TOLD = { had_pips: true, folders: [{ folder: "lime_tiles", pips: [GST, ERP] }], personal: [MORNINGS, GARDEN], do_it_all: [MORNINGS] };
 const NEW_USER = { had_pips: false, folders: [], personal: [], do_it_all: [] };
 const KEY = "dgc.pipsWelcomeSeen", NEWS = "dgc.whatsNewSeen";
 
@@ -137,13 +137,13 @@ test("How Pips work now (Pips settings) opens it again whenever asked: seen or n
 
 test("what DGC answers is checked before the page is told: only real Pip ids, names as text of a sane length, bounded lists", async () => {
   const messy = { had_pips: true, extra: "x",
-    folders: [{ workspace_id: ws("4"), folder: "riverside_shop", path: "/home/me/code/riverside_shop", pips: [GST, { id: "pip_nope", name: "Bad id" }, { id: pid("f"), name: "  " }, { id: pid("9"), name: "x".repeat(500) }] },
+    folders: [{ workspace_id: ws("4"), folder: "lime_tiles", path: "/home/me/code/lime_tiles", pips: [GST, { id: "pip_nope", name: "Bad id" }, { id: pid("f"), name: "  " }, { id: pid("9"), name: "x".repeat(500) }] },
       { workspace_id: ws("5"), folder: "empty", pips: [] }, "junk", { folder: 7, pips: [ERP] }],
     personal: [MORNINGS, null, { id: pid("b"), name: "Mornings again" }], do_it_all: "no" };
   const side = provider(memory({ [NEWS]: "0.52" }), { welcome: messy });
   await side.open();
   const [told] = side.shown();
-  assert.deepEqual(told.welcome.folders.map((f) => [f.folder, f.pips.map((p) => p.name.length)]), [["riverside_shop", [12, 120]], ["", [15]]], "a folder with no Pips is left out; a name is cut at 120");
+  assert.deepEqual(told.welcome.folders.map((f) => [f.folder, f.pips.map((p) => p.name.length)]), [["lime_tiles", [12, 120]], ["", [15]]], "a folder with no Pips is left out; a name is cut at 120");
   assert.deepEqual(told.welcome.personal, [MORNINGS], "a Pip is named once");
   assert.deepEqual(told.welcome.do_it_all, []);
   assert.deepEqual(Object.keys(told.welcome).sort(), ["do_it_all", "folders", "had_pips", "personal"]);
@@ -188,7 +188,7 @@ test("the words: the title, nothing was lost, each folder's Pips, the Personal o
   assert.equal(words(s.doc.getElementById(layer.getAttribute("aria-labelledby"))), "Your Pips moved into one list");
   assert.equal(words(layer.querySelector(".pw-lead")), "Nothing was lost. Every Pip kept its name, its job, its schedule and its history.");
   assert.deepEqual(rows(layer), [
-    ["GST watchdog · ERP daily audit", "Were Project Pips in riverside_shop. Now each has its own computer and reads your files as they are, not only what is committed."],
+    ["GST watchdog · ERP daily audit", "Were Project Pips in lime_tiles. Now each has its own computer and reads your files as they are, not only what is committed."],
     ["Mornings · Garden notes", "Were Personal Pips. Nothing changes for them."],
     ["What is different", "A Pip now tells you what it finds in its own chat, not in a Work session. What needs you is on Home and under Needs attention here. All your Pips start at Ask me first."],
     ["Mornings", "was on Do it all. It keeps what that meant before; choose Do it all again to let it do more."],
@@ -201,12 +201,12 @@ test("the words: the title, nothing was lost, each folder's Pips, the Personal o
 
 test("names and counts are the user's own: one Pip in the singular, more than three as \"A, B and N more\", a group with none left out", () => {
   const many = { had_pips: true, folders: [
-    { folder: "riverside_shop", pips: [GST, ERP, { id: pid("1"), name: "Night tests" }, { id: pid("2"), name: "Docs check" }, { id: pid("3"), name: "Lock review" }, { id: pid("4"), name: "Stock count" }] },
+    { folder: "lime_tiles", pips: [GST, ERP, { id: pid("1"), name: "Night tests" }, { id: pid("2"), name: "Docs check" }, { id: pid("3"), name: "Lock review" }, { id: pid("4"), name: "Stock count" }] },
     { folder: "garden", pips: [{ id: pid("5"), name: "Bed planner" }] }], personal: [], do_it_all: [] };
   const s = page();
   s.openTab(); s.welcome(many);
   assert.deepEqual(rows(s.layer()), [
-    ["GST watchdog, ERP daily audit and 4 more", "Were Project Pips in riverside_shop. Now each has its own computer and reads your files as they are, not only what is committed."],
+    ["GST watchdog, ERP daily audit and 4 more", "Were Project Pips in lime_tiles. Now each has its own computer and reads your files as they are, not only what is committed."],
     ["Bed planner", "Was a Project Pip in garden. Now it has its own computer and reads your files as they are, not only what is committed."],
     ["What is different", "A Pip now tells you what it finds in its own chat, not in a Work session. What needs you is on Home and under Needs attention here. All your Pips start at Ask me first."],
   ], "no Personal row, no Do it all row");

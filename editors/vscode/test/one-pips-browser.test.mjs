@@ -6,7 +6,7 @@
 // the first line, files and model under it). Nothing scrolls sideways.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { GST, RIVERSIDE_DIR, openOnePips } from "./support/one-pips-scene.mjs";
+import { GST, LIME_DIR, openOnePips } from "./support/one-pips-scene.mjs";
 
 let chromium;
 try { ({ chromium } = await import("@playwright/test")); } catch { chromium = null; }
@@ -50,7 +50,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
       // Each row says where its Pip works; in a narrow list the way to the folder gives way and its name stays whole.
       const place = await x.inPips((root, id) => { const p = root.querySelector(`.pips-one-list [data-job="${id}"] .pip-row-place`), dir = p.querySelector(".pip-row-place-dir"), name = p.querySelector(".pip-row-place-name");
         return { dir: dir.checkVisibility(), name: name.textContent, whole: name.getBoundingClientRect().right <= p.getBoundingClientRect().right + 0.5, title: p.title }; }, GST);
-      assert.equal(place.name, "riverside_shop"); assert.equal(place.title, RIVERSIDE_DIR); assert.equal(place.whole, true, "the folder's own name shows whole");
+      assert.equal(place.name, "lime_tiles"); assert.equal(place.title, LIME_DIR); assert.equal(place.whole, true, "the folder's own name shows whole");
       assert.equal(place.dir, width > 420, width > 420 ? "with room, the way there too" : "narrow: the name alone");
       // The filter's menu is one shape with its button, and its rows are in view.
       await x.click("#pips-filter");

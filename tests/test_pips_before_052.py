@@ -163,7 +163,7 @@ class TheWelcome(unittest.TestCase):
 
     def test_it_names_what_moved_by_folder_the_personal_ones_and_those_on_do_it_all(self):
         from dgc import pip_levels
-        shop = self.base / "riverside_shop"
+        shop = self.base / "lime_tiles"
         shop.mkdir()
 
         def make(registry, store):
@@ -182,7 +182,7 @@ class TheWelcome(unittest.TestCase):
         said = self.welcome()
         self.assertTrue(said["had_pips"])
         [folder] = said["folders"]
-        self.assertEqual((folder["folder"], [p["name"] for p in folder["pips"]]), ("riverside_shop", ["GST watchdog", "ERP daily audit"]))
+        self.assertEqual((folder["folder"], [p["name"] for p in folder["pips"]]), ("lime_tiles", ["GST watchdog", "ERP daily audit"]))
         self.assertEqual([p["name"] for p in said["personal"]], ["Mornings", "Garden notes"], "Core is not news")
         self.assertEqual([p["name"] for p in said["do_it_all"]], ["Mornings"])
 

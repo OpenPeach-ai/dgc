@@ -6,7 +6,7 @@
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {setup as open} from './support/one-pips-node.mjs';
-import {P,SHOP,RIVERSIDE,HERE,RIVERSIDE_DIR,GARDEN_DIR} from './support/one-pips-scene.mjs';
+import {P,SHOP,LIME,HERE,LIME_DIR,GARDEN_DIR} from './support/one-pips-scene.mjs';
 
 const windows=[];after(()=>windows.forEach(w=>w.close()));
 const setup=options=>{const x=open(options);windows.push(x.w);return x;};
@@ -38,16 +38,16 @@ test('on All Pips the folder line says "+ Give it a folder": a Pip with no folde
 
 test('with a folder chosen on the filter line, New Pip opens on that folder, and the Pip is made there',async()=>{
  const x=setup();await x.drain();
- await x.choose(RIVERSIDE_DIR);
+ await x.choose(LIME_DIR);
  const d=await newPip(x);
- assert.equal(d.querySelector('#new-pip-folder .dgc-folder-v').textContent,'riverside_shop','pre-filled from the filter');
- assert.equal(d.querySelector('.new-pip-folder-path')?.title,RIVERSIDE_DIR,'its path under it');
+ assert.equal(d.querySelector('#new-pip-folder .dgc-folder-v').textContent,'lime_tiles','pre-filled from the filter');
+ assert.equal(d.querySelector('.new-pip-folder-path')?.title,LIME_DIR,'its path under it');
  x.type(d.querySelector('#newPipName'),'Invoice checker');
  d.querySelector('#review-confirm').click();await x.drain();
  const made=x.requests('create_pip').at(-1);
- assert.equal(made.workspace_id,RIVERSIDE,'in that folder\'s project');assert.equal(made.goal,'','still no goal');assert.equal(made.name,'Invoice checker');
+ assert.equal(made.workspace_id,LIME,'in that folder\'s project');assert.equal(made.goal,'','still no goal');assert.equal(made.name,'Invoice checker');
  assert.ok(x.$('#chat-form'),'its chat opens');
- assert.equal(x.$('.pip-topbar .pip-where')?.textContent,'riverside_shop');
+ assert.equal(x.$('.pip-topbar .pip-where')?.textContent,'lime_tiles');
 });
 
 test('asked for from a Work session, the folder line is that session\'s folder',async()=>{
@@ -60,13 +60,13 @@ test('asked for from a Work session, the folder line is that session\'s folder',
 
 test('one click changes the folder: any folder, no folder, or Add a folder…',async()=>{
  const x=setup();await x.drain();
- await x.choose(RIVERSIDE_DIR);
+ await x.choose(LIME_DIR);
  let d=await newPip(x);
  d.querySelector('#new-pip-folder').click();await x.drain();
  const menu=[...x.d.querySelectorAll('.dgc-folder-menu .dgc-menu-row')];
  assert.equal(menu[0].querySelector('.dgc-menu-label').textContent,'No folder (Personal)');
  assert.ok(menu.some(r=>r.dataset.folderAdd),'Add a folder… is at its end');
- assert.equal(menu.find(r=>r.dataset.folder===RIVERSIDE_DIR).getAttribute('aria-checked'),'true');
+ assert.equal(menu.find(r=>r.dataset.folder===LIME_DIR).getAttribute('aria-checked'),'true');
  assert.ok(menu.find(r=>/notes$/.test(r.dataset.folder||'')).disabled,'a folder that is gone can\'t be chosen');
  menu.find(r=>r.dataset.folder===HERE).click();await x.drain();
  d=x.dialog();

@@ -8,9 +8,9 @@ import { build } from "esbuild";
 import { THEMES, panelHtml } from "./options-scene.mjs";
 
 const hex = (c) => c.repeat(32);
-export const P = "ws_" + hex("1"), SHOP = "ws_" + hex("2"), GARDEN = "ws_" + hex("3"), RIVERSIDE = "ws_" + hex("4");
+export const P = "ws_" + hex("1"), SHOP = "ws_" + hex("2"), GARDEN = "ws_" + hex("3"), LIME = "ws_" + hex("4");
 export const CORE = "pip_" + hex("a"), MORNINGS = "pip_" + hex("b"), GST = "pip_" + hex("c"), ERP = "pip_" + hex("d"), BEDS = "pip_" + hex("e");
-export const HERE = "/home/me/code/shop", GARDEN_DIR = "/home/me/code/garden", RIVERSIDE_DIR = "/home/me/code/riverside_shop", NOTES = "/home/me/code/notes";
+export const HERE = "/home/me/code/shop", GARDEN_DIR = "/home/me/code/garden", LIME_DIR = "/home/me/code/lime_tiles", NOTES = "/home/me/code/notes";
 export const CHECK = "run_" + hex("1"), FIXRUN = "run_" + hex("2"), OLDER = "run_" + hex("3"), FIX = "pipfix_" + hex("1"), CHANGE = "pchange_" + hex("1"), WAIT = "pipwait_" + hex("1");
 
 /** The stand-in DGC. Self-contained (it is also sent into a browser page as source): `o` chooses the scene.
@@ -24,7 +24,7 @@ export const CHECK = "run_" + hex("1"), FIXRUN = "run_" + hex("2"), OLDER = "run
  *  Returns {answer(request) → result | undefined | {error}, state}. */
 export function makeBackend(o = {}) {
   const hex = (c) => c.repeat(32), ws = (c) => "ws_" + hex(c), pid = (c) => "pip_" + hex(c);
-  const P = ws("1"), SHOP = ws("2"), GARDEN = ws("3"), RIVERSIDE = ws("4");
+  const P = ws("1"), SHOP = ws("2"), GARDEN = ws("3"), LIME = ws("4");
   const CORE = pid("a"), MORNINGS = pid("b"), GST = pid("c"), ERP = pid("d"), BEDS = pid("e");
   const CHECK = "run_" + hex("1"), FIXRUN = "run_" + hex("2"), OLDER = "run_" + hex("3"), FIX = "pipfix_" + hex("1"), CHANGE = "pchange_" + hex("1"), WAIT = "pipwait_" + hex("1");
   const now = Date.now(), ago = (minutes) => new Date(now - minutes * 60000).toISOString();
@@ -37,12 +37,12 @@ export function makeBackend(o = {}) {
     goal: "Help with what I ask in this chat", source_ref: "HEAD", source_policy: space === P ? { mode: "personal" } : { mode: "current_tree", exclusions: "safe_source_v1" }, schedule: null, proposals: [], pending_review_count: 0,
     model_choice: { mode: "default" }, created_at: "2026-11-01T09:00:00Z", updated_at: "2026-11-01T09:00:00Z", ...extra });
   const pips = o.empty ? [] : [pip(CORE, P, "Core", "core"), pip(MORNINGS, P, "Mornings", "quill"),
-    pip(GST, RIVERSIDE, "GST watchdog", "rook", { goal: "Check the GST code every evening at 8", schedule: { type: "daily", time: "20:00", timezone: "Asia/Kolkata" }, ...(o.branch ? { source_ref: o.branch, source_policy: { mode: "committed_only" } } : {}) }),
-    pip(ERP, RIVERSIDE, "ERP daily audit", "scout"), pip(BEDS, GARDEN, "Bed planner", "scout")];
+    pip(GST, LIME, "GST watchdog", "rook", { goal: "Check the GST code every evening at 8", schedule: { type: "daily", time: "20:00", timezone: "Asia/Kolkata" }, ...(o.branch ? { source_ref: o.branch, source_policy: { mode: "committed_only" } } : {}) }),
+    pip(ERP, LIME, "ERP daily audit", "scout"), pip(BEDS, GARDEN, "Bed planner", "scout")];
   const folders = [
     { folder: "/home/me/code/shop", name: "shop", here: true, exists: true, sessions: 2, pips: 0, workspace_id: SHOP, updated_at: ago(30) },
     { folder: "/home/me/code/garden", name: "garden", here: false, exists: true, sessions: 1, pips: 1, workspace_id: GARDEN, updated_at: ago(90) },
-    { folder: "/home/me/code/riverside_shop", name: "riverside_shop", here: false, exists: true, sessions: 3, pips: 2, workspace_id: RIVERSIDE, updated_at: ago(10) },
+    { folder: "/home/me/code/lime_tiles", name: "lime_tiles", here: false, exists: true, sessions: 3, pips: 2, workspace_id: LIME, updated_at: ago(10) },
     { folder: "/home/me/code/notes", name: "notes", here: false, exists: false, sessions: 1, pips: 0, workspace_id: null, updated_at: ago(9000) }];
   const runner = { runner_id: "r", status: "running", online: true, paused: false, counts: { queued: 0, running: 0, cancelling: 0 } };
   const controls = { version: 1, mode: "read_only", options: { context_size: 8192, thinking: "off" }, options_source: "last_message", inherited_context_size: 1048576, effective_context_size: 8192,
@@ -57,7 +57,7 @@ export function makeBackend(o = {}) {
       ? "Tonight's check found 3 things and I fixed 2 of them in your folder.\n\n---\n\nE-way bills over ₹50,000 were created without the transporter ID, so the portal rejected them: that is why 4 were stuck. They carry it now. The round-off also matches the PDF. Tests for both pass.\n\n---\n\nI left the retry loop alone: that one is your call (it would also stop the nightly re-send)."
       : "Tonight's check found 3 things. Two are new, and one is back from Tuesday.\n\n---\n\nThe one that matters: e-way bills over ₹50,000 are created without the transporter ID, so the portal rejects them. That is why 4 are stuck since Monday. I'm sure of this one." };
   const older = { run_id: OLDER, pip_id: GST, name: "GST watchdog", pip_type: "rook", kind: "audit", trigger: "schedule", text: "x", outcome: "clear", posted_at: ago(1449), finished_at: ago(1449), total: 0, counts: {}, findings: [], title: "Evening check" };
-  const run = (id, at, extra = {}) => ({ id, pip_id: GST, workspace_id: RIVERSIDE, status: "succeeded", created_at: at, started_at: at, finished_at: new Date(Date.parse(at) + 134000).toISOString(),
+  const run = (id, at, extra = {}) => ({ id, pip_id: GST, workspace_id: LIME, status: "succeeded", created_at: at, started_at: at, finished_at: new Date(Date.parse(at) + 134000).toISOString(),
     manifest: { run_kind: "audit", job_version: 1, trigger: "schedule", model: "qwen3-coder:480b" }, result: { usage: { input_tokens: 41200, output_tokens: 3100 } }, ...extra });
   const runs = [run(CHECK, ago(11)), run(OLDER, ago(1451), { manifest: { run_kind: "audit", job_version: 1, trigger: "schedule" }, result: null, started_at: null, finished_at: null })];
   const fixNow = () => {
@@ -71,7 +71,7 @@ export function makeBackend(o = {}) {
       ...(done ? { change_id: CHANGE, tests: "passed", findings: [{ ...findings[0], verdict: "fixed" }, { ...findings[1], verdict: "fixed" }, { ...findings[2], verdict: "needs_you", why: "Stopping on error 4012 would also stop the nightly re-send." }] } : {}) }];
   };
   const waitingNow = () => state.waiting === "none" ? [] : [{ id: WAIT, title: "GSP wallet is empty", blocks: "filings are blocked", since: ago(4400), state: state.waiting, can_undo: state.waiting === "dismissed" }];
-  const change = () => ({ id: CHANGE, workspace_id: RIVERSIDE, name: "riverside_shop", status: state.change, digest: "c1", more: 0, created_at: ago(3), updated_at: ago(2), tests: "passed",
+  const change = () => ({ id: CHANGE, workspace_id: LIME, name: "lime_tiles", status: state.change, digest: "c1", more: 0, created_at: ago(3), updated_at: ago(2), tests: "passed",
     files: [{ path: "billing/eway.py", change: "modified", plus: 12, minus: 1 }, { path: "billing/billing_routes.py", change: "modified", plus: 5, minus: 3 }],
     result: state.change === "applied" ? { applied: ["billing/eway.py", "billing/billing_routes.py"], held_back: [], ...(state.fix === "applied" ? { by: "pip-level:full" } : {}) }
       : state.change === "undone" ? { restored: ["billing/eway.py", "billing/billing_routes.py"], kept: [] } : null,
@@ -85,7 +85,7 @@ export function makeBackend(o = {}) {
     const item = (kind, card, p, title, detail, minutes) => ({ id: `${kind}:${card}`, kind, card, pip_id: p.id, pip_name: p.name, pip_type: p.pip_type, workspace_id: p.workspace_id, title, detail, created_at: ago(minutes), expires_at: null });
     const of = (id) => pips.find((x) => x.id === id);
     if (!pips.length) return [];
-    return [...(state.fix === "ask" ? [item("fix_ask", FIX, of(GST), "Wants to fix 3 things", "E-way bills, round-off and the retry loop in riverside_shop", 8)] : []),
+    return [...(state.fix === "ask" ? [item("fix_ask", FIX, of(GST), "Wants to fix 3 things", "E-way bills, round-off and the retry loop in lime_tiles", 8)] : []),
       ...(state.fix === "ready" && state.change === "pending" ? [item("fix_ready", CHANGE, of(GST), "A fix is ready: 2 files", "billing/eway.py and billing/billing_routes.py", 2)] : []),
       ...(state.waiting === "waiting" ? [item("waiting", WAIT, of(GST), "GSP wallet is empty", "Only you can do this", 4400)] : []),
       item("email", "maildraft_" + hex("9"), of(MORNINGS), "Send this morning's brief to the team?", "Ready to send", 50)];
@@ -93,14 +93,14 @@ export function makeBackend(o = {}) {
   const messages = (id) => {
     const space = pips.find((x) => x.id === id)?.workspace_id || P;
     const list = id === GST && o.own ? [
-      { id: "msg_" + hex("1"), pip_id: GST, workspace_id: RIVERSIDE, role: "user", text: "check the GST code every evening at 8", run_id: "run_" + hex("8"), model: "m", created_at: ago(2000), status: "succeeded" },
-      { id: "msg_" + hex("2"), pip_id: GST, workspace_id: RIVERSIDE, role: "assistant", text: "Done. I'll check the GST code every evening at 8.", run_id: "run_" + hex("8"), model: "m", created_at: ago(1999), status: "succeeded",
+      { id: "msg_" + hex("1"), pip_id: GST, workspace_id: LIME, role: "user", text: "check the GST code every evening at 8", run_id: "run_" + hex("8"), model: "m", created_at: ago(2000), status: "succeeded" },
+      { id: "msg_" + hex("2"), pip_id: GST, workspace_id: LIME, role: "assistant", text: "Done. I'll check the GST code every evening at 8.", run_id: "run_" + hex("8"), model: "m", created_at: ago(1999), status: "succeeded",
         changes: [{ id: "own_" + hex("1"), kind: "job", fields: ["schedule"], after: { schedule: { type: "daily", time: "20:00" } }, status: "applied" }] }] : [];
     return { pip_id: id, workspace_id: space, messages: list, next_before_id: null, active_run: null, history_context_omitted_count: 0, chat_controls: controls };
   };
   const listed = (list, r) => { const q = (r.query || "").toLowerCase(), hit = q ? list.filter((x) => x.name.toLowerCase().includes(q)) : list; return { pips: hit, total: hit.length, next_offset: null }; };
   const answers = {
-    list_workspaces: () => ({ workspaces: [{ id: P, name: "Personal", kind: "personal" }, { id: SHOP, name: "shop", kind: "git" }, { id: GARDEN, name: "garden", kind: "git" }, { id: RIVERSIDE, name: "riverside_shop", kind: "git" }], current_workspace_id: SHOP }),
+    list_workspaces: () => ({ workspaces: [{ id: P, name: "Personal", kind: "personal" }, { id: SHOP, name: "shop", kind: "git" }, { id: GARDEN, name: "garden", kind: "git" }, { id: LIME, name: "lime_tiles", kind: "git" }], current_workspace_id: SHOP }),
     list_pip_types: () => ({ types }), list_pip_setups: () => ({ setups: [] }), list_pip_starters: () => ({ starters: [] }), list_project_folders: () => ({ folders }),
     list_pips: (r) => {
       if (r.scope === "all") { const order = typeof state.order === "function" ? state.order() : state.order; return listed([...pips.filter((x) => x.id === CORE), ...order.map((id) => pips.find((x) => x.id === id)).filter(Boolean), ...pips.filter((x) => x.id !== CORE && !order.includes(x.id))], r); }
@@ -134,7 +134,7 @@ export function makeBackend(o = {}) {
     apply_pip_project_change: () => { state.change = "applied"; return change(); }, discard_pip_project_change: () => { state.change = "discarded"; return change(); },
     undo_pip_project_change: () => { state.change = "undone"; return change(); }, commit_pip_project_change: () => { state.committed = true; return change(); },
     // ---- the flow's own commands (Pips API 96), as the editor expects them ----
-    list_pip_fixes: (r) => ({ pip_id: r.pip_id, workspace_id: pips.find((x) => x.id === r.pip_id)?.workspace_id || P, folder: r.pip_id === GST ? "riverside_shop" : "", fixes: r.pip_id === GST ? fixNow() : [], waiting: r.pip_id === GST ? waitingNow() : [] }),
+    list_pip_fixes: (r) => ({ pip_id: r.pip_id, workspace_id: pips.find((x) => x.id === r.pip_id)?.workspace_id || P, folder: r.pip_id === GST ? "lime_tiles" : "", fixes: r.pip_id === GST ? fixNow() : [], waiting: r.pip_id === GST ? waitingNow() : [] }),
     decide_pip_fix: (r) => { state.fix = r.allow ? "running" : "declined"; return { fix: fixNow()[0] }; },
     start_pip_work_helper: () => { state.helper++; return { asks: state.level !== "full" }; },
     answer_pip_waiting: (r) => { state.waiting = { done: "done", later: "later", not_a_problem: "dismissed", undo: "waiting" }[r.answer]; return { waiting: waitingNow() }; },
