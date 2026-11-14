@@ -94,8 +94,6 @@
   const plural = (n, word, many) => `${n} ${n === 1 ? word : many || word + "s"}`;
   // The Clock: Here and at most this many added time zones (the host's own bound, src/homeCards.ts).
   const ZONES_MOST = 3;
-  // What the Notes card holds at most (the host's own bounds, src/homeCards.ts).
-  const NOTES_MOST = 500, NOTE_MOST = 20000;
   /** A place as words: its name, its region when that says more, its country. */
   const placeWords = (p) => [p.name, p.admin1 && p.admin1 !== p.name ? p.admin1 : "", p.country].filter(Boolean).join(", ");
   /** When something was last changed or made, in a word or two. */
@@ -118,9 +116,6 @@
   const SHORT_DAY = (d) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", ...(d.getFullYear() === new Date().getFullYear() ? {} : { year: "numeric" }) }).format(d);
   const A_KIND = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", page: "Page", dashboard: "Dashboard" };
   const A_MADE = { chat: "made in Chat", work: "made in Work", pip: "made by a Pip", sdk: "made by an app", cli: "made in the terminal" };
-  /** A note's name: its first line with words in it (a tick box's line without its box). */
-  const noteTitle = (text) => { const first = String(text || "").split("\n").find((l) => l.trim()) || ""; return first.replace(/^\s*- \[[ xX]\]\s*/, "").trim().slice(0, 120) || "New note"; };
-  const TICK_LINE = /^(\s*)- \[([ xX])\] ?(.*)$/;
 
   // ---- numbers and days ------------------------------------------------------------------------------------------------
   const pad = (v) => String(v).padStart(2, "0");
@@ -172,14 +167,12 @@
   function create({ host, data, act, post, slot, slotted, kept, keep, onDraw } = {}) {
     const doc = host.ownerDocument, view = doc.defaultView;
     const still = () => !!view.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    let layout = { order: [...DEFAULT], settings: {}, notes: [] }, heard = false;
+    let layout = { order: [...DEFAULT], settings: {} }, heard = false;
     let usage = null, usageAt = 0, weather = null, weatherAt = 0, weatherAsked = 0, weatherWait = 30 * 60000, weatherRetried = "";
     // What the Library lists, for the Widgets and Artifacts cards: null until the host has said; when each was asked.
     const made = { widgets: null, artifacts: null }, madeAt = { widgets: 0, artifacts: 0 };
-    const ui = { open: TYPES.includes(kept?.()?.open) ? kept().open : "", arranging: false, lifted: "", token: { metric: "tokens", hot: "", range: "30d" }, weatherEdit: false,
-      // Notes: the note that is open, the one being typed in, what is searched for, the note just deleted (for Undo).
-      notes: { open: "", editing: "", q: "", undo: null, fresh: "" } };
-    let filling = false, library = null, libraryAdding = "", pending = 0, drag = null, liftedFrom = null, noteTimer = 0, noteDirty = "", undoTimer = 0, focusNext = "";
+    const ui = { open: TYPES.includes(kept?.()?.open) ? kept().open : "", arranging: false, lifted: "", token: { metric: "tokens", hot: "", range: "30d" }, weatherEdit: false };
+    let filling = false, library = null, libraryAdding = "", pending = 0, drag = null, liftedFrom = null, focusNext = "";
     host.classList.add("dgc-home");
     host.innerHTML = '<div class="hc-head"></div><div class="hc-notes"></div><div class="hc-grid" data-form="s"></div><div class="hc-open" hidden></div><div class="hc-pantry" hidden></div><p class="hc-live" role="status" aria-live="polite"></p>';
     // (The hubs' own elements wait here, drawn and out of sight, until a card that shows them takes them.)
@@ -363,49 +356,8 @@
         + `<div class="hc-hours">${(weather.hours || []).slice(0, 5).map((h) => `<span class="hc-hour"><span class="hc-sub">${esc(h.time)}</span><span class="hc-hrow">${wx(h.code, true, 15)}<span class="hc-hv">${deg(h.temp)}</span></span></span>`).join("")}</div>${foot(true)}`;
     }
 
-    // ---- Notes: many notes, each named by its first line ------------------------------------------------------------------
-    /** The notes, pinned first, then the latest changed; `q` keeps those with those words in them. */
-    function notesNow(q = "") {
-      const all = [...(layout.notes || [])].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.at - a.at), find = q.trim().toLowerCase();
-      return find ? all.filter((n) => n.text.toLowerCase().includes(find)) : all;
-    }
-    const noteOf = (id) => (layout.notes || []).find((n) => n.id === id) || null;
-    const noteRow = (n, on) => { const rest = n.text.split("\n").map((l) => l.trim()).filter(Boolean).slice(1).join(" · ").replace(/- \[[ xX]\]\s*/g, "");
-      return `<button type="button" class="hc-li hc-note-row${on ? " on" : ""}" data-note="${esc(n.id)}" title="Open this note"${on ? ' aria-current="true"' : ""}><span class="hc-tx"><span class="hc-nm">${esc(noteTitle(n.text))}</span><span class="hc-meta">${esc([ago(n.at), rest.slice(0, 80)].filter(Boolean).join(" · "))}</span></span>${n.pinned ? `<span class="hc-note-pinmark" title="Pinned to the top">${pinSvg(true, 10)}</span>` : ""}</button>`; };
-    const full500 = () => (layout.notes || []).length >= NOTES_MOST;
-    const newNote = (cls = "") => `<button type="button" class="hc-btn hc-solid hc-note-new${cls}"${full500() ? ` disabled title="${NOTES_MOST} notes is the most. Delete one to add another."` : ' title="Start a new note"'}>${PLUS}New note</button>`;
-    const undoBar = () => (ui.notes.undo ? `<div class="hc-note-undo" role="status"><span>Note deleted.</span><button type="button" class="hc-lnk hc-undo" title="Bring the note back">Undo</button></div>` : "");
-    /** The open note: its tools (when it was changed, Edit or Done, pin, delete), then its words: read, with a tick box
-     *  for each "- [ ]" line, or typed into (the words themselves are put in after the draw, never drawn again while typing). */
-    function notePane(n, back) {
-      if (!n) return '<div class="hc-note-pane"><p class="hc-quiet">No note is open. Choose one, or start a new one.</p></div>';
-      const editing = ui.notes.editing === n.id, lines = n.text.split("\n");
-      const view = lines.map((line, k) => { const tick = TICK_LINE.exec(line);
-        return tick ? `<label class="hc-check" style="margin-left:${Math.min(4, Math.floor(tick[1].length / 2)) * 14}px"><input type="checkbox" data-line="${k}"${tick[2] === " " ? "" : " checked"}><span>${esc(tick[3])}</span></label>` : `<span class="hc-note-ln${k === lines.findIndex((l) => l.trim()) ? " hc-note-title" : ""}">${esc(line) || "&nbsp;"}</span>`; }).join("");
-      return `<div class="hc-note-pane" data-note="${esc(n.id)}"><div class="hc-note-tools">${back ? `<button type="button" class="hc-lnk hc-note-all" title="Back to all your notes">${BACK}All notes</button>` : ""}<span class="hc-cap hc-cut">${n.at ? `Changed ${esc(ago(n.at).replace(/^Just now$/, "just now").replace(/^Yesterday$/, "yesterday"))}` : "New"}</span><span class="hc-sp"></span>`
-        + `<button type="button" class="hc-btn hc-note-mode" data-fk="note-mode" title="${editing ? "Finish typing (Escape)" : "Type in this note"}">${editing ? "Done" : "Edit"}</button>`
-        + `<button type="button" class="hc-btn hc-icon hc-note-pin" data-fk="note-pin" aria-pressed="${n.pinned}" title="${n.pinned ? "Unpin: let it fall back among the others" : "Pin to the top of your notes"}" aria-label="${n.pinned ? "Unpin this note" : "Pin this note to the top"}">${pinSvg(n.pinned)}</button>`
-        + `<button type="button" class="hc-btn hc-icon hc-note-del" title="Delete this note (Undo brings it back)" aria-label="Delete this note">${BIN}</button></div>`
-        + (editing ? `<textarea class="hc-note-edit hc-field" data-note="${esc(n.id)}" data-fk="note-edit" maxlength="${NOTE_MOST}" placeholder="Write a note… Its first line is its name. A line that starts “- [ ]” is a tick box." aria-label="Note"></textarea><p class="hc-fine hc-note-limit" hidden>${NOTE_MOST.toLocaleString("en-US")} characters is the most for one note.</p>`
-          : `<div class="hc-note-view" data-note="${esc(n.id)}" title="Click to type in this note">${n.text.trim() ? view : '<span class="hc-quiet">Empty. Click to write.</span>'}</div>`) + "</div>";
-    }
-    function noteCard(form) {
-      const all = notesNow(), count = all.length;
-      if (form === "s") { const newest = [...all].sort((a, b) => b.at - a.at)[0];
-        return `<span class="hc-lbl">Notes</span><span class="hc-mid hc-note-line hc-grow">${newest ? esc(noteTitle(newest.text)) : '<span class="hc-sub">No notes yet. Open to write one.</span>'}</span>${count > 1 ? `<span class="hc-sub">+${count - 1} ${count === 2 ? "note" : "notes"}</span>` : ""}`; }
-      const none = '<p class="hc-quiet">No notes yet. New note starts one: its first line is its name.</p>';
-      if (form === "m") { const shown = all.slice(0, 4);
-        return `${headOf("Notes", '<span class="hc-cap hc-cut">Kept on this computer</span>', `${count ? '<button type="button" class="hc-lnk hc-viewall" title="Open Notes whole: every note, search, and the note you open">View all</button>' : ""}${newNote()}`)}${undoBar()}${shown.length ? `<div class="hc-list">${shown.map((n) => noteRow(n, false)).join("")}</div>${count > shown.length ? `<span class="hc-more-n">${count - shown.length} more</span>` : ""}` : none}`; }
-      // Large: the list beside the open note. Opened: the whole app (search, the list, the note): side by side when
-      // there is the room for both, else the list, and the note over it with All notes to go back.
-      const wide = form === "l" || widthNow() >= 560, found = form === "full" ? notesNow(ui.notes.q) : all;
-      const open = noteOf(ui.notes.open) || (wide && !ui.notes.q ? all[0] : wide ? found[0] : null) || null;
-      const list = `<div class="hc-notes-list">${found.length ? `<div class="hc-list">${found.slice(0, form === "l" ? 40 : NOTES_MOST).map((n) => noteRow(n, !!open && n.id === open.id)).join("")}</div>` : ui.notes.q ? `<p class="hc-quiet">No note has “${esc(ui.notes.q.trim())}”.</p>` : none}</div>`;
-      const head = form === "l" ? headOf("Notes", `<span class="hc-cap hc-cut">${plural(count, "note")}</span>`, newNote())
-        : `${headOf("Notes", `<span class="hc-cap hc-cut">${plural(count, "note")} · kept on this computer</span>`)}<div class="hc-notes-bar"><input class="hc-note-find hc-field" type="search" data-fk="note-find" placeholder="Search notes" aria-label="Search your notes" autocomplete="off" spellcheck="false" maxlength="200">${newNote()}</div>`;
-      if (wide) return `${head}${undoBar()}<div class="hc-notes-app">${list}${count || open ? notePane(open, false) : ""}</div>`;
-      return open && !ui.notes.q ? `${headOf("Notes", `<span class="hc-cap hc-cut">${plural(count, "note")}</span>`, newNote())}${undoBar()}${notePane(open, true)}` : `${head}${undoBar()}${list}`;
-    }
+    // ---- Notes: the notes app (media/shared/notes.js) draws its own card in place ----------------------------------------------
+    const notesApp = root.DgcNotes?.create({ doc, post, say: (text) => say(text), width: () => widthNow(), redraw: () => draw(), openCard: () => open("note"), isOpen: () => ui.open === "note" }) || null;
 
     // ---- Widgets and Artifacts: what the Library lists, a page at a time ---------------------------------------------------
     const PER = { widgets: { s: 1, m: 1, l: 2 }, artifacts: { s: 1, m: 2, l: 4 } };
@@ -447,14 +399,14 @@
       return (form === "s" ? `<span class="hc-lbl">${name}<span class="hc-cnt">${rows.length}${said.more ? "+" : ""}</span></span>` : headOf(name, "", link)) + stack + pager;
     }
     const render = (id, form, d, tight) => (id === "token" ? tokenCard(form) : id === "recent" ? recentCard(form, d, tight) : id === "needs" ? needsCard(form, d) : id === "running" ? runningCard(form, d, tight)
-      : id === "quick" ? quickCard(form, d) : id === "folders" ? foldersCard(form, d) : id === "clock" ? clockCard(form) : id === "weather" ? weatherCard(form, tight) : id === "note" ? noteCard(form)
+      : id === "quick" ? quickCard(form, d) : id === "folders" ? foldersCard(form, d) : id === "clock" ? clockCard(form) : id === "weather" ? weatherCard(form, tight) : id === "note" ? (notesApp ? notesApp.small() : "")
       : id === "widgets" || id === "artifacts" ? stackCard(id, form, d) : listCard(id, form, d, tight));
     /** A card's one line while Home is arranged, and its small preview in the library. */
     function caption(id, d) {
       return id === "needs" ? (d.needs?.count ? `${d.needs.count} waiting` : "Nothing waiting") : id === "running" ? ((d.running || []).length ? `${d.running.length} running` : "Nothing running") : id === "recent" ? "Work, chats and Pips"
         : id === "token" ? "Tokens, requests, cache" : id === "quick" ? "New session · chat · Pip" : id === "work" ? plural(d.work?.total || 0, "session") : id === "chats" ? plural(d.chats?.total || 0, "chat") : id === "pips" ? plural(d.pips?.total || 0, "Pip")
         : id === "folders" ? plural((d.folders?.rows || []).length, "folder") : id === "clock" ? "The time here" : id === "weather" ? placeOf()?.name || "A place you choose"
-        : id === "widgets" ? (made.widgets ? plural(rowsOf("widgets").length, "widget") : "The widgets made for you") : id === "artifacts" ? (made.artifacts ? plural(rowsOf("artifacts").length, "artifact") : "What was made for you") : plural((layout.notes || []).length, "note");
+        : id === "widgets" ? (made.widgets ? plural(rowsOf("widgets").length, "widget") : "The widgets made for you") : id === "artifacts" ? (made.artifacts ? plural(rowsOf("artifacts").length, "artifact") : "What was made for you") : plural(notesApp?.count() || 0, "note");
     }
     function preview(id, d) {
       const marks = (rows) => (rows || []).slice(0, 3).map((r) => `<span class="hc-ico">${r.icon || ""}</span>`).join("") || `<span class="hc-sub">${esc(caption(id, d))}</span>`;
@@ -469,8 +421,7 @@
       if (id === "weather") return weather?.ok && placeOf() ? `${wx(weather.now.code, weather.now.day, 20)}<span class="hc-pvt">${Math.round(layout.settings.weather.unit === "f" ? (weather.now.temp * 9) / 5 + 32 : weather.now.temp)}°</span>` : `${wx(1, true, 20)}<span class="hc-pvw">A place you choose</span>`;
       if (id === "widgets") return rowsOf(id).slice(0, 3).map((r) => (d.widgets?.mark ? d.widgets.mark(r.id) : "")).join("") || `<span class="hc-pvw">${esc(CARDS[id].line)}</span>`;
       if (id === "artifacts") return rowsOf(id).slice(0, 3).map((r) => `<span class="hc-ico">${d.artifacts?.sheet ? d.artifacts.sheet(r.type) : ""}</span>`).join("") || `<span class="hc-pvw">${esc(CARDS[id].line)}</span>`;
-      const newest = notesNow()[0];
-      return `<span class="hc-pvw hc-note-line">${esc(newest ? noteTitle(newest.text) : "Your notes")}</span>`;
+      return `<span class="hc-pvw hc-note-line">${esc(notesApp?.top()?.title || "Your notes")}</span>`;
     }
 
     // ---- drawing --------------------------------------------------------------------------------------------------------
@@ -484,17 +435,20 @@
       section.classList.toggle("hc-lifted", arranging && ui.lifted === id);
       if (small || arranging) { section.tabIndex = 0; section.setAttribute("role", arranging ? "listitem" : "button"); } else { section.removeAttribute("tabindex"); section.setAttribute("role", "group"); }
       section.setAttribute("aria-label", arranging ? `${CARDS[id].name}. Space lifts it to move it, Delete takes it off Home.` : small ? `${CARDS[id].name}: open` : CARDS[id].name);
+      // Notes draws its Medium, Large and opened cards itself, part by part: a note being typed in is never drawn over.
+      if (id === "note" && notesApp && !arranging && form !== "s") { section.__html = null; notesApp.fill(section, form); return; }
+      if (id === "note" && section.__nt) { section.__nt.mode = ""; }
       if (section.__html === html) { after(section, id, form); return; }
       // (The keyboard may be inside a hub's own element, which is moved, not redrawn: the same button takes it back.)
       const moved = [...section.querySelectorAll("[data-slot] > *")], inSlot = moved.some((node) => node.contains(doc.activeElement)) ? doc.activeElement : null;
       const key = inSlot ? null : focusKey(section);
       // A field being typed in (a note, a search, a city) keeps its words, its caret and the keyboard across the draw.
-      const typed = !inSlot && doc.activeElement?.matches?.("textarea.hc-note-edit, input.hc-note-find, input.hc-city, input.hc-zone") && section.contains(doc.activeElement) ? doc.activeElement : null;
-      const held = typed ? { fk: typed.dataset.fk, note: typed.dataset.note || "", value: typed.value, from: typed.selectionStart, to: typed.selectionEnd, top: typed.scrollTop, place: typed.__place || null } : null;
+      const typed = !inSlot && doc.activeElement?.matches?.("input.hc-city, input.hc-zone") && section.contains(doc.activeElement) ? doc.activeElement : null;
+      const held = typed ? { fk: typed.dataset.fk, value: typed.value, from: typed.selectionStart, to: typed.selectionEnd, top: typed.scrollTop, place: typed.__place || null } : null;
       for (const node of moved) pantry.append(node);
       filling = true; section.__html = html; section.innerHTML = html; filling = false;
       for (const place of section.querySelectorAll("[data-slot]")) { const node = slot?.(place.dataset.slot); if (node) { place.append(node); slotted?.(place.dataset.slot, form, tight); } }
-      const again = held ? [...section.querySelectorAll(`[data-fk="${held.fk}"]`)].find((n) => (n.dataset.note || "") === held.note) : null;
+      const again = held ? [...section.querySelectorAll(`[data-fk="${held.fk}"]`)][0] : null;
       if (again) {
         again.value = held.value; filling = true; again.focus({ preventScroll: true }); filling = false;
         try { again.setSelectionRange(held.from, held.to); } catch { /* a field with no caret to place */ }
@@ -511,11 +465,6 @@
     /** What a draw leaves to be set by hand: a note's words and what is searched for (never while they are typed), the
      *  inked day; the Clock's field is emptied. */
     function after(section, id, form) {
-      if (id === "note") {
-        const box = section.querySelector("textarea.hc-note-edit"), find = section.querySelector("input.hc-note-find");
-        if (box) { const n = noteOf(box.dataset.note); if (n && doc.activeElement !== box && box.value !== n.text) box.value = n.text; const limit = section.querySelector(".hc-note-limit"); if (limit) limit.hidden = box.value.length < NOTE_MOST; }
-        if (find && doc.activeElement !== find && find.value !== ui.notes.q) find.value = ui.notes.q;
-      }
       if (id === "clock") { const field = section.querySelector("input.hc-zone"); if (field && doc.activeElement !== field && field.value) field.value = ""; }
       if (id === "token" && form !== "s") inkHot(section);
     }
@@ -762,74 +711,6 @@
     function weatherEditEnd(card) { pickClose(); ui.weatherEdit = false; focusNext = `${card.parentNode === grid ? ".hc-grid" : ".hc-open"} .hc-weather .hc-city-edit`; cancelAnimationFrame(pending); drawNow(); }
     view.addEventListener("resize", onResize);
 
-    // ---- Notes: what is done to a note -----------------------------------------------------------------------------------------
-    const setNotes = (notes) => { layout = { ...layout, notes }; };
-    /** A note as it is now, here at once and to the host: soon (typing rests) or now. A new note with no words yet is not kept. */
-    function keepNote(n, now = false) {
-      const all = layout.notes || [], at = all.findIndex((x) => x.id === n.id);
-      setNotes(at >= 0 ? all.map((x) => (x.id === n.id ? n : x)) : [n, ...all]);
-      noteDirty = n.id;
-      view.clearTimeout(noteTimer); noteTimer = 0;
-      if (ui.notes.fresh === n.id && !n.text.trim()) return;
-      const send = () => { noteTimer = 0; const cur = noteOf(n.id); if (!cur) return; if (ui.notes.fresh === cur.id) ui.notes.fresh = ""; post?.({ type: "homeNote", op: "save", note: { id: cur.id, text: cur.text, at: cur.at, pinned: cur.pinned } }); };
-      if (now) send(); else noteTimer = view.setTimeout(send, 400);
-    }
-    /** What was typed and not yet sent goes now. */
-    function flushNote() { if (!noteTimer) return; view.clearTimeout(noteTimer); noteTimer = 0; const cur = noteOf(noteDirty); if (cur && !(ui.notes.fresh === cur.id && !cur.text.trim())) { if (ui.notes.fresh === cur.id) ui.notes.fresh = ""; post?.({ type: "homeNote", op: "save", note: { id: cur.id, text: cur.text, at: cur.at, pinned: cur.pinned } }); } }
-    /** Typing in a note ends: it is read again. A new note left with no words is not a note. */
-    function endEdit() {
-      flushNote();
-      const id = ui.notes.editing; ui.notes.editing = "";
-      if (id && ui.notes.fresh === id) { ui.notes.fresh = ""; if (!noteOf(id)?.text.trim()) { setNotes((layout.notes || []).filter((n) => n.id !== id)); if (ui.notes.open === id) ui.notes.open = ""; if (noteDirty === id) noteDirty = ""; } }
-    }
-    const scopeOf = (card) => (card.parentNode === grid ? ".hc-grid" : ".hc-open");
-    function startNote(card) {
-      if (full500()) return;
-      endEdit();
-      const n = { id: `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, text: "", at: 0, pinned: false };
-      setNotes([n, ...(layout.notes || [])]);
-      ui.notes = { ...ui.notes, fresh: n.id, open: n.id, editing: n.id, q: "" }; noteDirty = n.id;
-      // On a Medium card (a list only) and a Small one, the note opens with the card whole; on a Large one, beside its list.
-      if (card.parentNode === grid && card.dataset.form !== "l") open("note"); else { cancelAnimationFrame(pending); drawNow(); }
-      host.querySelector(`${card.parentNode === grid && card.dataset.form === "l" ? ".hc-grid" : ".hc-open"} textarea.hc-note-edit`)?.focus({ preventScroll: true });
-    }
-    function showNote(id, card) {
-      if (ui.notes.editing !== id) endEdit();
-      ui.notes.open = id;
-      if (card.parentNode === grid && card.dataset.form !== "l") { ui.notes.q = ""; open("note"); } else { focusNext = `${scopeOf(card)} .hc-note-row[data-note="${id}"]`; cancelAnimationFrame(pending); drawNow(); }
-    }
-    function editNote(id, card, on) {
-      if (on) { if (ui.notes.editing && ui.notes.editing !== id) endEdit(); ui.notes.open = id; ui.notes.editing = id; } else endEdit();
-      focusNext = on ? "" : `${scopeOf(card)} [data-fk="note-mode"]`;
-      cancelAnimationFrame(pending); drawNow();
-      if (on) { const box = host.querySelector(`${scopeOf(card)} textarea.hc-note-edit`); if (box) { box.focus({ preventScroll: true }); try { box.setSelectionRange(box.value.length, box.value.length); } catch { /* at its start */ } } }
-    }
-    function deleteNote(id, card) {
-      const n = noteOf(id); if (!n) return;
-      view.clearTimeout(noteTimer); noteTimer = 0; if (noteDirty === id) noteDirty = "";
-      const kept = ui.notes.fresh !== id;
-      setNotes((layout.notes || []).filter((x) => x.id !== id));
-      if (ui.notes.open === id) ui.notes.open = ""; if (ui.notes.editing === id) ui.notes.editing = ""; if (!kept) ui.notes.fresh = "";
-      if (kept) {
-        post?.({ type: "homeNote", op: "delete", id });
-        // Undo, for a few seconds: the note as it was.
-        ui.notes.undo = { note: n }; view.clearTimeout(undoTimer); undoTimer = view.setTimeout(() => { ui.notes.undo = null; draw(); }, 8000);
-        say("Note deleted. Undo brings it back.");
-      }
-      focusNext = kept ? `${scopeOf(card)} .hc-undo` : "";
-      cancelAnimationFrame(pending); drawNow();
-    }
-    function undoDelete(card) {
-      const n = ui.notes.undo?.note; if (!n) return;
-      ui.notes.undo = null; view.clearTimeout(undoTimer);
-      if ((layout.notes || []).length >= NOTES_MOST) { say(`${NOTES_MOST} notes is the most. Delete one to bring it back.`); draw(); return; }
-      ui.notes.open = n.id;
-      keepNote(n, true);
-      say("The note is back.");
-      focusNext = `${scopeOf(card)} .hc-note-row[data-note="${n.id}"]`;
-      cancelAnimationFrame(pending); drawNow();
-    }
-
     // ---- a Small card opened to its full form -----------------------------------------------------------------------------
     function open(id) {
       if (!CARDS[id] || !layout.order.includes(id) || ui.arranging) return;
@@ -841,7 +722,7 @@
     function close(focus = true) {
       if (!ui.open) return;
       const was = ui.open; ui.open = ""; ui.weatherEdit = false; keep?.({ open: "" });
-      pickClose(); if (was === "note") { endEdit(); ui.notes.open = ""; ui.notes.q = ""; }
+      pickClose(); if (was === "note") notesApp?.closed();
       cancelAnimationFrame(pending); drawNow();
       if (focus) { const card = grid.querySelector(`.hc-card[data-card="${was}"]`); (card?.tabIndex === 0 ? card : card?.querySelector("button, [tabindex]") || head.querySelector(".hc-cards-btn"))?.focus({ preventScroll: true }); }
     }
@@ -1026,19 +907,8 @@
         if (t.closest("[data-library]")) { act?.("library", id); return; }
         if (tile) { const row = rowsOf(id).find((r) => r.id === tile.dataset.tile); if (row) act?.(id === "widgets" ? "widget" : "artifact", row); return; }
       }
-      if (id === "note") {
-        const pane = t.closest(".hc-note-pane"), noteId = pane?.dataset.note || "";
-        if (t.closest(".hc-note-new")) { startNote(card); return; }
-        if (t.closest(".hc-note-row")) { showNote(t.closest(".hc-note-row").dataset.note, card); return; }
-        if (t.closest(".hc-undo")) { undoDelete(card); return; }
-        if (t.closest(".hc-note-all")) { endEdit(); ui.notes.open = ""; focusNext = ".hc-open .hc-note-row, .hc-open .hc-note-new"; cancelAnimationFrame(pending); drawNow(); return; }
-        if (t.closest(".hc-viewall")) { endEdit(); ui.notes.open = ""; ui.notes.q = ""; open(id); return; }
-        if (noteId && t.closest(".hc-note-mode")) { editNote(noteId, card, ui.notes.editing !== noteId); return; }
-        if (noteId && t.closest(".hc-note-pin")) { const n = noteOf(noteId); if (n) { keepNote({ ...n, pinned: !n.pinned }, true); say(n.pinned ? "Unpinned." : "Pinned to the top."); cancelAnimationFrame(pending); drawNow(); } return; }
-        if (noteId && t.closest(".hc-note-del")) { deleteNote(noteId, card); return; }
-        if (noteId && t.closest(".hc-note-view") && !t.closest("label, input")) { editNote(noteId, card, true); return; }
-        if (t.closest("label.hc-check, .hc-note-pane, .hc-notes-bar")) return;
-      }
+      // Notes: a Medium, Large or opened card answers its own presses (media/shared/notes.js); a Small one has its + here.
+      if (id === "note") { if (t.closest(".nt-quick")) { notesApp?.start(card); return; } if (card.dataset.form !== "s") return; }
       if (t.closest(".hc-viewall")) { open(id); return; }
       if (t.closest("[data-new]")) { act?.("new", t.closest("[data-new]").dataset.new); return; }
       if (t.closest("[data-quick]")) { act?.("new", t.closest("[data-quick]").dataset.quick); return; }
@@ -1060,26 +930,7 @@
       if (was) focusNext = `${scope} .hc-weather .hc-city-edit`;
       setting("weather", { place, city: undefined }); draw();
     });
-    // A tick box in a note: its line is written "- [x]" or "- [ ]", and kept.
-    host.addEventListener("change", (e) => {
-      const box = e.target; if (!box.matches?.('.hc-note-view input[type="checkbox"]')) return;
-      const n = noteOf(box.closest(".hc-note-view").dataset.note), at = Number(box.dataset.line); if (!n) return;
-      const lines = n.text.split("\n"), tick = TICK_LINE.exec(lines[at] || ""); if (!tick) return;
-      lines[at] = `${tick[1]}- [${box.checked ? "x" : " "}] ${tick[3]}`;
-      keepNote({ ...n, text: lines.join("\n"), at: Date.now() });
-      draw();
-    });
-    host.addEventListener("input", (e) => {
-      const t = e.target;
-      if (t.matches?.("input.hc-note-find")) { ui.notes.q = t.value.slice(0, 200); draw(); return; }
-      if (!t.matches?.("textarea.hc-note-edit")) return;
-      const n = noteOf(t.dataset.note); if (!n) return;
-      const text = t.value.slice(0, NOTE_MOST), limit = t.parentNode.querySelector(".hc-note-limit");
-      if (limit) limit.hidden = text.length < NOTE_MOST;
-      keepNote({ ...n, text, at: Date.now() });
-      draw();
-    });
-    host.addEventListener("contextmenu", (e) => { const card = e.target.closest(".hc-grid > .hc-card"); if (!card || e.target.closest("textarea, input, .dgc-hub-card, .hc-note-view")) return; e.preventDefault(); if (!ui.arranging) arrange(true, `.hc-grid .hc-card[data-card="${card.dataset.card}"]`); });
+    host.addEventListener("contextmenu", (e) => { const card = e.target.closest(".hc-grid > .hc-card"); if (!card || e.target.closest("textarea, input, .dgc-hub-card, .nt-doc, .nt-menu")) return; e.preventDefault(); if (!ui.arranging) arrange(true, `.hc-grid .hc-card[data-card="${card.dataset.card}"]`); });
     host.addEventListener("pointerdown", (e) => { const card = e.target.closest(".hc-grid.hc-arranging > .hc-card"); if (card) dragStart(e, card); });
     host.addEventListener("pointermove", (e) => {
       if (drag) { dragMove(e); return; }
@@ -1099,9 +950,6 @@
         if (!card.contains(doc.activeElement)) card.querySelector(".hc-stack")?.focus({ preventScroll: true });
         return;
       }
-      // A note being typed in: Escape ends the typing (and closes nothing else).
-      if (t.matches?.("textarea.hc-note-edit") && e.key === "Escape") { e.preventDefault(); e.stopPropagation(); editNote(t.dataset.note, card, false); return; }
-      if (t.matches?.("input.hc-note-find") && e.key === "Escape" && t.value) { e.preventDefault(); e.stopPropagation(); t.value = ""; ui.notes.q = ""; draw(); return; }
       if (t.matches?.(".hc-plot")) {
         const cols = [...t.querySelectorAll(".hc-col")], at = cols.findIndex((c) => c.dataset.day === ui.token.hot);
         if (e.key === "Escape" && at >= 0) { e.preventDefault(); e.stopPropagation(); hot(""); return; }
@@ -1135,15 +983,16 @@
       if (drag?.lifted) { e.preventDefault(); dragEnd(null, false); }
       else if (ui.lifted) { e.preventDefault(); drop(false); }
       else if (ui.arranging) { e.preventDefault(); arrange(false); }
+      else if (ui.open === "note" && notesApp?.back()) e.preventDefault();
       else if (ui.open) { e.preventDefault(); close(); }
     };
     doc.addEventListener("keydown", onKey);
 
     // The side bar's edge dragged: a new form, and the cards glide to their places.
     let width = widthNow(), was = gridForm(width), sized = null;
-    if (view.ResizeObserver) { sized = new view.ResizeObserver(() => { const w = widthNow(); if (!w || w === width) return; width = w; const g = gridForm(w); if (g !== was || g === "l") { if (g !== was && !ui.open) ui.weatherEdit = false; was = g; draw(true); } }); sized.observe(host); }
+    if (view.ResizeObserver) { sized = new view.ResizeObserver(() => { const w = widthNow(); if (!w || w === width) return; const notesTurn = ui.open === "note" && (w >= 560) !== (width >= 560); width = w; const g = gridForm(w); if (g !== was || g === "l" || notesTurn) { if (g !== was && !ui.open) ui.weatherEdit = false; was = g; draw(true); } }); sized.observe(host); }
     const tick = view.setInterval(() => { if (host.checkVisibility?.() && (layout.order.includes("clock") || layout.order.includes("recent") || layout.order.includes("note") || (layout.order.includes("weather") && weather && weather.ok === false))) draw(); }, 20000);
-    post?.({ type: "homeCardsReady" });
+    post?.({ type: "homeCardsReady" });      // (answered with the cards and, for the Notes card, the list of notes)
     drawNow();
 
     return {
@@ -1155,14 +1004,7 @@
         const changed = JSON.stringify(order) !== JSON.stringify(layout.order);
         if (ui.lifted || drag) return;      // a card is in the air: what the user holds wins
         const whereOf = (w) => (w?.place ? `${w.place.lat},${w.place.lon}` : w?.city || ""), was = whereOf(layout.settings?.weather);
-        // The notes as the host keeps them; the one being typed in (or not yet sent) stays as it is here.
-        let notes = Array.isArray(next?.notes) ? next.notes.filter((n) => n && typeof n.id === "string" && typeof n.text === "string").map((n) => ({ id: n.id, text: n.text, at: Number(n.at) || 0, pinned: n.pinned === true })) : layout.notes || [];
-        if (noteDirty) {
-          const mine = noteOf(noteDirty), theirs = notes.find((n) => n.id === noteDirty);
-          if (mine && (noteTimer || ui.notes.fresh === noteDirty || !theirs || theirs.text !== mine.text || theirs.pinned !== mine.pinned)) notes = theirs ? notes.map((n) => (n.id === noteDirty ? mine : n)) : [mine, ...notes];
-          else noteDirty = "";
-        }
-        layout = { order, settings: next?.settings && typeof next.settings === "object" ? next.settings : {}, notes };
+        layout = { order, settings: next?.settings && typeof next.settings === "object" ? next.settings : {} };
         if (was !== whereOf(layout.settings?.weather)) { weather = null; weatherAt = 0; }
         draw(changed);
       },
@@ -1189,11 +1031,15 @@
         if (kind === "artifacts") rows.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
         made[kind] = { offered: said?.offered !== false, rows, more: said?.more === true }; madeAt[kind] = Date.now(); draw();
       },
+      /** The host's Notes messages (the list, a note's words, a search): the notes app's. */
+      notes(message) { notesApp?.heard(message); },
+      /** A new note, from the palette's "DGC: New Note": Notes is put on Home if it is not there, and opens on it. */
+      newNote() { if (!notesApp) return; if (!layout.order.includes("note")) keepOrder([...layout.order, "note"]); if (ui.arranging) arrange(false); notesApp.start(null); },
       open, close, opened: () => ui.open, arranging: () => ui.arranging, order: () => [...layout.order],
       closeLibrary: () => closeLibrary(false),
       /** Home is in front again: what it reads is read again when it is old. */
       shown() { ask(); },
-      dispose() { doc.removeEventListener("keydown", onKey); view.removeEventListener("resize", onResize); sized?.disconnect(); view.clearInterval(tick); view.clearTimeout(placeTimer); view.clearTimeout(undoTimer); flushNote(); pickClose(); closeLibrary(false); },
+      dispose() { doc.removeEventListener("keydown", onKey); view.removeEventListener("resize", onResize); sized?.disconnect(); view.clearInterval(tick); view.clearTimeout(placeTimer); notesApp?.dispose(); pickClose(); closeLibrary(false); },
     };
   }
 

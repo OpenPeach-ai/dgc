@@ -13440,6 +13440,9 @@ function permissionChoices(ev) {
     if (msg.type === "artifactNews") { artifactNews(msg.artifact, msg.op); return; }
     if (msg.type === "homePages") { homePagesNow = homePagesFrom(msg.pages); paintHub(); return; }
     if (msg.type === "homeCards") { home?.layout(msg); return; }
+    if (typeof msg.type === "string" && msg.type.startsWith("homeNote")) { home?.notes(msg); return; }
+    // "DGC: New Note" from the palette: Home, with a new note open in Notes.
+    if (msg.type === "homeNewNote") { showSideTab("home"); home?.newNote(); return; }
     if (msg.type === "whatsNew") { openWhatsNew(msg); return; }
     if (msg.type === "pipsWelcome") { openPipsWelcome(msg); return; }
     if (msg.type === "pipsMacNote") { openPipsMacNote(); return; }

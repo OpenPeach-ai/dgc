@@ -335,9 +335,10 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 4
       assert.match(text("weather"), /24°/); assert.match(text("weather"), /Lisbon/);
       if (form("weather") !== "s") { assert.match(text("weather"), /26°/); assert.match(text("weather"), /17°/); assert.match(text("weather"), /Weather from Open-Meteo/); assert.match(text("weather"), /16:00/); }
       assert.ok(await x.page.locator('.hc-grid .hc-card[data-card="weather"] svg.hc-wx').count() >= 1, "the conditions are a drawing on the page, not a picture fetched");
-      // Notes: the newest note's first line Small; the notes by their first lines from Medium up.
-      if (form("note") === "s") { assert.match(text("note"), /Ferry to Porto/); assert.doesNotMatch(text("note"), /09:40/); assert.match(text("note"), /\+2 notes/); }
-      else { assert.match(text("note"), /Call the bank about the card/); assert.match(text("note"), /Ferry to Porto/); assert.match(text("note"), /New note/); }
+      // Notes (14 Nov, the notes app): the top note Small (a pinned one first, as in every list; it was the newest); the
+      // notes by their first lines from Medium up, with New (it said "New note" before the folder button stood beside it).
+      if (form("note") === "s") { assert.match(text("note"), /Call the bank about the card/); assert.doesNotMatch(text("note"), /09:40/); assert.match(text("note"), /3 notes|\+2 notes/); }
+      else { assert.match(text("note"), /Call the bank about the card/); assert.match(text("note"), /Ferry to Porto/); assert.match(text("note"), /New/); }
       // Words are read: the quietest word on a card clears 4.5:1 on the card's own ground.
       const low = await x.page.evaluate(() => { const parse = (c) => { const m = c.match(/-?[\d.]+(e-?\d+)?/g)?.map(Number) || [0, 0, 0, 0]; return c.startsWith("color(srgb") ? [m[0] * 255, m[1] * 255, m[2] * 255, m[3] ?? 1] : [m[0], m[1], m[2], m[3] ?? 1]; };
         const over = (top, under) => top.slice(0, 3).map((v, i) => v * top[3] + under[i] * (1 - top[3])).concat(1);
@@ -511,9 +512,10 @@ test("the cards act: Quick start, a session's row, New, a folder's tile and New 
     assert.equal((await x.tabs()).tabs.find((tab) => tab.selected).id, "work", "on the Work tab");
     await p.click("#side-tab-home"); await x.rest(300);
     // A note: typed on the card, kept by the host.
+    // (14 Nov: the notes app. The note is typed in place on the Large card, and the host keeps it as a file.)
     await p.click(`${sel("note")} .hc-note-new`); await x.rest(200);
-    await p.fill(`${sel("note")} textarea.hc-note-edit`, "Buy tomato seeds"); await x.rest(900);
-    assert.equal((await x.host()).notes[0].text, "Buy tomato seeds");
+    await p.keyboard.type("Buy tomato seeds"); await x.rest(900);
+    assert.equal(await x.notes.text((await x.notes.list()).find((n) => n.title === "Buy tomato seeds").id), "Buy tomato seeds");
     // Weather: Celsius by default, Fahrenheit by its toggle; where it comes from is said.
     assert.match(await p.locator(sel("weather")).innerText(), /24°/);
     await p.click(`${sel("weather")} button[data-unit="f"]`); await x.rest(300);

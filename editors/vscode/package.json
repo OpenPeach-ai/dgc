@@ -48,7 +48,8 @@
     "onWebviewPanel:dgc.chatEditor",
     "onWebviewPanel:dgc.chatdgcEditor",
     "onWebviewPanel:dgc.chatdgcWidget",
-    "onWebviewPanel:dgc.artifactPanel"
+    "onWebviewPanel:dgc.artifactPanel",
+    "onWebviewPanel:dgc.noteTab"
   ],
   "contributes": {
     "customEditors": [
@@ -346,6 +347,11 @@
       {
         "command": "dgc.whatsNew",
         "title": "What's New",
+        "category": "DGC"
+      },
+      {
+        "command": "dgc.newNote",
+        "title": "New Note",
         "category": "DGC"
       }
     ],

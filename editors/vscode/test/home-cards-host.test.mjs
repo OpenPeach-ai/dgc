@@ -13,7 +13,7 @@ const out = await build({ entryPoints: [root + "src/homeCards.ts"], bundle: true
     b.onLoad({ filter: /.*/, namespace: "stub" }, () => ({ contents: "module.exports = globalThis.__HC_VSCODE;" })); } }] });
 const mod = { exports: {} };
 new Function("module", "exports", "require", out.outputFiles[0].text)(mod, mod.exports, (await import("node:module")).createRequire(import.meta.url));
-const { HomeCards, HOME_DEFAULT, HOME_CARD_TYPES, usageForHome, NOTES_MOST, NOTE_MOST } = mod.exports;
+const { HomeCards, HOME_DEFAULT, HOME_CARD_TYPES, usageForHome } = mod.exports;
 const store = () => { const kept = new Map(); return { globalState: { get: (k) => kept.get(k), update: async (k, v) => { if (v === undefined) kept.delete(k); else kept.set(k, JSON.parse(JSON.stringify(v))); } }, kept }; };
 
 test("someone new has the default set; what is added, moved and removed is kept on this computer across a reload", async () => {
@@ -35,7 +35,8 @@ test("someone new has the default set; what is added, moved and removed is kept 
 test("the host keeps no palette for a card: the library's cards have no icon of their own", async () => {
   const context = store(), home = new HomeCards(context);
   await home.setOrder(["note", "clock"]);
-  assert.deepEqual(Object.keys(home.state()).sort(), ["notes", "order", "settings", "type"]);
+  // (14 Nov: and no notes either. They are files in DGC's storage folder now: src/notes.ts, test/notes-store.test.mjs.)
+  assert.deepEqual(Object.keys(home.state()).sort(), ["order", "settings", "type"]);
   assert.equal("palettes" in (context.kept.get("dgc.homeCards.v1") || {}), false);
 });
 
@@ -59,46 +60,9 @@ test("the everyday cards' settings are kept with the layout, and only what a car
   assert.equal(new HomeCards(context).state().settings.clock, undefined);
 });
 
-// ---- Notes: many notes, kept with the layout -----------------------------------------------------------------------
-test("Notes: made, changed, pinned and deleted, kept across a reload; the old single note becomes the first note", async () => {
-  // Someone who had the one sticky note (0.52's first cards): it is the first note now, and is not lost on the first write.
-  const old = store(); await old.globalState.update("dgc.homeCards.v1", { order: ["note"], settings: { note: { text: "Buy seeds\nthen water" }, clock: { zone: "Asia/Tokyo" } } });
-  let home = new HomeCards(old, { now: () => 5000 });
-  let notes = home.state().notes;
-  assert.equal(notes.length, 1); assert.equal(notes[0].text, "Buy seeds\nthen water"); assert.equal(notes[0].pinned, false); assert.match(notes[0].id, /^[a-z0-9]{4,24}$/); assert.equal(notes[0].at, 5000);
-  assert.equal(home.state().settings.note, undefined, "the old setting is a note now, not a setting");
-  assert.deepEqual(home.state().notes, notes, "the same note, with the same id, every time it is asked");
-  await home.note({ op: "save", note: { id: "n0002", text: "Second", at: 9000, pinned: true, evil: "<script>" } });
-  home = new HomeCards(old);
-  assert.deepEqual(home.state().notes, [{ id: "n0002", text: "Second", at: 9000, pinned: true }, notes[0]], "a reload finds both: the new one first, the old note still there");
-  assert.deepEqual(home.state().settings.clock, { zones: ["Asia/Tokyo"] });   // (14 Nov: the one zone kept before is the first of the added zones)
-  // Changed in place; a note with words only; an id that is one.
-  await home.note({ op: "save", note: { id: "n0002", text: "Second, changed", at: 9500, pinned: false } });
-  await home.note({ op: "save", note: { id: "../x", text: "bad id", at: 1 } });
-  await home.note({ op: "save", note: { id: "n0003", text: 42, at: 1 } });
-  assert.deepEqual(new HomeCards(old).state().notes.map((n) => [n.id, n.text, n.pinned]), [["n0002", "Second, changed", false], [notes[0].id, "Buy seeds\nthen water", false]]);
-  await home.note({ op: "delete", id: notes[0].id });
-  assert.deepEqual(new HomeCards(old).state().notes.map((n) => n.id), ["n0002"]);
-  // Undo is the page saving the note again as it was.
-  await home.note({ op: "save", note: notes[0] });
-  assert.deepEqual(new HomeCards(old).state().notes.map((n) => n.id), [notes[0].id, "n0002"]);
-  await home.note({ op: "delete", id: "n0002" }); await home.note({ op: "delete", id: notes[0].id });
-  assert.deepEqual(new HomeCards(old).state().notes, [], "every note deleted: none, and the old note does not come back");
-});
-
-test("Notes are bounded: 500 notes, 20,000 characters each", async () => {
-  assert.equal(NOTES_MOST, 500); assert.equal(NOTE_MOST, 20000);
-  const context = store(), home = new HomeCards(context);
-  await context.globalState.update("dgc.homeCards.v1", { notes: Array.from({ length: 499 }, (_, k) => ({ id: `m${String(k).padStart(4, "0")}`, text: `Note ${k}`, at: k + 1, pinned: false })) });
-  await home.note({ op: "save", note: { id: "last1", text: "x".repeat(30000), at: 7 } });
-  let notes = new HomeCards(context).state().notes;
-  assert.equal(notes.length, 500); assert.equal(notes[0].id, "last1"); assert.equal(notes[0].text.length, 20000, "a note is at most 20,000 characters");
-  await home.note({ op: "save", note: { id: "over1", text: "one too many", at: 8 } });
-  notes = new HomeCards(context).state().notes;
-  assert.equal(notes.length, 500, "the 501st is not kept"); assert.equal(notes.some((n) => n.id === "over1"), false);
-  await home.note({ op: "save", note: { id: "m0003", text: "still changes", at: 9 } });
-  assert.equal(new HomeCards(context).state().notes.find((n) => n.id === "m0003").text, "still changes", "a note that is there can still be changed");
-});
+// (The tests "Notes: made, changed, pinned and deleted ..." and "Notes are bounded: 500 notes, 20,000 characters each"
+// went on 14 Nov with the notes app: notes are no longer kept in this state. test/notes-store.test.mjs has what replaced
+// them: the carry-over of these very notes into files, made and edited times, 2,000 notes of 100,000 characters.)
 
 const GEO = { results: [{ name: "Lisbon", country: "Portugal", latitude: 38.72, longitude: -9.13 }] };
 const FORECAST = (hour = "2026-11-13T14:00") => ({ current: { time: hour, temperature_2m: 24.3, weather_code: 2, is_day: 1 }, daily: { temperature_2m_max: [26.1, 25], temperature_2m_min: [17.4, 16] },
@@ -232,10 +196,26 @@ test("a page's messages: only Home's own are taken, and each answers with what i
   home.handle({ type: "homeCardSetting", card: "weather", settings: { place: said.at(-1).places[0] } }, reply);
   await new Promise((d) => setTimeout(d, 30));
   assert.ok(said.some((m) => m.type === "homeWeather" && m.ok && m.place === "Lisbon, Portugal"), "a place chosen is answered with its weather");
-  assert.equal(home.handle({ type: "homeNote", op: "save", note: { id: "n0001", text: "A note", at: 5, pinned: false } }, reply), true);
-  await new Promise((d) => setTimeout(d, 10));
-  assert.deepEqual(said.at(-1).notes, [{ id: "n0001", text: "A note", at: 5, pinned: false }], "a note saved is answered with the notes kept");
+  // (14 Nov: the old "homeNote" message is gone with the notes kept in this state; a store with no storage folder takes none.)
+  assert.equal(home.handle({ type: "homeNote", op: "save", note: { id: "n0001", text: "A note", at: 5, pinned: false } }, reply), false);
   home.handle({ type: "homeCardsReset" }, reply);
   await new Promise((d) => setTimeout(d, 10));
   assert.deepEqual(said.at(-1).order, HOME_DEFAULT);
+});
+
+// ---- Notes, the full app (14 Nov): Home's host hands a Notes message to the notes' own store (src/notes.ts) -------------
+test("a Notes message goes to the notes' own store, which keeps files in DGC's storage folder", async () => {
+  const { mkdtempSync, rmSync, existsSync } = await import("node:fs"), { tmpdir } = await import("node:os"), { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "dgc-home-notes-"));
+  try {
+    const context = { ...store(), globalStorageUri: { fsPath: dir }, secrets: { get: async () => undefined, store: async () => {}, delete: async () => {} } }, home = new HomeCards(context), said = [];
+    assert.equal(home.handle({ type: "homeNotesDo", op: "save", id: "note01", text: "Tide tables\nlow water 06:12" }, (m) => said.push(m)), true);
+    await home.notes.idle();
+    assert.deepEqual(said.find((m) => m.type === "homeNotes").notes.map((n) => [n.id, n.title, n.line]), [["note01", "Tide tables", "low water 06:12"]]);
+    assert.equal(existsSync(join(dir, "notes", "note01.md")), true);
+    assert.equal(context.kept.get("dgc.homeCards.v1"), undefined, "nothing of it in the extension's state");
+    // Home ready: answered with its cards and with the list of notes (the page asks for no more than that).
+    const ready = []; home.handle({ type: "homeCardsReady" }, (m) => ready.push(m.type)); await home.notes.idle();
+    assert.deepEqual(ready, ["homeCards", "homeNotes"]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

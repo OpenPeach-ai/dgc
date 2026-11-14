@@ -49,26 +49,8 @@ for (const theme of ["dark-modern", "light-modern"]) {
     else { await x.page.click(sel("token")); await x.rest(400); await x.page.mouse.move(2, 500); await shot(x, `4-token-opened-${width}-${t}`); }
     await x.close();
   }
-  // 6. Notes: each form; a note open; being typed in; search; Undo.
-  if (want("notes")) for (const width of [300, 460, 700]) {
-    const x = await openGrid(browser, { width, theme, layout: ["note", "clock", "token", "quick"], notes: NOTES, height: 700, scale: 2 });
-    await x.page.mouse.move(2, 600); await x.rest(300); await shot(x, `6-notes-${width}-${t}`);
-    if (width === 300) {
-      await x.page.click(sel("note")); await x.rest(300); await shot(x, `6-notes-opened-list-${width}-${t}`);
-      await x.page.click('.hc-open .hc-note-row[data-note="n0003"]'); await x.rest(300); await shot(x, `6-notes-opened-note-${width}-${t}`);
-      await x.page.click(".hc-open .hc-note-mode"); await x.rest(300); await x.page.mouse.move(2, 600); await x.page.keyboard.type("\n- [ ] ask about the dog"); await x.rest(700); await shot(x, `6-notes-typing-${width}-${t}`);
-    } else if (width === 460) {
-      await x.page.click(`${sel("note")} .hc-viewall`); await x.rest(300); await x.page.fill(".hc-open input.hc-note-find", "ferry"); await x.rest(300); await shot(x, `6-notes-search-${width}-${t}`);
-    } else {
-      await x.page.click(`${sel("note")} .hc-note-row[data-note="n0003"]`); await x.rest(300); await shot(x, `6-notes-large-ticks-${width}-${t}`);
-      await x.page.click(`${sel("note")} .hc-note-del`); await x.rest(300); await shot(x, `6-notes-undo-${width}-${t}`);
-      await x.resize(900); await x.page.click(`${sel("note")} .hc-note-row`); await x.rest(200);
-    }
-    await x.close();
-  }
-  if (want("notes")) { const x = await openGrid(browser, { width: 700, theme, layout: ["clock", "note"], notes: NOTES, height: 620, scale: 2, saved: { sideTab: "home", homeCards: { open: "note" } } });
-    await x.rest(300); if (!(await x.grid()).open) { await x.resize(460); await x.page.click(`${sel("note")} .hc-viewall`); await x.resize(700); }
-    await x.page.mouse.move(2, 600); await x.rest(300); await shot(x, `6-notes-opened-wide-700-${t}`); await x.close(); }
+  // 6. Notes: the notes app has its own pictures now (14 Nov: every card size, the opened app in both layouts, the
+  // editor, the lock, Recently deleted): they are drawn from test/support/notes-sample.mjs by the notes build's harness.
   // 7. Widgets and Artifacts.
   if (want("made")) for (const width of [300, 460, 700]) {
     let x = await openGrid(browser, { width, theme, layout: ["widgets", "artifacts", "clock", "quick"], height: width === 700 ? 420 : 640, scale: 2 });

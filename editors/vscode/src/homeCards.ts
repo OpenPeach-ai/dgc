@@ -3,7 +3,8 @@
 // Kept on this computer, in the extension's global state as the dock's pins are (src/dock.ts), so a reload and every
 // window find Home as it was left: which cards are on Home and in what order (the side bar's width picks each card's
 // size, so no size is kept), the everyday cards' own settings (the Clock's added time zones, the Weather's place and
-// unit, which widget and which artifact their cards last showed), and the notes of the Notes card.
+// unit, which widget and which artifact their cards last showed). The Notes card's notes are not here: they are files in
+// DGC's own storage folder (src/notes.ts), and a Notes message a page sends is handed to that store.
 //
 // Read for it: the token report, shaped for the Token usage card (the days as DGC counted them, the models by tokens
 // with their provider and share; never a prompt or a reply), and the weather. The Weather card's requests are the only
@@ -12,6 +13,7 @@
 // the user chooses is kept whole (name, region, country, latitude, longitude, time zone) and the forecast is asked by
 // its coordinates. Nothing else is sent. A forecast is kept for half an hour.
 import type * as vscode from "vscode";
+import { Notes, notesOf } from "./notes";
 
 const KEY = "dgc.homeCards.v1";
 /** Every card there is, in the library's order. */
@@ -20,24 +22,21 @@ export type HomeCardType = typeof HOME_CARD_TYPES[number];
 /** Home for someone new. */
 export const HOME_DEFAULT: HomeCardType[] = ["needs", "recent", "running", "token", "quick"];
 const WEATHER_KEEP_MS = 30 * 60000;
-/** The Notes card holds at most this many notes, each at most this long. */
-export const NOTES_MOST = 500, NOTE_MOST = 20000;
 /** The Clock shows Here and at most this many added time zones (four in all). */
 export const CLOCK_ZONES_MOST = 3;
 
 /** A place as Open-Meteo's search named it, kept whole: the forecast is asked by its coordinates. */
 export type HomePlace = { name: string; admin1: string; country: string; code: string; lat: number; lon: number; tz: string };
-export type HomeNote = { id: string; text: string; at: number; pinned: boolean };
 /** `clock.zones`: the time zones added beside Here, in the order they were added. `weather.city`: a city typed before
  *  places were chosen from a list (found once more, then kept as a place). */
 export type HomeSettings = { clock?: { zones: string[] }; weather?: { place?: HomePlace; city?: string; unit?: "c" | "f" }; widgets?: { shown?: string }; artifacts?: { shown?: string } };
-export type HomeCardsState = { type: "homeCards"; order: HomeCardType[]; settings: HomeSettings; notes: HomeNote[] };
+export type HomeCardsState = { type: "homeCards"; order: HomeCardType[]; settings: HomeSettings };
 export type HomeWeather = { type: "homeWeather"; ok: true; place: string; at: number; now: { temp: number; code: number; day: boolean }; high: number; low: number; hours: { time: string; temp: number; code: number }[] }
   | { type: "homeWeather"; ok: false; reason: "nocity" | "offline" | "refused" | "notfound" };
 /** The places found for the letters typed (`q`, as the page sent them; `seq` is the page's own count of its asks). */
 export type HomePlaces = { type: "homeWeatherPlaces"; q: string; seq: number; ok: true; places: HomePlace[] } | { type: "homeWeatherPlaces"; q: string; seq: number; ok: false; reason: "offline" | "refused" };
 type Fetcher = (url: string, init?: { signal?: AbortSignal }) => Promise<{ ok: boolean; status: number; json(): Promise<any> }>;
-type Kept = { order?: unknown; settings?: unknown; notes?: unknown };
+type Kept = { order?: unknown; settings?: unknown };
 
 const isType = (value: unknown): value is HomeCardType => typeof value === "string" && (HOME_CARD_TYPES as readonly string[]).includes(value);
 function order(value: unknown): HomeCardType[] | undefined {
@@ -82,19 +81,6 @@ function settings(value: unknown): HomeSettings {
   for (const card of ["widgets", "artifacts"] as const) if (typeof from[card]?.shown === "string" && SHOWN_ID.test(from[card].shown)) out[card] = { shown: from[card].shown };
   return out;
 }
-const NOTE_ID = /^[a-z0-9]{4,24}$/;
-/** One note, checked: an id of its own, its words, when it was last changed, whether it is pinned. undefined: not one. */
-function note(entry: any): HomeNote | undefined {
-  const id = String(entry?.id ?? ""), at = Number(entry?.at);
-  if (!NOTE_ID.test(id) || typeof entry?.text !== "string") return undefined;
-  return { id, text: entry.text.slice(0, NOTE_MOST), at: Number.isFinite(at) && at > 0 ? Math.round(at) : 0, pinned: entry.pinned === true };
-}
-function notes(value: unknown): HomeNote[] {
-  const out: HomeNote[] = [], seen = new Set<string>();
-  for (const entry of Array.isArray(value) ? value.slice(0, NOTES_MOST) : []) { const one = note(entry); if (one && !seen.has(one.id)) { seen.add(one.id); out.push(one); } }
-  return out;
-}
-
 export type HomeUsageModel = { name: string; model: string; provider: string; where: string; tokens: number; share: number };
 export type HomeUsageDay = { date: string; input_tokens: number; output_tokens: number; cached_input_tokens: number; requests: number; models?: HomeUsageModel[] };
 /** A provider as people call it ("ollama" is Ollama); one this list doesn't know keeps its own name, capitalised. */
@@ -138,8 +124,10 @@ export class HomeCards {
   private held?: { where: string; at: number; said: HomeWeather };
   /** The places found for the last few things typed, so the same letters are not asked twice. */
   private readonly found = new Map<string, HomePlace[]>();
-  private firstNote?: HomeNote;
-  constructor(private readonly context: Pick<vscode.ExtensionContext, "globalState">, options: { fetcher?: Fetcher; now?: () => number } = {}) {
+  /** The Notes card's own store (src/notes.ts): files in DGC's storage folder. None where there is no such folder. */
+  readonly notes?: Notes;
+  constructor(private readonly context: Pick<vscode.ExtensionContext, "globalState"> & Partial<Pick<vscode.ExtensionContext, "globalStorageUri" | "secrets">>, options: { fetcher?: Fetcher; now?: () => number; notes?: Notes } = {}) {
+    this.notes = options.notes ?? (context.globalStorageUri && context.secrets ? new Notes(context as any, { now: options.now }) : undefined);
     this.fetcher = options.fetcher ?? (typeof (globalThis as any).fetch === "function" ? ((url, init) => (globalThis as any).fetch(url, init)) : undefined);
     this.now = options.now ?? Date.now;
   }
@@ -153,19 +141,9 @@ export class HomeCards {
     try { await this.context.globalState.update(KEY, { ...this.kept(), ...change }); } catch { /* kept for this window still */ }
     for (const listener of [...this.listeners]) { try { listener(); } catch { /* one page's trouble is its own */ } }
   }
-  /** The notes kept. Before there were notes there was one sticky note, a setting: where no notes are kept yet, it is
-   *  the first note (the same note every time it is asked, and written with the first change to any note). */
-  private notesNow(): HomeNote[] {
-    const kept = this.kept();
-    if (Array.isArray(kept.notes)) return notes(kept.notes);
-    const old = (kept.settings as any)?.note?.text;
-    if (typeof old !== "string" || !old.trim()) return [];
-    if (!this.firstNote || this.firstNote.text !== old.slice(0, NOTE_MOST)) this.firstNote = { id: "first1", text: old.slice(0, NOTE_MOST), at: this.now(), pinned: false };
-    return [this.firstNote];
-  }
   state(): HomeCardsState {
     const kept = this.kept();
-    return { type: "homeCards", order: order(kept.order) ?? [...HOME_DEFAULT], settings: settings(kept.settings), notes: this.notesNow() };
+    return { type: "homeCards", order: order(kept.order) ?? [...HOME_DEFAULT], settings: settings(kept.settings) };
   }
   onChange(listener: () => void): { dispose(): void } {
     this.listeners.add(listener);
@@ -197,27 +175,6 @@ export class HomeCards {
       if (!now.weather.place && !now.weather.city && !now.weather.unit) delete now.weather;
     }
     await this.keep({ settings: now });
-  }
-  /** A note saved (new, or changed in place), or deleted. A new note past the most is not kept. */
-  async note(message: any): Promise<void> {
-    const all = this.notesNow();
-    if (message?.op === "delete") {
-      const id = String(message.id ?? ""), next = all.filter((n) => n.id !== id);
-      if (next.length === all.length) return;
-      await this.keepNotes(next);
-    } else if (message?.op === "save") {
-      const one = note(message.note);
-      if (!one) return;
-      const at = all.findIndex((n) => n.id === one.id);
-      if (at >= 0) all[at] = one; else if (all.length < NOTES_MOST) all.unshift(one); else return;
-      await this.keepNotes(all);
-    }
-  }
-  /** The notes, and with them the old sticky note's setting taken away: it is a note now. */
-  private async keepNotes(next: HomeNote[]): Promise<void> {
-    const old = this.kept().settings, rest = old && typeof old === "object" ? { ...(old as Record<string, unknown>) } : {};
-    delete rest.note;
-    await this.keep({ notes: next, settings: rest });
   }
 
   private async ask(url: string): Promise<any> {
@@ -286,9 +243,11 @@ export class HomeCards {
   }
 
   /** A page's Home-cards message. False when it isn't one. `reply` gets what the page asked for. */
-  handle(message: any, reply?: (said: HomeCardsState | HomeWeather | HomePlaces) => void): boolean {
+  handle(message: any, reply?: (said: any) => void): boolean {
+    if (this.notes?.handle(message, reply)) return true;
     switch (message?.type) {
-      case "homeCardsReady": reply?.(this.state()); return true;
+      // (Home is ready: its cards, and for the Notes card the list of notes, never a note's words.)
+      case "homeCardsReady": reply?.(this.state()); this.notes?.handle({ type: "homeNotesDo", op: "get" }, reply); return true;
       case "homeCardsSet": void this.setOrder(message.order).then(() => reply?.(this.state())); return true;
       case "homeCardsReset": void this.reset().then(() => reply?.(this.state())); return true;
       case "homeCardSetting":
@@ -297,7 +256,6 @@ export class HomeCards {
           if (message.card === "weather" && message.settings && typeof message.settings === "object" && "place" in message.settings) reply?.(await this.weather());
         });
         return true;
-      case "homeNote": void this.note(message).then(() => reply?.(this.state())); return true;
       case "homeWeatherSuggest": void this.places(message.q, message.seq).then((said) => reply?.(said)); return true;
       case "homeWeatherGet": void this.weather().then((said) => reply?.(said)); return true;
       default: return false;
@@ -309,6 +267,6 @@ const homes = new WeakMap<object, HomeCards>();
 /** The one Home of this extension (every window's side bar shares it). */
 export function homeCardsOf(context: vscode.ExtensionContext): HomeCards {
   let home = homes.get(context);
-  if (!home) { home = new HomeCards(context); homes.set(context, home); }
+  if (!home) { home = new HomeCards(context, { notes: notesOf(context) }); homes.set(context, home); }
   return home;
 }

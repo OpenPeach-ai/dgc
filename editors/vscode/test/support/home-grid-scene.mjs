@@ -4,6 +4,7 @@
 // touches a network: the weather is a stand-in's. Shared by home-cards.test.mjs and the pictures. Not a *.test.mjs file.
 import { openDock, DOCK_SESSIONS } from "./dock-scene.mjs";
 import { homeState, CHATS } from "./home-scene.mjs";
+import { notesModule, context as notesContext, seed as notesSeed, OLD_KEY } from "./notes-host.mjs";
 
 export const DEFAULT = ["needs", "recent", "running", "token", "quick"];
 export const EVERY = ["needs", "recent", "running", "token", "quick", "work", "chats", "pips", "folders", "clock", "weather", "note"];
@@ -61,12 +62,20 @@ export const THIRTY_FOLDERS = ["shop", "garden-notes", "invoices", "recipes", "t
  *  folders: the Project Folder rows (null: a DGC that lists none); news: Work replies nobody saw ([{ id, at, preview }]).
  *  Everything else is dock-scene's (width, height, theme, motion, state, sessions, video...). */
 export async function openGrid(browser, { layout = DEFAULT, settings = {}, usage = USAGE(), weather = WEATHER, folders = FOLDERS, news = [], sessions = DOCK_SESSIONS, state = homeState("busy"),
-  notes = [], places = PLACES, geo = "ok", widgets = WIDGETS, artifacts = ARTIFACTS, ...rest } = {}) {
+  notes = [], seed = null, notesOptions = {}, keychain = true, places = PLACES, geo = "ok", widgets = WIDGETS, artifacts = ARTIFACTS, ...rest } = {}) {
   const x = await openDock(browser, { tab: "home", sessions, state, height: 900, grid: true, ...rest });
+  // Notes are the real host's (src/notes.ts), on a folder of its own: `notes` are the notes kept before the notes app
+  // ([{ id, text, at, pinned }], carried over as the host carries them), `seed` is notes and folders as files
+  // ({ notes: [{ id, text, folder, pinned, created, edited, deleted }], folders: [{ id, name }] }).
+  const { Notes } = await notesModule(), nc = notesContext(undefined, { state: notes.length ? { [OLD_KEY]: { notes } } : {}, keychain });
+  if (seed) await notesSeed(nc, seed);
+  const store = new Notes(nc, notesOptions), tell = (said) => x.page.evaluate((d) => window.dispatchEvent(new MessageEvent("message", { data: d })), JSON.parse(JSON.stringify(said))).catch(() => {});
+  await x.page.exposeFunction("__notesHost", (m) => { store.handle(m, tell); });
+  store.onSaid(tell);      // (what the host says by itself, as when notes lock after a while, reaches the page too)
   const requests = [];
   x.page.on("request", (r) => requests.push(r.url()));
   await x.page.evaluate(({ layout, settings, usage, weather, DEFAULT, notes, places, geo, widgets, artifacts }) => {
-    const kept = window.__homeCards = { order: [...layout], settings: JSON.parse(JSON.stringify(settings)), notes: JSON.parse(JSON.stringify(notes)) };
+    const kept = window.__homeCards = { order: [...layout], settings: JSON.parse(JSON.stringify(settings)) };
     // The stand-in place search: `geo` "ok" | "offline" | "refused"; what was asked of it is noted (never a network).
     window.__homeGeo = { places, mode: geo }; window.__geoAsked = [];
     window.__homeWidgets = widgets; window.__homeArtifacts = artifacts;
@@ -75,7 +84,7 @@ export async function openGrid(browser, { layout = DEFAULT, settings = {}, usage
     const say = () => tell({ type: "homeCards", ...kept });
     const host = (m) => {
       if (!m || typeof m.type !== "string" || !m.type.startsWith("home")) return;
-      if (m.type === "homeCardsReady") say();
+      if (m.type === "homeCardsReady") { say(); window.__notesHost({ type: "homeNotesDo", op: "get" }); }
       else if (m.type === "homeCardsSet") { kept.order = [...new Set(m.order)]; say(); }
       else if (m.type === "homeCardsReset") { kept.order = [...DEFAULT]; say(); }
       else if (m.type === "homeCardSetting") {
@@ -92,17 +101,14 @@ export async function openGrid(browser, { layout = DEFAULT, settings = {}, usage
         if (g.mode !== "ok") tell({ type: "homeWeatherPlaces", q: m.q, seq: m.seq, ok: false, reason: g.mode });
         else tell({ type: "homeWeatherPlaces", q: m.q, seq: m.seq, ok: true, places: g.places.filter((p) => p.name.toLowerCase().startsWith(q)).slice(0, 8) });
       }
-      else if (m.type === "homeNote") {
-        if (m.op === "delete") kept.notes = kept.notes.filter((n) => n.id !== m.id);
-        else if (m.op === "save" && m.note) { const at = kept.notes.findIndex((n) => n.id === m.note.id); if (at >= 0) kept.notes[at] = { ...m.note }; else if (kept.notes.length < 500) kept.notes.unshift({ ...m.note }); }
-        say();
-      }
+      // Notes: the real host (src/notes.ts) answers, from the test's own process (see below).
+      else if (m.type === "homeNotesDo") window.__notesHost(m);
       else if (m.type === "homeWidgetsGet") tell(window.__homeWidgets ? { type: "homeWidgets", offered: true, widgets: window.__homeWidgets } : { type: "homeWidgets", offered: false, widgets: [] });
       else if (m.type === "homeArtifactsGet") tell(window.__homeArtifacts ? { type: "homeArtifacts", offered: true, items: window.__homeArtifacts } : { type: "homeArtifacts", offered: false, items: [] });
     };
     const posted = window.__posted, push = posted.push;
     posted.push = function (m) { const n = push.call(this, m); try { host(m); } catch (error) { window.__homeCardsError = String(error); } return n; };
-    say();
+    say(); window.__notesHost({ type: "homeNotesDo", op: "get" });
     if (usage) tell(usage);
     if (kept.settings.weather?.place || kept.settings.weather?.city) tell(weather);
   }, { layout, settings, usage, weather, DEFAULT, notes, places, geo, widgets, artifacts });
@@ -111,7 +117,10 @@ export async function openGrid(browser, { layout = DEFAULT, settings = {}, usage
   /** Until the cards have come to rest (a glide, a flip wave). */
   const rest2 = async (ms = 80) => { await x.page.evaluate((w) => new Promise((d) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(d, w)))), ms); };
   const resize = async (width, height = 900) => { await x.page.setViewportSize({ width, height }); await rest2(700); };
-  return { ...x, requests, grid: () => gridNow(x.page), rest: rest2, resize, host: () => x.page.evaluate(() => JSON.parse(JSON.stringify(window.__homeCards))) };
+  return { ...x, requests, grid: () => gridNow(x.page), rest: rest2, resize, host: () => x.page.evaluate(() => JSON.parse(JSON.stringify(window.__homeCards))),
+    /** The notes as the host has them: the list (`all`: the bin too), one note's words as its file has them, the store itself. */
+    notes: { store, context: nc, list: async (all = false) => { await store.idle(); return store.state().notes.filter((n) => all || !n.deleted); }, state: async () => { await store.idle(); return store.state(); },
+      text: async (id) => { await store.idle(); let said; store.handle({ type: "homeNotesDo", op: "open", id }, (m) => { said = m; }); await store.idle(); return said?.ok ? said.text : undefined; } } };
 }
 
 /** Home's cards as they are on screen: the grid's form, each card (which, its form, its box, its words), what is opened,

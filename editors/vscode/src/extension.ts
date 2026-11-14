@@ -8,6 +8,8 @@ import { resolveDgcExecutable } from "./configuration";
 import { heldCliTerminalOptions, updateCliWithProgress } from "./cliupdate";
 import { wslCli } from "./wslSetup";
 import { setEditorEnv } from "./backend";
+import { notesOf } from "./notes";
+import { NoteTabs, notesEnv } from "./notesTab";
 
 export function activate(context: vscode.ExtensionContext): void | object {
   if (vscode.workspace.isTrusted === false) {
@@ -25,6 +27,10 @@ export function activate(context: vscode.ExtensionContext): void | object {
   // The "Open" pop-up: one notification when a turn makes or updates something you keep (src/artifactNotice.ts).
   const madeNotice = new ArtifactNotice(context, artifacts);
   context.subscriptions.push(artifacts.listen((message) => madeNotice.heard(message)));
+  // Notes (Home's Notes card): a note opens wide in an editor tab of its own, on the same notes; and what Notes asks of
+  // the editor (the Save dialog for an export, the clipboard, the browser for a link) is given here.
+  const noteTabs = new NoteTabs(context, notesOf(context));
+  notesOf(context).env = notesEnv(noteTabs);
   // #3: the side bar is the Sessions home, and each session opens in an editor tab of its own.
   const tabs = new SessionTabs(context, provider, (init) => {
     const tab = new DgcViewProvider(context, init);
@@ -96,6 +102,8 @@ export function activate(context: vscode.ExtensionContext): void | object {
     }),
     tabs.register(),
     tabs,
+    noteTabs.register(),
+    noteTabs,
     chatdgc.register(),
     chatdgc,
     artifacts.register(),
@@ -174,6 +182,11 @@ export function activate(context: vscode.ExtensionContext): void | object {
     vscode.commands.registerCommand("dgc.whatsNew", async () => {
       try { await vscode.commands.executeCommand("dgc.focus"); } catch { /* the view is shown as it is */ }
       provider.showWhatsNew();
+    }),
+    // "DGC: New Note" (no key of its own): the side bar comes forward on Home with a new note open in Notes.
+    vscode.commands.registerCommand("dgc.newNote", async () => {
+      try { await vscode.commands.executeCommand("dgc.focus"); } catch { /* the view is shown as it is */ }
+      provider.newNote();
     }),
     vscode.commands.registerCommand("dgc.settings", () => provider.openSettings()),
     // The status line's `Router 9/11`: Settings -> Models, at DGC Router.

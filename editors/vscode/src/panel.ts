@@ -978,6 +978,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   /** Set on the side bar's provider once it is the Sessions home (useSessionsHome). */
   private places?: ChatPlaces;
   private home = false;
+  /** What Notes says to this page (one function, so the page that asked is not told twice). */
+  private readonly notesSaid = (said: any): void => { if (this.webviewReady) this.post(said); };
   /** ChatDGC (chatdgc.ts): only the side bar's provider has it. */
   private chatdgc?: ChatDGC;
   /** Artifacts (artifacts.ts): every provider shows their cards; the side bar's process answers for them. */
@@ -1048,6 +1050,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }));
     // Home's cards (src/homeCards.ts): another window added, moved or removed one, or changed a card's setting.
     if (this.home) { this.context.subscriptions.push(homeCardsOf(this.context).onChange(() => { if (this.webviewReady) this.post(homeCardsOf(this.context).state()); })); }
+    // Notes (src/notes.ts): every page with Home hears a note made, changed, locked or deleted in another.
+    if (this.home) { const notes = homeCardsOf(this.context).notes; if (notes) this.context.subscriptions.push(notes.onSaid(this.notesSaid)); }
     if (tab) { return; }
     mcpAppsHost(this.context.extensionUri).logoOf = (plugin) => this.replyPluginLogo(plugin);
     // The saved default is the whole profile's: another window may have changed it while this one was in the background.
@@ -2937,6 +2941,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   /** "DGC: What's New" (the DGC view's ⋯ menu): the dialog again, whenever asked. */
   showWhatsNew(): void {
     this.whenWebviewReady(() => this.post(whatsNewMessage(false)));
+  }
+  /** "DGC: New Note": Home shows, with a new note open in its Notes card (media/shared/notes.js). */
+  newNote(): void {
+    this.whenWebviewReady(() => this.post({ type: "homeNewNote" }));
   }
 
   // ---- "Your Pips moved into one list" (pips-flow-design §3.3, item 2; src/pipsWelcome.ts) ----
@@ -6044,7 +6052,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     if (dockOf(this.context).handle(msg, (state) => this.post(state))) return;
     // Home's cards (src/homeCards.ts): which are on Home and in what order, a card's setting, the weather. Kept for this computer.
-    if (this.home && homeCardsOf(this.context).handle(msg, (said) => this.post(said))) return;
+    if (this.home && homeCardsOf(this.context).handle(msg, typeof msg?.type === "string" && msg.type.startsWith("homeNotes") ? this.notesSaid : (said) => this.post(said))) return;
     if (this.home && msg?.type === "homeUsageGet") { this.askHomeUsage(); return; }
     if (msg?.type === "dockOpen") { this.openFromDock(String(msg.key || "")); return; }
     if (msg?.type === "folderOpenWindow") { this.openFolderWindow(msg.folder); return; }
@@ -10946,6 +10954,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const hubJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "hub.js"));
     // Home as cards: the grid, the card library and each card (media/shared/homecards.js, window.DgcHomeCards).
     const homeCardsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "homecards.js"));
+    // Notes, the notes app in Home's Notes card (media/shared/notes.js, window.DgcNotes): loaded before the cards.
+    const notesJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "notes.js"));
     // "What's new", the dialog the side bar shows once per release (media/shared/whatsnew.js, window.DgcWhatsNew).
     const whatsNewJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "whatsnew.js"));
     // "Your Pips moved into one list" and the note above an old Work session (media/shared/pipswelcome.js, window.DgcPipsWelcome).
@@ -11290,7 +11300,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${composerJs}"></script><script nonce="${nonce}" src="${trayJs}"></script>
 <script nonce="${nonce}" src="${cardJs}"></script>
 <script nonce="${nonce}" src="${sheetJs}"></script>
-<script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script><script nonce="${nonce}" src="${folderPickJs}"></script><script nonce="${nonce}" src="${ageJs}"></script><script nonce="${nonce}" src="${homeCardsJs}"></script><script nonce="${nonce}" src="${whatsNewJs}"></script><script nonce="${nonce}" src="${pipsWelcomeJs}"></script>
+<script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script><script nonce="${nonce}" src="${folderPickJs}"></script><script nonce="${nonce}" src="${ageJs}"></script><script nonce="${nonce}" src="${notesJs}"></script><script nonce="${nonce}" src="${homeCardsJs}"></script><script nonce="${nonce}" src="${whatsNewJs}"></script><script nonce="${nonce}" src="${pipsWelcomeJs}"></script>
 <script nonce="${nonce}" src="${mcpAppsJs}"></script>
 <script nonce="${nonce}" src="${markdown}"></script>
 <script nonce="${nonce}" src="${breakdownScript}"></script>
