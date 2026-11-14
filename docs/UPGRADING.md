@@ -30,6 +30,12 @@ See [Controls during a turn](LIVE_CONTROLS.md) for live skills, permission chang
 4. Reload the editor after an extension update if the old code is still active. Use **DGC: Restart
    Backend** after updating the CLI or changing its executable.
 
+**Going back from 0.52 to 0.51 with Pips.** 0.52 upgrades the Pips database, which a 0.51 can't open
+("This Pips database needs a compatible DGC version"). Before upgrading it, 0.52 keeps a copy of your
+Pips as they were, for 30 days. Run `dgc pips restore-before-0.52` with DGC closed (it refuses while
+Pips are running) before `dgc update --rollback`: it puts that copy back and keeps what 0.52 had aside,
+so neither direction loses anything. See [Going back to 0.51](PIPS.md#going-back-to-051).
+
 `the extension speaks editor protocol v13; this CLI speaks v14` means an older extension is running
 against a newer CLI: update and reload the extension. The reverse means the CLI needs updating. Do
 not edit the protocol number in installed files or remove the handshake check: the two

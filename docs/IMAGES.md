@@ -103,7 +103,7 @@ same way. A refusal by the provider's policy is said as it is.
 - **ChatDGC:** into the chat's folder (`~/.dgc/images/chats/<chat>/`), under the reply, and in the Library (Images,
   Made by ChatDGC). A paid generator there puts a card under the reply with its price; nothing is made until you send
   it.
-- **Pips:** a Personal Pip makes images in its chat and its tasks; they're kept with its reply and in
+- **Pips:** a Pip makes images in its chat (a Personal Pip in its tasks too); they're kept with its reply and in
   `~/.dgc/images/pips/<pip>/`. A Pip never spends on its own say-so: it asks you in its reply, with the price, and
   makes the image only after your yes. A routine's run never makes a paid image.
 

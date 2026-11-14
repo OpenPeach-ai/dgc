@@ -1,34 +1,40 @@
 # Pips
 
-Pips are standing agents that work beside your main DGC chat. A Pip has one job,
-written in plain words, and keeps it: reviewing a project's committed code every
-morning, drafting documentation when a folder changes, running a fixed set of test
-commands on a schedule, or helping you plan your week.
+Pips are standing agents that work beside your Work sessions and chats. A Pip has
+one job, written in plain words, and keeps it: checking a project's code every
+evening, drafting documentation when a folder changes, running a fixed set of checks
+on a schedule, or helping you plan your week.
 
-Pips work within the access level and action rules you set. Actions outside those
-rules wait for your review. An unattended workflow can pass a result between Pips,
-but it does not grant either Pip new tool permissions.
+Every Pip has its own chat, its own computer and, when you give it a folder, its own
+copy of that folder to work in. Inside its own computer it works freely. What crosses
+out of it (a change to your folder, a send, a post, a payment) follows the level you
+choose for that Pip: **Ask me first**, **Approve for me** or **Do it all**. An
+unattended workflow can pass a result between Pips, but it does not grant either Pip
+new permissions.
 
 Pips were introduced in DGC CLI 0.50.0, VS Code extension 0.34.0, and SDK 0.8.0.
-This guide covers the 0.51.0 CLI, 0.35.0 extension, and 0.9.0 SDK (`session.pips`).
-For contracts and limits in detail, see
-[PIPS_REFERENCE.md](PIPS_REFERENCE.md).
+This guide covers DGC 0.52 (the CLI, and the editor extension and SDK released with
+it). Until 0.52 there were two kinds, Project Pips and Personal Pips; now there is one
+(see [One kind of Pip](#one-kind-of-pip)), and
+[Going back to 0.51](#going-back-to-051) says how to return. For contracts and limits
+in detail, see [PIPS_REFERENCE.md](PIPS_REFERENCE.md).
 
 ### Personal Pip workflows
 
-In **Pips → Personal → Workflows**, choose two to four distinct active Personal Pips and write the exact task for each receiving Pip. A manual task or a scheduled routine result from the first Pip starts the sequence. **Review each handoff** leaves the next result for your decision. **Unattended handoffs** pass that result to the next Pip without another routing question, up to three starts in any 24 hours. The previous Pip's result is shared exactly; an oversized or held result pauses that step. Pause stops future handoffs, while runs already queued may finish. Changing a Pip, its model, or its app access pauses the workflow until you create a new reviewed one.
+In **Workflows**, under the list on the Pips page, choose two to four distinct active Personal Pips and write the exact task for each receiving Pip. A manual task or a scheduled routine result from the first Pip starts the sequence. **Review each handoff** leaves the next result for your decision. **Unattended handoffs** pass that result to the next Pip without another routing question, up to three starts in any 24 hours. The previous Pip's result is shared exactly; an oversized or held result pauses that step. Pause stops future handoffs, while runs already queued may finish. Changing a Pip, its model, or its app access pauses the workflow until you create a new reviewed one.
 
 If Core proposed a team in one reply, create each Pip from its separate setup card. When all of those cards have been accepted, **Workflows** offers that team in Core's proposed order. Select **Set up workflow**, write the receiving tasks, choose the routing mode, and review the exact sequence. Core's suggestion never starts a workflow by itself.
 
-Workflow routing never changes a Pip's tool permissions. New Personal Pips start at **Ask**, and existing Pips keep their saved level. Sending mail, publishing, paid generation, computer actions and other changes still follow each Pip's own approval rules.
+Workflow routing never changes a Pip's tool permissions. New Pips start at **Ask me first**, and existing Pips keep their saved level. Sending mail, publishing, paid generation, computer actions and other changes still follow each Pip's own approval rules.
 
-**Project Pips → Workflows** routes the first source checked finding from a completed audit to the next read only Project Pip on the same committed source. Choose review at each handoff or unattended routing, again capped at three starts in any 24 hours. Scout, Lens, Rook and Lock can join; Patch and Pulse still require their own exact action review. A Project workflow cannot include Personal Pips.
+A folder's workflow routes the first source checked finding from a completed audit to the next read only Pip of that folder, on the same committed source. Choose review at each handoff or unattended routing, again capped at three starts in any 24 hours. Scout, Lens, Rook and Lock can join; Patch and Pulse still require their own exact action review. A folder's workflow cannot include Personal Pips.
 
 ## The characters
 
-Each Pip is one of eight characters. A character is a look and a role, not a
-permission: what a Pip may do is fixed by its reviewed job and by the rules on this
-page.
+Each Pip is one of eight characters. A character is a look, a voice and a role, not a
+permission: what a Pip may do is fixed by its level and by the rules on this page. In
+its own computer a character never stops a Pip running commands; the limits in the
+table below are about your real folder and the handoffs a Pip is sent.
 
 | Character | Role | What it does in a project |
 | --- | --- | --- |
@@ -46,19 +52,55 @@ excerpts, and the limits of what was inspected. DGC checks every quoted excerpt
 against the source, but a finding is still the model's assessment, not a verified
 bug. No Pip claims that tests passed unless DGC itself recorded the result.
 
-## Project Pips and Personal Pips
+## One kind of Pip
 
-A **Project Pip** belongs to one project folder, which must be the root of a Git
-repository. It reads the project's **committed** source at a Git ref you choose
-(`HEAD` by default). Uncommitted and untracked changes are not included. For a
-manual review of work in progress you can propose a separately reviewed
-"current tree" source; that Pip then runs only when you ask, never on a schedule
-or trigger.
+There is one kind of Pip, in one list: the **Pips** tab of DGC's side bar. Core comes
+first, then the Pip with the latest message or report. Each row says where the Pip
+works: **Personal** for a Pip with no folder, or its folder. A search box sits on top,
+and the line under it shows **All Pips**, **Personal** or one folder; **Needs
+attention** follows that choice. Every Pip has the same chat and the same page, its own
+computer, and a level; with a folder it also has its own copy of that folder.
 
-### What a Pip's copy leaves out
+The first time the Pips tab opens after the update to 0.52, someone who had Pips sees
+once what moved: the Pips that were Project Pips, by folder, the Personal ones, and any
+on Do it all. Nothing was lost: every Pip kept its name, its job, its schedule and its
+history. **How Pips work now** in Pips settings shows it again. A Pip that had a folder
+starts at **Ask me first**, as it always was; a Personal Pip keeps the level you chose.
 
-Each run reads a private copy of the source. Under the current source rules
-(`safe_source_v2`, what new Pips use) a big working project doesn't stop it:
+"Personal" is only the word for a Pip with no folder. A **Personal Pip** belongs to your
+DGC profile rather than a project: it is available from any project on this computer and
+is meant for your own tasks (planning, summaries, replies, research), and there its
+character is only a look. In the CLI, add `--personal` to a command for one.
+
+### Its own copy of your folder
+
+A Pip with a folder gets a copy of that folder in its computer's Files
+(`Files/projects/<name>/`) at the start of each turn:
+
+- **What is copied**: the files Git lists, tracked and new, without what Git ignores (so
+  no `.env`, no `node_modules`), never `.git`, and never a link. A folder that isn't a
+  Git project is walked, leaving out the usual dependency and build folders.
+- **Your files as they are now.** Every run reads its copy, scheduled runs included, so
+  a Pip sees your uncommitted work and never only the last commit. After the first copy,
+  only what changed in the folder is copied again.
+- **While a change waits for you**, the files that change touched stay as the Pip left
+  them; every other file is brought up to date.
+- **Never all or nothing.** A copy holds at most 200 MB (raisable in Dev Mode) and
+  20,000 files. Past that, the biggest files are left out and the Pip is told which; a
+  file it makes where one was left out is never applied over yours.
+- **Nothing reaches your folder** until its change is applied: by your **Apply**, or by
+  itself at Do it all (see [When a check finds something](#when-a-check-finds-something)).
+
+Deleting a Pip also removes DGC's own records of its folder copies.
+
+### What a source copy leaves out
+
+Where a Pip has no computer of its own (a Mac that can't run one; see
+[A computer of its own](#a-computer-of-its-own-linux-and-macos)), or its folder can't be
+copied, a run reads a private copy of the source as before 0.52: by default the
+**committed** source at a Git ref (`HEAD`), or your current files for a Pip set to read
+them. Under the current source rules (`safe_source_v2`, what new Pips use) a big
+working project doesn't stop it:
 
 - **Files it can't copy are left out and listed**, never fatal: files over 4 MiB
   (videos, dumps, big images), links and submodules, and in a copy of your current
@@ -83,44 +125,25 @@ Source, choose any Excluded folders and **Save**, or run
 `dgc pips propose PIP --expected-version N --source-rules v2` and accept it. Its first
 report after the change isn't compared with the earlier ones.
 
-A **Personal Pip** belongs to your DGC profile rather than a project. It is
-available from any project on this computer and is meant for your own tasks:
-planning, summaries, reminders drafted for you to send, research from a few fixed
-pages. A Personal Pip has no project files, no shell and no browsing. It can use:
-
-- app reads and web reads that you approve as part of its job;
-- drafts of emails, calendar events and connector actions, which you review and
-  send yourself.
-
-Any character can be a Personal Pip, but in Personal scope the character is only a
-look: the job is whatever its approved goal says.
-
-In the Pips view, the **Personal | Project** tabs at the top switch between your
-Personal Pips and this folder's project. In the CLI, add `--personal` to a command.
-
 ## Creating a Pip
 
-Pips are on by default. Open the Pips view with the Pips button in the DGC chat
-view's title bar or the **DGC: Open Pips** command.
+Pips are on by default. Open them with the **Pips** tab of DGC's side bar, the Pips
+button in the DGC view's title bar, or the **DGC: Open Pips** command.
 
-**From the Pips view.** Choose **New Pip**: its face is on the left and a list beside
-it, and the face changes with what you pick. For a Personal Pip the list is
-**Character**, the names with their faces; a Personal Pip then needs only a name: it
-says hello and sets itself up in its chat. For a Project Pip the character is the kind
-of work, so the list asks **What should it do?**: Map out the project (Scout), Answer a
-question about the code (Lens), Fix files you approve (Patch), Review the code for bugs
-(Rook), Run tests you approve (Pulse), Look for security problems (Lock) or Draft
-documentation (Quill). You then say what it does, the branch or commit it reads
-(`HEAD` by default) and its model, and choose **Create Pip**. Patch and Pulse first
-show what they may do. The list works from the keyboard too: the arrow keys, Home and
-End move, typing a name or a job's first letters goes to it, Enter or Space picks,
-and Esc closes it. To have DGC set a Project Pip up
-from your own words, choose **Describe the job to DGC instead**, say what it should
-look after and when, then choose **Describe to DGC**. This prepares a message in the
-main chat; nothing is sent until you send it. **Choose a Pip myself** goes back to the
-list.
+**From the Pips view.** Choose **New Pip**. It asks for three things: a **Character**
+(the names with their faces; the face beside the list changes with what you pick), a
+**Name**, and a **Folder**. The folder is filled in from where you are: the folder the
+list shows, or the Work session you came from. **+ Give it a folder** picks one, and no
+folder makes a Personal Pip. There is no job form, no branch and no model to choose: the
+Pip says hello and sets itself up in its chat as you talk to it (see
+[Working with a Pip](#working-with-a-pip)). The list works from the keyboard too: the
+arrow keys, Home and End move, typing a name's first letters goes to it, Enter or Space
+picks, and Esc closes it. Once a folder is chosen, **Describe the job to DGC instead**
+lets DGC set the Pip up from your own words: say what it should look after and when,
+then choose **Describe to DGC**. This prepares a message in a Work chat; nothing is sent
+until you send it. **Import a shared Pip…** is beside it.
 
-**From a starter.** On a project's Pips, **New Pip → Describe the job to DGC instead**
+**From a starter.** With a folder chosen, **New Pip → Describe the job to DGC instead**
 lists starter Pips for common jobs, and `dgc pips starters` lists them all:
 
 | Starter | Pip | Runs |
@@ -210,18 +233,18 @@ because a routine runs with no window open, and only that provider's key does. E
 whichever provider other chats use. Removing the provider in Settings removes that copy too: the Pip's next run stops
 and says so, and its model menu asks you to choose another. It never moves to another provider by itself.
 
-## Images (Personal Pips)
+## Images
 
-A Personal Pip makes images with your image generators (see Image generation in `/docs`), in its chat and its
-tasks: they're made by DGC itself, never inside the Pip's run, kept with its reply (its chat shows them) and in
+A Pip makes images with your image generators (see Image generation in `/docs`), in its chat (a Personal Pip in its
+tasks too): they're made by DGC itself, never inside the Pip's run, kept with its reply (its chat shows them) and in
 `~/.dgc/images/pips/<pip>/`. A generator that costs money is never used on the Pip's own say-so: it tells you the
 price in its reply and makes the image only after your yes. A routine's run never makes a paid image; it says what it
 would make. A free generator, or one you allowed (Always allow), makes the image at once.
 
 ## Your own Claude Code or Codex (Personal Pips)
 
-A Personal Pip can think with the Claude Code or Codex you are already signed in to, on
-your own plan. Open its chat, choose the model under the chat box, and pick **Claude
+A Personal Pip (one with no folder) can think with the Claude Code or Codex you are already
+signed in to, on your own plan. Open its chat, choose the model under the chat box, and pick **Claude
 Code** or **Codex** under **Your subscriptions**, then **CLI default**, one of that CLI's models, or
 **Enter another model** for any other name. Only the ones installed and signed in on
 this computer are listed. **Default** follows DGC: when DGC's own default is Claude Code
@@ -275,9 +298,9 @@ the CLI ever reached for a tool of its own, DGC stops the turn and says so in on
 Not offered for Pips: **Kimi Code** (it always starts your own MCP servers, from
 `~/.kimi-code/mcp.json`, and approves every tool in prompt mode), and **Qwen Code** and
 **Copilot CLI** (neither could be checked by trying here, so neither is offered).
-**Project Pips** (audits, Pulse, Quill, Patch) still need a local or API model: their
-source checks run only in DGC's own loop. Choosing a subscription for one is refused with
-that line.
+A **Pip with a folder** (its checks, Pulse, Quill, Patch) still needs a local or API model:
+its source checks run only in DGC's own loop. Choosing a subscription for one is refused
+with that line.
 
 ## The runner
 
@@ -485,12 +508,11 @@ and the run reviews the ref's commit at the moment it is queued.
 
 ## The daily digest
 
-Pips don't message you after every run. In the editor, **Pips** on the DGC home lists
-the Pips with news, one line each. A number means something needs you: it's what Needs
-attention counts, and the Personal and Project tabs, each Pip's row and the home say the
-same one. A dot means there's something new to read, and becomes **Read** when you hover or
-focus it. The home's heading says both, "Pips · 2 need you · 3 new", and **Dismiss all**
-marks what's new as read and leaves what's waiting. A notification
+Pips don't message you after every run. In the editor, Home's **Needs you** card holds what
+a Pip waits on you for, and **Recent** its new messages, beside your Work
+sessions and chats; the **Pips** card, if you add it, lists Core first, then the others and what
+waits. A number means something needs you: it's what Needs attention counts, and each Pip's row
+and the Pips tab say the same one. A dot means there's something new to read. A notification
 says when something is waiting for you. Once a day, when there is something to say, the
 digest gathers new findings, failed runs, reviews waiting, and earlier findings that
 went away after their file changed.
@@ -564,20 +586,22 @@ commands are reviewed on the card.
 Each run a Pip finishes is posted in its own chat, as a message from the Pip: its face, its name and
 the time, then what happened in its own short words, the way Grok Bots and OpenAI Dots post a scheduled
 run in the bot's conversation. Reply to it there: "is the e-way one the same as last week?" The full
-list is the Pip's **History** tab (it was Runs; for a Personal Pip, Results).
+list is the Pip's **Reports** (a Pip with a folder) or **History**.
 
 | Run | What the Pip says | Under it |
 | --- | --- | --- |
-| A review with findings (Scout, Lens, Rook, Lock) | "I found 4 issues, 3 of them serious. The worst is in billing.py: the GST total skips cess on every invoice." | **Report · 4 findings ›** (opens the top three with severity, title and file:line, how many more, and **Open full report**) and **Ask DGC to fix** |
-| Pulse checks that failed | "1 of 2 checks failed: GET …/api/invoices → 200." | **Report · 1 of 2 failed ›** and **Ask DGC to fix** |
-| A run that didn't finish | "I couldn't finish this run. I ran out of time. Nothing in your project was changed. I'll try again tomorrow at 9:00 AM." | **See what happened**, **Run again now** when it can, **Ask DGC to fix** |
+| A review with findings (Scout, Lens, Rook, Lock) | "I found 4 issues, 3 of them serious. The worst is in billing.py: the GST total skips cess on every invoice." | The findings card: up to eight findings, each with its severity and its file and line (a click opens it), marked new, still there or came back, with the full report one click away. Then what becomes of them: see [When a check finds something](#when-a-check-finds-something) |
+| Pulse checks that failed | "1 of 2 checks failed: GET …/api/invoices → 200." | **Report · 1 of 2 failed ›** |
+| A run that didn't finish | "I couldn't finish this run. I ran out of time. Nothing in your project was changed. I'll try again tomorrow at 9:00 AM." | **See what happened**, and **Run again now** when it can |
 | A clean run | "Both checks passed. Nothing for you to do." or "I didn't find any issues this run." | **Open run** |
-| A live-data run | Its summary: "Orders: 2 paid, 1 unpaid. Disk 62% used. Health ok." | **Output · 3 commands ›** and **Ask DGC to fix** when it needs you; **Open run** when all is clear |
+| A live-data run | Its summary: "Orders: 2 paid, 1 unpaid. Disk 62% used. Health ok." | **Output · 3 commands ›** when it needs you; **Open run** when all is clear |
 | A Quill draft | "I drafted “Release notes for 0.48”." and its summary | **Open draft** |
 | A Personal Pip's scheduled task (Core and the others) | Its result, in its own words, starting short with **Show all** | **Open result** |
 
-**Its words are the report's.** DGC writes the sentence from the run's saved result alone, so every
-number, file name and title the Pip says is in the report; no model writes it. A live-data Pip is the one exception:
+**Its own words, and the report's.** A check that finds something leads with the Pip's own short words about it:
+what is wrong, why it matters and how sure it is. The findings card under them is DGC's, read from the saved report,
+so every file, line and title on it is the report's. Where a run has no words of its own, DGC writes the sentence
+from the run's saved result alone; no model writes it. For a live-data Pip:
 its model sums up what its commands printed, and every number in that summary must be in their output. A few wordings for each
 kind of run, chosen by the run, keep a week of nightly runs from reading the same, and a run always reads
 the same however often you open the chat. A routine's reply is the Pip's own message already: it says
@@ -589,23 +613,14 @@ Nothing for you to do." with **✓ Passed 12 times since Monday ›**, which ope
 day (each opens that run). A new pass updates that message where it is. A run that fails or finds
 something breaks the fold and says so in its own message, and a message from you starts a new one.
 
-**Open full report** opens that run under History, at its report. **Ask DGC to fix** opens the
-chat the Pip reports to (the newest one it was set up in or attached to) in its tab, and DGC fixes
-the report there in the background, as the Work chat's card does (see
-[Ask DGC to fix](#ask-dgc-to-fix)); a Pip that reports to no chat starts a new one, and its report's
-card appears there. The message then follows the fix, as the Work chat's card does: **DGC is fixing this**
-while it works, **Fixed · 3 files** when it is done (a click opens the Work chat it ran in, at its card, where
-**Review** and **Undo** are), **The fix didn't finish** with **Ask DGC to fix again**, and **Ask DGC to fix** again
-once you undo it. It updates while you look, and says the same after a reload or a restart of the runner: DGC
-keeps each fix's record, and the message reads it. The status beside the Pip's name, at the top of its chat, says what
-its last run found ("Today's audit: 5 findings") and goes to its message.
+**Open full report** opens that run in its Reports, at its report. The status beside the Pip's name, at the top of
+its chat, says what its last run found ("Today's check: 5 findings") and goes to its message.
 
-**One chat for every Pip.** A Project Pip's chat looks and answers like a Personal Pip's: the Pip at work with its
-face, its name, what it is doing and its clock; its reply written in as it comes, as one message or the few short
-messages the Pip chose (it parts them with a line of just `---`); time marks between messages; the buttons under a
-message when you point at it; the same box. Its page is the same too (see
-[A Project Pip's page](#a-project-pips-page)), and its runs with Ask DGC to fix are in its chat. Which code it reads
-(committed, or your current files) is under **What this Pip can do** beside the box.
+**One chat for every Pip.** Every Pip's chat looks and answers the same way: the Pip at work with its face, its
+name, what it is doing and its clock; its reply written in as it comes, as one message or the few short messages the
+Pip chose (it parts them with a line of just `---`); time marks between messages; the buttons under a message when you
+point at it; the same box, with the level chip at its left. Its page is the same too (see
+[A Pip's page](#a-pips-page)).
 
 **While it runs, it is already there.** From the moment a run starts, the chat has one post for it at the end: the
 Pip's face at work, what it is doing now ("Reading billing.py", "Waiting for the model"), a clock, **Stop**, and how
@@ -614,8 +629,8 @@ it started: **Started by you**, **On schedule · 9:00 AM**, **From a new commit*
 stops the run, as History's Cancel run does; a run you stop posts nothing, and the chat says so. A Personal Pip's
 routine runs as one too (**From Shop event**, **From Gmail event**, **On schedule · 8:00 AM**), its reply written
 under what it is doing, and its reply takes its place. All of it is read from the run itself, so a window reload
-while it runs draws it again. The Work chat a Pip reports to says so too: a chip above its box ("Billing audit running
-· 0:42", or "2 Pips running") that opens this chat at the run.
+while it runs draws it again. A Work session that started the run shows it in its agent map's Pips section, with
+**Stop**.
 
 **Once, even with the editor closed.** The post is written when the run finishes, by the
 runner, so a run that ends overnight is in the chat in the morning. Chat replies, Patch work
@@ -626,123 +641,105 @@ add a Test results card under the chat as well.
 something you said. When you next write to the Pip, its model reads its five latest posts as
 reference data, told that you saw them as its own messages, with the full report a tool call away.
 
-## Reports reach the chat
+## When a check finds something
 
-What a Pip finds comes to the chat that should act on it, as an item, not a new turn.
-When a Pip's run finishes, a card appears in the transcript of every chat it reports to:
+A Pip's chat is its home: everything it finds, asks, fixes and reports lives there. When
+one of its checks finds something, it says so in its own chat, in its own words (what
+is wrong, why it matters, how sure it is), with the findings card under that: each
+finding opens its file at its line and is marked **new**, **still there** or **came
+back**. A run with nothing new says nothing new. What happens next follows its level:
 
-- the chat it was **set up in**;
-- any chat it is **attached to** (ask DGC there: "attach ERP daily audit to this chat");
-- the chat that **ran it** with `run_pip_now`, for that run.
+| When a check finds something | Ask me first | Approve for me | Do it all |
+| --- | --- | --- | --- |
+| Says so in its chat | yes | yes | yes |
+| Starts fixing in its own copy | after your **Allow** | by itself, new findings only | by itself |
+| Puts the change in your folder | after your **Apply** | after your **Apply** | by itself, with **Undo** |
+| What only you can do | said once, kept as **Waiting on you** | the same | the same |
 
-A Pip that reports to no chat keeps reporting where it always has: its Pips page, Needs
-attention and the Pips strip on the Sessions home, and its own chat. Its **History** page says
-which it is, and how to attach it.
+Ask me first asks before it spends time and tokens. Approve for me asks before it
+touches your folder. Do it all asks nothing and tells you afterwards.
 
-The card shows the Pip's face and name, what happened and when: "finished · 5 findings (2 high,
-3 medium)", "finished · 1 of 2 checks failed", or "failed:" and the reason in plain words (the
-saved error below it), with the worst findings, file and line. It has three buttons:
+- **The Allow card.** At Ask me first the Pip asks with the same card as anything else
+  it asks for, naming the fix ("Fix 3 things in my_project"), with **Allow** and **Not
+  now**. Not now leaves it, and that finding is not asked about again. There is no
+  separate "Fix it" card.
+- **The fix is the Pip's own turn**, in its own computer, on its own copy of your
+  folder. It works only on those findings, never changes live data or services, and
+  never commits, pushes or deploys. If the project has tests it can run in its copy, it
+  runs them. While it works, its card shows its steps, with **Watch its computer** and
+  **Stop**; your folder is untouched.
+- **The change card.** When the fix is ready, the Pip says what was wrong, what it
+  changed and what it left alone and why. The card lists the files with their counts
+  and whether its tests passed or failed in its copy, with **Apply**, **Review** (the
+  diff in an editor tab) and **Discard**.
+- **Apply** writes each file only while yours is still what was copied. A file you
+  changed meanwhile is held back, and the card says which; the rest go in. Nothing is
+  written into `.git`, into a file Git ignores, or through a link.
+- **Do it all** applies the change by itself when its turn ends, file by file, under
+  the same rule: never over a file you changed meanwhile. Its card says the change is
+  in your folder, and says so too when its tests failed in its copy. Each change it
+  applied is listed under **What it did on its own** on its page.
+- **Undo** puts back each file that still holds exactly what the change wrote, and
+  keeps a file you have changed since.
+- **Commit these files.** In a Git folder, the card says whether the change is
+  committed. **Commit these files** commits exactly the files that change put in your
+  folder, as you, with the Pip's name in the message; nothing else waiting in the
+  folder is committed.
+- **One try per finding.** A finding it fixed that comes back is said as "came back"
+  and asked about, at every level, and never fixed again by itself. A finding it judged
+  not a defect is not asked about again. A fix that failed is asked about again, never
+  rerun by itself.
+- **One fix at a time.** While its Allow card waits, a later check updates that card
+  with what it still finds and what is new. While a change waits at Apply, a later check
+  says what it finds and asks nothing new; the files that change touched stay as it
+  left them in its copy.
+- **What only you can do** (data, money, an account: "the payment account is empty")
+  is not a finding. It is said once, then kept as one line at the top of the Pip's chat,
+  **Waiting on you**, and as one row in Needs attention, with **I've done it**, **Remind
+  me later** (it comes back tomorrow) and **Not a problem**. An answer can be undone for
+  ten minutes. A waiting card never pauses a Pip: its routines, its checks and your
+  other Pips go on.
 
-| Button | What it does |
-| --- | --- |
-| **Ask DGC to fix** | DGC fixes it in the background, in a copy of the project, and the card shows how it is going; you keep working in the chat. See [Ask DGC to fix](#ask-dgc-to-fix). |
-| **Open report** | Opens the Pips view at that run. |
-| **Dismiss** | Removes the card. The report stays in Pips. Saved with the chat. |
+**Where you notice.** What waits for you is on **Home** (the Needs you card) and on the
+Pips page under **Needs attention**, where a fix to allow and a change to apply carry
+their **Allow** and **Apply** on the row. A Pip pinned to the dock shows a number on its
+face when it needs you.
 
-When the model provider turned down the Pip's key, or its subscription isn't signed in, nothing in the project
-can fix that: the card says so and offers **Check sign-in**, which opens Settings → Models, in place of Ask DGC to fix.
+On a computer where Pips can't have their own computer (see
+[A computer of its own](#a-computer-of-its-own-linux-and-macos)), a Pip with a folder
+reports what it finds and fixes nothing.
 
-**One card per Pip.** A Pip's newer card takes the place of its older one in the chat, so a routine that runs every
-morning and evening leaves one card, not one per run. The same failure again is said again once the last card
-about it is six hours old, so the evening's run replaces the morning's card; a check failing every half hour says so at
-most every six hours. The older runs stay in Pips, under Runs, and count as read. The
-card says what changed: "failed again" when it failed again, "fixed · nothing found" when a clean run
-follows a problem, and, opened, "Earlier: failed · 8:00 AM". A card you acted on stays where it is: one whose fix
-started, or whose prompt you sent. Dismiss removes the card and the ones it replaced.
+## Pips and Work sessions
 
-**New or still there.** Each review sees its last report and says, for every finding, which earlier one it is
-the same problem as, however it words it this time or wherever it moved. The card says "1 new · 3 still there"
-and names the new one first. A run with nothing new is not news: no new card, even when the model words the same
-problems differently. A model that doesn't say is counted as before, by its findings' words.
+No Work session owns a Pip, and a Pip's reports never go into a Work session by
+themselves.
 
-### Ask DGC to fix
+- **A run a chat started comes back to it.** "Run it now" asked from a Work session or
+  a chat (`run_pip_now`) brings that run's card back to that chat, as well as the post
+  in the Pip's own chat. A card never starts a turn and never reaches the model by
+  itself; DGC acts on it only when you send a message that asks it to.
+- **Attaching a Pip to a chat** gives that chat a note of the Pip; it no longer brings
+  the Pip's reports there.
+- **Cards from before 0.52** stay in a Work chat as history, each with one **Open in its
+  chat**. A finished fix from before keeps its **Review** and **Undo** while its undo
+  record lives. A session that used to get Pip cards says so once, quietly at its top,
+  with a button to open each Pip; **×** closes it for good.
+- **The agent map's Pips section.** Under a Work session's own helpers, its agent map
+  lists the Pips working on a job from this session (with **Stop**), then this folder's
+  Pips that are running or need you (**Open** goes to their chat), then one quiet line
+  ("2 more Pips in this folder are idle · 5 Pips elsewhere · All Pips"). **Hide** and
+  **Show** fold it. Allow and Apply are not on the map: they are in the Pip's chat, on
+  Home and on the Pips page.
+- **A Work chat can always read a Pip's history.** Reading what Pips found and did
+  (`pips_context`) is offered in every turn, so "what did the billing check find last
+  night?" is answered from the Pip's own records. The tools that change Pips load with
+  `use_pips`.
+- **If you fix a finding yourself** in a Work session, nothing needs telling: the Pip's
+  next check reads your files as they are and says the finding is gone.
 
-**Ask DGC to fix** (**Fix** on the card's second line) starts a helper that works in the background
-of the chat: no new turn, no message from you, and the message box is left alone, so you keep
-chatting while it works. It reads the whole report (every finding with its evidence, the checks
-that failed, or why the run failed), checks each finding against the code, fixes the real ones in a
-copy of the project and runs the project's tests there when it can. It never changes live data or
-services: no deploys, no pushes, nothing against a production database. If something can only be
-fixed on a live system, it stops and says what you should do.
-
-**The card is the fix's status.** It gets a line of its own under its two, shown whether the card
-is open or closed:
-
-| The line says | Its buttons |
-| --- | --- |
-| "Waiting · starts after the fix for ERP daily audit": another fix of this project runs first | **Stop** |
-| "Getting the fix copy ready", "Installing dependencies: npm ci" | **Watch**, **Stop** |
-| "Fixing · Running npm test": what the helper is doing now, and for how long | **Watch** (the helper's own page), **Stop** |
-| "Needs you", with the question under it: a permission it needs, asked on the card | the question's own buttons |
-| "Fixed · 2 files changed +12 −3", the files (each opens its diff), and whether the tests ran in the fix copy ("Tests passed in the fix copy · npm test", "Tests failed…", "Tests didn't run in the fix copy: no test command") | **Review**, **Undo**, **Watch** |
-| "Fixed 1 file · 1 held back": a file you changed on the same lines while it worked is not touched; "Held back: app/gst.py" opens what the fix would change there | **Review**, **Undo** |
-| "Nothing to change", with the helper's reason | **Watch** |
-| "Stopped", "The fix didn't finish", "Interrupted": nothing in your project was changed | **Try again** |
-
-**When it finishes, its changes are applied**, as any helper's are: a file you didn't touch gets its
-change, a file you changed elsewhere meanwhile is merged with your change, and one you changed on the
-same lines is held back. A file with uncommitted work of yours is fixed on top of that work.
-**Undo** puts every file it changed back as it was before the fix, after asking, and keeps a file you
-have changed since (the card says which). **Review** opens the diff of a file, or lets you pick one.
-A question it needs is asked on the card, and the agents pill at the bottom says an agent needs you.
-
-**One fix copy per project.** The fix works in a copy of the project DGC keeps for fixes (a Git
-worktree under `~/.dgc/fix-copies/`), never in your files. Before each fix the copy is brought up to
-date with your project: its commit and your uncommitted changes. What Git ignores stays in it
-between fixes, so dependencies are installed once, with the project's own install command (`npm ci`,
-`pnpm install`, `yarn install`, `bun install`, `uv sync`, `poetry install`, `pipenv sync`,
-`composer install`, `cargo fetch`, `go mod download`), and again only when a lock file changes. The
-install goes through your permission rules like any command: in Default mode the card asks before
-it runs, and **Always allow** saves the rule. A Git project is needed; Plan mode changes nothing, so a fix doesn't
-start there. Fixes run one at a time per project; another one waits its turn on its own card.
-
-**A file Git ignores, only when a test needs it.** A `.env` or a local config isn't in the copy. If
-a test the helper runs needs one, it asks for it on the card ("Copy .env from your project into
-the fix copy?"): **Copy it** copies the file (a copy, never a link), and later fixes of that project
-get it too without asking. Nothing is asked up front.
-
-**The Pip fixes chip.** While a fix works, and until you have seen how it ended, a **Pip fixes**
-chip sits on the line of chips above the message box (never a row of its own); it turns amber when
-a fix needs you, and opens a list of this chat's fixes, each one going to its card. Other background
-work stays in the agents pill.
-
-**After a reload.** A fix keeps working while the window reloads, and the reopened chat draws its
-card as it is, with a question it is waiting on. A fix that DGC itself stopped before it finished
-reads "Interrupted" and changed nothing.
-
-**Out of sight.** A fix copy nobody used for 14 days is removed by itself; `dgc doctor` lists the
-copies and their size. An older DGC CLI keeps the earlier behaviour: Ask DGC to fix sends DGC one
-message naming the run, and the button reads "Asked DGC". A CLI with Pips API 64 or older fixes in the background but
-the Pip's own chat says only "Asked DGC"; from Pips API 65 it says what the fix did.
-
-**Which runs.** A finished source review (Scout, Lens, Rook, Lock), a Pulse's checks, a live-data
-run, and a failed run of any of them. They are said when something changes: the first report, new or different
-findings, a failure, or the all clear after one. A clean run after a clean one, the same findings
-again or the same failure again are not shown again. A clean run is one quiet line. A run you
-asked a chat to start is always shown there. Runs that finished while the chat was closed arrive
-when you open it, the newest per Pip, with how many earlier ones it folds. Runs more than a week
-old don't arrive. Chat replies, Quill drafts and Patch work stay in Pips.
-
-**Never a turn.** A card doesn't wake the chat, start a turn, interrupt one or reach the model:
-it is saved with the chat for you to see. If a turn is running when a report arrives, the card
-appears below it and the turn carries on. DGC acts on a report only when you send it a message
-that asks it to. That is why a chat never needs a monitor or a script that polls Pips: DGC's
-models are told so, and told that a report is not a request to change anything.
-
-**Once per chat.** Each chat gets each report once, open or closed, in the editor or the
-terminal. In the terminal (`dgc`) a report is one line in the open chat, such as
-`Pip 'ERP daily audit' finished: 5 findings (2 high, 3 medium) · /pips to open`, and the
-editor shows its card when you open that chat there.
+**Fix copies from before 0.52.** Ask DGC to fix worked in a copy of the project DGC kept
+for fixes (a Git worktree under `~/.dgc/fix-copies/`). A copy nobody used for 14 days is
+removed by itself; `dgc doctor` lists the copies and their size.
 
 ## A Pip for live data
 
@@ -759,9 +756,8 @@ curl -s http://127.0.0.1:8000/health
 On its schedule, or when you choose **Run now**, DGC runs exactly those lines and nothing else, and the Pip's model
 writes two or three sentences about what they printed, saying whether something needs you under its goal ("Tell me
 when invoices miss GST or the disk is over 80% full"). The summary posts in the Pip's chat; all-clear runs fold into
-one message, and a run that needs you is a report card in the chats it reports to, with **Ask DGC to fix**. Fixing is
-always a chat action you choose: the Pip never fixes anything, and DGC's fixer works in a copy of the project and
-never touches live data or services.
+one message, and a run that needs you says so in its post. A live-data Pip never fixes anything: what to do about it
+is yours to decide, in a Work session or with the Pip.
 
 **Only the approved lines run.** Each run runs every approved line once, in order. A line that isn't on the list is
 refused and never runs, and a run whose job changed after it was queued runs nothing. Changing the list is a reviewed
@@ -922,15 +918,16 @@ failed runs. Marking one read approves, rejects or starts nothing.
 
 ## Working with a Pip
 
-**Chat with a Pip.** Each Pip has its own conversation. A project Pip can read its
-approved source while it answers, but it can't edit files, run commands or change
-its own job. In its message box you choose its **context window** and how much it
-**thinks**, as in DGC's own chat; they are that Pip's own, saved as you change them,
+**Chat with a Pip.** Each Pip has its own chat, and can have several conversations (its
+name at the top of its chat opens them). A Pip with a folder reads its own copy of the
+folder while it answers and works in its own computer; nothing it changes reaches your
+folder until its change is applied. In its message box you choose its **level** (the chip
+at the left), its **context window** and how much it **thinks**, as in DGC's own chat; they are that Pip's own, saved as you change them,
 and apply to its replies and to everything it does on its own (schedules, routines,
 triggers, handoffs). A new Pip starts with DGC's context window. They don't change the
 Pip's job. A Pip answers only while the runner is running.
 
-**A Personal Pip changes itself at once, with Undo.** Ask it to ("call yourself Pitch and write one-page sales sheets",
+**A Pip changes itself at once, with Undo.** Ask it to ("call yourself Pitch and write one-page sales sheets",
 "check in every weekday at 9") and its name, instructions, schedule or model change as soon as its reply is in, and a
 routine it adds is on. Each change is one line after that reply, such as "Pitch updated its job: name, instructions ·
 Undo · Details": **Undo** puts it back (only while nothing has changed it since; then change it in its Settings), and
@@ -950,7 +947,7 @@ its hits. Play it or scrub its timeline. A run keeps its steps beside its result
 reload and go when the Pip is deleted. `list_pip_reply_stats` says `has_trace` for each run, and brings the steps as
 `trace` when asked about one run. A run that failed or was stopped, and one from before steps were recorded, has no Trace.
 
-You can send a Personal Pip photos and files with a message, as in the main chat: use the attach
+You can send a Pip photos and files with a message, as in a Work session: use the **+**
 button, paste, or drop them on the message box. Images (PNG, JPEG, GIF, WebP, BMP), text and code
 files, and PDF, Word, Excel, PowerPoint, OpenDocument, RTF, CSV and TSV files are accepted. The
 Pip sees the photos and reads the files' text; a Pip with a computer also finds the files in its
@@ -971,7 +968,9 @@ Files, under **From chat**.
   a high-quality, lightly sharpened JPEG, so small print stays readable. The chat keeps your original: its thumbnail
   shows it, and clicking the thumbnail opens it in an editor tab at full size.
 
-**Skills.** A Personal Pip has your DGC skills that fit everyday work: your own skills, plugin
+**Skills, notes and goals.** Every Pip, with a folder or without, keeps what you told it (**What it
+remembers**), its own working notes, routines, and a goal for its chat ("keep going until done"), and has
+your DGC skills that fit everyday work: your own skills, plugin
 skills, and the built-in **deep-research**, **dataviz** and **plan** (the code-only built-ins stay
 with project work). It loads one when it fits the task. Skills you turn off in DGC Settings are off
 for Pips too, and a skill is only instructions: it never gives a Pip new access. **Manage skills…**
@@ -985,12 +984,15 @@ dgc pips messages PIP_ID
 **From the main chat.** Ask the main chat about your Pips and it loads its Pips
 tools when it needs them. It can read Pip definitions, reports and drafts; prepare
 setup cards and proposals; queue a run of Scout, Lens, Rook, Lock, Quill or a
-Personal Pip; pause, resume or attach a Pip to the chat; propose handoffs; and draft
-emails, events and connector actions from a Personal result. In the editor, type `@` and choose
+Personal Pip; pause or resume a Pip; propose handoffs; and draft emails, events and
+connector actions from a Personal result. Attaching a Pip to the chat gives the chat a
+note of it; it no longer brings the Pip's reports there (see
+[Pips and Work sessions](#pips-and-work-sessions)). Reading your Pips (`pips_context`) is
+offered in every turn; the tools that change Pips load when needed. In the editor, type `@` and choose
 **Reference a Pip…** to point a message at a Pip in this project.
 
 A Pip's own chat box takes `@` too, for what that Pip can reach. A Personal Pip lists the plugins it can use and your
-other Personal Pips; a Project Pip lists the other Pips of its project and the project's files. It reads your message
+other Personal Pips; a Pip with a folder lists the other Pips of that folder and the folder's files. It reads your message
 as plain words, the name or the path. A Pip named this way comes with a short note of what it is (its name, type,
 goal and status): it can talk about that Pip, and it can't run or change it. Pips make no Outputs, so a Pip's list has
 none.
@@ -1063,33 +1065,50 @@ GitHub `origin`. The review shows the repository and each read. An issue or a
 failing check is context for the model, not evidence: every finding still needs
 exact source lines.
 
-## A Project Pip's page
+## A Pip's page
 
-A project's Pips have the page your Personal Pips have. Its list shows each Pip with what it is doing or what
-waits for you ("1 waiting for you"), with a search and **New Pip**; the **…** beside **New Pip** opens the
-project's **Workspace context** and **Notifications**. New Pips the DGC chat set up for you wait above the list.
+Every Pip has the same page and the same chat. It opens in its chat, under a top bar: back to the
+list, its face and name with its status (what its last run found, which goes to that run's message),
+and a **…** menu. On its page, besides its instructions and schedule:
 
-A Project Pip opens in its chat, under a top bar: back to the list, its face and name with its status (what its
-last run found, which goes to that run's message), **Run now** and a **…** menu.
+- **How much it asks**: its level, the same as the chip in its prompt box, with **What it did on its
+  own** under it (see [How much it asks](#how-much-it-asks)). At Do it all, its rule for payments and
+  its daily dollar limit (see [Paying by itself](#paying-by-itself-in-dollars)).
+- **What it remembers** (what you told it, with **Forget**) and the **Knows about you** switch: what
+  DGC remembers about you (you, the people in your life, how you like things done) reaches every Pip,
+  on by default, and this switch turns it off for this Pip. **Settings → Memory** still turns it off for
+  all Pips. A Pip on Do it all that reads strangers' pages is the one to switch off.
+- Its **working notes**, its **routines** and a **goal** for its chat.
+- **Sent to the web**: one row listing each site its computer reached, how many times, how much went
+  out and came back, and anything blocked for carrying a secret (see
+  [Privacy and where state lives](#privacy-and-where-state-lives)).
+- Its **computer** (open it, its Files and its Terminal), and for a Pip with a folder, its change cards
+  and a **Reports** table: when, what, files, model, time and tokens, findings. In a narrow side bar
+  the table stacks.
 
-- **Run now** (the play button, where a Personal Pip has its computer) starts what the Pip runs: an audit for
-  Scout, Lens, Rook and Lock, a draft for Quill, a Pulse's approved command plan, or a live-data Pip's commands.
-  Patch runs only on a handoff you approve, and a Pulse with no command plan has nothing to run, so they have
-  none. While a run is going it says **Running…**, and a click opens that run in History; the run's live post in the
-  chat says what it is doing, with Stop (see [A Pip's runs in its own chat](#a-pips-runs-in-its-own-chat)). When the Pip can't run
-  (Pips are off, the Pip is paused), the button says why.
-- **The … menu** has every section: **History** (every run and its report), **Settings** (what it does, when it
-  runs, its model, pause and archive, and under Advanced its notifications, its source and sharing), **Schedule**
-  (**Plan & schedule** for Pulse), **Handoffs**, **Changes**, **Memory**, **Context** and **Notifications**. Each
-  opens under the same bar, with its name beside the Pip's; back returns to the chat.
-- **What waits for you stays in sight.** A change waiting for your review is a card in its chat, and above each
-  section, with **Review** and **Reject**. New Pips waiting for you are a line under the top bar that goes to them.
+A Pip with a folder has **Run now** in its top bar (the play button) and more sections in its **…**
+menu:
 
-A run's full report opens from its message in the chat (**Report · 2 findings**, then **Open full report**) and
-from its row in History. With a DGC CLI before Pips API 51, and in the remote view, a Project Pip keeps the
-earlier page: a list beside its Chat, History, Settings and More.
+- **Run now** starts what the Pip runs: a check for Scout, Lens, Rook and Lock, a draft for Quill, a
+  Pulse's approved command plan, or a live-data Pip's commands. Patch runs only on a handoff you
+  approve, and a Pulse with no command plan has nothing to run, so they have none. While a run is going
+  it says **Running…**; the run's live post in the chat says what it is doing, with Stop (see
+  [A Pip's runs in its own chat](#a-pips-runs-in-its-own-chat)). When the Pip can't run (Pips are off,
+  the Pip is paused), the button says why.
+- **The … menu** has every section: **Reports** (every run and its report), **Settings** (what it does,
+  when it runs, its model, pause and archive, and under Advanced its notifications, its source (what a
+  run reads where it has no computer of its own) and sharing),
+  **Schedule** (**Plan & schedule** for Pulse), **Handoffs**, **Changes**, **Memory**, **Context** and
+  **Notifications**. Each opens under the same bar, with its name beside the Pip's; back returns to the
+  chat.
+- **What waits for you stays in sight.** A change waiting for your review is a card in its chat, and
+  above each section, with **Review** and **Reject**.
 
-## A Personal Pip's page
+A run's full report opens from its message in the chat and from its row in Reports. With a DGC CLI
+before Pips API 51, and in the remote view, a Pip with a folder keeps the earlier page: a list beside
+its Chat, History, Settings and More. With a DGC before Pips API 96, the page keeps the 0.51 rows.
+
+### A Personal Pip's Settings
 
 A Personal Pip's **Settings** (the **…** menu in its chat) is one simple page, like a Grok bot's:
 its face, its name and an optional title at the top, then four tabs.
@@ -1113,7 +1132,8 @@ robot check on its computer. Turn it off for a Pip that is chatty; its chat stil
 
 ### Routines
 
-A routine is something a Personal Pip does on its own. It has a name, what to do, and when:
+A routine is something a Pip does on its own (every Pip, with a folder or without). It has a name, what to do,
+and when:
 
 | When | Example | Notes |
 | --- | --- | --- |
@@ -1168,6 +1188,12 @@ after asking.
 
 The gear on **Your Pips** opens settings for all of them:
 
+- **How Pips work now** opens again what the Pips tab showed once after the update to 0.52: which
+  Pips moved where.
+- **Payments**: **All Pips together: up to $___ a day**, optional and empty by default, with what all
+  your Pips used today. Each Pip's own limit is on its page (see
+  [Paying by itself](#paying-by-itself-in-dollars)).
+
 - **Computer**: **Update computer** checks now for newer programs (Google Chrome, the desktop),
   instead of waiting for the daily check. **Reset** starts one Pip's computer fresh: signed out of
   every site, no browser history; its Files stay. DGC asks first, and refuses while that Pip is
@@ -1195,11 +1221,33 @@ The gear on **Your Pips** opens settings for all of them:
 Each Pip still has its own computer: a separate home, browser profile and sign-ins, so one Pip's
 sites never see another's. Settings are shared; computers are not.
 
-## Personal Pips: apps and the web
+## Going back to 0.51
+
+Before 0.52 updates your Pips, it keeps a copy of them as they were (SQLite's own backup, in
+`backups/before-0.52/` in the `pips` folder), for 30 days. To go back:
+
+```sh
+dgc pips restore-before-0.52
+```
+
+It puts that copy back, after copying what 0.52 had aside too (in `backups/from-0.52/`), so neither
+direction loses anything, and DGC 0.51 can open your Pips again. It says what is lost: "Pips go back to
+how they were on <date>. What they did since then is kept in <folder>, but DGC 0.51 can't show it."
+Quit DGC (or stop `dgc pips serve`) first: it refuses while Pips are running. Then install DGC 0.51;
+opening 0.52 again updates them once more. Without the copy (more than 30 days after the update, or a
+database that never came from 0.51) there is nothing to go back to, and it says so. Changes a Pip put
+into your folder under 0.52 stay there: they are your files now.
+
+## Apps and the web
+
+This section grew up with Personal Pips. From 0.52 a Pip with a folder has these in its chat too: your
+apps through DGC (Composio and your DGC plugins; their keys stay in DGC), web search, making images and
+video, its own keys at Do it all, and borrowing your Chrome when you allow it. Careful mode remembers
+what it read from your apps, and its level is said to it.
 
 ### Searching the web
 
-Every Personal Pip can search the web with the search you set in DGC **Settings** (the same one
+Every Pip can search the web with the search you set in DGC **Settings** (the same one
 your main chat uses). It gets titles, links and snippets; to read a page itself, it uses its own
 computer. A search never carries what the Pip read from your apps (careful mode): a Pip that read
 your parcel number in an email can't send that number to a search engine unless you said it
@@ -1207,7 +1255,7 @@ yourself.
 
 ### Connecting an app from a Pip's chat
 
-Ask a Personal Pip to do something with an app it doesn't have yet, for example "set up
+Ask a Pip to do something with an app it doesn't have yet, for example "set up
 my Gmail so you can check my inbox every morning". The Pip puts a **Connect Gmail**
 card in its chat, with one line on what it will do with it. Choose **Connect Gmail**:
 DGC asks Composio (your connection in **Settings → Plugins**) which accounts it has. If
@@ -1313,10 +1361,14 @@ reported, and the run continues.
 
 ### A computer of its own (Linux and macOS)
 
-Every new Personal Pip gets its own computer: a web browser and a home folder in a sandbox,
-separate from your browser and your files (unless you lend it your own Chrome for one task: see
+Every new Pip gets its own computer: a web browser, Files and a Terminal in a sandbox, walled off
+from your browser and your files (unless you lend it your own Chrome for one task: see
 [Borrowing your own Chrome](#borrowing-your-own-chrome)). That holds wherever this machine can run one (Linux,
-and Macs with Apple silicon on macOS 26 or later). It starts the first time the Pip uses it and
+WSL 2, and Macs with Apple silicon on macOS 26 or later). A Pip with a folder has one there from its next
+chat, with no new version of the Pip, and a copy of its folder in its Files (see
+[Its own copy of your folder](#its-own-copy-of-your-folder)). On a Mac that can't run one, one dialog says
+so, once: "Pips' own computers need a Mac with Apple silicon on macOS 26." There a Pip with a folder reads
+its folder as before 0.52 and fixes nothing. It starts the first time the Pip uses it and
 closes when it has been idle for 15 minutes. Remove it with **Remove computer…** in its **Job** tab,
 or `dgc pips computer remove PIP`. A Pip made before computers were
 the default gets one with **Give this Pip a computer…**, or `dgc pips computer give PIP`. Either is
@@ -1377,9 +1429,9 @@ without.
   network, this computer's own services and cloud metadata addresses are refused. A request
   caused by the Pip that carries a payment card number waits for you every time: its review says it sends payment
   card details, it never offers **Always allow**, and no Always allow you gave for that site sends
-  one. So does anything else with real signs of paying: see [What counts as a payment](#what-counts-as-a-payment). A Pip with
-  a computer can't also have app reads, so private data from your accounts never sits in a
-  browser that could send it on.
+  one. So does anything else with real signs of paying: see [What counts as a payment](#what-counts-as-a-payment). What it
+  read from your apps goes freely only to a site you named or allowed, or one you sent to before; any other site asks
+  once (careful mode). Every site its computer reaches is listed in **Sent to the web** on its page.
 - **Stop it any time.** **Stop computer**, or `dgc pips computer stop PIP`, closes the browser at
   once and cancels anything waiting, unsent. A computer with nothing waiting closes itself after 15 minutes idle.
   **Remove computer…** takes it away; the Pip's saved sign-ins stay in its folder (see
@@ -1387,12 +1439,19 @@ without.
 
 ### How much it asks
 
-Each Personal Pip has a level, the way OpenMausBot's bots do (Pips API 58): **Ask me first**, **Approve for me** or
-**Do it all**. Its chip sits at the left of its prompt box, where Work's mode picker is, and says the level's name. Its
+Every Pip has a level, with a folder or without, the way OpenMausBot's bots do (Pips API 58; a Pip with a folder from
+Pips API 95): **Ask me first**, **Approve for me** or **Do it all**. Its chip sits at the left of its prompt box, where Work's mode picker is, and says the level's name. Its
 menu gives each level with one line saying what it means, and a last row, **What PIP can do**. The same setting is on
 its page under **How much it asks**: change it in one place and the other follows. A change made while a reply runs
-applies from its next step. Only you change it, on this computer. A new Personal Pip starts at **Ask me first**.
-Existing Pips keep the level you chose for them. A Project Pip has no chip: it always asks.
+applies from its next step. Only you change it, on this computer. Choosing **Do it all** first shows what it allows,
+with **Continue** or **Cancel**. A new Pip starts at **Ask me first**. Existing Pips keep the level you chose for them;
+a Pip that had a folder before 0.52 starts at Ask me first, as it always was.
+
+The wall is the same for every Pip: inside its own computer it works freely, and only what crosses out of it asks.
+For a Pip with a folder, its level also decides what happens to what it changed in its copy of your folder: below Do
+it all the change waits for you as a card (**Apply**, **Review**, **Discard**); at Do it all it is applied to your
+folder when its turn ends, file by file, never over a file you changed meanwhile, always with **Undo**. What its checks
+find becomes a fix by its level: see [When a check finds something](#when-a-check-finds-something).
 
 | Level | What goes by itself | What still asks |
 |---|---|---|
@@ -1427,14 +1486,12 @@ Existing Pips keep the level you chose for them. A Project Pip has no chip: it a
   its Files, or a real question with no sensible default. A plugin set to **Always ask**, or one that can move money,
   still asks. The line under the level says the risk plainly: a page or an email it reads could talk it into sending
   something.
-- **Paying by itself.** Each Pip has its own rule for payments. **Ask me each time** is the default: every payment
-  asks, at every level. **Let it pay** (on its page, under its level, or `dgc pips payments --pip PIP allow`) is only
-  for a Pip at Do it all: it then pays by itself, at most **Payments a day** times across your Pips (3 unless you change
-  it in the Pips view's Controls, or `dgc pips payments 5`). Leaving Do it all puts its rule back to Ask. Only you
-  change these, on this computer. It never types a card number: a request carrying one still asks, and your own Pay
-  on its screen is still yours. A pay, buy or order step is never replayed: Always allow is never offered on one, and
-  no Always allow sends one. Something that only might be a payment (one money word, such as a billing page, with
-  nothing certain) goes at Do it all, and still asks at Approve for me.
+- **Paying by itself.** Each Pip has its own rule for payments, **Ask me each time** (the default) or **Let it pay**,
+  only at Do it all and only within a daily dollar limit you set: see
+  [Paying by itself, in dollars](#paying-by-itself-in-dollars). It never types a card number: a request carrying one
+  still asks, and your own Pay on its screen is still yours. A pay, buy or order step is never replayed: Always allow
+  is never offered on one, and no Always allow sends one. Something that only might be a payment (one money word, such
+  as a billing page, with nothing certain) goes at Do it all, and still asks at Approve for me.
 - **A fallback model.** In a Pip's model picker, the **⋯** beside a model offers **Use as main** and **Use as fallback**
   (or **Stop using as fallback**); once a fallback is set, the two rows say **Main** and **Fallback**. It is one model
   on your own connection or on one of your saved providers, so it is clear which provider it falls back to, or Claude
@@ -1451,7 +1508,7 @@ Existing Pips keep the level you chose for them. A Project Pip has no chip: it a
 - **The fuse.** If a Pip does 25 things on its own in an hour (a submit, a send or a plugin change its level or an
   Always allow let through; a new site's first visit doesn't count), it asks before each one again until the hour has
   passed, whatever its level. Its card says so, with the time. The level you chose stays as it was.
-- **Every Personal Pip has its computer and your plugins**, a routine's run too. The model decides which it needs.
+- **Every Pip has its computer and your plugins**, a routine's run too. The model decides which it needs.
   What it read from your apps goes freely to a site you named or allowed, or one you sent to before (your Allow, or an
   Always allow you gave). A site it sent to on its own level doesn't count, so a page can't make its own site trusted.
   To any other site it asks once, and **Allow** adds that site. A Terminal command carrying it asks.
@@ -1466,10 +1523,10 @@ Existing Pips keep the level you chose for them. A Project Pip has no chip: it a
 
 ### Working notes, a daily log, and /learn
 
-A Personal Pip learns its job as it goes (Pips API 57), the way OpenMausBot's bots keep a `MEMORY.md`:
+A Pip learns its job as it goes (Pips API 57; every Pip from 0.52), the way OpenMausBot's bots keep a `MEMORY.md`:
 
 - **Its working notes.** It keeps short lines on how the job goes, like "The hospital portal asks for the UHID first"
-  or "Bills go to Arjun Mehta", with a small tool of its own (add a line, replace one, strike one), up to 60 lines or
+  or "Bills go to the accounts inbox", with a small tool of its own (add a line, replace one, strike one), up to 60 lines or
   6 KB. Every run of it, a chat reply or a routine, starts with them. They're its notes, not your memory: a line is
   refused when it holds a password, a code, a card or account number, what it read in your apps in the last day
   (what an email or an event said), or an email address or a link you never gave it. Its page shows them under **Working notes**; **Edit** changes them, one line a
@@ -1827,20 +1884,50 @@ ask at every level and never get **Always allow**:
 - a payment provider's own site, such as Stripe's API, PayPal or Razorpay.
 
 A single word doesn't make a payment. A billing profile, a zone's subscription, a lone `amount` or `card`
-field, or an order with no sign of paying is truly unclear, so it still asks at every level, with a plain
-line ("It mentions "billing", so DGC asks. Nothing shows it's a payment.") and **Always allow**. A newsletter's
+field, or an order with no sign of paying is truly unclear, so it still asks at Ask me first and Approve for me,
+with a plain line ("It mentions "billing", so DGC asks. Nothing shows it's a payment.") and **Always allow**; at Do it
+all it goes. A newsletter's
 Subscribe that takes only an email isn't about money at all. A page could mislabel what it does; that is why
 what is unclear keeps asking until you say otherwise.
 
+### Paying by itself, in dollars
+
+Each Pip has its own rule for payments. **Ask me each time** is the default: every payment waits for you on a card,
+at every level. **Let it pay**, on its page under its level, is only for a Pip at Do it all, and it pays by itself
+only once you set how much:
+
+- **Allow payments up to $___ a day** (required): the total of all its payments in the last 24 hours. **No limit** is
+  a choice you tick, never the default.
+- **At most ___ payments a day** (optional): any number.
+- **Only on these sites** (optional): empty is any site; a site covers its subdomains.
+- **All Pips together: up to $___ a day** (optional, in Pips settings): one total for every Pip.
+
+Its page says what it used today ("$12.50 used today"). **DGC reads each amount itself**, never the model: one amount
+and one certain currency from the payment's own fields, converted to dollars with the day's reference rate (the
+European Central Bank's, which DGC reads once a day). A payment it can't read for certain, one in a currency with no
+rate to hand, one that would go past a limit, or the same site and the same amount twice in a day asks you instead.
+So some payments still ask at Do it all; that is the honest answer.
+
+Leaving Do it all puts its rule back to Ask. Only you change these, on this computer. The 3-payments-a-day count of
+earlier versions is gone: a Pip you let pay before 0.52 asks until you set its daily limit. In the terminal:
+
+```sh
+dgc pips payments --pip PIP allow          # its rule: allow or ask
+dgc pips payments --pip PIP --usd 50       # its daily limit in dollars, or no_limit
+dgc pips payments 200                      # all Pips together, or none
+```
+
 ## What Pips never do
 
-- **Change your project.** No Pip edits your working files, commits, merges,
-  pushes or deploys. Patch edits only a private copy; you decide what to do with
-  its diff.
-- **Run anything you didn't approve.** Pulse and Patch run only the exact command
-  lists you reviewed, in a confined copy with the network off, apart from fixed checks of
-  local `http://127.0.0.1` addresses you approved. No Pip has a shell, installs
-  dependencies or picks its own commands.
+- **Change your folder behind the wall.** A Pip works on its own copy in its own
+  computer. What it changed reaches your folder only by your **Apply**, or by itself
+  at Do it all, file by file, never over a file you changed, always with **Undo**. A
+  Pip never commits, pushes or deploys as part of a fix; **Commit these files** is
+  your click.
+- **Run anything outside its own computer you didn't approve.** In its own computer
+  a Pip runs what it needs, in its Terminal. Outside it, Pulse and Patch run only the
+  exact command lists you reviewed, in a confined copy with the network off, apart
+  from fixed checks of local `http://127.0.0.1` addresses you approved.
 - **Approve themselves.** No Pip can accept a setup, proposal, handoff or external
   action. The main chat sets up and changes Pips only through tool calls your
   permission mode decides (auto mode creates a Pip directly, including one that reads
@@ -1848,18 +1935,18 @@ what is unclear keeps asking until you say otherwise.
   still wait for you in the Pips view or the CLI.
   When the chat runs `dgc pips` in its own shell, the CLI only reads (and can make
   the emergency stop); anything that changes a Pip is refused there.
-- **Act outside their reviewed reads.** Project Pips read only their approved
-  source. Personal Pips see only the app and web reads you approved, the public
-  websites their own computer opens, and, for one task you allow once, the sites on
-  its card in your own Chrome.
+- **Act outside their reviewed reads.** A Pip with a folder reads its own copy of
+  that folder (never `.env`, `.git` or what Git ignores). Every Pip sees the apps
+  and web reads you gave it, the public websites its own computer opens, and, for
+  one task you allow once, the sites on its card in your own Chrome.
 - **Send, create or call without you.** Every email, event and connector call is a
   single attempt you approved on its exact content, or one you chose to **Always
   allow** for that Pip, connection, account and tool. So is every form a Pip's computer
   would submit.
-- **Buy, pay or book on their own,** unless you allowed it. A Pip has no tool of its
-  own for this; a Pip's computer holds every submit, a payment included, for you or for an Always
-  allow that covers it; a connector action runs the exact tool call you reviewed, or one you
-  always allow, so check what that tool does before you allow it.
+- **Buy, pay or book on their own,** unless you let that Pip pay, at Do it all, within
+  the daily dollar limit you set. Otherwise a Pip's computer holds every payment for you;
+  a connector action runs the exact tool call you reviewed, or one you always allow, so
+  check what that tool does before you allow it.
 - **Use a cloud service of DGC's.** There is no Pips account or hosted runner.
 
 ## Privacy and where state lives
@@ -1892,6 +1979,31 @@ Each run gets its own private home, with no access to your MCP servers, hooks or
 credentials. The model key reaches the run only for its own model requests.
 Configured secrets are redacted from reports and previews. Saved artifact files
 (Patch diffs and Pulse output) are kept as written, readable only by you.
+
+**Secrets and what a Pip sends.**
+
+- A Pip's run is never shown your saved keys, and the secret values in a project's
+  top-level `.env` files (a password, a key, a token, a salt; not a port, a mode or a
+  plain URL) are hidden wherever it reads them. Its copy of your folder has no `.env`
+  at all.
+- DGC's own web tools never send a secret: a web fetch whose address, or a web search
+  whose words, hold a key, a password or a token DGC knows (or one shaped like a key)
+  is not sent, and says so. A Pip's computer sends nothing over plain HTTP that carries
+  one.
+- Every Pip is told not to send code, files, secrets or personal details to a site
+  unless the task needs it, and to say what it sent and where.
+- **Sent to the web**, on each Pip's page, lists every site its computer reached, how
+  many times, how much went out and came back, and anything blocked.
+  (`list_pip_sent` reads it.)
+
+What this can't see: a secure (HTTPS) connection from a Pip's computer is a sealed
+tunnel. DGC sees which site it goes to and how much goes out, never what is inside. So
+what a Pip on Do it all may send is decided by its level, the Do it all warning you
+accepted and its **Knows about you** switch, not by a filter.
+
+**Going back.** Before 0.52 updated your Pips, DGC copied the Pips database to
+`backups/before-0.52/` in the `pips` folder, kept for 30 days (see
+[Going back to 0.51](#going-back-to-051)).
 
 ## Turning Pips off
 
@@ -1931,8 +2043,12 @@ than run unconfined.
   number of helper calls you approved (1 to 3) is their only bound.
 - Up to four Pips run at once (`pips_parallel_runs`, 1 to 32), each one run at a time; at
   most 20 runs queued or running.
-- Source copies: up to 256 MiB and 10,000 files and folders; files over 4 MiB, links
-  and submodules are left out and listed (see What a Pip's copy leaves out). Under the
+- A folder's copy in a Pip's computer: up to 200 MB of what Git lists (raisable in Dev
+  Mode) and 20,000 files; past that, the biggest files are left out and said (see Its own
+  copy of your folder).
+- Source copies where a Pip has no computer of its own: up to 256 MiB and 10,000 files
+  and folders; files over 4 MiB, links and submodules are left out and listed (see What
+  a source copy leaves out). Under the
   original rules: 64 MiB, and a file over 4 MiB, a committed symbolic link or a
   submodule fails the run.
 - Pulse and Patch commands: up to four per run, each with 60 seconds, 30 CPU

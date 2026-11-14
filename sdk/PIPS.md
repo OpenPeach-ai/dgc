@@ -524,8 +524,8 @@ approves, rejects or starts nothing. Open the referenced record before acting.
 | `rename_pip_conversation` | M | `pip_id`, `conversation_id` (`conv_<32 hex>`), `title`; from API 79 |
 | `archive_pip_conversation` | M | `pip_id`, `conversation_id`, `archived?` (default true; false restores; never the first); from API 79 |
 | `add_pip_computer` | M | `pip_id`: one more computer for the Pip, shared by its conversations (up to 3 unless raised); from API 79 |
-| `get_pips_payments` | R | none; from API 75 |
-| `set_pips_payments` | M | `limit` (whole number, 1 to 20): how many payments your Pips may make by themselves in a day; from API 75 |
+| `get_pips_payments` | R | none; from API 75. From API 96 it answers `usd_per_day` (all Pips together, or null) and `spent_today` (in dollars) |
+| `set_pips_payments` | M | from API 96, `usd_per_day` (dollars above 0, up to 1,000,000, or null for none): all Pips together, up to this a day. API 75 to 95 took `limit` (whole number, 1 to 20), a count of payments a day, retired in 96 |
 | `set_pip_paying` | M | `pip_id`, `rule` (`ask` or `allow`): one Pip's rule for a payment; `allow` only at Do it all; from API 75 |
 | `get_pip_usage` | R | `pip_id` |
 | `export_pip` | R | `pip_id`; returns a shareable `dgc-pip` file (no accounts, IDs, memory or history) |
@@ -700,14 +700,12 @@ couldn't do before, except a switch turned back on.
 | `get_pip_skills` | R | `pip_id`: `skills` [{name, description, source, on}] (API 88) |
 | `set_pip_skill` | M | `pip_id`, `skill`, `on` (bool): a skill switched off is never offered to its model (API 88) |
 | `export_pip_team` | R | `pip_ids` (1 to 20), `name`: `{document, text}`, one `dgc-team` file holding each Pip's shareable file (no accounts, IDs, memory or history) (API 88) |
-| `get_pip_owner`, `set_pip_owner` | R, M | `pip_id`, `session_id` (set: a session of its project, or null): a Project Pip's owner session (API 89) |
-| `list_session_pips` | R | `session_id`: the Project Pips it owns (API 89) |
 | `get_pip_webhook`, `replace_pip_webhook_address`, `set_pip_webhook_signing`, `send_pip_webhook_test` | R, M, M, M | `pip_id`, `routine_id`, `secret` (signing: text or null): a routine's own webhook address (API 90) |
 | `get_webhook_reach`, `set_webhook_reach` | R, M | `local_network`, `tunnel` (`tailscale`, `own` or null), `own_base`: how calls reach this computer (API 90) |
-| `list_pip_project_choices`, `list_pip_project_changes`, `get_pip_project_change` | R | `pip_id`, `change_id`, `path`: a Personal Pip's project copies and what changed in them (API 91) |
+| `list_pip_project_choices`, `list_pip_project_changes`, `get_pip_project_change` | R | `pip_id`, `change_id`, `path`: a Pip's project copies (a Personal Pip's @ copies; from API 95 a folder Pip's own copy too) and what changed in them (API 91) |
 | `apply_pip_project_change`, `discard_pip_project_change`, `undo_pip_project_change` | M | `pip_id`, `change_id`, `expected_digest` (apply): what you decide about a change (API 91) |
 | `list_project_folders`, `add_project_folder` | R, M | `folder`: the folders with a session or a Project Pip; a folder added as a project (API 93) |
-| `set_pip_goal`, `get_pip_goal`, `stop_pip_goal` | M, R, M | `pip_id`, `objective`, `conversation_id`, `goal_id`: a goal for a Personal Pip's conversation (API 92) |
+| `set_pip_goal`, `get_pip_goal`, `stop_pip_goal` | M, R, M | `pip_id`, `objective`, `conversation_id`, `goal_id`: a goal for a Pip's conversation (every Pip's from API 96) (API 92) |
 | `delete_pip_routine` | M | `pip_id`, `routine_id` (API 43) |
 | `decide_pip_routine` | M | `pip_id`, `routine_id`, `add` (bool): the user's Add routine, or Not now, on a routine the Pip suggested in its chat (API 43) |
 

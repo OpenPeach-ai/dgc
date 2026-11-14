@@ -9,11 +9,12 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
 
 ## Using it
 
-- **Open it.** The DGC side bar has two tabs, **Work** and **Chat**, so a long list of either never hides the
-  other. Work comes first and opens by default; after that the side bar remembers the one you used last. **New chat** opens a chat in an editor tab. You can also run
-  **DGC: New Chat (ChatDGC)** from the Command Palette. One search box searches both tabs, and while you
-  search, each tab says how many it found. It finds a chat by its name or anything said in it, and shows the
-  words around what it found.
+- **Open it.** The DGC side bar has one tab bar, **Home**, **Work**, **Chat** and **Pips**, and remembers the
+  tab you were on. **Chat** lists your chats, with its own search box and **New chat**, which opens a chat in an
+  editor tab. You can also run **DGC: New Chat (ChatDGC)** from the Command Palette. The search finds a chat by
+  its name or anything said in it, and shows the words around what it found. **Archive** in a chat's **…** menu
+  takes it off the list, with **Undo** for a few seconds; **Archived (N)** at the list's end has **Restore** and
+  **Delete**.
 - **Ask.** Enter sends your message. Shift+Enter adds a new line, and Esc stops a reply. Replies stream
   in as Markdown, with code blocks, tables and links. A link opens in your browser only after you click
   it.

@@ -37,7 +37,8 @@ capabilities object, so strict older clients still accept the handshake.
 - `pip_references: 1` means the backend accepts `list_prompt_pips` and
   `pip_references` on `prompt`.
 - `pip_reports: 1` means a finished Pip run that reports to this chat can arrive as a
-  card in its transcript ([Reports reach the chat](PIPS.md#reports-reach-the-chat)). A
+  card in its transcript. From Pips API 96 that is only a run this chat started
+  (`run_pip_now`); see [Pips and Work sessions](PIPS.md#pips-and-work-sessions). A
   client that draws them sends `{"type": "watch_pip_reports"}`; until one does, the chat
   is sent nothing and no report is taken. Then each arrives as
   `{"type": "pip_report", "report": {...}}` (an open object: `run_id`, `pip_id`, `name`,

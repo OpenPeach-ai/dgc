@@ -169,9 +169,9 @@ that is what you want.
 - Arcade supports Arcade Cloud gateways with Arcade Auth. Custom domains and
   self-hosted Arcade are not supported.
 
-## Personal Pips
+## Pips
 
-Personal Pips can use these same saved connections, but only through reviewed
-steps: bounded Composio reads that you approve as part of the Pip's job, and
-single external actions that you approve one at a time. See
-[Pips](PIPS.md#personal-pips-apps-and-the-web).
+Pips can use these same saved connections (a Personal Pip, and from 0.52 a Pip
+with a folder in its chat), but only through reviewed steps: bounded Composio
+reads that you approve as part of the Pip's job, and single external actions
+that you approve one at a time. See [Pips](PIPS.md#apps-and-the-web).

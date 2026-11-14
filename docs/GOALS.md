@@ -4,6 +4,11 @@
 through work cycles until it completes the goal, pauses, or reports a blocker. The editor also
 accepts `objective /goal`; choosing `/goal` from the inline picker starts the prepared draft.
 
+In VS Code and Cursor each work cycle is a turn of its own, as in Codex: it ends like any turn, with its
+reply, the files it changed and its time, and DGC starts the next one by itself ("Goal · turn 3", never a
+bubble you sent). A message you queue runs first, as its own turn; a turn that ends with a question to
+you waits for your answer. In the terminal, and for an SDK app, the cycles still run inside one turn.
+
 A native work cycle that reaches its configured time limit pauses the goal without accepting a
 completion report. Cancellation and time limits return a nonzero one-shot CLI exit status; the editor
 reports cancellation or error rather than completed work. Saved partial work remains available for
@@ -66,8 +71,9 @@ prevent resumption and produce a specific error.
 `/goal --tokens 50000 <objective>` sets an optional token budget. Work time excludes time spent
 offline or paused. Budgets are checked between model requests or delegated turns, so an in-flight
 request can exceed the remaining allowance. A route that does not report usage cannot continue
-under an enforceable token budget. Three consecutive cycles without distinct tool progress block
-the goal for review; successful process exit alone does not mark a goal complete.
+under an enforceable token budget. Three goal cycles in a row that come back empty (no reply and no
+tool work) block the goal for review; whether repeated work is progress is the model's own check, as in
+Codex. Successful process exit alone does not mark a goal complete.
 
 A goal that is complete, blocked or paused stays in the model's instructions as one line, so a
 compaction never sends it back to work you already have: a short name for the goal, the day it

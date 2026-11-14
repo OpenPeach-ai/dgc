@@ -6,12 +6,21 @@ Pips API history. For a guided introduction, start with [PIPS.md](PIPS.md).
 
 | Component | Version |
 | --- | --- |
-| DGC CLI | 0.51.0 |
-| VS Code extension | 0.35.0 |
-| SDK (Python and TypeScript) | 0.9.0 |
-| Pips API | 77 |
+| DGC CLI | 0.52 |
+| VS Code extension | the one released with CLI 0.52 |
+| SDK (Python and TypeScript) | the one released with CLI 0.52 |
+| Pips API | 96 |
 | Editor protocol | v14 |
-| Pips registry schema | 52 |
+| Pips registry schema | 55 |
+
+0.52 made Pips one kind: every Pip has its own chat, its own computer and, with a folder, its own copy
+of that folder; a folder Pip's level governs its computer and its copy; a check's findings become a fix
+by level, in the Pip's own chat; no Work session owns a Pip. [PIPS.md](PIPS.md) tells it from the
+user's side, and [sdk/PIPS.md](../sdk/PIPS.md) lists each command and field by the Pips API that added
+it (80 to 96). Before upgrading a database from schema 51 or earlier, DGC copies it to
+`backups/before-0.52/` in the Pips folder (SQLite's online backup, owner-only, kept 30 days); no copy, no
+upgrade. `dgc pips restore-before-0.52` puts the newest copy back after copying the current database to
+`backups/from-0.52/`, and refuses while the runner is online.
 
 ## Security model
 
@@ -802,9 +811,12 @@ pairs with a user message. A conversation run's context carries the five newest 
 `run_posts` (each without the Pip's id and name, a Personal result's preview cut to 400
 characters), and the worker puts them in the reference data beside `last_report`, with a note
 that the user saw each as a short message from the Pip and that DGC wrote them, not the user.
-`get_pip` returns `report_session`: the newest chat the Pip reports to (attached, or set up there),
-where the editor's **Ask DGC to fix** fixes the report in the background (`start_pip_fix`, see
-[PIPS.md](PIPS.md#ask-dgc-to-fix)).
+`get_pip` returns `report_session`: before Pips API 96, the newest chat the Pip reported to
+(attached, or set up there), where the editor's **Ask DGC to fix** fixed the report in the background
+(`start_pip_fix`). From API 96 no session is sent a Pip's scheduled reports: `report_session` is null
+and `report_chats` 0, a chat gets a card only for a run it started (`run_pip_now`), and a check's
+findings become a fix in the Pip's own chat (`list_pip_fixes`, `decide_pip_fix`; see
+[PIPS.md](PIPS.md#when-a-check-finds-something)).
 
 `list_pip_run_fixes {pip_id}` (API 65, a read, local only) returns `{pip_id, workspace_id, fixes}`: for each of the
 Pip's runs, the latest fix any chat of its project ran (`dgc/pip_fix.py` keeps them in the project's
@@ -1084,7 +1096,7 @@ created_at}], max}`; `add_pip_note {pip_id, text}` (refused with `secret_note` w
 change it) and `forget_pip_note {pip_id, note_id | all: true}` return the same. Forget deletes the row.
 
 **Its own working notes** (`pip_working_notes`, Pips API 57, Personal Pips only): lines about doing its job ("The
-hospital portal asks for the UHID first", "Bills go to Arjun Mehta"), at most 60 lines, 6 KB and 300 characters a
+hospital portal asks for the UHID first", "Bills go to the accounts inbox"), at most 60 lines, 6 KB and 300 characters a
 line, in `pips/working-notes/<pip>.md` (mode 0600). Every `conversation` and `personal_task` run (not a reviewed
 handoff) gets them from the supervisor as `working_notes` (`[line]`, redacted again) and has a `working_notes {op:
 add | replace | strike, line?, match?}` tool: `replace` and `strike` name the line by words from it (exactly one
@@ -2414,8 +2426,9 @@ Clients check it before using a newer control.
 | 72 | Reviewed local Personal and Project Pip workflow controls: list, get, create and set status. Two to four Pips of one workspace and kind can pass exact results or a committed-source finding through reviewed or unattended routing; each Pip keeps its own external-action permissions. |
 | 73 | A text message can join one running Personal Pip conversation as a mid-turn update. It stays in that run's history and does not start a second reply. One that reply never read becomes the next turn, or says it wasn't sent if the reply was stopped or failed; `list_pip_messages` lists those waiting for a turn in `waiting` (see PIPS_EDITOR_PROTOCOL.md). |
 | 74 | A Pip on a provider saved in the editor's Settings → Models: `model_choice` `{"mode": "provider", "provider", "model"}`. |
-| 75 | Paying by itself (local only): `set_pip_paying {pip_id, rule}` (`ask` or `allow`, only at Do it all; `get_pip_level`'s `paying`) and `get_pips_payments` / `set_pips_payments {limit}` → `{payments: {limit, default, most, paid}}`. A Pip allowed to pay pays by itself at most `limit` (3 unless changed, 1 to 20) times in 24 hours across all Pips, never a request carrying a card number. A pay, buy or order step is never always allowed (`pip_computer.never_replayed`). |
+| 75 | Paying by itself (local only): `set_pip_paying {pip_id, rule}` (`ask` or `allow`, only at Do it all; `get_pip_level`'s `paying`) and `get_pips_payments` / `set_pips_payments {limit}` → `{payments: {limit, default, most, paid}}`. A Pip allowed to pay pays by itself at most `limit` (3 unless changed, 1 to 20) times in 24 hours across all Pips, never a request carrying a card number. A pay, buy or order step is never always allowed (`pip_computer.never_replayed`). The count was retired in 96 for daily dollar limits. |
 | 76 | A Pip's fallback model: `get_pip_backup {pip_id}` / `set_pip_backup {pip_id, model, provider?, engine?, router?}` → `{backup: {pip_id, provider, model, engine?, router?, on?}}` (`provider` "" DGC's own connection or `provider_<32 hex>`, `model` "" or null none; `engine` `claude` or `codex` for Claude Code or Codex, `model` then its model or "" its default; `router: true` for DGC Router, `model` "" or `<system>/<model>`; `on` `{since, model}` while it answers) and the one new Pips start with, `get_pips_backup` / `set_pips_backup {model, provider?}` → `{backup: {provider, model}}`, all local only. When a run's own model doesn't answer, it carries on with the fallback; the first reply of an outage carries `backup`, its one line, and `list_pip_messages` carries `fallback_on {model, since}` while the fallback answers. |
 | 77 | A Personal Pip's own changes at once, with Undo: in a turn the user started, its `name`, `goal`, `schedule` and `model_choice` change when its reply is saved, and a routine it adds is `on`; the reply carries `changes` (`[{id, kind, fields, after, status}]`), and `undo_pip_change {pip_id, change_id}` (local only) → `{change, pip}` puts one back while nothing changed it since. `/setup` in a user message sets the Pip up after up to three questions. Registry schema 52. |
 | 78 | No new command. A run's post may carry `artifact` `{id, type ("doc" or "sheet"), title, version}`: the review it kept as the Pip's document or sheet, or the Quill draft that became its document; the editor draws the document card. Read it only from a runtime advertising 78 |
 | 79 | Several conversations per Pip (`pip_conversations`): list, start, rename, archive or restore one (all local only); send, list, mark read and the context meter take an optional `conversation_id`, none meaning the first. Each has its own history, checkpoints, steering and unread; the Pip answers in them in parallel and its replies take turns on its computer. Routines post in the first unless moved (`update_pip_routine` `changes.conversation_id`). A Pip may have several computers: `add_pip_computer {pip_id}` (local only, up to 3 unless raised); a reply takes a free one, else waits, saying so. Messages and replies are up to 256 KB each (they were 4,000 characters and 24 KiB); a reply past that carries `artifact` `{id, type, title, version}`, the Pip's document holding the whole of it; a page of `list_pip_messages` is about 1 MiB and always holds the newest message. |
+| 80 to 96 | Listed command by command in [sdk/PIPS.md](../sdk/PIPS.md#capability-gates). In short: 80, a Project Pip's level (about its handoffs); 81 and 82, a plugin's key and a Pip's own site keys, asked on cards; 83, quoting a Pip's message; 84, photos and files while a reply runs; 85, a site key in its Terminal at Do it all; 86, names and screen sizes for a Pip's computers; 87, big files in and out of its Files; 88, apps, skills and team files; 89, owner sessions (never released, removed in 96); 90, webhooks; 91, @ a project in a Personal Pip's chat; 92, a goal for a conversation; 93, the Project Folder dropdown; 94, one list of every Pip (`list_pips {scope: "all"}`); 95, a folder Pip's own computer and its level over it; 96, the Pips flow: fixes by level (`list_pip_fixes`, `decide_pip_fix`), what only you can do (`answer_pip_waiting`), `commit_pip_project_change`, `get_pips_welcome`, `list_pip_sent`, `set_pip_knows_you`, `list_related_pips`, and payments in dollars (`set_pip_pay_limits`; `set_pips_payments {usd_per_day}`, the count retired). |
