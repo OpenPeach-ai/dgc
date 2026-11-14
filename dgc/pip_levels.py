@@ -326,13 +326,19 @@ def listing(registry, pip_id) -> dict:
     """get_pip_level: the level, the three with their lines, and the newest things it did on its own. A Project Pip's
     (`kind` "project") are about the handoffs it is sent, with no paying rule."""
     _, personal = _scope(registry, pip_id)
+    from .pip_payments import limits as pay_limits, spent
+    # Its pay limits and what it used today (0.52, pip_payments), so its page reads them back after a reload.
+    money = {"pay_limits": pay_limits(registry, pip_id), "spent_today": float(spent(registry, pip_id))}
     if not personal:
-        says = BOX_SAYS if _boxed(registry, pip_id) else PROJECT_SAYS
+        boxed = _boxed(registry, pip_id)
+        says = BOX_SAYS if boxed else PROJECT_SAYS
         return {"pip_id": pip_id, "kind": "project", "level": project_level(registry, pip_id), "default": DEFAULT,
+                # A folder Pip with its own computer may pay as any Pip at Do it all (every Pip gets everything).
+                **({"paying": paying(registry, pip_id), **money} if boxed else {}),
                 "levels": [{"level": value, "name": NAMES[value], "says": says[value]} for value in LEVELS],
                 "on_its_own": on_its_own(registry, pip_id)}
     return {"pip_id": pip_id, "kind": "personal", "level": level(registry, pip_id), "default": DEFAULT,
-            "paying": paying(registry, pip_id),
+            "paying": paying(registry, pip_id), **money,
             "levels": [{"level": value, "name": NAMES[value], "says": SAYS[value]} for value in LEVELS],
             "on_its_own": on_its_own(registry, pip_id)}
 

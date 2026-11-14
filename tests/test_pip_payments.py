@@ -167,3 +167,25 @@ class TheCommands(Paying):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReadBack(Paying):
+    """get_pip_level answers a Pip's pay limits and what it used today (the Pip page helper's gap, 14 Nov: after a
+    reload the page couldn't know a limit set earlier), for a Pip with a folder too."""
+
+    def test_its_limits_and_today_come_back_with_its_level(self):
+        self.limit(usd_per_day=50, max_count=3, sites=["shop.example"])
+        self.paid(amount="12.50")
+        said = levels.listing(self.registry, self.pip["id"])
+        self.assertEqual(said["pay_limits"], {"usd_per_day": 50, "max_count": 3, "sites": ["shop.example"]})
+        self.assertEqual(said["spent_today"], 12.5)
+
+    def test_a_pip_with_a_folder_and_its_own_computer_has_a_paying_rule_too(self):
+        folder = self.base / "shop"
+        folder.mkdir()
+        workspace = self.registry.resolve(folder)
+        pip = self.store.create(workspace["id"], "Orders", None, "editor-user", pip_type="scout")
+        with patch.object(pips, "folder_boxes", return_value=True):
+            levels.set_level(self.registry, pip["id"], levels.FULL, "editor-user")
+            said = levels.listing(self.registry, pip["id"])
+        self.assertEqual((said["paying"], said["pay_limits"]["usd_per_day"]), ("ask", None))
