@@ -7166,6 +7166,16 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
             elif command in ("get_pip_runner", "stop_pips"):
                 from .pip_daemon import runner_status, stop_all
                 result = {"runner": runner_status(registry) if command == "get_pip_runner" else stop_all(config, actor)}
+                if command == "get_pip_runner":
+                    # 0.52 (pips-sandbox-design §6): whether this machine gives Pips their own computer, and why not, so
+                    # the editor can show the Mac dialog once. The backend never decides to show it.
+                    try:
+                        from .pip_screen_setup import supported as boxes_supported
+                        available, why = boxes_supported()
+                    except Exception:                    # noqa: BLE001 - unreadable: say none, with no reason
+                        available, why = False, ""
+                    result["runner"] = {**result["runner"], "boxes": {"available": bool(available),
+                                                                      "why": "" if available else str(why or "")[:300]}}
             elif receipt_command:
                 import copy
                 from .workspace_session_execution import SessionExecutionStore
