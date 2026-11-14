@@ -813,7 +813,7 @@ def take_floor(registry, pip_id, digest) -> bool:
 
 # --------------------------------------------------------------------------- what the model is told
 
-def instructions(value, *, drafting=False, unattended=False, pays=False) -> str:
+def instructions(value, *, drafting=False, unattended=False, pays=False, pay_left="") -> str:
     """The Pip's line about its level, after its computer's notice and the draft notices. `pays`: at Do it all, the user
     let it pay by itself and today's count isn't used (may_pay, when its run started)."""
     if value == APPROVE:
@@ -833,7 +833,8 @@ def instructions(value, *, drafting=False, unattended=False, pays=False) -> str:
         if pays:
             line = line.replace("a payment, a sign-in", "a sign-in").replace(
                 "A payment still waits for the user.",
-                "The user lets you pay by yourself: DGC lets a payment through too, up to their count for the day, and the "
+                "The user lets you pay by yourself within the daily limit they set"
+                + (f" ({pay_left})" if pay_left else "") + ": DGC checks each payment against it and the "
                 "tool says when one waits for them instead. You never type a card number: a card field is theirs.")
         if drafting:
             line += " After your reply, DGC sends your drafts without asking (a payment excepted); never say one already went."

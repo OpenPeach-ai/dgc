@@ -3720,6 +3720,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     from . import pip_levels
                     said_level = pip_levels.instructions(
                         level_pin.get('level'), unattended=level_pin.get('unattended') is True, pays=level_pin.get('pays') is True,
+                        pay_left=str(level_pin.get('pay_left') or '')[:120],
                         drafting=bool(email_drafting or calendar_drafting or (connector_context is not None and connector_context.get('connections'))))
                     if said_level:
                         base_instructions += '\n' + said_level
@@ -3759,7 +3760,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     if isinstance(folder_level, dict):
                         from . import pip_levels
                         said_level = pip_levels.instructions(folder_level.get('level'), unattended=folder_level.get('unattended') is True,
-                                                             pays=folder_level.get('pays') is True, drafting=False)
+                                                             pays=folder_level.get('pays') is True, drafting=False,
+                                                             pay_left=str(folder_level.get('pay_left') or '')[:120])
                         if said_level:
                             base_instructions += '\n' + said_level
             if specialist_pin is not None:
@@ -5174,8 +5176,10 @@ def _execute_run(registry, row, config):
         from .pip_careful import UNATTENDED
         chosen = pip_levels.level(registry, row['pip_id'])
         if chosen != pip_levels.ASK:
+            pays = pip_levels.pays_at_all(registry, row['pip_id'])
+            from .pip_payments import left_words
             manifest = {**manifest, 'approval_level': {'level': chosen, 'unattended': row['requested_by'] in UNATTENDED,
-                                                       'pays': pip_levels.pays_at_all(registry, row['pip_id'])}}
+                                                       'pays': pays, **({'pay_left': left_words(registry, row['pip_id'])} if pays else {})}}
         if chosen == 'full':
             # Its own keys its Terminal has (pip_keys, slice 2c): names and sites only, never a value.
             from . import pip_keys

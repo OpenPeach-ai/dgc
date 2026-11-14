@@ -132,6 +132,17 @@ def payments(registry) -> dict:
     return {"usd_per_day": all_total(registry), "spent_today": float(spent(registry))}
 
 
+def left_words(registry, pip_id) -> str:
+    """What its run is told, for planning only: "up to $50.00 a day; $10.00 used today", or "no daily limit"."""
+    rules = limits(registry, pip_id)
+    used = spent(registry, pip_id)
+    if rules["usd_per_day"] == "no_limit":
+        return f"no daily limit; ${used:.2f} used today"
+    if rules["usd_per_day"] is None:
+        return ""
+    return f"up to ${Decimal(str(rules['usd_per_day'])):.2f} a day; ${used:.2f} used today"
+
+
 # ---- what it paid ------------------------------------------------------------------------------------------------
 def _ensure(db) -> None:
     for statement in (part.strip() for part in SCHEMA.split(";")):
