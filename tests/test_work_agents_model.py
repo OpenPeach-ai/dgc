@@ -120,6 +120,43 @@ class SessionAgentsModel(window.IsolatedHome):
         [said] = self.told("q")
         self.assertEqual((said["own"], said["model"], said["settings_model"]), (True, "own-coder", "settings-2"))
 
+    def test_settings_key_reaches_the_other_open_chats_that_follow_settings(self):
+        import time
+        host = self.started()
+        def open_chat(name, request_id):
+            folder = self.root.parent / name
+            (folder / ".git").mkdir(parents=True)
+            host.dispatch({"type": "open_chat", "request_id": request_id, "cwd": str(folder)})
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline:
+                done = [f for f in self.frames() if f.get("request_id") == request_id
+                        and f["type"] in ("chat_opened", "command_rejected")]
+                if done:
+                    self.assertEqual(done[-1]["type"], "chat_opened", done[-1])
+                    return host.chats[done[-1]["chat_id"]]
+                time.sleep(0.05)
+            self.fail("no chat opened")
+        def answered(request_id, kinds=("config", "command_rejected")):
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline:
+                done = [f for f in self.frames() if f.get("request_id") == request_id and f["type"] in kinds]
+                if done:
+                    return done[-1]
+                time.sleep(0.05)
+            self.fail(f"no answer to {request_id}")
+        follows, own = open_chat("follows", "o1"), open_chat("own", "o2")
+        host.dispatch({"type": "set_config", "scope": "session", "chat_id": own.chat_id, "request_id": "mine",
+                       "values": dict(OWN)})
+        self.assertEqual(answered("mine")["type"], "config")
+        self.assertTrue(own.config.agents_route_own())
+        host.dispatch({"type": "set_config", "request_id": "settings", "values": {
+            "subagent_model": "new-coder", "subagent_base_url": "https://new-agents.example/v1", "subagent_api_key": "sk-new"}})
+        self.assertEqual(answered("settings")["type"], "config")
+        self.assertEqual((follows.config.get("subagent_base_url"), follows.config.get("subagent_api_key")),
+                         ("https://new-agents.example/v1", "sk-new"), "a chat following Settings has the new address and its key")
+        self.assertEqual((own.config.get("subagent_base_url"), own.config.get("subagent_api_key")),
+                         ("https://agents.example/v1", "sk-agents"), "a chat with its own keeps its own, and its key")
+
     def test_its_own_agents_model_wins_over_dgc_router(self):
         host = self.started()
         agent = host.default.agent

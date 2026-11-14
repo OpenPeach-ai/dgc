@@ -9870,6 +9870,9 @@ class Backend:
                                  **_request_fields(request_id))
                     return
             settings_agents = {}
+            # Settings' sub-agents key (the editor's, never saved by DGC): every other open chat that follows Settings
+            # on that address gets it too, or its sub-agents would run keyless after following a new address (0.52).
+            settings_key = values.get("subagent_api_key") if not session_route else None
             if (not session_route and getattr(self.config, "agents_route_own", lambda: False)()
                     and set(values) & {"subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_api_key"}):
                 # Settings > Sub-agents changed from a session that chose its own agents model: Settings is saved for
@@ -9883,6 +9886,9 @@ class Backend:
                     fresh = _Fresh(project_root=self.config.project_root)
                     for key, value in settings_agents.items():
                         fresh.set(key, value)
+                    host = getattr(self, "_host", None)
+                    if host is not None:            # the others follow what is on disk now
+                        host._user_state_saved(self.config, set(settings_agents), False)
                 except Exception:                   # noqa: BLE001
                     self.em.emit("command_rejected", command=t, reason="config_apply_failed",
                                  message="Settings' agents model could not be saved.", **_request_fields(request_id))
@@ -10022,6 +10028,10 @@ class Backend:
             if settings_agents or (session_route and set(values) & {"subagent_model", "subagent_base_url",
                                                                     "subagent_api_mode", "subagent_api_key"}):
                 self._emit_agents_model(request_id)
+            if isinstance(settings_key, str) and getattr(self, "_host", None) is not None:
+                from .config import USER_CONFIG, _read_config_payload
+                address = str((_read_config_payload(USER_CONFIG) or {}).get("subagent_base_url", "") or "")
+                self._host.share_agents_key(self.config, address, settings_key)
             if "subscription_engine" in values or "prompt_cache" in values:
                 self._publish_cache_clock(current=True)  # whose cache the next turn uses changed
             if "subscription_engine" in values and getattr(self, "_server_window_wanted", False):
@@ -11281,6 +11291,21 @@ class Host:
             if catalogs:
                 threading.Thread(target=self._refresh_catalogs, args=(chat, catalogs), daemon=True,
                                  name=f"dgc-refresh-{chat.chat_id}").start()
+
+    def share_agents_key(self, source: Config, address: str, key: str) -> None:
+        """Settings' sub-agents key reaches every other open chat that follows Settings on that address (0.52): never one
+        that chose its own sub-agents model, and never one on another address."""
+        with self._chats_lock:
+            others = [chat for chat_id, chat in self.chats.items()
+                      if chat.config is not source and chat_id not in self._closing]
+        for chat in others:
+            config = chat.config
+            try:
+                if config.agents_route_own() or str(config.get("subagent_base_url", "") or "") != address:
+                    continue
+                config.set_runtime_secret("subagent_api_key", key)
+            except Exception:                           # noqa: BLE001 -- one chat's config never stops the rest
+                continue
 
     def mcp_connected(self, source: "Backend", names: set[str]) -> None:
         """Refresh the same configured servers in open peers after credentials are saved.
