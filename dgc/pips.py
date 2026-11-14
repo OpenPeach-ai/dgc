@@ -70,6 +70,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_project_choices", "list_pip_project_changes", "get_pip_project_change", "apply_pip_project_change",
     "discard_pip_project_change", "undo_pip_project_change",
     "list_pip_fixes", "decide_pip_fix", "start_pip_work_helper", "answer_pip_waiting", "commit_pip_project_change",
+    "list_pip_agents", "stop_pip_agent", "set_pip_agents", "retry_pip_fix",
     "set_pip_goal", "get_pip_goal", "stop_pip_goal",
     "list_project_folders", "add_project_folder",
     "run_pip_computer_command", "list_pip_computer_terminal", "get_pip_computer_desktop",
@@ -233,6 +234,8 @@ _COMMAND_ARGS = {
     "apply_pip_project_change": {"pip_id", "change_id", "expected_digest"},
     "discard_pip_project_change": {"pip_id", "change_id"}, "undo_pip_project_change": {"pip_id", "change_id"},
     "list_pip_fixes": {"pip_id"}, "decide_pip_fix": {"pip_id", "fix_id", "expected_digest", "allow"},
+    "list_pip_agents": {"pip_id"}, "stop_pip_agent": {"pip_id", "agent_id"}, "set_pip_agents": {"pip_id", "slots"},
+    "retry_pip_fix": {"pip_id", "fix_id", "again"},
     "start_pip_work_helper": {"pip_id", "fix_id"}, "answer_pip_waiting": {"pip_id", "waiting_id", "answer"},
     "commit_pip_project_change": {"pip_id", "change_id"},
     # A goal for a Personal Pip's conversation (pip_goals, API 92): keep going until done, needs you or blocked.
@@ -1377,6 +1380,7 @@ class PipStore:
             if schedule_occurrence is not None or not isinstance(conversation_request, dict):
                 raise RegistryError("invalid_request", "Conversation requests cannot carry a schedule occurrence.")
             marks = conversation_request.get("display_mentions")
+            agent = conversation_request.get("agent")
             conversation_id = conversation_request.get("conversation_id")
             quoted = conversation_request.get("reply_to")
             conversation_request = pip_chat.request(conversation_request.get("text"), conversation_request.get("request_key"),
@@ -1386,6 +1390,12 @@ class PipStore:
                 conversation_request["display_mentions"] = marks      # display-only: never part of the retry key
             if conversation_id is not None:
                 conversation_request["conversation_id"] = conversation_id   # which of its conversations (pip_conversations)
+            if isinstance(agent, dict):
+                # A sub-agent's turn (pip_agents): no chat rows, its own copy, its job's id. Never from a client.
+                from .pip_careful import UNATTENDED as _UNATTENDED
+                if actor not in _UNATTENDED or not isinstance(agent.get("job_id"), str) or not re.fullmatch(r"pipagent_[0-9a-f]{32}", agent["job_id"]):
+                    raise RegistryError("invalid_request", "Only DGC starts a Pip's sub-agent.")
+                conversation_request["agent"] = {key: agent.get(key) for key in ("job_id", "folder", "copy", "try")}
             if quoted is not None:
                 # The Pip's own message it replies to (pip_replies): its words are read from the store again here.
                 from .pip_replies import check as checked_reply
@@ -1726,7 +1736,16 @@ class PipStore:
                 if not standalone and run_kind != "live":
                     manifest["workspace_context"] = ContextStore(self.registry).snapshot(pip["workspace_id"])
                 pinned_history = None
-                if conversation_request is not None:
+                if conversation_request is not None and conversation_request.get("agent"):
+                    # A sub-agent's turn (pip_agents): the job is its whole history; it never reads the Pip's chat.
+                    # (No conversation_id: it belongs to no thread, and the executor refuses one named None.)
+                    manifest["conversation"] = {"text": conversation_request["text"], "history": [], "history_omitted_count": 0,
+                                                "last_report": None}
+                    manifest["agent"] = conversation_request["agent"]
+                    manifest["generative_ui_supported"] = False
+                    from .pip_chat_setup import pin as pin_chat_setup
+                    manifest['chat_setup'] = pin_chat_setup(latest, direct=False)     # it never changes its Pip's settings
+                elif conversation_request is not None:
                     manifest["conversation"] = pip_chat.prepare(self, latest, conversation_request,
                         context_size=_history_window(frozen_config, model), secrets=secret_values(frozen_config))
                     # A big window's history, and a long message, are kept beside the run, pinned by their digest
@@ -1809,7 +1828,7 @@ class PipStore:
                 if pinned_history is not None:
                     from . import pip_run_inputs
                     pip_run_inputs.put(self.db, run_id, pinned_history)
-                if conversation_request is not None:
+                if conversation_request is not None and not conversation_request.get("agent"):     # (a sub-agent: no chat rows)
                     pip_chat.insert_user(self, latest, conversation_request, run_id, model["model"], self.registry.clock(),
                                          waiting=_waiting_message)
                 if schedule_occurrence is not None:
@@ -2056,12 +2075,21 @@ class PipStore:
             # The oldest queued run that nothing running holds back: several Pips run together. A Pip answers in its
             # conversations in parallel (pip_conversations), never twice in one; its other work (scheduled runs,
             # reviews, tasks) still runs one at a time, alone.
+            # A sub-agent's run (pip_agents, manifest "agent") runs beside its Pip's chat and other work, never holding
+            # them back nor held back by them: at most the Pip's slots of them at once (1, Ultra 4).
             rows = self.db.execute("""SELECT r.id, r.manifest FROM pip_runs r JOIN pips p ON p.id=r.pip_id
                 LEFT JOIN pip_chat_messages rm ON rm.run_id=r.id AND rm.role='user'
-                WHERE r.status='queued' AND (p.status='active' OR (p.status='paused' AND rm.id IS NOT NULL))
-                  AND NOT EXISTS (SELECT 1 FROM pip_runs o LEFT JOIN pip_chat_messages om ON om.run_id=o.id AND om.role='user'
-                    WHERE o.pip_id=r.pip_id AND o.status IN ('running','cancelling')
-                      AND (rm.id IS NULL OR om.id IS NULL OR om.conversation_id IS rm.conversation_id))
+                WHERE r.status='queued' AND (
+                  (json_extract(r.manifest,'$.agent') IS NOT NULL AND p.status='active'
+                    AND (SELECT count(*) FROM pip_runs a WHERE a.pip_id=r.pip_id AND a.status IN ('running','cancelling')
+                         AND json_extract(a.manifest,'$.agent') IS NOT NULL)
+                        < COALESCE((SELECT CAST(value AS INTEGER) FROM metadata WHERE key='pip_agent_slots:'||r.pip_id),1))
+                  OR (json_extract(r.manifest,'$.agent') IS NULL
+                    AND (p.status='active' OR (p.status='paused' AND rm.id IS NOT NULL))
+                    AND NOT EXISTS (SELECT 1 FROM pip_runs o LEFT JOIN pip_chat_messages om ON om.run_id=o.id AND om.role='user'
+                      WHERE o.pip_id=r.pip_id AND o.status IN ('running','cancelling')
+                        AND json_extract(o.manifest,'$.agent') IS NULL
+                        AND (rm.id IS NULL OR om.id IS NULL OR om.conversation_id IS rm.conversation_id))))
                 ORDER BY r.created_at,r.id LIMIT ?""", (1 if admit is None else 64,)).fetchall()
             row = next((item for item in rows if admit is None or admit(item["id"], item["manifest"])), None)
             if row is None:
@@ -2115,7 +2143,8 @@ class PipStore:
                     expected = {key: source['source_snapshot'][key] for key in ('sha256', 'files', 'bytes')}
                     if result.get('snapshot') != expected:
                         raise RegistryError('source_mismatch', 'The completed result does not match its queued current-tree snapshot.')
-            if status == "succeeded" and run["manifest"].get("run_kind", "audit") == "conversation":
+            if (status == "succeeded" and run["manifest"].get("run_kind", "audit") == "conversation"
+                    and not run["manifest"].get("agent")):                # (a sub-agent's turn has no chat rows)
                 from .pip_chat import insert_reply
                 insert_reply(self, run, result, self.registry.clock())
             checkpoint_audit = (status == "succeeded" and run["manifest"].get("run_kind", "audit") == "audit"
@@ -2156,7 +2185,8 @@ class PipStore:
             if status == "succeeded" and steps is not None:
                 from .pip_chat import keep_trace
                 keep_trace(self.db, run, steps)
-            if status == 'succeeded' and run['manifest'].get('run_kind') in ('conversation', 'personal_task'):
+            if (status == 'succeeded' and run['manifest'].get('run_kind') in ('conversation', 'personal_task')
+                    and not run['manifest'].get('agent')):              # (a sub-agent drafts nothing for its Pip)
                 from .pip_message_drafts import commit_reply
                 commit_reply(self, run_id, result)
             if checkpoint_audit:
@@ -2165,7 +2195,8 @@ class PipStore:
                 # Its result, in its own chat: once, in this transaction (pip_run_posts).
                 from .pip_run_posts import post as post_in_chat
                 post_in_chat(self.registry, run_id)
-            if notes_ops and status == "succeeded" and run["manifest"].get("run_kind") in ("conversation", "personal_task"):
+            if (notes_ops and status == "succeeded" and run["manifest"].get("run_kind") in ("conversation", "personal_task")
+                    and not run["manifest"].get("agent")):              # (its Pip's working notes are the Pip's own)
                 self._commit_working_notes(run, notes_ops)
             self.registry.event(run["workspace_id"], "pip_run_" + status, pip_id=run["pip_id"], run_id=run_id,
                                 payload={"status": status, "error": error})
@@ -4918,7 +4949,16 @@ def _execute_run(registry, row, config):
     boxed = (not personal and not live and action is None and not current_tree and manifest.get('computer') is not None
              and manifest.get('run_kind') in ('conversation', 'audit', 'draft'))
     copy_root = None
-    if boxed:
+    if boxed and isinstance(manifest.get('agent'), dict):
+        # A sub-agent (pip_agents) works in the copy made for its job, never its Pip's copy (which stays as it was
+        # until the Pip has checked the sub-agent's work).
+        from . import pip_agents
+        rel = str(manifest['agent'].get('copy') or '')
+        if not re.fullmatch(r"agents/[0-9a-f]{32}/[^/]{1,120}", rel):
+            raise RegistryError("invalid_request", "A sub-agent's copy is in its Pip's agents folder.")
+        copy_root = pip_agents.copy_root(registry, row['pip_id'], rel)
+        manifest = {**manifest, 'own_folder': {'name': rel.rsplit('/', 1)[-1], 'folder': rel, 'kept': True, 'updated': 0}}
+    elif boxed:
         # Its own folder, in its box's Files: copied, brought up to date, or kept while its changes wait
         # (pip_project_copies.own_folder). One that can't be copied is said, and the run reads committed code.
         from . import pip_project_copies
@@ -6727,6 +6767,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 from .pip_welcome import welcome
                 result = welcome(registry)
             elif command in ("list_pip_fixes", "decide_pip_fix", "start_pip_work_helper", "answer_pip_waiting",
+                             "list_pip_agents", "stop_pip_agent", "set_pip_agents", "retry_pip_fix",
                              "commit_pip_project_change"):
                 # Pips API 96 (pips-flow-design, 14 Nov): what a check found and what became of it, by the Pip's level;
                 # what only you can do. Every answer is the user's own click, on this computer.

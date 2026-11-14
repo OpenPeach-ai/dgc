@@ -474,6 +474,12 @@ API96_MUTATIONS = frozenset({'decide_pip_fix', 'start_pip_work_helper', 'answer_
                              'set_pip_knows_you', 'set_pip_pay_limits'})
 READ_COMMANDS |= API96_READS
 MUTATION_COMMANDS |= API96_MUTATIONS
+# API 97: a Pip's sub-agents. A fix is a sub-agent's job in its own copy, checked by its Pip (list_pip_agents; Stop with
+# stop_pip_agent; how many run at once with set_pip_agents). list_pip_fixes's fixes gain `agent`. Local only.
+API97_READS = frozenset({'list_pip_agents'})
+API97_MUTATIONS = frozenset({'stop_pip_agent', 'set_pip_agents', 'retry_pip_fix'})
+READ_COMMANDS |= API97_READS
+MUTATION_COMMANDS |= API97_MUTATIONS
 
 
 def _api88_field(command, values) -> bool:
@@ -632,6 +638,10 @@ COMMAND_FIELDS = {
     'decide_pip_fix': frozenset({'pip_id', 'fix_id', 'expected_digest', 'allow'}),
     'start_pip_work_helper': frozenset({'pip_id', 'fix_id'}),
     'answer_pip_waiting': frozenset({'pip_id', 'waiting_id', 'answer'}),
+    'list_pip_agents': frozenset({'pip_id'}),
+    'stop_pip_agent': frozenset({'pip_id', 'agent_id'}),
+    'set_pip_agents': frozenset({'pip_id', 'slots'}),
+    'retry_pip_fix': frozenset({'pip_id', 'fix_id', 'again'}),
     'commit_pip_project_change': frozenset({'pip_id', 'change_id'}),
     'set_pip_goal': frozenset({'pip_id', 'objective', 'conversation_id'}),
     'get_pip_goal': frozenset({'pip_id', 'conversation_id'}),
@@ -955,7 +965,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API96_READS | API96_MUTATIONS:
+        if command in API97_READS | API97_MUTATIONS:
+            minimum = 97
+        elif command in API96_READS | API96_MUTATIONS:
             minimum = 96
         elif command in API93_READS | API93_MUTATIONS:
             minimum = 93

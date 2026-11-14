@@ -170,7 +170,10 @@ def read(config, topic: str = "") -> str:
         for limit in dev_mode.listing(config):
             lines.append(f"- {limit['name']}: {limit['value']} (default {limit['default']}"
                          + (f", most without Dev Mode {limit['ceiling']}" if limit['ceiling'] is not None else "")
-                         + f") — {limit['label']}. Raising it: {limit['cost']}")
+                         + f") — {limit['label']}."
+                         + (f" DGC may set it up to {limit['ceiling']} without Dev Mode (action dev_limit)."
+                            if limit['name'] in ORDINARY_LIMITS and limit['ceiling'] is not None else "")
+                         + f" Raising it: {limit['cost']}")
     lines.append("Never changed by DGC (the user's, in Settings): keys, the sandbox, redaction, hooks, MCP servers, "
                  "provider addresses, Dev Mode itself.")
     return "\n".join(lines)
@@ -224,12 +227,43 @@ def rule(config, action, text, remove: bool = False, reason: str = "") -> str:
     return (f"{'Removed' if remove else 'Added'} {text} {'from' if remove else 'to'} {action} rules. Undo: {change_id}")
 
 
+# The limits that are an ordinary setting below their ceiling: the setting each one reads with Dev Mode off.
+ORDINARY_LIMITS = {"pips_parallel_runs": "pips_parallel_runs", "work_helpers": "max_parallel_tasks",
+                   "helper_depth": "max_subagent_depth"}
+
+
+def _within(name, value):
+    """The ordinary setting a limit's value goes to with Dev Mode off, or None when it needs Dev Mode."""
+    from . import dev_mode
+    limit = dev_mode._BY_NAME.get(name) if isinstance(name, str) else None
+    key = ORDINARY_LIMITS.get(name) if limit is not None else None
+    if key and type(value) is int and limit.ceiling is not None and 1 <= value <= limit.ceiling:
+        return key
+    return None
+
+
 def dev_limit(config, name, value, reason: str = "") -> str:
-    """A Dev Mode limit: only while Dev Mode is on and the user let DGC change its limits."""
+    """A limit. Up to its ceiling it is an ordinary setting (with Undo), Dev Mode or not: the live test of 14 Nov found
+    "Let my Pips run up to 8 at once" refused as Dev Mode only, with 32 the most without it. Past the ceiling only while
+    Dev Mode is on and the user let DGC change its limits."""
     from . import dev_mode
     if not dev_mode.on(config) or config.get("dev_mode_tools") is not True:
-        raise SettingsError("DGC may change Dev Mode limits only when you have turned on Dev Mode and \"Let DGC change "
-                            "Dev Mode settings\" in Settings › Dev Mode. Say which limit and value, and you can set it there.")
+        key = _within(name, value)
+        if key:
+            before = config.get(key)
+            if before == value:
+                return f"{name} is already {value}: nothing changed."
+            config.set(key, value)
+            change_id = _remember(config, {"kind": "setting", "key": key, "before": before, "after": value,
+                                           "reason": str(reason or "")[:300]})
+            label = dev_mode._BY_NAME[name].label
+            return f"Changed {label[:1].lower() + label[1:]} ({name}): {_shown(before)} → {value}. Undo: {change_id}"
+        limit = dev_mode._BY_NAME.get(name) if isinstance(name, str) else None
+        most = (f" {name} goes up to {limit.ceiling} without Dev Mode." if limit is not None and name in ORDINARY_LIMITS
+                and limit.ceiling is not None else "")
+        raise SettingsError(f"That needs Dev Mode.{most} Past that, DGC may change Dev Mode limits only when you have "
+                            "turned on Dev Mode and \"Let DGC change Dev Mode settings\" in Settings › Dev Mode. Say which "
+                            "limit and value, and you can set it there.")
     kept, refused = dev_mode.clean_limits({name: value})
     if refused:
         raise SettingsError(refused[0])
@@ -379,3 +413,28 @@ def run(agent, name: str, args: dict) -> str:
         return "error: action is setting, rule, dev_limit or undo."
     except SettingsError as exc:
         return f"error: {exc}"
+
+
+def card_words(config, args) -> dict:
+    """What the Allow card shows beside the model's arguments (the live test of 14 Nov found a raw "Run dgc_settings
+    {json}"): the setting's own words and what it holds now. Nothing for a key DGC never changes."""
+    if not isinstance(args, dict):
+        return {}
+    action, key = args.get("action"), args.get("key")
+    if not isinstance(key, str) or _never(key):
+        return {}
+    try:
+        if action == "setting" and key in ORDINARY:
+            return {"setting_label": ORDINARY[key][2], "before": config.get(key)}
+        if action == "dev_limit":
+            from . import dev_mode
+            limit = dev_mode._BY_NAME.get(key)
+            if limit is None:
+                return {}
+            if not dev_mode.on(config) and key in ORDINARY_LIMITS:
+                return {"setting_label": limit.label, "before": config.get(ORDINARY_LIMITS[key], limit.default)}
+            return {"setting_label": limit.label, "before": dev_mode.value(key, config)}
+    except Exception:                                    # noqa: BLE001 -- the card keeps the model's words
+        return {}
+    return {}
+

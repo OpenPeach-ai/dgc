@@ -184,6 +184,16 @@ class PipModelsTests(unittest.TestCase):
         self.assertEqual("", result["default_model"])
         self.assertNotIn(self.config["api_key"], json.dumps(result))
 
+    def test_a_model_the_host_lists_is_never_refused_because_a_key_holds_its_name(self):
+        # Live test 14 Nov: Pips refused his whole Ollama list ("A configured model identifier contains sensitive data")
+        # because a saved key held his main model's name. The host lists it, so it is not a secret.
+        config = {**self.config, "model": "deepseek-v4.1-flash:cloud", "fallback_api_key": "deepseek-v4.1-flash:cloud"}
+        with patch.object(models.LLMClient, "list_models", return_value=["codellama:13b", "deepseek-v4.1-flash:cloud"]):
+            result = models.list_pip_models(config)
+        self.assertEqual("deepseek-v4.1-flash:cloud", result["default_model"])
+        self.assertIn("deepseek-v4.1-flash:cloud", [m["id"] if isinstance(m, dict) else m for m in result["models"]])
+        self.assertNotIn("error", result)
+
     def test_execution_keeps_pinned_model_when_main_selection_changes(self):
         pinned = {"base_url": self.config["base_url"] + "/", "api_mode": self.config["api_mode"], "model": "old-model"}
         before = copy.deepcopy(pinned)

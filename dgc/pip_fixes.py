@@ -65,6 +65,7 @@ LEVEL_BY = {"approve": "pip-level:approve", "full": "pip-level:full"}
 _VERDICT_LINE = re.compile(r"^\s*FINDING\s+(\d{1,2})\s*:\s*(fixed|already fixed|not a defect|needs you)\b\s*[—–:-]?\s*(.*)$",
                            re.IGNORECASE | re.MULTILINE)
 _TESTS_LINE = re.compile(r"^\s*TESTS\s*:\s*(passed|failed|not run)\b", re.IGNORECASE | re.MULTILINE)
+_RESULT_LINE = re.compile(r"^\s*RESULT\s*:\s*(PASS|RETRY)\b", re.IGNORECASE)        # the Pip's check (pip_agents)
 FIX_TEXT = (
     "This message is from DGC, not the user. Fix what your check found, in your own copy of {folder} on your "
     "computer: the user's real folder is untouched until your change is applied. The findings:\n{findings}\n"
@@ -152,6 +153,13 @@ def _turn(db, row):
                       "FROM pip_runs WHERE id=?", (run_id,)).fetchone()
 
 
+def _agent(db, row):
+    """The fix's sub-agent job (pip_agents), the newest, or None."""
+    if not _table(db, "pip_agent_jobs"):
+        return None
+    return db.execute("SELECT * FROM pip_agent_jobs WHERE fix_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1", (row["id"],)).fetchone()
+
+
 def _table(db, name) -> bool:
     return db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() is not None
 
@@ -194,6 +202,13 @@ def _steps(db, run) -> list:
 def view(db, row) -> dict:
     run = _turn(db, row)
     state = _state(db, row, run)
+    job = _agent(db, row)
+    if job is not None:
+        from . import pip_agents
+        if job["state"] in pip_agents.LIVE and row["state"] != "ended":
+            state = "running"                                # its sub-agent works, or its Pip checks the work
+        elif job["state"] in ("held", "stopped", "asked", "left", "failed"):
+            state = job["state"]                             # asked: after its last try (Try again · Leave it)
     out = {"id": row["id"], "run_id": row["run_id"], "state": state, "count": row["count"], "digest": digest(row),
            "asked_at": row["asked_at"], "decided_at": row["decided_at"], "by": row["by"] or "",
            "fix_run_id": run["id"] if run is not None else None,
@@ -209,10 +224,26 @@ def view(db, row) -> dict:
         used = sum(v for v in (run["input_tokens"], run["output_tokens"]) if type(v) is int and v >= 0)
         if used:
             out["tokens"] = used                 # what the fix cost (his answer 1, 14 Nov: cost shown)
+    if job is not None:
+        from . import pip_agents
+        out["agent"] = pip_agents.view(db, job)              # its sub-agent: try n of 3, what it is doing, its model
+        out["helpers"] = 1 if job["state"] in pip_agents.LIVE else 0
     message = row["message"] or ("The last check no longer finds these." if row["note"] == "gone" else "")
+    if not message and state == "ask":
+        # The Pip asks in its own words above the Allow card (the live check of 14 Nov found it never did).
+        message = _asks(row["count"])
     if message:
         out["message"] = _clip(message, 600)
     return out
+
+
+_COUNT_WORDS = ("", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten")
+
+
+def _asks(count) -> str:
+    if count == 1:
+        return "Want me to fix this?"
+    return f"Want me to fix these {_COUNT_WORDS[count] if 0 < count < len(_COUNT_WORDS) else count}?"
 
 
 def _rows(db, pip_id):
@@ -442,31 +473,30 @@ def send_due(registry, config, *, only=None) -> int:
     store, sent = PipStore(registry), 0
     rows = db.execute("SELECT * FROM pip_fixes WHERE state='queued' AND fix_run_id IS NULL" + (" AND id=?" if only else "")
                       + " ORDER BY created_at,rowid LIMIT 20", (only,) if only else ()).fetchall()
+    from . import pip_agents
     for row in rows:
-        if _turn(db, row) is not None:
-            run = _turn(db, row)
-            with registry.transaction():
-                db.execute("UPDATE pip_fixes SET fix_run_id=?,started_at=COALESCE(started_at,?) WHERE id=? AND fix_run_id IS NULL",
-                           (run["id"], run["started_at"] or run["created_at"], row["id"]))
-            continue
+        job = _agent(db, row)
+        if job is not None and job["state"] in pip_agents.LIVE:
+            continue                                         # its sub-agent job is under way
         try:
             pip = store._job(row["pip_id"])
             folder = db.execute("SELECT name FROM workspaces WHERE id=?", (pip["workspace_id"],)).fetchone()
-            from .pip_routines import ACTOR as UNATTENDED_ACTOR     # nobody at the keyboard: careful, as a routine
-            answer = pip_chat._send_in(store, row["pip_id"], _brief(row, folder[0] if folder else ""),
-                                       FIX_KEY + row["id"][7:], UNATTENDED_ACTOR, config, None)
+            from . import pip_agents
+            count = len(_load(row["findings"], []))
+            job = pip_agents.start(store, config, row["pip_id"], kind="fix",
+                                   title=f"Fix {count} thing{'s' if count != 1 else ''} in {folder[0] if folder else 'its folder'}",
+                                   brief=_brief(row, folder[0] if folder else ""), fix_id=row["id"])
         except RegistryError as exc:
-            if exc.code == "conversation_busy":
-                continue
             with registry.transaction():
                 db.execute("UPDATE pip_fixes SET state='ended',message=?,revision=revision+1,updated_at=? WHERE id=?",
                            (_clip(f"It couldn't start: {exc}", 600), _now(registry), row["id"]))
             continue
-        run_id = ((answer or {}).get("run") or {}).get("id")
         with registry.transaction():
             db.execute("UPDATE pip_fixes SET fix_run_id=?,started_at=?,updated_at=? WHERE id=?",
-                       (run_id, _now(registry), _now(registry), row["id"]))
+                       (job["run_id"], _now(registry), _now(registry), row["id"]))
         sent += 1
+    from . import pip_agents
+    sent += pip_agents.send_due(registry, config)          # the Pip's checks and the sub-agents' next tries
     return sent
 
 
@@ -533,10 +563,72 @@ def after_fix_turn(store, run, status, result, error) -> None:
                        payload={"fix_id": fix_id, "status": status, "change_id": change_id})
 
 
+def after_agent_job(store, job) -> None:
+    """Its sub-agent job ended (pip_agents): the Pip's verdicts from its check, the tests the sub-agent ran, the change
+    now in the Pip's copy (or why there is none), and what only you can do."""
+    db, registry = store.db, store.registry
+    if not _has(db):
+        return
+    row = db.execute("SELECT * FROM pip_fixes WHERE id=?", (job["fix_id"],)).fetchone()
+    if row is None or row["state"] == "ended":
+        return
+    findings = _load(row["findings"], [])
+    said, _ = verdicts(job["verdict"] or "", len(findings))
+    _, tests = verdicts(job["said"] or "", len(findings))
+    for number, finding in enumerate(findings, 1):
+        if number in said:
+            finding["verdict"], finding["why"] = said[number]
+    change_id, held = None, job["state"] == "held"
+    if job["state"] == "merged" and _table(db, "pip_project_changes"):
+        from . import pip_project_copies
+        try:
+            pip_project_copies.refresh(store, row["pip_id"])
+        except (RegistryError, OSError):
+            pass
+        change = db.execute("SELECT id FROM pip_project_changes WHERE pip_id=? AND updated_at>=? ORDER BY updated_at DESC "
+                            "LIMIT 1", (row["pip_id"], job["created_at"])).fetchone()
+        change_id = change[0] if change else None
+    files = _load(job["held"], []) if held else []
+    message = {"merged": _first_words(job["verdict"] or ""),
+               "held": "Your copy of " + ", ".join(files[:5]) + (" and more" if len(files) > 5 else "")
+                       + " changed while its sub-agent worked, so it didn't overwrite them.",
+               "asked": f"It tried {job['tries']} times and it isn't right yet: " + (job["notes"] or "see its last check."),
+               "failed": "Its sub-agent stopped with an error: " + _clip(job["said"] or "", 300),
+               "stopped": "Its sub-agent was stopped. Nothing reached your copy."}.get(job["state"], "")
+    now = _now(registry)
+    with registry.transaction():
+        db.execute("UPDATE pip_fixes SET state='ended',findings=?,fix_run_id=?,change_id=?,tests=?,message=?,note=?,"
+                   "revision=revision+1,updated_at=? WHERE id=?",
+                   (_json(findings), job["run_id"], change_id, tests, _clip(message, 600),
+                    "held" if held else row["note"], now, row["id"]))
+        for finding in findings:
+            if finding.get("verdict") == "needs_you":
+                db.execute("INSERT OR IGNORE INTO pip_waiting(id,pip_id,workspace_id,fix_id,identity,title,blocks,state,since,"
+                           "created_at,updated_at) VALUES(?,?,?,?,?,?,?,'waiting',?,?,?)",
+                           ("pipwait_" + secrets.token_hex(16), row["pip_id"], row["workspace_id"], row["id"],
+                            finding.get("identity") or identity(finding), _clip(finding.get("title"), 200),
+                            _clip(finding.get("why") or "", 300), now, now, now))
+        registry.event(row["workspace_id"], "pip_fix_ended", pip_id=row["pip_id"], run_id=job["run_id"],
+                       payload={"fix_id": row["id"], "status": job["state"], "change_id": change_id})
+    if change_id and job["state"] == "merged":
+        from . import pip_levels, pip_project_copies
+        if pip_levels.effective(registry, row["pip_id"]) == pip_levels.FULL:
+            try:
+                pip_project_copies.auto_apply(store, row["pip_id"])     # Do it all: applied, with Undo
+            except (RegistryError, OSError):
+                pass
+
+
+def shown_text(text: str) -> str:
+    """A Pip's reply as the chat shows it: without the lines meant for DGC (FINDING n, TESTS, RESULT)."""
+    kept = [line for line in (text or "").splitlines() if not _VERDICT_LINE.match(line) and not _TESTS_LINE.match(line)
+            and not _RESULT_LINE.match(line) and not re.match(r"^\s*FINDING\s+\d{1,2}\s*:", line, re.I)]
+    return "\n".join(kept).strip()
+
+
 def _first_words(text: str) -> str:
     """What it says it did, without its verdict lines: the first few sentences, for the card."""
-    kept = [line for line in (text or "").splitlines() if not _VERDICT_LINE.match(line) and not _TESTS_LINE.match(line)]
-    return _clip(" ".join(kept), 600)
+    return _clip(" ".join(shown_text(text).splitlines()), 600)
 
 
 # ---- waiting on you -------------------------------------------------------------------------------------------------
@@ -614,8 +706,15 @@ def after_run(store, run, *, status, result, error) -> None:
         kind = manifest.get("run_kind", "audit")
         if kind == "audit" and status == "succeeded":
             after_check(store, run, result)
+        elif kind == "conversation" and manifest.get("agent"):
+            from . import pip_agents                        # a sub-agent's try ended: due for its Pip's check
+            pip_agents.after_agent_run(store, run, status, result, error)
         elif kind == "conversation" and status in ("succeeded", "failed", "cancelled"):
-            after_fix_turn(store, run, status, result, error)
+            from . import pip_agents
+            if pip_agents.check_of_run(store.db, run["id"]) is not None:
+                pip_agents.after_check_turn(store, run, status, result)    # the Pip checked a sub-agent's work
+            else:
+                after_fix_turn(store, run, status, result, error)       # (a fix turn from before sub-agents)
     except Exception:                                    # noqa: BLE001 - the run's own end stands either way
         try:
             store.registry._rollback_after_error()
@@ -646,10 +745,68 @@ def control(store, command, request, actor, config) -> dict:
         return answer_waiting(store, pip_id, request.get("waiting_id"), request.get("answer"), actor)
     if command == "start_pip_work_helper":
         return start_work_helper(store, pip_id, request.get("fix_id"), actor, config)
+    if command == "retry_pip_fix":
+        return retry(store, pip_id, request.get("fix_id"), request.get("again"), actor, config)
+    if command in ("list_pip_agents", "stop_pip_agent", "set_pip_agents"):
+        # Its sub-agents (pip_agents, Pips API 97): the agent map in its chat, Stop, and how many run at once.
+        from . import pip_agents
+        if command == "list_pip_agents":
+            return pip_agents.listing(store, pip_id)
+        if command == "stop_pip_agent":
+            return {"agent": pip_agents.stop(store, pip_id, request.get("agent_id"), actor)}
+        return {"slots": pip_agents.set_slots(store.registry, pip_id, request.get("slots"))}
     if command == "commit_pip_project_change":
         from . import pip_project_copies
         return pip_project_copies.commit(store, pip_id, request.get("change_id"), actor)
     raise RegistryError("invalid_request", "Unknown fix command.")
+
+
+RETRIABLE = ("asked", "held", "failed", "stopped")
+_DONE = ("fixed", "already fixed", "not a defect")
+
+
+def retry(store, pip_id, fix_id, again, actor, config) -> dict:
+    """retry_pip_fix (Pips API 97), after a fix's sub-agent ended without its change (its last try, held, failed or
+    stopped). Try again: a fresh sub-agent in a copy made from the Pip's copy as it is now, for what isn't fixed yet,
+    with what the Pip's last check said. Leave it: it ends there and is never asked again."""
+    if actor not in LOCAL:
+        raise RegistryError("forbidden", "Only you can try a fix again, from the Pip's chat.")
+    if type(again) is not bool:
+        raise RegistryError("invalid_request", "again is true or false.")
+    from . import pip_agents
+    registry, db = store.registry, store.db
+    store._job(pip_id)
+    row = _fix(db, pip_id, fix_id)
+    job = _agent(db, row)
+    if row["state"] != "ended" or job is None or job["state"] not in RETRIABLE:
+        raise RegistryError("invalid_state", "This fix isn't waiting on you. Open the chat again.")
+    if not again:
+        pip_agents.leave(store, job)
+        with registry.transaction():
+            db.execute("UPDATE pip_fixes SET message=?,note='left',revision=revision+1,updated_at=? WHERE id=?",
+                       ("Left as it is. I won't try this again.", _now(registry), row["id"]))
+            registry.event(row["workspace_id"], "pip_fix_left", pip_id=pip_id, run_id=job["run_id"],
+                           payload={"fix_id": row["id"], "by": actor})
+        return {"fix": view(db, _fix(db, pip_id, fix_id))}
+    findings = _load(row["findings"], [])
+    open_ = [f for f in findings if f.get("verdict") not in _DONE] or findings
+    redo = dict(row)
+    redo["findings"] = _json(open_)
+    folder = db.execute("SELECT name FROM workspaces WHERE id=?", (row["workspace_id"],)).fetchone()
+    folder = folder[0] if folder else ""
+    brief = _brief(redo, folder)
+    if job["notes"]:
+        brief += "\n\nWhat your Pip's last check said, so do it differently this time: " + _clip(job["notes"], 1500)
+    started = pip_agents.start(store, config, pip_id, kind="fix",
+                               title=f"Fix {len(open_)} thing{'s' if len(open_) != 1 else ''} in {folder or 'its folder'}",
+                               brief=brief, fix_id=row["id"])
+    now = _now(registry)
+    with registry.transaction():
+        db.execute("UPDATE pip_fixes SET state='queued',fix_run_id=?,started_at=?,message=NULL,note=NULL,change_id=NULL,"
+                   "revision=revision+1,updated_at=? WHERE id=?", (started["run_id"], now, now, row["id"]))
+        registry.event(row["workspace_id"], "pip_fix_allowed", pip_id=pip_id, run_id=row["run_id"],
+                       payload={"fix_id": row["id"], "by": actor, "again": True})
+    return {"fix": view(db, _fix(db, pip_id, fix_id))}
 
 
 def start_work_helper(store, pip_id, fix_id, actor, config) -> dict:

@@ -39,9 +39,19 @@ def _supervisor_command(project_root):
             str(Path(__file__).resolve().parents[1]), str(Path(project_root).absolute())]
 
 
+def this_install() -> str:
+    """Which install this DGC runs from (its package's folder): a runner says it, so a runner left by another install of
+    the same version is moved too. Every 0.52 test build says the same version; on his machine (15 Nov) the runner of a
+    build installed a day earlier kept running its old code after two newer installs."""
+    return str(Path(__file__).resolve().parents[1])
+
+
 def _state(directory):
     with WorkspaceRegistry(directory) as registry:
-        return runner_status(registry), (_read(registry, SUPERVISOR_KEY) or {}).get("instance_id")
+        record = _read(registry, SUPERVISOR_KEY) or {}
+        install = record.get("install")
+        return ({**runner_status(registry), "install": install if isinstance(install, str) else None},
+                record.get("instance_id"))
 
 
 def supervisor_is_live(directory, status):
@@ -72,7 +82,8 @@ def _other_runner(status) -> str:
     from . import __version__
     theirs = status.get("version")
     if theirs == __version__:
-        return ""
+        # The same version from another install (or from before runners said theirs) is another install's runner.
+        return "" if status.get("install") == this_install() else "other"
     if theirs is None:
         return "older"                                   # from before runners said their version
     ours, found = _release(__version__), _release(theirs)

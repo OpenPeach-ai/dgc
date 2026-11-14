@@ -715,7 +715,9 @@ KEYS_KEY = "keys_"
 GOAL_KEY = "goal_"
 # A fix's turn (pip_fixes, 0.52): DGC asks the Pip to fix what its check found, in its own copy.
 FIX_KEY = "dgcfix_"
-DGC_KEYS = (INTRO_KEY, COMPUTER_KEY, APPS_KEY, CHECK_KEY, ROUTINE_KEY, PLUGINS_KEY, BORROW_KEY, KEYS_KEY, GOAL_KEY, FIX_KEY)
+AGENT_CHECK_KEY = "dgccheck_"           # the Pip checks its sub-agent's work (pip_agents.CHECK_KEY): a message from DGC
+DGC_KEYS = (INTRO_KEY, COMPUTER_KEY, APPS_KEY, CHECK_KEY, ROUTINE_KEY, PLUGINS_KEY, BORROW_KEY, KEYS_KEY, GOAL_KEY, FIX_KEY,
+            AGENT_CHECK_KEY)
 # The turns DGC writes so the Pip carries on with what the user asked: they see the photos of that ask again.
 FOLLOW_UP_KEYS = (COMPUTER_KEY, APPS_KEY, CHECK_KEY, PLUGINS_KEY, BORROW_KEY, KEYS_KEY)
 KEY_SAVED = ("This message is from DGC, not the user. The user saved the {name} for {host}. Read the API with "
@@ -1256,6 +1258,9 @@ def _last_report(store, pip_id):
                            "length(CAST(r.manifest AS BLOB)) AS manifest_size FROM pip_runs r "
                            "WHERE r.pip_id=? AND r.status='succeeded' AND NOT EXISTS "
                            "(SELECT 1 FROM pip_chat_messages m WHERE m.run_id=r.id) "
+                           # A sub-agent's run has no chat rows by design and is never a report (live test 15 Nov:
+                           # taken as the last report, every message into the Pip's chat was refused).
+                           "AND json_extract(r.manifest,'$.agent') IS NULL "
                            "ORDER BY r.finished_at DESC,r.id DESC LIMIT 2", (pip_id,)).fetchall()
     if not rows:
         return None
@@ -1764,6 +1769,16 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
         else:
             asked = store.db.execute("SELECT id,request_key FROM pip_chat_messages WHERE run_id=? AND role='user'",
                                      (row["run_id"],)).fetchone()
+            if asked and str(asked["request_key"] or "").startswith(FIX_KEY):
+                # An older DGC's fix turn (before sub-agents): never the lines meant for DGC (FINDING n, TESTS, RESULT).
+                from .pip_fixes import shown_text
+                message["text"] = shown_text(message["text"])
+            if asked and str(asked["request_key"] or "").startswith(AGENT_CHECK_KEY):
+                # The Pip's check of its sub-agent's work (Pips API 97): the chat shows the fix's message in its place,
+                # and never the lines meant for DGC (FINDING n, TESTS, RESULT).
+                from .pip_fixes import shown_text
+                message["check"] = True
+                message["text"] = shown_text(message["text"])
             if asked and not str(asked["request_key"] or "").startswith(DGC_KEYS):
                 # API 83: the user's message this reply answers. The chat quotes it only when it isn't the one just above.
                 message["answers"] = asked["id"]

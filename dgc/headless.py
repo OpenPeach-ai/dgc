@@ -99,8 +99,26 @@ def _only_bytes(value) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) and _BASE64.match(item) for item in value)
 
 
+def _catalog_names(event: dict) -> list[str]:
+    """The model names a host listed, in an event that carries its list: Work's models and models_at, and the Pips list
+    (pips_result for list_pip_models). Each list was already checked against the key sent to its host."""
+    kind = event.get("type")
+    if kind in ("models", "models_at") and isinstance(event.get("ids"), list):
+        return [name for name in event["ids"] if isinstance(name, str)]
+    result = event.get("result")
+    if kind == "pips_result" and event.get("command") == "list_pip_models" and isinstance(result, dict) \
+            and isinstance(result.get("models"), list):
+        return [row.get("id") for row in result["models"] if isinstance(row, dict) and isinstance(row.get("id"), str)]
+    return []
+
+
 def sanitize_event(event: dict, secrets) -> dict:
-    """An event as it may go on the wire: every string redacted, but for its own base64 bytes."""
+    """An event as it may go on the wire: every string redacted, but for its own base64 bytes, and never a model name
+    its host listed (catalog_secrets: live test 14 Nov, a saved key holding a model's name hid it as "[REDACTED]")."""
+    names = _catalog_names(event)
+    if names:
+        from .redaction import catalog_secrets
+        secrets = catalog_secrets(secrets, names)
     binary = {key: event[key] for key in _BINARY_EVENT_FIELDS.get(event.get("type"), ())
               if _only_bytes(event.get(key))}
     out = redact_value({key: value for key, value in event.items() if key not in binary}, secrets)
@@ -535,7 +553,7 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # finding becomes a fix by the Pip's level; list_pip_attention kinds fix_ask, fix_ready, fix_held, waiting; a run post's
 # said, found and findings[].state; a change's tests and git. A Work chat gets a Pip's card only for a run it started;
 # get_pip's report_chats is 0 and report_session null. get_pip_owner, set_pip_owner and list_session_pips are gone.
-PIPS_API_VERSION = 96
+PIPS_API_VERSION = 97
 
 
 def attachment_limits() -> dict:
@@ -6265,6 +6283,8 @@ class Backend:
             return
         ids = []
         families = getattr(client, "_listed_ollama_families", {}) if client.api_mode == "ollama" else {}
+        from .redaction import catalog_secrets
+        secrets = catalog_secrets(secrets, listed[:4096] if isinstance(listed, list) else [], keep=(key,))   # (its own names)
         for item in listed[:4096] if isinstance(listed, list) else []:
             if isinstance(item, str) and item and item != "?":
                 family = families.get(item, "") if isinstance(families, dict) else ""
@@ -9035,7 +9055,10 @@ class Backend:
                         self.config.base_url, self.config.api_key, self.config.model)
                     listed = client.list_models()
                     families = getattr(client, "_listed_ollama_families", {}) if client.api_mode == "ollama" else {}
-                    ids = [redact_value(item, secret_values(self.config))[:512]
+                    from .redaction import catalog_secrets
+                    shown = catalog_secrets(secret_values(self.config), listed[:4096] if isinstance(listed, list) else [],
+                                            keep=(self.config.api_key,))
+                    ids = [redact_value(item, shown)[:512]
                            for item in listed[:4096]
                            if isinstance(item, str) and not embedding_only(
                                item, families.get(item, "") if isinstance(families, dict) else "")]

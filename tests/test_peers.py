@@ -72,8 +72,13 @@ class PeerRegistryTest(unittest.TestCase):
         sibling = {"pid": os.getpid(), "chat": "c2", "liveness": "live", "project_root": "/w"}
         for record in (busy, talked, two_chats, one_busy, older, sibling):
             self.assertEqual(peers.working([record]), [record], record)
+        # Live test 14 Nov: four idle tabs read "4 other DGCs are working in this folder". One that holds a chat but
+        # runs no turn has it open; "working" is for one running a turn.
         self.assertEqual(peers.user_line(peers.working([dict(talked, liveness="live")])),
-                         "1 other DGC is working in this folder.")
+                         "1 other DGC has a chat open in this folder.")
+        self.assertEqual(peers.user_line([dict(busy, liveness="live"), dict(talked, liveness="live")]),
+                         "1 other DGC is working in this folder, and 1 more has a chat open.")
+        self.assertEqual(peers.user_line([dict(one_busy, liveness="live")]), "1 other DGC is working in this folder.")
 
     def test_a_relative_session_name_is_not_taken_as_proof(self):
         # Only an absolute path to a file that is not there proves the chat has nothing saved.

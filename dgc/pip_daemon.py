@@ -344,7 +344,9 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now, server=False)
             followed: dict = {}
             _follow_pips_default(runtime_config, followed)
             from . import __version__
+            from .pip_runtime import this_install
             record = {"schema_version": 1, "instance_id": identifier("supervisor"), "version": __version__,
+                      "install": this_install(),                    # (another install's runner is moved when idle)
                       "pid": os.getpid(), "started_at": clock(), "heartbeat_at": clock(), "awake_since": clock(), "status": "running",
                       **({"mode": pip_server.MODE} if server else {})}
             log = pip_server.EventLog(registry) if server else None

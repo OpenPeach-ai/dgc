@@ -12911,6 +12911,11 @@ class Agent(GoalLifecycle):
             named = display_name(args.get(PIP_NAMED_TOOLS[name]))       # a draft's: the Pip whose result it came from
             shown = {key: value for key, value in args.items() if key != "pip_name"}
             return {**shown, "pip_name": named} if named else shown
+        if name == "dgc_settings" and isinstance(args, dict):
+            # Its card in plain words: the setting's own label and what it is now (settings_tool.card_words).
+            from .settings_tool import card_words
+            shown = {key: value for key, value in args.items() if key not in ("setting_label", "before")}
+            return {**shown, **card_words(self.config, args)}
         if name not in ("message_task", "close_task", "continue_task") or not isinstance(args, dict):
             return args
         ident = str(args.get("id") or "")

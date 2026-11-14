@@ -131,6 +131,17 @@ def _config_secret_keys() -> tuple[str, ...]:
     return tuple(sorted(SECRET_KEYS))
 
 
+def catalog_secrets(secrets, names, keep=()) -> tuple[str, ...]:
+    """The secrets to hide from a host's own model list: never one that a name the host lists contains. A model's name
+    is the host's word, not a credential; a saved key that holds one (live test 14 Nov: his main model showed as
+    "[REDACTED]" in Work and Pips refused the whole list) must not hide it. A key pasted where a model goes is still
+    hidden: the host doesn't list it. `keep`: the key sent to that very host stays hidden even in its own names (a host
+    that lists the key it was given back as a model is never believed)."""
+    listed = [name for name in (names or ()) if isinstance(name, str) and name]
+    kept = {k for k in keep if isinstance(k, str) and k}
+    return tuple(secret for secret in secrets if secret in kept or not any(secret in name for name in listed))
+
+
 def secret_values(config=None) -> tuple[str, ...]:
     """Return bounded live credentials known to DGC, longest first.
 

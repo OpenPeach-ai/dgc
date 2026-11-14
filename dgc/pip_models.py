@@ -23,7 +23,7 @@ from urllib.parse import urlsplit
 
 from .llm import LLMClient
 from .model_discovery import embedding_only
-from .redaction import redact_text, secret_values
+from .redaction import catalog_secrets, redact_text, secret_values
 from .workspace_registry import RegistryError
 
 MAX_MODEL_ID = 256
@@ -219,7 +219,11 @@ def _safe_model_id(value, secrets):
 def _catalog(config) -> list[str]:
     base, mode = _connection(config)
     secrets = secret_values(config)
-    model = _safe_model_id(config.get("model", ""), secrets)
+    try:
+        model = _safe_model_id(config.get("model", ""), secrets)
+        hidden = None
+    except RegistryError as exc:
+        model, hidden = "", exc                  # never sent to the host; it may still be a name the host lists
     try:
         client = LLMClient(base_url=base, api_key=config.get("api_key", ""), model=model,
                            api_mode=mode, read_timeout=10,
@@ -233,6 +237,10 @@ def _catalog(config) -> list[str]:
         raise RegistryError("invalid_model_catalog", "The configured connection returned an invalid model catalog.")
     if len(values) > MAX_CATALOG_MODELS:
         raise RegistryError("model_catalog_limit", "The configured connection returned too many models. Choose DGC default or use a smaller model catalog.")
+    # A name the host lists is the host's word, not a secret: a saved key that holds one never hides it (catalog_secrets).
+    secrets = catalog_secrets(secrets, values, keep=(config.get("api_key", ""),))
+    if hidden is not None and str(config.get("model", "") or "") not in values:
+        raise hidden
     models, seen, byte_count = [], set(), 0
     families = getattr(client, "_listed_ollama_families", {}) if client.api_mode == "ollama" else {}
     for value in values:
@@ -305,9 +313,20 @@ def list_pip_models(config) -> dict:
                                     **({"reason": reason} if reason else {})}
     try:
         _connection(config)
+        pending = None
         if not engine:
-            result["default_model"] = _safe_model_id(default_model(config), secret_values(config))
+            try:
+                result["default_model"] = _safe_model_id(default_model(config), secret_values(config))
+            except RegistryError as exc:
+                pending = exc                    # a saved key may hold this name: the host's own list decides
         catalog = _catalog(config)
+        shown = catalog_secrets(secret_values(config), catalog, keep=(config.get("api_key", ""),))   # (its own names)
+        if pending is not None:
+            if default_model(config) not in catalog:
+                raise pending
+            result["default_model"] = _safe_model_id(default_model(config), shown)
+        if chosen and not result["pips_model"] and chosen in catalog:
+            result["pips_model"] = _safe_model_id(chosen, shown)
         for model in catalog:
             row = {"id": model, "name": model}
             window = model_window(config, model)

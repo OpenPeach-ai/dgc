@@ -49,6 +49,19 @@ MAX_PATCH = 512 * 1024                    # the whole change as one patch
 MAX_PROJECTS = 3                          # projects one message may name
 LOCAL = ("editor-user", "local-console")
 SKIP = {".git", "node_modules", ".venv", "venv", "__pycache__", ".dgc", "dist", "build", ".next", ".cache", ".tox"}
+# What running code leaves behind in a copy (live test 14 Nov: a Pip's test run left __pycache__/*.pyc, and Apply then
+# offered them as a second change). A file the copy didn't start with is never a change when it is one of these, even
+# when the project's own ignore rules don't name it.
+LEFTOVER_DIRS = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".hypothesis", ".tox", ".nox",
+                 "node_modules", ".venv", "venv", ".cache", ".parcel-cache", ".turbo", ".next", ".svelte-kit", ".gradle"}
+LEFTOVER_FILE = re.compile(r"(?:.*\.py[cod]|\$py\.class|\.DS_Store|Thumbs\.db|\.coverage(?:\..*)?|coverage\.xml|"
+                           r"nosetests\.xml|.*\.egg-info|npm-debug\.log.*|yarn-error\.log.*)", re.IGNORECASE)
+
+
+def leftover(rel: str) -> bool:
+    """Whether a path is something running code leaves behind (bytecode, test and type-check caches, installed packages)."""
+    parts = rel.split("/")
+    return bool(set(parts[:-1]) & LEFTOVER_DIRS) or bool(LEFTOVER_FILE.fullmatch(parts[-1]))
 NAME = re.compile(r"[^A-Za-z0-9._-]+")
 DIR = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 STATUSES = ("pending", "applied", "partial", "not_applied", "discarded", "undone")
@@ -702,6 +715,8 @@ def _compare(store, copy) -> list:
                 kind, size, mtime = now.get(rel, ("missing", 0, 0))
                 if kind in ("link", "other"):
                     out.append({"path": rel, "change": "link"})
+                elif leftover(rel):
+                    continue                                # (a test run's __pycache__ is never a change, new or old)
                 elif kind == "missing":
                     out.append({"path": rel, "change": "deleted"})
                 elif old is None:

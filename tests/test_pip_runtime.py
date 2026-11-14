@@ -24,7 +24,8 @@ class LocalStartupTests(unittest.TestCase):
         self.process = Mock()
         self.process.poll.return_value = None
         self.offline = {"online": False, "status": "offline", "paused": False}
-        self.online = {"online": True, "status": "running", "paused": False, "version": __version__}
+        self.online = {"online": True, "status": "running", "paused": False, "version": __version__,
+                       "install": runtime.this_install()}
         for name, value in (("state_directory", self.directory),):
             p = patch.object(runtime, name, return_value=value); p.start(); self.addCleanup(p.stop)
 
@@ -66,6 +67,25 @@ class LocalStartupTests(unittest.TestCase):
                     self.assertIn(f"moves it to this one ({__version__})", str(caught.exception))
                     self.assertNotIn("Keep Pips running", str(caught.exception))
                 self.assertEqual(pause.call_count, 2)
+
+    def test_a_runner_from_another_install_of_the_same_version_is_moved_too(self):
+        # 15 Nov, on his machine: every 0.52 test build says the same version, so the Pips runner of a build installed
+        # a day earlier kept running its old code after two newer installs. A runner says which install it runs from;
+        # another install's (or one too old to say) is moved like an older version's.
+        here = runtime.this_install()
+        self.assertTrue(here)
+        self.assertEqual(runtime._other_runner({**self.online, "install": here}), "", "this install's own runner")
+        for status in ({**self.online, "install": "/elsewhere/0.52-test-old/src"},
+                       {key: value for key, value in self.online.items() if key != "install"}):
+            with self.subTest(status=status):
+                self.assertEqual(runtime._other_runner(status), "other")
+                with patch.object(runtime, "_state", return_value=(status, "old")), \
+                     patch.object(runtime, "supervisor_is_live", return_value=True), \
+                     patch("dgc.pip_daemon.pause_if_idle", return_value=False), \
+                     patch.object(runtime.subprocess, "Popen", side_effect=AssertionError("no duplicate")):
+                    with self.assertRaises(RegistryError) as caught:
+                        runtime.start_runtime(self.config)
+                    self.assertIn("another DGC install", str(caught.exception))
 
     def test_a_runner_from_a_newer_install_is_never_replaced_by_this_one(self):
         newer = {**self.online, "version": "999.0.0"}
@@ -258,8 +278,9 @@ class MovingTheRunnerTests(unittest.TestCase):
         self.lease = named_process_lock("pips-supervisor", str(self.directory))
         self.daemon, self.threading = pip_daemon, threading
 
-    def supervisor(self, version, instance):
+    def supervisor(self, version, instance, install=None):
         record = {"schema_version": 1, "instance_id": instance, "version": version, "pid": os.getpid(),
+                  **({"install": install} if install else {}),
                   "started_at": self.registry.clock(), "heartbeat_at": self.registry.clock(), "status": "running"}
         with self.registry.transaction():
             self.daemon._write(self.registry, self.daemon.SUPERVISOR_KEY, record)
@@ -283,7 +304,7 @@ class MovingTheRunnerTests(unittest.TestCase):
         return seen
 
     def this_install_starts(self, *args, **kwargs):
-        self.supervisor(__version__, "supervisor_new")
+        self.supervisor(__version__, "supervisor_new", runtime.this_install())     # as this install's daemon writes it
         self.assertTrue(self.lease.acquire(blocking=False))
         self.addCleanup(self.lease.release)
         process = Mock()

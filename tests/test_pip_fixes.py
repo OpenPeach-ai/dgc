@@ -56,14 +56,21 @@ class FixWorld(WithABox):
         return fixes.send_due(self.registry, self.cfg)
 
     def fix_turn_ends(self, text=DONE, *, edit=True):
-        """Its fix turn runs (the message DGC sent, claimed by the runner), edits its copy, and ends."""
+        """Its fix (0.52, sub-agents): the sub-agent's try (claimed, it edits its own copy, it ends), then the Pip's
+        check in its chat (its verdict lines and RESULT: PASS), which puts the change into the Pip's copy."""
+        from dgc import pip_agents
         row = self.store.claim_next()
-        self.assertIsNotNone(row, "the fix turn was queued")
+        self.assertIsNotNone(row, "the sub-agent's run was queued")
+        self.assertIn("agent", json.loads(row["manifest"]), "a fix is a sub-agent's job")
         if edit:
-            self.edit_its_copy()
-        if levels.effective(self.registry, self.helper["id"]) == levels.FULL:
-            copies.auto_apply(self.store, self.helper["id"])         # as the runner does when the turn ends
+            job = self.registry.db.execute("SELECT * FROM pip_agent_jobs WHERE run_id=?", (row["id"],)).fetchone()
+            copy = pip_agents.copy_root(self.registry, self.helper["id"], job["copy"])
+            (copy / "app.py").write_text("def total(items):\n    return sum(items) + 0\n")
         self.store.finish(row["id"], result={"text": text, "usage": {"input_tokens": 1200, "output_tokens": 340}})
+        self.send()
+        check = self.store.claim_next()
+        self.assertIsNotNone(check, "the Pip's check was queued in its chat")
+        self.store.finish(check["id"], result={"text": text + "\nRESULT: PASS"})
         return row["id"]
 
 
@@ -78,20 +85,18 @@ class AtAskMeFirst(FixWorld, unittest.TestCase):
         self.assertEqual(self.fixes()["folder"], "shop")
         self.assertEqual(self.send(), 0, "nothing runs before Allow")
 
-    def test_allow_starts_the_fix_as_its_own_turn_in_its_chat(self):
+    def test_allow_starts_the_fix_as_a_sub_agents_job(self):
         self.check([TOTAL])
         fix = self.one()
         answer = self.control("decide_pip_fix", pip_id=self.helper["id"], fix_id=fix["id"],
                               expected_digest=fix["digest"], allow=True)
-        self.assertEqual((answer["fix"]["state"], answer["fix"]["by"]), ("queued", "you"))
-        message = self.registry.db.execute("SELECT text,request_key FROM pip_chat_messages WHERE pip_id=? AND role='user'",
-                                           (self.helper["id"],)).fetchone()
-        self.assertTrue(message["request_key"].startswith(pip_chat.FIX_KEY), "a message from DGC, not the user")
-        self.assertIn("This message is from DGC", message["text"])
-        self.assertIn("Total ignores the discount — app.py:2", message["text"])
-        self.assertIn("FINDING n: fixed", message["text"])
-        listed = pip_chat.list_messages(self.store, self.helper["id"])["messages"]
-        self.assertTrue(all(m.get("intro") for m in listed if m["role"] == "user"), "the editor shows it no bubble")
+        self.assertEqual((answer["fix"]["state"], answer["fix"]["by"]), ("running", "you"))
+        job = self.registry.db.execute("SELECT * FROM pip_agent_jobs WHERE fix_id=?", (fix["id"],)).fetchone()
+        self.assertIn("This message is from DGC", job["brief"])
+        self.assertIn("Total ignores the discount — app.py:2", job["brief"])
+        self.assertIn("FINDING n: fixed", job["brief"])
+        self.assertEqual(self.registry.db.execute("SELECT count(*) FROM pip_chat_messages WHERE pip_id=?",
+                                                  (self.helper["id"],)).fetchone()[0], 0, "nothing in the Pip's chat yet")
 
     def test_not_now_leaves_it_and_the_next_check_does_not_ask_again(self):
         self.check([TOTAL])

@@ -101,16 +101,39 @@ class TheTool(unittest.TestCase):
         with self.assertRaises(T.SettingsError):
             T.rule(self.config, "allow", "not a (rule")
 
-    def test_dev_mode_limits_only_with_both_switches_on(self):
+    def test_dev_mode_limits_beyond_their_ceiling_only_with_both_switches_on(self):
         from dgc import settings_tool as T
         with self.assertRaises(T.SettingsError):
-            T.dev_limit(self.config, "work_helpers", 12)
+            T.dev_limit(self.config, "work_helpers", 40)             # past the most without Dev Mode (32)
         self.config.set("dev_mode", True)
         with self.assertRaises(T.SettingsError, msg="Dev Mode on, but the user didn't let DGC change its limits"):
-            T.dev_limit(self.config, "work_helpers", 12)
+            T.dev_limit(self.config, "work_helpers", 40)
         self.config.set("dev_mode_tools", True)
+        self.assertIn("→ 40", T.dev_limit(self.config, "work_helpers", 40))
+        self.assertEqual(self.config.get("dev_limits")["work_helpers"], 40)
+
+    def test_a_limit_within_its_ceiling_is_an_ordinary_change_with_undo(self):
+        # Live test 14 Nov: "Let my Pips run up to 8 at once" was refused as Dev Mode only, while its own answer said the
+        # most without Dev Mode is 32. Under the ceiling it is an ordinary setting, with Undo.
+        from dgc import pips, settings_tool as T
+        said = T.dev_limit(self.config, "pips_parallel_runs", 8, reason="he asked")
+        self.assertIn("→ 8", said)
+        self.assertEqual(pips.parallel_runs(self.config), 8)
+        self.assertFalse(self.config.get("dev_limits"), "Dev Mode's own limits untouched")
+        T.undo(self.config, said.rsplit("Undo: ", 1)[1])
+        self.assertEqual(pips.parallel_runs(self.config), 4)
         self.assertIn("→ 12", T.dev_limit(self.config, "work_helpers", 12))
-        self.assertEqual(self.config.get("dev_limits")["work_helpers"], 12)
+        from dgc import ultra
+        self.assertEqual(ultra.worker_limit(self.config), 12)
+        with self.assertRaises(T.SettingsError) as raised:
+            T.dev_limit(self.config, "pips_parallel_runs", 33)
+        self.assertIn("32", str(raised.exception), "it says how far it goes without Dev Mode")
+
+    def test_read_says_how_far_each_limit_goes_without_dev_mode(self):
+        from dgc import settings_tool as T
+        said = T.read(self.config, "limit")
+        self.assertIn("pips_parallel_runs", said)
+        self.assertIn("up to 32 without Dev Mode", said)
 
     def test_docs_answer_from_dgcs_own_pages(self):
         from dgc import settings_tool as T
@@ -144,6 +167,19 @@ class TheAgentUsesThem(unittest.TestCase):
     def test_offered_every_turn_to_the_session_the_user_talks_to(self):
         names = {tool["function"]["name"] for tool in self.harness.agent._tool_schemas()}
         self.assertTrue({"dgc_settings_read", "dgc_settings", "dgc_docs"} <= names)
+
+    def test_its_card_says_what_changes_in_plain_words(self):
+        # Live test 14 Nov: "Let my Pips run up to 8 at once" asked with a raw card, "Run dgc_settings {json}". The card
+        # is given the setting's own words and what it is now; the editor shows "Pip runs at once: 4 → 8".
+        shown = self.harness.agent._with_task_agent("dgc_settings", {"action": "dev_limit", "key": "pips_parallel_runs",
+                                                                      "value": 8, "reason": "he asked"})
+        self.assertEqual((shown["setting_label"], shown["before"], shown["value"]), ("Pip runs at once (all Pips)", 4, 8))
+        shown = self.harness.agent._with_task_agent("dgc_settings", {"action": "setting", "key": "bash_timeout", "value": 300})
+        self.assertEqual(shown["before"], 120)
+        self.assertTrue(shown["setting_label"])
+        self.assertNotIn("setting_label", self.harness.agent._with_task_agent("dgc_settings", {"action": "setting",
+                                                                                              "key": "api_key", "value": "x"}),
+                         "never for a key DGC doesn't change")
 
     def test_auto_mode_changes_it_without_a_card_and_says_what_changed(self):
         self.assertEqual(self.harness.config.get("mode"), "auto")

@@ -390,8 +390,16 @@ def strip_model_line(text: str) -> str:
     return re.sub(r"\n\n<dgc-peers>" + count + re.escape(suffix) + r"\s*\Z", "", text)
 
 
+def _running_a_turn(peer: dict) -> bool:
+    """Whether a peer runs a turn now. A note that doesn't say (an older DGC) counts as working."""
+    if "status" not in peer:
+        return True
+    return any(str(place.get("status") or "") == "working" for place in _places(peer))
+
+
 def user_line(peers: list[dict]) -> str:
-    """One line for the person. Empty when nothing is worth saying."""
+    """One line for the person. Empty when nothing is worth saying. "Working" only for one running a turn (live test
+    14 Nov: four idle tabs read "4 other DGCs are working in this folder"); one that holds a chat has it open."""
     live = [p for p in peers if p.get("liveness") == "live"]
     unsure = [p for p in peers if p.get("liveness") == "unknown"]
     if not live and not unsure:
@@ -400,7 +408,12 @@ def user_line(peers: list[dict]) -> str:
         return "1 other DGC" if n == 1 else f"{n} other DGCs"
 
     if live and not unsure:
-        return f"{count(len(live))} {'is' if len(live) == 1 else 'are'} working in this folder."
+        busy = [p for p in live if _running_a_turn(p)]
+        open_ = len(live) - len(busy)
+        if not busy:
+            return f"{count(open_)} {'has' if open_ == 1 else 'have'} a chat open in this folder."
+        line = f"{count(len(busy))} {'is' if len(busy) == 1 else 'are'} working in this folder"
+        return line + (f", and {open_} more {'has' if open_ == 1 else 'have'} a chat open." if open_ else ".")
     if unsure and not live:
         return f"{count(len(unsure))} may still be working in this folder."
     return (f"{count(len(live))} {'is' if len(live) == 1 else 'are'} working in this folder, "
