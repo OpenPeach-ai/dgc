@@ -745,6 +745,17 @@ export class PipsEditor implements vscode.Disposable {
     this.connectFailed = false;
     this.state = { connected: true, supported: capabilities?.pips_supported === true && capabilities?.pips_api_version >= 9, enabled: capabilities?.pips_enabled === true };
     this.publish();
+    try { this.whenReady?.(); } catch { /* the welcome is never in the way of the connection */ }
+  }
+  /** Told each time a DGC is connected (the panel offers the Pips tab's one-time welcome once DGC can be asked). */
+  private whenReady?: () => void;
+  useReady(notify: () => void): void { this.whenReady = notify; }
+  /** A DGC with the Pips flow is connected (Pips API 96): a Pip tells you in its own chat, and get_pips_welcome answers. */
+  flowReady(): boolean { return this.state.connected && this.state.supported && this.state.enabled && this.apiVersion >= FLOW_API; }
+  /** get_pips_welcome {} (Pips API 96): what the Pips tab's one-time welcome names. An older DGC is never asked. */
+  welcome(): Promise<any> {
+    if (!this.flowReady()) return Promise.reject(new Error('Update DGC to see how Pips work now.'));
+    return this.hostAsk('get_pips_welcome');
   }
   /** `failed`: the backend stopped and isn't coming back by itself, so the page says so. Any other time with no connection
    *  (starting, a chat switching, a restart under way) the page only waits. */
@@ -789,7 +800,7 @@ export class PipsEditor implements vscode.Disposable {
     return this.hostAsk('list_project_folders');
   }
   /** One read the host makes for Continue in Work, answered in DGC's own words when it is refused. */
-  private hostAsk(type: 'list_project_folders' | 'add_project_folder' | 'list_workspaces' | 'get_pip_project_change' | 'get_pip' | 'list_session_pips' | 'set_pip_owner' | 'archive_pip' | 'delete_archived_pip', fields: Record<string, unknown> = {}): Promise<any> {
+  private hostAsk(type: 'get_pips_welcome' | 'list_project_folders' | 'add_project_folder' | 'list_workspaces' | 'get_pip_project_change' | 'get_pip' | 'list_session_pips' | 'set_pip_owner' | 'archive_pip' | 'delete_archived_pip', fields: Record<string, unknown> = {}): Promise<any> {
     return new Promise((resolve, reject) => {
       if (!this.state.connected || !this.state.supported || !this.state.enabled) { reject(new Error('Pips aren’t available. Reconnect, then try again.')); return; }
       const requestId = 'pips-host-' + randomBytes(12).toString('hex');

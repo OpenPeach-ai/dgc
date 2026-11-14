@@ -19,6 +19,7 @@
 @import url("./shared/mosaic.css");
 @import url("./shared/homecards.css");
 @import url("./shared/whatsnew.css");
+@import url("./shared/pipswelcome.css");
 @import url("./shared/folderpick.css");
 @import url("./pips/wordmark.css");
 /* DGC panel — Codex's quiet editor hierarchy with a restrained DGC accent. */
@@ -112,7 +113,7 @@ body:not([data-agent-page]) #phead .pm ~ .thread-title { margin-left: calc(6px -
 #pips-host { display:flex; flex:1 1 auto; min-height:0; min-width:0; overflow:hidden; width:100%; }
 /* (The Pips view stands on the side bar's own ground, as Home, Work and Chat do, 13 Nov: the tab bar and the dock keep
    the one ground on every tab. They took the editor's ground under the Pips view, which stood on it.) */
-body.pips-active > :not(#phead):not(#side-tabs):not(#pips-host):not(#announcer):not(.dgc-trace-backdrop):not(#dgc-dock):not(.dgc-pop):not(#whats-new):not(script) { display:none !important; }
+body.pips-active > :not(#phead):not(#side-tabs):not(#pips-host):not(#announcer):not(.dgc-trace-backdrop):not(#dgc-dock):not(.dgc-pop):not(#whats-new):not(#pips-welcome):not(script) { display:none !important; }
 /* A page of the Pips view with a back arrow (a Pip's chat, its Settings, History and its other pages; Pips settings,
    Needs attention's View all, a project's New Pip, Workspace context and Notifications) has the side bar to itself: no
    dock and no tab bar (main.js, onInsidePip), and the page takes their room. DGC's own header stays. Not drawn, so
@@ -125,7 +126,7 @@ body.pips-active #phead .pm { display:inline-flex; flex:1; align-self:center; }
    way the Pips are: everything but the header, the list, the announcer and the hover label hides. */
 /* (The dialog a session's delete opens when it owns Project Pips is this page's own: it shows over it.) */
 /* ("What's new" is the side bar's own dialog too, #whats-new.) */
-body.sessions-active > :not(#phead):not(#side-tabs):not(#sessions-host):not(#announcer):not(#hover-tip):not(#dgc-dock):not(.dgc-pop):not(#whats-new):not(script) { display:none !important; }
+body.sessions-active > :not(#phead):not(#side-tabs):not(#sessions-host):not(#announcer):not(#hover-tip):not(#dgc-dock):not(.dgc-pop):not(#whats-new):not(#pips-welcome):not(script) { display:none !important; }
 body.sessions-active #phead :is(.thread-title,.pd,.chat-add,.agent-back,.agent-mark) { display:none !important; }
 body.sessions-active #phead .pm { display:inline-flex; flex:1; align-self:center; }
 /* The side bar's top: the header row with DGC's wordmark (its slashes breathing), then the tabs (media/shared/tabs.css):
@@ -3307,6 +3308,16 @@ body.vscode-high-contrast-light :is(.pip-report, .pip-report-group, .pips-digest
 .pip-report-dismiss-slim .codicon { font-size: 12px; }
 .pip-report-dismiss-slim:hover { border-color: var(--btn-line); background: var(--btn-wash); color: var(--text); }
 .pip-report-dismiss-slim:focus-visible { outline: var(--btn-ring); outline-offset: 1px; }
+/* Pips API 96 (0.52): the Pip says it in its own chat, so a card here is history. Its one answer, "Open in its chat",
+   is a quiet link at the width of its words (as a fix row's Review and Undo are), closed and opened; no ✕. */
+.pip-report[data-flow] .pip-report-slim-actions button.pip-report-chat-slim, .pip-report[data-flow] .pip-report-actions button.act.pip-report-chat,
+.pip-report[data-flow] .pip-report-slim-actions button.pip-report-chat-slim:is(:hover, :active):not(:disabled), .pip-report[data-flow] .pip-report-actions button.act.pip-report-chat:is(:hover, :active):not(:disabled) {
+  display: inline-block; flex: none; box-sizing: border-box; width: auto; min-width: 0; max-width: 100%; height: var(--btn-h-sm); min-height: 0; padding: 0 2px; border: 0; border-radius: var(--btn-r); background: transparent;
+  color: var(--link, var(--accent-text)); font: var(--w-reg, 400) var(--t-xs)/var(--btn-h-sm) var(--sans); white-space: nowrap; text-decoration: underline; text-underline-offset: 2px;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent); transform: none; box-shadow: none; cursor: pointer; }
+.pip-report[data-flow] .pip-report-slim-actions button.pip-report-chat-slim:hover, .pip-report[data-flow] .pip-report-actions button.act.pip-report-chat:hover { text-decoration-color: currentColor; }
+.pip-report[data-flow] .pip-report-slim-actions button.pip-report-chat-slim:focus-visible, .pip-report[data-flow] .pip-report-actions button.act.pip-report-chat:focus-visible { outline: var(--btn-ring); outline-offset: 2px; }
+.pip-report[data-flow] .pip-report-actions button.act.pip-report-chat { font-size: var(--t-sm); }
 /* Asked: the card says so in one quiet line where Fix was (asked 13 Nov), not as a greyed-out filled button. */
 .pip-report .pip-report-slim-actions button.pip-report-fix-slim.asked, .pip-report .pip-report-actions button.act.pip-report-fix.asked,
 .pip-report .pip-report-slim-actions button.pip-report-fix-slim.asked:hover, .pip-report .pip-report-actions button.act.pip-report-fix.asked:hover {

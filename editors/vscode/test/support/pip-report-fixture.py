@@ -3,7 +3,8 @@
 Run with the panel session's HOME, so it writes the registry that session's `dgc serve` reads:
     create ROOT NAME TYPE            -> prints the new Pip's id
     attach ROOT SESSION_ID PIP_ID    -> the Pip reports to that chat
-    finish ROOT PIP_ID FINDINGS_JSON -> a finished audit run with those findings; prints its run id
+    finish ROOT PIP_ID FINDINGS_JSON [SESSION_ID] -> a finished audit run with those findings, started from that chat
+                                     when SESSION_ID is given (0.52: only then does the chat get its card); prints its id
     fail ROOT PIP_ID CODE MESSAGE    -> a failed run; prints its run id
 Not a test file.
 """
@@ -31,6 +32,11 @@ def main(command, root, *rest):
                                     (session_id, pip_id, workspace["id"], 1, registry.clock(), "fixture"))
             return
         pip = store.get(rest[0])
+        requested_by = "fixture"
+        if command == "finish" and len(rest) > 2:
+            from dgc.pip_report_delivery import chat_identity
+            registry.associate_session(rest[2], root)
+            requested_by = chat_identity(rest[2])
         run_id = identifier("run")
         manifest = {"pip_id": pip["id"], "workspace_id": workspace["id"], "job_version": pip["current_version"],
                     "source_revision": "a" * 40, "model": "fixture-model", "run_kind": "audit",
@@ -40,7 +46,7 @@ def main(command, root, *rest):
             registry.db.execute("""INSERT INTO pip_runs
                 (id,pip_id,workspace_id,binding_id,idempotency_key,requested_by,manifest,status,created_at,started_at)
                 VALUES(?,?,?,?,?,?,?,?,?,?)""", (run_id, pip["id"], workspace["id"], registry.binding(workspace["id"])["id"],
-                                                  run_id, "fixture", json.dumps(manifest), "running", now, now))
+                                                  run_id, requested_by, json.dumps(manifest), "running", now, now))
         if command == "finish":
             findings = json.loads(rest[1])
             store.finish(run_id, result={"summary": "Review", "findings": findings, "limitations": [], "tests_executed": False})

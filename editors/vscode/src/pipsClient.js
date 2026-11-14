@@ -5737,8 +5737,11 @@ function pipsSettingsMarkup(){
  const body=view==='webhooks'?reachMarkup(pipsSettings.reach,{esc,busy:pipsSettings.reachBusy,off:busy,error:pipsSettings.reachError,refusal:pipsSettings.reachRefusal,ownBase:draft.hookOwnBase,formatDate:shortDate})
   :view==='plugins'?pluginUsesMarkup(pipsSettings.plugins,{esc,busy,error:pipsSettings.pluginsError}):view==='apps'?ownAppsMarkup(S.apiVersion>=61?S.ownApps:[],{esc,busy,error:S.apiVersion>=61?S.ownAppsError:''})+appsSettingsMarkup(pipsSettings.apps,{esc,busy,error:pipsSettings.appsError,ownApps:S.apiVersion>=61&&(S.ownApps||[]).length>0})+(S.apiVersion>=43&&!remoteHost?`<section class="pip-page-group"><div class="pip-page-row static"><span class="row-words"><strong>Skills</strong><small>Your Pips use your DGC skills that fit everyday work: deep research, charts and planning, and the ones you add. A skill is instructions; it never gives a Pip new access.</small></span>${button('manage-skills','Manage skills…',false,'quiet pill')}</div></section>`:'')+(S.apiVersion>=44&&!remoteHost&&pipsSettings.limit?`<section class="pip-page-group"><form id="pips-limit-form" class="pip-page-row static"><span class="row-words"><label for="pipsMax"><strong>How many Pips you can have</strong></label><small>${pipsSettings.limit.default.toLocaleString('en-US')} unless you choose another number, up to ${pipsSettings.limit.maximum.toLocaleString('en-US')}. Archived Pips don’t count. A powerful computer can run thousands.</small></span><input id="pipsMax" data-draft="pipsMax" type="number" min="1" max="${pipsSettings.limit.maximum}" step="1" inputmode="numeric" value="${esc(draft.pipsMax)}" aria-label="How many Pips you can have"><button type="submit" class="quiet pill"${busy||String(pipsSettings.limit.max_pips)===draft.pipsMax?' disabled':''}>Save</button></form></section>`:'')
   :computersMarkup(pipsSettings.computers,{esc,busy,error:pipsSettings.computersError,formatDate:shortDate,confirming:pipsSettings.confirmReset});
- return `<header class="pip-topbar"><button type="button" id="pips-settings-close" class="topbar-icon" aria-label="Your Pips" title="Your Pips">${simpleIcon('back')}</button><div class="pip-pill settings-pill"><span>Pips settings</span></div><span></span></header><div class="simple-content"><div class="pip-page">${tabs}<div class="pip-page-body">${body}</div></div></div>`;
+ return `<header class="pip-topbar"><button type="button" id="pips-settings-close" class="topbar-icon" aria-label="Your Pips" title="Your Pips">${simpleIcon('back')}</button><div class="pip-pill settings-pill"><span>Pips settings</span></div><span></span></header><div class="simple-content"><div class="pip-page">${tabs}<div class="pip-page-body">${body}</div>${howPipsWorkLine()}</div></div>`;
 }
+// Pips settings › How Pips work now (0.52, Pips API 96): opens "Your Pips moved into one list" again. The pop-up is the
+// side bar's (media/shared/pipswelcome.js), so the line is here only where the page gave a way to open it.
+function howPipsWorkLine(){return S.apiVersion>=FLOW_API&&!remoteHost&&typeof options.onHowPipsWork==='function'?`<p class="pips-how-line"><button type="button" id="pips-how" class="link hook-link">How Pips work now</button><span> What changed for your Pips in 0.52.</span></p>`:'';}
 async function appLinkAction(type,id,quiet=false,fields={}){
  if(!usable()||!personalPip()||(appLinkBusy&&!quiet))return;
  const token=scope(),pip=S.selected;if(!quiet){appLinkBusy=id;render();}
@@ -6963,6 +6966,7 @@ document.addEventListener('click',event=>{
     case 'create-core':void createSimplePip('core','Core');break;
     case 'simple-back':chatDrafts.set(S.selected,draft.chatText);S.overview=true;rememberView();render();if(onePips())oneHomeAgain();void loadFlows();break;
     case 'one-more':void loadOneMore();break;
+    case 'pips-how':options.onHowPipsWork?.();break;
     case 'pips-settings-open':pipsSettings.view=pipsSettings.view||'computer';pipsSettings.confirmReset='';render();void loadPipsSettings();break;
     case 'pips-settings-close':pipsSettings.view='';render();break;
     case 'pip-page-back':S.pipPage='info';lookDirty=false;render();void loadRoutines();break;

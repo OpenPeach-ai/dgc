@@ -40,6 +40,7 @@ import { openCodePreview } from "./codePreview";
 import { DEV_SAVED_KEY, DEV_WARNED_KEY, devLimitsTable, devLimitValues, devShown, devToolsOffered, devToolsShown, type DevLimit } from "./devMode";
 import { INSTANCE as STUCK_INSTANCE, heartbeatOf, isStuck, stuckHolder, type StuckFacts } from "./stuckHolder";
 import { whatsNewAnswered, whatsNewDue, whatsNewMessage } from "./whatsNew";
+import { NO_PIPS_MOVED, WELCOME_API, noteSession, pipsWelcomeAnswered, pipsWelcomeDue, pipsWelcomeMessage, pipsWelcomeOf, sessionNoteClosed, sessionNoteGone } from "./pipsWelcome";
 import { homePages, homePagesAttr, homeShowAttr, noteHomePage, pipHomeDismissedAttr, rememberHomePagesDismissed, rememberHomeShow, rememberPipHomeDismissed } from "./pipHomeDismiss";
 import { addProfile, adoptWorkingRoute, defaultProfileId, firstTakesDefault, keepWorkingRoute, hasRunnableProfile, listProfiles, markDefaultProfile, profileCredential, removeProfile, startingModel } from "./providerProfiles.js";
 
@@ -2926,12 +2927,59 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  Only the side bar's own page, never a session's tab. */
   offerWhatsNew(): void {
     if (!this.home || this.tab || !whatsNewDue(this.context)) { return; }
+    this.openedByItself = true;                 // the one thing that opens by itself in this launch (the Pips pop-up waits)
     this.post(whatsNewMessage(true));
   }
 
   /** "DGC: What's New" (the DGC view's ⋯ menu): the dialog again, whenever asked. */
   showWhatsNew(): void {
     this.whenWebviewReady(() => this.post(whatsNewMessage(false)));
+  }
+
+  // ---- "Your Pips moved into one list" (pips-flow-design §3.3, item 2; src/pipsWelcome.ts) ----
+  /** What's new was shown by itself in this launch: only one thing opens by itself per launch. */
+  private openedByItself = false;
+  /** The side bar's Pips tab is showing (the page says when it opens and when it is left). */
+  private pipsTabShown = false;
+  /** DGC is being asked, or said nothing moved for this user (asked once a launch). */
+  private pipsWelcomeAsking = false;
+  private pipsWelcomeNone = false;
+  /** The Pips tab's welcome by itself: once, the first time the tab opens with a DGC at Pips API 96, only for someone
+   *  whose Pips came from 0.51, until Got it, Esc or a click outside. Never in a session's tab, and never in a launch
+   *  that already showed What's new. A DGC that isn't up yet is asked when it is (pipsBridgeReady). */
+  async offerPipsWelcome(): Promise<void> {
+    if (this.tab || !this.pipsTabShown || this.openedByItself || this.pipsWelcomeAsking || this.pipsWelcomeNone || !pipsWelcomeDue(this.context)) { return; }
+    const bridge = this.pipsEditor;
+    if (!bridge?.flowReady()) { return; }
+    this.pipsWelcomeAsking = true;
+    try {
+      const welcome = pipsWelcomeOf(await bridge.welcome());
+      if (!welcome) { return; }
+      if (!welcome.had_pips) { this.pipsWelcomeNone = true; return; }
+      // (Answered in another window, or the tab left, while DGC was asked: it waits for the next visit.)
+      if (this.pipsTabShown && !this.openedByItself && pipsWelcomeDue(this.context)) { this.post(pipsWelcomeMessage(true, welcome)); }
+    } catch { /* DGC didn't answer: asked again at the next visit to the tab */ }
+    finally { this.pipsWelcomeAsking = false; }
+  }
+  /** A DGC is connected to the Pips bridge: the welcome a tab opened too early for is offered now. */
+  async pipsBridgeReady(): Promise<void> { await this.offerPipsWelcome(); }
+  /** Pips settings › How Pips work now: the pop-up again, whenever asked. Someone with nothing moved is told how Pips
+   *  work without a list; a DGC that can't be asked right now shows that too. */
+  async showPipsWelcome(): Promise<void> {
+    if (this.tab) { return; }
+    const bridge = this.pipsEditor;
+    if (!bridge?.flowReady()) { return; }
+    let welcome = NO_PIPS_MOVED;
+    try { welcome = pipsWelcomeOf(await bridge.welcome()) ?? NO_PIPS_MOVED; } catch { /* how Pips work, without the list */ }
+    this.post(pipsWelcomeMessage(false, welcome));
+  }
+  /** The quiet note above a Work session that used to get Pip cards (§3.3, item 3): whether it is still due here. Only
+   *  with a DGC at Pips API 96 (an older one still posts cards to the session), until it is closed in any window. */
+  private answerSessionNote(asked: unknown): void {
+    const session = noteSession(asked);
+    if (!session) { return; }
+    const api = Number((this.lastReadyEvent as any)?.capabilities?.pips_api_version);
+    this.post({ type: "pipSessionNote", session, show: Number.isSafeInteger(api) && api >= WELCOME_API && !sessionNoteGone(this.context, session) });
   }
 
   /** "Open here": take this chat's session from the window that shows it, or from the backend that kept
@@ -6360,6 +6408,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         // Skip, Done or Esc in "What's new": never by itself again, in any window of this editor (src/whatsNew.ts).
         await whatsNewAnswered(this.context);
         break;
+      // The Pips tab's one-time welcome and the quiet note above an old Work session (src/pipsWelcome.ts).
+      case "pipsTabOpened": this.pipsTabShown = true; await this.offerPipsWelcome(); break;
+      case "pipsTabClosed": this.pipsTabShown = false; break;
+      case "pipsWelcomeSeen": await pipsWelcomeAnswered(this.context); break;        // Got it, Esc, a click outside, or a Pip opened from it
+      case "pipsWelcomeOpen": await this.showPipsWelcome(); break;                    // Pips settings › How Pips work now
+      case "pipSessionNoteAsk": this.answerSessionNote(msg.session); break;
+      case "pipSessionNoteGone": { const session = noteSession(msg.session); if (session) await sessionNoteClosed(this.context, session); break; }
       case "clear_todos":
         // The backend empties the list at once, even while a turn runs, and answers with an empty
         // `todos` event; that is what hides the Tasks row. An older CLI that still refuses mid-turn
@@ -8742,6 +8797,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (this.sessionReady) this.pipsEditor?.ready(this.lastReadyEvent?.capabilities, this.backend);
       }, true);
       this.pipsEditor.attach(message => this.post(message));
+      this.pipsEditor.useReady(() => { void this.pipsBridgeReady(); });   // the Pips tab's welcome, once DGC can be asked
       this.pipsEditor.useDictation(() => this.dictationService(), () => this.readAloudService());
       this.pipsEditor.usePluginLogos((plugin) => this.replyPluginLogo(plugin));
       this.pipsEditor.useSavedProviders(() => this.pipSavedProviders(), (id, model) => this.savePipProvider(id, model), () => this.noProvider());
@@ -10690,6 +10746,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const homeCardsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "homecards.js"));
     // "What's new", the dialog the side bar shows once per release (media/shared/whatsnew.js, window.DgcWhatsNew).
     const whatsNewJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "whatsnew.js"));
+    // "Your Pips moved into one list" and the note above an old Work session (media/shared/pipswelcome.js, window.DgcPipsWelcome).
+    const pipsWelcomeJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "pipswelcome.js"));
     // The Project Folder dropdown over the Work sessions and in New Session's dialog (media/shared/folderpick.js, window.DgcFolderPick).
     const folderPickJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "folderpick.js"));
     // How long ago a Work session is from, in the Work list's words (media/shared/age.js, window.DgcAge).
@@ -10773,6 +10831,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <section id="pips-host" data-style-uri="${pipsStyle}" data-cards-style-uri="${mcpAppsCss}" aria-label="DGC Pips" hidden></section>
 <section id="sessions-host" class="sessions-home" aria-label="DGC" hidden><section id="home-hub" class="dgc-hub" role="tabpanel" aria-labelledby="side-tab-home"></section><section id="work-home" class="home-work" role="tabpanel" aria-labelledby="side-tab-work" hidden><div class="home-bar"><input id="sessions-search" class="sessions-search" type="search" placeholder="Search Work sessions" aria-label="Search this project's sessions: names and everything said" autocomplete="off" maxlength="200"><button type="button" id="sessions-new" class="home-new" title="New session: it opens in an editor tab" aria-label="New session"><span class="codicon codicon-add" aria-hidden="true"></span><span>New</span></button></div><div id="work-library-row" class="home-library-row"><button type="button" id="work-library" class="home-library" title="Library: reopen, export or remove Artifacts made in Work" hidden><span class="codicon codicon-library" aria-hidden="true"></span><span>Library</span></button></div><p id="sessions-status" class="sessions-status" role="status">Loading this project's sessions…</p><ul id="sessions-list" class="sessions-list" aria-label="Sessions in this project"></ul><button type="button" id="sessions-more" class="sessions-more" title="Show 200 more sessions" hidden>Load more</button></section><section id="chats-home" class="home-chats" role="tabpanel" aria-labelledby="side-tab-chat" hidden><div class="home-bar"><input id="chats-search" class="sessions-search" type="search" placeholder="Search chats" aria-label="Search your chats: names and everything said" autocomplete="off" maxlength="200"><button type="button" id="chats-new" class="home-new" title="New chat: it opens in an editor tab" aria-label="New chat"><span class="codicon codicon-add" aria-hidden="true"></span><span>New</span></button></div><button type="button" id="chats-library" class="home-library" title="Library: every file you attached or ChatDGC made, and every widget, in one place" hidden><span class="codicon codicon-library" aria-hidden="true"></span><span>Library</span></button><div id="projects-home" class="home-projects" hidden><div class="home-sub-head"><h3 id="projects-title" class="home-sub">Projects</h3><button type="button" id="projects-new" class="home-sub-add" title="New project: chats, files and instructions together" aria-label="New project"><span class="codicon codicon-new-folder" aria-hidden="true"></span></button></div><ul id="projects-list" class="projects-list" aria-labelledby="projects-title"></ul></div><h3 id="chats-sub" class="home-sub home-sub-chats" hidden>Chats</h3><p id="chats-status" class="sessions-status" role="status" hidden></p><ul id="chats-list" class="sessions-list" aria-label="Your chats"></ul><button type="button" id="chats-more" class="sessions-more" title="Show more of your chats" hidden>Show more</button></section></section>
 <nav id="chatbar" class="chatbar" hidden aria-label="Running chats"></nav>
+<aside id="pip-session-note" class="psn" role="note" aria-label="Pips report in their own chats now" hidden></aside>
 <main id="log" role="log" aria-live="off" aria-label="DGC conversation"></main>
 <section id="agent-page" hidden>
   <p id="agent-page-meta" class="agent-page-meta"></p>
@@ -10802,6 +10861,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   <div id="changes-review-list" class="changes-review-list" tabindex="-1"></div>
 </div>
 <div id="whats-new" class="wn-layer dgc-scrim" role="dialog" aria-modal="true" hidden></div>
+<div id="pips-welcome" class="pw-layer dgc-scrim" role="dialog" aria-modal="true" hidden></div>
 <div id="goal-editor" class="modal-layer dgc-scrim" role="dialog" aria-modal="true" aria-labelledby="goal-editor-title" hidden>
   <div class="goal-dialog dgc-dialog">
     <div class="goal-dialog-mark"><span class="codicon codicon-target" aria-hidden="true"></span></div>
@@ -11020,7 +11080,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${composerJs}"></script><script nonce="${nonce}" src="${trayJs}"></script>
 <script nonce="${nonce}" src="${cardJs}"></script>
 <script nonce="${nonce}" src="${sheetJs}"></script>
-<script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script><script nonce="${nonce}" src="${folderPickJs}"></script><script nonce="${nonce}" src="${ageJs}"></script><script nonce="${nonce}" src="${homeCardsJs}"></script><script nonce="${nonce}" src="${whatsNewJs}"></script>
+<script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script><script nonce="${nonce}" src="${folderPickJs}"></script><script nonce="${nonce}" src="${ageJs}"></script><script nonce="${nonce}" src="${homeCardsJs}"></script><script nonce="${nonce}" src="${whatsNewJs}"></script><script nonce="${nonce}" src="${pipsWelcomeJs}"></script>
 <script nonce="${nonce}" src="${mcpAppsJs}"></script>
 <script nonce="${nonce}" src="${markdown}"></script>
 <script nonce="${nonce}" src="${breakdownScript}"></script>

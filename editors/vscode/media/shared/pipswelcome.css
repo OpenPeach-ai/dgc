@@ -1,0 +1,59 @@
+/* The two migration notes of 0.52 (media/shared/pipswelcome.js).
+
+   "Your Pips moved into one list" (.pw-*): a pop-up over the Pips tab. A title, one line that nothing was lost, then a
+   row per group: a small face, the Pips' names (each opens its Pip) and what became of them, a hairline between rows.
+   Its foot keeps "How Pips work now" (a link) and Got it (the one button family: 6 px, 28 px) in sight while a long
+   list scrolls above it. From 276 px to 440 px wide; nothing in it is cut.
+
+   The note above an old Work session (.psn): one quiet card between the header and the chat, in the chat's own column.
+   A face, a bold line, the sentence, a link per Pip, and × in the corner. Tokens from media/shared/tokens.css. */
+.pw-layer { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; box-sizing: border-box; padding: 12px; overflow: hidden; }
+.pw-layer[hidden] { display: none; }
+.pw-dialog { box-sizing: border-box; display: flex; flex-direction: column; width: 100%; max-width: 440px; max-height: 100%; overflow: hidden; background: var(--surface); color: var(--text); }
+.pw-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; box-sizing: border-box; padding: 18px 18px 4px; }
+.pw-title { margin: 0 0 6px; color: var(--text-strong); font: 600 16px/1.3 var(--sans); letter-spacing: -.005em; outline: none; }
+.pw-lead { margin: 0 0 12px; color: var(--text); font: var(--w-reg, 400) var(--t-sm, 13px)/1.5 var(--sans); overflow-wrap: anywhere; }
+.pw-rows { display: flex; flex-direction: column; }
+.pw-row { display: grid; grid-template-columns: 20px minmax(0, 1fr); column-gap: 10px; align-items: start; padding: 10px 0; border-top: 1px solid var(--hair); }
+.pw-words { min-width: 0; }
+.pw-names { display: block; color: var(--text-strong); font: var(--w-med, 500) var(--t-sm, 13px)/1.45 var(--sans); overflow-wrap: anywhere; }
+.pw-says, .pw-line { margin: 2px 0 0; color: var(--muted); font: var(--w-reg, 400) var(--t-sm, 13px)/1.5 var(--sans); overflow-wrap: anywhere; }
+.pw-line { margin: 0; }
+.pw-line .pw-names, .pw-line .pw-says { display: inline; margin: 0; }
+/* A name is a button that reads as the name: no box until it is pointed at or focused, in the button family's corner. */
+.pw-pip { display: inline; margin: 0; padding: 0 1px; border: 0; border-radius: 3px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere;
+  text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px; }
+.pw-pip:hover { text-decoration-color: currentColor; }
+.pw-pip:focus-visible { outline: var(--btn-ring); outline-offset: 1px; }
+.pw-more { color: var(--muted); font-weight: var(--w-reg, 400); }
+.pw-face { display: inline-flex; align-items: center; justify-content: center; gap: 3px; width: 20px; height: 20px; margin-top: 0; border-radius: 50%; background: #4FA86E; }
+.pw-face i { display: block; width: 3px; height: 6px; border-radius: 1.5px; background: #fff; }
+.pw-face[data-tone="blue"] { background: #5F8FE3; }
+.pw-dot { justify-self: center; width: 6px; height: 6px; margin-top: 7px; border-radius: 50%; background: #D9A441; }
+.pw-dot.quiet { background: color-mix(in srgb, var(--text) 35%, transparent); }
+.pw-foot { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 18px 16px; border-top: 1px solid var(--hair); }
+.pw-how { flex: 0 1 auto; min-width: 0; margin: 0; padding: 0 2px; border: 0; border-radius: 3px; background: transparent; color: var(--link, var(--accent-text)); font: var(--w-reg, 400) var(--t-sm, 13px)/1.4 var(--sans);
+  text-align: left; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.pw-how:focus-visible { outline: var(--btn-ring); outline-offset: 2px; }
+.pw-foot .dgc-btn { width: 84px; }
+@media (max-width: 340px) { .pw-body { padding: 14px 14px 2px; } .pw-foot { padding: 10px 14px 14px; } .pw-foot .dgc-btn { width: 76px; } }
+
+.psn { flex: none; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: 10px; align-items: start; box-sizing: border-box; margin: var(--sp-3, 12px) var(--sp-4, 16px) 0; padding: 10px 8px 10px 12px;
+  border: 1px solid var(--hair-strong, var(--border)); border-radius: var(--r-md, 10px); background: var(--surface); color: var(--text); }
+.psn[hidden] { display: none; }
+body[data-agent-page] .psn { display: none; }
+.psn .pw-face { margin-top: 1px; }
+.psn-words { min-width: 0; }
+.psn-title { display: block; color: var(--text-strong); font: var(--w-semi, 600) var(--t-sm, 13px)/1.4 var(--sans); }
+.psn-text { margin: 2px 0 0; color: var(--muted); font: var(--w-reg, 400) var(--t-xs, 12px)/1.45 var(--sans); overflow-wrap: anywhere; }
+.psn-links { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 12px; margin-top: 4px; }
+.psn-open { margin: 0; padding: 0 1px; border: 0; border-radius: 3px; background: transparent; color: var(--link, var(--accent-text)); font: var(--w-reg, 400) var(--t-xs, 12px)/1.5 var(--sans); text-align: left; overflow-wrap: anywhere;
+  text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.psn-open:focus-visible { outline: var(--btn-ring); outline-offset: 2px; }
+.psn-more { color: var(--muted); font: var(--w-reg, 400) var(--t-xs, 12px)/1.5 var(--sans); }
+.psn-close { display: inline-grid; place-items: center; box-sizing: border-box; width: var(--btn-h-sm); height: var(--btn-h-sm); margin: -2px 0 0; padding: 0; border: 1px solid transparent; border-radius: var(--btn-r);
+  background: transparent; color: var(--muted); cursor: pointer; transition: var(--btn-move); }
+.psn-close .codicon { font-size: 12px; }
+.psn-close:hover { border-color: var(--btn-line); background: var(--btn-wash); color: var(--text); }
+.psn-close:focus-visible { outline: var(--btn-ring); outline-offset: 1px; }
+@media (forced-colors: active) { .pw-face, .pw-dot { forced-color-adjust: none; } .psn { border-color: CanvasText; } }

@@ -599,6 +599,8 @@ button.link.hook-link:hover{background:transparent;color:var(--pip-ink);text-dec
 .webhook-own>summary:hover{color:var(--vscode-foreground)}
 .webhook-own-form{display:flex;flex-direction:column;gap:6px;min-width:0;margin-top:8px}
 .webhook-refused .row-words small{font-size:12px}
+/* Pips settings › How Pips work now (0.52): one quiet line under whichever tab is open. */
+.pips-how-line{margin:14px 2px 0;color:var(--muted);font-size:12px;line-height:1.5}
 /* Pips settings has a fourth tab (Webhooks): in a narrow side bar the four stay inside it. */
 .pip-page-tabs[aria-label="Pips settings"]{max-width:100%;min-width:0}
 .pip-page-tabs[aria-label="Pips settings"] button.seg{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

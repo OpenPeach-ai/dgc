@@ -1,9 +1,10 @@
 // Pip reports reach the chat, end to end: the REAL panel, the REAL `dgc serve` of this checkout, a
 // real Pip registry in the session's HOME, and media/main.js in Chromium (test/support/panel-live.mjs).
-// A Pip attached to the chat finishes a run; its card arrives in the open chat by itself (no turn);
-// Ask DGC to fix starts a BACKGROUND fix (reported 19 Oct): no turn, the card is its status, the
-// fixer reads the whole finding, its change is applied with Undo and the card says so; a reload draws
-// the same card; Dismiss is saved; and the card fits a narrow panel.
+// A Pip's run finishes; its card arrives in the open chat by itself (no turn). With 0.52's DGC (Pips API 96)
+// the card is history: no Ask DGC to fix and no Dismiss, one quiet "Open in its chat" (the fix is the Pip's own, in
+// its chat); a reload draws the same card; and the card fits a narrow panel. (Until 0.52 this test also started a
+// background fix from the card and dismissed it: neither is offered at API 96, so neither can be reached here. The
+// fix row's own drawing is still held by the jsdom tests, pip-fix-row and agent-lines.)
 // DGC_REQUIRE_CHROMIUM=1 turns a missing browser or Python into a failure.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
@@ -55,7 +56,7 @@ const cards = (page) => page.evaluate(() => [...document.querySelectorAll("#log 
     && !!(block.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING) };
 }));
 
-test("a report reaches the open chat as a card, Ask DGC to fix fixes it in the background with Undo", async (t) => {
+test("a report reaches the open chat as a card with one quiet answer, Open in its chat; a reload draws the same card", async (t) => {
   if (env.skipOrFail(t)) return;
   const s = await panelSession({ ...env, model, name: "pip-report", config: { pips_enabled: true },
     files: { ".gitignore": ".env\n" } });
@@ -70,10 +71,10 @@ test("a report reaches the open chat as a card, Ask DGC to fix fixes it in the b
     await s.typePrompt("Set up a daily audit of the billing code");
     await until(() => s.events.some((e) => e.type === "turn_end"), "the first turn to end", 30_000);
     await until(() => s.provider.currentSessionSaved, "the chat to be saved", 10_000);
-    py(s, "attach", s.work, s.provider.currentSessionId, pip);
+    // 0.52: a Work chat gets a Pip's card only for a run it started (attaching routes nothing): this chat ran it.
     reportRun = py(s, "finish", s.work, pip, JSON.stringify([
       { title: "GST total skips cess", severity: "high", path: "app/gst.py", line: 2, evidence: "return x", verification: "source_excerpt_only" },
-      { title: "Rounding drops paise", severity: "medium", path: "app/billing.py", line: 12, evidence: "round", verification: "source_excerpt_only" }]));
+      { title: "Rounding drops paise", severity: "medium", path: "app/billing.py", line: 12, evidence: "round", verification: "source_excerpt_only" }]), s.provider.currentSessionId);
     const turnsBefore = s.events.filter((e) => e.type === "turn_start").length;
 
     const event = await until(() => s.events.find((e) => e.type === "pip_report"), "the report to arrive by itself", 20_000);
@@ -85,57 +86,39 @@ test("a report reaches the open chat as a card, Ask DGC to fix fixes it in the b
     const state = await s.page.locator(".pip-report .pip-report-state").textContent();
     assert.equal(state, "finished · 2 findings (1 high, 1 medium)");
 
-    // The narrow panel: nothing clipped sideways, the actions on screen.
+    // The narrow panel: nothing clipped sideways, its one answer on screen.
     const fit = async () => s.page.evaluate(() => {
       const card = document.querySelector(".pip-report"), log = document.getElementById("log");
       const box = card.getBoundingClientRect();
       return { overflow: card.scrollWidth - card.clientWidth, logOverflow: log.scrollWidth - log.clientWidth,
         right: box.right, width: innerWidth,
-        // The buttons on screen (closed, the second line's Fix · Open · ✕; the whole card's row waits behind the fold).
+        // The buttons on screen (closed: the second line's; the whole card's row waits behind the fold).
         buttons: [...card.querySelectorAll("button")].filter((b) => b.getClientRects().length)
-          .map((b) => { const r = b.getBoundingClientRect(); return r.right <= innerWidth && r.width > 0; }) };
+          .map((b) => { const r = b.getBoundingClientRect(); return { text: b.textContent.trim(), inside: r.right <= innerWidth && r.width > 0 }; }) };
     });
     const before = await fit();
     assert.ok(before.overflow <= 0 && before.logOverflow <= 0, JSON.stringify(before));
-    assert.ok(before.right <= before.width && before.buttons.every(Boolean), JSON.stringify(before));
-    assert.ok(before.buttons.length >= 3, "Fix, Open and ✕ are on the card's second line");
-
-    await s.page.locator(".pip-report-fix-slim").click();                // the user's ask: a fix in the background
+    assert.ok(before.right <= before.width && before.buttons.every((b) => b.inside), JSON.stringify(before));
+    // 0.52, Pips API 96 (this checkout's DGC): the Pip tells you in its own chat, so the card here is history. No Fix,
+    // no Ask DGC to fix and no Dismiss: one quiet "Open in its chat" (test/pip-report-quiet.test.mjs has the card's
+    // every state; the background fix a card used to start is the Pip's own now, test/one-pips-flow.test.mjs).
+    assert.deepEqual(before.buttons.map((b) => b.text), ["Open in its chat"], "its one answer, on the card's second line");
+    assert.equal(await s.page.locator(".pip-report-fix-slim, .pip-report-fix, .pip-report-dismiss-slim, .pip-fix-dismiss").count(), 0, "nothing to fix or dismiss here");
     assert.equal(await s.page.locator("#input").evaluate((el) => el.value), "", "the box is left alone");
-    const fixed = await until(() => s.events.find((e) => e.type === "pip_fix" && e.fix.state === "applied"),
-      "the background fix to be applied", 60_000);
-    assert.equal(s.events.filter((e) => e.type === "turn_start").length, turnsBefore, "the fix is no turn: the chat stays free");
-    assert.equal(readFileSync(join(s.work, "app", "gst.py"), "utf8"), "def total(x):\n    return x * 118 // 100\n");
-    assert.ok(seen.some((u) => u.includes("GST total skips cess") && u.includes("Evidence: return x")), "the fixer read the finding");
-    await until(async () => (await s.page.locator(".pip-fix .pip-fix-text").textContent()) === "Fixed · 1 file changed", "the card to say so");
-    assert.deepEqual(await s.page.locator(".pip-fix .pip-fix-act").allTextContents(), ["Review", "Undo", "Watch"]);
-    assert.match(await s.page.locator(".pip-fix .pip-fix-tests").textContent(), /^Tests didn't run in the fix copy: this fixture has no tests$/);
-    assert.equal(await s.page.locator(".pip-report-fix-slim").isVisible(), false, "the fix's own line replaces Fix");
-    const after = await fit();
-    assert.ok(after.overflow <= 0 && after.logOverflow <= 0 && after.buttons.every(Boolean), JSON.stringify(after));
-    assert.equal(fixed.fix.files[0].path, "app/gst.py");
+    assert.equal(s.events.filter((e) => e.type === "pip_fix").length, 0, "no fix was started in this chat");
 
-    // A reload draws the same card where it was, its fix with it. Compared at rest: while DGC's own tooltip is up it
-    // lifts the control's `title` (and puts it back on hide), so a pointer left over the card's place ("gst.py, line
-    // 2", whose title is the exact path) would make the live copy differ from the replay by that one attribute.
+    // A reload draws the same card where it was. Compared at rest: while DGC's own tooltip is up it lifts the
+    // control's `title` (and puts it back on hide), so a pointer left over the card's place ("gst.py, line 2", whose
+    // title is the exact path) would make the live copy differ from the replay by that one attribute.
     await s.page.mouse.move(0, 0);
     await until(async () => s.page.evaluate(() => !document.querySelector(".pip-report-where:not([title])")), "the tooltip to put the title back", 5_000);
     const liveCards = await cards(s.page);
     await s.reloadWebview({ width: 360, height: 760 });
     await s.ready();
     await until(async () => (await cards(s.page)).length === 1, "the replayed card", 20_000);
-    await until(async () => (await s.page.locator(".pip-fix .pip-fix-text").count()) === 1, "the replayed fix", 20_000);
     const replayed = await cards(s.page);
-    const plain = (html) => html.replace(/<span class="pip-fix-time">[^<]*<\/span>/, "");
-    assert.deepEqual(replayed.map((c) => plain(c.html)), liveCards.map((c) => plain(c.html)), "replay draws what live drew");
-
-    // (The card is the fix's helper row now: its Dismiss is the row's own, which is the card's.)
-    await s.page.locator(".pip-fix-dismiss").click();
-    await sleep(800);
-    await s.reloadWebview({ width: 360, height: 760 });
-    await s.ready();
-    await sleep(1500);
-    assert.equal((await cards(s.page)).length, 0, "Dismiss is saved with the chat");
+    assert.deepEqual(replayed.map((c) => c.html), liveCards.map((c) => c.html), "replay draws what live drew");
+    assert.deepEqual((await fit()).buttons.map((b) => b.text), ["Open in its chat"], "and still its one answer");
     assert.deepEqual(s.errors, []);
   } finally {
     await s.close();

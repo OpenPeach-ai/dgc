@@ -515,6 +515,7 @@
   // Pips has its own durable conversations. Hiding the main chat preserves its
   // live stream, draft, scroll position and session; it never changes that session.
   let pipsApp = null, pipsOpen = false, pipsViewVisible = true, pipsWindowFocused = true;
+  let pipsWelcome = null;                // "Your Pips moved into one list", once it has been opened (openPipsWelcome)
   const pipsListeners = new Set();
   let pipSetupCards = null;
   function setupCards() {
@@ -620,6 +621,8 @@
         onAskDgc:({report, session} = {}) => askDgcFromPips(report, session),
         // What the fix did, in the run's post (Pips API 65): a click goes to its card in the chat it ran in.
         onOpenFix:({session, run_id} = {}) => openPipFixFromPips(session, run_id),
+        // Pips settings › How Pips work now: the editor opens "Your Pips moved into one list" again.
+        onHowPipsWork:() => vscode.postMessage({ type: "pipsWelcomeOpen" }),
         onSetupPrompt:prompt => {
           // Preparing a message is never sending it or replacing the user's work.
           if (composerText() || input.querySelector(".composer-pill") || attachments.length || pendingImageFiles || pendingImageBytes) return 'The main chat already has a draft or attachments. Send or save that draft before describing this setup.';
@@ -633,6 +636,8 @@
     }
     tellPipsDock();
     if (sessionsOpen) hideSessions();
+    // A visit to the Pips tab: the editor may show its one-time welcome (src/pipsWelcome.ts).
+    if (!pipsOpen) vscode.postMessage({ type: "pipsTabOpened" });
     pipsOpen = true;
     if (chatPlace === "home") { sideTab = "pips"; keepSideTab(); paintSideTabs(); }
     document.body.classList.add("pips-active");
@@ -645,6 +650,8 @@
   // `back`: whether to go back to what was there before -- the side bar's Sessions home goes back to
   // its list. False when the list itself is what is taking over.
   function closePips(back = true) {
+    if (pipsOpen) vscode.postMessage({ type: "pipsTabClosed" });
+    pipsWelcome?.close(false);                 // the pop-up belongs to the tab: left unanswered, it comes again
     pipsOpen = false;
     pipsApp?.setVisible?.(false);
     document.body.classList.remove("pips-active");
@@ -2034,6 +2041,12 @@
   let pipReportsLive = false;            // ready.capabilities.pip_reports: Dismiss is saved with the chat
   let displayMentionsVersion = 0;       // display-only inline marks replayed in sent prompts
   let pipFixLive = false;                // ready.capabilities.pip_fix: Ask DGC to fix runs in the background
+  // Pips API 96 (the Pips flow): a Pip tells you what it finds in its own chat. A report card in a Work chat is history
+  // then: no Ask DGC to fix and no Dismiss, one quiet "Open in its chat"; and a session that used to get cards says so
+  // once, above its chat (media/shared/pipswelcome.js).
+  let pipsApi = 0;
+  const PIPS_FLOW_API = 96;
+  const pipsFlow = () => pipsApi >= PIPS_FLOW_API;
   // Declared up here: the rail's chip line reads them while the panel is still starting up.
   const pipFixes = new Map();            // run_id -> the latest fix record of that report in this chat
   const pipFixSteps = new Map();         // agent id -> what the fixer is doing now ("Running npm test")
@@ -8950,6 +8963,8 @@ function permissionChoices(ev) {
         backgroundNowLive = Number(ev.capabilities?.background_now?.version) >= 1;
         pipReportsLive = ev.capabilities?.pip_reports === 1;
         pipFixLive = pipReportsLive && ev.capabilities?.pip_fix === 1;
+        pipsApi = Number.isSafeInteger(ev.capabilities?.pips_api_version) ? ev.capabilities.pips_api_version : 0;
+        sessionNoteFor(ev.session_id);
         steerQueuedLive = nativeSteering && ev.capabilities?.steer_queued === true;
         queueEditLive = ev.capabilities?.queue_edit === true;
         turnFilesLive = ev.capabilities?.turn_files === 1;
@@ -8998,6 +9013,7 @@ function permissionChoices(ev) {
       case "history":
         if (ev.complete === true) prepareCompleteHistory(ev.items || []);
         renderHistory(ev.items || []);
+        sessionNoteFrom(ev.items);
         askGoalRuns();                           // the goals this session ran: their end lines come back
         if (heldSend && sessionReady) setTimeout(flushHeldSend, 0);
         railSnapshot(ev.items);
@@ -9040,6 +9056,7 @@ function permissionChoices(ev) {
         }
         setThreadTitle(ev.name, ev.session_id, ev.kind === "cleared" || ev.kind === "new");
         if (ev.session_id) selectDraftSession(ev.session_id);
+        sessionNoteFor(ev.session_id);
         renderUnconfirmedDrafts();
         break;
       case "session_named": setThreadTitle(ev.name); break;
@@ -11820,6 +11837,9 @@ function permissionChoices(ev) {
     const fixed = quiet && replaced.some((x) => PIP_REPORT_BAD.includes(x.outcome));
     const again = r.outcome === "failed" && replaced.length > 0 && replaced.every((x) => x.outcome === "failed");
     const signIn = r.outcome === "failed" && r.sign_in === true;
+    // Pips API 96: the Pip says this in its own chat, so the card here is history. One quiet answer, Open in its chat.
+    const flow = pipsFlow();
+    if (flow) card.dataset.flow = "";
     if (fixed) card.dataset.fixed = "";
     const state = fixed ? `fixed · ${pipReportState(r).replace(/^finished · /, "")}`
       : again ? pipReportState(r).replace(/^failed/, "failed again") : pipReportState(r);
@@ -11925,10 +11945,13 @@ function permissionChoices(ev) {
       read();
       (next?.querySelector?.("button, [tabindex='0']") || input).focus({ preventScroll: true });
     };
-    if (signIn) button("Check sign-in", "act primary pip-report-signin", signInTitle, checkSignIn);
+    const openChat = () => { read(); openPipsAt({ pip: r.pip_id, section: "chat" }); };
+    const chatTitle = `Open ${r.name}'s chat in Pips: it tells you what it finds there now`;
+    if (flow) button("Open in its chat", "act pip-report-chat", chatTitle, openChat);
+    else if (signIn) button("Check sign-in", "act primary pip-report-signin", signInTitle, checkSignIn);
     else if (!quiet) button("Ask DGC to fix", "act pip-report-fix", fixTitle, fix);
     // One filled answer and one quiet one. Dismiss is the ✕ at the end of the card's first line, closed and opened.
-    button("Open report", "act pip-report-open", `Open this run of ${r.name} in Pips`, openReport);
+    if (!flow) button("Open report", "act pip-report-open", `Open this run of ${r.name} in Pips`, openReport);
     main.append(actions);
     // Two lines until opened (reported 19 Oct: the cards took too much room). Line one: the Pip, what it found,
     // when, and a chevron; line two: the worst finding or why it failed, with Fix, Open and Dismiss. A clean run is
@@ -11951,11 +11974,13 @@ function permissionChoices(ev) {
     const slimActs = el("span", "pip-report-slim-actions");
     // "Check sign-in" is wider than Fix: beside it the line keeps only ✕, so it fits a 300 px side bar. Open report is
     // in the opened card.
-    if (signIn) button("Check sign-in", "pip-report-signin-slim", signInTitle, checkSignIn, slimActs);
+    if (flow) button("Open in its chat", "pip-report-chat-slim", chatTitle, openChat, slimActs);
+    else if (signIn) button("Check sign-in", "pip-report-signin-slim", signInTitle, checkSignIn, slimActs);
     else if (!quiet) button("Fix", "pip-report-fix-slim", fixTitle, fix, slimActs);
-    if (!signIn) button("Open", "pip-report-open-slim", `Open this run of ${r.name} in Pips`, openReport, slimActs);
-    const x = button("", "pip-report-dismiss-slim", "Dismiss: remove this card from the chat. The report stays in Pips.", dismiss, line1);
-    x.setAttribute("aria-label", "Dismiss"); x.innerHTML = '<span class="codicon codicon-close" aria-hidden="true"></span>';
+    if (!flow && !signIn) button("Open", "pip-report-open-slim", `Open this run of ${r.name} in Pips`, openReport, slimActs);
+    // (At API 96 a card is history and has no Dismiss: `x` is a mark that is never drawn, so the lines below place nothing.)
+    const x = flow ? line1.appendChild(document.createComment("")) : button("", "pip-report-dismiss-slim", "Dismiss: remove this card from the chat. The report stays in Pips.", dismiss, line1);
+    if (!flow) { x.setAttribute("aria-label", "Dismiss"); x.innerHTML = '<span class="codicon codicon-close" aria-hidden="true"></span>'; }
     const chevron = el("span", "pip-report-chevron codicon codicon-chevron-right"); chevron.setAttribute("aria-hidden", "true");
     const fold = (open = card.dataset.shown !== "open") => {
       card.dataset.shown = open ? "open" : "closed"; line1.setAttribute("aria-expanded", String(open));
@@ -12327,7 +12352,8 @@ function permissionChoices(ev) {
       if (undoable) act("Undo", "pip-fix-undo", "Put these files back as they were before the fix", (b) => {
         vscode.postMessage({ type: "undoPipFix", fix_id: fix.fix_id, files: files.length });
       });
-      if (["failed", "stopped", "interrupted", "not_applied", "undone"].includes(fix.state) && validPipReport(card._report)) {
+      // (Pips API 96: a new fix is the Pip's own, in its chat. An old fix here keeps Review and Undo, nothing more.)
+      if (!pipsFlow() && ["failed", "stopped", "interrupted", "not_applied", "undone"].includes(fix.state) && validPipReport(card._report)) {
         act("Try again", "pip-fix-again", "Start a new fix of this report", () => startPipFix(card._report, card));
       }
       if (canWatch && fix.state !== "undone") act("Watch", "pip-fix-watch", "See what the fix did, step by step", (b) => openAgentPage(fix.agent_id, { from: b }));
@@ -13010,6 +13036,47 @@ function permissionChoices(ev) {
     whatsNew = whatsNew || window.DgcWhatsNew.mount(layer, { onSeen: () => vscode.postMessage({ type: "whatsNewSeen" }) });
     whatsNew.open({ release: msg?.release });
   }
+  // "Your Pips moved into one list" (media/shared/pipswelcome.js): the pop-up the Pips tab shows once, and again from
+  // Pips settings. Got it, Esc or a click outside tells the host, which never shows it by itself again
+  // (src/pipsWelcome.ts). A Pip's name in it opens that Pip's chat.
+  function openPipsWelcome(msg) {
+    const layer = $("pips-welcome");
+    if (!layer || !window.DgcPipsWelcome || !pipsOpen || !msg.welcome || typeof msg.welcome !== "object") return;
+    pipsWelcome = pipsWelcome || window.DgcPipsWelcome.mount(layer, { onSeen: () => vscode.postMessage({ type: "pipsWelcomeSeen" }),
+      onOpenPip: (pip) => openPipsAt({ pip, section: "chat" }) });
+    pipsWelcome.open(msg.welcome);
+  }
+  // The quiet note above a Work session that used to get Pip cards (pips-flow-design §3.3, item 3). The session's
+  // history names the Pips; the host says whether the note was ever closed (it remembers per session). It is drawn
+  // above the chat, never in it: the model never sees it and nothing is sent to DGC. × or one of its Pips opened:
+  // gone for good.
+  let noteSession = "", noteAsked = "", notePips = [];
+  function sessionNoteHide() { const host = $("pip-session-note"); if (host) { host.hidden = true; host.replaceChildren(); } }
+  function sessionNoteFor(session) {
+    const id = typeof session === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(session) ? session : "";
+    if (!id || id === noteSession) return;
+    noteSession = id; noteAsked = ""; notePips = [];
+    sessionNoteHide();
+  }
+  function sessionNoteFrom(items) {
+    if (!pipsFlow() || !noteSession || !window.DgcPipsWelcome) return;
+    const pips = window.DgcPipsWelcome.reporters(items);
+    if (!pips.length) return;
+    notePips = pips;
+    if (noteAsked === noteSession) return;
+    noteAsked = noteSession;
+    vscode.postMessage({ type: "pipSessionNoteAsk", session: noteSession });
+  }
+  function sessionNoteGone() {
+    sessionNoteHide();
+    notePips = [];
+    vscode.postMessage({ type: "pipSessionNoteGone", session: noteSession });
+  }
+  function sessionNoteShow(msg) {
+    if (msg.show !== true || msg.session !== noteSession || !notePips.length || !pipsFlow()) return;
+    window.DgcPipsWelcome?.note($("pip-session-note"), notePips, { onClose: sessionNoteGone,
+      onOpen: (pip) => { sessionNoteGone(); openPipsAt({ pip, section: "chat" }); } });
+  }
   window.addEventListener("message", (e) => {
     const msg = e.data;
     if (window.DgcVideo?.message(msg)) return;     // a video's bytes, its state or its Stop (src/videoHost.ts)
@@ -13098,6 +13165,8 @@ function permissionChoices(ev) {
     if (msg.type === "homePages") { homePagesNow = homePagesFrom(msg.pages); paintHub(); return; }
     if (msg.type === "homeCards") { home?.layout(msg); return; }
     if (msg.type === "whatsNew") { openWhatsNew(msg); return; }
+    if (msg.type === "pipsWelcome") { openPipsWelcome(msg); return; }
+    if (msg.type === "pipSessionNote") { sessionNoteShow(msg); return; }
     if (msg.type === "homeUsage") { home?.usage(msg); return; }
     if (msg.type === "homeWeather") { home?.weather(msg); return; }
     if (msg.type === "homeWeatherPlaces") { home?.places(msg); return; }
