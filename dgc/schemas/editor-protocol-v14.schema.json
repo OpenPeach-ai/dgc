@@ -2674,6 +2674,60 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "agents_model"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "own": {
+              "type": "boolean"
+            },
+            "model": {
+              "type": "string"
+            },
+            "base_url": {
+              "type": "string"
+            },
+            "api_mode": {
+              "type": "string"
+            },
+            "api_key_set": {
+              "type": "boolean"
+            },
+            "settings_model": {
+              "type": "string"
+            },
+            "settings_base_url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "own",
+            "model",
+            "base_url",
+            "api_mode",
+            "api_key_set",
+            "settings_model",
+            "settings_base_url"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "model_defaults_changed"
             },
             "seq": {
@@ -10976,6 +11030,46 @@
           "properties": {
             "type": {
               "const": "list_models"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "get_agents_model"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "reset_agents_model"
             },
             "chat_id": {
               "type": "string",

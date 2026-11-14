@@ -263,7 +263,7 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
     # The person saved a file in the editor: a fact for the command watch, not the person acting on the chat.
     "user_saved",
     "get_config", "status", "get_history", "get_outline", "list_monitors", "stop_monitor", "list_mcp_context",
-    "list_agents", "get_image", "list_troupes", "stop_troupe",
+    "list_agents", "get_image", "list_troupes", "stop_troupe", "get_agents_model",
     # The window a vLLM, SGLang or llama.cpp server was started with: asked once, then sent as it changes.
     "server_window",
     # Pip reports: a client asking for them, or dismissing a card, is not a user acting on the chat.
@@ -590,7 +590,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "get_plan", "new_session", "clear_session", "resume_session", "list_sessions", "get_recall",
     "delete_session", "archive_session", "create_session", "fork_session", "list_checkpoints", "rewind", "undo_to", "list_retained_tasks",
     "resolve_retained_task", "compact", "context_breakdown", "server_window", "list_artifacts", "stop_artifact",
-    "set_config", "clear_todos", "get_config", "status", "name_session", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "get_skill", "list_docs", "get_doc",
+    "set_config", "get_agents_model", "reset_agents_model", "clear_todos", "get_config", "status", "name_session", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "get_skill", "list_docs", "get_doc",
     "list_mcp_servers", "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
     "list_mcp_context", "get_mcp_context", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command", "get_history", "get_outline",
     "list_permissions", "add_permission_rule", "remove_permission_rule",
@@ -2892,6 +2892,11 @@ class Backend:
                           # or fallback_engine (Claude Code or Codex as its fallback; get_config's opt-in field of the
                           # same name says which), and model_fallback says while the fallback answers (D14).
                           "model_fallback": 1,
+                          # agents_model (0.52): set_config scope=session takes subagent_model, subagent_base_url,
+                          # subagent_api_mode and subagent_api_key (this session's own agents model, kept with it,
+                          # never its key; it wins over DGC Router); reset_agents_model goes back to Settings';
+                          # get_agents_model answers agents_model.
+                          "agents_model": 1,
                           "model_defaults": True,
                           "subscription_defaults": True,
                           # False: nothing chose a model (no saved route, no DGC_MODEL, no subscription), so the model
@@ -5781,6 +5786,19 @@ class Backend:
             sanitizer=lambda value: redact_value(value, secret_values(self.config)))
         fields = {"message": str(message)[:500]} if message else {}
         self.em.emit("memory", request_id=request_id, project=project, user=user, **fields)
+
+    def _emit_agents_model(self, request_id: str = "") -> None:
+        """agents_model (0.52): whether this Work session chose its own agents model, which, and Settings' one."""
+        from .config import USER_CONFIG, _read_config_payload
+        cfg = self.config
+        settings = _read_config_payload(USER_CONFIG) or {}
+        self.em.emit("agents_model", own=bool(cfg.agents_route_own()),
+                     model=str(cfg.get("subagent_model", "") or ""), base_url=str(cfg.get("subagent_base_url", "") or ""),
+                     api_mode=str(cfg.get("subagent_api_mode", "") or ""),
+                     api_key_set=bool(cfg.get("subagent_api_key", "")),
+                     settings_model=str(settings.get("subagent_model", "") or ""),
+                     settings_base_url=str(settings.get("subagent_base_url", "") or ""),
+                     **_request_fields(request_id))
 
     def _save_model_provider(self, cmd: dict, request_id: str) -> None:
         """Keep one provider saved in Settings for the Pips set to it, or forget it (``remove``). A fresh Config owns it,
@@ -9832,11 +9850,43 @@ class Backend:
             if session_route and not set(values).issubset({
                     "subscription_engine", "subscription_model", "subscription_effort",
                     "fallback_model", "fallback_base_url", "fallback_api_mode", "fallback_api_key",
-                    "fallback_engine"}):
+                    "fallback_engine",
+                    # 0.52: this session's own agents model (Settings > Sub-agents for every other chat)
+                    "subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_api_key"}):
                 self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="session route may only change its subscription engine, model and effort, and its fallback",
+                             message="session route may only change its subscription engine, model and effort, its fallback "
+                                     "and its agents model",
                              **_request_fields(request_id))
                 return
+            agents_chosen = session_route and bool(set(values) & {"subagent_model", "subagent_base_url",
+                                                                  "subagent_api_mode"})
+            if agents_chosen:
+                from .sessions import _clean_agents_route
+                proposed = {key: str(values.get(f"subagent_{key}", self.config.get(f"subagent_{key}", "")) or "")
+                            for key in ("model", "base_url", "api_mode")}
+                if _clean_agents_route(proposed) is None:
+                    self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                                 message="the agents model's address must be a plain HTTP or HTTPS URL",
+                                 **_request_fields(request_id))
+                    return
+            settings_agents = {}
+            if (not session_route and getattr(self.config, "agents_route_own", lambda: False)()
+                    and set(values) & {"subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_api_key"}):
+                # Settings > Sub-agents changed from a session that chose its own agents model: Settings is saved for
+                # every other chat, and this session keeps its own (0.52). A fresh Config owns the save, as
+                # save_model_provider's does; Settings' key stays with the editor, as it does for every chat.
+                settings_agents = {key: values.pop(key) for key in ("subagent_model", "subagent_base_url",
+                                                                    "subagent_api_mode") if key in values}
+                values.pop("subagent_api_key", None)
+                try:
+                    from .config import Config as _Fresh
+                    fresh = _Fresh(project_root=self.config.project_root)
+                    for key, value in settings_agents.items():
+                        fresh.set(key, value)
+                except Exception:                   # noqa: BLE001
+                    self.em.emit("command_rejected", command=t, reason="config_apply_failed",
+                                 message="Settings' agents model could not be saved.", **_request_fields(request_id))
+                    return
             config_get = getattr(self.config, "get", None)
             if "search_api_key" in values:
                 # An older editor's one key field: the key of the provider this save selects (else the one
@@ -9969,6 +10019,9 @@ class Backend:
                 if has_persist_flag:
                     self.config._persist = persist_before
             self._emit_config(request_id)
+            if settings_agents or (session_route and set(values) & {"subagent_model", "subagent_base_url",
+                                                                    "subagent_api_mode", "subagent_api_key"}):
+                self._emit_agents_model(request_id)
             if "subscription_engine" in values or "prompt_cache" in values:
                 self._publish_cache_clock(current=True)  # whose cache the next turn uses changed
             if "subscription_engine" in values and getattr(self, "_server_window_wanted", False):
@@ -9980,6 +10033,22 @@ class Backend:
                 self.em.emit("think_changed", think=shown, **_request_fields(request_id))
             if "context_size" in values:
                 self._emit_context(request_id)
+        elif t == "get_agents_model":
+            self._emit_agents_model(request_id)
+        elif t == "reset_agents_model":
+            # "Same as settings": this session drops its own agents model and follows Settings again (0.52).
+            before = (copy.deepcopy(self.config.data), set(getattr(self.config, "_ephemeral_keys", set())),
+                      set(getattr(self.config, "_held_keys", set())), set(getattr(self.config, "_env_secret_keys", set())),
+                      dict(getattr(self.config, "_provider_secret_identity", {})))
+            self.config.restore_agents_route(None)
+            if not self.agent._persist():
+                (self.config.data, self.config._ephemeral_keys, self.config._held_keys, self.config._env_secret_keys,
+                 self.config._provider_secret_identity) = before
+                self.em.emit("command_rejected", command=t, reason="session_save_failed",
+                             message="The session could not save its agents model.", **_request_fields(request_id))
+                return
+            self._emit_config(request_id)
+            self._emit_agents_model(request_id)
         elif t == "get_config":
             fields = cmd.get("fields")
             if isinstance(fields, list):

@@ -1459,6 +1459,10 @@ _SESSION_KEYS = frozenset({
     "provider_capabilities", "fallback_model", "fallback_base_url", "fallback_api_mode", "fallback_engine",
     "subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_context_size", "subagent_thinking",
 })
+# The agents model (Settings > Sub-agents). Still session keys, so the generic adopt never moves an address without
+# its key; since 0.52 a chat that didn't choose its own follows Settings on each save (Config._follow_agents_settings),
+# dropping the old address's key, and a Work session that chose its own holds it (Config.restore_agents_route).
+AGENTS_ROUTE_KEYS = ("subagent_model", "subagent_base_url", "subagent_api_mode")
 
 
 # Lists several processes edit one entry at a time. Written whole, a Config that loaded before
@@ -2089,6 +2093,95 @@ class Config:
         else:
             bindings.pop("fallback_api_key", None)
 
+    def agents_route_own(self) -> bool:
+        """Whether this Work session chose its own agents model (0.52) rather than following Settings > Sub-agents."""
+        held = getattr(self, "_ephemeral_keys", set())
+        return any(key in held for key in AGENTS_ROUTE_KEYS)
+
+    def _follow_agents_settings(self, payload: dict, changed: dict) -> None:
+        """A chat that didn't choose its own agents model follows Settings > Sub-agents as it is on disk (0.52). A new
+        address never gets the old one's key: the key Settings saved for the new address, else none (the editor
+        supplies one)."""
+        if self.agents_route_own() or any(key in changed for key in AGENTS_ROUTE_KEYS):
+            return
+        future = dict(self.data)
+        for key in AGENTS_ROUTE_KEYS:
+            if key in payload:
+                future[key] = payload[key]
+        if all(future.get(key) == self.data.get(key) for key in AGENTS_ROUTE_KEYS):
+            return
+        before = _provider_secret_identity(self.data, "subagent_api_key")
+        after = _provider_secret_identity(future, "subagent_api_key")
+        if before != after:
+            secret = ""
+            stored = _read_config_payload(USER_SECRETS) or {}
+            bindings = stored.get("provider_identity")
+            if after and isinstance(bindings, dict) and bindings.get("subagent_api_key") == after \
+                    and isinstance(stored.get("subagent_api_key"), str):
+                secret = stored["subagent_api_key"]
+            self.data["subagent_api_key"] = secret
+            identities = self.__dict__.setdefault("_provider_secret_identity", {})
+            if secret and after:
+                identities["subagent_api_key"] = after
+            else:
+                identities.pop("subagent_api_key", None)
+        baseline = getattr(self, "_baseline_data", None)
+        for key in AGENTS_ROUTE_KEYS:
+            if key in payload:
+                self.data[key] = payload[key]
+                if isinstance(baseline, dict):
+                    baseline[key] = payload[key]
+
+    def restore_agents_route(self, saved: dict | None = None) -> None:
+        """A Work session's agents model (0.52): its own as saved, held so no save adopts Settings' over it; or, with
+        none, Settings > Sub-agents, followed live. A session file never holds its key: the one in Settings is used for
+        its own address, the editor supplies any other (as for a session's fallback)."""
+        from .sessions import _clean_agents_route
+        route = _clean_agents_route(saved)
+        defaults = _read_config_payload(USER_CONFIG) or {}
+        settings = {key: str(defaults.get(f"subagent_{key}", DEFAULTS.get(f"subagent_{key}", "")) or "")
+                    for key in ("model", "base_url", "api_mode")}
+        ephemeral = self.__dict__.setdefault("_ephemeral_keys", set())
+        held = self.__dict__.setdefault("_held_keys", set())
+        if route is None:
+            baseline = getattr(self, "_baseline_data", None)
+            for key in ("model", "base_url", "api_mode"):
+                ephemeral.discard(f"subagent_{key}")
+                held.discard(f"subagent_{key}")
+                self.data[f"subagent_{key}"] = settings[key]
+                if isinstance(baseline, dict):
+                    # As read from Settings, not chosen here: the next save adopts a newer Settings value, never
+                    # writes this one back over it.
+                    baseline[f"subagent_{key}"] = settings[key]
+        else:
+            for key in ("model", "base_url", "api_mode"):
+                self.hold(f"subagent_{key}", route[key])
+        base = (route or settings)["base_url"]
+        identity = _provider_secret_identity({**self.data, "subagent_base_url": base}, "subagent_api_key")
+        secret = ""
+        if base == settings["base_url"]:
+            stored = _read_config_payload(USER_SECRETS) or {}
+            bindings = stored.get("provider_identity")
+            if isinstance(bindings, dict) and bindings.get("subagent_api_key") == identity:
+                value = stored.get("subagent_api_key")
+                if isinstance(value, str):
+                    secret = value
+        had_own_key = "subagent_api_key" in ephemeral or "subagent_api_key" in held
+        if route is not None:
+            self.hold("subagent_api_key", secret)            # the editor supplies any other address's key
+        elif had_own_key:
+            ephemeral.discard("subagent_api_key")
+            held.discard("subagent_api_key")
+            self.__dict__.setdefault("_env_secret_keys", set()).discard("subagent_api_key")
+            self.data["subagent_api_key"] = secret           # never the session's own key on Settings' address
+        else:
+            return                                           # following Settings already, with its own key
+        bindings = self.__dict__.setdefault("_provider_secret_identity", {})
+        if secret and identity:
+            bindings["subagent_api_key"] = identity
+        else:
+            bindings.pop("subagent_api_key", None)
+
     def restore_native_route(self, saved: dict | None = None) -> None:
         """Restore a chat's native endpoint/model without borrowing another host's key.
 
@@ -2312,6 +2405,7 @@ class Config:
                     if (key != "permissions" and key not in changed and key not in _SESSION_KEYS
                             and key not in ephemeral and key not in self._env_secret_keys):
                         self.data[key] = value
+                self._follow_agents_settings(payload, changed)
                 own_allow = self.user_permissions()["allow"]
                 contributed = self._project_contribution()     # a rule the user removed drops here
                 # Trust another session granted arrives through the adopt loop above, but only load()

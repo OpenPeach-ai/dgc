@@ -361,6 +361,11 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # A Work chat's model failed and its fallback answers (D14, capabilities.model_fallback): `model` is the fallback, and
     # `active` false (model "") says its own model answers again.
     "model_fallback": {"model": _S(), "active": _B()},
+    # A Work session's agents model (0.52, capabilities.agents_model): `own` when this session chose its own (in its
+    # model menu), else it follows Settings > Sub-agents; settings_* are Settings' own; api_key_set says whether a key
+    # for its address is to hand (the editor supplies one for an address Settings has no key for).
+    "agents_model": {"request_id": _S(False), "own": _B(), "model": _S(), "base_url": _S(), "api_mode": _S(),
+                     "api_key_set": _B(), "settings_model": _S(), "settings_base_url": _S()},
     "model_defaults_changed": {"base_url": _S(), "model": _S(), "request_id": _S(False)},
     "model_provider_saved": {"id": _S(), "removed": _B(), "request_id": _S(False)},
     "subscription_default_changed": {"engine": _f("string", enum=("claude", "codex")),
@@ -821,6 +826,10 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
             enum=("", "low", "medium", "high", "xhigh", "max")), "request_id": _S(False),
     },
     "list_models": {"request_id": _S(False)},
+    # 0.52, capabilities.agents_model: which agents model this Work session uses (answers agents_model), and "Same as
+    # settings" (drops the session's own; it follows Settings > Sub-agents again).
+    "get_agents_model": {"request_id": _S(False)},
+    "reset_agents_model": {"request_id": _S(False)},
     "list_mcp_tools": {
         "request_id": _S(), "offset": _I(False), "limit": _I(False),
     },

@@ -285,6 +285,29 @@ def _clean_fallback_route(value) -> dict[str, str] | None:
     return {"model": model, "base_url": base_url, "api_mode": api_mode, "engine": value.get("engine", "")}
 
 
+def _clean_agents_route(value) -> dict[str, str] | None:
+    """A Work session's own agents model (0.52): its model, its address and API, never its key. Saved only when the
+    session chose its own; without one the session follows Settings > Sub-agents."""
+    from urllib.parse import urlsplit
+    if not isinstance(value, dict) or set(value) != {"model", "base_url", "api_mode"}:
+        return None
+    model, base_url, api_mode = (value.get(key) for key in ("model", "base_url", "api_mode"))
+    if (not all(isinstance(part, str) for part in (model, base_url, api_mode)) or len(model) > 256
+            or len(base_url) > 2048 or any(ord(ch) < 32 for ch in model + base_url)
+            or api_mode not in ("", "auto", "ollama", "anthropic", "chat_completions", "responses")):
+        return None
+    if base_url:
+        try:
+            parsed = urlsplit(base_url)
+            if (parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password
+                    or parsed.query or parsed.fragment):
+                return None
+            parsed.port
+        except ValueError:
+            return None
+    return {"model": model, "base_url": base_url, "api_mode": api_mode}
+
+
 def _clean_native_route(value) -> dict[str, str] | None:
     """A Work chat's non-secret native route; credentials are never session data."""
     from urllib.parse import urlsplit
@@ -700,6 +723,7 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
          subscription_route: dict | None = None,
          native_route: dict | None = None,
          fallback_route: dict | None = None,
+         agents_route: dict | None = None,
          chat_changes: dict | None = None,
          images: list | None = None,
          agents: dict | None = None,
@@ -806,6 +830,9 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
         clean_fallback_route = _clean_fallback_route(fallback_route)
         if clean_fallback_route:
             data["fallback_route"] = clean_fallback_route
+        clean_agents_route = _clean_agents_route(agents_route)
+        if clean_agents_route:
+            data["agents_route"] = clean_agents_route       # only when the session chose its own (0.52)
         if images:
             # images: the viewed-image index, metadata only (the bytes live in <session>.images/).
             # A name is display text a page or tool chose, so it is redacted like any other.

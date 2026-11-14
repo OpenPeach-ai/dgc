@@ -4943,6 +4943,9 @@ class Agent(GoalLifecycle):
             restore_fallback = getattr(self.config, "restore_fallback_route", None)
             if callable(restore_fallback):
                 restore_fallback()            # and from the fallback in Settings (D14)
+            restore_agents = getattr(self.config, "restore_agents_route", None)
+            if callable(restore_agents):
+                restore_agents()              # and follows Settings' agents model (0.52)
         self._mode_chosen_for_chat = False
         self._mode_restore_note = ""
         self._active_tool_intents: set[str] = set()
@@ -7267,6 +7270,10 @@ class Agent(GoalLifecycle):
                             key: str(self.config.get(f"fallback_{key}", "") or "")
                             for key in ("model", "base_url", "api_mode", "engine")
                         },
+                        # 0.52: this session's own agents model, only when it chose one (else it follows Settings)
+                        agents_route=({key: str(self.config.get(f"subagent_{key}", "") or "")
+                                       for key in ("model", "base_url", "api_mode")}
+                                      if getattr(self.config, "agents_route_own", lambda: False)() else None),
                         images=image_index,
                         agents=self.subagents.saved_state(),
                         mode=self.mode, plan_return_mode=self.plan_return_mode,
@@ -7716,6 +7723,9 @@ class Agent(GoalLifecycle):
             restore_fallback = getattr(self.config, "restore_fallback_route", None)
             if callable(restore_fallback):
                 restore_fallback(record.get("fallback_route"))
+            restore_agents = getattr(self.config, "restore_agents_route", None)
+            if callable(restore_agents):
+                restore_agents(record.get("agents_route"))
             restore_native = getattr(self.config, "restore_native_route", None)
             if callable(restore_native):
                 prior_model = str(self.config.model or "")
@@ -11954,7 +11964,9 @@ class Agent(GoalLifecycle):
         worker can be leased for it and given back when it ends) and whose agent definition chose no model or
         host of its own: that choice is explicit and still wins. With the Router off this is 0.50's route."""
         cfg = self.config
-        if lease_for and not (adef and (adef.model or adef.base_url)):
+        # A Work session's own agents model (0.52) is an explicit choice, as an agent file's is: the Router isn't asked.
+        own = bool(getattr(cfg, "agents_route_own", lambda: False)())
+        if lease_for and not own and not (adef and (adef.model or adef.base_url)):
             from . import router as router_mod
             routed = router_mod.subagent_route(self, dict(hint or {}), owner=lease_for, cancel=cancel,
                                                registry=registry, agent_id=agent_id, label=lease_label)
