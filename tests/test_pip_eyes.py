@@ -353,7 +353,7 @@ class EyesStoreTests(unittest.TestCase):
 class PaymentTests(unittest.TestCase):
     setUp = fixtures.LocalPipsTests.setUp
 
-    def test_a_payment_is_never_always_allowed(self):
+    def test_a_card_payment_can_be_always_allowed_but_never_pays_an_amount_it_cannot_read(self):
         from dgc import pip_action_grants as grants
         pip = self.store.create(self.registry.personal()["id"], "Shop", None, "editor-user", pip_type="lens",
                                 computer_plan={"schema_version": 1})
@@ -363,9 +363,9 @@ class PaymentTests(unittest.TestCase):
             self.registry.db.execute("INSERT INTO pip_computer_actions VALUES(?,?,?,?,?,?,?,?,?,'pending',?,?,NULL,NULL,NULL)",
                 ("compact_" + "1" * 32, pip["id"], pip["workspace_id"], None, "host_1", "req-1", json.dumps(summary),
                  pip_computer._digest(summary), None, "2026-10-01T10:00:00.000Z", "2099-01-01T00:00:00.000Z"))
-        with self.assertRaises(RegistryError) as refused:
-            pip_computer.approve_always(self.registry, "compact_" + "1" * 32, pip_computer._digest(summary), "editor-user")
-        self.assertEqual(refused.exception.code, "asks_every_time")
+        pip_computer.approve_always(self.registry, "compact_" + "1" * 32, pip_computer._digest(summary), "editor-user")
+        [granted] = grants.list_grants(self.registry, pip["id"])
+        self.assertIn("payment", granted["label"])          # (his call 15 Nov; card details carry no amount: it asks)
         # Even a grant for the same site and path never sends a payment by itself.
         plain = {**summary, "payment": False}
         with self.registry.transaction():

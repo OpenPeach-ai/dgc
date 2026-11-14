@@ -715,14 +715,23 @@ class RealBrowserTests(Store):
         self.assertTrue((files / "keep.txt").exists())
         [action] = [a for a in pip_computer.list_actions(self.registry, pip["id"]) if a["status"] == "pending"]
         self.assertEqual(action["summary"]["kind"], "floor")
-        with self.assertRaises(RegistryError):
-            pip_computer.approve_always(self.registry, action["id"], action["digest"], "editor-user")
         host.waiting = []
         self.assertIn("exit 0", host.call("run", {"command": "ls"}), "an ordinary command just runs")
         pip_computer.decide(self.registry, action["id"], action["digest"], True, "editor-user")
         pip_computer.tick(self.registry, self.cfg)
         self.assertIn("exit 0", host.call("run", {"command": "rm -rf ~/*"}))
         self.assertFalse((files / "keep.txt").exists(), "allowed once, it ran")
+        # His call 15 Nov: Always allow on every card, this one too. Once given, such a command runs without asking.
+        (files / "keep.txt").write_text("mine")
+        host.waiting = []
+        said = host.call("run", {"command": "rm -rf ~/*"})
+        [again] = [a for a in pip_computer.list_actions(self.registry, pip["id"]) if a["status"] == "pending"]
+        pip_computer.approve_always(self.registry, again["id"], again["digest"], "editor-user")
+        pip_computer.tick(self.registry, self.cfg)
+        host.waiting = []
+        (files / "keep2.txt").write_text("mine")
+        self.assertIn("exit 0", host.call("run", {"command": "rm -rf ~/*"}), "always allowed: it runs")
+        self.assertFalse((files / "keep2.txt").exists())
         host.waiting = []
         self.assertTrue(host.call("run", {"command": "rm -rf ~/*"}).startswith("Held:"), "once means once")
 

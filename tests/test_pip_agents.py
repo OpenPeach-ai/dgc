@@ -394,5 +394,120 @@ class BuildLeftoversNeverBecomeAChange(AgentWorld, unittest.TestCase):
         self.assertEqual(paths, ["app.py"])
 
 
+class AFixsOwnWorkRunsInItsBoxWithoutCarefulHolds(AgentWorld, unittest.TestCase):
+    """His call 15 Nov (A): the Allow on a fix covers the work inside its own computer. Live test: careful mode held 9 to
+    15 of a sub-agent's Terminal commands per fix, and the Pip's check of its work too ("It's held again…"). Its own
+    sub-agent's try and the Pip's check run Terminal commands in its box without a hold; any other run still asks."""
+
+    def host(self, run_id):
+        import types
+        from dgc import pip_computer
+        held = []
+        taint = types.SimpleNamespace(carried=lambda text, said: ["what it read from your apps"])
+        host = types.SimpleNamespace(careful=True, run_id=run_id, state_directory=self.registry.directory,
+                                     pip_id=self.helper["id"], taint=taint, said=set(),
+                                     _careful_hold=lambda *a, **k: held.append(a) or "Held: careful")
+        return (lambda command: pip_computer.Host._careful_command(host, command)), held
+
+    def test_its_sub_agents_commands_are_not_held(self):
+        self.allowed()
+        run = self.store.claim_next()
+        check, held = self.host(run["id"])
+        self.assertIsNone(check("python -m pytest -q"))
+        self.assertEqual(held, [])
+
+    def test_the_pips_check_of_its_work_is_not_held(self):
+        self.allowed()
+        self.try_ends()
+        self.send()
+        check, held = self.host(self.job()["check_run_id"])
+        self.assertIsNone(check("python -m pytest -q"))
+
+    def test_any_other_run_still_asks(self):
+        pip_chat.send(self.store, self.helper["id"], "run the tests", "you-plain", "editor-user", self.cfg)
+        run = self.store.claim_next()
+        check, held = self.host(run["id"])
+        self.assertEqual(check("python -m pytest -q"), "Held: careful")
+        self.assertEqual(len(held), 1)
+
+
+class ASubAgentsHeldStepCarriesOnInItsOwnRun(AgentWorld, unittest.TestCase):
+    """Seen in the live video (15 Nov): a sub-agent's held step, once allowed, came back as the Pip speaking in its own
+    chat ("I wanted to write … DGC is holding it"). It carries on in the sub-agent's own next try instead, which doesn't
+    count as one of its three, and nothing is posted in the Pip's chat."""
+
+    def held(self, run_id):
+        return {"id": "pipact_" + "f" * 16, "run_id": run_id, "pip_id": self.helper["id"],
+                "summary": json.dumps({"kind": "text", "method": "OPEN", "host": "example.com", "fields": []})}
+
+    def chat_rows(self):
+        return self.registry.db.execute("SELECT count(*) FROM pip_chat_messages WHERE pip_id=?", (self.helper["id"],)).fetchone()[0]
+
+    def test_after_its_try_ended_it_gets_a_next_try_to_carry_on(self):
+        from dgc import pip_computer
+        self.allowed()
+        run_id = self.try_ends()
+        rows = self.chat_rows()
+        pip_computer._continue(self.registry, self.held(run_id), self.cfg)
+        self.assertEqual(self.chat_rows(), rows, "nothing posted as the Pip")
+        self.assertEqual(self.job()["state"], "retry_due")
+        self.assertIn("carry on", self.job()["notes"].lower())
+        self.send()
+        self.assertEqual(self.job()["tries"], 1, "a held step's carry-on isn't one of its three tries")
+        manifest = json.loads(self.registry.db.execute("SELECT manifest FROM pip_runs WHERE id=?", (self.job()["run_id"],)).fetchone()[0])
+        self.assertIn("carry on", manifest["conversation"]["text"].lower())
+
+    def test_while_its_try_still_runs_the_carry_on_waits_for_its_end(self):
+        from dgc import pip_computer
+        self.allowed()
+        run = self.store.claim_next()
+        pip_computer._continue(self.registry, self.held(run["id"]), self.cfg)
+        self.store.finish(run["id"], result={"text": DONE})
+        self.assertEqual(self.job()["state"], "retry_due", "its next try, not the Pip's check yet")
+
+
+class AlwaysAllowOnACarefulCard(AgentWorld, unittest.TestCase):
+    """His call 15 Nov: Always allow on every Pip card. A careful card (carrying what it read from your apps) gets one,
+    pinned to that one destination: its own Terminal, or one website; another website still asks."""
+
+    def card(self, host):
+        summary = {"kind": "text", "method": "RUN" if host == "Terminal" else "TYPE", "host": host, "path": "/",
+                   "fields": [{"name": "command", "value": "python fix.py"}], "more_fields": 0, "body_bytes": 0, "page": ""}
+        from dgc import pip_computer
+        action_id = "compact_" + ("1" if host == "Terminal" else "2") * 32
+        with self.registry.transaction():
+            self.registry.db.execute("INSERT INTO pip_computer_actions VALUES(?,?,?,?,?,?,?,?,?,'pending',?,?,NULL,NULL,NULL)",
+                (action_id, self.helper["id"], self.helper["workspace_id"], None, "host_1", "req-" + action_id[-4:],
+                 json.dumps(summary), pip_computer._digest(summary), None, "2026-11-15T00:00:00.000Z", "2099-01-01T00:00:00.000Z"))
+        return action_id, pip_computer._digest(summary)
+
+    def other_run(self):
+        pip_chat.send(self.store, self.helper["id"], "run the tests", "you-" + str(id(self)), "editor-user", self.cfg)
+        return self.store.claim_next()["id"]
+
+    def test_its_own_terminal(self):
+        import types
+        from dgc import pip_action_grants as grants, pip_computer
+        action_id, digest = self.card("Terminal")
+        pip_computer.approve_always(self.registry, action_id, digest, "editor-user")
+        [grant] = grants.list_grants(self.registry, self.helper["id"])
+        self.assertIn("Terminal", grant["label"])
+        host = types.SimpleNamespace(careful=True, run_id=self.other_run(), state_directory=self.registry.directory,
+                                     pip_id=self.helper["id"], said=set(), _careful_hold=lambda *a, **k: "Held: careful",
+                                     taint=types.SimpleNamespace(carried=lambda text, said: ["what it read"]))
+        self.assertIsNone(pip_computer.Host._careful_command(host, "python fix.py"), "always allowed now")
+
+    def test_one_website_and_never_another(self):
+        from dgc import pip_action_grants as grants, pip_computer
+        action_id, digest = self.card("forms.example")
+        pip_computer.approve_always(self.registry, action_id, digest, "editor-user")
+        self.assertTrue(pip_computer.Host._carry_granted(self._host(), "forms.example"))
+        self.assertFalse(pip_computer.Host._carry_granted(self._host(), "elsewhere.example"))
+
+    def _host(self):
+        import types
+        return types.SimpleNamespace(state_directory=self.registry.directory, pip_id=self.helper["id"])
+
+
 if __name__ == "__main__":
     unittest.main()

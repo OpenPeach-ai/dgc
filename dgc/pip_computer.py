@@ -775,7 +775,7 @@ class Host:
             if not fused and self.run_id is not None and held.request_id in self.browser.held:
                 # Always allowed for this Pip (same site, method and route): sent now, as the grant, and the run goes on.
                 # Told to stop and wait, a Pip said it was waiting on a card that never came.
-                grant = Host._grant_for(self, summary)
+                grant = Host._grant_for(self, summary, held)
                 if grant is not None:
                     Host._release_by_grant(self, held, summary, grant)
                     continue
@@ -826,18 +826,40 @@ class Host:
         except Exception:                                  # noqa: BLE001 - a registry that can't say: as before
             return ""
 
-    def _grant_for(self, summary) -> dict | None:
-        """The Always allow that covers this held submit, or None. A pay, buy or order step asks every time: no grant
-        sends one (never_replayed)."""
+    def _grant_for(self, summary, held=None) -> dict | None:
+        """The Always allow that covers this held submit, or None. A pay, buy or order step needs a grant given on one
+        (pinned apart: action_grants.computer_pins), and it goes only when DGC reads an amount inside the Pip's daily
+        dollar limit (his call 15 Nov: Always allow on every card, payments inside the limit)."""
         from .pip_action_grants import computer_grant_for
         from .workspace_registry import WorkspaceRegistry
-        if summary.get("kind") in CAREFUL_KINDS or never_replayed(summary):
+        if summary.get("kind") in CAREFUL_KINDS:
             return None
         try:
             with WorkspaceRegistry(self.state_directory) as registry:
-                return computer_grant_for(registry, self.pip_id, summary)
+                grant = computer_grant_for(registry, self.pip_id, summary)
         except (OSError, RegistryError, sqlite3.Error):
             return None                                    # it waits for the user, as with no grant
+        if grant is not None and never_replayed(summary):
+            if held is None or getattr(held, "payment", False):
+                return None                                # a card number carries no amount DGC can read: it asks
+            from .pip_careful import site_of
+            from .pip_payments import read_payment
+            payment = read_payment(held.fields, site_of(str(summary.get("host") or "")))
+            if not Host._may_pay(self, payment):
+                return None
+        return grant
+
+    def _carry_granted(self, destination) -> bool:
+        """Whether an Always allow lets the Pip carry what it read from the user's apps to this destination ("Terminal",
+        or a website's host) without asking (his call 15 Nov)."""
+        from .pip_action_grants import computer_grant_for
+        from .workspace_registry import WorkspaceRegistry
+        try:
+            with WorkspaceRegistry(self.state_directory) as registry:
+                return computer_grant_for(registry, self.pip_id, {"kind": "text", "host": destination, "method": "CARRY",
+                                                                  "path": "/"}) is not None
+        except Exception:                                  # noqa: BLE001 - unreadable: it asks
+            return False
 
     def _release_by_grant(self, held, summary, grant) -> None:
         """Send one held submit an Always allow covers: kept on record as sent by that grant, shown in the run's timeline,
@@ -1367,6 +1389,8 @@ class Host:
             url = _safe_url(args.get("url"))
             parts = urlsplit(url)
             carried = [] if allowed(parts.hostname or "", Host._carry(self)) else self.taint.carried(url, self.said)
+            if carried and Host._carry_granted(self, parts.hostname or ""):
+                carried = []                               # always allowed to this site (his call 15 Nov)
             if carried:
                 return self._careful_hold("text", {"method": "OPEN", "host": parts.hostname or "", "path": (parts.path or "/")[:300],
                                                    "fields": [{"name": "address", "value": _preview(url)}]}, url, carried)
@@ -1391,11 +1415,32 @@ class Host:
             text = str((args.get("value") if op == "choose" else args.get("text")) or "")
             parts = urlsplit(page)
             carried = [] if allowed(parts.hostname or "", Host._carry(self)) else self.taint.carried(text, self.said)
+            if carried and Host._carry_granted(self, parts.hostname or ""):
+                carried = []                               # always allowed to this site (his call 15 Nov)
             if carried:
                 return self._careful_hold("text", {"method": "CHOOSE" if op == "choose" else "TYPE", "host": parts.hostname or "",
                                                    "path": (parts.path or "/")[:300],
                                                    "fields": [{"name": "typed" if op in ("type", "dialog") else "chosen", "value": _preview(text)}]},
                                           text, carried)
+        return None
+
+    def _careful_command(self, command) -> str | None:
+        """Careful mode on a Terminal command: held when it carries what the Pip read from the user's apps, else None.
+        A fix's own work runs in its box without a hold (his call 15 Nov, A: the Allow on a fix covers the work inside
+        its own computer; live, careful mode held 9 to 15 commands of one fix and the Pip's check of it too): its
+        sub-agent's try and the Pip's check of that work. The floor is checked before this; the Terminal's careful
+        network policy still applies, so nothing leaves the box unasked."""
+        if not (getattr(self, "careful", False) and getattr(self, "run_id", None) is not None):
+            return None
+        from .pip_agents import is_fix_run
+        if is_fix_run(getattr(self, "state_directory", None), self.run_id):
+            return None
+        carried = self.taint.carried(command, self.said)
+        if carried and Host._carry_granted(self, "Terminal"):
+            return None                                    # always allowed in its own Terminal (his call 15 Nov)
+        if carried:
+            return self._careful_hold("text", {"method": "RUN", "host": "Terminal", "path": "/",
+                                               "fields": [{"name": "command", "value": _preview(command)}]}, command, carried)
         return None
 
     def _carry(self) -> set:
@@ -1472,12 +1517,9 @@ class Host:
                 if held:
                     return held
             careful = getattr(self, "careful", False) and self.run_id is not None
-            if careful:
-                command = str(args.get("command") or "")
-                carried = self.taint.carried(command, self.said)
-                if carried:
-                    return self._careful_hold("text", {"method": "RUN", "host": "Terminal", "path": "/",
-                                                       "fields": [{"name": "command", "value": _preview(command)}]}, command, carried)
+            held = Host._careful_command(self, str(args.get("command") or ""))
+            if held:
+                return held
             keys = terminal_keys(getattr(self, "state_directory", None), getattr(self, "pip_id", None))
             if args.get("background") is True:
                 job = desk.start_background(self.root, args.get("command"), "pip",
@@ -1508,6 +1550,9 @@ class Host:
             with WorkspaceRegistry(self.state_directory) as registry:
                 if pip_levels.take_floor(registry, self.pip_id, text_digest(command)):
                     return None
+                from .pip_action_grants import computer_grant_for
+                if computer_grant_for(registry, self.pip_id, {"kind": "floor", "host": "Terminal", "method": "RUN", "path": "/"}):
+                    return None                            # always allowed (his call 15 Nov)
         except (OSError, RegistryError, sqlite3.Error):
             pass
         return self._careful_hold("floor", {"method": "RUN", "host": "Terminal", "path": "/",
@@ -2205,20 +2250,12 @@ def approve_always(registry, action_id: str, expected_digest: str, actor: str) -
         raise RegistryError("local_only", "Approve a Pip's computer actions on this computer.")
     summary = json.loads(_row(registry, action_id)["summary"])
     kind = summary.get("kind")
-    if summary.get("payment") is True:
-        raise RegistryError("asks_every_time", "This sends payment card details, so it asks you every time. Choose Send once.")
-    if is_payment(summary):
-        raise RegistryError("asks_every_time", "This looks like a payment, so it asks you every time. Choose Send once.")
-    if never_replayed(summary):
-        raise RegistryError("asks_every_time", "This may place an order, so it asks you every time. Choose Send once.")
+    # His call 15 Nov: Always allow on every card. A payment's pays only inside the Pip's daily dollar limit (_grant_for);
+    # a careful card's covers its one destination; the floor's, its Terminal.
     if kind == "site":
         raise RegistryError("asks_once", "Allow adds this site for good: choose Allow.")
     if kind == LOGIN_KIND:
         raise RegistryError("save_login", "Save the login on its card (Save login…), or choose Not now.")
-    if kind == "text":
-        raise RegistryError("asks_every_time", "Carrying what it read from your apps onto a website asks every time.")
-    if kind == "floor":
-        raise RegistryError("asks_every_time", "A command that could delete everything in its Files asks every time.")
     with registry.transaction():
         _decide(registry, action_id, expected_digest, True, actor)
         grant = add_computer_grant(registry, action_id, actor)
@@ -2428,8 +2465,13 @@ def _continue(registry, row, config) -> str | None:
         return None
     from .pips import PipStore
     store = PipStore(registry)
-    origin = registry.db.execute("SELECT json_extract(manifest,'$.run_kind') FROM pip_runs WHERE id=?",
-                                 (row["run_id"],)).fetchone() if row["run_id"] else None
+    origin = registry.db.execute("SELECT json_extract(manifest,'$.run_kind'),json_extract(manifest,'$.agent.job_id') "
+                                 "FROM pip_runs WHERE id=?", (row["run_id"],)).fetchone() if row["run_id"] else None
+    if origin is not None and origin[1]:
+        # A Pip's sub-agent held it: it carries on in its own next try, never as the Pip speaking in its chat (seen
+        # in the live video, 15 Nov).
+        from .pip_agents import after_held_step
+        return after_held_step(store, config, origin[1], json.loads(row["summary"]))
     if origin is not None and origin[0] == "conversation":
         from .pip_chat import continue_after_computer
         return continue_after_computer(store, row["pip_id"], row["id"], json.loads(row["summary"]), config)["run"]["id"]

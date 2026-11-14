@@ -48,11 +48,13 @@ def _local(actor):
         raise RegistryError("local_only", "Only you can allow a Pip to act without asking, on this computer.")
 
 
-def require_can_always(payload) -> None:
-    """Refuse Always allow for a payment plugin's action, or one of a plugin the user set to Always ask, before
-    anything runs."""
+def require_can_always(payload, *, card=False) -> None:
+    """Refuse Always allow for one of a plugin the user set to Always ask (an allow never beats an ask rule of the
+    user's own), before anything runs. A payment plugin's action: refused when an app asks for it in a template;
+    allowed from its card (his call 15 Nov: Always allow on every card), and then it runs only inside the Pip's daily
+    dollar limit (dispatch_for_run)."""
     money = _asks_every_time(payload)
-    if money:
+    if money and not card:
         raise RegistryError("asks_every_time", f"{money} can move money, so a Pip asks you every time. Choose Allow for this one.")
     asks = _always_ask(payload)
     if asks:
@@ -111,7 +113,7 @@ def grant_from_action(store, action_id, expected_digest, actor) -> dict:
         raise RegistryError("action_conflict", "Review this exact saved action before allowing it.")
     payload = action["payload"]
     pip_id = payload["source"]["pip_id"]
-    require_can_always(payload)
+    require_can_always(payload, card=True)
     pins = _pins(payload)
     with store.registry.transaction():
         existing_grants = list_grants(store.registry, pip_id)
@@ -202,8 +204,19 @@ def check(store, actor, payload):
     grant_id = actor.split(":", 1)[1]
     pins = _pins(payload)
     grant = next((g for g in list_grants(store.registry, payload["source"]["pip_id"]) if g["id"] == grant_id), None)
-    if grant is None or any(grant[k] != v for k, v in pins.items()) or _asks_every_time(payload):
+    if grant is None or any(grant[k] != v for k, v in pins.items()) or (
+            _asks_every_time(payload) and not _inside_dollar_limit(store.registry, payload)):
         raise RegistryError("local_only", "This Pip is not allowed to run that action without asking.")
+
+
+def _inside_dollar_limit(registry, payload) -> bool:
+    """An action that moves money runs on an Always allow only when DGC reads its amount and it fits the Pip's daily
+    dollar limit and rules (his call 15 Nov); anything else waits for the user."""
+    from .pip_levels import _connector_payment, may_pay
+    try:
+        return may_pay(registry, payload["source"]["pip_id"], _connector_payment(payload))
+    except Exception:                                    # noqa: BLE001 - unreadable: it asks
+        return False
 
 
 def covers(registry, pip_id, kind) -> bool:
@@ -309,6 +322,10 @@ def dispatch_for_run(registry, config, run_id) -> list:
                 grant = _matching(grants, action_kind, content, linked)
                 if grant is None or (draft_kind == "connector" and _always_ask({"kind": action_kind, **content})):
                     continue                     # Always ask, set after this grant was given, wins: its card waits
+                if draft_kind == "connector" and _asks_every_time({"kind": action_kind, **content}):
+                    from .pip_levels import _connector_payment, may_pay
+                    if not may_pay(registry, row[0], _connector_payment(content)):
+                        continue                 # money past its daily limit, or an amount DGC can't read: its card waits
                 actor = "pip-grant:" + grant["id"]
                 message = content["call"] if draft_kind == "connector" else content
                 prepared = drafts.prepare(store, draft_id, draft["digest"], grant["server"], grant["connection_digest"],
@@ -510,11 +527,41 @@ def _graphql_scope(route: str, fields) -> str:
 _OLD_ROUTE_GRANT = ("POST", "dash.cloudflare.com", "/cdn-cgi/challenge-platform/h/b/precursor/")
 
 
+def carry_destination(summary) -> str:
+    """Where a careful card carries what the Pip read from the user's apps: "Terminal", or the website (its site)."""
+    host = str(summary.get("host") or "").lower()
+    if host == "terminal":
+        return "Terminal"
+    from .pip_careful import site_of
+    return site_of(host) or host
+
+
+def paying(summary) -> bool:
+    """A pay, buy or order step (pip_computer.never_replayed): its Always allow is its own, never one given on the same
+    address for something else, and it pays only inside the Pip's daily dollar limit."""
+    from .pip_computer import never_replayed
+    return never_replayed(summary)
+
+
 def computer_pins(pip_id, summary, *, exact=False) -> dict:
+    """What an Always allow on a computer card is pinned to. His call 15 Nov: every card offers one. A careful card
+    (carrying what it read from your apps) is pinned to that one destination; the wipe-everything floor to its Terminal;
+    a submit to its site, method and the address's shape, a payment's apart from the rest."""
+    connection = _hash("dgc.pip.computer\0" + pip_id)
+    if summary.get("kind") == "text":
+        where = carry_destination(summary)
+        # (One kind, computer_submit, for every computer grant: an editor checks the kinds it knows, and the list
+        # stays readable to one that predates these. What it covers is in its tool: CARRY, FLOOR, PAY.)
+        return {"kind": "computer_submit", "server": where, "connection_digest": connection, "account": "browser",
+                "schema_digest": _hash(f"CARRY {where}"), "tool": f"CARRY {where}"[:160]}
+    if summary.get("kind") == "floor":
+        return {"kind": "computer_submit", "server": "Terminal", "connection_digest": connection, "account": "terminal",
+                "schema_digest": _hash("FLOOR Terminal"), "tool": "FLOOR Terminal"}
     method, host = str(summary["method"]).upper(), str(summary["host"]).lower()
     route = str(summary["path"]) if exact else str(summary.get("route") or route_of(summary["path"]))
-    return {"kind": "computer_submit", "server": host, "connection_digest": _hash("dgc.pip.computer\0" + pip_id),
-            "account": "browser", "schema_digest": _hash(f"{method} {host}{route}"), "tool": f"{method} {route}"[:160]}
+    pay = "PAY " if paying(summary) else ""
+    return {"kind": "computer_submit", "server": host, "connection_digest": connection,
+            "account": "browser", "schema_digest": _hash(f"{pay}{method} {host}{route}"), "tool": f"{pay}{method} {route}"[:160]}
 
 
 def computer_grant_for(registry, pip_id, summary):
@@ -579,19 +626,30 @@ def add_computer_grant(registry, action_id, actor) -> dict:
     for existing in existing_grants:
         if all(existing[k] == v for k, v in pins.items()):
             return existing
-    # This route covers every one-address approval of it from before routes: each is one grant of 20 this no longer needs.
+    plain = not str(pins["tool"]).startswith(("PAY ", "CARRY ", "FLOOR "))
     method, route = pins["tool"].split(" ", 1)
-    existing_grants = _drop_grants(registry, row["pip_id"], row["workspace_id"], existing_grants, [
-        g for g in existing_grants if _one_off_address(g) and g["server"] == pins["server"]
-        and str(g["tool"]).startswith(method + " ") and route_of(_one_off_address(g)) == route])
+    if plain:
+        # This route covers every one-address approval of it from before routes: each is one grant of 20 this no longer needs.
+        existing_grants = _drop_grants(registry, row["pip_id"], row["workspace_id"], existing_grants, [
+            g for g in existing_grants if _one_off_address(g) and g["server"] == pins["server"]
+            and str(g["tool"]).startswith(method + " ") and route_of(_one_off_address(g)) == route])
     existing_grants = _reclaim_one_offs(registry, row["pip_id"], row["workspace_id"], existing_grants)
     if len(existing_grants) >= MAX_PER_PIP:
         raise RegistryError("limit", f"A Pip can always allow at most {MAX_PER_PIP} actions. Remove one in its Job tab first.")
     grant_id = identifier("grant")
-    label = route_label(pins["server"], route)[:200]
+    if str(pins["tool"]).startswith("CARRY "):
+        label = ("Run what it read from your apps in its own Terminal" if pins["server"] == "Terminal"
+                 else f"Carry what it read from your apps to {pins['server']}")
+    elif str(pins["tool"]).startswith("FLOOR "):
+        label = "Run commands that could delete everything in its Files"
+    elif not plain:
+        label = route_label(pins["server"], route.split(" ", 1)[1] if " " in route else route)[:160] + " (a payment, inside its daily limit)"
+    else:
+        label = route_label(pins["server"], route)
+    label = label[:200]
     record = {**pins, "label": label, "created_at": registry.clock(), "created_by": actor, "from_action": action_id}
     registry.db.execute("INSERT INTO metadata VALUES(?,?)", (_key(row["pip_id"], grant_id), json.dumps(record, ensure_ascii=False)))
     registry.event(row["workspace_id"], "pip_action_granted", pip_id=row["pip_id"],
-                   payload={"grant_id": grant_id, "kind": "computer_submit", "tool": pins["tool"], "actor": actor})
+                   payload={"grant_id": grant_id, "kind": pins["kind"], "tool": pins["tool"], "actor": actor})
     return {"id": grant_id, **{k: record[k] for k in ("kind", "server", "connection_digest", "account", "schema_digest",
                                                     "tool", "label", "created_at", "created_by")}}

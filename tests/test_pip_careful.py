@@ -170,18 +170,24 @@ class CarefulStoreTests(unittest.TestCase):
         self.assertEqual(held, [("text", "new.example")])
         self.assertIsNone(host._careful("type", {"text": "my own words"}), "its own words never ask")
 
-    def test_always_allow_is_refused_for_a_site_or_app_data(self):
+    def test_always_allow_a_site_is_refused_but_carrying_app_data_is_pinned(self):
+        """His call 15 Nov: Always allow on every card. A new site still has no Always (Allow adds it for good); a careful
+        card (carrying what it read to one destination) pins that destination only."""
         pip = self.make()
-        for kind, code in (("site", "asks_once"), ("text", "asks_every_time")):
+        for kind in ("site", "text"):
             summary = {"kind": kind, "method": "GET", "host": "shop.example", "path": "/", "fields": [], "more_fields": 0, "body_bytes": 0}
             with self.registry.transaction():
                 self.registry.db.execute("INSERT INTO pip_computer_actions VALUES(?,?,?,?,?,?,?,?,?,'pending',?,?,NULL,NULL,NULL)",
                                          ("compact_" + kind[0] * 32, pip["id"], pip["workspace_id"], None, "host_x", "careful:x",
                                           json.dumps(summary), pip_computer._digest(summary), None, "2026-10-08T00:00:00.000Z", "2099-01-01T00:00:00.000Z"))
-            with self.subTest(kind=kind), self.assertRaises(RegistryError) as raised:
-                pip_computer.approve_always(self.registry, "compact_" + kind[0] * 32, pip_computer._digest(summary), "editor-user")
-            self.assertEqual(raised.exception.code, code)
-
+        with self.assertRaises(RegistryError) as raised:
+            pip_computer.approve_always(self.registry, "compact_" + "s" * 32, pip_computer._digest(
+                {"kind": "site", "method": "GET", "host": "shop.example", "path": "/", "fields": [], "more_fields": 0, "body_bytes": 0}), "editor-user")
+        self.assertEqual(raised.exception.code, "asks_once")
+        text = {"kind": "text", "method": "GET", "host": "shop.example", "path": "/", "fields": [], "more_fields": 0, "body_bytes": 0}
+        action, grant = pip_computer.approve_always(self.registry, "compact_" + "t" * 32, pip_computer._digest(text), "editor-user")
+        self.assertEqual(action["status"], "approved")
+        self.assertEqual(grant["tool"], "CARRY shop.example", "pinned to its one destination")
 
 if __name__ == "__main__":
     unittest.main()

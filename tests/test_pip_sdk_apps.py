@@ -563,14 +563,26 @@ class ChangeTests(AppWorld, unittest.TestCase):
         self.assertEqual([c["arguments"]["order_id"] for c in self.shop.posted()], ["ord_17", "ord_18"])
         said = dict(grants.ran_on_their_own(self.registry))[outcome["action_id"]]
         self.assertIn("ran create_dispatch with Shop app, as you always allow.", said)
-        # Money: asks every time.
+        # Money (his call 15 Nov: Always allow on every card): its card offers Always allow too, and a later draft of it
+        # runs on the grant only when DGC reads an amount inside the Pip's daily dollar limit.
         refund = self.propose("refund_order", key="refund")
-        with self.assertRaises(RegistryError) as raised:
-            self.control("always_allow_pip_app_action", action_id=refund["id"], expected_digest=refund["digest"])
-        self.assertEqual(raised.exception.code, "asks_every_time")
-        self.assertIn("Shop app's refund_order can move money", str(raised.exception))
-        self.assertEqual(len(self.shop.requests), 2, "refused before it ran")
+        allowed = self.control("always_allow_pip_app_action", action_id=refund["id"], expected_digest=refund["digest"])
+        self.assertEqual(allowed["action"]["status"], "succeeded")
         self.assertEqual(grants._asks_every_time(refund["payload"]), "Shop app's refund_order")
+        from unittest import mock
+        for inside, runs in ((False, 0), (True, 1)):
+            again = self.store.enqueue(self.source["id"], f"refund-{inside}", "local-console", self.cfg)
+            self.store.claim_next()
+            value = {"server": "app:shop", "connection_digest": inspected["connection_digest"],
+                     "schema_digest": next(t for t in inspected["tools"] if t["tool"] == "refund_order")["schema_digest"],
+                     "call": {"tool": "refund_order", "arguments": {"order_id": f"ord_r{int(inside)}", "amount": 5, "currency": "USD"}}}
+            pip_plugins.offer(self.registry, again["id"], value)
+            self.store.finish(again["id"], result={"text": "Drafted.", "external_actions": False, "tools_called": 0, "usage": {},
+                                                   "connector_action_draft": value})
+            before = len(self.shop.requests)
+            with mock.patch("dgc.pip_levels.may_pay", return_value=inside):
+                grants.dispatch_for_run(self.registry, self.cfg, again["id"])
+            self.assertEqual(len(self.shop.requests) - before, runs, "inside the limit it runs; past it, it waits for you")
         self.assertIsNone(pip_levels.decide_send(self.registry, self.source["id"], "full", "connector",
                                                  {"server": "app:shop", "call": refund["payload"]["call"]}, money=True),
                           "not even Full access")

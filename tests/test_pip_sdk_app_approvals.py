@@ -311,23 +311,22 @@ class DecideTests(ApprovalWorld, unittest.TestCase):
 
 
 class FloorTests(ApprovalWorld, unittest.TestCase):
-    def test_a_change_that_moves_money_always_asks_and_both_sides_see_it(self):
+    def test_a_change_that_moves_money_asks_even_at_full_access_and_both_sides_see_it(self):
+        # His call 15 Nov: its card offers Always allow too (inside the Pip's dollar limit; ChangeTests covers that);
+        # here nobody chose it, so it waits for a person, in DGC or in the app.
         self.register(tools=(UNPAID, DISPATCH, REFUND))
         pip_levels.set_level(self.registry, self.source["id"], "full", "editor-user")
         run, draft = self.proposed_by_a_run("refund_order", key="refund")
         review = self.review(run)
         self.assertEqual(review["status"], "pending", "not even Full access runs it")
         self.assertEqual(draft["status"], "pending", "DGC's card asks")
-        self.assertEqual(grants._asks_every_time(review["payload"]), "Shop app's refund_order", "with no Always allow")
+        self.assertEqual(grants._asks_every_time(review["payload"]), "Shop app's refund_order", "money: never on a level")
         self.deliver()
         [asked] = self.posted("approval_requested")
         self.assertTrue(asked["moves_money"])
         self.assertTrue(self.events[0].moves_money)
         [waiting] = self.control("list_app_approvals")["approvals"]
         self.assertTrue(waiting["moves_money"])
-        with self.assertRaises(RegistryError) as raised:
-            self.control("always_allow_pip_app_action", action_id=review["id"], expected_digest=review["digest"])
-        self.assertEqual(raised.exception.code, "asks_every_time")
         said = self.control("decide_app_approval", action_id=review["id"], decision="accept", expected_digest=review["digest"])
         self.assertEqual((said["approval"]["status"], said["approval"]["by"]), ("succeeded", "app"), "a person in the app")
         self.assertEqual(len(self.posted("tool_call")), 1)

@@ -179,13 +179,14 @@ def start(store, config, pip_id, *, kind, title, brief, fix_id=None) -> dict:
     return view(db, _row(db, job_id))
 
 
-def _run(store, config, job_id, text):
-    """Its next try: a conversation run with no chat rows, marked as this job's."""
+def _run(store, config, job_id, text, *, counted=True):
+    """Its next try: a conversation run with no chat rows, marked as this job's. `counted` False: a held step's carry-on,
+    which isn't one of its three tries."""
     registry, db = store.registry, store.db
     row = _row(db, job_id)
-    tries = row["tries"] + 1
+    tries = row["tries"] + (1 if counted else 0)
     from .pip_routines import ACTOR as UNATTENDED_ACTOR
-    key = f"{AGENT_KEY}{short(job_id)}_{tries}"
+    key = f"{AGENT_KEY}{short(job_id)}_{tries}" + ("" if counted else f"_more{secrets.token_hex(3)}")
     request = {"text": text, "request_key": key,
                "agent": {"job_id": job_id, "folder": row["folder"], "copy": row["copy"], "try": tries}}
     run = store.enqueue(row["pip_id"], key, UNATTENDED_ACTOR, config, conversation_request=request)
@@ -196,6 +197,22 @@ def _run(store, config, job_id, text):
 
 
 # ---- its run ended: the Pip checks ----------------------------------------------------------------------------------
+def is_fix_run(state_directory, run_id) -> bool:
+    """Whether a run is a fix's own work: its sub-agent's try or the Pip's check of that work (careful mode lets it work
+    in its box without holds: his call 15 Nov, A). False when it can't be told."""
+    if not run_id or not state_directory:
+        return False
+    try:
+        from .workspace_registry import WorkspaceRegistry
+        with WorkspaceRegistry(state_directory) as registry:
+            if not _has(registry.db):
+                return False
+            return registry.db.execute("SELECT 1 FROM pip_agent_jobs WHERE run_id=? OR check_run_id=? LIMIT 1",
+                                       (run_id, run_id)).fetchone() is not None
+    except Exception:                                    # noqa: BLE001 -- unknown: careful mode as before
+        return False
+
+
 def job_of_run(db, run_id):
     return db.execute("SELECT * FROM pip_agent_jobs WHERE run_id=?", (run_id,)).fetchone() if _has(db) else None
 
@@ -248,6 +265,28 @@ def diff_text(registry, row, files) -> str:
     return "".join(parts)
 
 
+CARRY_KEY = "pip_agent_carry:"                  # metadata: a held step allowed while its try still ran
+
+
+def after_held_step(store, config, job_id, summary) -> None:
+    """You allowed a step its sub-agent held (careful mode, on something leaving its computer): it carries on in its
+    own next try, which isn't one of its three. A try that still runs carries on once it ends."""
+    db, registry = store.db, store.registry
+    row = _row(db, job_id)
+    if row is None:
+        return None
+    what = " ".join(str(summary.get(k) or "") for k in ("method", "host") if isinstance(summary, dict)).strip() or "it"
+    note = f"The step DGC held for the user ({what}) was allowed and done. Carry on from there with the rest of the job."
+    with registry.transaction():
+        if row["state"] == "working":
+            db.execute("INSERT OR REPLACE INTO metadata(key,value) VALUES(?,?)", (CARRY_KEY + job_id, note))
+        elif row["state"] in ("check_due", "retry_due"):
+            db.execute("UPDATE pip_agent_jobs SET state='retry_due',notes=?,updated_at=? WHERE id=?",
+                       (note, _now(registry), job_id))
+            db.execute("INSERT OR REPLACE INTO metadata(key,value) VALUES(?,?)", (CARRY_KEY + job_id, "uncounted"))
+    return None
+
+
 def after_agent_run(store, run, status, result, error) -> None:
     """Its try ended: due for the Pip's check (a failed or stopped run is said, never retried by itself)."""
     db, registry = store.db, store.registry
@@ -255,6 +294,13 @@ def after_agent_run(store, run, status, result, error) -> None:
     if row is None or row["state"] != "working":
         return
     text = str((result or {}).get("text") or "") if isinstance(result, dict) else ""
+    carry = db.execute("SELECT value FROM metadata WHERE key=?", (CARRY_KEY + row["id"],)).fetchone()
+    if status == "succeeded" and carry is not None and carry[0] != "uncounted":
+        with registry.transaction():                     # a held step was allowed meanwhile: its carry-on, first
+            db.execute("UPDATE pip_agent_jobs SET state='retry_due',said=?,notes=?,updated_at=? WHERE id=?",
+                       (text[:4000], carry[0], _now(registry), row["id"]))
+            db.execute("UPDATE metadata SET value='uncounted' WHERE key=?", (CARRY_KEY + row["id"],))
+        return
     with registry.transaction():
         if status == "succeeded":
             db.execute("UPDATE pip_agent_jobs SET state='check_due',said=?,updated_at=? WHERE id=?",
@@ -297,7 +343,11 @@ def send_due(registry, config) -> int:
     store, sent = PipStore(registry), 0
     for row in db.execute("SELECT * FROM pip_agent_jobs WHERE state IN ('check_due','retry_due') ORDER BY updated_at LIMIT 20").fetchall():
         if row["state"] == "retry_due":
-            _run(store, config, row["id"], _retry_text(row))
+            carry = db.execute("SELECT value FROM metadata WHERE key=?", (CARRY_KEY + row["id"],)).fetchone()
+            _run(store, config, row["id"], _retry_text(row, carry=carry is not None), counted=carry is None)
+            if carry is not None:
+                with registry.transaction():
+                    db.execute("DELETE FROM metadata WHERE key=?", (CARRY_KEY + row["id"],))
             sent += 1
             continue
         files = change(registry, row)
@@ -328,7 +378,9 @@ def send_due(registry, config) -> int:
     return sent
 
 
-def _retry_text(row) -> str:
+def _retry_text(row, *, carry=False) -> str:
+    if carry:                                             # a held step was allowed: not a try the Pip sent back
+        return (f"{row['notes']} What you did so far is still in your copy. Finish the job: {row['title']}.\n\n{row['brief']}")
     return (f"Try {row['tries'] + 1} of {MAX_TRIES}. Your Pip checked your last try and sent it back: {row['notes'] or 'it was not right yet'}. "
             f"Carry on in your copy (what you did so far is still there) and finish the job: {row['title']}.\n\n{row['brief']}")
 

@@ -661,7 +661,7 @@ class PluginActionTests(PluginWorld, unittest.TestCase):
         with self.assertRaises(RegistryError):
             self.propose(draft, key="two")
 
-    def test_always_allow_covers_that_tool_but_never_a_payment_plugin(self):
+    def test_always_allow_covers_that_tool_and_a_payment_plugins_from_its_card(self):
         _, draft = self.offer()
         done = self.accept(self.propose(draft))
         grant = grants.grant_from_action(self.store, done["id"], done["digest"], "editor-user")
@@ -669,10 +669,10 @@ class PluginActionTests(PluginWorld, unittest.TestCase):
         _, money = self.offer("aave", "create_record", {"amount": "1"})
         paid = self.accept(self.propose(money, key="aave"))
         self.assertEqual(paid["status"], "succeeded", "Allow works for a payment plugin")
-        with self.assertRaises(RegistryError) as raised:
-            grants.grant_from_action(self.store, paid["id"], paid["digest"], "editor-user")
-        self.assertEqual(raised.exception.code, "asks_every_time")
-        self.assertIn("Aave can move money", str(raised.exception))
+        # His call 15 Nov: Always allow on every card. A payment plugin's grant runs only inside the dollar limit
+        # (dispatch_for_run / check); an app asking for one in a template is still refused (test_dgc_sdk_pip_templates).
+        money_grant = grants.grant_from_action(self.store, paid["id"], paid["digest"], "editor-user")
+        self.assertEqual((money_grant["server"], money_grant["tool"]), ("aave", "create_record"))
 
     def test_after_allow_the_pip_reads_the_answer_by_asking_again_and_it_does_not_run_again(self):
         _, draft = self.offer()
@@ -783,17 +783,15 @@ class PluginActionTests(PluginWorld, unittest.TestCase):
         fake = "\x00DGC-ADDRESS-0\x00"
         self.assertEqual(pip_plugins.cleaned(fake, self.cfg), fake)
 
-    def test_always_allow_on_a_payment_plugin_is_refused_before_anything_runs(self):
-        self.cfg.data["pips_enabled"] = True
+    def test_always_allow_on_a_payment_plugin_is_refused_only_in_an_apps_template(self):
+        # From its card it is allowed now (his call 15 Nov); require_can_always still refuses money when an app asks
+        # for standing permission (not a card).
         _, money = self.offer("aave", "create_record", {"amount": "1"})
         action = self.propose(money)
-        with patch("dgc.pips.WorkspaceRegistry", return_value=self.registry), patch.object(self.registry, "close"):
-            response = pips.handle_control(self.cfg, {"request_id": "r", "type": "always_allow_pip_app_action",
-                                                      "action_id": action["id"], "expected_digest": action["digest"]},
-                                           "editor-user", start_worker=False)
-        self.assertFalse(response["ok"])
-        self.assertEqual(response["error"]["code"], "asks_every_time")
-        self.assertEqual(actions.get(self.store, action["id"])["status"], "pending", "nothing ran")
+        grants.require_can_always(action["payload"], card=True)
+        with self.assertRaises(RegistryError) as raised:
+            grants.require_can_always(action["payload"])
+        self.assertEqual(raised.exception.code, "asks_every_time")
 
     def test_a_plugin_set_to_always_ask_has_no_always_allow_and_an_earlier_grant_never_overrides_it(self):
         self.cfg.data["pips_enabled"] = True
