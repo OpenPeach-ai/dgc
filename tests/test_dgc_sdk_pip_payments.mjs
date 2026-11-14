@@ -20,20 +20,20 @@ function fixture(version) {
 
 test('paying by itself: refused before API 75, checked, then sent', async () => {
   assert.deepEqual([...COMMAND_FIELDS.get_pips_payments], []);
-  assert.deepEqual([...COMMAND_FIELDS.set_pips_payments], ['limit']);
+  assert.deepEqual([...COMMAND_FIELDS.set_pips_payments], ['usd_per_day']);   // the count `limit` is retired (13 Nov)
   assert.deepEqual([...COMMAND_FIELDS.set_pip_paying], ['pip_id', 'rule']);
   const old = fixture(74);
   await assert.rejects(old.session.pips.read('get_pips_payments', {}), (e) => e instanceof DGCUnsupportedError && /API 75/.test(e.message));
-  await assert.rejects(old.session.pips.mutate('set_pips_payments', { limit: 3 }, { approved: true }), DGCUnsupportedError);
+  await assert.rejects(old.session.pips.mutate('set_pips_payments', { usd_per_day: 30 }, { approved: true }), DGCUnsupportedError);
   await assert.rejects(old.session.pips.mutate('set_pip_paying', { pip_id: 'pip_1', rule: 'allow' }, { approved: true }), DGCUnsupportedError);
   assert.equal(old.calls.length, 0);
   const current = fixture(75);
   await assert.rejects(current.session.pips.mutate('set_pip_paying', { pip_id: 'pip_1', rule: 'yes' }, { approved: true }), (e) => e instanceof DGCConfigError && /ask or allow/.test(e.message));
-  for (const limit of [true, '3', 2.5]) {
-    await assert.rejects(current.session.pips.mutate('set_pips_payments', { limit }, { approved: true }), (e) => e instanceof DGCConfigError && /whole number/.test(e.message));
+  for (const usd_per_day of [true, '30']) {
+    await assert.rejects(current.session.pips.mutate('set_pips_payments', { usd_per_day }, { approved: true }), (e) => e instanceof DGCConfigError && /number of dollars/.test(e.message));
   }
   assert.equal(current.calls.length, 0);
   assert.equal((await current.session.pips.read('get_pips_payments', {})).request.type, 'get_pips_payments');
-  assert.equal((await current.session.pips.mutate('set_pips_payments', { limit: 5 }, { approved: true })).request.limit, 5);
+  assert.equal((await current.session.pips.mutate('set_pips_payments', { usd_per_day: 50 }, { approved: true })).request.usd_per_day, 50);
   assert.equal((await current.session.pips.mutate('set_pip_paying', { pip_id: 'pip_1', rule: 'allow' }, { approved: true })).request.rule, 'allow');
 });

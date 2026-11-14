@@ -79,9 +79,7 @@ LIMITS = (
           "Each routine can start a run on its schedule: more model calls.", "pip_routines.max_routines"),
     Limit("pip_conversations", 500, 500, "Conversations per Pip (archived included)",
           "Each keeps its messages in the Pips registry on disk.", "pip_conversations.MAX_CONVERSATIONS"),
-    # Money: a safeguard you can change, never dropped
-    Limit("payments_a_day", 3, 20, "Payments a day by Pips you let pay",
-          "Money: each is a payment a Pip makes without asking you.", "pip_levels.pay_limit"),
+    # (Money: each Pip's daily dollar limit is yours to set on its page; the 3-a-day count is retired, 13 Nov.)
 )
 _BY_NAME = {limit.name: limit for limit in LIMITS}
 _lock = threading.Lock()

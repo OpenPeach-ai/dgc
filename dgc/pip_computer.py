@@ -806,13 +806,13 @@ class Host:
             self.waiting.append(action_id)
         return made
 
-    def _may_pay(self) -> bool:
-        """Whether its level may pay this one (pip_levels.may_pay), read now."""
+    def _may_pay(self, payment=None) -> bool:
+        """Whether its level may pay this one (pip_levels.may_pay: its daily dollar limit and rules), read now."""
         from .pip_levels import may_pay
         from .workspace_registry import WorkspaceRegistry
         try:
             with WorkspaceRegistry(self.state_directory) as registry:
-                return may_pay(registry, self.pip_id)
+                return may_pay(registry, self.pip_id, payment)
         except Exception:                                  # noqa: BLE001 - unreadable: it asks
             return False
 
@@ -909,11 +909,15 @@ class Host:
         if not cues["target"]:
             form_cues = getattr(self.browser, "form_cues", None)
             cues["buttons"] = (form_cues(held.url) or {}).get("buttons", []) if form_cues else []
-        # A payment goes only at Do it all, when the user let Pips pay and today's three aren't used (pip_levels.may_pay).
-        pay = acting and level == pip_levels.FULL and Host._may_pay(self)
+        # A payment goes only at Do it all, when the user let it pay and it fits its daily dollar limit and rules
+        # (pip_payments): DGC reads the amount and currency from what it sends; anything uncertain asks.
+        from .pip_careful import site_of
+        from .pip_payments import read_payment
+        payment = read_payment(held.fields, site_of(parts.hostname or "")) if acting and level == pip_levels.FULL else None
+        pay = acting and level == pip_levels.FULL and Host._may_pay(self, payment)
         found = pip_levels.decide_write(level, cues, pay=pay) if acting else None
         if found is not None and found.get("verdict") == "payment":
-            found = {**found, "paid": True}
+            found = {**found, "paid": True, "payment": payment}
         if found is not None and upload_name:
             self.upload_from_chat = None
         if found is None:
@@ -945,6 +949,9 @@ class Host:
                 with registry.transaction():
                     registry.event(self.workspace_id, "pip_level_sending", pip_id=self.pip_id, run_id=self.run_id,
                                    payload={"kind": "computer", "what": str(approval.get("what") or "")[:200]})
+                    if approval.get("paid") and approval.get("payment"):
+                        from .pip_payments import record       # counted against its day before it goes
+                        record(registry, self.pip_id, approval["payment"], "computer")
         except Exception:                                  # noqa: BLE001 - not noted, not sent
             return False
         if approval.get("site"):
@@ -953,7 +960,7 @@ class Host:
         if approval.get("site"):
             summary.update(kind="site", site=approval["site"])
         if approval.get("paid"):
-            summary["paid"] = True                          # counted against today's payments (pip_levels.paid)
+            summary["paid"] = True                          # paid by itself (pip_payments counted it before it went)
         self.browser.release(held.request_id)
         self.browser.pump(1.5)
         Host._level_record(self, summary, approval["what"], held.request_id)

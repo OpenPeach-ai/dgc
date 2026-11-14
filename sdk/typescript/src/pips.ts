@@ -185,7 +185,7 @@ export type PipMutationParams = {
   set_pip_feedback: { run_id: string; rating: "up" | "down" | null; note: string };
   set_pip_daily_cap: { pip_id: string; daily_tokens: number | null };
   set_pips_desktop_notifications: { enabled: boolean };
-  set_pips_payments: { limit: number };
+  set_pips_payments: { usd_per_day: number | null };
   set_pip_paying: { pip_id: string; rule: "ask" | "allow" };
   set_pips_backup: { model: string; provider?: string; engine?: "claude" | "codex"; router?: boolean };
   set_pip_backup: { pip_id: string; model: string | null; provider?: string; engine?: "claude" | "codex"; router?: boolean };
@@ -222,6 +222,7 @@ export type PipMutationParams = {
   list_pip_sent: { pip_id: string };
   set_pip_knows_you: { pip_id: string; on: boolean };
   list_related_pips: { session_id: string };
+  set_pip_pay_limits: { pip_id: string; usd_per_day?: number | "no_limit" | null; max_count?: number | null; sites?: string[] | null };
   decide_pip_fix: { pip_id: string; fix_id: string; expected_digest: string; allow: boolean };
   start_pip_work_helper: { pip_id: string; fix_id: string };
   answer_pip_waiting: { pip_id: string; waiting_id: string; answer: "done" | "later" | "not_a_problem" | "undo" };
@@ -396,7 +397,7 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   get_pips_desktop_notifications: [],
   set_pips_desktop_notifications: ["enabled"],
   get_pips_payments: [],
-  set_pips_payments: ["limit"],
+  set_pips_payments: ["usd_per_day"],
   set_pip_paying: ["pip_id", "rule"],
   get_pips_backup: [],
   set_pips_backup: ["model", "provider", "engine", "router"],
@@ -435,6 +436,7 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   list_pip_sent: ["pip_id"],
   set_pip_knows_you: ["pip_id", "on"],
   list_related_pips: ["session_id"],
+  set_pip_pay_limits: ["pip_id", "usd_per_day", "max_count", "sites"],
   decide_pip_fix: ["pip_id", "fix_id", "expected_digest", "allow"],
   start_pip_work_helper: ["pip_id", "fix_id"],
   answer_pip_waiting: ["pip_id", "waiting_id", "answer"],
@@ -1003,7 +1005,7 @@ for (const command of API93_MUTATIONS) MUTATIONS.add(command);
 // API 96: the Pips flow. What a check found and what became of it, by the Pip's level (list_pip_fixes; Allow or Not now
 // with decide_pip_fix); what only you can do (answer_pip_waiting); commit exactly a change's files. Local only.
 const API96_READS = new Set(["list_pip_fixes", "get_pips_welcome", "list_pip_sent", "list_related_pips"]);
-const API96_MUTATIONS = new Set(["decide_pip_fix", "start_pip_work_helper", "answer_pip_waiting", "commit_pip_project_change", "set_pip_knows_you"]);
+const API96_MUTATIONS = new Set(["decide_pip_fix", "start_pip_work_helper", "answer_pip_waiting", "commit_pip_project_change", "set_pip_knows_you", "set_pip_pay_limits"]);
 for (const command of API96_READS) READS.add(command);
 for (const command of API96_MUTATIONS) MUTATIONS.add(command);
 /** What came with API 88 inside existing commands: set_pip_profile's changes.group (a folder in the Personal list) and
@@ -1428,7 +1430,7 @@ export class Pips {
     if (command === "save_pip_login") checkLoginSave(values);
     if (command === "set_pip_level" && !PIP_LEVELS.has(values.level as string)) throw new DGCConfigError("level must be ask, approve or full");
     if (command === "set_pip_paying" && !["ask", "allow"].includes(values.rule as string)) throw new DGCConfigError("rule must be ask or allow");
-    if (command === "set_pips_payments" && !Number.isInteger(values.limit)) throw new DGCConfigError("limit must be a whole number");
+    if (command === "set_pips_payments" && values.usd_per_day !== null && values.usd_per_day !== undefined && typeof values.usd_per_day !== "number") throw new DGCConfigError("usd_per_day must be a number of dollars, or null");
     if (command === "set_pip_artifacts" && values.report_as !== undefined && !["chat", "doc", "sheet"].includes(values.report_as as string)) throw new DGCConfigError("report_as must be chat, doc or sheet");
     if (API59_MUTATIONS.has(command) && !(typeof values.borrow_id === "string" && /^pipborrow_[a-f0-9]{32}$/.test(values.borrow_id))) {
       throw new DGCConfigError("borrow_id is the card's id, pipborrow_ and 32 hex digits");

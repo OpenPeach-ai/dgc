@@ -1,5 +1,6 @@
-"""Pips API 75 in the Python SDK: paying by itself, a rule per Pip (set_pip_paying, ask or allow) and the day's count
-(get_pips_payments / set_pips_payments {limit}): known, checked, refused before API 75, then sent."""
+"""Pips API 75 in the Python SDK: paying by itself, a rule per Pip (set_pip_paying, ask or allow) and, since API 96
+(agreed 13 Nov), all Pips together up to $Y a day (set_pips_payments {usd_per_day}; the count `limit` is retired):
+known, checked, refused before API 75, then sent."""
 import unittest
 
 from test_dgc_sdk_pips import CAPS, Wire, session
@@ -18,7 +19,7 @@ class PipPaymentsSDKTests(unittest.TestCase):
     def test_refused_before_api75_checked_then_sent(self):
         wire = Wire(); old = session(wire, caps={**CAPS, 'pips_api_version': 74})
         for call in (lambda s: s.pips.read('get_pips_payments', {}),
-                     lambda s: s.pips.mutate('set_pips_payments', {'limit': 3}, approved=True),
+                     lambda s: s.pips.mutate('set_pips_payments', {'usd_per_day': 30}, approved=True),
                      lambda s: s.pips.mutate('set_pip_paying', {'pip_id': 'pip_1', 'rule': 'allow'}, approved=True)):
             with self.assertRaisesRegex(DGCUnsupportedError, 'API 75'):
                 call(old)
@@ -27,12 +28,12 @@ class PipPaymentsSDKTests(unittest.TestCase):
         for fields in ({'pip_id': 'pip_1', 'rule': 'yes'}, {'pip_id': 'pip_1', 'rule': True}):
             with self.assertRaisesRegex(DGCConfigError, 'ask or allow'):
                 current.pips.mutate('set_pip_paying', fields, approved=True)
-        for limit in (True, '3', 2.5):
-            with self.assertRaisesRegex(DGCConfigError, 'whole number'):
-                current.pips.mutate('set_pips_payments', {'limit': limit}, approved=True)
+        for usd in (True, '30'):
+            with self.assertRaisesRegex(DGCConfigError, 'number of dollars'):
+                current.pips.mutate('set_pips_payments', {'usd_per_day': usd}, approved=True)
         self.assertFalse(wire.calls)
         self.assertEqual(current.pips.read('get_pips_payments', {})['request']['type'], 'get_pips_payments')
-        self.assertEqual(current.pips.mutate('set_pips_payments', {'limit': 5}, approved=True)['request']['limit'], 5)
+        self.assertEqual(current.pips.mutate('set_pips_payments', {'usd_per_day': 50}, approved=True)['request']['usd_per_day'], 50)
         self.assertEqual(current.pips.mutate('set_pip_paying', {'pip_id': 'pip_1', 'rule': 'allow'}, approved=True)['request']['rule'], 'allow')
 
 

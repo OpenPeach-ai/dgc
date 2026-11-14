@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Pips API 96: `list_pip_fixes`, `decide_pip_fix`, `answer_pip_waiting`, `commit_pip_project_change`, `start_pip_work_helper`, `get_pips_welcome`, `list_pip_sent`, `set_pip_knows_you` and `list_related_pips` (both SDKs gate them on API 96). `get_pip_owner`, `set_pip_owner` and `list_session_pips` (API 89, never released) are gone.
+- Pips API 96: `list_pip_fixes`, `decide_pip_fix`, `answer_pip_waiting`, `commit_pip_project_change`, `start_pip_work_helper`, `get_pips_welcome`, `list_pip_sent`, `set_pip_knows_you`, `list_related_pips` and `set_pip_pay_limits`; `set_pips_payments` takes `usd_per_day` (the count `limit` is retired) (both SDKs gate them on API 96). `get_pip_owner`, `set_pip_owner` and `list_session_pips` (API 89, never released) are gone.
 - The protocol copy knows the `wakeups` event (a chat's waiting wake-ups: `{id, at, why}`) and the `cancel_wakeup {id}` command, sent only where `ready.capabilities.wakeups` says so. A wake-up's own turn is a `monitor` turn whose prompt is `wake-up: <why>`.
 - A ChatDGC message takes up to 50 files (`files`; it was 10), as the backend now does (Limits for everyone).
 - The protocol copy knows `list_sessions`'s `scope`: `project` (the default, as before) or `all`, every project's sessions, each item with its `project` folder, `project_name`, `here` and `folder_exists`; sent only where `ready.capabilities.session_scopes` says so.

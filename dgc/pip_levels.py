@@ -219,26 +219,16 @@ def effective(registry, pip_id) -> str:
     return chosen
 
 
-# --------------------------------------------------------------------------- paying by itself (0.52, agreed 10 Nov)
-# As OpenMausBot does it: each Personal Pip has its own rule for a payment. Ask, the default: every payment waits for you
-# on a card, at every level. Allow, which only a Pip at Do it all can have: it pays by itself, at most the day's count
-# across all your Pips (payments counted, not money; PAY_LIMIT unless you change it, up to PAY_MOST). Leaving Do it all
-# puts its rule back to Ask. It never types a card number: a request carrying one still asks, and your own Pay on its
-# screen is still your own. And a pay, buy or order step is never replayed: no Always allow sends one
-# (pip_computer.never_replayed).
+# --------------------------------------------------------------------------- paying by itself (0.52, agreed 13 Nov)
+# Each Pip has its own rule for a payment. Ask, the default: every payment waits for you on a card, at every level.
+# Allow, which only a Pip at Do it all can have: it pays by itself within its daily dollar limit and rules
+# (pip_payments: the total of its payments that day, required; optional count and sites; optional all-Pips total; the
+# same site and amount twice asks). The 10 Nov count (3 a day across all Pips) is retired. Leaving Do it all puts its
+# rule back to Ask. It never types a card number: a request carrying one still asks, and your own Pay on its screen is
+# still your own. And a pay, buy or order step is never replayed (pip_computer.never_replayed).
 ALLOW = "allow"
 PAY_RULES = (ASK, ALLOW)
 PAYING_KEY = "pip_paying:"                 # metadata: a Pip's rule, JSON {rule, at, by}
-PAYMENTS_KEY = "pips_level_payments"       # metadata: the day's count, JSON {limit, at, by}
-PAY_LIMIT = 3
-PAY_MOST = 20                              # Dev Mode lifts it (pay_most)
-PAY_DEV_MOST = 1_000_000                   # in Dev Mode: no real ceiling, a safeguard you still set
-
-
-def pay_most() -> int:
-    from .dev_mode import on
-    return PAY_DEV_MOST if on() else PAY_MOST
-PAY_SECONDS = 24 * 3600
 
 
 def paying(registry, pip_id) -> str:
@@ -257,7 +247,7 @@ def set_paying(registry, pip_id, rule, actor) -> dict:
         raise RegistryError("local_only", "Only you let a Pip pay, on this computer.")
     if rule not in PAY_RULES:
         raise RegistryError("invalid_request", "Choose ask or allow.")
-    workspace = _personal(registry, pip_id)
+    workspace = _scope(registry, pip_id)[0]           # every Pip may pay at Do it all (it has its own computer)
     if rule == ALLOW and level(registry, pip_id) != FULL:
         raise RegistryError("not_do_it_all", "A Pip pays by itself only at Do it all. Choose Do it all first.")
     with registry.transaction():
@@ -269,54 +259,26 @@ def set_paying(registry, pip_id, rule, actor) -> dict:
     return listing(registry, pip_id)
 
 
-def pay_limit(registry) -> int:
-    """How many payments your Pips may make by themselves in a day: yours, else PAY_LIMIT."""
+def _connector_payment(content) -> dict | None:
+    """The amount and currency of an app action that moves money, read by DGC from its inputs (pip_payments)."""
+    from .pip_payments import read_payment
+    call = content.get("call") if isinstance(content, dict) else None
+    arguments = call.get("arguments") if isinstance(call, dict) and isinstance(call.get("arguments"), dict) else call
+    return read_payment(arguments if isinstance(arguments, dict) else {}, "app:" + str((content or {}).get("server") or ""))
+
+
+def may_pay(registry, pip_id, payment=None) -> bool:
+    """Whether this Pip may make this payment by itself now (pip_payments.may_pay). No payment read: it asks."""
+    from .pip_payments import may_pay as within_limits
+    return within_limits(registry, pip_id, payment)
+
+
+def pays_at_all(registry, pip_id) -> bool:
+    """Whether it may pay by itself at all (allowed, Do it all, a daily limit set): what its run is told, for planning."""
     try:
-        row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (PAYMENTS_KEY,)).fetchone()
-        value = json.loads(row["value"]).get("limit") if row else None
-    except Exception:                       # noqa: BLE001 - unreadable is the default
-        value = None
-    return value if type(value) is int and 1 <= value <= pay_most() else PAY_LIMIT
-
-
-def payments(registry) -> dict:
-    """get_pips_payments: {limit, default, most, paid}: the day's count, and how many your Pips paid in the last day."""
-    return {"limit": pay_limit(registry), "default": PAY_LIMIT, "most": pay_most(), "paid": len(paid(registry))}
-
-
-def set_payments(registry, value, actor) -> dict:
-    """set_pips_payments {limit}: the day's count, a whole number from 1 to PAY_MOST. Only you, on this computer."""
-    if actor not in LOCAL:
-        raise RegistryError("local_only", "Only you set how many times Pips may pay in a day, on this computer.")
-    if type(value) is not int or not 1 <= value <= pay_most():
-        raise RegistryError("invalid_request", f"Choose a whole number from 1 to {pay_most()}.")
-    with registry.transaction():
-        registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
-                            (PAYMENTS_KEY, json.dumps({"limit": value, "at": utc_now(), "by": actor})))
-    return payments(registry)
-
-
-def paid(registry, seconds=PAY_SECONDS) -> list[str]:
-    """When each payment a Pip made by itself in the last `seconds` went, across all Pips: a computer submit its level
-    paid, and a plugin change or app send it paid (pip_level_approved with paid)."""
-    since, times = _since(seconds, registry), []
-    for query in ("SELECT resolved_at FROM pip_computer_actions WHERE status='sent' AND resolved_at>=? "
-                  "AND resolved_by LIKE 'pip-level:%' AND json_extract(summary,'$.paid')=1",
-                  "SELECT created_at FROM workspace_events WHERE created_at>=? AND event_type='pip_level_approved' "
-                  "AND json_extract(payload,'$.paid')=1"):
-        try:
-            times += [str(r[0]) for r in registry.db.execute(query, (since,))]
-        except Exception:                   # noqa: BLE001 - a registry without that kind of action
-            pass
-    return sorted(times)
-
-
-def may_pay(registry, pip_id) -> bool:
-    """Whether this Pip may pay by itself now: you allowed it, it is at Do it all (the fuse not holding), and fewer than
-    the day's count went in the last day across your Pips."""
-    try:
+        from .pip_payments import limits
         return (paying(registry, pip_id) == ALLOW and effective(registry, pip_id) == FULL
-                and len(paid(registry)) < pay_limit(registry))
+                and limits(registry, pip_id)["usd_per_day"] is not None)
     except Exception:                       # noqa: BLE001 - unreadable means it asks
         return False
 
@@ -963,7 +925,7 @@ def check(store, actor, payload) -> None:
         "server": payload["server"], "call": payload["call"]}
     money = bool(_asks_every_time(payload))
     if decide_send(store.registry, pip_id, chosen, kind, content, money=money,
-                   pay=money and may_pay(store.registry, pip_id)) is None:
+                   pay=money and may_pay(store.registry, pip_id, _connector_payment(content) if kind == "connector" else None)) is None:
         # Approve for me's second look said the user asked for exactly this action (pip_second_look), and it still may.
         from . import pip_second_look
         if not (pip_second_look.case(chosen, kind, content, money=money) is not None
@@ -1027,7 +989,8 @@ def dispatch_for_run(registry, config, run_id) -> list:
                 content = draft["payload"][field]
                 money = draft_kind == "connector" and bool(_asks_every_time({"kind": "connector_call", "server": content.get("server"),
                                                                              "call": content.get("call")}))
-                pay = bool(money) and may_pay(registry, row[0])
+                payment = _connector_payment(content) if money else None
+                pay = bool(money) and may_pay(registry, row[0], payment)
                 looked = None
                 if decide_send(registry, row[0], chosen, draft_kind, content, money=money, pay=pay) is None:
                     # Approve for me would leave it waiting: one short call, did the user ask for exactly this?
@@ -1051,6 +1014,9 @@ def dispatch_for_run(registry, config, run_id) -> list:
                 registry.event(row[1], "pip_level_approved", pip_id=row[0], run_id=run_id,
                                payload={"action_id": done["id"], "level": chosen, "kind": draft_kind, **({"paid": True} if pay else {}),
                                         **({"you_asked": looked["quote"]} if looked is not None else {})})
+                if pay and payment is not None:
+                    from .pip_payments import record       # counted against its day (pip_payments)
+                    record(registry, row[0], payment, "app")
                 from .pip_plugins import after_action
                 after_action(store, config, done)     # a plugin action: the Pip reads its answer and carries on
             except Exception as exc:        # noqa: BLE001 - it stays a draft for the user

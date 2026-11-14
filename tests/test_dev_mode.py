@@ -38,7 +38,8 @@ class TableTests(unittest.TestCase):
                 self.assertTrue(limit.ceiling is None or limit.ceiling >= limit.default)
                 self.assertTrue(limit.label and limit.cost and limit.where)
                 self.assertNotIn(" AI ", f" {limit.label} {limit.cost} ")
-        for first in ("pips_parallel_runs", "pip_computers", "pip_conversations", "payments_a_day",
+        # (payments_a_day is retired, 13 Nov: each Pip's daily dollar limit replaces the count)
+        for first in ("pips_parallel_runs", "pip_computers", "pip_conversations",
                       "monitors_per_chat", "monitors_per_dgc"):
             self.assertIn(first, names)
 
@@ -50,11 +51,11 @@ class TableTests(unittest.TestCase):
 
     def test_on_each_limit_is_yours_with_no_ceiling_and_a_bad_value_is_ignored(self):
         on = Settings(dev_mode=True, dev_limits={"pip_computers": 40, "pips_parallel_runs": 500, "monitors_per_chat": 0,
-                                                 "pip_conversations": "lots", "payments_a_day": True})
+                                                 "pip_conversations": "lots"})
         self.assertTrue(dev_mode.on(on))
         self.assertEqual(dev_mode.value("pip_computers", on), 40)
         self.assertEqual(dev_mode.value("pips_parallel_runs", on), 500, "past the usual ceiling of 32")
-        for name, default in (("monitors_per_chat", 4), ("pip_conversations", 500), ("payments_a_day", 3)):
+        for name, default in (("monitors_per_chat", 4), ("pip_conversations", 500)):
             self.assertEqual(dev_mode.value(name, on), default, f"{name}: not a whole number of 1 or more")
         with self.assertRaises(KeyError):
             dev_mode.value("sandbox", on)
@@ -118,12 +119,12 @@ class WiredTests(unittest.TestCase):
             db.execute("INSERT INTO metadata VALUES(?,?)", (pip_computer.COMPUTERS_LIMIT_KEY, "100"))
             self.assertEqual(pip_computer.computers_limit(db), 100, "a registry's own setting still wins")
 
-    def test_payments_a_day_may_go_past_twenty_only_in_dev_mode(self):
+    def test_payments_are_no_longer_a_dev_mode_count(self):
+        # Changed on purpose (agreed 13 Nov): the 3-a-day count (20 at most, lifted in Dev Mode) is retired; each Pip's
+        # daily dollar limit is set on its page, with no Dev Mode ceiling.
         from dgc import pip_levels
-        with self.settings(False):
-            self.assertEqual(pip_levels.pay_most(), 20)
-        with self.settings(True):
-            self.assertEqual(pip_levels.pay_most(), 1_000_000, "no real ceiling")
+        self.assertFalse(hasattr(pip_levels, "pay_most"))
+        self.assertNotIn("payments_a_day", [limit.name for limit in dev_mode.LIMITS])
 
 
 class HelpersTests(unittest.TestCase):

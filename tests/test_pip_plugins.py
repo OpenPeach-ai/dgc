@@ -423,11 +423,14 @@ class PluginAccessTests(PluginWorld, unittest.TestCase):
         self.assertEqual(len(pip_levels.outward(self.registry, self.pip["id"])), 1, "the fuse counts it")
         # A plugin that can move money still asks at Do it all, and so does one set to Always ask.
         self.assertIn("draft", self.use("call_plugin", session, plugin="aave", tool="create_record", arguments={}))
-        # Unless you let this Pip at Do it all pay: then it runs, and counts against today's three.
+        # Unless you let this Pip at Do it all pay: then it runs, and counts against its day (pip_payments; changed on
+        # purpose 13 Nov: it was "today's three").
+        from dgc import pip_payments
         with patch.object(pip_levels, "may_pay", return_value=True):
-            paid = self.use("call_plugin", session, plugin="aave", tool="create_record", arguments={})
+            paid = self.use("call_plugin", session, plugin="aave", tool="create_record",
+                            arguments={"amount": "25", "currency": "USD"})
         self.assertIsInstance(paid, str, "it paid: no card")
-        self.assertEqual(pip_levels.payments(self.registry)["paid"], 1)
+        self.assertEqual(float(pip_payments.spent(self.registry, self.pip["id"])), 25.0)
         plugins.set_permission("airtable", "always_ask", money=False)
         self.assertIn("draft", self.use("call_plugin", session, plugin="airtable", tool="create_record", arguments={"table": "T"}))
         plugins.set_permission("airtable", "important", money=False)

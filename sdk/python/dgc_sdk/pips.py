@@ -471,7 +471,7 @@ MUTATION_COMMANDS |= API93_MUTATIONS
 # with decide_pip_fix); what only you can do (answer_pip_waiting); commit exactly a change's files. Local only.
 API96_READS = frozenset({'list_pip_fixes', 'get_pips_welcome', 'list_pip_sent', 'list_related_pips'})
 API96_MUTATIONS = frozenset({'decide_pip_fix', 'start_pip_work_helper', 'answer_pip_waiting', 'commit_pip_project_change',
-                             'set_pip_knows_you'})
+                             'set_pip_knows_you', 'set_pip_pay_limits'})
 READ_COMMANDS |= API96_READS
 MUTATION_COMMANDS |= API96_MUTATIONS
 
@@ -628,6 +628,7 @@ COMMAND_FIELDS = {
     'list_pip_sent': frozenset({'pip_id'}),
     'set_pip_knows_you': frozenset({'pip_id', 'on'}),
     'list_related_pips': frozenset({'session_id'}),
+    'set_pip_pay_limits': frozenset({'pip_id', 'usd_per_day', 'max_count', 'sites'}),
     'decide_pip_fix': frozenset({'pip_id', 'fix_id', 'expected_digest', 'allow'}),
     'start_pip_work_helper': frozenset({'pip_id', 'fix_id'}),
     'answer_pip_waiting': frozenset({'pip_id', 'waiting_id', 'answer'}),
@@ -638,7 +639,7 @@ COMMAND_FIELDS = {
     'list_project_folders': frozenset(),
     'add_project_folder': frozenset({'folder'}),
     'get_pips_payments': frozenset(),
-    'set_pips_payments': frozenset({'limit'}),
+    'set_pips_payments': frozenset({'usd_per_day'}),
     'set_pip_paying': frozenset({'pip_id', 'rule'}),
     'get_pips_desktop_notifications': frozenset(),
     'set_pips_desktop_notifications': frozenset({'enabled'}),
@@ -1183,8 +1184,9 @@ class Pips:
             raise DGCConfigError('level must be ask, approve or full')
         if command == 'set_pip_paying' and (type(values.get('rule')) is not str or values['rule'] not in PAY_RULES):
             raise DGCConfigError('rule must be ask or allow')
-        if command == 'set_pips_payments' and type(values.get('limit')) is not int:
-            raise DGCConfigError('limit must be a whole number')
+        if command == 'set_pips_payments' and values.get('usd_per_day') is not None and (
+                type(values.get('usd_per_day')) not in (int, float) or isinstance(values.get('usd_per_day'), bool)):
+            raise DGCConfigError('usd_per_day must be a number of dollars, or None')
         if command == 'set_pip_artifacts' and 'report_as' in values and (
                 type(values['report_as']) is not str or values['report_as'] not in PIP_REPORT_AS):
             raise DGCConfigError("report_as must be chat, doc or sheet")
