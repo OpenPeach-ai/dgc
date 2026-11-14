@@ -583,7 +583,7 @@ from .artifact_commands import CAPABILITY as _ARTIFACT_CAPABILITY     # noqa: E4
 _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "pips_enable", "pips_runtime", "list_prompt_pips", "watch_pip_reports", "pip_report_dismiss", "watch_pip_runs",
     "watch_agent_reports", "watch_turn_files", "watch_session_owner", "watch_agent_runs", "watch_mcp_apps",
-    "start_pip_fix", "undo_pip_fix", "list_pip_fixes",
+    "start_pip_fix", "undo_pip_fix", "list_pip_fixes", "undo_setting_change",
     "prompt", "start_goal", "resume_turn",
     "get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change",
     "set_workspace_roots", "set_mode", "set_model", "set_model_defaults", "save_model_provider", "set_subscription_default", "set_think", "set_goal", "get_goal",
@@ -3025,6 +3025,7 @@ class Backend:
                           # Dev Mode's capacity limits (dgc/dev_mode.py), for Settings → Dev Mode's Limits group.
                           "dev_limits": dev_mode_limits(),
                           "dev_mode_tools": 1,          # set_config takes dev_mode_tools (the editor shows its switch)
+                          "settings_undo": 1,           # undo_setting_change: Undo on a settings change's line
                           # A spooled `image/heic` or `image/heif` (an iPhone photo) is taken and sent on as
                           # a JPEG (photos.heic_to_jpeg), or refused with one sentence saying what to install.
                           "heic_images": True,
@@ -9413,6 +9414,15 @@ class Backend:
             self._start_pip_fix(cmd, request_id)
         elif t == "undo_pip_fix":
             self._undo_pip_fix(cmd, request_id)
+        elif t == "undo_setting_change":
+            # The editor's Undo on the line a dgc_settings change left in the chat (0.52): the user's own click.
+            from . import settings_tool
+            change_id = str(cmd.get("change_id") or "")[:64]
+            try:
+                said, ok = settings_tool.undo(self.config, change_id), True
+            except settings_tool.SettingsError as exc:
+                said, ok = str(exc), False
+            self.em.emit("setting_undone", request_id=request_id, change_id=change_id, ok=ok, said=said[:400])
         elif t == "list_pip_fixes":
             self._emit_pip_fixes(request_id)
         elif t == "get_pip_fix_change":

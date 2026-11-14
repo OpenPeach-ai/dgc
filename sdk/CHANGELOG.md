@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The protocol copy knows `undo_setting_change {change_id, request_id}` and its answer `setting_undone {request_id, change_id, ok, said}` (Undo on a dgc_settings change's line), offered when `ready.capabilities.settings_undo` says so.
 - Pips API 96: `list_pip_fixes`, `decide_pip_fix`, `answer_pip_waiting`, `commit_pip_project_change`, `start_pip_work_helper`, `get_pips_welcome`, `list_pip_sent`, `set_pip_knows_you`, `list_related_pips` and `set_pip_pay_limits`; `set_pips_payments` takes `usd_per_day` (the count `limit` is retired) (both SDKs gate them on API 96). `get_pip_owner`, `set_pip_owner` and `list_session_pips` (API 89, never released) are gone.
 - The protocol copy knows the `wakeups` event (a chat's waiting wake-ups: `{id, at, why}`) and the `cancel_wakeup {id}` command, sent only where `ready.capabilities.wakeups` says so. A wake-up's own turn is a `monitor` turn whose prompt is `wake-up: <why>`.
 - A ChatDGC message takes up to 50 files (`files`; it was 10), as the backend now does (Limits for everyone).

@@ -190,3 +190,39 @@ class DocsReachEverySection(unittest.TestCase):
     def test_nothing_found_still_says_so(self):
         from dgc import settings_tool
         self.assertIn("nothing on that", settings_tool.docs("zzqx wvvq"))
+
+
+class TheEditorUndoes(unittest.TestCase):
+    """The editor's Undo on the line a settings change leaves in the chat: undo_setting_change {change_id, request_id},
+    answered by setting_undone {request_id, change_id, ok, said}; ready says it is there (capabilities.settings_undo)."""
+
+    setUp = TheTool.setUp
+
+    def backend(self):
+        import sys
+        from unittest.mock import patch
+        from dgc.headless import Backend
+        from tests.test_pip_report_delivery import Wire
+        self.wire = Wire()
+        with patch("dgc.trust.is_trusted", return_value=True), patch.object(sys, "stdout", self.wire):
+            backend = Backend(self.config)
+        self.addCleanup(lambda: backend.agent.mcp.stop_all())
+        return backend
+
+    def test_undo_from_the_editor_puts_it_back_and_says_so(self):
+        from dgc import editor_protocol as ep, settings_tool as T
+        said = T.change(self.config, "compact_threshold", 0.7, reason="he asked")
+        change_id = said.rsplit("Undo: ", 1)[1]
+        backend = self.backend()
+        self.assertEqual(backend._ready_payload()["capabilities"]["settings_undo"], 1)
+        command = {"type": "undo_setting_change", "change_id": change_id, "request_id": "u1"}
+        self.assertIsNone(ep.command_error(command))
+        backend.dispatch(command)
+        [answer] = self.wire.of("setting_undone")
+        self.assertIsNone(ep.event_error(answer))
+        self.assertEqual((answer["request_id"], answer["change_id"], answer["ok"], answer["said"]), ("u1", change_id, True, "Undone."))
+        self.assertNotEqual(self.config.get("compact_threshold"), 0.7)
+        backend.dispatch({"type": "undo_setting_change", "change_id": "setchg_nope", "request_id": "u2"})
+        refused = self.wire.of("setting_undone")[-1]
+        self.assertEqual((refused["ok"], refused["request_id"]), (False, "u2"))
+        self.assertIn("isn't recorded", refused["said"])

@@ -7293,6 +7293,45 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "setting_undone"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "change_id": {
+              "type": "string"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "said": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "request_id",
+            "change_id",
+            "ok",
+            "said"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "undo_result"
             },
             "seq": {
@@ -14540,6 +14579,31 @@
           "required": [
             "type",
             "index",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "undo_setting_change"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "change_id": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "change_id",
             "request_id"
           ],
           "additionalProperties": false

@@ -1468,6 +1468,10 @@ EVENT_FIELDS["rewind_preview"] = {"request_id": _S(), "index": _I(), "files": _I
 # leaves as they are; `undo_result` then carries `git: true` after an Undo of such a turn.
 COMMAND_FIELDS["user_saved"] = {"paths": _A(), "at": _N(False)}
 COMMAND_FIELDS["undo_to"] = {"index": _I(), "overwrite": _A(False), "keep": _A(False), "request_id": _S()}
+# A settings change DGC made (dgc_settings, 0.52) put back from the editor's Undo on its line in the chat; offered when
+# ready.capabilities.settings_undo says so. `said`: DGC's own words ("Undone.", or why nothing was undone).
+COMMAND_FIELDS["undo_setting_change"] = {"change_id": _S(), "request_id": _S()}
+EVENT_FIELDS["setting_undone"] = {"request_id": _S(), "change_id": _S(), "ok": _B(), "said": _S()}
 EVENT_FIELDS["undo_result"] = {"request_id": _S(), "index": _I(), "ok": _B(), "files_restored": _I(),
                                "conflicts": _A(), "left": _A(), "stopped": _I(), "error": _S(False),
                                "git": _B(False), "merged": _A(False), "kept": _A(False)}
