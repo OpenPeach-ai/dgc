@@ -287,7 +287,7 @@ button.pill{border-radius: var(--btn-r, 6px);padding:6px 16px}
 .pip-row-both>:is(.pip-row-read,.pip-row-read-slot){margin:0 -6px 0 -8px}
 .pip-row-read:hover{background:transparent}
 /* "Read" ends where a number ends (the marks' own edge) and starts where the row's words stop (their 12px gap). */
-.pip-read-word{display:none;position:absolute;z-index:1;top:50%;right:0;transform:translateY(-50%);box-sizing:border-box;width:34px;height:20px;padding:0;align-items:center;justify-content:center;border-radius:10px;background:var(--solid);color:var(--on-solid);font-size:11px;font-weight:600;white-space:nowrap}
+.pip-read-word{display:none;position:absolute;z-index:1;top:50%;right:0;transform:translateY(-50%);box-sizing:border-box;width:34px;height:20px;padding:0;align-items:center;justify-content:center;border-radius:var(--btn-r,6px);background:var(--solid);color:var(--on-solid);font-size:11px;font-weight:600;white-space:nowrap}
 .pip-row-read:hover .pip-read-word{background:var(--solid-hover)}
 .pip-row-read:is(:hover,:focus-visible) .pip-new-dot{visibility:hidden}
 .pip-row-read:is(:hover,:focus-visible) .pip-read-word{display:inline-flex}
@@ -1292,9 +1292,14 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 @media(prefers-reduced-motion:reduce){.job-pin{transition:none}}
 /* The same pin beside a row of Your Pips: at the row's end, left of its number and its dot; a pinned row keeps room for it. */
 .pip-row-slot{position:relative;display:grid;grid-template-columns:minmax(0,1fr);min-width:0}
-.pip-row-slot>.job-pin{top:50%;right:8px;margin-top:-10px}
+.pip-row-slot>.job-pin{top:50%;right:8px;margin-top:0;transform:translateY(-50%)}
 .pip-row-slot:has(.pip-row-marked)>.job-pin{right:40px}
 .pip-row-slot:has(.pip-row-both)>.job-pin{right:66px}
+/* A dot that turns to "Read" (34px, from the marks' right edge 10px in): the pin stays clear of it, level with the dot (14 Nov). */
+.pip-row-slot:has(.pip-row-marks-live)>.job-pin{right:50px}
+.pip-row-slot:has(.pip-row-marks-live):is(.is-pinned,:hover,:focus-within) .pip-row-copy{padding-right:40px}
+/* Where nothing hovers (a touch screen) the pins always show, so the words always keep their room. */
+@media(hover:none){.pip-row-slot .pip-row-copy{padding-right:26px}.pip-row-slot:has(.pip-row-marks-live) .pip-row-copy{padding-right:40px}}
 .pip-row-slot:is(:hover,:focus-within)>.job-pin{opacity:1}
 .pip-row-slot.is-pinned .pip-row-copy,.pip-row-slot:is(:hover,:focus-within) .pip-row-copy{padding-right:26px}
 /* ==== Several conversations per Pip (Pips API 79; src/pipConversations.js). The Pip's name in its chat's top bar is a
