@@ -121,7 +121,14 @@
     if (k[0] === "h") return `${"#".repeat(Number(k[1]) || 2)} ${body}`;
     return body.replace(/^(\s*)(#{1,6}[ \t]|[-*+][ \t])/, "$1\\$2").replace(/^(\s*\d{1,9})([.)][ \t])/, "$1\\$2");
   }
-  const lineHtml = (l) => `<div class="nt-l" data-k="${l.k}"${l.in ? ` data-in="${l.in}"` : ""}${l.k === "ck" ? ` data-done="${l.done ? 1 : 0}"` : ""}>${inline(l.body) || "<br>"}</div>`;
+  const lineHtml = (l) => `<div class="nt-l" data-k="${l.k}"${l.in ? ` data-in="${l.in}"` : ""}${l.k === "ck" ? ` data-done="${l.done ? 1 : 0}" role="checkbox" aria-checked="${l.done ? "true" : "false"}"` : ""}>${inline(l.body) || "<br>"}</div>`;
+  /** A tick box says what it is and whether it is ticked (the box itself is drawn by the stylesheet, which a screen
+   *  reader does not read): a checkbox by role, checked or not; a line that is no tick box says neither. */
+  function sayBox(line) {
+    if (!line || line.nodeType !== 1) return;
+    if (line.dataset.k === "ck") { const on = line.dataset.done === "1" ? "true" : "false"; if (line.getAttribute("role") !== "checkbox") line.setAttribute("role", "checkbox"); if (line.getAttribute("aria-checked") !== on) line.setAttribute("aria-checked", on); }
+    else { if (line.getAttribute("role") === "checkbox") line.removeAttribute("role"); if (line.hasAttribute("aria-checked")) line.removeAttribute("aria-checked"); }
+  }
   /** Numbered lines keep themselves in order: each run counts from 1, a deeper one inside it on its own. */
   function renumber(el) {
     const c = [0, 0, 0, 0, 0];
@@ -145,6 +152,10 @@
     el.className = "nt-doc"; el.contentEditable = "true"; el.spellcheck = true; el.dataset.fk = "note-doc";
     el.setAttribute("role", "textbox"); el.setAttribute("aria-multiline", "true"); el.setAttribute("aria-label", "Note: its first line is its name");
     let hist = [], at = -1, cur = "", composing = false, held = null;
+    // However a line becomes a tick box, is ticked, or stops being one (typed, the format bar, a paste, undo, Enter):
+    // its checked state follows what the line itself says.
+    if (typeof root.MutationObserver === "function") new root.MutationObserver((changes) => { for (const c of changes) { if (c.type === "attributes") { if (c.target.parentNode === el) sayBox(c.target); } else for (const n of c.addedNodes) if (n.parentNode === el) sayBox(n); } })
+      .observe(el, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-k", "data-done"] });
     const lineAt = (node) => { while (node && node.parentNode !== el) node = node.parentNode; return node && node.nodeType === 1 ? node : null; };
     /** A place in the note as [line, how many characters into it]. */
     function where(node, off) {

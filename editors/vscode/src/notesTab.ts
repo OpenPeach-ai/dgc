@@ -11,7 +11,7 @@ import type { Notes, NotesEnv } from "./notes";
 export const NOTE_TAB = "dgc.noteTab";
 const ID = /^[a-z0-9]{4,24}$/;
 const attr = (value: string) => String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
-const STYLES = ["shared/tokens.css", "shared/menu.css", "shared/homecards.css", "shared/notes.css"], SCRIPTS = ["shared/menu.js", "shared/notes.js", "shared/notestab.js"];
+const STYLES = ["shared/tokens.css", "shared/menu.css", "shared/homecards.css", "shared/notes.css", "shared/tip.css"], SCRIPTS = ["shared/menu.js", "shared/tip.js", "shared/notes.js", "shared/notestab.js"];
 /** The tab's document for one note. `uri(name)`: where a file under media/ is served from. */
 export function noteTabDocument(uri: (name: string) => string, cspSource: string, noteId: string): string {
   const id = ID.test(noteId) ? noteId : "";

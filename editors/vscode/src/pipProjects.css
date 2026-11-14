@@ -16,11 +16,13 @@
 /* (The line is tall enough for an underscore: at a line-height of 1 the clip below takes it off.) */
 .pip-project-card .f { display: flex; flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--text); line-height: 1.4; white-space: nowrap; }
 .pip-project-card .f .fd { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+/* (Pointed at, the row is washed: its folder's quiet words step up with it; they read 4.46:1 on the lit row.) */
+.pip-project-card .diff-toggle:hover .f .fd { color: var(--muted-firm, var(--muted)); }
 .pip-project-card .f .fn { flex: 0 0 auto; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .pip-project-card .pip-project-kind { flex: none; color: var(--muted); font: var(--w-reg) var(--t-xs)/1 var(--sans); white-space: nowrap; }
 .pip-project-card .diff .diff-stat { flex: none; font-weight: var(--w-bold); }
-.pip-project-card .diff .add-stat { color: var(--good); }
-.pip-project-card .diff .del-stat { color: var(--del-text); }
+.pip-project-card .diff .add-stat { color: var(--add-text, var(--good)); }
+.pip-project-card .diff .del-stat { color: var(--del-ink, var(--del-text)); }
 .pip-project-card .diff pre { display: block; box-sizing: border-box; max-width: 100%; max-height: 320px; margin: 0; padding: var(--sp-1) 0; border: 0; border-radius: 0; background: none; overflow: auto; font: var(--w-reg) var(--t-xs)/1.6 var(--mono); color: var(--text); white-space: pre; }
 .pip-project-card .diff pre > span { display: flex; min-width: max-content; padding: 0 var(--sp-2) 0 0; white-space: pre; }
 .pip-project-card .diff .ln { display: inline-block; flex: none; width: 35px; padding-right: var(--sp-2); color: var(--faint); text-align: right; user-select: none; }

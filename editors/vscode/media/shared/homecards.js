@@ -260,7 +260,7 @@
       const fresh = (d.news || []).map((r) => ({ ...r, fresh: true })), rows = [...fresh, ...(d.recent || [])];
       if (form === "s") {
         const r = rows[0];
-        return `<span class="hc-lbl">Recent${fresh.length ? `<span class="hc-newmark">New${fresh.length > 1 ? ` · ${fresh.length}` : ""}</span>` : ""}</span>${r ? `<span class="hc-ico hc-ico-s">${r.icon || ""}</span><span class="hc-mid hc-grow${r.fresh ? " hc-b" : ""}">${esc(r.name)}</span><span class="hc-sub">${esc(r.meta || "")}${r.age ? ` · ${esc(r.age)}` : ""}</span>` : '<span class="hc-grow"></span><span class="hc-sub">Nothing yet</span>'}`;
+        return `<span class="hc-lbl">Recent${fresh.length ? `<span class="hc-newmark">New${fresh.length > 1 ? ` · ${fresh.length}` : ""}</span>` : ""}</span>${r ? `<span class="hc-ico hc-ico-s">${r.icon || ""}</span><span class="hc-mid hc-grow${r.fresh ? " hc-b" : ""}">${esc(r.name)}</span><span class="hc-sub hc-cut">${esc(r.meta || "")}${r.age ? ` · ${esc(r.age)}` : ""}</span>` : '<span class="hc-grow"></span><span class="hc-sub">Nothing yet</span>'}`;
       }
       // Opened: what is new as cards with their own answers (Open, Mark read, Dismiss, Undo) and Clear, the hub's; then the rest as rows.
       if (form === "full") return `${fresh.length ? "" : headOf("Recent", '<span class="hc-cap">Work, chats and Pips</span>')}<div data-slot="new"></div>${(d.recent || []).length ? `${fresh.length ? '<div class="hc-ch hc-earlier"><span class="hc-ct">Earlier</span></div>' : ""}<div class="hc-list">${d.recent.slice(0, 30).map((r) => li(r)).join("")}</div>` : fresh.length ? "" : '<p class="hc-quiet">Nothing yet. Sessions, chats and Pips show here as you use them.</p>'}`;

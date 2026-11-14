@@ -31,7 +31,7 @@ test("the tab's document: scripts and styles from the extension only, no inline 
   assert.match(html, /<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src vscode-resource:\/\/ext; script-src vscode-resource:\/\/ext;">/);
   assert.equal(/<script(?![^>]*\ssrc=)[^>]*>/.test(html), false, "no inline script"); assert.equal(/\son[a-z]+=|style="/.test(html), false, "no inline handlers or styles");
   assert.match(html, /<body[^>]* data-note="ferry1"/);
-  assert.deepEqual([...html.matchAll(/(?:src|href)="vscode-resource:\/\/ext\/media\/([^"]+)"/g)].map((m) => m[1]), ["shared/tokens.css", "shared/menu.css", "shared/homecards.css", "shared/notes.css", "shared/menu.js", "shared/notes.js", "shared/notestab.js"]);
+  assert.deepEqual([...html.matchAll(/(?:src|href)="vscode-resource:\/\/ext\/media\/([^"]+)"/g)].map((m) => m[1]), ["shared/tokens.css", "shared/menu.css", "shared/homecards.css", "shared/notes.css", "shared/tip.css", "shared/menu.js", "shared/tip.js", "shared/notes.js", "shared/notestab.js"]);
   assert.equal(noteTabDocument((n) => n, "x", '"><script>alert(1)</script>').includes("<script>alert"), false, "a note id is never markup");
 });
 

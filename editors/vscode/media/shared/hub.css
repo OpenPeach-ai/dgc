@@ -96,7 +96,7 @@
 }
 .dgc-hub-note { margin: 0; color: var(--err-text); font: var(--w-reg) var(--t-sm)/1.4 var(--sans); }
 .dgc-hub-note .dgc-hub-link { display: inline; margin: 0 0 0 var(--sp-1); padding: 0 var(--sp-1); text-decoration: underline; text-underline-offset: 2px; }
-.dgc-hub-empty { margin: var(--sp-1) 0 0; color: var(--text-2); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
+.dgc-hub-empty { margin: var(--sp-1) 0 0; color: var(--muted-firm, var(--text-2)); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
 @media (forced-colors: active) { .dgc-hub-show { border-color: CanvasText; } }
 
 /* ---- A held answer's Undo (DGC's one button, tokens.css, at its small size: 76 by 22 px, an outline), where the icons

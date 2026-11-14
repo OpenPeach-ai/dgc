@@ -872,6 +872,8 @@ body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { ma
 .commentary-actions { position: absolute; right: 0; bottom: 0; display: flex; opacity: 0; transition: opacity .12s; }
 .text.commentary:hover .commentary-actions, .commentary-actions:focus-within { opacity: .62; }
 .text.commentary:hover .commentary-actions:hover { opacity: 1; }
+/* Where nothing hovers (a touch screen) a line's Copy is always in sight (14 Nov). */
+@media (hover: none) { .commentary-actions { opacity: 1; } }    /* full strength: nothing points at it to raise it */
 @media (prefers-reduced-motion: reduce) { .commentary-actions { transition: none; } }
 /* A detailed mid-turn message (a diagnosis, a plan before substantial work: main.js
    isDetailedCommentary) reads like an answer, not one more progress line: the room an answer gets
@@ -1169,6 +1171,9 @@ body.hide-reasoning .tool-group-label .tg-thought { display: none; }
 .diff .diff-stat { flex: none; font-weight: var(--w-bold); }
 .diff .add-stat { color: var(--good); }
 .diff .del-stat { color: var(--del-text); }
+/* (On a light ground the dark theme's green and red read 2.0 and 2.8:1: there the counts take --add-text and --del-ink, the same hues, darker.) */
+body.vscode-light .diff .add-stat, body.vscode-high-contrast-light .diff .add-stat { color: var(--add-text); }
+body.vscode-light .diff .del-stat, body.vscode-high-contrast-light .diff .del-stat { color: var(--del-ink); }
 .diff .diff-action { color: var(--faint); font-size: var(--t-xs); font-weight: var(--w-reg); }
 .diff pre { display: none; margin: 0; max-height: 320px; overflow: auto; padding: var(--sp-1) 0; font: var(--w-reg) var(--t-xs)/1.6 var(--mono); }
 .diff.open pre { display: block; }
@@ -1231,7 +1236,7 @@ body.vscode-light .approval-dock > .card { box-shadow: 0 -8px 20px -14px rgba(0,
 .card.perm-card .btns button.act { min-height: 26px; padding: 0 10px; }
 .card.perm-card .btns button.act:not(.primary) { background: transparent; border-color: var(--border-strong); }
 .card.perm-card pre { margin: 6px 0 0; padding: 3px 8px; border: 0; border-radius: var(--r-chip, 6px); font-size: 12px;
-  background: color-mix(in srgb, var(--text) 5%, transparent); }
+  background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--muted-firm); }   /* (on its own washed ground the quiet grey read 4.46:1) */
 .card.perm-card .feedback { margin: var(--sp-2) 0 0; }
 /* The same look as every card that asks (media/shared/card.css): its corner and hairline, the mark in a small grey
    tile, and its answers as pills: one filled, the others quiet. Its ground stays the editor's own (opaque: the dock
@@ -1944,6 +1949,7 @@ pre.code .copy.done, .md-table-wrap .copy.done, blockquote > .copy.done { opacit
 .artifact .alabel { font: var(--w-reg) var(--t-sm)/1 var(--sans); color: var(--muted); }
 .artifact .aurl { display: block; width: 100%; margin: var(--sp-2) 0 var(--sp-2); padding: 0; border: 0; background: transparent; text-align: left; font: var(--w-med) var(--t-sm)/1.45 var(--mono); color: var(--accent-text); cursor: pointer; word-break: break-all; }
 .artifact .aurl:hover { color: var(--lav); text-decoration: underline; }
+body.vscode-light .artifact .aurl:hover, body.vscode-high-contrast-light .artifact .aurl:hover { color: var(--accent-text); }   /* (the pale lavender read 2.7:1 on a light ground) */
 /* The same buttons serve the artifact card and the /artifact and /monitors listing cards (plain
    .card rows); scoped to .artifact alone, the listing Stop buttons fell back to the browser's own. */
 :is(.artifact, .card) .abtns { display: flex; gap: var(--sp-2); }
@@ -2493,6 +2499,7 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
   padding: 0 var(--sp-3) 0 var(--sp-2); border: 1px solid var(--border-strong); border-radius: var(--r-md);
   background: var(--am-ground); color: var(--text); text-align: left; cursor: pointer; font: var(--w-reg) var(--t-sm)/1.35 var(--sans); }
 .am-row:hover { background: var(--surface2); }
+.am-row:hover .am-meta { color: var(--muted-firm); }   /* (on the lit row the quiet grey read 3.9:1) */
 .am-row .agent-dot { margin-top: 0; }
 .am-face { width: 16px; height: 16px; }
 .am-pip-float { position: absolute; left: calc(100% + 7px); top: 50%; transform: translateY(-50%);
@@ -3846,7 +3853,7 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .mod-bar-part { outl
    title and crumbs, the tray's chips, a question's options, and anything that only opens or folds a row. */
 button.act, .card.perm-card .btns button.act, .card.perm-card .btns button.act:not(.primary), .goal-dialog-actions .act, :is(.artifact, .card) .abtn:not(.dgc-doc-open), .ask-act, .open-ask-send, .open-ask-skip, .auto-mode-buttons button, #sessions-host .home-new { display: inline-block; flex: none; box-sizing: border-box; width: var(--btn-w); min-width: 0; max-width: 100%; height: var(--btn-h); min-height: 0; padding: 0 var(--btn-pad); border: 1px solid var(--btn-line); border-radius: var(--btn-r);
   background: transparent; color: var(--btn-text); font-weight: var(--w-med, 500); line-height: calc(var(--btn-h) - 2px); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: none; transition: var(--btn-move); }
-button.act[data-d="acceptEdits"], button.act.wide { width: var(--btn-w-wide); }
+button.act[data-d="acceptEdits"], button.act.wide, :is(.artifact, .card) .abtn.wide:not(.dgc-doc-open) { width: var(--btn-w-wide); }
 button.act:hover:not(:disabled), .card.perm-card .btns button.act:hover:not(:disabled), .card.perm-card .btns button.act:not(.primary):hover:not(:disabled), .goal-dialog-actions .act:hover:not(:disabled), :is(.artifact, .card) .abtn:not(.dgc-doc-open):hover:not(:disabled), .ask-act:hover:not(:disabled), .open-ask-send:hover:not(:disabled), .open-ask-skip:hover:not(:disabled), .auto-mode-buttons button:hover:not(:disabled), #sessions-host .home-new:hover:not(:disabled) { border-color: var(--btn-line-hover); background: var(--btn-wash); color: var(--btn-text); transform: var(--btn-up); transition-duration: var(--btn-in); }
 button.act:active:not(:disabled), .card.perm-card .btns button.act:active:not(:disabled), .card.perm-card .btns button.act:not(.primary):active:not(:disabled), .goal-dialog-actions .act:active:not(:disabled), :is(.artifact, .card) .abtn:not(.dgc-doc-open):active:not(:disabled), .ask-act:active:not(:disabled), .open-ask-send:active:not(:disabled), .open-ask-skip:active:not(:disabled), .auto-mode-buttons button:active:not(:disabled), #sessions-host .home-new:active:not(:disabled) { transform: var(--btn-down); transition-duration: var(--btn-press); }
 button.act:focus-visible, .card.perm-card .btns button.act:focus-visible, .card.perm-card .btns button.act:not(.primary):focus-visible, .goal-dialog-actions .act:focus-visible, :is(.artifact, .card) .abtn:not(.dgc-doc-open):focus-visible, .ask-act:focus-visible, .open-ask-send:focus-visible, .open-ask-skip:focus-visible, .auto-mode-buttons button:focus-visible, #sessions-host .home-new:focus-visible { outline: var(--btn-ring); outline-offset: 2px; }

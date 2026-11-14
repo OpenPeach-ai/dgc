@@ -8,6 +8,8 @@
 // Names are the user's words: text nodes only. Images are asked of the backend by id, as the chat screen asks.
 (function () {
   const vscode = acquireVsCodeApi();
+  // A control's `title` shows as DGC's own label, inside the tab (media/shared/tip.js; Work's look, from main.css).
+  window.DgcTip?.install({ look: "tip" });
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
   const icon = (name) => { const g = el("span", `codicon codicon-${name}`); g.setAttribute("aria-hidden", "true"); return g; };

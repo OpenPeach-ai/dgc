@@ -5,6 +5,7 @@
   "use strict";
   const vscode = acquireVsCodeApi(), id = document.body.dataset.note || "", section = document.querySelector(".hc-note"), live = document.querySelector(".hc-live");
   let pending = 0;
+  window.DgcTip?.install();   // a control's `title` as DGC's own label, inside the tab (media/shared/tip.js)
   const draw = () => { if (pending) return; pending = requestAnimationFrame(() => { pending = 0; app.fill(section, "tab"); }); };
   const app = window.DgcNotes.create({ post: (message) => vscode.postMessage(message), say: (text) => { live.textContent = text; }, width: () => window.innerWidth, redraw: draw, isOpen: () => true, tab: id });
   window.addEventListener("message", (event) => app.heard(event.data));

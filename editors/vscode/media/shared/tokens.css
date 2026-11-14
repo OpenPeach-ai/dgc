@@ -43,6 +43,10 @@
   --muted-firm: color-mix(in srgb, var(--text) 68%, transparent);
   --muted: rgb(from var(--text) min(r, 141) min(g, 141) min(b, 141));
   --muted-firm: rgb(from var(--text) min(r, 154) min(g, 154) min(b, 154));
+  /* A menu's own ground is lighter still than a field's (#3a3a3a under Dark Modern): #9a9a9a read 4.0:1 there
+     (14 Nov). --muted-raised is the quiet grey for words on it: #aaaaaa at most on dark, 4.9:1. */
+  --muted-raised: color-mix(in srgb, var(--text) 76%, transparent);
+  --muted-raised: rgb(from var(--text) min(r, 170) min(g, 170) min(b, 170));
   --dgc-muted: var(--muted);
   --dgc-quiet: color-mix(in srgb, var(--text) 65%, transparent);
   /* Quiet words are the text colour, thinned. Second-level words (a row's second line, a menu row at rest) at 65%:
@@ -215,7 +219,7 @@ body.vscode-high-contrast-light { --link:#6D49E8; --accent-text:#6D49E8; }
 body.vscode-light, body.vscode-high-contrast-light {
   --text-2: color-mix(in srgb, var(--text) 72%, transparent); --faint: color-mix(in srgb, var(--text) 72%, transparent);
   --muted: color-mix(in srgb, var(--text) 72%, var(--bg)); --muted-firm: color-mix(in srgb, var(--text) 80%, transparent);
-  --muted: rgb(from var(--text) max(r, 108) max(g, 108) max(b, 108)); --muted-firm: rgb(from var(--text) max(r, 94) max(g, 94) max(b, 94));
+  --muted: rgb(from var(--text) max(r, 108) max(g, 108) max(b, 108)); --muted-firm: rgb(from var(--text) max(r, 94) max(g, 94) max(b, 94)); --muted-raised: var(--muted-firm);
   --dgc-muted: var(--muted); --dgc-quiet: color-mix(in srgb, var(--text) 72%, transparent);
   --solid-hover: color-mix(in srgb, var(--text) 86%, #000); --home-quiet: var(--text-2);
   --lift-2: 0 2px 6px rgba(0,0,0,.07), 0 24px 48px -16px rgba(0,0,0,.20);

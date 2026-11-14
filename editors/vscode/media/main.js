@@ -10066,7 +10066,7 @@ function permissionChoices(ev) {
         const c = el("div", "artifact"); c.dataset.artifactId = String(ev.id || "");
         c.innerHTML = `<div class="ahead"><span class="aico" aria-hidden="true">${icon("app-window")}</span><span class="anm">Artifact ready</span><span class="alabel">${esc(ev.name)}</span></div><button type="button" class="aurl">${esc(ev.url)}</button>`;
         const row = el("div", "abtns");
-        const open = el("button", "abtn primary", "Open in browser"); open.type = "button";
+        const open = el("button", "abtn primary wide", "Open in browser"); open.type = "button";   // (the wide box: its words are 8px too long for the one box, and were cut)
         open.onclick = () => vscode.postMessage({ type: "openExternal", url: ev.url });
         const stop = el("button", "abtn", "Stop"); stop.type = "button"; stop.dataset.artifactStop = "1";
         stop.onclick = () => requestArtifactStop(ev.id, c, stop);

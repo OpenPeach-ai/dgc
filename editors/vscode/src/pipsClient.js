@@ -30,6 +30,9 @@ import '../media/shared/dialog.css';   // every popover's and dialog's lift and 
 import '../media/shared/tray.css';
 import '../media/shared/tray.js';
 import './pips.css';
+// DGC's own hover label, drawn in the page: the browser's own `title` tooltip is cut by the window's edge (window.DgcTip).
+import '../media/shared/tip.css';
+import '../media/shared/tip.js';
 import '../media/messagequeue.js';
 import '../media/messagequeue.css';
 import '../media/trace.js'; // window.DgcTrace: a reply's steps replayed, the same dialog as Work and ChatDGC
@@ -132,6 +135,8 @@ export function mountPips(options) {
   }else nativeDocument.body.classList.add('pip-app-root');
   const shell=embedded?root.querySelector('.pip-app-root'):nativeDocument.body;
   if(!remoteHost)shell.classList.add('extension-pips');
+  // Every control's `title` shows as DGC's own label, inside this view (in the side bar's shadow root, or the tab).
+  if(typeof DgcTip!=='undefined'){const tip=DgcTip.install({root,shell});disposers.push(()=>tip.dispose());}
   const document={
     ownerDocument:owner,
     head:embedded?root:nativeDocument.head,body:shell,

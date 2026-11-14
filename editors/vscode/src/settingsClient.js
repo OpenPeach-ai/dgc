@@ -3,6 +3,9 @@ import { APP_CONNECTORS, ownAppRedirect } from './appConnectors';
 import '../media/shared/tokens.css';
 import '../media/shared/dialog.css';   // every popover's and dialog's lift and arrival, as in Work, ChatDGC and Pips (ui-08)
 import './settings.css';
+// DGC's own hover label, drawn in the page: the browser's own `title` tooltip is cut by the window's edge (window.DgcTip).
+import '../media/shared/tip.css';
+import '../media/shared/tip.js';
 import {watchButtons} from './buttonFit.js';
 import {parseMcpPaste} from './mcpPaste.js';
 import zapierLogo from '../media/plugin-logos/zapier.ico';
@@ -46,6 +49,7 @@ import { createImages } from './settingsImages.js';
 // The user's mods, listed as the chats' /mods lists them (window.DgcMods.listView: every word goes in as text).
 import '../media/mods.js';
 const vscode = acquireVsCodeApi();
+if (typeof DgcTip !== 'undefined') DgcTip.install();   // a control's `title` as DGC's own label, inside the page
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const paths = { dev: 'M8 3h5 M9 3v5.5L4.6 16a1.4 1.4 0 0 0 1.2 2.1h9.4a1.4 1.4 0 0 0 1.2-2.1L12 8.5V3 M6.8 13h7.4', voice: 'M10 2a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z M5 10a5 5 0 0 0 10 0 M10 15v3 M7 18h6', web: 'M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15z M3 10.5h15 M10.5 3c-2.2 2.1-3.2 4.6-3.2 7.5s1 5.4 3.2 7.5 M10.5 3c2.2 2.1 3.2 4.6 3.2 7.5s-1 5.4-3.2 7.5', chatdgc: 'M5 4h11a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H9.5L6 17v-3H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z M7.6 11.4l1.3-4.3 M10 11.4l1.3-4.3 M12.4 11.4l1.3-4.3', memory: 'M6 3h9a1 1 0 0 1 1 1v14l-5.5-3.5L5 18V4a1 1 0 0 1 1-1z M8.5 8h4', general: 'M9 3h6l1 3 3 1v6l-3 1-1 3H9l-1-3-3-1V7l3-1z M13 10a2 2 0 1 1-4 0 2 2 0 0 1 4 0', models: 'M4 6h14M4 11h14M4 16h14M7 4v4M14 9v4M9 14v4', agents: 'M9 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0M3 17v-3a3 3 0 0 1 6 0v3M13 5h5M13 10h5M13 15h5', usage: 'M4 17V9M10 17V3M16 17v-6', security: 'M10 2l7 3v5c0 5-7 8-7 8S3 15 3 10V5z M7 10l2 2 4-4', plugins: 'M3 7h5V3h4v4h5v5h-4v5H8v-5H3z', mcp: 'M7 3v5M13 3v5M5 8h10v3a5 5 0 0 1-10 0z M10 16v3', panel: 'M3 3h15v15H3z M8 3v15', gear: 'M8 3h4l1 3 3 1v4l-3 1-1 3H8l-1-3-3-1V7l3-1z M12 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0', app: 'M4 3h13v14H4z M4 7h13', running: 'M3 5h9v8H3z M15 9h3v8H8v-2 M6 9l2 2 3-3' };

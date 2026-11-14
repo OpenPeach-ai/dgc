@@ -119,6 +119,8 @@
 .nt-format-s { align-self: flex-start; padding: 0; border: 0; }
 .hc-note[data-form="l"] .nt-doc > .nt-l:first-child[data-k="p"] { font-size: 13.5px; }
 .hc-note[data-form="l"] .nt-pane { gap: 4px; }
+/* (On a Large card the rows start at the list's own clipping edge: their ring is drawn inside, where 2px of it was cut.) */
+.hc-note[data-form="l"] .nt-listbox .hc-note-row:focus-visible { outline-offset: -1px; }
 .nt-sep { flex: none; width: 1px; height: 14px; margin: 0 3px; background: var(--hair-strong); }
 .nt-limit { color: var(--hc-bad); }
 @media (forced-colors: active) { .nt-format, .nt-l[data-k="ck"]::before { border-color: CanvasText; } .nt-l[data-k="ck"][data-done="1"]::before { background: Highlight; } }
@@ -137,7 +139,10 @@
 .nt-dots i.on { border-color: var(--text-strong); background: var(--text-strong); }
 .nt-dots.nt-bad i { border-color: var(--hc-bad); }
 .nt-pad { display: grid; grid-template-columns: repeat(3, 54px); gap: 5px; padding: 3px; border-radius: var(--btn-r, 6px); outline: none; }
-.nt-pad:focus-visible { outline: var(--btn-ring, 2px solid var(--vscode-focusBorder)); outline-offset: 2px; }
+/* The pad takes the keyboard by itself (the number keys type), so its ring shows through a whole PIN: a quiet grey
+   that still reads at 3:1, never the editor's blue ring (14 Nov). */
+.nt-pad:focus-visible { outline: 1.5px solid color-mix(in srgb, var(--text) 60%, transparent); outline-offset: 2px; }
+@media (forced-colors: active) { .nt-pad:focus-visible { outline-color: Highlight; } }
 .nt-pad .hc-btn { width: 54px; height: 34px; padding: 0; font: var(--w-med) 15px/1 var(--mono); }
 .nt-pad[data-off] { opacity: .5; }
 .nt-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
@@ -156,6 +161,18 @@
 .hc-note[data-form="l"] .nt-dots { padding: 2px 0; }
 .hc-note[data-form="l"] .nt-pad { grid-template-columns: repeat(3, 40px); gap: 2px; padding: 2px; }
 .hc-note[data-form="l"] .nt-pad .hc-btn { width: 40px; height: 19px; font-size: 12px; }
+/* Every PIN screen with a pad fits the Large card without a scroll (14 Nov: "Choose a PIN" was 19px taller than the
+   card, its bottom row cut). While a PIN is chosen, changed, or asked to lock or unlock a note, the box has the whole
+   pane: the note's own tools (pin, lock, more) are for a note that is not in sight, and each of these screens has its
+   Cancel. And the pad gives way before anything is cut: its keys go from 19px down to 15px when the words above them
+   take more lines. (A locked note waiting for its PIN keeps its tools: its menu is how its lock is taken off.) */
+.hc-note[data-form="l"] .nt-pane:has(.nt-lockbox:not(.nt-lock-open) .nt-pad) > .nt-toolsbox { display: none; }
+.hc-note[data-form="l"] .nt-body:has(.nt-lockbox .nt-pad) { display: flex; flex-direction: column; }
+.hc-note[data-form="l"] .nt-lockbox:has(.nt-pad) { flex: 1 1 auto; min-height: 0; }
+.hc-note[data-form="l"] .nt-lockbox:has(.nt-pad) > :not(.nt-pad) { flex: none; }
+.hc-note[data-form="l"] .nt-lockbox .nt-pad { flex: 0 1 86px; min-height: 70px; grid-template-rows: repeat(4, minmax(0, 1fr)); }
+.hc-note[data-form="l"] .nt-lockbox .nt-pad .hc-btn { height: auto; min-height: 0; }
+.hc-note[data-form="l"] .nt-lockbox .nt-row .hc-btn { height: 22px; }
 
 /* A note open wide in an editor tab (media/shared/notestab.js): the note alone, in a readable column. */
 body.nt-tabpage { margin: 0; padding: 0; background: var(--vscode-editor-background, var(--bg)); color: var(--text); font: var(--w-reg) var(--t-base, 13px)/1.4 var(--sans); }

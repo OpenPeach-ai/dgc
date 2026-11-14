@@ -1,0 +1,18 @@
+/* DGC's own hover label (media/shared/tip.js), for every page that is not Work's: the look of Work's own (.tip in
+   media/main.css), from the shared tokens. Drawn in the page, so the window's edge never cuts it. */
+.dgc-tip {
+  position: fixed; left: 0; top: 0; z-index: 90; box-sizing: border-box; width: max-content; max-width: min(280px, calc(100vw - 16px)); margin: 0; pointer-events: none;
+  display: flex; flex-direction: column; gap: 2px; padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--border-strong); border-radius: var(--r-md); box-shadow: var(--lift-1);
+  background: var(--surface2); color: var(--text-strong);
+  font: var(--w-med) var(--t-xs)/1.45 var(--sans); letter-spacing: 0; text-transform: none; text-align: left; white-space: normal; overflow-wrap: anywhere;
+}
+.dgc-tip[hidden] { display: none; }
+.dgc-tip .dgc-tip-detail { color: var(--muted); font-weight: var(--w-reg); }
+.dgc-tip::after { content: ""; position: absolute; left: var(--tip-arrow, 50%); width: 6px; height: 6px; margin-left: -3px;
+  background: var(--surface2); border: 1px solid var(--border-strong); border-width: 0 1px 1px 0; }
+.dgc-tip.above::after { bottom: -4px; transform: rotate(45deg); }
+.dgc-tip.below::after { top: -4px; transform: rotate(-135deg); }
+@media (prefers-reduced-motion: no-preference) { .dgc-tip { animation: dgc-tip-in .1s ease-out; } }
+@keyframes dgc-tip-in { from { opacity: 0; } }
+@media (forced-colors: active) { .dgc-tip { border-color: CanvasText; } }

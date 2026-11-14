@@ -38,6 +38,9 @@
   display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font: var(--w-reg) var(--t-sm)/1.3 var(--sans); color: var(--muted);
 }
+/* Pointed at, the card's ground steps toward the text: its quiet line steps with it, so it still reads at 4.5:1
+   (it was 4.3 to 4.4:1 on the lit card, 14 Nov). */
+.dgc-doc-card:hover .dgc-doc-meta { color: var(--muted-firm, var(--muted)); }
 .dgc-doc-card .dgc-doc-acts { flex: none; display: flex; align-items: center; gap: 6px; width: auto; margin: 0 0 0 auto; }
 .dgc-doc-card .dgc-doc-acts > :not(.dgc-doc-open) { position: relative; z-index: 1; }
 

@@ -74,6 +74,10 @@ body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, 
 .hc-sub { color: var(--hc-quiet); font-size: var(--t-xs); line-height: 1.3; }
 .hc-b { color: var(--text-strong); font-weight: var(--w-semi); }
 .hc-grow { flex: 1 1 auto; min-height: 0; }
+/* Two lines at most, even where the card has room for a third (a third showed under the second's ellipsis); the line
+   under it keeps to the card's foot. */
+.hc-mid.hc-grow { flex: 0 1 auto; max-height: 2.6em; }
+.hc-mid.hc-grow + .hc-sub { margin-top: auto; }
 .hc-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .hc-good { color: var(--hc-good); font-weight: var(--w-semi); }
 .hc-bad { color: var(--hc-bad); font-weight: var(--w-semi); }
@@ -256,6 +260,8 @@ body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, 
 .hc-pin { appearance: none; position: absolute; top: 0; left: 0; display: grid; place-items: center; width: 22px; height: 22px; margin: 0; padding: 0; border: 1px solid var(--hair-strong); border-radius: var(--btn-r, 6px); background: var(--bg); color: var(--text); opacity: 0; cursor: pointer; transition: opacity var(--dur-hover) var(--ease-out); }
 .hc-tile:hover .hc-pin, .hc-tile:focus-within .hc-pin, .hc-pin[aria-pressed="true"] { opacity: 1; }
 .hc-pin:hover { background: color-mix(in srgb, var(--text) 12%, var(--bg)); color: var(--text-strong); }
+/* Where nothing hovers (a touch screen) a folder's New session and its pin are always in sight (14 Nov). */
+@media (hover: none) { .hc-tile .hc-here, .hc-tile .hc-pin { opacity: 1; } }
 /* The Clock (14 Nov): Here and up to three more. Two to a row (one where a row has no room for two; four across in the
    card opened in a wide side bar), so four are two rows of two. A city's name is never cut: its offset and its day go to
    a second line first. An added zone's × is at its clock's top right, in sight while the clock is pointed at or has the
@@ -281,7 +287,7 @@ body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, 
 .hc-grid > .hc-card[data-card="clock"][data-form="l"] .hc-zone-x { top: 6px; right: 6px; }
 .hc-time { color: var(--text-strong); font: var(--w-semi) 26px/1 var(--mono); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
 .hc-field { box-sizing: border-box; height: 26px; margin: 0; padding: 0 8px; border: 1px solid var(--hair-strong); border-radius: var(--btn-r, 6px); background: var(--surface2, transparent); color: var(--text); font: var(--w-reg) var(--t-sm)/1.2 var(--sans); }
-.hc-field::placeholder { color: var(--hc-quiet); opacity: 1; }
+.hc-field::placeholder { color: var(--muted-firm, var(--hc-quiet)); opacity: 1; }
 input.hc-zone { flex: 0 1 132px; width: 132px; min-width: 84px; font-size: var(--t-xs); }
 /* The dropdown under a field (a place for Weather, a time zone for Clock): the menu's look (media/shared/menu.css) with
    the one corner, an opaque ground, a few rows at a time and the rest by scrolling. Each row: a name over a quiet line,

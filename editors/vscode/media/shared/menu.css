@@ -112,4 +112,4 @@
   .dgc-menu kbd, .dgc-menu .dgc-key { border-color: CanvasText; }
 }
 /* A menu is a raised ground: its quiet words take the firmer grey (tokens.css, --muted-firm). */
-.dgc-menu { --muted: var(--muted-firm); }
+.dgc-menu { --muted: var(--muted-raised, var(--muted-firm)); }

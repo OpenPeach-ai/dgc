@@ -326,6 +326,8 @@ button.pill{border-radius: var(--btn-r, 6px);padding:6px 16px}
 .chat-style .pip-message.msg .response-actions{opacity:1}
 .chat-style .pip-message .response-actions>*{transition:opacity .12s}
 .chat-style .pip-message:not(:hover):not(:focus-within) .response-actions>:not(.msg-time){opacity:0}
+/* Where nothing hovers (a touch screen) a message's actions are always in sight (14 Nov). */
+@media(hover:none){.chat-style .pip-message:not(:hover):not(:focus-within) .response-actions>:not(.msg-time){opacity:1}}
 .chat-style .pip-message .chat-activity-toggle{display:none}
 .pip-conversation.chat-style .composer-hint{display:none}
 .pip-conversation.chat-style .pip-composer{border-radius:22px}
@@ -477,7 +479,7 @@ button.pill{border-radius: var(--btn-r, 6px);padding:6px 16px}
 .pip-name-actions{display:flex;gap:6px;margin-top:4px}
 .pip-page-tabs{display:flex;gap:4px;padding:3px;border-radius: var(--btn-r, 6px);background:var(--pip-wash);align-self:center}
 /* button.seg: the generic classless-button rule (0,2,1) would otherwise give each tab a border. */
-.pip-page-tabs button.seg{border:0;border-radius:max(2px, calc(var(--btn-r, 6px) - 3px));padding:5px 14px;min-height:28px;background:transparent;color:var(--muted);font-size:12px}
+.pip-page-tabs button.seg{border:0;border-radius:max(2px, calc(var(--btn-r, 6px) - 3px));padding:5px 14px;min-height:28px;background:transparent;color:var(--muted-firm,var(--muted));font-size:12px}
 .pip-page-tabs button.seg:hover{color:var(--vscode-foreground)}
 .pip-page-tabs button.seg[aria-pressed=true]{background:var(--vscode-editor-background);color:var(--vscode-foreground);box-shadow:0 1px 3px #0003}
 .pip-page-body{display:flex;flex-direction:column;gap:12px}
@@ -499,7 +501,7 @@ button.pip-page-row:hover{background:var(--pip-wash)}
 .pip-page-row.sub{min-height:40px;padding:6px 14px 6px 56px}
 .row-words{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
 .row-words strong{font-weight:600}
-.row-words small{color:var(--muted);font-size:12px;line-height:1.45;overflow-wrap:anywhere}
+.row-words small{color:var(--muted-firm,var(--muted));font-size:12px;line-height:1.45;overflow-wrap:anywhere}
 .row-preview{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .row-chevron{flex:none;color:var(--muted)}
 .row-confirm{display:inline-flex;gap:6px}
@@ -741,7 +743,7 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 /* (The shared button's corner and height, as Work's and Chat's search boxes and the Project Folder dropdown: asked 13 Nov.) */
 .pip-search input{flex:1;min-width:0;height:var(--btn-h,28px);border:1px solid transparent;border-radius:var(--btn-r,6px);padding:0 10px;font-size:12px;background:var(--field)}
 .pip-search input:focus-visible{outline:1px solid var(--vscode-focusBorder,var(--accent));outline-offset:-1px}
-.pip-search input::placeholder{color:var(--muted);opacity:1}
+.pip-search input::placeholder{color:var(--muted-firm,var(--muted));opacity:1}
 .pip-search-count{flex:none;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
 .pip-match{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal}
 /* An Allow card being edited: its fields right on the card (Edit, then Send what it shows). */
@@ -1813,3 +1815,16 @@ body.motion-paused .pip-found-spin,.motion-paused .pip-found-spin{animation-play
 .pip-sent>p.error,.pip-sent>p.muted{margin:0;padding:10px 14px;font-size:12px}
 .pip-sent-note{margin:0;padding:10px 14px 12px;color:var(--muted);font-size:12px;line-height:1.45;overflow-wrap:anywhere}
 @media(prefers-reduced-motion:reduce){.pip-sent>.pip-page-row>.row-chevron{transition:none}}
+
+/* ==== The visual polish pass (14 Nov) ====
+   A field's placeholder is the quiet grey that reads on a field (the browser's own grey read 2.8:1 on New Pip's name
+   and a Pip's "Add something to remember"). */
+:is(input,textarea)::placeholder{color:var(--muted-firm,var(--muted));opacity:1}
+/* "not offered here" and the like on a light ground: the theme's error red read 3.2 to 3.4:1 there. */
+body.vscode-light .error,body.vscode-high-contrast-light .error,:host-context(body.vscode-light) .error,:host-context(body.vscode-high-contrast-light) .error{color:color-mix(in srgb,var(--vscode-errorForeground) 58%,black)}
+/* A focus ring is whole: the chat's log clips at its left edge, where a choice and Undo start (their ring was cut by
+   3px), and a page's group clips at its rounded edge (a row's ring was cut by 2px), so there the ring is drawn inside. */
+.simple-pips.chat-open .simple-content.chat .conversation-log{padding-left:4px;margin-left:-4px}
+.pip-page-group>:is(button,a):focus-visible,.pip-page-group .routine-open:focus-visible,.pip-page-group .pip-page-row:focus-visible{outline-offset:-2px}
+/* Pointed at, a row's ground is washed: its quiet second line steps up with it (it read 4.2 to 4.4:1 on the lit row). */
+.pip-row-slot:hover .pip-row-copy small,.pip-row:hover .pip-row-copy small,.attention-row:hover .attention-copy small{color:var(--muted-firm,var(--muted))}

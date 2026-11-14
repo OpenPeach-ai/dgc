@@ -4,6 +4,8 @@
 (() => {
   "use strict";
   const vscode = acquireVsCodeApi();
+  // A control's `title` shows as DGC's own label, inside the tab (media/shared/tip.js; Work's look, from main.css).
+  window.DgcTip?.install({ look: "tip" });
   // Plugins' cards in a reply (MCP Apps, media/mcpApps.js): what one asks goes to the extension host from here.
   window.DgcMcpApps?.setup({ post: (message) => vscode.postMessage(message), surface: "chat" });
   const $ = (id) => document.getElementById(id);
