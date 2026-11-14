@@ -263,15 +263,17 @@ def _earlier(db, pip_id) -> dict:
     """identity -> what became of it in this Pip's earlier fixes: "asked" (still waiting), "declined", "fixed",
     "not_a_defect", "needs_you", "tried" (a turn ran, no verdict); and the loose (file, code) matches for rewording."""
     seen, loose = {}, {}
-    rank = {"tried": 1, "asked": 2, "needs_you": 3, "declined": 4, "not_a_defect": 5, "fixed": 6}
-    for row in db.execute("SELECT state,findings FROM pip_fixes WHERE pip_id=? ORDER BY created_at,rowid", (pip_id,)).fetchall():
+    rank = {"failed": 0, "tried": 1, "asked": 2, "needs_you": 3, "declined": 4, "not_a_defect": 5, "fixed": 6}
+    for row in db.execute("SELECT * FROM pip_fixes WHERE pip_id=? ORDER BY created_at,rowid", (pip_id,)).fetchall():
+        # A fix whose turn failed, was stopped or interrupted didn't really try: its findings may be asked about again.
+        broke = row["state"] == "ended" and _state(db, row, _turn(db, row)) in ("failed", "stopped", "interrupted")
         for finding in _load(row["findings"], []):
             if not isinstance(finding, dict) or not finding.get("identity"):
                 continue
             verdict = finding.get("verdict")
             what = ("declined" if row["state"] == "declined" else "asked" if row["state"] == "ask"
                     else "fixed" if verdict in ("fixed", "already_fixed") else verdict if verdict in ("not_a_defect", "needs_you")
-                    else "tried")
+                    else "failed" if broke else "tried")
             for table, key in ((seen, finding["identity"]), (loose, (finding.get("path"), finding.get("issue")))):
                 if rank[what] >= rank.get(table.get(key), 0):
                     table[key] = what
@@ -339,6 +341,8 @@ def after_check(store, run, result) -> str | None:
                 continue                                 # asked once, or not for fixing: never asked again
             if was == "fixed":
                 item["state"] = "back"                   # fixed before and found again: asked, never fixed again by itself
+            if was == "failed":
+                item["retry"] = True                     # its fix failed: asked again, never rerun by itself
             chosen.append(item)
         if open_fix is not None:
             # Its Allow card still waits: it asks about what this check still finds, and what is new since.
@@ -360,7 +364,7 @@ def after_check(store, run, result) -> str | None:
         if not chosen:
             return None
         level = pip_levels.effective(registry, run["pip_id"])
-        back = any(item["state"] == "back" for item in chosen)
+        back = any(item["state"] == "back" or item.get("retry") for item in chosen)     # these always ask
         if level == pip_levels.APPROVE and not back:
             fresh = [item for item in chosen if item["state"] == "new"]
             if not fresh:

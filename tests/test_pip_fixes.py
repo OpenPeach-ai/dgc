@@ -262,6 +262,19 @@ class ByLevel(FixWorld, unittest.TestCase):
         self.check([TOTAL, FLAG])
         self.assertEqual(len(self.fixes()["fixes"]), 2, "the next check asks about what is new")
 
+    def test_a_fix_that_failed_is_asked_about_again_never_rerun_by_itself(self):
+        # Self-review, 14 Nov: a failed or stopped fix counted as tried, so its findings were never offered again. Now
+        # the next check asks (Allow card) even at Approve for me: a fix that keeps failing never reruns every night.
+        self.choose(levels.APPROVE)
+        self.check([TOTAL])
+        self.send()
+        row = self.store.claim_next()
+        self.store.finish(row["id"], error={"code": "worker_failed", "message": "It stopped."})
+        self.assertEqual(self.one()["state"], "failed")
+        self.check([TOTAL])
+        newest = self.fixes()["fixes"][-1]
+        self.assertEqual((len(self.fixes()["fixes"]), newest["state"]), (2, "ask"))
+
     def test_a_pip_with_no_box_gets_no_fix(self):
         with patch.object(pips, "folder_boxes", return_value=False):
             self.check([TOTAL])
