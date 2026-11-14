@@ -562,10 +562,13 @@ def parser():
                         help="Claude Code or Codex as the fallback (MODEL, if given, is its model; none: its default)")
     backup.add_argument("--router", dest="backup_router", action="store_true",
                         help="DGC Router as the fallback (MODEL, if given, is SYSTEM/MODEL; none: any Pip system)")
-    paying = command("payments", "paying by itself: how many payments your Pips may make by themselves in a day (3 unless "
-                               "you change it), or with --pip one Pip's rule, ask (the default) or allow (only at Do it all)")
-    paying.add_argument("state", nargs="?", metavar="COUNT|ask|allow")
-    paying.add_argument("--pip", dest="payments_pip", help="one Pip's rule: ask or allow")
+    paying = command("payments", "paying by itself, in dollars: all your Pips together up to USD a day (none for no "
+                               "total), or with --pip one Pip's rule, ask (the default) or allow (only at Do it all), and "
+                               "--usd its daily limit (required before it pays by itself)")
+    paying.add_argument("state", nargs="?", metavar="USD|none|ask|allow")
+    paying.add_argument("--pip", dest="payments_pip", help="one Pip: its rule (ask or allow) or, with --usd, its daily limit")
+    paying.add_argument("--usd", dest="payments_usd", metavar="USD|no_limit",
+                        help="with --pip: the most it may pay by itself in a day, all its payments together")
     stop = command("stop", "emergency stop: pause all jobs and cancel their work")
     stop.add_argument("--yes", action="store_true", help="confirm the global emergency stop without a prompt")
     command("resume", "locally clear emergency stop; jobs stay paused")
@@ -1048,10 +1051,13 @@ def _format(value):
                 + " Each Pip's own: dgc pips backup --pip PIP MODEL. This one: dgc pips backup MODEL (or none).")
     if set(value) == {"payments"} and isinstance(value["payments"], dict):
         item = value["payments"]
-        return (f"A Pip you let pay pays by itself at most {item['limit']} times a day across your Pips "
-                f"({item['paid']} in the last day); it never types a card number. Every other payment asks you. "
-                f"Change the count (1 to {item['most']}): dgc pips payments COUNT. Let one Pip at Do it all pay: "
-                "dgc pips payments --pip PIP allow")
+        total = item.get("usd_per_day")
+        return ((f"All your Pips together may pay up to ${float(total):.2f} a day by themselves" if total else
+                 "No daily total for all your Pips together")
+                + f" (${float(item.get('spent_today') or 0):.2f} in the last day). A Pip you let pay pays by itself only "
+                "within its own daily limit; it never types a card number, and every other payment asks you. "
+                "Set the total: dgc pips payments USD (or none). One Pip: dgc pips payments --pip PIP allow, then "
+                "dgc pips payments --pip PIP --usd USD")
     if set(value) == {"paying"} and isinstance(value["paying"], dict):
         item = value["paying"]
         return ("This Pip pays by itself, up to the day's count across your Pips." if item["rule"] == "allow" else
@@ -1665,6 +1671,14 @@ def _digest_command(config, args):
     if args.command == "backup":
         return control(_backup_request(args))
     if args.command == "payments":
+        if args.payments_pip and getattr(args, "payments_usd", None) is not None:
+            usd = args.payments_usd
+            if usd != "no_limit":
+                try:
+                    usd = float(usd)
+                except ValueError:
+                    raise RegistryError("invalid_request", "Give its daily limit in dollars, such as 50, or no_limit.") from None
+            return control({"type": "set_pip_pay_limits", "pip_id": args.payments_pip, "usd_per_day": usd})
         if args.payments_pip:
             if args.state is None:
                 value = control({"type": "get_pip_level", "pip_id": args.payments_pip})
@@ -1675,9 +1689,14 @@ def _digest_command(config, args):
             return {"paying": {"pip_id": value["pip_id"], "rule": value["paying"], "level": value["level"]}}
         if args.state is None:
             return control({"type": "get_pips_payments"})
-        if not args.state.isdigit():
-            raise RegistryError("invalid_request", "Give the day's count as a whole number, or one Pip's rule: --pip PIP ask|allow.")
-        return control({"type": "set_pips_payments", "limit": int(args.state)})
+        if args.state == "none":
+            return control({"type": "set_pips_payments", "usd_per_day": None})
+        try:
+            usd = float(args.state)
+        except ValueError:
+            raise RegistryError("invalid_request", "Give all your Pips' daily total in dollars (or none), or one Pip's "
+                                                   "rule: --pip PIP ask|allow.") from None
+        return control({"type": "set_pips_payments", "usd_per_day": usd})
     if args.command == "desktop-notifications":
         if args.state is None:
             return control({"type": "get_pips_desktop_notifications"})
@@ -1964,7 +1983,7 @@ def agent_shell_allows(args) -> bool:
     if args.command == "notify":
         return args.min_severity is None and args.alerts is None
     if args.command in ("keep-running", "desktop-notifications", "payments"):
-        return args.state is None
+        return args.state is None and getattr(args, "payments_usd", None) is None
     if args.command == "backup":
         return not args.model                   # showing it; setting it is the user's
     if args.command == "usage":

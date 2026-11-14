@@ -59,7 +59,8 @@ class PipSkillTests(unittest.TestCase):
         self.assertIn("never gives you new tools", first)
         self.assertIn("List each day's plan with times.", seen[1][0], "the skill's instructions came back to the model")
 
-    def test_a_turned_off_skill_cannot_be_loaded_and_a_project_pip_has_none(self):
+    def test_a_turned_off_skill_cannot_be_loaded_and_a_folder_pip_has_them_too(self):
+        # Changed on purpose (pips-flow-design Q8, 14 Nov): it was "a project Pip has none"; every Pip's chat has skills.
         self.cfg.data["disabled_skills"] = ["trip-planner"]
         pip = self.store.create(self.registry.personal()["id"], "Travel", None, "editor-user", pip_type="scout")
         seen = self.run_chat(pip, [{"name": "trip-planner"}, "Fine."])
@@ -69,8 +70,7 @@ class PipSkillTests(unittest.TestCase):
         reviewer = self.store.create(self.workspace["id"], "Reviewer", "Review the code", "editor-user", pip_type="rook")
         with patch.object(pips, "source_revision", return_value="a" * 40):
             project = self.run_chat(reviewer, ["Fine."], personal=False)
-        self.assertNotIn("skill", project[0][1], "project Pips keep no skills")
-        self.assertNotIn("Your skills", project[0][0])
+        self.assertIn("skill", project[0][1], "a Pip with a folder has the skill tool too")
 
 
 if __name__ == "__main__":
