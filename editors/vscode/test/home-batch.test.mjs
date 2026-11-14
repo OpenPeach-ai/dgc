@@ -96,7 +96,10 @@ for (const [theme, width] of [["dark-modern", 300], ["dark-modern", 460], ["ligh
       }
       const card = width < 380 ? ".hc-open .hc-card" : sel("clock"), field = `${card} input.hc-zone`;
       let c = await clockNow(p, card);
-      assert.deepEqual(c.clocks.map((k) => k.text.replace(/^\d\d:\d\d /, "")), ["Here", "Tokyo · UTC+9"], "the zone kept before is the first added one");
+      // Tokyo is already tomorrow here in the evening (IST + 3:30): the card says so, and so does what it is checked against.
+      const day = await p.evaluate(() => { const f = (zone) => new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+        const here = f(undefined), there = f("Asia/Tokyo"); return there > here ? " · tomorrow" : there < here ? " · yesterday" : ""; });
+      assert.deepEqual(c.clocks.map((k) => k.text.replace(/^\d\d:\d\d /, "")), ["Here", "Tokyo · UTC+9" + day], "the zone kept before is the first added one");
       assert.equal(c.clocks[0].x, null, "Here cannot be removed");
       assert.deepEqual([c.clocks[1].x.tag, c.clocks[1].x.label], ["BUTTON", "Remove Tokyo"], "an added zone has an ×, a button with its name");
       assert.equal(c.field.placeholder, "Add a city"); assert.equal(c.field.value, "", "the field adds: it names no city");
