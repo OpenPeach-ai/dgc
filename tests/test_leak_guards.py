@@ -122,6 +122,15 @@ class NoFileToolWritesTheMark(Project):
         self.assertTrue(said.startswith("error:"), said)
         self.assertIn("hides", said)
 
+    def test_a_file_with_no_hidden_secret_may_say_redacted(self):
+        # Self-review, 14 Nov: code and docs about redaction legitimately write the word; only a file that holds a
+        # secret DGC hides from the model is guarded.
+        said = self.run_tool("write_file", path="test_logs.py", content='assert clean(line) == "token=[REDACTED]"\n')
+        self.assertFalse(said.startswith("error:"), said)
+        (self.root / "notes.md").write_text("Plain notes.\n")
+        said = self.run_tool("edit_file", path="notes.md", old_string="Plain notes.", new_string="Logs show [REDACTED].")
+        self.assertFalse(said.startswith("error:"), said)
+
     def test_a_file_that_already_holds_the_mark_can_still_be_written(self):
         (self.root / "notes.md").write_text("Logs show [REDACTED] where a key was.\n")
         said = self.run_tool("write_file", path="notes.md", content="Logs show [REDACTED] where a key was. Fixed.\n")
