@@ -474,11 +474,7 @@ def _personal_pip(registry, pip_id) -> dict:
     from .pips import PipStore
     if not isinstance(pip_id, str) or not _PIP_ID.fullmatch(pip_id):
         raise LoginError("Choose a Pip.", "invalid_request")
-    job = PipStore(registry)._job(pip_id)
-    workspace = registry.get(job["workspace_id"])
-    if workspace.get("kind") != "personal":
-        raise LoginError("Saved logins are for Personal Pips.", "invalid_request")
-    return job
+    return PipStore(registry)._job(pip_id)         # every Pip has its own computer and browser (one kind, 15 Nov)
 
 
 def _pips_list(registry, value, pip_id=None) -> "str | list":

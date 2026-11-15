@@ -154,10 +154,8 @@ def after_run(directory, db, run: dict, *, status: str, result=None, error=None,
         kind = manifest.get("run_kind")
         if kind not in ("conversation", "personal_task"):
             return
-        personal = db.execute("SELECT 1 FROM pips p JOIN workspaces w ON w.id=p.workspace_id WHERE p.id=? AND "
-                              "w.kind='personal'", (run["pip_id"],)).fetchone()
-        if personal is None:
-            return
+        if db.execute("SELECT 1 FROM pips WHERE id=?", (run["pip_id"],)).fetchone() is None:
+            return                                 # every Pip keeps its log (one kind of Pip, 15 Nov)
         what = "Task"
         if kind == "conversation":
             asked = db.execute("SELECT text,request_key FROM pip_chat_messages WHERE run_id=? AND role='user' LIMIT 1",

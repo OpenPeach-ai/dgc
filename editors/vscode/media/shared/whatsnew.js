@@ -27,7 +27,7 @@
   function slides(shipped) {
     return [
       { scene: "pips-list", title: "Pips are one kind now",
-        text: "No more Personal and Project Pips. One list, one New Pip. Every Pip has its own chat, its own computer, and, if you give it a folder, its own copy of that folder to work in.",
+        text: "Every Pip has its own chat, its own computer, and, if you give it a folder, its own copy of that folder to work in. One list, one New Pip.",
         more: "A Pip tells you what it finds in its own chat. What needs you is on Home." },
       { scene: "wall", title: "Each Pip works behind a wall",
         text: "Inside its own computer a Pip never asks. Only what crosses the wall does: changing your folder, sending, posting, paying. You choose how much it asks: Ask me first, Approve for me, or Do it all." },
@@ -36,7 +36,7 @@
       { scene: "cards", title: "Home is yours",
         text: "Home is now cards: Needs you, Recent, Running now, Token usage and more. Add, remove and arrange them with Cards; they change shape with the width." },
       { scene: "work", title: "Work, tidier",
-        text: "Archive and restore sessions. A goal now runs as turns you can follow. Type @ and a Pip's name to hand it a job; its answer comes back to that session." },
+        text: "Archive and restore sessions. A goal now runs as turns you can follow." },
       { scene: "settings", title: "Also new", text: alsoNew(shipped) },
     ];
   }

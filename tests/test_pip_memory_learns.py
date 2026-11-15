@@ -152,9 +152,9 @@ class WorkingNotesTests(Base):
         self.assertEqual(raised.exception.code, "local_only")
         path = self.registry.directory / "working-notes" / f"{pip['id']}.md"
         self.assertEqual(oct(path.stat().st_mode & 0o777), "0o600")
+        # (15 Nov) One kind of Pip: a Pip with a folder has its working notes on its page too.
         project = self.store.create(self.workspace["id"], "Project", "Review", "editor-user")
-        with self.assertRaises(RegistryError):
-            self.control("get_pip_working_notes", pip_id=project["id"])
+        self.assertIn("text", self.control("get_pip_working_notes", pip_id=project["id"]))
 
 
 class DailyLogTests(Base):

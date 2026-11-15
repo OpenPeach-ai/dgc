@@ -6591,9 +6591,8 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 from . import pip_daily_log, pip_working_notes
                 if actor not in ('editor-user', 'local-console'):
                     raise RegistryError('local_only', "A Pip's notes and log are on this computer only.")
-                if registry.db.execute("SELECT 1 FROM pips p JOIN workspaces w ON w.id=p.workspace_id WHERE p.id=? "
-                                       "AND w.kind='personal'", (pip_id,)).fetchone() is None:
-                    raise RegistryError('not_found', 'Working notes and a daily log belong to a Personal Pip.')
+                if registry.db.execute("SELECT 1 FROM pips WHERE id=?", (pip_id,)).fetchone() is None:
+                    raise RegistryError('not_found', 'That Pip was not found.')      # every Pip has them (one kind, 15 Nov)
                 if command == 'get_pip_working_notes':
                     result = pip_working_notes.view(registry.directory, pip_id)
                 elif command == 'set_pip_working_notes':

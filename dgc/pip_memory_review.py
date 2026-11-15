@@ -150,9 +150,9 @@ def after_run(registry, config, run_id) -> None:
     Never raises."""
     try:
         from .pip_notes import user_turn
+        # Every Pip's chat (one kind of Pip, 15 Nov): a Pip with a folder used to be skipped.
         row = registry.db.execute("SELECT r.id,r.pip_id,r.status,json_extract(r.manifest,'$.run_kind') AS kind FROM "
-                                  "pip_runs r JOIN pips p ON p.id=r.pip_id JOIN workspaces w ON w.id=p.workspace_id "
-                                  "WHERE r.id=? AND w.kind='personal'", (run_id,)).fetchone()
+                                  "pip_runs r WHERE r.id=?", (run_id,)).fetchone()
         if row is None or row["kind"] != "conversation" or row["status"] != "succeeded":
             return
         if user_turn(registry, {"id": row["id"]}) is None:

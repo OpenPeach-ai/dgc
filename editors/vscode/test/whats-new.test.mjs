@@ -111,11 +111,11 @@ before(async () => {
 after(async () => { await browser?.close(); });
 
 const SLIDES = [
-  ["Pips are one kind now", "No more Personal and Project Pips. One list, one New Pip. Every Pip has its own chat, its own computer, and, if you give it a folder, its own copy of that folder to work in. A Pip tells you what it finds in its own chat. What needs you is on Home."],
+  ["Pips are one kind now", "Every Pip has its own chat, its own computer, and, if you give it a folder, its own copy of that folder to work in. One list, one New Pip. A Pip tells you what it finds in its own chat. What needs you is on Home."],
   ["Each Pip works behind a wall", "Inside its own computer a Pip never asks. Only what crosses the wall does: changing your folder, sending, posting, paying. You choose how much it asks: Ask me first, Approve for me, or Do it all."],
   ["Pips tell you, then fix", "When a check finds something, the Pip says what is wrong and why, fixes it in its own copy, and shows you the change to apply. What only you can do is said once and kept in one place."],
   ["Home is yours", "Home is now cards: Needs you, Recent, Running now, Token usage and more. Add, remove and arrange them with Cards; they change shape with the width."],
-  ["Work, tidier", "Archive and restore sessions. A goal now runs as turns you can follow. Type @ and a Pip's name to hand it a job; its answer comes back to that session."],
+  ["Work, tidier", "Archive and restore sessions. A goal now runs as turns you can follow."],
   ["Also new", "Change settings by asking. A fallback model on every surface. Daily payment limits in dollars. Incognito chats."],
 ];
 /** The dialog as it is on screen, or null when it is closed. */

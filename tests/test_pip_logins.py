@@ -514,9 +514,11 @@ class SignInTests(unittest.TestCase):
         remote = self.control({"type": "list_pip_logins"}, actor="device_1")
         self.assertFalse(remote["ok"])
         project = self.store.create(self.workspace["id"], "Auditor", "Inspect.", "editor-user")
-        no = self.control({"type": "save_pip_login", "pip_id": project["id"], "site": "x.example", "username": "a",
-                           "password": PASSWORD})
-        self.assertEqual(no["error"]["message"], "Saved logins are for Personal Pips.")
+        # (15 Nov) One kind of Pip: a Pip with a folder has its own computer and browser, and may keep a login too.
+        folder = self.control({"type": "save_pip_login", "pip_id": project["id"], "site": "x.example", "username": "a",
+                               "password": PASSWORD})
+        self.assertTrue(folder["ok"], folder)
+        self.assertNotIn(PASSWORD, json.dumps(folder))
         removed = self.control({"type": "remove_pip_login", "login_id": stored["id"]})
         self.assertEqual(removed["result"]["removed"], True)
         # Nothing of it is in the Pips database, its exports or a shared Pip.

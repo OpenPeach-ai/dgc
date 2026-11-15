@@ -185,9 +185,7 @@ def context_estimate(store, pip_id, config, context_size=None, *, conversation_i
     messages that fit, as the reply itself prepares them, and what its last reply measured besides (its
     instructions, tools, job, memory, skills, apps and references), part by part in `breakdown`
     (dgc/context_breakdown.py's shape). Read-only; about four bytes a token."""
-    pip = store._job(pip_id)
-    if pip['source_policy'] != {'mode': 'personal'}:
-        raise RegistryError('invalid_request', 'Context use is shown for Personal Pips.')
+    store._job(pip_id)                      # every Pip's chat shows it (one kind of Pip, 15 Nov)
     size = controls(store, pip_id, config)['options']['context_size'] if context_size is None else context_size
     if type(size) is not int or not CONTEXT_MIN <= size <= CONTEXT_MAX:
         raise RegistryError('invalid_request', f'Choose a context window from {CONTEXT_MIN:,} to {CONTEXT_MAX:,} tokens.')
