@@ -4919,76 +4919,10 @@
       } });
     return drawn || promptText(body);
   }
-  // A URL the user typed is a link they can open, not grey text to select and copy by hand.
-  //
-  // Built out of DOM nodes rather than an escaped HTML string: this is verbatim user input, and
-  // the one place in the panel where getting escaping wrong would be an injection instead of a
-  // cosmetic bug. textContent is byte-identical to what the old `esc(body)` produced, which is
-  // what bubbleProse() compares against to avoid echoing a prompt twice.
-  //
-  // The trailing class excludes sentence punctuation, so "see https://vibedgc.com." does not
-  // swallow the full stop and "(https://x.dev)" does not swallow the bracket.
-  const PROMPT_URL = /https?:\/\/[^\s<>"'`]*[^\s<>"'`.,;:!?)\]}]/gi;
-  function promptText(body) {
-    const host = el("div", "prompt-text");
-    const text = String(body || "");
-    let at = 0;
-    for (const match of text.matchAll(PROMPT_URL)) {
-      if (match.index > at) host.appendChild(document.createTextNode(text.slice(at, match.index)));
-      host.appendChild(promptLink(match[0]));
-      at = match.index + match[0].length;
-    }
-    if (at < text.length) host.appendChild(document.createTextNode(text.slice(at)));
-    return host;
-  }
-  function promptLink(raw) {
-    const target = window.DgcMarkdown?.linkTarget?.(raw);
-    if (!target || target.kind !== "external") return document.createTextNode(raw);
-    // The same element, class and delegated click handler an answer's links use, so there is
-    // still exactly ONE route out of the panel and the extension host re-validates it there.
-    const link = el("button", "md-link prompt-link");
-    link.type = "button";
-    link.dataset.linkKind = "external";
-    link.dataset.target = target.target;
-    link.title = target.target;
-    const mark = window.DgcMarkdown.linkSource(target.target);
-    const icon = promptFavicon(target.target, link, mark);
-    if (icon) link.appendChild(icon); else link.dataset.linkSource = mark;
-    link.appendChild(document.createTextNode(raw));
-    return link;
-  }
-  function promptFavicon(url, link, mark) {
-    if (!faviconsEnabled()) return null;
-    const src = window.DgcMarkdown?.faviconUrl?.(url);
-    if (!src) return null;
-    const img = el("img", "link-favicon");
-    img.alt = "";
-    img.setAttribute("aria-hidden", "true");
-    img.referrerPolicy = "no-referrer";
-    // The mark travels as a fallback rather than rendering now: the global handler below puts it
-    // back if the image cannot load. Setting data-link-source here would draw BOTH.
-    link.dataset.linkFallback = mark;
-    img.src = src;
-    return img;
-  }
-  function faviconsEnabled() { return document.body.dataset.linkFavicons !== "off"; }
-  // ONE fallback for every favicon in the panel, wherever it came from -- a link the user typed,
-  // a link in an answer, a link in a skill's documentation. `error` does not bubble, but it does
-  // capture, so a single listener at the document catches every one without the renderer having
-  // to attach a closure per image (it cannot: the markdown path builds an HTML string).
-  //
-  // A blank gap where a link's mark should be is worse than no favicon at all: when the icon
-  // service is unreachable, blocked, or has nothing for that host, the bundled glyph comes back.
-  document.addEventListener("error", (event) => {
-    const img = event.target;
-    if (!img || img.tagName !== "IMG" || !img.classList?.contains("link-favicon")) return;
-    const link = img.closest?.(".md-link");
-    img.remove();
-    if (link) {
-      link.dataset.linkSource = link.dataset.linkFallback || "web";
-      delete link.dataset.linkFallback;
-    }
-  }, true);
+  // A URL the user typed is a link they can open, with its site's favicon, and one fallback puts the bundled mark back
+  // when an icon cannot load: the same in ChatDGC and a Pip's chat (media/mentions.js, "links").
+  function promptText(body) { return M.linkWords(body); }
+  M.watchFavicons(document);
   function promptAttachmentChip(item, images, bubble) {
     if (item.pipReference) {
       const chip = el("span", "prompt-att chip pip-reference-chip");
@@ -11538,14 +11472,10 @@ function permissionChoices(ev) {
       foldPastedText(paste);
       return;
     }
-    // A pasted link becomes a pill carrying its favicon, which is what Codex does and what was
-    // asked for. Only when the clipboard is EXACTLY one URL: pasting a paragraph that happens to
-    // contain a link is pasting prose, and rewriting the middle of it would be presumptuous.
-    //
-    // Unlike a skill pill, this one's wire text is the URL ITSELF, so the model receives precisely
-    // the characters that were pasted. The pill is a way of SHOWING the link, not of replacing it.
-    const single = pasted.trim();
-    if (single && !/\s/.test(single) && /^https?:\/\/\S+$/i.test(single) && single === pasted.trim()) {
+    // A pasted link becomes a pill: only when the clipboard is EXACTLY one URL, and its wire text is the URL ITSELF.
+    // The rule is the shared box's (M.pastedLink), so ChatDGC's box and a Pip's do the same.
+    const single = M.pastedLink(pasted);
+    if (single) {
       e.preventDefault();
       const [selStart, selEnd] = composerSelection();
       insertComposerPill(selStart, selEnd, "link", single, single);
@@ -13657,7 +13587,9 @@ function permissionChoices(ev) {
     // pipsModelsChanged: Settings or the Router changed, so the embedded Pips page reads its model list again.
     // pipsUnreadChanged: a Pip was marked read somewhere (its pill, its chat, a card acted on): it reads its counts again.
     // pipsProjectFolder: the Project Folder choice changed; pipsFolderPicked: the folder the editor's picker gave (Add a folder…).
-    if (["pipsPluginLogos", "pipsAppLogos", "pipsFiles", "pipsModelsChanged", "pipsUnreadChanged", "pipsProjectFolder", "pipsFolderPicked"].includes(msg.type)) { for (const listener of pipsListeners) listener(msg); return; }
+    // pipsChatDraft, pipsChatChanged: a Pip's chat is open in another page too (its editor tab, the Pips tab): what was
+    // typed there, and that something was sent or answered there (15 Nov, "Open in editor").
+    if (["pipsPluginLogos", "pipsAppLogos", "pipsFiles", "pipsModelsChanged", "pipsUnreadChanged", "pipsProjectFolder", "pipsFolderPicked", "pipsChatDraft", "pipsChatChanged"].includes(msg.type)) { for (const listener of pipsListeners) listener(msg); return; }
     // pipSetupChanged: a new-Pip card was created or turned down somewhere else; this chat's copy and the Pips page read it again.
     if (msg.type === "pipSetupChanged") { pipSetupCards?.receive(msg); for (const listener of pipsListeners) listener(msg); return; }
     if (["pipsConnection","pipsReply","pipsVisibility"].includes(msg.type)) {

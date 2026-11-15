@@ -27,7 +27,7 @@ import { McpBrowserRequest, editorIsRemote, handSignInBack, openMcpBrowser } fro
 import { routerCommand } from "./routerCommands";
 import { imagesCommand, MAX_WORKFLOW_CHARS } from "./imagesCommands";
 import { allowFromJobs, handleVideoMessage, VIDEO_MESSAGES } from "./videoHost";
-import { PipsEditor, openEngineSignIn, workSessionTitles, type ProjectWork, type WorkSessionTitle } from "./pipsView";
+import { PipsEditor, openEngineSignIn, workSessionTitles, type ChatConversation, type ChatPip, type ProjectWork, type WorkSessionTitle } from "./pipsView";
 import { sameHost } from "./endpointmodels";
 import { mcpAppsHost } from "./mcpApps";
 import { PLUGIN_ID, pluginLogoData, pluginLogoSource, type PluginLogoItem } from "./pluginLogos";
@@ -6147,6 +6147,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "pipsReconnect":
       case "pipsRequest":
       case "pipsOpenComputer":
+      // Open in editor on a Pip's chat, and what is typed in its box, told to the chat's other pages (15 Nov).
+      case "pipsOpenChat":
+      case "pipsChatDraft":
       case "pipsOpenPhoto":
       case "pipsOpenArtifact":
       case "pipsPluginLogos":
@@ -9022,6 +9025,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.pipsEditor.useUnreadRead(() => this.pipUnreadRead());
       this.pipsEditor.useSetupDecided((id) => this.pipSetupDecided(id));
       this.pipsEditor.useProfileChanged(() => this.pipProfileChanged());
+      // Open in editor on a Pip's chat: its tab is kept by the window's one keeper of them, not by this side bar.
+      this.pipsEditor.useOpenChat((pip, conversation) => (this.tab?.host || this).openPipChat(pip, conversation));
     }
     if (this.sessionReady) this.pipsEditor.ready(this.lastReadyEvent?.capabilities, this.backend);
     return this.pipsEditor;
@@ -9091,6 +9096,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   /** A Work tab opens Pips alongside it. The side bar keeps its own Pips bridge. */
   private openPipsEditor(navigation?: { pip: string; section?: 'chat' | 'runs'; run?: string } | { overview: true }): void {
+    this.ensurePipsTab().open(navigation);
+  }
+  /** Open in editor on a Pip's chat (15 Nov, as a Work session and a ChatDGC chat have it): that Pip, that
+   *  conversation, in an editor tab of its own, or its tab brought forward. One keeper for the whole window (the
+   *  bridge the Pips tab is on), so the side bar, the Pips tab and a chat's own tab all open the same tab. */
+  private openPipChat(pip: ChatPip, conversation?: ChatConversation): void {
+    this.ensurePipsTab().openChat(pip, conversation);
+  }
+  /** The bridge the Pips tab and every Pip chat's own tab are on, connected. */
+  private ensurePipsTab(): PipsEditor {
     if (!this.pipsTab) {
       this.pipsTab = new PipsEditor(this.context.extensionUri,
         (message, owner) => {
@@ -9121,9 +9136,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.pipsTab.useUnreadRead(() => this.pipUnreadRead());
       this.pipsTab.useSetupDecided((id) => this.pipSetupDecided(id));
       this.pipsTab.useProfileChanged(() => this.pipProfileChanged());
+      this.pipsTab.useOpenChat((pip, conversation) => this.openPipChat(pip, conversation));
     }
     if (this.sessionReady) this.pipsTab.ready(this.lastReadyEvent?.capabilities, this.backend);
-    this.pipsTab.open(navigation);
+    return this.pipsTab;
   }
 
   /** DGC Router: where each helper runs and the free workers. Asked once; from then on the backend sends

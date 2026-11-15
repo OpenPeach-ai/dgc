@@ -305,14 +305,67 @@ export function pipKeyRefusal(request: any, apiVersion: number): string {
  *  local DGC…", which flashed before the mark on every open (0.51 check). */
 const PIPS_BOOT_MARK = '<div class="pips-loading" role="status" aria-label="Loading Pips"><svg viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg></div>';
 
-export function pipsDocument(scriptUri = '', styleUri = '', cspSource = '', markdownUri = '', cardsUri = '', cardsStyleUri = '', videoUri = '', codiconUri = ''): string {
+/** What a Pips page is told as it is written: `favicons`, dgc.linkFavicons as it stood (left out: off); `chat`, the Pip
+ *  conversation this page is the editor tab of ("Open in editor"), '' for the Pip's first. */
+export type PipsPage = { favicons?: boolean; chat?: { pip: string; conversation: string } };
+export function pipsDocument(scriptUri = '', styleUri = '', cspSource = '', markdownUri = '', cardsUri = '', cardsStyleUri = '', videoUri = '', codiconUri = '', page: PipsPage = {}): string {
+  // img-src: `https:` is what lets a favicon load beside a link (a reply's, and one the user sent), the same allowance
+  // Work's page makes, and only while dgc.linkFavicons is on: off, the policy itself keeps any icon from leaving for
+  // one, whatever the page draws. It is not what keeps model output from phoning home: the Markdown renderer never
+  // emits an <img> for model content (model-images-never-render.test.mjs), and a favicon asks about a link's ORIGIN
+  // only (src/markdown.ts, faviconUrl). The page reads the same setting from its body (data-link-favicons).
+  const favicons = page?.favicons === true;
+  const chat = page?.chat && /^pip_[A-Za-z0-9]{1,64}$/.test(page.chat.pip) && /^(?:conv_[0-9a-f]{32})?$/.test(page.chat.conversation) ? page.chat : undefined;
+  const says = ` data-link-favicons="${favicons ? 'on' : 'off'}"${chat ? ` data-pip-chat="${attr(chat.pip)}" data-pip-conversation="${attr(chat.conversation)}"` : ''}`;
   // frame-src: only a plugin's card (MCP Apps), at the loopback address DGC's backend serves it from.
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};${codiconUri ? ` font-src ${attr(cspSource)};` : ''}${videoUri ? ' media-src blob:;' : ''}${cardsUri ? ' frame-src http://127.0.0.1:* http://localhost:*;' : ''}">${codiconUri ? `<link rel="stylesheet" href="${attr(codiconUri)}">` : ''}<link rel="stylesheet" href="${attr(styleUri)}">${cardsStyleUri ? `<link rel="stylesheet" href="${attr(cardsStyleUri)}">` : ''}<title>DGC Pips</title></head><body><main id="app">${PIPS_BOOT_MARK}</main><div id="review-root"></div>${cardsUri ? `<script src="${attr(cardsUri)}"></script>` : ''}${videoUri ? `<script src="${attr(videoUri)}"></script>` : ''}${markdownUri ? `<script src="${attr(markdownUri)}"></script>` : ''}<script src="${attr(scriptUri)}"></script></body></html>`;
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:${favicons ? ' https:' : ''}; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};${codiconUri ? ` font-src ${attr(cspSource)};` : ''}${videoUri ? ' media-src blob:;' : ''}${cardsUri ? ' frame-src http://127.0.0.1:* http://localhost:*;' : ''}">${codiconUri ? `<link rel="stylesheet" href="${attr(codiconUri)}">` : ''}<link rel="stylesheet" href="${attr(styleUri)}">${cardsStyleUri ? `<link rel="stylesheet" href="${attr(cardsStyleUri)}">` : ''}<title>DGC Pips</title></head><body${says}><main id="app">${PIPS_BOOT_MARK}</main><div id="review-root"></div>${cardsUri ? `<script src="${attr(cardsUri)}"></script>` : ''}${videoUri ? `<script src="${attr(videoUri)}"></script>` : ''}${markdownUri ? `<script src="${attr(markdownUri)}"></script>` : ''}<script src="${attr(scriptUri)}"></script></body></html>`;
 }
 
 /** A Pip's computer in an editor tab: its Browser, Files and Terminal. */
 export function computerDocument(scriptUri = '', styleUri = '', cspSource = '', title = 'Computer'): string {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};"><link rel="stylesheet" href="${attr(styleUri)}"><title>${attr(title)}</title></head><body><main id="app"><p role="status">Connecting to local DGC…</p></main><script type="module" src="${attr(scriptUri)}"></script></body></html>`;
+}
+/** "Open in editor" for a Pip's chat: the Pip and the conversation a page names, each checked here. */
+export type ChatPip = { id: string; name: string; pip_type: string };
+export type ChatConversation = { id: string; title?: string };
+/** Several conversations a Pip (Pips API 79): before it a Pip has one chat, and its tab is that chat's. */
+const CONVERSATIONS_API = 79;
+const CHAT_PIP_TYPES = ['core', 'scout', 'lens', 'patch', 'rook', 'pulse', 'lock', 'quill'];
+/** A Pip as a page names it, or undefined. `whole`: with its kind too (to open a tab); a tab saying what it shows
+ *  names the Pip and its name only. */
+export function chatPip(value: any, whole = true): ChatPip | undefined {
+  if (!value || typeof value !== 'object' || typeof value.id !== 'string' || !/^pip_[A-Za-z0-9]{1,64}$/.test(value.id)) return undefined;
+  if (typeof value.name !== 'string' || !value.name.trim() || value.name.length > 120 || /[\u0000-\u001f\u007f]/.test(value.name)) return undefined;
+  if (whole && !CHAT_PIP_TYPES.includes(value.pip_type)) return undefined;
+  return { id: value.id, name: value.name.trim(), pip_type: whole ? value.pip_type : String(value.pip_type || '') };
+}
+/** A conversation as a page names it: undefined for none (the Pip's one chat, or its first), null for one that is not
+ *  a conversation. Its id is DGC's, or '' for the Pip's first; its title a line of words, when the page knows it. */
+export function chatConversation(value: any): ChatConversation | undefined | null {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object' || typeof value.id !== 'string' || !/^(?:conv_[0-9a-f]{32})?$/.test(value.id)) return null;
+  if (value.title !== undefined && (typeof value.title !== 'string' || value.title.length > 200 || /[\u0000-\u001f\u007f]/.test(value.title))) return null;
+  return { id: value.id, ...(typeof value.title === 'string' && value.title.trim() ? { title: value.title.trim() } : {}) };
+}
+/** A chat tab's title: "{Pip name} · {conversation}", the conversation "Chat" until the page has said its name. */
+export function chatTitle(pip: string, conversation?: string): string { return `${pip} · ${conversation || 'Chat'}`; }
+const DRAFT_PART_KINDS = ['plugin', 'pip', 'file', 'project', 'link'];
+/** A draft as a page says it, or undefined: its Pip, its conversation ('' the first), its words (up to a message's
+ *  256 KB) and, when it has marks, its parts, which must spell those words. Passed on as it is checked here. */
+export function chatDraftOf(message: any): { type: 'pipsChatDraft'; pip_id: string; conversation_id: string; text: string; parts?: unknown[] } | undefined {
+  if (!message || typeof message.pip_id !== 'string' || !/^pip_[A-Za-z0-9]{1,64}$/.test(message.pip_id)) return undefined;
+  if (typeof message.conversation_id !== 'string' || !/^(?:conv_[0-9a-f]{32})?$/.test(message.conversation_id)) return undefined;
+  if (typeof message.text !== 'string' || message.text.length > 262144) return undefined;
+  const parts = message.parts;
+  if (parts !== undefined) {
+    if (!Array.isArray(parts) || parts.length > 256) return undefined;
+    const fine = parts.every((part: any) => typeof part === 'string' || part && typeof part === 'object' && DRAFT_PART_KINDS.includes(part.kind)
+      && typeof part.label === 'string' && part.label.length <= 4096 && typeof part.wire === 'string' && part.wire.length <= 4096
+      && typeof part.identity === 'string' && part.identity.length <= 128 && (part.pipType === undefined || typeof part.pipType === 'string' && part.pipType.length <= 40));
+    if (!fine || parts.map((part: any) => typeof part === 'string' ? part : part.wire).join('') !== message.text) return undefined;
+  }
+  return { type: 'pipsChatDraft', pip_id: message.pip_id, conversation_id: message.conversation_id, text: message.text,
+    ...(parts !== undefined ? { parts: parts.map((part: any) => typeof part === 'string' ? part : { kind: part.kind, label: part.label, wire: part.wire, identity: part.identity, ...(part.pipType !== undefined ? { pipType: part.pipType } : {}) }) } : {}) };
 }
 /** Continue in Work on a Pip's project change: what the panel opens Work with. */
 export type ProjectWork = { name: string; change_id: string; file: string; patch: string; brief: string };
@@ -429,6 +482,19 @@ export class PipsEditor implements vscode.Disposable {
   private embeddedPost?: (message: any) => void;
   /** The open computer tabs, by Pip and (from Pips API 86, when the page says which) the computer's number: "pip_x:2". */
   private computers = new Map<string, { panel: vscode.WebviewPanel; pip: ComputerPip; number?: number }>();
+  /** "Open in editor" (15 Nov): the open editor tabs of Pip chats, one per Pip conversation, by "pip_x#conv_y" (the
+   *  Pip's first conversation: "pip_x#"). Each is the Pips page itself, pinned to that chat and talking to DGC through
+   *  this bridge as the Pips tab does: the same chat, never a copy. Closing one asks DGC nothing. */
+  private chats = new Map<string, { panel: vscode.WebviewPanel; pip: ChatPip; conversation: string }>();
+  /** Every bridge of this window (the side bar's, the Pips tab's): what is typed in one page of a chat is told to
+   *  all the others, whichever bridge they are on. */
+  private static readonly bridges = new Set<PipsEditor>();
+  /** A conversation's draft as a page last said it, so a tab opened later starts with what is in the box. Words and
+   *  marks only, in memory only, a few at a time. */
+  private static readonly drafts = new Map<string, any>();
+  /** Who opens a chat's tab when a page asks: the window's one keeper of them (the panel sets it). None: this bridge. */
+  private chatOpener?: (pip: ChatPip, conversation?: ChatConversation) => void;
+  useOpenChat(open: (pip: ChatPip, conversation?: ChatConversation) => void): void { this.chatOpener = open; }
   /** Each Pip's computers by name, as DGC last said them (get_pip_computer, rename_pip_computer, add_pip_computer). */
   private computerNames = new Map<string, { number: number; name: string }[]>();
   /** The computer tabs with an Add file… or Save to this computer… under way (a dialog open, or a copy running): one at a time each. */
@@ -445,7 +511,7 @@ export class PipsEditor implements vscode.Disposable {
   private desktopNumbers = false;
   /** /learn in a Pip's chat (ready.capabilities.learn): learn_skill drafts, save_skill writes a personal skill. */
   private learn = false;
-  private pending = new Map<string, { client: string; command: string; at: number; surface?: string; document?: { run: string; save: boolean; generation: number }; exportFile?: { generation: number }; exportTeam?: { generation: number }; keptImage?: { pip: string; message: string; index: number; generation: number }; spooled?: string[]; newsDismiss?: { pipIds: string[]; until: string } }>();
+  private pending = new Map<string, { client: string; command: string; at: number; surface?: string; pip?: string; document?: { run: string; save: boolean; generation: number }; exportFile?: { generation: number }; exportTeam?: { generation: number }; keptImage?: { pip: string; message: string; index: number; generation: number }; spooled?: string[]; newsDismiss?: { pipIds: string[]; until: string } }>();
   private generation = 0;
   private apiVersion = 0;
   /** The backend's image spool (ready.capabilities.image_spool_dir), where a Pip message's photos and files go from API 52. */
@@ -483,9 +549,9 @@ export class PipsEditor implements vscode.Disposable {
   /** The dock (src/dock.ts): a Pip's pin on its row. The page is told what is pinned as it opens and whenever it changes. */
   private dock?: { handle: (message: any, reply: (state: any) => void) => boolean; state: () => any };
   useDock(handle: (message: any, reply: (state: any) => void) => boolean, state: () => any): void { this.dock = { handle, state }; }
-  dockChanged(): void { if (this.dock) this.post(this.dock.state()); }
+  dockChanged(): void { if (this.dock) this.postPages(this.dock.state()); }
   /** Settings changed Pictures in replies: the page follows it. */
-  picturesSetting(message: any): void { this.post(message); }
+  picturesSetting(message: any): void { this.postPages(message); }
   private newsDismissed?: (pipIds: string[], until: string) => void;
   useNewsDismissed(notify: (pipIds: string[], until: string) => void): void { this.newsDismissed = notify; }
   /** A Pip's messages were marked read here (mark_pip_read answered): the home's count and the other Pips pages follow. */
@@ -496,10 +562,10 @@ export class PipsEditor implements vscode.Disposable {
   private setupDecided?: (setupId: string) => void;
   useSetupDecided(notify: (setupId: string) => void): void { this.setupDecided = notify; }
   /** A new-Pip card was decided somewhere else: this page's copy reads it again. */
-  setupChanged(setupId: string): void { this.post({ type: 'pipSetupChanged', setup_id: setupId }); }
+  setupChanged(setupId: string): void { this.postPages({ type: 'pipSetupChanged', setup_id: setupId }); }
   private profileChangeNotice?: () => void;
   useProfileChanged(notify: () => void): void { this.profileChangeNotice = notify; }
-  profileChanged(): void { this.post({ type: 'pipsProfileChanged' }); }
+  profileChanged(): void { this.postPages({ type: 'pipsProfileChanged' }); }
   /** A video's Stop from a Pip's chat: the window's backend (videos_stop), set by the panel. */
   videoStop?: (job: string) => Promise<Record<string, unknown> | undefined>;
   /** A Pip reply's running video: the window's backend polls (or watches) it, so one a restart left on disk ends. */
@@ -608,7 +674,7 @@ export class PipsEditor implements vscode.Disposable {
       } catch (error) { throw new Error(`${pip.name}: ${error instanceof Error && error.message ? error.message : 'DGC couldn’t delete it.'}`); }
     }
   }
-  constructor(private readonly extensionUri: vscode.Uri, private readonly send: (message: any, backendIdentity?: object) => boolean, private readonly connect: () => void, private readonly requireGeneration = false) {}
+  constructor(private readonly extensionUri: vscode.Uri, private readonly send: (message: any, backendIdentity?: object) => boolean, private readonly connect: () => void, private readonly requireGeneration = false) { PipsEditor.bridges.add(this); }
   attach(post: (message: any) => void): void {
     // The main panel is now the primary surface. Retire any old editor instance
     // before changing the reply destination, so requests cannot cross surfaces.
@@ -619,14 +685,98 @@ export class PipsEditor implements vscode.Disposable {
   }
   private post(message: any, surface = 'main'): void {
     if (surface.startsWith('computer:')) { void this.computers.get(surface.slice(9))?.panel.webview.postMessage(message); return; }
+    if (surface.startsWith('chat:')) { void this.chats.get(surface.slice(5))?.panel.webview.postMessage(message); return; }
     if (this.embeddedPost) this.embeddedPost(message);
     else this.panel?.webview.postMessage(message);
   }
+  /** To the Pips page and to every chat's own tab: what any page showing Pips needs to hear. */
+  private postPages(message: any, except = ''): void {
+    if (except !== 'main') this.post(message);
+    for (const key of this.chats.keys()) if ('chat:' + key !== except) this.post(message, 'chat:' + key);
+  }
+  /** To every page of every bridge in this window but the one that said it. */
+  private tellOthers(message: any, from: string): void {
+    for (const bridge of PipsEditor.bridges) { try { bridge.postPages(message, bridge === this ? from : ''); } catch { /* a page that has gone */ } }
+  }
+  /** The webview a page's own replies go to (videos, a plugin's card): the Pips tab, or a chat's tab. */
+  private pagePanel(surface: string): vscode.WebviewPanel | undefined {
+    return surface.startsWith('chat:') ? this.chats.get(surface.slice(5))?.panel : this.panel;
+  }
   /** Settings saved, or the Router's settings changed: what a Pip on Default runs on may have changed with them (Pips run
    *  on, the Router on or off, its Pip systems), so an open Pips page reads list_pip_models again. */
-  modelsChanged(): void { this.post({ type: 'pipsModelsChanged' }); }
+  modelsChanged(): void { this.postPages({ type: 'pipsModelsChanged' }); }
   /** A Pip was marked read somewhere else: an open Pips page reads its unread counts again. */
-  unreadChanged(): void { this.post({ type: 'pipsUnreadChanged' }); }
+  unreadChanged(): void { this.postPages({ type: 'pipsUnreadChanged' }); }
+  /** Open a Pip's chat as an editor tab, or bring its tab forward: "{Pip name} · {conversation}", one tab per Pip
+   *  conversation, as a Work session and a ChatDGC chat each have their own. It needs nothing new of DGC: the tab is the
+   *  Pips page on this bridge, so it is there on any DGC that has Pips (one before several conversations, Pips API 79,
+   *  has one chat a Pip: "{Pip name} · Chat"). Its title is a first word on it: the page says what it shows once it has
+   *  read it from DGC (pipsChatShown), and the title follows. */
+  openChat(pip: ChatPip, conversation?: ChatConversation): void {
+    const conv = this.apiVersion >= CONVERSATIONS_API && conversation ? conversation.id : '';
+    const key = `${pip.id}#${conv}`;
+    const open = this.chats.get(key);
+    if (open) { open.panel.reveal(vscode.ViewColumn.Active); return; }
+    const title = chatTitle(pip.name, this.apiVersion >= CONVERSATIONS_API ? conversation?.title : undefined);
+    const panel = vscode.window.createWebviewPanel('dgc.pipChat', title, vscode.ViewColumn.Active, {
+      enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [this.extensionUri],
+    });
+    const tab = { panel, pip, conversation: conv };
+    this.chats.set(key, tab);
+    const surface = () => 'chat:' + this.chatKey(tab);
+    panel.onDidDispose(() => {
+      const at = this.chatKey(tab);
+      if (this.chats.get(at) === tab) this.chats.delete(at);
+      for (const [id, item] of this.pending) if (item.surface === 'chat:' + at) this.pending.delete(id);
+    });
+    const focused = () => { try { return vscode.window.state?.focused !== false; } catch { return true; } };
+    panel.onDidChangeViewState(() => panel.webview.postMessage({ type: 'pipsVisibility', visible: panel.visible, focused: focused() }));
+    try { const watch = vscode.window.onDidChangeWindowState?.(() => { void panel.webview.postMessage({ type: 'pipsVisibility', visible: panel.visible, focused: focused() }); }); if (watch) panel.onDidDispose(() => watch.dispose()); } catch { /* an editor that does not say */ }
+    panel.webview.onDidReceiveMessage(message => this.receive(message, surface()));
+    panel.webview.html = this.pageHtml(panel, { pip: pip.id, conversation: conv });
+    this.connect();
+  }
+  /** Where a chat's tab is kept now (its conversation may have changed under it: chatShown). */
+  private chatKey(tab: { pip: ChatPip; conversation: string }): string { return `${tab.pip.id}#${tab.conversation}`; }
+  /** A chat's tab says what it shows (its Pip's name and its conversation, as read from DGC): its title follows a
+   *  rename. A tab that now shows another conversation (its own is gone: the first one, then) is kept under that one;
+   *  if that one already has a tab, this one closes and that one comes forward, so two tabs never show one chat. */
+  private chatShown(surface: string, message: any): void {
+    const tab = this.chats.get(surface.slice(5)), shown = chatPip(message?.pip, false), conversation = chatConversation(message?.conversation);
+    if (!tab || !shown || shown.id !== tab.pip.id || conversation === null || !conversation) return;
+    const conv = this.apiVersion >= CONVERSATIONS_API ? conversation.id : '';
+    if (conv !== tab.conversation) {
+      const there = this.chats.get(`${tab.pip.id}#${conv}`);
+      if (there && there !== tab) { tab.panel.dispose(); there.panel.reveal(vscode.ViewColumn.Active); return; }
+      const before = 'chat:' + this.chatKey(tab);
+      this.chats.delete(this.chatKey(tab));
+      tab.conversation = conv;
+      this.chats.set(this.chatKey(tab), tab);
+      for (const item of this.pending.values()) if (item.surface === before) item.surface = 'chat:' + this.chatKey(tab);
+    }
+    tab.pip = { ...tab.pip, name: shown.name };
+    const title = chatTitle(shown.name, conversation.title);
+    if (tab.panel.title !== title) tab.panel.title = title;
+  }
+  /** The Pips page's document for one of this bridge's tabs, its favicons as dgc.linkFavicons stands now. */
+  private pageHtml(panel: vscode.WebviewPanel, chat?: { pip: string; conversation: string }): string {
+    const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', name)).toString();
+    const media = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', name)).toString();
+    let favicons = true;
+    try { favicons = vscode.workspace.getConfiguration('dgc').get<boolean>('linkFavicons', true) !== false; } catch { favicons = false; }
+    return pipsDocument(asset('pips.js'), asset('pips.css'), panel.webview.cspSource, asset('markdown.js'),
+                        media('mcpApps.js'), media('mcpApps.css'), media('videoPlayer.js'), media('codicon.css'), { favicons, ...(chat ? { chat } : {}) });
+  }
+  /** What a page typed in a conversation's box, told to every other page of this window; '' when it sent it or
+   *  cleared it. Words and marks only, as the page's own saved state keeps them. Nothing is sent to DGC. */
+  private chatDraft(surface: string, message: any): void {
+    const draft = chatDraftOf(message);
+    if (!draft) return;
+    const key = `${draft.pip_id}#${draft.conversation_id}`;
+    PipsEditor.drafts.delete(key);
+    if (draft.text) { PipsEditor.drafts.set(key, draft); if (PipsEditor.drafts.size > 64) PipsEditor.drafts.delete(PipsEditor.drafts.keys().next().value!); }
+    this.tellOthers(draft, surface);
+  }
   /** Open a Pip's computer as an editor tab, or bring its tab forward: "Gmail · Computer", and one tab for each computer
    *  by its name ("Gmail · Juniper") when the page says which (Pips API 86). */
   openComputer(pip: ComputerPip, number?: number): void {
@@ -792,17 +942,15 @@ export class PipsEditor implements vscode.Disposable {
       enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [this.extensionUri],
     });
     this.panel = panel;
-    panel.onDidDispose(() => { this.panel = undefined; this.pending.clear(); this.dictation?.().release(this.mic); this.readAloud?.().release(this.mic); });
+    // (Its own requests go with it; a chat's tab on this bridge keeps the ones it is waiting on.)
+    panel.onDidDispose(() => { this.panel = undefined; for (const [id, item] of this.pending) if (!item.surface || item.surface === 'main') this.pending.delete(id); this.dictation?.().release(this.mic); this.readAloud?.().release(this.mic); });
     // (focused: this window has the focus. A Pip's chat reads what it shows only while someone can be looking at it;
     // when the focus is back with its tab in front, it reads it then. "New" means not seen, 13 Nov.)
     const focused = () => { try { return vscode.window.state?.focused !== false; } catch { return true; } };
     panel.onDidChangeViewState(() => panel.webview.postMessage({ type: 'pipsVisibility', visible: panel.visible, focused: focused() }));
     try { const watch = vscode.window.onDidChangeWindowState?.(() => { void panel.webview.postMessage({ type: 'pipsVisibility', visible: panel.visible, focused: focused() }); }); if (watch) panel.onDidDispose(() => watch.dispose()); } catch { /* an editor that does not say */ }
     panel.webview.onDidReceiveMessage(message => this.receive(message));
-    const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', name)).toString();
-    const media = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', name)).toString();
-    panel.webview.html = pipsDocument(asset('pips.js'), asset('pips.css'), panel.webview.cspSource, asset('markdown.js'),
-                                      media('mcpApps.js'), media('mcpApps.css'), media('videoPlayer.js'), media('codicon.css'));
+    panel.webview.html = this.pageHtml(panel);
     this.connect();
   }
   ready(capabilities: any, backendIdentity?: object): void {
@@ -854,7 +1002,7 @@ export class PipsEditor implements vscode.Disposable {
     const folders = this.foldersOn && this.projectFolderHook
       ? { projectFolder: this.projectFolderHook.choice(), home: homedir(), ...(typeof own === 'string' && own ? { windowFolder: { folder: own, name: own.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || own } } : {}) } : {};
     const connection = { type: 'pipsConnection', generation: this.generation, apiVersion: this.apiVersion, backgroundSetup:this.backgroundSetup, displayMentions:this.displayMentions, ...(folder === undefined ? {} : { folder }), ...folders, ...(this.connectFailed ? { failed: true } : {}), ...this.state };
-    this.post(connection);
+    this.postPages(connection);
     for (const id of this.computers.keys()) this.post(connection, 'computer:' + id);
   }
   /** One host-owned read through the same channel: only the digest, only on an API 41 backend. */
@@ -972,15 +1120,15 @@ export class PipsEditor implements vscode.Disposable {
     if (event.type === 'pips_result' && event.command !== owner.command) return true;
     this.pending.delete(event.request_id);
     if (owner.document && event.type === 'pips_result' && event.ok === true) {
-      void this.openResultDocument(owner.client, owner.document, event.result?.run);
+      void this.openResultDocument(owner.client, owner.document, event.result?.run, owner.surface);
       return true;
     }
     if (owner.exportFile && event.type === 'pips_result' && event.ok === true) {
-      void this.openExport(owner.client, owner.exportFile.generation, event.result);
+      void this.openExport(owner.client, owner.exportFile.generation, event.result, owner.surface);
       return true;
     }
     if (owner.exportTeam && event.type === 'pips_result' && event.ok === true) {
-      void this.saveTeam(owner.client, owner.exportTeam.generation, event.result);
+      void this.saveTeam(owner.client, owner.exportTeam.generation, event.result, owner.surface);
       return true;
     }
     if (owner.spooled && !(event.type === 'pips_result' && event.ok === true)) void this.unspool(owner.spooled);
@@ -1009,6 +1157,9 @@ export class PipsEditor implements vscode.Disposable {
       else if (owner.command === 'rename_pip_computer' || owner.command === 'add_pip_computer') this.computersNamed(event.result?.pip_id, event.result?.names);
     }
     if (owner.command === 'mark_pip_read' && event.type === 'pips_result' && event.ok === true) this.unreadRead?.();
+    // A message DGC took from one page: every other page showing that Pip's chat reads it again (the same chat, in its
+    // editor tab, in the Pips page, in the side bar).
+    if (owner.command === 'send_pip_message' && event.type === 'pips_result' && event.ok === true && owner.pip) this.tellOthers({ type: 'pipsChatChanged', pip_id: owner.pip }, owner.surface || 'main');
     if (owner.command === 'set_pip_profile' && event.type === 'pips_result' && event.ok === true) this.profileChangeNotice?.();
     if ((owner.command === 'accept_pip_setup' || owner.command === 'reject_pip_setup') && event.type === 'pips_result' && event.ok === true) {
       const decided = event.result?.setup?.id;
@@ -1037,7 +1188,7 @@ export class PipsEditor implements vscode.Disposable {
     this.post({ type: 'pipsReply', id: client, ok: true, result: { ...rest, opened } }, surface);
   }
   /** A shared Pip file opens as an unsaved JSON document, then Save As: the user picks where. */
-  private async openExport(client: string, generation: number, result: any): Promise<void> {
+  private async openExport(client: string, generation: number, result: any, surface?: string): Promise<void> {
     try {
       if (generation !== this.generation || !this.state.connected) throw Error('The DGC connection changed. Export again.');
       const text = result?.text;
@@ -1046,23 +1197,23 @@ export class PipsEditor implements vscode.Disposable {
       await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
       await vscode.commands.executeCommand('workbench.action.files.saveAs', document.uri);
       const leftOut = Array.isArray(result?.document?.left_out) ? result.document.left_out.filter((x: any) => typeof x === 'string').slice(0, 8) : [];
-      this.post({ type: 'pipsReply', id: client, ok: true, result: { opened: true, left_out: leftOut } });
+      this.post({ type: 'pipsReply', id: client, ok: true, result: { opened: true, left_out: leftOut } }, surface);
     } catch (error) {
-      this.post({ type: 'pipsReply', id: client, ok: false, error: { message: error instanceof Error ? error.message : 'Could not export the Pip.' } });
+      this.post({ type: 'pipsReply', id: client, ok: false, error: { message: error instanceof Error ? error.message : 'Could not export the Pip.' } }, surface);
     }
   }
   /** The user picks a shared Pip file; the host reads it and the chat saves it as a setup card. */
-  private async importFile(client: string): Promise<void> {
-    const fail = (text: string) => this.post({ type: 'pipsReply', id: client, ok: false, error: { message: text } });
+  private async importFile(client: string, surface?: string): Promise<void> {
+    const fail = (text: string) => this.post({ type: 'pipsReply', id: client, ok: false, error: { message: text } }, surface);
     try {
       const generation = this.generation;
       const picked = await vscode.window.showOpenDialog({ canSelectMany: false, openLabel: 'Import Pip', filters: { 'Shared Pip': ['json'] } });
-      if (!picked || !picked.length) { this.post({ type: 'pipsReply', id: client, ok: true, result: { cancelled: true } }); return; }
+      if (!picked || !picked.length) { this.post({ type: 'pipsReply', id: client, ok: true, result: { cancelled: true } }, surface); return; }
       const bytes = await vscode.workspace.fs.readFile(picked[0]);
       if (bytes.byteLength > 24576) { fail('A shared Pip file is at most 24 KiB.'); return; }
       if (generation !== this.generation || !this.state.connected) { fail('The DGC connection changed. Import again.'); return; }
       const requestId = 'pips-editor-' + randomBytes(12).toString('hex');
-      this.pending.set(requestId, { client, command: 'import_pip_document', at: Date.now() });
+      this.pending.set(requestId, { client, command: 'import_pip_document', at: Date.now(), surface });
       if (!this.send({ type: 'pips_control', request: { type: 'import_pip_document', document: Buffer.from(bytes).toString('utf8'), request_id: requestId } }, this.backendIdentity)) {
         this.pending.delete(requestId); fail('DGC could not send the file. Nothing was saved.');
       }
@@ -1072,7 +1223,7 @@ export class PipsEditor implements vscode.Disposable {
   }
   /** pips-12: a team's file is saved where the user chooses in the save dialog. The text came from DGC's own export; the
    *  page hears the file's name and what was left out, never where it is. */
-  private async saveTeam(client: string, generation: number, result: any): Promise<void> {
+  private async saveTeam(client: string, generation: number, result: any, surface?: string): Promise<void> {
     try {
       if (generation !== this.generation || !this.state.connected) throw Error('The DGC connection changed. Export again.');
       const text = result?.text, team = result?.document;
@@ -1080,27 +1231,27 @@ export class PipsEditor implements vscode.Disposable {
         || !Array.isArray(team.pips) || !team.pips.length || team.pips.length > TEAM_PIPS) throw Error('The team file is invalid.');
       const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir()), teamFileName(team.name)),
         saveLabel: 'Save team', filters: { 'DGC team': ['json'] } });
-      if (!target) { this.post({ type: 'pipsReply', id: client, ok: true, result: { cancelled: true } }); return; }
+      if (!target) { this.post({ type: 'pipsReply', id: client, ok: true, result: { cancelled: true } }, surface); return; }
       await vscode.workspace.fs.writeFile(target, Buffer.from(text, 'utf8'));
       const leftOut: string[] = [];
       for (const pip of team.pips) for (const note of Array.isArray(pip?.left_out) ? pip.left_out : []) if (typeof note === 'string' && !leftOut.includes(note)) leftOut.push(note);
-      this.post({ type: 'pipsReply', id: client, ok: true, result: { saved: true, file: String(target.path).split(/[\\/]/).pop() || teamFileName(team.name), name: team.name, count: team.pips.length, left_out: leftOut.slice(0, 8) } });
+      this.post({ type: 'pipsReply', id: client, ok: true, result: { saved: true, file: String(target.path).split(/[\\/]/).pop() || teamFileName(team.name), name: team.name, count: team.pips.length, left_out: leftOut.slice(0, 8) } }, surface);
     } catch (error) {
-      this.post({ type: 'pipsReply', id: client, ok: false, error: { message: error instanceof Error ? error.message : 'Could not export the team.' } });
+      this.post({ type: 'pipsReply', id: client, ok: false, error: { message: error instanceof Error ? error.message : 'Could not export the team.' } }, surface);
     }
   }
   /** pips-12: the user picks a team file; the host reads it and the chat saves one setup card per Pip in it. */
-  private async importTeamFile(client: string): Promise<void> {
-    const fail = (text: string) => this.post({ type: 'pipsReply', id: client, ok: false, error: { message: text } });
+  private async importTeamFile(client: string, surface?: string): Promise<void> {
+    const fail = (text: string) => this.post({ type: 'pipsReply', id: client, ok: false, error: { message: text } }, surface);
     try {
       const generation = this.generation;
       const picked = await vscode.window.showOpenDialog({ canSelectMany: false, openLabel: 'Import team', filters: { 'DGC team': ['json'] } });
-      if (!picked || !picked.length) { this.post({ type: 'pipsReply', id: client, ok: true, result: { cancelled: true } }); return; }
+      if (!picked || !picked.length) { this.post({ type: 'pipsReply', id: client, ok: true, result: { cancelled: true } }, surface); return; }
       const bytes = await vscode.workspace.fs.readFile(picked[0]);
       if (bytes.byteLength > TEAM_FILE_BYTES) { fail('A team file is at most 256 KiB.'); return; }
       if (generation !== this.generation || !this.state.connected) { fail('The DGC connection changed. Import again.'); return; }
       const requestId = 'pips-editor-' + randomBytes(12).toString('hex');
-      this.pending.set(requestId, { client, command: 'import_pip_team', at: Date.now() });
+      this.pending.set(requestId, { client, command: 'import_pip_team', at: Date.now(), surface });
       if (!this.send({ type: 'pips_control', request: { type: 'import_pip_team', document: Buffer.from(bytes).toString('utf8'), request_id: requestId } }, this.backendIdentity)) {
         this.pending.delete(requestId); fail('DGC could not send the file. Nothing was saved.');
       }
@@ -1108,7 +1259,7 @@ export class PipsEditor implements vscode.Disposable {
       fail(error instanceof Error ? error.message : 'Could not read the team file.');
     }
   }
-  private async openResultDocument(client: string, requested: { run: string; save: boolean; generation: number }, run: any): Promise<void> {
+  private async openResultDocument(client: string, requested: { run: string; save: boolean; generation: number }, run: any, surface?: string): Promise<void> {
     try {
       if (requested.generation !== this.generation || !this.state.connected) throw Error('The DGC connection changed. Open the result again.');
       if (run?.id !== requested.run || run?.status !== 'succeeded') throw Error('Only a completed saved result can be opened.');
@@ -1122,9 +1273,9 @@ export class PipsEditor implements vscode.Disposable {
       if (requested.generation !== this.generation || !this.state.connected) throw Error('The DGC connection changed. Open the result again.');
       await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
       if (requested.save) await vscode.commands.executeCommand('workbench.action.files.saveAs', document.uri);
-      this.post({type:'pipsReply', id:client, ok:true, result:{opened:true}});
+      this.post({type:'pipsReply', id:client, ok:true, result:{opened:true}}, surface);
     } catch (error) {
-      this.post({type:'pipsReply', id:client, ok:false, error:{message:error instanceof Error ? error.message : 'Could not open the saved document.'}});
+      this.post({type:'pipsReply', id:client, ok:false, error:{message:error instanceof Error ? error.message : 'Could not open the saved document.'}}, surface);
     }
   }
   /** A kept photo the backend named (get_pip_message_image as_file, API 52), read here as a data URI: a photo
@@ -1277,18 +1428,30 @@ export class PipsEditor implements vscode.Disposable {
   }
   receive(message: any, surface = 'main'): void {
     const computer = surface.startsWith('computer:') ? this.computers.get(surface.slice(9)) : undefined;
-    if (surface !== 'main' && !computer) return;
-    if (VIDEO_MESSAGES.has(String(message?.type || '')) && !computer && this.panel) {
+    // (A chat's own tab is the Pips page on another surface: what the Pips page may ask, it may, answered to it.)
+    const chat = surface.startsWith('chat:') ? this.chats.get(surface.slice(5)) : undefined;
+    if (surface !== 'main' && !computer && !chat) return;
+    if (message?.type === 'pipsOpenChat' && !computer) {
+      // Open in editor: this Pip's chat, this conversation, in a tab of its own. The page names both; anything that is
+      // not a Pip and a conversation opens nothing. The window's one keeper of these tabs opens it (or this bridge).
+      const pip = chatPip(message.pip), conversation = chatConversation(message.conversation);
+      if (!pip || conversation === null) return;
+      if (this.chatOpener) this.chatOpener(pip, conversation); else this.openChat(pip, conversation);
+      return;
+    }
+    if (message?.type === 'pipsChatDraft' && !computer) { this.chatDraft(surface, message); return; }
+    if (message?.type === 'pipsChatShown') { if (chat) this.chatShown(surface, message); return; }
+    if (VIDEO_MESSAGES.has(String(message?.type || '')) && !computer && this.pagePanel(surface)) {
       // A Pip reply's video: its bytes and state from DGC's own folder, Open, Show in folder, and a Stop through this
       // window's backend (src/videoHost.ts).
-      const panel = this.panel;
+      const panel = this.pagePanel(surface)!;
       void handleVideoMessage(message, reply => { void panel.webview.postMessage(reply); },
                               { stop: this.videoStop, follow: this.videoFollow });
       return;
     }
-    if (message?.type === 'mcpApp' && !computer && this.panel) {
+    if (message?.type === 'mcpApp' && !computer && this.pagePanel(surface)) {
       // A plugin's card in a Pip's reply, in the Pips tab: what it asks goes to this window's backend (src/mcpApps.ts).
-      const panel = this.panel;
+      const panel = this.pagePanel(surface)!;
       mcpAppsHost(this.extensionUri).fromPage(message, reply => { void panel.webview.postMessage(reply); },
                                               command => this.send(command, this.backendIdentity));
       return;
@@ -1374,10 +1537,18 @@ export class PipsEditor implements vscode.Disposable {
       return;
     }
     if (!computer && this.folds?.remember(message)) return;
-    if (!computer && this.dock?.handle(message, (state) => this.post(state))) return;
+    if (!computer && this.dock?.handle(message, (state) => this.postPages(state))) return;
     if (message?.type === 'pipsReady') {
-      if (!computer && this.folds) this.post(this.folds.initial());
-      if (!computer && this.dock) this.post(this.dock.state());
+      if (!computer && this.folds) this.post(this.folds.initial(), surface);
+      if (!computer && this.dock) this.post(this.dock.state(), surface);
+      if (chat) {
+        // Its page finds its own way to its chat (its body names the Pip and the conversation). What is in that
+        // conversation's box in another page is in this one's from the start.
+        this.publish();
+        const draft = PipsEditor.drafts.get(this.chatKey(chat));
+        if (draft) this.post(draft, surface);
+        return;
+      }
       if (computer) { this.post({ type: 'pipComputerInit', pip: computer.pip, desktop: this.desktopStream,
         ...(computer.number ? { number: computer.number, name: this.computerName(computer.pip.id, computer.number), numbers: this.desktopNumbers } : {}) }, surface); this.post({ type: 'pipsConnection', generation: this.generation, apiVersion: this.apiVersion, backgroundSetup:this.backgroundSetup, ...this.state }, surface); }
       else {
@@ -1492,11 +1663,11 @@ export class PipsEditor implements vscode.Disposable {
       if (this.apiVersion < 41) { fail('Update DGC to share Pips.'); return; }
       if (request.type === 'import_pip_file') {
         if (Object.keys(request).some(key => key !== 'type')) { fail('Choose a shared Pip file to import.'); return; }
-        void this.importFile(message.id); return;
+        void this.importFile(message.id, surface); return;
       }
       if (Object.keys(request).some(key => !['type','pip_id'].includes(key)) || typeof request.pip_id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(request.pip_id)) { fail('Choose a Pip to export.'); return; }
       const requestId = 'pips-export-' + randomBytes(12).toString('hex');
-      this.pending.set(requestId, { client: message.id, command: 'export_pip', at: Date.now(), exportFile: { generation: this.generation } });
+      this.pending.set(requestId, { client: message.id, command: 'export_pip', at: Date.now(), surface, exportFile: { generation: this.generation } });
       if (!this.send({ type: 'pips_control', request: { type: 'export_pip', pip_id: request.pip_id, request_id: requestId } }, this.backendIdentity)) {
         this.pending.delete(requestId); fail('DGC could not export the Pip.');
       }
@@ -1507,14 +1678,14 @@ export class PipsEditor implements vscode.Disposable {
       if (this.apiVersion < 88) { fail('Update DGC to share a team of Pips.'); return; }
       if (request.type === 'import_pip_team_file') {
         if (Object.keys(request).some(key => key !== 'type')) { fail('Choose a team file to import.'); return; }
-        void this.importTeamFile(message.id); return;
+        void this.importTeamFile(message.id, surface); return;
       }
       const ids = request.pip_ids;
       if (Object.keys(request).some(key => !['type','pip_ids','name'].includes(key)) || !Array.isArray(ids) || !ids.length || ids.length > TEAM_PIPS
         || ids.some((id: unknown) => typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) || new Set(ids).size !== ids.length) { fail('Choose 1 to 20 Pips to share as a team.'); return; }
       if (typeof request.name !== 'string' || [...request.name].length > 80 || /[\u0000-\u001f\u007f]/.test(request.name)) { fail('A team’s name is one line of up to 80 characters.'); return; }
       const requestId = 'pips-export-' + randomBytes(12).toString('hex');
-      this.pending.set(requestId, { client: message.id, command: 'export_pip_team', at: Date.now(), exportTeam: { generation: this.generation } });
+      this.pending.set(requestId, { client: message.id, command: 'export_pip_team', at: Date.now(), surface, exportTeam: { generation: this.generation } });
       if (!this.send({ type: 'pips_control', request: { type: 'export_pip_team', pip_ids: ids, name: request.name, request_id: requestId } }, this.backendIdentity)) {
         this.pending.delete(requestId); fail('DGC could not export the team.');
       }
@@ -1525,7 +1696,7 @@ export class PipsEditor implements vscode.Disposable {
         fail('Choose a saved Pip result to open.'); return;
       }
       const requestId = 'pips-document-' + randomBytes(12).toString('hex');
-      this.pending.set(requestId, {client:message.id, command:'get_pip_run', at:Date.now(), document:{run:request.run_id, save:request.save, generation:this.generation}});
+      this.pending.set(requestId, {client:message.id, command:'get_pip_run', at:Date.now(), surface, document:{run:request.run_id, save:request.save, generation:this.generation}});
       if (!this.send({type:'pips_control', request:{type:'get_pip_run', run_id:request.run_id, request_id:requestId}}, this.backendIdentity)) {
         this.pending.delete(requestId); fail('DGC could not read the saved result.');
       }
@@ -1706,8 +1877,9 @@ export class PipsEditor implements vscode.Disposable {
       && typeof request.until === 'string' && Number.isFinite(Date.parse(request.until))
       ? { pipIds: request.pip_ids as string[], until: request.until as string } : undefined;
     // (A code may wait for the Pip's computer to open before it is typed: its answer is kept a while longer.)
-    this.pending.set(requestId, {client: message.id, command: request.type, at: Date.now() + (request.type === 'fill_pip_code' ? 45000 : 0), surface, newsDismiss});
+    this.pending.set(requestId, {client: message.id, command: request.type, at: Date.now() + (request.type === 'fill_pip_code' ? 45000 : 0), surface, newsDismiss,
+      ...(request.type === 'send_pip_message' && typeof request.pip_id === 'string' && /^pip_[A-Za-z0-9]{1,64}$/.test(request.pip_id) ? { pip: request.pip_id } : {})});
     if (!this.send(command, this.backendIdentity)) { this.pending.delete(requestId); fail('DGC couldn’t send that. Refresh to see whether it worked before trying again.'); }
   }
-  dispose(): void { this.pending.clear(); this.embeddedPost = undefined; this.panel?.dispose(); for (const { panel } of [...this.computers.values()]) panel.dispose(); }
+  dispose(): void { PipsEditor.bridges.delete(this); this.pending.clear(); this.embeddedPost = undefined; this.panel?.dispose(); for (const { panel } of [...this.computers.values()]) panel.dispose(); for (const { panel } of [...this.chats.values()]) panel.dispose(); }
 }

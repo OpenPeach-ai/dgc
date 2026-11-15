@@ -177,8 +177,12 @@ test("a mark is never left to inherit a colour", () => {
   assert.match(rule.body, /color:\s*var\(--fk-[a-z]+\)/, "the default mark takes a hue token");
   const source = rules(mainCss).find((r) => r.selector === ".md-link[data-link-source]::before");
   assert.ok(source, "the link-source rule should exist");
-  assert.match(source.body, /color:\s*var\(--link\)/,
-    "a host mark is not a file kind and keeps the link tone");
+  // (15 Nov, his look) A host's stand-in mark in the link's purple read as its brand in the wrong colour (a purple
+  // GitHub logo): a host mark is grey; only DGC's own mark keeps the link tone (link-contrast proves 3:1).
+  assert.match(source.body, /color:\s*var\(--muted\)/,
+    "a host mark is not a file kind, and not the brand in our purple: grey");
+  const own = rules(mainCss).find((r) => r.selector === '.md-link[data-link-source="dgc"]::before');
+  assert.ok(own && /color:\s*var\(--link\)/.test(own.body), "DGC's own mark keeps the link tone");
 });
 
 

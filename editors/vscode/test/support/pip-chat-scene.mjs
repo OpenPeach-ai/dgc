@@ -6,6 +6,7 @@
 // Shared by pip-chat-design-browser.test.mjs and the before/after pictures. Not a *.test.mjs file. No port is opened:
 // the page is routed.
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { build } from "esbuild";
 
 const bundles = new Map();
@@ -24,6 +25,21 @@ export async function client(root = new URL("../..", import.meta.url).pathname) 
   bundles.set(root, made);
   return made;
 }
+
+/** opts.icons: the icon service a link's favicon is asked of, from the page's first request: "answer" (a 16 px picture),
+    "refuse", or a function of the address asked that gives the picture's bytes (none: refused). Returns every address
+    asked of it. */
+const ICON_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAHUlEQVR4nGMsC/n2n4ECwESJ5lEDRg0YNWAwGQAAZakC32PgnS0AAAAASUVORK5CYII=", "base64");
+async function iconService(context, how) {
+  const asked = [];
+  if (how) await context.route("https://www.google.com/**", (route) => { asked.push(route.request().url());
+    const body = typeof how === "function" ? how(route.request().url()) : how === "answer" ? ICON_PNG : null;
+    return body ? route.fulfill({ contentType: "image/png", body }) : route.abort(); });
+  return asked;
+}
+/** The editor's icon font with its file inline, as a page that may not fetch one needs it. */
+const codicon = (root) => readFileSync(`${root}/media/codicon.css`, "utf8").replace(/url\([^)]*codicon\.ttf[^)]*\)/,
+  `url("data:font/ttf;base64,${readFileSync(`${root}/media/codicon.ttf`).toString("base64")}")`);
 
 export const PIP = "pip_" + "9".repeat(32);   // hex, as DGC names a Pip (Needs attention checks it)
 
@@ -158,6 +174,8 @@ export const host = (opts) => `(${function (PIP, opts) {
     say("a1", "assistant", "It doesn't. The screenshot shows a total of 1,180.00, and `billing.py` rounds each line before it adds tax, which gives 1,179.96 for the same rate card. The rounding is on line 212.", "1", 29),
   ];
   const messages = opts.empty ? [] : opts.details ? (project ? detailsProject : detailsChat) : project ? projectChat : opts.ticks ? ticksChat : personal;
+  // opts.said: more messages after those, each {role, text} (a prompt with links in it, a reply with links).
+  (opts.said || []).forEach((m, i) => messages.push(say("x" + i, m.role, m.text, "8", Math.max(1, 6 - i))));
   // opts.reply: one more prompt and the Pip's answer to it, as given (a reply with code blocks, say).
   // (opts.replyMarks: that prompt's marks, as DGC keeps them: a project, a file, a Pip named in it.)
   if (opts.reply && !opts.empty) messages.push(say("u8", "user", opts.replyTo || "Show me.", "8", 3, opts.replyMarks ? { display_mentions: opts.replyMarks } : {}), say("a8", "assistant", opts.reply, "8", 2));
@@ -770,14 +788,20 @@ export const FRAMES = `(${function () {
 export async function openChat(browser, { width = 300, height = 800, theme = "dark", where = "side", srcRoot, motion = "reduce", ...opts } = {}) {
   const { js, css, work, markdown, root: tree } = await client(srcRoot);
   const t = THEMES[theme], script = (code) => `<script>${code.replace(/<\/script/g, "<\\/script")}</script>`;
+  // (opts.favicons "off": dgc.linkFavicons is off, as the page's body says it; opts.pinned {pip, conversation}: the tab
+  // is one Pip conversation's own, as "Open in editor" makes it; opts.codicon: the editor's icon font, as the real
+  // pages have it, for a link's bundled mark.)
+  const says = `${opts.favicons === "off" ? ' data-link-favicons="off"' : ""}${opts.pinned ? ` data-pip-chat="${opts.pinned.pip}" data-pip-conversation="${opts.pinned.conversation || ""}"` : ""}`;
+  const quiet = opts.favicons === "off" ? script("globalThis.DgcMarkdown?.setFavicons?.(false);") : "";
+  const font = opts.codicon ? `<style>${codicon(tree)}</style>` : "";
   const html = where === "tab"
-    ? `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${t.css}${css}</style></head><body class="${t.kind}"><main id="app">${opts.boot || ""}</main><div id="review-root"></div>${script(host(opts))}${script(markdown)}${script(js)}</body></html>`
+    ? `<!DOCTYPE html><html><head><meta charset="utf-8">${font}<style>${t.css}${css}</style></head><body class="${t.kind}"${says}><main id="app">${opts.boot || ""}</main><div id="review-root"></div>${script(host(opts))}${script(markdown)}${quiet}${script(js)}</body></html>`
     // Work's page: its tokens on :root and its ground on the body; Pips mounted into #pips-host's shadow root, with the
     // bundle's CSS inside it (media/main.js showPips).
-    : `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${t.css}${work}
+    : `<!DOCTYPE html><html><head><meta charset="utf-8">${font}<style>${t.css}${work}
 html,body{height:100%;margin:0}body{display:flex;flex-direction:column;background:var(--vscode-sideBar-background);color:var(--vscode-foreground);font:13px var(--vscode-font-family)}
-#pips-host{display:flex;flex:1 1 auto;min-height:0;min-width:0;overflow:hidden;width:100%}</style></head><body class="${t.kind}"><section id="pips-host"></section>
-${script(host(opts))}${script(markdown)}${script(js)}${script(`(${function (text) {
+#pips-host{display:flex;flex:1 1 auto;min-height:0;min-width:0;overflow:hidden;width:100%}</style></head><body class="${t.kind}"${says}><section id="pips-host"></section>
+${script(host(opts))}${script(markdown)}${quiet}${script(js)}${script(`(${function (text) {
       const api = acquireVsCodeApi(), hostEl = document.getElementById("pips-host"), root = hostEl.attachShadow({ mode: "open" });
       window.__pipsRoot = root;
       window.__pipsApp = window.DgcPips.mount({ root, stylesheetText: text, postMessage: (m) => api.postMessage(m), getState: () => undefined, setState: (v) => api.setState(v),
@@ -786,6 +810,7 @@ ${script(host(opts))}${script(markdown)}${script(js)}${script(`(${function (text
   // (opts.forced: Windows High Contrast; opts.touch: a finger, no pointer; opts.video: a folder to record the page into.)
   const context = await browser.newContext({ viewport: { width, height }, reducedMotion: motion, colorScheme: theme, deviceScaleFactor: opts.scale || 1, forcedColors: opts.forced ? "active" : "none", hasTouch: !!opts.touch,
     ...(opts.video ? { recordVideo: { dir: opts.video, size: { width, height } } } : {}) });
+  const asked = await iconService(context, opts.icons);
   const p = await context.newPage();
   // (opts.frames: every frame painted from the first, as the page's own words for what it shows; see FRAMES below.)
   if (opts.frames) await p.addInitScript(FRAMES);
@@ -798,16 +823,55 @@ ${script(host(opts))}${script(markdown)}${script(js)}${script(`(${function (text
   if (opts.connectAfter) await p.waitForTimeout(opts.connectAfter);   // (the backend comes up a little after the page)
   await p.evaluate(() => window.__connect());
   // Playwright's selectors pierce the open shadow root, so the same ones work in both places.
-  await p.waitForSelector(`[data-job="${PIP}"]`);
+  if (!opts.pinned) await p.waitForSelector(`[data-job="${PIP}"]`);
   const root0 = await p.evaluateHandle(() => window.__pipsRoot || document);
-  if (opts.home) return { p, root: root0, errors, close: () => context.close() };
-  await p.click(`[data-job="${PIP}"]`);
+  if (opts.home) return { p, root: root0, errors, asked, close: () => context.close() };
+  if (!opts.pinned) await p.click(`[data-job="${PIP}"]`);
   await p.waitForSelector("#chat-form");
   if (!opts.empty) await p.waitForSelector(".pip-message, .run-post");
   if (opts.hold) await p.waitForSelector("[data-computer-card]");
   if (opts.code && opts.code.wait !== false) await p.waitForSelector("[data-code-card]");
   const root = await p.evaluateHandle(() => window.__pipsRoot || document);
-  return { p, root, errors, close: () => context.close() };
+  return { p, root, errors, asked, close: () => context.close() };
+}
+
+/** The Pips tab as the editor serves it: the document src/pipsView.ts writes (its own Content-Security-Policy and
+    all), its scripts and styles fetched from the page's own origin, in real Chromium. `favicons`: dgc.linkFavicons;
+    `chat` {pip, conversation}: one Pip conversation's own tab, as "Open in editor" opens it. The stub host is put in
+    before the page's scripts (an init script, which the policy does not apply to). */
+let viewBuilt;
+export async function pipsViewModule(root = new URL("../..", import.meta.url).pathname) {
+  viewBuilt ||= (await build({ entryPoints: [`${root}/src/pipsView.ts`], bundle: true, write: false, platform: "node", format: "cjs", external: ["vscode"] })).outputFiles[0].text;
+  return (stub = {}) => { const out = { exports: {} }; new Function("module", "exports", "require", viewBuilt)(out, out.exports, (name) => name === "vscode" ? stub : createRequire(import.meta.url)(name)); return out.exports; };
+}
+export async function openTabPage(browser, { width = 700, height = 800, theme = "dark", favicons = true, chat, srcRoot, ...opts } = {}) {
+  const { js, css, markdown, root: tree } = await client(srcRoot);
+  const { pipsDocument } = (await pipsViewModule(tree))();
+  const O = "https://pips.test", t = THEMES[theme];
+  const html = pipsDocument(`${O}/dist/pips.js`, `${O}/dist/pips.css`, O, `${O}/dist/markdown.js`, "", "", "", `${O}/media/codicon.css`, { favicons, ...(chat ? { chat } : {}) });
+  const context = await browser.newContext({ viewport: { width, height }, reducedMotion: "reduce", colorScheme: theme, deviceScaleFactor: opts.scale || 1 });
+  const asked = await iconService(context, opts.icons);
+  const p = await context.newPage();
+  const errors = [];
+  p.on("pageerror", (error) => errors.push(String(error)));
+  await p.addInitScript(host(opts));
+  await p.addInitScript(`document.addEventListener("DOMContentLoaded", () => document.body.classList.add(${JSON.stringify(t.kind)}));
+    document.addEventListener("securitypolicyviolation", (e) => (window.__blocked ||= []).push(e.effectiveDirective + " " + e.blockedURI));`);
+  await p.route(`${O}/**`, (r) => {
+    const path = new URL(r.request().url()).pathname;
+    if (path === "/view") return r.fulfill({ body: html, contentType: "text/html" });
+    if (path === "/dist/pips.js") return r.fulfill({ body: js, contentType: "text/javascript" });
+    if (path === "/dist/markdown.js") return r.fulfill({ body: markdown, contentType: "text/javascript" });
+    if (path === "/dist/pips.css") return r.fulfill({ body: t.css + css, contentType: "text/css" });
+    if (path.startsWith("/media/")) return r.fulfill({ path: `${tree}${path}` });
+    return r.fulfill({ status: 404, body: "" });
+  });
+  await p.goto(`${O}/view`);
+  await p.evaluate(() => window.__connect());
+  if (!chat) { await p.waitForSelector(`[data-job="${PIP}"]`); await p.click(`[data-job="${PIP}"]`); }
+  await p.waitForSelector("#chat-form");
+  if (!opts.empty) await p.waitForSelector(".pip-message, .run-post");
+  return { p, html, errors, asked, blocked: () => p.evaluate(() => window.__blocked || []), close: () => context.close() };
 }
 
 /** What the chat measures as, read in the page (pass it to page.evaluate). Colours are resolved by painting them

@@ -2,6 +2,8 @@
 // box that holds them, one implementation for Work's box (media/main.js), ChatDGC's (media/chatdgc.js) and a Pip chat's
 // (src/pipsClient.js). The marks are words in a sentence: what the model reads is the pill's wire text, what a copy
 // reads is the token that made it, and what a reload redraws is a short list of display-only positions.
+// It is also where a link is one thing in all three: what a pasted link is, a sent prompt's links, and the fallback for a
+// favicon that cannot load (the "links" section).
 //
 // Two measured facts drive the text half of this file:
 //
@@ -327,7 +329,7 @@
       // paste": paste an internal wiki or Jira URL, think better of it, delete the pill, never
       // send, and the host has already left the machine. The transcript's trade is that Google
       // learns the hosts you SENT; this would have covered hosts you merely considered, which is
-      // not the same trade. Nothing is lost after send: promptFavicon draws the site's own icon on
+      // not the same trade. Nothing is lost after send: linkWords() draws the site's own icon on
       // the prompt bubble, which is where it was drawn before pills existed, and dgc.linkFavicons
       // still governs that. The pill carries the host as text, which is what a reader needs.
       let shown = label;
@@ -881,12 +883,25 @@
           if (now && now.rangeCount && !now.isCollapsed) quietly(() => deleteSelection(el));
           for (const part of list) {
             if (typeof part === "string") { insertText(part); continue; }
-            if (opts.pasteBack ? opts.pasteBack(part) : false) insertPill(null, null, part);
+            // (A link is a pill in any box: it needs nothing the box may not have.)
+            if (part.kind === "link" || (opts.pasteBack ? opts.pasteBack(part) : false)) insertPill(null, null, part);
             else insertText(part.token);
           }
         });
         announce();
         return;
+      }
+      // Exactly one link is a pill (pastedLink, above): the same in every box, Work's included. One that would not
+      // fit the box is words, as any paste too long is.
+      const link = pastedLink(paste.clean);
+      if (link) {
+        const [start, end] = selectedOffsets(el);
+        if (!maxLength || text().length - (end - start) + link.length <= maxLength) {
+          edit(() => { insertPill(start, end, { kind: "link", label: link, wire: link, identity: "" }); });
+          announce();
+          noteCleaned(paste);
+          return;
+        }
       }
       land(paste);
     };
@@ -921,6 +936,131 @@
       note: noteRow?.el || null, noteCleaned, forgetCleaned, checkCleaned, get cleaned() { return cleaned; },
       dispose: () => view.removeEventListener("paste", onPaste),
     };
+  }
+
+  // ---- links -----------------------------------------------------------------------------------
+  // One way of doing a link in all three chats: what a pasted link is, a sent prompt's links, and the one fallback for
+  // a favicon that cannot load. Work's page, ChatDGC's and a Pip's keep no copy of any of it.
+
+  /** The link a paste is, or "". A pasted link becomes a pill, which is what Codex does and what was asked for. Only
+   *  when the clipboard is EXACTLY one URL: pasting a paragraph that happens to contain a link is pasting prose, and
+   *  rewriting the middle of it would be presumptuous. Unlike a skill pill, this one's wire text is the URL ITSELF, so
+   *  the model receives precisely the characters that were pasted. The pill is a way of SHOWING the link, not of
+   *  replacing it. */
+  function pastedLink(pasted) {
+    const single = String(pasted || "").trim();
+    return single && !/\s/.test(single) && /^https?:\/\/\S+$/i.test(single) ? single : "";
+  }
+
+  // A URL the user typed is a link they can open, not grey text to select and copy by hand. The trailing class excludes
+  // sentence punctuation, so "see https://vibedgc.com." does not swallow the full stop and "(https://x.dev)" does not
+  // swallow the bracket.
+  const PROMPT_URL = /https?:\/\/[^\s<>"'`]*[^\s<>"'`.,;:!?)\]}]/gi;
+  // The icons that could not load, by their address: a page that redraws does not ask for them again.
+  const failedIcons = new Set();
+  const markdown = () => globalThis.DgcMarkdown;
+  /** Whether a link may wear its site's favicon here: `dgc.linkFavicons`, as the page's body says it and as the page
+   *  told its Markdown. Off means no request leaves the machine for an icon. */
+  function faviconsOn(doc) {
+    const md = markdown();
+    return doc?.body?.dataset?.linkFavicons !== "off" && (typeof md?.faviconsOn === "function" ? md.faviconsOn() !== false : true);
+  }
+  /** A prompt's words in pieces: a string, or a link {raw, target, mark, icon}. `icon` is its favicon's address (the
+   *  ORIGIN alone is asked about, as Codex does), "" when favicons are off or that icon has already failed. */
+  function linkPieces(body, doc) {
+    const text = String(body || ""), md = markdown(), pieces = [], icons = faviconsOn(doc);
+    let at = 0;
+    for (const match of text.matchAll(PROMPT_URL)) {
+      const target = md?.linkTarget?.(match[0]);
+      if (!target || target.kind !== "external") continue;
+      if (match.index > at) pieces.push(text.slice(at, match.index));
+      const icon = (icons && md.faviconUrl?.(target.target)) || "";
+      pieces.push({ raw: match[0], target: target.target, mark: md.linkSource?.(target.target) || "web", icon: failedIcons.has(icon) ? "" : icon });
+      at = match.index + match[0].length;
+    }
+    if (at < text.length) pieces.push(text.slice(at));
+    return pieces;
+  }
+  /** A sent prompt's words with its links as links. Built out of DOM nodes rather than an escaped HTML string: this is
+   *  verbatim user input, and the one place where getting escaping wrong would be an injection instead of a cosmetic
+   *  bug. textContent is byte-identical to the words. Each link is the same element and class an answer's links are,
+   *  so there is still exactly ONE route out of the page and the extension host re-validates it there. */
+  function linkWords(body, { doc = document, hostClass = "prompt-text" } = {}) {
+    const host = doc.createElement("div");
+    host.className = hostClass;
+    for (const piece of linkPieces(body, doc)) {
+      if (typeof piece === "string") { host.appendChild(doc.createTextNode(piece)); continue; }
+      const link = doc.createElement("button");
+      link.className = "md-link prompt-link";
+      link.type = "button";
+      link.dataset.linkKind = "external";
+      link.dataset.target = piece.target;
+      link.title = piece.target;
+      if (piece.icon) {
+        const img = doc.createElement("img");
+        img.className = "link-favicon";
+        img.alt = "";
+        img.setAttribute("aria-hidden", "true");
+        img.setAttribute("referrerpolicy", "no-referrer");
+        // The mark travels as a fallback rather than rendering now: watchFavicons puts it back if the image cannot
+        // load. Setting data-link-source here would draw BOTH.
+        link.dataset.linkFallback = piece.mark;
+        img.src = piece.icon;
+        link.appendChild(img);
+      } else link.dataset.linkSource = piece.mark;
+      link.appendChild(doc.createTextNode(piece.raw));
+      host.appendChild(link);
+    }
+    return host;
+  }
+  /** The same, as a string, for a page that builds strings (a Pip's transcript): what linkWords() holds. Every word of
+   *  the prompt is escaped here, and nowhere else. */
+  function linkWordsHtml(body, { doc = globalThis.document } = {}) {
+    return linkPieces(body, doc).map((piece) => {
+      if (typeof piece === "string") return esc(piece);
+      const icon = piece.icon ? `<img class="link-favicon" src="${esc(piece.icon)}" alt="" aria-hidden="true" referrerpolicy="no-referrer">` : "";
+      return `<button type="button" class="md-link prompt-link" data-link-kind="external" data-target="${esc(piece.target)}" title="${esc(piece.target)}"`
+        + ` ${icon ? "data-link-fallback" : "data-link-source"}="${esc(piece.mark)}">${icon}${esc(piece.raw)}</button>`;
+    }).join("");
+  }
+  function markInstead(img) {
+    const link = img.closest?.(".md-link");
+    img.remove();
+    if (link) {
+      link.dataset.linkSource = link.dataset.linkFallback || "web";
+      delete link.dataset.linkFallback;
+    }
+  }
+  // ONE fallback for every favicon in a page, wherever it came from -- a link the user typed, a link in an answer, a
+  // link in a skill's documentation. `error` does not bubble, but it does capture, so a single listener at the root
+  // catches every one without the renderer having to attach a closure per image (it cannot: the Markdown path builds
+  // an HTML string). It does not leave a shadow root, so a page drawn in one (a Pip's chat in the side bar) watches
+  // its own root.
+  //
+  // A blank gap where a link's mark should be is worse than no favicon at all: when the icon service is unreachable,
+  // blocked, or has nothing for that host, the bundled glyph comes back.
+  const watching = new WeakMap();
+  /** Watch `root` (a document or a shadow root). Watching twice is watching once. Returns what stops it. */
+  function watchFavicons(root) {
+    if (!root?.addEventListener) return () => {};
+    if (watching.has(root)) return watching.get(root);
+    const failed = (event) => {
+      const img = event.target;
+      if (!img || img.tagName !== "IMG" || !img.classList?.contains("link-favicon")) return;
+      const src = img.getAttribute("src");
+      if (src) { if (failedIcons.size >= 500) failedIcons.clear(); failedIcons.add(src); }
+      markInstead(img);
+    };
+    const stop = () => { root.removeEventListener("error", failed, true); watching.delete(root); };
+    root.addEventListener("error", failed, true);
+    watching.set(root, stop);
+    return stop;
+  }
+  /** Before a page that redraws from strings puts `root` (what it is about to draw) on screen: a link whose icon has
+   *  already failed gets its bundled mark at once, so no redraw asks the icon service for it again. */
+  function settleFavicons(root) {
+    if (!failedIcons.size || !root?.querySelectorAll) return;
+    for (const img of root.querySelectorAll("img.link-favicon")) if (failedIcons.has(img.getAttribute("src"))) markInstead(img);
   }
 
   // ---- the @ list ------------------------------------------------------------------------------
@@ -1082,5 +1222,6 @@
     PIP_TYPES, walk, rangeAt, selectionOf, setRange, selectedOffsets, textFragment, spliceText, clipboardText, pasteFrom,
     ensureFaceStyles, pill, pillLabel, pillToken, parts, displayMarks, validMarks, partsOfMarks, sentNode, placePill, pillAgainstCaret, caretAfterClickedPill,
     deleteSelection, copySelection, capture, restore, restoreCaret, box, esc, rowIconClass, rowMarkup, picker,
+    pastedLink, linkWords, linkWordsHtml, watchFavicons, settleFavicons,
   };
 })();

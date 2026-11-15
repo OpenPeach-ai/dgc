@@ -17,14 +17,8 @@
   // then, and with it off, no image loads from a link's site.
   window.DgcMarkdown?.setFavicons?.(false);
   // An icon that cannot load (the icon service unreachable, or nothing for that host) gives the link its bundled glyph
-  // back, as Work's panel does: `error` does not bubble, but it captures, so one listener catches every reply's links.
-  document.addEventListener("error", (event) => {
-    const img = event.target;
-    if (!img || img.tagName !== "IMG" || !img.classList?.contains("link-favicon")) return;
-    const link = img.closest?.(".md-link");
-    img.remove();
-    if (link) { link.dataset.linkSource = link.dataset.linkFallback || "web"; delete link.dataset.linkFallback; }
-  }, true);
+  // back: the one fallback Work's page and a Pip's chat use (media/mentions.js, "links").
+  window.DgcMentions?.watchFavicons(document);
   // Maths, as ChatGPT draws it: the Markdown leaves each formula as TeX in a placeholder, and KaTeX (loaded the first
   // time one shows) draws it in the conversation. A copied reply is built afresh, so it carries the TeX as written.
   window.DgcMarkdown?.setMath?.(true);
@@ -1605,8 +1599,9 @@
       if (state.editing === message.id) node.append(editor(message));
       else if (message.text) {
         const bubble = el("div", "cd-bubble");
-        const drawn = M.sentNode(String(message.text), message.display_mentions, { pillFor: markLook });
-        if (drawn) bubble.append(drawn); else bubble.textContent = message.text;
+        // A link you sent is a link, with its site's favicon, as in Work and a Pip's chat (media/mentions.js, "links").
+        const drawn = M.sentNode(String(message.text), message.display_mentions, { pillFor: markLook, words: (text) => M.linkWords(text) });
+        if (drawn) bubble.append(drawn); else bubble.append(...M.linkWords(String(message.text)).childNodes);
         node.append(bubble);
       }
       if (message.local === true) {

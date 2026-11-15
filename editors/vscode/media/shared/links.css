@@ -1,0 +1,35 @@
+/* A link's mark, the same wherever a link is drawn: an answer's and a sent prompt's, in Work, ChatDGC and a Pip's chat
+   (media/mentions.js draws a prompt's links, src/markdown.ts an answer's). Loaded by Work's page and ChatDGC's through
+   media/main.css, and bundled into the Pips page, where it also reaches the side bar's shadow root. */
+
+/* Where a link goes, shown beside it. Codicons are bundled with the panel, so naming the source
+   costs no network request -- a favicon fetch would leak every URL a model mentions to whoever
+   hosts it, and the panel's CSP forbids it anyway. */
+.md-link[data-link-source]::before {
+  font-family: codicon; font-size: var(--t-sm); font-weight: normal; font-style: normal;
+  line-height: 1; display: inline-block; vertical-align: -1px;
+  margin-right: 4px; color: var(--muted); text-decoration: none;   /* grey: a site's stand-in, never its brand in our purple */
+}
+.md-link[data-link-source="github"]::before      { content: "\eba1"; }  /* github-inverted */
+.md-link[data-link-source="gitlab"]::before      { content: "\ea62"; }  /* repo */
+.md-link[data-link-source="dgc"]::before         { content: "\ea86"; color: var(--link); }  /* zap, the panel’s own mark */
+.md-link[data-link-source="marketplace"]::before { content: "\eae6"; }  /* extensions */
+.md-link[data-link-source="openvsx"]::before     { content: "\eae6"; }
+.md-link[data-link-source="npm"]::before         { content: "\eb29"; }  /* package */
+.md-link[data-link-source="stackoverflow"]::before { content: "\eb01"; }  /* no brand glyph; globe */
+.md-link[data-link-source="web"]::before         { content: "\eb01"; }  /* globe: the catch-all */
+
+/* Every external link wears the site's own favicon -- one the user typed and one an answer wrote
+   alike, which is how Codex reads. When the image cannot load, the page puts the bundled mark back
+   (see data-link-fallback); the two are mutually exclusive by construction, because a link that
+   carries a favicon has no data-link-source for the rule above to match.
+   Sized to the text rather than to a fixed pixel count, so the mark keeps its proportion when the
+   panel's font scales, and baseline-aligned so a run of links does not look like it is bouncing. */
+.md-link .link-favicon {
+  width: 1.05em; height: 1.05em; margin-right: 5px; vertical-align: -0.17em;
+  border-radius: 3px; object-fit: contain; flex: none;
+}
+
+/* A link you sent shows its whole address, and an address has no spaces to break at: it breaks wherever the line ends,
+   so its mark stays on the line with the start of it and a narrow bubble (a 300 px side bar) fills each line. */
+.md-link.prompt-link { word-break: break-all; }

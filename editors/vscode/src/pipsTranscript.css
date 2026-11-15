@@ -14,6 +14,14 @@
 .message-body pre.code{position:relative;border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:8px 0;background:var(--vscode-textCodeBlock-background,var(--vscode-editor-background,#151516));overflow:auto;max-width:100%;white-space:pre;font-size:12px;line-height:1.6}
 .message-body pre.code>code{font-size:inherit;padding:0;border-radius:0;background:transparent;display:block}.message-body .code-language{margin-bottom:12px;font-size:11px;padding-right:24px}
 .message-body .md-link{font:inherit;color:var(--vscode-textLink-foreground,var(--link));background:transparent;min-height:0;text-decoration:none;padding:0}.message-body .md-link:hover,.message-body .md-link:focus-visible{text-decoration:underline;text-underline-offset:3px}
+/* A link in a message you sent (15 Nov): the same button a reply's link is, with its site's favicon or its bundled mark
+   (media/shared/links.css), in the quiet colour a sent mark has (media/mentions.css, .prompt-link). It sits among the
+   words it was typed with and breaks where a long address must, in a bubble 300 px wide too; a reply's link does the
+   same. */
+.prompt-text .md-link{display:inline;min-height:0;height:auto;margin:0;padding:0;border:0;border-radius:3px;background:transparent;font:inherit;cursor:pointer;text-align:inherit;overflow-wrap:anywhere;text-decoration:none}
+.prompt-text .md-link:hover,.prompt-text .md-link:focus-visible{background:transparent;text-decoration:underline;text-underline-offset:3px}
+.prompt-text .md-link:focus-visible{outline:1px solid var(--vscode-focusBorder,var(--accent));outline-offset:2px}
+.message-body .md-link{display:inline;text-align:inherit;overflow-wrap:anywhere}
 .message-body blockquote{position:relative;margin:12px 0;padding:12px 16px;background:var(--vscode-editor-background,#202021);border:1px solid var(--line);border-left:3px solid var(--vscode-input-border,var(--line));border-radius:8px;color:var(--muted)}
 .message-body blockquote>.copy+*{margin-top:0;padding-right:36px}.message-body blockquote>:last-child{margin-bottom:0}.message-body hr{border:0;border-top:1px solid var(--line);margin:16px 0}
 .message-body .md-table-wrap{position:relative;max-width:100%;overflow-x:auto;margin:8px 0}.message-body .md-table{display:table;width:100%;border-collapse:collapse;font-size:12px;line-height:1.45}.message-body .md-table :is(th,td){padding:4px 8px;border:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}.message-body .md-table th{background:var(--vscode-input-background,#29292b);font-weight:700}

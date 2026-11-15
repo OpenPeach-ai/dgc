@@ -115,6 +115,9 @@ body.cd-blank .cd-fine { display: none; }
 .cd-bubble { max-width: min(85%, 640px); padding: var(--sp-2) var(--sp-4); border-radius: var(--r-2xl);
   background: var(--bubble); color: var(--text);
   font: var(--w-reg) var(--t-chat)/1.6 var(--sans); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* A link you sent: a link with its site's favicon (media/mentions.js, "links"), in the quiet colour a sent mark has
+   in this bubble and in Work's, never the accent. */
+.cd-bubble .prompt-link { color: var(--mark-sent); }
 .cd-assistant .cd-body { font-size: calc(var(--t-chat) + 1px); }
 /* What it's doing while it works, as Work's status row says it: DGC's slashes lighting in turn, then the words (the
    slashes' rules are main.css's .thinking ones, which name .cd-wave too). The words hold still: no pulse. */

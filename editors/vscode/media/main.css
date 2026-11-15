@@ -25,6 +25,7 @@
 @import url("./shared/whatsnew.css");
 @import url("./shared/pipswelcome.css");
 @import url("./shared/folderpick.css");
+@import url("./shared/links.css");
 @import url("./pips/wordmark.css");
 /* DGC panel — Codex's quiet editor hierarchy with a restrained DGC accent. */
 * { box-sizing: border-box; }
@@ -690,33 +691,8 @@ body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { ma
    about to be opened, which is the moment it is worth something. */
 .md-link { display: inline; border: 0; padding: 0; background: transparent; color: var(--link); font: inherit; cursor: pointer; text-align: inherit; overflow-wrap: anywhere; text-decoration: none; text-underline-offset: 3px; }
 .md-link:hover, .md-link:focus-visible { text-decoration: underline; text-decoration-color: currentColor; }
-/* Where a link goes, shown beside it. Codicons are bundled with the panel, so naming the source
-   costs no network request -- a favicon fetch would leak every URL a model mentions to whoever
-   hosts it, and the panel's CSP forbids it anyway. */
-.md-link[data-link-source]::before {
-  font-family: codicon; font-size: var(--t-sm); font-weight: normal; font-style: normal;
-  line-height: 1; display: inline-block; vertical-align: -1px;
-  margin-right: 4px; color: var(--link); text-decoration: none;
-}
-.md-link[data-link-source="github"]::before      { content: "\eba1"; }  /* github-inverted */
-.md-link[data-link-source="gitlab"]::before      { content: "\ea62"; }  /* repo */
-.md-link[data-link-source="dgc"]::before         { content: "\ea86"; color: var(--link); }  /* zap, the panel’s own mark */
-.md-link[data-link-source="marketplace"]::before { content: "\eae6"; }  /* extensions */
-.md-link[data-link-source="openvsx"]::before     { content: "\eae6"; }
-.md-link[data-link-source="npm"]::before         { content: "\eb29"; }  /* package */
-.md-link[data-link-source="stackoverflow"]::before { content: "\eb01"; }  /* no brand glyph; globe */
-.md-link[data-link-source="web"]::before         { content: "\eb01"; }  /* globe: the catch-all */
-
-/* Every external link wears the site's own favicon -- one the user typed and one an answer wrote
-   alike, which is how Codex reads. When the image cannot load, main.js puts the bundled mark back
-   (see data-link-fallback); the two are mutually exclusive by construction, because a link that
-   carries a favicon has no data-link-source for the rule above to match.
-   Sized to the text rather than to a fixed pixel count, so the mark keeps its proportion when the
-   panel's font scales, and baseline-aligned so a run of links does not look like it is bouncing. */
-.md-link .link-favicon {
-  width: 1.05em; height: 1.05em; margin-right: 5px; vertical-align: -0.17em;
-  border-radius: 3px; object-fit: contain; flex: none;
-}
+/* Where a link goes, shown beside it (its site's favicon, or the bundled mark): media/shared/links.css, the same in
+   ChatDGC and a Pip's chat. */
 
 /* A file named in an answer, or a chip for one the agent made, wears its kind.
    The glyphs are Seti (jesseweed/seti-ui, MIT) -- the same font VS Code ships as its default file

@@ -52,6 +52,7 @@ import '../media/numbered-list.js';
 import '../media/pasteclean.js';  // window.DgcPasteClean: what a paste becomes, the same in all three chats
 import '../media/mentions.js';   // window.DgcMentions: @ marks in the box and the bubble, the same in all three chats
 import '../media/mentions.css';
+import '../media/shared/links.css';   // a link's favicon and its bundled mark, the same in Work and ChatDGC
 import {messageMarkup,replyParts,executionCardMarkup,transcriptIcon} from './pipsTranscript.js';
 import {patchChildren} from './pipsDomPatch.js';
 import {runPostsPage,mergePosts,postMarkup,postShort,postStatus,timeline,shortReply,routineTitle as postRoutineTitle,runFixesPage,askable,FIX_ACTIVE,livePostMarkup} from './pipRunPosts.js';
@@ -122,6 +123,11 @@ export function mountPips(options) {
   if(typeof DgcIconActions!=='undefined')disposers.push(DgcIconActions.watch(root));   // a card's icons turn into the full button when pointed at or reached by Tab
   if(typeof DgcMenu!=='undefined'&&DgcMenu.slide)DgcMenu.slide(root);   // a long model name slides while its row is pointed at (9 Nov)
   const remoteHost=options.host==='remote';
+  // "Open in editor" (15 Nov): this page is one Pip conversation's own editor tab, as the host opened it. It shows that
+  // chat and no list behind it, and tells the host what it shows, for the tab's title. `conversation` '' is the Pip's first.
+  const chatTab=!embedded&&!remoteHost&&options.chatTab&&/^pip_[A-Za-z0-9]{1,64}$/.test(String(options.chatTab.pip||''))
+   ?{pip:options.chatTab.pip,conversation:/^conv_[0-9a-f]{32}$/.test(String(options.chatTab.conversation||''))?options.chatTab.conversation:''}:null;
+  if(chatTab)options.navigation={pip:chatTab.pip,section:'chat',conversation:chatTab.conversation};
   let disposed=false,motionPaused=false;
   // A notice says what just happened, then goes: longer ones stay long enough to read. Errors stay, and so does a
   // notice someone may need to act on later (noticeStays: the folder a deletion left in place), until another replaces it.
@@ -151,6 +157,13 @@ export function mountPips(options) {
     addEventListener(type,fn){const target=type==='visibilitychange'?nativeDocument:root;target.addEventListener(type,fn);disposers.push(()=>target.removeEventListener(type,fn));}
   };
 const vscode = {postMessage:options.postMessage};
+// A link's favicon follows dgc.linkFavicons: in a tab this page's body says it (src/pipsView.ts writes it beside the
+// policy that lets one load); in the side bar Work's page has already told the Markdown. An icon that cannot load gives
+// the link its bundled mark back, by the one fallback all three chats use (media/mentions.js), in the root this page
+// is drawn in: an image's `error` does not leave a shadow root.
+if(!embedded)globalThis.DgcMarkdown?.setFavicons?.(nativeDocument.body.dataset.linkFavicons!=='off');
+disposers.push(globalThis.DgcMentions?.watchFavicons(root)||(()=>{}));
+if(chatTab)shell.classList.add('pip-chat-tab');
 let dockPins=new Set(),dockKnown=false;   // what is pinned to the dock, once the host has said (a host with no dock never does)
 // A reply's pictures fold away (media/pictureFold.js, through pipsTranscript.js): drawn in this page's root (a shadow
 // root in the side bar), and a choice goes to the host, which keeps it.
@@ -392,7 +405,7 @@ const heldRejects=new Map(),REJECT_HOLD_MS=6000;
 // Show all, opened on a run's result or a routine's reply (by run or message id): for this view only.
 const shownInFull=new Set();
 S.sidebarPinned=savedView?.sidebar_pinned===true;
-function rememberView(){savedView={workspace_id:S.workspace?.id,scope_tab:S.workspace?scopeTab():undefined,...(S.apiVersion>=ONE_API?{pips_filter:one.filter}:{}),selected:S.selected,tab:S.tab,overview:S.overview,sidebar_pinned:S.sidebarPinned,conversations:Object.fromEntries([...convShown].slice(-20)),conversation_drafts:Object.fromEntries([...convDrafts].slice(-40)),conversations_hidden:convState.collapsed,drafts:Object.fromEntries([...chatDrafts].slice(-20)),draft_marks:Object.fromEntries([...chatMarks].slice(-20)),chat_queues:Object.fromEntries([...chatQueues].filter(([,list])=>list.length).slice(-20)),asked:[...askedRuns].slice(-100),attention_folded:[...attentionFolded].slice(-500),folders_closed:[...foldersClosed].slice(-100),goals_dismissed:[...goalsDismissed].slice(-100)};options.setState?.(savedView);}
+function rememberView(){savedView={workspace_id:S.workspace?.id,scope_tab:S.workspace?scopeTab():undefined,...(S.apiVersion>=ONE_API?{pips_filter:one.filter}:{}),selected:S.selected,tab:S.tab,overview:S.overview,sidebar_pinned:S.sidebarPinned,conversations:Object.fromEntries([...convShown].slice(-20)),conversation_drafts:Object.fromEntries([...convDrafts].slice(-40)),conversations_hidden:convState.collapsed,drafts:Object.fromEntries([...chatDrafts].slice(-20)),draft_marks:Object.fromEntries([...chatMarks].slice(-20)),chat_queues:Object.fromEntries([...chatQueues].filter(([,list])=>list.length).slice(-20)),asked:[...askedRuns].slice(-100),attention_folded:[...attentionFolded].slice(-500),folders_closed:[...foldersClosed].slice(-100),goals_dismissed:[...goalsDismissed].slice(-100)};options.setState?.(savedView);shareDraft();}
 const characterStyles=document.createElement('style');characterStyles.id='pips-plush-styles';characterStyles.textContent=window.PipConcepts.plush.styles;document.head.append(characterStyles);
 let outcomeSessions=[],outcomeSessionsCursor='',outcomeSessionsMore=false,outcomeSessionsLoaded=false,outcomeSessionsLoading=false,outcomeSessionsError='',outcomeHistory=[],outcomeCursor=null,outcomeLoaded=false,outcomeLoading=false,outcomeError='',outcomeInspection=null,outcomeInspecting=false,outcomeSessionSeq=0,outcomeSeq=0,outcomeInspectSeq=0,outcomeReviewSeq=0,outcomeRetry=null;
 let notifications=null,notificationItems=[],notificationLoading=false,notificationError='',notificationSeq=0,notificationMark='';
@@ -3692,7 +3705,7 @@ function chatTime(at){
  return days===0?`Today ${time}`:days===1?`Yesterday ${time}`:`${when.toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short'})}, ${time}`;
 }
 function characterType(id){const i=SIMPLE_CHARACTERS.indexOf(id);return S.types.find(t=>t.id===id)||{id,name:id?id[0].toUpperCase()+id.slice(1):'Pip',character_index:i<0?4:i};}
-const simpleIcon=name=>`<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${{back:'<path d="M10 3 5 8l5 5"/>',computer:'<rect x="2" y="2.5" width="12" height="8.5" rx="1.5"/><path d="M6 14h4M8 11v3"/>',more:'<circle cx="3.5" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="12.5" cy="8" r=".6"/>',share:'<path d="M8 2v8M5 5l3-3 3 3"/><path d="M3 9v4h10V9"/>',gear:'<path d="M2 4h6.5M12 4h2M2 8h2M7.5 8H14M2 12h8.5M14 12h0"/><circle cx="10" cy="4" r="1.6"/><circle cx="5.5" cy="8" r="1.6"/><circle cx="12" cy="12" r="1.6"/>',plus:'<path d="M8 3v10M3 8h10"/>',play:'<path d="M5.5 3.5v9l7-4.5z"/>'}[name]}</svg>`;
+const simpleIcon=name=>`<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${{back:'<path d="M10 3 5 8l5 5"/>',computer:'<rect x="2" y="2.5" width="12" height="8.5" rx="1.5"/><path d="M6 14h4M8 11v3"/>',more:'<circle cx="3.5" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="12.5" cy="8" r=".6"/>',openEditor:'<path d="M9.5 1.5H3.5v13h9V4.5Z"/><path d="M9.5 1.5v3h3"/><path d="M5.5 9.5h5M8.5 7.5l2 2-2 2"/>',share:'<path d="M8 2v8M5 5l3-3 3 3"/><path d="M3 9v4h10V9"/>',gear:'<path d="M2 4h6.5M12 4h2M2 8h2M7.5 8H14M2 12h8.5M14 12h0"/><circle cx="10" cy="4" r="1.6"/><circle cx="5.5" cy="8" r="1.6"/><circle cx="12" cy="12" r="1.6"/>',plus:'<path d="M8 3v10M3 8h10"/>',play:'<path d="M5.5 3.5v9l7-4.5z"/>'}[name]}</svg>`;
 function meetCoreMarkup(){
  return `<section class="meet-core" aria-label="Meet Core">${avatar('idle',characterType('core'),'meet-core')}<h2>Meet Core</h2><p>Core is your Primary Pip. It is your go-to for everyday tasks, looks after your other Pips, and checks in when it needs your help.</p><p class="muted">Core is also the character of DGC’s main chat: your Primary Pip uses it. It works across your projects, without their files.</p>${button('create-core',S.busy?'Creating…':'Create Core',S.busy||!usable(),'primary pill')}</section>`;
 }
@@ -4328,7 +4341,12 @@ function homeRow(p,place=''){const type=pipType(p,S.types)||characterType(p.pip_
   if(!readable)return button;
   const label=`Mark ${p.name}'s ${unread.count} new message${unread.count===1?'':'s'} as read`,dot=pose.state==='working'||pose.state==='waiting_approval'&&!waiting;
   return `<div class="pip-row-item${dot?' pip-row-dot':''}">${button}<span class="pip-row-marks pip-row-marks-live${count?' pip-row-both':''}"><button type="button" class="pip-row-read" id="pip-read-${esc(p.id)}" data-pip-read="${esc(p.id)}" aria-label="${esc(label)}" title="Mark as read, without opening its chat"><span class="pip-new-dot" aria-hidden="true"></span><span class="pip-read-word">Read</span></button>${count}</span></div>`;}
-function homeRowInner(p,place=''){const pin=jobPin(p),row=homeRow(p,place);return pin?`<div class="pip-row-slot${dockPins.has(`pip:${p.id}`)?' is-pinned':''}">${row}${pin}</div>`:row;}
+// (Open in editor, beside its pin: shown when the row is pointed at or reached by Tab, as the pin is.)
+function jobOpen(p){
+  if(!canOpenChatTab()||p.status==='archived')return '';
+  return `<button type="button" class="dgc-pin job-open" data-open-pip-chat="${esc(p.id)}" title="Open in editor" aria-label="Open in editor: ${esc(p.name)}">${simpleIcon('openEditor')}</button>`;
+}
+function homeRowInner(p,place=''){const pin=jobPin(p),tab=jobOpen(p),row=homeRow(p,place);return pin||tab?`<div class="pip-row-slot${dockPins.has(`pip:${p.id}`)?' is-pinned':''}${tab?' has-open':''}">${row}${tab}${pin}</div>`:row;}
 // Its on/off switch is beside the row, at the right end (never inside it: the row is a button). Off, the row reads black and white.
 function homeRowSlot(p,place=''){const toggle=pipSwitchMarkup(p);return toggle?`<div class="pip-row-line${pipOff(p)?' is-off':''}" data-pip-line="${esc(p.id)}">${homeRowInner(p,place)}${toggle}</div>`:homeRowInner(p,place);}
 function simpleHomeList(all,live){
@@ -4941,6 +4959,71 @@ function pipSetupNotes(){
  const unknown=S.pip&&!pipType(S.pip,S.types)?'<p class="notice error simple-note">This editor doesn’t know this kind of Pip. You can still read its reports; update the DGC extension to use it.</p>':'';
  return unknown;
 }
+// ---- A Pip's chat in an editor tab (15 Nov: "Open in editor", as Work's and ChatDGC's sessions have it) ----
+// The host opens one tab per Pip conversation and brings it forward when asked again (src/pipsView.ts). It is the same
+// chat, never a copy: every page of it talks to DGC over the same channel, what is typed in one is told to the others
+// as it changes (pipsChatDraft), and one that sent or was answered tells the others to read again (pipsChatChanged).
+function canOpenChatTab(){return !remoteHost&&!chatTab;}
+/** The conversation this page shows, as the host is told it: none for a DGC whose Pips have one chat. */
+function shownChat(){if(!convsOn())return undefined;const c=shownConversation();return {id:S.conv,...(c?{title:conversationTitle(c)}:{})};}
+function openChatTab(p,conv){
+ if(!p||remoteHost||typeof p.id!=='string')return;
+ // What is in the box goes with it: the tab opens on the draft as it stands.
+ if(p.id===S.selected&&draft.chatText)shareDraft(true);
+ vscode.postMessage({type:'pipsOpenChat',pip:{id:p.id,name:p.name,pip_type:p.pip_type},...(conv?{conversation:conv}:{})});
+}
+// What this tab shows, for its title: "{Pip name} · {conversation}". Said when it changes (a rename, or its
+// conversation gone and the first shown instead).
+let shownSaid='';
+function sayShown(){
+ if(!chatTab||!S.pip||S.pip.id!==chatTab.pip||S.selected!==chatTab.pip)return;
+ if(convsOn()&&!convList())return;
+ const c=shownConversation(),said={type:'pipsChatShown',pip:{id:S.pip.id,name:S.pip.name},conversation:{id:S.conv,title:c?conversationTitle(c):'Chat'}},key=JSON.stringify(said);
+ if(key===shownSaid)return;
+ shownSaid=key;vscode.postMessage(said);
+}
+// The draft of each conversation as this page last told it or was told it: a draft is told when it CHANGES here, never
+// because a chat was opened (opening a chat in one page must not empty the box of another).
+const draftSeen=new Map();
+const draftPart=p=>record(p)&&['plugin','pip','file','project','link'].includes(p.kind)&&typeof p.label==='string'&&typeof p.wire==='string'&&typeof p.identity==='string'&&p.label.length<=4096&&p.wire.length<=4096&&p.identity.length<=128&&(p.pipType===undefined||typeof p.pipType==='string'&&p.pipType.length<=40);
+function draftLoaded(){if(S.selected)draftSeen.set(convKey(S.selected,S.conv),draft.chatText||'');}
+function shareDraft(always=false){
+ if(remoteHost||!S.selected||S.pip&&S.pip.id!==S.selected)return;
+ const pip=S.selected,key=convKey(pip,S.conv),text=draft.chatText||'';
+ if(!draftSeen.has(key)){draftSeen.set(key,text);if(!always)return;}
+ else if(draftSeen.get(key)===text&&!always)return;
+ draftSeen.set(key,text);
+ const kept=chatMarks.get(pip),parts=kept&&kept.text===text&&Array.isArray(kept.parts)&&kept.parts.length<=256&&kept.parts.every(part=>typeof part==='string'||draftPart(part))?kept.parts:null;
+ vscode.postMessage({type:'pipsChatDraft',pip_id:pip,conversation_id:S.conv,text,...(parts?{parts}:{})});
+}
+function takeDraft(message){
+ if(remoteHost||typeof message.pip_id!=='string'||typeof message.text!=='string'||message.text.length>CHAT_MAX_CHARS)return;
+ const pip=message.pip_id,conv=typeof message.conversation_id==='string'&&/^conv_[0-9a-f]{32}$/.test(message.conversation_id)?message.conversation_id:'',text=message.text,key=convKey(pip,conv);
+ const parts=Array.isArray(message.parts)&&message.parts.length<=256&&message.parts.every(part=>typeof part==='string'||draftPart(part))&&message.parts.map(part=>typeof part==='string'?part:part.wire).join('')===text?message.parts:null;
+ draftSeen.set(key,text);
+ if(conv!==(convShown.get(pip)||'')){
+  // Another conversation's: it waits there for when that one is shown.
+  const kept=convStash.get(key);
+  if(kept){kept.draft=text;kept.kept[0]=text||undefined;kept.kept[1]=parts?{text,parts}:undefined;}
+  if(text)convDrafts.set(key,text);else convDrafts.delete(key);
+  return;
+ }
+ if(text)chatDrafts.set(pip,text);else chatDrafts.delete(pip);
+ if(parts)chatMarks.set(pip,{text,parts});else chatMarks.delete(pip);
+ if(pip!==S.selected||draft.chatText===text&&!parts)return;
+ chatEdit(()=>{draft.chatText=text;rememberView();render();});
+}
+/** The conversation a Pip's chat opens on, before it is opened: what the page keeps for its chat follows it. */
+function convsAvailable(){return S.apiVersion>=79&&!remoteHost;}
+function aimConversation(pip,conv){
+ const was=convShown.get(pip)||'';if(was===conv)return;
+ const held=chatDrafts.get(pip);
+ if(held)convDrafts.set(convKey(pip,was),held);
+ if(conv)convShown.set(pip,conv);else convShown.delete(pip);
+ const now=convDrafts.get(convKey(pip,conv));convDrafts.delete(convKey(pip,conv));
+ if(now)chatDrafts.set(pip,now);else chatDrafts.delete(pip);
+ chatMarks.delete(pip);
+}
 // ---- Several conversations per Pip (Pips API 79; src/pipConversations.js) ----
 // A Pip's chat shows one of its conversations. `convShown` says which for each Pip (none: its first, and then a request
 // names no conversation, exactly as before API 79). Everything this page keeps per Pip for its chat (the draft and its
@@ -4966,7 +5049,7 @@ async function loadConversations(){
   if(token!==scope()||sequence!==convState.seq||S.selected!==pip)return;
   convState.pip=pip;convState.list=list;
   // The one shown was archived or is gone (another window did it): the chat goes back to its first.
-  if(S.conv&&!list.some(c=>c.id===S.conv&&!c.archived)){showConversation('');return;}
+  if(S.conv&&!list.some(c=>c.id===S.conv&&!c.archived)){showConversation('',{own:true});return;}
   render();maybeMarkRead();
  }catch{if(token===scope()&&sequence===convState.seq&&convState.pip!==pip){convState.pip=pip;convState.list=null;render();}}
 }
@@ -4991,14 +5074,17 @@ function restoreConversation(){
  convScroll=kept?.scroll&&!kept.scroll.end?{pip,conv:S.conv,top:kept.scroll.top}:null;
 }
 /** Show one of its conversations ('' or its first one's id: the first). */
-function showConversation(id,{focus=false}={}){
+function showConversation(id,{focus=false,own=false}={}){
  const pip=S.selected,list=convList(),ui=convUi();if(!pip)return;
  const next=!id||list?.find(c=>c.id===id)?.first?'':id;
  Object.assign(ui,{menu:false,more:'',renaming:'',newStep:false,error:''});
+ // A conversation's own editor tab stays on it: another one, chosen here, opens in (or comes forward as) its own tab.
+ // (`own`: this tab's conversation is gone, so it shows the first from now on and says so to the host.)
+ if(chatTab&&!own&&next!==S.conv){const c=list?.find(x=>next?x.id===next:x.first);openChatTab(S.pip,{id:next,...(c?{title:conversationTitle(c)}:{})});render();return;}
  if(next!==S.conv){
   stashConversation();
   if(next)convShown.set(pip,next);else convShown.delete(pip);
-  restoreConversation();rememberView();
+  restoreConversation();draftLoaded();rememberView();
  }
  render();void loadMessages();
  if(focus)$('chatText')?.focus({preventScroll:true});
@@ -5294,7 +5380,12 @@ function simplePipHeader(){
   const sub=['instructions','character'].includes(S.pipPage),share=S.apiVersion>=41&&['scout','lens','rook','lock','quill'].includes(p.pip_type)&&!archived();
   return `<header class="pip-topbar"><button type="button" id="${sub?'pip-page-back':'simple-to-chat'}" class="topbar-icon" aria-label="${sub?'Back':'Back to the chat'}" title="${sub?'Back':'Back to the chat'}">${simpleIcon('back')}</button><div class="pip-pill${pipOff(p)?' is-off':''}">${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span>${esc(p.name)}</span><small>${sub?(S.pipPage==='character'?'Face':'Instructions'):'Settings'}${pipOff(p)?' · Off':''}</small></div><div class="topbar-actions">${pipSwitchMarkup(p)}${share?`<button type="button" class="topbar-icon" data-pip-share aria-label="Share as template" title="Share as template"${S.busy||!usable()?' disabled':''}>${simpleIcon('share')}</button>`:''}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${pipPageMenu()}</div></details></div></header>`;
  }
- const actions=`<div class="topbar-actions">${pipSwitchMarkup(p)}${project||folderPip&&activeOwnRun()?runNowMarkup():''}${computer}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${folderPip?runNowMenuRow():''}${sections.map(([key,label])=>`<button type="button" data-tab="${key}">${label}</button>`).join('')}</div></details></div>`;
+ // Open in editor (15 Nov), as Work's and ChatDGC's sessions have it: this chat, this conversation, in an editor tab of
+ // its own. A row of ⋯ at every width (its first, after Run now where a Pip has one); an icon too from 700 px, where
+ // the header has room for one more (under that its measured widths leave none: src/pips.css). Not in the tab itself.
+ const opens=onChat&&canOpenChatTab();
+ const openIcon=opens?`<button type="button" id="pip-open-editor" class="topbar-icon open-editor-icon" data-open-chat-tab aria-label="Open in editor" title="Open in editor">${simpleIcon('openEditor')}</button>`:'';
+ const actions=`<div class="topbar-actions">${pipSwitchMarkup(p)}${project||folderPip&&activeOwnRun()?runNowMarkup():''}${computer}${openIcon}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${folderPip?runNowMenuRow():''}${opens?'<button type="button" data-open-chat-tab>Open in editor</button><hr>':''}${sections.map(([key,label])=>`<button type="button" data-tab="${key}">${label}</button>`).join('')}</div></details></div>`;
  // Its chat: back, its face and name at the left, fixed; the thread selector in the middle, always centred; the switch,
  // its computer and the menu at the right (live round 1, 14 Nov). What a Project Pip last did, or its folder, follows
  // its name where there is room.
@@ -5302,7 +5393,8 @@ function simplePipHeader(){
   // (Pointed at, its face says who it is: a Project Pip's character and role as before, any other Pip's name. Its
   // name is always drawn, his call of 15 Nov; where it ends in "…" the name itself says all of it when pointed at.)
   const thread=convThreadMarkup(p),pillTitle=project&&pipType(p,S.types)?`${type.name} · ${type.role}`:p.name;
-  return `<header class="pip-topbar pip-topbar-chat${thread?(convSeveral()?' has-threads':' one-thread'):''}"><button type="button" id="simple-back" class="topbar-icon" aria-label="Your Pips" title="Your Pips">${simpleIcon('back')}</button><div class="pip-pill${pipOff(p)?' is-off':''}" title="${esc(pillTitle)}">${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span class="pip-name" title="${esc(p.name)}">${esc(p.name)}</span>${project?`<small class="pip-status">${lastRunLink(p,pose.label)}</small>`:folderPip?folderWhereMarkup(p):''}</div>${thread}${actions}${convMenuMarkup()}${computerMenuMarkup()}</header>`;
+  // (A conversation's own editor tab has no list behind it: no Back.)
+  return `<header class="pip-topbar pip-topbar-chat${thread?(convSeveral()?' has-threads':' one-thread'):''}">${chatTab?'':`<button type="button" id="simple-back" class="topbar-icon" aria-label="Your Pips" title="Your Pips">${simpleIcon('back')}</button>`}<div class="pip-pill${pipOff(p)?' is-off':''}" title="${esc(pillTitle)}">${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span class="pip-name" title="${esc(p.name)}">${esc(p.name)}</span>${project?`<small class="pip-status">${lastRunLink(p,pose.label)}</small>`:folderPip?folderWhereMarkup(p):''}</div>${thread}${actions}${convMenuMarkup()}${computerMenuMarkup()}</header>`;
  }
  return `<header class="pip-topbar"><button type="button" id="simple-to-chat" class="topbar-icon" aria-label="Back to the chat" title="Back to the chat">${simpleIcon('back')}</button><div class="pip-pill${pipOff(p)?' is-off':''}"${project&&pipType(p,S.types)?` title="${esc(`${type.name} · ${type.role}`)}"`:''}>${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span>${esc(p.name)}</span><small>${esc(project||folderPip?(every.find(([key])=>key===S.tab)||[])[1]||'':sections.length&&{runs:historyName('Results'),job:'Settings',memory:'Memory',revisions:'Versions',notifications:'Notifications',schedule:'Schedule',handoffs:'Handoffs',context:'Context'}[S.tab]||'')}</small></div>${actions}${computerMenuMarkup()}</header>`;
 }
@@ -5358,16 +5450,18 @@ function render() {
   shell.classList.toggle('simple-pips',!intro&&simpleMode());
   const header=(embedded?`<header class="embedded-header${!intro&&scopeTabs()?' scoped':''}"><span class="workspace-name" title="${esc(S.workspace?.name||'Current workspace')}">${esc(S.workspace?.name||'Pips')}</span>${runnerMarkup()}</header>`:`<header><div class="heading"><div>${options.close?button('return-main','Back to DGC',false,'back-control'):''}<h1><span class="pips-wordmark">Pips</span></h1><p class="muted">${esc(S.workspace?.kind==='personal'?'Personal':S.workspace?.name||'Current workspace')}</p></div></div>${runnerMarkup()}</header>`)+(intro?'':scopeTabsMarkup());
   const markup=!intro&&simpleMode()?simpleMarkup():`${header}${S.error&&!chatView?`<div style="padding:0 20px">${errorMarkup(S.error)}</div>`:''}${S.notice&&!chatView?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${chatView?'':undoRejectMarkup()}${!intro&&S.overview&&!S.create&&!(S.projectEmpty&&scopeTabs())?setupsMarkup():''}${intro?`<div class="content">${intro}</div>`:S.projectEmpty&&scopeTabs()?projectEmptyMarkup():S.switching?`<div class="pips-tab-loading"${scopePanelAttrs()}></div>`:`<div class="layout ${S.overview&&!S.create?'overview':'selected'}"${scopePanelAttrs()}><aside aria-label="Workspace Pips"><div class="aside-heading">${!remoteHost?`<button type="button" id="pin-pips-sidebar" class="sidebar-toggle" aria-label="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" title="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" aria-pressed="${S.sidebarPinned}"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M6 2v12"/></svg></button>`:''}<h2>Your Pips</h2><button type="button" id="new-pip" aria-label="New Pip" title="New Pip"${S.busy||!usable()||!S.types.length?' disabled':''}><span aria-hidden="true" class="new-pip-mark">+</span><span class="new-pip-text">New</span></button></div>${S.overview&&!S.create?`<div class="pips-overview-intro${S.jobs.length?'':' welcome'}"><span class="pips-eyebrow">${S.workspace?.kind==='personal'?'A little help, day to day':'Your project, looked after'}</span><h2>A little team. A clear purpose.</h2><p>Give each Pip a job. Stay in the conversation, and review what comes back.</p></div>`:''}<div class="job-list">${S.jobs.filter(p=>S.showArchived||p.status!=='archived').map(jobMarkup).join('')||`<div class="pips-first-job"><div class="pips-welcome-cast">${S.types.filter(t=>['scout','rook','pulse'].includes(t.id)).map(t=>avatar('idle',t,`welcome-${t.id}`)).join('')}</div><h3>What should your first Pip look after?</h3><p>Describe the job to DGC. You’ll review the scope and schedule before it starts.</p>${button('create-first','Describe a job',!usable()||!S.types.length,'primary')}<small>No Pips yet · Nothing is running for this project</small></div>`}</div>${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived Pips':`Show archived Pips (${S.jobs.filter(p=>p.status==='archived').length})`):''}${button('workspace-context','Workspace context',!usable())}${S.apiVersion>=13?button('workspace-notifications','Notifications',!usable()):''}${!embedded&&!remoteHost?`<details><summary>Local controls</summary><p class="muted">Stop all pauses every Pip on this computer and stops what they’re doing. To undo it, resume Pips here, then resume each Pip.</p>${button('disable','Turn off Pips…',S.busy||!usable())}</details>`:''}</aside><div class="content" data-view="${esc(S.tab)}">${!S.create&&(S.selected||['context','notifications'].includes(S.tab))?button('back-pips','Back to Pips',false,'back-control'):''}${S.overview&&!S.create?'':setupsMarkup()}<nav class="tabs" aria-label="Pip sections"${S.create||!S.selected?' hidden':''}>${tabsMarkup()}</nav>${detailMarkup()}</div></div>`}`;
-  if(markup===lastMarkup){syncChatBox();tellInsidePip();return;}
+  if(markup===lastMarkup){syncChatBox();tellInsidePip();sayShown();return;}
   lastMarkup=markup;
   const allAnchor=attentionAllAnchor();
   const previousAvatars=new Map([...document.querySelectorAll('[data-avatar-key]')].map(node=>[node.dataset.avatarKey,node]));
   avatarObserver?.disconnect();
   globalThis.DgcMcpApps?.park();          // a plugin card's live frame waits out the redraw (media/mcpApps.js)
-  if(chatView&&oldLog&&oldPipId===S.selected){
-    const next=owner.createElement('template');next.innerHTML=markup;
-    patchChildren($('app'),next.content);
-  }else $('app').innerHTML=markup;
+  // (A favicon that could not load is its link's bundled mark from here on: what is about to be drawn is settled first,
+  // so a redraw never asks the icon service for it again. media/mentions.js, settleFavicons.)
+  const next=owner.createElement('template');next.innerHTML=markup;
+  globalThis.DgcMentions?.settleFavicons(next.content);
+  if(chatView&&oldLog&&oldPipId===S.selected)patchChildren($('app'),next.content);
+  else $('app').replaceChildren(next.content);
   keepAttentionAllScroll(allAnchor);
   tellInsidePip();   // with the draw itself, so the side bar's dock and tab bar go and come in the same frame
   // The keyed chat patch above retains message nodes and their selection, and leaves the box in place. The other
@@ -5389,7 +5483,7 @@ function render() {
   reader?.sync();talkBar?.refresh();voiceBar?.refresh();
   const parts=document.querySelector('.pip-ctx-breakdown');if(parts&&S.chatContext?.breakdown&&window.DgcBreakdown)parts.replaceChildren(window.DgcBreakdown.render(S.chatContext.breakdown));
   for(const node of document.querySelectorAll('[data-avatar-key]')){const old=previousAvatars.get(node.dataset.avatarKey);if(old&&old!==node&&old.dataset.character===node.dataset.character&&old.dataset.pose===node.dataset.pose)node.replaceWith(old);}
-  observeAvatars();fitChatInput();hydrateMessageImages();hydrateMessageVideos();hydratePluginLogos();
+  observeAvatars();fitChatInput();hydrateMessageImages();hydrateMessageVideos();hydratePluginLogos();sayShown();
   if(typeof DgcIconActions!=='undefined')DgcIconActions.refresh(root);   // an answer the pointer or the keyboard is still on shows its pill again
   // A card Needs attention opened stays shown as the chat redraws while its drafts and apps load.
   if(cardFlash.selector&&Date.now()<cardFlash.until)for(const el of document.querySelectorAll(cardFlash.selector))el.classList.add('attention-flash');
@@ -6543,7 +6637,7 @@ async function loadSelected(chooseLatest=false) {
     const desired=S.runId||(chooseLatest?r.runs.find(run=>run.manifest?.run_kind!=='conversation')?.id:'');if(desired&&S.tab!=='chat')await loadRun(desired);if(S.tab==='chat')await loadMessages();
   }catch(error){if(token===scope()&&sequence===selectionSeq)setError(error);}
 }
-async function select(id) {if(id===S.selected&&!S.create){S.overview=false;S.tab='chat';rememberView();render();void loadMessages();return;}clearSelection();S.selected=id;S.create=false;S.overview=false;S.tab='chat';draft.chatText=chatDrafts.get(id)||'';chatHistory?.reset();S.error='';rememberView();render();await loadSelected(true);}
+async function select(id) {if(id===S.selected&&!S.create){S.overview=false;S.tab='chat';rememberView();render();void loadMessages();return;}clearSelection();S.selected=id;S.create=false;S.overview=false;S.tab='chat';draft.chatText=chatDrafts.get(id)||'';draftLoaded();chatHistory?.reset();S.error='';rememberView();render();await loadSelected(true);}
 let refreshFlight=null;
 function refresh(includeContext=false) {
   if(!usable()||!S.workspace)return Promise.resolve();
@@ -6568,7 +6662,7 @@ async function refreshNow(includeContext=false) {
     if(includeContext){if(results[2].status==='fulfilled'){S.context=null;S.context=context(results[2].value.context,S.workspace.id);}else{S.context=null;S.error=errorText(results[2].reason);}}
     if(S.selected&&!S.jobs.some(p=>p.id===S.selected)&&paged&&S.pip?.id===S.selected)S.jobs=[...S.jobs,S.pip];
     if(S.selected&&!S.jobs.some(p=>p.id===S.selected)){clearSelection();S.selected='';}
-    if(restoreView&&!S.create){restoreView=false;if(savedView?.workspace_id===S.workspace.id&&S.apiVersion>=79){if(record(savedView.conversations))for(const [id,conv] of Object.entries(savedView.conversations).slice(-20))if(/^conv_[0-9a-f]{32}$/.test(conv))convShown.set(id,conv);if(record(savedView.conversation_drafts))for(const [key,text] of Object.entries(savedView.conversation_drafts).slice(-40))if(typeof text==='string'&&text.length<=65536)convDrafts.set(key,text);}if(savedView?.workspace_id===S.workspace.id&&record(savedView.drafts))for(const [id,text] of Object.entries(savedView.drafts).slice(-20))if(typeof text==='string'&&text.length<=65536)chatDrafts.set(id,text);if(savedView?.workspace_id===S.workspace.id&&record(savedView.draft_marks))for(const [id,kept] of Object.entries(savedView.draft_marks).slice(-20)){const fine=record(kept)&&typeof kept.text==='string'&&Array.isArray(kept.parts)&&kept.parts.length<=256&&kept.parts.every(p=>typeof p==='string'||record(p)&&['plugin','pip','file'].includes(p.kind)&&typeof p.label==='string'&&typeof p.wire==='string'&&typeof p.identity==='string'&&p.label.length<=4096&&p.wire.length<=4096&&p.identity.length<=128)&&kept.parts.map(p=>typeof p==='string'?p:p.wire).join('')===kept.text;if(fine)chatMarks.set(id,kept);}if(savedView?.workspace_id===S.workspace.id&&record(savedView.chat_queues))for(const [id,list] of Object.entries(savedView.chat_queues).slice(-20))if(Array.isArray(list))chatQueues.set(id,list.filter(item=>record(item)&&typeof item.id==='string'&&typeof item.text==='string'&&item.text.length<=4000).slice(0,MAX_CHAT_QUEUE));if(savedView?.workspace_id===S.workspace.id&&!savedView.overview&&!(navigationPending&&options.navigation?.overview===true)&&S.jobs.some(p=>p.id===savedView.selected))await select(savedView.selected);}if(S.selected)await loadSelected(false);
+    if(restoreView&&!S.create){restoreView=false;if(savedView?.workspace_id===S.workspace.id&&S.apiVersion>=79){if(record(savedView.conversations))for(const [id,conv] of Object.entries(savedView.conversations).slice(-20))if(/^conv_[0-9a-f]{32}$/.test(conv))convShown.set(id,conv);if(record(savedView.conversation_drafts))for(const [key,text] of Object.entries(savedView.conversation_drafts).slice(-40))if(typeof text==='string'&&text.length<=65536)convDrafts.set(key,text);}if(savedView?.workspace_id===S.workspace.id&&record(savedView.drafts))for(const [id,text] of Object.entries(savedView.drafts).slice(-20))if(typeof text==='string'&&text.length<=65536)chatDrafts.set(id,text);if(savedView?.workspace_id===S.workspace.id&&record(savedView.draft_marks))for(const [id,kept] of Object.entries(savedView.draft_marks).slice(-20)){const fine=record(kept)&&typeof kept.text==='string'&&Array.isArray(kept.parts)&&kept.parts.length<=256&&kept.parts.every(p=>typeof p==='string'||draftPart(p))&&kept.parts.map(p=>typeof p==='string'?p:p.wire).join('')===kept.text;if(fine)chatMarks.set(id,kept);}if(savedView?.workspace_id===S.workspace.id&&record(savedView.chat_queues))for(const [id,list] of Object.entries(savedView.chat_queues).slice(-20))if(Array.isArray(list))chatQueues.set(id,list.filter(item=>record(item)&&typeof item.id==='string'&&typeof item.text==='string'&&item.text.length<=4000).slice(0,MAX_CHAT_QUEUE));if(savedView?.workspace_id===S.workspace.id&&!savedView.overview&&!(navigationPending&&options.navigation?.overview===true)&&S.jobs.some(p=>p.id===savedView.selected))await select(savedView.selected);}if(S.selected)await loadSelected(false);
   }catch(error){if(token===scope())S.error=errorText(error);}
   finally{if(epoch===S.epoch&&sequence===refreshSeq){S.refreshing=false;render();if(S.apiVersion>=72&&(!S.selected||S.overview)&&!S.create&&(!flowState.loaded||flowState.workspace!==S.workspace.id||Date.now()-flowState.loadedAt>15000))void loadFlows();}}
 }
@@ -6636,7 +6730,11 @@ async function navigateFromHostNow(value) {
    if(!S.jobs.some(p=>p.id===found.id))S.jobs=[...S.jobs,found];
   }
   S.error='';
+  // (A conversation named with the Pip, as its own editor tab names it: that one is shown. '' is its first.)
+  const aimed=typeof value.conversation==='string'&&convsAvailable()?(/^conv_[0-9a-f]{32}$/.test(value.conversation)?value.conversation:''):null;
+  if(aimed!==null&&S.selected!==value.pip)aimConversation(value.pip,aimed);
   const selecting=select(value.pip),token=scope();await selecting;if(token!==scope()||S.selected!==value.pip||!usable())return;
+  if(aimed!==null&&aimed!==S.conv)showConversation(aimed,{own:true});
   const allowed=['chat','job','runs','schedule','handoffs','revisions','context','notifications'];
   let tab=allowed.includes(value.section)?value.section:'chat';
   if(tab==='schedule'&&executionPip(S.pip)&&!pulsePip(S.pip)||tab==='handoffs'&&documentationPip(S.pip))tab='chat';
@@ -6928,6 +7026,14 @@ document.addEventListener('pointerover',event=>{
  if(!event.target.closest?.('aside'))shell.classList.remove('sidebar-dismissed');
 });
 document.addEventListener('click',event=>{
+  const tabFor=event.target.closest?.('[data-open-chat-tab],[data-open-pip-chat]');
+  if(tabFor){
+   event.preventDefault();
+   document.querySelectorAll('details[data-details="pip-menu"]').forEach(d=>d.removeAttribute('open'));
+   if(tabFor.dataset.openPipChat){const p=(S.jobs||[]).find(job=>job.id===tabFor.dataset.openPipChat)||(one.pips||[]).find(job=>job.id===tabFor.dataset.openPipChat);const conv=p&&convShown.get(p.id);openChatTab(p,conv?{id:conv}:undefined);}
+   else openChatTab(S.pip,shownChat());
+   return;
+  }
   const pinned=event.target.closest?.('[data-pin-pip]');
   if(pinned){
    const p=(S.jobs||[]).find(job=>job.id===pinned.dataset.pinPip);
@@ -7681,6 +7787,10 @@ const stopMessages=options.onMessage(message=>{
   // A Pip was marked read somewhere else (its pill on the home, a card in a Work chat): the counts are read again.
   if(message.type==='pipsUnreadChanged'){lastUnreadAt=0;void loadUnread(true);if(convOn()&&S.tab==='chat'&&S.selected)void loadFlow();return;}   // (a Pips event: its fixes and sub-agents are read again)
   if(message.type==='pipsProfileChanged'){void refresh(false);return;}
+  // One chat in several pages (its editor tab, the Pips page, the side bar): what is typed in another, and that
+  // something was sent or answered there.
+  if(message.type==='pipsChatDraft'){takeDraft(message);return;}
+  if(message.type==='pipsChatChanged'){if(message.pip_id===S.selected&&S.tab==='chat'&&!S.overview&&usable()){void loadMessages();if(convsOn())void loadConversations();}return;}
   if(message.type==='pipSetupChanged'){void refresh(false);return;}
   // The Project Folder choice changed (here, over the Work sessions, in another window): the Project tab and Needs
   // attention follow it. And the folder the editor's picker gave for Add a folder… (null: closed without one).
@@ -7723,6 +7833,8 @@ if(typeof window!=='undefined'&&typeof acquireVsCodeApi==='function'&&!window.do
   // Plugins' cards in a Pip's replies (MCP Apps): what one asks goes to the extension host, its answers come back here.
   window.DgcMcpApps?.setup({post:message=>api.postMessage(message),surface:'pip'});
   window.addEventListener('message',event=>{const m=event.data;if(window.DgcMcpApps?.host(m))return;if(m?.type==='event'&&/^mcp_app_/.test(String(m.event?.type||'')))window.DgcMcpApps?.event(m.event);});
-  const app=mountPips({root:window.document,postMessage:message=>api.postMessage(message),getState:()=>api.getState?.(),setState:value=>api.setState?.(value),onMessage:listener=>{const handle=event=>listener(event.data);window.addEventListener('message',handle);return()=>window.removeEventListener('message',handle);}});
+  // (One Pip conversation's own tab says so on its body: src/pipsView.ts, "Open in editor".)
+  const own=window.document.body.dataset.pipChat;
+  const app=mountPips({root:window.document,...(own?{chatTab:{pip:own,conversation:window.document.body.dataset.pipConversation||''}}:{}),postMessage:message=>api.postMessage(message),getState:()=>api.getState?.(),setState:value=>api.setState?.(value),onMessage:listener=>{const handle=event=>listener(event.data);window.addEventListener('message',handle);return()=>window.removeEventListener('message',handle);}});
   window.addEventListener('message',event=>{if(event.data?.type==='pipsNavigate')void app.navigate(event.data.navigation);});
 }

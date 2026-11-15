@@ -52,7 +52,7 @@ async function open(browser, which, { width, height, theme, state, touch = false
   return { page, send, posted, errors };
 }
 
-export const openChat = (browser, { width = 900, height = 760, theme = "dark-modern", state } = {}) => open(browser, "chat", { width, height, theme, state });
+export const openChat = (browser, { width = 900, height = 760, theme = "dark-modern", state, scale } = {}) => open(browser, "chat", { width, height, theme, state, scale });
 export const openLibrary = (browser, { width = 900, height = 760, theme = "dark-modern", state, touch, forced, scale } = {}) => open(browser, "library", { width, height, theme, state, touch, forced, scale });
 
 export const OFFER = { version: 1, types: ["page", "doc", "slides", "sheet", "dashboard"], outputs: ["auto", "document", "slides", "spreadsheet", "page", "dashboard"],

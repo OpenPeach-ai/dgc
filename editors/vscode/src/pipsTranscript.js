@@ -37,13 +37,18 @@ export function replyParts(text) {
   return parts.length>8?[...parts.slice(0,7),parts.slice(7).join('\n\n')]:parts;
 }
 
+// A sent message's words with its links as links: the same button a reply's link is, with its site's favicon, as in
+// Work and ChatDGC (media/mentions.js, "links"). A page with no document (a test of the words alone) gets the words.
+const promptWords=text=>globalThis.DgcMentions?.linkWordsHtml&&globalThis.document?globalThis.DgcMentions.linkWordsHtml(String(text),{doc:globalThis.document}):esc(text);
 // A message's words with its @ marks where they were typed, or "" for plain words. A face keeps a key of its own, so a
 // redraw leaves it moving (pipsDomPatch.js).
 function promptWithMarks(m,pluginLogo){
   const M=globalThis.DgcMentions;
   if(!M||!Array.isArray(m.display_mentions)||!m.display_mentions.length)return '';
   let n=0;
-  const node=M.sentNode(String(m.text),m.display_mentions,{doc:globalThis.document,
+  // (The words between the marks: their links are links, built where no image loads until the page draws them.)
+  const words=text=>{const held=globalThis.document.createElement('template');held.innerHTML=`<div>${M.linkWordsHtml(text,{doc:globalThis.document})}</div>`;return held.content.firstChild;};
+  const node=M.sentNode(String(m.text),m.display_mentions,{doc:globalThis.document,words,
     pillFor:mark=>({logo:mark.kind==='plugin'?pluginLogo(mark.identity):'',plug:transcriptIcon('plug'),folder:FOLDER_ICON,faceStyles:false,faceId:`sent-${m.id}-${++n}`}),
     decorate:(pill,mark)=>{if(mark.kind!=='pip')return;const face=pill.querySelector('.composer-pip-face');if(face){face.setAttribute('data-avatar-key',`mention-${m.id}-${n}`);face.setAttribute('data-character',mark.pip_type);face.setAttribute('data-pose','idle');}}});
   return node?node.innerHTML:'';
@@ -152,7 +157,7 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   // A message that is only images or files shows them, not DGC's stand-in text.
   const standIn=pictures&&m.text==='(sent an image)'||files&&m.text==='(sent a file)';
   const said=!user&&clip&&!clip.open?clip.text:m.text;
-  const body=user?`${pictures}${files}${standIn?'':`<div class="bubble"><div class="prompt-text">${promptWithMarks(m,pluginLogo)||esc(m.text)}</div></div>`}`:(split?`<div class="answer split">${replyParts(said).map(part=>`<div class="message-body text final reply-part">${renderMarkdown(part)}</div>`).join('')}</div>`:`<div class="answer"><div class="message-body text final">${renderMarkdown(replyParts(said).join('\n\n'))}</div></div>`)
+  const body=user?`${pictures}${files}${standIn?'':`<div class="bubble"><div class="prompt-text">${promptWithMarks(m,pluginLogo)||promptWords(m.text)}</div></div>`}`:(split?`<div class="answer split">${replyParts(said).map(part=>`<div class="message-body text final reply-part">${renderMarkdown(part)}</div>`).join('')}</div>`:`<div class="answer"><div class="message-body text final">${renderMarkdown(replyParts(said).join('\n\n'))}</div></div>`)
     // A reply's pictures and videos fold away under one header row each, as in Work and ChatDGC (media/pictureFold.js).
     +(!user&&pictures?foldPictures(`pip:${m.id}:images`,pictures,{pictures:Math.min(64,m.images.length)}):'')
     // Each picture it made is a file too: a row with its kind, its size and Download (pips-08).

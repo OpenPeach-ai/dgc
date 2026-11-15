@@ -289,6 +289,11 @@ export function widgetDocument(html: string, fields?: WidgetField[], ref?: Widge
 // Absolute: POSIX, a drive, or DGC's own distro on Windows (hidden WSL: \\wsl.localhost\DGC\home\...).
 const CANVAS_PATH = /^(?:\/|[A-Za-z]:\\|\\\\wsl(?:\.localhost|\$)\\).*[\\/]canvas[\\/](chat_[a-f0-9]{32})[\\/](cv_[a-f0-9]{16})[\\/][^\\/]+$/;
 const attr = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+/** dgc.linkFavicons: whether a link may wear its site's favicon. Read when a chat's page is written (its policy) and
+ *  again when it is told (what it draws). */
+function linkFavicons(): boolean {
+  try { return vscode.workspace.getConfiguration("dgc").get<boolean>("linkFavicons", true) !== false; } catch { return true; }
+}
 
 /** The file a tab shows, as text or formatted (the canvas's own editor), or undefined. */
 function canvasTabPath(tab: vscode.Tab): string | undefined {
@@ -300,7 +305,16 @@ function canvasTabPath(tab: vscode.Tab): string | undefined {
 
 // Its header opens on DGC's wordmark as Work's does (panel.ts, #phead .pm), with ChatDGC's own mark: the tab icon's
 // bubble and slashes, inline so the slashes can move as Work's do (main.css styles both).
-export function chatdgcDocument(asset: (name: string) => string, cspSource: string): string {
+// img-src: the icon service's two hosts are there for one thing, a link's or a source's favicon (Google's, asked about
+// the origin only: media/chatdgc.js faviconNode and a reply's and a sent message's links). Nothing else this page shows
+// comes from them (its pictures are data: URIs and the editor's own files). So they are let in only while
+// dgc.linkFavicons is on: off, the policy itself keeps an icon from being asked for, as Work's and the Pips tab's do.
+const FAVICON_HOSTS = " https://www.google.com https://*.gstatic.com";
+export function chatdgcDocument(asset: (name: string) => string, cspSource: string, favicons = true): string {
+  const page = chatdgcPage(asset, cspSource);
+  return favicons ? page : page.replace(`data:${FAVICON_HOSTS};`, "data:;");
+}
+function chatdgcPage(asset: (name: string) => string, cspSource: string): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data: https://www.google.com https://*.gstatic.com; font-src ${attr(cspSource)}; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)}; media-src blob:; frame-src http://127.0.0.1:* http://localhost:*;">
 <link rel="stylesheet" href="${attr(asset("media/codicon.css"))}"><link rel="stylesheet" href="${attr(asset("media/main.css"))}"><link rel="stylesheet" href="${attr(asset("media/mentions.css"))}"><link rel="stylesheet" href="${attr(asset("media/messagequeue.css"))}"><link rel="stylesheet" href="${attr(asset("media/trace.css"))}"><link rel="stylesheet" href="${attr(asset("media/genui.css"))}"><link rel="stylesheet" href="${attr(asset("media/chatdgc.css"))}"><link rel="stylesheet" href="${attr(asset("media/voicebar.css"))}"><link rel="stylesheet" href="${attr(asset("media/mcpApps.css"))}">
@@ -1309,7 +1323,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     const docked = dockOf(this.context).onChange(() => { this.paintIcon(tab); this.post(tab, dockOf(this.context).state()); });
     panel.onDidDispose(() => docked.dispose());
     const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, ...name.split("/"))).toString();
-    panel.webview.html = chatdgcDocument(asset, panel.webview.cspSource);
+    panel.webview.html = chatdgcDocument(asset, panel.webview.cspSource, linkFavicons());
   }
 
   /** A chat's tab icon is its Mote at rest, in the palette the chat wears: the same mark the dock and its own
@@ -1983,9 +1997,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         void this.models(tab);
         // A source's favicon, as Work's panel shows one: Google's icon service, asked about the origin only.
         // dgc.linkFavicons off: no request leaves for an icon.
-        let favicons = true;
-        try { favicons = vscode.workspace.getConfiguration("dgc").get<boolean>("linkFavicons", true) !== false; } catch { /* default */ }
-        this.post(tab, { type: "favicons", on: favicons });
+        this.post(tab, { type: "favicons", on: linkFavicons() });
         this.post(tab, { type: "windows", presets: this.windowPresets() });
         this.post(tab, { type: "attachmentLimit", count: this.attachmentLimit() });
         this.post(tab, { type: "artifacts", offered: this.artifactsOffer() ?? null });
