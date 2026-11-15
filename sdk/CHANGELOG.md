@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Pips API 99: where a message sent while a Pip worked was read.** A reply's `steers` (`[{id, at}]`) places each such message in the reply's text; no new command.
 - **Pips API 98: the code card.** `fill_pip_code` types the code a site sent into a Pip's computer from its card in the Pip's chat; local only, never stored or answered.
 - Pips API 97: `list_pip_agents`, `stop_pip_agent`, `set_pip_agents` and `retry_pip_fix` (a Pip's sub-agents; Try again or Leave it after its last try), gated on API 97 in both SDKs; `list_pip_fixes`'s fixes gain `agent`; the Pip's check reply carries `check: true`.
 - The protocol copy knows the sub-agents' fallback (`ready.capabilities.subagent_fallback`): `set_config` takes `subagent_fallback_model`, `subagent_fallback_base_url`, `subagent_fallback_api_mode` and `subagent_fallback_api_key` (with `scope: "session"`, a session's own); `agents_model` gains `fallback_own`, `fallback_model`, `fallback_base_url`, `fallback_api_mode`, `fallback_api_key_set`, `settings_fallback_model` and `settings_fallback_base_url`; `reset_agents_model` takes `part` (`"model"` or `"fallback"`; none drops both); `get_config` sends `subagent_fallback_model`, `_base_url`, `_api_mode` and `_api_key_set` when its `fields` name them; `list_models_at` takes role `subagent_fallback`.

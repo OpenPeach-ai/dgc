@@ -5874,6 +5874,8 @@ class Agent(GoalLifecycle):
                     # each was its own bubble live, and a restored chat shows them the same way.
                     message["_dgc_steering"] = [m["text"] for m in group]
                     message["_dgc_steering_at"] = [m.get("at") for m in group]
+                    # Which messages they were (a Pip's reply says where each was read: pips, Pips API 99).
+                    message["_dgc_steering_ids"] = [str(m.get("request_id") or "") for m in group]
                     message["_dgc_steering_image_counts"] = [len(m["images"]) for m in group]
                 else:
                     # NOT a user bubble, and not the user's words for anything that reads roles.

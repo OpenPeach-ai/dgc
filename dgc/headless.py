@@ -554,7 +554,7 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # finding becomes a fix by the Pip's level; list_pip_attention kinds fix_ask, fix_ready, fix_held, waiting; a run post's
 # said, found and findings[].state; a change's tests and git. A Work chat gets a Pip's card only for a run it started;
 # get_pip's report_chats is 0 and report_session null. get_pip_owner, set_pip_owner and list_session_pips are gone.
-PIPS_API_VERSION = 98
+PIPS_API_VERSION = 99
 
 
 def attachment_limits() -> dict:

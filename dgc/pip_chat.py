@@ -578,6 +578,12 @@ SYSTEM = (
     "silently change the approved job. Direct requested job/model/schedule changes to the "
     "user's reviewed settings flow. Do not claim tests ran or that a previous report proves "
     "correctness. Say when context is incomplete. Answer the current user message. "
+    # His live test (15 Nov): minutes of silence on a long job, and a message sent while it worked made it drop the
+    # first ask. Work's replies say what they are about to do; a Pip's do too, and keep the first ask.
+    "When answering takes work first (tools, your computer, research, several steps), start with one short "
+    "line saying what you'll do, then do it; never stop at that line. A message the user sends while you work "
+    "adds to the task: fold it in and still finish and answer what they first asked, unless they tell you to stop "
+    "or to do something else instead. "
     # Leak guard 3 (0.52): said to every Pip (leak_guard.INSTRUCTION, kept word for word).
     "Never send code, files, secrets or personal details to a website, an API or an app unless the task "
     "needs it, and when it does, say what you sent and where."
@@ -1604,8 +1610,24 @@ def valid_apps(value):
     return value
 
 
+# Where each message read on the way sits in a reply (Pips API 99, dgc/pip_steering.place): at most this many.
+MAX_REPLY_STEERS = 64
+_STEER_ID = re.compile(r"message_[0-9a-f]{32}")
+
+
+def validate_steers(value, text: str) -> list:
+    """[{id, at}]: a message's id and a place in the reply's text (0 to its length), each message once."""
+    if (not isinstance(value, list) or len(value) > MAX_REPLY_STEERS
+            or any(not isinstance(p, dict) or set(p) != {"id", "at"} or not isinstance(p["id"], str)
+                   or not _STEER_ID.fullmatch(p["id"]) or type(p["at"]) is not int or not 0 <= p["at"] <= len(text)
+                   for p in value)
+            or len({p["id"] for p in value}) != len(value)):
+        raise RegistryError("invalid_reply", "Where this reply read its messages is invalid.")
+    return [{"id": p["id"], "at": p["at"]} for p in value]
+
+
 def insert_reply(store, run, result, now):
-    if set(result) - {"text", "kept_document", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "core_setup_drafts", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes", "apps", "goal_update"}:
+    if set(result) - {"text", "kept_document", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "core_setup_drafts", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes", "apps", "goal_update", "steers"}:
         raise RegistryError("invalid_reply", "Conversation replies cannot contain source findings or control actions.")
     if "apps" in result and valid_apps(result["apps"]) is None:
         raise RegistryError("invalid_reply", "This reply's plugin cards are invalid.")
@@ -1681,6 +1703,9 @@ def insert_reply(store, run, result, now):
         touch(store.db, row["conversation_id"], now)
     for index, label in enumerate(choices):
         store.db.execute("INSERT INTO pip_chat_choices VALUES(?,?,?)", (reply_id, index, label))
+    if "steers" in result:
+        from .pip_steering import place               # where it read each message sent while it worked (API 99)
+        place(store.db, run["id"], validate_steers(result["steers"], text))
     from .pip_images import attach as attach_images         # images it made this run (generate_image): on its reply
     attach_images(store, run, reply_id)
     from .pip_videos import attach as attach_videos         # videos it started this run (generate_video): the same
@@ -1801,6 +1826,11 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             offered = message_choices(store.db, row["id"])
             if offered:
                 message["choices"] = offered
+            from .pip_steering import places
+            placed = places(store.db, row["run_id"])
+            if placed:
+                message["steers"] = placed          # API 99: where each message sent while it worked was read
+
             plugins = reply_plugins(store.db, row["run_id"])
             if plugins:
                 message["plugins"] = plugins

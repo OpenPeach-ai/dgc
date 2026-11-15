@@ -52,6 +52,38 @@ CREATE TABLE IF NOT EXISTS pip_chat_steer_attachments (
  files TEXT NOT NULL CHECK(length(CAST(files AS BLOB)) BETWEEN 2 AND 131072)
 );
 """
+# Where in a reply each message read on the way sits (Pips API 99): `at`, a place in that reply's own text, so the chat
+# draws the reply in pieces with each message between them, as Work shows a message where it was read. Made the first
+# time a reply places one; a message with no row here shows by when it was sent, as before.
+PLACES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS pip_reply_steers (
+ steer_id TEXT PRIMARY KEY,
+ run_id TEXT NOT NULL,
+ at INTEGER NOT NULL CHECK(at >= 0)
+);
+"""
+
+
+def place(db, run_id, places) -> None:
+    """Keep where a finished reply read each of its messages: only this run's own messages, never another's."""
+    mine = [(p["id"], p["at"]) for p in places
+            if db.execute("SELECT 1 FROM pip_chat_steers WHERE id=? AND run_id=?", (p["id"], run_id)).fetchone()]
+    if not mine:
+        return
+    db.execute(PLACES_SCHEMA)
+    for steer_id, at in mine:
+        db.execute("INSERT OR REPLACE INTO pip_reply_steers VALUES(?,?,?)", (steer_id, run_id, at))
+
+
+def places(db, run_id) -> list:
+    """[{id, at}] for a reply's run, in the reply's order; [] for a reply that read nothing on the way."""
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pip_reply_steers'").fetchone() is None:
+        return []
+    rows = db.execute("SELECT p.steer_id, p.at FROM pip_reply_steers p JOIN pip_chat_steers s ON s.id=p.steer_id "
+                      "WHERE p.run_id=? AND s.run_id=? ORDER BY p.at, s.seq", (run_id, run_id)).fetchall()
+    return [{"id": r[0], "at": r[1]} for r in rows]
+
+
 # What one message's photos and files add to the inbox: their digests, names and kept paths, never their bytes.
 MAX_ATTACHMENT_NOTE_BYTES = 512 * 1024
 # The worker's inbox holds every update a reply has not read yet: eight at most, each escaped at worst six bytes a byte.

@@ -4545,8 +4545,13 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             turn = next((i for i in range(len(agent.messages) - 1, -1, -1)
                          if agent.messages[i].get("role") == "user"
                          and not agent.messages[i].get("_dgc_steering")), -1)
-            said = []
+            said, read_at = [], []          # read_at: (how many of `said` came before, the message's id)
+            mine = getattr(agent, "_pip_steers_seen", set())
             for item in agent.messages[turn + 1:choices_cut]:
+                if item.get("role") == "user" and isinstance(item.get("_dgc_steering_ids"), list):
+                    # A message sent while it worked, read here: it sits after what the Pip had said so far (API 99).
+                    read_at += [(len(said), sid) for sid in item["_dgc_steering_ids"] if sid in mine]
+                    continue
                 text = item.get("content") if item.get("role") == "assistant" else None
                 if not isinstance(text, str):
                     continue
@@ -4557,6 +4562,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             if said or choices_cut is not None:
                 # Ended at its choices, the turn has no closing text of its own: the reply is what it said.
                 final = "\n\n".join(said)
+            else:
+                read_at = []                # the reply is its last words alone: nothing to place in it
             if (eyes['card'] is None and choices_candidate is None and eyes_pin is not None and eyes_pin['choice'] == 'ask'
                     and eyes_pin.get('vision_model') and eyes['mode'] == 'ask'
                     and (eyes['needs'] or _CANNOT_SEE.search(final or ''))):
@@ -4583,9 +4590,18 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                          else "Choose one below." if choices_candidate is not None
                          else final)
             from .redaction import redact_text, secret_values
+            if read_at and not final.startswith("\n\n".join(said)):
+                read_at = []                # its words were replaced (a line about seeing, a card's words): no places
             # A reply past 256 KB: its start here, the whole of it passed up for the Pip's document (keep_long_reply).
             reply_text, long_text = pip_chat.cut_long_reply(redact_text(final, secret_values(config)))
             result = {"text": pip_chat.validate_text(reply_text, reply=True)}
+            if read_at:
+                # Where each message read on the way sits, counted in the text the user reads (masked: a secret never
+                # spans the blank line between two parts), at most the reply's end when the rest went to its document.
+                secrets_now = secret_values(config)
+                result["steers"] = [{"id": sid, "at": min(len(result["text"]),
+                                                          len(redact_text("\n\n".join(said[:count]), secrets_now)))}
+                                    for count, sid in read_at][:pip_chat.MAX_REPLY_STEERS]
             if long_text is not None:
                 result['long_text'] = long_text
             if setup_candidate is not None:
