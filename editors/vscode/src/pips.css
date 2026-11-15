@@ -1324,14 +1324,19 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
    keys, the corner and the greys are the shared menu's (media/shared/menu.css); the buttons are the shared button at its
    dense size. The only accent here is the unread dot. ==== */
 .pip-topbar{position:relative}
-/* A Pip's chat header (his call of 14 Nov): back, its face and its name at the left, fixed; the thread selector in the
-   middle, always centred, in a capped width, a long name ending in "…"; the switch, its computer and the menu at the
-   right. The two sides are the same width (the selector's box carries Back's width on its right as the left side
+/* A Pip's chat header (his calls of 14 and 15 Nov): back, its face and its name at the left, fixed; the thread selector
+   in the middle, always centred, in a capped width, a long name ending in "…"; the switch, its computer and the menu at
+   the right. The two sides are the same width (the selector's box carries Back's width on its right as the left side
    carries Back itself), and the selector's width comes from the page's width, never from the name it shows: so nothing
-   moves when the thread changes. */
+   moves when the thread changes.
+   THE PIP'S NAME NEVER DISAPPEARS. Where the line is tight the name ends in "…" (the whole name is its tooltip), and
+   the selector gives way instead. The whole selector shows from 560 px, by measurement: the two sides and the gaps
+   take 202 px, the selector 160 px ("New conversation", what every new one is called, with its unread dot: 157 px)
+   and the name 96 px on each side of the middle (14 letters: "Nightly review" is 95 px), 202 + 160 + 2 × 99 = 560.
+   From there the selector grows to its cap (at 620 px) and after that the name's room does. */
 .pip-topbar.pip-topbar-chat{--thread-cap:220px;--back-w:36px;grid-template-columns:auto minmax(0,1fr) auto minmax(0,1fr)}
 .pip-topbar-chat>.pip-pill{grid-column:2;justify-self:start;padding-right:4px}
-.pip-topbar-chat>.pip-thread{grid-column:3;box-sizing:content-box;display:flex;justify-content:center;min-width:0;width:clamp(72px,100cqi - 330px,var(--thread-cap));padding-right:var(--back-w)}
+.pip-topbar-chat>.pip-thread{grid-column:3;box-sizing:content-box;display:flex;justify-content:center;min-width:0;width:clamp(160px,100cqi - 400px,var(--thread-cap));padding-right:var(--back-w)}
 .pip-topbar-chat>.topbar-actions{grid-column:4;justify-self:end}
 .pip-thread .pip-convs{display:inline-flex;align-items:center;gap:4px;min-width:0;max-width:100%;height:26px;min-height:0;margin:0;padding:0 6px;border:0;border-radius:var(--btn-r,6px);background:transparent;color:inherit;font:inherit;font-weight:600;cursor:pointer;transition:background-color var(--dur-hover,120ms) ease}
 .pip-thread .pip-convs:hover,.pip-thread .pip-convs[aria-expanded="true"]{background:var(--wash)}
@@ -1339,31 +1344,40 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 .pip-conv-title{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pip-convs-chevron{flex:none;color:var(--muted);transition:transform var(--dur-hover,120ms) ease}
 .pip-convs[aria-expanded="true"] .pip-convs-chevron{transform:rotate(180deg)}
-/* The narrow side bar. Several conversations: the selector keeps the middle of the room between the two sides and the
-   Pip's name gives way to its face (pointed at, the face says the name). One conversation: there is nothing to tell
-   apart, so its name stays and the selector is its chevron alone. */
-@container(max-width:380px){
- .pip-topbar.pip-topbar-chat{grid-template-columns:auto auto minmax(0,1fr) auto}
- .pip-topbar-chat>.pip-thread{width:auto;padding-right:0}
- .pip-topbar-chat>.pip-pill{padding-right:0}
+/* Under 560 px (the side bar, mostly): the selector is its chevron right beside the name, as a Pip with one
+   conversation has always had it ("Tile checker ⌄"); pointed at, it says the conversation shown. Something unread in
+   another conversation is the dot on the chevron's own corner, so the button is the same size with it and without.
+   The name takes the room it needs and no more; a long one ends in "…" against the chevron. (The last column is the
+   right side's own width at the least, so the name can never push the buttons off.) */
+@container(width<560px){
+ .pip-topbar.pip-topbar-chat{grid-template-columns:auto minmax(0,auto) auto 1fr}
+ .pip-topbar-chat>.pip-thread{width:auto;padding-right:0;margin-left:-4px}
+ .simple-pips .pip-topbar.pip-topbar-chat>.pip-pill{padding-right:0}
  .pip-topbar-chat>.pip-pill small{display:none}
- .pip-topbar-chat.has-threads .pip-name{display:none}
- .pip-topbar.pip-topbar-chat.one-thread{grid-template-columns:auto minmax(0,auto) minmax(0,1fr) auto}
- .pip-topbar-chat.one-thread>.pip-thread{justify-content:flex-start}
- .pip-topbar-chat.one-thread .pip-conv-title{display:none}
+ .pip-topbar-chat .pip-conv-title{display:none}
+ .pip-thread .pip-convs{position:relative}
+ .pip-thread .pip-convs .conv-mark{position:absolute;top:4px;right:2px;width:6px;height:6px}
+ .pip-thread .pip-convs .conv-mark.unread::before{width:6px;height:6px}
 }
-/* Narrower still (220 px, then VS Code's narrowest side bar): the selector is its chevron alone (pointed at, it says
-   the conversation), and at the very narrowest the on/off switch gives way too: it is on the Pip's row in the list and
-   on its page. Nothing ever lies on anything else. */
+@container(max-width:340px){.pip-topbar-chat>.pip-thread{margin-left:0}}
+/* Narrower still, every part keeps its place and the name keeps what is left: the paddings tighten at 260 px, the
+   on/off switch gives way at 240 px (with it the name had 18 px at 220: the switch is on the Pip's row in the list
+   and on its page), and at VS Code's narrowest side bar the icon buttons are 24 px wide (as high as ever), which
+   leaves the name two or three letters and its "…" at 170 px. (The face is never restyled.) Nothing ever lies on anything
+   else. */
 @container(max-width:260px){
- .pip-topbar-chat .pip-conv-title,.pip-topbar-chat.one-thread .pip-name{display:none}
- .pip-topbar-chat>.pip-thread,.pip-topbar-chat.one-thread>.pip-thread{justify-content:center}
- .pip-topbar.pip-topbar-chat,.pip-topbar.pip-topbar-chat.one-thread{grid-template-columns:auto auto minmax(0,1fr) auto}
+ .simple-pips.chat-open .pip-topbar.pip-topbar-chat{padding-left:8px;padding-right:8px}
+ .simple-pips.chat-open .pip-topbar.pip-topbar-chat>.pip-pill{padding-left:0;gap:4px}
+ .pip-topbar-chat .pip-thread .pip-convs{padding:0 3px}
+ .pip-thread .pip-convs .conv-mark{right:0}
+}
+@container(max-width:240px){
+ .pip-topbar-chat .pip-switch{display:none}
 }
 @container(max-width:200px){
- .simple-pips.chat-open .pip-topbar.pip-topbar-chat{gap:2px;padding-left:6px;padding-right:6px}
- .pip-topbar-chat .pip-switch{display:none}
- .pip-topbar-chat .pip-thread .pip-convs{padding:0 3px}
+ .simple-pips.chat-open .pip-topbar.pip-topbar-chat{gap:2px;padding-left:4px;padding-right:4px}
+ .simple-pips.chat-open .pip-topbar.pip-topbar-chat .topbar-icon{width:24px}
+ .pip-topbar-chat .pip-thread .pip-convs{padding:0 3px 0 1px}
 }
 .conv-mark{flex:none;display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;color:var(--muted)}
 .conv-mark.unread::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent)}

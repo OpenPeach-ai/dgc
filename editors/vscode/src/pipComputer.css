@@ -310,3 +310,35 @@ body.pc-screen-mode{padding:0}
 .pc-card-live{position:absolute;top:14px;right:14px;width:8px;height:8px;border-radius:50%;background:var(--accent)}
 @media (prefers-reduced-motion:reduce){.pc-drawer,.pc-drawer *{transition:none!important}}
 @media (forced-colors:active){.pc-drawer.pc-fan,.pc-card{border-color:CanvasText}.pc-drawer.pc-fan{background:Canvas}}
+
+/* ==== A card's own dialog (15 Nov): "Save login…" and "Review…" on a notification open here what they open in the Pip's
+   chat. DGC's raised dialog (media/shared/dialog.css) over a scrim over the screen; the shared button (28 px, the 6 px
+   corner), boxes of the same height and corner. Under 360 px its buttons take a row each. ==== */
+#pc-dialog-root{position:fixed;inset:0;z-index:60}
+.pc-scrim{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto}
+.pc-dialog{box-sizing:border-box;width:100%;max-width:480px;max-height:100%;overflow:auto;padding:20px;background:var(--vscode-editor-background);color:var(--vscode-foreground);font:var(--t-sm,13px)/1.5 var(--vscode-font-family,system-ui);text-align:left}
+.pc-dialog[data-kind="review"]{max-width:540px}
+.pc-dialog h2{margin:0 0 6px;font-size:15px;font-weight:600;line-height:1.35;overflow-wrap:break-word}
+.pc-dialog h2:focus{outline:none}
+.pc-dialog p{margin:6px 0;overflow-wrap:break-word}
+.pc-dialog .muted{color:var(--muted)}
+.pc-dialog label{display:grid;gap:5px;margin:12px 0 0}
+.pc-dialog input:not([type=checkbox]){box-sizing:border-box;width:100%;height:var(--btn-h,28px);padding:0 8px;border:1px solid var(--vscode-input-border,var(--hair-strong));border-radius:var(--btn-r,6px);background:var(--vscode-input-background);color:var(--vscode-input-foreground,var(--vscode-foreground));font:inherit}
+.pc-dialog input:not([type=checkbox]):focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:-1px}
+.pc-dialog input:disabled{opacity:.6}
+.pc-dialog label.login-all-row{display:flex;align-items:center;gap:8px;margin:14px 0 2px}
+.pc-dialog input[type=checkbox]{width:auto;margin:0;flex:none}
+.pc-dialog .login-help{font-size:12px;margin:4px 0}
+.pc-dialog .login-site{margin:6px 0 2px}
+.pc-dialog .error{color:var(--vscode-errorForeground)}
+.pc-dialog .actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:16px}
+.pc-dialog .actions .pc-dialog-first{margin-right:auto}
+.pc-dialog .actions .dgc-btn:disabled{opacity:.5;cursor:default}
+.pc-dialog-meta{display:grid;grid-template-columns:minmax(0,max-content) minmax(0,1fr);gap:6px 14px;margin:12px 0;font-size:12px}
+.pc-dialog-meta dt{color:var(--muted)}
+.pc-dialog-meta dd{margin:0;overflow-wrap:anywhere}
+.pc-dialog-notice{padding:8px 10px;border:1px solid var(--hair-strong);border-radius:var(--btn-r,6px)}
+/* A review has four answers: where they do not fit one row, two rows of two (Reject, Cancel / Always allow, Send once). */
+@media (max-width:520px){.pc-dialog[data-kind="review"] .actions .dgc-btn{flex:1 1 40%;width:auto}.pc-dialog[data-kind="review"] .actions .pc-dialog-first{margin-right:0}}
+@media (max-width:360px){.pc-scrim{padding:8px}.pc-dialog{padding:14px}.pc-dialog .actions .dgc-btn{width:100%}.pc-dialog .actions .pc-dialog-first{margin-right:0}}
+@media (forced-colors:active){.pc-dialog{background:Canvas}}

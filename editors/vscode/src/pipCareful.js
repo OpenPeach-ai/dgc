@@ -102,6 +102,30 @@ export function offersAlways(summary) {
   return summary?.kind !== 'site' && summary?.kind !== 'login' && summary?.kind !== 'yours';
 }
 
+/** A held request's answers, in its card's order: the ONE list that its card in the Pip's chat (src/pipsClient.js) and
+ *  its notification in the computer view (src/pipComputerDrawer.js) both draw, so the two never differ (his call of
+ *  15 Nov: a login's notification offered only "Not now" while its chat card offered "Save login…" too).
+ *  Each: `how` it is answered (login: the form that saves a login; review: what a payment sends, shown first, since a
+ *  payment is never sent in one tap; send; always; reject), its `label`, and `done`, the quiet word once it is given. */
+export function heldRequestAnswers(summary, pipName = 'The Pip') {
+  const s = summary || {}, words = carefulWords(s, pipName);
+  const always = {how: 'always', label: 'Always allow', done: 'Always allowed'};
+  if (words) return [s.kind === 'login' ? {how: 'login', label: words[2], done: 'Saved'} : {how: 'send', label: words[2], done: 'Allowed'},
+    ...(offersAlways(s) ? [always] : []), {how: 'reject', label: 'Not now', done: 'Not now'}];
+  return [isPayment(s) ? {how: 'review', label: 'Review…', done: 'Sent once'} : {how: 'send', label: 'Send once', done: 'Sent once'},
+    always, {how: 'reject', label: 'Reject', done: 'Rejected'}];
+}
+
+/** What a held submit's review says before it is sent (the chat's dialog and the computer view's): its title, what it is,
+ *  the notices under what it sends. */
+export function reviewWords(summary, pipName = 'The Pip') {
+  const s = summary || {}, pay = asksEveryTime(s);
+  return {title: 'Send this once?', description: `${pipName} wants to send a form to ${s.host}. Nothing has been sent. ${coversDetail(s, pipName)}`,
+    notice: s.payment === true ? 'This sends payment card details.' : pay ? 'This looks like a payment.' : '',
+    limit: pay ? 'Always allow pays only inside its daily limit.' : '',
+    sent: 'Sent exactly as shown, once. Values marked ••• are hidden here but will be sent.'};
+}
+
 /** A payment's one quiet line beside its Always allow: it pays only within the Pip's daily dollar limit. "" for the rest. */
 export function limitWords(summary) {
   return offersAlways(summary) && asksEveryTime(summary) ? 'Inside its daily limit' : '';

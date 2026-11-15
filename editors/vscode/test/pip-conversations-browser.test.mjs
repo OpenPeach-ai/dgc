@@ -277,7 +277,7 @@ test("a wide chat shows the list as a column beside it; narrower, only the menu;
       assert.equal(await inPage(y.p, (root) => root.querySelector("#conv-column").getClientRects().length), 0, `no column at ${width}px`);
       await y.p.click("#pip-convs");
       await y.p.waitForSelector("#conv-menu");
-      const fit = await inPage(y.p, (root) => { const m = root.querySelector("#conv-menu").getBoundingClientRect(), name = root.querySelector(".pip-conv-title"); return [m.left >= 0 && m.right <= window.innerWidth, name.getBoundingClientRect().width >= 24, document.documentElement.scrollWidth > document.documentElement.clientWidth]; });
+      const fit = await inPage(y.p, (root) => { const m = root.querySelector("#conv-menu").getBoundingClientRect(), name = root.querySelector(".pip-topbar .pip-name");   /* (15 Nov: under 560 px the selector is its chevron, and the Pip's name is what always shows) */ return [m.left >= 0 && m.right <= window.innerWidth, name.getBoundingClientRect().width >= 24, document.documentElement.scrollWidth > document.documentElement.clientWidth]; });
       assert.deepEqual(fit, [true, true, false], `the menu fits at ${width}px`);
     } finally { await y.close(); }
   }

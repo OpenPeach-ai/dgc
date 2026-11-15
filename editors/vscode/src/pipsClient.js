@@ -73,7 +73,7 @@ import {attentionPage,waitingOn,needWords,attentionMarkup,attentionAllMarkup,att
 import {answerFor,sendItemAnswer,readVisits} from './pipCardAnswers.js';
 import {notesPage,notesMarkup,keptMarkup} from './pipNotes.js';
 import {workingNotesPage,dailyLogPage,workingNotesMarkup,dailyLogMarkup,learnCardMarkup,learnRequest} from './pipWorkingNotes.js';
-import {carefulPage,carefulMarkup,carefulWords,wordsHtml,addressHtml,settledWords,isPayment,asksEveryTime,offersAlways,limitWords,asksWords,coversWords,coversDetail} from './pipCareful.js';
+import {carefulPage,carefulMarkup,carefulWords,heldRequestAnswers,reviewWords,wordsHtml,addressHtml,settledWords,isPayment,asksEveryTime,offersAlways,limitWords,asksWords,coversWords,coversDetail} from './pipCareful.js';
 import {loginsMarkup,loginFormMarkup,readLoginForm,loginFormProblem,clearLoginForm} from './pipLogins.js';
 import {pipLogins,pipLogin,SLOW_READ} from './pipsModel.js';
 import {mergeChatPage} from './pipsModel.js';
@@ -2211,13 +2211,18 @@ function computerWaitingCards(){
  const total=waitingDock.seen.size,count=total>1?`<span class="perm-count">${total-waiting.length+1} of ${total}</span>`:'';
  return `<div class="pip-approval-dock" role="region" aria-label="Waiting for your answer">${waitingCard(waiting[0],count)}</div>`;
 }
+// A held request's buttons, from the one list of its answers (src/pipCareful.js heldRequestAnswers; the computer view's
+// notification draws the same list): the first is the solid one, and each is sent its own way.
+function heldButtons(a,s,name,off){
+ const id=esc(a.id),how={login:`data-login-card="${id}"`,review:`data-computer-action="${id}"`,send:`data-computer-decide="${id}" data-approve="1"`,
+  always:`data-computer-always="${id}"${off} title="${esc(coversDetail(s,name))}"`,reject:`data-computer-decide="${id}" data-approve="0"`};
+ return heldRequestAnswers(s,name).map((b,i)=>`<button type="button" class="${i===0?'primary':'quiet'}" ${how[b.how]}${b.how==='always'?'':off}>${esc(b.label)}</button>`).join('');
+}
 function waitingCard(a,count){
  const name=S.pip?.name||'The Pip',off=S.busy||!usable()||archived()?' disabled':'';
  const s=a.summary||{},words=carefulWords(s,name);
  if(!words)return computerSubmitCard(a,name,off,count);
- const yes=s.kind==='login'?`<button type="button" class="primary" data-login-card="${esc(a.id)}"${off}>${esc(words[2])}</button>`
-  :`<button type="button" class="primary" data-computer-decide="${esc(a.id)}" data-approve="1"${off}>${esc(words[2])}</button>`;
- return `<div class="dgc-card app-link" data-state="waiting" data-computer-card="${esc(a.id)}" role="group" aria-label="${esc(words[0])}"><div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">!</span><div class="dgc-card-words app-link-words"><strong>${wordsHtml(words[0],s,esc)}</strong><small>${wordsHtml(words[1],s,esc)}</small></div>${count}</div><div class="dgc-card-actions app-link-actions">${yes}${offersAlways(s)?`<button type="button" class="quiet" data-computer-always="${esc(a.id)}"${off} title="${esc(coversDetail(s,name))}">Always allow</button>`:''}<button type="button" class="quiet" data-computer-decide="${esc(a.id)}" data-approve="0"${off}>Not now</button></div></div>`;
+ return `<div class="dgc-card app-link" data-state="waiting" data-computer-card="${esc(a.id)}" role="group" aria-label="${esc(words[0])}"><div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">!</span><div class="dgc-card-words app-link-words"><strong>${wordsHtml(words[0],s,esc)}</strong><small>${wordsHtml(words[1],s,esc)}</small></div>${count}</div><div class="dgc-card-actions app-link-actions">${heldButtons(a,s,name,off)}</div></div>`;
 }
 // A submit its computer holds, as the Soft card (approved 2026-11-05): what it is, what Always allow would cover, Send once /
 // Always allow / Reject, and the rest under Details. A payment is never sent once in one tap: Review… shows it first. Since
@@ -2235,10 +2240,7 @@ function computerSubmitCard(a,name,off,count=''){
   +(s.more_fields?`<p class="app-link-note">And ${esc(String(s.more_fields))} more fields.</p>`:'')
   +`<p class="app-link-note">${addressHtml(coversDetail(s,name),esc)}</p>`+(pay?'':`<button type="button" class="link allow-see" data-computer-action="${id}"${off}>See the page…</button>`)
   +'</details>';
- const always=`<button type="button" class="quiet" data-computer-always="${id}"${off} title="${esc(coversDetail(s,name))}">Always allow</button>`;
- const actions=(pay?`<button type="button" class="primary" data-computer-action="${id}"${off}>Review…</button>`
-  :`<button type="button" class="primary" data-computer-decide="${id}" data-approve="1"${off}>Send once</button>`)+always;
- return `<div class="dgc-card allow-card" data-state="waiting" data-computer-card="${id}" role="group" aria-label="${esc(title)}"><div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">${pay?'!':'↗'}</span><div class="dgc-card-words app-link-words"><strong>${wordsHtml(title,s,esc)}</strong><small>${esc(line)}</small></div>${count}</div>${sends}${details}${limit?`<p class="app-link-note allow-limit">${esc(limit)}</p>`:''}<div class="dgc-card-actions app-link-actions">${actions}<button type="button" class="quiet" data-computer-decide="${id}" data-approve="0"${off}>Reject</button></div></div>`;
+ return `<div class="dgc-card allow-card" data-state="waiting" data-computer-card="${id}" role="group" aria-label="${esc(title)}"><div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">${pay?'!':'↗'}</span><div class="dgc-card-words app-link-words"><strong>${wordsHtml(title,s,esc)}</strong><small>${esc(line)}</small></div>${count}</div>${sends}${details}${limit?`<p class="app-link-note allow-limit">${esc(limit)}</p>`:''}<div class="dgc-card-actions app-link-actions">${heldButtons(a,s,name,off)}</div></div>`;
 }
 async function decideInChat(id,approve){
  const pip=S.selected,a=computerState.pip===pip?computerState.value?.actions?.find(x=>x.id===id):null;if(!a||S.busy||!usable())return;
@@ -2330,9 +2332,9 @@ async function openComputerAction(id){
    request:{type:'decide_pip_computer_action',action_id:a.id,expected_digest:a.digest,approve:true}});
   return;
  }
- const pay=asksEveryTime(s),name=S.pip?.name||'The Pip';
- openReview({title:'Send this once?',description:`${name} wants to send a form to ${s.host}. Nothing has been sent. ${coversDetail(s,name)}`,
-  body:`${image?`<img class="computer-shot" alt="The page as the Pip left it" src="${image}">`:''}<dl class="meta"><dt>Sends to</dt><dd>${esc(s.host)}${esc(s.path)}</dd><dt>From page</dt><dd>${esc(s.page)}</dd>${rows}</dl>${s.more_fields?`<p class="muted">And ${s.more_fields} more fields.</p>`:''}${s.payment===true?'<p class="notice">This sends payment card details.</p>':pay?'<p class="notice">This looks like a payment.</p>':''}${pay?'<p class="muted">Always allow pays only inside its daily limit.</p>':''}<p class="muted">Sent exactly as shown, once. Values marked ••• are hidden here but will be sent.</p>`,secondary:{id:'reject-computer-action',label:'Reject'},
+ const name=S.pip?.name||'The Pip',say=reviewWords(s,name);
+ openReview({title:say.title,description:say.description,
+  body:`${image?`<img class="computer-shot" alt="The page as the Pip left it" src="${image}">`:''}<dl class="meta"><dt>Sends to</dt><dd>${esc(s.host)}${esc(s.path)}</dd><dt>From page</dt><dd>${esc(s.page)}</dd>${rows}</dl>${s.more_fields?`<p class="muted">And ${s.more_fields} more fields.</p>`:''}${say.notice?`<p class="notice">${esc(say.notice)}</p>`:''}${say.limit?`<p class="muted">${esc(say.limit)}</p>`:''}<p class="muted">${esc(say.sent)}</p>`,secondary:{id:'reject-computer-action',label:'Reject'},
   confirm:'Send once',always:true,expiresAt:a.expires_at,computerAction:a.id,request:{type:'decide_pip_computer_action',action_id:a.id,expected_digest:a.digest,approve:true}});
 }
 async function decideComputerAction(review,approve){
@@ -4950,11 +4952,13 @@ function convListMarkup(place){
 // The thread selector, in the middle of a Pip's chat header (his call of 14 Nov): the conversation shown, by its name,
 // with the chevron that opens the list. The Pip's face and name stay at the left whatever is shown here, so nothing in
 // the header moves when the thread changes. A long name ends in "…" (the stylesheet caps its width).
+// Under 560 px the stylesheet draws the chevron alone, right beside the Pip's name (his call of 15 Nov: the name never
+// goes, the selector gives way); its label and tooltip still say the conversation shown.
 function convThreadMarkup(p){
  const list=convList();if(!list)return '';
  const ui=convUi(),shown=shownConversation(),title=shown?conversationTitle(shown):'Chat';
  const unread=list.some(c=>!c.archived&&c.unread&&c!==shown);
- return `<div class="pip-thread"><button type="button" id="pip-convs" class="pip-convs" aria-haspopup="menu" aria-expanded="${ui.menu}" aria-controls="conv-menu" aria-label="${esc(`${title}: conversations with ${p.name}`)}" title="${esc(title.length>24?`${title} · conversations with ${p.name}`:`Conversations with ${p.name}`)}"><span class="pip-conv-title">${esc(title)}</span>${unread?'<span class="conv-mark unread" aria-hidden="true"></span>':''}<svg class="pip-convs-chevron" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>${unread?'<span class="sr-only">, something new in another conversation</span>':''}</button></div>`;
+ return `<div class="pip-thread"><button type="button" id="pip-convs" class="pip-convs" aria-haspopup="menu" aria-expanded="${ui.menu}" aria-controls="conv-menu" aria-label="${esc(`${title}: conversations with ${p.name}`)}" title="${esc(`${title} · conversations with ${p.name}`)}"><span class="pip-conv-title">${esc(title)}</span>${unread?'<span class="conv-mark unread" aria-hidden="true"></span>':''}<svg class="pip-convs-chevron" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>${unread?'<span class="sr-only">, something new in another conversation</span>':''}</button></div>`;
 }
 /** Whether this Pip has more than one conversation to choose from (or shows one that is not its first). */
 function convSeveral(){const list=convList();return !!list&&(list.filter(c=>!c.archived).length>1||!!S.conv);}
@@ -5170,10 +5174,10 @@ function simplePipHeader(){
  // its computer and the menu at the right (live round 1, 14 Nov). What a Project Pip last did, or its folder, follows
  // its name where there is room.
  if(onChat){
-  // (Pointed at, its face says who it is: a Project Pip's character and role as before, any other Pip's name, which
-  // the narrow side bar leaves to its face.)
+  // (Pointed at, its face says who it is: a Project Pip's character and role as before, any other Pip's name. Its
+  // name is always drawn, his call of 15 Nov; where it ends in "…" the name itself says all of it when pointed at.)
   const thread=convThreadMarkup(p),pillTitle=project&&pipType(p,S.types)?`${type.name} · ${type.role}`:p.name;
-  return `<header class="pip-topbar pip-topbar-chat${thread?(convSeveral()?' has-threads':' one-thread'):''}"><button type="button" id="simple-back" class="topbar-icon" aria-label="Your Pips" title="Your Pips">${simpleIcon('back')}</button><div class="pip-pill${pipOff(p)?' is-off':''}" title="${esc(pillTitle)}">${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span class="pip-name">${esc(p.name)}</span>${project?`<small class="pip-status">${lastRunLink(p,pose.label)}</small>`:folderPip?folderWhereMarkup(p):''}</div>${thread}${actions}${convMenuMarkup()}${computerMenuMarkup()}</header>`;
+  return `<header class="pip-topbar pip-topbar-chat${thread?(convSeveral()?' has-threads':' one-thread'):''}"><button type="button" id="simple-back" class="topbar-icon" aria-label="Your Pips" title="Your Pips">${simpleIcon('back')}</button><div class="pip-pill${pipOff(p)?' is-off':''}" title="${esc(pillTitle)}">${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span class="pip-name" title="${esc(p.name)}">${esc(p.name)}</span>${project?`<small class="pip-status">${lastRunLink(p,pose.label)}</small>`:folderPip?folderWhereMarkup(p):''}</div>${thread}${actions}${convMenuMarkup()}${computerMenuMarkup()}</header>`;
  }
  return `<header class="pip-topbar"><button type="button" id="simple-to-chat" class="topbar-icon" aria-label="Back to the chat" title="Back to the chat">${simpleIcon('back')}</button><div class="pip-pill${pipOff(p)?' is-off':''}"${project&&pipType(p,S.types)?` title="${esc(`${type.name} · ${type.role}`)}"`:''}>${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span>${esc(p.name)}</span><small>${esc(project||folderPip?(every.find(([key])=>key===S.tab)||[])[1]||'':sections.length&&{runs:historyName('Results'),job:'Settings',memory:'Memory',revisions:'Versions',notifications:'Notifications',schedule:'Schedule',handoffs:'Handoffs',context:'Context'}[S.tab]||'')}</small></div>${actions}${computerMenuMarkup()}</header>`;
 }

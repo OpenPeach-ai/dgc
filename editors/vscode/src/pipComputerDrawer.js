@@ -4,7 +4,7 @@
 //
 // The drawer is DGC's own page. It is never drawn into the computer's desktop or a frame the Pip reads, and nothing
 // done on it is sent to the computer.
-import {carefulWords,sendsWords,isPayment,offersAlways,limitWords,asksWords,coversWords} from './pipCareful.js';
+import {carefulWords,heldRequestAnswers,sendsWords,isPayment,limitWords,asksWords,coversWords} from './pipCareful.js';
 import {esc} from './pipsModel.js';
 
 /** How long things take, in ms: a card springing in, a card leaving, an answered card's moment, a banner's stay, the bell's wiggle. */
@@ -34,19 +34,19 @@ export function ageWords(created,now=Date.now()){
 }
 
 /** What a waiting approval says on its card: the kind (its tile), where it is from, what it wants in bold, one line of
- *  detail, the rest of what its card always showed (the detail, one press away), and its answers. Each answer: how it is
- *  sent (send, always, reject), its label, and the quiet word that takes the buttons' place once it is given. */
+ *  detail, the rest of what its card always showed (the detail, one press away), and its answers: the ones its card in
+ *  the Pip's chat offers, in the same order and words (one list, pipCareful.js heldRequestAnswers; his call of 15 Nov). Each
+ *  answer: how it is given (login, review, send, always, reject), its label, and the quiet word that takes the buttons'
+ *  place once it is given. */
 export function cardWords(a,pipName='The Pip'){
  const s=a.summary||{},words=carefulWords(s,pipName),site=s.site||s.host||'a site';
- if(words&&s.kind==='login')return {kind:'signin',source:site,title:words[0],line:`${words[1]} Save it from the card in its chat.`,sends:'',text:'',
-  answers:[{how:'reject',label:'Not now',done:'Not now'}]};
- if(words)return {kind:s.kind==='floor'?'terminal':s.kind,source:s.kind==='floor'?'Terminal':site,title:words[0],line:words[1],sends:'',text:s.kind==='text'&&typeof s.text==='string'?s.text:'',
-  answers:[{how:'send',label:words[2],done:'Allowed'},...(offersAlways(s)?[{how:'always',label:'Always allow',done:'Always allowed'}]:[]),{how:'reject',label:'Not now',done:'Not now'}]};
+ const answers=heldRequestAnswers(s,pipName);
+ if(words&&s.kind==='login')return {kind:'signin',source:site,title:words[0],line:words[1],sends:'',text:'',answers};
+ if(words)return {kind:s.kind==='floor'?'terminal':s.kind,source:s.kind==='floor'?'Terminal':site,title:words[0],line:words[1],sends:'',text:s.kind==='text'&&typeof s.text==='string'?s.text:'',answers};
  const asks=asksWords(s),sends=sendsWords(s);
  const limit=limitWords(s);
  const line=`${s.payment===true?'Sends payment card details. ':''}${asks}${asks?' ':''}Nothing has been sent. ${coversWords(s)}.`;
- return {kind:s.kind==='download'?'download':isPayment(s)?'payment':'form',source:s.host,title:`${isPayment(s)?'Pay on':'Send a form to'} ${s.host}`,line,sends,text:'',limit,
-  answers:[{how:'send',label:'Send once',done:'Sent once'},{how:'always',label:'Always allow',done:'Always allowed'},{how:'reject',label:'Reject',done:'Rejected'}]};
+ return {kind:s.kind==='download'?'download':isPayment(s)?'payment':'form',source:s.host,title:`${isPayment(s)?'Pay on':'Send a form to'} ${s.host}`,line,sends,text:'',limit,answers};
 }
 
 /** The card's title alone, for the bell's own words. */
@@ -59,7 +59,7 @@ function cardMarkup(card,{pipName,now,open}){
  const detail=`${w.sends?`<span class="pc-sends">${esc(w.sends)}</span>`:''}<span>${esc(w.line)}</span>${w.text?`<pre class="pc-held-text">${esc(w.text)}</pre>`:''}`;
  const answers=answered
   ?`<span class="pc-card-done" role="status">${svg(CHECK)}<span>${esc(card.done)}</span></span>`
-  :`<div class="pc-card-actions pc-actions">${w.answers.map((b,i)=>`<button type="button" id="pc-${b.how}-${id}" class="pc-pill${i===0&&b.how==='send'?' solid':''}" data-${b.how}="${id}">${esc(b.label)}</button>`).join('')}</div>`;
+  :`<div class="pc-card-actions pc-actions">${w.answers.map((b,i)=>`<button type="button" id="pc-${b.how}-${id}" class="pc-pill${i===0&&b.how!=='reject'?' solid':''}" data-${b.how}="${id}">${esc(b.label)}</button>`).join('')}</div>`;
  return `<div class="pc-card pc-hold" role="listitem" data-card="${id}" data-state="${answered?'answered':'waiting'}" data-kind="${w.kind}" aria-label="${esc(`${w.source}: ${w.title}`)}">`
   +`<span class="pc-card-tile" aria-hidden="true">${svg(KIND[w.kind]||KIND.form)}</span>`
   +`<div class="pc-card-body"><p class="pc-card-top"><span class="pc-card-source">${esc(w.source)}</span><span aria-hidden="true">·</span><span class="pc-card-age">${esc(ageWords(a.created_at,now))}</span></p>`

@@ -2,17 +2,20 @@
 // The tab talks to the extension host exactly as the Pips view does (pipsRequest/pipsReply), and
 // the host pins it to this one Pip and to the computer commands.
 import {DRAWER,cardWords,cardTitle,drawerMarkup,bellMarkup} from './pipComputerDrawer.js';
+import {reviewWords} from './pipCareful.js';
+import {loginFormMarkup,readLoginForm,loginFormProblem,clearLoginForm} from './pipLogins.js';
 import {computerPortal} from './pipComputerNames.js';
 // One set of tokens for every page, first, so each page's own stylesheet can lean on it (media/shared/tokens.css).
 import '../media/shared/tokens.css';
 import '../media/shared/menu.css';
+import '../media/shared/dialog.css';
 // This computer's own mark, the maintainer's Portal, as he wrote it: in the bar, beside the computer's name.
 import '../media/shared/portal.css';
 import './pipComputer.css';
 import '../media/shared/menu.js';
 import '../media/pips/plush.js';
 import RFB from '@novnc/novnc';
-import {esc,errorText,record,requestBroker,pipComputer,pipComputerView,pipComputerAction,pipComputerFiles,pipComputerFile,pipComputerTerminal,pipComputerTerminalEntry,pipComputerDesktop,pipComputerPointer,pipComputerApps} from './pipsModel.js';
+import {esc,errorText,record,requestBroker,pipLogin,pipComputer,pipComputerView,pipComputerAction,pipComputerFiles,pipComputerFile,pipComputerTerminal,pipComputerTerminalEntry,pipComputerDesktop,pipComputerPointer,pipComputerApps} from './pipsModel.js';
 
 const vscode=acquireVsCodeApi();
 const TYPES=['core','scout','lens','patch','rook','pulse','lock','quill'];
@@ -682,11 +685,85 @@ async function decide(id,how){
    S.notice=a.summary?.kind==='site'?(d.status==='approved'?'Allowed. It opens the site and carries on.':'Not now. It won’t open it.'):a.summary?.kind==='text'?(d.status==='approved'?'Allowed once. It carries on.':'Not now. It won’t do that.'):d.status==='approved'?'Approved. It is sent within a few seconds, exactly as shown.':'Rejected. Nothing was sent.';
   }
   // Its card says so in place of its buttons for a moment, then leaves (the drawer).
-  settle(a,cardWords(a,S.pip?.name||'The Pip').answers.find(b=>b.how===how)?.done||'Done');
+  settle(a,cardWords(a,S.pip?.name||'The Pip').answers.find(b=>b.how===how||how==='send'&&b.how==='review')?.done||'Done');
   S.computer={...S.computer,actions:S.computer.actions.filter(item=>item.id!==a.id)};
  }catch(error){S.error=errorText(error);S.actionError=true;}
  finally{S.busy=false;await loadComputer();if(within&&settledCard(id))$(`pc-open-${id}`)?.focus();}
 }
+// ---- A card's own dialog (15 Nov: a notification offers what its card in the Pip's chat offers). "Save login…" opens
+// the chat's login form here, and "Review…" shows what a payment sends before it is sent, with the card's other
+// answers. It is DGC's own page, over the screen: nothing typed in it reaches the computer, and a password is sent to
+// DGC's sealed store once and kept nowhere here. It is drawn once and never rebuilt while it is open (that would empty
+// what is being typed); only its error and its buttons change.
+let cardDialog=null;
+function openCardDialog(kind,id){
+ const a=(S.computer?.actions||[]).find(x=>x.id===id);if(!a||S.busy||settledCard(id)||cardDialog||!S.connected)return;
+ const name=S.pip?.name||'The Pip',s=a.summary||{},root=document.createElement('div');
+ cardDialog={kind,a,from:`pc-${kind}-${id}`};root.id='pc-dialog-root';
+ let body;
+ if(kind==='login'){const site=s.site||s.host;
+  body=`<h2 id="pc-dialog-title" tabindex="-1">${esc(`Save a login for ${site}`)}</h2><p>${esc(`So ${name} can sign in to ${site} by itself.`)}</p>${loginFormMarkup({esc,site,shown:s.shown||s.host,fixed:true,pipName:name})}`;
+ }else{const say=reviewWords(s,name),fields=Array.isArray(s.fields)?s.fields:[];
+  body=`<h2 id="pc-dialog-title" tabindex="-1">${esc(say.title)}</h2><p>${esc(say.description)}</p>`
+   +`<dl class="pc-dialog-meta"><dt>Sends to</dt><dd>${esc(s.host)}${esc(s.path)}</dd>${s.page?`<dt>From page</dt><dd>${esc(s.page)}</dd>`:''}${fields.map(f=>`<dt>${esc(f.name)}</dt><dd>${esc(f.value)}</dd>`).join('')}</dl>`
+   +`${s.more_fields?`<p class="muted">And ${esc(String(s.more_fields))} more fields.</p>`:''}${say.notice?`<p class="pc-dialog-notice">${esc(say.notice)}</p>`:''}${say.limit?`<p class="muted">${esc(say.limit)}</p>`:''}<p class="muted">${esc(say.sent)}</p>`
+   +`<p class="error" role="alert" id="login-error" hidden></p><div class="actions"><button type="button" id="pc-review-reject" class="pc-dialog-first">Reject</button><button type="button" id="review-cancel">Cancel</button>`
+   +`<button type="button" id="pc-review-always">Always allow</button><button type="button" id="pc-review-send" class="primary">Send once</button></div>`;}
+ root.innerHTML=`<div class="pc-scrim dgc-scrim"><section class="pc-dialog dgc-dialog" data-kind="${kind}" role="dialog" aria-modal="true" aria-labelledby="pc-dialog-title">${body}</section></div>`;
+ for(const b of root.querySelectorAll('.actions button'))b.classList.add('dgc-btn');   // the shared button, as every dialog's
+ // (In full screen only what is inside the element shown is drawn.)
+ (document.fullscreenElement||document.body).appendChild(root);
+ (kind==='login'?$('loginUser'):$('pc-dialog-title'))?.focus({preventScroll:true});
+}
+function closeCardDialog(){
+ const root=$('pc-dialog-root'),from=cardDialog?.from;if(!root)return;
+ clearLoginForm(root);root.remove();cardDialog=null;if(from)$(from)?.focus();
+}
+function sayInDialog(error=''){
+ const root=$('pc-dialog-root');if(!root)return;
+ for(const box of root.querySelectorAll('input,button'))if(box.id!=='review-cancel')box.disabled=S.busy;
+ const said=root.querySelector('#login-error');if(said){said.textContent=error;said.hidden=!error;}
+}
+async function saveCardLogin(){
+ const d=cardDialog,root=$('pc-dialog-root');if(!d||d.kind!=='login'||!root||S.busy)return;
+ const values=readLoginForm(root,true),problem=loginFormProblem(values,true);
+ if(problem){sayInDialog(problem);return;}
+ // The card's own id and digest say which site: the page names none.
+ const request={pip_id:S.pip.id,username:values.username,password:values.password,pips:values.all?'all':'only',...(values.totp?{totp:values.totp}:{}),action_id:d.a.id,expected_digest:d.a.digest};
+ values.password='';values.totp='';
+ ++computerRefreshSerial;S.busy=true;S.error='';S.actionError=false;S.notice='';sayInDialog();
+ let saved=null,failed='';
+ try{saved=pipLogin((await send('save_pip_login',request)).login);}
+ catch(error){failed=errorText(error);}
+ request.password='';if(request.totp)request.totp='';
+ S.busy=false;
+ if(cardDialog!==d){await loadComputer();return;}
+ if(!saved){sayInDialog(failed||'The login was not saved. Try again.');return;}
+ closeCardDialog();
+ S.notice=`Saved. ${S.pip?.name||'It'} signs in to ${saved.site} by itself now.`;
+ settle(d.a,'Saved');S.computer={...S.computer,actions:S.computer.actions.filter(item=>item.id!==d.a.id)};
+ await loadComputer();
+}
+async function answerReview(how){
+ const d=cardDialog;if(!d||d.kind!=='review'||S.busy)return;
+ const id=d.a.id;closeCardDialog();await decide(id,how);
+}
+function dialogClick(event){
+ const t=event.target.closest('button');if(!t)return;
+ if(t.id==='review-cancel')closeCardDialog();
+ else if(t.id==='pc-review-send')void answerReview('send');
+ else if(t.id==='pc-review-always')void answerReview('always');
+ else if(t.id==='pc-review-reject')void answerReview('reject');
+}
+// Its keys are its own (before any other listener hears them): Escape closes it and nothing else, and Tab stays in it.
+document.addEventListener('keydown',event=>{
+ const root=$('pc-dialog-root');if(!root)return;
+ if(event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();if(!S.busy)closeCardDialog();return;}
+ if(event.key==='Tab'){const stops=[...root.querySelectorAll('input,button')].filter(e=>!e.disabled);if(!stops.length)return;
+  const first=stops[0],last=stops[stops.length-1],at=document.activeElement;
+  if(!root.contains(at)||event.shiftKey&&at===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&at===last){event.preventDefault();first.focus();}}
+ event.stopImmediatePropagation();
+},true);
 function screenPoint(event){
  const img=$('pc-screen');if(!img)return null;const box=img.getBoundingClientRect();
  return {x:Math.round((event.clientX-box.left)/box.width*Number(img.dataset.width)),y:Math.round((event.clientY-box.top)/box.height*Number(img.dataset.height))};
@@ -719,6 +796,7 @@ document.addEventListener('click',event=>{
  const wasSize=S.sizeMenu&&!event.target.closest?.('#pc-size-menu,#pc-size,#pc-more-menu'),wasMore=S.more&&!event.target.closest?.('#pc-more-menu,#pc-more');
  if(wasSize)S.sizeMenu=false;if(wasMore)S.more=false;if(wasSize||wasMore)render();
  // A press on the drawer is the drawer's alone: it is DGC's page over the screen, and never a press on the computer.
+ if(event.target.closest?.('#pc-dialog-root')){dialogClick(event);return;}
  if(event.target.closest?.('#pc-drawer')){drawerClick(event);return;}
  // A press anywhere else folds the drawer back to its stack.
  if(S.fan&&!event.target.closest?.('#pc-bell'))setFan(false);
@@ -774,6 +852,8 @@ function drawerClick(event){
  if(t.id==='pc-drawer-collapse')collapseDrawer();
  else if(t.dataset.cardOpen){const id=t.dataset.cardOpen;if(S.detail.has(id))S.detail.delete(id);else S.detail.add(id);if(!tucked())S.fan=true;render();}
  else if(t.dataset.cardClear)dismiss(t.dataset.cardClear,true);
+ else if(t.dataset.login)openCardDialog('login',t.dataset.login);
+ else if(t.dataset.review)openCardDialog('review',t.dataset.review);
  else if(t.dataset.send)void decide(t.dataset.send,'send');
  else if(t.dataset.always)void decide(t.dataset.always,'always');
  else if(t.dataset.reject)void decide(t.dataset.reject,'reject');
@@ -806,6 +886,7 @@ document.addEventListener('submit',event=>{
  event.preventDefault();
  if(event.target.id==='pc-go'){const url=$('pc-url').value.trim();S.address=null;if(url)void frame('go',{url:/^[a-z]+:\/\//i.test(url)?url:/\s/.test(url)||!url.includes('.')?'https://duckduckgo.com/?q='+encodeURIComponent(url):'https://'+url});}
  if(event.target.id==='pc-run')void runCommand($('pc-command').value);
+ if(event.target.id==='login-form')void saveCardLogin();
 });
 document.addEventListener('input',event=>{if(event.target.id==='pc-command')S.terminal.draft=event.target.value;if(event.target.id==='pc-url')S.address=event.target.value;
  if(event.target.id==='pc-paste-text'){S.clip.draft=event.target.value;if(S.clip.note)clipSay('');}});

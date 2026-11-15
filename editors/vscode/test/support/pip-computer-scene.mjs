@@ -39,6 +39,10 @@ function host(PIP, scene) {
     // The held submits (scene.actions): an answer settles one, as DGC does, and it is gone from the next look.
     decide_pip_computer_action: (r) => { const a = scene.actions.find((x) => x.id === r.action_id); scene.actions = scene.actions.filter((x) => x !== a); return { action: { ...a, status: r.approve ? "approved" : "rejected" } }; },
     always_allow_pip_computer_action: (r) => { const a = scene.actions.find((x) => x.id === r.action_id); scene.actions = scene.actions.filter((x) => x !== a); return { action: { ...a, status: "approved" }, grant: { id: "grant_" + "1".repeat(32) } }; },
+    // A login saved from its card (15 Nov): the card is answered by it, and DGC says the login it sealed (never the password).
+    save_pip_login: (r) => { const a = scene.actions.find((x) => x.id === r.action_id); scene.actions = scene.actions.filter((x) => x !== a);
+      return { login: { id: "login_" + "1".repeat(32), site: a.summary.site, hosts: [a.summary.host], username: r.username, has_code: !!r.totp, pips: r.pips === "all" ? "all" : [PIP.id], source: "card",
+        created_at: new Date().toISOString(), last_used_at: null }, action: { ...a, status: "approved" } }; },
     // Stop: DGC says it is stopping, and the screen's stream closes a moment later.
     stop_pip_computer: () => { setTimeout(() => post({ type: "pipDesktopClosed", reason: "The computer's screen closed." }), 40); return { pip_id: PIP.id, stopping: true }; },
   };

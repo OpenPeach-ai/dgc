@@ -132,7 +132,7 @@ for (const width of WIDTHS) {
       assert.equal(await x.p.textContent("#pc-bell .pc-bell-count"), "4");
       // Answered from the drawer: the quiet word, and the screen in its place.
       await x.p.click("#pc-bell"); await fanned(x.p);
-      await x.p.click(`[data-send="${PAY.id}"]`); await x.p.waitForSelector(`.pc-card[data-card="${PAY.id}"] .pc-card-done`); await settled(x.p);
+      await x.p.click(`[data-review="${PAY.id}"]`); await x.p.click("#pc-review-send"); await x.p.waitForSelector(`.pc-card[data-card="${PAY.id}"] .pc-card-done`); await settled(x.p);
       const answered = await look(x.p);
       same(answered, idle, "with an answered card"); for (const b of answered.buttons) inside(b, answered.drawer, `“${b.text}” is inside the drawer`);
       assert.deepEqual(x.errors, []);

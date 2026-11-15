@@ -170,7 +170,8 @@ test('a login reply is checked: never a password or a key, and the right shape',
  assert.throws(()=>model.pipLogins({logins:[],extra:1},PIP),/saved logins didn't load/);
 });
 
-test('the computer tab shows a login card with Not now only: the form is in its chat',async()=>{
+// (15 Nov: its notification offers what its chat card offers; the form opens there too. test/pip-held-answers.test.mjs.)
+test('the computer tab shows a login card with its chat card\'s answers: Save login… and Not now',async()=>{
  const dom=new JSDOM(viewModule.computerDocument(),{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);
  const sent=[],answered=new Set();w.setInterval=()=>0;w.clearInterval=()=>{};
  w.acquireVsCodeApi=()=>({postMessage:m=>sent.push(m),getState:()=>undefined,setState:()=>{}});
@@ -182,7 +183,7 @@ test('the computer tab shows a login card with Not now only: the form is in its 
   use_pip_computer_view:{view:{ok:true,watching:false,url:'https://login.northwind-bank.example/signin',width:1280,height:800,image:'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ=='}},
   get_pip_computer_apps:{apps:{apps:[],missing:[],state:'ready',line:'',bytes:null}}}[r.type];if(result){answered.add(m.id);message({type:'pipsReply',id:m.id,ok:true,result});}}}
  const hold=w.document.querySelector('.pc-hold');assert.ok(hold);
- assert.match(hold.textContent,/Save a login for northwind-bank\.example so Banker can sign in itself\?.*Save it from the card in its chat\./);
+ assert.match(hold.textContent,/Save a login for northwind-bank\.example so Banker can sign in itself\?/);assert.doesNotMatch(hold.textContent,/card in its chat/);
  // (Its answers: from 0.52 the card's title is a button too, which opens its detail.)
- assert.deepEqual([...hold.querySelectorAll('.pc-card-actions button')].map(b=>b.textContent),['Not now']);
+ assert.deepEqual([...hold.querySelectorAll('.pc-card-actions button')].map(b=>b.textContent),['Save login…','Not now']);
 });

@@ -197,10 +197,11 @@ test('a real payment with no card number in it is Pay, with Always allow inside 
  assert.doesNotMatch(text,/Inside its daily limit/,'only a payment says so');
 });
 
-test('a payment waits with Send once, Always allow and Reject, in the order of every other card',async()=>{
+// (15 Nov: its chat card's answers. A payment is reviewed first there, so here too: test/pip-held-answers.test.mjs.)
+test('a payment waits with Review…, Always allow and Reject, in the order of every other card',async()=>{
  const x=setup({status:computer({pending:1,actions:[{...hold,summary:{...hold.summary,payment:true}}]})});await x.drain();
- assert.ok(x.d.querySelector(`[data-send="${actionId}"]`));assert.ok(x.d.querySelector(`[data-reject="${actionId}"]`));
- assert.deepEqual([...x.d.querySelectorAll('.pc-waiting .pc-card-actions button')].map(b=>b.textContent),['Send once','Always allow','Reject']);
+ assert.ok(x.d.querySelector(`[data-review="${actionId}"]`));assert.equal(x.d.querySelector(`[data-send="${actionId}"]`),null);assert.ok(x.d.querySelector(`[data-reject="${actionId}"]`));
+ assert.deepEqual([...x.d.querySelectorAll('.pc-waiting .pc-card-actions button')].map(b=>b.textContent),['Review…','Always allow','Reject']);
  x.click(`[data-always="${actionId}"]`);await x.drain();
  assert.equal(x.requests('always_allow_pip_computer_action')[0].request.action_id,actionId,'it asks DGC for the grant');
  const plain=setup({status:computer({pending:1,actions:[hold]})});await plain.drain();

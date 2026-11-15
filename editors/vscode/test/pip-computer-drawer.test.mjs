@@ -103,7 +103,7 @@ test('the bell says how many wait, and is not there at none; it stands where the
  x.click(`[data-reject="${FORM.id}"]`);await x.drain();
  assert.equal(x.bell().count,'1');assert.equal(x.bell().label,'1 waiting for you: Pay on pay.example');
  assert.equal(x.$('.pc-drawer-count').textContent,'1');
- x.click(`[data-send="${PAY.id}"]`);await x.drain();
+ x.click(`[data-review="${PAY.id}"]`);x.click('#pc-review-send');await x.drain();   // (a payment: Review… first, as its chat card; 15 Nov)
  assert.equal(x.bell(),null,'the bell goes with the last one');
  // With its live screen the bell is in the same bar, before Full screen.
  const live=setup({actions:[FORM],screen:true});await live.drain();
@@ -120,8 +120,8 @@ test('every approval is a notification card, newest first: a tile for its kind, 
   ['form','shop.example','4m','Send a form to shop.example'],
   ['site','news.example','2h','Let Shopper visit news.example?'],
   ['signin','bank.example','2d','Save a login for bank.example so Shopper can sign in itself?']]);
- assert.deepEqual(x.cards().map(c=>c.buttons),[['Send once','Always allow','Reject'],['Allow once','Always allow','Not now'],['Send once','Always allow','Reject'],['Allow this site','Not now'],['Not now']],'Always allow on every card that DGC can grant (15 Nov): a payment and app data too; a new site and a login never');
- assert.deepEqual(x.cards().map(c=>c.solid),[[true,false,false],[true,false,false],[true,false,false],[true,false],[false]],'the answer that lets it through is the solid one; a login has none here');
+ assert.deepEqual(x.cards().map(c=>c.buttons),[['Review…','Always allow','Reject'],['Allow once','Always allow','Not now'],['Send once','Always allow','Reject'],['Allow this site','Not now'],['Save login…','Not now']],'its chat card\'s answers, word for word (15 Nov): Always allow on every card that DGC can grant, a payment and app data too, a new site and a login never; a payment is reviewed first; a login is saved from here');
+ assert.deepEqual(x.cards().map(c=>c.solid),[[true,false,false],[true,false,false],[true,false,false],[true,false],[true,false]],'the answer that lets it through is the solid one');
  assert.ok(x.cards().every(c=>c.state==='waiting'&&c.done===null));
  for(const card of x.all('#pc-drawer .pc-card')){assert.ok(card.querySelector('.pc-card-tile svg'),'each has its kind\'s icon');assert.equal(card.getAttribute('role'),'listitem');}
  assert.equal(x.$('#pc-drawer .pc-waiting').getAttribute('role'),'list');
@@ -196,7 +196,7 @@ test('a waiting card can\'t be cleared, swiped away or deleted; an answered one 
  assert.equal(x.$(`[data-card-clear="${FORM.id}"]`).getAttribute('aria-label'),'Clear');
  x.click(`[data-card-clear="${FORM.id}"]`);
  assert.deepEqual(x.cards().map(c=>c.id),[PAY.id],'cleared at once');
- x.click(`[data-send="${PAY.id}"]`);await x.drain();
+ x.click(`[data-review="${PAY.id}"]`);x.click('#pc-review-send');await x.drain();   // (a payment: Review… first, as its chat card; 15 Nov)
  const paid=x.$(`.pc-card[data-card="${PAY.id}"]`);
  x.pointer(paid,'pointerdown',20);x.pointer(paid,'pointermove',60);
  assert.match(paid.style.transform,/translateX\(40px\)/,'an answered card follows the drag');
@@ -212,7 +212,7 @@ test('a waiting card can\'t be cleared, swiped away or deleted; an answered one 
 
 test('an answered card says so for a moment in place of its buttons, then leaves: Sent once, Always allowed, Rejected, Allowed, Not now',async()=>{
  const x=setup({actions:[PAY,TEXT,FORM,SITE]});await x.drain();
- x.click(`[data-send="${PAY.id}"]`);await x.drain();
+ x.click(`[data-review="${PAY.id}"]`);x.click('#pc-review-send');await x.drain();   // (a payment: Review… first, as its chat card; 15 Nov)
  assert.deepEqual(x.requests('decide_pip_computer_action'),[{type:'decide_pip_computer_action',action_id:PAY.id,expected_digest:PAY.digest,approve:true}]);
  let paid=x.cards()[0];
  assert.deepEqual([paid.id,paid.state,paid.done,paid.buttons],[PAY.id,'answered','Sent once',[]],'the buttons give way to the quiet word, in its place in the list');
@@ -285,7 +285,7 @@ test('a card that arrives opens the drawer; collapsed, it shows alone for 6 seco
  await x.arrive([PAY,FORM]);
  assert.equal(x.bell().count,'2','the count goes up');assert.equal(x.bell().expanded,'false','the drawer stays collapsed');
  assert.ok(x.shown());assert.ok(x.$('#pc-drawer').classList.contains('pc-drawer-banner'),'a banner');
- assert.deepEqual(x.cards().map(c=>[c.id,c.buttons]),[[PAY.id,['Send once','Always allow','Reject']]],'the new one alone, with its buttons');
+ assert.deepEqual(x.cards().map(c=>[c.id,c.buttons]),[[PAY.id,['Review…','Always allow','Reject']]],'the new one alone, with its buttons');
  assert.equal(x.$('#pc-drawer .pc-drawer-head'),null,'no header on a banner');
  await x.wait(5500);await x.poll();
  assert.ok(x.shown(),'still there at 5.5 s');

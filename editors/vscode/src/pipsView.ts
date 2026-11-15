@@ -317,6 +317,19 @@ export function computerDocument(scriptUri = '', styleUri = '', cspSource = '', 
 /** Continue in Work on a Pip's project change: what the panel opens Work with. */
 export type ProjectWork = { name: string; change_id: string; file: string; patch: string; brief: string };
 /** What a computer tab may ask for: its own Pip's computer, nothing else. */
+/** What a computer tab may not ask ('' when it may): it is pinned to its own Pip and to the computer's commands. Saving
+ *  a login is one of them only as the answer to a card its computer holds (15 Nov: a login's notification offers "Save
+ *  login…" as its chat card does): the request names that card and its digest and never a site, so DGC saves the login
+ *  for the site the Pip itself met, and nothing else about logins (listing, removing, sharing) is a computer tab's. */
+export function computerTabRefusal(request: any, pipId: string): string {
+  const refused = 'This tab only uses this Pip\'s computer.';
+  if (!request || typeof request !== 'object') return refused;
+  const own = (key: string) => Object.prototype.hasOwnProperty.call(request, key);
+  if (own('pip_id') && request.pip_id !== pipId) return refused;
+  if (request.type === 'save_pip_login') return request.pip_id === pipId && typeof request.action_id === 'string' && /^compact_[a-f0-9]{32}$/.test(request.action_id)
+    && typeof request.expected_digest === 'string' && !own('site') ? '' : refused;
+  return COMPUTER_COMMANDS.has(request.type) ? '' : refused;
+}
 const COMPUTER_COMMANDS = new Set(['get_pip_computer','open_pip_computer','use_pip_computer_view','stop_pip_computer','list_pip_computer_actions','decide_pip_computer_action','always_allow_pip_computer_action','list_pip_computer_files','read_pip_computer_file','add_pip_computer_file','remove_pip_computer_file','run_pip_computer_command','list_pip_computer_terminal','get_pip_computer_desktop','get_pip_computer_apps','set_pip_computer_apps','set_pip_computer_screen']);
 const PIP_TYPES = ['core','scout','lens','patch','rook','pulse','lock','quill'];
 /** Big files into and out of a Pip computer's Files (pc-background-commands, Pips API 87): copy_pip_computer_file_in
@@ -1376,7 +1389,7 @@ export class PipsEditor implements vscode.Disposable {
     // The copy commands carry a path on this computer: no page sends one, whichever page it is.
     if (COMPUTER_COPY_COMMANDS.has(message.request?.type)) { fail(this.apiVersion < COMPUTER_COPY_API ? 'Update DGC to copy files over 2 MB.' : 'Use Add file… or Save to this computer… in the computer’s Files.'); return; }
     // A computer tab is pinned to its own Pip and to the computer's commands.
-    if (computer && (!COMPUTER_COMMANDS.has(message.request?.type) || (Object.prototype.hasOwnProperty.call(message.request, 'pip_id') && message.request.pip_id !== computer.pip.id))) { fail('This tab only uses this Pip\'s computer.'); return; }
+    if (computer) { const refused = computerTabRefusal(message.request, computer.pip.id); if (refused) { fail(refused); return; } }
     // And to its own one of them: a tab says no other computer's number.
     if (computer && Object.prototype.hasOwnProperty.call(message.request, 'number') && message.request.number !== computer.number) { fail('This tab only uses this computer.'); return; }
     if (this.requireGeneration && message.generation !== this.generation) { fail('This view is from an earlier connection. Refresh and try again.'); return; }

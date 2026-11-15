@@ -33,7 +33,7 @@ for (const theme of ["dark", "light"]) for (const width of [1100, 700, 300]) {
   await x.p.waitForSelector("#pc-drawer.pc-drawer-banner", { timeout: 15000 });
   await shot("banner");
   await x.p.click("#pc-bell"); await x.p.waitForSelector("#pc-drawer.pc-fan");
-  await x.p.click(`[data-send="${PAY.id}"]`); await x.p.waitForSelector(".pc-card-done"); await x.p.mouse.move(box.x + box.width / 2, box.y + 30);
+  await x.p.click(`[data-review="${PAY.id}"]`); await x.p.click("#pc-review-send"); await x.p.waitForSelector(".pc-card-done"); await x.p.mouse.move(box.x + box.width / 2, box.y + 30);
   await x.p.waitForTimeout(250); await x.p.screenshot({ path: `${out}/drawer-answered-${theme}-${width}.png` });
   if (x.errors.length) console.error(theme, width, x.errors);
   await x.close();

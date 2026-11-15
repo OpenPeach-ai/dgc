@@ -58,7 +58,7 @@ export const host = (opts) => `(${function (PIP, opts) {
   const types = ["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"].map((id, character_index) => ({ id, character_index, name: id[0].toUpperCase() + id.slice(1), role: id,
     description: "Reads the committed code and says what it finds.", available: true, unavailable_reason: null, default_name: id, default_goal: "Help",
     engine: id === "patch" ? "patch" : id === "pulse" ? "test" : id === "quill" ? "documentation_draft" : "source_audit" }));
-  const project = !!opts.project, name = project ? "Billing review" : "Mornings";
+  const project = !!opts.project, name = opts.pipName || (project ? "Billing review" : "Mornings");   // (opts.pipName: its own name, for a long one)
   const pip = { id: PIP, workspace_id: W, pip_type: project ? "rook" : "lens", name, goal: project ? "Look for billing bugs that charge the wrong amount." : "Send a short morning news brief.",
     source_policy: { mode: project ? "committed_only" : "personal" }, source_ref: "HEAD", status: "active", current_version: 2, lifecycle_revision: 0, policy: "read_only",
     trigger: "manual", schedule: null, proposals: [], pending_review_count: 0, model_choice: { mode: "default" } };
