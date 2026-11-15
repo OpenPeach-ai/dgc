@@ -321,8 +321,10 @@ class Reviews:
                 return None
             thread = threading.Thread(target=self._run, args=(key,), daemon=True,
                                       name=f"dgc-memory-review-{str(key)[:24]}")
+            # Started before it is listed and before the lock is let go: a close() or wait() that lands here never
+            # joins a thread that hasn't started (its _run takes the lock only when it ends).
+            thread.start()
             self._running[key] = thread
-        thread.start()
         return thread
 
     def _run(self, key: str) -> None:

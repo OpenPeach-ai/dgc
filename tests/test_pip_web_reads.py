@@ -252,7 +252,8 @@ def chat(self, messages, tools=None, **kwargs):
     reference = json.dumps(messages)
     assert 'Untrusted web reference data' in reference, 'Web reference envelope missing'
     assert 'PAGE_TEXT_SENTINEL' in reference and 'SEARCH_TEXT_SENTINEL' in reference, 'Read text missing'
-    return ChatResult(content='All systems are normal and it will be sunny. No messages were sent.')
+    offered = ' '.join(sorted(t['function']['name'] for t in (tools or [])))
+    return ChatResult(content='All systems are normal and it will be sunny. No messages were sent. OFFERED: ' + offered)
 with patch.object(LLMClient, 'chat', chat), patch('requests.sessions.Session.request', side_effect=AssertionError('No network in the worker')):
     raise SystemExit(_worker_main())
 '''
@@ -267,6 +268,10 @@ with patch.object(LLMClient, 'chat', chat), patch('requests.sessions.Session.req
              patch.object(web, "_fetch_page", side_effect=lambda url: fetched.append(url) or (url, "PAGE_TEXT_SENTINEL")), \
              patch.object(web, "_search", side_effect=lambda query, config: fetched.append(query) or "SEARCH_TEXT_SENTINEL"):
             result = pips._execute_run(self.registry, row, self.cfg)
+        offered = set(str(result.get("text") or "").partition("OFFERED: ")[2].split())
+        # 0.52 (his "yes to your full add list"): the real worker is offered the Library, a page read, DGC's docs and
+        # deep research, not only their schemas in a list.
+        self.assertTrue({"make_artifact", "edit_artifact", "web_fetch", "dgc_docs", "deep_research"} <= offered, offered)
         self.store.finish(run["id"], result=result)
         self.assertEqual(self.store.run(run["id"])["status"], "succeeded")
         self.assertEqual(fetched, ["https://status.example.com/today", "weather in Pune today"])
