@@ -2305,3 +2305,178 @@ test("the Library's editor tab: his Iris books on its tab, opened on the tab ask
     assert.deepEqual(shown, [["maker", { kind: "session", id: "20261106-101500-a1", name: "Fix totals" }], ["maker", { kind: "pip", id: "pip_" + "b".repeat(32), name: "Tile checker" }], ["settings", "security"]]);
   } finally { delete host.openSettings; delete host.openMaker; }
 });
+
+// ---- an item's menu in the Library (0.52, 15 Nov): one route to the host, "itemAct" -----------------------------------------------
+// The page names an item (its kind and its id or path) and one of the eight things; the host does it only for an item
+// the Library was shown, from its OWN record of it: never a path, a title or content the page sent.
+test("an item's menu asks one way (itemAct): each of the eight is done only for an item the Library was shown, from the host's own record of it", async () => {
+  const vs = globalThis.__DGC_TEST_VSCODE, fs = vs.workspace.fs, kept = { readFile: fs.readFile, copy: fs.copy, delete: fs.delete, status: vs.window.setStatusBarMessage };
+  const read = [], copied = [], trashed = [], files = {};
+  fs.readFile = async (uri) => { read.push(uri.fsPath); if (!(uri.fsPath in files)) throw new Error("ENOENT"); return Buffer.from(files[uri.fsPath]); };
+  fs.copy = async (from, to) => { copied.push([from.fsPath, to.fsPath]); };
+  fs.delete = async (uri, options) => { trashed.push([uri.fsPath, options]); };
+  vs.window.setStatusBarMessage = () => ({ dispose() {} });
+  const wait = () => new Promise((r) => setTimeout(r, 8));
+  const ar = (c) => "ar_" + c.repeat(16), att = (c) => "att_" + c.repeat(32);
+  const DOC = { id: ar("3"), type: "doc", title: "Launch notes", version: 4, file: `/home/me/.dgc/artifacts/${ar("3")}/work/Launch notes.md`, exports: ["docx", "pdf", "md"] };
+  const PAGE = { id: ar("1"), type: "page", title: "Tide pool walk", version: 1, exports: ["html"] };
+  const hub = Object.assign(fakeArtifacts(), { renamed: [], detailed: [], async list() { return [DOC, PAGE]; },
+    async detail(id) { this.detailed.push(id); return id === DOC.id ? { view: DOC, content: "# Launch\n\nOn the 3rd." } : undefined; },
+    async rename(view) { this.renamed.push(view); return true; } });
+  chat.useArtifacts(hub);
+  chat.openLibrary();
+  const lib = world.panels.at(-1);
+  lib.say({ type: "ready" });
+  const act = async (what, item) => { lib.say({ type: "itemAct", act: what, item }); await wait(); };
+  const said = () => lib.webview.posted.filter((m) => m.type === "itemSaid").map((m) => m.words);
+  try {
+    // ---- artifacts: nothing is done for one the Library was not shown
+    await act("path", { kind: "artifact", id: DOC.id });
+    assert.equal(world.clipboard, "", "the Library has listed nothing yet: nothing is copied");
+    lib.say({ type: "artifactList" }); await wait();
+    await act("path", { kind: "artifact", id: DOC.id, file: "/etc/passwd", title: "x" });
+    assert.equal(world.clipboard, DOC.file, "Copy path: the doc's own file, as the host knows it (never a path the page sent)");
+    assert.deepEqual(said(), ["Path copied"]);
+    await act("reveal", { kind: "artifact", id: DOC.id, file: "/etc" });
+    assert.deepEqual([world.commands.at(-1)[0], world.commands.at(-1)[1].fsPath], ["revealFileInOS", DOC.file], "Reveal in file manager: VS Code's own");
+    await act("copy", { kind: "artifact", id: DOC.id });
+    assert.deepEqual(hub.detailed, [DOC.id]);
+    assert.equal(world.clipboard, "# Launch\n\nOn the 3rd.", "Copy: a doc's text");
+    assert.equal(said().at(-1), "Text copied");
+    await act("editor", { kind: "artifact", id: DOC.id });
+    assert.equal(world.shown.at(-1).path, DOC.file, "Open in editor: its Markdown file in an editor tab");
+    await act("open", { kind: "artifact", id: DOC.id });
+    assert.deepEqual(hub.opened.at(-1), [DOC.id, { type: "doc", title: "Launch notes", file: DOC.file }]);
+    // Save a copy…: the formats the editor offers for its kind, then its own save dialog (Artifacts.exportArtifact).
+    world.choose = (items) => { world.picks.push(items.map((i) => i.label)); return items.find((i) => i.format === "pdf"); };
+    await act("save", { kind: "artifact", id: DOC.id });
+    assert.deepEqual(world.picks.at(-1), ["Word document (.docx)", "PDF", "Markdown (.md)"]);
+    assert.deepEqual([hub.exported.at(-1)[0].id, hub.exported.at(-1)[1]], [DOC.id, "pdf"]);
+    const picks = world.picks.length;
+    await act("save", { kind: "artifact", id: PAGE.id });
+    assert.deepEqual([hub.exported.at(-1)[0].id, hub.exported.at(-1)[1], world.picks.length], [PAGE.id, "html", picks], "a page is saved as .html: one format, no question");
+    world.choose = undefined;
+    await act("rename", { kind: "artifact", id: DOC.id, title: "Not this" });
+    assert.deepEqual(hub.renamed, [{ id: DOC.id, title: "Launch notes", type: "doc" }], "Rename: the hub asks for the new name (Artifacts.rename)");
+    // What a page cannot do is not done, whatever the page asks.
+    const before = { clip: world.clipboard, commands: world.commands.length, shown: world.shown.length, detailed: hub.detailed.length };
+    for (const what of ["path", "reveal", "copy", "editor", "rename"]) await act(what, { kind: "artifact", id: PAGE.id, file: DOC.file });
+    assert.deepEqual({ clip: world.clipboard, commands: world.commands.length, shown: world.shown.length, detailed: hub.detailed.length }, before, "a page has no file and no text to copy");
+    assert.equal(hub.renamed.length, 1, "and is not renamed from here");
+    // An id that is an artifact's, but none the Library was shown; a thing that is not one of the eight.
+    await act("remove", { kind: "artifact", id: ar("9") }); await act("open", { kind: "artifact", id: ar("9") }); await act("delete-everything", { kind: "artifact", id: DOC.id });
+    assert.deepEqual([hub.removed.length, hub.opened.length], [0, 1]);
+    hub.answer = true;
+    await act("remove", { kind: "artifact", id: PAGE.id, title: "x" });
+    assert.deepEqual(hub.removed, [{ id: PAGE.id, title: "Tide pool walk" }], "Remove asks first (Artifacts.remove: a modal), by the host's own title");
+    assert.deepEqual(lib.last("artifactRemoved"), { type: "artifactRemoved", id: PAGE.id });
+
+    // ---- images: a file on disk, by a path images_library listed
+    const fox = "/home/me/app/assets/generated/fox.png";
+    files[fox] = "png-bytes"; files["/home/me/app/assets/generated/fox.json"] = JSON.stringify({ prompt: "a red fox", file: "fox.png", made_by: "DGC" });
+    host.imagesOffered = () => true;
+    host.imagesLibrary = async () => ({ type: "images_library", images: [{ path: fox, prompt: "a red fox", surface: "work" }], total: 1, next_offset: null });
+    await act("path", { kind: "image", path: fox });
+    assert.notEqual(world.clipboard, fox, "not listed yet: not copied");
+    lib.say({ type: "workImages", query: "", offset: 0, limit: 60, seq: 1 }); await wait();
+    await act("path", { kind: "image", path: fox });
+    assert.equal(world.clipboard, fox, "Copy path");
+    await act("path", { kind: "image", path: "/home/me/.ssh/id_rsa.png" });
+    assert.equal(world.clipboard, fox, "a path the Library wasn't given is never copied");
+    await act("reveal", { kind: "image", path: fox }); await act("open", { kind: "image", path: fox }); await act("editor", { kind: "image", path: fox });
+    assert.deepEqual(world.commands.slice(-3).map((c) => [c[0], c[1].fsPath]), [["revealFileInOS", fox], ["vscode.open", fox], ["vscode.open", fox]]);
+    await act("copy", { kind: "image", path: fox });
+    assert.deepEqual(lib.last("itemCopy"), { type: "itemCopy", key: `image:${fox}`, data: `data:image/png;base64,${Buffer.from("png-bytes").toString("base64")}` }, "Copy: the picture, handed to the page for the clipboard");
+    await act("copy", { kind: "image", path: "/home/me/secret.png" });
+    assert.ok(!read.includes("/home/me/secret.png"), "never one it wasn't given");
+    world.saveTo = { scheme: "file", fsPath: "/home/me/Desktop/fox.png" };
+    await act("save", { kind: "image", path: fox });
+    assert.deepEqual(copied.at(-1), [fox, "/home/me/Desktop/fox.png"], "Save a copy…: asked where, then written");
+    assert.equal(world.saveAsked.title, "Save a copy of this image");
+    await act("rename", { kind: "image", path: fox });
+    assert.equal(hub.renamed.length, 1, "an image is not renamed");
+    world.answer = undefined; const warned = world.warnings.length;
+    await act("remove", { kind: "image", path: fox });
+    assert.equal(world.warnings.length, warned + 1, "Remove asks first"); assert.match(world.warnings.at(-1), /Remove “fox\.png”\?/);
+    assert.deepEqual(trashed, [], "not answered: nothing is removed");
+    world.answer = "Move to Trash";
+    await act("remove", { kind: "image", path: fox });
+    assert.deepEqual(trashed, [[fox, { useTrash: true }], ["/home/me/app/assets/generated/fox.json", { useTrash: true }]], "to the computer's trash, with the note DGC wrote beside it");
+    assert.ok(lib.last("refresh"), "and the Library lists again");
+    await act("path", { kind: "image", path: fox });
+    assert.equal(said().filter((w) => w === "Path copied").length, 2, "removed: it is no longer one of the Library's");
+    // A file beside it that is not DGC's own note is never touched.
+    const owl = "/home/me/app/owl.png"; files[owl] = "x"; files["/home/me/app/owl.json"] = JSON.stringify({ name: "a project's own file" });
+    host.imagesLibrary = async () => ({ type: "images_library", images: [{ path: owl, prompt: "an owl", surface: "work" }], total: 1, next_offset: null });
+    lib.say({ type: "workImages", query: "", offset: 0, limit: 60, seq: 2 }); await wait();
+    await act("remove", { kind: "image", path: owl });
+    assert.deepEqual(trashed.slice(2), [[owl, { useTrash: true }]], "only the image");
+    // The page could not put a picture on the clipboard: said in words.
+    const w2 = world.warnings.length;
+    lib.say({ type: "itemCopied", ok: false }); await wait();
+    assert.equal(world.warnings.length, w2 + 1); assert.match(world.warnings.at(-1), /couldn't be copied/);
+    lib.say({ type: "itemCopied", ok: true }); await wait();
+    assert.equal(world.warnings.length, w2 + 1);
+
+    // ---- videos: a path videos_library listed
+    const clip = "/home/me/app/assets/clip.mp4";
+    host.videosOffered = () => true;
+    host.videosLibrary = async () => ({ type: "videos_library", videos: [{ path: clip, prompt: "tiles" }], total: 1, next_offset: null });
+    lib.say({ type: "videoList", seq: 1, offset: 0 }); await wait();
+    await act("path", { kind: "video", path: clip });
+    assert.equal(world.clipboard, clip);
+    await act("path", { kind: "video", path: "/home/me/private.mp4" });
+    assert.equal(world.clipboard, clip, "a video the Library wasn't given is never named");
+    await act("reveal", { kind: "video", path: clip }); await act("editor", { kind: "video", path: clip });
+    assert.deepEqual(world.commands.slice(-2).map((c) => [c[0], c[1].fsPath]), [["revealFileInOS", clip], ["vscode.open", clip]]);
+    world.saveTo = { scheme: "file", fsPath: "/home/me/Desktop/clip.mp4" };
+    await act("save", { kind: "video", path: clip });
+    assert.deepEqual(copied.at(-1), [clip, "/home/me/Desktop/clip.mp4"]);
+    assert.equal(world.saveAsked.title, "Save a copy of this video");
+    const posted = lib.webview.posted.filter((m) => m.type === "itemCopy").length;
+    await act("copy", { kind: "video", path: clip });
+    assert.equal(lib.webview.posted.filter((m) => m.type === "itemCopy").length, posted, "a video is not put on the clipboard");
+    world.answer = "Move to Trash";
+    await act("remove", { kind: "video", path: clip });
+    assert.deepEqual(trashed.at(-1), [clip, { useTrash: true }]);
+
+    // ---- files: a chat's or a project's, by an id chatdgc_library listed
+    const map = { id: att("3"), name: "map.png", type: "image", source: "chat", chat_id: ID(1) }, pdf = { id: att("4"), name: "review.pdf", type: "pdf", source: "chat", chat_id: ID(1) };
+    const ref = (f) => ({ kind: "file", id: f.id, source: "chat", chat_id: f.chat_id });
+    const count = (type) => sent.filter((c) => c.type === type).length;
+    await act("copy", ref(map));
+    assert.equal(count("chatdgc_file"), 0, "not listed yet: not read");
+    chat.onEvent({ type: "chatdgc_library", request_id: last("chatdgc_library").request_id, files: [map, pdf], total: 2, next_offset: null, counts: {} });
+    await act("copy", ref(map));
+    assert.deepEqual({ ...last("chatdgc_file"), request_id: "" }, { type: "chatdgc_file", conversation_id: ID(1), attachment_id: map.id, request_id: "" });
+    chat.onEvent({ type: "chatdgc_file", request_id: last("chatdgc_file").request_id, conversation_id: ID(1), attachment_id: map.id, data: "data:image/png;base64,AAAA" });
+    assert.deepEqual(lib.last("itemCopy"), { type: "itemCopy", key: `file:${map.id}`, data: "data:image/png;base64,AAAA" });
+    assert.equal(lib.webview.posted.filter((m) => m.type === "image" && m.id === map.id).length, 0, "(its answer is for the clipboard, not the row's picture)");
+    await act("copy", ref(pdf)); await act("copy", { kind: "file", id: att("5"), source: "chat", chat_id: ID(1) }); await act("copy", { ...ref(map), chat_id: ID(2) });
+    assert.equal(count("chatdgc_file"), 1, "a PDF has nothing to copy; a file the Library wasn't shown, or named in another chat, is not read");
+    const clipboard = world.clipboard;
+    await act("path", ref(map)); await act("reveal", ref(map)); await act("editor", ref(map)); await act("rename", ref(map));
+    assert.equal(world.clipboard, clipboard, "a chat's file has no path of its own to copy");
+    world.saveTo = { scheme: "file", fsPath: "/home/me/Desktop/map.png" };
+    await act("save", ref(map));
+    assert.deepEqual({ ...last("chatdgc_library_file"), request_id: "" }, { type: "chatdgc_library_file", op: "save", conversation_id: ID(1), attachment_id: map.id, path: "/home/me/Desktop/map.png", request_id: "" });
+    world.answer = undefined; const w3 = world.warnings.length, files3 = count("chatdgc_library_file");
+    await act("remove", ref(map));
+    assert.equal(world.warnings.length, w3 + 1, "Remove asks first"); assert.match(world.warnings.at(-1), /Delete “map\.png” from your Library\?/);
+    assert.equal(count("chatdgc_library_file"), files3);
+    const panels = world.panels.length;
+    await act("open", ref(map));
+    assert.equal(world.panels.length, panels + 1, "Open: the chat it is in");
+
+    // ---- the side bar's Library tab asks the same way, and is answered the same way
+    world.clipboard = "";
+    await chat.sideLibrary({ type: "itemAct", act: "path", item: { kind: "artifact", id: DOC.id } }); await wait();
+    assert.equal(world.clipboard, DOC.file);
+    assert.deepEqual(host.home.filter((m) => m.type === "sideLibrary" && m.message.type === "itemSaid").map((m) => m.message.words), ["Path copied"]);
+    await chat.sideLibrary({ type: "itemCopied", ok: false }); await wait();
+    assert.match(world.warnings.at(-1), /couldn't be copied/);
+  } finally {
+    Object.assign(fs, { readFile: kept.readFile, copy: kept.copy, delete: kept.delete }); vs.window.setStatusBarMessage = kept.status;
+    delete host.imagesOffered; delete host.imagesLibrary; delete host.videosOffered; delete host.videosLibrary; world.choose = undefined;
+  }
+});

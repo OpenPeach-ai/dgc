@@ -2785,7 +2785,8 @@
     const profiles = [...levels, "ultra"];
     const selected = curUltra ? "ultra" : profiles.includes(curThink) ? curThink : profiles[0];
     const index = Math.max(0, profiles.indexOf(selected));
-    return modelTabsHtml(`<section class="reasoning-card${curUltra ? " is-ultra" : ""}" aria-label="Model and reasoning"><button type="button" class="mrow dgc-menu-row model-summary" aria-expanded="false"><span class="codicon codicon-zap" aria-hidden="true"></span><span class="model-summary-label">${esc(curModel || "Select model")} <span class="muted">${effortLabel(selected, subscription)}</span></span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button><div class="effort-control" style="--effort:${index / (profiles.length - 1) * 100}%"><input class="effort-slider" type="range" min="0" max="${profiles.length - 1}" step="1" value="${index}" data-profiles="${profiles.join(",")}" aria-label="Thinking effort" aria-valuetext="${effortLabel(selected, subscription)}"/><div class="effort-labels" data-at="${index === 0 ? "start" : index === profiles.length - 1 ? "end" : ""}"><span>${effortLabel(profiles[0], subscription)}</span><output>${effortLabel(selected, subscription)}</output><span>Ultra</span></div></div><p class="reasoning-note clamped">${esc(subscription ? "Uses the selected CLI’s supported effort. Ultra adds DGC orchestration guidance." : reasoningNote())}</p><button type="button" class="reasoning-more" aria-expanded="false" hidden>Show more</button></section>`);
+    // The slider is the one a Pip's menu has too (media/shared/effort.js, window.DgcEffort).
+    return modelTabsHtml(`<section class="reasoning-card${curUltra ? " is-ultra" : ""}" aria-label="Model and reasoning"><button type="button" class="mrow dgc-menu-row model-summary" aria-expanded="false"><span class="codicon codicon-zap" aria-hidden="true"></span><span class="model-summary-label">${esc(curModel || "Select model")} <span class="muted">${effortLabel(selected, subscription)}</span></span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>${window.DgcEffort.html({ levels: profiles.map((value) => ({ value, label: effortLabel(value, subscription) })), at: index })}<p class="reasoning-note clamped">${esc(subscription ? "Uses the selected CLI’s supported effort. Ultra adds DGC orchestration guidance." : reasoningNote())}</p><button type="button" class="reasoning-more" aria-expanded="false" hidden>Show more</button></section>`);
   }
   // The note under the slider is three lines at most, with Show more when there is more to read: a
   // long one (Ollama's levels) took over the menu. Measured once the menu is on screen.
@@ -2831,19 +2832,8 @@
     bindAgentsRow(mm);
     slider.onpointerdown = () => slider.classList.add("by-pointer");
     slider.onkeydown = () => slider.classList.remove("by-pointer");
-    slider.oninput = () => {
-      const profiles = slider.dataset.profiles.split(","), value = profiles[Number(slider.value)];
-      slider.parentElement.style.setProperty("--effort", `${Number(slider.value) / (profiles.length - 1) * 100}%`);
-      slider.setAttribute("aria-valuetext", effortLabel(value));
-      card.querySelector("output").textContent = effortLabel(value);
-      // (At either end the end's own word says it: the middle word is not said twice, "Off … Off … Ultra".)
-      card.querySelector(".effort-labels").dataset.at = Number(slider.value) === 0 ? "start" : Number(slider.value) === profiles.length - 1 ? "end" : "";
-      // Acknowledge the step. Restarting the class is what replays the keyframe.
-      const control = slider.parentElement;
-      control.classList.remove("bumped");
-      void control.offsetWidth;
-      control.classList.add("bumped");
-    };
+    // The slider itself is the shared one (media/shared/effort.js): its fill, its word and its bump follow the hand.
+    slider.oninput = () => { window.DgcEffort.follow(slider); };
     slider.onchange = () => {
       vscode.postMessage({ type: "setReasoningProfile", level: slider.dataset.profiles.split(",")[Number(slider.value)] });
       // A drag's release closes the menu; an arrow key keeps it open for the next step (it closed after one: final check,

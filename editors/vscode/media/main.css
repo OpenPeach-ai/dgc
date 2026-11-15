@@ -26,6 +26,7 @@
 @import url("./shared/pipswelcome.css");
 @import url("./shared/folderpick.css");
 @import url("./shared/links.css");
+@import url("./shared/effort.css");
 @import url("./pips/wordmark.css");
 /* DGC panel — Codex's quiet editor hierarchy with a restrained DGC accent. */
 * { box-sizing: border-box; }
@@ -1631,7 +1632,7 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
 
 /* One hover label for the whole panel: the panel's own surface and type, not the operating
    system's, and quick enough to feel like part of the interface rather than a delayed hint. */
-.tip { box-shadow: var(--lift-1); position: fixed; z-index: 60; max-width: min(280px, calc(100vw - 16px)); pointer-events: none;
+.tip { box-shadow: var(--lift-1); position: fixed; z-index: 61;   /* (over a menu, whose rows it labels: .dgc-pop is 60) */ max-width: min(280px, calc(100vw - 16px)); pointer-events: none;
   display: flex; flex-direction: column; gap: 2px; padding: var(--sp-1) var(--sp-2);
   border: 1px solid var(--border-strong); border-radius: var(--r-md);
   background: var(--surface2); color: var(--text-strong);
@@ -1703,38 +1704,6 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
 #modelmenu .model-list-scroll .dgc-menu-row-sub .dgc-menu-sub { overflow-wrap: anywhere; }
 .model-summary-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-summary > .codicon:first-child { color: var(--accent); }
-.effort-control { padding: var(--sp-2) var(--sp-2) var(--sp-1); }
-.effort-slider { appearance: none; display: block; width: 100%; height: 25px; border-radius: var(--r-2xl); margin: 0;
-  background: linear-gradient(to right, var(--accent) var(--effort), var(--surface2) var(--effort)); cursor: pointer;
-  box-shadow: inset 0 0 0 1px var(--hair-strong); }       /* (the track has an edge: at Off it was a faint smudge) */
-.effort-slider::-webkit-slider-thumb { appearance: none; width: 28px; height: 28px; border-radius: var(--r-full);
-  background: var(--text-strong); border: 1px solid var(--border); box-shadow: 0 1px 4px rgba(0,0,0,.18); }
-/* Dragging it must never box it: the focus ring is for the keyboard, and it goes on the thumb. */
-.effort-slider, .effort-slider:focus, .effort-slider:focus-visible { outline: none; }
-.effort-slider:focus-visible:not(.by-pointer)::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--accent), 0 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent); }
-/* The fill glides to the new stop rather than jumping, and the thumb acknowledges the change.
-   --effort is registered so a gradient stop can be transitioned at all. */
-@property --effort { syntax: "<percentage>"; inherits: true; initial-value: 0%; }
-.effort-control { transition: --effort .18s ease-out; }
-.effort-slider::-webkit-slider-thumb {
-  transition: transform .12s ease-out, box-shadow .12s ease-out;
-}
-.effort-slider:active::-webkit-slider-thumb { transform: scale(1.06); }
-.effort-control.bumped .effort-slider::-webkit-slider-thumb { animation: effort-bump .3s ease-out; }
-@keyframes effort-bump {
-  0%   { transform: scale(1);    box-shadow: 0 1px 4px rgba(0,0,0,.18); }
-  45%  { transform: scale(1.12); box-shadow: 0 1px 4px rgba(0,0,0,.18), 0 0 0 6px var(--accent-soft); }
-  100% { transform: scale(1);    box-shadow: 0 1px 4px rgba(0,0,0,.18); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .effort-control { transition: none; }
-  .effort-control.bumped .effort-slider::-webkit-slider-thumb { animation: none; }
-  .effort-slider::-webkit-slider-thumb { transition: none; }
-}
-.effort-labels { display: flex; justify-content: space-between; margin-top: var(--sp-2); color: var(--muted); font-size: var(--t-xs); }
-.effort-labels output { color: var(--text); }
-.effort-labels[data-at]:not([data-at=""]) output { visibility: hidden; }      /* at an end, the end's own word says it */
-.effort-labels[data-at="start"] > span:first-child, .effort-labels[data-at="end"] > span:last-child { color: var(--text); }
 .reasoning-note { margin: 10px 14px 14px; color: var(--muted); font-size: 11px; line-height: 1.5; white-space: normal; }
 .reasoning-note.clamped { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .reasoning-note.has-more { margin-bottom: 2px; }
@@ -1742,9 +1711,6 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
 .reasoning-more:hover { text-decoration: underline; }
 .reasoning-more:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
 .reasoning-more[hidden] { display: none; }
-.reasoning-card.is-ultra .effort-slider { background: linear-gradient(100deg, var(--accent), var(--lav), var(--accent)); background-size: 200% 100%; animation: effort-shimmer 3s linear infinite; }
-@keyframes effort-shimmer { to { background-position: 200% 0; } }
-@media (prefers-reduced-motion: reduce) { .reasoning-card.is-ultra .effort-slider { animation: none; } }
 
 /* Combined model + reasoning selector. The continuous rail reads as one power scale while every
    stop remains a real keyboard-focusable radio item. Ultra gets motion only as status feedback. */

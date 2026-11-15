@@ -53,7 +53,8 @@
 
   /**
    * Open a small menu beside `anchor` (above it when there is room, as a dock's menu opens; below it otherwise).
-   *   rows:   [{ id, label, icon?, danger?, disabled? }] or groups of them ([[...], [...]]: a hairline between groups)
+   *   rows:   [{ id, label, icon?, danger?, disabled?, why? }] or groups of them ([[...], [...]]: a hairline between groups);
+   *           `why`: the row is off and this is the reason, its label on hover and on focus (it is never chosen)
    *   head:   a small heading over the rows
    *   colour: { kind: "work" | "chat", chosen }: the twelve palettes, the one it wears marked
    *   onPick(id), onColour(palette)
@@ -72,7 +73,7 @@
     // only { head } is a small heading over the rows after it.)
     const CHECK = '<svg class="dgc-menu-check" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     const row = (r) => (r.head ? `<div class="dgc-menu-head" role="presentation"><span>${esc(r.head)}</span></div>`
-      : `<button type="button" role="${r.checked === undefined ? "menuitem" : "menuitemradio"}"${r.checked === undefined ? "" : ` aria-checked="${r.checked ? "true" : "false"}"`} class="dgc-menu-row${r.danger ? " is-danger" : ""}" data-id="${esc(r.id)}"${r.disabled ? " disabled" : ""}>`
+      : `<button type="button" role="${r.checked === undefined ? "menuitem" : "menuitemradio"}"${r.checked === undefined ? "" : ` aria-checked="${r.checked ? "true" : "false"}"`} class="dgc-menu-row${r.danger && !r.why ? " is-danger" : ""}${r.why ? " is-off" : ""}" data-id="${esc(r.id)}"${r.disabled ? " disabled" : ""}${r.why ? ` aria-disabled="true" title="${esc(r.why)}"` : ""}>`
       + (r.icon ? `<span class="dgc-pop-icon">${icon(r.icon)}</span>` : "") + `<span class="dgc-menu-label">${esc(r.label)}</span>${r.checked === undefined ? "" : CHECK}</button>`);
     menu.innerHTML = (head ? `<div class="dgc-menu-head" role="presentation"><span>${esc(head)}</span></div>` : "")
       + groups.map((g, i) => (i ? '<div class="dgc-menu-div mdiv" role="separator"></div>' : "") + g.map(row).join("")).join("")
@@ -93,7 +94,8 @@
     const dots = () => [...menu.querySelectorAll(".dgc-swatch")];
     const choose = (target) => {
       const el = target.closest(".dgc-menu-row, .dgc-swatch");
-      if (!el || el.disabled) return;
+      // (A row that is off with a reason stays where the keyboard and the pointer reach it, so the reason can be read.)
+      if (!el || el.disabled || el.getAttribute("aria-disabled") === "true") return;
       const picked = el.dataset.colour, id = el.dataset.id;
       close(true);
       if (picked !== undefined) onColour?.(picked);

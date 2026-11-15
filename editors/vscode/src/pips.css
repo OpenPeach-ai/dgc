@@ -58,8 +58,7 @@
 .pip-composer .composer-controls{display:flex;align-items:center;flex-wrap:wrap;gap:4px;row-gap:4px;padding:4px 8px 8px}.composer-left,.composer-right{display:flex;align-items:center;gap:4px;min-width:0}.composer-left{flex:0 1 auto}.composer-right{flex:1 1 200px;justify-content:flex-end}.composer-left>*,.composer-right>*{flex:0 0 auto}.pip-composer .composer-chip,.pip-composer .model-control{height:28px;min-height:28px;min-width:28px;border:0;border-radius:8px;background:transparent;color:var(--composer-faint);padding:0 8px;display:inline-flex;align-items:center;justify-content:center;gap:4px;font:500 12px/1 var(--vscode-font-family,system-ui)}.pip-composer .composer-chip{width:28px;padding:0}.pip-composer .model-control{flex:0 1 auto;max-width:100%;min-width:0;padding:0 4px 0 8px}.model-copy{min-width:0;display:flex;align-items:baseline;gap:4px}.composer-model-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--vscode-foreground,#d7d7da)}.composer-effort-name{flex:0 0 auto;font-size:11px;color:var(--composer-faint);white-space:nowrap}.composer-chevron{flex:none;display:flex}.composer-chevron svg{width:12px;height:12px}.pip-composer .composer-chip:hover,.pip-composer .model-control:hover{background:var(--vscode-toolbar-hoverBackground,#ffffff0a);color:var(--vscode-foreground)}
 .pip-composer .chat-send{height:28px;width:28px;min-height:28px;margin-left:4px;border:0;border-radius:9999px;padding:0;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;color:var(--composer-faint);background:transparent;transition:background .12s,color .12s}.pip-composer .chat-send.ready{background:var(--accent-fill);color:#fff}.pip-composer .chat-send.ready:hover{background:var(--accent-hover)}.pip-composer .chat-send:not(.ready):hover{background:var(--vscode-panel-border,#303032);color:var(--vscode-foreground)}.pip-composer .chat-send:disabled{opacity:1;cursor:default}.pip-composer #chat-stop{flex:none}.composer-hint{font-size:11px;line-height:1.45;margin:4px 2px 0;color:var(--muted,#96969b)}
 .composer-model-menu{position:absolute;bottom:calc(100% + 8px);right:0;z-index:20;display:flex;flex-direction:column;width:min(300px,100%);max-height:min(440px,62vh);overflow-y:auto}.composer-model-menu>.section-head{flex:none;margin:0 0 4px}.composer-model-menu>.section-head strong{font-size:12px}.composer-model-menu>.section-head button{font-size:11px;min-height:24px;padding:0 4px;background:transparent}.composer-model-menu>p,.composer-model-heading p{font-size:11px;line-height:1.45;flex:none}.composer-model-heading{flex:none;border-top:1px solid var(--line);padding-top:8px;margin-top:8px}.composer-model-heading strong{font-size:12px}.composer-model-menu>input{font-size:12px;flex:none;margin:4px 0}.composer-model-options{overflow-y:auto;min-height:32px;flex:1 1 auto}.composer-model-options small{display:block;font-size:11px;color:inherit;opacity:.8}.composer-model-menu>#chat-refresh-models{flex:none;margin-top:4px;font-size:11px;align-self:flex-start;background:transparent}
-/* The face rides a slimmer track: at Work's thick one its purple sank into the filled part (the contact sheet, r2-e). The box stays the face's height, so the place to grab is as big as it was. */
-.composer-effort-control{--effort-track:14px;--effort-face:26px;--effort-fill:calc(var(--effort-face)/2 + (100% - var(--effort-face))*var(--effort-t,0));flex:none;padding:8px 4px 0}.composer-effort-control[data-step="0"]{--effort-fill:0%}.composer-effort-control[data-full="1"]{--effort-fill:100%}.composer-effort-slider{appearance:none;display:block;width:100%;height:var(--effort-face);min-height:0;padding:0;border:0;margin:0;background:transparent;cursor:pointer}.composer-effort-slider::-webkit-slider-runnable-track{height:var(--effort-track);border-radius:9999px;background:linear-gradient(to right,var(--accent) var(--effort-fill),color-mix(in srgb,var(--vscode-foreground) 14%,transparent) var(--effort-fill))}.composer-effort-slider::-webkit-slider-thumb{appearance:none;width:var(--effort-face);height:var(--effort-face);margin-top:calc((var(--effort-track) - var(--effort-face))/2);border-radius:9999px;background:var(--vscode-editor-foreground,var(--vscode-foreground,#f5f5f6));border:1px solid var(--line);box-shadow:0 1px 4px rgba(0,0,0,.18)}.composer-effort-labels{display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--muted)}.composer-effort-labels output{color:var(--vscode-foreground)}.composer-scope,.composer-unavailable{font-size:11px;line-height:1.45;color:var(--muted)}.composer-context-menu{left:0;right:auto;padding:12px}.composer-context-size{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px}.composer-context-size label{margin:0;font-size:11px}.composer-context-size select{width:auto;height:24px;padding:0 8px;font:600 11px/1 var(--vscode-editor-font-family,monospace);border:1px solid var(--line);border-radius:6px}.composer-context-menu p{margin:8px 0 0}
+.composer-scope,.composer-unavailable{font-size:11px;line-height:1.45;color:var(--muted)}.composer-context-menu{left:0;right:auto;padding:12px}.composer-context-size{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px}.composer-context-size label{margin:0;font-size:11px}.composer-context-size select{width:auto;height:24px;padding:0 8px;font:600 11px/1 var(--vscode-editor-font-family,monospace);border:1px solid var(--line);border-radius:6px}.composer-context-menu p{margin:8px 0 0}
 @media(prefers-reduced-motion:reduce){.pip-composer .chat-send{transition:none}}
 .pip-composer-shell{position:relative;flex:none;min-width:0}
 /* What its computer holds waits just above its box, one at a time (pipsClient.js computerWaitingCards, ui-04). */
@@ -71,13 +70,17 @@ body.vscode-light .pip-approval-dock>:is(.allow-card,.app-link),body.vscode-ligh
 .pip-composer .composer-routines:hover,.pip-composer .composer-routines[aria-expanded=true]{background:var(--vscode-toolbar-hoverBackground,#ffffff0a);color:var(--vscode-foreground)}
 .composer-routines b{display:grid;place-items:center;min-width:16px;height:16px;padding:0 3px;border-radius:999px;background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--vscode-foreground);font-size:10px}
 .pip-routines-popover{position:absolute;z-index:25;right:0;bottom:calc(100% + 8px);width:min(390px,100%);max-height:min(520px,65vh);overflow:auto;padding:12px}
-.pip-routines-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}.pip-routines-head strong{font-size:12px}.pip-routines-head small{margin-left:auto}.pip-routines-head button{min-width:26px;min-height:26px;padding:0;font-size:18px;line-height:1}
+.pip-routines-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}.pip-routines-head strong{font-size:12px}.pip-routines-head small{margin-left:auto}
+/* A pop-up's close button is an icon, not a worded button (15 Nov: as "quiet" it took the worded buttons' fixed 104px
+   and their outline, from the one-shape rule further down): a 26px square with the 6px corner, no line, a wash under
+   the pointer, at the header's right end. */
+.pop-close{flex:none;display:inline-grid;place-items:center;box-sizing:border-box;width:26px;height:26px;min-width:0;min-height:0;margin:0;padding:0;border:0;border-radius:var(--btn-r,6px);background:transparent;color:var(--muted);cursor:pointer}
+.pop-close:hover{background:var(--wash,var(--surface2));color:var(--text,var(--vscode-foreground))}
+.pop-close:focus-visible{outline:var(--btn-ring,1px solid var(--vscode-focusBorder));outline-offset:1px}
+.pop-close>svg{display:block}
+@media(forced-colors:active){.pop-close{color:ButtonText}.pop-close:hover{background:Highlight;color:HighlightText;forced-color-adjust:none}}
 .pip-routines-popover .routine-list{margin:0}.pip-routines-popover .routine-row{min-width:0}.pip-routines-popover .routine-form-row{min-width:0}.pip-routines-popover .routine-form{min-width:0}
-.composer-effort-slider,.composer-effort-slider:focus,.composer-effort-slider:focus-visible{outline:none}.composer-effort-control:has(.composer-effort-slider.by-keys:focus-visible) .composer-effort-face{border-radius:50%;box-shadow:0 0 0 2px var(--accent),0 0 0 4px color-mix(in srgb,var(--accent) 30%,transparent)}
-.composer-effort-control{position:relative}.composer-effort-slider::-webkit-slider-thumb{background:transparent;border-color:transparent;box-shadow:none}.composer-effort-face{position:absolute;z-index:1;top:8px;left:calc(4px + var(--effort-face)/2 + (100% - 8px - var(--effort-face))*var(--effort-t,0));width:var(--effort-face);height:var(--effort-face);transform:translateX(-50%);pointer-events:none}.composer-effort-face .avatar{display:block;width:var(--effort-face);height:var(--effort-face);animation:pip-effort-breathe 3.4s ease-in-out infinite}
-@keyframes pip-effort-breathe{0%,100%{transform:translateY(0)}50%{transform:translateY(-1px)}}
 @container(max-width:430px){.composer-routines>span{display:none}.pip-composer .composer-routines{padding:0 5px}}
-@media(prefers-reduced-motion:reduce){.composer-effort-face .avatar{animation:none}}
 
 /* Compact project list; the conversation keeps its existing collapsible rail. */
 .layout.overview{display:block;min-height:0}.layout.overview>.content{display:none}
@@ -383,7 +386,6 @@ button.pill{border-radius: var(--btn-r, 6px);padding:6px 16px}
 .chat-style .pip-message.assistant .answer.split .reply-part{max-width:88%;background:var(--pip-bubble);border-radius:18px;padding:9px 14px}
 .chat-style .reply-part>:first-child{margin-top:0}
 .chat-style .reply-part>:last-child{margin-bottom:0}
-.chat-style .pip-message.provisional .message-status{display:none}
 .chat-style .pip-message.user .message-status[data-status=queued],.chat-style .pip-message.user .message-status[data-status=running]{display:none}
 .pip-working{display:flex;align-items:center;gap:10px;margin:2px 0 18px;color:var(--muted);font-size:13px}
 .pip-working .avatar{width:34px;height:33px;flex:none}
@@ -1169,12 +1171,15 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 .pip-composer .composer-right{flex:1 1 0;min-width:0}
 .pip-composer .composer-model-icon{display:none;flex:none;color:var(--vscode-foreground)}
 .pip-composer .composer-model-icon svg{display:block;width:16px;height:16px}
+/* The model's chip takes the room the row leaves it (.model-slot, measured by its own container query): its name is
+   cut to fit with "…" and is whole in its title, never swapped for the word "Model" (15 Nov: "it says Model"). */
+.pip-composer .composer-right>.model-slot{flex:1 1 0;min-width:28px;display:flex;justify-content:flex-end;container:pip-model-slot/inline-size}
+.pip-composer .model-slot>.model-control{flex:0 1 auto;min-width:0;max-width:100%}
 @container pip-composer (max-width:606px){
-  /* The context meter is its ring; the model has a shorter label. */
+  /* The context meter is its ring; the model is its name alone, cut to fit. */
   .pip-composer .composer-ctx-pct{display:none}
   .pip-composer #chat-context-toggle.with-text{width:28px;padding:0}
-  .pip-composer .model-control .composer-model-name,.pip-composer .model-control .composer-effort-name{display:none}
-  .pip-composer .model-control .model-copy::before{content:"Model";color:var(--vscode-foreground)}
+  .pip-composer .model-control .composer-effort-name{display:none}
 }
 @container pip-composer (max-width:526px){
   .pip-composer .composer-controls,.pip-composer .composer-left,.pip-composer .composer-right{gap:2px}
@@ -1185,7 +1190,12 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
   /* The level is its shield; the model is its icon. */
   .pip-composer .composer-level-name{display:none}
   .pip-composer .composer-chip.composer-level{width:28px;padding:0}
-  .pip-composer .model-control{flex:0 0 auto;width:28px;max-width:28px;padding:0}
+  .pip-composer .model-control{padding:0 6px}
+  .pip-composer .model-control .composer-chevron{display:none}
+}
+/* No room for even a few letters of the name (a narrow side bar with Stop beside it): the model is its icon. */
+@container pip-model-slot (max-width:52px){
+  .pip-composer .model-slot>.model-control{flex:0 0 auto;width:28px;max-width:28px;padding:0}
   .pip-composer .model-control .model-copy,.pip-composer .model-control .composer-chevron{display:none}
   .pip-composer .model-control .composer-model-icon{display:inline-flex}
 }
@@ -1194,7 +1204,8 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
   .pip-composer .chat-send{margin-left:2px}
 }
 @container pip-composer (max-width:286px){
-  .pip-composer .composer-chip,.pip-composer .model-control,.pip-composer .composer-chip.composer-level,.pip-composer #chat-context-toggle.with-text{min-width:24px;width:24px;max-width:24px}
+  .pip-composer .composer-chip,.pip-composer .composer-chip.composer-level,.pip-composer #chat-context-toggle.with-text{min-width:24px;width:24px;max-width:24px}
+  .pip-composer .composer-right>.model-slot{min-width:24px}
   .pip-composer .composer-routines{padding:0 3px}
 }
 /* The narrowest side bar (14 Nov): the faces in the list and on a waiting card are a size smaller, so the names beside
@@ -1335,11 +1346,15 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 @media(prefers-reduced-motion:reduce){.job-pin{transition:none}}
 /* The same pin beside a row of Your Pips: at the row's end, left of its number and its dot; a pinned row keeps room for it. */
 .pip-row-slot{position:relative;display:grid;grid-template-columns:minmax(0,1fr);min-width:0}
-.pip-row-slot>.job-pin{top:50%;right:8px;margin-top:0;transform:translateY(-50%)}
-.pip-row-slot:has(.pip-row-marked)>.job-pin{right:40px}
-.pip-row-slot:has(.pip-row-both)>.job-pin{right:66px}
+/* A working Pip's row wears a dot at its very end (.pip-row::after, 13px in), and keeps 15px more room there for it.
+   The row's buttons stand that much further in, beside the dot and never on it (his picture, 15 Nov: the pin was drawn
+   on the dot): the dot says the Pip is working, so it keeps its place and nothing covers it. */
+.pip-row-slot:has(.pip-row:is([data-state="working"],[data-state="waiting_approval"][data-waiting="0"])){--pip-dot-room:15px}
+.pip-row-slot>.job-pin{top:50%;right:calc(8px + var(--pip-dot-room,0px));margin-top:0;transform:translateY(-50%)}
+.pip-row-slot:has(.pip-row-marked)>.job-pin{right:calc(40px + var(--pip-dot-room,0px))}
+.pip-row-slot:has(.pip-row-both)>.job-pin{right:calc(66px + var(--pip-dot-room,0px))}
 /* A dot that turns to "Read" (34px, from the marks' right edge 10px in): the pin stays clear of it, level with the dot (14 Nov). */
-.pip-row-slot:has(.pip-row-marks-live)>.job-pin{right:50px}
+.pip-row-slot:has(.pip-row-marks-live)>.job-pin{right:calc(50px + var(--pip-dot-room,0px))}
 .pip-row-slot:has(.pip-row-marks-live):is(.is-pinned,:hover,:focus-within) .pip-row-copy{padding-right:40px}
 /* Where nothing hovers (a touch screen) the pins always show, so the words always keep their room. */
 @media(hover:none){.pip-row-slot .pip-row-copy{padding-right:26px}.pip-row-slot:has(.pip-row-marks-live) .pip-row-copy{padding-right:40px}}
@@ -1348,14 +1363,14 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 /* Open in editor beside it (15 Nov, as a Work session's row has it): the same small button, shown when the row is
    pointed at or reached by Tab. Alone it stands where the pin would; with a pin it is the next one in, and the row's
    words keep room for both. */
-.pip-row-slot>.job-open{position:absolute;top:50%;right:8px;z-index:1;transform:translateY(-50%);opacity:0;transition:opacity var(--dur-hover,120ms) ease}
-.pip-row-slot:has(.pip-row-marked)>.job-open{right:40px}
-.pip-row-slot:has(.pip-row-both)>.job-open{right:66px}
-.pip-row-slot:has(.pip-row-marks-live)>.job-open{right:50px}
-.pip-row-slot:has(>.job-pin)>.job-open{right:32px}
-.pip-row-slot:has(>.job-pin):has(.pip-row-marked)>.job-open{right:64px}
-.pip-row-slot:has(>.job-pin):has(.pip-row-both)>.job-open{right:90px}
-.pip-row-slot:has(>.job-pin):has(.pip-row-marks-live)>.job-open{right:74px}
+.pip-row-slot>.job-open{position:absolute;top:50%;right:calc(8px + var(--pip-dot-room,0px));z-index:1;transform:translateY(-50%);opacity:0;transition:opacity var(--dur-hover,120ms) ease}
+.pip-row-slot:has(.pip-row-marked)>.job-open{right:calc(40px + var(--pip-dot-room,0px))}
+.pip-row-slot:has(.pip-row-both)>.job-open{right:calc(66px + var(--pip-dot-room,0px))}
+.pip-row-slot:has(.pip-row-marks-live)>.job-open{right:calc(50px + var(--pip-dot-room,0px))}
+.pip-row-slot:has(>.job-pin)>.job-open{right:calc(32px + var(--pip-dot-room,0px))}
+.pip-row-slot:has(>.job-pin):has(.pip-row-marked)>.job-open{right:calc(64px + var(--pip-dot-room,0px))}
+.pip-row-slot:has(>.job-pin):has(.pip-row-both)>.job-open{right:calc(90px + var(--pip-dot-room,0px))}
+.pip-row-slot:has(>.job-pin):has(.pip-row-marks-live)>.job-open{right:calc(74px + var(--pip-dot-room,0px))}
 .pip-row-slot:is(:hover,:focus-within)>.job-open{opacity:1}
 .pip-row-slot.has-open:has(>.job-pin):is(:hover,:focus-within) .pip-row-copy{padding-right:50px}
 .pip-row-slot.has-open:has(>.job-pin):has(.pip-row-marks-live):is(:hover,:focus-within) .pip-row-copy{padding-right:64px}
@@ -1945,8 +1960,6 @@ body.vscode-light .error,body.vscode-high-contrast-light .error,:host-context(bo
 /* Pointed at, a row's ground is washed: its quiet second line steps up with it (it read 4.2 to 4.4:1 on the lit row). */
 .pip-row-slot:hover .pip-row-copy small,.pip-row:hover .pip-row-copy small,.attention-row:hover .attention-copy small{color:var(--muted-firm,var(--muted))}
 
-/* At an end of the thinking slider the end's own word says it: never "Off … Off … Ultra" (14 Nov). */
-.composer-effort-labels[data-at]:not([data-at=""]) output{visibility:hidden}
 
 /* ==== The narrowest side bar (live round 1, finding 28, 14 Nov). The rule on every page: a heading never breaks
    inside a word. When room runs out the buttons beside it become icons first (New Pip is "+"), then the heading ends

@@ -165,21 +165,21 @@ test('the thinking control uses this Pip’s face at every effort stop',async(t)
  const personal=job('a',{name:'Microsoft',source_policy:{mode:'personal'},profile:{body:'core',color:'purple'}});
  const x=setup({api:47,jobs:[personal]});await x.select('a');
  x.click('#chat-model');await x.drain();
- const face=x.d.querySelector('.composer-effort-face .avatar');
+ const face=x.d.querySelector('.effort-face .avatar');
  assert.ok(face,'the existing Pip avatar replaces the plain range dot');
  assert.equal(x.d.querySelector('#chat-thinking').value,'0');
  const browser=await launchOrSkip(t);if(!browser)return;
  try{
   const page=await browser.newPage({viewport:{width:390,height:420}});
-  const css=readStylesheet(TOKENS_CSS)+readFileSync(new URL('../src/pips.css',import.meta.url),'utf8').replace(/^@import[^;]+;/gm,'');
+  const css=readStylesheet(TOKENS_CSS)+readFileSync(new URL('../media/shared/effort.css',import.meta.url),'utf8')+readFileSync(new URL('../src/pips.css',import.meta.url),'utf8').replace(/^@import[^;]+;/gm,'');
   const plush=x.d.querySelector('#pips-plush-styles')?.textContent||'';
   const sprite=`data:image/webp;base64,${readFileSync(new URL('../media/pips/plush-bodies.webp',import.meta.url)).toString('base64')}`;
-  const control=x.d.querySelector('.composer-effort-control').outerHTML.replaceAll('../media/pips/plush-bodies.webp',sprite);
+  const control=x.d.querySelector('.effort-control').outerHTML.replaceAll('../media/pips/plush-bodies.webp',sprite);
   await page.setContent(`<style>${plush}\n${css}</style><main class="pip-app-root" style="width:330px;padding:12px"><div class="composer-model-menu" style="position:relative;bottom:auto">${control}</div></main>`);
-  await page.locator('.composer-effort-face .dgc-plush-rig > image:first-child').evaluate(async(el)=>{const img=new Image();img.src=el.getAttribute('href');await img.decode();});
+  await page.locator('.effort-face .dgc-plush-rig > image:first-child').evaluate(async(el)=>{const img=new Image();img.src=el.getAttribute('href');await img.decode();});
   for(const step of [0,2,4]){
-   await page.locator('#chat-thinking').evaluate((el,value)=>{el.value=String(value);const control=el.closest('.composer-effort-control');control.dataset.step=String(value);control.style.setProperty('--effort-t',String(value/4));},step);
-   const bounds=await page.evaluate(()=>{const f=document.querySelector('.composer-effort-face'),a=f.getBoundingClientRect(),s=document.querySelector('#chat-thinking').getBoundingClientRect(),style=getComputedStyle(f);return{left:a.x,right:a.right,mid:a.x+a.width/2,midY:a.y+a.height/2,trackLeft:s.x,trackRight:s.right,trackMidY:s.y+s.height/2,ring:style.boxShadow,fill:style.backgroundColor};});
+   await page.locator('#chat-thinking').evaluate((el,value)=>{el.value=String(value);const control=el.closest('.effort-control');control.style.setProperty('--effort',`${value/4*100}%`);control.style.setProperty('--effort-t',String(value/4));},step);
+   const bounds=await page.evaluate(()=>{const f=document.querySelector('.effort-face'),a=f.getBoundingClientRect(),s=document.querySelector('#chat-thinking').getBoundingClientRect(),style=getComputedStyle(f);return{left:a.x,right:a.right,mid:a.x+a.width/2,midY:a.y+a.height/2,trackLeft:s.x,trackRight:s.right,trackMidY:s.y+s.height/2,ring:style.boxShadow,fill:style.backgroundColor};});
    assert.ok(bounds.left>=bounds.trackLeft-.5&&bounds.right<=bounds.trackRight+.5,`Pip face stays inside the track's ends at ${step}`);
    assert.ok(Math.abs(bounds.midY-bounds.trackMidY)<.6,`and centred on it at ${step}`);
    assert.equal(bounds.ring,'none','no ring around the face');
@@ -198,9 +198,9 @@ test('dragging the thinking slider moves its face and word with the pointer, and
  const slider=x.d.querySelector('#chat-thinking'),W=x.w,saves=()=>x.requests('set_pip_chat_options').length,before=saves();
  slider.dispatchEvent(new W.Event('pointerdown',{bubbles:true,composed:true}));
  slider.value='3';slider.dispatchEvent(new W.Event('input',{bubbles:true}));
- const control=x.d.querySelector('.composer-effort-control');
- assert.equal(control.dataset.step,'3','the face and the fill follow while it is held');
- assert.equal(control.style.getPropertyValue('--effort-t'),'0.75');
+ const control=x.d.querySelector('.effort-control');
+ assert.equal(control.style.getPropertyValue('--effort'),'75%','the fill follows while it is held');
+ assert.equal(control.style.getPropertyValue('--effort-t'),'0.75','and the face');
  assert.equal(control.querySelector('output').textContent,'High','and the word');
  assert.equal(slider.getAttribute('aria-valuetext'),'High');
  x.receive({type:'pipsConnection',apiVersion:47,generation:1,connected:true,supported:true,enabled:true});await x.drain();

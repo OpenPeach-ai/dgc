@@ -514,3 +514,63 @@ test("an artifact's view keeps who made it (made_by) and what made a Page (made_
   assert.equal(artifactView({ ...base, legacy: { widget: "wg_1", chat: "chat_1" } }).made_as, "widget");
   assert.equal(artifactView({ ...base, legacy: { made: "att_1" } }).made_as, undefined, "a sheet from a chat's file is not a widget");
 });
+
+// ---- Rename and Copy, from the Library's item menu (0.52, 15 Nov) ---------------------------------------------------------------
+test("detail: what an artifact is now, with its content (a doc's text), in one answer", async () => {
+  const DOC = { ...VIEW, type: "doc", label: "Document", title: "Launch notes", exports: ["docx", "pdf", "md"] };
+  const asked = hub.detail(ID);
+  await tick();
+  assert.deepEqual({ ...last("artifact_get"), request_id: "" }, { type: "artifact_get", id: ID, content: true, request_id: "" });
+  hub.onEvent({ type: "artifact_detail", artifact: DOC, content: "# Launch\n\nOn the 3rd.", request_id: last("artifact_get").request_id });
+  const got = await asked;
+  assert.deepEqual([got.view.title, got.content], ["Launch notes", "# Launch\n\nOn the 3rd."]);
+  const failed = hub.detail(ID);
+  await tick();
+  hub.onEvent({ type: "command_rejected", command: "artifact_get", reason: "invalid", message: "No such artifact.", request_id: last("artifact_get").request_id });
+  assert.equal(await failed, undefined, "refused: nothing, and no words of its own (the caller says what it could not do)");
+  assert.equal(await hub.detail("../etc"), undefined, "only an artifact's id");
+});
+
+test("Rename asks for the new name, then makes one new version that differs only in its title; a page says it cannot be renamed here", async () => {
+  const vs = globalThis.__DGC_ART_VSCODE;
+  vs.window.showInputBox = async (options) => { world.inputAsked = options; return world.input; };
+  try {
+    // Cancelled, left empty or left as it was: nothing is asked of DGC.
+    for (const input of [undefined, "   ", "Q3 plan"]) {
+      world.input = input;
+      assert.equal(await hub.rename({ id: ID, title: "Q3 plan", type: "slides" }), false);
+    }
+    assert.equal(last("artifact_get"), undefined);
+    assert.equal(world.inputAsked.value, "Q3 plan", "the box starts with the name it has");
+    assert.match(world.inputAsked.title, /Rename “Q3 plan”/);
+    assert.equal(world.inputAsked.validateInput(""), "A name is needed."); assert.equal(world.inputAsked.validateInput("Q4"), undefined);
+    assert.match(world.inputAsked.validateInput("x".repeat(201)), /200/);
+    world.input = "  Q4 plan  ";
+    const done = hub.rename({ id: ID, title: "Q3 plan", type: "slides" });
+    await tick();
+    const get = last("artifact_get");
+    assert.equal(get.content, true);
+    hub.onEvent({ type: "artifact_detail", artifact: VIEW, content: { slides: [{ title: "One" }] }, request_id: get.request_id });
+    await tick();
+    const update = last("artifact_update");
+    assert.deepEqual({ ...update, request_id: "" }, { type: "artifact_update", id: ID, content: { slides: [{ title: "One" }] }, base_version: 3, title: "Q4 plan", note: "Renamed", request_id: "" },
+      "its content as it is, from the version it has now, with the new title");
+    hub.onEvent({ type: "artifact_changed", artifact: { ...VIEW, title: "Q4 plan", version: 4 }, op: "changed", surface: "editor", request_id: update.request_id });
+    assert.equal(await done, true);
+    assert.equal(hub.title(ID), "Q4 plan");
+    // DGC refuses (it changed meanwhile): said in words, and false.
+    const again = hub.rename({ id: ID, title: "Q4 plan", type: "slides" }); world.input = "Q5 plan";
+    const refused = hub.rename({ id: ID, title: "Q4 plan", type: "slides" });
+    await tick();
+    for (const cmd of sent.filter((c) => c.type === "artifact_get").slice(1)) hub.onEvent({ type: "artifact_detail", artifact: { ...VIEW, version: 4 }, content: { slides: [] }, request_id: cmd.request_id });
+    await tick();
+    for (const cmd of sent.filter((c) => c.type === "artifact_update").slice(1)) hub.onEvent({ type: "command_rejected", command: "artifact_update", reason: "conflict", message: "It changed since version 4.", request_id: cmd.request_id });
+    assert.deepEqual([await again, await refused], [false, false]);
+    assert.match(String(world.warnings.at(-1).message), /wasn't renamed: It changed since version 4\./);
+    // A page is files, which this window never holds: it is not renamed from here, and says so.
+    const before = sent.length, warned = world.warnings.length;
+    assert.equal(await hub.rename({ id: ID, title: "Tide pools", type: "page" }), false);
+    assert.equal(sent.length, before);
+    assert.match(String(world.warnings.at(-1).message), /A page can't be renamed here yet/); assert.equal(world.warnings.length, warned + 1);
+  } finally { delete vs.window.showInputBox; }
+});

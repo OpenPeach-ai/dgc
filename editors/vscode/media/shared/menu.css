@@ -26,6 +26,11 @@
 .dgc-menu :is(.dgc-menu-row, .dgc-menu-rows > button):focus-visible { background: var(--wash); }
 .dgc-menu :is(.dgc-menu-row, .dgc-menu-rows > button):focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
 .dgc-menu :is(.dgc-menu-row, .dgc-menu-rows > button):disabled { cursor: default; opacity: .55; }
+/* A row that is off and says why (its label on hover and on focus): dimmed, no wash under the pointer, still reached by the keyboard. */
+.dgc-menu .dgc-menu-row[aria-disabled="true"] { cursor: default; }
+.dgc-menu .dgc-menu-row[aria-disabled="true"] > * { opacity: .55; }
+.dgc-menu .dgc-menu-row[aria-disabled="true"]:hover { background: transparent; }
+@media (forced-colors: active) { .dgc-menu .dgc-menu-row[aria-disabled="true"] { color: GrayText; } .dgc-menu .dgc-menu-row[aria-disabled="true"] > * { opacity: 1; } }
 .dgc-menu :is(.dgc-menu-row, .dgc-menu-rows > button):is(.is-selected, [aria-checked="true"], [aria-selected="true"], [aria-pressed="true"]) {
   background: var(--wash); color: var(--text-strong);
 }

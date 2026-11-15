@@ -83,7 +83,7 @@ test('Pips Shift+Enter continues numbered prompts without sending',async()=>{
 });
 // What a chat draws, by its pieces, with the Pip's name taken out: the same for both kinds means the same chat.
 function shape(x,name){
-  const c=x.$('.pip-conversation'),log=x.$('.conversation-log'),live=c.querySelector('.provisional');
+  const c=x.$('.pip-conversation'),log=x.$('.conversation-log'),live=c.querySelector('.live-reply');
   const replies=[...log.querySelectorAll('.pip-message.assistant[data-message]')];
   return {chatStyle:c.classList.contains('chat-style'),
     working:text(c.querySelector('.pip-working')).replace(name,'NAME').replace(/\d+/g,'N'),workingFace:!!c.querySelector('.pip-working .avatar'),
@@ -154,7 +154,8 @@ test('a remote view keeps the chat it had, and so does a DGC from before simple 
     const c=x.$('.pip-conversation');
     assert.equal(c.classList.contains('chat-style'),false,JSON.stringify(options));
     assert.equal(c.querySelector('.pip-working'),null,JSON.stringify(options));
-    assert.match(text(c.querySelector('.provisional')),/Still writing…/,JSON.stringify(options));
+    assert.ok(c.querySelector('.live-reply'),JSON.stringify(options));
+    assert.match(text(c.querySelector('.live-reply + .live-status')),/Still writing…/,JSON.stringify(options));
     assert.match(x.$('#chatText').getAttribute('placeholder'),/^Message Rook…$/,JSON.stringify(options));
   }
 });

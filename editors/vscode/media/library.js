@@ -13,9 +13,13 @@
 //              whether you uploaded it or ChatDGC made it.
 //
 // Every row says who made it, by name ("made by Tile checker · 2h"; an image the model kept on purpose says "kept by"),
-// and the name leads back: a Pip to its chat, a session and a chat to their tabs. A row opens its item. What else it
-// can do (show in its folder, save a copy, download, pin to the dock, remove) is a line of icon buttons where there is
-// room and one ⋯ where there is not: the same list either way. The search field searches the tab you are on.
+// and the name leads back: a Pip to its chat, a session and a chat to their tabs. A row opens its item. Every item has
+// ONE menu, the same in both places, on a right-click, on the row's ⋯ and from the keyboard (Shift+F10, the
+// context-menu key): Open · Open in editor · Save a copy… · Copy · Copy path · Reveal in file manager · Rename… ·
+// Remove…, then what only its kind has (pin to the dock, use in a new chat, ...). What a kind cannot do is there, off,
+// and says why. Each of the eight asks the host one way ("itemAct", naming the item and nothing else): the host does it
+// only for an item it listed, from its own record of it. Where there is room a row also keeps its quick icon buttons.
+// The search field searches the tab you are on.
 // Names are the user's words: text nodes only. media/shared/library.css is how it looks. A classic script:
 // window.DgcLibrary.
 (function () {
@@ -43,8 +47,6 @@
     ["presentation", "Presentations", "presentations"], ["code", "Code", "code files"], ["text", "Pasted text", "pasted text"]];
   const F_KIND = { image: "Image", pdf: "PDF", document: "Document", spreadsheet: "Spreadsheet", presentation: "Presentation", code: "Code", text: "Pasted text" };
   const ORIGINS = [["", "All"], ["uploaded", "Uploaded"], ["made", "Made by ChatDGC"]];
-  const FORMATS = { docx: "Word document (.docx)", pdf: "PDF", md: "Markdown (.md)", pptx: "PowerPoint (.pptx)", html: "Web page (.html)",
-    xlsx: "Excel workbook (.xlsx)", csv: "CSV (first sheet)", zip: "Zip of its files (.zip)" };
   // Who made things, by kind: the filter's word, the words of a row with no name, of an empty list, the menu's heading,
   // and the surface the host lists images and videos by.
   const KINDS = { session: { all: "Work", bare: "in Work", none: "made in Work", head: "Work sessions", surface: "work" }, chat: { all: "Chat", bare: "in Chat", none: "made in Chat", head: "Chats", surface: "chat" },
@@ -55,6 +57,76 @@
   const PIN = (on) => `<svg viewBox="0 0 16 16" width="16" height="16" fill="${on ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="M10.2 1.8l4 4-2.2.9-2.4 2.4.3 3.1-1.1 1.1-2.6-2.6L2.8 14l-.8-.8 3.3-3.4-2.6-2.6 1.1-1.1 3.1.3 2.4-2.4z"/></svg>`;
   const DOTS = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="3.5" cy="8" r="1.25" fill="currentColor"/><circle cx="8" cy="8" r="1.25" fill="currentColor"/><circle cx="12.5" cy="8" r="1.25" fill="currentColor"/></svg>';
   const PAGE = 200;         // artifacts and widgets drawn at a time ("Show more" draws the next)
+  // An item's menu: the eight things, in his order (15 Nov), the same for every kind.
+  const ITEM_ACTS = [["open", "Open"], ["editor", "Open in editor"], ["save", "Save a copy…"], ["copy", "Copy"], ["path", "Copy path"], ["reveal", "Reveal in file manager"], ["rename", "Rename…"], ["remove", "Remove…"]];
+  // What only a kind has, kept under the eight (by the ids of actions() below).
+  const ITEM_MORE = ["chat", "player", "use", "project", "add", "pin"];
+  const A_WORD = { doc: "doc", slides: "deck", sheet: "sheet", page: "page", dashboard: "dashboard" };
+  const SAID_MS = 2600;     // how long "Path copied" stays
+
+  /** Why an item cannot do one of the eight ("" when it can). The host decides again for itself (src/chatdgc.ts
+   *  libraryAct): this is only what the menu shows. */
+  function whyNot(item, act) {
+    const r = item.raw;
+    if (item.source === "artifact") {
+      const word = A_WORD[r.type] || "artifact", a = /^[aeiou]/.test(word) ? "An" : "A", doc = r.type === "doc", file = doc && typeof r.file === "string" && !!r.file;
+      if (act === "editor") return file ? "" : doc ? "This doc has no file to open yet." : `${a} ${word} opens in DGC's own viewer: it has no file an editor can open.`;
+      if (act === "save") return Array.isArray(r.exports) && r.exports.length ? "" : `This DGC has no format to save ${a.toLowerCase()} ${word} in.`;
+      if (act === "copy") return doc ? "" : `Copy takes a doc's text or an image. Use Save a copy… for ${a.toLowerCase()} ${word}.`;
+      if (act === "path" || act === "reveal") return file ? "" : doc ? "This doc has no file yet." : `${a} ${word} is kept inside DGC, not as one file. Save a copy… makes a file.`;
+      if (act === "rename") return r.type === "page" ? "A page can't be renamed here yet. Ask DGC to rename it." : "";
+      return "";
+    }
+    if (item.source === "widget") {
+      if (act === "editor") return "A widget opens beside its chat: it has no file an editor can open.";
+      if (act === "save") return "A widget lives in its chat. Ask ChatDGC to make it a page, then save that.";
+      if (act === "copy") return "Copy takes a doc's text or an image. A widget is neither.";
+      if (act === "path" || act === "reveal") return "A widget is kept inside its chat, not as a file.";
+      if (act === "rename") return "A widget keeps the name its chat gave it.";
+      return "";
+    }
+    if (item.source === "image") return act === "rename" ? "An image is listed by the words it was made from. Its file keeps its name." : "";
+    if (item.source === "video") {
+      if (act === "copy") return "A video is too big for the clipboard. Use Copy path or Save a copy….";
+      if (act === "rename") return "A video is listed by the words it was made from. Its file keeps its name.";
+      return "";
+    }
+    const where = r.source === "project" ? "project" : "chat";
+    if (act === "editor") return `This file is kept inside its ${where}. Save a copy… to open it in an editor.`;
+    if (act === "copy") return r.type === "image" && r.source !== "project" ? "" : "Copy takes an image or a doc's text. Use Save a copy… for this file.";
+    if (act === "path" || act === "reveal") return `This file is kept inside its ${where}, not on its own. Save a copy… makes a file.`;
+    if (act === "rename") return "A file keeps the name it was attached with.";
+    return "";
+  }
+  /** An item as the host is told of it: its kind and its id (or its path), never its title, its content or a file. */
+  function refOf(item) {
+    const r = item.raw;
+    if (item.source === "artifact") return { kind: "artifact", id: String(r.id || "") };
+    if (item.source === "widget") return { kind: "widget", id: String(r.id || ""), chat_id: String(r.chat_id || "") };
+    if (item.source === "image" || item.source === "video") return { kind: item.source, path: String(r.path || "") };
+    return r.source === "project" ? { kind: "file", id: String(r.id || ""), source: "project", project_id: String(r.project_id || "") } : { kind: "file", id: String(r.id || ""), source: "chat", chat_id: String(r.chat_id || "") };
+  }
+  /** A picture the host handed over (a data: URI), as a PNG for the clipboard: every app pastes a PNG. */
+  function pngOf(doc, data) {
+    return new Promise((resolve, reject) => {
+      const comma = data.indexOf(","), mime = data.slice(5, data.indexOf(";"));
+      if (mime === "image/png") {
+        const raw = atob(data.slice(comma + 1)), bytes = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+        resolve(new Blob([bytes], { type: "image/png" })); return;
+      }
+      const img = new Image();
+      img.onerror = () => reject(new Error("not a picture"));
+      img.onload = () => {
+        try {
+          const canvas = doc.createElement("canvas"); canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+          canvas.getContext("2d").drawImage(img, 0, 0);
+          canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("not a picture"))), "image/png");
+        } catch (error) { reject(error); }
+      };
+      img.src = data;
+    });
+  }
 
   /** How long ago, in a few characters, from a time DGC wrote ("now", "40m", "2h", "1d", "3w", "4mo", "2y"). */
   function age(at, now = Date.now()) {
@@ -144,10 +216,11 @@
       + "</div>"
       + '<div id="library-filters" class="lib-filters" role="group" aria-label="Show"></div>'
       + '<p id="library-status" class="lib-status" role="status" hidden></p>'
+      + '<div class="lib-said-at"><p id="library-said" class="lib-said" role="status" hidden></p></div>'
       + '<ul id="library-list" class="lib-list" role="tabpanel"></ul>'
       + '<button type="button" id="library-load" class="lib-load" title="Show more" hidden>Show more</button>';
     const $ = (id) => host.querySelector(`#${id}`);
-    const els = { search: $("library-search"), tabs: $("library-tabs"), filters: $("library-filters"), status: $("library-status"), list: $("library-list"), load: $("library-load"), more: $("library-more") };
+    const els = { search: $("library-search"), tabs: $("library-tabs"), filters: $("library-filters"), status: $("library-status"), list: $("library-list"), load: $("library-load"), more: $("library-more"), said: $("library-said") };
     // In its own tab the list scrolls inside the page (library.css) and takes the keyboard for that.
     if (place === "tab") els.list.tabIndex = 0;
     const saved = kept?.() || {};
@@ -182,6 +255,13 @@
       if (button.getAttribute("aria-expanded") === "true") { root.DgcBlob.close(true); return; }
       root.DgcBlob.popup(button, { keyboard: true, label, place: "below", rows, onPick: pick, onClose: () => button.setAttribute("aria-expanded", "false") });
     };
+    /** What the host (or the Library itself) just did, in a word or two over the list's top, then gone: "Path copied". */
+    let saidTimer = 0;
+    function say(words) {
+      view.clearTimeout(saidTimer);
+      els.said.textContent = String(words || "").slice(0, 120); els.said.hidden = !els.said.textContent;
+      if (!els.said.hidden) saidTimer = view.setTimeout(() => { els.said.hidden = true; els.said.textContent = ""; }, SAID_MS);
+    }
 
     // ---- who made it: the filter's value, and what the host is asked for ----------------------------------------------------
     const makerKey = (item) => (item.by.id && item.by.name && KINDS[item.by.kind] ? `${item.by.kind}:${item.by.id}` : "");
@@ -283,44 +363,45 @@
       els.filters.__html = html; els.filters.innerHTML = html;
       if (had) doc.getElementById(had)?.focus({ preventScroll: true });
     }
-    /** What a row can do, in order: the first is what a click on the row does. */
+    /** A row's quick buttons, in order: the first is what a click on the row does. Those that are one of the eight
+     *  (open, save, reveal, remove) ask the host the menu's way, itemAct; the rest are what only that kind has. */
     function actions(item) {
       const r = item.raw, pinned = (kind, id) => docked.has(`${kind}:${id}`);
+      const ask = (act) => () => post({ type: "itemAct", act, item: refOf(item) });
       const pinRow = (pinItem) => ({ id: "pin", label: pinned(pinItem.kind, pinItem.id) ? "Unpin from the dock" : "Pin to the dock", pinned: pinned(pinItem.kind, pinItem.id), run: () => sendPin({ type: "dockToggle", item: pinItem }) });
       if (item.source === "artifact") {
-        const a = { id: r.id, type: r.type, title: r.title, ...(typeof r.file === "string" ? { file: r.file } : {}) };
-        return [{ id: "open", icon: "go-to-file", label: r.type === "doc" ? "Open it in the editor" : "Open it", run: () => post({ type: "artifactOpen", artifact: a }) },
-          ...(Array.isArray(r.exports) && r.exports.length ? [{ id: "export", icon: "desktop-download", label: "Download…", formats: r.exports.filter((x) => typeof x === "string") }] : []),
+        return [{ id: "open", icon: "go-to-file", label: r.type === "doc" ? "Open it in the editor" : "Open it", run: ask("open") },
+          ...(Array.isArray(r.exports) && r.exports.length ? [{ id: "save", icon: "desktop-download", label: "Save a copy…", run: ask("save") }] : []),
           pinRow({ kind: "artifact", id: String(r.id), title: item.title, sub: item.facts.filter(Boolean).join(" · "), look: { type: String(r.type || "") }, ...(typeof r.file === "string" ? { ref: { file: r.file } } : {}) }),
-          { id: "remove", icon: "trash", label: "Remove…", tip: "Remove: it goes to DGC's trash, where it can be recovered", danger: true, run: () => post({ type: "artifactRemove", artifact: r }) }];
+          { id: "remove", icon: "trash", label: "Remove…", tip: "Remove: it goes to DGC's trash, where it can be recovered", danger: true, run: ask("remove") }];
       }
       if (item.source === "widget") {
-        return [{ id: "open", icon: "play", label: "Open it beside you", run: () => post({ type: "widgetOpen", widget: r }) },
+        return [{ id: "open", icon: "play", label: "Open it beside you", run: ask("open") },
           { id: "chat", icon: "comment-discussion", label: "Open the chat it's in", run: () => post({ type: "widgetChat", widget: r }) },
           pinRow({ kind: "widget", id: String(r.id || ""), title: item.title, sub: `Widget · in “${r.chat_title || "a chat"}”`, ref: { chat_id: String(r.chat_id || "") } }),
-          { id: "remove", icon: "trash", label: "Delete the widget…", danger: true, run: () => post({ type: "widgetRemove", widget: r }) }];
+          { id: "remove", icon: "trash", label: "Delete the widget…", danger: true, run: ask("remove") }];
       }
       if (item.source === "image") {
-        return [{ id: "open", icon: "go-to-file", label: "Open the image", run: () => post({ type: "workImageOpen", path: r.path }) },
-          { id: "reveal", icon: "folder-opened", label: "Show it in its folder", run: () => post({ type: "workImageReveal", path: r.path }) },
-          { id: "save", icon: "desktop-download", label: "Save a copy…", run: () => post({ type: "workImageSave", path: r.path }) },
+        return [{ id: "open", icon: "go-to-file", label: "Open the image", run: ask("open") },
+          { id: "reveal", icon: "folder-opened", label: "Reveal in file manager", run: ask("reveal") },
+          { id: "save", icon: "desktop-download", label: "Save a copy…", run: ask("save") },
           { id: "project", icon: "file-symlink-file", label: "Save to project…", tip: "Save to project… (the folder open in VS Code)", run: () => post({ type: "workImageToProject", path: r.path }) }];
       }
       if (item.source === "video") {
         return [{ id: "open", icon: "play", label: "Play it here", run: (li) => play(li, r) },
           { id: "player", icon: "link-external", label: "Open it in your player", run: () => post({ type: "videoOpen", path: r.path }) },
-          { id: "reveal", icon: "folder-opened", label: "Show it in its folder", run: () => post({ type: "videoReveal", path: r.path }) },
+          { id: "reveal", icon: "folder-opened", label: "Reveal in file manager", run: ask("reveal") },
           { id: "project", icon: "desktop-download", label: "Save to project…", run: () => post({ type: "videoSave", path: r.path }) }];
       }
       const project = r.source === "project";
-      return [{ id: "open", icon: project ? "folder" : "comment-discussion", label: project ? `Open the project ${r.project_name || ""}`.trim() : "Open the chat it's in", run: () => post({ type: "open", file: r }) },
+      return [{ id: "open", icon: project ? "folder" : "comment-discussion", label: project ? `Open the project ${r.project_name || ""}`.trim() : "Open the chat it's in", run: ask("open") },
         { id: "use", icon: "comment", label: "Use in a new chat", run: () => post({ type: "use", file: r }) },
-        { id: "save", icon: "desktop-download", label: "Save a copy…", run: () => post({ type: "save", file: r }) },
+        { id: "save", icon: "desktop-download", label: "Save a copy…", run: ask("save") },
         ...(r.type === "image" ? [{ id: "project", icon: "file-symlink-file", label: "Save to project…", tip: "Save to project… (the folder open in VS Code)", run: () => post({ type: "saveToProject", file: r }) }] : []),
         { id: "add", icon: "new-folder", label: "Add a copy to a project…", run: () => post({ type: "toProject", file: r }) },
         pinRow({ kind: "file", id: String(r.id || ""), title: item.title, sub: [F_KIND[r.type] || "File", project ? `in the project ${r.project_name || ""}`.trim() : `in “${r.chat_title || "a chat"}”`].join(" · "),
           look: { type: String(r.type || "") }, ref: project ? { project_id: String(r.project_id || "") } : { chat_id: String(r.chat_id || "") } }),
-        { id: "remove", icon: "trash", label: "Delete from your Library…", danger: true, run: () => post({ type: "remove", file: r }) }];
+        { id: "remove", icon: "trash", label: "Delete from your Library…", danger: true, run: ask("remove") }];
     }
     /** A video plays in its own row, with the shared player (media/videoPlayer.js). */
     function play(li, v) {
@@ -328,9 +409,28 @@
       li.append(root.DgcVideo.figure({ id: String(v.job || "vid_library"), state: "done", resolution: "", label: v.generator_name,
         result: { path: v.path, poster: v.poster, bytes: v.bytes, seconds: v.seconds, width: v.width, height: v.height, file: baseName(v.path) } }));
     }
-    /** Download…: the formats it can be saved as, in the same small menu. */
-    function formats(button, item, act) {
-      view.setTimeout(() => menu(button, `Download ${item.title} as`, act.formats.map((f) => ({ id: f, label: FORMATS[f] || f.toUpperCase() })), (format) => post({ type: "artifactExport", artifact: item.raw, format })), 0);
+    /** An item's one menu: the eight (what it cannot do is off, with why), then what only its kind has. */
+    function itemRows(item) {
+      const more = actions(item).filter((a) => ITEM_MORE.includes(a.id)).sort((a, b) => ITEM_MORE.indexOf(a.id) - ITEM_MORE.indexOf(b.id));
+      return [ITEM_ACTS.map(([id, label]) => { const why = whyNot(item, id); return { id, label, ...(why ? { why } : {}), ...(id === "remove" ? { danger: true } : {}) }; }),
+        more.map((a) => ({ id: `more:${a.id}`, label: a.label }))];
+    }
+    function itemPick(item, li, id) {
+      if (id.startsWith("more:")) { const act = actions(item).find((a) => a.id === id.slice(5)); if (act) act.run(li); return; }
+      if (whyNot(item, id)) return;
+      // (A video plays in its own row, from the bytes the host hands over: nothing is opened anywhere else.)
+      if (id === "open" && item.source === "video") { play(li, item.raw); return; }
+      post({ type: "itemAct", act: id, item: refOf(item) });
+    }
+    /** Opens it: beside the row's ⋯, or at a point (a right-click). `fromRow`: the keyboard came from the row, and goes back to it. */
+    function itemMenu(item, li, { at = null, keyboard = false, fromRow = false } = {}) {
+      const dots = li.querySelector(".lib-row-more");
+      if (!root.DgcBlob || !dots) return;
+      if (!at && dots.getAttribute("aria-expanded") === "true") { root.DgcBlob.close(true); return; }
+      root.DgcBlob.popup(dots, { keyboard, label: `More for ${item.title}`, place: "below", rows: itemRows(item), ...(at ? { at } : {}),
+        onPick: (id) => itemPick(item, li, id),
+        // (Escape puts the keyboard back on what opened the menu, the ⋯: from a row, on the row.)
+        onClose: () => { dots.setAttribute("aria-expanded", "false"); if (fromRow && li.isConnected && doc.activeElement === dots) li.focus({ preventScroll: true }); } });
     }
     function thumb(item) {
       const box = doc.createElement("span"); box.className = "lib-row-thumb"; box.setAttribute("aria-hidden", "true");
@@ -385,7 +485,7 @@
       for (const act of acts) {
         const b = doc.createElement("button"); b.type = "button"; b.className = `lib-act${act.id === "pin" ? " lib-pin" : ""}`; b.dataset.act = act.id; b.title = act.tip || act.label; b.setAttribute("aria-label", act.label);
         if (act.id === "pin") { b.setAttribute("aria-pressed", String(!!act.pinned)); b.setAttribute("aria-label", `${act.label}: ${item.title}`); b.innerHTML = PIN(!!act.pinned); }
-        else { if (act.formats) { b.setAttribute("aria-haspopup", "menu"); b.setAttribute("aria-expanded", "false"); } b.innerHTML = `<span class="codicon codicon-${act.icon}" aria-hidden="true"></span>`; }
+        else b.innerHTML = `<span class="codicon codicon-${act.icon}" aria-hidden="true"></span>`;
         bar.append(b);
       }
       const dots = doc.createElement("button"); dots.type = "button"; dots.className = "lib-row-more"; dots.setAttribute("aria-haspopup", "menu"); dots.setAttribute("aria-expanded", "false");
@@ -476,7 +576,7 @@
     });
     function run(item, act, li, button) {
       if (!item || !act) return;
-      if (act.formats) formats(button, item, act); else act.run(li);
+      act.run(li);
     }
     els.list.addEventListener("click", (e) => {
       const t = e.target, li = t.closest?.(".lib-row"); if (!li) return;
@@ -489,12 +589,39 @@
       if (dots) {
         e.stopPropagation();
         // (Words only: the small menu has a drawing for some of these and not for others, and a list half with icons reads ragged.)
-        menu(dots, `More for ${item.title}`, acts.map((a) => ({ id: a.id, label: a.label, danger: !!a.danger })), (id) => run(item, acts.find((a) => a.id === id), li, dots));
+        itemMenu(item, li, { keyboard: e.detail === 0 });
         return;
       }
       acts[0].run(li);
     });
+    // A right-click (or the context-menu key, or Shift+F10) on a row is the row's own menu. Nothing in the Library took
+    // it before, so the editor's own Cut · Copy · Paste opened, and its Copy copies selected text: a row has none.
+    let keyMenuAt = 0;
+    els.list.addEventListener("contextmenu", (e) => {
+      const li = e.target.closest?.(".lib-row"); if (!li || e.target.closest(".made-video")) return;
+      const item = byKey(li.dataset.key); if (!item) return;
+      e.preventDefault();
+      // (From the keyboard the event has no pointer: the menu opens beside the row's ⋯, its first row focused. The
+      // keydown below has already opened it where the key is one the page hears first.)
+      const keys = e.button !== 2 && e.detail === 0;
+      if (keys) { if (Date.now() - keyMenuAt > 400) itemMenu(item, li, { keyboard: true, fromRow: !e.target.closest(".lib-row-more, [data-act]") }); return; }
+      root.DgcBlob?.close(false);
+      itemMenu(item, li, { at: { x: e.clientX, y: e.clientY } });
+    });
+    // The rest of the Library has no menu of its own: no dead Cut · Copy · Paste there either. A field you type in,
+    // and words you have selected, keep the editor's.
+    host.addEventListener("contextmenu", (e) => {
+      if (e.defaultPrevented || e.target.closest?.("input, textarea, [contenteditable], .made-video")) return;
+      if (String(view.getSelection?.() || "")) return;
+      e.preventDefault();
+    });
     els.list.addEventListener("keydown", (e) => {
+      const menuKey = e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey);
+      if (menuKey) {
+        const li = e.target.closest?.(".lib-row"), item = li && byKey(li.dataset.key);
+        if (item && !e.target.closest(".made-video")) { e.preventDefault(); e.stopPropagation(); keyMenuAt = Date.now(); root.DgcBlob?.close(false); itemMenu(item, li, { keyboard: true, fromRow: e.target === li }); }
+        return;
+      }
       // The list itself (its editor tab, where it scrolls inside the page): the arrows and the page keys scroll it.
       if (e.target === els.list) {
         if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -579,6 +706,15 @@
           state.files.rows = asked.offset ? [...state.files.rows, ...found.filter((f) => !state.files.rows.some((x) => x.id === f.id))] : found;
           state.files.next = next(msg.next); state.files.loaded = true; if (sig.files === null) sig.files = asked.sig;
           draw(); return;
+        }
+        case "itemSaid": say(msg.words); return;
+        case "itemCopy": {
+          // Copy: the host read the item's own picture and hands it over; the clipboard is the page's to write.
+          const ok = typeof msg.data === "string" && IMAGE_DATA.test(msg.data) && !!view.navigator?.clipboard?.write && typeof view.ClipboardItem === "function";
+          const done = (good) => { if (good) say("Image copied"); post({ type: "itemCopied", ok: good }); };
+          if (!ok) { done(false); return; }
+          pngOf(doc, msg.data).then((blob) => view.navigator.clipboard.write([new view.ClipboardItem({ "image/png": blob })])).then(() => done(true), () => done(false));
+          return;
         }
         case "image": setPic(`file:${String(msg.id || "")}`, msg); return;
         case "workImageData": setPic(`image:${String(msg.path || "")}`, msg); return;

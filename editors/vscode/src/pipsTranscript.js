@@ -37,6 +37,18 @@ export function replyParts(text) {
   return parts.length>8?[...parts.slice(0,7),parts.slice(7).join('\n\n')]:parts;
 }
 
+// A reply that read messages sent while it worked (Pips API 99, `steers`: [{id, at}]) is drawn in pieces, each of
+// those messages between the words written before it was read and the words written after. `at` counts characters as
+// Python does, so the text is cut by code point. `has(id)`: is that message here to be drawn (one from a page not
+// loaded isn't, and the words on each side of it stay together). Returns [{text} | {steer: id}], no empty text.
+export function replyPieces(text,steers,has=()=>true){
+  const chars=[...String(text)],out=[];let from=0;
+  const words=to=>{const piece=chars.slice(from,to).join('');from=to;if(piece.trim()){const last=out.at(-1);if(last&&'text' in last)last.text+=piece;else out.push({text:piece});}};
+  for(const s of Array.isArray(steers)?steers:[]){if(!has(s.id)||s.at<from||s.at>chars.length)continue;words(s.at);out.push({steer:s.id});}
+  words(chars.length);
+  return out;
+}
+
 // A sent message's words with its links as links: the same button a reply's link is, with its site's favicon, as in
 // Work and ChatDGC (media/mentions.js, "links"). A page with no document (a test of the words alone) gets the words.
 const promptWords=text=>globalThis.DgcMentions?.linkWordsHtml&&globalThis.document?globalThis.DgcMentions.linkWordsHtml(String(text),{doc:globalThis.document}):esc(text);
@@ -145,9 +157,11 @@ export function madeFilesMarkup(m){
   }).join('')}</div>`;
 }
 
+// `inline`: the messages a reply read on the way, each one's drawn bubble by its id (replyPieces); `live`: the reply as
+// it is being written, the finished reply's own markup without the row it ends with.
 // `head`: a line above a reply the Pip sent unasked (a routine's: its face, name, routine and time); `clip`: {text, open,
 // key}, a long one's start and its Show all.
-export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false,imageSrc=()=>'',pluginLogo=()=>'',choices=null,stats=null,head='',clip=null,quote='',canReply=false,canDownload=false,undo=false,openChanges=new Set(),undoing='',undoErrors=new Map()}) {
+export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false,imageSrc=()=>'',pluginLogo=()=>'',choices=null,stats=null,head='',clip=null,quote='',canReply=false,canDownload=false,undo=false,openChanges=new Set(),undoing='',undoErrors=new Map(),inline=null,live=false}) {
   const m=message,user=m.role==='user',label=user?'You':name;
   // Every photo the message brought (no four-photo cap from Pips API 52); a click opens the original.
   // A Pip's reply shows the images it made (generate_image) the same way, below its words.
@@ -157,7 +171,11 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   // A message that is only images or files shows them, not DGC's stand-in text.
   const standIn=pictures&&m.text==='(sent an image)'||files&&m.text==='(sent a file)';
   const said=!user&&clip&&!clip.open?clip.text:m.text;
-  const body=user?`${pictures}${files}${standIn?'':`<div class="bubble"><div class="prompt-text">${promptWithMarks(m,pluginLogo)||promptWords(m.text)}</div></div>`}`:(split?`<div class="answer split">${replyParts(said).map(part=>`<div class="message-body text final reply-part">${renderMarkdown(part)}</div>`).join('')}</div>`:`<div class="answer"><div class="message-body text final">${renderMarkdown(replyParts(said).join('\n\n'))}</div></div>`)
+  const words=text=>split?`<div class="answer split">${replyParts(text).map(part=>`<div class="message-body text final reply-part">${renderMarkdown(part)}</div>`).join('')}</div>`:`<div class="answer"><div class="message-body text final">${renderMarkdown(replyParts(text).join('\n\n'))}</div></div>`;
+  // The messages it read on the way, where it read them (`inline`: each one's own drawn bubble, by id).
+  const pieces=!user&&!clip&&inline&&Array.isArray(m.steers)?replyPieces(m.text,m.steers,id=>inline.has(id)):[];
+  const parted=pieces.some(p=>p.steer),lastWords=pieces.findLastIndex(p=>'text' in p);
+  const body=user?`${pictures}${files}${standIn?'':`<div class="bubble"><div class="prompt-text">${promptWithMarks(m,pluginLogo)||promptWords(m.text)}</div></div>`}`:(parted?(lastWords<0?'':words(pieces[lastWords].text)):words(said))
     // A reply's pictures and videos fold away under one header row each, as in Work and ChatDGC (media/pictureFold.js).
     +(!user&&pictures?foldPictures(`pip:${m.id}:images`,pictures,{pictures:Math.min(64,m.images.length)}):'')
     // Each picture it made is a file too: a row with its kind, its size and Download (pips-08).
@@ -206,7 +224,18 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   const startedAgain=line?esc(line.slice(0,120)):'';
   const replyTime=startedAgain&&time?time.replace(/(<time[^>]*>)/,`$1${startedAgain} · `):startedAgain?`<span class="msg-time">${startedAgain}</span>`:time;
   const activityRow=!user?`<button type="button" class="chat-activity-toggle" data-chat-activity="${esc(m.run_id)}" aria-expanded="${activity?.open===true}">${transcriptIcon('tool')}<span>${activity?.loading?'Loading…':'What it did'}</span><span class="activity-chevron">${transcriptIcon('chevron')}</span></button>${activity?.open?activityMarkup(activity,m.run_id):''}`:'';
-  return `<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}" data-message="${esc(m.id)}">${user?'':head}<span class="sr-only role">${esc(label)}</span>${quoted}${activityRow}${shownCards}${body}${!user&&postArtifact(m)?docCardMarkup(postArtifact(m)):''}${used}${offered}${user?'':ownChangesMarkup(m,{name,undo,open:openChanges,busy:undoing,errors:undoErrors})}${status}<div class="response-actions">${user?'':head?(startedAgain?`<span class="msg-time">${startedAgain}</span>`:''):replyTime}${yesAction}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${replyAction}${options}${details}${trace}${!user&&stats?replyStats(stats):''}${user?sentTime:''}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
+  // A reply in pieces: its first words carry what a reply opens with (What it did, a plugin's card), each message it read
+  // follows the words before it, and its last words are the reply itself, with everything a reply ends with. One reply
+  // to copy, read aloud and reply to, whatever it read on the way.
+  const role=`<span class="sr-only role">${esc(label)}</span>`,opens=`${user?'':head}${role}${quoted}${activityRow}${shownCards}`;
+  const drawn=id=>`<div class="steer-inline" data-steer-inline="${esc(id)}">${inline.get(id)}</div>`;
+  let before='',after='',opened=false;
+  if(parted)pieces.forEach((p,i)=>{
+    if(p.steer){if(i>lastWords&&lastWords>=0)after+=drawn(p.steer);else before+=drawn(p.steer);return;}
+    if(i===lastWords)return;
+    before+=`<article class="pip-message msg assistant dgc reply-piece" data-reply-piece="${esc(m.id)}:${i}">${opened?role:opens}${words(p.text)}</article>`;opened=true;
+  });
+  return `${before}<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}${parted?' reply-piece reply-end':''}${live?' live-reply':''}" ${live?`data-live-reply="${esc(m.run_id)}" aria-label="Live reply"`:`data-message="${esc(m.id)}"`}>${opened?role:opens}${body}${!user&&postArtifact(m)?docCardMarkup(postArtifact(m)):''}${used}${offered}${user?'':ownChangesMarkup(m,{name,undo,open:openChanges,busy:undoing,errors:undoErrors})}${status}${live?'</article>'+after:`<div class="response-actions">${user?'':head?(startedAgain?`<span class="msg-time">${startedAgain}</span>`:''):replyTime}${yesAction}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${replyAction}${options}${details}${trace}${!user&&stats?replyStats(stats):''}${user?sentTime:''}<span class="copy-feedback sr-only" role="status"></span></div></article>${after}`}`;
 }
 
 // What a reply took, beside its actions: its time and its tokens (in and out, all its model requests).

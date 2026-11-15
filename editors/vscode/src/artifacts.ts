@@ -743,6 +743,48 @@ export class Artifacts implements vscode.Disposable {
     });
   }
 
+  /** What an artifact is now, with its content (a doc's text; a sheet, deck or dashboard as data): one answer. Nothing
+   *  when DGC refuses or the artifact is a page (a page is files, which this window never holds). */
+  detail(id: string): Promise<{ view: ArtifactView; content: unknown } | undefined> {
+    if (!ARTIFACT_ID.test(String(id || ""))) return Promise.resolve(undefined);
+    return new Promise((resolve) => {
+      this.ask({ type: "artifact_get", id, content: true }, {
+        ok: (ev) => { const view = artifactView(ev.artifact); resolve(view && ev.content !== undefined && ev.content !== null ? { view, content: ev.content } : undefined); },
+        fail: () => resolve(undefined),
+      });
+    });
+  }
+
+  /** Rename it (the Library's item menu): asks for the new name, then makes one new version that differs only in its
+   *  title, as a save from the editor would (artifact_update keeps the title with the version). True when renamed. */
+  async rename(view: Pick<ArtifactView, "id" | "title" | "type">): Promise<boolean> {
+    if (!ARTIFACT_ID.test(String(view?.id || ""))) return false;
+    if (view.type === "page") {
+      void vscode.window.showWarningMessage("A page can't be renamed here yet. Ask DGC to rename it.");
+      return false;
+    }
+    const typed = await vscode.window.showInputBox({
+      title: `Rename “${view.title}”`, value: view.title, prompt: "Its new name",
+      validateInput: (value: string) => !value.trim() ? "A name is needed." : value.trim().length > 200 ? "A name is at most 200 characters." : undefined,
+    });
+    const title = String(typed ?? "").trim().slice(0, 200);
+    if (!title || title === view.title) return false;
+    const refuse = (why: string) => { void vscode.window.showWarningMessage(`“${view.title}” wasn't renamed: ${why}`); return false; };
+    const now = await this.detail(view.id);
+    if (!now) return refuse("DGC couldn't read it.");
+    const content = now.content as string | Record<string, unknown>;
+    if (typeof content !== "string" && typeof content !== "object") return refuse("DGC couldn't read it.");
+    if (Buffer.byteLength(typeof content === "string" ? content : JSON.stringify(content), "utf8") > MAX_SAVE_BYTES) {
+      return refuse("it is more than one save from the editor can carry. Ask DGC to rename it.");
+    }
+    return new Promise<boolean>((resolve) => {
+      this.ask({ type: "artifact_update", id: view.id, content, base_version: now.view.version, title, note: "Renamed" }, {
+        ok: () => resolve(true),
+        fail: (_reason, message) => resolve(refuse(message)),
+      });
+    });
+  }
+
   /** In the browser, at its own address (asExternalUri, so a remote or WSL window's browser reaches it). */
   openInBrowser(view: Pick<ArtifactView, "id" | "title">): void {
     this.ask({ type: "artifact_open", id: view.id }, {

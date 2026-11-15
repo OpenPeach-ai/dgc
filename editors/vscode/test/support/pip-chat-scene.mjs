@@ -468,7 +468,11 @@ export const host = (opts) => `(${function (PIP, opts) {
   // opts.title: the Pip's own title, as its page shows it under its name.
   if (opts.title) pip.profile = { title: opts.title, body: null, color: null, notify: true };
   if (opts.many && !project) {
-    const other = (c, pip_type, name, more = {}) => ({ ...pip, id: "pip_" + c.repeat(32), pip_type, name, proposals: [], pending_review_count: 0, ...more });
+    // (opts.working: the Pips at work, by the character their id is made of, "9" the scene's own: each is replying, so
+    // its row says "Replying" and wears the blue dot at its end.)
+    const atWork = (c) => (String(opts.working || "").includes(c) ? { active_run: { id: "run_" + c.repeat(32), status: "running", run_kind: "conversation" } } : {});
+    if (String(opts.working || "").includes("9")) Object.assign(pip, atWork("9"));
+    const other = (c, pip_type, name, more = {}) => ({ ...pip, id: "pip_" + c.repeat(32), pip_type, name, proposals: [], pending_review_count: 0, active_run: null, ...atWork(c), ...more });
     const list = [other("1", "core", "Core"), pip, other("2", "scout", "Weekly competitor pricing and release notes digest for the sales team"),
       other("3", "quill", "Inbox", { profile: { title: "Chief of staff for everything that arrives before nine", body: null, color: null, notify: true } }),
       other("4", "lock", "Supercalifragilisticexpialidocious-renewals-and-subscriptions-watcher"), other("5", "patch", "Receipts", { status: "paused" }),

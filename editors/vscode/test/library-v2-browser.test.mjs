@@ -247,23 +247,24 @@ for (const place of ["side", "tab"]) {
       await maker(1); await x.rest(150);
       if (place === "side") assert.deepEqual((await posted(x, "chatdgcOpen")).at(-1), { type: "chatdgcOpen", id: CHAT });
       else assert.deepEqual((await asked(x, "maker")).at(-1), { type: "maker", maker: { kind: "chat", id: CHAT, name: "Rent or buy: the numbers" } });
-      assert.equal((await asked(x, "workImageOpen")).length, 0, "the name is its own press: the row did not open");
-      // The row opens the image; Show in folder and Save a copy are its actions.
-      const path = LIB_IMAGES[2].path;
+      assert.equal((await asked(x, "itemAct")).length, 0, "the name is its own press: the row did not open");
+      // The row opens the image; Reveal in file manager and Save a copy are its actions. Each asks the host the one
+      // way an item's menu does (itemAct, library-actions-browser.test.mjs), naming the image by its path.
+      const path = LIB_IMAGES[2].path, item = { kind: "image", path };
       await x.page.locator("#library-list .lib-row").nth(2).locator(".lib-row-name").click(); await x.rest(120);
-      assert.deepEqual((await asked(x, "workImageOpen")).at(-1), { type: "workImageOpen", path });
+      assert.deepEqual((await asked(x, "itemAct")).at(-1), { type: "itemAct", act: "open", item });
       const act = async (n, id, label) => {
         const row = x.page.locator("#library-list .lib-row").nth(n);
         if (place === "tab") { const b = row.locator(`.lib-row-actions [data-act="${id}"]`); assert.equal(await b.getAttribute("aria-label"), label); await b.click(); }
-        else { await row.hover(); await row.locator(".lib-row-more").click(); await x.page.waitForTimeout(350); await x.page.locator(".dgc-pop .dgc-menu-row", { hasText: label }).first().click(); }
+        else { await row.hover(); await row.locator(".lib-row-more").click(); await x.page.waitForTimeout(350); await x.page.locator(`.dgc-pop .dgc-menu-row[data-id="${id}"]`).click(); }
         await x.rest(200);
       };
       if (place === "side") { const row = x.page.locator("#library-list .lib-row").nth(2); await row.hover(); await row.locator(".lib-row-more").click(); await x.page.waitForTimeout(350);
-        assert.deepEqual(await x.menuRows(), ["Open the image", "Show it in its folder", "Save a copy…", "Save to project…"]); await x.page.keyboard.press("Escape"); await x.rest(200); }
-      await act(2, "reveal", "Show it in its folder");
-      assert.deepEqual((await asked(x, "workImageReveal")).at(-1), { type: "workImageReveal", path });
+        assert.deepEqual(await x.menuRows(), ["Open", "Open in editor", "Save a copy…", "Copy", "Copy path", "Reveal in file manager", "Rename…", "Remove…", "Save to project…"]); await x.page.keyboard.press("Escape"); await x.rest(200); }
+      await act(2, "reveal", "Reveal in file manager");
+      assert.deepEqual((await asked(x, "itemAct")).at(-1), { type: "itemAct", act: "reveal", item });
       await act(2, "save", "Save a copy…");
-      assert.deepEqual((await asked(x, "workImageSave")).at(-1), { type: "workImageSave", path });
+      assert.deepEqual((await asked(x, "itemAct")).at(-1), { type: "itemAct", act: "save", item });
       if (place === "side") {
         // A Pip's name opens that Pip's chat, in the Pips view.
         await maker(0);
@@ -341,34 +342,35 @@ test("Images reads on: Show more asks the host for the next page of images", asy
 });
 
 // ---- rows: what each can do, the same in both ---------------------------------------------------------------------------------
-test("tab 1100 px: a row's actions are icon buttons beside it; side 300 px: the same actions under the row's ⋯", async (t) => {
+test("tab 1100 px: a row's quick actions are icon buttons beside it, then its ⋯; side 300 px: everything under the row's ⋯", async (t) => {
   if (skipOrFail(t)) return;
   const wide = await open("tab", { width: 1100 }), narrow = await open("side", { width: 300 });
   try {
     const w = (await wide.lib()).rows[1], n = (await narrow.lib()).rows[1];
     assert.equal(w.title, "Acme sales sheet"); assert.equal(n.title, "Acme sales sheet");
-    assert.deepEqual(w.acts, ["open", "export", "pin", "remove"], "wide: its buttons"); assert.equal(w.more, false, "wide: no ⋯");
+    assert.deepEqual(w.acts, ["open", "save", "pin", "remove"], "wide: its buttons"); assert.equal(w.more, true, "wide: and its ⋯, the whole menu");
     assert.deepEqual(n.acts, [], "narrow: no row of buttons");
     const row = narrow.page.locator("#library-list .lib-row").nth(1); await row.hover(); await narrow.rest(200);
     assert.equal(await row.locator(".lib-row-more").evaluate((b) => b.checkVisibility({ opacityProperty: true })), true, "narrow: ⋯ under the pointer");
     await row.locator(".lib-row-more").click(); await narrow.page.waitForTimeout(350);
-    assert.deepEqual(await narrow.menuRows(), ["Open it", "Download…", "Pin to the dock", "Remove…"]);
-    await narrow.page.locator(".dgc-pop .dgc-menu-row", { hasText: "Download" }).click(); await narrow.page.waitForTimeout(350);
-    assert.deepEqual(await narrow.menuRows(), ["Excel workbook (.xlsx)", "CSV (first sheet)"], "Download offers its formats");
-    await narrow.page.locator(".dgc-pop .dgc-menu-row", { hasText: "CSV" }).click(); await narrow.rest(150);
-    assert.deepEqual([(await asked(narrow, "artifactExport")).at(-1).format, (await asked(narrow, "artifactExport")).at(-1).artifact.id], ["csv", ar(2)]);
+    assert.deepEqual(await narrow.menuRows(), ["Open", "Open in editor", "Save a copy…", "Copy", "Copy path", "Reveal in file manager", "Rename…", "Remove…", "Pin to the dock"]);
+    // Save a copy…: the host offers a sheet's formats (Excel, CSV) and then its own save dialog (src/chatdgc.ts libraryAct).
+    const sheet = { kind: "artifact", id: ar(2) };
+    await narrow.page.locator('.dgc-pop .dgc-menu-row[data-id="save"]').click(); await narrow.rest(150);
+    assert.deepEqual((await asked(narrow, "itemAct")).at(-1), { type: "itemAct", act: "save", item: sheet });
     // Wide: the same, from its buttons.
-    await wide.page.locator("#library-list .lib-row").nth(1).locator('[data-act="export"]').click(); await wide.page.waitForTimeout(350);
-    assert.deepEqual(await wide.menuRows(), ["Excel workbook (.xlsx)", "CSV (first sheet)"]);
-    await wide.page.keyboard.press("Escape"); await wide.rest(200);
+    const save = wide.page.locator("#library-list .lib-row").nth(1).locator('[data-act="save"]');
+    assert.equal(await save.getAttribute("aria-label"), "Save a copy…");
+    await save.click(); await wide.rest(150);
+    assert.deepEqual((await asked(wide, "itemAct")).at(-1), { type: "itemAct", act: "save", item: sheet });
     await wide.page.locator("#library-list .lib-row").nth(1).locator('[data-act="remove"]').click(); await wide.rest(150);
-    assert.equal((await asked(wide, "artifactRemove")).at(-1).artifact.id, ar(2));
+    assert.deepEqual((await asked(wide, "itemAct")).at(-1), { type: "itemAct", act: "remove", item: sheet });
     // A row opens its item, by a click and by Enter, in both.
     for (const x of [wide, narrow]) {
       await x.page.locator("#library-list .lib-row").first().locator(".lib-row-name").click(); await x.rest(120);
-      assert.equal((await asked(x, "artifactOpen")).at(-1).artifact.id, ar(1));
+      assert.deepEqual((await asked(x, "itemAct")).at(-1), { type: "itemAct", act: "open", item: { kind: "artifact", id: ar(1) } });
       await x.page.locator("#library-list .lib-row").nth(2).focus(); await x.page.keyboard.press("Enter"); await x.rest(120);
-      assert.equal((await asked(x, "artifactOpen")).at(-1).artifact.id, ar(3));
+      assert.deepEqual((await asked(x, "itemAct")).at(-1), { type: "itemAct", act: "open", item: { kind: "artifact", id: ar(3) } });
       assert.deepEqual(x.errors, []);
     }
   } finally { await wide.close(); await narrow.close(); }

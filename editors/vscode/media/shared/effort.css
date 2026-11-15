@@ -1,0 +1,53 @@
+/* The thinking slider, the same in Work's model menu and a Pip's (media/shared/effort.js, 15 Nov): the track with its
+   edge, the fill that glides to the new stop, the 28px dot, the three words under it. A Pip's is this one with its own
+   face where the dot is (.has-face). */
+.effort-control { padding: var(--sp-2) var(--sp-2) var(--sp-1); }
+.effort-slider, input.effort-slider { appearance: none; display: block; width: 100%; height: 25px; min-height: 0; padding: 0; border: 0; border-radius: var(--r-2xl); margin: 0;
+  background: linear-gradient(to right, var(--accent) var(--effort, 0%), var(--surface2) var(--effort, 0%)); cursor: pointer;
+  box-shadow: inset 0 0 0 1px var(--hair-strong); }       /* (the track has an edge: at Off it was a faint smudge) */
+.effort-slider::-webkit-slider-thumb { appearance: none; width: 28px; height: 28px; border-radius: var(--r-full);
+  background: var(--text-strong); border: 1px solid var(--border); box-shadow: 0 1px 4px rgba(0,0,0,.18); }
+/* Dragging it must never box it: the focus ring is for the keyboard, and it goes on the thumb. */
+.effort-slider, .effort-slider:focus, .effort-slider:focus-visible { outline: none; }
+.effort-slider:focus-visible:not(.by-pointer)::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--accent), 0 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent); }
+/* The fill glides to the new stop rather than jumping, and the thumb acknowledges the change.
+   --effort is registered so a gradient stop can be transitioned at all. */
+@property --effort { syntax: "<percentage>"; inherits: true; initial-value: 0%; }
+.effort-control { transition: --effort .18s ease-out; }
+.effort-slider::-webkit-slider-thumb {
+  transition: transform .12s ease-out, box-shadow .12s ease-out;
+}
+.effort-slider:active::-webkit-slider-thumb { transform: scale(1.06); }
+.effort-control.bumped .effort-slider::-webkit-slider-thumb { animation: effort-bump .3s ease-out; }
+@keyframes effort-bump {
+  0%   { transform: scale(1);    box-shadow: 0 1px 4px rgba(0,0,0,.18); }
+  45%  { transform: scale(1.12); box-shadow: 0 1px 4px rgba(0,0,0,.18), 0 0 0 6px var(--accent-soft); }
+  100% { transform: scale(1);    box-shadow: 0 1px 4px rgba(0,0,0,.18); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .effort-control { transition: none; }
+  .effort-control.bumped .effort-slider::-webkit-slider-thumb { animation: none; }
+  .effort-slider::-webkit-slider-thumb { transition: none; }
+}
+.effort-labels { display: flex; justify-content: space-between; margin-top: var(--sp-2); color: var(--muted); font-size: var(--t-xs); }
+.effort-labels output { color: var(--text); }
+.effort-labels[data-at]:not([data-at=""]) output { visibility: hidden; }      /* at an end, the end's own word says it */
+.effort-labels[data-at="start"] > span:first-child, .effort-labels[data-at="end"] > span:last-child { color: var(--text); }
+:is(.reasoning-card, .effort-control).is-ultra .effort-slider { background: linear-gradient(100deg, var(--accent), var(--lav), var(--accent)); background-size: 200% 100%; animation: effort-shimmer 3s linear infinite; }
+@keyframes effort-shimmer { to { background-position: 200% 0; } }
+@media (prefers-reduced-motion: reduce) { :is(.reasoning-card, .effort-control).is-ultra .effort-slider { animation: none; } }
+/* A Pip's face is the dot (.has-face): the dot's size, on the dot's centre at every stop, with the dot's own focus
+   ring and its bump. The slider's own dot is still what is dragged; it is only not drawn. */
+.effort-control.has-face { position: relative; }
+.effort-control.has-face .effort-slider::-webkit-slider-thumb { background: transparent; border-color: transparent; box-shadow: none; }
+.effort-control.has-face.bumped .effort-slider::-webkit-slider-thumb { animation: none; }
+.effort-face { position: absolute; z-index: 1; top: calc(var(--sp-2) + 12.5px); left: calc(var(--sp-2) + 14px + (100% - 2 * var(--sp-2) - 28px) * var(--effort-t, 0));
+  width: 28px; height: 28px; translate: -50% -50%; border-radius: var(--r-full); pointer-events: none;
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,.3));      /* (the dot's own lift, so a face of the fill's colour still stands off it) */
+  transition: scale .12s ease-out, box-shadow .12s ease-out; }
+.effort-control.has-face .effort-face > * { display: block; width: 28px; height: 28px; flex: none; }
+.effort-control.has-face:has(.effort-slider:focus-visible:not(.by-pointer)) .effort-face { box-shadow: 0 0 0 2px var(--accent), 0 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent); }
+.effort-control.has-face:has(.effort-slider:active) .effort-face { scale: 1.06; }
+.effort-control.has-face.bumped .effort-face { animation: effort-face-bump .3s ease-out; }
+@keyframes effort-face-bump { 0% { scale: 1; } 45% { scale: 1.12; } 100% { scale: 1; } }
+@media (prefers-reduced-motion: reduce) { .effort-face { transition: none; } .effort-control.has-face.bumped .effort-face { animation: none; } }

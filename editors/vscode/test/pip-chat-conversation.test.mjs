@@ -189,7 +189,7 @@ test('the composer has the sub-agents pill, counting its sub-agents, and it open
  const pill=x.$('#chat-agents');
  assert.ok(pill,'in the prompt box');assert.equal(pill.dataset.state,'running');
  assert.equal(pill.querySelector('.agents-text').textContent,'1 sub-agent');assert.equal(pill.querySelector('.agents-short').textContent,'1');
- assert.equal(pill.nextElementSibling?.id,'chat-model','where Work has it: before the model');
+ assert.equal(pill.nextElementSibling?.querySelector('#chat-model')?.id,'chat-model','where Work has it: before the model (in the slot that measures its room)');
  assert.deepEqual(x.requests('list_pip_agents').at(-1),{type:'list_pip_agents',pip_id:GST});
  pill.click();await x.drain();
  const map=x.$('.pip-agent-map[role="dialog"]');

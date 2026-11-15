@@ -15,7 +15,7 @@ const pipCards = (() => {
   const mod = { exports: {} }; new Function("module", "exports", code)(mod, mod.exports); return mod.exports;
 })();
 const mainCopy = (() => {
-  const src = readFileSync(here + "/../media/shared/menu.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/composer.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/tray.js", "utf8") + "\n" + readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
+  const src = readFileSync(here + "/../media/shared/effort.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/menu.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/composer.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/tray.js", "utf8") + "\n" + readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
   const body = src.slice(src.indexOf("// card-number:start"), src.indexOf("// card-number:end"));
   return new Function(body + "\nreturn cardNumberIn;")();
 })();

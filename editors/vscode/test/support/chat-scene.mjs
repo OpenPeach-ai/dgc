@@ -31,13 +31,15 @@ function documents() {
   return cached;
 }
 
-async function open(browser, which, { width, height, theme, state, touch = false, forced = false, scale = 2 }) {
+async function open(browser, which, { width, height, theme, state, touch = false, forced = false, scale = 2, secure = false }) {
   const docs = documents();
   const { html, js } = docs[which];
   // (touch: a finger, no pointer; forced: Windows High Contrast.)
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: scale, hasTouch: touch, forcedColors: forced ? "active" : "none" });
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
+  // (secure: the page has an https origin, as a webview's has, so what needs one is there: the clipboard.)
+  if (secure) { await page.route("https://library.test/**", (r) => r.fulfill({ body: "<!doctype html>", contentType: "text/html" })); await page.goto("https://library.test/"); }
   await page.setContent(html, { waitUntil: "load" });
   await page.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; --vscode-editor-font-family: ui-monospace, monospace; ${THEMES[theme]} }` });
   await page.evaluate((t) => document.body.classList.add(t.startsWith("light") ? "vscode-light" : t === "hc" ? "vscode-high-contrast" : "vscode-dark"), theme);
@@ -53,7 +55,7 @@ async function open(browser, which, { width, height, theme, state, touch = false
 }
 
 export const openChat = (browser, { width = 900, height = 760, theme = "dark-modern", state, scale } = {}) => open(browser, "chat", { width, height, theme, state, scale });
-export const openLibrary = (browser, { width = 900, height = 760, theme = "dark-modern", state, touch, forced, scale } = {}) => open(browser, "library", { width, height, theme, state, touch, forced, scale });
+export const openLibrary = (browser, { width = 900, height = 760, theme = "dark-modern", state, touch, forced, scale, secure } = {}) => open(browser, "library", { width, height, theme, state, touch, forced, scale, secure });
 
 export const OFFER = { version: 1, types: ["page", "doc", "slides", "sheet", "dashboard"], outputs: ["auto", "document", "slides", "spreadsheet", "page", "dashboard"],
                        exports: { doc: ["docx", "pdf", "md"], slides: ["pptx", "pdf", "html"], sheet: ["xlsx", "csv"], dashboard: ["html"], page: ["html", "zip"] } };

@@ -87,6 +87,9 @@ const HOST = `(${function (data, say, PNG, PICTURES) {
       say({ type: "videos", seq: m.seq || 0, offset: m.offset || 0, videos: found, total: found.length, next: null }); }
     else if (m.type === "image") say({ type: "image", id: m.file.id, data: picture(m.file.name) });
     else if (m.type === "workImage") say({ type: "workImageData", path: m.path, data: picture(m.path) });
+    // Copy (an item's menu): the host reads the picture and hands it back for the clipboard, as src/chatdgc.ts libraryAct does.
+    else if (m.type === "itemAct" && m.act === "copy" && m.item && m.item.kind === "image") say({ type: "itemCopy", key: "image:" + m.item.path, data: picture(m.item.path) });
+    else if (m.type === "itemAct" && m.act === "copy" && m.item && m.item.kind === "file") say({ type: "itemCopy", key: "file:" + m.item.id, data: picture((lib.files.find((f) => f.id === m.item.id) || {}).name) });
   };
 }.toString()})`;
 
@@ -149,8 +152,8 @@ export async function openLibraryTab(browser, { artifacts = LIB_ARTIFACTS, widge
 
 /** Opens the Library in its editor tab (the page src/chatdgc.ts serves), on the same stand-in host. `view`: the tab
  *  the host opens it on ("" for the page's own). */
-export async function openLibraryPage(browser, { artifacts = LIB_ARTIFACTS, widgets = LIB_WIDGETS, files = LIB_FILES, images = LIB_IMAGES, videos = LIB_VIDEOS, pageSize = 60, pins = [], view = "", width = 1100, height = 760, theme = "dark-modern", state, touch = false, forced = false, scale = 1 } = {}) {
-  const x = await openLibrary(browser, { width, height, theme, state, touch, forced, scale });
+export async function openLibraryPage(browser, { artifacts = LIB_ARTIFACTS, widgets = LIB_WIDGETS, files = LIB_FILES, images = LIB_IMAGES, videos = LIB_VIDEOS, pageSize = 60, pins = [], view = "", width = 1100, height = 760, theme = "dark-modern", state, touch = false, forced = false, scale = 1, secure = false } = {}) {
+  const x = await openLibrary(browser, { width, height, theme, state, touch, forced, scale, secure });
   await x.page.evaluate(({ data, HOST, PNG, PICTURES }) => {
     const say = (message) => window.dispatchEvent(new MessageEvent("message", { data: JSON.parse(JSON.stringify(message)) }));
     const answer = (0, eval)(HOST)(data, say, PNG, PICTURES);

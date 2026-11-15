@@ -1672,8 +1672,11 @@ test("the Library's Files: every file you attached, by kind, searched by name, e
     for (const label of ["Open the chat it's in", "Use in a new chat", "Save a copy…", "Add a copy to a project…", "Delete from your Library…"]) {
       await second.locator(`button[aria-label="${label}"]`).click();
     }
-    assert.deepEqual((await page.evaluate(() => window.__posted.filter((m) => m.file))).map((m) => [m.type, m.file.id]),
-      [["image", `att_${"1".repeat(32)}`], ...["open", "use", "save", "toProject", "remove"].map((type) => [type, `att_${"2".repeat(32)}`])]);
+    // (Open, Save a copy… and Delete are three of the eight an item's menu has: they ask the host its one way, itemAct,
+    // naming the file by its id and its chat. Use in a new chat and Add a copy to a project… are a file's own.)
+    assert.deepEqual((await page.evaluate(() => window.__posted.filter((m) => m.file || m.type === "itemAct"))).map((m) => (m.type === "itemAct" ? [m.act, m.item] : [m.type, m.file.id])),
+      [["image", `att_${"1".repeat(32)}`], ...["open", "use", "save", "toProject", "remove"].map((type) => (type === "use" || type === "toProject" ? [type, `att_${"2".repeat(32)}`]
+        : [type, { kind: "file", id: `att_${"2".repeat(32)}`, source: "chat", chat_id: `chat_${"b".repeat(32)}` }]))]);
     assert.equal(await page.locator("#library-list .lib-row").nth(2).locator('button[aria-label^="Open the project"]').getAttribute("aria-label"), "Open the project Goa trip");
     await pick("kind", "PDFs");
     assert.deepEqual((await posted("list")).at(-1), { type: "list", query: "", kind: "pdf", offset: 0 });
@@ -1720,9 +1723,9 @@ test("the Library's Images: every image DGC made or kept, on every surface, aske
     assert.deepEqual((await posted("workImage")).map((m) => m.path), [fox.path, owl.path], "each preview asked for by its path");
     await send({ type: "workImageData", path: fox.path, data: "data:image/png;base64,iVBORw0KGgo=" });
     assert.equal(await page.locator("#library-list .lib-row-thumb img").first().getAttribute("src"), "data:image/png;base64,iVBORw0KGgo=");
-    for (const label of ["Open the image", "Show it in its folder", "Save a copy…", "Save to project…"]) await page.locator("#library-list .lib-row").first().locator(`button[aria-label="${label}"]`).click();
-    assert.deepEqual((await page.evaluate(() => window.__posted.filter((m) => /^workImage(Open|Reveal|Save|ToProject)$/.test(m.type)))).map((m) => [m.type, m.path]),
-      [["workImageOpen", fox.path], ["workImageReveal", fox.path], ["workImageSave", fox.path], ["workImageToProject", fox.path]]);
+    for (const label of ["Open the image", "Reveal in file manager", "Save a copy…", "Save to project…"]) await page.locator("#library-list .lib-row").first().locator(`button[aria-label="${label}"]`).click();
+    assert.deepEqual((await page.evaluate(() => window.__posted.filter((m) => m.type === "itemAct" || /^workImage(Open|Reveal|Save|ToProject)$/.test(m.type)))).map((m) => (m.type === "itemAct" ? [m.act, m.item] : [m.type, m.path])),
+      [...["open", "reveal", "save"].map((act) => [act, { kind: "image", path: fox.path }]), ["workImageToProject", fox.path]], "the three an item's menu has ask its one way (itemAct); Save to project… is an image's own");
     if (process.env.DGC_SHOTS) await page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-library-images.png") });
     // Show more: the next page, added to the list.
     await page.locator("#library-load").click();
@@ -1770,8 +1773,8 @@ test("the Library's Widgets: a tab of their own once the backend keeps them, eac
     assert.deepEqual(await metas(), ["made by Home loan · now · Interactive"]);
     if (process.env.DGC_SHOTS) await page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-library-widgets.png") });
     for (const label of ["Open it beside you", "Open the chat it's in", "Delete the widget…"]) await page.locator(`#library-list button[aria-label="${label}"]`).click();
-    assert.deepEqual((await page.evaluate(() => window.__posted.filter((m) => m.widget))).map((m) => [m.type, m.widget.id]),
-                     [["widgetOpen", w.id], ["widgetChat", w.id], ["widgetRemove", w.id]]);
+    assert.deepEqual((await page.evaluate(() => window.__posted.filter((m) => m.widget || m.type === "itemAct"))).map((m) => (m.type === "itemAct" ? [m.act, m.item] : [m.type, m.widget.id])),
+                     [["open", { kind: "widget", id: w.id, chat_id: w.chat_id }], ["widgetChat", w.id], ["remove", { kind: "widget", id: w.id, chat_id: w.chat_id }]]);
     await page.locator("#library-search").fill("tip");
     await page.waitForFunction(() => window.__posted.filter((m) => m.type === "widgets").at(-1)?.query === "tip", null, { timeout: 5000 });
     assert.deepEqual((await posted("widgets")).at(-1), { type: "widgets", query: "tip", offset: 0 });

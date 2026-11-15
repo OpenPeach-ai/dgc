@@ -120,7 +120,7 @@ await step("menus", async () => {
     }
     await sheet(`menus-${theme}`, rows);
     const y = await openLibraryPage(browser, { width: 1100, theme: `${theme}-modern` });
-    try { await y.page.locator("#library-list .lib-row").nth(1).locator('[data-act="export"]').click(); await y.page.waitForTimeout(350); await shot(y.page, `menu-editor-download-${theme}`);
+    try { await y.page.locator("#library-list .lib-row").nth(1).locator(".lib-row-more").click(); await y.page.waitForTimeout(350); await shot(y.page, `menu-editor-download-${theme}`);
       await y.page.keyboard.press("Escape"); await y.rest(200); await y.menu("maker"); await shot(y.page, `menu-editor-maker-${theme}`); } finally { await y.close(); }
     await sheet(`menus-editor-${theme}`, [[`menu-editor-download-${theme}`], [`menu-editor-maker-${theme}`]]);
   }

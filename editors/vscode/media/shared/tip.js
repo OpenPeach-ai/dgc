@@ -96,7 +96,8 @@
       // Only focus the Tab key brought: a label on every click is noise, and so is one on the control focus is put
       // back on as a menu or a dialog closes (it would cover what was under it).
       let keyboard = true; try { keyboard = found ? found.matches(":focus-visible") : false; } catch { keyboard = !!found; }
-      keyboard = keyboard && lastKey === "Tab";
+      // (And a menu's row that is off, reached by the arrows: its label is why it is off, which nothing else says.)
+      keyboard = keyboard && (lastKey === "Tab" || (found.getAttribute("aria-disabled") === "true" && /^(Arrow(Up|Down)|Home|End)$/.test(lastKey)));
       if (found && keyboard) show(found, true); else hide();
     };
     const key = (e) => { lastKey = e.key; if (e.key === "Escape") hide(); };

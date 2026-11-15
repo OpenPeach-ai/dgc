@@ -55,6 +55,12 @@
 .dgc-lib .lib-status { margin: 0; padding: 0; color: var(--muted); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
 .dgc-lib .lib-status[hidden] { display: none; }
 .dgc-lib .lib-status[data-kind="error"] { color: var(--err-text); }
+/* What was just done, in a word or two ("Path copied", "Image copied"): a small label over the top of the list for a
+   moment. It takes no room (nothing moves under the pointer), and is read out (role="status"). */
+.dgc-lib .lib-said-at { position: relative; z-index: 3; height: 0; margin-top: calc(-1 * var(--lib-gap)); pointer-events: none; }
+.dgc-lib .lib-said { position: absolute; top: calc(var(--lib-gap) + 4px); left: 50%; translate: -50% 0; box-sizing: border-box; max-width: 100%; margin: 0; padding: 4px 10px; border: 1px solid var(--hair); border-radius: var(--btn-r);
+  background: var(--raised, var(--surface2)); color: var(--text-strong); font: var(--w-med) var(--t-xs)/1.4 var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: var(--lift-1); }
+.dgc-lib .lib-said[hidden] { display: none; }
 
 /* ---- the rows: a small picture or the kind's sheet, the title on one line, and who made it under it ---- */
 .dgc-lib .lib-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
@@ -127,7 +133,9 @@
   .dgc-lib .lib-row-sheet > .dgc-sheet { scale: 1; }
   .dgc-lib .lib-row-mark [data-mark] { --size: 36px; }
   .dgc-lib .lib-row-actions { display: inline-flex; }
-  .dgc-lib .lib-row .lib-row-more, .dgc-lib .lib-row:is(:hover, :focus-within) .lib-row-more { display: none; }
+  /* The row's ⋯ is there too, after its buttons, always: the whole menu (the same one a right-click opens). */
+  .dgc-lib .lib-row .lib-row-more, .dgc-lib .lib-row:is(:hover, :focus-within) .lib-row-more { position: static; translate: none; display: inline-flex; margin-left: calc(2px - var(--sp-3)); background: transparent; }
+  .dgc-lib .lib-row .lib-row-more:hover, .dgc-lib .lib-row .lib-row-more[aria-expanded="true"] { background: var(--wash); }
   .dgc-lib .lib-row:is(:hover, :focus-within) .lib-row-main, .dgc-lib .lib-row:has(.lib-row-more[aria-expanded="true"]) .lib-row-main { padding-right: 0; }
   .dgc-lib .lib-row-facts { display: block; }
   .dgc-lib .lib-row-name { font-weight: var(--w-med); }

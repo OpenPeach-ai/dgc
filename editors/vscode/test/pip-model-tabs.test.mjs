@@ -31,7 +31,7 @@ test("the model row and the slider stay on top; under them the tabs Main model a
   const menu = x.$(".composer-model-menu");
   assert.deepEqual(tabs(x), [["Main model", "true"], ["Sub-agents", "false"]]);
   const order = [...menu.children].map((n) => n.id || n.className.split(" ")[0]);
-  assert.ok(order.indexOf("chat-model-summary") < order.indexOf("composer-effort-control") && order.indexOf("composer-effort-control") < order.indexOf("model-tabs"), `the row, the slider, then the tabs: ${order}`);
+  assert.ok(order.indexOf("chat-model-summary") < order.indexOf("effort-control") && order.indexOf("effort-control") < order.indexOf("model-tabs"), `the row, the slider, then the tabs: ${order}`);
   assert.ok(order.indexOf("model-tabs") < order.indexOf("composer-model-list"), "the list is under the tabs");
   assert.ok(x.$(".composer-model-list"), "the Main tab shows the model list");
   assert.equal(x.$(".composer-agents"), null);

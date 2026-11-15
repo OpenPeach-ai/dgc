@@ -179,6 +179,13 @@ export function messagesPage(value,pip,workspace) {
     const ok=m.role==='assistant'&&Array.isArray(m.plugins)?m.plugins.filter(p=>record(p)&&typeof p.plugin==='string'&&/^[a-z0-9][a-z0-9-]{0,63}$/.test(p.plugin)&&typeof p.name==='string'&&p.name&&[...p.name].length<=80).slice(0,8):[];
     if(ok.length)m.plugins=ok;else delete m.plugins;
   }
+  // Where a reply read the messages sent while it worked (Pips API 99): [{id, at}], `at` a place in its own text counted
+  // in characters as Python counts them, in order, at most 64. A bad list never costs the chat: the reply is then whole.
+  for(const m of value.messages)if(m.steers!==undefined){
+    const length=m.role==='assistant'?[...m.text].length:-1,list=Array.isArray(m.steers)?m.steers:null;
+    const ok=!!list&&list.length>0&&list.length<=64&&list.every((x,i)=>record(x)&&typeof x.id==='string'&&!!x.id&&Number.isSafeInteger(x.at)&&x.at>=0&&x.at<=length&&(i===0||x.at>=list[i-1].at))&&new Set(list.map(x=>x.id)).size===list.length;
+    if(ok)m.steers=list.map(x=>({id:x.id,at:x.at}));else delete m.steers;
+  }
   for(const m of value.messages)if(m.choices!==undefined&&(m.role!=='assistant'||!Array.isArray(m.choices)||m.choices.length<2||m.choices.length>4||m.choices.some(c=>typeof c!=='string'||!c||c.length>80)))throw new Error('Conversation choices are invalid.');
   if(value.next_before_id!==null&&value.next_before_id!==value.messages[0]?.id)throw new Error('Conversation history cursor is invalid.');
   if(value.active_run!==null&&(!record(value.active_run)||typeof value.active_run.id!=='string'||!active(value.active_run.status)))throw new Error('Conversation active run is invalid.');

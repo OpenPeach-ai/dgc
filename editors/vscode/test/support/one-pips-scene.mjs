@@ -34,6 +34,11 @@ export const CHECK = "run_" + hex("1"), FIXRUN = "run_" + hex("2"), OLDER = "run
  *             findings; `fix` also takes "checking" (the Pip checks its work), "retry" (sent back, try 2 of 3),
  *             "held", "asked" (after the last try), "failed" and "stopped"; fixes carry `agent`; list_pip_agents,
  *             stop_pip_agent and retry_pip_fix answer; `earlier`: that many finished sub-agents from before
+ *    chat     {[pip id]: {messages, active_run, waiting}}: that Pip's chat as given (each message needs only its id,
+ *             role, text, run_id and status); kept in state.chat, so a test changes it as the reply goes on. A message
+ *             sent while its `active_run` runs joins it as one sent mid-reply (steered, not read yet)
+ *    activity {[run id]: events}: a run's live events ({event_type, payload}); kept in state.activity
+ *    model    every Pip's own model, by name; thinking: the chat's thinking level ("off" by default)
  *  Returns {answer(request) → result | undefined | {error}, state}. */
 export function makeBackend(o = {}) {
   const hex = (c) => c.repeat(32), ws = (c) => "ws_" + hex(c), pid = (c) => "pip_" + hex(c);
@@ -45,14 +50,15 @@ export function makeBackend(o = {}) {
   const state = { slots: o.slots || 1, fix: o.fix || "none", waiting: o.waiting === false ? "none" : "waiting", level: o.level || "ask", change: o.fix === "applied" ? "applied" : "pending", committed: false,
     order: o.order || [GST, ERP, MORNINGS, BEDS], requests: [], unread: o.unread || {}, made: [], helper: 0, left: false, again: 0,
     paying: o.paying || "ask", limits: o.limits === false ? null : { usd_per_day: null, max_count: null, sites: null, ...(o.limits || {}) }, spent: o.spent || 0,
-    total: { usd_per_day: null, spent_today: 0, ...(o.total || {}) }, knows: {}, notes: (o.notes || []).slice() };
+    total: { usd_per_day: null, spent_today: 0, ...(o.total || {}) }, knows: {}, notes: (o.notes || []).slice(),
+    chat: JSON.parse(JSON.stringify(o.chat || {})), activity: JSON.parse(JSON.stringify(o.activity || {})), sent: [] };
   const said = () => o.limits === false ? {} : { pay_limits: { ...state.limits }, spent_today: state.spent };
   const types = ["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"].map((id, character_index) => ({ id, character_index, name: id[0].toUpperCase() + id.slice(1),
     role: id, description: "Reads the code and reports what it finds", available: id !== "core", unavailable_reason: id === "core" ? "Core is the main chat." : null, default_name: id[0].toUpperCase() + id.slice(1),
     default_goal: "Review the project", engine: id === "core" ? null : id === "patch" ? "patch" : id === "pulse" ? "test" : id === "quill" ? "documentation_draft" : "source_audit" }));
   const pip = (id, space, name, type, extra = {}) => ({ id, name, pip_type: type, workspace_id: space, status: "active", current_version: 3, lifecycle_revision: 0, policy: "read_only", trigger: "manual",
     goal: "Help with what I ask in this chat", source_ref: "HEAD", source_policy: space === P ? { mode: "personal" } : { mode: "current_tree", exclusions: "safe_source_v1" }, schedule: null, proposals: [], pending_review_count: 0,
-    model_choice: { mode: "default" }, created_at: "2026-11-01T09:00:00Z", updated_at: "2026-11-01T09:00:00Z", ...extra });
+    model_choice: o.model ? { mode: "model", model: o.model } : { mode: "default" }, created_at: "2026-11-01T09:00:00Z", updated_at: "2026-11-01T09:00:00Z", ...extra });
   const pips = o.empty ? [] : [pip(CORE, P, "Core", "core"), pip(MORNINGS, P, "Mornings", "quill"),
     pip(GST, LIME, NAME, "rook", { goal: sub ? "Check the tile shop's totals every evening at 8" : "Check the GST code every evening at 8", schedule: { type: "daily", time: "20:00", timezone: "Asia/Kolkata" }, ...(o.branch ? { source_ref: o.branch, source_policy: { mode: "committed_only" } } : {}) }),
     pip(ERP, LIME, "ERP daily audit", "scout"), pip(BEDS, GARDEN, "Bed planner", "scout")];
@@ -62,7 +68,7 @@ export function makeBackend(o = {}) {
     { folder: "/home/me/code/lime_tiles", name: "lime_tiles", here: false, exists: true, sessions: 3, pips: 2, workspace_id: LIME, updated_at: ago(10) },
     { folder: "/home/me/code/notes", name: "notes", here: false, exists: false, sessions: 1, pips: 0, workspace_id: null, updated_at: ago(9000) }];
   const runner = { runner_id: "r", status: "running", online: true, paused: false, counts: { queued: 0, running: 0, cancelling: 0 }, boxes: { available: true, why: "", ...(o.boxes || {}) } };
-  const controls = { version: 1, mode: "read_only", options: { context_size: 8192, thinking: "off" }, options_source: "last_message", inherited_context_size: 1048576, effective_context_size: 8192,
+  const controls = { version: 1, mode: "read_only", options: { context_size: 8192, thinking: o.thinking || "off" }, options_source: "last_message", inherited_context_size: 1048576, effective_context_size: 8192,
     context_min: 2048, context_max: 32768, thinking_levels: ["off", "low", "medium", "high", "xhigh"], reasoning_control: "provider_dependent", reasoning_note: "n", context_note: "n" };
   const findings = sub ? [
     { id: "f1", title: "Order total ignores the discount", severity: "high", path: "totals.py", line: 3, state: "new" },
@@ -140,6 +146,8 @@ export function makeBackend(o = {}) {
   };
   const messages = (id) => {
     const space = pips.find((x) => x.id === id)?.workspace_id || P;
+    if (state.chat[id]) return { pip_id: id, workspace_id: space, next_before_id: null, history_context_omitted_count: 0, chat_controls: controls, waiting: [], active_run: null, ...state.chat[id],
+      messages: state.chat[id].messages.map((m, i) => ({ pip_id: id, workspace_id: space, model: "m", created_at: ago(30 - i), ...m })) };
     const list = id === GST && o.own ? [
       { id: "msg_" + hex("1"), pip_id: GST, workspace_id: LIME, role: "user", text: "check the GST code every evening at 8", run_id: "run_" + hex("8"), model: "m", created_at: ago(2000), status: "succeeded" },
       { id: "msg_" + hex("2"), pip_id: GST, workspace_id: LIME, role: "assistant", text: "Done. I'll check the GST code every evening at 8.", run_id: "run_" + hex("8"), model: "m", created_at: ago(1999), status: "succeeded",
@@ -172,7 +180,7 @@ export function makeBackend(o = {}) {
     list_pip_runs: (r) => ({ runs: r.pip_id === GST ? runs : [] }),
     run_pip: () => ({ run: runs[0] }),
     get_pip_run: (r) => ({ run: { ...runs.find((x) => x.id === r.run_id), result: { summary: "Three findings.", findings: [], limitations: [] } } }),
-    list_pip_run_posts: (r) => ({ pip_id: r.pip_id, workspace_id: pips.find((x) => x.id === r.pip_id)?.workspace_id || P, posts: r.pip_id === GST && o.posts !== false ? [older, post] : [], next_before_id: null }),
+    list_pip_run_posts: (r) => ({ pip_id: r.pip_id, workspace_id: pips.find((x) => x.id === r.pip_id)?.workspace_id || P, posts: r.pip_id === GST && o.posts !== false && !state.chat[GST] ? [older, post] : [], next_before_id: null }),
     list_pip_run_fixes: (r) => ({ pip_id: r.pip_id, workspace_id: pips.find((x) => x.id === r.pip_id)?.workspace_id || P, fixes: [] }),
     list_pip_messages: (r) => messages(r.pip_id),
     list_pip_attention: (r) => { const all = attention(), items = all.filter((i) => i.workspace_id === P || r.projects === "all" || r.projects === i.workspace_id);
@@ -220,7 +228,16 @@ export function makeBackend(o = {}) {
     set_pip_agents: (r) => { state.slots = r.slots; return { slots: r.slots }; },
     stop_pip_agent: () => { state.fix = "stopped"; return { agent: agentNow() }; },
     retry_pip_fix: (r) => { if (r.again) { state.fix = "running"; state.again++; } else state.left = true; return { fix: fixNow()[0] }; },
-    list_pip_run_activity: (r) => r.run_id !== FIXRUN ? undefined : { run_id: FIXRUN, pip_id: GST, workspace_id: LIME, next_cursor: Math.max(r.after || 0, 3), has_more: false, history_may_be_truncated: false, retention_limit: 500, retention_scope: "workspace",
+    send_pip_message: (r) => { if (!state.chat[r.pip_id]) return undefined;     // (a scene with no given chat never answers, as before)
+      const chat = state.chat[r.pip_id], run = chat?.active_run || { id: "run_" + hex("5"), status: "queued", run_kind: "conversation" };
+      const message = { id: "msg_sent" + (state.sent.length + 1), pip_id: r.pip_id, workspace_id: pips.find((x) => x.id === r.pip_id)?.workspace_id || P, role: "user", text: r.text, run_id: run.id, model: "m", created_at: ago(0), status: "queued",
+        ...(chat?.active_run ? { steered: true, steer_status: "pending" } : {}) };
+      state.sent.push(message); if (chat) { chat.messages.push(message); if (!chat.active_run) chat.active_run = run; }
+      return { message, run: { ...run, pip_id: r.pip_id } }; },
+    list_pip_run_activity: (r) => state.activity[r.run_id] ? (() => { const owner = pips.find((x) => state.chat[x.id]?.messages.some((m) => m.run_id === r.run_id)) || pips.find((x) => x.id === GST);
+      const events = state.activity[r.run_id].map((e, i) => ({ payload: {}, ...e, seq: i + 1, run_id: r.run_id, pip_id: owner.id, workspace_id: owner.workspace_id, created_at: ago(0) })).filter((e) => e.seq > (r.after || 0)).slice(0, 50);
+      return { run_id: r.run_id, pip_id: owner.id, workspace_id: owner.workspace_id, next_cursor: events.length ? events.at(-1).seq : (r.after || 0), has_more: false, history_may_be_truncated: false, retention_limit: 500, retention_scope: "workspace", events }; })()
+      : r.run_id !== FIXRUN ? undefined : { run_id: FIXRUN, pip_id: GST, workspace_id: LIME, next_cursor: Math.max(r.after || 0, 3), has_more: false, history_may_be_truncated: false, retention_limit: 500, retention_scope: "workspace",
       events: [{ seq: 1, event_type: "pip_run_started", payload: {} }, { seq: 2, event_type: "pip_run_progress", payload: { kind: "tool_call", tool: "edit_file", path: "totals.py" } },
         { seq: 3, event_type: "pip_run_progress", payload: { kind: "progress", state: "tool", message: "Running the tests" } }].filter((e) => e.seq > (r.after || 0)).map((e) => ({ ...e, run_id: FIXRUN, pip_id: GST, workspace_id: LIME, created_at: ago(0) })) },
     cancel_pip_run: () => { state.fix = "stopped"; return { run: { id: FIXRUN, status: "cancelling" } }; },

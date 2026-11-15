@@ -153,16 +153,14 @@ test("the Library's Artifacts tab: only when offered, newest first, by kind and 
     await s.page.fill("#library-search", "");
     await s.page.waitForTimeout(420);
     const row = s.page.locator('#library-list .lib-row[data-type="dashboard"]');
+    // A row's buttons ask the host the one way an item's menu does (itemAct, 15 Nov): the artifact by its id, no more.
+    const item = { kind: "artifact", id: ITEMS[2].id };
     await row.locator('[aria-label="Open it"]').click();
-    assert.equal((await s.posted("artifactOpen"))[0].artifact.id, ITEMS[2].id);
-    await row.locator('[aria-label="Download…"]').click();
-    await s.page.waitForSelector(".dgc-pop .dgc-menu-row");
-    assert.deepEqual(await s.page.locator(".dgc-pop .dgc-menu-label").allTextContents(), ["Web page (.html)"], "a dashboard's one format");
-    await s.page.locator(".dgc-pop .dgc-menu-row").click();
-    assert.deepEqual((await s.posted("artifactExport")).map((m) => [m.artifact.id, m.format]), [[ITEMS[2].id, "html"]]);
+    assert.deepEqual(await s.posted("itemAct"), [{ type: "itemAct", act: "open", item }]);
+    await row.locator('[aria-label="Save a copy…"]').click();
+    assert.deepEqual((await s.posted("itemAct")).at(-1), { type: "itemAct", act: "save", item }, "the host offers its formats (a dashboard's one: .html) and its save dialog");
     await row.locator('[aria-label^="Remove"]').click();
-    const [remove] = await s.posted("artifactRemove");
-    assert.equal(remove.artifact.id, ITEMS[2].id, "Remove asks the host, which asks you first");
+    assert.deepEqual((await s.posted("itemAct")).at(-1), { type: "itemAct", act: "remove", item }, "Remove asks the host, which asks you first");
     assert.equal(await row.count(), 1, "still listed until you said yes");
     await s.send({ type: "artifactRemoved", id: ITEMS[2].id });
     assert.equal(await row.count(), 0);

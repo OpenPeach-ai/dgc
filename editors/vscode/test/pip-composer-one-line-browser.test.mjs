@@ -95,12 +95,13 @@ for (const width of [300, 360, 440, 700]) {
         assert.ok(by["chat-model"].words.length > 3, "the model is named");
       }
       if (width <= 300) {
-        // At the narrowest, the level is its shield, Routines its icon, the context its icon, the model its icon.
+        // At the narrowest, the level is its shield, Routines its icon, the context its icon; the model keeps its name,
+        // cut to fit (15 Nov: it was its icon here, and the bare word "Model" a little wider).
         assert.equal(by["chat-level"].words, "", "the level is its shield only");
         assert.doesNotMatch(by["chat-routines"].words, /Routines/, "Routines is its icon");
         assert.equal(by["chat-context-toggle"].words, "", "the context meter is its icon only");
-        assert.equal(by["chat-model"].words, "", "the model is its icon only");
-        assert.ok(by["chat-model"].icon, "with an icon to press");
+        assert.notEqual(by["chat-model"].words, "", "the model is named");
+        assert.notEqual(by["chat-model"].words, "Model", "by its own name");
       }
       assert.deepEqual(chat.errors, []);
     } finally { await chat.close(); }
@@ -109,8 +110,10 @@ for (const width of [300, 360, 440, 700]) {
 
 test("a Pip's prompt box gives way at the widths Work's composer does, so both change together", async (t) => {
   if (skipOrFail(t)) return;
-  // Work's model picker is its icon only from 420px of the side bar down, and its short label from 640px down
-  // (media/main.css). A Pip's is the same on each side of both.
+  // Work's mode is its shield from 420px of the side bar down, and its context % gives way from 640px down
+  // (media/main.css). A Pip's level and context meter do the same on each side of both. Its model is always its own
+  // name, cut to fit (15 Nov: it was the bare word "Model" from 640px down and an icon from 420px down): from 640px
+  // down the thinking level beside the name gives way, and the name stays.
   const words = async (width) => {
     const chat = await openChat(browser, { ...OPTS, width });
     try {
@@ -120,12 +123,13 @@ test("a Pip's prompt box gives way at the widths Work's composer does, so both c
     } finally { await chat.close(); }
   };
   const [at421, at420, at641, at640] = [await words(421), await words(420), await words(641), await words(640)];
-  assert.notEqual(at421["chat-model"], "", "above 420px the model still has a label");
-  assert.equal(at420["chat-model"], "", "at 420px it is its icon, as Work's");
-  assert.equal(at420["chat-level"], "", "and the level is its shield, as Work's mode");
+  for (const [width, at] of [[421, at421], [420, at420], [641, at641], [640, at640]]) {
+    assert.notEqual(at["chat-model"], "", `at ${width}px the model is named`);
+    assert.notEqual(at["chat-model"], "Model", `at ${width}px by its own name, never the word`);
+  }
+  assert.equal(at420["chat-level"], "", "at 420px the level is its shield, as Work's mode");
   assert.match(at421["chat-level"], /Ask me first/);
-  assert.equal(at640["chat-model"], "Model", "from 640px down the model has its shorter label, as Work's");
-  assert.notEqual(at641["chat-model"], "Model", "above it, its own name");
+  assert.ok(at641["chat-model"].startsWith(at640["chat-model"]) && at641["chat-model"].length > at640["chat-model"].length, `from 640px down the name stands alone; above it, the thinking level is beside it (${at640["chat-model"]} / ${at641["chat-model"]})`);
   assert.equal(at640["chat-context-toggle"], "", "the context % gives way to its icon at 640px, as Work's");
   assert.match(at641["chat-context-toggle"], /%/);
 });

@@ -115,12 +115,12 @@ test('started again: the stuck try’s words go, and the working row says so',as
   activity:[ev(1,{kind:'text_delta',text:'Half of an answer that never'}),ev(2,{kind:'progress',state:'restarted',message:'Got stuck, started again'}),
    ev(3,{kind:'text_delta',text:'A fresh answer.'})]});
  await openChat(x);
- const live=x.d.querySelector('.pip-message.provisional');assert.ok(live,'the live reply');
+ const live=x.d.querySelector('.pip-message.live-reply');assert.ok(live,'the live reply');
  assert.equal(live.querySelector('.message-body').textContent.trim(),'A fresh answer.','only the new try’s words');
  const quiet=setup({activeRun:{id:RUN,status:'running',created_at:started,started_at:started},
   activity:[ev(1,{kind:'text_delta',text:'Half of an answer'}),ev(2,{kind:'progress',state:'restarted',message:'Got stuck, started again'})]});
  await openChat(quiet);
- assert.equal(quiet.d.querySelector('.pip-message.provisional'),null,'nothing of the stuck try is left on screen');
+ assert.equal(quiet.d.querySelector('.pip-message.live-reply'),null,'nothing of the stuck try is left on screen');
  assert.match(quiet.d.querySelector('.pip-working').textContent,/Got stuck, started again/);
 });
 test('the reply of a run that started again keeps the one line beside its time',async()=>{

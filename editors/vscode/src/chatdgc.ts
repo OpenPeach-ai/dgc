@@ -9,8 +9,8 @@ import { keepRunningAfterClose } from "./closingTab";
 import { holderFacts, holderLine, type HolderLine } from "./holderWords";
 import type { Dictation, DictationOwner, ReadAloud } from "./voice";
 import { mcpAppsHost } from "./mcpApps";
-import { ARTIFACT_ID, forwardedArtifactPage, outputChoice, type Artifacts } from "./artifacts";
-import { allowFromJobs, handleVideoMessage, VIDEO_MESSAGES } from "./videoHost";
+import { ARTIFACT_ID, FORMAT_LABELS, forwardedArtifactPage, outputChoice, type Artifacts } from "./artifacts";
+import { allowFromJobs, handleVideoMessage, videoPathAllowed, VIDEO_MESSAGES } from "./videoHost";
 import { onPicturesSetting, pictureFoldsMessage, picturesFolded, rememberPictureFold } from "./pictureFolds";
 import { sessionIcon, dockOf, type DockPin } from "./dock";
 import { openCodePreview } from "./codePreview";
@@ -34,7 +34,11 @@ export const CHATDGC_LIBRARY = "dgc.chatdgcLibrary";
 const SIDE_LIBRARY = new Set(["ready", "list", "image", "open", "use", "save", "saveToProject", "toProject", "remove",
   "artifactList", "artifactOpen", "artifactExport", "artifactRemove", "widgets", "widgetOpen", "widgetChat", "widgetRemove",
   "workImages", "workImage", "workImageOpen", "workImageReveal", "workImageSave", "workImageToProject",
-  "videoList", "videoOpen", "videoReveal", "videoSave"]);
+  "videoList", "videoOpen", "videoReveal", "videoSave", "itemAct", "itemCopied"]);
+/** An item's menu in the Library (media/library.js): the eight things an item can be asked to do. */
+const ITEM_ACTS = new Set(["open", "editor", "save", "copy", "path", "reveal", "rename", "remove"]);
+/** The most an image may weigh to be handed to the page for the clipboard. */
+const MAX_COPY_IMAGE = 20 * 1024 * 1024;
 /** The Library's tabs, as a "view" the host may open it on. */
 const LIBRARY_VIEWS = new Set(["artifacts", "artifacts-work", "widgets", "images", "videos", "files"]);
 const LIBRARY_KINDS = new Set(["image", "pdf", "document", "spreadsheet", "presentation", "code", "text"]);
@@ -595,6 +599,10 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   private libraryView = "";
   /** The Work images the Library was shown (images_library): only these may be read, opened or copied from it. */
   private readonly workImagePaths = new Set<string>();
+  /** The artifacts and the files the Library was shown, as the backend listed them: an item's menu acts on these, by
+   *  the host's own record of each (its type, its title, its file), never on what the page says of an item. */
+  private readonly libraryArtifacts = new Map<string, any>();
+  private readonly libraryFiles = new Map<string, any>();
 
   /** A chat's model made pictures: an open Library lists them. */
   imagesMade(): void {
@@ -991,6 +999,13 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       return;
     }
     switch (message?.type) {
+      case "itemAct":
+        await this.libraryAct(panel, message);
+        return;
+      case "itemCopied":
+        // The page was handed a picture for the clipboard and could not put it there.
+        if (message.ok !== true) void vscode.window.showWarningMessage("That couldn't be copied to the clipboard here. Use Save a copy… instead.");
+        return;
       case "maker": {
         // A maker's name was pressed in the Library's editor tab: back to that chat, project, session or Pip.
         const maker = message.maker && typeof message.maker === "object" ? message.maker : {};
@@ -1014,13 +1029,19 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         return;
       case "artifactList": {
         if (!this.artifacts || !this.artifactsOffer()) { void panel.webview.postMessage({ type: "artifactsOffered", on: false }); return; }
-        try { void panel.webview.postMessage({ type: "artifacts", items: await this.artifacts.list() }); }
+        try {
+          const items = await this.artifacts.list();
+          this.libraryArtifacts.clear();
+          for (const a of Array.isArray(items) ? items : []) if (a && ARTIFACT_ID.test(String(a.id || ""))) this.libraryArtifacts.set(String(a.id), a);
+          void panel.webview.postMessage({ type: "artifacts", items });
+        }
         catch (err: any) { void panel.webview.postMessage({ type: "error", message: `Your artifacts couldn't be listed: ${String(err?.message || err)}` }); }
         return;
       }
       case "artifactOpen":
+        // (A file the page names is used only when it is that very artifact's working file, as the hub knows it.)
         if (artifact) this.artifacts?.open(String(artifact.id), { type: String(artifact.type || ""), title: String(artifact.title || ""),
-                                                                   ...(typeof artifact.file === "string" ? { file: artifact.file } : {}) });
+                                                                   ...(typeof artifact.file === "string" && this.artifacts.docAt(artifact.file)?.id === String(artifact.id) ? { file: artifact.file } : {}) });
         return;
       case "artifactExport":
         if (artifact && typeof message.format === "string") {
@@ -1131,6 +1152,144 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         return;
       }
     }
+  }
+
+  /** An item's menu in the Library (the side bar's tab and its editor tab alike): Open, Open in editor, Save a copy…,
+   *  Copy, Copy path, Reveal in file manager, Rename…, Remove…. ONE route: the page names an item (its kind, and its id
+   *  or its path) and which of the eight; everything else is the host's own. An item is acted on only if the Library
+   *  was shown it (an artifact or a file the backend listed, an image images_library listed, a video videos_library
+   *  listed), and its file, title and content are read from here, never taken from the page. What a kind cannot do
+   *  is not done (the page's menu shows that row off, with why). */
+  private async libraryAct(panel: vscode.WebviewPanel, message: any): Promise<void> {
+    const act = String(message?.act || ""), item = message?.item && typeof message.item === "object" ? message.item : {};
+    if (!ITEM_ACTS.has(act)) return;
+    const say = (words: string) => { void panel.webview.postMessage({ type: "itemSaid", words }); };
+    const copyText = async (text: string, words: string) => {
+      try { await vscode.env.clipboard.writeText(text); say(words); }
+      catch { void vscode.window.showWarningMessage("That couldn't be copied to the clipboard here."); }
+    };
+    const kind = String(item.kind || "");
+    if (kind === "artifact") {
+      const known = this.libraryArtifacts.get(String(item.id || ""));
+      if (!known || !this.artifacts) return;
+      const id = String(known.id), type = String(known.type || ""), title = String(known.title || "").slice(0, 200) || "this artifact";
+      const file = type === "doc" && typeof known.file === "string" && known.file ? known.file as string : "";
+      const formats: string[] = Array.isArray(known.exports) ? known.exports.filter((f: unknown) => typeof f === "string") : [];
+      switch (act) {
+        case "open": this.artifacts.open(id, { type, title, ...(file ? { file } : {}) }); return;
+        case "editor":
+          // A doc is a Markdown file: here it opens as one, in an editor tab (Open shows it formatted).
+          if (file) { try { await vscode.window.showTextDocument(vscode.Uri.file(file), { preview: false }); } catch (err: any) { void vscode.window.showWarningMessage(`“${title}” couldn't be opened: ${String(err?.message || err)}`); } }
+          return;
+        case "save": {
+          // The formats the editor offers for its kind (a page as .html), then its own save dialog.
+          if (!formats.length) return;
+          const format = formats.length === 1 ? formats[0]
+            : (await vscode.window.showQuickPick(formats.map((f) => ({ label: FORMAT_LABELS[f] || f.toUpperCase(), format: f })), { placeHolder: `Save a copy of “${title}” as` }) as any)?.format;
+          if (typeof format === "string") await this.artifacts.exportArtifact({ id, title, type, exports: formats }, format);
+          return;
+        }
+        case "copy": {
+          if (type !== "doc") return;
+          const now = await this.artifacts.detail(id);
+          if (now && typeof now.content === "string") await copyText(now.content, "Text copied");
+          else void vscode.window.showWarningMessage(`“${title}” couldn't be read to copy it.`);
+          return;
+        }
+        case "path": if (file) await copyText(file, "Path copied"); return;
+        case "reveal": if (file) await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(file)); return;
+        case "rename":
+          if (type !== "page" && await this.artifacts.rename({ id, title, type })) void panel.webview.postMessage({ type: "artifactChanged" });
+          return;
+        case "remove":
+          // Asked first (Artifacts.remove: a modal): it goes to DGC's trash, so it can be recovered.
+          if (await this.artifacts.remove({ id, title: title.slice(0, 120) })) {
+            this.libraryArtifacts.delete(id);
+            void dockOf(this.context).forget("artifact", id);
+            void panel.webview.postMessage({ type: "artifactRemoved", id });
+          }
+          return;
+      }
+      return;
+    }
+    if (kind === "widget") {
+      // (A widget lives in its chat: opened beside it, or deleted from it, as its row's own buttons do.)
+      const widget = { id: String(item.id || ""), chat_id: String(item.chat_id || "") };
+      if (act === "open") await this.fromLibrary(panel, { type: "widgetOpen", widget });
+      else if (act === "remove") await this.fromLibrary(panel, { type: "widgetRemove", widget });
+      return;
+    }
+    if (kind === "image" || kind === "video") {
+      const asked = typeof item.path === "string" ? item.path : "";
+      const path = kind === "image" ? (this.workImagePaths.has(asked) ? asked : "") : (asked && videoPathAllowed(asked) === asked ? asked : "");
+      if (!path) return;
+      const uri = vscode.Uri.file(path), name = path.split(/[\\/]/).pop() || kind;
+      try {
+        switch (act) {
+          case "open": case "editor": await vscode.commands.executeCommand("vscode.open", uri); return;
+          case "reveal": await vscode.commands.executeCommand("revealFileInOS", uri); return;
+          case "path": await copyText(path, "Path copied"); return;
+          case "save": {
+            if (kind === "image") { await this.workImage(panel, { type: "workImageSave", path }); return; }
+            const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(join(homedir(), name)), saveLabel: "Save", title: "Save a copy of this video" });
+            if (!target || target.scheme !== "file") return;
+            await vscode.workspace.fs.copy(uri, target, { overwrite: true });
+            return;
+          }
+          case "copy": {
+            // An image goes to the clipboard as a picture, which only the page can write: it is handed the bytes.
+            if (kind !== "image") return;
+            const stat = await vscode.workspace.fs.stat(uri);
+            if (stat.size > MAX_COPY_IMAGE) { void vscode.window.showWarningMessage(`${name} is too large to copy. Use Save a copy… instead.`); return; }
+            const bytes = await vscode.workspace.fs.readFile(uri);
+            const ext = (path.match(WORK_IMAGE)?.[1] || "png").toLowerCase();
+            void panel.webview.postMessage({ type: "itemCopy", key: `image:${path}`, data: `data:${ext === "jpg" || ext === "jpeg" ? "image/jpeg" : `image/${ext}`};base64,${Buffer.from(bytes).toString("base64")}` });
+            return;
+          }
+          case "remove": {
+            // Asked first. The file goes to the computer's trash (never deleted outright), with the note DGC wrote
+            // beside it (and a video's poster): the Library lists only files that are still there.
+            const TRASH = "Move to Trash";
+            const choice = await vscode.window.showWarningMessage(`Remove “${name}”?`,
+              { modal: true, detail: `${path} goes to your computer's trash, where it can be recovered. It leaves the Library.` }, TRASH);
+            if (choice !== TRASH) return;
+            await vscode.workspace.fs.delete(uri, { useTrash: true });
+            for (const beside of await this.besideMade(path)) { try { await vscode.workspace.fs.delete(vscode.Uri.file(beside), { useTrash: true }); } catch { /* the item itself is what was asked for */ } }
+            if (kind === "image") this.workImagePaths.delete(path);
+            void panel.webview.postMessage({ type: "refresh" });
+            this.imagesMade();
+            return;
+          }
+        }
+      } catch (err: any) {
+        void vscode.window.showWarningMessage(`${name}: ${String(err?.message || err)}`);
+      }
+      return;
+    }
+    if (kind === "file") {
+      const ref = this.libraryRef({ id: item.id, source: item.source, project_id: item.project_id, chat_id: item.chat_id });
+      const known = ref ? this.libraryFiles.get(ref.attachment_id) : undefined;
+      // (The file the backend listed under that id, in that chat or project: one named somewhere else is not it.)
+      if (!ref || !known || this.libraryRef(known)?.conversation_id !== ref.conversation_id || this.libraryRef(known)?.project_id !== ref.project_id) return;
+      if (act === "open" || act === "save" || act === "remove") { await this.fromLibrary(panel, { type: act, file: known }); return; }
+      if (act === "copy" && known.type === "image" && ref.conversation_id) {
+        this.libraryAsk(panel, "libraryCopy", { type: "chatdgc_file", conversation_id: ref.conversation_id, attachment_id: ref.attachment_id });
+      }
+    }
+  }
+
+  /** What DGC wrote beside an image or a video it made, to go to the trash with it: its note (`<name>.json`) and, for
+   *  a video, the poster the note names. Only a note that is DGC's own and is about this very file: a project's own
+   *  `<name>.json` is never touched. */
+  private async besideMade(path: string): Promise<string[]> {
+    const note = path.replace(/\.[^.\\/]+$/, ".json"), name = path.split(/[\\/]/).pop() || "";
+    if (note === path) return [];
+    try {
+      const record = JSON.parse(Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.file(note))).toString("utf8"));
+      if (!record || typeof record !== "object" || record.made_by !== "DGC" || record.file !== name) return [];
+      const poster = typeof record.poster === "string" && /^[^\\/]+\.jpg$/i.test(record.poster) ? [path.slice(0, path.length - name.length) + record.poster] : [];
+      return [note, ...poster];
+    } catch { return []; }
   }
 
   /** A Library file as the composer shows it, and what a send says of it. */
@@ -1658,6 +1817,11 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "chatdgc_library": {
         if (asker) this.requests.delete(requestId);
         if (asker?.kind === "libraryRecent") { this.recentWaiting.shift()?.(Array.isArray(ev.files) ? ev.files : []); return; }
+        if (asker?.libraryPanel) {
+          // What the Library is shown: an item's menu acts only on these (libraryAct).
+          if (this.libraryFiles.size >= 5000) this.libraryFiles.clear();
+          for (const f of Array.isArray(ev.files) ? ev.files : []) if (f && ATTACHMENT_ID.test(String(f.id || ""))) this.libraryFiles.set(String(f.id), f);
+        }
         void asker?.libraryPanel?.webview.postMessage({ type: "library", files: Array.isArray(ev.files) ? ev.files : [], total: Number(ev.total) || 0,
           next: ev.next_offset ?? null, counts: ev.counts && typeof ev.counts === "object" ? ev.counts : {},
           origins: ev.origins && typeof ev.origins === "object" ? ev.origins : {} });
@@ -1864,6 +2028,13 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         return;
       }
       case "chatdgc_file":
+        if (asker?.libraryPanel && asker.kind === "libraryCopy") {
+          // Copy, from an item's menu: the picture, for the page to put on the clipboard.
+          this.requests.delete(requestId);
+          if (typeof ev.data === "string") void asker.libraryPanel.webview.postMessage({ type: "itemCopy", key: `file:${String(ev.attachment_id || "")}`, data: ev.data });
+          else void vscode.window.showWarningMessage(`That file couldn't be read to copy it${ev.error ? `: ${String(ev.error).slice(0, 200)}` : "."}`);
+          return;
+        }
         if (asker?.libraryPanel) {
           this.requests.delete(requestId);
           void asker.libraryPanel.webview.postMessage({ type: "image", id: String(ev.attachment_id || ""),
