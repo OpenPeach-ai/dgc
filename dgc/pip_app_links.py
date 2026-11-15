@@ -512,6 +512,10 @@ SDK_APP_OPS = ("app_tool", "app_answer")    # your own apps' tools (pip_sdk_apps
 # as data, under careful mode and the leak guard like web_search and web_fetch.
 RESEARCH_OPS = ("research_search", "research_page")
 MAX_RESEARCH_PAGE = 400_000                 # characters of one page (the engine cuts it to its window's share)
+# Deep research reads four pages and runs four searches at once: those are served side by side, each on its own thread
+# (at most RESEARCH_AT_ONCE); every other op is served one at a time, as the worker sends one tool call at a time.
+BACKLOG = 16
+RESEARCH_AT_ONCE = 8
 MAX_QUERY = 400
 
 
@@ -606,7 +610,7 @@ class RunSocket:
         self.server = socket.socket(socket.AF_UNIX)
         self.server.bind(str(self.path))
         self.path.chmod(0o600)
-        self.server.listen(4)
+        self.server.listen(BACKLOG)
         self.calls, self.asked, self.reads = 0, [], 0
         self.on_read = None          # careful mode (pip_careful): what the Pip reads from apps, for its computer
         self.taint, self.said = None, ""   # careful mode: what it read from apps, and the user's own words this turn
@@ -828,41 +832,60 @@ class RunSocket:
         return web_fetch({"url": url}, types.SimpleNamespace(config=self.config))[:MAX_TEXT]
 
     def _serve(self) -> None:
+        slots = threading.BoundedSemaphore(RESEARCH_AT_ONCE)
         while not self._stopped.is_set():
             try:
                 client, _ = self.server.accept()
             except OSError:
                 return
-            with client:
-                try:
-                    client.settimeout(120)
-                    raw = b""
-                    while not raw.endswith(b"\n") and len(raw) < 65536:
-                        chunk = client.recv(65536)
-                        if not chunk:
-                            break
-                        raw += chunk
-                    message = json.loads(raw.decode("utf-8"))
-                    if not isinstance(message, dict) or not _secrets.compare_digest(str(message.get("token", "")), self.token):
-                        reply = {"text": "error: refused"}
-                    else:
-                        self.calls += 1
-                        op = str(message.get("op", ""))
-                        args = message.get("args")
-                        from .pip_plugins import TOOLS as PLUGIN_TOOLS
-                        from .pip_borrow import TOOLS as BORROW_TOOLS
-                        from .pip_images import TOOLS as IMAGE_TOOLS
-                        from .pip_videos import TOOLS as VIDEO_TOOLS
-                        from .pip_keys import TOOLS as KEY_TOOLS
-                        from .pip_library import TOOLS as LIBRARY_TOOLS
-                        answer = ("error: invalid app arguments" if not isinstance(args, dict) else
-                                  self.call(op, args) if op in TOOLS + PLUGIN_TOOLS + BORROW_TOOLS + SDK_APP_OPS
-                                  + IMAGE_TOOLS + VIDEO_TOOLS + KEY_TOOLS + LIBRARY_TOOLS + RESEARCH_OPS
-                                  else "error: unknown app operation")
-                        reply = answer if isinstance(answer, dict) else {"text": answer}
-                    client.sendall(json.dumps(reply).encode("utf-8") + b"\n")
-                except (OSError, ValueError, TypeError):
-                    continue
+            try:
+                client.settimeout(120)
+                raw = b""
+                while not raw.endswith(b"\n") and len(raw) < 65536:
+                    chunk = client.recv(65536)
+                    if not chunk:
+                        break
+                    raw += chunk
+                message = json.loads(raw.decode("utf-8"))
+            except (OSError, ValueError, TypeError):
+                client.close()
+                continue
+            if isinstance(message, dict) and str(message.get("op", "")) in RESEARCH_OPS:
+                slots.acquire()
+
+                def side(client=client, message=message):
+                    try:
+                        self._answer(client, message)
+                    finally:
+                        slots.release()
+                threading.Thread(target=side, name="pip-apps-research", daemon=True).start()
+            else:
+                self._answer(client, message)
+
+    def _answer(self, client, message) -> None:
+        """One request's reply, sent and the connection closed. Never raises."""
+        with client:
+            try:
+                if not isinstance(message, dict) or not _secrets.compare_digest(str(message.get("token", "")), self.token):
+                    reply = {"text": "error: refused"}
+                else:
+                    self.calls += 1
+                    op = str(message.get("op", ""))
+                    args = message.get("args")
+                    from .pip_plugins import TOOLS as PLUGIN_TOOLS
+                    from .pip_borrow import TOOLS as BORROW_TOOLS
+                    from .pip_images import TOOLS as IMAGE_TOOLS
+                    from .pip_videos import TOOLS as VIDEO_TOOLS
+                    from .pip_keys import TOOLS as KEY_TOOLS
+                    from .pip_library import TOOLS as LIBRARY_TOOLS
+                    answer = ("error: invalid app arguments" if not isinstance(args, dict) else
+                              self.call(op, args) if op in TOOLS + PLUGIN_TOOLS + BORROW_TOOLS + SDK_APP_OPS
+                              + IMAGE_TOOLS + VIDEO_TOOLS + KEY_TOOLS + LIBRARY_TOOLS + RESEARCH_OPS
+                              else "error: unknown app operation")
+                    reply = answer if isinstance(answer, dict) else {"text": answer}
+                client.sendall(json.dumps(reply).encode("utf-8") + b"\n")
+            except (OSError, ValueError, TypeError):
+                pass
 
     def close(self) -> None:
         self._stopped.set()
@@ -892,7 +915,14 @@ def worker_reply(pin: dict, op: str, args: dict, *, timeout: float = 120) -> dic
     try:
         with socket.socket(socket.AF_UNIX) as client:
             client.settimeout(timeout)
-            client.connect(pin["socket"])
+            for attempt in range(40):             # a socket briefly full (research's reads at once): try again shortly
+                try:
+                    client.connect(pin["socket"])
+                    break
+                except BlockingIOError:
+                    if attempt == 39:
+                        raise
+                    time.sleep(0.05)
             client.sendall(json.dumps({"token": pin["token"], "op": op, "args": args}).encode("utf-8") + b"\n")
             raw = b""
             while not raw.endswith(b"\n"):

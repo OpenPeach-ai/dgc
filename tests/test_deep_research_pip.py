@@ -165,5 +165,40 @@ class Offered(unittest.TestCase):
         self.assertIn("pip_research.TOOLS", source)
 
 
+class ConcurrentReads(unittest.TestCase):
+    """Deep research reads four pages and runs four searches at once. The run's socket served one connection at a time
+    with a backlog of four, so the rest failed at once ("your apps are unavailable ([Errno 11] Resource temporarily
+    unavailable)") and a Pip's research came back with nothing (live, 15 Nov 06:31)."""
+
+    def test_eight_reads_at_once_all_answer_and_run_side_by_side(self):
+        import os
+        import tempfile
+        import time
+        from concurrent.futures import ThreadPoolExecutor
+        from unittest import mock
+        home = tempfile.mkdtemp(prefix="dgc-rs-")
+        with mock.patch.object(pip_app_links, "socket_dir", return_value=Path(home)):
+            run = pip_app_links.RunSocket.__new__(pip_app_links.RunSocket)
+            # Only what serving needs: a socket, a token, the stop flag (no registry, no apps).
+            run.token, run.calls, run._stopped = "t" * 48, 0, threading.Event()
+            run.path = Path(home) / "probe-apps.sock"
+            import socket as socketlib
+            run.server = socketlib.socket(socketlib.AF_UNIX)
+            run.server.bind(str(run.path))
+            run.server.listen(pip_app_links.BACKLOG)
+            run._research = lambda op, args: (time.sleep(0.4), {"text": "ok", "data": {"url": args["url"], "text": "x"}})[1]
+            threading.Thread(target=run._serve, daemon=True).start()
+            pin = {"socket": str(run.path), "token": run.token}
+            started = time.monotonic()
+            with ThreadPoolExecutor(8) as pool:
+                replies = list(pool.map(lambda i: pip_app_links.worker_reply(pin, "research_page", {"url": f"https://a{i}.example/"}), range(8)))
+            took = time.monotonic() - started
+            run._stopped.set()
+            run.server.close()
+        self.assertEqual([r.get("data", {}).get("url") for r in replies], [f"https://a{i}.example/" for i in range(8)],
+                         [r.get("text") for r in replies])
+        self.assertLess(took, 8 * 0.4 * 0.6, "side by side, not one after another")
+
+
 if __name__ == "__main__":
     unittest.main()
