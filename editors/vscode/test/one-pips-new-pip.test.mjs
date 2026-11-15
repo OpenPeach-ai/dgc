@@ -27,7 +27,7 @@ test('on All Pips the folder line says "+ Give it a folder": a Pip with no folde
  const x=setup();await x.drain();
  const d=await newPip(x),line=d.querySelector('#new-pip-folder');
  assert.equal(line.querySelector('.dgc-folder-v').textContent,'+ Give it a folder');
- assert.match(x.squash(d.querySelector('.new-pip-folder').textContent),/No folder: it is a Personal Pip\./);
+ assert.match(x.squash(d.querySelector('.new-pip-folder').textContent),/No folder: it is listed under Personal\./);
  x.type(d.querySelector('#newPipName'),'Travel');
  d.querySelector('#review-confirm').click();await x.drain();
  const made=x.requests('create_pip').at(-1);

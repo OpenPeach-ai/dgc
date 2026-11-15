@@ -288,11 +288,12 @@ let chatBox=null,chatPop=null,chatPicker=null,boxPip='',projectFiles=[],projectF
 const rowTerminal='<svg class="pi-icon" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 4 3.5 3.5L3 11M8 12h5"/></svg>';
 function chatMarkLook(part){return{logo:part.kind==='plugin'?pluginLogoSrc(part.identity):'',plug:transcriptIcon('plug'),folder:FOLDER_ICON,faceStyles:false};}
 function rememberMarks(pip=S.selected){if(!chatBox||!pip)return;const parts=chatBox.parts();if(parts)chatMarks.set(pip,{text:chatBox.el.value,parts});else chatMarks.delete(pip);}
-// What this Pip can reach, and nothing else: the plugins it can call (a Personal Pip's), the other Pips of its own
-// workspace (what it can hand work to and be told about), and the project's files for a Pip that reads them. It makes
-// no Outputs: a Pip's chat has no Output menu and no artifact tools.
+// What this Pip can reach, and nothing else: the plugins it can call (DGC lets a Pip with no folder call them so far),
+// the other Pips of its own workspace (what it can hand work to and be told about; each row says where that Pip works),
+// and its folder's files for a Pip that has one. It makes no Outputs: a Pip's chat has no Output menu and no artifact
+// tools.
 function chatMentionSources(){
- const others=(S.jobs||[]).filter(p=>p.id!==S.selected&&p.status!=='archived'&&p.name).slice(0,100).map(p=>{const body=profile(p.profile).body;return{pip_id:p.id,name:p.name,pip_type:personalPip(p)&&body?body:p.pip_type,kind:`${p.pip_type} Pip`,detail:`${personalPip(p)?'Personal':'Project'} · v${p.current_version} · ${p.id.slice(-8)}`};}).filter(p=>Mentions.PIP_TYPES.includes(p.pip_type));
+ const others=(S.jobs||[]).filter(p=>p.id!==S.selected&&p.status!=='archived'&&p.name).slice(0,100).map(p=>{const body=profile(p.profile).body;return{pip_id:p.id,name:p.name,pip_type:body||p.pip_type,kind:`${p.pip_type} Pip`,detail:`${pipPlace(p)} · v${p.current_version} · ${p.id.slice(-8)}`};}).filter(p=>Mentions.PIP_TYPES.includes(p.pip_type));
  return{plugins:personalPip()?(S.pluginsInstalled||[]).map(p=>({id:p.plugin,name:p.name})):[],outputs:[],pips:others,pipsEmpty:'No other Pips here',files:personalPip()?[]:projectFiles,
   // This computer's projects (pips-21, API 91): naming one gives this Pip a private copy of it.
   projects:projectMentionsOn()?S.projectChoices:[]};
@@ -315,8 +316,12 @@ if(Mentions){
   pipPart:p=>{const name=p.name.replace(/\s+/g,' ').trim();return{kind:'pip',label:name,wire:name,identity:p.pip_id,pipType:p.pip_type};},
   // A project's Pip reads the project: the path is the words.
   filePart:file=>({kind:'file',label:file.label,wire:file.label,identity:''}),
-  // "/" at the start: a Personal Pip's commands (API 77). /setup asks a few questions, then it sets itself up (Undo).
-  commands:()=>personalPip()&&S.apiVersion>=77&&!archived()?[{name:'setup',detail:'Set it up for a job: a few questions, then it changes itself (Undo)'}]:[]});
+  // "/" at the start: this Pip's commands. /setup asks a few questions, then it sets itself up (Undo; API 77, and on
+  // DGC's side still a Pip with no folder's). /learn and /goal are every Pip's: listed here, as they work typed.
+  // (The menu itself is from API 77: an older DGC's box has none, as before.)
+  commands:()=>archived()||S.apiVersion<77?[]:[...(personalPip()?[{name:'setup',detail:'Set it up for a job: a few questions, then it changes itself (Undo)'}]:[]),
+   ...(learnOn()?[{name:'learn',detail:'Make a skill from this chat: a draft you Save, Edit or Cancel'}]:[]),
+   ...(goalsOn()?[{name:'goal',detail:'Give this conversation a goal: it keeps going until it is done or needs you'}]:[])]});
  if(chatBox.note)chatBox.note.id='chat-paste-note';   // what the bar's "paste" pill opens (ui-09: it was a row above the box)
  disposers.push(()=>chatBox.dispose());
 }
@@ -718,7 +723,7 @@ function composerNote(text){
  return `<p class="composer-note${long&&!S.composerNoteOpen?' clamped':''}">${esc(text)}</p>${long?`<button type="button" class="composer-more" data-composer-more aria-expanded="${S.composerNoteOpen}">${S.composerNoteOpen?'Show less':'Show more'}</button>`:''}`;
 }
 async function loadChatContext(){
- if(remoteHost||S.apiVersion<44||!personalPip()||!usable()||!S.chatControls)return;
+ if(remoteHost||S.apiVersion<44||!keepsAll()||!usable()||!S.chatControls)return;
  const token=scope(),pip=S.selected,sequence=++chatContextSeq,size=chosenChatOptions().context_size;
  try{const v=await send('get_pip_chat_context',{pip_id:pip,context_size:size,...convArg()});if(token!==scope()||S.selected!==pip||sequence!==chatContextSeq)return;
   if(!record(v)||v.pip_id!==pip||v.context_size!==size||![v.used_tokens,v.recent_messages,v.summarized_messages].every(n=>Number.isSafeInteger(n)&&n>=0))throw Error('bad context');
@@ -794,7 +799,7 @@ function chatControlsMarkup(canSend,busy){
  // The slider is Work's (media/shared/effort.js, 15 Nov): the same track, stops, words and keyboard. Its dot is this Pip's face.
  const effortLevels=[...chatThinkingLevels.map(value=>({value,label:EFFORT_NAME[value]})),...(effortMax===5?[{value:'ultra',label:'Ultra'}]:[])];
  const effort=o?`${globalThis.DgcEffort.html({levels:effortLevels,at:effortStep,id:'chat-thinking',title:choiceScope(),disabled:locked,ultra:ultraOn,byPointer:!effortByKeys,thumb:pipAvatar(S.pip,S.chatActiveRun?'working':'idle',`effort-${S.pip.id}`,pipType(S.pip,S.types)||characterType(S.pip.pip_type))})}${composerNote(choiceScope()+' '+S.chatControls.reasoning_note)}`:unavailable;
- const reviewed=!personalPip();
+ const reviewed=!keepsAll();
  // The two tabs under the model row and the slider, as in Work's menu (live round 1, 14 Nov): once DGC has said how
  // many sub-agents this Pip runs (Pips API 97). An older DGC has no sub-agents for a Pip, so no tabs.
  const tabbed=ultraOffered(),agentsTab=tabbed&&S.modelTab==='agents';
@@ -866,7 +871,7 @@ function reviewChatModel(value){
  if(!usable()||S.busy||archived()||!S.pip)return;
  let choice;try{choice=modelChoice(value,S.models,subscriptionChoices(personalPip()),routerOffer(),savedProviders());}catch(error){setError(error);return;}
  S.composerPanel='';const current=S.pip.model_choice||{mode:'default'};if(JSON.stringify(choice)===JSON.stringify(current)){render();return;}
- if(personalPip()){const name=choice.mode==='provider'?`${choice.model} on ${providerOf(choice.provider)?.name||'that provider'}`:choice.mode==='model'?(S.models.find(m=>m.id===choice.model)?.name||choice.model):choice.mode==='subscription'?modelLabel(choice):choice.mode==='router'?routerLabel(choice):'the same model as DGC',usage=usageLine(modelValue(choice));void applyOwnChange({model_choice:choice},d=>JSON.stringify(d.model_choice)===JSON.stringify(choice),`${S.pip.name} now uses ${name}.${usage?' '+usage:''}`);return;}
+ if(keepsAll()){const name=choice.mode==='provider'?`${choice.model} on ${providerOf(choice.provider)?.name||'that provider'}`:choice.mode==='model'?(S.models.find(m=>m.id===choice.model)?.name||choice.model):choice.mode==='subscription'?modelLabel(choice):choice.mode==='router'?routerLabel(choice):'the same model as DGC',usage=usageLine(modelValue(choice));void applyOwnChange({model_choice:choice},d=>JSON.stringify(d.model_choice)===JSON.stringify(choice),`${S.pip.name} now uses ${name}.${usage?' '+usage:''}`);return;}
  const version=S.pip.current_version,pip=S.selected;
  void mutate({type:'propose_pip_update',pip_id:pip,expected_version:version,changes:{model_choice:choice},reason:'Model selected in this Pip conversation.'},result=>{const proposal=result.proposal;if(!record(proposal)||proposal.pip_id!==pip||proposal.expected_version!==version||!record(proposal.definition)||JSON.stringify(proposal.definition.model_choice)!==JSON.stringify(choice))throw Error('The saved model choice differs from the selection. Refresh before reviewing it.');S.pip={...S.pip,proposals:[...(S.pip.proposals||[]).filter(p=>p.id!==proposal.id),proposal]};S.notice='New model is waiting for you. Nothing changes until you accept it.';proposalReview(proposal.id);});
 }
@@ -971,7 +976,7 @@ const workingClock=window.setInterval(()=>{for(const el of document.querySelecto
   for(const el of document.querySelectorAll('.run-post-clock[data-since]'))el.textContent=elapsed(Date.now()-Number(el.dataset.since));},1000);
 // Messaging feel (pips-17c). Reply on a Pip's message (Pips API 83): the message becomes a quote in the prompt box, the
 // shown conversation's own (chatReplies is one of convMaps), and goes with what you send next as `reply_to`.
-function canReply(){return S.apiVersion>=83&&!remoteHost&&personalPip()&&!archived()&&usable();}
+function canReply(){return S.apiVersion>=83&&!remoteHost&&keepsAll()&&!archived()&&usable();}
 function pendingReply(){return canReply()?chatReplies.get(S.selected)||null:null;}
 function replyChipMarkup(){
  const reply=pendingReply(),P=globalThis.DgcComposer;if(!reply||!P)return '';
@@ -1698,7 +1703,7 @@ async function sendChat(sent={}){
   if(S.chatActiveRun&&(images.length||files.length)&&!attachesMidReply()){setError('Send attached photos or files after this reply. Mid-turn updates are text only.');return;}
   // /learn [what]: a skill drafted from this chat, shown here with Save, Edit and Cancel. It isn't a message to the Pip.
   bumpPip(S.selected);
-  const learning=personalPip()&&!images.length&&!files.length?learnRequest(text):null;if(learning){void startLearn(learning);return;}
+  const learning=learnOn()&&!images.length&&!files.length?learnRequest(text):null;if(learning){void startLearn(learning);return;}
   // /goal <what>: this conversation's goal (Pips API 92), set with DGC and never sent to the Pip as a message.
   const goaling=goalsOn()&&!images.length&&!files.length?goalRequest(text):null;if(goaling){void setGoal(goaling.objective,text);return;}
   // A card number never leaves the box: not sent, not kept as a draft. The user types it on the Pip's screen.
@@ -1835,7 +1840,7 @@ function linkedAppsMarkup(off){
 // off; its link stays), each app's addresses with Disconnect, and one more address of an app it has. Below API 88 the
 // page keeps "Linked apps", as before.
 const appsUse={pip:'',asked:'',value:null,error:'',busy:false,seq:0,confirm:''};
-function appsUseShown(){return S.apiVersion>=88&&!remoteHost&&personalPip();}
+function appsUseShown(){return S.apiVersion>=88&&!remoteHost&&keepsAll();}
 async function loadAppsUse(){
  if(!appsUseShown()||!usable())return;
  const token=scope(),pip=S.selected,sequence=++appsUse.seq;appsUse.asked=pip;
@@ -1848,7 +1853,12 @@ function appsUseMarkup(off){
  if(appsSettingsPip!==S.selected){appsSettingsPip=S.selected;void loadAppLinks();}
  if(appsUse.asked!==S.selected)void loadAppsUse();
  const mine=appsUse.pip===S.selected;
- return pipAppsMarkup(mine?appsUse.value:null,{esc,links:S.appLinks||[],busy:off||appsUse.busy||!!appLinkBusy,error:mine?appsUse.error:'',pipName:S.pip?.name||'This Pip',confirm:appsUse.confirm,
+ // (An app's own addresses, with Disconnect and "another address", are its app links: DGC keeps those to a Pip with no
+ //  folder so far, so a Pip with a folder has each app's switch and its addresses by name.)
+ // Plugins stay off this list for a Pip with a folder until DGC lets one use them (one-kind audit A4: the backend
+ // still refuses it), so no switch here does nothing.
+ const offered=mine&&appsUse.value?(personalPip()?appsUse.value:appsUse.value.filter(a=>a.kind!=='plugin')):null;
+ return pipAppsMarkup(offered,{esc,links:personalPip()?S.appLinks||[]:[],connects:personalPip(),busy:off||appsUse.busy||!!appLinkBusy,error:mine?appsUse.error:'',pipName:S.pip?.name||'This Pip',confirm:appsUse.confirm,
   waiting:shownAppLinks(S.appLinks).filter(l=>l.another===true).map(l=>l.toolkit),logo:a=>(a.kind==='plugin'?pluginLogoCache:appLogoCache).get(a.id)||''});
 }
 async function setAppUse(app,on){
@@ -1904,13 +1914,14 @@ async function setSkillUse(skill,on){
 // folders in use, "New folder…" and "No folder". A folder only groups the list. The Project list has none.
 const folderUi={open:false,adding:false,error:'',busy:false};
 function foldersListed(){return S.apiVersion>=88&&!remoteHost&&S.workspace?.kind==='personal';}
+// A folder only groups the Personal list; a Pip with a folder of its own is listed under that folder instead.
 function pipFolderSetMarkup(off){
- if(!appsUseShown())return '';
+ if(!appsUseShown()||!personalPip())return '';
  return pipFolderMarkup({esc,folder:pipFolder(S.pip?.profile),folders:foldersInUse(S.jobs.filter(p=>p.status!=='archived')),open:folderUi.open,adding:folderUi.adding,draft:draft.pipFolderName||'',busy:off||folderUi.busy,error:folderUi.error,pipName:S.pip?.name||'This Pip'});
 }
 function closeFolderMenu(focus=false){if(!folderUi.open)return;folderUi.open=false;render();if(focus)$('pip-folder-btn')?.focus({preventScroll:true});}
 async function setPipFolder(group){
- if(!S.pip||folderUi.busy||S.busy||!usable()||!appsUseShown())return;
+ if(!S.pip||folderUi.busy||S.busy||!usable()||!appsUseShown()||!personalPip())return;
  if(group===pipFolder(S.pip.profile)){folderUi.open=false;folderUi.adding=false;folderUi.error='';render();$('pip-folder-btn')?.focus({preventScroll:true});return;}
  const token=scope(),pip=S.pip.id,name=S.pip.name;folderUi.busy=true;folderUi.error='';folderUi.open=false;render();
  try{const result=await send('set_pip_profile',{pip_id:pip,changes:{group}});if(token!==scope())return;
@@ -2095,6 +2106,11 @@ async function loadAdaptations(more=false){
  finally{if(token===scope()&&sequence===adaptationSeq){S.adaptationsLoading=false;render();}}
 }
 function personalPip(pip=S.pip){return pip?.source_policy?.mode==='personal';}
+// One kind of Pip: what differs between two Pips is where each works. In a word: "Personal" (no folder), or its
+// folder's name.
+function pipPlace(pip=S.pip){return personalPip(pip)?'Personal':spaceName(pip?.workspace_id)||'A folder';}
+// Whether this Pip has a computer of its own: one it was given (no folder), or the one that comes with its folder.
+function hasBox(){return personalPip()?!!S.pip?.computer_plan:folderBox();}
 // What was only a Personal Pip's is every Pip's from Pips API 96 (pips-flow-design Q8): what it remembers, its working
 // notes, routines and a goal for its chat. A Pip with a folder has them in the one page and chat (One Pips).
 function keepsAll(){return personalPip()||S.apiVersion>=FLOW_API&&onePips()&&!!S.pip;}
@@ -4033,8 +4049,10 @@ function learnCard(){
  if(!S.learn||S.learn.pip!==S.selected)return '';
  return learnCardMarkup({...S.learn,text:S.learn.editing?draft.pipLearnText:S.learn.text},{esc,markdown:renderPipMarkdown,busy:!usable()});
 }
+// /learn is every Pip's (one kind of Pip): the skill it drafts is the user's own, whichever Pip's chat it came from.
+function learnOn(){return !remoteHost&&!!S.pip&&keepsAll()&&!archived();}
 async function startLearn(request){
- const pip=S.selected,token=scope();if(!pip||!personalPip())return;
+ const pip=S.selected,token=scope();if(!pip||!learnOn())return;
  S.learn={pip,status:'drafting',request:request.request,draft:null,text:'',editing:false,message:''};draft.chatText='';chatDrafts.set(pip,'');render();
  try{const result=await broker.request({type:'learn_skill',pip_id:pip,...(request.request?{request:request.request}:{})},300000);if(token!==scope()||S.learn?.pip!==pip)return;
   if(typeof result?.markdown!=='string'||typeof result?.name!=='string')throw new Error('DGC’s draft was malformed. Try /learn again.');
@@ -4068,8 +4086,9 @@ function computerNamesRow(off){
 }
 function computerRowMarkup(p,off){
  if(S.apiVersion<42||remoteHost||!(personalPip()||folderBox())||archived())return '';
- // A Pip with a folder has the computer DGC gave it: it is opened here, never removed.
- if(!personalPip())return `<section class="pip-page-group" aria-label="Computer"><div class="pip-page-row static"><span class="row-words"><strong>Its own computer${infoTip('pipComputerSays','Its own computer',`A browser, a Terminal and its own copy of your folder, separate from yours. What ${esc(p.name)} changes there comes back to you as a card.`)}</strong></span><button type="button" class="quiet" data-flow-watch="page"${off?' disabled':''}>Open</button></div></section>`;
+ // A Pip with a folder has the computer DGC gave it: it is opened here, never removed. How many it has, one more and
+ // each one's name are as any Pip's.
+ if(!personalPip())return `<section class="pip-page-group" aria-label="Computer"><div class="pip-page-row static"><span class="row-words"><strong>Its own computer${infoTip('pipComputerSays','Its own computer',`A browser, a Terminal and its own copy of your folder, separate from yours. What ${esc(p.name)} changes there comes back to you as a card.`)}</strong></span><button type="button" class="quiet" data-flow-watch="page"${off?' disabled':''}>Open</button>${computersRowMarkup(off)}</div></section>`;
  return `<section class="pip-page-group" aria-label="Computer"><div class="pip-page-row static"><span class="row-words">${p.computer_plan
   ?`<strong>Its own computer${infoTip('pipComputerSays','Its own computer',`A browser, a Terminal and files, separate from yours. It starts when ${esc(p.name)} needs it.`)}</strong></span>${button('remove-computer','Remove…',off,'quiet')}`+computersRowMarkup(off)
   :`<strong>Computer${infoTip('pipComputerSays','Computer',`Give ${esc(p.name)} its own computer, so it can look things up and fill in forms for you.`)}</strong></span>${button('give-computer','Give it a computer…',off,'quiet')}`}</div></section>`;
@@ -4182,14 +4201,14 @@ const carefulState={pip:'',value:null,error:'',busy:false,seq:0};let sitesAll=fa
 // user types into the dialog is kept here: the boxes are read once on Save, sent to DGC's sealed store, and emptied.
 const loginsState={pip:'',value:null,error:'',busy:false,seq:0,confirm:''};
 async function loadLogins(){
- if(S.apiVersion<56||!personalPip()||remoteHost||!S.pip?.computer_plan)return;
+ if(S.apiVersion<56||remoteHost||!hasBox())return;
  const token=scope(),pip=S.selected,sequence=++loginsState.seq;
  try{const value=pipLogins(await send('list_pip_logins',{pip_id:pip}),pip);if(token!==scope()||sequence!==loginsState.seq||S.selected!==pip)return;
   loginsState.pip=pip;loginsState.value=value;loginsState.error='';render();}
  catch(error){if(token===scope()&&sequence===loginsState.seq){loginsState.error=errorText(error);render();}}
 }
 async function loginCall(type,fields,notice){
- if(loginsState.busy||!usable()||!personalPip())return;const token=scope(),pip=S.selected;loginsState.busy=true;loginsState.error='';render();
+ if(loginsState.busy||!usable()||!hasBox())return;const token=scope(),pip=S.selected;loginsState.busy=true;loginsState.error='';render();
  try{await send(type,fields);if(token!==scope()||S.selected!==pip)return;loginsState.confirm='';S.notice=notice;}
  catch(error){if(token===scope())loginsState.error=errorText(error);}
  finally{loginsState.busy=false;if(token===scope()){render();void loadLogins();}}
@@ -4429,7 +4448,7 @@ function newPipBody(){
 function oneNewPipFolderField(){
  const Pick=globalThis.DgcFolderPick;if(!Pick)return '';
  const rows=createFolderRows(),row=rows.find(r=>r.folder===draft.createFolder);
- return `<div class="new-pip-folder new-pip-folder-one">${Pick.buttonHtml({id:'new-pip-folder',rows,choice:row?row.folder:'',label:'Folder',empty:'+ Give it a folder',title:row?`It works in ${row.folder}`:'It works in no folder (Personal). Give it one to work on that folder’s files.'})}${row?`<p class="new-pip-folder-path" title="${esc(row.folder)}">${Pick.pathHtml(row.shown,row.folder)}</p>`:'<p class="muted new-pip-folder-none">No folder: it is a Personal Pip.</p>'}</div>`;
+ return `<div class="new-pip-folder new-pip-folder-one">${Pick.buttonHtml({id:'new-pip-folder',rows,choice:row?row.folder:'',label:'Folder',empty:'+ Give it a folder',title:row?`It works in ${row.folder}`:'It works in no folder. Give it one to work on that folder’s files.'})}${row?`<p class="new-pip-folder-path" title="${esc(row.folder)}">${Pick.pathHtml(row.shown,row.folder)}</p>`:'<p class="muted new-pip-folder-none">No folder: it is listed under Personal.</p>'}</div>`;
 }
 function oneNewPipBody(){
  const chooser=pickerMarkup({id:'new-pip-character',label:'Character',value:draft.newPipCharacter,face:avatar('idle',characterType(draft.newPipCharacter),'new-face'),
@@ -4934,6 +4953,12 @@ function oneReportsMarkup(){
   +`<p class="muted">Every check, newest first. What it found is also in its chat, where you can ask about it.</p>`
   +reportsTableMarkup(rows,{esc,sort:one.reportsSort,current:S.runId,when:t=>t?shortDate(new Date(t).toISOString()):'',off:!usable(),name:S.pip.name})+'</section>'+reportMarkup()+checkpointHistoryMarkup();
 }
+// Where a Pip with no folder works, on its settings page: the same row a folder's Pip has, saying "Personal" (the
+// word its row in the list and the filter line use).
+function placePartMarkup(){
+ if(!onePips())return '';
+ return `<section class="pip-page-group pip-place-part" aria-label="Where it works"><div class="pip-page-row static"><span class="row-words"><strong>Works in</strong><small class="pip-folder-where">Personal: it works in no folder</small></span></div></section>`;
+}
 // What only a Pip with a folder has, on its settings page.
 function folderPartsMarkup(p){
  const row=pipFolderRow(p),name=row?.name||spaceName(p.workspace_id)||'its folder',Pick=globalThis.DgcFolderPick,boxed=folderBox();
@@ -5021,7 +5046,9 @@ function openChatTab(p,conv){
  if(!p||remoteHost||typeof p.id!=='string')return;
  // What is in the box goes with it: the tab opens on the draft as it stands.
  if(p.id===S.selected&&draft.chatText)shareDraft(true);
- vscode.postMessage({type:'pipsOpenChat',pip:{id:p.id,name:p.name,pip_type:p.pip_type},...(conv?{conversation:conv}:{})});
+ // (`body`: the character chosen for it, so its tab opens wearing its face; DGC's own word for it follows.)
+ const body=profile(p.profile).body;
+ vscode.postMessage({type:'pipsOpenChat',pip:{id:p.id,name:p.name,pip_type:p.pip_type,...(body?{body}:{})},...(conv?{conversation:conv}:{})});
 }
 // What this tab shows, for its title: "{Pip name} · {conversation}". Said when it changes (a rename, or its
 // conversation gone and the first shown instead).
@@ -5171,7 +5198,7 @@ function openConvMenu(){
 function closeConvMenu(){const ui=convUi();if(!ui.menu&&!ui.more&&!ui.renaming&&!ui.newStep)return;Object.assign(ui,{menu:false,more:'',renaming:'',newStep:false,error:''});render();}
 // Whether it has a computer is read as its chat opens; a click before that answer waits for it (2 s at most).
 async function computerKnown(){
- const pip=S.selected;if(S.apiVersion<42||!personalPip()||archived())return;
+ const pip=S.selected;if(S.apiVersion<42||!mayHaveBox()||archived())return;
  for(let i=0;i<40&&!disposed&&S.selected===pip&&!(computerState.pip===pip&&(computerState.value||computerState.error));i++){
   if(computerState.pip!==pip||!computerState.loading)void loadComputer();
   await new Promise(done=>window.setTimeout(done,50));}
@@ -5180,7 +5207,7 @@ async function beginNewConversation(){
  const ui=convUi(),pip=S.selected;
  await computerKnown();if(S.selected!==pip||ui!==convUi())return;
  // With a computer of its own, it asks which the new conversation's work should use (the user's call, 10 Nov).
- if(personalPip()&&!archived()&&pipComputers()){ui.newStep=true;ui.newChoice='use';ui.more='';ui.renaming='';ui.error='';render();focusConv('input[name=convComputer]:checked');return;}
+ if(!archived()&&pipComputers()){ui.newStep=true;ui.newChoice='use';ui.more='';ui.renaming='';ui.error='';render();focusConv('input[name=convComputer]:checked');return;}
  void startConversation(false);
 }
 async function startConversation(add){
@@ -5320,7 +5347,7 @@ function pipComputerNames(){
 const compUi={pip:'',menu:false,renaming:0,place:'',renameText:'',error:'',busy:false};
 let compPoll=null;
 function computerUi(){if(compUi.pip!==S.selected)Object.assign(compUi,{pip:S.selected,menu:false,renaming:0,place:'',renameText:'',error:'',busy:false});return compUi;}
-function severalComputers(){const names=pipComputerNames();return !!names&&names.length>1&&personalPip()&&!archived();}
+function severalComputers(){const names=pipComputerNames();return !!names&&names.length>1&&!archived();}
 function computerPolling(){
  const on=computerUi().menu&&!disposed;
  if(on&&compPoll===null)compPoll=window.setInterval(()=>{if(!computerUi().menu||disposed||!$('computer-menu')){computerPolling();return;}if(!document.hidden)void refreshComputer();},3000);
@@ -6086,8 +6113,8 @@ let routineSeq=0,routineEditing='',routineBusy='',routineError='',pageNameDirty=
 const shared={pip:'',kind:'',items:null,error:'',loading:false,seq:0,desk:null};
 const pipsSettings={view:'',computers:null,computersError:'',apps:null,appsError:'',plugins:null,pluginsError:'',confirmReset:'',seq:0,busy:false};
 Object.assign(draft,{pipPageName:'',pipPageTitle:'',pipInstructions:'',lookBody:''},routineDraft(null,defaultZone));
-// A Personal Pip's chosen face and colour; any other Pip keeps the face its type gives it.
-function pipAvatar(p,state,key,type){const look=profile(p?.profile),own=personalPip(p);return avatar(state,own&&look.body?characterType(look.body):type,key);}
+// A Pip's chosen character; one with none chosen keeps the face its type gives it.
+function pipAvatar(p,state,key,type){const look=profile(p?.profile);return avatar(state,look.body?characterType(look.body):type,key);}
 function sameJson(a,b){const norm=v=>Array.isArray(v)?v.map(norm):record(v)?Object.fromEntries(Object.keys(v).sort().map(k=>[k,norm(v[k])])):v;return JSON.stringify(norm(a))===JSON.stringify(norm(b));}
 async function loadRoutines(){
  if(remoteHost||S.apiVersion<43||!keepsAll()||!usable())return;
@@ -6249,7 +6276,7 @@ async function saveNameAndTitle(){
  pageNameDirty=false;titleEditing=false;draft.pipPageName=S.pip?.name||name;draft.pipPageTitle=profile(S.pip?.profile).title;render();
 }
 async function loadShared(kind){
- if(remoteHost||S.apiVersion<43||!personalPip()||!usable())return;
+ if(remoteHost||S.apiVersion<43||!keepsAll()||!usable())return;
  const token=scope(),sequence=++shared.seq,pip=S.selected;
  if(shared.pip!==pip||shared.kind!==kind){shared.items=null;shared.desk=null;}
  shared.pip=pip;shared.kind=kind;shared.loading=true;shared.error='';render();
@@ -6273,7 +6300,7 @@ function pipPageMarkup(){
  const body=tab==='links'?linksMarkup(items,{esc,formatDate:shortDate,loading,error})
   :tab==='media'?mediaMarkup(items,{esc,imageSrc:messageImageSrc,loading,error})
   :tab==='files'?filesMarkup(items,mine?shared.desk:null,{esc,formatDate:shortDate,loading,error,hasComputer:computerState.pip===S.selected&&!!computerState.value?.granted})
-  :(templateShown()?templateMarkup(templateState.pip===p.id?templateState.value:null,{esc,busy:off||templateState.busy,error:templateState.pip===p.id?templateState.error:'',pipName:p.name}):'')+infoMarkup({esc,goal:p.goal,routines:keepsAll()?routinesSectionMarkup(true):null,notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+(personalPip()?'':folderPartsMarkup(p))+pipFolderSetMarkup(off)+appsUseMarkup(off)+skillsUseMarkup(off)+computerRowMarkup(p,off)+(S.apiVersion>=53&&!remoteHost&&personalPip()?eyesMarkup(eyesState.pip===p.id?eyesState.value:null,{esc,busy:off||eyesState.busy,error:eyesState.error,pipName:p.name}):'')+(levelShown()?levelMarkup(levelState.pip===p.id?levelState.value:null,{esc,busy:off||levelState.busy,error:levelState.error,pipName:p.name,payLimits:payFormMarkup(levelState.pip===p.id?levelState.value:null),when:at=>shortDate(at)}):'')+artifactsSectionMarkup(p,off)+(S.apiVersion>=44&&!remoteHost&&(personalPip()?p.computer_plan:folderBox())?carefulMarkup(carefulState.pip===p.id?carefulState.value:null,{esc,busy:off||carefulState.busy,error:carefulState.error,pipName:p.name,showAll:sitesAll}):'')+(S.apiVersion>=56&&!remoteHost&&personalPip()&&p.computer_plan?loginsMarkup(loginsState.pip===p.id?loginsState.value:null,{esc,busy:off||loginsState.busy,error:loginsState.error,pipId:p.id,pipName:p.name,names:pipNames(),confirm:loginsState.confirm}):'')+sentSection(off)+(pipKeysShown()?pipKeysPageMarkup(S.pipKeys,{esc,busy:off||!!pipKeyBusy,pipName:p.name,confirm:pipKeyConfirm,error:S.pipKeysError,level:levelState.pip===p.id?levelState.value?.level||'':''}):'')+(S.apiVersion>=44&&!remoteHost&&keepsAll()?notesMarkup(S.notesPip===p.id?S.notes:null,{esc,busy:off||notesBusy,error:S.notesError,pipName:p.name,adding:draft.noteAdd,confirmAll:noteConfirmAll,knows:knowsYou()}):'')+(workingNotesShown()?workingNotesMarkup(S.workingNotesPip===p.id?S.workingNotes:null,{esc,busy:off||workingNotesBusy,error:S.workingNotesError,pipName:p.name,editing:workingNotesEditing,text:draft.workingNotesText})+dailyLogMarkup(S.dailyLogPip===p.id?S.dailyLog:null,{esc,error:S.dailyLogError,pipName:p.name,today:localDay()}):'')+allowedMarkup()+(S.apiVersion>=44&&!remoteHost&&personalPip()?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
+  :(templateShown()?templateMarkup(templateState.pip===p.id?templateState.value:null,{esc,busy:off||templateState.busy,error:templateState.pip===p.id?templateState.error:'',pipName:p.name}):'')+infoMarkup({esc,goal:p.goal,routines:keepsAll()?routinesSectionMarkup(true):null,notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+(personalPip()?placePartMarkup():folderPartsMarkup(p))+pipFolderSetMarkup(off)+appsUseMarkup(off)+skillsUseMarkup(off)+computerRowMarkup(p,off)+(S.apiVersion>=53&&!remoteHost&&personalPip()?eyesMarkup(eyesState.pip===p.id?eyesState.value:null,{esc,busy:off||eyesState.busy,error:eyesState.error,pipName:p.name}):'')+(levelShown()?levelMarkup(levelState.pip===p.id?levelState.value:null,{esc,busy:off||levelState.busy,error:levelState.error,pipName:p.name,payLimits:payFormMarkup(levelState.pip===p.id?levelState.value:null),when:at=>shortDate(at)}):'')+artifactsSectionMarkup(p,off)+(S.apiVersion>=44&&!remoteHost&&(personalPip()?p.computer_plan:folderBox())?carefulMarkup(carefulState.pip===p.id?carefulState.value:null,{esc,busy:off||carefulState.busy,error:carefulState.error,pipName:p.name,showAll:sitesAll}):'')+(S.apiVersion>=56&&!remoteHost&&hasBox()?loginsMarkup(loginsState.pip===p.id?loginsState.value:null,{esc,busy:off||loginsState.busy,error:loginsState.error,pipId:p.id,pipName:p.name,names:pipNames(),confirm:loginsState.confirm}):'')+sentSection(off)+(pipKeysShown()?pipKeysPageMarkup(S.pipKeys,{esc,busy:off||!!pipKeyBusy,pipName:p.name,confirm:pipKeyConfirm,error:S.pipKeysError,level:levelState.pip===p.id?levelState.value?.level||'':''}):'')+(S.apiVersion>=44&&!remoteHost&&keepsAll()?notesMarkup(S.notesPip===p.id?S.notes:null,{esc,busy:off||notesBusy,error:S.notesError,pipName:p.name,adding:draft.noteAdd,confirmAll:noteConfirmAll,knows:knowsYou()}):'')+(workingNotesShown()?workingNotesMarkup(S.workingNotesPip===p.id?S.workingNotes:null,{esc,busy:off||workingNotesBusy,error:S.workingNotesError,pipName:p.name,editing:workingNotesEditing,text:draft.workingNotesText})+dailyLogMarkup(S.dailyLogPip===p.id?S.dailyLog:null,{esc,error:S.dailyLogError,pipName:p.name,today:localDay()}):'')+allowedMarkup()+(S.apiVersion>=44&&!remoteHost&&personalPip()?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
  return `<div class="pip-page">${head}${healthMarkup(p.routine_health,{busy:off,canSignIn:!remoteHost})}${pageTabsMarkup(tab)}<div class="pip-page-body" data-page="${tab}">${body}</div></div>`;
 }
 // What it may do without asking (an Always allow you gave): only shown when there is one, and each
@@ -7090,7 +7117,7 @@ document.addEventListener('click',event=>{
   const pinned=event.target.closest?.('[data-pin-pip]');
   if(pinned){
    const p=(S.jobs||[]).find(job=>job.id===pinned.dataset.pinPip);
-   if(p)vscode.postMessage({type:'dockToggle',item:{kind:'pip',id:p.id,title:p.name,scope:personalPip(p)?'':'project',look:{body:(personalPip(p)&&profile(p.profile).body)||p.pip_type,ws:p.workspace_id||''}}});
+   if(p)vscode.postMessage({type:'dockToggle',item:{kind:'pip',id:p.id,title:p.name,scope:personalPip(p)?'':'project',look:{body:profile(p.profile).body||p.pip_type,ws:p.workspace_id||''}}});
    return;
   }
   if(picker.click(event))return;
@@ -7601,10 +7628,11 @@ document.addEventListener('click',event=>{
     case 'simple-to-chat':S.tab='chat';rememberView();render();void loadMessages();break;
     case 'pip-computer-open':{
       // The Pip's computer, one tap from its chat: open its screen, or offer it one.
-      if(S.apiVersion<42||!personalPip()||archived())break;
+      if(S.apiVersion<42||!mayHaveBox()||archived())break;
       // With more than one (Pips API 86), a menu under the icon asks which.
       if(computerUi().menu){closeComputerMenu();break;}
-      const open=()=>{if(computerState.pip!==S.selected||!computerState.value)return;if(!computerState.value.granted)grantComputer(true);else if(severalComputers())openComputerMenu();else void openComputerView();};
+      // (Only a Pip with no folder is offered one here: a folder's Pip has the computer that came with its folder.)
+      const open=()=>{if(computerState.pip!==S.selected||!computerState.value)return;if(!computerState.value.granted){if(personalPip())grantComputer(true);}else if(severalComputers())openComputerMenu();else void openComputerView();};
       if(computerState.pip===S.selected&&computerState.value)open();else void loadComputer().then(open);
       break;}
     case 'edit-goal':S.editingGoal=true;draft.revisionGoal=S.pip?.goal||'';render();$('revisionGoal')?.focus();break;

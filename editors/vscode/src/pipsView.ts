@@ -8,6 +8,7 @@ import { handleVideoMessage, VIDEO_MESSAGES } from './videoHost';
 import { displayMentions, workspaceFiles } from './mentionsHost';
 import { APP_ID, appLogoData } from './pluginLogos';
 import { markIcon } from './dock';
+import { pipFace, pipTabFace } from './pipTabFace';
 import marks from '../media/shared/marks.js';
 import { FOLDERS_API, foldersOffered, fullFolder } from './projectFolder';
 import { PROJECTS_API, PROJECT_COMMANDS, PROJECT_WORK_COMMAND, patchFileName, pipProjectsRefusal, projectChange, projectWorkBrief, projectWorkRequest } from './pipProjects.js';
@@ -326,7 +327,7 @@ export function computerDocument(scriptUri = '', styleUri = '', cspSource = '', 
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};"><link rel="stylesheet" href="${attr(styleUri)}"><title>${attr(title)}</title></head><body><main id="app"><p role="status">Connecting to local DGC…</p></main><script type="module" src="${attr(scriptUri)}"></script></body></html>`;
 }
 /** "Open in editor" for a Pip's chat: the Pip and the conversation a page names, each checked here. */
-export type ChatPip = { id: string; name: string; pip_type: string };
+export type ChatPip = { id: string; name: string; pip_type: string; body?: string };
 export type ChatConversation = { id: string; title?: string };
 /** Several conversations a Pip (Pips API 79): before it a Pip has one chat, and its tab is that chat's. */
 const CONVERSATIONS_API = 79;
@@ -337,7 +338,9 @@ export function chatPip(value: any, whole = true): ChatPip | undefined {
   if (!value || typeof value !== 'object' || typeof value.id !== 'string' || !/^pip_[A-Za-z0-9]{1,64}$/.test(value.id)) return undefined;
   if (typeof value.name !== 'string' || !value.name.trim() || value.name.length > 120 || /[\u0000-\u001f\u007f]/.test(value.name)) return undefined;
   if (whole && !CHAT_PIP_TYPES.includes(value.pip_type)) return undefined;
-  return { id: value.id, name: value.name.trim(), pip_type: whole ? value.pip_type : String(value.pip_type || '') };
+  // (`body`: the character chosen for it, as the page knows it, for its tab's first icon. DGC's own word follows.)
+  return { id: value.id, name: value.name.trim(), pip_type: whole ? value.pip_type : String(value.pip_type || ''),
+    ...(whole && typeof value.body === 'string' && CHAT_PIP_TYPES.includes(value.body) ? { body: value.body } : {}) };
 }
 /** A conversation as a page names it: undefined for none (the Pip's one chat, or its first), null for one that is not
  *  a conversation. Its id is DGC's, or '' for the Pip's first; its title a line of words, when the page knows it. */
@@ -485,7 +488,9 @@ export class PipsEditor implements vscode.Disposable {
   /** "Open in editor" (15 Nov): the open editor tabs of Pip chats, one per Pip conversation, by "pip_x#conv_y" (the
    *  Pip's first conversation: "pip_x#"). Each is the Pips page itself, pinned to that chat and talking to DGC through
    *  this bridge as the Pips tab does: the same chat, never a copy. Closing one asks DGC nothing. */
-  private chats = new Map<string, { panel: vscode.WebviewPanel; pip: ChatPip; conversation: string }>();
+  private chats = new Map<string, { panel: vscode.WebviewPanel; pip: ChatPip; conversation: string; face?: string }>();
+  /** The character each Pip wears, as DGC last said it in this window (get_pip, set_pip_profile): '' for its type's own. */
+  private static faces = new Map<string, string>();
   /** Every bridge of this window (the side bar's, the Pips tab's): what is typed in one page of a chat is told to
    *  all the others, whichever bridge they are on. */
   private static readonly bridges = new Set<PipsEditor>();
@@ -721,8 +726,11 @@ export class PipsEditor implements vscode.Disposable {
     const panel = vscode.window.createWebviewPanel('dgc.pipChat', title, vscode.ViewColumn.Active, {
       enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [this.extensionUri],
     });
-    const tab = { panel, pip, conversation: conv };
+    const tab: { panel: vscode.WebviewPanel; pip: ChatPip; conversation: string; face?: string } = { panel, pip, conversation: conv };
     this.chats.set(key, tab);
+    // Its tab wears its face (16 Nov), as a computer's tab wears its Portal: the character DGC last said it wears, else
+    // the one its opener named, else its type's.
+    this.wearFace(tab, PipsEditor.faces.has(pip.id) ? PipsEditor.faces.get(pip.id) : pip.body);
     const surface = () => 'chat:' + this.chatKey(tab);
     panel.onDidDispose(() => {
       const at = this.chatKey(tab);
@@ -735,6 +743,24 @@ export class PipsEditor implements vscode.Disposable {
     panel.webview.onDidReceiveMessage(message => this.receive(message, surface()));
     panel.webview.html = this.pageHtml(panel, { pip: pip.id, conversation: conv });
     this.connect();
+  }
+  /** A chat tab's icon: its Pip's face. Set only when the face changes (an editor draws a tab again when its icon is set). */
+  private wearFace(tab: { panel: vscode.WebviewPanel; pip: ChatPip; face?: string }, body: unknown): void {
+    const face = pipFace(tab.pip.pip_type, body);
+    if (!face || tab.face === face) return;
+    const icon = pipTabFace(this.extensionUri, face);
+    if (!icon) return;
+    try { tab.panel.iconPath = icon; tab.face = face; } catch { /* a tab on its way out */ }
+  }
+  /** DGC said which character a Pip wears (its profile's body; none: its type's own): every chat tab of that Pip, on
+   *  every bridge of this window, wears it from now. Never from what a page says. */
+  private static faceSaid(pipId: unknown, profile: unknown): void {
+    if (typeof pipId !== 'string' || !/^pip_[A-Za-z0-9]{1,64}$/.test(pipId)) return;
+    const body = profile && typeof profile === 'object' && typeof (profile as any).body === 'string' ? (profile as any).body : '';
+    PipsEditor.faces.delete(pipId);
+    PipsEditor.faces.set(pipId, body);
+    if (PipsEditor.faces.size > 512) PipsEditor.faces.delete(PipsEditor.faces.keys().next().value!);
+    for (const bridge of PipsEditor.bridges) for (const tab of bridge.chats.values()) if (tab.pip.id === pipId) bridge.wearFace(tab, body);
   }
   /** Where a chat's tab is kept now (its conversation may have changed under it: chatShown). */
   private chatKey(tab: { pip: ChatPip; conversation: string }): string { return `${tab.pip.id}#${tab.conversation}`; }
@@ -1161,6 +1187,11 @@ export class PipsEditor implements vscode.Disposable {
     // editor tab, in the Pips page, in the side bar).
     if (owner.command === 'send_pip_message' && event.type === 'pips_result' && event.ok === true && owner.pip) this.tellOthers({ type: 'pipsChatChanged', pip_id: owner.pip }, owner.surface || 'main');
     if (owner.command === 'set_pip_profile' && event.type === 'pips_result' && event.ok === true) this.profileChangeNotice?.();
+    // A Pip's face on its chat tabs follows DGC's own word for its character: its page read, or its character changed.
+    if (event.type === 'pips_result' && event.ok === true) {
+      if (owner.command === 'get_pip' && event.result?.pip && typeof event.result.pip === 'object') PipsEditor.faceSaid(event.result.pip.id, event.result.pip.profile);
+      else if (owner.command === 'set_pip_profile' && event.result && typeof event.result === 'object' && 'profile' in event.result) PipsEditor.faceSaid(event.result.pip_id, event.result.profile);
+    }
     if ((owner.command === 'accept_pip_setup' || owner.command === 'reject_pip_setup') && event.type === 'pips_result' && event.ok === true) {
       const decided = event.result?.setup?.id;
       if (typeof decided === 'string' && /^setup_[a-f0-9]{32}$/.test(decided)) this.setupDecided?.(decided);

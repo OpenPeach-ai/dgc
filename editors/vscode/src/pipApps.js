@@ -45,15 +45,16 @@ function appMark(a, esc, logo) {
  * The section. `apps`: pipAppsPage's list, or null while it loads. `links`: the Pip's app links (list_pip_app_links),
  * whose connected ones are an app's addresses, each with its card id for Disconnect. `confirm`: the link whose
  * Disconnect is asking. `waiting`: the apps with a Connect card already open for one more address. `logo(app)`: the
- * app's logo as the page has it, or "".
+ * app's logo as the page has it, or "". `connects`: whether this Pip can be asked to connect an app.
  */
-export function pipAppsMarkup(apps, { esc, links = [], busy = false, error = '', pipName = 'This Pip', confirm = '', waiting = [], logo = null }) {
+export function pipAppsMarkup(apps, { esc, links = [], busy = false, error = '', pipName = 'This Pip', confirm = '', waiting = [], logo = null, connects = true }) {
   const off = busy ? ' disabled' : '', name = esc(pipName);
   const head = `<section class="pip-page-group pip-apps" aria-label="Apps it can use"><h3 class="pip-page-label">Apps it can use${infoTip('pipAppsUseSays', 'Apps it can use',
     `Every app is on until you switch it off here. Off, ${name} can’t read it, use it or ask for it; its sign-in stays, so switching it back on needs nothing more. Other Pips are not changed.`)}</h3>`;
   const said = error ? `<p class="error" role="alert">${esc(error)}</p>` : '';
   if (!apps) return `${head}${said || '<p class="muted" role="status">Loading…</p>'}</section>`;
-  if (!apps.length) return `${head}<p class="pip-page-empty">None yet. Turn a plugin on in Settings → Plugins, or ask ${name} in its chat to connect an app, like Gmail.</p>${said}</section>`;
+  // (`connects` false: a Pip with a folder, which DGC doesn't connect an app or a plugin for yet, is told neither.)
+  if (!apps.length) return `${head}<p class="pip-page-empty">${connects ? `None yet. Turn a plugin on in Settings → Plugins, or ask ${name} in its chat to connect an app, like Gmail.` : 'None yet.'}</p>${said}</section>`;
   const row = a => {
     const mine = (links || []).filter(l => l.status === 'connected' && l.toolkit === a.id);
     // Its addresses: the linked ones (each can be disconnected); before the links have loaded, their names alone.

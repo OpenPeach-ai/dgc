@@ -6,7 +6,8 @@ import { build } from "esbuild";
 import { FakeRfbServer } from "./fake-rfb-server.mjs";
 import { THEMES } from "./pip-chat-scene.mjs";
 
-const src = fileURLToPath(new URL("../../src/", import.meta.url));
+// (DGC_PIPS_SRC: another tree's src folder, for pictures of the tab as it was.)
+const src = process.env.DGC_PIPS_SRC ? process.env.DGC_PIPS_SRC + "/" : fileURLToPath(new URL("../../src/", import.meta.url));
 let built;
 /** As esbuild.js builds it for the extension: an ES module (noVNC uses top-level await), its stylesheet beside it. */
 export async function bundle() {
@@ -52,7 +53,10 @@ function host(PIP, scene) {
       a.status = mode === "lost" ? "lost" : "sent"; a.resolved_at = new Date().toISOString(); a.resolved_by = mode === "lost" ? "page-moved" : "editor-user";
       return mode === "lost" ? { ok: false, lost: true, error: "The page moved on before the code came: the Pip will ask again.", action: { ...a } } : { ok: true, ...(mode === "signed" ? { signed_in: true } : {}), action: { ...a } }; },
     // Stop: DGC says it is stopping, and the screen's stream closes a moment later.
-    stop_pip_computer: () => { setTimeout(() => post({ type: "pipDesktopClosed", reason: "The computer's screen closed." }), 40); return { pip_id: PIP.id, stopping: true }; },
+    // (scene.stopReason: what the closing stream says. DGC's supervisor has taken the screen's socket away by then, and
+    //  the stream's own words for that are the system's: "[Errno 2] No such file or directory". scene.stopFirst: the
+    //  stream closes before DGC's answer to Stop arrives, as it can.)
+    stop_pip_computer: () => { setTimeout(() => post({ type: "pipDesktopClosed", reason: scene.stopReason || "The computer's screen closed." }), scene.stopFirst ? 0 : 40); return { pip_id: PIP.id, stopping: true }; },
   };
   let chain = Promise.resolve();
   window.__all = []; window.__states = [];
@@ -93,7 +97,7 @@ export async function openComputer(browser, opts = {}) {
   const { js, css } = await bundle();
   const t = THEMES[theme];
   const page = `<!DOCTYPE html><html><head><meta charset="utf-8">${VSCODE_WEBVIEW}<style>${t.css}</style><style>${css}</style></head><body class="${t.kind}"><main id="app"></main>`
-    + `<script>(${host})(${JSON.stringify(PIP)}, ${JSON.stringify({ api, using, screen, screens, files: opts.files || [], actions: opts.actions || [], code: opts.code || "ok", codeAfter: opts.codeAfter || 0 })});</script><script type="module" src="/ext/dist/pipComputer.js"></script></body></html>`;
+    + `<script>(${host})(${JSON.stringify(PIP)}, ${JSON.stringify({ api, using, screen, screens, files: opts.files || [], actions: opts.actions || [], code: opts.code || "ok", codeAfter: opts.codeAfter || 0, stopReason: opts.stopReason || "", stopFirst: !!opts.stopFirst })});</script><script type="module" src="/ext/dist/pipComputer.js"></script></body></html>`;
   const context = await browser.newContext({ viewport: { width, height }, reducedMotion: motion, colorScheme: theme, hasTouch: !!opts.touch });   // (opts.touch: a finger, no pointer)
   const p = await context.newPage();
   const errors = [];

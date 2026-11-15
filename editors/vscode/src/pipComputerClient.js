@@ -356,9 +356,27 @@ class ScreenChannel{
  end(reason){if(this.readyState==='closed')return;this.readyState='closed';this.onclose?.({code:1000,reason,wasClean:false});}
 }
 let channel=null,viewer=null;
+// Stop computer (user test P12). The stop is the user's own: its screen closing is what was asked for, so the tab shows
+// the stopped state where the screen was and nothing else. The closing stream's own words are not shown (DGC has taken
+// the screen's socket away by then, and they are the system's: "[Errno 2] No such file or directory"), and the screen
+// stays closed until Open the screen again: the look that re-opens a screen that dropped would start the computer
+// that was just stopped.
+const STOPPED='Stopped. Its sign-ins are kept.';
+let stopping=false;
+function showStopped(){
+ S.view=null;S.viewError='';S.error='';S.actionError=false;
+ if(!screenMode()){S.notice=STOPPED;return;}
+ S.notice='';S.restart=null;S.screen={state:'closed',reason:STOPPED,stopped:true};
+ const old=channel;channel=null;old?.end(STOPPED);
+}
+// What a closed screen says: DGC's own words, and never a bare system error line.
+function closedWords(reason){return typeof reason==='string'&&reason&&!/^\[Errno -?\d+\]|^\[WinError \d+\]/.test(reason)?reason:'The screen closed.';}
 function startScreen(explicit=false){
  // One stream per Pip: while another tab of this Pip shows its screen, this one takes it back only when asked (Show here).
  if(!screenMode()||S.screen.state==='opening'||S.screen.state==='live'||S.screen.state==='restarting'&&!explicit||S.screen.state==='elsewhere'&&!explicit)return;
+ // A computer the user stopped stays stopped until they open it.
+ if(S.screen.state==='closed'&&S.screen.stopped&&!explicit)return;
+ stopping=false;
  S.screen={state:'opening',reason:''};render();
  channel=new ScreenChannel();
  const Viewer=globalThis.__dgcTestRFB||RFB;
@@ -878,10 +896,10 @@ document.addEventListener('click',event=>{
  else if(t.dataset.app)show(t.dataset.app,true);
  else if(t.dataset.minimize){S.app='';render();schedule();vscode.setState({app:'',fit:S.fit});}
  else if(t.dataset.close){S.open=S.open.filter(a=>a!==t.dataset.close);S.app='';render();schedule();vscode.setState({app:'',fit:S.fit});}
- else if(t.id==='pc-reconnect'){S.screen={state:'off',reason:''};startScreen();}
+ else if(t.id==='pc-reconnect'){S.screen={state:'off',reason:''};if(S.notice===STOPPED)S.notice='';startScreen(true);}
  else if(t.id==='pc-show-here'){S.screen={state:'off',reason:''};startScreen(true);}
  else if(t.id==='pc-reopen-browser')void frame('reopen',{},true);
- else if(id==='pc-stop')void send('stop_pip_computer',{pip_id:S.pip.id}).then(()=>{S.notice='Stopped. Its sign-ins are kept.';S.view=null;return loadComputer();},error=>{S.error=errorText(error);render();});
+ else if(id==='pc-stop'){stopping=true;void send('stop_pip_computer',{pip_id:S.pip.id}).then(()=>{showStopped();render();return loadComputer();},error=>{stopping=false;S.error=errorText(error);render();});}
  else if(t.id==='pc-back')void frame('back');
  else if(t.id==='pc-screen'){const p=screenPoint(event);if(p&&!using())void frame('click',p);}
  else if(t.dataset.folder!==undefined){S.files.selected=null;S.files.preview=null;void loadFiles([S.files.path,t.dataset.folder].filter(Boolean).join('/'));}
@@ -1006,7 +1024,8 @@ window.addEventListener('message',event=>{
  else if(m.type==='pipDesktopData'&&typeof m.data==='string')channel?.deliver(m.data);
  // Restarting: its screen closing is expected, and it is opened again (a few tries while the old one winds down).
  else if(m.type==='pipDesktopClosed'&&S.restart&&S.restart.tries<5){const old=channel;channel=null;S.screen={state:'restarting',reason:''};old?.end('');render();reopenSoon(700+400*S.restart.tries);}
- else if(m.type==='pipDesktopClosed'){S.restart=null;S.screen={state:'closed',reason:typeof m.reason==='string'&&m.reason?m.reason:'The screen closed.'};channel?.end(S.screen.reason);render();}
+ else if(m.type==='pipDesktopClosed'&&(stopping||S.screen.stopped)){showStopped();render();}
+ else if(m.type==='pipDesktopClosed'){S.restart=null;S.screen={state:'closed',reason:closedWords(m.reason)};channel?.end(S.screen.reason);render();}
  else if(m.type==='pipComputerCopied'){clipSay(m.ok===true?'Copied.':'Could not copy here.',m.ok!==true);}
  // Add file…: the files are picked (their names show as "copying", fewer as each lands), then what DGC said of each.
  else if(m.type==='pipComputerAdding'&&S.files.adding&&Array.isArray(m.names)){S.files.adding={...S.files.adding,names:m.names.filter(n=>typeof n==='string').slice(0,200).map(n=>n.slice(0,255))};render();if(m.refresh===true)void loadFiles();}
