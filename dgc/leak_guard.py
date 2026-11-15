@@ -54,7 +54,21 @@ def looks_secret(value: str) -> bool:
         return True
     if value.lower().startswith(("http://", "https://", "/", "./", "../")):
         return False
+    if _reads_as_a_name(value):
+        return False
     return len(value) >= 20 and any(c.isdigit() for c in value) and any(c.isalpha() for c in value)
+
+
+def _reads_as_a_name(value: str) -> bool:
+    """A name made of words joined by - . : / _ (a model like deepseek-v4.1-flash:cloud, a repo path), not a secret:
+    at least two words of four or more letters, each lowercase or Capitalized. A key, a hex string, a UUID or a token
+    has none (its letters come in short runs of mixed case). Live 15 Nov: a model name in a project's .env was hidden
+    as "[REDACTED]" everywhere DGC showed it."""
+    if not any(c in "-.:/_" for c in value):
+        return False
+    words = [run for run in re.findall(r"[A-Za-z]+", value)
+             if len(run) >= 4 and (run.islower() or (run[0].isupper() and run[1:].islower()))]
+    return len(words) >= 2
 
 
 def _values_of(text: str) -> list[str]:
