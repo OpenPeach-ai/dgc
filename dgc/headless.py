@@ -5273,8 +5273,11 @@ class Backend:
         if not failed:
             self._goal_auto_resumes = 0    # progress resets the budget
             return False
-        if not (getattr(self.agent, "goal", "")
-                and getattr(self.agent, "goal_status", "none") == "active"):
+        status = getattr(self.agent, "goal_status", "none")
+        # A turn that failed (the model didn't answer) paused its goal itself (goals: _goal_failed_pause); a goal the
+        # user paused is theirs and never resumed here.
+        own_failure = status == "paused" and getattr(self.agent, "_goal_failed_pause", False) is True
+        if not (getattr(self.agent, "goal", "") and (status == "active" or own_failure)):
             return False
         used = getattr(self, "_goal_auto_resumes", 0)
         reason = str(getattr(self.agent, "_last_turn_error", "") or "")
@@ -5282,6 +5285,8 @@ class Backend:
             self.ui.error(
                 f"the standing goal stopped {used + 1} times in a row and DGC has stopped "
                 "retrying. Look at the last error, then resume the goal when it is addressed.")
+            if own_failure:
+                return False               # it stays paused, with its reason: resume it when the model answers
             # Leaving it "active" was a lie the clock told: the goal card kept counting while
             # nothing was running and nothing was going to run. Blocked is what this actually is,
             # it stops the clock, and it carries the reason a person needs in the goal review.
@@ -5294,6 +5299,8 @@ class Backend:
                 else:
                     self._emit_goal()
             return False
+        if own_failure:
+            return self._resume_goal_later(used, reason)
         with self._turn_state_lock():
             if self._queue:                # real work is already waiting; it supersedes a retry
                 return False
@@ -5304,6 +5311,47 @@ class Backend:
             f"the goal stopped — continuing it automatically "
             f"({used + 1} of {AUTO_RESUME_MAX})")
         return True
+
+    def _resume_goal_later(self, used: int, reason: str) -> bool:
+        """A goal its own failed turn paused: resumed after a wait (goals.AUTO_RESUME_WAITS), so an outage can pass.
+        What the user does in the meantime wins (_resume_goal_now checks again)."""
+        from .goals import AUTO_RESUME_MAX, AUTO_RESUME_WAITS
+        wait = AUTO_RESUME_WAITS[min(used, len(AUTO_RESUME_WAITS) - 1)]
+        self._goal_auto_resumes = used + 1
+        token = object()
+        self._goal_resume_token = token
+        at = time.strftime("%H:%M", time.localtime(time.time() + wait))
+        why = " ".join(reason.split())[:160]
+        self.ui.info(f"the goal stopped{f' ({why})' if why else ''}. DGC tries it again at {at} "
+                     f"({used + 1} of {AUTO_RESUME_MAX}); Resume goal to try sooner.")
+        timer = threading.Timer(wait, lambda: self._resume_goal_now(token, reason, used + 1))
+        timer.daemon = True
+        self._goal_resume_timer = timer
+        timer.start()
+        return True
+
+    def _resume_goal_now(self, token, reason: str, number: int) -> None:
+        from .goals import AUTO_RESUME_MAX, auto_resume_prompt
+        agent = self.agent
+        with self._turn_state_lock():
+            if getattr(self, "_goal_resume_token", None) is not token:
+                return
+            self._goal_resume_token = None
+            # Anything that happened meanwhile wins: the user resumed, paused or replaced it, a message is waiting or
+            # running, or DGC is going down.
+            if (getattr(agent, "stopping", False) is True or getattr(agent, "goal_status", "") != "paused"
+                    or getattr(agent, "_goal_failed_pause", False) is not True or self._queue
+                    or getattr(self, "_worker", None) is not None):
+                return
+            if not agent.update_goal("active"):
+                return
+            self._queue.append((auto_resume_prompt(reason, checklist_cleared=self._checklist_cleared()),
+                                None, None, "resume"))
+            worker = threading.Thread(target=self._run_turn_queue, daemon=True, name="dgc-headless-turns")
+            self._worker = worker
+            worker.start()
+        self._emit_goal()
+        self.ui.info(f"continuing the goal ({number} of {AUTO_RESUME_MAX})")
 
     def _maybe_continue_goal(self, failed: bool, cancelled: bool) -> bool:
         """Codex's shape for a goal (12 Nov, his call): each cycle is a turn of its own, and when one ends with the goal

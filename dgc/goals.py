@@ -397,6 +397,9 @@ class ReportFilter:
 # quoted verbatim because the most common stop is the loop guard, whose own advice ("repeating the
 # same prompt will loop again") is exactly what the model needs to read before it tries again.
 AUTO_RESUME_MAX = 2          # consecutive automatic resumes before DGC stops and waits for a human
+# A turn that FAILED (the model didn't answer: an outage, a 503) paused its goal; it is resumed after a wait, so the
+# outage has time to pass: a minute, then five (found by the goal soak, 16 Nov: the resume never ran at all).
+AUTO_RESUME_WAITS = (60, 300)
 
 
 # The three sentences DGC writes into the transcript AS THE USER so the model reads them. They are
@@ -774,6 +777,7 @@ class GoalLifecycle:
 
     def set_goal(self, text: str, status: str = "active", *, token_budget: int | None = None,
                  replace: bool = False, inputs: dict | None = None) -> bool:
+        self._goal_failed_pause = False
         clean = self._safe_text(text).strip()
         too_long = self.objective_size_error(clean)
         if too_long:
@@ -863,6 +867,7 @@ class GoalLifecycle:
     def update_goal(self, status: str, *, reason: str = "", evidence: list | None = None) -> bool:
         if not self.goal or status not in STATUSES:
             return False
+        self._goal_failed_pause = False      # any change after a failed turn's pause is no longer that failure
         if getattr(self, "_goal_running", False) and self._goal_owner != threading.get_ident():
             self._last_persist_error = "Stop the active turn before changing its goal."
             return False
@@ -1027,7 +1032,11 @@ class GoalLifecycle:
                             self._last_turn_error = self._last_persist_error
                             return {**result, "ok": False} if isinstance(result, dict) else False
                         return result
-                    return finish("paused", result, reason=reason)
+                    outcome = finish("paused", result, reason=reason)
+                    if not self.cancelled.is_set() and self.goal_status == "paused":
+                        # Paused by its own failed turn, never by the user: the backend may resume it after a wait.
+                        self._goal_failed_pause = True
+                    return outcome
                 if getattr(self, "_last_turn_pause", ""):
                     return finish("paused", result, reason=self._last_turn_pause)
                 if dismissed:

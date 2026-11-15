@@ -1595,6 +1595,28 @@ _RECLAIM_WAIT_S = 25.0
 _STOOD_DOWN_REASON = "it agreed to hand the session over and is still saving its work"
 
 
+_BRIEF_HEADINGS = ("## Goal", "## Progress", "## Next")
+_THINK_BLOCK = re.compile(r"<(think|thinking|reasoning)>.*?</\1>", re.S | re.I)
+
+
+def _brief_only(text: str) -> str:
+    """A compaction brief without whatever the summariser wrote before it: from the LAST line that starts "## Goal"
+    and is followed by "## Progress" and then "## Next" at the starts of lines, to the end; <think> blocks dropped.
+    "" when there is no such brief (thinking that only names the headings is none)."""
+    text = _THINK_BLOCK.sub("", str(text or "")).strip()
+    lines = text.splitlines()
+    for start in range(len(lines) - 1, -1, -1):
+        if not lines[start].startswith(_BRIEF_HEADINGS[0]):
+            continue
+        rest, want = lines[start + 1:], list(_BRIEF_HEADINGS[1:])
+        for line in rest:
+            if want and line.startswith(want[0]):
+                want.pop(0)
+        if not want:
+            return "\n".join(lines[start:]).strip()
+    return ""
+
+
 @dataclass
 class AgentContext:
     project_root: Path
@@ -14680,12 +14702,12 @@ class Agent(GoalLifecycle):
                         [{"role": "user", "content": prompt}], tools=None,
                         reasoning_effort="off", cancel=compact_cancel)
                 self._record_usage(getattr(result, "usage", None), "compaction")
-                candidate = self._safe_text(
-                    str(getattr(result, "content", "") or "").strip())
-                required = ("## Goal", "## Progress", "## Next")
+                # The brief alone: from its real "## Goal" on, never the summariser's thinking before it (the goal
+                # soak, 16 Nov: one brief was mostly "I need produce compact brief exactly headings…").
+                candidate = _brief_only(self._safe_text(
+                    str(getattr(result, "content", "") or "").strip()))
                 if (candidate and not compact_cancel.is_set()
-                        and not getattr(result, "tool_calls", None)
-                        and all(heading in candidate for heading in required)):
+                        and not getattr(result, "tool_calls", None)):
                     summary = _bounded_head_tail(candidate, brief_chars)
                     used_model = True
                 elif compact_cancel.is_set():
